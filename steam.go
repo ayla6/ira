@@ -12,9 +12,10 @@ import (
 
 // SteamClient handles Steam API requests and local disk caching.
 type SteamClient struct {
-	APIKey   string
-	cacheDir string
-	http     *http.Client
+	APIKey            string
+	SteamGridDBAPIKey string
+	cacheDir          string
+	http              *http.Client
 }
 
 // SteamGameDetails holds the subset of store API data we care about.
@@ -24,12 +25,13 @@ type SteamGameDetails struct {
 	CapsuleImage string `json:"capsule_imagev5"`
 }
 
-func NewSteamClient(apiKey string) *SteamClient {
+func NewSteamClient(apiKey, sgdbKey string) *SteamClient {
 	cacheBase, _ := os.UserCacheDir()
 	return &SteamClient{
-		APIKey:   apiKey,
-		cacheDir: filepath.Join(cacheBase, "achievement-viewer"),
-		http:     &http.Client{Timeout: 20 * time.Second},
+		APIKey:            apiKey,
+		SteamGridDBAPIKey: sgdbKey,
+		cacheDir:          filepath.Join(cacheBase, "achievement-viewer"),
+		http:              &http.Client{Timeout: 20 * time.Second},
 	}
 }
 
@@ -98,8 +100,8 @@ func (s *SteamClient) FetchGlobalAchievements(appID string) (map[string]float64,
 	var raw struct {
 		AchievementPercentages struct {
 			Achievements []struct {
-				Name    string          `json:"name"`
-				Percent json.Number     `json:"percent"`
+				Name    string      `json:"name"`
+				Percent json.Number `json:"percent"`
 			} `json:"achievements"`
 		} `json:"achievementpercentages"`
 	}
@@ -141,40 +143,106 @@ func (s *SteamClient) downloadFile(url, destPath string) error {
 	return err
 }
 
+func (s *SteamClient) findCachedIcon(appID string) string {
+	dir := s.gameDir(appID)
+	for _, ext := range []string{".png", ".ico", ".jpg", ".webp"} {
+		path := filepath.Join(dir, "icon"+ext)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return ""
+}
+
+func (s *SteamClient) findCachedHero(appID string) string {
+	path := filepath.Join(s.gameDir(appID), "library_hero.jpg")
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	return ""
+}
+
+func (s *SteamClient) fetchSteamGridDBIconURL(appID string) (string, error) {
+	req, err := http.NewRequest("GET", "https://www.steamgriddb.com/api/v2/icons/steam/"+appID, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.SteamGridDBAPIKey)
+
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("steamgriddb returned status %d", resp.StatusCode)
+	}
+
+	var raw struct {
+		Success bool `json:"success"`
+		Data    []struct {
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return "", err
+	}
+
+	if !raw.Success || len(raw.Data) == 0 {
+		return "", fmt.Errorf("no icons found on steamgriddb")
+	}
+
+	return raw.Data[0].URL, nil
+}
+
 // EnsureAssets downloads icon and library hero for a game if not yet cached.
 // Hero image always comes from the Steam CDN using the known URL pattern.
 // Returns the local paths (empty string when unavailable).
-func (s *SteamClient) EnsureAssets(appID string, d *SteamGameDetails) (iconPath, heroPath string) {
+func (s *SteamClient) EnsureAssets(appID string, d *SteamGameDetails, hasLocalIcon bool) (iconPath, heroPath string) {
 	dir := s.gameDir(appID)
 
-	// Icon: from store API capsule image
-	iconPath = filepath.Join(dir, "icon.jpg")
-	if _, err := os.Stat(iconPath); os.IsNotExist(err) {
-		if d.CapsuleImage != "" {
-			if err := s.downloadFile(d.CapsuleImage, iconPath); err != nil {
-				fmt.Printf("icon download failed for %s: %v\n", appID, err)
-				iconPath = ""
-			}
-		} else {
-			iconPath = ""
-		}
-	} else if err != nil {
+	// 1. Icon Resolution
+	if hasLocalIcon {
 		iconPath = ""
+	} else {
+		iconPath = s.findCachedIcon(appID)
+		if iconPath == "" {
+			// Try SteamGridDB if API key is set
+			if s.SteamGridDBAPIKey != "" {
+				if sgdbUrl, err := s.fetchSteamGridDBIconURL(appID); err == nil && sgdbUrl != "" {
+					ext := filepath.Ext(sgdbUrl)
+					if ext == "" {
+						ext = ".png"
+					}
+					dest := filepath.Join(dir, "icon"+ext)
+					if err := s.downloadFile(sgdbUrl, dest); err == nil {
+						iconPath = dest
+					}
+				}
+			}
+
+			// Fallback to Steam capsule if SteamGridDB fails or no API key
+			if iconPath == "" && d != nil && d.CapsuleImage != "" {
+				dest := filepath.Join(dir, "icon.jpg")
+				if err := s.downloadFile(d.CapsuleImage, dest); err == nil {
+					iconPath = dest
+				}
+			}
+		}
 	}
 
-	// Hero: always from Steam CDN library_hero_2x — use a distinct filename
-	heroURL := fmt.Sprintf(
-		"https://shared.steamstatic.com/store_item_assets/steam/apps/%s/library_hero_2x.jpg",
-		appID,
-	)
-	heroPath = filepath.Join(dir, "library_hero.jpg")
-	if _, err := os.Stat(heroPath); os.IsNotExist(err) {
-		if err := s.downloadFile(heroURL, heroPath); err != nil {
-			fmt.Printf("hero download failed for %s: %v\n", appID, err)
-			heroPath = ""
+	// 2. Hero Resolution
+	heroPath = s.findCachedHero(appID)
+	if heroPath == "" {
+		heroURL := fmt.Sprintf(
+			"https://shared.steamstatic.com/store_item_assets/steam/apps/%s/library_hero_2x.jpg",
+			appID,
+		)
+		dest := filepath.Join(dir, "library_hero.jpg")
+		if err := s.downloadFile(heroURL, dest); err == nil {
+			heroPath = dest
 		}
-	} else if err != nil {
-		heroPath = ""
 	}
 
 	return iconPath, heroPath

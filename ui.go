@@ -12,14 +12,14 @@ import (
 // buildUI constructs the main window layout.
 func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *SteamClient) {
 	splitView := gtk.NewPaned(gtk.OrientationHorizontal)
-	splitView.SetPosition(220)
+	splitView.SetPosition(260)
 	splitView.SetShrinkStartChild(false)
 	splitView.SetResizeStartChild(false)
 
 	// ── Sidebar ──────────────────────────────────────────────────────────────
 	sidebarScroll := gtk.NewScrolledWindow()
 	sidebarScroll.SetPolicy(gtk.PolicyAutomatic, gtk.PolicyAutomatic)
-	sidebarScroll.SetSizeRequest(160, -1)
+	sidebarScroll.SetSizeRequest(200, -1)
 
 	gameList := gtk.NewListBox()
 	gameList.AddCSSClass("navigation-sidebar")
@@ -85,7 +85,7 @@ func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *St
 		titleLabel := gtk.NewLabel(game.Name)
 		titleLabel.SetXAlign(0)
 		titleLabel.AddCSSClass("heading")
-		titleLabel.SetMaxWidthChars(18)
+		titleLabel.SetMaxWidthChars(20)
 		vbox.Append(titleLabel)
 
 		pct := 0
@@ -114,31 +114,37 @@ func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *St
 	})
 }
 
-// showSettingsDialog opens a modal window for editing the Steam API key.
+// showSettingsDialog opens a modal window for editing the Steam and SteamGridDB API keys.
 func showSettingsDialog(parent *adw.ApplicationWindow, cfg *Config, steam *SteamClient) {
-	dialog := gtk.NewWindow()
+	dialog := adw.NewWindow()
 	dialog.SetTitle("Settings")
-	dialog.SetDefaultSize(420, 180)
+	dialog.SetDefaultSize(450, 260)
 	dialog.SetModal(true)
 	dialog.SetTransientFor(&parent.Window)
-	dialog.SetDestroyWithParent(true)
+
+	toolbarView := adw.NewToolbarView()
+	toolbarView.AddTopBar(adw.NewHeaderBar())
 
 	box := gtk.NewBox(gtk.OrientationVertical, 0)
-	hbar := adw.NewHeaderBar()
-	box.Append(hbar)
 
 	group := adw.NewPreferencesGroup()
-	group.SetTitle("Steam")
+	group.SetTitle("API Keys")
 	group.SetMarginTop(16)
 	group.SetMarginBottom(16)
 	group.SetMarginStart(16)
 	group.SetMarginEnd(16)
 
-	entry := adw.NewEntryRow()
-	entry.SetTitle("Steam Web API Key")
-	entry.SetText(cfg.SteamAPIKey)
-	entry.SetInputPurpose(gtk.InputPurposePassword)
-	group.Add(entry)
+	steamEntry := adw.NewEntryRow()
+	steamEntry.SetTitle("Steam Web API Key")
+	steamEntry.SetText(cfg.SteamAPIKey)
+	steamEntry.SetInputPurpose(gtk.InputPurposePassword)
+	group.Add(steamEntry)
+
+	sgdbEntry := adw.NewEntryRow()
+	sgdbEntry.SetTitle("SteamGridDB API Key")
+	sgdbEntry.SetText(cfg.SteamGridDBAPIKey)
+	sgdbEntry.SetInputPurpose(gtk.InputPurposePassword)
+	group.Add(sgdbEntry)
 
 	saveBtn := gtk.NewButton()
 	saveBtn.SetLabel("Save")
@@ -149,8 +155,12 @@ func showSettingsDialog(parent *adw.ApplicationWindow, cfg *Config, steam *Steam
 	saveBtn.SetMarginEnd(16)
 
 	saveBtn.ConnectClicked(func() {
-		cfg.SteamAPIKey = entry.Text()
+		cfg.SteamAPIKey = steamEntry.Text()
+		cfg.SteamGridDBAPIKey = sgdbEntry.Text()
+		
 		steam.APIKey = cfg.SteamAPIKey
+		steam.SteamGridDBAPIKey = cfg.SteamGridDBAPIKey
+		
 		if err := cfg.Save(); err != nil {
 			fmt.Println("Failed to save config:", err)
 		}
@@ -158,8 +168,8 @@ func showSettingsDialog(parent *adw.ApplicationWindow, cfg *Config, steam *Steam
 	})
 
 	box.Append(group)
-	box.Append(saveBtn)
-	dialog.SetChild(box)
+	toolbarView.SetContent(box)
+	dialog.SetContent(toolbarView)
 	dialog.Show()
 }
 
@@ -169,10 +179,14 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 		contentBox.Remove(child)
 	}
 
+	fraction := 0.0
+	if game.TotalCount > 0 {
+		fraction = float64(game.EarnedCount) / float64(game.TotalCount)
+	}
+
 	// ── Hero banner ──────────────────────────────────────────────────────────
 	if game.HeroImagePath != "" {
 		overlay := gtk.NewOverlay()
-		overlay.SetSizeRequest(-1, 200)
 
 		hero := gtk.NewPicture()
 		hero.SetFilename(game.HeroImagePath)
@@ -192,7 +206,7 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 		infoBox.SetVAlign(gtk.AlignEnd)
 		infoBox.SetMarginStart(24)
 		infoBox.SetMarginEnd(24)
-		infoBox.SetMarginBottom(16)
+		infoBox.SetMarginBottom(24)
 
 		if game.IconPath != "" {
 			img := gtk.NewImageFromFile(game.IconPath)
@@ -208,10 +222,6 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 		titleLabel.AddCSSClass("title-1")
 		titleVbox.Append(titleLabel)
 
-		fraction := 0.0
-		if game.TotalCount > 0 {
-			fraction = float64(game.EarnedCount) / float64(game.TotalCount)
-		}
 		subLabel := gtk.NewLabel(fmt.Sprintf(
 			"%d of %d achievements  ·  %.0f%% complete",
 			game.EarnedCount, game.TotalCount, fraction*100,
@@ -223,16 +233,15 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 		infoBox.Append(titleVbox)
 		overlay.AddOverlay(infoBox)
 
-		contentBox.Append(overlay)
-
-		// Progress bar below banner
+		// Translucent progress bar overlayed directly on the hero bottom
 		progress := gtk.NewProgressBar()
 		progress.SetFraction(fraction)
-		progress.SetMarginStart(24)
-		progress.SetMarginEnd(24)
-		progress.SetMarginTop(12)
-		progress.SetMarginBottom(4)
-		contentBox.Append(progress)
+		progress.SetVAlign(gtk.AlignEnd)
+		progress.AddCSSClass("hero-progress")
+		overlay.AddOverlay(progress)
+
+		overlay.SetSizeRequest(-1, 280)
+		contentBox.Append(overlay)
 
 	} else {
 		// Fallback: plain header without hero
@@ -257,10 +266,6 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 		titleLabel.AddCSSClass("title-1")
 		titleVbox.Append(titleLabel)
 
-		fraction := 0.0
-		if game.TotalCount > 0 {
-			fraction = float64(game.EarnedCount) / float64(game.TotalCount)
-		}
 		subLabel := gtk.NewLabel(fmt.Sprintf(
 			"%d of %d achievements  ·  %.0f%% complete",
 			game.EarnedCount, game.TotalCount, fraction*100,
@@ -280,11 +285,36 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 		contentBox.Append(headerBox)
 	}
 
-	sep := gtk.NewSeparator(gtk.OrientationHorizontal)
-	sep.SetMarginTop(12)
-	contentBox.Append(sep)
+	// Spacing instead of horizontal line
+	spacer := gtk.NewBox(gtk.OrientationVertical, 0)
+	spacer.SetMarginTop(12)
+	contentBox.Append(spacer)
 
-	// ── Categorize ────────────────────────────────────────────────────────────
+	// ── Centered / Clamped Content VBox ──────────────────────────────────────
+	gameVBox := gtk.NewBox(gtk.OrientationVertical, 0)
+
+	// Tab View Stack & Switcher
+	viewStack := adw.NewViewStack()
+
+	viewSwitcher := adw.NewViewSwitcher()
+	viewSwitcher.SetStack(viewStack)
+	viewSwitcher.SetHAlign(gtk.AlignCenter)
+	viewSwitcher.SetMarginTop(12)
+	viewSwitcher.SetMarginBottom(12)
+	gameVBox.Append(viewSwitcher)
+
+	// Spacing instead of horizontal line
+	switcherSpacer := gtk.NewBox(gtk.OrientationVertical, 0)
+	switcherSpacer.SetMarginBottom(12)
+	gameVBox.Append(switcherSpacer)
+
+	// Tab 1: My Progress
+	progressVBox := gtk.NewBox(gtk.OrientationVertical, 16)
+
+	// Tab 2: Global Stats
+	globalVBox := gtk.NewBox(gtk.OrientationVertical, 16)
+
+	// ── Categorize achievements ──────────────────────────────────────────────
 	var earned, locked, hidden []MergedAchievement
 	for _, ach := range game.Achievements {
 		if ach.Earned {
@@ -296,6 +326,7 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 		}
 	}
 
+	// Sorts
 	sort.Slice(earned, func(i, j int) bool {
 		return earned[i].EarnedTime > earned[j].EarnedTime
 	})
@@ -303,63 +334,253 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 		return locked[i].DisplayName < locked[j].DisplayName
 	})
 
-	// ── Sections ─────────────────────────────────────────────────────────────
+	// ── Populate Tab 1: My Progress ──────────────────────────────────────────
 	if len(earned) > 0 {
-		appendEarnedSection(contentBox, earned)
+		earnedGroup := adw.NewPreferencesGroup()
+		earnedGroup.SetTitle(fmt.Sprintf("Earned  ·  %d", len(earned)))
+		for _, ach := range earned {
+			earnedGroup.Add(createAchievementRow(ach))
+		}
+		progressVBox.Append(earnedGroup)
 	}
-	appendLockedSection(contentBox, locked, hidden)
+
+	if len(locked) > 0 || len(hidden) > 0 {
+		lockedGroup := adw.NewPreferencesGroup()
+		lockedGroup.SetTitle(fmt.Sprintf("Locked  ·  %d", len(locked)+len(hidden)))
+		for _, ach := range locked {
+			lockedGroup.Add(createAchievementRow(ach))
+		}
+		if len(hidden) > 0 {
+			hiddenRow := adw.NewActionRow()
+			hiddenRow.SetTitle(fmt.Sprintf("... and %d hidden achievements", len(hidden)))
+			hiddenRow.SetSubtitle("Earn them to reveal details")
+			hiddenRow.SetSensitive(false)
+			lockedGroup.Add(hiddenRow)
+		}
+		progressVBox.Append(lockedGroup)
+	}
+
+	// ── Populate Tab 2: Global Stats ──────────────────────────────────────────
+	allAch := append([]MergedAchievement{}, game.Achievements...)
+	sort.Slice(allAch, func(i, j int) bool {
+		return allAch[i].GlobalPercent > allAch[j].GlobalPercent
+	})
+
+	globalGroup := adw.NewPreferencesGroup()
+	globalGroup.SetTitle("Global Unlock Rates")
+	globalGroup.SetMarginBottom(24)
+
+	for _, ach := range allAch {
+		row, reveal := createGlobalStatsRow(ach)
+		globalGroup.Add(row)
+		if reveal != nil {
+			row.Connect("activate", func() {
+				reveal()
+			})
+		}
+	}
+
+	globalVBox.Append(globalGroup)
+
+	// Add pages to ViewStack
+	progressPage := viewStack.AddTitled(progressVBox, "progress", "My Progress")
+	progressPage.SetIconName("user-home-symbolic")
+
+	globalPage := viewStack.AddTitled(globalVBox, "global", "Global Stats")
+	globalPage.SetIconName("dialog-information-symbolic")
+
+	gameVBox.Append(viewStack)
+
+	// Restrict content width to 860px max and center it
+	clamp := adw.NewClamp()
+	clamp.SetMaximumSize(860)
+	clamp.SetMarginBottom(32)
+	clamp.SetChild(gameVBox)
+
+	contentBox.Append(clamp)
 }
 
-func appendEarnedSection(contentBox *gtk.Box, achievements []MergedAchievement) {
-	group := adw.NewPreferencesGroup()
-	group.SetTitle(fmt.Sprintf("Unlocked  ·  %d", len(achievements)))
-	group.SetMarginStart(24)
-	group.SetMarginEnd(24)
-	group.SetMarginTop(16)
-	group.SetMarginBottom(8)
-	for _, ach := range achievements {
-		group.Add(createAchievementRow(ach))
+// createGlobalStatsRow builds a list row with a native Adwaita progress bar background using Grid overlapping.
+func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
+	row := gtk.NewListBoxRow()
+	row.SetSelectable(false)
+
+	grid := gtk.NewGrid()
+
+	// Progress bar in the background (draws first)
+	progress := gtk.NewProgressBar()
+	progress.SetFraction(ach.GlobalPercent / 100.0)
+	progress.SetVAlign(gtk.AlignFill)
+	progress.SetHAlign(gtk.AlignFill)
+	progress.SetHExpand(true)
+	progress.SetVExpand(true)
+	progress.SetOpacity(0.18) // Native Adwaita accent color, translucent!
+
+	provider := gtk.NewCSSProvider()
+	provider.LoadFromString(`
+		trough {
+			background-color: transparent;
+			border: none;
+		}
+		progress {
+			border: none;
+			border-radius: 0;
+		}
+	`)
+	progress.StyleContext().AddProvider(provider, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+	// Content in the foreground (draws second, on top)
+	content := gtk.NewBox(gtk.OrientationHorizontal, 12)
+	// Match ActionRow padding EXACTLY so heights are identical
+	content.SetMarginTop(8)
+	content.SetMarginBottom(8)
+	content.SetMarginStart(12)
+	content.SetMarginEnd(12)
+	// Icon
+	var img *gtk.Image
+	if ach.Hidden && !ach.Earned {
+		if ach.IconGrayPath != "" {
+			img = gtk.NewImageFromFile(ach.IconGrayPath)
+		} else {
+			img = gtk.NewImageFromIconName("dialog-question")
+		}
+	} else {
+		if ach.IconPath != "" {
+			img = gtk.NewImageFromFile(ach.IconPath)
+		} else {
+			img = gtk.NewImageFromIconName("dialog-question")
+		}
 	}
-	contentBox.Append(group)
+	img.SetPixelSize(48)
+	content.Append(img)
+
+	// Text VBox
+	vbox := gtk.NewBox(gtk.OrientationVertical, 2)
+	vbox.SetVAlign(gtk.AlignCenter)
+	vbox.SetHExpand(true)
+
+	title := gtk.NewLabel("")
+	title.SetXAlign(0)
+	vbox.Append(title)
+
+	desc := gtk.NewLabel("")
+	desc.SetXAlign(0)
+	desc.AddCSSClass("dim-label")
+	desc.AddCSSClass("caption")
+	vbox.Append(desc)
+
+	content.Append(vbox)
+
+	// Percentage
+	pct := gtk.NewLabel(fmt.Sprintf("%.1f%%", ach.GlobalPercent))
+	pct.SetVAlign(gtk.AlignCenter)
+	pct.AddCSSClass("heading")
+	content.Append(pct)
+
+	// Attach to grid: both in cell (0,0). Progress added first (behind).
+	grid.Attach(progress, 0, 0, 1, 1)
+	grid.Attach(content, 0, 0, 1, 1)
+
+	row.SetChild(grid)
+	var reveal func()
+
+	// Handle hidden vs normal display
+	if ach.Hidden && !ach.Earned {
+		title.SetLabel("Hidden Achievement")
+		desc.SetLabel("Click to reveal spoiler")
+		
+		row.SetSelectable(true)
+		row.SetActivatable(true)
+		
+		revealed := false
+		reveal = func() {
+			if revealed {
+				return
+			}
+			revealed = true
+			title.SetLabel(ach.DisplayName)
+			desc.SetLabel(ach.Description)
+			if ach.IconPath != "" {
+				img.SetFromFile(ach.IconPath)
+			}
+			row.SetActivatable(false)
+			row.SetSelectable(false)
+		}
+	} else {
+		title.SetLabel(ach.DisplayName)
+		desc.SetLabel(ach.Description)
+	}
+
+	return row, reveal
 }
 
-func appendLockedSection(contentBox *gtk.Box, locked, hidden []MergedAchievement) {
-	total := len(locked) + len(hidden)
-	if total == 0 {
-		return
-	}
+// createAchievementRow builds a standard achievement row.
+func createAchievementRow(ach MergedAchievement) *gtk.ListBoxRow {
+	row := gtk.NewListBoxRow()
+	row.SetSelectable(false)
 
-	group := adw.NewPreferencesGroup()
-	group.SetTitle(fmt.Sprintf("Locked  ·  %d", total))
-	group.SetMarginStart(24)
-	group.SetMarginEnd(24)
-	group.SetMarginTop(16)
-	group.SetMarginBottom(24)
-
-	for _, ach := range locked {
-		group.Add(createAchievementRow(ach))
-	}
-
-	// Hidden achievements — shown inline, spoiler-protected per row
-	for _, ach := range hidden {
-		group.Add(createHiddenAchievementRow(ach))
-	}
-
-	contentBox.Append(group)
-}
-
-// createAchievementRow builds a standard (non-hidden) achievement row.
-func createAchievementRow(ach MergedAchievement) *adw.ActionRow {
-	row := adw.NewActionRow()
-	row.SetTitle(ach.DisplayName)
-	row.SetSubtitle(ach.Description)
-	row.SetSubtitleLines(2)
-	row.SetTitleLines(1)
+	content := gtk.NewBox(gtk.OrientationHorizontal, 12)
+	content.SetMarginTop(8)
+	content.SetMarginBottom(8)
+	content.SetMarginStart(12)
+	content.SetMarginEnd(12)
 
 	var img *gtk.Image
 	if ach.Earned && ach.IconPath != "" {
 		img = gtk.NewImageFromFile(ach.IconPath)
 	} else if !ach.Earned && ach.IconGrayPath != "" {
+		img = gtk.NewImageFromFile(ach.IconGrayPath)
+	} else {
+		img = gtk.NewImageFromIconName("dialog-question")
+	}
+	img.SetPixelSize(48)
+	content.Append(img)
+
+	vbox := gtk.NewBox(gtk.OrientationVertical, 2)
+	vbox.SetVAlign(gtk.AlignCenter)
+	vbox.SetHExpand(true)
+
+	title := gtk.NewLabel(ach.DisplayName)
+	title.SetXAlign(0)
+	vbox.Append(title)
+
+	desc := gtk.NewLabel(ach.Description)
+	desc.SetXAlign(0)
+	desc.AddCSSClass("dim-label")
+	desc.AddCSSClass("caption")
+	vbox.Append(desc)
+
+	content.Append(vbox)
+
+	// In regular mode, show unlock timestamp if earned
+	if ach.Earned && ach.EarnedTime > 0 {
+		t := time.Unix(ach.EarnedTime, 0)
+		timeLabel := gtk.NewLabel(t.Format("Jan 2, 2006 @ 3:04 PM"))
+		timeLabel.SetJustify(gtk.JustifyRight)
+		timeLabel.SetVAlign(gtk.AlignCenter)
+		timeLabel.AddCSSClass("dim-label")
+		timeLabel.AddCSSClass("caption")
+		content.Append(timeLabel)
+	}
+
+	row.SetChild(content)
+	return row
+}
+
+// createGlobalHiddenRow creates a clickable, spoiler-protected row for global stats.
+func createGlobalHiddenRow(ach MergedAchievement) *adw.ActionRow {
+	row := adw.NewActionRow()
+	row.AddCSSClass("global-row-actionrow")
+	revealed := false
+
+	row.SetTitle("Hidden Achievement")
+	row.SetSubtitle("Click to reveal spoiler")
+	row.SetSubtitleLines(2)
+	row.SetTitleLines(1)
+	row.SetActivatable(true)
+
+	var img *gtk.Image
+	if ach.IconGrayPath != "" {
 		img = gtk.NewImageFromFile(ach.IconGrayPath)
 	} else {
 		img = gtk.NewImageFromIconName("dialog-question")
@@ -371,56 +592,11 @@ func createAchievementRow(ach MergedAchievement) *adw.ActionRow {
 	img.SetMarginEnd(4)
 	row.AddPrefix(img)
 
-	// Global unlock % suffix
-	if ach.GlobalPercent > 0 {
-		pctLabel := gtk.NewLabel(fmt.Sprintf("%.1f%%\nglobal", ach.GlobalPercent))
-		pctLabel.SetJustify(gtk.JustifyRight)
-		pctLabel.AddCSSClass("dim-label")
-		pctLabel.AddCSSClass("caption")
-		pctLabel.SetMarginEnd(8)
-		row.AddSuffix(pctLabel)
-	}
-
-	// Unlock timestamp for earned achievements
-	if ach.Earned && ach.EarnedTime > 0 {
-		t := time.Unix(ach.EarnedTime, 0)
-		timeLabel := gtk.NewLabel(t.Format("Jan 2, 2006") + "\n" + t.Format("3:04 PM"))
-		timeLabel.SetJustify(gtk.JustifyRight)
-		timeLabel.AddCSSClass("dim-label")
-		timeLabel.AddCSSClass("caption")
-		timeLabel.SetMarginEnd(8)
-		row.AddSuffix(timeLabel)
-	}
-
-	return row
-}
-
-// createHiddenAchievementRow builds a spoiler-protected row for hidden achievements.
-// The row shows "Hidden Achievement" with the global %; clicking it reveals the real content.
-func createHiddenAchievementRow(ach MergedAchievement) *adw.ActionRow {
-	row := adw.NewActionRow()
-	revealed := false
-
-	subtitle := "Hidden achievement"
-	if ach.GlobalPercent > 0 {
-		subtitle = fmt.Sprintf("%.1f%% of players have unlocked this  ·  Click to reveal spoiler", ach.GlobalPercent)
-	} else {
-		subtitle = "Unknown unlock rate  ·  Click to reveal spoiler"
-	}
-
-	row.SetTitle("Hidden Achievement")
-	row.SetSubtitle(subtitle)
-	row.SetSubtitleLines(1)
-	row.SetTitleLines(1)
-	row.SetActivatable(true)
-
-	img := gtk.NewImageFromIconName("view-conceal-symbolic")
-	img.SetPixelSize(48)
-	img.SetMarginTop(8)
-	img.SetMarginBottom(8)
-	img.SetMarginStart(4)
-	img.SetMarginEnd(4)
-	row.AddPrefix(img)
+	pctLabel := gtk.NewLabel(fmt.Sprintf("%.1f%%", ach.GlobalPercent))
+	pctLabel.AddCSSClass("dim-label")
+	pctLabel.AddCSSClass("heading")
+	pctLabel.SetMarginEnd(8)
+	row.AddSuffix(pctLabel)
 
 	row.ConnectActivated(func() {
 		if revealed {
@@ -428,17 +604,8 @@ func createHiddenAchievementRow(ach MergedAchievement) *adw.ActionRow {
 		}
 		revealed = true
 		row.SetTitle(ach.DisplayName)
-		revealedSub := ach.Description
-		if ach.GlobalPercent > 0 {
-			revealedSub += fmt.Sprintf("  ·  %.1f%% global", ach.GlobalPercent)
-		}
-		row.SetSubtitle(revealedSub)
+		row.SetSubtitle(ach.Description)
 		row.SetActivatable(false)
-		if ach.IconGrayPath != "" {
-			img.SetFromFile(ach.IconGrayPath)
-		} else {
-			img.SetFromIconName("dialog-question")
-		}
 	})
 
 	return row

@@ -32,11 +32,27 @@ func activate(app *adw.Application) {
 	cssProvider := gtk.NewCSSProvider()
 	cssProvider.LoadFromString(`
 		.hero-gradient {
-			background: linear-gradient(
+			background-image: linear-gradient(
 				to bottom,
-				alpha(@window_bg_color, 0) 0%,
-				alpha(@window_bg_color, 0.85) 100%
+				rgba(0, 0, 0, 0) 0%,
+				rgba(0, 0, 0, 0.85) 100%
 			);
+		}
+		
+		/* Translucent hero progress bar track */
+		.hero-progress trough {
+			background-color: transparent;
+			border: none;
+			border-radius: 0;
+		}
+		.hero-progress progress {
+			background-color: @accent_color;
+			border: none;
+			border-radius: 0;
+		}
+		.hero-progress {
+			min-height: 8px;
+			border: none;
 		}
 	`)
 	gtk.StyleContextAddProviderForDisplay(
@@ -46,7 +62,7 @@ func activate(app *adw.Application) {
 	)
 
 	cfg := LoadConfig()
-	steam := NewSteamClient(cfg.SteamAPIKey)
+	steam := NewSteamClient(cfg.SteamAPIKey, cfg.SteamGridDBAPIKey)
 
 	games, err := loadGames(saveDir)
 	if err != nil {
@@ -65,7 +81,7 @@ func activate(app *adw.Application) {
 				g.Name = details.Name
 			}
 			// Download icon/hero if not already locally present
-			iconPath, heroPath := steam.EnsureAssets(g.AppID, details)
+			iconPath, heroPath := steam.EnsureAssets(g.AppID, details, g.IconPath != "")
 			if g.IconPath == "" && iconPath != "" {
 				g.IconPath = iconPath
 			}

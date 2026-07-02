@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/png"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/diamondburned/gotk4-adwaita/pkg/adw"
@@ -65,7 +66,7 @@ func activate(app *adw.Application) {
 	)
 
 	cfg := LoadConfig()
-	steam := NewSteamClient(cfg.SteamAPIKey, cfg.SteamGridDBAPIKey)
+	steam := NewSteamClient(cfg.SteamAPIKey, cfg.SteamGridDBAPIKey, filepath.Join(saveDir, "data"))
 
 	games, err := loadGames(saveDir, steam)
 	if err != nil {

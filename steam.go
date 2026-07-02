@@ -26,12 +26,11 @@ type SteamGameDetails struct {
 	CapsuleImage string `json:"capsule_imagev5"`
 }
 
-func NewSteamClient(apiKey, sgdbKey string) *SteamClient {
-	cacheBase, _ := os.UserCacheDir()
+func NewSteamClient(apiKey, sgdbKey, dataDir string) *SteamClient {
 	return &SteamClient{
 		APIKey:            apiKey,
 		SteamGridDBAPIKey: sgdbKey,
-		cacheDir:          filepath.Join(cacheBase, "achievement-viewer"),
+		cacheDir:          dataDir,
 		http:              &http.Client{Timeout: 20 * time.Second},
 	}
 }
@@ -245,8 +244,30 @@ func (s *SteamClient) EnsureAssets(appID string, d *SteamGameDetails, hasLocalIc
 			appID,
 		)
 		dest := filepath.Join(dir, "library_hero.jpg")
+		
+		success := false
 		if err := s.downloadFile(heroURL, dest); err == nil {
-			heroPath = dest
+			if info, err := os.Stat(dest); err == nil && info.Size() >= 200 {
+				success = true
+				heroPath = dest
+			} else {
+				os.Remove(dest)
+			}
+		}
+
+		if !success {
+			// Fallback to 1x version
+			fallbackURL := fmt.Sprintf(
+				"https://shared.steamstatic.com/store_item_assets/steam/apps/%s/library_hero.jpg",
+				appID,
+			)
+			if err := s.downloadFile(fallbackURL, dest); err == nil {
+				if info, err := os.Stat(dest); err == nil && info.Size() >= 200 {
+					heroPath = dest
+				} else {
+					os.Remove(dest)
+				}
+			}
 		}
 	}
 

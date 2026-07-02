@@ -157,10 +157,10 @@ func showSettingsDialog(parent *adw.ApplicationWindow, cfg *Config, steam *Steam
 	saveBtn.ConnectClicked(func() {
 		cfg.SteamAPIKey = steamEntry.Text()
 		cfg.SteamGridDBAPIKey = sgdbEntry.Text()
-		
+
 		steam.APIKey = cfg.SteamAPIKey
 		steam.SteamGridDBAPIKey = cfg.SteamGridDBAPIKey
-		
+
 		if err := cfg.Save(); err != nil {
 			fmt.Println("Failed to save config:", err)
 		}
@@ -292,6 +292,8 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 
 	// ── Centered / Clamped Content VBox ──────────────────────────────────────
 	gameVBox := gtk.NewBox(gtk.OrientationVertical, 0)
+	gameVBox.SetMarginStart(16)
+	gameVBox.SetMarginEnd(16)
 
 	// Tab View Stack & Switcher
 	viewStack := adw.NewViewStack()
@@ -374,9 +376,11 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 		row, reveal := createGlobalStatsRow(ach)
 		globalGroup.Add(row)
 		if reveal != nil {
-			row.Connect("activate", func() {
+			click := gtk.NewGestureClick()
+			click.ConnectPressed(func(nPress int, x, y float64) {
 				reveal()
 			})
+			row.AddController(click)
 		}
 	}
 
@@ -389,12 +393,18 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 	globalPage := viewStack.AddTitled(globalVBox, "global", "Global Stats")
 	globalPage.SetIconName("dialog-information-symbolic")
 
+	// Disable homogeneous height so tabs size independently
+	viewStack.SetVhomogeneous(false)
+	viewStack.SetMarginBottom(32)
+
 	gameVBox.Append(viewStack)
 
 	// Restrict content width to 860px max and center it
 	clamp := adw.NewClamp()
 	clamp.SetMaximumSize(860)
-	clamp.SetMarginBottom(32)
+	clamp.SetTighteningThreshold(860)
+	clamp.SetMarginStart(16)
+	clamp.SetMarginEnd(16)
 	clamp.SetChild(gameVBox)
 
 	contentBox.Append(clamp)
@@ -414,10 +424,10 @@ func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
 	progress.SetHAlign(gtk.AlignFill)
 	progress.SetHExpand(true)
 	progress.SetVExpand(true)
-	progress.SetOpacity(0.18) // Native Adwaita accent color, translucent!
+	progress.SetOpacity(0.18)
 
-	provider := gtk.NewCSSProvider()
-	provider.LoadFromString(`
+	barProvider := gtk.NewCSSProvider()
+	barProvider.LoadFromString(`
 		trough {
 			background-color: transparent;
 			border: none;
@@ -427,88 +437,106 @@ func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
 			border-radius: 0;
 		}
 	`)
-	progress.StyleContext().AddProvider(provider, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+	progress.StyleContext().AddProvider(barProvider, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
-	// Content in the foreground (draws second, on top)
+	isHiddenSpoiler := ach.Hidden && !ach.Earned
+
+	// Build icon — hidden spoiler starts with placeholder, revealed on click
+	var img *gtk.Image
+	if isHiddenSpoiler && ach.IconGrayPath == "" {
+		img = gtk.NewImageFromIconName("changes-prevent-symbolic")
+	} else if ach.Earned {
+		if ach.IconPath != "" {
+			img = gtk.NewImageFromFile(ach.IconPath)
+		} else {
+			img = gtk.NewImageFromIconName("trophy-symbolic")
+		}
+	} else {
+		if ach.IconGrayPath != "" {
+			img = gtk.NewImageFromFile(ach.IconGrayPath)
+		} else {
+			img = gtk.NewImageFromIconName("changes-prevent-symbolic")
+		}
+	}
+	img.SetPixelSize(48)
+
+	// Single content box — icon swaps on reveal, only text animates
 	content := gtk.NewBox(gtk.OrientationHorizontal, 12)
-	// Match ActionRow padding EXACTLY so heights are identical
 	content.SetMarginTop(8)
 	content.SetMarginBottom(8)
 	content.SetMarginStart(12)
 	content.SetMarginEnd(12)
-	// Icon: show locked/gray icon for any unearned achievement
-	var img *gtk.Image
-	if !ach.Earned {
-		if ach.IconGrayPath != "" {
-			img = gtk.NewImageFromFile(ach.IconGrayPath)
-		} else {
-			img = gtk.NewImageFromIconName("dialog-question")
-		}
-	} else {
-		if ach.IconPath != "" {
-			img = gtk.NewImageFromFile(ach.IconPath)
-		} else {
-			img = gtk.NewImageFromIconName("dialog-question")
-		}
-	}
-	img.SetPixelSize(48)
 	content.Append(img)
 
-	// Text VBox
-	vbox := gtk.NewBox(gtk.OrientationVertical, 2)
-	vbox.SetVAlign(gtk.AlignCenter)
-	vbox.SetHExpand(true)
+	// Animated text Stack (slides left on reveal)
+	textStack := gtk.NewStack()
+	textStack.SetHExpand(true)
+	textStack.SetTransitionType(gtk.StackTransitionTypeSlideLeft)
+	textStack.SetTransitionDuration(350)
 
-	title := gtk.NewLabel("")
-	title.SetXAlign(0)
-	vbox.Append(title)
+	vboxSpoiler := gtk.NewBox(gtk.OrientationVertical, 2)
+	vboxSpoiler.SetVAlign(gtk.AlignCenter)
+	titleSpoiler := gtk.NewLabel("Hidden Achievement")
+	titleSpoiler.SetXAlign(0)
+	vboxSpoiler.Append(titleSpoiler)
+	descSpoiler := gtk.NewLabel("Click to reveal spoiler")
+	descSpoiler.SetXAlign(0)
+	descSpoiler.AddCSSClass("dim-label")
+	descSpoiler.AddCSSClass("caption")
+	vboxSpoiler.Append(descSpoiler)
+	textStack.AddNamed(vboxSpoiler, "spoiler")
 
-	desc := gtk.NewLabel("")
-	desc.SetXAlign(0)
-	desc.AddCSSClass("dim-label")
-	desc.AddCSSClass("caption")
-	vbox.Append(desc)
+	vboxReal := gtk.NewBox(gtk.OrientationVertical, 2)
+	vboxReal.SetVAlign(gtk.AlignCenter)
+	titleReal := gtk.NewLabel(ach.DisplayName)
+	titleReal.SetXAlign(0)
+	vboxReal.Append(titleReal)
+	descReal := gtk.NewLabel(ach.Description)
+	descReal.SetXAlign(0)
+	descReal.AddCSSClass("dim-label")
+	descReal.AddCSSClass("caption")
+	vboxReal.Append(descReal)
+	textStack.AddNamed(vboxReal, "real")
 
-	content.Append(vbox)
+	content.Append(textStack)
 
-	// Percentage
 	pct := gtk.NewLabel(fmt.Sprintf("%.1f%%", ach.GlobalPercent))
 	pct.SetVAlign(gtk.AlignCenter)
 	pct.AddCSSClass("heading")
 	content.Append(pct)
 
-	// Attach to grid: both in cell (0,0). Progress added first (behind).
 	grid.Attach(progress, 0, 0, 1, 1)
 	grid.Attach(content, 0, 0, 1, 1)
-
 	row.SetChild(grid)
+
 	var reveal func()
 
-	// Handle hidden vs normal display
-	if ach.Hidden && !ach.Earned {
-		title.SetLabel("Hidden Achievement")
-		desc.SetLabel("Click to reveal spoiler")
-		
+	if isHiddenSpoiler {
+		textStack.SetVisibleChildName("spoiler")
 		row.SetSelectable(true)
 		row.SetActivatable(true)
-		
+
 		revealed := false
 		reveal = func() {
 			if revealed {
 				return
 			}
 			revealed = true
-			title.SetLabel(ach.DisplayName)
-			desc.SetLabel(ach.Description)
+			textStack.SetVisibleChildName("real")
+			// Swap to actual icon with grayscale filter (locked but revealed)
 			if ach.IconPath != "" {
 				img.SetFromFile(ach.IconPath)
+				grayProvider := gtk.NewCSSProvider()
+				grayProvider.LoadFromString("image { filter: grayscale(100%); }")
+				img.StyleContext().AddProvider(grayProvider, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+			} else if ach.IconGrayPath != "" {
+				img.SetFromFile(ach.IconGrayPath)
 			}
 			row.SetActivatable(false)
 			row.SetSelectable(false)
 		}
 	} else {
-		title.SetLabel(ach.DisplayName)
-		desc.SetLabel(ach.Description)
+		textStack.SetVisibleChildName("real")
 	}
 
 	return row, reveal
@@ -526,12 +554,18 @@ func createAchievementRow(ach MergedAchievement) *gtk.ListBoxRow {
 	content.SetMarginEnd(12)
 
 	var img *gtk.Image
-	if ach.Earned && ach.IconPath != "" {
-		img = gtk.NewImageFromFile(ach.IconPath)
-	} else if !ach.Earned && ach.IconGrayPath != "" {
-		img = gtk.NewImageFromFile(ach.IconGrayPath)
+	if ach.Earned {
+		if ach.IconPath != "" {
+			img = gtk.NewImageFromFile(ach.IconPath)
+		} else {
+			img = gtk.NewImageFromIconName("trophy-symbolic")
+		}
 	} else {
-		img = gtk.NewImageFromIconName("dialog-question")
+		if ach.IconGrayPath != "" {
+			img = gtk.NewImageFromFile(ach.IconGrayPath)
+		} else {
+			img = gtk.NewImageFromIconName("changes-prevent-symbolic")
+		}
 	}
 	img.SetPixelSize(48)
 	content.Append(img)
@@ -568,4 +602,3 @@ func createAchievementRow(ach MergedAchievement) *gtk.ListBoxRow {
 }
 
 // createGlobalHiddenRow is no longer used; spoiler logic is handled inside createGlobalStatsRow.
-

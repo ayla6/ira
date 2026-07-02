@@ -84,12 +84,19 @@ func findIconPath(gameDir, iconField string) string {
 	if iconField == "" {
 		return ""
 	}
+	// If the field has no extension (e.g. "achievement_images/481510"),
+	// the API returned a bare ID — no real image file to look up.
+	if filepath.Ext(iconField) == "" {
+		return ""
+	}
 	path := filepath.Join(gameDir, "steam_settings", iconField)
-	if _, err := os.Stat(path); err == nil {
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
 		if converted, err := convertIcoToPng(path); err == nil {
 			return converted
 		}
-		return path
+		if !strings.HasSuffix(strings.ToLower(path), ".ico") {
+			return path
+		}
 	}
 
 	base := filepath.Base(iconField)
@@ -99,14 +106,16 @@ func findIconPath(gameDir, iconField string) string {
 		filepath.Join(gameDir, "steam_settings", "img", base),
 	}
 	for _, cand := range candidates {
-		if _, err := os.Stat(cand); err == nil {
+		if info, err := os.Stat(cand); err == nil && !info.IsDir() {
 			if converted, err := convertIcoToPng(cand); err == nil {
 				return converted
 			}
-			return cand
+			if !strings.HasSuffix(strings.ToLower(cand), ".ico") {
+				return cand
+			}
 		}
 	}
-	return path
+	return ""
 }
 
 func loadGames(basePath string, steam *SteamClient) ([]Game, error) {

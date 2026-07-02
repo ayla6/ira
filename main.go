@@ -64,7 +64,7 @@ func activate(app *adw.Application) {
 	cfg := LoadConfig()
 	steam := NewSteamClient(cfg.SteamAPIKey, cfg.SteamGridDBAPIKey)
 
-	games, err := loadGames(saveDir)
+	games, err := loadGames(saveDir, steam)
 	if err != nil {
 		fmt.Println("Error loading games:", err)
 	}

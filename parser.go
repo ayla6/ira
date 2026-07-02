@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 type AchievementStatus struct {
@@ -102,13 +103,16 @@ func findIconPath(gameDir, iconField string) string {
 	return path
 }
 
-func loadGames(basePath string) ([]Game, error) {
+func loadGames(basePath string, steam *SteamClient) ([]Game, error) {
 	var games []Game
 
 	entries, err := os.ReadDir(basePath)
 	if err != nil {
 		return nil, err
 	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -122,16 +126,32 @@ func loadGames(basePath string) ([]Game, error) {
 
 		gameDir := filepath.Join(basePath, appID)
 
-		game, err := loadGame(appID, gameDir)
-		if err != nil {
-			fmt.Printf("Skipping game %s: %v\n", appID, err)
-		} else if len(game.Achievements) == 0 {
-			fmt.Printf("Skipping game %s: no achievements found\n", appID)
-		} else {
-			fmt.Printf("Loaded game %s (%d achievements)\n", game.Name, len(game.Achievements))
-			games = append(games, game)
-		}
+		wg.Add(1)
+		go func(appID, gameDir string) {
+			defer wg.Done()
+
+			metaPath := filepath.Join(gameDir, "steam_settings", "achievements.json")
+			if _, err := os.Stat(metaPath); os.IsNotExist(err) {
+				fmt.Printf("Generating missing steam_settings for %s...\n", appID)
+				if err := steam.GenerateSteamSettings(appID, gameDir); err != nil {
+					fmt.Printf("Failed to generate for %s: %v\n", appID, err)
+				}
+			}
+
+			game, err := loadGame(appID, gameDir)
+			if err != nil {
+				fmt.Printf("Skipping game %s: %v\n", appID, err)
+			} else if len(game.Achievements) == 0 {
+				fmt.Printf("Skipping game %s: no achievements found\n", appID)
+			} else {
+				mu.Lock()
+				games = append(games, game)
+				mu.Unlock()
+			}
+		}(appID, gameDir)
 	}
+
+	wg.Wait()
 
 	sort.Slice(games, func(i, j int) bool {
 		return games[i].Name < games[j].Name
@@ -158,13 +178,11 @@ func loadGame(appID, gameDir string) (Game, error) {
 
 	statusPath := filepath.Join(gameDir, "achievements.json")
 	statusData, err := os.ReadFile(statusPath)
-	if err != nil {
-		return game, err
-	}
-
-	var statusMap map[string]AchievementStatus
-	if err := json.Unmarshal(statusData, &statusMap); err != nil {
-		return game, err
+	statusMap := make(map[string]AchievementStatus)
+	if err == nil {
+		if err := json.Unmarshal(statusData, &statusMap); err != nil {
+			fmt.Printf("Warning: failed to unmarshal status for %s: %v\n", appID, err)
+		}
 	}
 
 	metaPath := filepath.Join(gameDir, "steam_settings", "achievements.json")

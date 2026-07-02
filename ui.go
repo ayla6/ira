@@ -436,9 +436,9 @@ func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
 	content.SetMarginBottom(8)
 	content.SetMarginStart(12)
 	content.SetMarginEnd(12)
-	// Icon
+	// Icon: show locked/gray icon for any unearned achievement
 	var img *gtk.Image
-	if ach.Hidden && !ach.Earned {
+	if !ach.Earned {
 		if ach.IconGrayPath != "" {
 			img = gtk.NewImageFromFile(ach.IconGrayPath)
 		} else {
@@ -567,46 +567,5 @@ func createAchievementRow(ach MergedAchievement) *gtk.ListBoxRow {
 	return row
 }
 
-// createGlobalHiddenRow creates a clickable, spoiler-protected row for global stats.
-func createGlobalHiddenRow(ach MergedAchievement) *adw.ActionRow {
-	row := adw.NewActionRow()
-	row.AddCSSClass("global-row-actionrow")
-	revealed := false
+// createGlobalHiddenRow is no longer used; spoiler logic is handled inside createGlobalStatsRow.
 
-	row.SetTitle("Hidden Achievement")
-	row.SetSubtitle("Click to reveal spoiler")
-	row.SetSubtitleLines(2)
-	row.SetTitleLines(1)
-	row.SetActivatable(true)
-
-	var img *gtk.Image
-	if ach.IconGrayPath != "" {
-		img = gtk.NewImageFromFile(ach.IconGrayPath)
-	} else {
-		img = gtk.NewImageFromIconName("dialog-question")
-	}
-	img.SetPixelSize(48)
-	img.SetMarginTop(8)
-	img.SetMarginBottom(8)
-	img.SetMarginStart(4)
-	img.SetMarginEnd(4)
-	row.AddPrefix(img)
-
-	pctLabel := gtk.NewLabel(fmt.Sprintf("%.1f%%", ach.GlobalPercent))
-	pctLabel.AddCSSClass("dim-label")
-	pctLabel.AddCSSClass("heading")
-	pctLabel.SetMarginEnd(8)
-	row.AddSuffix(pctLabel)
-
-	row.ConnectActivated(func() {
-		if revealed {
-			return
-		}
-		revealed = true
-		row.SetTitle(ach.DisplayName)
-		row.SetSubtitle(ach.Description)
-		row.SetActivatable(false)
-	})
-
-	return row
-}

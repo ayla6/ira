@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -246,4 +247,136 @@ func (s *SteamClient) EnsureAssets(appID string, d *SteamGameDetails, hasLocalIc
 	}
 
 	return iconPath, heroPath
+}
+
+// SteamSchemaAchievement is the shape Steam returns for each achievement in GetSchemaForGame.
+type SteamSchemaAchievement struct {
+	Name        string `json:"name"`
+	DefaultVal  int    `json:"defaultvalue"`
+	DisplayName string `json:"displayName"`
+	Hidden      int    `json:"hidden"`
+	Description string `json:"description"`
+	Icon        string `json:"icon"`
+	IconGray    string `json:"icongray"`
+}
+
+// goldbergAchievement is the shape Goldberg (and our parser) expect in achievements.json.
+type goldbergAchievement struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName"`
+	Description string `json:"description"`
+	Hidden      string `json:"hidden"`
+	Icon        string `json:"icon"`
+	IconGray    string `json:"icon_gray"`
+}
+
+// GenerateSteamSettings fetches the game schema from Steam and writes
+// steam_settings/achievements.json + downloads achievement images into
+// steam_settings/achievement_images/ under gameDir.
+// Returns a descriptive error (or nil on success).
+func (s *SteamClient) GenerateSteamSettings(appID, gameDir string) error {
+	if s.APIKey == "" {
+		return fmt.Errorf("no Steam API key configured — add it in Settings first")
+	}
+
+	// 1. Fetch the game schema
+	url := fmt.Sprintf(
+		"https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/?key=%s&appid=%s&format=json",
+		s.APIKey, appID,
+	)
+	resp, err := s.http.Get(url)
+	if err != nil {
+		return fmt.Errorf("schema request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var raw struct {
+		Game struct {
+			AvailableGameStats struct {
+				Achievements []SteamSchemaAchievement `json:"achievements"`
+			} `json:"availableGameStats"`
+		} `json:"game"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return fmt.Errorf("failed to decode schema: %w", err)
+	}
+
+	achs := raw.Game.AvailableGameStats.Achievements
+	if len(achs) == 0 {
+		return fmt.Errorf("Steam returned 0 achievements for app %s (check appid and API key)", appID)
+	}
+
+	// 2. Convert to Goldberg format and collect icon URLs
+	settingsDir := filepath.Join(gameDir, "steam_settings")
+	imgDir := filepath.Join(settingsDir, "achievement_images")
+	if err := os.MkdirAll(imgDir, 0755); err != nil {
+		return fmt.Errorf("could not create steam_settings dir: %w", err)
+	}
+
+	type iconJob struct{ url, dest string }
+	var jobs []iconJob
+	var out []goldbergAchievement
+
+	for _, a := range achs {
+		hidden := "0"
+		if a.Hidden != 0 {
+			hidden = "1"
+		}
+		// Icon filename is just the basename of the URL
+		iconBase := filepath.Base(a.Icon)
+		iconGrayBase := filepath.Base(a.IconGray)
+
+		out = append(out, goldbergAchievement{
+			Name:        a.Name,
+			DisplayName: a.DisplayName,
+			Description: a.Description,
+			Hidden:      hidden,
+			Icon:        "achievement_images/" + iconBase,
+			IconGray:    "achievement_images/" + iconGrayBase,
+		})
+
+		if a.Icon != "" {
+			jobs = append(jobs, iconJob{a.Icon, filepath.Join(imgDir, iconBase)})
+		}
+		if a.IconGray != "" {
+			jobs = append(jobs, iconJob{a.IconGray, filepath.Join(imgDir, iconGrayBase)})
+		}
+	}
+
+	// 3. Write achievements.json
+	b, err := json.MarshalIndent(out, "", "    ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal achievements: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(settingsDir, "achievements.json"), b, 0644); err != nil {
+		return fmt.Errorf("failed to write achievements.json: %w", err)
+	}
+
+	// 4. Download icons concurrently (8 workers)
+	jobCh := make(chan iconJob, len(jobs))
+	for _, j := range jobs {
+		jobCh <- j
+	}
+	close(jobCh)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobCh {
+				// Skip if already cached
+				if _, err := os.Stat(j.dest); err == nil {
+					continue
+				}
+				if err := s.downloadFile(j.url, j.dest); err != nil {
+					fmt.Printf("  icon download failed %s: %v\n", j.url, err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	fmt.Printf("Generated steam_settings for app %s: %d achievements, %d icons\n", appID, len(out), len(jobs))
+	return nil
 }

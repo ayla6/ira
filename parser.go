@@ -86,6 +86,9 @@ func findIconPath(gameDir, iconField string) string {
 	}
 	path := filepath.Join(gameDir, "steam_settings", iconField)
 	if _, err := os.Stat(path); err == nil {
+		if converted, err := convertIcoToPng(path); err == nil {
+			return converted
+		}
 		return path
 	}
 
@@ -97,6 +100,9 @@ func findIconPath(gameDir, iconField string) string {
 	}
 	for _, cand := range candidates {
 		if _, err := os.Stat(cand); err == nil {
+			if converted, err := convertIcoToPng(cand); err == nil {
+				return converted
+			}
 			return cand
 		}
 	}
@@ -174,6 +180,13 @@ func loadGame(appID, gameDir string) (Game, error) {
 	iconPath := filepath.Join(gameDir, "steam_settings", "icon.png")
 	if _, err := os.Stat(iconPath); err == nil {
 		game.IconPath = iconPath
+	} else {
+		icoPath := filepath.Join(gameDir, "steam_settings", "icon.ico")
+		if _, err := os.Stat(icoPath); err == nil {
+			if converted, err := convertIcoToPng(icoPath); err == nil {
+				game.IconPath = converted
+			}
+		}
 	}
 
 	statusPath := filepath.Join(gameDir, "achievements.json")

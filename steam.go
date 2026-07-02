@@ -218,7 +218,11 @@ func (s *SteamClient) EnsureAssets(appID string, d *SteamGameDetails, hasLocalIc
 					}
 					dest := filepath.Join(dir, "icon"+ext)
 					if err := s.downloadFile(sgdbUrl, dest); err == nil {
-						iconPath = dest
+						if converted, err := convertIcoToPng(dest); err == nil {
+							iconPath = converted
+						} else {
+							iconPath = dest
+						}
 					}
 				}
 			}

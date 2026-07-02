@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"image"
+	"image/png"
 	"os"
 	"strings"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/gio/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
+	_ "github.com/sergeymakinen/go-ico"
 )
 
 const saveDir = "/data/Games/Saves/GSE Saves"
@@ -103,4 +106,41 @@ func activate(app *adw.Application) {
 
 	buildUI(window, games, cfg, steam)
 	window.Show()
+}
+
+// convertIcoToPng checks if a file is an .ico, and if so, decodes it (extracting
+// the largest resolution image by default via go-ico) and saves it as .png.
+func convertIcoToPng(icoPath string) (string, error) {
+	if !strings.HasSuffix(strings.ToLower(icoPath), ".ico") {
+		return icoPath, nil
+	}
+
+	pngPath := icoPath[:len(icoPath)-4] + ".png"
+
+	if _, err := os.Stat(pngPath); err == nil {
+		return pngPath, nil // Already converted
+	}
+
+	inFile, err := os.Open(icoPath)
+	if err != nil {
+		return icoPath, err
+	}
+	defer inFile.Close()
+
+	img, _, err := image.Decode(inFile)
+	if err != nil {
+		return icoPath, err
+	}
+
+	outFile, err := os.Create(pngPath)
+	if err != nil {
+		return icoPath, err
+	}
+	defer outFile.Close()
+
+	if err := png.Encode(outFile, img); err != nil {
+		return icoPath, err
+	}
+
+	return pngPath, nil
 }

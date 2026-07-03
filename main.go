@@ -11,6 +11,7 @@ import (
 	"github.com/diamondburned/gotk4-adwaita/pkg/adw"
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/gio/v2"
+	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 	_ "github.com/sergeymakinen/go-ico"
 )
@@ -42,7 +43,7 @@ func activate(app *adw.Application) {
 				rgba(0, 0, 0, 0.85) 100%
 			);
 		}
-		
+
 		/* Translucent hero progress bar track */
 		.hero-progress trough {
 			background-color: transparent;
@@ -58,6 +59,10 @@ func activate(app *adw.Application) {
 			min-height: 8px;
 			border: none;
 		}
+
+		.sidebar-row-title {
+			min-width: 0;
+		}
 	`)
 	gtk.StyleContextAddProviderForDisplay(
 		gdk.DisplayGetDefault(),
@@ -68,45 +73,80 @@ func activate(app *adw.Application) {
 	cfg := LoadConfig()
 	steam := NewSteamClient(cfg.SteamAPIKey, cfg.SteamGridDBAPIKey, filepath.Join(saveDir, "data"))
 
-	games, err := loadGames(saveDir, steam)
+	// Load whatever is already on disk. This does no network I/O, so the
+	// window can appear almost instantly instead of blocking on Steam/asset
+	// downloads for every game up front.
+	games, err := loadGames(saveDir)
 	if err != nil {
 		fmt.Println("Error loading games:", err)
 	}
 
-	// Enrich each game with Steam data (uses cache; first run may be slow)
+	window.Show()
+	buildUI(window, games, cfg, steam)
+
+	// Enrich every game in the background: fetch missing achievement
+	// definitions, titles, icons, hero art, and global unlock percentages.
+	// Each game's UI row/content is refreshed in place as its data arrives,
+	// so nothing blocks the window from being usable immediately.
 	for i := range games {
-		g := &games[i]
-		details, err := steam.FetchGameDetails(g.AppID)
-		if err != nil {
-			fmt.Printf("Steam details unavailable for %s: %v\n", g.AppID, err)
-		} else {
-			// Fill in name if we only have the App ID fallback
-			if strings.HasPrefix(g.Name, "App ID:") && details.Name != "" {
-				g.Name = details.Name
+		enrichGameAsync(games[i].AppID, filepath.Join(saveDir, games[i].AppID), steam)
+	}
+}
+
+// enrichGameAsync performs all network-dependent work for a single game on a
+// background goroutine, then hands the freshly loaded Game back to the UI
+// thread via glib.IdleAdd so widgets are only ever touched from the main loop.
+func enrichGameAsync(appID, gameDir string, steam *SteamClient) {
+	go func() {
+		// Generate achievement definitions if we don't have them yet.
+		metaPath := filepath.Join(gameDir, "steam_settings", "achievements.json")
+		if _, err := os.Stat(metaPath); os.IsNotExist(err) {
+			if err := steam.GenerateSteamSettings(appID, gameDir); err != nil {
+				fmt.Printf("Could not generate steam_settings for %s: %v\n", appID, err)
 			}
-			// Download icon/hero if not already locally present
-			iconPath, heroPath := steam.EnsureAssets(g.AppID, details, g.IconPath != "")
-			if g.IconPath == "" && iconPath != "" {
-				g.IconPath = iconPath
+		}
+
+		// Reload from disk now that achievements.json may have appeared.
+		game, err := loadGame(appID, gameDir)
+		if err != nil {
+			fmt.Printf("Failed reloading %s: %v\n", appID, err)
+			return
+		}
+
+		// Resolve a proper title if we're still using the App ID fallback.
+		if strings.HasPrefix(game.Name, "App ID:") {
+			if name, err := steam.FetchNemirtingasGameName(appID); err == nil && name != "" {
+				game.Name = name
+			}
+		}
+
+		details, err := steam.FetchGameDetails(appID)
+		if err != nil {
+			fmt.Printf("Steam details unavailable for %s: %v\n", appID, err)
+		} else {
+			if strings.HasPrefix(game.Name, "App ID:") && details.Name != "" {
+				game.Name = details.Name
+			}
+			iconPath, heroPath := steam.EnsureAssets(appID, details, game.IconPath != "")
+			if game.IconPath == "" && iconPath != "" {
+				game.IconPath = iconPath
 			}
 			if heroPath != "" {
-				g.HeroImagePath = heroPath
+				game.HeroImagePath = heroPath
 			}
 		}
 
-		// Fetch global achievement percentages (permanently cached)
-		globalPcts, err := steam.FetchGlobalAchievements(g.AppID)
-		if err != nil {
-			fmt.Printf("Global achievements unavailable for %s: %v\n", g.AppID, err)
-		} else {
-			for j := range g.Achievements {
-				g.Achievements[j].GlobalPercent = globalPcts[g.Achievements[j].Name]
+		globalPcts, err := steam.FetchGlobalAchievements(appID)
+		if err == nil {
+			for j := range game.Achievements {
+				game.Achievements[j].GlobalPercent = globalPcts[game.Achievements[j].Name]
 			}
 		}
-	}
 
-	buildUI(window, games, cfg, steam)
-	window.Show()
+		glib.IdleAdd(func() {
+			onGameUpdated(game)
+		})
+	}()
 }
 
 // convertIcoToPng checks if a file is an .ico, and if so, decodes it (extracting

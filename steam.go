@@ -244,7 +244,7 @@ func (s *SteamClient) EnsureAssets(appID string, d *SteamGameDetails, hasLocalIc
 			appID,
 		)
 		dest := filepath.Join(dir, "library_hero.jpg")
-		
+
 		success := false
 		if err := s.downloadFile(heroURL, dest); err == nil {
 			if info, err := os.Stat(dest); err == nil && info.Size() >= 200 {
@@ -295,23 +295,102 @@ type goldbergAchievement struct {
 	IconGray    string `json:"icon_gray"`
 }
 
-// GenerateSteamSettings fetches the game schema from Steam and writes
-// steam_settings/achievements.json + downloads achievement images into
-// steam_settings/achievement_images/ under gameDir.
-// Returns a descriptive error (or nil on success).
-func (s *SteamClient) GenerateSteamSettings(appID, gameDir string) error {
-	if s.APIKey == "" {
-		return fmt.Errorf("no Steam API key configured — add it in Settings first")
+// langMap decodes a Nemirtingas-style {"english": "...", "french": "...", ...} object,
+// preferring English but falling back to whatever is present.
+type langMap map[string]string
+
+func (m langMap) pick() string {
+	if v, ok := m["english"]; ok && v != "" {
+		return v
+	}
+	for _, v := range m {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// nemirtingasAchievement is one entry of achievements_db.json from the
+// Nemirtingas/games-infos-datas repository. Unlike the Steam Web API, this
+// source includes full names/descriptions even for hidden achievements.
+type nemirtingasAchievement struct {
+	Name        string  `json:"name"`
+	Hidden      bool    `json:"hidden"`
+	Icon        string  `json:"icon"`
+	IconGray    string  `json:"icongray"`
+	DisplayName langMap `json:"displayName"`
+	Description langMap `json:"description"`
+}
+
+const nemirtingasBaseURL = "https://raw.githubusercontent.com/Nemirtingas/games-infos-datas/refs/heads/main/steam"
+
+// nemirtingasGameInfo mirrors the shape of steam/<appid>/<appid>.json in that repo.
+type nemirtingasGameInfo struct {
+	Name string `json:"Name"`
+}
+
+// FetchNemirtingasGameName looks up the game's title from the community-maintained
+// games-infos-datas repo. This is used to fill in a proper title for games we
+// don't yet have a local title.txt or Steam store entry for.
+func (s *SteamClient) FetchNemirtingasGameName(appID string) (string, error) {
+	url := fmt.Sprintf("%s/%s/%s.json", nemirtingasBaseURL, appID, appID)
+	resp, err := s.http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("games-infos-datas returned status %d for app %s", resp.StatusCode, appID)
 	}
 
-	// 1. Fetch the game schema
+	var info nemirtingasGameInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return "", err
+	}
+	if info.Name == "" {
+		return "", fmt.Errorf("no name found for app %s", appID)
+	}
+	return info.Name, nil
+}
+
+// fetchNemirtingasAchievements downloads achievements_db.json for appID. It returns
+// nil, err if the app isn't present in the repo (404) or the data is malformed.
+func (s *SteamClient) fetchNemirtingasAchievements(appID string) ([]nemirtingasAchievement, error) {
+	url := fmt.Sprintf("%s/%s/achievements_db.json", nemirtingasBaseURL, appID)
+	resp, err := s.http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("games-infos-datas returned status %d for app %s", resp.StatusCode, appID)
+	}
+
+	var achs []nemirtingasAchievement
+	if err := json.NewDecoder(resp.Body).Decode(&achs); err != nil {
+		return nil, err
+	}
+	if len(achs) == 0 {
+		return nil, fmt.Errorf("no achievements found for app %s", appID)
+	}
+	return achs, nil
+}
+
+// fetchSteamSchemaAchievements downloads the official achievement schema from the
+// Steam Web API. Note: Steam omits name/description for achievements marked hidden.
+func (s *SteamClient) fetchSteamSchemaAchievements(appID string) ([]SteamSchemaAchievement, error) {
+	if s.APIKey == "" {
+		return nil, fmt.Errorf("no Steam API key configured — add it in Settings first")
+	}
+
 	url := fmt.Sprintf(
 		"https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/?key=%s&appid=%s&format=json",
 		s.APIKey, appID,
 	)
 	resp, err := s.http.Get(url)
 	if err != nil {
-		return fmt.Errorf("schema request failed: %w", err)
+		return nil, fmt.Errorf("schema request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -323,52 +402,92 @@ func (s *SteamClient) GenerateSteamSettings(appID, gameDir string) error {
 		} `json:"game"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return fmt.Errorf("failed to decode schema: %w", err)
+		return nil, fmt.Errorf("failed to decode schema: %w", err)
 	}
 
 	achs := raw.Game.AvailableGameStats.Achievements
 	if len(achs) == 0 {
-		return fmt.Errorf("Steam returned 0 achievements for app %s (check appid and API key)", appID)
+		return nil, fmt.Errorf("Steam returned 0 achievements for app %s (check appid and API key)", appID)
 	}
+	return achs, nil
+}
 
-	// 2. Convert to Goldberg format and collect icon URLs
+// GenerateSteamSettings resolves achievement metadata for appID and writes
+// steam_settings/achievements.json + downloads achievement images into
+// steam_settings/achievement_images/ under gameDir.
+//
+// It prefers the community-maintained Nemirtingas games-infos-datas repo, since
+// (unlike the official Steam API) it includes full descriptions for hidden
+// achievements. If that source doesn't have the game, it falls back to the
+// official Steam schema (Steam API key required).
+func (s *SteamClient) GenerateSteamSettings(appID, gameDir string) error {
+	type iconJob struct{ url, dest string }
+	var jobs []iconJob
+	var out []goldbergAchievement
+
 	settingsDir := filepath.Join(gameDir, "steam_settings")
 	imgDir := filepath.Join(settingsDir, "achievement_images")
 	if err := os.MkdirAll(imgDir, 0755); err != nil {
 		return fmt.Errorf("could not create steam_settings dir: %w", err)
 	}
 
-	type iconJob struct{ url, dest string }
-	var jobs []iconJob
-	var out []goldbergAchievement
+	if nemAchs, err := s.fetchNemirtingasAchievements(appID); err == nil {
+		for _, a := range nemAchs {
+			hidden := "0"
+			if a.Hidden {
+				hidden = "1"
+			}
+			iconBase := filepath.Base(a.Icon)
+			iconGrayBase := filepath.Base(a.IconGray)
 
-	for _, a := range achs {
-		hidden := "0"
-		if a.Hidden != 0 {
-			hidden = "1"
+			out = append(out, goldbergAchievement{
+				Name:        a.Name,
+				DisplayName: a.DisplayName.pick(),
+				Description: a.Description.pick(),
+				Hidden:      hidden,
+				Icon:        "achievement_images/" + iconBase,
+				IconGray:    "achievement_images/" + iconGrayBase,
+			})
+			if a.Icon != "" {
+				jobs = append(jobs, iconJob{a.Icon, filepath.Join(imgDir, iconBase)})
+			}
+			if a.IconGray != "" {
+				jobs = append(jobs, iconJob{a.IconGray, filepath.Join(imgDir, iconGrayBase)})
+			}
 		}
-		// Icon filename is just the basename of the URL
-		iconBase := filepath.Base(a.Icon)
-		iconGrayBase := filepath.Base(a.IconGray)
+	} else {
+		fmt.Printf("games-infos-datas unavailable for %s (%v), falling back to Steam schema\n", appID, err)
 
-		out = append(out, goldbergAchievement{
-			Name:        a.Name,
-			DisplayName: a.DisplayName,
-			Description: a.Description,
-			Hidden:      hidden,
-			Icon:        "achievement_images/" + iconBase,
-			IconGray:    "achievement_images/" + iconGrayBase,
-		})
-
-		if a.Icon != "" {
-			jobs = append(jobs, iconJob{a.Icon, filepath.Join(imgDir, iconBase)})
+		achs, serr := s.fetchSteamSchemaAchievements(appID)
+		if serr != nil {
+			return fmt.Errorf("no achievement source available: %w", serr)
 		}
-		if a.IconGray != "" {
-			jobs = append(jobs, iconJob{a.IconGray, filepath.Join(imgDir, iconGrayBase)})
+		for _, a := range achs {
+			hidden := "0"
+			if a.Hidden != 0 {
+				hidden = "1"
+			}
+			iconBase := filepath.Base(a.Icon)
+			iconGrayBase := filepath.Base(a.IconGray)
+
+			out = append(out, goldbergAchievement{
+				Name:        a.Name,
+				DisplayName: a.DisplayName,
+				Description: a.Description,
+				Hidden:      hidden,
+				Icon:        "achievement_images/" + iconBase,
+				IconGray:    "achievement_images/" + iconGrayBase,
+			})
+			if a.Icon != "" {
+				jobs = append(jobs, iconJob{a.Icon, filepath.Join(imgDir, iconBase)})
+			}
+			if a.IconGray != "" {
+				jobs = append(jobs, iconJob{a.IconGray, filepath.Join(imgDir, iconGrayBase)})
+			}
 		}
 	}
 
-	// 3. Write achievements.json
+	// Write achievements.json
 	b, err := json.MarshalIndent(out, "", "    ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal achievements: %w", err)
@@ -377,7 +496,7 @@ func (s *SteamClient) GenerateSteamSettings(appID, gameDir string) error {
 		return fmt.Errorf("failed to write achievements.json: %w", err)
 	}
 
-	// 4. Download icons concurrently (8 workers)
+	// Download icons concurrently (8 workers)
 	jobCh := make(chan iconJob, len(jobs))
 	for _, j := range jobs {
 		jobCh <- j

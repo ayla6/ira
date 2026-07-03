@@ -2,36 +2,81 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/diamondburned/gotk4-adwaita/pkg/adw"
+	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
+	"github.com/diamondburned/gotk4/pkg/pango"
 )
+
+// sidebarRowWidgets holds references to the widgets inside one sidebar entry
+// so we can update them in place once background enrichment finishes for
+// that game, without rebuilding the whole list.
+type sidebarRowWidgets struct {
+	row      *gtk.ListBoxRow
+	icon     *gtk.Image
+	title    *gtk.Label
+	subtitle *gtk.Label
+}
+
+// uiState bundles everything buildUI's closures need to share, so the
+// top-level onGameUpdated callback (invoked from main.go's background
+// goroutines) can refresh the right widgets.
+type uiState struct {
+	window     *adw.ApplicationWindow
+	games      []*Game
+	rows       []*sidebarRowWidgets
+	gameList   *gtk.ListBox
+	contentBox *gtk.Box
+	emptyState *adw.StatusPage
+	selectedID string
+	cfg        *Config
+	steam      *SteamClient
+}
+
+// onGameUpdated is invoked (always on the GTK main thread, via glib.IdleAdd)
+// whenever background enrichment finishes loading fresh data for a game.
+var onGameUpdated func(updated Game)
 
 // buildUI constructs the main window layout.
 func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *SteamClient) {
+	state := &uiState{window: window, cfg: cfg, steam: steam}
+	for i := range games {
+		g := games[i]
+		state.games = append(state.games, &g)
+	}
+
 	splitView := gtk.NewPaned(gtk.OrientationHorizontal)
 	splitView.SetPosition(260)
 	splitView.SetShrinkStartChild(false)
 	splitView.SetResizeStartChild(false)
 
 	// ── Sidebar ──────────────────────────────────────────────────────────────
+	// Never scroll horizontally: long titles must ellipsize and show their
+	// full text in a tooltip instead of forcing the sidebar to grow or scroll.
 	sidebarScroll := gtk.NewScrolledWindow()
-	sidebarScroll.SetPolicy(gtk.PolicyAutomatic, gtk.PolicyAutomatic)
-	sidebarScroll.SetSizeRequest(200, -1)
+	sidebarScroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
+	sidebarScroll.SetSizeRequest(220, -1)
+	sidebarScroll.SetVExpand(true)
 
 	gameList := gtk.NewListBox()
 	gameList.AddCSSClass("navigation-sidebar")
 	sidebarScroll.SetChild(gameList)
+	state.gameList = gameList
+
 	splitView.SetStartChild(sidebarScroll)
 
 	// ── Content area ─────────────────────────────────────────────────────────
 	contentScroll := gtk.NewScrolledWindow()
-	contentScroll.SetPolicy(gtk.PolicyAutomatic, gtk.PolicyAutomatic)
+	contentScroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
 	contentBox := gtk.NewBox(gtk.OrientationVertical, 0)
 	contentScroll.SetChild(contentBox)
 	splitView.SetEndChild(contentScroll)
+	state.contentBox = contentBox
 
 	// ── Header bar ───────────────────────────────────────────────────────────
 	headerBar := adw.NewHeaderBar()
@@ -46,6 +91,12 @@ func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *St
 		showSettingsDialog(window, cfg, steam)
 	})
 
+	addBtn := gtk.NewButton()
+	addBtn.SetIconName("list-add-symbolic")
+	addBtn.SetTooltipText("Add a game by pointing at its install folder")
+	addBtn.AddCSSClass("flat")
+	headerBar.PackStart(addBtn)
+
 	toolbarView := adw.NewToolbarView()
 	toolbarView.AddTopBar(headerBar)
 	toolbarView.SetContent(splitView)
@@ -57,61 +108,273 @@ func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *St
 	emptyState.SetDescription("Select a game from the sidebar to view achievements.")
 	emptyState.SetIconName("trophy-symbolic")
 	contentBox.Append(emptyState)
+	state.emptyState = emptyState
 
-	// ── Sidebar game rows ─────────────────────────────────────────────────────
-	for _, g := range games {
-		game := g
-		row := gtk.NewListBoxRow()
-
-		hbox := gtk.NewBox(gtk.OrientationHorizontal, 10)
-		hbox.SetMarginTop(8)
-		hbox.SetMarginBottom(8)
-		hbox.SetMarginStart(10)
-		hbox.SetMarginEnd(10)
-
-		var icon *gtk.Image
-		if game.IconPath != "" {
-			icon = gtk.NewImageFromFile(game.IconPath)
-		} else {
-			icon = gtk.NewImageFromIconName("application-x-executable")
-		}
-		icon.SetPixelSize(32)
-		hbox.Append(icon)
-
-		vbox := gtk.NewBox(gtk.OrientationVertical, 2)
-		vbox.SetVAlign(gtk.AlignCenter)
-		vbox.SetHExpand(true)
-
-		titleLabel := gtk.NewLabel(game.Name)
-		titleLabel.SetXAlign(0)
-		titleLabel.AddCSSClass("heading")
-		titleLabel.SetMaxWidthChars(20)
-		vbox.Append(titleLabel)
-
-		pct := 0
-		if game.TotalCount > 0 {
-			pct = game.EarnedCount * 100 / game.TotalCount
-		}
-		countLabel := gtk.NewLabel(fmt.Sprintf("%d/%d · %d%%", game.EarnedCount, game.TotalCount, pct))
-		countLabel.SetXAlign(0)
-		countLabel.AddCSSClass("dim-label")
-		countLabel.AddCSSClass("caption")
-		vbox.Append(countLabel)
-
-		hbox.Append(vbox)
-		row.SetChild(hbox)
-		gameList.Append(row)
-	}
+	rebuildSidebar(state)
 
 	gameList.ConnectRowSelected(func(row *gtk.ListBoxRow) {
 		if row == nil {
 			return
 		}
 		idx := row.Index()
-		if idx >= 0 && idx < len(games) {
-			displayGame(games[idx], contentBox, emptyState)
+		if idx >= 0 && idx < len(state.games) {
+			state.selectedID = state.games[idx].AppID
+			displayGame(state.games[idx], state)
 		}
 	})
+
+	addBtn.ConnectClicked(func() {
+		showAddGameDialog(state)
+	})
+
+	// Wire up the global callback used by background enrichment goroutines.
+	onGameUpdated = func(updated Game) {
+		applyGameUpdate(state, updated)
+	}
+}
+
+// rebuildSidebar clears and repopulates the game list from state.games. Used
+// both for the initial population and after a new game is added.
+func rebuildSidebar(state *uiState) {
+	for child := state.gameList.FirstChild(); child != nil; child = state.gameList.FirstChild() {
+		state.gameList.Remove(child)
+	}
+	state.rows = nil
+
+	for _, g := range state.games {
+		state.rows = append(state.rows, buildSidebarRow(state.gameList, g))
+	}
+}
+
+// buildSidebarRow creates one sidebar entry and appends it to list.
+func buildSidebarRow(list *gtk.ListBox, game *Game) *sidebarRowWidgets {
+	row := gtk.NewListBoxRow()
+
+	hbox := gtk.NewBox(gtk.OrientationHorizontal, 10)
+	hbox.SetMarginTop(8)
+	hbox.SetMarginBottom(8)
+	hbox.SetMarginStart(10)
+	hbox.SetMarginEnd(10)
+
+	var icon *gtk.Image
+	if game.IconPath != "" {
+		icon = gtk.NewImageFromFile(game.IconPath)
+	} else {
+		icon = gtk.NewImageFromIconName("application-x-executable")
+	}
+	icon.SetPixelSize(32)
+	hbox.Append(icon)
+
+	vbox := gtk.NewBox(gtk.OrientationVertical, 2)
+	vbox.SetVAlign(gtk.AlignCenter)
+	vbox.SetHExpand(true)
+
+	titleLabel := gtk.NewLabel(game.Name)
+	titleLabel.SetXAlign(0)
+	titleLabel.AddCSSClass("heading")
+	titleLabel.AddCSSClass("sidebar-row-title")
+	titleLabel.SetEllipsize(pango.EllipsizeEnd)
+	titleLabel.SetHExpand(true)
+	titleLabel.SetTooltipText(game.Name)
+	vbox.Append(titleLabel)
+
+	pct := 0
+	if game.TotalCount > 0 {
+		pct = game.EarnedCount * 100 / game.TotalCount
+	}
+	countLabel := gtk.NewLabel(fmt.Sprintf("%d/%d · %d%%", game.EarnedCount, game.TotalCount, pct))
+	countLabel.SetXAlign(0)
+	countLabel.AddCSSClass("dim-label")
+	countLabel.AddCSSClass("caption")
+	countLabel.SetEllipsize(pango.EllipsizeEnd)
+	vbox.Append(countLabel)
+
+	hbox.Append(vbox)
+	row.SetChild(hbox)
+	list.Append(row)
+
+	return &sidebarRowWidgets{row: row, icon: icon, title: titleLabel, subtitle: countLabel}
+}
+
+// applyGameUpdate replaces a game's data (after background enrichment) and
+// refreshes only the affected sidebar row / content view.
+func applyGameUpdate(state *uiState, updated Game) {
+	for i, g := range state.games {
+		if g.AppID != updated.AppID {
+			continue
+		}
+		*state.games[i] = updated
+
+		if i < len(state.rows) {
+			rw := state.rows[i]
+			rw.title.SetText(updated.Name)
+			rw.title.SetTooltipText(updated.Name)
+			pct := 0
+			if updated.TotalCount > 0 {
+				pct = updated.EarnedCount * 100 / updated.TotalCount
+			}
+			rw.subtitle.SetText(fmt.Sprintf("%d/%d · %d%%", updated.EarnedCount, updated.TotalCount, pct))
+			if updated.IconPath != "" {
+				setImageAsync(rw.icon, updated.IconPath)
+			}
+		}
+
+		if state.selectedID == updated.AppID {
+			displayGame(state.games[i], state)
+		}
+		return
+	}
+}
+
+// setImageAsync sets an already-downloaded local image file on img.
+//
+// By the time any code in this file references an achievement/game icon
+// path, that file is guaranteed to already exist on disk: achievement art is
+// fully downloaded during background enrichment (see enrichGameAsync in
+// main.go) *before* a Game is ever handed to the UI, and findIconPath
+// (parser.go) only ever returns paths that pass an os.Stat check. Decoding a
+// small local PNG/JPEG is sub-millisecond, so routing it through a
+// goroutine + glib.IdleAdd round trip bought us nothing but an extra frame
+// of placeholder-then-pop-in flicker. Loading it synchronously and
+// immediately is both simpler and smoother.
+//
+// The name is kept (rather than a plain setImage) as a signal that this is
+// the single choke point to revisit if a future image source is no longer
+// guaranteed to be local/cheap (e.g. loading uncached art directly from a
+// network URL) and needs real async handling again.
+func setImageAsync(img *gtk.Image, path string) {
+	if path == "" {
+		return
+	}
+	img.SetFromFile(path)
+}
+
+// setPictureAsync is the gtk.Picture equivalent of setImageAsync.
+func setPictureAsync(pic *gtk.Picture, path string) {
+	if path == "" {
+		return
+	}
+	pic.SetFilename(path)
+}
+
+// showAddGameDialog walks the user through adding a new game: pick its
+// install folder, detect (or ask for) its Steam App ID, then wire everything
+// up and reload.
+func showAddGameDialog(state *uiState) {
+	chooser := gtk.NewFileChooserNative(
+		"Select Game Folder",
+		&state.window.Window,
+		gtk.FileChooserActionSelectFolder,
+		"Select",
+		"Cancel",
+	)
+	chooser.ConnectResponse(func(response int) {
+		if response != int(gtk.ResponseAccept) {
+			return
+		}
+		file := chooser.File()
+		if file == nil {
+			return
+		}
+		folder := file.Path()
+		if folder == "" {
+			return
+		}
+
+		if appID, ok := detectAppID(folder); ok {
+			finishAddGame(state, folder, appID)
+			return
+		}
+
+		promptForAppID(state, folder)
+	})
+	chooser.Show()
+}
+
+// promptForAppID is shown when we couldn't auto-detect a steam_appid.txt in
+// the chosen folder.
+func promptForAppID(state *uiState, folder string) {
+	dialog := adw.NewMessageDialog(&state.window.Window, "Enter Steam App ID",
+		"No steam_appid.txt was found in this folder. Enter the game's Steam App ID to continue.")
+
+	entry := gtk.NewEntry()
+	entry.SetPlaceholderText("e.g. 1687950")
+	entry.SetInputPurpose(gtk.InputPurposeDigits)
+	entry.SetMarginTop(8)
+	entry.SetMarginBottom(8)
+	entry.SetMarginStart(8)
+	entry.SetMarginEnd(8)
+	dialog.SetExtraChild(entry)
+
+	dialog.AddResponse("cancel", "Cancel")
+	dialog.AddResponse("add", "Add Game")
+	dialog.SetResponseAppearance("add", adw.ResponseSuggested)
+	dialog.SetDefaultResponse("add")
+	dialog.SetCloseResponse("cancel")
+
+	dialog.ConnectResponse(func(response string) {
+		if response != "add" {
+			return
+		}
+		finishAddGame(state, folder, entry.Text())
+	})
+
+	dialog.Show()
+}
+
+// finishAddGame performs the actual filesystem wiring + achievement download,
+// then inserts (or refreshes) the game in the sidebar.
+func finishAddGame(state *uiState, folder, appID string) {
+	go func() {
+		gameDir, err := AddGameFromFolder(folder, appID, state.steam)
+		if err != nil {
+			fmt.Println("Add game failed:", err)
+			glib.IdleAdd(func() {
+				errDialog := adw.NewMessageDialog(&state.window.Window, "Couldn't Add Game", err.Error())
+				errDialog.AddResponse("ok", "OK")
+				errDialog.SetDefaultResponse("ok")
+				errDialog.SetCloseResponse("ok")
+				errDialog.Show()
+			})
+			if gameDir == "" {
+				return
+			}
+		}
+
+		game, lerr := loadGame(filepath.Base(gameDir), gameDir)
+		if lerr != nil {
+			fmt.Println("Failed to load newly added game:", lerr)
+			return
+		}
+		if strings.HasPrefix(game.Name, "App ID:") {
+			if name, nerr := state.steam.FetchNemirtingasGameName(game.AppID); nerr == nil && name != "" {
+				game.Name = name
+			}
+		}
+
+		glib.IdleAdd(func() {
+			insertOrUpdateGame(state, game)
+		})
+
+		enrichGameAsync(game.AppID, gameDir, state.steam)
+	}()
+}
+
+// insertOrUpdateGame adds a freshly-added game to the sidebar (or refreshes
+// it if it already existed), keeping the list sorted by name.
+func insertOrUpdateGame(state *uiState, game Game) {
+	for i, g := range state.games {
+		if g.AppID == game.AppID {
+			*state.games[i] = game
+			rebuildSidebar(state)
+			return
+		}
+	}
+	state.games = append(state.games, &game)
+	sort.Slice(state.games, func(i, j int) bool {
+		return state.games[i].Name < state.games[j].Name
+	})
+	rebuildSidebar(state)
 }
 
 // showSettingsDialog opens a modal window for editing the Steam and SteamGridDB API keys.
@@ -168,13 +431,15 @@ func showSettingsDialog(parent *adw.ApplicationWindow, cfg *Config, steam *Steam
 	})
 
 	box.Append(group)
+	box.Append(saveBtn)
 	toolbarView.SetContent(box)
 	dialog.SetContent(toolbarView)
 	dialog.Show()
 }
 
 // displayGame clears the content area and renders a game's achievements.
-func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
+func displayGame(game *Game, state *uiState) {
+	contentBox := state.contentBox
 	for child := contentBox.FirstChild(); child != nil; child = contentBox.FirstChild() {
 		contentBox.Remove(child)
 	}
@@ -189,9 +454,9 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 		overlay := gtk.NewOverlay()
 
 		hero := gtk.NewPicture()
-		hero.SetFilename(game.HeroImagePath)
 		hero.SetContentFit(gtk.ContentFitCover)
 		hero.SetCanShrink(true)
+		setPictureAsync(hero, game.HeroImagePath)
 		overlay.SetChild(hero)
 
 		// Dark gradient overlay so text is readable
@@ -240,8 +505,31 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 		progress.AddCSSClass("hero-progress")
 		overlay.AddOverlay(progress)
 
-		overlay.SetSizeRequest(-1, 280)
-		contentBox.Append(overlay)
+		// Pin the hero to a fixed height. A plain container's measured size
+		// always incorporates its children's natural size, so a Box (even
+		// with an explicit size request, which only acts as a *minimum*)
+		// still grows to fit the Picture's aspect-ratio-driven natural
+		// height — which varies per game and can be far taller than 280px
+		// for portrait-ish hero art, especially once there isn't much
+		// achievement content below to fill out the rest of the window.
+		//
+		// GtkScrolledWindow is different: by default it does NOT propagate
+		// its child's natural size upward (propagate-natural-height is
+		// false), so giving it an explicit size request results in exactly
+		// that size no matter how large the child wants to be — the extra
+		// content is simply clipped. Scrollbars are disabled since we only
+		// want the clipping behavior, not actual scrolling.
+		overlay.SetVExpand(false)
+		overlay.SetHExpand(true)
+		gradient.SetVExpand(false)
+		heroWrap := gtk.NewScrolledWindow()
+		heroWrap.SetPolicy(gtk.PolicyNever, gtk.PolicyNever)
+		heroWrap.SetPropagateNaturalHeight(false)
+		heroWrap.SetPropagateNaturalWidth(false)
+		heroWrap.SetSizeRequest(-1, 280)
+		heroWrap.SetVExpand(false)
+		heroWrap.SetChild(overlay)
+		contentBox.Append(heroWrap)
 
 	} else {
 		// Fallback: plain header without hero
@@ -336,12 +624,19 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 		return locked[i].DisplayName < locked[j].DisplayName
 	})
 
+	gameDir := filepath.Join(saveDir, game.AppID)
+	reload := func() {
+		if updated, err := loadGame(game.AppID, gameDir); err == nil {
+			applyGameUpdate(state, updated)
+		}
+	}
+
 	// ── Populate Tab 1: My Progress ──────────────────────────────────────────
 	if len(earned) > 0 {
 		earnedGroup := adw.NewPreferencesGroup()
 		earnedGroup.SetTitle(fmt.Sprintf("Earned  ·  %d", len(earned)))
 		for _, ach := range earned {
-			earnedGroup.Add(createAchievementRow(ach))
+			earnedGroup.Add(createAchievementRow(ach, nil))
 		}
 		progressVBox.Append(earnedGroup)
 	}
@@ -350,7 +645,10 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 		lockedGroup := adw.NewPreferencesGroup()
 		lockedGroup.SetTitle(fmt.Sprintf("Locked  ·  %d", len(locked)+len(hidden)))
 		for _, ach := range locked {
-			lockedGroup.Add(createAchievementRow(ach))
+			a := ach
+			lockedGroup.Add(createAchievementRow(a, func() {
+				confirmMarkUnlocked(state, gameDir, a, reload)
+			}))
 		}
 		if len(hidden) > 0 {
 			hiddenRow := adw.NewActionRow()
@@ -410,6 +708,39 @@ func displayGame(game Game, contentBox *gtk.Box, emptyState *adw.StatusPage) {
 	contentBox.Append(clamp)
 }
 
+// confirmMarkUnlocked shows a deliberately-unmissable confirmation dialog
+// before writing a manual unlock, since this is meant to be hard to trigger
+// by accident. The unlock time is left at zero so it's obvious in the UI
+// this wasn't a real, timestamped unlock.
+func confirmMarkUnlocked(state *uiState, gameDir string, ach MergedAchievement, reload func()) {
+	dialog := adw.NewMessageDialog(&state.window.Window,
+		"Mark as Already Unlocked?",
+		fmt.Sprintf(
+			"This will mark “%s” as earned without a real unlock time. "+
+				"Use this only if you already unlocked it previously (e.g. before using this tool).",
+			ach.DisplayName,
+		),
+	)
+	dialog.AddResponse("cancel", "Cancel")
+	dialog.AddResponse("confirm", "Mark as Unlocked")
+	dialog.SetResponseAppearance("confirm", adw.ResponseDestructive)
+	dialog.SetDefaultResponse("cancel")
+	dialog.SetCloseResponse("cancel")
+
+	dialog.ConnectResponse(func(response string) {
+		if response != "confirm" {
+			return
+		}
+		if err := SetAchievementEarned(gameDir, ach.Name, true); err != nil {
+			fmt.Println("Failed to mark achievement as unlocked:", err)
+			return
+		}
+		reload()
+	})
+
+	dialog.Show()
+}
+
 // createGlobalStatsRow builds a list row with a native Adwaita progress bar background using Grid overlapping.
 func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
 	row := gtk.NewListBoxRow()
@@ -442,23 +773,22 @@ func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
 	isHiddenSpoiler := ach.Hidden && !ach.Earned
 
 	// Build icon — hidden spoiler starts with placeholder, revealed on click
-	var img *gtk.Image
+	img := gtk.NewImageFromIconName("changes-prevent-symbolic")
+	img.SetPixelSize(48)
+	img.SetVAlign(gtk.AlignStart)
 	if isHiddenSpoiler && ach.IconGrayPath == "" {
-		img = gtk.NewImageFromIconName("changes-prevent-symbolic")
+		// keep placeholder
 	} else if ach.Earned {
 		if ach.IconPath != "" {
-			img = gtk.NewImageFromFile(ach.IconPath)
+			setImageAsync(img, ach.IconPath)
 		} else {
-			img = gtk.NewImageFromIconName("trophy-symbolic")
+			img.SetFromIconName("trophy-symbolic")
 		}
 	} else {
 		if ach.IconGrayPath != "" {
-			img = gtk.NewImageFromFile(ach.IconGrayPath)
-		} else {
-			img = gtk.NewImageFromIconName("changes-prevent-symbolic")
+			setImageAsync(img, ach.IconGrayPath)
 		}
 	}
-	img.SetPixelSize(48)
 
 	// Single content box — icon swaps on reveal, only text animates
 	content := gtk.NewBox(gtk.OrientationHorizontal, 12)
@@ -471,11 +801,12 @@ func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
 	// Animated text Stack (slides left on reveal)
 	textStack := gtk.NewStack()
 	textStack.SetHExpand(true)
+	textStack.SetVAlign(gtk.AlignStart)
 	textStack.SetTransitionType(gtk.StackTransitionTypeSlideLeft)
 	textStack.SetTransitionDuration(350)
 
 	vboxSpoiler := gtk.NewBox(gtk.OrientationVertical, 2)
-	vboxSpoiler.SetVAlign(gtk.AlignCenter)
+	vboxSpoiler.SetVAlign(gtk.AlignStart)
 	titleSpoiler := gtk.NewLabel("Hidden Achievement")
 	titleSpoiler.SetXAlign(0)
 	vboxSpoiler.Append(titleSpoiler)
@@ -487,11 +818,13 @@ func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
 	textStack.AddNamed(vboxSpoiler, "spoiler")
 
 	vboxReal := gtk.NewBox(gtk.OrientationVertical, 2)
-	vboxReal.SetVAlign(gtk.AlignCenter)
+	vboxReal.SetVAlign(gtk.AlignStart)
 	titleReal := gtk.NewLabel(ach.DisplayName)
 	titleReal.SetXAlign(0)
 	vboxReal.Append(titleReal)
 	descReal := gtk.NewLabel(ach.Description)
+	descReal.SetWrap(true)
+	descReal.SetWrapMode(pango.WrapWordChar)
 	descReal.SetXAlign(0)
 	descReal.AddCSSClass("dim-label")
 	descReal.AddCSSClass("caption")
@@ -501,7 +834,7 @@ func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
 	content.Append(textStack)
 
 	pct := gtk.NewLabel(fmt.Sprintf("%.1f%%", ach.GlobalPercent))
-	pct.SetVAlign(gtk.AlignCenter)
+	pct.SetVAlign(gtk.AlignStart)
 	pct.AddCSSClass("heading")
 	content.Append(pct)
 
@@ -525,12 +858,12 @@ func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
 			textStack.SetVisibleChildName("real")
 			// Swap to actual icon with grayscale filter (locked but revealed)
 			if ach.IconPath != "" {
-				img.SetFromFile(ach.IconPath)
+				setImageAsync(img, ach.IconPath)
 				grayProvider := gtk.NewCSSProvider()
 				grayProvider.LoadFromString("image { filter: grayscale(100%); }")
 				img.StyleContext().AddProvider(grayProvider, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 			} else if ach.IconGrayPath != "" {
-				img.SetFromFile(ach.IconGrayPath)
+				setImageAsync(img, ach.IconGrayPath)
 			}
 			row.SetActivatable(false)
 			row.SetSelectable(false)
@@ -542,8 +875,10 @@ func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
 	return row, reveal
 }
 
-// createAchievementRow builds a standard achievement row.
-func createAchievementRow(ach MergedAchievement) *gtk.ListBoxRow {
+// createAchievementRow builds a standard achievement row. If onMarkUnlocked is
+// non-nil, right-clicking the row offers a (confirmation-gated) way to
+// manually mark it as already earned.
+func createAchievementRow(ach MergedAchievement, onMarkUnlocked func()) *gtk.ListBoxRow {
 	row := gtk.NewListBoxRow()
 	row.SetSelectable(false)
 
@@ -553,33 +888,36 @@ func createAchievementRow(ach MergedAchievement) *gtk.ListBoxRow {
 	content.SetMarginStart(12)
 	content.SetMarginEnd(12)
 
-	var img *gtk.Image
+	img := gtk.NewImageFromIconName("changes-prevent-symbolic")
+	img.SetPixelSize(48)
+	img.SetVAlign(gtk.AlignStart)
 	if ach.Earned {
 		if ach.IconPath != "" {
-			img = gtk.NewImageFromFile(ach.IconPath)
+			setImageAsync(img, ach.IconPath)
 		} else {
-			img = gtk.NewImageFromIconName("trophy-symbolic")
+			img.SetFromIconName("trophy-symbolic")
 		}
-	} else {
-		if ach.IconGrayPath != "" {
-			img = gtk.NewImageFromFile(ach.IconGrayPath)
-		} else {
-			img = gtk.NewImageFromIconName("changes-prevent-symbolic")
-		}
+	} else if ach.IconGrayPath != "" {
+		setImageAsync(img, ach.IconGrayPath)
 	}
-	img.SetPixelSize(48)
 	content.Append(img)
 
+	// title stays pinned to the top of its own column, independent from how
+	// many lines the description below it wraps to.
 	vbox := gtk.NewBox(gtk.OrientationVertical, 2)
-	vbox.SetVAlign(gtk.AlignCenter)
+	vbox.SetVAlign(gtk.AlignStart)
 	vbox.SetHExpand(true)
 
 	title := gtk.NewLabel(ach.DisplayName)
 	title.SetXAlign(0)
+	title.SetVAlign(gtk.AlignStart)
 	vbox.Append(title)
 
 	desc := gtk.NewLabel(ach.Description)
 	desc.SetXAlign(0)
+	desc.SetVAlign(gtk.AlignStart)
+	desc.SetWrap(true)
+	desc.SetWrapMode(pango.WrapWordChar)
 	desc.AddCSSClass("dim-label")
 	desc.AddCSSClass("caption")
 	vbox.Append(desc)
@@ -587,18 +925,32 @@ func createAchievementRow(ach MergedAchievement) *gtk.ListBoxRow {
 	content.Append(vbox)
 
 	// In regular mode, show unlock timestamp if earned
-	if ach.Earned && ach.EarnedTime > 0 {
-		t := time.Unix(ach.EarnedTime, 0)
-		timeLabel := gtk.NewLabel(t.Format("Jan 2, 2006 @ 3:04 PM"))
+	if ach.Earned {
+		timeLabel := gtk.NewLabel("")
 		timeLabel.SetJustify(gtk.JustifyRight)
-		timeLabel.SetVAlign(gtk.AlignCenter)
+		timeLabel.SetVAlign(gtk.AlignStart)
 		timeLabel.AddCSSClass("dim-label")
 		timeLabel.AddCSSClass("caption")
+		if ach.EarnedTime > 0 {
+			t := time.Unix(ach.EarnedTime, 0)
+			timeLabel.SetText(t.Format("Jan 2, 2006 @ 3:04 PM"))
+		} else {
+			timeLabel.SetText("Marked manually")
+		}
 		content.Append(timeLabel)
 	}
 
 	row.SetChild(content)
+
+	if onMarkUnlocked != nil {
+		click := gtk.NewGestureClick()
+		click.SetButton(3) // right-click only, so this can't be triggered by accident
+		click.ConnectPressed(func(nPress int, x, y float64) {
+			onMarkUnlocked()
+		})
+		row.AddController(click)
+		row.SetTooltipText("Right-click to mark as already unlocked")
+	}
+
 	return row
 }
-
-// createGlobalHiddenRow is no longer used; spoiler logic is handled inside createGlobalStatsRow.

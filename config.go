@@ -41,13 +41,13 @@ func setSecret(key, value string) error {
 
 func LoadConfig() *Config {
 	c := &Config{}
-	
+
 	// 1. Load fallback plaintext config
 	data, err := os.ReadFile(configPath())
 	if err == nil {
 		_ = json.Unmarshal(data, c)
 	}
-	
+
 	// 2. Override with secure keyring values if available
 	if steamKey := getSecret("steam"); steamKey != "" {
 		c.SteamAPIKey = steamKey
@@ -55,7 +55,7 @@ func LoadConfig() *Config {
 	if sgdbKey := getSecret("steamgriddb"); sgdbKey != "" {
 		c.SteamGridDBAPIKey = sgdbKey
 	}
-	
+
 	return c
 }
 

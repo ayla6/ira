@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -118,7 +119,13 @@ func findIconPath(gameDir, iconField string) string {
 	return ""
 }
 
-func loadGames(basePath string, steam *SteamClient) ([]Game, error) {
+// loadGames scans basePath for game directories and loads whatever is already
+// present on disk. It performs no network access, so it returns almost
+// instantly — this is what lets the window appear immediately on startup.
+// Games that don't have steam_settings/achievements.json yet are still
+// included (with zero achievements); the caller is expected to enrich them
+// asynchronously via steam.GenerateSteamSettings and reload them in place.
+func loadGames(basePath string) ([]Game, error) {
 	var games []Game
 
 	entries, err := os.ReadDir(basePath)
@@ -135,7 +142,10 @@ func loadGames(basePath string, steam *SteamClient) ([]Game, error) {
 		}
 
 		appID := entry.Name()
-		if appID == "settings" {
+		// Steam App IDs are always numeric. Skip any non-numeric directory
+		// (e.g. "settings", our own "data" asset cache, etc.) so it's never
+		// mistaken for a game.
+		if _, err := strconv.Atoi(appID); err != nil {
 			continue
 		}
 
@@ -145,24 +155,14 @@ func loadGames(basePath string, steam *SteamClient) ([]Game, error) {
 		go func(appID, gameDir string) {
 			defer wg.Done()
 
-			metaPath := filepath.Join(gameDir, "steam_settings", "achievements.json")
-			if _, err := os.Stat(metaPath); os.IsNotExist(err) {
-				fmt.Printf("Generating missing steam_settings for %s...\n", appID)
-				if err := steam.GenerateSteamSettings(appID, gameDir); err != nil {
-					fmt.Printf("Failed to generate for %s: %v\n", appID, err)
-				}
-			}
-
 			game, err := loadGame(appID, gameDir)
 			if err != nil {
 				fmt.Printf("Skipping game %s: %v\n", appID, err)
-			} else if len(game.Achievements) == 0 {
-				fmt.Printf("Skipping game %s: no achievements found\n", appID)
-			} else {
-				mu.Lock()
-				games = append(games, game)
-				mu.Unlock()
+				return
 			}
+			mu.Lock()
+			games = append(games, game)
+			mu.Unlock()
 		}(appID, gameDir)
 	}
 
@@ -173,6 +173,30 @@ func loadGames(basePath string, steam *SteamClient) ([]Game, error) {
 	})
 
 	return games, nil
+}
+
+// SetAchievementEarned manually marks an achievement as earned (or not) directly
+// in the game's achievements.json status file, without going through the game
+// itself. When marking as earned manually, EarnedTime is deliberately left at
+// 0 so it's clear in the UI that the unlock time isn't real/known.
+func SetAchievementEarned(gameDir, achName string, earned bool) error {
+	statusPath := filepath.Join(gameDir, "achievements.json")
+
+	statusMap := make(map[string]AchievementStatus)
+	if data, err := os.ReadFile(statusPath); err == nil {
+		_ = json.Unmarshal(data, &statusMap)
+	}
+
+	statusMap[achName] = AchievementStatus{
+		Earned:     earned,
+		EarnedTime: 0,
+	}
+
+	b, err := json.MarshalIndent(statusMap, "", "    ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(statusPath, b, 0644)
 }
 
 func loadGame(appID, gameDir string) (Game, error) {

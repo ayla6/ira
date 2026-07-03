@@ -10,8 +10,9 @@ import (
 )
 
 type Config struct {
-	SteamAPIKey       string `json:"steam_api_key,omitempty"`
-	SteamGridDBAPIKey string `json:"steam_griddb_api_key,omitempty"`
+	SteamAPIKey          string `json:"steam_api_key,omitempty"`
+	SteamGridDBAPIKey    string `json:"steam_griddb_api_key,omitempty"`
+	NotificationsEnabled bool   `json:"notifications_enabled"`
 }
 
 func configPath() string {
@@ -40,7 +41,7 @@ func setSecret(key, value string) error {
 }
 
 func LoadConfig() *Config {
-	c := &Config{}
+	c := &Config{NotificationsEnabled: true}
 
 	// 1. Load fallback plaintext config
 	data, err := os.ReadFile(configPath())
@@ -66,7 +67,8 @@ func (c *Config) Save() error {
 
 	// Save plaintext config. If keyring succeeded, we omit the key to be secure.
 	// If keyring failed, we fall back to plaintext storage in config.json.
-	plaintextConfig := Config{}
+	// Non-secret settings (like NotificationsEnabled) always go here.
+	plaintextConfig := Config{NotificationsEnabled: c.NotificationsEnabled}
 	if steamErr != nil {
 		plaintextConfig.SteamAPIKey = c.SteamAPIKey
 	}

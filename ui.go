@@ -27,24 +27,39 @@ type sidebarRowWidgets struct {
 // top-level onGameUpdated callback (invoked from main.go's background
 // goroutines) can refresh the right widgets.
 type uiState struct {
-	window     *adw.ApplicationWindow
-	games      []*Game
-	rows       []*sidebarRowWidgets
-	gameList   *gtk.ListBox
-	contentBox *gtk.Box
-	emptyState *adw.StatusPage
-	selectedID string
-	cfg        *Config
-	steam      *SteamClient
+	window        *adw.ApplicationWindow
+	games         []*Game
+	rows          []*sidebarRowWidgets
+	gameList      *gtk.ListBox
+	contentScroll *gtk.ScrolledWindow
+	contentBox    *gtk.Box
+	emptyState    *adw.StatusPage
+	selectedID    string
+	cfg           *Config
+	steam         *SteamClient
+	watcher       *AchievementWatcher
+
+	// scrollPositions remembers each game's last scroll offset, so flipping
+	// back to a game you were previously scrolled through returns you right
+	// where you left off. Switching to a game with no remembered position
+	// (i.e. you haven't visited it this session) starts at the top instead
+	// of inheriting whatever the previous game happened to be scrolled to.
+	scrollPositions map[string]float64
 }
 
 // onGameUpdated is invoked (always on the GTK main thread, via glib.IdleAdd)
 // whenever background enrichment finishes loading fresh data for a game.
 var onGameUpdated func(updated Game)
 
+// onNewGameDiscovered is invoked (always on the GTK main thread, via
+// glib.IdleAdd) when a game that wasn't previously in the sidebar shows up -
+// either through the "Add Game" dialog or because the watcher noticed a new
+// folder appear in the saves directory on its own.
+var onNewGameDiscovered func(game Game)
+
 // buildUI constructs the main window layout.
-func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *SteamClient) {
-	state := &uiState{window: window, cfg: cfg, steam: steam}
+func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *SteamClient, watcher *AchievementWatcher) {
+	state := &uiState{window: window, cfg: cfg, steam: steam, watcher: watcher}
 	for i := range games {
 		g := games[i]
 		state.games = append(state.games, &g)
@@ -76,7 +91,9 @@ func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *St
 	contentBox := gtk.NewBox(gtk.OrientationVertical, 0)
 	contentScroll.SetChild(contentBox)
 	splitView.SetEndChild(contentScroll)
+	state.contentScroll = contentScroll
 	state.contentBox = contentBox
+	state.scrollPositions = make(map[string]float64)
 
 	// ── Header bar ───────────────────────────────────────────────────────────
 	headerBar := adw.NewHeaderBar()
@@ -106,7 +123,7 @@ func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *St
 	emptyState := adw.NewStatusPage()
 	emptyState.SetTitle("No Game Selected")
 	emptyState.SetDescription("Select a game from the sidebar to view achievements.")
-	emptyState.SetIconName("trophy-symbolic")
+	emptyState.SetIconName("applications-games-symbolic")
 	contentBox.Append(emptyState)
 	state.emptyState = emptyState
 
@@ -118,8 +135,7 @@ func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *St
 		}
 		idx := row.Index()
 		if idx >= 0 && idx < len(state.games) {
-			state.selectedID = state.games[idx].AppID
-			displayGame(state.games[idx], state)
+			switchToGame(state, state.games[idx].AppID)
 		}
 	})
 
@@ -127,9 +143,12 @@ func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *St
 		showAddGameDialog(state)
 	})
 
-	// Wire up the global callback used by background enrichment goroutines.
+	// Wire up the global callbacks used by background enrichment goroutines.
 	onGameUpdated = func(updated Game) {
 		applyGameUpdate(state, updated)
+	}
+	onNewGameDiscovered = func(game Game) {
+		insertOrUpdateGame(state, game)
 	}
 }
 
@@ -175,7 +194,7 @@ func buildSidebarRow(list *gtk.ListBox, game *Game) *sidebarRowWidgets {
 	titleLabel.AddCSSClass("sidebar-row-title")
 	titleLabel.SetEllipsize(pango.EllipsizeEnd)
 	titleLabel.SetHExpand(true)
-	titleLabel.SetTooltipText(game.Name)
+	titleLabel.SetTooltipText(fmt.Sprintf("%s (App ID: %s)", game.Name, game.AppID))
 	vbox.Append(titleLabel)
 
 	pct := 0
@@ -196,6 +215,46 @@ func buildSidebarRow(list *gtk.ListBox, game *Game) *sidebarRowWidgets {
 	return &sidebarRowWidgets{row: row, icon: icon, title: titleLabel, subtitle: countLabel}
 }
 
+// mergeGameEnrichment fills in any enrichment data updated is missing (a
+// resolved title, downloaded icon/hero art, per-achievement global unlock
+// percentages) from the existing, previously-enriched copy.
+//
+// This matters because not every source of a Game update has that
+// enrichment available: a plain loadGame (e.g. from the live filesystem
+// watcher reacting to an achievement being unlocked, or a manual "mark as
+// unlocked" edit) only reads what's on local disk under steam_settings/ —
+// it has no way to know about the title/icon/hero art resolved from Steam or
+// the Nemirtingas repo, or global unlock percentages fetched from the Steam
+// API, since none of that is persisted back to disk anywhere loadGame reads
+// from. Without this merge, every live-reload would regress the game back
+// to its pre-enrichment state (losing its title, hero banner, and icon)
+// even though nothing about that data actually changed.
+func mergeGameEnrichment(existing, updated Game) Game {
+	if strings.HasPrefix(updated.Name, "App ID:") && !strings.HasPrefix(existing.Name, "App ID:") {
+		updated.Name = existing.Name
+	}
+	if updated.IconPath == "" {
+		updated.IconPath = existing.IconPath
+	}
+	if updated.HeroImagePath == "" {
+		updated.HeroImagePath = existing.HeroImagePath
+	}
+
+	if len(existing.Achievements) > 0 {
+		existingPct := make(map[string]float64, len(existing.Achievements))
+		for _, a := range existing.Achievements {
+			existingPct[a.Name] = a.GlobalPercent
+		}
+		for i := range updated.Achievements {
+			if updated.Achievements[i].GlobalPercent == 0 {
+				updated.Achievements[i].GlobalPercent = existingPct[updated.Achievements[i].Name]
+			}
+		}
+	}
+
+	return updated
+}
+
 // applyGameUpdate replaces a game's data (after background enrichment) and
 // refreshes only the affected sidebar row / content view.
 func applyGameUpdate(state *uiState, updated Game) {
@@ -203,24 +262,33 @@ func applyGameUpdate(state *uiState, updated Game) {
 		if g.AppID != updated.AppID {
 			continue
 		}
-		*state.games[i] = updated
+		merged := mergeGameEnrichment(*state.games[i], updated)
+		*state.games[i] = merged
 
 		if i < len(state.rows) {
 			rw := state.rows[i]
-			rw.title.SetText(updated.Name)
-			rw.title.SetTooltipText(updated.Name)
+			rw.title.SetText(merged.Name)
+			rw.title.SetTooltipText(fmt.Sprintf("%s (App ID: %s)", merged.Name, merged.AppID))
 			pct := 0
-			if updated.TotalCount > 0 {
-				pct = updated.EarnedCount * 100 / updated.TotalCount
+			if merged.TotalCount > 0 {
+				pct = merged.EarnedCount * 100 / merged.TotalCount
 			}
-			rw.subtitle.SetText(fmt.Sprintf("%d/%d · %d%%", updated.EarnedCount, updated.TotalCount, pct))
-			if updated.IconPath != "" {
-				setImageAsync(rw.icon, updated.IconPath)
+			rw.subtitle.SetText(fmt.Sprintf("%d/%d · %d%%", merged.EarnedCount, merged.TotalCount, pct))
+			if merged.IconPath != "" {
+				setImageAsync(rw.icon, merged.IconPath)
 			}
 		}
 
-		if state.selectedID == updated.AppID {
+		if state.selectedID == merged.AppID {
+			// This is a live refresh of the game already on screen (e.g. a new
+			// achievement just got unlocked), not the user switching games, so
+			// keep them exactly where they were scrolled to instead of jumping
+			// anywhere.
+			current := state.contentScroll.VAdjustment().Value()
 			displayGame(state.games[i], state)
+			glib.IdleAdd(func() {
+				state.contentScroll.VAdjustment().SetValue(current)
+			})
 		}
 		return
 	}
@@ -233,15 +301,15 @@ func applyGameUpdate(state *uiState, updated Game) {
 // fully downloaded during background enrichment (see enrichGameAsync in
 // main.go) *before* a Game is ever handed to the UI, and findIconPath
 // (parser.go) only ever returns paths that pass an os.Stat check. Decoding a
-// small local PNG/JPEG is sub-millisecond, so routing it through a
-// goroutine + glib.IdleAdd round trip bought us nothing but an extra frame
-// of placeholder-then-pop-in flicker. Loading it synchronously and
-// immediately is both simpler and smoother.
+// single small local PNG/JPEG is sub-millisecond, so there's no need to hop
+// through a goroutine for it — that would just add a round trip and a frame
+// of placeholder-then-pop-in flicker for something already cheap.
 //
-// The name is kept (rather than a plain setImage) as a signal that this is
-// the single choke point to revisit if a future image source is no longer
-// guaranteed to be local/cheap (e.g. loading uncached art directly from a
-// network URL) and needs real async handling again.
+// The cost that *does* matter is decoding hundreds of them back-to-back on
+// the main thread in one go (e.g. opening a 280-achievement game), which is
+// what imageLoader/queueImageLoads below are for: only the handful of rows
+// visible immediately are loaded through this function eagerly, the rest are
+// deferred and trickled in via GLib idle callbacks.
 func setImageAsync(img *gtk.Image, path string) {
 	if path == "" {
 		return
@@ -255,6 +323,72 @@ func setPictureAsync(pic *gtk.Picture, path string) {
 		return
 	}
 	pic.SetFilename(path)
+}
+
+// imageLoadRequest is one deferred (not-yet-visible) icon load.
+type imageLoadRequest struct {
+	img  *gtk.Image
+	path string
+}
+
+// imageLoader lets row-builder functions stay agnostic of whether an icon
+// should be loaded immediately (because the row will be visible the instant
+// the tab is shown) or deferred (because it's below the fold).
+type imageLoader func(img *gtk.Image, path string)
+
+// eagerImageBudget is how many icons get loaded immediately per tab —
+// comfortably more than fit in a typical window's initial viewport, so nothing
+// on-screen ever shows a placeholder. Everything past this is deferred.
+const eagerImageBudget = 18
+
+// queueImageLoads progressively sets images on rows that are very likely
+// scrolled out of view when a tab is first opened. Work happens in small
+// batches on GLib's low-priority idle queue so it never competes with
+// painting or input handling, and it typically finishes well before a user
+// could scroll down far enough to notice a still-unset icon.
+func queueImageLoads(reqs []imageLoadRequest) {
+	if len(reqs) == 0 {
+		return
+	}
+	const batchSize = 12
+	i := 0
+	glib.IdleAddPriority(glib.PriorityLow, func() bool {
+		end := i + batchSize
+		if end > len(reqs) {
+			end = len(reqs)
+		}
+		for _, r := range reqs[i:end] {
+			r.img.SetFromFile(r.path)
+		}
+		i = end
+		return i < len(reqs)
+	})
+}
+
+// newImageLoaderBudget returns an imageLoader factory: the first
+// eagerImageBudget calls load immediately (so whatever's visible the moment
+// a tab appears is already correct, no flicker), and every call after that
+// defers loading via queueImageLoads instead of blocking row construction.
+func newImageLoaderBudget(budget int) (next func() imageLoader, flush func()) {
+	remaining := budget
+	var deferred []imageLoadRequest
+	next = func() imageLoader {
+		if remaining > 0 {
+			remaining--
+			return setImageAsync
+		}
+		return func(img *gtk.Image, path string) {
+			if path == "" {
+				return
+			}
+			deferred = append(deferred, imageLoadRequest{img: img, path: path})
+		}
+	}
+	flush = func() {
+		queueImageLoads(deferred)
+		deferred = nil
+	}
+	return next, flush
 }
 
 // showAddGameDialog walks the user through adding a new game: pick its
@@ -356,7 +490,10 @@ func finishAddGame(state *uiState, folder, appID string) {
 			insertOrUpdateGame(state, game)
 		})
 
-		enrichGameAsync(game.AppID, gameDir, state.steam)
+		if state.watcher != nil {
+			state.watcher.Watch(game.AppID, gameDir, game.Achievements)
+		}
+		enrichGameAsync(game.AppID, gameDir, state.steam, state.watcher, onNewGameDiscovered)
 	}()
 }
 
@@ -381,7 +518,7 @@ func insertOrUpdateGame(state *uiState, game Game) {
 func showSettingsDialog(parent *adw.ApplicationWindow, cfg *Config, steam *SteamClient) {
 	dialog := adw.NewWindow()
 	dialog.SetTitle("Settings")
-	dialog.SetDefaultSize(450, 260)
+	dialog.SetDefaultSize(450, 360)
 	dialog.SetModal(true)
 	dialog.SetTransientFor(&parent.Window)
 
@@ -409,6 +546,18 @@ func showSettingsDialog(parent *adw.ApplicationWindow, cfg *Config, steam *Steam
 	sgdbEntry.SetInputPurpose(gtk.InputPurposePassword)
 	group.Add(sgdbEntry)
 
+	notifGroup := adw.NewPreferencesGroup()
+	notifGroup.SetTitle("Live Updates")
+	notifGroup.SetMarginTop(16)
+	notifGroup.SetMarginStart(16)
+	notifGroup.SetMarginEnd(16)
+
+	notifRow := adw.NewSwitchRow()
+	notifRow.SetTitle("Notify on New Unlocks")
+	notifRow.SetSubtitle("Show a desktop notification the moment an achievement unlocks")
+	notifRow.SetActive(cfg.NotificationsEnabled)
+	notifGroup.Add(notifRow)
+
 	saveBtn := gtk.NewButton()
 	saveBtn.SetLabel("Save")
 	saveBtn.AddCSSClass("suggested-action")
@@ -420,6 +569,7 @@ func showSettingsDialog(parent *adw.ApplicationWindow, cfg *Config, steam *Steam
 	saveBtn.ConnectClicked(func() {
 		cfg.SteamAPIKey = steamEntry.Text()
 		cfg.SteamGridDBAPIKey = sgdbEntry.Text()
+		cfg.NotificationsEnabled = notifRow.Active()
 
 		steam.APIKey = cfg.SteamAPIKey
 		steam.SteamGridDBAPIKey = cfg.SteamGridDBAPIKey
@@ -431,10 +581,36 @@ func showSettingsDialog(parent *adw.ApplicationWindow, cfg *Config, steam *Steam
 	})
 
 	box.Append(group)
+	box.Append(notifGroup)
 	box.Append(saveBtn)
 	toolbarView.SetContent(box)
 	dialog.SetContent(toolbarView)
 	dialog.Show()
+}
+
+// switchToGame remembers the outgoing game's scroll offset (so coming back
+// to it later resumes where you left off), then displays the requested
+// game and restores its own remembered offset - or the top, if it hasn't
+// been visited yet this session, so switching games never inherits
+// whatever the previous game happened to be scrolled to.
+func switchToGame(state *uiState, appID string) {
+	if state.selectedID != "" && state.selectedID != appID {
+		state.scrollPositions[state.selectedID] = state.contentScroll.VAdjustment().Value()
+	}
+	state.selectedID = appID
+
+	for _, g := range state.games {
+		if g.AppID != appID {
+			continue
+		}
+		displayGame(g, state)
+
+		target := state.scrollPositions[appID] // zero value if never visited
+		glib.IdleAdd(func() {
+			state.contentScroll.VAdjustment().SetValue(target)
+		})
+		return
+	}
 }
 
 // displayGame clears the content area and renders a game's achievements.
@@ -632,11 +808,18 @@ func displayGame(game *Game, state *uiState) {
 	}
 
 	// ── Populate Tab 1: My Progress ──────────────────────────────────────────
+	// Only the first eagerImageBudget icons across this tab are decoded right
+	// away (comfortably covering anything visible without scrolling); the
+	// rest are trickled in afterwards so opening a game with hundreds of
+	// achievements doesn't stall the UI thread decoding images nobody can
+	// see yet.
+	nextProgressLoader, flushProgressLoader := newImageLoaderBudget(eagerImageBudget)
+
 	if len(earned) > 0 {
 		earnedGroup := adw.NewPreferencesGroup()
 		earnedGroup.SetTitle(fmt.Sprintf("Earned  ·  %d", len(earned)))
 		for _, ach := range earned {
-			earnedGroup.Add(createAchievementRow(ach, nil))
+			earnedGroup.Add(createAchievementRow(ach, nil, nextProgressLoader()))
 		}
 		progressVBox.Append(earnedGroup)
 	}
@@ -648,7 +831,7 @@ func displayGame(game *Game, state *uiState) {
 			a := ach
 			lockedGroup.Add(createAchievementRow(a, func() {
 				confirmMarkUnlocked(state, gameDir, a, reload)
-			}))
+			}, nextProgressLoader()))
 		}
 		if len(hidden) > 0 {
 			hiddenRow := adw.NewActionRow()
@@ -659,30 +842,44 @@ func displayGame(game *Game, state *uiState) {
 		}
 		progressVBox.Append(lockedGroup)
 	}
+	flushProgressLoader()
 
 	// ── Populate Tab 2: Global Stats ──────────────────────────────────────────
-	allAch := append([]MergedAchievement{}, game.Achievements...)
-	sort.Slice(allAch, func(i, j int) bool {
-		return allAch[i].GlobalPercent > allAch[j].GlobalPercent
-	})
-
-	globalGroup := adw.NewPreferencesGroup()
-	globalGroup.SetTitle("Global Unlock Rates")
-	globalGroup.SetMarginBottom(24)
-
-	for _, ach := range allAch {
-		row, reveal := createGlobalStatsRow(ach)
-		globalGroup.Add(row)
-		if reveal != nil {
-			click := gtk.NewGestureClick()
-			click.ConnectPressed(func(nPress int, x, y float64) {
-				reveal()
-			})
-			row.AddController(click)
+	// This tab is expensive to build for games with hundreds of achievements
+	// and, unlike "My Progress", most users never open it. So its rows aren't
+	// built at all until the user actually switches to it.
+	globalBuilt := false
+	buildGlobalTab := func() {
+		if globalBuilt {
+			return
 		}
-	}
+		globalBuilt = true
 
-	globalVBox.Append(globalGroup)
+		allAch := append([]MergedAchievement{}, game.Achievements...)
+		sort.Slice(allAch, func(i, j int) bool {
+			return allAch[i].GlobalPercent > allAch[j].GlobalPercent
+		})
+
+		globalGroup := adw.NewPreferencesGroup()
+		globalGroup.SetTitle("Global Unlock Rates")
+		globalGroup.SetMarginBottom(24)
+
+		nextGlobalLoader, flushGlobalLoader := newImageLoaderBudget(eagerImageBudget)
+		for _, ach := range allAch {
+			row, reveal := createGlobalStatsRow(ach, nextGlobalLoader())
+			globalGroup.Add(row)
+			if reveal != nil {
+				click := gtk.NewGestureClick()
+				click.ConnectPressed(func(nPress int, x, y float64) {
+					reveal()
+				})
+				row.AddController(click)
+			}
+		}
+		flushGlobalLoader()
+
+		globalVBox.Append(globalGroup)
+	}
 
 	// Add pages to ViewStack
 	progressPage := viewStack.AddTitled(progressVBox, "progress", "My Progress")
@@ -690,6 +887,12 @@ func displayGame(game *Game, state *uiState) {
 
 	globalPage := viewStack.AddTitled(globalVBox, "global", "Global Stats")
 	globalPage.SetIconName("dialog-information-symbolic")
+
+	viewStack.NotifyProperty("visible-child-name", func() {
+		if viewStack.VisibleChildName() == "global" {
+			buildGlobalTab()
+		}
+	})
 
 	// Disable homogeneous height so tabs size independently
 	viewStack.SetVhomogeneous(false)
@@ -742,7 +945,7 @@ func confirmMarkUnlocked(state *uiState, gameDir string, ach MergedAchievement, 
 }
 
 // createGlobalStatsRow builds a list row with a native Adwaita progress bar background using Grid overlapping.
-func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
+func createGlobalStatsRow(ach MergedAchievement, loadImg imageLoader) (*gtk.ListBoxRow, func()) {
 	row := gtk.NewListBoxRow()
 	row.SetSelectable(false)
 
@@ -780,13 +983,13 @@ func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
 		// keep placeholder
 	} else if ach.Earned {
 		if ach.IconPath != "" {
-			setImageAsync(img, ach.IconPath)
+			loadImg(img, ach.IconPath)
 		} else {
-			img.SetFromIconName("trophy-symbolic")
+			img.SetFromIconName("starred-symbolic")
 		}
 	} else {
 		if ach.IconGrayPath != "" {
-			setImageAsync(img, ach.IconGrayPath)
+			loadImg(img, ach.IconGrayPath)
 		}
 	}
 
@@ -856,7 +1059,9 @@ func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
 			}
 			revealed = true
 			textStack.SetVisibleChildName("real")
-			// Swap to actual icon with grayscale filter (locked but revealed)
+			// Swap to actual icon with grayscale filter (locked but revealed).
+			// This is a direct user interaction (a click), so it always loads
+			// immediately rather than going through the deferred loader.
 			if ach.IconPath != "" {
 				setImageAsync(img, ach.IconPath)
 				grayProvider := gtk.NewCSSProvider()
@@ -877,8 +1082,9 @@ func createGlobalStatsRow(ach MergedAchievement) (*gtk.ListBoxRow, func()) {
 
 // createAchievementRow builds a standard achievement row. If onMarkUnlocked is
 // non-nil, right-clicking the row offers a (confirmation-gated) way to
-// manually mark it as already earned.
-func createAchievementRow(ach MergedAchievement, onMarkUnlocked func()) *gtk.ListBoxRow {
+// manually mark it as already earned. loadImg controls whether this row's
+// icon is decoded immediately or deferred (see imageLoader).
+func createAchievementRow(ach MergedAchievement, onMarkUnlocked func(), loadImg imageLoader) *gtk.ListBoxRow {
 	row := gtk.NewListBoxRow()
 	row.SetSelectable(false)
 
@@ -893,12 +1099,12 @@ func createAchievementRow(ach MergedAchievement, onMarkUnlocked func()) *gtk.Lis
 	img.SetVAlign(gtk.AlignStart)
 	if ach.Earned {
 		if ach.IconPath != "" {
-			setImageAsync(img, ach.IconPath)
+			loadImg(img, ach.IconPath)
 		} else {
-			img.SetFromIconName("trophy-symbolic")
+			img.SetFromIconName("starred-symbolic")
 		}
 	} else if ach.IconGrayPath != "" {
-		setImageAsync(img, ach.IconGrayPath)
+		loadImg(img, ach.IconGrayPath)
 	}
 	content.Append(img)
 

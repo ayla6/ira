@@ -81,22 +81,49 @@ func activate(app *adw.Application) {
 		fmt.Println("Error loading games:", err)
 	}
 
+	watcher, err := NewAchievementWatcher(cfg)
+	if err != nil {
+		fmt.Println("Live achievement watching unavailable:", err)
+	}
+
 	window.Show()
-	buildUI(window, games, cfg, steam)
+	buildUI(window, games, cfg, steam, watcher)
 
 	// Enrich every game in the background: fetch missing achievement
 	// definitions, titles, icons, hero art, and global unlock percentages.
 	// Each game's UI row/content is refreshed in place as its data arrives,
 	// so nothing blocks the window from being usable immediately.
 	for i := range games {
-		enrichGameAsync(games[i].AppID, filepath.Join(saveDir, games[i].AppID), steam)
+		gameDir := filepath.Join(saveDir, games[i].AppID)
+		if watcher != nil {
+			watcher.Watch(games[i].AppID, gameDir, games[i].Achievements)
+		}
+		enrichGameAsync(games[i].AppID, gameDir, steam, watcher, onGameUpdated)
+	}
+
+	if watcher != nil {
+		// Also watch the saves root itself so a new game folder dropped in by
+		// something other than our own "Add Game" flow (e.g. another tool, or
+		// you just mkdir-ing it) is picked up automatically instead of
+		// requiring a restart. This is still the same single fsnotify.Watcher
+		// instance/goroutine — just one more registered path on it.
+		if err := watcher.WatchRoot(saveDir); err != nil {
+			fmt.Println("Could not watch saves directory for new games:", err)
+		}
+		watcher.OnNewGameDir = func(appID, gameDir string) {
+			watcher.Watch(appID, gameDir, nil)
+			enrichGameAsync(appID, gameDir, steam, watcher, onNewGameDiscovered)
+		}
+		watcher.Start()
 	}
 }
 
 // enrichGameAsync performs all network-dependent work for a single game on a
-// background goroutine, then hands the freshly loaded Game back to the UI
-// thread via glib.IdleAdd so widgets are only ever touched from the main loop.
-func enrichGameAsync(appID, gameDir string, steam *SteamClient) {
+// background goroutine, then hands the freshly loaded Game to onDone via
+// glib.IdleAdd so widgets are only ever touched from the main loop. onDone is
+// onGameUpdated for games already in the sidebar, or onNewGameDiscovered for
+// ones just detected (via "Add Game" or the watcher noticing a new folder).
+func enrichGameAsync(appID, gameDir string, steam *SteamClient, watcher *AchievementWatcher, onDone func(Game)) {
 	go func() {
 		// Generate achievement definitions if we don't have them yet.
 		metaPath := filepath.Join(gameDir, "steam_settings", "achievements.json")
@@ -143,8 +170,15 @@ func enrichGameAsync(appID, gameDir string, steam *SteamClient) {
 			}
 		}
 
+		// Re-sync the watcher's "last known earned" snapshot now that we have
+		// the full picture — the very first Watch() call (made before
+		// achievements.json necessarily existed) may have seen an empty list.
+		if watcher != nil {
+			watcher.Watch(appID, gameDir, game.Achievements)
+		}
+
 		glib.IdleAdd(func() {
-			onGameUpdated(game)
+			onDone(game)
 		})
 	}()
 }

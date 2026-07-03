@@ -39,6 +39,16 @@ type uiState struct {
 	steam         *SteamClient
 	watcher       *AchievementWatcher
 
+	// contentUnloaded is true while the window is hidden to the background:
+	// the sidebar and content area have been stripped and the texture cache
+	// cleared. restoreContent rebuilds them on the way back.
+	contentUnloaded bool
+
+	// restoring gates RowSelected while restoreContent re-selects the
+	// previously-open game's row, so that programmatic selection doesn't
+	// trigger a redundant switchToGame.
+	restoring bool
+
 	// scrollPositions remembers each game's last scroll offset, so flipping
 	// back to a game you were previously scrolled through returns you right
 	// where you left off. Switching to a game with no remembered position
@@ -57,12 +67,137 @@ var onGameUpdated func(updated Game)
 // folder appear in the saves directory on its own.
 var onNewGameDiscovered func(game Game)
 
+// current is the active window's UI state, set by buildUI. It lets a second
+// activation of the app (e.g. launching the binary again while it's already
+// running in the background) restore and present the existing window instead
+// of building a new one.
+var current *uiState
+
+// hideToBackground tears down the UI and hides the window, keeping the process
+// (and the live achievement watcher) running. All widgets and decoded image
+// textures are released; only lightweight state (game list, selected game,
+// scroll positions) is kept so reopening returns you to roughly where you were.
+func hideToBackground(state *uiState) {
+	teardownContent(state)
+	state.window.Hide()
+}
+
+// destroyWidget unparents w and all of its descendants. A container holds a C
+// reference on every child, so a child only becomes GC-able once its parent
+// releases it — and that only happens once the parent itself is finalized.
+// For a deep tree (clamp → box → viewStack → … → achievement row → icon) that
+// means widgets are freed one level per GC cycle, so memory piles up far
+// faster than it's reclaimed when switching games. Unparenting every
+// descendant first drops every parent→child reference at once, so the whole
+// subtree reaches toggle-ref-only in the same cycle and a single GC reclaims
+// it instead of cascading over many.
+func destroyWidget(w gtk.Widgetter) {
+	base := gtk.BaseWidget(w)
+	for child := base.FirstChild(); child != nil; child = base.FirstChild() {
+		destroyWidget(child)
+	}
+	base.Unparent()
+}
+
+// clearChildren unparents every direct child of w and its descendants. Safe
+// for containers whose child management is the widget tree alone (Box,
+// Overlay, Grid, ScrolledWindow, AdwPreferencesGroup, …). A ListBox is not —
+// use clearListBox for that, since gtk_listbox_remove updates a separate row
+// list that Unparent would skip.
+func clearChildren(w gtk.Widgetter) {
+	base := gtk.BaseWidget(w)
+	for child := base.FirstChild(); child != nil; child = base.FirstChild() {
+		destroyWidget(child)
+	}
+}
+
+// clearListBox removes every row from lb, unparenting each row's descendants
+// first so the whole row (icon, labels, …) is freed in one GC cycle instead of
+// cascading. It uses Remove rather than Unparent so the ListBox keeps its
+// internal row list consistent.
+func clearListBox(lb *gtk.ListBox) {
+	for child := lb.FirstChild(); child != nil; child = lb.FirstChild() {
+		base := gtk.BaseWidget(child)
+		for d := base.FirstChild(); d != nil; d = base.FirstChild() {
+			destroyWidget(d)
+		}
+		lb.Remove(child)
+	}
+}
+
+// teardownContent removes every widget from the content area and sidebar, drops
+// the texture cache, and triggers GC so the freed GObjects are actually
+// collected. state.games, scrollPositions and selectedID are kept.
+func teardownContent(state *uiState) {
+	clearChildren(state.contentBox)
+	clearListBox(state.gameList)
+	state.rows = nil
+	textures.clear()
+	state.contentUnloaded = true
+	gcSoon()
+}
+
+// restoreContent rebuilds the UI teardownContent stripped away, returning the
+// user to the game they had open (at the remembered scroll offset) or the
+// empty state. Called when the window is brought back from the background.
+func restoreContent(state *uiState) {
+	if !state.contentUnloaded {
+		return
+	}
+	state.contentUnloaded = false
+	rebuildSidebar(state)
+
+	if state.selectedID == "" {
+		state.contentBox.Append(state.emptyState)
+		return
+	}
+
+	for _, g := range state.games {
+		if g.AppID != state.selectedID {
+			continue
+		}
+		displayGame(g, state)
+		target := state.scrollPositions[state.selectedID]
+		glib.IdleAdd(func() {
+			state.contentScroll.VAdjustment().SetValue(target)
+		})
+		// Re-select the sidebar row so it's highlighted again, without
+		// re-triggering switchToGame (which would rebuild the content a
+		// second time for nothing).
+		for i, rg := range state.games {
+			if rg.AppID == state.selectedID && i < len(state.rows) {
+				state.restoring = true
+				state.gameList.SelectRow(state.rows[i].row)
+				state.restoring = false
+				break
+			}
+		}
+		return
+	}
+
+	// The selected game vanished from the list while we were hidden; fall
+	// back to the empty state rather than rendering a stale appID.
+	state.selectedID = ""
+	state.contentBox.Append(state.emptyState)
+}
+
 // buildUI constructs the main window layout.
 func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *SteamClient, watcher *AchievementWatcher) {
 	state := &uiState{window: window, cfg: cfg, steam: steam, watcher: watcher}
 	for i := range games {
 		g := games[i]
 		state.games = append(state.games, &g)
+	}
+
+	if watcher != nil {
+		watcher.GameNameFunc = func(appID string) string {
+			for _, g := range state.games {
+				if g.AppID == appID {
+					return g.Name
+				}
+			}
+			return ""
+		}
 	}
 
 	splitView := gtk.NewPaned(gtk.OrientationHorizontal)
@@ -130,7 +265,7 @@ func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *St
 	rebuildSidebar(state)
 
 	gameList.ConnectRowSelected(func(row *gtk.ListBoxRow) {
-		if row == nil {
+		if state.restoring || row == nil {
 			return
 		}
 		idx := row.Index()
@@ -150,14 +285,52 @@ func buildUI(window *adw.ApplicationWindow, games []Game, cfg *Config, steam *St
 	onNewGameDiscovered = func(game Game) {
 		insertOrUpdateGame(state, game)
 	}
+
+	// Lets a second activation restore/present the existing window instead of
+	// building a new one.
+	current = state
+
+	// With Close-to-Background on, closing asks whether to hide to the
+	// background or quit outright; off, it just quits.
+	window.ConnectCloseRequest(func() bool {
+		if cfg.CloseToBackground {
+			showCloseChoiceDialog(state)
+			return true // keep the window alive while the dialog decides
+		}
+		return false // proceed with normal close/destroy -> app quits
+	})
+}
+
+// showCloseChoiceDialog is the popup the close button raises when
+// Close-to-Background is enabled: hide to the background, quit, or cancel.
+func showCloseChoiceDialog(state *uiState) {
+	dialog := adw.NewMessageDialog(&state.window.Window, "Close Achievement Viewer",
+		"Keep the watcher running in the background, or quit completely?")
+	dialog.AddResponse("cancel", "Cancel")
+	dialog.AddResponse("background", "Hide to Background")
+	dialog.AddResponse("quit", "Quit")
+	dialog.SetResponseAppearance("background", adw.ResponseSuggested)
+	dialog.SetResponseAppearance("quit", adw.ResponseDestructive)
+	dialog.SetDefaultResponse("background")
+	dialog.SetCloseResponse("cancel")
+
+	dialog.ConnectResponse(func(resp string) {
+		switch resp {
+		case "background":
+			hideToBackground(state)
+		case "quit":
+			// Destroy doesn't re-emit close-request (unlike Close), so this
+			// won't loop. With this the only window, GtkApplication quits.
+			state.window.Destroy()
+		}
+	})
+	dialog.Show()
 }
 
 // rebuildSidebar clears and repopulates the game list from state.games. Used
 // both for the initial population and after a new game is added.
 func rebuildSidebar(state *uiState) {
-	for child := state.gameList.FirstChild(); child != nil; child = state.gameList.FirstChild() {
-		state.gameList.Remove(child)
-	}
+	clearListBox(state.gameList)
 	state.rows = nil
 
 	for _, g := range state.games {
@@ -177,7 +350,7 @@ func buildSidebarRow(list *gtk.ListBox, game *Game) *sidebarRowWidgets {
 
 	var icon *gtk.Image
 	if game.IconPath != "" {
-		icon = gtk.NewImageFromFile(game.IconPath)
+		icon = newImageFromFile(game.IconPath)
 	} else {
 		icon = gtk.NewImageFromIconName("application-x-executable")
 	}
@@ -194,7 +367,7 @@ func buildSidebarRow(list *gtk.ListBox, game *Game) *sidebarRowWidgets {
 	titleLabel.AddCSSClass("sidebar-row-title")
 	titleLabel.SetEllipsize(pango.EllipsizeEnd)
 	titleLabel.SetHExpand(true)
-	titleLabel.SetTooltipText(fmt.Sprintf("%s (App ID: %s)", game.Name, game.AppID))
+	titleLabel.SetTooltipText(fmt.Sprintf("%s (%s)", game.Name, game.AppID))
 	vbox.Append(titleLabel)
 
 	pct := 0
@@ -268,22 +441,23 @@ func applyGameUpdate(state *uiState, updated Game) {
 		if i < len(state.rows) {
 			rw := state.rows[i]
 			rw.title.SetText(merged.Name)
-			rw.title.SetTooltipText(fmt.Sprintf("%s (App ID: %s)", merged.Name, merged.AppID))
+			rw.title.SetTooltipText(fmt.Sprintf("%s (%s)", merged.Name, merged.AppID))
 			pct := 0
 			if merged.TotalCount > 0 {
 				pct = merged.EarnedCount * 100 / merged.TotalCount
 			}
 			rw.subtitle.SetText(fmt.Sprintf("%d/%d · %d%%", merged.EarnedCount, merged.TotalCount, pct))
 			if merged.IconPath != "" {
-				setImageAsync(rw.icon, merged.IconPath)
+				setImage(rw.icon, merged.IconPath)
 			}
 		}
 
-		if state.selectedID == merged.AppID {
+		if state.selectedID == merged.AppID && !state.contentUnloaded {
 			// This is a live refresh of the game already on screen (e.g. a new
 			// achievement just got unlocked), not the user switching games, so
 			// keep them exactly where they were scrolled to instead of jumping
-			// anywhere.
+			// anywhere. Skipped while hidden to the background — the data is
+			// already updated above, and restoreContent will render it fresh.
 			current := state.contentScroll.VAdjustment().Value()
 			displayGame(state.games[i], state)
 			glib.IdleAdd(func() {
@@ -292,37 +466,6 @@ func applyGameUpdate(state *uiState, updated Game) {
 		}
 		return
 	}
-}
-
-// setImageAsync sets an already-downloaded local image file on img.
-//
-// By the time any code in this file references an achievement/game icon
-// path, that file is guaranteed to already exist on disk: achievement art is
-// fully downloaded during background enrichment (see enrichGameAsync in
-// main.go) *before* a Game is ever handed to the UI, and findIconPath
-// (parser.go) only ever returns paths that pass an os.Stat check. Decoding a
-// single small local PNG/JPEG is sub-millisecond, so there's no need to hop
-// through a goroutine for it — that would just add a round trip and a frame
-// of placeholder-then-pop-in flicker for something already cheap.
-//
-// The cost that *does* matter is decoding hundreds of them back-to-back on
-// the main thread in one go (e.g. opening a 280-achievement game), which is
-// what imageLoader/queueImageLoads below are for: only the handful of rows
-// visible immediately are loaded through this function eagerly, the rest are
-// deferred and trickled in via GLib idle callbacks.
-func setImageAsync(img *gtk.Image, path string) {
-	if path == "" {
-		return
-	}
-	img.SetFromFile(path)
-}
-
-// setPictureAsync is the gtk.Picture equivalent of setImageAsync.
-func setPictureAsync(pic *gtk.Picture, path string) {
-	if path == "" {
-		return
-	}
-	pic.SetFilename(path)
 }
 
 // imageLoadRequest is one deferred (not-yet-visible) icon load.
@@ -358,7 +501,7 @@ func queueImageLoads(reqs []imageLoadRequest) {
 			end = len(reqs)
 		}
 		for _, r := range reqs[i:end] {
-			r.img.SetFromFile(r.path)
+			setImage(r.img, r.path)
 		}
 		i = end
 		return i < len(reqs)
@@ -375,7 +518,7 @@ func newImageLoaderBudget(budget int) (next func() imageLoader, flush func()) {
 	next = func() imageLoader {
 		if remaining > 0 {
 			remaining--
-			return setImageAsync
+			return setImage
 		}
 		return func(img *gtk.Image, path string) {
 			if path == "" {
@@ -498,12 +641,16 @@ func finishAddGame(state *uiState, folder, appID string) {
 }
 
 // insertOrUpdateGame adds a freshly-added game to the sidebar (or refreshes
-// it if it already existed), keeping the list sorted by name.
+// it if it already existed), keeping the list sorted by name. The sidebar
+// rebuild is skipped while hidden to the background; restoreContent will
+// rebuild it (with the new entry) on the way back.
 func insertOrUpdateGame(state *uiState, game Game) {
 	for i, g := range state.games {
 		if g.AppID == game.AppID {
 			*state.games[i] = game
-			rebuildSidebar(state)
+			if !state.contentUnloaded {
+				rebuildSidebar(state)
+			}
 			return
 		}
 	}
@@ -511,7 +658,9 @@ func insertOrUpdateGame(state *uiState, game Game) {
 	sort.Slice(state.games, func(i, j int) bool {
 		return state.games[i].Name < state.games[j].Name
 	})
-	rebuildSidebar(state)
+	if !state.contentUnloaded {
+		rebuildSidebar(state)
+	}
 }
 
 // showSettingsDialog opens a modal window for editing the Steam and SteamGridDB API keys.
@@ -558,6 +707,12 @@ func showSettingsDialog(parent *adw.ApplicationWindow, cfg *Config, steam *Steam
 	notifRow.SetActive(cfg.NotificationsEnabled)
 	notifGroup.Add(notifRow)
 
+	bgRow := adw.NewSwitchRow()
+	bgRow.SetTitle("Close to Background")
+	bgRow.SetSubtitle("Closing the window keeps the watcher running silently in the background")
+	bgRow.SetActive(cfg.CloseToBackground)
+	notifGroup.Add(bgRow)
+
 	saveBtn := gtk.NewButton()
 	saveBtn.SetLabel("Save")
 	saveBtn.AddCSSClass("suggested-action")
@@ -570,6 +725,7 @@ func showSettingsDialog(parent *adw.ApplicationWindow, cfg *Config, steam *Steam
 		cfg.SteamAPIKey = steamEntry.Text()
 		cfg.SteamGridDBAPIKey = sgdbEntry.Text()
 		cfg.NotificationsEnabled = notifRow.Active()
+		cfg.CloseToBackground = bgRow.Active()
 
 		steam.APIKey = cfg.SteamAPIKey
 		steam.SteamGridDBAPIKey = cfg.SteamGridDBAPIKey
@@ -609,16 +765,15 @@ func switchToGame(state *uiState, appID string) {
 		glib.IdleAdd(func() {
 			state.contentScroll.VAdjustment().SetValue(target)
 		})
+		// Reclaim the just-unparented content widgets' GObjects.
+		gcSoon()
 		return
 	}
 }
 
 // displayGame clears the content area and renders a game's achievements.
 func displayGame(game *Game, state *uiState) {
-	contentBox := state.contentBox
-	for child := contentBox.FirstChild(); child != nil; child = contentBox.FirstChild() {
-		contentBox.Remove(child)
-	}
+	clearChildren(state.contentBox)
 
 	fraction := 0.0
 	if game.TotalCount > 0 {
@@ -632,7 +787,7 @@ func displayGame(game *Game, state *uiState) {
 		hero := gtk.NewPicture()
 		hero.SetContentFit(gtk.ContentFitCover)
 		hero.SetCanShrink(true)
-		setPictureAsync(hero, game.HeroImagePath)
+		setPicture(hero, game.HeroImagePath)
 		overlay.SetChild(hero)
 
 		// Dark gradient overlay so text is readable
@@ -650,7 +805,7 @@ func displayGame(game *Game, state *uiState) {
 		infoBox.SetMarginBottom(24)
 
 		if game.IconPath != "" {
-			img := gtk.NewImageFromFile(game.IconPath)
+			img := newImageFromFile(game.IconPath)
 			img.SetPixelSize(56)
 			infoBox.Append(img)
 		}
@@ -705,7 +860,7 @@ func displayGame(game *Game, state *uiState) {
 		heroWrap.SetSizeRequest(-1, 280)
 		heroWrap.SetVExpand(false)
 		heroWrap.SetChild(overlay)
-		contentBox.Append(heroWrap)
+		state.contentBox.Append(heroWrap)
 
 	} else {
 		// Fallback: plain header without hero
@@ -717,7 +872,7 @@ func displayGame(game *Game, state *uiState) {
 
 		titleRow := gtk.NewBox(gtk.OrientationHorizontal, 14)
 		if game.IconPath != "" {
-			img := gtk.NewImageFromFile(game.IconPath)
+			img := newImageFromFile(game.IconPath)
 			img.SetPixelSize(56)
 			titleRow.Append(img)
 		}
@@ -746,13 +901,13 @@ func displayGame(game *Game, state *uiState) {
 		progress.SetMarginTop(4)
 		headerBox.Append(progress)
 
-		contentBox.Append(headerBox)
+		state.contentBox.Append(headerBox)
 	}
 
 	// Spacing instead of horizontal line
 	spacer := gtk.NewBox(gtk.OrientationVertical, 0)
 	spacer.SetMarginTop(12)
-	contentBox.Append(spacer)
+	state.contentBox.Append(spacer)
 
 	// ── Centered / Clamped Content VBox ──────────────────────────────────────
 	gameVBox := gtk.NewBox(gtk.OrientationVertical, 0)
@@ -908,7 +1063,7 @@ func displayGame(game *Game, state *uiState) {
 	clamp.SetMarginEnd(16)
 	clamp.SetChild(gameVBox)
 
-	contentBox.Append(clamp)
+	state.contentBox.Append(clamp)
 }
 
 // confirmMarkUnlocked shows a deliberately-unmissable confirmation dialog
@@ -960,18 +1115,7 @@ func createGlobalStatsRow(ach MergedAchievement, loadImg imageLoader) (*gtk.List
 	progress.SetVExpand(true)
 	progress.SetOpacity(0.18)
 
-	barProvider := gtk.NewCSSProvider()
-	barProvider.LoadFromString(`
-		trough {
-			background-color: transparent;
-			border: none;
-		}
-		progress {
-			border: none;
-			border-radius: 0;
-		}
-	`)
-	progress.StyleContext().AddProvider(barProvider, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+	progress.StyleContext().AddProvider(sharedBarCSSProvider(), gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
 	isHiddenSpoiler := ach.Hidden && !ach.Earned
 
@@ -1063,12 +1207,10 @@ func createGlobalStatsRow(ach MergedAchievement, loadImg imageLoader) (*gtk.List
 			// This is a direct user interaction (a click), so it always loads
 			// immediately rather than going through the deferred loader.
 			if ach.IconPath != "" {
-				setImageAsync(img, ach.IconPath)
-				grayProvider := gtk.NewCSSProvider()
-				grayProvider.LoadFromString("image { filter: grayscale(100%); }")
-				img.StyleContext().AddProvider(grayProvider, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+				setImage(img, ach.IconPath)
+				img.StyleContext().AddProvider(sharedGrayScaleCSSProvider(), gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 			} else if ach.IconGrayPath != "" {
-				setImageAsync(img, ach.IconGrayPath)
+				setImage(img, ach.IconGrayPath)
 			}
 			row.SetActivatable(false)
 			row.SetSelectable(false)

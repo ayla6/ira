@@ -27,15 +27,19 @@ type AchievementWatcher struct {
 
 	// OnNewGameDir, if set, is called (on an arbitrary goroutine, never the
 	// GTK main thread) whenever a new numeric-named directory shows up
-	// directly inside the watched saves root — e.g. a game folder dropped in
-	// by some other tool while the app is already running. It's the caller's
-	// job to enrich/watch/display it; the watcher itself only detects it.
+	// directly inside the watched saves root.
 	OnNewGameDir func(appID, gameDir string)
 
+	// GameNameFunc, if set, is called to resolve a human-readable name for
+	// a given appID. It must be safe to call from any goroutine. When not
+	// set (or when it returns ""), the name embedded in the Game struct
+	// returned by loadGame is used instead.
+	GameNameFunc func(appID string) string
+
 	mu         sync.Mutex
-	dirToApp   map[string]string          // watched directory -> appID
-	lastEarned map[string]map[string]bool // appID -> achievement name -> earned
-	debounce   map[string]*time.Timer     // appID -> pending-reload timer
+	dirToApp   map[string]string
+	lastEarned map[string]map[string]bool
+	debounce   map[string]*time.Timer
 }
 
 // NewAchievementWatcher creates a watcher. The caller is expected to call
@@ -193,8 +197,17 @@ func (w *AchievementWatcher) reload(appID, gameDir string) {
 			onGameUpdated(game)
 		}
 		if w.cfg.NotificationsEnabled {
+			// Prefer the enriched name already known to the UI over the
+			// bare "App ID: 12345" that loadGame returns before network
+			// enrichment has finished.
+			name := game.Name
+			if w.GameNameFunc != nil {
+				if resolved := w.GameNameFunc(game.AppID); resolved != "" {
+					name = resolved
+				}
+			}
 			for _, a := range newlyEarned {
-				w.notify(game.Name, a)
+				w.notify(name, a)
 			}
 		}
 	})
@@ -219,7 +232,12 @@ func (w *AchievementWatcher) notify(gameName string, ach MergedAchievement) {
 		body = fmt.Sprintf("%s\n%s", ach.DisplayName, ach.Description)
 	}
 
-	cmd := exec.Command("notify-send", "--app-name=Achievement Viewer", "--icon=starred-symbolic", title, body)
+	icon := "starred-symbolic"
+	if ach.IconPath != "" {
+		icon = ach.IconPath
+	}
+
+	cmd := exec.Command("notify-send", "--app-name=Achievement Viewer", "--icon="+icon, title, body)
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("Could not show notification for %s: %v\n", ach.DisplayName, err)
 	}

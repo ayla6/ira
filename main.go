@@ -29,6 +29,18 @@ func main() {
 }
 
 func activate(app *adw.Application) {
+	if len(app.Windows()) > 0 {
+		w := app.Windows()[0]
+		w.SetVisible(true)
+		w.Present()
+		// If the window is coming back from the background its UI was torn
+		// down (see teardownContent); rebuild it and return the user to the
+		// game they had open.
+		if current != nil {
+			restoreContent(current)
+		}
+		return
+	}
 	window := adw.NewApplicationWindow(&app.Application)
 	window.SetTitle("Achievement Viewer")
 	window.SetDefaultSize(1100, 720)

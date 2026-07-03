@@ -13,6 +13,7 @@ type Config struct {
 	SteamAPIKey          string `json:"steam_api_key,omitempty"`
 	SteamGridDBAPIKey    string `json:"steam_griddb_api_key,omitempty"`
 	NotificationsEnabled bool   `json:"notifications_enabled"`
+	CloseToBackground    bool   `json:"close_to_background"`
 }
 
 func configPath() string {
@@ -68,7 +69,10 @@ func (c *Config) Save() error {
 	// Save plaintext config. If keyring succeeded, we omit the key to be secure.
 	// If keyring failed, we fall back to plaintext storage in config.json.
 	// Non-secret settings (like NotificationsEnabled) always go here.
-	plaintextConfig := Config{NotificationsEnabled: c.NotificationsEnabled}
+	plaintextConfig := Config{
+		NotificationsEnabled: c.NotificationsEnabled,
+		CloseToBackground:    c.CloseToBackground,
+	}
 	if steamErr != nil {
 		plaintextConfig.SteamAPIKey = c.SteamAPIKey
 	}

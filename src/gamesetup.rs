@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub fn detect_app_id(folder: &str) -> Option<String> {
     let candidates = [

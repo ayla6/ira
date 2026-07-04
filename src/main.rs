@@ -7,7 +7,6 @@ mod steam;
 mod ui;
 mod watcher;
 
-use crate::config::Config;
 use crate::parser::{load_games, Game};
 use crate::steam::SteamClient;
 use crate::ui::{build_ui, enrich_game_async, handle_app_message, restore_content, SharedState};

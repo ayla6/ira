@@ -21,7 +21,7 @@ const EAGER_IMAGE_BUDGET: usize = 18;
 pub struct AppState {
     pub window: adw::ApplicationWindow,
     pub games: Vec<Game>,
-    pub rows: Vec<SidebarRowWidgets>,
+    rows: Vec<SidebarRowWidgets>,
     pub game_list: gtk4::ListBox,
     pub content_scroll: gtk4::ScrolledWindow,
     pub content_box: gtk4::Box,
@@ -128,16 +128,19 @@ fn build_window(state: &SharedState, app: &adw::Application) {
     window.set_default_size(1100, 720);
 
     let css = gtk4::CssProvider::new();
-    css.load_from_data(
-        ".hero-gradient {
+    css.load_from_bytes(&gtk4::glib::Bytes::from(
+        b".hero-gradient {
             background-image: linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.85) 100%);
         }
         .hero-progress trough { background-color: transparent; border: none; border-radius: 0; }
         .hero-progress progress { background-color: @accent_color; border: none; border-radius: 0; }
         .hero-progress { min-height: 8px; border: none; }
-        .sidebar-row-title { min-width: 0; }",
-    );
-    gtk4::StyleContext::add_provider_for_display(
+        .sidebar-row-title { min-width: 0; }
+        .global-bar trough { background-color: transparent; border: none; }
+        .global-bar progress { border: none; border-radius: 0; }
+        .grayscale-icon { filter: grayscale(100%); }",
+    ));
+    gtk4::style_context_add_provider_for_display(
         &gtk4::gdk::Display::default().expect("no default display"),
         &css,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
@@ -354,15 +357,14 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         }
         AppMessage::AddGameError(e) => {
             let window = state.borrow().window.clone();
-            let dialog = adw::MessageDialog::new(
-                Some(&window),
+            let dialog = adw::AlertDialog::new(
                 Some("Couldn't Add Game"),
                 Some(&e),
             );
             dialog.add_response("ok", "OK");
             dialog.set_default_response(Some("ok"));
             dialog.set_close_response("ok");
-            dialog.present();
+            dialog.present(Some(&window));
         }
     }
 }
@@ -457,9 +459,16 @@ pub fn switch_to_game(state: &SharedState, app_id: &str) {
 fn display_game(game: &Game, state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
 
+    // Remove old content — this drops widget references to the previous
+    // game's textures, so clearing the cache actually frees the pixel data.
     while let Some(child) = content_box.first_child() {
         content_box.remove(&child);
     }
+
+    // Clear the texture cache so the previous game's decoded images are freed.
+    // Sidebar icons stay alive (their gtk::Image widgets hold their own refs);
+    // only the cache's extra references are dropped.
+    crate::images::clear_texture_cache();
 
     let fraction = if game.total_count > 0 {
         game.earned_count as f64 / game.total_count as f64
@@ -845,10 +854,7 @@ fn create_global_stats_row(
     progress.set_hexpand(true);
     progress.set_vexpand(true);
     progress.set_opacity(0.18);
-    progress.style_context().add_provider(
-        &crate::images::bar_css_provider(),
-        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
+    progress.add_css_class("global-bar");
 
     let is_hidden_spoiler = ach.hidden && !ach.earned;
 
@@ -934,10 +940,7 @@ fn create_global_stats_row(
             text_stack.set_visible_child_name("real");
             if !icon_path.is_empty() {
                 crate::images::set_image(&img, &icon_path);
-                img.style_context().add_provider(
-                    &crate::images::grayscale_css_provider(),
-                    gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-                );
+                img.add_css_class("grayscale-icon");
             } else if !icon_gray_path.is_empty() {
                 crate::images::set_image(&img, &icon_gray_path);
             }
@@ -954,8 +957,7 @@ fn create_global_stats_row(
 
 fn show_close_choice_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
-    let dialog = adw::MessageDialog::new(
-        Some(&window),
+    let dialog = adw::AlertDialog::new(
         Some("Close Achievement Viewer"),
         Some("Keep the watcher running in the background, or quit completely?"),
     );
@@ -981,7 +983,7 @@ fn show_close_choice_dialog(state: &SharedState) {
             _ => {}
         }
     });
-    dialog.present();
+    dialog.present(Some(&window));
 }
 
 pub fn hide_to_background(state: &SharedState) {
@@ -1178,21 +1180,13 @@ fn show_settings_dialog(
 
 fn show_add_game_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
-    let chooser = gtk4::FileChooserNative::new(
-        Some("Select Game Folder"),
-        Some(&window),
-        gtk4::FileChooserAction::SelectFolder,
-        Some("Select"),
-        Some("Cancel"),
-    );
+    let dialog = gtk4::FileDialog::new();
+    dialog.set_title("Select Game Folder");
 
     let state_clone = state.clone();
-    chooser.connect_response(move |chooser, response| {
-        if response != gtk4::ResponseType::Accept {
-            return;
-        }
-        let Some(file) = chooser.file() else { return; };
-        let Some(path) = file.path() else { return; };
+    dialog.select_folder(Some(&window), None::<&gio::Cancellable>, move |result| {
+        let Ok(file) = result else { return };
+        let Some(path) = file.path() else { return };
         let folder = path.to_string_lossy().into_owned();
 
         if let Some(app_id) = crate::gamesetup::detect_app_id(&folder) {
@@ -1201,13 +1195,11 @@ fn show_add_game_dialog(state: &SharedState) {
             prompt_for_app_id(&state_clone, &folder);
         }
     });
-    chooser.show();
 }
 
 fn prompt_for_app_id(state: &SharedState, folder: &str) {
     let window = state.borrow().window.clone();
-    let dialog = adw::MessageDialog::new(
-        Some(&window),
+    let dialog = adw::AlertDialog::new(
         Some("Enter Steam App ID"),
         Some("No steam_appid.txt was found in this folder. Enter the game's Steam App ID to continue."),
     );
@@ -1236,7 +1228,7 @@ fn prompt_for_app_id(state: &SharedState, folder: &str) {
         let app_id = entry.text().to_string();
         finish_add_game(&state_clone, &folder_clone, &app_id);
     });
-    dialog.present();
+    dialog.present(Some(&window));
 }
 
 fn finish_add_game(state: &SharedState, folder: &str, app_id: &str) {
@@ -1287,8 +1279,7 @@ fn finish_add_game(state: &SharedState, folder: &str, app_id: &str) {
 
 fn confirm_mark_unlocked(state: &SharedState, game_dir: &str, ach: &MergedAchievement, reload: impl Fn() + 'static) {
     let window = state.borrow().window.clone();
-    let dialog = adw::MessageDialog::new(
-        Some(&window),
+    let dialog = adw::AlertDialog::new(
         Some("Mark as Already Unlocked?"),
         Some(&format!(
             "This will mark \u{201C}{}\u{201D} as earned without a real unlock time. \
@@ -1314,7 +1305,7 @@ fn confirm_mark_unlocked(state: &SharedState, game_dir: &str, ach: &MergedAchiev
         }
         reload();
     });
-    dialog.present();
+    dialog.present(Some(&window));
 }
 
 pub fn enrich_game_async(

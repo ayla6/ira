@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Duration;
 
 pub struct SteamClient {
@@ -504,6 +504,3 @@ impl SteamClient {
     }
 }
 
-pub fn shared_steam(api_key: String, sgdb_key: String, data_dir: &str) -> Arc<SteamClient> {
-    Arc::new(SteamClient::new(api_key, sgdb_key, data_dir))
-}

@@ -4,8 +4,6 @@ use std::collections::HashMap;
 
 thread_local! {
     static TEXTURE_CACHE: RefCell<HashMap<String, Texture>> = RefCell::new(HashMap::new());
-    static BAR_CSS: RefCell<Option<gtk4::CssProvider>> = const { RefCell::new(None) };
-    static GRAYSCALE_CSS: RefCell<Option<gtk4::CssProvider>> = const { RefCell::new(None) };
 }
 
 pub fn texture_for(path: &str) -> Option<Texture> {
@@ -28,12 +26,6 @@ pub fn texture_for(path: &str) -> Option<Texture> {
     })
 }
 
-pub fn clear_texture_cache() {
-    TEXTURE_CACHE.with(|cell| {
-        cell.borrow_mut().clear();
-    });
-}
-
 pub fn set_image(img: &gtk4::Image, path: &str) {
     if let Some(t) = texture_for(path) {
         img.set_paintable(Some(&t));
@@ -54,29 +46,8 @@ pub fn new_image_from_file(path: &str) -> gtk4::Image {
     }
 }
 
-pub fn bar_css_provider() -> gtk4::CssProvider {
-    BAR_CSS.with(|cell| {
-        let mut cache = cell.borrow_mut();
-        if cache.is_none() {
-            let p = gtk4::CssProvider::new();
-            p.load_from_data(
-                "trough { background-color: transparent; border: none; }
-                 progress { border: none; border-radius: 0; }",
-            );
-            *cache = Some(p);
-        }
-        cache.as_ref().unwrap().clone()
-    })
-}
-
-pub fn grayscale_css_provider() -> gtk4::CssProvider {
-    GRAYSCALE_CSS.with(|cell| {
-        let mut cache = cell.borrow_mut();
-        if cache.is_none() {
-            let p = gtk4::CssProvider::new();
-            p.load_from_data("image { filter: grayscale(100%); }");
-            *cache = Some(p);
-        }
-        cache.as_ref().unwrap().clone()
-    })
+pub fn clear_texture_cache() {
+    TEXTURE_CACHE.with(|cell| {
+        cell.borrow_mut().clear();
+    });
 }

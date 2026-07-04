@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::parser::{load_game, Game, MergedAchievement};
+use crate::parser::{load_game, MergedAchievement};
 use crate::AppMessage;
 use notify::{Config as NotifyConfig, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;

@@ -1,6 +1,5 @@
 use crate::ui::{hide_to_background, switch_to_game, SharedState};
 use gtk4::glib;
-use gtk4::prelude::*;
 use std::time::Duration;
 
 fn vm_rss_kb() -> i64 {
@@ -39,14 +38,12 @@ pub fn run_bench(state: SharedState) {
 
     let mut phase: u8 = 0; // 0=wait, 1=switching, 2=hide, 3=done
     let mut switch_i: i32 = 0;
-    let mut step_delay = Duration::from_millis(900);
 
-    glib::timeout_add_local(Duration::from_millis(1000), move || {
+    glib::timeout_add_local(Duration::from_millis(900), move || {
         match phase {
             0 => {
                 log("settled, pre-switch");
                 phase = 1;
-                step_delay = Duration::from_millis(900);
             }
             1 => {
                 let id = if switch_i % 2 == 0 { &app_a } else { &app_b };
@@ -55,14 +52,12 @@ pub fn run_bench(state: SharedState) {
                 switch_i += 1;
                 if switch_i >= 10 {
                     phase = 2;
-                    step_delay = Duration::from_millis(500);
                 }
             }
             2 => {
                 hide_to_background(&state);
                 log("after hide-to-background");
                 phase = 3;
-                step_delay = Duration::from_millis(500);
             }
             3 => {
                 unsafe { malloc_trim(0); }

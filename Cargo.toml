@@ -1,0 +1,18 @@
+[package]
+name = "achievement-viewer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gtk4 = { version = "0.11", features = ["v4_14"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_6"] }
+glib = "0.22"
+gio = "0.22"
+gdk4 = "0.11"
+pango = "0.22"
+notify = "9.0.0-rc.4"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", features = ["png", "ico"] }
+chrono = { version = "0.4", default-features = false, features = ["std"] }

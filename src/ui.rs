@@ -15,7 +15,7 @@ use gtk4::pango;
 use gtk4::prelude::*;
 use adw::prelude::*;
 
-pub const SAVE_DIR: &str = "/data/Games/Saves/GSE Saves";
+pub const SAVE_DIR: &str = "/data/Games/Saves/GSE";
 const EAGER_IMAGE_BUDGET: usize = 18;
 
 pub struct AppState {
@@ -30,7 +30,6 @@ pub struct AppState {
     pub cfg: Config,
     pub steam: Arc<SteamClient>,
     pub watcher: Option<AchievementWatcher>,
-    pub scroll_positions: HashMap<String, f64>,
     pub sender: Sender<AppMessage>,
     pub game_names: Arc<Mutex<HashMap<String, String>>>,
     pub content_unloaded: bool,
@@ -109,7 +108,6 @@ pub fn build_ui(
         cfg: cfg.clone(),
         steam: steam.clone(),
         watcher: watcher.clone(),
-        scroll_positions: HashMap::new(),
         sender,
         game_names,
         content_unloaded: false,
@@ -366,6 +364,30 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             dialog.set_close_response("ok");
             dialog.present(Some(&window));
         }
+        AppMessage::GogEmuNotFound { galaxy_folder, product_id, game_name, steam_app_id } => {
+            let window = state.borrow().window.clone();
+            let dialog = adw::AlertDialog::new(
+                Some("Emulator Not Initialized"),
+                Some("Could not find ngalaxye_settings/NemirtingasGalaxyEmu.json.\nLaunch the game at least once with the GOG emulator, then click Retry."),
+            );
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("retry", "Retry");
+            dialog.set_response_appearance("retry", adw::ResponseAppearance::Suggested);
+            dialog.set_default_response(Some("retry"));
+            dialog.set_close_response("cancel");
+
+            let state_clone = state.clone();
+            let galaxy_folder = galaxy_folder.clone();
+            let product_id = product_id.clone();
+            let game_name = game_name.clone();
+            let steam_app_id = steam_app_id.clone();
+            dialog.connect_response(None, move |_, response| {
+                if response == "retry" {
+                    finish_add_gog_game(&state_clone, &galaxy_folder, &galaxy_folder, &product_id, &game_name, &steam_app_id);
+                }
+            });
+            dialog.present(Some(&window));
+        }
     }
 }
 
@@ -405,11 +427,6 @@ fn apply_game_update(state: &SharedState, mut updated: Game) {
         let game = state.borrow().games.iter().find(|g| g.app_id == app_id).cloned();
         if let Some(game) = game {
             display_game(&game, state);
-            let scroll_val = state.borrow().content_scroll.vadjustment().value();
-            let content_scroll = state.borrow().content_scroll.clone();
-            glib::idle_add_local_once(move || {
-                content_scroll.vadjustment().set_value(scroll_val);
-            });
         }
     }
 }
@@ -435,24 +452,11 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
 }
 
 pub fn switch_to_game(state: &SharedState, app_id: &str) {
-    {
-        let mut s = state.borrow_mut();
-        if !s.selected_id.is_empty() && s.selected_id != app_id {
-            let prev_id = s.selected_id.clone();
-            let v = s.content_scroll.vadjustment().value();
-            s.scroll_positions.insert(prev_id, v);
-        }
-        s.selected_id = app_id.to_string();
-    }
+    state.borrow_mut().selected_id = app_id.to_string();
 
     let game = state.borrow().games.iter().find(|g| g.app_id == app_id).cloned();
     if let Some(game) = game {
         display_game(&game, state);
-        let target = state.borrow().scroll_positions.get(app_id).copied().unwrap_or(0.0);
-        let content_scroll = state.borrow().content_scroll.clone();
-        glib::idle_add_local_once(move || {
-            content_scroll.vadjustment().set_value(target);
-        });
     }
 }
 
@@ -700,6 +704,11 @@ fn display_game(game: &Game, state: &SharedState) {
     clamp.set_child(Some(&game_vbox));
 
     content_box.append(&clamp);
+
+    let content_scroll = state.borrow().content_scroll.clone();
+    glib::idle_add_local_once(move || {
+        content_scroll.vadjustment().set_value(0.0);
+    });
 }
 
 fn build_global_tab(game: &Game, global_vbox: &gtk4::Box) {
@@ -987,16 +996,6 @@ fn show_close_choice_dialog(state: &SharedState) {
 }
 
 pub fn hide_to_background(state: &SharedState) {
-    // Save scroll position for the current game
-    {
-        let mut s = state.borrow_mut();
-        if !s.selected_id.is_empty() {
-            let id = s.selected_id.clone();
-            let v = s.content_scroll.vadjustment().value();
-            s.scroll_positions.insert(id, v);
-        }
-    }
-
     // Remove all content widgets from the old window
     teardown_content(state);
 
@@ -1065,11 +1064,6 @@ pub fn restore_content(state: &SharedState) {
     let game = state.borrow().games.iter().find(|g| g.app_id == selected_id).cloned();
     if let Some(game) = game {
         display_game(&game, state);
-        let target = state.borrow().scroll_positions.get(&selected_id).copied().unwrap_or(0.0);
-        let content_scroll = state.borrow().content_scroll.clone();
-        glib::idle_add_local_once(move || {
-            content_scroll.vadjustment().set_value(target);
-        });
 
         let game_list = state.borrow().game_list.clone();
         let idx = state.borrow().games.iter().position(|g| g.app_id == selected_id);
@@ -1191,6 +1185,14 @@ fn show_add_game_dialog(state: &SharedState) {
 
         if let Some(app_id) = crate::gamesetup::detect_app_id(&folder) {
             finish_add_game(&state_clone, &folder, &app_id);
+        } else if crate::gamesetup::is_gog_game(&folder) {
+            // GOG game detected — find .info files by walking up
+            if let Some((info_dir, product_id, game_name)) = crate::gamesetup::find_gog_info(&folder) {
+                let info_dir_str = info_dir.to_string_lossy().into_owned();
+                prompt_for_steam_id_gog(&state_clone, &folder, &info_dir_str, &product_id, &game_name);
+            } else {
+                prompt_for_app_id(&state_clone, &folder);
+            }
         } else {
             prompt_for_app_id(&state_clone, &folder);
         }
@@ -1231,6 +1233,46 @@ fn prompt_for_app_id(state: &SharedState, folder: &str) {
     dialog.present(Some(&window));
 }
 
+fn prompt_for_steam_id_gog(state: &SharedState, galaxy_folder: &str, info_dir: &str, product_id: &str, game_name: &str) {
+    let window = state.borrow().window.clone();
+    let dialog = adw::AlertDialog::new(
+        Some("Add GOG Game"),
+        Some(&format!(
+            "Detected GOG game: {}\nGOG Product ID: {}\n\nEnter the Steam App ID to use for achievement definitions:",
+            game_name, product_id
+        )),
+    );
+
+    let entry = gtk4::Entry::new();
+    entry.set_placeholder_text(Some("e.g. 1687950"));
+    entry.set_input_purpose(gtk4::InputPurpose::Digits);
+    entry.set_margin_top(8);
+    entry.set_margin_bottom(8);
+    entry.set_margin_start(8);
+    entry.set_margin_end(8);
+    dialog.set_extra_child(Some(&entry));
+
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("add", "Add Game");
+    dialog.set_response_appearance("add", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("add"));
+    dialog.set_close_response("cancel");
+
+    let state_clone = state.clone();
+    let galaxy_folder = galaxy_folder.to_string();
+    let info_dir = info_dir.to_string();
+    let product_id = product_id.to_string();
+    let game_name = game_name.to_string();
+    dialog.connect_response(None, move |_, response| {
+        if response != "add" {
+            return;
+        }
+        let steam_app_id = entry.text().to_string();
+        finish_add_gog_game(&state_clone, &galaxy_folder, &info_dir, &product_id, &game_name, &steam_app_id);
+    });
+    dialog.present(Some(&window));
+}
+
 fn finish_add_game(state: &SharedState, folder: &str, app_id: &str) {
     let steam = state.borrow().steam.clone();
     let watcher = state.borrow().watcher.clone();
@@ -1257,14 +1299,7 @@ fn finish_add_game(state: &SharedState, folder: &str, app_id: &str) {
                             watcher.watch(&game.app_id, &game_dir, &game.achievements);
                         }
                         let _ = sender.send(AppMessage::NewGame(game));
-                        enrich_game_async(
-                            game_id,
-                            game_dir,
-                            steam,
-                            watcher,
-                            sender,
-                            true,
-                        );
+                        enrich_game_async(game_id, game_dir, steam, watcher, sender, false);
                     }
                     Err(e) => eprintln!("Failed to load newly added game: {}", e),
                 }
@@ -1272,6 +1307,50 @@ fn finish_add_game(state: &SharedState, folder: &str, app_id: &str) {
             Err(e) => {
                 eprintln!("Add game failed: {}", e);
                 let _ = sender.send(AppMessage::AddGameError(e));
+            }
+        }
+    });
+}
+
+fn finish_add_gog_game(state: &SharedState, galaxy_folder: &str, _info_dir: &str, product_id: &str, game_name: &str, steam_app_id: &str) {
+    let steam = state.borrow().steam.clone();
+    let watcher = state.borrow().watcher.clone();
+    let sender = state.borrow().sender.clone();
+    let galaxy_folder = galaxy_folder.to_string();
+    let product_id = product_id.to_string();
+    let game_name = game_name.to_string();
+    let steam_app_id = steam_app_id.to_string();
+
+    std::thread::spawn(move || {
+        match crate::gamesetup::add_gog_game_from_folder(
+            &galaxy_folder, &galaxy_folder, &product_id, &game_name, &steam_app_id, &steam, SAVE_DIR,
+        ) {
+            Ok(game_dir) => {
+                match load_game(&steam_app_id, std::path::Path::new(&game_dir)) {
+                    Ok(mut game) => {
+                        game.name = game_name.clone();
+                        game.game_dir = game_dir.clone();
+                        if let Some(ref watcher) = watcher {
+                            watcher.watch(&steam_app_id, &game_dir, &game.achievements);
+                        }
+                        let _ = sender.send(AppMessage::NewGame(game));
+                        enrich_game_async(steam_app_id, game_dir, steam, watcher, sender, false);
+                    }
+                    Err(e) => eprintln!("Failed to load newly added GOG game: {}", e),
+                }
+            }
+            Err(e) => {
+                if e == crate::gamesetup::EMU_NOT_FOUND {
+                    let _ = sender.send(AppMessage::GogEmuNotFound {
+                        galaxy_folder: galaxy_folder.clone(),
+                        product_id: product_id.clone(),
+                        game_name: game_name.clone(),
+                        steam_app_id: steam_app_id.clone(),
+                    });
+                } else {
+                    eprintln!("GOG add game failed: {}", e);
+                    let _ = sender.send(AppMessage::AddGameError(e));
+                }
             }
         }
     });

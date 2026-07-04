@@ -23,6 +23,12 @@ pub enum AppMessage {
     WatcherGameUpdated(Game),
     WatcherNewGameDir { app_id: String, game_dir: String },
     AddGameError(String),
+    GogEmuNotFound {
+        galaxy_folder: String,
+        product_id: String,
+        game_name: String,
+        steam_app_id: String,
+    },
 }
 
 fn main() {
@@ -55,7 +61,7 @@ fn activate(app: &adw::Application) -> SharedState {
     let steam = Arc::new(SteamClient::new(
         cfg.steam_api_key.clone(),
         cfg.steam_griddb_api_key.clone(),
-        &format!("{}/data", ui::SAVE_DIR),
+        &format!("{}/steam/data", ui::SAVE_DIR),
     ));
 
     let games = load_games(ui::SAVE_DIR);
@@ -101,7 +107,7 @@ fn activate(app: &adw::Application) -> SharedState {
     let games_snapshot: Vec<Game> = state.borrow().games.clone();
     for game in &games_snapshot {
         let app_id = game.app_id.clone();
-        let game_dir = format!("{}/{}", ui::SAVE_DIR, app_id);
+        let game_dir = game.game_dir.clone();
         if let Some(ref watcher) = watcher {
             watcher.watch(&app_id, &game_dir, &game.achievements);
         }
@@ -116,7 +122,7 @@ fn activate(app: &adw::Application) -> SharedState {
     }
 
     if let Some(ref watcher) = watcher {
-        if let Err(e) = watcher.watch_root(ui::SAVE_DIR) {
+        if let Err(e) = watcher.watch_root(&format!("{}/steam", ui::SAVE_DIR)) {
             eprintln!("Could not watch saves directory for new games: {}", e);
         }
     }

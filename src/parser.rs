@@ -9,6 +9,14 @@ pub struct AchievementStatus {
     pub earned_time: i64,
 }
 
+/// GOG emulator status entry: { "unlock_time": 1234567890 }
+/// Only earned achievements appear; absent = not earned.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GogAchievementStatus {
+    #[serde(default)]
+    pub unlock_time: i64,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct StringOrMap {
     pub val: String,
@@ -72,6 +80,7 @@ pub struct MergedAchievement {
 #[derive(Debug, Clone)]
 pub struct Game {
     pub app_id: String,
+    pub game_dir: String,
     pub name: String,
     pub icon_path: String,
     pub hero_image_path: String,
@@ -136,26 +145,64 @@ fn find_icon_path(game_dir: &Path, icon_field: &str) -> String {
     String::new()
 }
 
+/// Scans both steam/ and gog/ subdirectories under base_path for games.
 pub fn load_games(base_path: &str) -> Vec<Game> {
-    let entries = match std::fs::read_dir(base_path) {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
-    };
-
     let mut games: Vec<Game> = Vec::new();
 
-    for entry in entries.flatten() {
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            continue;
+    // Steam games: base_path/steam/<app_id>/
+    let steam_dir = format!("{}/steam", base_path);
+    if let Ok(entries) = std::fs::read_dir(&steam_dir) {
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let app_id = entry.file_name().to_string_lossy().into_owned();
+            if app_id.parse::<i64>().is_err() {
+                continue;
+            }
+            let game_dir = entry.path();
+            match load_game(&app_id, &game_dir) {
+                Ok(mut game) => {
+                    game.game_dir = game_dir.to_string_lossy().into_owned();
+                    games.push(game);
+                }
+                Err(e) => eprintln!("Skipping steam game {}: {}", app_id, e),
+            }
         }
-        let app_id = entry.file_name().to_string_lossy().into_owned();
-        if app_id.parse::<i64>().is_err() {
-            continue;
-        }
-        let game_dir = entry.path();
-        match load_game(&app_id, &game_dir) {
-            Ok(game) => games.push(game),
-            Err(e) => eprintln!("Skipping game {}: {}", app_id, e),
+    }
+
+    // GOG games: base_path/gog/<galaxyid>/<productid>/
+    let gog_dir = format!("{}/gog", base_path);
+    if let Ok(galaxy_entries) = std::fs::read_dir(&gog_dir) {
+        for galaxy_entry in galaxy_entries.flatten() {
+            if !galaxy_entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let galaxy_path = galaxy_entry.path();
+            if let Ok(product_entries) = std::fs::read_dir(&galaxy_path) {
+                for product_entry in product_entries.flatten() {
+                    if !product_entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                        continue;
+                    }
+                    let game_dir = product_entry.path();
+                    // Read Steam App ID from steam_appid.txt
+                    let appid_path = game_dir.join("steam_appid.txt");
+                    let app_id = match std::fs::read_to_string(&appid_path) {
+                        Ok(s) => s.trim().to_string(),
+                        Err(_) => continue, // Not a registered GOG game
+                    };
+                    if app_id.parse::<i64>().is_err() {
+                        continue;
+                    }
+                    match load_game(&app_id, &game_dir) {
+                        Ok(mut game) => {
+                            game.game_dir = game_dir.to_string_lossy().into_owned();
+                            games.push(game);
+                        }
+                        Err(e) => eprintln!("Skipping gog game {}: {}", app_id, e),
+                    }
+                }
+            }
         }
     }
 
@@ -167,7 +214,7 @@ pub fn set_achievement_earned(game_dir: &str, ach_name: &str, earned: bool) -> R
     let status_path = Path::new(game_dir).join("achievements.json");
     let mut status_map: HashMap<String, AchievementStatus> = HashMap::new();
     if let Ok(data) = std::fs::read(&status_path) {
-        let _ = serde_json::from_slice::<HashMap<String, AchievementStatus>>(&data, ).map(|m| status_map = m);
+        let _ = serde_json::from_slice::<HashMap<String, AchievementStatus>>(&data).map(|m| status_map = m);
     }
     status_map.insert(
         ach_name.to_string(),
@@ -181,9 +228,50 @@ pub fn set_achievement_earned(game_dir: &str, ach_name: &str, earned: bool) -> R
     Ok(())
 }
 
+/// Reads achievement status from achievements.json. Handles both Goldberg
+/// format ({ "name": { "earned": bool, "earned_time": N } }) and GOG emulator
+/// format ({ "name": { "unlock_time": N } }, only earned listed, or null).
+fn load_status_map(game_dir: &Path) -> HashMap<String, AchievementStatus> {
+    let status_path = game_dir.join("achievements.json");
+    let Ok(data) = std::fs::read(&status_path) else {
+        return HashMap::new();
+    };
+
+    // GOG emulator writes `null` when nothing is earned yet.
+    let trimmed = std::str::from_utf8(&data).unwrap_or("").trim();
+    if trimmed == "null" || trimmed.is_empty() {
+        return HashMap::new();
+    }
+
+    // Try Goldberg format first
+    if let Ok(m) = serde_json::from_slice::<HashMap<String, AchievementStatus>>(&data) {
+        return m;
+    }
+
+    // Try GOG format: { "name": { "unlock_time": N } }
+    if let Ok(gog_m) = serde_json::from_slice::<HashMap<String, GogAchievementStatus>>(&data) {
+        return gog_m
+            .into_iter()
+            .map(|(k, v)| {
+                let earned = v.unlock_time > 0;
+                (
+                    k,
+                    AchievementStatus {
+                        earned,
+                        earned_time: v.unlock_time,
+                    },
+                )
+            })
+            .collect();
+    }
+
+    HashMap::new()
+}
+
 pub fn load_game(app_id: &str, game_dir: &Path) -> Result<Game, String> {
     let mut game = Game {
         app_id: app_id.to_string(),
+        game_dir: game_dir.to_string_lossy().into_owned(),
         name: format!("App ID: {}", app_id),
         icon_path: String::new(),
         hero_image_path: String::new(),
@@ -212,13 +300,7 @@ pub fn load_game(app_id: &str, game_dir: &Path) -> Result<Game, String> {
         }
     }
 
-    let status_path = game_dir.join("achievements.json");
-    let mut status_map: HashMap<String, AchievementStatus> = HashMap::new();
-    if let Ok(data) = std::fs::read(&status_path) {
-        if let Ok(m) = serde_json::from_slice::<HashMap<String, AchievementStatus>>(&data) {
-            status_map = m;
-        }
-    }
+    let status_map = load_status_map(game_dir);
 
     let meta_path = game_dir.join("steam_settings").join("achievements.json");
     if let Ok(meta_data) = std::fs::read(&meta_path) {

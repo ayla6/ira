@@ -44,7 +44,20 @@ struct GlobalAchievementsInner {
 #[derive(Debug, Deserialize)]
 struct GlobalAchievementEntry {
     name: String,
-    percent: serde_json::Number,
+    #[serde(deserialize_with = "deserialize_percent")]
+    percent: f64,
+}
+
+fn deserialize_percent<'de, D>(d: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = serde_json::Value::deserialize(d)?;
+    match v {
+        serde_json::Value::String(s) => s.parse::<f64>().map_err(serde::de::Error::custom),
+        serde_json::Value::Number(n) => n.as_f64().ok_or_else(|| serde::de::Error::custom("invalid number")),
+        _ => Err(serde::de::Error::custom("expected string or number")),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -202,19 +215,26 @@ impl SteamClient {
             }
         };
 
-        let raw: GlobalAchievementsResponse = match resp.json() {
+        let text = match resp.text() {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("Global achievements read error for {}: {}", app_id, e);
+                return None;
+            }
+        };
+
+        let raw: GlobalAchievementsResponse = match serde_json::from_str(&text) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("Global achievements decode error for {}: {}", app_id, e);
+                eprintln!("Response body: {}", &text[..text.len().min(500)]);
                 return None;
             }
         };
 
         let mut m = std::collections::HashMap::new();
         for a in raw.achievementpercentages.achievements {
-            if let Some(pct) = a.percent.as_f64() {
-                m.insert(a.name, pct);
-            }
+            m.insert(a.name, a.percent);
         }
         let _ = std::fs::create_dir_all(self.game_dir(app_id));
         if let Ok(b) = serde_json::to_vec(&m) {

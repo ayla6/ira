@@ -38,7 +38,8 @@ fn main() {
         let state_holder = state_holder.clone();
         move |app| {
             if let Some(state) = state_holder.borrow().as_ref() {
-                state.borrow().window.present();
+                let win = state.borrow().window.clone();
+                win.present();
                 restore_content(state);
                 return;
             }

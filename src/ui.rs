@@ -97,6 +97,32 @@ pub fn build_ui(
     sender: Sender<AppMessage>,
     game_names: Arc<Mutex<HashMap<String, String>>>,
 ) -> SharedState {
+    let state = Rc::new(RefCell::new(AppState {
+        window: adw::ApplicationWindow::new(app),
+        games,
+        rows: Vec::new(),
+        game_list: gtk4::ListBox::new(),
+        content_scroll: gtk4::ScrolledWindow::new(),
+        content_box: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
+        empty_state: adw::StatusPage::new(),
+        selected_id: String::new(),
+        cfg: cfg.clone(),
+        steam: steam.clone(),
+        watcher: watcher.clone(),
+        scroll_positions: HashMap::new(),
+        sender,
+        game_names,
+        content_unloaded: false,
+        restoring: false,
+    }));
+
+    build_window(&state, app);
+    let win = state.borrow().window.clone();
+    win.present();
+    state
+}
+
+fn build_window(state: &SharedState, app: &adw::Application) {
     let window = adw::ApplicationWindow::new(app);
     window.set_title(Some("Achievement Viewer"));
     window.set_default_size(1100, 720);
@@ -162,28 +188,17 @@ pub fn build_ui(
     empty_state.set_icon_name(Some("applications-games-symbolic"));
     content_box.append(&empty_state);
 
-    let state = Rc::new(RefCell::new(AppState {
-        window: window.clone(),
-        games,
-        rows: Vec::new(),
-        game_list: game_list.clone(),
-        content_scroll: content_scroll.clone(),
-        content_box: content_box.clone(),
-        empty_state: empty_state.clone(),
-        selected_id: String::new(),
-        cfg: cfg.clone(),
-        steam: steam.clone(),
-        watcher: watcher.clone(),
-        scroll_positions: HashMap::new(),
-        sender,
-        game_names,
-        content_unloaded: false,
-        restoring: false,
-    }));
+    {
+        let mut s = state.borrow_mut();
+        s.window = window.clone();
+        s.game_list = game_list.clone();
+        s.content_scroll = content_scroll.clone();
+        s.content_box = content_box.clone();
+        s.empty_state = empty_state.clone();
+    }
 
-    rebuild_sidebar(&state);
+    rebuild_sidebar(state);
 
-    let game_list_clone = game_list.clone();
     let state_clone = state.clone();
     game_list.connect_row_selected(move |_list, row| {
         let s = state_clone.borrow();
@@ -198,7 +213,6 @@ pub fn build_ui(
             switch_to_game(&state_clone, &app_id);
         }
     });
-    let _ = game_list_clone;
 
     let state_clone = state.clone();
     add_btn.connect_clicked(move |_| {
@@ -224,9 +238,6 @@ pub fn build_ui(
             glib::Propagation::Proceed
         }
     });
-
-    window.present();
-    state
 }
 
 fn rebuild_sidebar(state: &SharedState) {
@@ -960,7 +971,13 @@ fn show_close_choice_dialog(state: &SharedState) {
     dialog.connect_response(None, move |_, resp| {
         match resp {
             "background" => hide_to_background(&state_clone),
-            "quit" => state_clone.borrow().window.destroy(),
+            "quit" => {
+                let app = state_clone.borrow().window.application()
+                    .expect("no application")
+                    .downcast::<adw::Application>()
+                    .expect("not an adw Application");
+                app.quit();
+            }
             _ => {}
         }
     });
@@ -968,8 +985,47 @@ fn show_close_choice_dialog(state: &SharedState) {
 }
 
 pub fn hide_to_background(state: &SharedState) {
+    // Save scroll position for the current game
+    {
+        let mut s = state.borrow_mut();
+        if !s.selected_id.is_empty() {
+            let id = s.selected_id.clone();
+            let v = s.content_scroll.vadjustment().value();
+            s.scroll_positions.insert(id, v);
+        }
+    }
+
+    // Remove all content widgets from the old window
     teardown_content(state);
-    state.borrow().window.set_visible(false);
+
+    // Get the app before destroying the window
+    let app = state.borrow().window.application()
+        .expect("no application")
+        .downcast::<adw::Application>()
+        .expect("not an adw Application");
+
+    // Destroy the old window entirely — this frees all rendering buffers,
+    // GPU resources, and widget GObjects that just removing children can't.
+    state.borrow().window.destroy();
+
+    // Build a fresh hidden window (minimal memory footprint)
+    build_window(state, &app);
+    let win = state.borrow().window.clone();
+    win.set_visible(false);
+
+    // Free decoded image textures
+    crate::images::clear_texture_cache();
+
+    // Return freed heap pages to the OS
+    extern "C" { fn malloc_trim(pad: usize) -> i32; }
+    unsafe { malloc_trim(0); }
+
+    // GTK releases some resources asynchronously — trim again after a delay
+    glib::timeout_add_local(std::time::Duration::from_millis(300), || {
+        extern "C" { fn malloc_trim(pad: usize) -> i32; }
+        unsafe { malloc_trim(0); }
+        glib::ControlFlow::Break
+    });
 }
 
 fn teardown_content(state: &SharedState) {
@@ -988,20 +1044,6 @@ fn teardown_content(state: &SharedState) {
     let mut s = state.borrow_mut();
     s.rows.clear();
     s.content_unloaded = true;
-    drop(s);
-
-    crate::images::clear_texture_cache();
-
-    extern "C" { fn malloc_trim(pad: usize) -> i32; }
-    unsafe { malloc_trim(0); }
-
-    // GTK may hold internal references that are released asynchronously.
-    // Schedule a second trim after a short delay.
-    glib::timeout_add_local(std::time::Duration::from_millis(300), || {
-        extern "C" { fn malloc_trim(pad: usize) -> i32; }
-        unsafe { malloc_trim(0); }
-        glib::ControlFlow::Break
-    });
 }
 
 pub fn restore_content(state: &SharedState) {

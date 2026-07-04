@@ -1,5 +1,6 @@
 use crate::config::Config;
-use crate::parser::{load_game, MergedAchievement};
+use crate::db::GameEntry;
+use crate::parser::{load_game, unlock_status_path, MergedAchievement};
 use crate::AppMessage;
 use notify::{Config as NotifyConfig, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
@@ -10,10 +11,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 struct WatcherState {
-    dir_to_app: HashMap<PathBuf, String>,
+    dir_to_game: HashMap<PathBuf, GameEntry>,
     last_earned: HashMap<String, HashMap<String, bool>>,
     game_names: Arc<Mutex<HashMap<String, String>>>,
-    root_dir: Option<PathBuf>,
+    save_dir: String,
 }
 
 #[derive(Clone)]
@@ -23,12 +24,12 @@ pub struct AchievementWatcher {
 }
 
 impl AchievementWatcher {
-    pub fn new(cfg: Arc<Config>, sender: Sender<AppMessage>) -> Result<Self, String> {
+    pub fn new(cfg: Arc<Config>, sender: Sender<AppMessage>, save_dir: String) -> Result<Self, String> {
         let state = Arc::new(Mutex::new(WatcherState {
-            dir_to_app: HashMap::new(),
+            dir_to_game: HashMap::new(),
             last_earned: HashMap::new(),
             game_names: Arc::new(Mutex::new(HashMap::new())),
-            root_dir: None,
+            save_dir,
         }));
 
         let (tx, rx) = std::sync::mpsc::channel();
@@ -51,31 +52,35 @@ impl AchievementWatcher {
         self.state.lock().unwrap().game_names.clone()
     }
 
-    pub fn watch(&self, app_id: &str, game_dir: &str, achievements: &[MergedAchievement]) {
+    pub fn watch(&self, entry: &GameEntry, achievements: &[MergedAchievement]) {
         let earned: HashMap<String, bool> =
             achievements.iter().map(|a| (a.name.clone(), a.earned)).collect();
-        let game_dir_path = PathBuf::from(game_dir);
+
+        let watch_dir = unlock_status_path(
+            &self.state.lock().unwrap().save_dir,
+            &entry.kind,
+            &entry.steam_id,
+            &entry.platform_id,
+        )
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default();
 
         let already_watching = {
             let mut st = self.state.lock().unwrap();
-            st.last_earned.insert(app_id.to_string(), earned);
-            st.dir_to_app.values().any(|id| id == app_id)
+            st.last_earned.insert(entry.steam_id.clone(), earned);
+            st.dir_to_game.values().any(|g| g.steam_id == entry.steam_id)
         };
 
         if !already_watching {
-            self.state.lock().unwrap().dir_to_app.insert(game_dir_path.clone(), app_id.to_string());
+            let mut st = self.state.lock().unwrap();
+            st.dir_to_game.insert(watch_dir.clone(), entry.clone());
+            drop(st);
             let mut w = self.watcher.lock().unwrap();
-            if let Err(e) = w.watch(&game_dir_path, RecursiveMode::NonRecursive) {
-                eprintln!("Could not watch {} for live updates: {}", game_dir, e);
+            if let Err(e) = w.watch(&watch_dir, RecursiveMode::NonRecursive) {
+                eprintln!("Could not watch {:?} for live updates: {}", watch_dir, e);
             }
         }
-    }
-
-    pub fn watch_root(&self, dir: &str) -> Result<(), String> {
-        let path = PathBuf::from(dir);
-        self.state.lock().unwrap().root_dir = Some(path.clone());
-        let mut w = self.watcher.lock().unwrap();
-        w.watch(&path, RecursiveMode::NonRecursive).map_err(|e| e.to_string())
     }
 }
 
@@ -92,7 +97,7 @@ fn event_loop(
         match rx.recv_timeout(Duration::from_millis(50)) {
             Ok(Ok(event)) => {
                 last_event = Instant::now();
-                handle_notify_event(&event, &state, &sender, &mut pending);
+                handle_notify_event(&event, &state, &mut pending);
             }
             Ok(Err(e)) => {
                 eprintln!("Achievement watcher error: {}", e);
@@ -113,30 +118,12 @@ fn event_loop(
 fn handle_notify_event(
     event: &notify::Event,
     state: &Mutex<WatcherState>,
-    sender: &Sender<AppMessage>,
     pending: &mut HashMap<String, PathBuf>,
 ) {
     let is_create = matches!(event.kind, EventKind::Create(_));
     let is_modify = matches!(event.kind, EventKind::Modify(_));
 
     for path in &event.paths {
-        let st = state.lock().unwrap();
-
-        if let Some(root) = &st.root_dir {
-            if let Some(parent) = path.parent() {
-                if parent == root.as_path() && is_create {
-                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    if name.parse::<i64>().is_ok() && path.is_dir() {
-                        let _ = sender.send(AppMessage::WatcherNewGameDir {
-                            app_id: name.to_string(),
-                            game_dir: path.to_string_lossy().into_owned(),
-                        });
-                    }
-                    return;
-                }
-            }
-        }
-
         if path.file_name().and_then(|n| n.to_str()) != Some("achievements.json") {
             continue;
         }
@@ -145,8 +132,9 @@ fn handle_notify_event(
         }
 
         let game_dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        if let Some(app_id) = st.dir_to_app.get(&game_dir) {
-            pending.insert(app_id.clone(), game_dir.clone());
+        let st = state.lock().unwrap();
+        if let Some(entry) = st.dir_to_game.get(&game_dir) {
+            pending.insert(entry.steam_id.clone(), game_dir.clone());
         }
     }
 }
@@ -158,7 +146,16 @@ fn process_reload(
     sender: &Sender<AppMessage>,
     cfg: &Config,
 ) {
-    let game = match load_game(app_id, game_dir) {
+    let (entry, save_dir) = {
+        let st = state.lock().unwrap();
+        let entry = st.dir_to_game.get(game_dir).cloned();
+        let save_dir = st.save_dir.clone();
+        (entry, save_dir)
+    };
+
+    let Some(entry) = entry else { return };
+
+    let game = match load_game(&entry, &save_dir) {
         Ok(g) => g,
         Err(e) => {
             eprintln!("Live-reload of {} failed: {}", app_id, e);

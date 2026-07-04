@@ -1,4 +1,9 @@
 use std::path::{Path, PathBuf};
+use xxhash_rust::xxh3::xxh3_64;
+
+use crate::db::DbConn;
+use crate::parser::GALAXY_ID;
+use crate::steam::SteamClient;
 
 /// Detect a Steam/Goldberg game by looking for steam_appid.txt.
 pub fn detect_app_id(folder: &str) -> Option<String> {
@@ -24,7 +29,6 @@ pub fn is_gog_game(folder: &str) -> bool {
 
 fn find_galaxy_dll(folder: &str) -> Option<PathBuf> {
     let dll_names = ["galaxy.dll", "galaxy64.dll"];
-    // Check the folder itself
     if let Ok(entries) = std::fs::read_dir(folder) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
@@ -34,7 +38,6 @@ fn find_galaxy_dll(folder: &str) -> Option<PathBuf> {
             }
         }
     }
-    // Check one level of subdirectories
     if let Ok(entries) = std::fs::read_dir(folder) {
         for entry in entries.flatten() {
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
@@ -96,52 +99,113 @@ pub fn find_gog_info(start: &str) -> Option<(PathBuf, String, String)> {
     None
 }
 
-/// Walk up from `start` looking for a `ngalaxye_settings` directory containing
-/// `NemirtingasGalaxyEmu.json`. Returns the path to the `ngalaxye_settings` folder.
-pub fn find_ngalaxye_settings(start: &str) -> Option<PathBuf> {
-    let mut current = Path::new(start).to_path_buf();
-    loop {
-        let candidate = current.join("ngalaxye_settings").join("NemirtingasGalaxyEmu.json");
-        if candidate.exists() {
-            return Some(current.join("ngalaxye_settings"));
-        }
-        if !current.pop() {
-            break;
+// ---- GOG emulator config generation ----
+
+const OLD_HASH_GALAXY64: u64 = 0xa511c62ff1db29d9;
+const OLD_HASH_GALAXY: u64 = 0x64b254c0a68a2718;
+
+fn find_galaxy_dll_file(folder: &str) -> Option<PathBuf> {
+    let dll_names = ["galaxy.dll", "galaxy64.dll"];
+    if let Ok(entries) = std::fs::read_dir(folder) {
+        for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str() {
+                if dll_names.contains(&name.to_lowercase().as_str()) {
+                    return Some(entry.path());
+                }
+            }
         }
     }
     None
 }
 
-/// Read NemirtingasGalaxyEmu.json from the given ngalaxye_settings folder.
-/// Handles both the old flat format and the new nested format.
-pub fn read_galaxy_emu_config(settings_dir: &Path) -> Option<(String, String)> {
-    let config_path = settings_dir.join("NemirtingasGalaxyEmu.json");
-    let data = std::fs::read_to_string(&config_path).ok()?;
-    let json: serde_json::Value = serde_json::from_str(&data).ok()?;
+fn checksum_dll(path: &Path) -> Option<u64> {
+    let data = std::fs::read(path).ok()?;
+    Some(xxh3_64(&data))
+}
 
-    // Try old flat format: { "galaxyid": N, "productid": N }
-    if let Some(gid) = json.get("galaxyid").and_then(|v| v.as_i64()) {
-        let pid = json.get("productid").and_then(|v| v.as_i64())?;
-        return Some((gid.to_string(), pid.to_string()));
+fn write_old_emu_config(settings_dir: &Path, product_id: &str) -> Result<(), String> {
+    let config = serde_json::json!({
+        "api_version": "1.152.1.0",
+        "disable_crashdump": true,
+        "disable_online_networking": false,
+        "enable_lan": true,
+        "enable_overlay": false,
+        "galaxyid": GALAXY_ID.parse::<i64>().unwrap_or(100000000000000000),
+        "ice_servers": [],
+        "language": "english",
+        "log_level": "off",
+        "productid": product_id.parse::<i64>().unwrap_or(0),
+        "savepath": "appdata",
+        "signaling_servers": [],
+        "unlock_dlcs": true,
+        "username": "DefaultName"
+    });
+    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    std::fs::write(settings_dir.join("NemirtingasGalaxyEmu.json"), json).map_err(|e| e.to_string())
+}
+
+fn write_new_emu_config(settings_dir: &Path, product_id: &str) -> Result<(), String> {
+    let config = serde_json::json!({
+        "GalaxyEmu": {
+            "Application": {
+                "ApiVersion": "1.152.11.0",
+                "AppId": product_id.parse::<i64>().unwrap_or(0),
+                "DisableOnlineNetworking": false,
+                "LogLevel": "off",
+                "SavePath": "appdata"
+            },
+            "Apps": {
+                "DlcList": {},
+                "UnlockDlcs": true
+            },
+            "Plugins": {
+                "Overlay": {
+                    "DelayDetection": "6s",
+                    "Enabled": true
+                }
+            },
+            "User": {
+                "GalaxyId": GALAXY_ID.parse::<i64>().unwrap_or(100000000000000000),
+                "Language": "english",
+                "Languages": ["english"],
+                "UserName": ""
+            }
+        }
+    });
+    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    std::fs::write(settings_dir.join("NemirtingasGalaxyEmu.json"), json).map_err(|e| e.to_string())
+}
+
+/// Generate NemirtingasGalaxyEmu.json in the game's ngalaxye_settings folder.
+/// Uses XXH3 checksum of the Galaxy DLL to determine old vs new config format.
+fn generate_galaxy_emu_config(galaxy_dll_folder: &str, product_id: &str) -> Result<(), String> {
+    let settings_dir = Path::new(galaxy_dll_folder).join("ngalaxye_settings");
+    std::fs::create_dir_all(&settings_dir).map_err(|e| format!("could not create ngalaxye_settings: {}", e))?;
+
+    let config_path = settings_dir.join("NemirtingasGalaxyEmu.json");
+    if config_path.exists() {
+        return Ok(());
     }
 
-    // Try new nested format: { "GalaxyEmu": { "Application": { "AppId": N }, "User": { "GalaxyId": N } } }
-    let galaxy_emu = json.get("GalaxyEmu")?;
-    let app_id = galaxy_emu
-        .get("Application")
-        .and_then(|a| a.get("AppId"))
-        .and_then(|v| v.as_i64())?;
-    let galaxy_id = galaxy_emu
-        .get("User")
-        .and_then(|u| u.get("GalaxyId"))
-        .and_then(|v| v.as_i64())?;
-    Some((galaxy_id.to_string(), app_id.to_string()))
+    let use_old_format = find_galaxy_dll_file(galaxy_dll_folder)
+        .and_then(|dll_path| checksum_dll(&dll_path))
+        .map(|hash| hash == OLD_HASH_GALAXY64 || hash == OLD_HASH_GALAXY)
+        .unwrap_or(false);
+
+    if use_old_format {
+        write_old_emu_config(&settings_dir, product_id)
+    } else {
+        write_new_emu_config(&settings_dir, product_id)
+    }
 }
+
+// ---- Game setup ----
 
 pub fn add_game_from_folder(
     folder: &str,
     app_id: &str,
-    steam: &crate::steam::SteamClient,
+    steam: &SteamClient,
+    db: &DbConn,
     save_dir: &str,
 ) -> Result<String, String> {
     let folder = folder.trim();
@@ -153,41 +217,46 @@ pub fn add_game_from_folder(
         return Err(format!("invalid Steam App ID {:?}", app_id));
     }
 
-    let settings_dir = Path::new(folder).join("steam_settings");
-    std::fs::create_dir_all(&settings_dir).map_err(|e| format!("could not create steam_settings: {}", e))?;
+    // Ensure the game's steam_settings exists (Goldberg emulator needs it)
+    let game_settings_dir = Path::new(folder).join("steam_settings");
+    std::fs::create_dir_all(&game_settings_dir).map_err(|e| format!("could not create steam_settings: {}", e))?;
 
-    let app_id_path = settings_dir.join("steam_appid.txt");
+    let app_id_path = game_settings_dir.join("steam_appid.txt");
     if !app_id_path.exists() {
         std::fs::write(&app_id_path, app_id).map_err(|e| format!("could not write steam_appid.txt: {}", e))?;
     }
 
-    let saves_game_dir = Path::new(save_dir).join("steam").join(app_id);
-    std::fs::create_dir_all(save_dir).map_err(|e| format!("could not create saves directory: {}", e))?;
-
-    let link_path = saves_game_dir.join("steam_settings");
-    if !link_path.exists() {
-        std::fs::create_dir_all(&saves_game_dir).map_err(|e| format!("could not create game save directory: {}", e))?;
+    // Create data/<app_id>/achievements/ as symlink to game's steam_settings
+    let data_ach_dir = crate::parser::achievements_dir(save_dir, app_id);
+    if !data_ach_dir.exists() {
+        std::fs::create_dir_all(data_ach_dir.parent().unwrap()).map_err(|e| format!("could not create data dir: {}", e))?;
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&settings_dir, &link_path).map_err(|e| format!("could not symlink steam_settings into saves: {}", e))?;
+        std::os::unix::fs::symlink(&game_settings_dir, &data_ach_dir).map_err(|e| format!("could not symlink achievements: {}", e))?;
     }
 
-    steam.generate_steam_settings(app_id, &saves_game_dir)?;
+    // Create steam/<app_id>/ save directory
+    let saves_game_dir = Path::new(save_dir).join("steam").join(app_id);
+    std::fs::create_dir_all(&saves_game_dir).map_err(|e| format!("could not create saves directory: {}", e))?;
+
+    // Generate achievement definitions
+    steam.generate_steam_settings(app_id)?;
+
+    // Add to DB
+    let title = std::fs::read_to_string(game_settings_dir.join("title.txt"))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    crate::db::add_game(db, "steam", app_id, app_id, &title)?;
 
     Ok(saves_game_dir.to_string_lossy().into_owned())
 }
 
-/// Error sentinel used to distinguish "emulator config not found" from other errors.
-pub const EMU_NOT_FOUND: &str = "__EMU_NOT_FOUND__";
-
-/// Set up a GOG game: symlinks the emulator's achievement data into the GOG saves tree
-/// and creates steam_settings + steam_appid.txt for definitions.
 pub fn add_gog_game_from_folder(
     galaxy_dll_folder: &str,
-    _game_root_folder: &str,
     product_id: &str,
     game_name: &str,
     steam_app_id: &str,
-    steam: &crate::steam::SteamClient,
+    steam: &SteamClient,
+    db: &DbConn,
     save_dir: &str,
 ) -> Result<String, String> {
     let steam_app_id = steam_app_id.trim();
@@ -195,51 +264,37 @@ pub fn add_gog_game_from_folder(
         return Err(format!("invalid Steam App ID {:?}", steam_app_id));
     }
 
-    // Find ngalaxye_settings by walking up directories from the Galaxy.dll folder
-    let ngalaxye_src = find_ngalaxye_settings(galaxy_dll_folder)
-        .ok_or_else(|| EMU_NOT_FOUND.to_string())?;
+    // Generate NemirtingasGalaxyEmu.json in the game's ngalaxye_settings
+    generate_galaxy_emu_config(galaxy_dll_folder, product_id)?;
 
-    // Read galaxyid from NemirtingasGalaxyEmu.json
-    let (galaxyid, _config_productid) = read_galaxy_emu_config(&ngalaxye_src)
-        .ok_or_else(|| "Could not parse NemirtingasGalaxyEmu.json in ngalaxye_settings.".to_string())?;
-
-    // Create GOG saves directory: save_dir/gog/<galaxyid>/<product_id>/
+    // Create GOG saves directory: save_dir/gog/<GALAXY_ID>/<product_id>/
     let gog_game_dir = Path::new(save_dir)
         .join("gog")
-        .join(&galaxyid)
+        .join(GALAXY_ID)
         .join(product_id);
     std::fs::create_dir_all(&gog_game_dir).map_err(|e| format!("could not create GOG saves dir: {}", e))?;
 
-    // Symlink ngalaxye_settings from the found location into the GOG saves tree
-    let ngalaxye_dst = gog_game_dir.join("ngalaxye_settings");
-    if ngalaxye_src.exists() && !ngalaxye_dst.exists() {
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&ngalaxye_src, &ngalaxye_dst).map_err(|e| format!("could not symlink ngalaxye_settings: {}", e))?;
-    }
-
-    // Create an empty achievements.json so the parser has something to read
-    // before the emulator writes to it on first launch.
+    // Create empty achievements.json so the parser has something to read
     let ach_path = gog_game_dir.join("achievements.json");
     if !ach_path.exists() {
         std::fs::write(&ach_path, "{}").map_err(|e| format!("could not write achievements.json: {}", e))?;
     }
 
-    // Create steam_settings for achievement definitions (fetched from Steam API)
-    let settings_dir = gog_game_dir.join("steam_settings");
-    std::fs::create_dir_all(&settings_dir).map_err(|e| format!("could not create steam_settings: {}", e))?;
+    // Create data/<steam_app_id>/achievements/ (real folder for GOG games)
+    let data_ach_dir = crate::parser::achievements_dir(save_dir, steam_app_id);
+    std::fs::create_dir_all(&data_ach_dir).map_err(|e| format!("could not create data achievements dir: {}", e))?;
 
-    // Write steam_appid.txt so load_games can find the Steam App ID
-    let appid_path = gog_game_dir.join("steam_appid.txt");
-    std::fs::write(&appid_path, steam_app_id).map_err(|e| format!("could not write steam_appid.txt: {}", e))?;
-
-    // Write title.txt with the game name from the .info file
-    let title_path = settings_dir.join("title.txt");
+    // Write title.txt
+    let title_path = data_ach_dir.join("title.txt");
     if !title_path.exists() {
         std::fs::write(&title_path, game_name).map_err(|e| format!("could not write title.txt: {}", e))?;
     }
 
     // Fetch achievement definitions from Steam API
-    steam.generate_steam_settings(steam_app_id, &gog_game_dir)?;
+    steam.generate_steam_settings(steam_app_id)?;
+
+    // Add to DB
+    crate::db::add_game(db, "gog", steam_app_id, product_id, game_name)?;
 
     Ok(gog_game_dir.to_string_lossy().into_owned())
 }

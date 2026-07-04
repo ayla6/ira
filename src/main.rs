@@ -1,5 +1,6 @@
 mod bench;
 mod config;
+mod db;
 mod gamesetup;
 mod images;
 mod parser;
@@ -7,7 +8,8 @@ mod steam;
 mod ui;
 mod watcher;
 
-use crate::parser::{load_games, Game};
+use crate::db::GameEntry;
+use crate::parser::Game;
 use crate::steam::SteamClient;
 use crate::ui::{build_ui, enrich_game_async, handle_app_message, restore_content, SharedState};
 use crate::watcher::AchievementWatcher;
@@ -21,14 +23,8 @@ pub enum AppMessage {
     EnrichedGame(Game),
     NewGame(Game),
     WatcherGameUpdated(Game),
-    WatcherNewGameDir { app_id: String, game_dir: String },
     AddGameError(String),
-    GogEmuNotFound {
-        galaxy_folder: String,
-        product_id: String,
-        game_name: String,
-        steam_app_id: String,
-    },
+    GameRemoved { app_id: String },
 }
 
 fn main() {
@@ -58,18 +54,26 @@ fn main() {
 
 fn activate(app: &adw::Application) -> SharedState {
     let cfg = config::load_config();
+
+    let db = db::init_db(&format!("{}/gse.db", ui::SAVE_DIR));
+
+    // If DB is empty, populate from existing directory structure
+    if db::load_all_games(&db).map(|v| v.is_empty()).unwrap_or(true) {
+        populate_db_from_dirs(&db, ui::SAVE_DIR);
+    }
+
     let steam = Arc::new(SteamClient::new(
         cfg.steam_api_key.clone(),
         cfg.steam_griddb_api_key.clone(),
-        &format!("{}/steam/data", ui::SAVE_DIR),
+        &format!("{}/data", ui::SAVE_DIR),
     ));
 
-    let games = load_games(ui::SAVE_DIR);
+    let games = parser::load_games(&db, ui::SAVE_DIR);
 
     let (sender, receiver) = mpsc::channel::<AppMessage>();
 
     let cfg_for_watcher = Arc::new(cfg.clone());
-    let watcher = match AchievementWatcher::new(cfg_for_watcher, sender.clone()) {
+    let watcher = match AchievementWatcher::new(cfg_for_watcher, sender.clone(), ui::SAVE_DIR.to_string()) {
         Ok(w) => Some(w),
         Err(e) => {
             eprintln!("Live achievement watching unavailable: {}", e);
@@ -91,6 +95,7 @@ fn activate(app: &adw::Application) -> SharedState {
         cfg,
         steam.clone(),
         watcher.clone(),
+        db.clone(),
         sender.clone(),
         game_names,
     );
@@ -106,25 +111,26 @@ fn activate(app: &adw::Application) -> SharedState {
 
     let games_snapshot: Vec<Game> = state.borrow().games.clone();
     for game in &games_snapshot {
-        let app_id = game.app_id.clone();
-        let game_dir = game.game_dir.clone();
         if let Some(ref watcher) = watcher {
-            watcher.watch(&app_id, &game_dir, &game.achievements);
+            let entry = GameEntry {
+                id: game.db_id,
+                kind: game.kind.clone(),
+                steam_id: game.app_id.clone(),
+                platform_id: game.platform_id.clone(),
+                title: game.name.clone(),
+                lutris_id: None,
+            };
+            watcher.watch(&entry, &game.achievements);
         }
         enrich_game_async(
-            app_id,
-            game_dir,
+            game.app_id.clone(),
+            game.kind.clone(),
+            game.platform_id.clone(),
+            game.db_id,
             steam.clone(),
             watcher.clone(),
             sender.clone(),
-            false,
         );
-    }
-
-    if let Some(ref watcher) = watcher {
-        if let Err(e) = watcher.watch_root(&format!("{}/steam", ui::SAVE_DIR)) {
-            eprintln!("Could not watch saves directory for new games: {}", e);
-        }
     }
 
     if std::env::var("AV_BENCH").is_ok() {
@@ -132,4 +138,64 @@ fn activate(app: &adw::Application) -> SharedState {
     }
 
     state
+}
+
+fn populate_db_from_dirs(db: &db::DbConn, save_dir: &str) {
+    use std::path::Path;
+
+    // Steam games: scan steam/<appid>/
+    let steam_dir = format!("{}/steam", save_dir);
+    if let Ok(entries) = std::fs::read_dir(&steam_dir) {
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let app_id = match entry.file_name().to_str() {
+                Some(s) if s.parse::<i64>().is_ok() => s.to_string(),
+                _ => continue,
+            };
+            let title = std::fs::read_to_string(
+                Path::new(save_dir).join("data").join(&app_id).join("achievements").join("title.txt"),
+            )
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+            let _ = db::add_game(db, "steam", &app_id, &app_id, &title);
+        }
+    }
+
+    // GOG games: scan gog/<galaxyid>/<productid>/
+    let gog_dir = format!("{}/gog", save_dir);
+    if let Ok(galaxy_entries) = std::fs::read_dir(&gog_dir) {
+        for galaxy_entry in galaxy_entries.flatten() {
+            if !galaxy_entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let galaxy_path = galaxy_entry.path();
+            if let Ok(product_entries) = std::fs::read_dir(&galaxy_path) {
+                for product_entry in product_entries.flatten() {
+                    if !product_entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                        continue;
+                    }
+                    let product_dir = product_entry.path();
+                    let product_id = match product_entry.file_name().to_str() {
+                        Some(s) if s.parse::<i64>().is_ok() => s.to_string(),
+                        _ => continue,
+                    };
+                    let app_id = match std::fs::read_to_string(product_dir.join("steam_appid.txt")) {
+                        Ok(s) => s.trim().to_string(),
+                        Err(_) => continue,
+                    };
+                    if app_id.parse::<i64>().is_err() {
+                        continue;
+                    }
+                    let title = std::fs::read_to_string(
+                        Path::new(save_dir).join("data").join(&app_id).join("achievements").join("title.txt"),
+                    )
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default();
+                    let _ = db::add_game(db, "gog", &app_id, &product_id, &title);
+                }
+            }
+        }
+    }
 }

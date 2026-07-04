@@ -426,15 +426,15 @@ impl SteamClient {
         Ok(achs)
     }
 
-    pub fn generate_steam_settings(&self, app_id: &str, game_dir: &Path) -> Result<(), String> {
+    pub fn generate_steam_settings(&self, app_id: &str) -> Result<(), String> {
         struct IconJob {
             url: String,
             dest: PathBuf,
         }
 
-        let settings_dir = game_dir.join("steam_settings");
+        let settings_dir = self.game_dir(app_id).join("achievements");
         let img_dir = settings_dir.join("achievement_images");
-        std::fs::create_dir_all(&img_dir).map_err(|e| format!("could not create steam_settings dir: {}", e))?;
+        std::fs::create_dir_all(&img_dir).map_err(|e| format!("could not create achievements dir: {}", e))?;
 
         let mut jobs: Vec<IconJob> = Vec::new();
         let mut out: Vec<serde_json::Value> = Vec::new();
@@ -519,7 +519,7 @@ impl SteamClient {
             }
         }
 
-        println!("Generated steam_settings for app {}: {} achievements", app_id, out.len());
+        println!("Generated achievements for app {}: {} achievements", app_id, out.len());
         Ok(())
     }
 }

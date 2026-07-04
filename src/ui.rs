@@ -1,11 +1,11 @@
 use crate::config::Config;
+use crate::db::{DbConn, GameEntry};
 use crate::parser::{load_game, Game, MergedAchievement, set_achievement_earned};
 use crate::steam::SteamClient;
 use crate::watcher::AchievementWatcher;
 use crate::AppMessage;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -30,6 +30,7 @@ pub struct AppState {
     pub cfg: Config,
     pub steam: Arc<SteamClient>,
     pub watcher: Option<AchievementWatcher>,
+    pub db: DbConn,
     pub sender: Sender<AppMessage>,
     pub game_names: Arc<Mutex<HashMap<String, String>>>,
     pub content_unloaded: bool,
@@ -93,6 +94,7 @@ pub fn build_ui(
     cfg: Config,
     steam: Arc<SteamClient>,
     watcher: Option<AchievementWatcher>,
+    db: DbConn,
     sender: Sender<AppMessage>,
     game_names: Arc<Mutex<HashMap<String, String>>>,
 ) -> SharedState {
@@ -108,6 +110,7 @@ pub fn build_ui(
         cfg: cfg.clone(),
         steam: steam.clone(),
         watcher: watcher.clone(),
+        db,
         sender,
         game_names,
         content_unloaded: false,
@@ -135,8 +138,7 @@ fn build_window(state: &SharedState, app: &adw::Application) {
         .hero-progress { min-height: 8px; border: none; }
         .sidebar-row-title { min-width: 0; }
         .global-bar trough { background-color: transparent; border: none; }
-        .global-bar progress { border: none; border-radius: 0; }
-        .grayscale-icon { filter: grayscale(100%); }",
+         .global-bar progress { border: none; border-radius: 0; }",
     ));
     gtk4::style_context_add_provider_for_display(
         &gtk4::gdk::Display::default().expect("no default display"),
@@ -251,12 +253,12 @@ fn rebuild_sidebar(state: &SharedState) {
     let games: Vec<Game> = state.borrow().games.iter().cloned().collect();
     let mut rows = Vec::with_capacity(games.len());
     for g in &games {
-        rows.push(build_sidebar_row(&game_list, g));
+        rows.push(build_sidebar_row(&game_list, g, state));
     }
     state.borrow_mut().rows = rows;
 }
 
-fn build_sidebar_row(list: &gtk4::ListBox, game: &Game) -> SidebarRowWidgets {
+fn build_sidebar_row(list: &gtk4::ListBox, game: &Game, state: &SharedState) -> SidebarRowWidgets {
     let row = gtk4::ListBoxRow::new();
 
     let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
@@ -305,6 +307,17 @@ fn build_sidebar_row(list: &gtk4::ListBox, game: &Game) -> SidebarRowWidgets {
     row.set_child(Some(&hbox));
     list.append(&row);
 
+    // Right-click context menu for game settings
+    let state_clone = state.clone();
+    let game_clone = game.clone();
+    let row_clone = row.clone();
+    let right_click = gtk4::GestureClick::new();
+    right_click.set_button(3);
+    right_click.connect_pressed(move |_, _, _, _| {
+        show_game_context_menu(&state_clone, &game_clone, &row_clone);
+    });
+    row.add_controller(right_click);
+
     SidebarRowWidgets {
         icon,
         title: title_label,
@@ -347,12 +360,6 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         AppMessage::NewGame(game) => {
             insert_or_update_game(state, game);
         }
-        AppMessage::WatcherNewGameDir { app_id, game_dir } => {
-            let steam = state.borrow().steam.clone();
-            let watcher = state.borrow().watcher.clone();
-            let sender = state.borrow().sender.clone();
-            enrich_game_async(app_id, game_dir, steam, watcher, sender, true);
-        }
         AppMessage::AddGameError(e) => {
             let window = state.borrow().window.clone();
             let dialog = adw::AlertDialog::new(
@@ -364,29 +371,12 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             dialog.set_close_response("ok");
             dialog.present(Some(&window));
         }
-        AppMessage::GogEmuNotFound { galaxy_folder, product_id, game_name, steam_app_id } => {
-            let window = state.borrow().window.clone();
-            let dialog = adw::AlertDialog::new(
-                Some("Emulator Not Initialized"),
-                Some("Could not find ngalaxye_settings/NemirtingasGalaxyEmu.json.\nLaunch the game at least once with the GOG emulator, then click Retry."),
-            );
-            dialog.add_response("cancel", "Cancel");
-            dialog.add_response("retry", "Retry");
-            dialog.set_response_appearance("retry", adw::ResponseAppearance::Suggested);
-            dialog.set_default_response(Some("retry"));
-            dialog.set_close_response("cancel");
-
-            let state_clone = state.clone();
-            let galaxy_folder = galaxy_folder.clone();
-            let product_id = product_id.clone();
-            let game_name = game_name.clone();
-            let steam_app_id = steam_app_id.clone();
-            dialog.connect_response(None, move |_, response| {
-                if response == "retry" {
-                    finish_add_gog_game(&state_clone, &galaxy_folder, &galaxy_folder, &product_id, &game_name, &steam_app_id);
-                }
-            });
-            dialog.present(Some(&window));
+        AppMessage::GameRemoved { app_id } => {
+            let mut s = state.borrow_mut();
+            s.games.retain(|g| g.app_id != app_id);
+            s.game_names.lock().unwrap().remove(&app_id);
+            drop(s);
+            rebuild_sidebar(state);
         }
     }
 }
@@ -625,12 +615,21 @@ fn display_game(game: &Game, state: &SharedState) {
     earned.sort_by(|a, b| b.earned_time.cmp(&a.earned_time));
     locked.sort_by(|a, b| a.display_name.cmp(&b.display_name));
 
-    let game_dir = format!("{}/{}", SAVE_DIR, game.app_id);
     let app_id_for_reload = game.app_id.clone();
-    let game_dir_for_reload = game_dir.clone();
+    let kind_for_reload = game.kind.clone();
+    let platform_id_for_reload = game.platform_id.clone();
+    let db_id_for_reload = game.db_id;
     let state_for_reload = state.clone();
     let reload = move || {
-        if let Ok(updated) = load_game(&app_id_for_reload, Path::new(&game_dir_for_reload)) {
+        let entry = GameEntry {
+            id: db_id_for_reload,
+            kind: kind_for_reload.clone(),
+            steam_id: app_id_for_reload.clone(),
+            platform_id: platform_id_for_reload.clone(),
+            title: String::new(),
+            lutris_id: None,
+        };
+        if let Ok(updated) = load_game(&entry, SAVE_DIR) {
             apply_game_update(&state_for_reload, updated);
         }
     };
@@ -652,12 +651,14 @@ fn display_game(game: &Game, state: &SharedState) {
         for ach in &locked {
             let ach_clone = (*ach).clone();
             let reload_clone = reload.clone();
-            let game_dir_clone = game_dir.clone();
+            let kind_clone = game.kind.clone();
+            let app_id_clone = game.app_id.clone();
+            let platform_id_clone = game.platform_id.clone();
             let state_clone = state.clone();
             locked_group.add(&create_achievement_row(
                 ach,
                 Some(Box::new(move || {
-                    confirm_mark_unlocked(&state_clone, &game_dir_clone, &ach_clone, reload_clone.clone());
+                    confirm_mark_unlocked(&state_clone, &kind_clone, &app_id_clone, &platform_id_clone, &ach_clone, reload_clone.clone());
                 })),
                 &mut budget,
             ));
@@ -867,97 +868,130 @@ fn create_global_stats_row(
 
     let is_hidden_spoiler = ach.hidden && !ach.earned;
 
-    let img = gtk4::Image::from_icon_name("changes-prevent-symbolic");
-    img.set_pixel_size(48);
-    img.set_valign(gtk4::Align::Start);
-    if is_hidden_spoiler && ach.icon_gray_path.is_empty() {
-    } else if ach.earned {
-        if !ach.icon_path.is_empty() {
-            budget.load(&img, &ach.icon_path);
-        } else {
-            img.set_icon_name(Some("starred-symbolic"));
-        }
-    } else if !ach.icon_gray_path.is_empty() {
-        budget.load(&img, &ach.icon_gray_path);
-    }
+    // Build a content stack so the entire row (icon + text + percentage)
+    // animates together when revealing a hidden achievement.
+    let content_stack = gtk4::Stack::new();
+    content_stack.set_hexpand(true);
+    content_stack.set_transition_type(gtk4::StackTransitionType::SlideLeft);
+    content_stack.set_transition_duration(350);
 
-    let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-    content.set_margin_top(8);
-    content.set_margin_bottom(8);
-    content.set_margin_start(12);
-    content.set_margin_end(12);
-    content.append(&img);
+    let make_content = |img: gtk4::Image, title: &str, desc: &str| -> gtk4::Box {
+        let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+        content.set_margin_top(8);
+        content.set_margin_bottom(8);
+        content.set_margin_start(12);
+        content.set_margin_end(12);
+        content.append(&img);
 
-    let text_stack = gtk4::Stack::new();
-    text_stack.set_hexpand(true);
-    text_stack.set_valign(gtk4::Align::Start);
-    text_stack.set_transition_type(gtk4::StackTransitionType::SlideLeft);
-    text_stack.set_transition_duration(350);
+        let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+        vbox.set_valign(gtk4::Align::Start);
+        vbox.set_hexpand(true);
+        let title_label = gtk4::Label::new(Some(title));
+        title_label.set_xalign(0.0);
+        vbox.append(&title_label);
+        let desc_label = gtk4::Label::new(Some(desc));
+        desc_label.set_wrap(true);
+        desc_label.set_wrap_mode(pango::WrapMode::WordChar);
+        desc_label.set_xalign(0.0);
+        desc_label.add_css_class("dim-label");
+        desc_label.add_css_class("caption");
+        vbox.append(&desc_label);
+        content.append(&vbox);
 
-    let vbox_spoiler = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
-    vbox_spoiler.set_valign(gtk4::Align::Start);
-    let title_spoiler = gtk4::Label::new(Some("Hidden Achievement"));
-    title_spoiler.set_xalign(0.0);
-    vbox_spoiler.append(&title_spoiler);
-    let desc_spoiler = gtk4::Label::new(Some("Click to reveal spoiler"));
-    desc_spoiler.set_xalign(0.0);
-    desc_spoiler.add_css_class("dim-label");
-    desc_spoiler.add_css_class("caption");
-    vbox_spoiler.append(&desc_spoiler);
-    text_stack.add_named(&vbox_spoiler, Some("spoiler"));
+        let pct_label = gtk4::Label::new(Some(&format!("{:.1}%", ach.global_percent)));
+        pct_label.set_valign(gtk4::Align::Start);
+        pct_label.add_css_class("heading");
+        content.append(&pct_label);
+        content
+    };
 
-    let vbox_real = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
-    vbox_real.set_valign(gtk4::Align::Start);
-    let title_real = gtk4::Label::new(Some(&ach.display_name));
-    title_real.set_xalign(0.0);
-    vbox_real.append(&title_real);
-    let desc_real = gtk4::Label::new(Some(&ach.description));
-    desc_real.set_wrap(true);
-    desc_real.set_wrap_mode(pango::WrapMode::WordChar);
-    desc_real.set_xalign(0.0);
-    desc_real.add_css_class("dim-label");
-    desc_real.add_css_class("caption");
-    vbox_real.append(&desc_real);
-    text_stack.add_named(&vbox_real, Some("real"));
-
-    content.append(&text_stack);
-
-    let pct_label = gtk4::Label::new(Some(&format!("{:.1}%", ach.global_percent)));
-    pct_label.set_valign(gtk4::Align::Start);
-    pct_label.add_css_class("heading");
-    content.append(&pct_label);
-
-    grid.attach(&progress, 0, 0, 1, 1);
-    grid.attach(&content, 0, 0, 1, 1);
-    row.set_child(Some(&grid));
+    let pct_str = format!("{:.1}%", ach.global_percent);
 
     let reveal = if is_hidden_spoiler {
-        text_stack.set_visible_child_name("spoiler");
+        // Spoiler view: gray icon (or placeholder if none) + "Hidden Achievement"
+        let spoiler_img = gtk4::Image::from_icon_name("changes-prevent-symbolic");
+        spoiler_img.set_pixel_size(48);
+        spoiler_img.set_valign(gtk4::Align::Start);
+        if !ach.icon_gray_path.is_empty() {
+            budget.load(&spoiler_img, &ach.icon_gray_path);
+        }
+
+        let spoiler_content = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+        spoiler_content.set_margin_top(8);
+        spoiler_content.set_margin_bottom(8);
+        spoiler_content.set_margin_start(12);
+        spoiler_content.set_margin_end(12);
+        spoiler_content.append(&spoiler_img);
+
+        let vbox_spoiler = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+        vbox_spoiler.set_valign(gtk4::Align::Start);
+        let title_spoiler = gtk4::Label::new(Some("Hidden Achievement"));
+        title_spoiler.set_xalign(0.0);
+        vbox_spoiler.append(&title_spoiler);
+        let desc_spoiler = gtk4::Label::new(Some("Click to reveal spoiler"));
+        desc_spoiler.set_xalign(0.0);
+        desc_spoiler.add_css_class("dim-label");
+        desc_spoiler.add_css_class("caption");
+        vbox_spoiler.append(&desc_spoiler);
+        spoiler_content.append(&vbox_spoiler);
+
+        let pct_label = gtk4::Label::new(Some(&pct_str));
+        pct_label.set_valign(gtk4::Align::Start);
+        pct_label.add_css_class("heading");
+        spoiler_content.append(&pct_label);
+
+        content_stack.add_named(&spoiler_content, Some("spoiler"));
+
+        // Real view: gray icon (or placeholder if none) + title + description
+        let real_img = gtk4::Image::from_icon_name("changes-prevent-symbolic");
+        real_img.set_pixel_size(48);
+        real_img.set_valign(gtk4::Align::Start);
+        if !ach.icon_gray_path.is_empty() {
+            budget.load(&real_img, &ach.icon_gray_path);
+        }
+
+        let real_content = make_content(real_img, &ach.display_name, &ach.description);
+        content_stack.add_named(&real_content, Some("real"));
+
+        content_stack.set_visible_child_name("spoiler");
         row.set_selectable(true);
         row.set_activatable(true);
 
-        let img_weak = img.downgrade();
-        let text_stack_weak = text_stack.downgrade();
-        let row_weak = row.downgrade();
-        let icon_path = ach.icon_path.clone();
-        let icon_gray_path = ach.icon_gray_path.clone();
+        grid.attach(&progress, 0, 0, 1, 1);
+        grid.attach(&content_stack, 0, 0, 1, 1);
+        row.set_child(Some(&grid));
 
+        let stack_weak = content_stack.downgrade();
+        let row_weak = row.downgrade();
         Some(Box::new(move || {
             let Some(row) = row_weak.upgrade() else { return };
-            let Some(img) = img_weak.upgrade() else { return };
-            let Some(text_stack) = text_stack_weak.upgrade() else { return };
-            text_stack.set_visible_child_name("real");
-            if !icon_path.is_empty() {
-                crate::images::set_image(&img, &icon_path);
-                img.add_css_class("grayscale-icon");
-            } else if !icon_gray_path.is_empty() {
-                crate::images::set_image(&img, &icon_gray_path);
-            }
+            let Some(stack) = stack_weak.upgrade() else { return };
+            stack.set_visible_child_name("real");
             row.set_activatable(false);
             row.set_selectable(false);
         }) as Box<dyn Fn()>)
     } else {
-        text_stack.set_visible_child_name("real");
+        let img = gtk4::Image::from_icon_name("changes-prevent-symbolic");
+        img.set_pixel_size(48);
+        img.set_valign(gtk4::Align::Start);
+        if ach.earned {
+            if !ach.icon_path.is_empty() {
+                budget.load(&img, &ach.icon_path);
+            } else {
+                img.set_icon_name(Some("starred-symbolic"));
+            }
+        } else if !ach.icon_gray_path.is_empty() {
+            budget.load(&img, &ach.icon_gray_path);
+        }
+
+        let content = make_content(img, &ach.display_name, &ach.description);
+        content_stack.add_named(&content, Some("real"));
+        content_stack.set_visible_child_name("real");
+
+        grid.attach(&progress, 0, 0, 1, 1);
+        grid.attach(&content_stack, 0, 0, 1, 1);
+        row.set_child(Some(&grid));
+
         None
     };
 
@@ -1172,6 +1206,115 @@ fn show_settings_dialog(
     dialog.present();
 }
 
+fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxRow) {
+    let menu = gio::Menu::new();
+    menu.append(Some("Edit Game Settings"), Some("game.edit"));
+    menu.append(Some("Remove Game"), Some("game.remove"));
+    let popover = gtk4::PopoverMenu::from_model(Some(&menu));
+    popover.set_halign(gtk4::Align::Start);
+
+    let state_clone = state.clone();
+    let game_clone = game.clone();
+    let actions = gio::SimpleActionGroup::new();
+
+    let edit_action = gio::SimpleAction::new("edit", None);
+    let sc = state_clone.clone();
+    let gc = game_clone.clone();
+    edit_action.connect_activate(move |_, _| {
+        show_game_settings_dialog(&sc, &gc);
+    });
+    actions.add_action(&edit_action);
+
+    let remove_action = gio::SimpleAction::new("remove", None);
+    let sc = state_clone.clone();
+    let gc = game_clone.clone();
+    remove_action.connect_activate(move |_, _| {
+        let window = sc.borrow().window.clone();
+        let dialog = adw::AlertDialog::new(
+            Some("Remove Game?"),
+            Some(&format!("Remove \u{201C}{}\u{201D} from the database? This won't delete any save files.", gc.name)),
+        );
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("remove", "Remove");
+        dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+
+        let sc2 = sc.clone();
+        let app_id = gc.app_id.clone();
+        let db_id = gc.db_id;
+        dialog.connect_response(None, move |_, response| {
+            if response != "remove" {
+                return;
+            }
+            if let Err(e) = crate::db::remove_game(&sc2.borrow().db, db_id) {
+                eprintln!("Failed to remove game from DB: {}", e);
+            }
+            let _ = sc2.borrow().sender.send(AppMessage::GameRemoved { app_id: app_id.clone() });
+        });
+        dialog.present(Some(&window));
+    });
+    actions.add_action(&remove_action);
+
+    row.insert_action_group("game", Some(&actions));
+
+    popover.set_parent(row);
+    popover.popup();
+}
+
+fn show_game_settings_dialog(state: &SharedState, game: &Game) {
+    let window = state.borrow().window.clone();
+    let dialog = adw::AlertDialog::new(
+        Some(&format!("Edit Game: {}", game.name)),
+        Some("Edit game properties below."),
+    );
+
+    let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    box_.set_margin_top(12);
+    box_.set_margin_bottom(4);
+
+    let title_entry = gtk4::Entry::new();
+    title_entry.set_placeholder_text(Some("Game Title"));
+    title_entry.set_text(&game.name);
+    box_.append(&gtk4::Label::new(Some("Title")));
+    box_.append(&title_entry);
+
+    let lutris_entry = gtk4::Entry::new();
+    lutris_entry.set_placeholder_text(Some("e.g. yakuza-like-a-dragon"));
+    box_.append(&gtk4::Label::new(Some("Lutris Slug")));
+    box_.append(&lutris_entry);
+
+    dialog.set_extra_child(Some(&box_));
+
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("save", "Save");
+    dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("save"));
+    dialog.set_close_response("cancel");
+
+    let state_clone = state.clone();
+    let db_id = game.db_id;
+    let app_id = game.app_id.clone();
+    dialog.connect_response(None, move |_, response| {
+        if response != "save" {
+            return;
+        }
+        let title = title_entry.text().to_string();
+        let lutris_id = lutris_entry.text().to_string();
+        let lutris_opt = if lutris_id.is_empty() { None } else { Some(lutris_id.as_str()) };
+        if let Err(e) = crate::db::update_game(&state_clone.borrow().db, db_id, &title, lutris_opt) {
+            eprintln!("Failed to update game: {}", e);
+        }
+        // Update game in state and rebuild
+        if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.app_id == app_id) {
+            g.name = title.clone();
+        }
+        state_clone.borrow().game_names.lock().unwrap().insert(app_id.clone(), title);
+        rebuild_sidebar(&state_clone);
+    });
+    dialog.present(Some(&window));
+}
+
 fn show_add_game_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
     let dialog = gtk4::FileDialog::new();
@@ -1186,10 +1329,8 @@ fn show_add_game_dialog(state: &SharedState) {
         if let Some(app_id) = crate::gamesetup::detect_app_id(&folder) {
             finish_add_game(&state_clone, &folder, &app_id);
         } else if crate::gamesetup::is_gog_game(&folder) {
-            // GOG game detected — find .info files by walking up
-            if let Some((info_dir, product_id, game_name)) = crate::gamesetup::find_gog_info(&folder) {
-                let info_dir_str = info_dir.to_string_lossy().into_owned();
-                prompt_for_steam_id_gog(&state_clone, &folder, &info_dir_str, &product_id, &game_name);
+            if let Some((_info_dir, product_id, game_name)) = crate::gamesetup::find_gog_info(&folder) {
+                prompt_for_steam_id_gog(&state_clone, &folder, &product_id, &game_name);
             } else {
                 prompt_for_app_id(&state_clone, &folder);
             }
@@ -1233,7 +1374,7 @@ fn prompt_for_app_id(state: &SharedState, folder: &str) {
     dialog.present(Some(&window));
 }
 
-fn prompt_for_steam_id_gog(state: &SharedState, galaxy_folder: &str, info_dir: &str, product_id: &str, game_name: &str) {
+fn prompt_for_steam_id_gog(state: &SharedState, galaxy_folder: &str, product_id: &str, game_name: &str) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
         Some("Add GOG Game"),
@@ -1260,7 +1401,6 @@ fn prompt_for_steam_id_gog(state: &SharedState, galaxy_folder: &str, info_dir: &
 
     let state_clone = state.clone();
     let galaxy_folder = galaxy_folder.to_string();
-    let info_dir = info_dir.to_string();
     let product_id = product_id.to_string();
     let game_name = game_name.to_string();
     dialog.connect_response(None, move |_, response| {
@@ -1268,7 +1408,7 @@ fn prompt_for_steam_id_gog(state: &SharedState, galaxy_folder: &str, info_dir: &
             return;
         }
         let steam_app_id = entry.text().to_string();
-        finish_add_gog_game(&state_clone, &galaxy_folder, &info_dir, &product_id, &game_name, &steam_app_id);
+        finish_add_gog_game(&state_clone, &galaxy_folder, &product_id, &game_name, &steam_app_id);
     });
     dialog.present(Some(&window));
 }
@@ -1277,29 +1417,26 @@ fn finish_add_game(state: &SharedState, folder: &str, app_id: &str) {
     let steam = state.borrow().steam.clone();
     let watcher = state.borrow().watcher.clone();
     let sender = state.borrow().sender.clone();
+    let db = state.borrow().db.clone();
     let app_id = app_id.to_string();
     let folder = folder.to_string();
-
     std::thread::spawn(move || {
-        match crate::gamesetup::add_game_from_folder(&folder, &app_id, &steam, SAVE_DIR) {
-            Ok(game_dir) => {
-                let game_id = std::path::Path::new(&game_dir)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(&app_id)
-                    .to_string();
-                match load_game(&game_id, std::path::Path::new(&game_dir)) {
-                    Ok(mut game) => {
-                        if game.name.starts_with("App ID:") {
-                            if let Some(name) = steam.fetch_nemirtingas_game_name(&game.app_id) {
-                                game.name = name;
-                            }
-                        }
+        match crate::gamesetup::add_game_from_folder(&folder, &app_id, &steam, &db, SAVE_DIR) {
+            Ok(_) => {
+                let entry = match crate::db::find_by_steam_id(&db, &app_id) {
+                    Ok(Some(e)) => e,
+                    _ => {
+                        eprintln!("Failed to find game in DB after adding: {}", app_id);
+                        return;
+                    }
+                };
+                match load_game(&entry, SAVE_DIR) {
+                    Ok(game) => {
                         if let Some(ref watcher) = watcher {
-                            watcher.watch(&game.app_id, &game_dir, &game.achievements);
+                            watcher.watch(&entry, &game.achievements);
                         }
                         let _ = sender.send(AppMessage::NewGame(game));
-                        enrich_game_async(game_id, game_dir, steam, watcher, sender, false);
+                        enrich_game_async(app_id.clone(), "steam".to_string(), app_id.clone(), entry.id, steam, watcher, sender);
                     }
                     Err(e) => eprintln!("Failed to load newly added game: {}", e),
                 }
@@ -1312,10 +1449,11 @@ fn finish_add_game(state: &SharedState, folder: &str, app_id: &str) {
     });
 }
 
-fn finish_add_gog_game(state: &SharedState, galaxy_folder: &str, _info_dir: &str, product_id: &str, game_name: &str, steam_app_id: &str) {
+fn finish_add_gog_game(state: &SharedState, galaxy_folder: &str, product_id: &str, game_name: &str, steam_app_id: &str) {
     let steam = state.borrow().steam.clone();
     let watcher = state.borrow().watcher.clone();
     let sender = state.borrow().sender.clone();
+    let db = state.borrow().db.clone();
     let galaxy_folder = galaxy_folder.to_string();
     let product_id = product_id.to_string();
     let game_name = game_name.to_string();
@@ -1323,40 +1461,36 @@ fn finish_add_gog_game(state: &SharedState, galaxy_folder: &str, _info_dir: &str
 
     std::thread::spawn(move || {
         match crate::gamesetup::add_gog_game_from_folder(
-            &galaxy_folder, &galaxy_folder, &product_id, &game_name, &steam_app_id, &steam, SAVE_DIR,
+            &galaxy_folder, &product_id, &game_name, &steam_app_id, &steam, &db, SAVE_DIR,
         ) {
-            Ok(game_dir) => {
-                match load_game(&steam_app_id, std::path::Path::new(&game_dir)) {
-                    Ok(mut game) => {
-                        game.name = game_name.clone();
-                        game.game_dir = game_dir.clone();
+            Ok(_) => {
+                let entry = match crate::db::find_by_steam_id(&db, &steam_app_id) {
+                    Ok(Some(e)) => e,
+                    _ => {
+                        eprintln!("Failed to find GOG game in DB after adding: {}", steam_app_id);
+                        return;
+                    }
+                };
+                match load_game(&entry, SAVE_DIR) {
+                    Ok(game) => {
                         if let Some(ref watcher) = watcher {
-                            watcher.watch(&steam_app_id, &game_dir, &game.achievements);
+                            watcher.watch(&entry, &game.achievements);
                         }
                         let _ = sender.send(AppMessage::NewGame(game));
-                        enrich_game_async(steam_app_id, game_dir, steam, watcher, sender, false);
+                        enrich_game_async(steam_app_id.clone(), "gog".to_string(), product_id.clone(), entry.id, steam, watcher, sender);
                     }
                     Err(e) => eprintln!("Failed to load newly added GOG game: {}", e),
                 }
             }
             Err(e) => {
-                if e == crate::gamesetup::EMU_NOT_FOUND {
-                    let _ = sender.send(AppMessage::GogEmuNotFound {
-                        galaxy_folder: galaxy_folder.clone(),
-                        product_id: product_id.clone(),
-                        game_name: game_name.clone(),
-                        steam_app_id: steam_app_id.clone(),
-                    });
-                } else {
-                    eprintln!("GOG add game failed: {}", e);
-                    let _ = sender.send(AppMessage::AddGameError(e));
-                }
+                eprintln!("GOG add game failed: {}", e);
+                let _ = sender.send(AppMessage::AddGameError(e));
             }
         }
     });
 }
 
-fn confirm_mark_unlocked(state: &SharedState, game_dir: &str, ach: &MergedAchievement, reload: impl Fn() + 'static) {
+fn confirm_mark_unlocked(state: &SharedState, kind: &str, app_id: &str, platform_id: &str, ach: &MergedAchievement, reload: impl Fn() + 'static) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
         Some("Mark as Already Unlocked?"),
@@ -1373,12 +1507,14 @@ fn confirm_mark_unlocked(state: &SharedState, game_dir: &str, ach: &MergedAchiev
     dialog.set_close_response("cancel");
 
     let ach_name = ach.name.clone();
-    let game_dir = game_dir.to_string();
+    let kind = kind.to_string();
+    let app_id = app_id.to_string();
+    let platform_id = platform_id.to_string();
     dialog.connect_response(None, move |_, response| {
         if response != "confirm" {
             return;
         }
-        if let Err(e) = set_achievement_earned(&game_dir, &ach_name, true) {
+        if let Err(e) = set_achievement_earned(SAVE_DIR, &kind, &app_id, &platform_id, &ach_name, true) {
             eprintln!("Failed to mark achievement as unlocked: {}", e);
             return;
         }
@@ -1389,23 +1525,31 @@ fn confirm_mark_unlocked(state: &SharedState, game_dir: &str, ach: &MergedAchiev
 
 pub fn enrich_game_async(
     app_id: String,
-    game_dir: String,
+    kind: String,
+    platform_id: String,
+    db_id: i64,
     steam: Arc<SteamClient>,
     watcher: Option<AchievementWatcher>,
     sender: Sender<AppMessage>,
-    is_new: bool,
 ) {
     std::thread::spawn(move || {
-        let meta_path = std::path::Path::new(&game_dir)
-            .join("steam_settings")
-            .join("achievements.json");
+        let entry = GameEntry {
+            id: db_id,
+            kind: kind.clone(),
+            steam_id: app_id.clone(),
+            platform_id: platform_id.clone(),
+            title: String::new(),
+            lutris_id: None,
+        };
+
+        let meta_path = crate::parser::achievements_dir(SAVE_DIR, &app_id).join("achievements.json");
         if !meta_path.exists() {
-            if let Err(e) = steam.generate_steam_settings(&app_id, std::path::Path::new(&game_dir)) {
-                eprintln!("Could not generate steam_settings for {}: {}", app_id, e);
+            if let Err(e) = steam.generate_steam_settings(&app_id) {
+                eprintln!("Could not generate achievements for {}: {}", app_id, e);
             }
         }
 
-        let Ok(mut game) = load_game(&app_id, std::path::Path::new(&game_dir)) else {
+        let Ok(mut game) = load_game(&entry, SAVE_DIR) else {
             eprintln!("Failed reloading {}", app_id);
             return;
         };
@@ -1439,14 +1583,17 @@ pub fn enrich_game_async(
         }
 
         if let Some(ref watcher) = watcher {
-            watcher.watch(&app_id, &game_dir, &game.achievements);
+            let watch_entry = GameEntry {
+                id: db_id,
+                kind: kind.clone(),
+                steam_id: app_id.clone(),
+                platform_id: platform_id.clone(),
+                title: String::new(),
+                lutris_id: None,
+            };
+            watcher.watch(&watch_entry, &game.achievements);
         }
 
-        let msg = if is_new {
-            AppMessage::NewGame(game)
-        } else {
-            AppMessage::EnrichedGame(game)
-        };
-        let _ = sender.send(msg);
+        let _ = sender.send(AppMessage::EnrichedGame(game));
     });
 }

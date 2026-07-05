@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::db::{DbConn, GameEntry};
 use crate::parser::{load_game, Game, MergedAchievement, set_achievement_earned};
 use crate::steam::SteamClient;
+use crate::strings as S;
 use crate::watcher::AchievementWatcher;
 use crate::AppMessage;
 use std::cell::RefCell;
@@ -25,7 +26,6 @@ pub struct AppState {
     pub game_list: gtk4::ListBox,
     pub content_scroll: gtk4::ScrolledWindow,
     pub content_box: gtk4::Box,
-    pub empty_state: adw::StatusPage,
     pub selected_id: String,
     pub cfg: Config,
     pub steam: Arc<SteamClient>,
@@ -35,7 +35,10 @@ pub struct AppState {
     pub game_names: Arc<Mutex<HashMap<String, String>>>,
     pub content_unloaded: bool,
     pub restoring: bool,
+    pub grid_scale_step: i32,
 }
+
+const GRID_SIZES: [i32; 5] = [80, 140, 200, 260, 320];
 
 pub type SharedState = Rc<RefCell<AppState>>;
 
@@ -105,7 +108,6 @@ pub fn build_ui(
         game_list: gtk4::ListBox::new(),
         content_scroll: gtk4::ScrolledWindow::new(),
         content_box: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
-        empty_state: adw::StatusPage::new(),
         selected_id: String::new(),
         cfg: cfg.clone(),
         steam: steam.clone(),
@@ -115,6 +117,7 @@ pub fn build_ui(
         game_names,
         content_unloaded: false,
         restoring: false,
+        grid_scale_step: cfg.grid_scale_step,
     }));
 
     build_window(&state, app);
@@ -125,7 +128,7 @@ pub fn build_ui(
 
 fn build_window(state: &SharedState, app: &adw::Application) {
     let window = adw::ApplicationWindow::new(app);
-    window.set_title(Some("Achievement Viewer"));
+    window.set_title(Some(S::APP_TITLE));
     window.set_default_size(1100, 720);
 
     let css = gtk4::CssProvider::new();
@@ -138,7 +141,12 @@ fn build_window(state: &SharedState, app: &adw::Application) {
         .hero-progress { min-height: 8px; border: none; }
         .sidebar-row-title { min-width: 0; }
         .global-bar trough { background-color: transparent; border: none; }
-         .global-bar progress { border: none; border-radius: 0; }",
+        .global-bar progress { border: none; border-radius: 0; }
+        .grid-card { transition: transform 150ms ease; }
+        .grid-card:hover { transform: scale(1.05); }
+        flowboxchild { background: none; outline: none; box-shadow: none; }
+        flowboxchild:hover { background: none; }
+        flowboxchild:active { background: none; }",
     ));
     gtk4::style_context_add_provider_for_display(
         &gtk4::gdk::Display::default().expect("no default display"),
@@ -170,13 +178,57 @@ fn build_window(state: &SharedState, app: &adw::Application) {
 
     let header_bar = adw::HeaderBar::new();
 
-    let settings_btn = gtk4::Button::from_icon_name("preferences-system-symbolic");
-    settings_btn.set_tooltip_text(Some("Settings"));
+    // Hamburger menu with settings + grid scale
+    let menu_btn = gtk4::MenuButton::new();
+    menu_btn.set_icon_name("open-menu-symbolic");
+    menu_btn.set_tooltip_text(Some(S::MENU));
+    menu_btn.add_css_class("flat");
+    header_bar.pack_end(&menu_btn);
+
+    let popover = gtk4::Popover::new();
+    popover.set_size_request(300, -1);
+    let popover_box = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+    popover_box.set_margin_start(16);
+    popover_box.set_margin_end(16);
+    popover_box.set_margin_top(12);
+    popover_box.set_margin_bottom(12);
+
+    let settings_btn = gtk4::Button::new();
+    let settings_label = gtk4::Label::new(Some(S::SETTINGS));
+    settings_label.set_xalign(0.0);
+    settings_btn.set_child(Some(&settings_label));
     settings_btn.add_css_class("flat");
-    header_bar.pack_end(&settings_btn);
+    settings_btn.set_halign(gtk4::Align::Fill);
+    popover_box.append(&settings_btn);
+
+    let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    popover_box.append(&sep);
+
+    let scale_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    let scale_label = gtk4::Label::new(Some(S::GRID_SIZE));
+    scale_label.set_halign(gtk4::Align::Start);
+    scale_label.set_hexpand(false);
+    scale_row.append(&scale_label);
+
+    let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 4.0, 1.0);
+    scale.set_value(state.borrow().grid_scale_step as f64);
+    scale.set_digits(0);
+    scale.set_draw_value(false);
+    scale.set_hexpand(true);
+    scale.add_mark(0.0, gtk4::PositionType::Bottom, None);
+    scale.add_mark(1.0, gtk4::PositionType::Bottom, None);
+    scale.add_mark(2.0, gtk4::PositionType::Bottom, None);
+    scale.add_mark(3.0, gtk4::PositionType::Bottom, None);
+    scale.add_mark(4.0, gtk4::PositionType::Bottom, None);
+    scale_row.append(&scale);
+
+    popover_box.append(&scale_row);
+
+    popover.set_child(Some(&popover_box));
+    menu_btn.set_popover(Some(&popover));
 
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_btn.set_tooltip_text(Some("Add a game by pointing at its install folder"));
+    add_btn.set_tooltip_text(Some(S::ADD_GAME));
     add_btn.add_css_class("flat");
     header_bar.pack_start(&add_btn);
 
@@ -185,22 +237,27 @@ fn build_window(state: &SharedState, app: &adw::Application) {
     toolbar_view.set_content(Some(&split_view));
     window.set_content(Some(&toolbar_view));
 
-    let empty_state = adw::StatusPage::new();
-    empty_state.set_title("No Game Selected");
-    empty_state.set_description(Some("Select a game from the sidebar to view achievements."));
-    empty_state.set_icon_name(Some("applications-games-symbolic"));
-    content_box.append(&empty_state);
-
     {
         let mut s = state.borrow_mut();
         s.window = window.clone();
         s.game_list = game_list.clone();
         s.content_scroll = content_scroll.clone();
         s.content_box = content_box.clone();
-        s.empty_state = empty_state.clone();
     }
 
     rebuild_sidebar(state);
+
+    // Only build grid on initial startup, not when rebuilding from hide-to-background
+    if !state.borrow().content_unloaded {
+        show_grid_view(state);
+        // Select "All Games" by default
+        let row = state.borrow().game_list.row_at_index(0);
+        if let Some(row) = row {
+            state.borrow_mut().restoring = true;
+            state.borrow().game_list.select_row(Some(&row));
+            state.borrow_mut().restoring = false;
+        }
+    }
 
     let state_clone = state.clone();
     game_list.connect_row_selected(move |_list, row| {
@@ -210,10 +267,19 @@ fn build_window(state: &SharedState, app: &adw::Application) {
         }
         let Some(row) = row else { return; };
         let idx = row.index();
-        if idx >= 0 && (idx as usize) < s.games.len() {
-            let app_id = s.games[idx as usize].app_id.clone();
+        if idx == 0 {
+            // "All Games" — show grid view
             drop(s);
-            switch_to_game(&state_clone, &app_id);
+            state_clone.borrow_mut().selected_id.clear();
+            show_grid_view(&state_clone);
+        } else if idx >= 1 {
+            // Game rows start at index 1
+            let game_idx = (idx - 1) as usize;
+            if game_idx < s.games.len() {
+                let app_id = s.games[game_idx].app_id.clone();
+                drop(s);
+                switch_to_game(&state_clone, &app_id);
+            }
         }
     });
 
@@ -229,6 +295,21 @@ fn build_window(state: &SharedState, app: &adw::Application) {
             (s.window.clone(), s.cfg.clone(), s.steam.clone())
         };
         show_settings_dialog(&window, cfg, steam, &state_clone);
+    });
+
+    let state_clone = state.clone();
+    scale.connect_value_changed(move |s| {
+        let step = s.value().round() as i32;
+        s.set_value(step as f64);
+        let sc = state_clone.clone();
+        glib::idle_add_local_once(move || {
+            sc.borrow_mut().grid_scale_step = step;
+            sc.borrow_mut().cfg.grid_scale_step = step;
+            let _ = sc.borrow().cfg.save();
+            if sc.borrow().selected_id.is_empty() {
+                show_grid_view(&sc);
+            }
+        });
     });
 
     let state_clone = state.clone();
@@ -250,6 +331,26 @@ fn rebuild_sidebar(state: &SharedState) {
         game_list.remove(&child);
     }
 
+    // "All Games" row at index 0
+    let all_games_row = gtk4::ListBoxRow::new();
+    all_games_row.add_css_class("all-games-row");
+    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
+    hbox.set_margin_top(8);
+    hbox.set_margin_bottom(8);
+    hbox.set_margin_start(10);
+    hbox.set_margin_end(10);
+    let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
+    icon.set_pixel_size(32);
+    hbox.append(&icon);
+    let label = gtk4::Label::new(Some(S::ALL_GAMES));
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    label.add_css_class("heading");
+    hbox.append(&label);
+    all_games_row.set_child(Some(&hbox));
+    game_list.append(&all_games_row);
+
+    // Game rows starting at index 1
     let games: Vec<Game> = state.borrow().games.iter().cloned().collect();
     let mut rows = Vec::with_capacity(games.len());
     for g in &games {
@@ -335,6 +436,15 @@ fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
     if updated.hero_image_path.is_empty() {
         updated.hero_image_path = existing.hero_image_path.clone();
     }
+    if updated.grid_path.is_empty() {
+        updated.grid_path = existing.grid_path.clone();
+    }
+    if updated.header_path.is_empty() {
+        updated.header_path = existing.header_path.clone();
+    }
+    if updated.logo_path.is_empty() {
+        updated.logo_path = existing.logo_path.clone();
+    }
 
     if !existing.achievements.is_empty() {
         let existing_pcts: HashMap<String, f64> = existing
@@ -363,10 +473,10 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         AppMessage::AddGameError(e) => {
             let window = state.borrow().window.clone();
             let dialog = adw::AlertDialog::new(
-                Some("Couldn't Add Game"),
+                Some(S::COULDNT_ADD_GAME),
                 Some(&e),
             );
-            dialog.add_response("ok", "OK");
+            dialog.add_response("ok", S::OK);
             dialog.set_default_response(Some("ok"));
             dialog.set_close_response("ok");
             dialog.present(Some(&window));
@@ -438,11 +548,31 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
 
     if !state.borrow().content_unloaded {
         rebuild_sidebar(state);
+        // If no game is selected, re-select "All Games" to refresh the grid
+        let selected = state.borrow().selected_id.clone();
+        if selected.is_empty() {
+            if let Some(row) = state.borrow().game_list.row_at_index(0) {
+                state.borrow_mut().restoring = true;
+                state.borrow().game_list.select_row(Some(&row));
+                state.borrow_mut().restoring = false;
+                show_grid_view(state);
+            }
+        }
     }
 }
 
 pub fn switch_to_game(state: &SharedState, app_id: &str) {
     state.borrow_mut().selected_id = app_id.to_string();
+
+    // Select the corresponding sidebar row (index + 1 for "All games" at index 0)
+    let game_list = state.borrow().game_list.clone();
+    let idx = state.borrow().games.iter().position(|g| g.app_id == app_id);
+    if let Some(idx) = idx {
+        state.borrow_mut().restoring = true;
+        let row = game_list.row_at_index((idx + 1) as i32);
+        game_list.select_row(row.as_ref());
+        state.borrow_mut().restoring = false;
+    }
 
     let game = state.borrow().games.iter().find(|g| g.app_id == app_id).cloned();
     if let Some(game) = game {
@@ -450,8 +580,86 @@ pub fn switch_to_game(state: &SharedState, app_id: &str) {
     }
 }
 
+fn show_grid_view(state: &SharedState) {
+    let content_box = state.borrow().content_box.clone();
+    while let Some(child) = content_box.first_child() {
+        content_box.remove(&child);
+    }
+
+    let games: Vec<Game> = state.borrow().games.iter().cloned().collect();
+    let step = state.borrow().grid_scale_step;
+    let card_w = GRID_SIZES[step.clamp(0, 4) as usize];
+    let card_h = (card_w as f64 * 1.5) as i32;
+
+    let flow = gtk4::FlowBox::new();
+    flow.set_homogeneous(true);
+    flow.set_column_spacing(0);
+    flow.set_row_spacing(12);
+    flow.set_margin_start(16);
+    flow.set_margin_end(16);
+    flow.set_margin_top(16);
+    flow.set_margin_bottom(16);
+    flow.set_min_children_per_line(1);
+    flow.set_max_children_per_line(30);
+    flow.set_selection_mode(gtk4::SelectionMode::None);
+    flow.set_vexpand(false);
+    flow.set_valign(gtk4::Align::Start);
+    flow.set_hexpand(true);
+
+    let state_clone = state.clone();
+    for game in &games {
+        let card = build_grid_card(game, card_w, card_h);
+        let app_id = game.app_id.clone();
+        let sc = state_clone.clone();
+        let click = gtk4::GestureClick::new();
+        click.connect_pressed(move |_, _, _, _| {
+            switch_to_game(&sc, &app_id);
+        });
+        card.add_controller(click);
+        flow.insert(&card, -1);
+    }
+
+    let wrapper = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    wrapper.set_valign(gtk4::Align::Start);
+    wrapper.set_vexpand(false);
+    wrapper.append(&flow);
+    content_box.append(&wrapper);
+    state.borrow_mut().selected_id.clear();
+}
+
+fn build_grid_card(game: &Game, width: i32, height: i32) -> gtk4::Widget {
+    let wrapper = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    wrapper.set_halign(gtk4::Align::Center);
+    wrapper.set_valign(gtk4::Align::Start);
+    wrapper.set_size_request(width, height);
+
+    if game.grid_path.is_empty() {
+        let icon = gtk4::Image::from_icon_name("applications-games-symbolic");
+        icon.set_pixel_size(width / 3);
+        icon.set_valign(gtk4::Align::Center);
+        icon.set_halign(gtk4::Align::Center);
+        icon.set_hexpand(true);
+        icon.set_vexpand(true);
+        wrapper.append(&icon);
+    } else {
+        let pic = gtk4::Picture::new();
+        pic.set_content_fit(gtk4::ContentFit::Cover);
+        crate::images::set_picture_scaled(&pic, &game.grid_path, width, height);
+        pic.set_hexpand(true);
+        pic.set_vexpand(true);
+        wrapper.append(&pic);
+    }
+
+    wrapper.add_css_class("grid-card");
+    wrapper.upcast()
+}
+
 fn display_game(game: &Game, state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
+    let content_scroll = state.borrow().content_scroll.clone();
+
+    // Reset scroll position BEFORE removing old content, so there's no visible jump
+    content_scroll.vadjustment().set_value(0.0);
 
     // Remove old content — this drops widget references to the previous
     // game's textures, so clearing the cache actually frees the pixel data.
@@ -686,10 +894,10 @@ fn display_game(game: &Game, state: &SharedState) {
         }
     });
 
-    let progress_page = view_stack.add_titled(&progress_vbox, Some("progress"), "My Progress");
+    let progress_page = view_stack.add_titled(&progress_vbox, Some("progress"), S::MY_PROGRESS);
     progress_page.set_icon_name(Some("user-home-symbolic"));
 
-    let global_page = view_stack.add_titled(&global_vbox, Some("global"), "Global Stats");
+    let global_page = view_stack.add_titled(&global_vbox, Some("global"), S::GLOBAL_STATS);
     global_page.set_icon_name(Some("dialog-information-symbolic"));
 
     view_stack.set_vhomogeneous(false);
@@ -705,11 +913,6 @@ fn display_game(game: &Game, state: &SharedState) {
     clamp.set_child(Some(&game_vbox));
 
     content_box.append(&clamp);
-
-    let content_scroll = state.borrow().content_scroll.clone();
-    glib::idle_add_local_once(move || {
-        content_scroll.vadjustment().set_value(0.0);
-    });
 }
 
 fn build_global_tab(game: &Game, global_vbox: &gtk4::Box) {
@@ -717,7 +920,7 @@ fn build_global_tab(game: &Game, global_vbox: &gtk4::Box) {
     all_ach.sort_by(|a, b| b.global_percent.partial_cmp(&a.global_percent).unwrap_or(std::cmp::Ordering::Equal));
 
     let global_group = adw::PreferencesGroup::new();
-    global_group.set_title("Global Unlock Rates");
+    global_group.set_title(S::GLOBAL_UNLOCK_RATES);
     global_group.set_margin_bottom(24);
 
     let mut budget = ImageLoadBudget::new(EAGER_IMAGE_BUDGET);
@@ -842,7 +1045,7 @@ fn create_achievement_row(
             on_mark();
         });
         row.add_controller(click);
-        row.set_tooltip_text(Some("Right-click to mark as already unlocked"));
+        row.set_tooltip_text(Some(S::RIGHT_CLICK_TO_MARK));
     }
 
     row
@@ -925,10 +1128,11 @@ fn create_global_stats_row(
 
         let vbox_spoiler = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
         vbox_spoiler.set_valign(gtk4::Align::Start);
-        let title_spoiler = gtk4::Label::new(Some("Hidden Achievement"));
+        vbox_spoiler.set_hexpand(true);
+        let title_spoiler = gtk4::Label::new(Some(S::HIDDEN_ACHIEVEMENT));
         title_spoiler.set_xalign(0.0);
         vbox_spoiler.append(&title_spoiler);
-        let desc_spoiler = gtk4::Label::new(Some("Click to reveal spoiler"));
+        let desc_spoiler = gtk4::Label::new(Some(S::CLICK_TO_REVEAL));
         desc_spoiler.set_xalign(0.0);
         desc_spoiler.add_css_class("dim-label");
         desc_spoiler.add_css_class("caption");
@@ -1001,12 +1205,12 @@ fn create_global_stats_row(
 fn show_close_choice_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
-        Some("Close Achievement Viewer"),
-        Some("Keep the watcher running in the background, or quit completely?"),
+        Some(S::CLOSE_VIEWER),
+        Some(S::CLOSE_VIEWER_BODY),
     );
-    dialog.add_response("cancel", "Cancel");
-    dialog.add_response("background", "Hide to Background");
-    dialog.add_response("quit", "Quit");
+    dialog.add_response("cancel", S::CANCEL);
+    dialog.add_response("background", S::HIDE_TO_BACKGROUND);
+    dialog.add_response("quit", S::QUIT);
     dialog.set_response_appearance("background", adw::ResponseAppearance::Suggested);
     dialog.set_response_appearance("quit", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("background"));
@@ -1090,8 +1294,13 @@ pub fn restore_content(state: &SharedState) {
     rebuild_sidebar(state);
 
     if selected_id.is_empty() {
-        let empty_state = state.borrow().empty_state.clone();
-        state.borrow().content_box.append(&empty_state);
+        show_grid_view(state);
+        // Re-select "All Games"
+        if let Some(row) = state.borrow().game_list.row_at_index(0) {
+            state.borrow_mut().restoring = true;
+            state.borrow().game_list.select_row(Some(&row));
+            state.borrow_mut().restoring = false;
+        }
         return;
     }
 
@@ -1103,7 +1312,8 @@ pub fn restore_content(state: &SharedState) {
         let idx = state.borrow().games.iter().position(|g| g.app_id == selected_id);
         if let Some(idx) = idx {
             state.borrow_mut().restoring = true;
-            let row = game_list.row_at_index(idx as i32);
+            // Game rows start at index 1
+            let row = game_list.row_at_index((idx + 1) as i32);
             if let Some(row) = row {
                 game_list.select_row(Some(&row));
             }
@@ -1111,8 +1321,12 @@ pub fn restore_content(state: &SharedState) {
         }
     } else {
         state.borrow_mut().selected_id.clear();
-        let empty_state = state.borrow().empty_state.clone();
-        state.borrow().content_box.append(&empty_state);
+        show_grid_view(state);
+        if let Some(row) = state.borrow().game_list.row_at_index(0) {
+            state.borrow_mut().restoring = true;
+            state.borrow().game_list.select_row(Some(&row));
+            state.borrow_mut().restoring = false;
+        }
     }
 }
 
@@ -1123,7 +1337,7 @@ fn show_settings_dialog(
     state: &SharedState,
 ) {
     let dialog = adw::Window::new();
-    dialog.set_title(Some("Settings"));
+    dialog.set_title(Some(S::SETTINGS));
     dialog.set_default_size(450, 360);
     dialog.set_modal(true);
     dialog.set_transient_for(Some(parent));
@@ -1134,43 +1348,43 @@ fn show_settings_dialog(
     let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
     let group = adw::PreferencesGroup::new();
-    group.set_title("API Keys");
+    group.set_title(S::API_KEYS);
     group.set_margin_top(16);
     group.set_margin_bottom(16);
     group.set_margin_start(16);
     group.set_margin_end(16);
 
     let steam_entry = adw::EntryRow::new();
-    steam_entry.set_title("Steam Web API Key");
+    steam_entry.set_title(S::STEAM_WEB_API_KEY);
     steam_entry.set_text(&cfg.steam_api_key);
     steam_entry.set_input_purpose(gtk4::InputPurpose::Password);
     group.add(&steam_entry);
 
     let sgdb_entry = adw::EntryRow::new();
-    sgdb_entry.set_title("SteamGridDB API Key");
+    sgdb_entry.set_title(S::STEAMGRIDDB_KEY);
     sgdb_entry.set_text(&cfg.steam_griddb_api_key);
     sgdb_entry.set_input_purpose(gtk4::InputPurpose::Password);
     group.add(&sgdb_entry);
 
     let notif_group = adw::PreferencesGroup::new();
-    notif_group.set_title("Live Updates");
+    notif_group.set_title(S::LIVE_UPDATES);
     notif_group.set_margin_top(16);
     notif_group.set_margin_start(16);
     notif_group.set_margin_end(16);
 
     let notif_row = adw::SwitchRow::new();
-    notif_row.set_title("Notify on New Unlocks");
-    notif_row.set_subtitle("Show a desktop notification the moment an achievement unlocks");
+    notif_row.set_title(S::NOTIFY_ON_UNLOCKS);
+    notif_row.set_subtitle(S::NOTIFY_SUBTITLE);
     notif_row.set_active(cfg.notifications_enabled);
     notif_group.add(&notif_row);
 
     let bg_row = adw::SwitchRow::new();
-    bg_row.set_title("Close to Background");
-    bg_row.set_subtitle("Closing the window keeps the watcher running silently in the background");
+    bg_row.set_title(S::CLOSE_TO_BG_TITLE);
+    bg_row.set_subtitle(S::CLOSE_TO_BG_SUBTITLE);
     bg_row.set_active(cfg.close_to_background);
     notif_group.add(&bg_row);
 
-    let save_btn = gtk4::Button::with_label("Save");
+    let save_btn = gtk4::Button::with_label(S::SAVE);
     save_btn.add_css_class("suggested-action");
     save_btn.set_margin_top(8);
     save_btn.set_margin_bottom(16);
@@ -1208,8 +1422,8 @@ fn show_settings_dialog(
 
 fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxRow) {
     let menu = gio::Menu::new();
-    menu.append(Some("Edit Game Settings"), Some("game.edit"));
-    menu.append(Some("Remove Game"), Some("game.remove"));
+    menu.append(Some(S::EDIT_GAME_SETTINGS), Some("game.edit"));
+    menu.append(Some(S::REMOVE_GAME), Some("game.remove"));
     let popover = gtk4::PopoverMenu::from_model(Some(&menu));
     popover.set_halign(gtk4::Align::Start);
 
@@ -1231,11 +1445,11 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
     remove_action.connect_activate(move |_, _| {
         let window = sc.borrow().window.clone();
         let dialog = adw::AlertDialog::new(
-            Some("Remove Game?"),
+            Some(S::REMOVE_GAME_QUESTION),
             Some(&format!("Remove \u{201C}{}\u{201D} from the database? This won't delete any save files.", gc.name)),
         );
-        dialog.add_response("cancel", "Cancel");
-        dialog.add_response("remove", "Remove");
+        dialog.add_response("cancel", S::CANCEL);
+        dialog.add_response("remove", S::REMOVE_GAME);
         dialog.set_response_appearance("remove", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         dialog.set_close_response("cancel");
@@ -1266,7 +1480,7 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
         Some(&format!("Edit Game: {}", game.name)),
-        Some("Edit game properties below."),
+        Some(S::EDIT_GAME_PROPS),
     );
 
     let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -1274,20 +1488,20 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     box_.set_margin_bottom(4);
 
     let title_entry = gtk4::Entry::new();
-    title_entry.set_placeholder_text(Some("Game Title"));
+    title_entry.set_placeholder_text(Some(S::GAME_TITLE));
     title_entry.set_text(&game.name);
-    box_.append(&gtk4::Label::new(Some("Title")));
+    box_.append(&gtk4::Label::new(Some(S::TITLE)));
     box_.append(&title_entry);
 
     let lutris_entry = gtk4::Entry::new();
     lutris_entry.set_placeholder_text(Some("e.g. yakuza-like-a-dragon"));
-    box_.append(&gtk4::Label::new(Some("Lutris Slug")));
+    box_.append(&gtk4::Label::new(Some(S::LUTRIS_SLUG)));
     box_.append(&lutris_entry);
 
     dialog.set_extra_child(Some(&box_));
 
-    dialog.add_response("cancel", "Cancel");
-    dialog.add_response("save", "Save");
+    dialog.add_response("cancel", S::CANCEL);
+    dialog.add_response("save", S::SAVE);
     dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("save"));
     dialog.set_close_response("cancel");
@@ -1318,7 +1532,7 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
 fn show_add_game_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
     let dialog = gtk4::FileDialog::new();
-    dialog.set_title("Select Game Folder");
+    dialog.set_title(S::SELECT_GAME_FOLDER);
 
     let state_clone = state.clone();
     dialog.select_folder(Some(&window), None::<&gio::Cancellable>, move |result| {
@@ -1343,8 +1557,8 @@ fn show_add_game_dialog(state: &SharedState) {
 fn prompt_for_app_id(state: &SharedState, folder: &str) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
-        Some("Enter Steam App ID"),
-        Some("No steam_appid.txt was found in this folder. Enter the game's Steam App ID to continue."),
+        Some(S::ENTER_STEAM_ID),
+        Some(S::ENTER_STEAM_ID_BODY),
     );
 
     let entry = gtk4::Entry::new();
@@ -1356,8 +1570,8 @@ fn prompt_for_app_id(state: &SharedState, folder: &str) {
     entry.set_margin_end(8);
     dialog.set_extra_child(Some(&entry));
 
-    dialog.add_response("cancel", "Cancel");
-    dialog.add_response("add", "Add Game");
+    dialog.add_response("cancel", S::CANCEL);
+    dialog.add_response("add", S::ADD_GAME_BTN);
     dialog.set_response_appearance("add", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("add"));
     dialog.set_close_response("cancel");
@@ -1377,10 +1591,12 @@ fn prompt_for_app_id(state: &SharedState, folder: &str) {
 fn prompt_for_steam_id_gog(state: &SharedState, galaxy_folder: &str, product_id: &str, game_name: &str) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
-        Some("Add GOG Game"),
+        Some(S::ADD_GOG_GAME),
         Some(&format!(
-            "Detected GOG game: {}\nGOG Product ID: {}\n\nEnter the Steam App ID to use for achievement definitions:",
-            game_name, product_id
+            "{}: {}\n{}: {}\n\n{}",
+            S::DETECTED_GOG_GAME, game_name,
+            S::GOG_PRODUCT_ID, product_id,
+            S::ENTER_STEAM_ID_GOG
         )),
     );
 
@@ -1393,8 +1609,8 @@ fn prompt_for_steam_id_gog(state: &SharedState, galaxy_folder: &str, product_id:
     entry.set_margin_end(8);
     dialog.set_extra_child(Some(&entry));
 
-    dialog.add_response("cancel", "Cancel");
-    dialog.add_response("add", "Add Game");
+    dialog.add_response("cancel", S::CANCEL);
+    dialog.add_response("add", S::ADD_GAME_BTN);
     dialog.set_response_appearance("add", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("add"));
     dialog.set_close_response("cancel");
@@ -1493,15 +1709,15 @@ fn finish_add_gog_game(state: &SharedState, galaxy_folder: &str, product_id: &st
 fn confirm_mark_unlocked(state: &SharedState, kind: &str, app_id: &str, platform_id: &str, ach: &MergedAchievement, reload: impl Fn() + 'static) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
-        Some("Mark as Already Unlocked?"),
+        Some(S::MARK_UNLOCKED),
         Some(&format!(
             "This will mark \u{201C}{}\u{201D} as earned without a real unlock time. \
              Use this only if you already unlocked it previously (e.g. before using this tool).",
             ach.display_name
         )),
     );
-    dialog.add_response("cancel", "Cancel");
-    dialog.add_response("confirm", "Mark as Unlocked");
+    dialog.add_response("cancel", S::CANCEL);
+    dialog.add_response("confirm", S::MARK_AS_UNLOCKED);
     dialog.set_response_appearance("confirm", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("cancel"));
     dialog.set_close_response("cancel");
@@ -1572,6 +1788,18 @@ pub fn enrich_game_async(
             if !hero_path.is_empty() {
                 game.hero_image_path = hero_path;
             }
+        }
+
+        // Download grid assets (vertical, header, logo)
+        let (grid_path, header_path, logo_path) = steam.ensure_grids(&app_id);
+        if !grid_path.is_empty() {
+            game.grid_path = grid_path;
+        }
+        if !header_path.is_empty() {
+            game.header_path = header_path;
+        }
+        if !logo_path.is_empty() {
+            game.logo_path = logo_path;
         }
 
         if let Some(pcts) = steam.fetch_global_achievements(&app_id) {

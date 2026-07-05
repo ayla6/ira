@@ -380,6 +380,101 @@ impl SteamClient {
         (icon_path, hero_path)
     }
 
+    /// Download Steam grid assets: vertical grid (600x900), header (460x215), logo.
+    /// Prioritises official Steam CDN.
+    pub fn ensure_grids(&self, app_id: &str) -> (String, String, String) {
+        let dir = self.game_dir(app_id);
+
+        // Vertical grid (library capsule, 600x900)
+        let grid_path = {
+            let dest = dir.join("library_600x900.jpg");
+            if dest.exists() {
+                dest.to_string_lossy().into_owned()
+            } else {
+                let mut found = String::new();
+                let url_2x = format!(
+                    "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_600x900_2x.jpg",
+                    app_id
+                );
+                if self.download_file(&url_2x, &dest).is_ok() {
+                    if let Ok(meta) = std::fs::metadata(&dest) {
+                        if meta.len() >= 200 {
+                            found = dest.to_string_lossy().into_owned();
+                        } else {
+                            let _ = std::fs::remove_file(&dest);
+                        }
+                    }
+                }
+                if found.is_empty() {
+                    let url_1x = format!(
+                        "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_600x900.jpg",
+                        app_id
+                    );
+                    if self.download_file(&url_1x, &dest).is_ok() {
+                        if let Ok(meta) = std::fs::metadata(&dest) {
+                            if meta.len() >= 200 {
+                                found = dest.to_string_lossy().into_owned();
+                            } else {
+                                let _ = std::fs::remove_file(&dest);
+                            }
+                        }
+                    }
+                }
+                found
+            }
+        };
+
+        // Header (horizontal, 460x215)
+        let header_path = {
+            let dest = dir.join("header.jpg");
+            if dest.exists() {
+                dest.to_string_lossy().into_owned()
+            } else {
+                let url = format!(
+                    "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/header.jpg",
+                    app_id
+                );
+                let mut found = String::new();
+                if self.download_file(&url, &dest).is_ok() {
+                    if let Ok(meta) = std::fs::metadata(&dest) {
+                        if meta.len() >= 200 {
+                            found = dest.to_string_lossy().into_owned();
+                        } else {
+                            let _ = std::fs::remove_file(&dest);
+                        }
+                    }
+                }
+                found
+            }
+        };
+
+        // Logo (transparent PNG for hero overlay)
+        let logo_path = {
+            let dest = dir.join("logo.png");
+            if dest.exists() {
+                dest.to_string_lossy().into_owned()
+            } else {
+                let url = format!(
+                    "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/logo.png",
+                    app_id
+                );
+                let mut found = String::new();
+                if self.download_file(&url, &dest).is_ok() {
+                    if let Ok(meta) = std::fs::metadata(&dest) {
+                        if meta.len() >= 200 {
+                            found = dest.to_string_lossy().into_owned();
+                        } else {
+                            let _ = std::fs::remove_file(&dest);
+                        }
+                    }
+                }
+                found
+            }
+        };
+
+        (grid_path, header_path, logo_path)
+    }
+
     pub fn fetch_nemirtingas_game_name(&self, app_id: &str) -> Option<String> {
         let url = format!("{}/{}/{}.json", NEMIRTINGAS_BASE_URL, app_id, app_id);
         let resp = self.http.get(&url).send().ok()?;

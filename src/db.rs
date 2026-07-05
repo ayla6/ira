@@ -34,7 +34,8 @@ pub fn init_db(db_path: &str) -> DbConn {
 pub fn add_game(conn: &DbConn, kind: &str, steam_id: &str, platform_id: &str, title: &str) -> Result<i64, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
     c.execute(
-        "INSERT OR IGNORE INTO games (kind, steam_id, platform_id, title) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO games (kind, steam_id, platform_id, title) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(steam_id) DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
         params![kind, steam_id, platform_id, title],
     ).map_err(|e| e.to_string())?;
     Ok(c.last_insert_rowid())

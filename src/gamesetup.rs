@@ -241,11 +241,8 @@ pub fn add_game_from_folder(
     // Generate achievement definitions
     steam.generate_steam_settings(app_id)?;
 
-    // Add to DB
-    let title = std::fs::read_to_string(game_settings_dir.join("title.txt"))
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
-    crate::db::add_game(db, "steam", app_id, app_id, &title)?;
+    // Add to DB (title will be filled from appdetails.json during enrichment)
+    crate::db::add_game(db, "steam", app_id, app_id, "")?;
 
     Ok(saves_game_dir.to_string_lossy().into_owned())
 }
@@ -283,12 +280,6 @@ pub fn add_gog_game_from_folder(
     // Create data/<steam_app_id>/achievements/ (real folder for GOG games)
     let data_ach_dir = crate::parser::achievements_dir(save_dir, steam_app_id);
     std::fs::create_dir_all(&data_ach_dir).map_err(|e| format!("could not create data achievements dir: {}", e))?;
-
-    // Write title.txt
-    let title_path = data_ach_dir.join("title.txt");
-    if !title_path.exists() {
-        std::fs::write(&title_path, game_name).map_err(|e| format!("could not write title.txt: {}", e))?;
-    }
 
     // Fetch achievement definitions from Steam API
     steam.generate_steam_settings(steam_app_id)?;

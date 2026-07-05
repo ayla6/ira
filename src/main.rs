@@ -5,6 +5,7 @@ mod gamesetup;
 mod images;
 mod parser;
 mod steam;
+mod strings;
 mod ui;
 mod watcher;
 
@@ -59,6 +60,9 @@ fn activate(app: &adw::Application) -> SharedState {
 
     // If DB is empty, populate from existing directory structure
     if db::load_all_games(&db).map(|v| v.is_empty()).unwrap_or(true) {
+        populate_db_from_dirs(&db, ui::SAVE_DIR);
+    } else {
+        // DB exists but some titles may be empty — re-scan to fill gaps
         populate_db_from_dirs(&db, ui::SAVE_DIR);
     }
 
@@ -143,7 +147,20 @@ fn activate(app: &adw::Application) -> SharedState {
 fn populate_db_from_dirs(db: &db::DbConn, save_dir: &str) {
     use std::path::Path;
 
-    // Steam games: scan steam/<appid>/
+    let read_title = |app_id: &str| -> String {
+        let data_dir = Path::new(save_dir).join("data").join(app_id);
+        if let Ok(data) = std::fs::read(data_dir.join("appdetails.json")) {
+            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&data) {
+                if let Some(name) = json.get("name").and_then(|v| v.as_str()) {
+                    if !name.is_empty() {
+                        return name.to_string();
+                    }
+                }
+            }
+        }
+        String::new()
+    };
+
     let steam_dir = format!("{}/steam", save_dir);
     if let Ok(entries) = std::fs::read_dir(&steam_dir) {
         for entry in entries.flatten() {
@@ -154,16 +171,11 @@ fn populate_db_from_dirs(db: &db::DbConn, save_dir: &str) {
                 Some(s) if s.parse::<i64>().is_ok() => s.to_string(),
                 _ => continue,
             };
-            let title = std::fs::read_to_string(
-                Path::new(save_dir).join("data").join(&app_id).join("achievements").join("title.txt"),
-            )
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
+            let title = read_title(&app_id);
             let _ = db::add_game(db, "steam", &app_id, &app_id, &title);
         }
     }
 
-    // GOG games: scan gog/<galaxyid>/<productid>/
     let gog_dir = format!("{}/gog", save_dir);
     if let Ok(galaxy_entries) = std::fs::read_dir(&gog_dir) {
         for galaxy_entry in galaxy_entries.flatten() {
@@ -188,11 +200,7 @@ fn populate_db_from_dirs(db: &db::DbConn, save_dir: &str) {
                     if app_id.parse::<i64>().is_err() {
                         continue;
                     }
-                    let title = std::fs::read_to_string(
-                        Path::new(save_dir).join("data").join(&app_id).join("achievements").join("title.txt"),
-                    )
-                    .map(|s| s.trim().to_string())
-                    .unwrap_or_default();
+                    let title = read_title(&app_id);
                     let _ = db::add_game(db, "gog", &app_id, &product_id, &title);
                 }
             }

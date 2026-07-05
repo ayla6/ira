@@ -90,6 +90,9 @@ pub struct Game {
     pub name: String,
     pub icon_path: String,
     pub hero_image_path: String,
+    pub grid_path: String,
+    pub header_path: String,
+    pub logo_path: String,
     pub achievements: Vec<MergedAchievement>,
     pub earned_count: usize,
     pub total_count: usize,
@@ -207,6 +210,9 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         },
         icon_path: String::new(),
         hero_image_path: String::new(),
+        grid_path: String::new(),
+        header_path: String::new(),
+        logo_path: String::new(),
         achievements: Vec::new(),
         earned_count: 0,
         total_count: 0,
@@ -214,13 +220,16 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
 
     let ach_dir = achievements_dir(save_dir, app_id);
 
-    // Title from title.txt (fallback if DB title is empty)
+    // Title fallback from appdetails.json if DB title is empty
     if entry.title.is_empty() {
-        let title_path = ach_dir.join("title.txt");
-        if let Ok(data) = std::fs::read_to_string(&title_path) {
-            let trimmed = data.trim();
-            if !trimmed.is_empty() {
-                game.name = trimmed.to_string();
+        let details_path = data_dir(save_dir, app_id).join("appdetails.json");
+        if let Ok(data) = std::fs::read(&details_path) {
+            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&data) {
+                if let Some(name) = json.get("name").and_then(|v| v.as_str()) {
+                    if !name.is_empty() {
+                        game.name = name.to_string();
+                    }
+                }
             }
         }
     }
@@ -236,6 +245,25 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
                 game.icon_path = png.to_string_lossy().into_owned();
             }
         }
+    }
+
+    // Grid assets
+    let data_game_dir = data_dir(save_dir, app_id);
+    let grid = data_game_dir.join("library_600x900.jpg");
+    if grid.is_file() {
+        game.grid_path = grid.to_string_lossy().into_owned();
+    }
+    let header = data_game_dir.join("header.jpg");
+    if header.is_file() {
+        game.header_path = header.to_string_lossy().into_owned();
+    }
+    let hero = data_game_dir.join("library_hero.jpg");
+    if hero.is_file() {
+        game.hero_image_path = hero.to_string_lossy().into_owned();
+    }
+    let logo = data_game_dir.join("logo.png");
+    if logo.is_file() {
+        game.logo_path = logo.to_string_lossy().into_owned();
     }
 
     // Unlock status

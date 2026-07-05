@@ -35,10 +35,7 @@ pub struct AppState {
     pub game_names: Arc<Mutex<HashMap<String, String>>>,
     pub content_unloaded: bool,
     pub restoring: bool,
-    pub grid_scale_step: i32,
 }
-
-const GRID_SIZES: [i32; 5] = [80, 140, 200, 260, 320];
 
 pub type SharedState = Rc<RefCell<AppState>>;
 
@@ -117,7 +114,6 @@ pub fn build_ui(
         game_names,
         content_unloaded: false,
         restoring: false,
-        grid_scale_step: cfg.grid_scale_step,
     }));
 
     build_window(&state, app);
@@ -141,12 +137,7 @@ fn build_window(state: &SharedState, app: &adw::Application) {
         .hero-progress { min-height: 8px; border: none; }
         .sidebar-row-title { min-width: 0; }
         .global-bar trough { background-color: transparent; border: none; }
-        .global-bar progress { border: none; border-radius: 0; }
-        .grid-card { transition: transform 150ms ease; }
-        .grid-card:hover { transform: scale(1.05); }
-        flowboxchild { background: none; outline: none; box-shadow: none; }
-        flowboxchild:hover { background: none; }
-        flowboxchild:active { background: none; }",
+        .global-bar progress { border: none; border-radius: 0; }",
     ));
     gtk4::style_context_add_provider_for_display(
         &gtk4::gdk::Display::default().expect("no default display"),
@@ -201,29 +192,6 @@ fn build_window(state: &SharedState, app: &adw::Application) {
     settings_btn.set_halign(gtk4::Align::Fill);
     popover_box.append(&settings_btn);
 
-    let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
-    popover_box.append(&sep);
-
-    let scale_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-    let scale_label = gtk4::Label::new(Some(S::GRID_SIZE));
-    scale_label.set_halign(gtk4::Align::Start);
-    scale_label.set_hexpand(false);
-    scale_row.append(&scale_label);
-
-    let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.0, 4.0, 1.0);
-    scale.set_value(state.borrow().grid_scale_step as f64);
-    scale.set_digits(0);
-    scale.set_draw_value(false);
-    scale.set_hexpand(true);
-    scale.add_mark(0.0, gtk4::PositionType::Bottom, None);
-    scale.add_mark(1.0, gtk4::PositionType::Bottom, None);
-    scale.add_mark(2.0, gtk4::PositionType::Bottom, None);
-    scale.add_mark(3.0, gtk4::PositionType::Bottom, None);
-    scale.add_mark(4.0, gtk4::PositionType::Bottom, None);
-    scale_row.append(&scale);
-
-    popover_box.append(&scale_row);
-
     popover.set_child(Some(&popover_box));
     menu_btn.set_popover(Some(&popover));
 
@@ -249,7 +217,6 @@ fn build_window(state: &SharedState, app: &adw::Application) {
 
     // Only build grid on initial startup, not when rebuilding from hide-to-background
     if !state.borrow().content_unloaded {
-        show_grid_view(state);
         // Select "All Games" by default
         let row = state.borrow().game_list.row_at_index(0);
         if let Some(row) = row {
@@ -268,10 +235,10 @@ fn build_window(state: &SharedState, app: &adw::Application) {
         let Some(row) = row else { return; };
         let idx = row.index();
         if idx == 0 {
-            // "All Games" — show grid view
+            // "All Games" — grid view removed; just deselect
             drop(s);
             state_clone.borrow_mut().selected_id.clear();
-            show_grid_view(&state_clone);
+            clear_content(&state_clone);
         } else if idx >= 1 {
             // Game rows start at index 1
             let game_idx = (idx - 1) as usize;
@@ -295,21 +262,6 @@ fn build_window(state: &SharedState, app: &adw::Application) {
             (s.window.clone(), s.cfg.clone(), s.steam.clone())
         };
         show_settings_dialog(&window, cfg, steam, &state_clone);
-    });
-
-    let state_clone = state.clone();
-    scale.connect_value_changed(move |s| {
-        let step = s.value().round() as i32;
-        s.set_value(step as f64);
-        let sc = state_clone.clone();
-        glib::idle_add_local_once(move || {
-            sc.borrow_mut().grid_scale_step = step;
-            sc.borrow_mut().cfg.grid_scale_step = step;
-            let _ = sc.borrow().cfg.save();
-            if sc.borrow().selected_id.is_empty() {
-                show_grid_view(&sc);
-            }
-        });
     });
 
     let state_clone = state.clone();
@@ -548,14 +500,13 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
 
     if !state.borrow().content_unloaded {
         rebuild_sidebar(state);
-        // If no game is selected, re-select "All Games" to refresh the grid
+        // If no game is selected, re-select "All Games"
         let selected = state.borrow().selected_id.clone();
         if selected.is_empty() {
             if let Some(row) = state.borrow().game_list.row_at_index(0) {
                 state.borrow_mut().restoring = true;
                 state.borrow().game_list.select_row(Some(&row));
                 state.borrow_mut().restoring = false;
-                show_grid_view(state);
             }
         }
     }
@@ -580,78 +531,11 @@ pub fn switch_to_game(state: &SharedState, app_id: &str) {
     }
 }
 
-fn show_grid_view(state: &SharedState) {
+fn clear_content(state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
     while let Some(child) = content_box.first_child() {
         content_box.remove(&child);
     }
-
-    let games: Vec<Game> = state.borrow().games.iter().cloned().collect();
-    let step = state.borrow().grid_scale_step;
-    let card_w = GRID_SIZES[step.clamp(0, 4) as usize];
-    let card_h = (card_w as f64 * 1.5) as i32;
-
-    let flow = gtk4::FlowBox::new();
-    flow.set_homogeneous(true);
-    flow.set_column_spacing(0);
-    flow.set_row_spacing(12);
-    flow.set_margin_start(16);
-    flow.set_margin_end(16);
-    flow.set_margin_top(16);
-    flow.set_margin_bottom(16);
-    flow.set_min_children_per_line(1);
-    flow.set_max_children_per_line(30);
-    flow.set_selection_mode(gtk4::SelectionMode::None);
-    flow.set_vexpand(false);
-    flow.set_valign(gtk4::Align::Start);
-    flow.set_hexpand(true);
-
-    let state_clone = state.clone();
-    for game in &games {
-        let card = build_grid_card(game, card_w, card_h);
-        let app_id = game.app_id.clone();
-        let sc = state_clone.clone();
-        let click = gtk4::GestureClick::new();
-        click.connect_pressed(move |_, _, _, _| {
-            switch_to_game(&sc, &app_id);
-        });
-        card.add_controller(click);
-        flow.insert(&card, -1);
-    }
-
-    let wrapper = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    wrapper.set_valign(gtk4::Align::Start);
-    wrapper.set_vexpand(false);
-    wrapper.append(&flow);
-    content_box.append(&wrapper);
-    state.borrow_mut().selected_id.clear();
-}
-
-fn build_grid_card(game: &Game, width: i32, height: i32) -> gtk4::Widget {
-    let wrapper = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    wrapper.set_halign(gtk4::Align::Center);
-    wrapper.set_valign(gtk4::Align::Start);
-    wrapper.set_size_request(width, height);
-
-    if game.grid_path.is_empty() {
-        let icon = gtk4::Image::from_icon_name("applications-games-symbolic");
-        icon.set_pixel_size(width / 3);
-        icon.set_valign(gtk4::Align::Center);
-        icon.set_halign(gtk4::Align::Center);
-        icon.set_hexpand(true);
-        icon.set_vexpand(true);
-        wrapper.append(&icon);
-    } else {
-        let pic = gtk4::Picture::new();
-        pic.set_content_fit(gtk4::ContentFit::Cover);
-        crate::images::set_picture_scaled(&pic, &game.grid_path, width, height);
-        pic.set_hexpand(true);
-        pic.set_vexpand(true);
-        wrapper.append(&pic);
-    }
-
-    wrapper.add_css_class("grid-card");
-    wrapper.upcast()
 }
 
 fn display_game(game: &Game, state: &SharedState) {
@@ -1294,7 +1178,7 @@ pub fn restore_content(state: &SharedState) {
     rebuild_sidebar(state);
 
     if selected_id.is_empty() {
-        show_grid_view(state);
+        clear_content(state);
         // Re-select "All Games"
         if let Some(row) = state.borrow().game_list.row_at_index(0) {
             state.borrow_mut().restoring = true;
@@ -1321,7 +1205,7 @@ pub fn restore_content(state: &SharedState) {
         }
     } else {
         state.borrow_mut().selected_id.clear();
-        show_grid_view(state);
+        clear_content(state);
         if let Some(row) = state.borrow().game_list.row_at_index(0) {
             state.borrow_mut().restoring = true;
             state.borrow().game_list.select_row(Some(&row));

@@ -12,8 +12,6 @@ pub struct Config {
     pub notifications_enabled: bool,
     #[serde(default)]
     pub close_to_background: bool,
-    #[serde(default = "default_grid_scale")]
-    pub grid_scale_step: i32,
 }
 
 impl Default for Config {
@@ -23,17 +21,12 @@ impl Default for Config {
             steam_griddb_api_key: String::new(),
             notifications_enabled: true,
             close_to_background: false,
-            grid_scale_step: 2,
         }
     }
 }
 
 fn default_true() -> bool {
     true
-}
-
-fn default_grid_scale() -> i32 {
-    2
 }
 
 fn config_path() -> PathBuf {
@@ -115,7 +108,6 @@ impl Config {
             steam_griddb_api_key: String::new(),
             notifications_enabled: self.notifications_enabled,
             close_to_background: self.close_to_background,
-            grid_scale_step: self.grid_scale_step,
         };
         if steam_err.is_err() {
             plaintext.steam_api_key = self.steam_api_key.clone();

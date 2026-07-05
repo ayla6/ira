@@ -1,6 +1,5 @@
 pub const APP_TITLE: &str = "Achievement viewer";
 pub const MENU: &str = "Menu";
-pub const GRID_SIZE: &str = "Zoom";
 pub const ADD_GAME: &str = "Add a game";
 pub const ALL_GAMES: &str = "All games";
 pub const SETTINGS: &str = "Settings";

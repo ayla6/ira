@@ -2,8 +2,6 @@
 
 ## Immediate fixes
 
-- [ ] **Fix grid view vertical spacing bug**: When there aren't enough rows to fill the screen, the vertical distance between rows expands. It should always be exactly 12px. Cards should pack at the top.
-- [ ] **Simplify grid card code**: `build_grid_card` has an unused `step` param, returns `gtk4::Widget` instead of `FlowBoxChild`. Clean up the upcast hack.
 - [ ] **Clean up dead code**: Remove leftover params, unify the two texture caches in `images.rs`, remove unnecessary wrapper Box in `show_grid_view`.
 - [ ] **Fix hero aspect ratio**: The hero banner's aspect ratio changes with window size. Should maintain a consistent ratio.
 
@@ -16,13 +14,6 @@
 - [ ] Display playtime from Lutris DB, with a refresh button
 - [ ] Last played data pulled from Lutris
 - [ ] Note: Lutris only stores total playtime numbers, not per-week breakdowns. Don't try to compute that ourselves.
-
-## Grid view improvements
-
-- [ ] **SteamGridDB integration**: Prioritise official Steam grids first, then allow picking custom ones from SteamGridDB via a UI picker
-- [ ] **Grid card polish**: Better hover effect (scale up without affecting grid layout, proper z-order above siblings but below overlays)
-- [ ] **Grid card sizing**: The zoom slider should have 5 steps with tick marks, snap to ticks, and be saved in config (partially done)
-- [ ] **Space-between distribution**: First card touches left border, last touches right border, equal spacing between (partially done with `set_homogeneous(true)` but needs vertical spacing fix first)
 
 ## UI improvements
 

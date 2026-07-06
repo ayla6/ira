@@ -135,6 +135,7 @@ fn activate(app: &adw::Application) -> SharedState {
                 g.kind.clone(),
                 g.platform_id.clone(),
                 g.db_id,
+                g.name.clone(),
                 steam.clone(),
                 watcher.clone(),
                 sender.clone(),

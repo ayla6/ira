@@ -50,6 +50,14 @@ pub fn update_game(conn: &DbConn, id: i64, title: &str, lutris_id: Option<&str>)
     Ok(())
 }
 
+/// Update only the title of a game (leaves lutris_id untouched).
+pub fn update_game_title(conn: &DbConn, id: i64, title: &str) -> Result<(), String> {
+    let c = conn.lock().map_err(|e| e.to_string())?;
+    c.execute("UPDATE games SET title = ?1 WHERE id = ?2", params![title, id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, lutris_id FROM games ORDER BY title")

@@ -386,7 +386,10 @@ fn build_sidebar_row(list: &gtk4::ListBox, game: &Game, state: &SharedState) -> 
 }
 
 fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
-    if updated.name.starts_with("App ID:") && !existing.name.starts_with("App ID:") {
+    // A real (non-placeholder) name already in state — typically the DB title,
+    // possibly user-edited — always wins. Only adopt the enriched name when we
+    // don't have one yet (e.g. a freshly added game with no title).
+    if !existing.name.is_empty() && !existing.name.starts_with("App ID:") {
         updated.name = existing.name.clone();
     }
     if updated.icon_path.is_empty() {
@@ -459,7 +462,18 @@ fn apply_game_update(state: &SharedState, mut updated: Game) {
             return;
         };
 
+        let was_placeholder =
+            s.games[i].name.is_empty() || s.games[i].name.starts_with("App ID:");
         merge_game_enrichment(&s.games[i], &mut updated);
+
+        // Enrichment resolved a real name for a game that previously had none —
+        // persist it so we don't re-fetch (and risk overwriting) on every start.
+        if was_placeholder && !updated.name.is_empty() && !updated.name.starts_with("App ID:") {
+            let db = s.db.clone();
+            if let Err(e) = crate::db::update_game_title(&db, updated.db_id, &updated.name) {
+                eprintln!("Failed to persist game title: {}", e);
+            }
+        }
 
         s.game_names.lock().unwrap().insert(app_id.clone(), updated.name.clone());
 
@@ -1515,12 +1529,14 @@ fn finalize_added_game(
             if let Some(ref watcher) = watcher {
                 watcher.watch(&entry, &game.achievements);
             }
+            let name = game.name.clone();
             let _ = sender.send(AppMessage::NewGame(game));
             enrich_game_async(
                 app_id.to_string(),
                 kind.to_string(),
                 platform_id.to_string(),
                 entry.id,
+                name,
                 steam,
                 watcher,
                 sender,
@@ -1602,6 +1618,7 @@ pub fn enrich_game_async(
     kind: String,
     platform_id: String,
     db_id: i64,
+    title: String,
     steam: Arc<SteamClient>,
     watcher: Option<AchievementWatcher>,
     sender: Sender<AppMessage>,
@@ -1612,7 +1629,7 @@ pub fn enrich_game_async(
             kind: kind.clone(),
             steam_id: app_id.clone(),
             platform_id: platform_id.clone(),
-            title: String::new(),
+            title,
             lutris_id: None,
         };
 
@@ -1643,20 +1660,20 @@ pub fn enrich_game_async(
             if game.icon_path.is_empty() && !icon_path.is_empty() {
                 game.icon_path = icon_path;
             }
-            if !hero_path.is_empty() {
+            if game.hero_image_path.is_empty() && !hero_path.is_empty() {
                 game.hero_image_path = hero_path;
             }
         }
 
-        // Download grid assets (vertical, header, logo)
+        // Download grid assets (vertical, header, logo) — only fill what's missing.
         let (grid_path, header_path, logo_path) = steam.ensure_grids(&app_id);
-        if !grid_path.is_empty() {
+        if game.grid_path.is_empty() && !grid_path.is_empty() {
             game.grid_path = grid_path;
         }
-        if !header_path.is_empty() {
+        if game.header_path.is_empty() && !header_path.is_empty() {
             game.header_path = header_path;
         }
-        if !logo_path.is_empty() {
+        if game.logo_path.is_empty() && !logo_path.is_empty() {
             game.logo_path = logo_path;
         }
 

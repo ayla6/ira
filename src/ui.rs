@@ -1702,8 +1702,8 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
 fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
-        Some(&format!("Edit Game: {}", game.name)),
-        Some(S::EDIT_GAME_PROPS),
+        Some(&game.name),
+        None,
     );
 
     let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -1713,7 +1713,9 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     let title_entry = gtk4::Entry::new();
     title_entry.set_placeholder_text(Some(S::GAME_TITLE));
     title_entry.set_text(&game.name);
-    box_.append(&gtk4::Label::new(Some(S::TITLE)));
+    let title_label = gtk4::Label::new(Some(S::TITLE));
+    title_label.set_halign(gtk4::Align::Start);
+    box_.append(&title_label);
     box_.append(&title_entry);
 
     dialog.set_extra_child(Some(&box_));

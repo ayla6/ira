@@ -58,11 +58,9 @@ fn activate(app: &adw::Application) -> SharedState {
 
     let db = db::init_db(&format!("{}/gse.db", ui::SAVE_DIR));
 
-    // If DB is empty, populate from existing directory structure
+    // Only scan the directory structure on a fresh (empty) DB. Once games exist
+    // — including user-edited titles — leave them untouched.
     if db::load_all_games(&db).map(|v| v.is_empty()).unwrap_or(true) {
-        populate_db_from_dirs(&db, ui::SAVE_DIR);
-    } else {
-        // DB exists but some titles may be empty — re-scan to fill gaps
         populate_db_from_dirs(&db, ui::SAVE_DIR);
     }
 
@@ -89,8 +87,11 @@ fn activate(app: &adw::Application) -> SharedState {
         Arc::new(Mutex::new(std::collections::HashMap::new()))
     });
 
-    for g in &games {
-        game_names.lock().unwrap().insert(g.app_id.clone(), g.name.clone());
+    {
+        let mut names = game_names.lock().unwrap();
+        for g in &games {
+            names.insert(g.app_id.clone(), g.name.clone());
+        }
     }
 
     let state = build_ui(
@@ -113,28 +114,32 @@ fn activate(app: &adw::Application) -> SharedState {
         glib::ControlFlow::Continue
     });
 
-    let games_snapshot: Vec<Game> = state.borrow().games.clone();
-    for game in &games_snapshot {
-        if let Some(ref watcher) = watcher {
-            let entry = GameEntry {
-                id: game.db_id,
-                kind: game.kind.clone(),
-                steam_id: game.app_id.clone(),
-                platform_id: game.platform_id.clone(),
-                title: game.name.clone(),
-                lutris_id: None,
-            };
-            watcher.watch(&entry, &game.achievements);
+    // Watch + enrich each game. Hold a single borrow and pass references into
+    // the watcher so we never clone the (large) achievements vectors here.
+    {
+        let s = state.borrow();
+        for g in &s.games {
+            if let Some(ref watcher) = watcher {
+                let entry = GameEntry {
+                    id: g.db_id,
+                    kind: g.kind.clone(),
+                    steam_id: g.app_id.clone(),
+                    platform_id: g.platform_id.clone(),
+                    title: String::new(),
+                    lutris_id: None,
+                };
+                watcher.watch(&entry, &g.achievements);
+            }
+            enrich_game_async(
+                g.app_id.clone(),
+                g.kind.clone(),
+                g.platform_id.clone(),
+                g.db_id,
+                steam.clone(),
+                watcher.clone(),
+                sender.clone(),
+            );
         }
-        enrich_game_async(
-            game.app_id.clone(),
-            game.kind.clone(),
-            game.platform_id.clone(),
-            game.db_id,
-            steam.clone(),
-            watcher.clone(),
-            sender.clone(),
-        );
     }
 
     if std::env::var("AV_BENCH").is_ok() {
@@ -145,22 +150,6 @@ fn activate(app: &adw::Application) -> SharedState {
 }
 
 fn populate_db_from_dirs(db: &db::DbConn, save_dir: &str) {
-    use std::path::Path;
-
-    let read_title = |app_id: &str| -> String {
-        let data_dir = Path::new(save_dir).join("data").join(app_id);
-        if let Ok(data) = std::fs::read(data_dir.join("appdetails.json")) {
-            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&data) {
-                if let Some(name) = json.get("name").and_then(|v| v.as_str()) {
-                    if !name.is_empty() {
-                        return name.to_string();
-                    }
-                }
-            }
-        }
-        String::new()
-    };
-
     let steam_dir = format!("{}/steam", save_dir);
     if let Ok(entries) = std::fs::read_dir(&steam_dir) {
         for entry in entries.flatten() {
@@ -171,7 +160,7 @@ fn populate_db_from_dirs(db: &db::DbConn, save_dir: &str) {
                 Some(s) if s.parse::<i64>().is_ok() => s.to_string(),
                 _ => continue,
             };
-            let title = read_title(&app_id);
+            let title = crate::parser::read_app_name(save_dir, &app_id).unwrap_or_default();
             let _ = db::add_game(db, "steam", &app_id, &app_id, &title);
         }
     }
@@ -200,7 +189,7 @@ fn populate_db_from_dirs(db: &db::DbConn, save_dir: &str) {
                     if app_id.parse::<i64>().is_err() {
                         continue;
                     }
-                    let title = read_title(&app_id);
+                    let title = crate::parser::read_app_name(save_dir, &app_id).unwrap_or_default();
                     let _ = db::add_game(db, "gog", &app_id, &product_id, &title);
                 }
             }

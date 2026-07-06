@@ -1,4 +1,4 @@
-use crate::ui::{hide_to_background, switch_to_game, SharedState};
+use crate::ui::{hide_to_background, malloc_trim, switch_to_game, SharedState};
 use gtk4::glib;
 use std::time::Duration;
 
@@ -18,10 +18,6 @@ fn vm_rss_kb() -> i64 {
 fn log(tag: &str) {
     let rss = vm_rss_kb();
     eprintln!("[bench] {:<30} RSS={} KB ({:.1} MB)", tag, rss, rss as f64 / 1024.0);
-}
-
-extern "C" {
-    fn malloc_trim(pad: usize) -> i32;
 }
 
 pub fn run_bench(state: SharedState) {

@@ -41,7 +41,6 @@ pub fn add_game(conn: &DbConn, kind: &str, steam_id: &str, platform_id: &str, ti
     Ok(c.last_insert_rowid())
 }
 
-#[allow(dead_code)]
 pub fn update_game(conn: &DbConn, id: i64, title: &str, lutris_id: Option<&str>) -> Result<(), String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
     c.execute(
@@ -73,7 +72,6 @@ pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
     Ok(result)
 }
 
-#[allow(dead_code)]
 pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
     c.execute("DELETE FROM games WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;

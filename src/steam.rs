@@ -125,6 +125,8 @@ fn pick_lang(m: &std::collections::HashMap<String, String>) -> String {
 const NEMIRTINGAS_BASE_URL: &str =
     "https://raw.githubusercontent.com/Nemirtingas/games-infos-datas/refs/heads/main/steam";
 
+const MIN_IMAGE_BYTES: u64 = 200;
+
 impl SteamClient {
     pub fn new(api_key: String, sgdb_key: String, data_dir: &str) -> Self {
         SteamClient {
@@ -153,6 +155,34 @@ impl SteamClient {
 
     fn game_dir(&self, app_id: &str) -> PathBuf {
         self.cache_dir.join(app_id)
+    }
+
+    /// Download `url` to `dest` and return its path if it's a real image
+    /// (>= `MIN_IMAGE_BYTES`); otherwise delete the bad file and return "".
+    fn fetch_image(&self, url: &str, dest: &Path) -> String {
+        if self.download_file(url, dest).is_ok() {
+            if let Ok(meta) = std::fs::metadata(dest) {
+                if meta.len() >= MIN_IMAGE_BYTES {
+                    return dest.to_string_lossy().into_owned();
+                }
+                let _ = std::fs::remove_file(dest);
+            }
+        }
+        String::new()
+    }
+
+    /// Return an existing `dest` as-is, otherwise download `primary` (then
+    /// `fallback` if given and the primary yielded nothing).
+    fn fetch_image_fallback(&self, primary: &str, fallback: &str, dest: &Path) -> String {
+        if dest.exists() {
+            return dest.to_string_lossy().into_owned();
+        }
+        let found = self.fetch_image(primary, dest);
+        if found.is_empty() && !fallback.is_empty() {
+            self.fetch_image(fallback, dest)
+        } else {
+            found
+        }
     }
 
     pub fn fetch_game_details(&self, app_id: &str) -> Option<SteamGameDetails> {
@@ -344,37 +374,11 @@ impl SteamClient {
         let hero_path = if let Some(cached) = self.find_cached_hero(app_id) {
             cached.to_string_lossy().into_owned()
         } else {
-            let hero_url = format!(
-                "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_hero_2x.jpg",
-                app_id
-            );
-            let dest = dir.join("library_hero.jpg");
-            let mut found = String::new();
-            if self.download_file(&hero_url, &dest).is_ok() {
-                if let Ok(meta) = std::fs::metadata(&dest) {
-                    if meta.len() >= 200 {
-                        found = dest.to_string_lossy().into_owned();
-                    } else {
-                        let _ = std::fs::remove_file(&dest);
-                    }
-                }
-            }
-            if found.is_empty() {
-                let fallback_url = format!(
-                    "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_hero.jpg",
-                    app_id
-                );
-                if self.download_file(&fallback_url, &dest).is_ok() {
-                    if let Ok(meta) = std::fs::metadata(&dest) {
-                        if meta.len() >= 200 {
-                            found = dest.to_string_lossy().into_owned();
-                        } else {
-                            let _ = std::fs::remove_file(&dest);
-                        }
-                    }
-                }
-            }
-            found
+            self.fetch_image_fallback(
+                &format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_hero_2x.jpg", app_id),
+                &format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_hero.jpg", app_id),
+                &dir.join("library_hero.jpg"),
+            )
         };
 
         (icon_path, hero_path)
@@ -384,93 +388,22 @@ impl SteamClient {
     /// Prioritises official Steam CDN.
     pub fn ensure_grids(&self, app_id: &str) -> (String, String, String) {
         let dir = self.game_dir(app_id);
+        let cdn = |suffix: &str| {
+            format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/{}", app_id, suffix)
+        };
 
         // Vertical grid (library capsule, 600x900)
-        let grid_path = {
-            let dest = dir.join("library_600x900.jpg");
-            if dest.exists() {
-                dest.to_string_lossy().into_owned()
-            } else {
-                let mut found = String::new();
-                let url_2x = format!(
-                    "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_600x900_2x.jpg",
-                    app_id
-                );
-                if self.download_file(&url_2x, &dest).is_ok() {
-                    if let Ok(meta) = std::fs::metadata(&dest) {
-                        if meta.len() >= 200 {
-                            found = dest.to_string_lossy().into_owned();
-                        } else {
-                            let _ = std::fs::remove_file(&dest);
-                        }
-                    }
-                }
-                if found.is_empty() {
-                    let url_1x = format!(
-                        "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_600x900.jpg",
-                        app_id
-                    );
-                    if self.download_file(&url_1x, &dest).is_ok() {
-                        if let Ok(meta) = std::fs::metadata(&dest) {
-                            if meta.len() >= 200 {
-                                found = dest.to_string_lossy().into_owned();
-                            } else {
-                                let _ = std::fs::remove_file(&dest);
-                            }
-                        }
-                    }
-                }
-                found
-            }
-        };
+        let grid_path = self.fetch_image_fallback(
+            &cdn("library_600x900_2x.jpg"),
+            &cdn("library_600x900.jpg"),
+            &dir.join("library_600x900.jpg"),
+        );
 
         // Header (horizontal, 460x215)
-        let header_path = {
-            let dest = dir.join("header.jpg");
-            if dest.exists() {
-                dest.to_string_lossy().into_owned()
-            } else {
-                let url = format!(
-                    "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/header.jpg",
-                    app_id
-                );
-                let mut found = String::new();
-                if self.download_file(&url, &dest).is_ok() {
-                    if let Ok(meta) = std::fs::metadata(&dest) {
-                        if meta.len() >= 200 {
-                            found = dest.to_string_lossy().into_owned();
-                        } else {
-                            let _ = std::fs::remove_file(&dest);
-                        }
-                    }
-                }
-                found
-            }
-        };
+        let header_path = self.fetch_image_fallback(&cdn("header.jpg"), "", &dir.join("header.jpg"));
 
         // Logo (transparent PNG for hero overlay)
-        let logo_path = {
-            let dest = dir.join("logo.png");
-            if dest.exists() {
-                dest.to_string_lossy().into_owned()
-            } else {
-                let url = format!(
-                    "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/logo.png",
-                    app_id
-                );
-                let mut found = String::new();
-                if self.download_file(&url, &dest).is_ok() {
-                    if let Ok(meta) = std::fs::metadata(&dest) {
-                        if meta.len() >= 200 {
-                            found = dest.to_string_lossy().into_owned();
-                        } else {
-                            let _ = std::fs::remove_file(&dest);
-                        }
-                    }
-                }
-                found
-            }
-        };
+        let logo_path = self.fetch_image_fallback(&cdn("logo.png"), "", &dir.join("logo.png"));
 
         (grid_path, header_path, logo_path)
     }

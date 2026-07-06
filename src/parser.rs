@@ -9,7 +9,6 @@ pub const GALAXY_ID: &str = "100000000000000000";
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct AchievementStatus {
     pub earned: bool,
-    #[serde(rename = "earned_time")]
     pub earned_time: i64,
 }
 
@@ -145,6 +144,20 @@ pub fn unlock_status_path(save_dir: &str, kind: &str, app_id: &str, platform_id:
     }
 }
 
+/// Read the game name from a cached `appdetails.json`, if present and non-empty.
+#[derive(Deserialize)]
+struct AppDetailsName {
+    #[serde(default)]
+    name: String,
+}
+pub fn read_app_name(save_dir: &str, app_id: &str) -> Option<String> {
+    let path = data_dir(save_dir, app_id).join("appdetails.json");
+    let data = std::fs::read(&path).ok()?;
+    let details: AppDetailsName = serde_json::from_slice(&data).ok()?;
+    let name = details.name.trim().to_string();
+    if name.is_empty() { None } else { Some(name) }
+}
+
 fn find_icon_path(ach_dir: &Path, icon_field: &str) -> String {
     if icon_field.is_empty() {
         return String::new();
@@ -222,15 +235,8 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
 
     // Title fallback from appdetails.json if DB title is empty
     if entry.title.is_empty() {
-        let details_path = data_dir(save_dir, app_id).join("appdetails.json");
-        if let Ok(data) = std::fs::read(&details_path) {
-            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&data) {
-                if let Some(name) = json.get("name").and_then(|v| v.as_str()) {
-                    if !name.is_empty() {
-                        game.name = name.to_string();
-                    }
-                }
-            }
+        if let Some(name) = read_app_name(save_dir, app_id) {
+            game.name = name;
         }
     }
 

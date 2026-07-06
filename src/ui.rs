@@ -18,17 +18,13 @@ use adw::prelude::*;pub const SAVE_DIR: &str = "/data/Games/Saves/GSE";
 const EAGER_IMAGE_BUDGET: usize = 18;
 
 const APP_CSS: &str = "
-.hero-gradient {
-    background-image: linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.85) 100%);
-}
-.hero-progress trough { background-color: transparent; border: none; border-radius: 0; }
-.hero-progress progress { background-color: @accent_color; border: none; border-radius: 0; }
-.hero-progress { min-height: 8px; border: none; }
 .sidebar-row-title { min-width: 0; }
 .global-bar trough { background-color: transparent; border: none; }
 .global-bar progress { border: none; border-radius: 0; }
 .hidden-game { opacity: 0.5; }
 .popover-btn, .popover-btn > label { font-weight: normal; }
+.play-btn-label { font-size: 1.15em; }
+.hero-bottom { background: linear-gradient(transparent 15%, @theme_bg_color 45%); }
 ";
 
 extern "C" {
@@ -51,6 +47,7 @@ pub struct AppState {
     pub game_names: Arc<Mutex<HashMap<String, String>>>,
     pub content_unloaded: bool,
     pub restoring: bool,
+    pub running_games: Arc<Mutex<HashMap<i64, std::process::Child>>>,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;
@@ -138,6 +135,7 @@ pub fn build_ui(
         game_names,
         content_unloaded: false,
         restoring: false,
+        running_games: Arc::new(Mutex::new(HashMap::new())),
     }));
 
     build_window(&state, app);
@@ -285,9 +283,9 @@ fn build_window(state: &SharedState, app: &adw::Application) {
             // Game rows start at index 1
             let game_idx = (idx - 1) as usize;
             if game_idx < s.games.len() {
-                let app_id = s.games[game_idx].app_id.clone();
+                let lutris_id = s.games[game_idx].lutris_id;
                 drop(s);
-                switch_to_game(&state_clone, &app_id);
+                switch_to_game(&state_clone, lutris_id);
             }
         }
     });
@@ -434,8 +432,13 @@ fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
         updated.name = existing.name.clone();
     }
     // Enrichment reloads the game from disk with a fresh GameEntry, which
-    // doesn't know the hidden flag — never let it clobber the real value.
+    // doesn't know the Lutris metadata or hidden flag — never let it clobber
+    // the real values set by build_game_list.
     updated.hidden = existing.hidden;
+    updated.lutris_id = existing.lutris_id;
+    updated.slug = existing.slug.clone();
+    updated.playtime = existing.playtime;
+    updated.lastplayed = existing.lastplayed;
     if updated.icon_path.is_empty() {
         updated.icon_path = existing.icon_path.clone();
     }
@@ -450,6 +453,13 @@ fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
     }
     if updated.logo_path.is_empty() {
         updated.logo_path = existing.logo_path.clone();
+    }
+    // Enrichment always resets logo_position to defaults — preserve user settings
+    if updated.logo_position.is_empty() || updated.logo_position == "bottom-left" {
+        updated.logo_position = existing.logo_position.clone();
+    }
+    if updated.logo_size == 0 || updated.logo_size == 25 {
+        updated.logo_size = existing.logo_size;
     }
 
     if !existing.achievements.is_empty() {
@@ -494,6 +504,15 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             drop(s);
             rebuild_sidebar(state);
         }
+        AppMessage::GameStopped(lutris_id) => {
+            state.borrow().running_games.lock().unwrap().remove(&lutris_id);
+            let selected_id = state.borrow().selected_id.clone();
+            if selected_id == lutris_id.to_string() {
+                if let Some(game) = state.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned() {
+                    display_game(&game, state);
+                }
+            }
+        }
     }
 }
 
@@ -537,7 +556,7 @@ fn apply_game_update(state: &SharedState, mut updated: Game) {
         }
 
         // Only the currently-displayed game needs a content rebuild.
-        let needs_rebuild = s.selected_id == app_id && !s.content_unloaded;
+        let needs_rebuild = s.selected_id == updated.lutris_id.to_string() && !s.content_unloaded;
         let game = if needs_rebuild { Some(updated.clone()) } else { None };
         s.games[i] = updated;
         game
@@ -550,12 +569,29 @@ fn apply_game_update(state: &SharedState, mut updated: Game) {
 
 fn insert_or_update_game(state: &SharedState, game: Game) {
     let app_id = game.app_id.clone();
+    let lutris_id = game.lutris_id;
 
     {
         let mut s = state.borrow_mut();
-        s.game_names.lock().unwrap().insert(app_id.clone(), game.name.clone());
+        if !app_id.is_empty() {
+            s.game_names.lock().unwrap().insert(app_id.clone(), game.name.clone());
+        }
 
-        if let Some(i) = s.games.iter().position(|g| g.app_id == app_id) {
+        // Look up by lutris_id (the stable identity) first, then by app_id.
+        let found = if lutris_id != 0 {
+            s.games.iter().position(|g| g.lutris_id == lutris_id)
+        } else {
+            None
+        };
+        let found = found.or_else(|| {
+            if !app_id.is_empty() {
+                s.games.iter().position(|g| g.app_id == app_id)
+            } else {
+                None
+            }
+        });
+
+        if let Some(i) = found {
             s.games[i] = game;
         } else {
             s.games.push(game);
@@ -574,18 +610,18 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
     }
 }
 
-pub fn switch_to_game(state: &SharedState, app_id: &str) {
-    state.borrow_mut().selected_id = app_id.to_string();
+pub fn switch_to_game(state: &SharedState, lutris_id: i64) {
+    state.borrow_mut().selected_id = lutris_id.to_string();
 
     // Select the corresponding sidebar row (index + 1 for "All games" at index 0)
     let game_list = state.borrow().game_list.clone();
-    let idx = state.borrow().games.iter().position(|g| g.app_id == app_id);
+    let idx = state.borrow().games.iter().position(|g| g.lutris_id == lutris_id);
     if let Some(idx) = idx {
         let row = game_list.row_at_index((idx + 1) as i32);
         select_row_silently(state, row.as_ref());
     }
 
-    let game = state.borrow().games.iter().find(|g| g.app_id == app_id).cloned();
+    let game = state.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned();
     if let Some(game) = game {
         display_game(&game, state);
     }
@@ -598,119 +634,263 @@ fn clear_content(state: &SharedState) {
     }
 }
 
-fn title_vbox(title: &str, subtitle: &str) -> gtk4::Box {
-    let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
+    let running_games = state.borrow().running_games.clone();
+    let sender = state.borrow().sender.clone();
+
+    let btn = gtk4::Button::new();
+    btn.set_valign(gtk4::Align::Center);
+    btn.set_size_request(130, 48);
+
+    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    hbox.set_valign(gtk4::Align::Center);
+    hbox.set_halign(gtk4::Align::Center);
+
+    let icon = gtk4::Image::from_icon_name("media-playback-start-symbolic");
+    icon.set_pixel_size(20);
+    hbox.append(&icon);
+
+    let label = gtk4::Label::new(Some("Play"));
+    label.add_css_class("play-btn-label");
+    hbox.append(&label);
+
+    btn.set_child(Some(&hbox));
+
+    let is_running = running_games.lock().unwrap().contains_key(&lutris_id);
+    if is_running {
+        icon.set_icon_name(Some("window-close-symbolic"));
+        label.set_text("Stop");
+    } else {
+        btn.add_css_class("suggested-action");
+    }
+
+    // Click: start / stop
+    let icon_click = icon.clone();
+    let label_click = label.clone();
+    let rg = running_games.clone();
+    let s = sender.clone();
+    btn.connect_clicked(move |btn| {
+        let uri = format!("lutris:rungameid/{}", lutris_id);
+        let mut map = rg.lock().unwrap();
+        if let Some(mut child) = map.remove(&lutris_id) {
+            drop(map);
+            // Send SIGTERM so Lutris can shut down the game gracefully
+            let _ = std::process::Command::new("kill")
+                .arg(child.id().to_string())
+                .spawn();
+            // Reap the child in background
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            icon_click.set_icon_name(Some("media-playback-start-symbolic"));
+            label_click.set_text("Play");
+            btn.add_css_class("suggested-action");
+            s.send(AppMessage::GameStopped(lutris_id)).ok();
+        } else {
+            drop(map);
+            match std::process::Command::new("lutris").arg(&uri).spawn() {
+                Ok(child) => {
+                    rg.lock().unwrap().insert(lutris_id, child);
+                    icon_click.set_icon_name(Some("window-close-symbolic"));
+                    label_click.set_text("Stop");
+                    btn.remove_css_class("suggested-action");
+
+                    // Monitor thread: poll for game exit
+                    let rg_mon = rg.clone();
+                    let s_mon = s.clone();
+                    let id = lutris_id;
+                    std::thread::spawn(move || {
+                        loop {
+                            std::thread::sleep(std::time::Duration::from_secs(2));
+                            let mut map = rg_mon.lock().unwrap();
+                            if let Some(child) = map.get_mut(&id) {
+                                match child.try_wait() {
+                                    Ok(Some(_)) => {
+                                        map.remove(&id);
+                                        drop(map);
+                                        s_mon.send(AppMessage::GameStopped(id)).ok();
+                                        return;
+                                    }
+                                    Ok(None) => {}
+                                    Err(_) => {
+                                        map.remove(&id);
+                                        drop(map);
+                                        s_mon.send(AppMessage::GameStopped(id)).ok();
+                                        return;
+                                    }
+                                }
+                            } else {
+                                // Already removed (user stopped)
+                                return;
+                            }
+                        }
+                    });
+                }
+                Err(e) => {
+                    eprintln!("Failed to launch {}: {}", uri, e);
+                }
+            }
+        }
+    });
+
+    btn
+}
+
+/// Format playtime (hours, float) as e.g. "5h20min".
+fn format_playtime(hours: f64) -> String {
+    let total = (hours * 60.0).round() as u64;
+    let h = total / 60;
+    let m = total % 60;
+    match (h, m) {
+        (0, 0) => "0min".to_string(),
+        (0, m) => format!("{}min", m),
+        (h, 0) => format!("{}h", h),
+        (h, m) => format!("{}h{:02}min", h, m),
+    }
+}
+
+/// Format a unix timestamp as e.g. "Jul 6" or "Never".
+fn format_lastplayed(ts: i64) -> String {
+    if ts == 0 {
+        return "Never".to_string();
+    }
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|dt| dt.format("%b %-d").to_string())
+        .unwrap_or_else(|| "Never".to_string())
+}
+
+/// A stat label pair: small caption above a larger value.
+fn stat_label(caption: &str, value: &str) -> gtk4::Box {
+    let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     vbox.set_valign(gtk4::Align::Center);
-
-    let title_label = gtk4::Label::new(Some(title));
-    title_label.set_xalign(0.0);
-    title_label.add_css_class("title-1");
-    vbox.append(&title_label);
-
-    let sub_label = gtk4::Label::new(Some(subtitle));
-    sub_label.set_xalign(0.0);
-    sub_label.add_css_class("dim-label");
-    vbox.append(&sub_label);
-
+    vbox.set_size_request(110, -1);
+    let cap = gtk4::Label::new(Some(caption));
+    cap.set_xalign(0.0);
+    cap.add_css_class("dim-label");
+    cap.add_css_class("caption");
+    vbox.append(&cap);
+    let val = gtk4::Label::new(Some(value));
+    val.set_xalign(0.0);
+    val.add_css_class("heading");
+    vbox.append(&val);
     vbox
 }
 
-/// The hero banner (when a hero image exists) or the plain header box.
-fn build_game_header(game: &Game, fraction: f64) -> gtk4::Widget {
-    let subtitle = format!(
-        "{} of {} achievements  ·  {:.0}% complete",
-        game.earned_count, game.total_count, fraction * 100.0
-    );
+/// The game header: icon + title on the first row, then a stats row with
+/// Play | Last played | Play time | Trophies, with hero background and logo.
+fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_width: i32) -> gtk4::Widget {
+    // Build common widgets
+    let title_row = {
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 14);
+        let title_label = gtk4::Label::new(Some(&game.name));
+        title_label.set_xalign(0.0);
+        title_label.add_css_class("title-1");
+        row.append(&title_label);
+        row
+    };
 
-    if !game.hero_image_path.is_empty() {
-        let overlay = gtk4::Overlay::new();
+    let stats_row = {
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
+        row.set_valign(gtk4::Align::Center);
+        row.append(&play_button(state, game.lutris_id));
+        row.append(&stat_label("Last played", &format_lastplayed(game.lastplayed)));
+        row.append(&stat_label("Play time", &format_playtime(game.playtime)));
+        // Trophies count with inline progress bar
+        let tbox = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+        tbox.set_valign(gtk4::Align::Center);
+        let cap = gtk4::Label::new(Some("Trophies"));
+        cap.set_xalign(0.0);
+        cap.add_css_class("dim-label");
+        cap.add_css_class("caption");
+        tbox.append(&cap);
+        let trow = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        trow.set_valign(gtk4::Align::Center);
+        let val = gtk4::Label::new(Some(&format!("{}/{}", game.earned_count, game.total_count)));
+        val.set_xalign(0.0);
+        val.set_valign(gtk4::Align::Center);
+        val.add_css_class("heading");
+        trow.append(&val);
+        let prog = gtk4::ProgressBar::new();
+        prog.set_fraction(fraction);
+        prog.set_valign(gtk4::Align::Center);
+        prog.set_size_request(120, -1);
+        trow.append(&prog);
+        tbox.append(&trow);
+        row.append(&tbox);
+        row
+    };
 
-        let hero = gtk4::Picture::new();
-        hero.set_content_fit(gtk4::ContentFit::Cover);
-        hero.set_can_shrink(true);
-        crate::images::set_picture(&hero, &game.hero_image_path);
-        overlay.set_child(Some(&hero));
+    let has_hero = !game.hero_image_path.is_empty();
+    if !has_hero {
+        let header = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+        header.set_margin_top(24);
+        header.set_margin_bottom(8);
+        header.set_margin_start(24);
+        header.set_margin_end(24);
+        header.append(&title_row);
+        header.append(&stats_row);
+        return header.upcast();
+    }
 
-        let gradient = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-        gradient.set_vexpand(true);
-        gradient.set_hexpand(true);
-        gradient.add_css_class("hero-gradient");
-        overlay.add_overlay(&gradient);
+    // Hero: height tracks width to maintain ~3.1:1 aspect ratio
+    let overlay = gtk4::Overlay::new();
+    overlay.set_vexpand(false);
+    overlay.set_hexpand(true);
 
-        let info_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 14);
-        info_box.set_valign(gtk4::Align::End);
-        info_box.set_margin_start(24);
-        info_box.set_margin_end(24);
-        info_box.set_margin_bottom(24);
+    let initial_hero_height = ((content_width as f64) / 3.1).max(150.0) as i32;
+    overlay.set_height_request(initial_hero_height);
 
-        if !game.icon_path.is_empty() {
-            let img = crate::images::new_image_from_file(&game.icon_path);
-            img.set_pixel_size(56);
-            info_box.append(&img);
+    let hero = gtk4::Picture::for_filename(&game.hero_image_path);
+    hero.set_halign(gtk4::Align::Fill);
+    hero.set_valign(gtk4::Align::Fill);
+    hero.set_hexpand(true);
+    hero.set_content_fit(gtk4::ContentFit::Cover);
+    overlay.set_child(Some(&hero));
+
+    overlay.add_tick_callback(move |o, _fc| {
+        let width = o.allocated_width();
+        let target = ((width as f64) / 3.1).max(150.0) as i32;
+        if o.height_request() != target {
+            o.set_height_request(target);
         }
+        glib::ControlFlow::Continue
+    });
 
-        info_box.append(&title_vbox(&game.name, &subtitle));
-        overlay.add_overlay(&info_box);
+    // Title at bottom of hero, above stats bar
+    title_row.set_margin_start(24);
+    title_row.set_margin_end(24);
+    title_row.set_margin_bottom(90);
+    title_row.set_valign(gtk4::Align::End);
+    title_row.set_halign(gtk4::Align::Start);
+    overlay.add_overlay(&title_row);
 
-        let progress = gtk4::ProgressBar::new();
-        progress.set_fraction(fraction);
-        progress.set_valign(gtk4::Align::End);
-        progress.add_css_class("hero-progress");
-        overlay.add_overlay(&progress);
+    // Stats bar with gradient
+    let bottom = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    bottom.set_halign(gtk4::Align::Fill);
+    bottom.set_valign(gtk4::Align::End);
+    bottom.set_hexpand(true);
+    bottom.add_css_class("hero-bottom");
+    stats_row.set_margin_start(24);
+    stats_row.set_margin_end(24);
+    stats_row.set_margin_top(24);
+    stats_row.set_margin_bottom(16);
+    bottom.append(&stats_row);
+    overlay.add_overlay(&bottom);
 
-        overlay.set_vexpand(false);
-        overlay.set_hexpand(true);
-        gradient.set_vexpand(false);
+    overlay.upcast()
+}
 
-        let hero_wrap = gtk4::ScrolledWindow::new();
-        hero_wrap.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Never);
-        hero_wrap.set_propagate_natural_height(false);
-        hero_wrap.set_propagate_natural_width(false);
-        hero_wrap.set_size_request(-1, 280);
-        hero_wrap.set_vexpand(false);
-        hero_wrap.set_child(Some(&overlay));
-
-        // Keep a consistent hero aspect ratio across window sizes instead of a
-        // flat 280px strip that looks tiny on wide windows. Height tracks width
-        // (≈3.2:1), clamped so it never gets absurdly tall or short.
-        let hero_for_resize = hero_wrap.clone();
-        let last_h = std::cell::Cell::new(280i32);
-        hero_wrap.connect_notify_local(Some("width"), move |w, _| {
-            let width = w.width();
-            if width > 0 {
-                let h = ((width as f64) / 3.2).round() as i32;
-                let h = h.clamp(240, 380);
-                if last_h.get() != h {
-                    last_h.set(h);
-                    hero_for_resize.set_size_request(-1, h);
-                }
-            }
-        });
-
-        hero_wrap.upcast()
-    } else {
-        let header_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-        header_box.set_margin_top(28);
-        header_box.set_margin_bottom(8);
-        header_box.set_margin_start(28);
-        header_box.set_margin_end(28);
-
-        let title_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 14);
-        if !game.icon_path.is_empty() {
-            let img = crate::images::new_image_from_file(&game.icon_path);
-            img.set_pixel_size(56);
-            title_row.append(&img);
-        }
-
-        title_row.append(&title_vbox(&game.name, &subtitle));
-        header_box.append(&title_row);
-
-        let progress = gtk4::ProgressBar::new();
-        progress.set_fraction(fraction);
-        progress.set_margin_top(4);
-        header_box.append(&progress);
-
-        header_box.upcast()
+fn logo_position_align(pos: &str) -> (gtk4::Align, gtk4::Align) {
+    match pos {
+        "bottom-center" => (gtk4::Align::Center, gtk4::Align::End),
+        "bottom-right" => (gtk4::Align::End, gtk4::Align::End),
+        "center-left" => (gtk4::Align::Start, gtk4::Align::Center),
+        "center" => (gtk4::Align::Center, gtk4::Align::Center),
+        "center-right" => (gtk4::Align::End, gtk4::Align::Center),
+        "top-left" => (gtk4::Align::Start, gtk4::Align::Start),
+        "top-center" => (gtk4::Align::Center, gtk4::Align::Start),
+        "top-right" => (gtk4::Align::End, gtk4::Align::Start),
+        _ => (gtk4::Align::Start, gtk4::Align::End), // bottom-left
     }
 }
 
@@ -738,7 +918,36 @@ fn display_game(game: &Game, state: &SharedState) {
         0.0
     };
 
-    content_box.append(&build_game_header(game, fraction));
+    let content_width = content_scroll.allocated_width().max(600);
+    content_box.append(&build_game_header(game, fraction, state, content_width));
+
+    if game.app_id.is_empty() {
+        // Unmatched — no achievement source yet. Offer to link it to Steam.
+        let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
+        box_.set_margin_top(32);
+        box_.set_margin_bottom(32);
+        box_.set_halign(gtk4::Align::Center);
+        let label = gtk4::Label::new(Some("This game isn't linked to a trophy source yet."));
+        label.add_css_class("dim-label");
+        let match_btn = gtk4::Button::with_label("Match to Steam");
+        match_btn.add_css_class("suggested-action");
+        match_btn.set_halign(gtk4::Align::Center);
+        let state_clone = state.clone();
+        let lutris_id = game.lutris_id;
+        let name = game.name.clone();
+        match_btn.connect_clicked(move |_| {
+            let sc = state_clone.clone();
+            let name_clone = name.clone();
+            let body = format!("Enter the Steam app ID for \u{201C}{}\u{201D}:", name);
+            prompt_for_steam_id(&state_clone, "Match to Steam", &body, move |app_id| {
+                match_game_to_steam(&sc, lutris_id, app_id.to_string(), name_clone.clone());
+            });
+        });
+        box_.append(&label);
+        box_.append(&match_btn);
+        content_box.append(&box_);
+        return;
+    }
 
     let spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     spacer.set_margin_top(12);
@@ -784,6 +993,7 @@ fn display_game(game: &Game, state: &SharedState) {
     let kind_for_reload = game.kind.clone();
     let platform_id_for_reload = game.platform_id.clone();
     let db_id_for_reload = game.db_id;
+    let lutris_id_for_reload = game.lutris_id;
     let state_for_reload = state.clone();
     let reload = move || {
         let entry = GameEntry {
@@ -792,8 +1002,11 @@ fn display_game(game: &Game, state: &SharedState) {
             steam_id: app_id_for_reload.clone(),
             platform_id: platform_id_for_reload.clone(),
             title: String::new(),
-            lutris_id: None,
+            lutris_db_id: if lutris_id_for_reload != 0 { Some(lutris_id_for_reload) } else { None },
+            sgdb_id: None,
             hidden: false,
+            logo_position: String::new(),
+            logo_size: 0,
         };
         if let Ok(updated) = load_game(&entry, SAVE_DIR) {
             apply_game_update(&state_for_reload, updated);
@@ -831,7 +1044,7 @@ fn display_game(game: &Game, state: &SharedState) {
         }
         if !hidden.is_empty() {
             let hidden_row = adw::ActionRow::new();
-            hidden_row.set_title(&format!("... and {} hidden achievements", hidden.len()));
+            hidden_row.set_title(&format!("... and {} hidden trophies", hidden.len()));
             hidden_row.set_subtitle("Earn them to reveal details");
             hidden_row.set_sensitive(false);
             locked_group.add(&hidden_row);
@@ -1282,12 +1495,13 @@ pub fn restore_content(state: &SharedState) {
         return;
     }
 
-    let game = state.borrow().games.iter().find(|g| g.app_id == selected_id).cloned();
+    let lutris_id: i64 = selected_id.parse().unwrap_or(0);
+    let game = state.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned();
     if let Some(game) = game {
         display_game(&game, state);
 
         let game_list = state.borrow().game_list.clone();
-        let idx = state.borrow().games.iter().position(|g| g.app_id == selected_id);
+        let idx = state.borrow().games.iter().position(|g| g.lutris_id == lutris_id);
         if let Some(idx) = idx {
             let row = game_list.row_at_index((idx + 1) as i32);
             select_row_silently(state, row.as_ref());
@@ -1403,6 +1617,9 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
 
     let menu = gio::Menu::new();
     menu.append(Some(S::EDIT_GAME_SETTINGS), Some("game.edit"));
+    if !game.logo_path.is_empty() {
+        menu.append(Some("Logo settings"), Some("game.logosettings"));
+    }
     menu.append(Some(if current_hidden { S::UNHIDE_GAME } else { S::HIDE_GAME }), Some("game.hide"));
     menu.append(Some(S::REMOVE_GAME), Some("game.remove"));
     let popover = gtk4::PopoverMenu::from_model(Some(&menu));
@@ -1419,6 +1636,16 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
         show_game_settings_dialog(&sc, &gc);
     });
     actions.add_action(&edit_action);
+
+    if !game_clone.logo_path.is_empty() {
+        let logo_action = gio::SimpleAction::new("logosettings", None);
+        let sc = state_clone.clone();
+        let gc = game_clone.clone();
+        logo_action.connect_activate(move |_, _| {
+            show_logo_settings_dialog(&sc, &gc);
+        });
+        actions.add_action(&logo_action);
+    }
 
     let hide_action = gio::SimpleAction::new("hide", None);
     let sc = state_clone.clone();
@@ -1489,11 +1716,6 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     box_.append(&gtk4::Label::new(Some(S::TITLE)));
     box_.append(&title_entry);
 
-    let lutris_entry = gtk4::Entry::new();
-    lutris_entry.set_placeholder_text(Some("e.g. yakuza-like-a-dragon"));
-    box_.append(&gtk4::Label::new(Some(S::LUTRIS_SLUG)));
-    box_.append(&lutris_entry);
-
     dialog.set_extra_child(Some(&box_));
 
     dialog.add_response("cancel", S::CANCEL);
@@ -1510,17 +1732,102 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
             return;
         }
         let title = title_entry.text().to_string();
-        let lutris_id = lutris_entry.text().to_string();
-        let lutris_opt = if lutris_id.is_empty() { None } else { Some(lutris_id.as_str()) };
-        if let Err(e) = crate::db::update_game(&state_clone.borrow().db, db_id, &title, lutris_opt) {
+        if let Err(e) = crate::db::update_game_title(&state_clone.borrow().db, db_id, &title) {
             eprintln!("Failed to update game: {}", e);
         }
         // Update game in state and rebuild
         if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.app_id == app_id) {
             g.name = title.clone();
         }
-        state_clone.borrow().game_names.lock().unwrap().insert(app_id.clone(), title);
+        if !app_id.is_empty() {
+            state_clone.borrow().game_names.lock().unwrap().insert(app_id.clone(), title);
+        }
         rebuild_sidebar(&state_clone);
+    });
+    dialog.present(Some(&window));
+}
+
+fn show_logo_settings_dialog(state: &SharedState, game: &Game) {
+    let window = state.borrow().window.clone();
+    let dialog = adw::AlertDialog::new(
+        Some(&format!("Logo settings: {}", game.name)),
+        None,
+    );
+
+    let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    box_.set_margin_top(12);
+    box_.set_margin_bottom(4);
+
+    // Logo preview
+    let preview = gtk4::Picture::for_filename(&game.logo_path);
+    preview.set_size_request(-1, 120);
+    preview.set_content_fit(gtk4::ContentFit::ScaleDown);
+    preview.set_margin_bottom(8);
+    box_.append(&preview);
+
+    // Position combo
+    let positions = ["bottom-left", "bottom-center", "bottom-right", "center-left", "center", "center-right", "top-left", "top-center", "top-right"];
+    let pos_store = gtk4::StringList::new(&positions);
+    let pos_combo = gtk4::DropDown::new(Some(pos_store), None::<&gtk4::PropertyExpression>);
+    let current_idx = positions.iter().position(|&p| p == game.logo_position).unwrap_or(0);
+    pos_combo.set_selected(current_idx as u32);
+    let pos_row = adw::ActionRow::new();
+    pos_row.set_title("Position");
+    pos_row.add_suffix(&pos_combo);
+    box_.append(&pos_row);
+
+    // Size spin (% of hero height)
+    let size_pct = if game.logo_size < 5 || game.logo_size > 50 { 25 } else { game.logo_size };
+    let size_adj = gtk4::Adjustment::new(size_pct as f64, 5.0, 50.0, 5.0, 10.0, 0.0);
+    let size_spin = gtk4::SpinButton::new(Some(&size_adj), 1.0, 0);
+    size_spin.set_numeric(true);
+    let size_row = adw::ActionRow::new();
+    size_row.set_title("Logo height (% of hero)");
+    size_row.add_suffix(&size_spin);
+    box_.append(&size_row);
+
+    dialog.set_extra_child(Some(&box_));
+
+    dialog.add_response("cancel", S::CANCEL);
+    dialog.add_response("save", S::SAVE);
+    dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("save"));
+    dialog.set_close_response("cancel");
+
+    let state_clone = state.clone();
+    let db_id = game.db_id;
+    let lutris_id = game.lutris_id;
+    dialog.connect_response(None, move |_, response| {
+        if response != "save" {
+            return;
+        }
+        let pos = positions[pos_combo.selected() as usize].to_string();
+        let size = size_adj.value() as i32;
+
+        // Update DB
+        if db_id != 0 {
+            if let Err(e) = crate::db::set_logo_settings(&state_clone.borrow().db, db_id, &pos, size) {
+                eprintln!("Failed to update logo settings: {}", e);
+            }
+        }
+
+        // Update game in state
+        let updated_game = {
+            let mut s = state_clone.borrow_mut();
+            s.games.iter_mut().find(|g| g.lutris_id == lutris_id).map(|g| {
+                g.logo_position = pos;
+                g.logo_size = size;
+                g.clone()
+            })
+        };
+
+        // Re-display if this game is currently shown
+        if let Some(g) = updated_game {
+            let s = state_clone.borrow();
+            if s.selected_id == g.lutris_id.to_string() {
+                display_game(&g, &state_clone);
+            }
+        }
     });
     dialog.present(Some(&window));
 }
@@ -1632,6 +1939,7 @@ fn finalize_added_game(
                 kind.to_string(),
                 platform_id.to_string(),
                 entry.id,
+                0,
                 name,
                 steam,
                 watcher,
@@ -1683,6 +1991,43 @@ fn finish_add_gog_game(state: &SharedState, galaxy_folder: &str, product_id: &st
     });
 }
 
+/// Link an unmatched Lutris game to a Steam achievement source: record the
+/// matching in the DB, generate achievement definitions, then announce + enrich.
+fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: String, lutris_name: String) {
+    let steam = state.borrow().steam.clone();
+    let watcher = state.borrow().watcher.clone();
+    let sender = state.borrow().sender.clone();
+    let db = state.borrow().db.clone();
+    std::thread::spawn(move || {
+        let _ = crate::db::upsert_matching(&db, lutris_id, &steam_app_id, "steam", &steam_app_id);
+        let _ = steam.generate_steam_settings(&steam_app_id);
+        if let Ok(Some(entry)) = crate::db::find_by_lutris_id(&db, lutris_id) {
+            if let Ok(mut game) = crate::parser::load_game(&entry, SAVE_DIR) {
+                if game.name.is_empty() || game.name.starts_with("App ID:") {
+                    game.name = lutris_name.clone();
+                }
+                game.lutris_id = lutris_id;
+                let name = game.name.clone();
+                if let Some(ref watcher) = watcher {
+                    watcher.watch(&entry, &game.achievements);
+                }
+                let _ = sender.send(AppMessage::NewGame(game));
+                enrich_game_async(
+                    steam_app_id.clone(),
+                    "steam".to_string(),
+                    steam_app_id.clone(),
+                    entry.id,
+                    lutris_id,
+                    name,
+                    steam,
+                    watcher,
+                    sender,
+                );
+            }
+        }
+    });
+}
+
 fn confirm_mark_unlocked(state: &SharedState, kind: &str, app_id: &str, platform_id: &str, ach: &MergedAchievement, reload: impl Fn() + 'static) {
     let window = state.borrow().window.clone();
     let ach_name = ach.name.clone();
@@ -1714,6 +2059,7 @@ pub fn enrich_game_async(
     kind: String,
     platform_id: String,
     db_id: i64,
+    lutris_id: i64,
     title: String,
     steam: Arc<SteamClient>,
     watcher: Option<AchievementWatcher>,
@@ -1726,8 +2072,11 @@ pub fn enrich_game_async(
             steam_id: app_id.clone(),
             platform_id: platform_id.clone(),
             title,
-            lutris_id: None,
+            lutris_db_id: if lutris_id != 0 { Some(lutris_id) } else { None },
+            sgdb_id: None,
             hidden: false,
+            logo_position: String::new(),
+            logo_size: 0,
         };
 
         let meta_path = crate::parser::achievements_dir(SAVE_DIR, &app_id).join("achievements.json");

@@ -96,6 +96,44 @@ pub struct Game {
     pub earned_count: usize,
     pub total_count: usize,
     pub hidden: bool,
+    /// Lutris internal game id (0 = not linked / unmatched).
+    pub lutris_id: i64,
+    pub slug: String,
+    /// Playtime in hours (from Lutris).
+    pub playtime: f64,
+    /// Unix timestamp of last play (from Lutris).
+    pub lastplayed: i64,
+    /// Logo overlay position (e.g. "bottom-left", "center", etc.).
+    pub logo_position: String,
+    /// Logo overlay pixel size.
+    pub logo_size: i32,
+}
+
+/// A Lutris game with no matched achievement source yet — shown in the sidebar
+/// with no achievements until the user matches it to a Steam/GOG app id.
+pub fn unmatched_game(lutris_id: i64, name: &str, slug: &str, playtime: f64, lastplayed: i64) -> Game {
+    Game {
+        app_id: String::new(),
+        kind: String::new(),
+        platform_id: String::new(),
+        db_id: 0,
+        name: name.to_string(),
+        icon_path: String::new(),
+        hero_image_path: String::new(),
+        grid_path: String::new(),
+        header_path: String::new(),
+        logo_path: String::new(),
+        achievements: Vec::new(),
+        earned_count: 0,
+        total_count: 0,
+        hidden: false,
+        lutris_id,
+        slug: slug.to_string(),
+        playtime,
+        lastplayed,
+        logo_position: String::new(),
+        logo_size: 0,
+    }
 }
 
 fn parse_hidden(v: &serde_json::Value) -> bool {
@@ -231,6 +269,12 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         earned_count: 0,
         total_count: 0,
         hidden: entry.hidden,
+        lutris_id: entry.lutris_db_id.unwrap_or(0),
+        slug: String::new(),
+        playtime: 0.0,
+        lastplayed: 0,
+        logo_position: entry.logo_position.clone(),
+        logo_size: entry.logo_size,
     };
 
     let ach_dir = achievements_dir(save_dir, app_id);

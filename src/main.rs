@@ -3,6 +3,7 @@ mod config;
 mod db;
 mod gamesetup;
 mod images;
+mod lutris;
 mod parser;
 mod steam;
 mod strings;
@@ -17,6 +18,7 @@ use crate::watcher::AchievementWatcher;
 use gtk4::glib;
 use gtk4::prelude::*;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 
@@ -26,6 +28,7 @@ pub enum AppMessage {
     WatcherGameUpdated(Game),
     AddGameError(String),
     GameRemoved { app_id: String },
+    GameStopped(i64),
 }
 
 fn main() {
@@ -58,8 +61,7 @@ fn activate(app: &adw::Application) -> SharedState {
 
     let db = db::init_db(&format!("{}/gse.db", ui::SAVE_DIR));
 
-    // Only scan the directory structure on a fresh (empty) DB. Once games exist
-    // — including user-edited titles — leave them untouched.
+    // Populate achievement sources from existing steam/gog save dirs (first run).
     if db::load_all_games(&db).map(|v| v.is_empty()).unwrap_or(true) {
         populate_db_from_dirs(&db, ui::SAVE_DIR);
     }
@@ -70,7 +72,7 @@ fn activate(app: &adw::Application) -> SharedState {
         &format!("{}/data", ui::SAVE_DIR),
     ));
 
-    let games = parser::load_games(&db, ui::SAVE_DIR);
+    let games = build_game_list(&db, ui::SAVE_DIR);
 
     let (sender, receiver) = mpsc::channel::<AppMessage>();
 
@@ -90,7 +92,9 @@ fn activate(app: &adw::Application) -> SharedState {
     {
         let mut names = game_names.lock().unwrap();
         for g in &games {
-            names.insert(g.app_id.clone(), g.name.clone());
+            if !g.app_id.is_empty() {
+                names.insert(g.app_id.clone(), g.name.clone());
+            }
         }
     }
 
@@ -114,11 +118,15 @@ fn activate(app: &adw::Application) -> SharedState {
         glib::ControlFlow::Continue
     });
 
-    // Watch + enrich each game. Hold a single borrow and pass references into
-    // the watcher so we never clone the (large) achievements vectors here.
+    // Watch + enrich matched games only (unmatched ones have no achievement
+    // source yet). Hold a single borrow and pass references into the watcher so
+    // we never clone the (large) achievements vectors here.
     {
         let s = state.borrow();
         for g in &s.games {
+            if g.app_id.is_empty() {
+                continue;
+            }
             if let Some(ref watcher) = watcher {
                 let entry = GameEntry {
                     id: g.db_id,
@@ -126,8 +134,11 @@ fn activate(app: &adw::Application) -> SharedState {
                     steam_id: g.app_id.clone(),
                     platform_id: g.platform_id.clone(),
                     title: String::new(),
-                    lutris_id: None,
-                hidden: false,
+                    hidden: false,
+                    lutris_db_id: if g.lutris_id != 0 { Some(g.lutris_id) } else { None },
+                    sgdb_id: None,
+                    logo_position: String::new(),
+                    logo_size: 0,
                 };
                 watcher.watch(&entry, &g.achievements);
             }
@@ -136,6 +147,7 @@ fn activate(app: &adw::Application) -> SharedState {
                 g.kind.clone(),
                 g.platform_id.clone(),
                 g.db_id,
+                g.lutris_id,
                 g.name.clone(),
                 steam.clone(),
                 watcher.clone(),
@@ -149,6 +161,152 @@ fn activate(app: &adw::Application) -> SharedState {
     }
 
     state
+}
+
+/// Normalize a game title for fuzzy matching: lowercase, strip non-alphanumerics,
+/// collapse whitespace, remove common suffixes like "- The Final Cut".
+fn normalize_title(s: &str) -> String {
+    let lower = s.to_lowercase();
+    let alnum: String = lower
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect();
+    let words: Vec<&str> = alnum.split_whitespace().collect();
+    // Drop trailing words that are often edition/version suffixes.
+    let suffixes = ["the", "final", "cut", "edition", "complete", "definitive", "remastered", "hd"];
+    let mut end = words.len();
+    while end > 0 && suffixes.contains(&words[end - 1]) {
+        end -= 1;
+    }
+    words[..end].join(" ")
+}
+
+/// Try to auto-match unmatched Lutris games to existing save dirs by title.
+/// Scans `data/<app_id>/appdetails.json` for the real game name, then matches
+/// by normalized title (one contains the other).
+fn auto_match_by_title(db: &db::DbConn, save_dir: &str, lutris_games: &[lutris::LutrisGame]) {
+    // Build a map of normalized_title → steam_id from existing save dirs.
+    let data_dir = std::path::Path::new(save_dir).join("data");
+    let mut title_map: Vec<(String, String)> = Vec::new(); // (normalized, steam_id)
+    if let Ok(entries) = std::fs::read_dir(&data_dir) {
+        for entry in entries.flatten() {
+            let app_id = match entry.file_name().to_str() {
+                Some(s) if s.parse::<i64>().is_ok() => s.to_string(),
+                _ => continue,
+            };
+            // Skip dirs already linked to a Lutris game.
+            if db::find_by_steam_id(db, &app_id)
+                .ok()
+                .flatten()
+                .map(|e| e.lutris_db_id.is_some())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            if let Some(name) = crate::parser::read_app_name(save_dir, &app_id) {
+                title_map.push((normalize_title(&name), app_id));
+            }
+        }
+    }
+
+    // For each unmatched Lutris game, try to find a matching save dir by title.
+    let entries = db::load_all_games(db).unwrap_or_default();
+    let linked: std::collections::HashSet<i64> = entries
+        .iter()
+        .filter_map(|e| e.lutris_db_id)
+        .collect();
+    for lg in lutris_games {
+        if linked.contains(&lg.id) {
+            continue;
+        }
+        let norm = normalize_title(&lg.name);
+        if norm.is_empty() {
+            continue;
+        }
+        // Exact normalized match first, then substring (Lutris name is shorter).
+        let match_id = title_map
+            .iter()
+            .find(|(t, _)| t == &norm)
+            .or_else(|| title_map.iter().find(|(t, _)| t.contains(&norm) || norm.contains(t.as_str())))
+            .map(|(_, id)| id.clone());
+        if let Some(steam_id) = match_id {
+            if let Ok(Some(entry)) = db::find_by_steam_id(db, &steam_id) {
+                let _ = db::set_lutris_db_id(db, entry.id, lg.id);
+                eprintln!("Auto-matched '{}' → steam_id {}", lg.name, steam_id);
+            }
+        }
+    }
+}
+
+/// Build the game list with Lutris as the source of truth.
+///
+/// Each Lutris game is joined to our DB (by `lutris_db_id`) to find its matched
+/// achievement source. Matched games load achievements from the save dir;
+/// unmatched ones appear with just their Lutris metadata until the user matches
+/// them. Lutris games with a `service` (steam/gog) are auto-linked to existing
+/// achievement sources by `service_id`.
+fn build_game_list(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
+    let lutris_games = match lutris::load_lutris_games() {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("Failed to read Lutris DB (falling back to DB-only list): {}", e);
+            return parser::load_games(db, save_dir);
+        }
+    };
+
+    // Auto-link Lutris service games to existing achievement sources.
+    for lg in &lutris_games {
+        if lg.service_id.is_empty() {
+            continue;
+        }
+        let entry = if lg.service == "steam" {
+            db::find_by_steam_id(db, &lg.service_id).ok().flatten()
+        } else if lg.service == "gog" {
+            db::find_gog_by_product_id(db, &lg.service_id).ok().flatten()
+        } else {
+            None
+        };
+        if let Some(entry) = entry {
+            if entry.lutris_db_id.is_none() {
+                let _ = db::set_lutris_db_id(db, entry.id, lg.id);
+            }
+        }
+    }
+
+    // Auto-match remaining unmatched Lutris games by title against existing
+    // save dirs (which have appdetails.json with the real game name).
+    auto_match_by_title(db, save_dir, &lutris_games);
+
+    // Join: Lutris games (source of truth) ← our DB (achievement matching).
+    let entries = db::load_all_games(db).unwrap_or_default();
+    let mut by_lutris: HashMap<i64, db::GameEntry> = entries
+        .into_iter()
+        .filter_map(|e| e.lutris_db_id.map(|id| (id, e)))
+        .collect();
+
+    let mut games = Vec::with_capacity(lutris_games.len());
+    for lg in &lutris_games {
+        if let Some(entry) = by_lutris.remove(&lg.id) {
+            match parser::load_game(&entry, save_dir) {
+                Ok(mut game) => {
+                    game.lutris_id = lg.id;
+                    game.slug = lg.slug.clone();
+                    game.playtime = lg.playtime;
+                    game.lastplayed = lg.lastplayed;
+                    if game.name.is_empty() || game.name.starts_with("App ID:") {
+                        game.name = lg.name.clone();
+                    }
+                    games.push(game);
+                }
+                Err(e) => eprintln!("Skipping {} ({}): {}", lg.name, lg.slug, e),
+            }
+        } else {
+            // Unmatched Lutris game — no achievement source yet.
+            games.push(parser::unmatched_game(lg.id, &lg.name, &lg.slug, lg.playtime, lg.lastplayed));
+        }
+    }
+    games.sort_by(|a, b| a.name.cmp(&b.name));
+    games
 }
 
 fn populate_db_from_dirs(db: &db::DbConn, save_dir: &str) {

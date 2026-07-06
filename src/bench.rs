@@ -27,8 +27,8 @@ pub fn run_bench(state: SharedState) {
         std::process::exit(1);
     }
 
-    let app_a = games[0].app_id.clone();
-    let app_b = games[1].app_id.clone();
+    let app_a = games[0].lutris_id;
+    let app_b = games[1].lutris_id;
 
     log("startup");
 
@@ -42,7 +42,7 @@ pub fn run_bench(state: SharedState) {
                 phase = 1;
             }
             1 => {
-                let id = if switch_i % 2 == 0 { &app_a } else { &app_b };
+                let id = if switch_i % 2 == 0 { app_a } else { app_b };
                 switch_to_game(&state, id);
                 log(&format!("after switch {:2} ({})", switch_i + 1, id));
                 switch_i += 1;

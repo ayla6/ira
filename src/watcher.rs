@@ -194,7 +194,7 @@ fn process_reload(
 }
 
 fn notify_unlock(game_name: &str, ach: &MergedAchievement) {
-    let title = format!("{} — Achievement Unlocked", game_name);
+    let title = format!("{} — Trophy Unlocked", game_name);
     let body = if ach.description.is_empty() {
         ach.display_name.clone()
     } else {

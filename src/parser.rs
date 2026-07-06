@@ -95,6 +95,7 @@ pub struct Game {
     pub achievements: Vec<MergedAchievement>,
     pub earned_count: usize,
     pub total_count: usize,
+    pub hidden: bool,
 }
 
 fn parse_hidden(v: &serde_json::Value) -> bool {
@@ -229,6 +230,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         achievements: Vec::new(),
         earned_count: 0,
         total_count: 0,
+        hidden: entry.hidden,
     };
 
     let ach_dir = achievements_dir(save_dir, app_id);

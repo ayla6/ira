@@ -12,6 +12,8 @@ pub struct Config {
     pub notifications_enabled: bool,
     #[serde(default)]
     pub close_to_background: bool,
+    #[serde(default)]
+    pub show_hidden_games: bool,
 }
 
 impl Default for Config {
@@ -21,6 +23,7 @@ impl Default for Config {
             steam_griddb_api_key: String::new(),
             notifications_enabled: true,
             close_to_background: false,
+            show_hidden_games: false,
         }
     }
 }
@@ -108,6 +111,7 @@ impl Config {
             steam_griddb_api_key: String::new(),
             notifications_enabled: self.notifications_enabled,
             close_to_background: self.close_to_background,
+            show_hidden_games: self.show_hidden_games,
         };
         if steam_err.is_err() {
             plaintext.steam_api_key = self.steam_api_key.clone();

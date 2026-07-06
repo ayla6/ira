@@ -10,6 +10,7 @@ pub struct GameEntry {
     pub title: String,
     #[allow(dead_code)]
     pub lutris_id: Option<String>,
+    pub hidden: bool,
 }
 
 pub type DbConn = Arc<Mutex<Connection>>;
@@ -28,6 +29,8 @@ pub fn init_db(db_path: &str) -> DbConn {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_kind_platform ON games(kind, platform_id);",
     ).expect("failed to create tables");
+    // Migration: add `hidden` column for databases created before it existed.
+    let _ = conn.execute("ALTER TABLE games ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0", []);
     Arc::new(Mutex::new(conn))
 }
 
@@ -60,7 +63,7 @@ pub fn update_game_title(conn: &DbConn, id: i64, title: &str) -> Result<(), Stri
 
 pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, lutris_id FROM games ORDER BY title")
+    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, lutris_id, hidden FROM games ORDER BY title")
         .map_err(|e| e.to_string())?;
     let entries = stmt.query_map([], |row| {
         Ok(GameEntry {
@@ -70,6 +73,7 @@ pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
             platform_id: row.get(3)?,
             title: row.get(4)?,
             lutris_id: row.get(5)?,
+            hidden: row.get(6)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -80,6 +84,13 @@ pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
     Ok(result)
 }
 
+pub fn set_game_hidden(conn: &DbConn, id: i64, hidden: bool) -> Result<(), String> {
+    let c = conn.lock().map_err(|e| e.to_string())?;
+    c.execute("UPDATE games SET hidden = ?1 WHERE id = ?2", params![hidden, id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
     c.execute("DELETE FROM games WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
@@ -88,7 +99,7 @@ pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
 
 pub fn find_by_steam_id(conn: &DbConn, steam_id: &str) -> Result<Option<GameEntry>, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, lutris_id FROM games WHERE steam_id = ?1")
+    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, lutris_id, hidden FROM games WHERE steam_id = ?1")
         .map_err(|e| e.to_string())?;
     let mut entries = stmt.query_map(params![steam_id], |row| {
         Ok(GameEntry {
@@ -98,6 +109,7 @@ pub fn find_by_steam_id(conn: &DbConn, steam_id: &str) -> Result<Option<GameEntr
             platform_id: row.get(3)?,
             title: row.get(4)?,
             lutris_id: row.get(5)?,
+            hidden: row.get(6)?,
         })
     }).map_err(|e| e.to_string())?;
 

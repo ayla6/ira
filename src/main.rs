@@ -127,6 +127,7 @@ fn activate(app: &adw::Application) -> SharedState {
                     platform_id: g.platform_id.clone(),
                     title: String::new(),
                     lutris_id: None,
+                hidden: false,
                 };
                 watcher.watch(&entry, &g.achievements);
             }

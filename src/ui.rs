@@ -27,6 +27,8 @@ const APP_CSS: &str = "
 .sidebar-row-title { min-width: 0; }
 .global-bar trough { background-color: transparent; border: none; }
 .global-bar progress { border: none; border-radius: 0; }
+.hidden-game { opacity: 0.5; }
+.popover-btn, .popover-btn > label { font-weight: normal; }
 ";
 
 extern "C" {
@@ -61,6 +63,7 @@ fn select_row_silently(state: &SharedState, row: Option<&gtk4::ListBoxRow>) {
 }
 
 struct SidebarRowWidgets {
+    row: gtk4::ListBoxRow,
     icon: gtk4::Image,
     title: gtk4::Label,
     subtitle: gtk4::Label,
@@ -200,15 +203,47 @@ fn build_window(state: &SharedState, app: &adw::Application) {
     settings_label.set_xalign(0.0);
     settings_btn.set_child(Some(&settings_label));
     settings_btn.add_css_class("flat");
+    settings_btn.add_css_class("popover-btn");
     settings_btn.set_halign(gtk4::Align::Fill);
+    settings_btn.set_margin_top(6);
+    settings_btn.set_margin_bottom(6);
     popover_box.append(&settings_btn);
+
+    let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    popover_box.append(&sep);
+
+    let hidden_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    hidden_row.set_hexpand(true);
+    let hidden_label = gtk4::Label::new(Some(S::SHOW_HIDDEN_GAMES));
+    hidden_label.set_xalign(0.0);
+    hidden_label.set_hexpand(true);
+    let hidden_switch = gtk4::Switch::new();
+    hidden_switch.set_active(state.borrow().cfg.show_hidden_games);
+    hidden_row.append(&hidden_label);
+    hidden_row.append(&hidden_switch);
+    popover_box.append(&hidden_row);
 
     popover.set_child(Some(&popover_box));
     menu_btn.set_popover(Some(&popover));
 
+    let state_clone = state.clone();
+    hidden_switch.connect_active_notify(move |sw| {
+        let active = sw.is_active();
+        state_clone.borrow_mut().cfg.show_hidden_games = active;
+        let _ = state_clone.borrow().cfg.save();
+        let s = state_clone.borrow();
+        for (i, g) in s.games.iter().enumerate() {
+            if i < s.rows.len() {
+                s.rows[i].row.set_visible(!g.hidden || active);
+            }
+        }
+    });
+
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.set_tooltip_text(Some(S::ADD_GAME));
     add_btn.add_css_class("flat");
+    // Disabled for now — game adding will move to the Lutris-based flow.
+    add_btn.set_sensitive(false);
     header_bar.pack_start(&add_btn);
 
     let toolbar_view = adw::ToolbarView::new();
@@ -310,15 +345,16 @@ fn rebuild_sidebar(state: &SharedState) {
     game_list.append(&all_games_row);
 
     // Game rows starting at index 1
+    let show_hidden = state.borrow().cfg.show_hidden_games;
     let games: Vec<Game> = state.borrow().games.to_vec();
     let mut rows = Vec::with_capacity(games.len());
     for g in &games {
-        rows.push(build_sidebar_row(&game_list, g, state));
+        rows.push(build_sidebar_row(&game_list, g, state, show_hidden));
     }
     state.borrow_mut().rows = rows;
 }
 
-fn build_sidebar_row(list: &gtk4::ListBox, game: &Game, state: &SharedState) -> SidebarRowWidgets {
+fn build_sidebar_row(list: &gtk4::ListBox, game: &Game, state: &SharedState, show_hidden: bool) -> SidebarRowWidgets {
     let row = gtk4::ListBoxRow::new();
 
     let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
@@ -366,6 +402,10 @@ fn build_sidebar_row(list: &gtk4::ListBox, game: &Game, state: &SharedState) -> 
     hbox.append(&vbox);
     row.set_child(Some(&hbox));
     list.append(&row);
+    row.set_visible(!game.hidden || show_hidden);
+    if game.hidden {
+        row.add_css_class("hidden-game");
+    }
 
     // Right-click context menu for game settings
     let state_clone = state.clone();
@@ -379,6 +419,7 @@ fn build_sidebar_row(list: &gtk4::ListBox, game: &Game, state: &SharedState) -> 
     row.add_controller(right_click);
 
     SidebarRowWidgets {
+        row,
         icon,
         title: title_label,
         subtitle: count_label,
@@ -392,6 +433,9 @@ fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
     if !existing.name.is_empty() && !existing.name.starts_with("App ID:") {
         updated.name = existing.name.clone();
     }
+    // Enrichment reloads the game from disk with a fresh GameEntry, which
+    // doesn't know the hidden flag — never let it clobber the real value.
+    updated.hidden = existing.hidden;
     if updated.icon_path.is_empty() {
         updated.icon_path = existing.icon_path.clone();
     }
@@ -625,6 +669,24 @@ fn build_game_header(game: &Game, fraction: f64) -> gtk4::Widget {
         hero_wrap.set_size_request(-1, 280);
         hero_wrap.set_vexpand(false);
         hero_wrap.set_child(Some(&overlay));
+
+        // Keep a consistent hero aspect ratio across window sizes instead of a
+        // flat 280px strip that looks tiny on wide windows. Height tracks width
+        // (≈3.2:1), clamped so it never gets absurdly tall or short.
+        let hero_for_resize = hero_wrap.clone();
+        let last_h = std::cell::Cell::new(280i32);
+        hero_wrap.connect_notify_local(Some("width"), move |w, _| {
+            let width = w.width();
+            if width > 0 {
+                let h = ((width as f64) / 3.2).round() as i32;
+                let h = h.clamp(240, 380);
+                if last_h.get() != h {
+                    last_h.set(h);
+                    hero_for_resize.set_size_request(-1, h);
+                }
+            }
+        });
+
         hero_wrap.upcast()
     } else {
         let header_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -731,6 +793,7 @@ fn display_game(game: &Game, state: &SharedState) {
             platform_id: platform_id_for_reload.clone(),
             title: String::new(),
             lutris_id: None,
+            hidden: false,
         };
         if let Ok(updated) = load_game(&entry, SAVE_DIR) {
             apply_game_update(&state_for_reload, updated);
@@ -1328,8 +1391,19 @@ fn show_settings_dialog(
 }
 
 fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxRow) {
+    // Read the current hidden state from state — the `game` arg is captured when
+    // the sidebar row was built and may be stale after a hide/unhide.
+    let current_hidden = state
+        .borrow()
+        .games
+        .iter()
+        .find(|g| g.app_id == game.app_id)
+        .map(|g| g.hidden)
+        .unwrap_or(game.hidden);
+
     let menu = gio::Menu::new();
     menu.append(Some(S::EDIT_GAME_SETTINGS), Some("game.edit"));
+    menu.append(Some(if current_hidden { S::UNHIDE_GAME } else { S::HIDE_GAME }), Some("game.hide"));
     menu.append(Some(S::REMOVE_GAME), Some("game.remove"));
     let popover = gtk4::PopoverMenu::from_model(Some(&menu));
     popover.set_halign(gtk4::Align::Start);
@@ -1345,6 +1419,28 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
         show_game_settings_dialog(&sc, &gc);
     });
     actions.add_action(&edit_action);
+
+    let hide_action = gio::SimpleAction::new("hide", None);
+    let sc = state_clone.clone();
+    let gc = game_clone.clone();
+    let row_clone = row.clone();
+    hide_action.connect_activate(move |_, _| {
+        let new_hidden = !current_hidden;
+        if let Err(e) = crate::db::set_game_hidden(&sc.borrow().db, gc.db_id, new_hidden) {
+            eprintln!("Failed to set hidden: {}", e);
+        }
+        if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.app_id == gc.app_id) {
+            g.hidden = new_hidden;
+        }
+        if new_hidden {
+            row_clone.add_css_class("hidden-game");
+        } else {
+            row_clone.remove_css_class("hidden-game");
+        }
+        let show_hidden = sc.borrow().cfg.show_hidden_games;
+        row_clone.set_visible(!new_hidden || show_hidden);
+    });
+    actions.add_action(&hide_action);
 
     let remove_action = gio::SimpleAction::new("remove", None);
     let sc = state_clone.clone();
@@ -1631,6 +1727,7 @@ pub fn enrich_game_async(
             platform_id: platform_id.clone(),
             title,
             lutris_id: None,
+            hidden: false,
         };
 
         let meta_path = crate::parser::achievements_dir(SAVE_DIR, &app_id).join("achievements.json");

@@ -24,7 +24,7 @@ const APP_CSS: &str = "
 .hidden-game { opacity: 0.5; }
 .popover-btn, .popover-btn > label { font-weight: normal; }
 .play-btn-label { font-size: 1.15em; }
-.hero-bottom { background: linear-gradient(transparent 15%, @theme_bg_color 45%); }
+
 .success-label { color: @accent_color; font-weight: bold; }
 ";
 
@@ -467,14 +467,12 @@ fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
     if updated.logo_path.is_empty() {
         updated.logo_path = existing.logo_path.clone();
     }
-    // Enrichment always resets logo_position to defaults — preserve user settings
-    if updated.logo_position.is_empty() || updated.logo_position == "bottom-left" {
+    // Enrichment sends empty/0 logo settings — preserve user's DB values
+    if updated.logo_position.is_empty() {
         updated.logo_position = existing.logo_position.clone();
     }
-    if updated.logo_size == 0 || updated.logo_size == 25 {
+    if updated.logo_size == 0 {
         updated.logo_size = existing.logo_size;
-    } else if existing.logo_size == 25 && updated.logo_size == 25 {
-        updated.logo_size = 50;
     }
 
     if !existing.achievements.is_empty() {
@@ -848,7 +846,7 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
         return header.upcast();
     }
 
-    // Hero: height tracks width to maintain ~3.1:1 aspect ratio
+    // Hero overlay: hero image + logo (logo painted via DrawingArea for exact positioning)
     let overlay = gtk4::Overlay::new();
     overlay.set_vexpand(false);
     overlay.set_hexpand(true);
@@ -861,7 +859,62 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
     hero.set_content_fit(gtk4::ContentFit::Cover);
     overlay.set_child(Some(&hero));
 
-    // Update height on resize
+    // Logo rendered via DrawingArea stacked on top of hero.
+    // The DrawingArea fills the full overlay so we compute the logo position
+    // exactly in draw-coordinates (Cairo) – no overlay child-allocation issues.
+    if !game.logo_path.is_empty() {
+        let logo_pct = game.logo_size.clamp(5, 100);
+        let logo_pos = game.logo_position.clone();
+
+        if let Ok(pixbuf) = gtk4::gdk_pixbuf::Pixbuf::from_file(&game.logo_path) {
+            let pb_w = pixbuf.width() as f64;
+            let pb_h = pixbuf.height() as f64;
+
+            let logo_area = gtk4::DrawingArea::new();
+            logo_area.set_halign(gtk4::Align::Fill);
+            logo_area.set_valign(gtk4::Align::Fill);
+            logo_area.set_hexpand(true);
+            logo_area.set_vexpand(true);
+
+            logo_area.set_draw_func(move |_area, cr, area_w, area_h| {
+                let w = area_w as f64;
+                let h = area_h as f64;
+                if w <= 0.0 || h <= 0.0 {
+                    return;
+                }
+
+                let (sw, sh) = logo_scaled_dims(w, h, pb_w, pb_h, logo_pct);
+                let lw = sw as f64;
+                let lh = sh as f64;
+
+                let (halign, valign) = logo_position_align(&logo_pos);
+
+                let x = match halign {
+                    gtk4::Align::Start => 24.0,
+                    gtk4::Align::Center => (w - lw) / 2.0,
+                    gtk4::Align::End => w - lw - 24.0,
+                    _ => 24.0,
+                };
+                let y = match valign {
+                    gtk4::Align::Start => 24.0,
+                    gtk4::Align::Center => (h - lh) / 2.0,
+                    gtk4::Align::End => h - lh - 24.0,
+                    _ => h - lh - 24.0,
+                };
+
+                let _ = cr.save();
+                cr.translate(x, y);
+                cr.scale(lw / pb_w, lh / pb_h);
+                cr.set_source_pixbuf(&pixbuf, 0.0, 0.0);
+                let _ = cr.paint();
+                let _ = cr.restore();
+            });
+
+            overlay.add_overlay(&logo_area);
+        }
+    }
+
+    // Tick callback: update hero height on resize
     overlay.add_tick_callback(move |o, _fc| {
         let w = o.allocated_width();
         if w > 0 {
@@ -873,52 +926,29 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
         glib::ControlFlow::Continue
     });
 
-    // Logo on hero (if exists) — sized once from content_width, no tick callback
-    if !game.logo_path.is_empty() {
-        let logo = gtk4::Picture::for_filename(&game.logo_path);
-        logo.set_content_fit(gtk4::ContentFit::ScaleDown);
-        let (halign, valign) = logo_position_align(&game.logo_position);
-        logo.set_halign(halign);
-        logo.set_valign(valign);
+    // Stats bar below hero (not overlaid)
+    let stats_container = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
+    stats_container.set_margin_start(24);
+    stats_container.set_margin_end(24);
+    stats_container.set_margin_top(12);
+    stats_container.set_margin_bottom(12);
+    stats_container.append(&stats_row);
 
-        // Compute logo height from hero height (which is content_width / 3.1)
-        let hero_h = ((content_width as f64) / 3.1).max(150.0);
-        let logo_pct = game.logo_size.clamp(5, 100).max(5);
-        let logo_h = (hero_h * (logo_pct as f64 / 100.0)).max(32.0) as i32;
-        let m = 24i32;
-        logo.set_margin_start(m);
-        logo.set_margin_end(m);
-        logo.set_margin_top(m);
-        logo.set_margin_bottom(m);
-        logo.set_size_request(-1, logo_h);
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    outer.append(&overlay);
+    outer.append(&stats_container);
+    outer.upcast()
+}
 
-        overlay.add_overlay(&logo);
-    }
-
-    // Title at bottom of hero, above stats bar (only if no logo)
-    if game.logo_path.is_empty() {
-        title_row.set_margin_start(24);
-        title_row.set_margin_end(24);
-        title_row.set_margin_bottom(90);
-        title_row.set_valign(gtk4::Align::End);
-        title_row.set_halign(gtk4::Align::Start);
-        overlay.add_overlay(&title_row);
-    }
-
-    // Stats bar with gradient
-    let bottom = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    bottom.set_halign(gtk4::Align::Fill);
-    bottom.set_valign(gtk4::Align::End);
-    bottom.set_hexpand(true);
-    bottom.add_css_class("hero-bottom");
-    stats_row.set_margin_start(24);
-    stats_row.set_margin_end(24);
-    stats_row.set_margin_top(24);
-    stats_row.set_margin_bottom(16);
-    bottom.append(&stats_row);
-    overlay.add_overlay(&bottom);
-
-    overlay.upcast()
+/// Compute logo scaled dimensions so both fit constraints:
+/// max height = logo_pct% of hero height, max width = logo_pct/2 % of hero width.
+fn logo_scaled_dims(hero_w: f64, hero_h: f64, src_w: f64, src_h: f64, logo_pct: i32) -> (i32, i32) {
+    let max_h = hero_h * (logo_pct as f64 / 100.0);
+    let max_w = hero_w * (logo_pct as f64 / 200.0);
+    let scale = (max_w / src_w).min(max_h / src_h);
+    let w = (src_w * scale).max(32.0) as i32;
+    let h = (src_h * scale).max(32.0) as i32;
+    (w, h)
 }
 
 fn logo_position_align(pos: &str) -> (gtk4::Align, gtk4::Align) {
@@ -1651,9 +1681,6 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
 
     let menu = gio::Menu::new();
     menu.append(Some(S::EDIT_GAME_SETTINGS), Some("game.edit"));
-    if !game.logo_path.is_empty() {
-        menu.append(Some("Logo settings"), Some("game.logosettings"));
-    }
     // Open folders submenu
     let folders_menu = gio::Menu::new();
     if game.kind == "steam" || game.kind == "sgdb" {
@@ -1684,16 +1711,6 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
         show_game_settings_dialog(&sc, &gc);
     });
     actions.add_action(&edit_action);
-
-    if !game_clone.logo_path.is_empty() {
-        let logo_action = gio::SimpleAction::new("logosettings", None);
-        let sc = state_clone.clone();
-        let gc = game_clone.clone();
-        logo_action.connect_activate(move |_, _| {
-            show_logo_settings_dialog(&sc, &gc);
-        });
-        actions.add_action(&logo_action);
-    }
 
     let hide_action = gio::SimpleAction::new("hide", None);
     let sc = state_clone.clone();
@@ -1888,6 +1905,40 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     let settings_label = gtk4::Label::new(Some("Settings"));
     notebook.append_page(&settings_page, Some(&settings_label));
 
+    // --- Logo tab (only if game has a logo) ---
+    let logo_positions = ["bottom-left", "bottom-center", "bottom-right", "center-left", "center", "center-right", "top-left", "top-center", "top-right"];
+    let logo_controls = if !game.logo_path.is_empty() {
+        let logo_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+        logo_page.set_margin_start(16);
+        logo_page.set_margin_end(16);
+        logo_page.set_margin_top(16);
+        logo_page.set_margin_bottom(16);
+
+        let pos_store = gtk4::StringList::new(&logo_positions);
+        let pos_combo = gtk4::DropDown::new(Some(pos_store), None::<&gtk4::PropertyExpression>);
+        let current_idx = logo_positions.iter().position(|&p| p == game.logo_position).unwrap_or(0);
+        pos_combo.set_selected(current_idx as u32);
+        let pos_row = adw::ActionRow::new();
+        pos_row.set_title("Position");
+        pos_row.add_suffix(&pos_combo);
+        logo_page.append(&pos_row);
+
+        let size_pct = game.logo_size.clamp(5, 100);
+        let size_adj = gtk4::Adjustment::new(size_pct as f64, 5.0, 100.0, 5.0, 10.0, 0.0);
+        let size_spin = gtk4::SpinButton::new(Some(&size_adj), 1.0, 0);
+        size_spin.set_numeric(true);
+        let size_row = adw::ActionRow::new();
+        size_row.set_title("Size (% of hero)");
+        size_row.add_suffix(&size_spin);
+        logo_page.append(&size_row);
+
+        let logo_label = gtk4::Label::new(Some("Logo"));
+        notebook.append_page(&logo_page, Some(&logo_label));
+        Some((pos_combo, size_adj))
+    } else {
+        None
+    };
+
     // --- Images tab (only for matched games) ---
     if !game.app_id.is_empty() {
         let images_page = build_image_manager_content(state, game, &win);
@@ -1913,21 +1964,50 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     save_btn.add_css_class("suggested-action");
     let state_clone = state.clone();
     let db_id = game.db_id;
+    let lutris_id = game.lutris_id;
     let app_id = game.app_id.clone();
     let title_entry_c = title_entry.clone();
+    let logo_controls_c = logo_controls.clone();
     let win_s = win.clone();
     save_btn.connect_clicked(move |_| {
         let title = title_entry_c.text().to_string();
         if let Err(e) = crate::db::update_game_title(&state_clone.borrow().db, db_id, &title) {
             eprintln!("Failed to update game: {}", e);
         }
-        if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.app_id == app_id) {
+
+        // Save logo settings if the game has a logo
+        if let Some((ref pos_combo, ref size_adj)) = logo_controls_c {
+            let pos = logo_positions[pos_combo.selected() as usize].to_string();
+            let size = size_adj.value() as i32;
+            if db_id != 0 {
+                if let Err(e) = crate::db::set_logo_settings(&state_clone.borrow().db, db_id, &pos, size) {
+                    eprintln!("Failed to update logo settings: {}", e);
+                }
+            }
+            // Update in-memory game
+            if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
+                g.logo_position = pos;
+                g.logo_size = size;
+            }
+        }
+
+        // Update title in game
+        if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
             g.name = title.clone();
         }
         if !app_id.is_empty() {
             state_clone.borrow().game_names.lock().unwrap().insert(app_id.clone(), title);
         }
         rebuild_sidebar(&state_clone);
+
+        // Re-display the current game to apply logo changes live
+        let selected = state_clone.borrow().selected_id.clone();
+        if selected == lutris_id.to_string() {
+            if let Some(g) = state_clone.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned() {
+                display_game(&g, &state_clone);
+            }
+        }
+
         win_s.close();
     });
 
@@ -1946,7 +2026,7 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
     content.set_margin_top(16);
     content.set_margin_bottom(16);
 
-    let is_steam = game.kind == "steam";
+    let is_steam = game.kind == "steam" || game.kind == "gog";
     let id = game.app_id.clone();
     let data_subdir = if game.kind == "sgdb" { "steamgriddb" } else { "steam" };
 
@@ -2304,91 +2384,6 @@ fn show_sgdb_picker(steam: &Arc<crate::steam::SteamClient>, id: &str, asset: &st
             glib::ControlFlow::Continue
         }
     });
-}
-
-fn show_logo_settings_dialog(state: &SharedState, game: &Game) {
-    let window = state.borrow().window.clone();
-    let dialog = adw::AlertDialog::new(
-        Some(&format!("Logo settings: {}", game.name)),
-        None,
-    );
-
-    let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    box_.set_margin_top(12);
-    box_.set_margin_bottom(4);
-
-    // Logo preview
-    let preview = gtk4::Picture::for_filename(&game.logo_path);
-    preview.set_size_request(-1, 120);
-    preview.set_content_fit(gtk4::ContentFit::ScaleDown);
-    preview.set_margin_bottom(8);
-    box_.append(&preview);
-
-    // Position combo
-    let positions = ["bottom-left", "bottom-center", "bottom-right", "center-left", "center", "center-right", "top-left", "top-center", "top-right"];
-    let pos_store = gtk4::StringList::new(&positions);
-    let pos_combo = gtk4::DropDown::new(Some(pos_store), None::<&gtk4::PropertyExpression>);
-    let current_idx = positions.iter().position(|&p| p == game.logo_position).unwrap_or(0);
-    pos_combo.set_selected(current_idx as u32);
-    let pos_row = adw::ActionRow::new();
-    pos_row.set_title("Position");
-    pos_row.add_suffix(&pos_combo);
-    box_.append(&pos_row);
-
-    // Size spin (% of hero height)
-    let size_pct = if game.logo_size < 5 || game.logo_size > 50 { 25 } else { game.logo_size };
-    let size_adj = gtk4::Adjustment::new(size_pct as f64, 5.0, 50.0, 5.0, 10.0, 0.0);
-    let size_spin = gtk4::SpinButton::new(Some(&size_adj), 1.0, 0);
-    size_spin.set_numeric(true);
-    let size_row = adw::ActionRow::new();
-    size_row.set_title("Logo height (% of hero)");
-    size_row.add_suffix(&size_spin);
-    box_.append(&size_row);
-
-    dialog.set_extra_child(Some(&box_));
-
-    dialog.add_response("cancel", S::CANCEL);
-    dialog.add_response("save", S::SAVE);
-    dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
-    dialog.set_default_response(Some("save"));
-    dialog.set_close_response("cancel");
-
-    let state_clone = state.clone();
-    let db_id = game.db_id;
-    let lutris_id = game.lutris_id;
-    dialog.connect_response(None, move |_, response| {
-        if response != "save" {
-            return;
-        }
-        let pos = positions[pos_combo.selected() as usize].to_string();
-        let size = size_adj.value() as i32;
-
-        // Update DB
-        if db_id != 0 {
-            if let Err(e) = crate::db::set_logo_settings(&state_clone.borrow().db, db_id, &pos, size) {
-                eprintln!("Failed to update logo settings: {}", e);
-            }
-        }
-
-        // Update game in state
-        let updated_game = {
-            let mut s = state_clone.borrow_mut();
-            s.games.iter_mut().find(|g| g.lutris_id == lutris_id).map(|g| {
-                g.logo_position = pos;
-                g.logo_size = size;
-                g.clone()
-            })
-        };
-
-        // Re-display if this game is currently shown
-        if let Some(g) = updated_game {
-            let s = state_clone.borrow();
-            if s.selected_id == g.lutris_id.to_string() {
-                display_game(&g, &state_clone);
-            }
-        }
-    });
-    dialog.present(Some(&window));
 }
 
 fn show_add_game_dialog(state: &SharedState) {
@@ -2780,7 +2775,8 @@ fn show_mass_match_dialog(state: &SharedState) {
         let games = s.games.clone();
         let unmatched: Vec<Game> = games.into_iter().filter(|g| g.app_id.is_empty() && !g.manual_unmatch).collect();
         let data_dir = std::path::Path::new(SAVE_DIR).join("data").join("steam");
-        let mut map: Vec<(String, String)> = Vec::new();
+        // (normalized_title, app_id, original_name)
+        let mut map: Vec<(String, String, String)> = Vec::new();
         if let Ok(entries) = std::fs::read_dir(&data_dir) {
             for entry in entries.flatten() {
                 let app_id = match entry.file_name().to_str() {
@@ -2788,7 +2784,7 @@ fn show_mass_match_dialog(state: &SharedState) {
                     _ => continue,
                 };
                 if let Some(name) = crate::parser::read_app_name(SAVE_DIR, &app_id) {
-                    map.push((normalize_title(&name), app_id));
+                    map.push((normalize_title(&name), app_id, name));
                 }
             }
         }
@@ -2874,8 +2870,8 @@ fn show_mass_match_dialog(state: &SharedState) {
     dialog.present();
 
     // Channel for background → UI communication
-    // Vec of (row_index, Option<matched_steam_id>, game_name, lutris_id)
-    let (tx, rx) = std::sync::mpsc::channel::<(usize, Option<String>, String, i64)>();
+    // (row_index, Option<(steam_id, matched_name)>, game_name, lutris_id)
+    let (tx, rx) = std::sync::mpsc::channel::<(usize, Option<(String, String)>, String, i64)>();
     let rx = std::cell::RefCell::new(rx);
     let remaining = std::cell::Cell::new(unmatched.len());
 
@@ -2887,18 +2883,18 @@ fn show_mass_match_dialog(state: &SharedState) {
             let norm = normalize_title(game_name);
 
             // 1. Try appdetails match
-            let matched_id = if norm.is_empty() {
+            let matched: Option<(String, String)> = if norm.is_empty() {
                 None
             } else {
                 title_map
                     .iter()
-                    .find(|(t, _)| t == &norm)
-                    .map(|(_, id)| id.clone())
+                    .find(|(t, _, _)| t == &norm)
+                    .map(|(_, id, name)| (id.clone(), name.clone()))
             };
 
             // 2. If not found, search Steam Store
-            let final_id = if matched_id.is_some() {
-                matched_id
+            let final_match = if matched.is_some() {
+                matched
             } else {
                 let results = steam.search_steam_store(game_name);
                 if results.is_empty() {
@@ -2908,11 +2904,11 @@ fn show_mass_match_dialog(state: &SharedState) {
                     results
                         .iter()
                         .find(|(_, name)| normalize_title(name) == norm)
-                        .map(|(id, _)| id.clone())
+                        .map(|(id, name)| (id.clone(), name.clone()))
                 }
             };
 
-            let _ = tx.send((i, final_id, game_name.clone(), *lutris_id));
+            let _ = tx.send((i, final_match, game_name.clone(), *lutris_id));
         }
     });
 
@@ -2924,7 +2920,7 @@ fn show_mass_match_dialog(state: &SharedState) {
     let parent_dialog = dialog.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
         // Non-blocking: process at most one result per tick
-        if let Ok((row_idx, matched_id, game_name, lutris_id)) = rx.borrow_mut().try_recv() {
+        if let Ok((row_idx, matched, game_name, lutris_id)) = rx.borrow_mut().try_recv() {
             if row_idx < row_boxes.len() {
                 let action_box = &row_boxes[row_idx];
                 // Clear action_box
@@ -2932,11 +2928,11 @@ fn show_mass_match_dialog(state: &SharedState) {
                     action_box.remove(&child);
                 }
 
-                if let Some(sid) = matched_id {
+                if let Some((sid, matched_name)) = matched {
                     // Auto-match
                     match_game_to_steam(&state_rx, lutris_id, sid.clone(), game_name.clone());
 
-                    let label = gtk4::Label::new(Some(&format!("Matched: {}", sid)));
+                    let label = gtk4::Label::new(Some(&format!("Matched: {} ({})", matched_name, sid)));
                     label.add_css_class("success-label");
                     action_box.append(&label);
 
@@ -2962,11 +2958,16 @@ fn show_mass_match_dialog(state: &SharedState) {
 
                     // Callback: update this row when a match is made
                     let ab = action_box.clone();
-                    let on_match: std::rc::Rc<dyn Fn(&str)> = std::rc::Rc::new(move |sid| {
+                    let on_match: std::rc::Rc<dyn Fn(&str, &str)> = std::rc::Rc::new(move |sid, name| {
                         while let Some(child) = ab.first_child() {
                             ab.remove(&child);
                         }
-                        let l = gtk4::Label::new(Some(&format!("Matched: {}", sid)));
+                        let text = if name.is_empty() {
+                            format!("Matched: {}", sid)
+                        } else {
+                            format!("Matched: {} ({})", name, sid)
+                        };
+                        let l = gtk4::Label::new(Some(&text));
                         l.add_css_class("success-label");
                         ab.append(&l);
                     });
@@ -2984,7 +2985,7 @@ fn show_mass_match_dialog(state: &SharedState) {
                         let body = format!("Enter the Steam app ID for \u{201C}{}\u{201D}:", name);
                         prompt_for_steam_id(&sc, "Match to Steam", &body, move |app_id| {
                             match_game_to_steam(&sc2, lid, app_id.to_string(), name2.clone());
-                            cb2(&app_id);
+                            cb2(&app_id, "");
                         });
                     });
                     action_box.append(&id_btn);
@@ -3038,7 +3039,7 @@ fn show_search_results_dialog(
     game_name: &str,
     lutris_id: i64,
     source: SearchSource,
-    on_match: std::rc::Rc<dyn Fn(&str)>,
+    on_match: std::rc::Rc<dyn Fn(&str, &str)>,
     parent: &gtk4::Window,
 ) {
     let dialog = adw::Window::new();
@@ -3162,6 +3163,7 @@ fn show_search_results_dialog(
                     let sc2 = sc.clone();
                     let name2 = name.clone();
                     let sid = app_id.clone();
+                    let matched_name = result_name.clone();
                     let lid = lutris_id;
                     let dialog_clone = dlg.clone();
                     let callback = cb.clone();
@@ -3171,7 +3173,7 @@ fn show_search_results_dialog(
                             SearchSource::Steam => match_game_to_steam(&sc2, lid, sid.clone(), name2.clone()),
                             SearchSource::SGDB => match_game_to_sgdb(&sc2, lid, sid.clone(), name2.clone()),
                         }
-                        callback(&sid);
+                        callback(&sid, &matched_name);
                         dialog_clone.close();
                     });
                     row.append(&match_btn);

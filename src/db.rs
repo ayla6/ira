@@ -34,29 +34,42 @@ pub fn init_db(db_path: &str) -> DbConn {
             steam_id TEXT NOT NULL,
             platform_id TEXT NOT NULL,
             title TEXT NOT NULL DEFAULT '',
-            lutris_id TEXT
+            hidden INTEGER NOT NULL DEFAULT 0,
+            lutris_db_id INTEGER,
+            sgdb_id TEXT,
+            logo_position TEXT NOT NULL DEFAULT 'bottom-left',
+            logo_size INTEGER NOT NULL DEFAULT 50,
+            ignored INTEGER NOT NULL DEFAULT 0,
+            manual_unmatch INTEGER NOT NULL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_games_kind_platform ON games(kind, platform_id);",
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_games_kind_platform ON games(kind, platform_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_games_lutris_db_id ON games(lutris_db_id) WHERE lutris_db_id IS NOT NULL;
+        CREATE TABLE IF NOT EXISTS lutris_meta (
+            lutris_id INTEGER PRIMARY KEY,
+            hidden INTEGER NOT NULL DEFAULT 0
+        );",
     ).expect("failed to create tables");
-    // Migrations for databases created before these columns existed.
-    let _ = conn.execute("ALTER TABLE games ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE games ADD COLUMN lutris_db_id INTEGER", []);
-    let _ = conn.execute("ALTER TABLE games ADD COLUMN sgdb_id TEXT", []);
+
+    // Migrations for databases created before columns existed
+    let columns = [
+        ("hidden", "INTEGER NOT NULL DEFAULT 0"),
+        ("lutris_db_id", "INTEGER"),
+        ("sgdb_id", "TEXT"),
+        ("logo_position", "TEXT NOT NULL DEFAULT 'bottom-left'"),
+        ("logo_size", "INTEGER NOT NULL DEFAULT 50"),
+        ("ignored", "INTEGER NOT NULL DEFAULT 0"),
+        ("manual_unmatch", "INTEGER NOT NULL DEFAULT 0"),
+    ];
+    for (col, def) in &columns {
+        let _ = conn.execute(&format!("ALTER TABLE games ADD COLUMN {} {}", col, def), []);
+    }
     let _ = conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_games_lutris_db_id ON games(lutris_db_id) WHERE lutris_db_id IS NOT NULL",
         [],
     );
-    let _ = conn.execute("ALTER TABLE games ADD COLUMN logo_position TEXT NOT NULL DEFAULT 'bottom-left'", []);
-    let _ = conn.execute("ALTER TABLE games ADD COLUMN logo_size INTEGER NOT NULL DEFAULT 50", []);
-    let _ = conn.execute("ALTER TABLE games ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE games ADD COLUMN manual_unmatch INTEGER NOT NULL DEFAULT 0", []);
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS lutris_meta (
-            lutris_id INTEGER PRIMARY KEY,
-            hidden INTEGER NOT NULL DEFAULT 0
-        );",
-    ).expect("failed to create lutris_meta table");
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS lutris_meta (lutris_id INTEGER PRIMARY KEY, hidden INTEGER NOT NULL DEFAULT 0);")
+        .expect("failed to create lutris_meta table");
     Arc::new(Mutex::new(conn))
 }
 

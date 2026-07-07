@@ -298,11 +298,16 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         }
     }
 
-    // Use the correct data directory based on kind
-    let image_dir = if kind == "sgdb" {
-        sgdb_data_dir(save_dir, app_id)
-    } else {
-        data_dir(save_dir, app_id)
+    // Use the correct data directory based on kind / sgdb_id
+    let image_dir = match entry.sgdb_id.as_ref().filter(|s| !s.is_empty()) {
+        Some(sgdb_id) => sgdb_data_dir(save_dir, sgdb_id),
+        None => {
+            if kind == "sgdb" {
+                sgdb_data_dir(save_dir, app_id)
+            } else {
+                data_dir(save_dir, app_id)
+            }
+        }
     };
 
     // Icon — try .png first, then .ico (with conversion), then other formats

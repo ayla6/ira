@@ -129,7 +129,12 @@ pub fn show_settings_dialog(state: &SharedState) {
     dialog.present();
 }
 
-pub fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxRow) {
+pub fn show_game_context_menu(
+    state: &SharedState,
+    game: &Game,
+    parent: &impl IsA<gtk4::Widget>,
+    sidebar_row: Option<&gtk4::ListBoxRow>,
+) {
     let current_hidden = state
         .borrow()
         .games
@@ -139,10 +144,15 @@ pub fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::List
         .unwrap_or(game.hidden);
 
     let menu = gio::Menu::new();
+
+    // Play at the top
+    let play_item = gio::MenuItem::new(Some("Play"), Some("game.play"));
+    play_item.set_icon(Some(&gio::ThemedIcon::new("media-playback-start-symbolic")));
+    menu.prepend_item(&play_item);
+
     menu.append(Some(S::EDIT_GAME_SETTINGS), Some("game.edit"));
     let folders_menu = gio::Menu::new();
     if game.kind == "steam" || game.kind == "sgdb" {
-        let subdir = if game.kind == "sgdb" { "steamgriddb" } else { "steam" };
         folders_menu.append(Some("Image data"), Some("game.open_images"));
     }
     if game.kind == "steam" {
@@ -153,14 +163,65 @@ pub fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::List
     if folders_menu.n_items() > 0 {
         menu.append_submenu(Some("Open folder"), &folders_menu);
     }
+    // Hide/unhide at the bottom
     menu.append(Some(if current_hidden { S::UNHIDE_GAME } else { S::HIDE_GAME }), Some("game.hide"));
-    menu.append(Some(S::REMOVE_GAME), Some("game.remove"));
+
     let popover = gtk4::PopoverMenu::from_model(Some(&menu));
     popover.set_halign(gtk4::Align::Start);
+    popover.set_has_arrow(false);
 
     let state_clone = state.clone();
     let game_clone = game.clone();
     let actions = gio::SimpleActionGroup::new();
+
+    // Play action — launch via Lutris
+    let play_action = gio::SimpleAction::new("play", None);
+    let sc = state_clone.clone();
+    let gc = game_clone.clone();
+    play_action.connect_activate(move |_, _| {
+        let lutris_id = gc.lutris_id;
+        if lutris_id != 0 {
+            let uri = format!("lutris:rungameid/{}", lutris_id);
+            let rg = sc.borrow().running_games.clone();
+            let sender = sc.borrow().sender.clone();
+            match std::process::Command::new("lutris").arg(&uri).spawn() {
+                Ok(child) => {
+                    rg.lock().unwrap().insert(lutris_id, child);
+                    let rg_mon = rg.clone();
+                    let s_mon = sender.clone();
+                    std::thread::spawn(move || {
+                        loop {
+                            std::thread::sleep(std::time::Duration::from_secs(2));
+                            let mut map = rg_mon.lock().unwrap();
+                            if let Some(ch) = map.get_mut(&lutris_id) {
+                                match ch.try_wait() {
+                                    Ok(Some(_)) => {
+                                        map.remove(&lutris_id);
+                                        drop(map);
+                                        s_mon.send(AppMessage::GameStopped(lutris_id)).ok();
+                                        return;
+                                    }
+                                    Ok(None) => {}
+                                    Err(_) => {
+                                        map.remove(&lutris_id);
+                                        drop(map);
+                                        s_mon.send(AppMessage::GameStopped(lutris_id)).ok();
+                                        return;
+                                    }
+                                }
+                            } else {
+                                return;
+                            }
+                        }
+                    });
+                }
+                Err(e) => {
+                    eprintln!("Failed to launch {}: {}", uri, e);
+                }
+            }
+        }
+    });
+    actions.add_action(&play_action);
 
     let edit_action = gio::SimpleAction::new("edit", None);
     let sc = state_clone.clone();
@@ -173,7 +234,7 @@ pub fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::List
     let hide_action = gio::SimpleAction::new("hide", None);
     let sc = state_clone.clone();
     let gc = game_clone.clone();
-    let row_clone = row.clone();
+    let row = sidebar_row.map(|r| r.clone());
     hide_action.connect_activate(move |_, _| {
         let new_hidden = !current_hidden;
         let lutris_id = gc.lutris_id;
@@ -194,44 +255,22 @@ pub fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::List
         if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
             g.hidden = new_hidden;
         }
-        let scroll = sc.borrow().sidebar_scroll.clone();
-        let saved_scroll = scroll.vadjustment().value();
-        if new_hidden {
-            row_clone.add_css_class("hidden-game");
-        } else {
-            row_clone.remove_css_class("hidden-game");
+        if let Some(ref row_clone) = row {
+            let scroll = sc.borrow().sidebar_scroll.clone();
+            let saved_scroll = scroll.vadjustment().value();
+            if new_hidden {
+                row_clone.add_css_class("hidden-game");
+            } else {
+                row_clone.remove_css_class("hidden-game");
+            }
+            let show_hidden = sc.borrow().cfg.show_hidden_games;
+            row_clone.set_visible(!new_hidden || show_hidden);
+            let adj = scroll.vadjustment();
+            let max = (adj.upper() - adj.page_size()).max(0.0);
+            adj.set_value(saved_scroll.min(max));
         }
-        let show_hidden = sc.borrow().cfg.show_hidden_games;
-        row_clone.set_visible(!new_hidden || show_hidden);
-        let adj = scroll.vadjustment();
-        let max = (adj.upper() - adj.page_size()).max(0.0);
-        adj.set_value(saved_scroll.min(max));
     });
     actions.add_action(&hide_action);
-
-    let remove_action = gio::SimpleAction::new("remove", None);
-    let sc = state_clone.clone();
-    let gc = game_clone.clone();
-    remove_action.connect_activate(move |_, _| {
-        let window = sc.borrow().window.clone();
-        let sc2 = sc.clone();
-        let app_id = gc.app_id.clone();
-        let db_id = gc.db_id;
-        confirm_dialog(
-            &window,
-            S::REMOVE_GAME_QUESTION,
-            &format!("Remove \u{201C}{}\u{201D} from the database? This won't delete any save files.", gc.name),
-            S::REMOVE_GAME,
-            adw::ResponseAppearance::Destructive,
-            move || {
-                if let Err(e) = crate::db::remove_game(&sc2.borrow().db, db_id) {
-                    eprintln!("Failed to remove game from DB: {}", e);
-                }
-                let _ = sc2.borrow().sender.send(AppMessage::GameRemoved { app_id: app_id.clone() });
-            },
-        );
-    });
-    actions.add_action(&remove_action);
 
     if game_clone.kind == "steam" || game_clone.kind == "sgdb" {
         let open_images = gio::SimpleAction::new("open_images", None);
@@ -264,9 +303,9 @@ pub fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::List
         actions.add_action(&open_gog);
     }
 
-    row.insert_action_group("game", Some(&actions));
+    parent.insert_action_group("game", Some(&actions));
 
-    popover.set_parent(row);
+    popover.set_parent(parent);
     popover.popup();
 }
 

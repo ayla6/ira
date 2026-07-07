@@ -115,8 +115,8 @@ fn build_sidebar_row(
     let row_clone = row.clone();
     let right_click = gtk4::GestureClick::new();
     right_click.set_button(3);
-    right_click.connect_pressed(move |_, _, _, _| {
-        crate::dialogs::show_game_context_menu(&state_clone, &game_clone, &row_clone);
+    right_click.connect_pressed(move |_, _, x, y| {
+        crate::dialogs::show_game_context_menu(&state_clone, &game_clone, &row_clone, x, y, Some(&row_clone));
     });
     row.add_controller(right_click);
 

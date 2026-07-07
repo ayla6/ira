@@ -209,7 +209,7 @@ fn notify_unlock(game_name: &str, ach: &MergedAchievement) {
     std::thread::spawn(move || {
         let _ = Command::new("notify-send")
             .args([
-                "--app-name=Achievement Viewer",
+                "--app-name=NotLutris",
                 &format!("--icon={}", icon),
                 &title,
                 &body,

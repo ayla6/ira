@@ -1,4 +1,4 @@
-pub const APP_TITLE: &str = "Achievement viewer";
+pub const APP_TITLE: &str = "NotLutris";
 pub const MENU: &str = "Menu";
 pub const ADD_GAME: &str = "Add a game";
 pub const ALL_GAMES: &str = "All games";
@@ -12,7 +12,7 @@ pub const COULDNT_ADD_GAME: &str = "Couldn't add game";
 pub const RIGHT_CLICK_TO_MARK: &str = "Right-click to mark as already unlocked";
 pub const HIDDEN_ACHIEVEMENT: &str = "Hidden trophy";
 pub const CLICK_TO_REVEAL: &str = "Click to reveal spoiler";
-pub const CLOSE_VIEWER: &str = "Close trophy viewer";
+pub const CLOSE_VIEWER: &str = "Close NotLutris";
 pub const CLOSE_VIEWER_BODY: &str = "Keep the watcher running in the background, or quit completely?";
 pub const EDIT_GAME_SETTINGS: &str = "Edit game settings";
 pub const REMOVE_GAME: &str = "Remove game";

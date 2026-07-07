@@ -377,6 +377,25 @@ fn rebuild_sidebar(state: &SharedState) {
     let upper = adj.upper();
     let max = (upper - adj.page_size()).max(0.0);
     adj.set_value(saved_scroll.min(max));
+
+    // Restore the previously selected row
+    let selected_id = state.borrow().selected_id.clone();
+    if selected_id.is_empty() {
+        let row = game_list.row_at_index(0);
+        select_row_silently(state, row.as_ref());
+    } else if let Ok(lutris_id) = selected_id.parse::<i64>() {
+        let idx = {
+            let s = state.borrow();
+            s.games.iter().position(|g| g.lutris_id == lutris_id)
+        };
+        if let Some(idx) = idx {
+            let row = game_list.row_at_index((idx + 1) as i32);
+            select_row_silently(state, row.as_ref());
+        } else {
+            let row = game_list.row_at_index(0);
+            select_row_silently(state, row.as_ref());
+        }
+    }
 }
 
 fn build_sidebar_row(list: &gtk4::ListBox, game: &Game, state: &SharedState, show_hidden: bool) -> SidebarRowWidgets {

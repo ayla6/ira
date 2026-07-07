@@ -130,22 +130,24 @@ fn activate(app: &adw::Application) -> SharedState {
             if g.app_id.is_empty() {
                 continue;
             }
-            if let Some(ref watcher) = watcher {
-                let entry = GameEntry {
-                    id: g.db_id,
-                    kind: g.kind.clone(),
-                    steam_id: g.app_id.clone(),
-                    platform_id: g.platform_id.clone(),
-                    title: String::new(),
-                    hidden: false,
-                    lutris_db_id: if g.lutris_id != 0 { Some(g.lutris_id) } else { None },
-                    sgdb_id: None,
-                    logo_position: String::new(),
-                    logo_size: 0,
-                    ignored: Some(0),
-                    manual_unmatch: Some(0),
-                };
-                watcher.watch(&entry, &g.achievements);
+            if g.kind != "sgdb" {
+                if let Some(ref watcher) = watcher {
+                    let entry = GameEntry {
+                        id: g.db_id,
+                        kind: g.kind.clone(),
+                        steam_id: g.app_id.clone(),
+                        platform_id: g.platform_id.clone(),
+                        title: String::new(),
+                        hidden: false,
+                        lutris_db_id: if g.lutris_id != 0 { Some(g.lutris_id) } else { None },
+                        sgdb_id: None,
+                        logo_position: String::new(),
+                        logo_size: 0,
+                        ignored: Some(0),
+                        manual_unmatch: Some(0),
+                    };
+                    watcher.watch(&entry, &g.achievements);
+                }
             }
             enrich_game_async(
                 g.app_id.clone(),

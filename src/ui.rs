@@ -2710,60 +2710,62 @@ pub fn enrich_game_async(
             manual_unmatch: Some(0),
         };
 
-        let meta_path = crate::parser::achievements_dir(SAVE_DIR, &app_id).join("achievements.json");
-        if !meta_path.exists() {
-            if let Err(e) = steam.generate_steam_settings(&app_id) {
-                eprintln!("Could not generate achievements for {}: {}", app_id, e);
-            }
-        }
-
         let Ok(mut game) = load_game(&entry, SAVE_DIR) else {
             eprintln!("Failed reloading {}", app_id);
             return;
         };
 
-        if game.name.starts_with("App ID:") {
-            if let Some(name) = steam.fetch_nemirtingas_game_name(&app_id) {
-                game.name = name;
-            }
-        }
-
-        if let Some(details) = steam.fetch_game_details(&app_id) {
-            if game.name.starts_with("App ID:") && !details.name.is_empty() {
-                game.name = details.name.clone();
-            }
-            let has_local_icon = !game.icon_path.is_empty();
-            let (icon_path, hero_path) = steam.ensure_assets(&app_id, has_local_icon);
-            if game.icon_path.is_empty() && !icon_path.is_empty() {
-                game.icon_path = icon_path;
-            }
-            if game.hero_image_path.is_empty() && !hero_path.is_empty() {
-                game.hero_image_path = hero_path;
-            }
-        }
-
-        // Download grid assets (vertical, header, logo) — only fill what's missing.
-        let (grid_path, header_path, logo_path) = steam.ensure_grids(&app_id);
-        if game.grid_path.is_empty() && !grid_path.is_empty() {
-            game.grid_path = grid_path;
-        }
-        if game.header_path.is_empty() && !header_path.is_empty() {
-            game.header_path = header_path;
-        }
-        if game.logo_path.is_empty() && !logo_path.is_empty() {
-            game.logo_path = logo_path;
-        }
-
-        if let Some(pcts) = steam.fetch_global_achievements(&app_id) {
-            for a in &mut game.achievements {
-                if let Some(&pct) = pcts.get(&a.name) {
-                    a.global_percent = pct;
+        if kind != "sgdb" {
+            let meta_path = crate::parser::achievements_dir(SAVE_DIR, &app_id).join("achievements.json");
+            if !meta_path.exists() {
+                if let Err(e) = steam.generate_steam_settings(&app_id) {
+                    eprintln!("Could not generate achievements for {}: {}", app_id, e);
                 }
             }
-        }
 
-        if let Some(ref watcher) = watcher {
-            watcher.watch(&entry, &game.achievements);
+            if game.name.starts_with("App ID:") {
+                if let Some(name) = steam.fetch_nemirtingas_game_name(&app_id) {
+                    game.name = name;
+                }
+            }
+
+            if let Some(details) = steam.fetch_game_details(&app_id) {
+                if game.name.starts_with("App ID:") && !details.name.is_empty() {
+                    game.name = details.name.clone();
+                }
+                let has_local_icon = !game.icon_path.is_empty();
+                let (icon_path, hero_path) = steam.ensure_assets(&app_id, has_local_icon);
+                if game.icon_path.is_empty() && !icon_path.is_empty() {
+                    game.icon_path = icon_path;
+                }
+                if game.hero_image_path.is_empty() && !hero_path.is_empty() {
+                    game.hero_image_path = hero_path;
+                }
+            }
+
+            // Download grid assets (vertical, header, logo) — only fill what's missing.
+            let (grid_path, header_path, logo_path) = steam.ensure_grids(&app_id);
+            if game.grid_path.is_empty() && !grid_path.is_empty() {
+                game.grid_path = grid_path;
+            }
+            if game.header_path.is_empty() && !header_path.is_empty() {
+                game.header_path = header_path;
+            }
+            if game.logo_path.is_empty() && !logo_path.is_empty() {
+                game.logo_path = logo_path;
+            }
+
+            if let Some(pcts) = steam.fetch_global_achievements(&app_id) {
+                for a in &mut game.achievements {
+                    if let Some(&pct) = pcts.get(&a.name) {
+                        a.global_percent = pct;
+                    }
+                }
+            }
+
+            if let Some(ref watcher) = watcher {
+                watcher.watch(&entry, &game.achievements);
+            }
         }
 
         let _ = sender.send(AppMessage::EnrichedGame(game));

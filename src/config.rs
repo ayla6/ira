@@ -14,6 +14,8 @@ pub struct Config {
     pub close_to_background: bool,
     #[serde(default)]
     pub show_hidden_games: bool,
+    #[serde(default = "default_grid_cover_width")]
+    pub grid_cover_width: i32,
 }
 
 impl Default for Config {
@@ -24,8 +26,14 @@ impl Default for Config {
             notifications_enabled: true,
             close_to_background: false,
             show_hidden_games: false,
+            grid_cover_width: DEFAULT_GRID_COVER_WIDTH,
         }
     }
+}
+
+const DEFAULT_GRID_COVER_WIDTH: i32 = 200;
+fn default_grid_cover_width() -> i32 {
+    DEFAULT_GRID_COVER_WIDTH
 }
 
 fn default_true() -> bool {
@@ -112,6 +120,7 @@ impl Config {
             notifications_enabled: self.notifications_enabled,
             close_to_background: self.close_to_background,
             show_hidden_games: self.show_hidden_games,
+            grid_cover_width: self.grid_cover_width,
         };
         if steam_err.is_err() {
             plaintext.steam_api_key = self.steam_api_key.clone();

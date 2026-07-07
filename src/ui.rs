@@ -36,6 +36,41 @@ const APP_CSS: &str = "
     background-color: @accent_color;
     color: white;
 }
+
+/* === Grid view (All Games) === */
+/* Strip FlowBox children of button-like appearance */
+.grid-flowbox flowboxchild {
+    background: transparent;
+    box-shadow: none;
+    border: none;
+    padding: 0;
+    outline: none;
+}
+.grid-flowbox flowboxchild:hover,
+.grid-flowbox flowboxchild:selected {
+    background: transparent;
+}
+
+.cover-item .game-cover-pic {
+    transition: 100ms ease;
+}
+.cover-item:hover .game-cover-pic {
+    transform: scale(1.06);
+}
+
+.section-title {
+    font-weight: 700;
+    font-size: 1.25em;
+}
+
+/* Hide scrollbar on the recent-played row */
+.recent-scroll scrollbar {
+    min-width: 0;
+    min-height: 0;
+    opacity: 0;
+    background: transparent;
+    border: none;
+}
 ";
 
 extern "C" {
@@ -60,6 +95,8 @@ pub struct AppState {
     pub content_unloaded: bool,
     pub restoring: bool,
     pub running_games: Arc<Mutex<HashMap<i64, std::process::Child>>>,
+    /// Debounce flag: a grid-view refresh is scheduled via timeout.
+    pub grid_refresh_pending: bool,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;
@@ -149,6 +186,7 @@ pub fn build_ui(
         content_unloaded: false,
         restoring: false,
         running_games: Arc::new(Mutex::new(HashMap::new())),
+        grid_refresh_pending: false,
     }));
 
     build_window(&state, app);
@@ -248,6 +286,21 @@ fn build_window(state: &SharedState, app: &adw::Application) {
     hidden_row.append(&hidden_switch);
     popover_box.append(&hidden_row);
 
+    // Cover size zoom slider
+    let zoom_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    zoom_row.set_hexpand(true);
+    let zoom_label = gtk4::Label::new(Some(S::COVER_SIZE));
+    zoom_label.set_xalign(0.0);
+    zoom_label.set_hexpand(true);
+    let zoom_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 100.0, 350.0, 10.0);
+    zoom_scale.set_value(state.borrow().cfg.grid_cover_width.clamp(100, 350) as f64);
+    zoom_scale.set_hexpand(true);
+    zoom_scale.set_draw_value(false);
+    zoom_scale.set_digits(0);
+    zoom_row.append(&zoom_label);
+    zoom_row.append(&zoom_scale);
+    popover_box.append(&zoom_row);
+
     popover.set_child(Some(&popover_box));
     menu_btn.set_popover(Some(&popover));
 
@@ -261,6 +314,21 @@ fn build_window(state: &SharedState, app: &adw::Application) {
             if i < s.rows.len() {
                 s.rows[i].row.set_visible(!g.hidden || active);
             }
+        }
+        drop(s);
+        // Rebuild the grid view if it's currently shown so hidden games appear/disappear
+        if state_clone.borrow().selected_id.is_empty() && !state_clone.borrow().content_unloaded {
+            show_grid_view(&state_clone);
+        }
+    });
+
+    let state_clone = state.clone();
+    zoom_scale.connect_value_changed(move |scale| {
+        let val = scale.value() as i32;
+        state_clone.borrow_mut().cfg.grid_cover_width = val;
+        let _ = state_clone.borrow().cfg.save();
+        if state_clone.borrow().selected_id.is_empty() && !state_clone.borrow().content_unloaded {
+            show_grid_view(&state_clone);
         }
     });
 
@@ -289,9 +357,10 @@ fn build_window(state: &SharedState, app: &adw::Application) {
 
     // Only build grid on initial startup, not when rebuilding from hide-to-background
     if !state.borrow().content_unloaded {
-        // Select "All Games" by default
+        // Select "All Games" by default and show the grid view
         let row = state.borrow().game_list.row_at_index(0);
         select_row_silently(state, row.as_ref());
+        show_grid_view(state);
     }
 
     let state_clone = state.clone();
@@ -303,10 +372,10 @@ fn build_window(state: &SharedState, app: &adw::Application) {
         let Some(row) = row else { return; };
         let idx = row.index();
         if idx == 0 {
-            // "All Games" — grid view removed; just deselect
+            // "All Games" — show the grid view
             drop(s);
             state_clone.borrow_mut().selected_id.clear();
-            clear_content(&state_clone);
+            show_grid_view(&state_clone);
         } else if idx >= 1 {
             // Game rows start at index 1
             let game_idx = (idx - 1) as usize;
@@ -561,7 +630,7 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
 fn apply_game_update(state: &SharedState, mut updated: Game) {
     let app_id = updated.app_id.clone();
 
-    let game_for_display = {
+    let (game_for_display, needs_grid_refresh) = {
         let mut s = state.borrow_mut();
         let Some(i) = s.games.iter().position(|g| g.app_id == app_id) else {
             return;
@@ -593,13 +662,33 @@ fn apply_game_update(state: &SharedState, mut updated: Game) {
 
         // Only the currently-displayed game needs a content rebuild.
         let needs_rebuild = s.selected_id == updated.lutris_id.to_string() && !s.content_unloaded;
+        // If the grid view is showing, schedule a debounced refresh so newly
+        // enriched cover images appear without rebuilding on every single update.
+        let needs_grid_refresh = s.selected_id.is_empty()
+            && !s.content_unloaded
+            && !s.grid_refresh_pending;
+        if needs_grid_refresh {
+            s.grid_refresh_pending = true;
+        }
         let game = if needs_rebuild { Some(updated.clone()) } else { None };
         s.games[i] = updated;
-        game
+        (game, needs_grid_refresh)
     };
 
     if let Some(game) = game_for_display {
         display_game(&game, state);
+    }
+    if needs_grid_refresh {
+        let state_clone = state.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || {
+            let mut s = state_clone.borrow_mut();
+            s.grid_refresh_pending = false;
+            let should_refresh = s.selected_id.is_empty() && !s.content_unloaded;
+            drop(s);
+            if should_refresh {
+                show_grid_view(&state_clone);
+            }
+        });
     }
 }
 
@@ -642,11 +731,12 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
 
     if !state.borrow().content_unloaded {
         rebuild_sidebar(state);
-        // If no game is selected, re-select "All Games"
+        // If no game is selected, re-select "All Games" and refresh the grid view
         let selected = state.borrow().selected_id.clone();
         if selected.is_empty() {
             let row = state.borrow().game_list.row_at_index(0);
             select_row_silently(state, row.as_ref());
+            show_grid_view(state);
         }
     }
 }
@@ -673,6 +763,275 @@ fn clear_content(state: &SharedState) {
     while let Some(child) = content_box.first_child() {
         content_box.remove(&child);
     }
+}
+
+// === All Games grid view ===
+
+/// Build and show the "All Games" grid view, similar to Steam's library.
+/// Shows a "Recently played" line at the top (latest game with horizontal
+/// header cover, others with vertical capsule covers), followed by a FlowBox
+/// grid of all games using vertical capsule (600x900) covers.
+fn show_grid_view(state: &SharedState) {
+    let content_box = state.borrow().content_box.clone();
+    let content_scroll = state.borrow().content_scroll.clone();
+
+    content_scroll.vadjustment().set_value(0.0);
+    while let Some(child) = content_box.first_child() {
+        content_box.remove(&child);
+    }
+    crate::images::clear_texture_cache();
+
+    let cover_width = state.borrow().cfg.grid_cover_width.clamp(100, 350);
+    let show_hidden = state.borrow().cfg.show_hidden_games;
+    let cover_height = ((cover_width as f64) * 1.5) as i32;
+
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    outer.set_margin_start(16);
+    outer.set_margin_end(16);
+    outer.set_margin_top(16);
+    outer.set_margin_bottom(32);
+
+    // --- Recently played section ---
+    let mut recent: Vec<Game> = state
+        .borrow()
+        .games
+        .iter()
+        .filter(|g| g.lastplayed > 0 && (!g.hidden || show_hidden))
+        .cloned()
+        .collect();
+    recent.sort_by(|a, b| b.lastplayed.cmp(&a.lastplayed));
+    recent.truncate(8);
+
+    if !recent.is_empty() {
+        outer.append(&build_recent_row(state, &recent, cover_height));
+    }
+
+    // --- All games grid ---
+    let heading = gtk4::Label::new(Some(S::ALL_GAMES));
+    heading.set_xalign(0.0);
+    heading.add_css_class("section-title");
+    heading.set_margin_top(if recent.is_empty() { 0 } else { 20 });
+    heading.set_margin_bottom(8);
+    outer.append(&heading);
+
+    let spacing: u32 = 12;
+    let games: Vec<Game> = state.borrow().games.clone();
+
+    let flow = gtk4::FlowBox::new();
+    flow.set_selection_mode(gtk4::SelectionMode::None);
+    flow.set_homogeneous(true);
+    flow.set_min_children_per_line(1);
+    flow.set_max_children_per_line(30);
+    flow.set_row_spacing(spacing);
+    flow.set_column_spacing(spacing);
+    flow.set_hexpand(true);
+    flow.set_halign(gtk4::Align::Fill);
+    flow.add_css_class("grid-flowbox");
+
+    for game in &games {
+        if game.hidden && !show_hidden {
+            continue;
+        }
+        let item = build_game_cover(state, game, cover_width, cover_height);
+        flow.insert(&item, -1);
+    }
+
+    outer.append(&flow);
+    content_box.append(&outer);
+}
+
+/// Build the "Recently played" row.  The most recent game uses its horizontal
+/// header cover; the rest use vertical capsule covers.  Scrollable via
+/// arrow buttons — no visible scrollbar, no half-cut items.
+fn build_recent_row(
+    state: &SharedState,
+    recent: &[Game],
+    cover_height: i32,
+) -> gtk4::Widget {
+    let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+
+    // --- Title row with scroll buttons ---
+    let title_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    title_row.set_hexpand(true);
+
+    let title = gtk4::Label::new(Some("Recently played"));
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    title.add_css_class("section-title");
+    title_row.append(&title);
+
+    let left_btn = gtk4::Button::from_icon_name("go-previous-symbolic");
+    left_btn.add_css_class("flat");
+    left_btn.set_sensitive(false);
+
+    let right_btn = gtk4::Button::from_icon_name("go-next-symbolic");
+    right_btn.add_css_class("flat");
+
+    let btn_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+    btn_box.append(&left_btn);
+    btn_box.append(&right_btn);
+    title_row.append(&btn_box);
+
+    vbox.append(&title_row);
+
+    // --- Scrollable cover row ---
+    let spacing = 12;
+    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, spacing);
+
+    let mut game_widths: Vec<i32> = Vec::with_capacity(recent.len());
+    for (i, game) in recent.iter().enumerate() {
+        let (w, h, use_header) = if i == 0 {
+            let w = ((cover_height as f64) * 460.0 / 215.0) as i32;
+            (w, cover_height, true)
+        } else {
+            let w = ((cover_height as f64) * 2.0 / 3.0) as i32;
+            (w, cover_height, false)
+        };
+        game_widths.push(w);
+        let path = if use_header { &game.header_path } else { &game.grid_path };
+        let item = build_cover(state, game, path, w, h);
+        hbox.append(&item);
+    }
+
+    let scrolled = gtk4::ScrolledWindow::new();
+    scrolled.set_policy(gtk4::PolicyType::Automatic, gtk4::PolicyType::Never);
+    scrolled.set_hexpand(true);
+    scrolled.set_vexpand(false);
+    scrolled.set_valign(gtk4::Align::Start);
+    scrolled.add_css_class("recent-scroll");
+    scrolled.set_child(Some(&hbox));
+
+    vbox.append(&scrolled);
+
+    // --- Scroll logic ---
+    let adj = scrolled.hadjustment();
+
+    let step_widths = std::rc::Rc::new(
+        game_widths.iter().map(|w| w + spacing).collect::<Vec<i32>>(),
+    );
+    let max_scroll = {
+        let total: i32 = step_widths.iter().sum();
+        total - spacing
+    };
+
+    let sw = step_widths.clone();
+    let ms = max_scroll;
+    let adj_clone = adj.clone();
+    right_btn.connect_clicked(move |_| {
+        let cur = adj_clone.value() as i32;
+        let mut target = cur;
+        for sw_i in sw.iter() {
+            if target < cur + sw_i {
+                target = cur + sw_i;
+                break;
+            }
+            target += sw_i;
+        }
+        adj_clone.set_value(target.min(ms) as f64);
+    });
+
+    let sw = step_widths.clone();
+    let adj_clone = adj.clone();
+    left_btn.connect_clicked(move |_| {
+        let cur = adj_clone.value() as i32;
+        let mut target = 0;
+        let mut running = 0;
+        for sw_i in sw.iter() {
+            let next = running + sw_i;
+            if next >= cur {
+                target = running;
+                break;
+            }
+            running = next;
+        }
+        adj_clone.set_value(target.max(0) as f64);
+    });
+
+    // Enable/disable buttons as scroll position changes
+    let left_btn2 = left_btn.clone();
+    let right_btn2 = right_btn.clone();
+    let max_scroll2 = max_scroll;
+    adj.connect_value_changed(move |adj| {
+        let v = adj.value() as i32;
+        left_btn2.set_sensitive(v > 0);
+        right_btn2.set_sensitive(v < max_scroll2);
+    });
+
+    vbox.upcast()
+}
+
+/// Build a clickable cover Picture (no title) that switches to the game on
+/// click.  The image is loaded already scaled to `w × h`.
+fn build_cover(
+    state: &SharedState,
+    game: &Game,
+    image_path: &str,
+    w: i32,
+    h: i32,
+) -> gtk4::Widget {
+    let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    vbox.set_valign(gtk4::Align::Start);
+    vbox.set_halign(gtk4::Align::Center);
+    vbox.add_css_class("cover-item");
+    vbox.set_size_request(w, h);
+    vbox.set_overflow(gtk4::Overflow::Visible);
+
+    let pic = gtk4::Picture::new();
+    pic.set_content_fit(gtk4::ContentFit::Cover);
+    pic.set_size_request(w, h);
+    pic.add_css_class("game-cover-pic");
+    if !image_path.is_empty() {
+        crate::images::set_picture_scaled(&pic, image_path, w, h);
+    }
+
+    vbox.append(&pic);
+
+    let state_clone = state.clone();
+    let lutris_id = game.lutris_id;
+    let click = gtk4::GestureClick::new();
+    click.connect_pressed(move |_, _, _, _| {
+        switch_to_game(&state_clone, lutris_id);
+    });
+    vbox.add_controller(click);
+
+    vbox.upcast()
+}
+
+/// Build a single game cover for the main grid.  Uses the vertical 600x900
+/// capsule image and maintains a 2:3 aspect ratio.  Image is loaded eagerly.
+fn build_game_cover(
+    state: &SharedState,
+    game: &Game,
+    cover_width: i32,
+    cover_height: i32,
+) -> gtk4::Widget {
+    let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    vbox.set_valign(gtk4::Align::Start);
+    vbox.set_halign(gtk4::Align::Center);
+    vbox.set_size_request(cover_width, cover_height);
+    vbox.add_css_class("cover-item");
+    vbox.set_overflow(gtk4::Overflow::Visible);
+
+    let pic = gtk4::Picture::new();
+    pic.set_content_fit(gtk4::ContentFit::Cover);
+    pic.set_size_request(cover_width, cover_height);
+    pic.add_css_class("game-cover-pic");
+
+    if !game.grid_path.is_empty() {
+        crate::images::set_picture_scaled(&pic, &game.grid_path, cover_width, cover_height);
+    }
+
+    vbox.append(&pic);
+
+    let state_clone = state.clone();
+    let lutris_id = game.lutris_id;
+    let click = gtk4::GestureClick::new();
+    click.connect_pressed(move |_, _, _, _| {
+        switch_to_game(&state_clone, lutris_id);
+    });
+    vbox.add_controller(click);
+
+    vbox.upcast()
 }
 
 fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
@@ -1582,9 +1941,10 @@ pub fn restore_content(state: &SharedState) {
 
     if selected_id.is_empty() {
         clear_content(state);
-        // Re-select "All Games"
+        // Re-select "All Games" and show the grid view
         let row = state.borrow().game_list.row_at_index(0);
         select_row_silently(state, row.as_ref());
+        show_grid_view(state);
         return;
     }
 
@@ -1604,6 +1964,7 @@ pub fn restore_content(state: &SharedState) {
         clear_content(state);
         let row = state.borrow().game_list.row_at_index(0);
         select_row_silently(state, row.as_ref());
+        show_grid_view(state);
     }
 }
 

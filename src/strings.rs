@@ -19,6 +19,7 @@ pub const REMOVE_GAME: &str = "Remove game";
 pub const HIDE_GAME: &str = "Hide game";
 pub const UNHIDE_GAME: &str = "Unhide game";
 pub const SHOW_HIDDEN_GAMES: &str = "Show hidden games";
+pub const COVER_SIZE: &str = "Cover size";
 pub const REMOVE_GAME_QUESTION: &str = "Remove game?";
 pub const EDIT_GAME_PROPS: &str = "Edit game properties below.";
 pub const GAME_TITLE: &str = "Game title";

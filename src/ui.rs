@@ -25,6 +25,7 @@ const APP_CSS: &str = "
 .popover-btn, .popover-btn > label { font-weight: normal; }
 .play-btn-label { font-size: 1.15em; }
 .hero-bottom { background: linear-gradient(transparent 15%, @theme_bg_color 45%); }
+.success-label { color: @accent_color; font-weight: bold; }
 ";
 
 extern "C" {
@@ -207,8 +208,22 @@ fn build_window(state: &SharedState, app: &adw::Application) {
     settings_btn.set_margin_bottom(6);
     popover_box.append(&settings_btn);
 
+    let match_btn = gtk4::Button::new();
+    let match_label = gtk4::Label::new(Some("Match unmatched games"));
+    match_label.set_xalign(0.0);
+    match_btn.set_child(Some(&match_label));
+    match_btn.add_css_class("flat");
+    match_btn.add_css_class("popover-btn");
+    match_btn.set_halign(gtk4::Align::Fill);
+    match_btn.set_margin_top(6);
+    match_btn.set_margin_bottom(6);
+
     let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    popover_box.append(&match_btn);
     popover_box.append(&sep);
+
+    let state_clone2 = state.clone();
+    match_btn.connect_clicked(move |_| show_mass_match_dialog(&state_clone2));
 
     let hidden_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
     hidden_row.set_hexpand(true);
@@ -375,27 +390,11 @@ fn build_sidebar_row(list: &gtk4::ListBox, game: &Game, state: &SharedState, sho
 
     let title_label = gtk4::Label::new(Some(&game.name));
     title_label.set_xalign(0.0);
-    title_label.add_css_class("heading");
     title_label.add_css_class("sidebar-row-title");
     title_label.set_ellipsize(pango::EllipsizeMode::End);
     title_label.set_hexpand(true);
     title_label.set_tooltip_text(Some(&format!("{} ({})", game.name, game.app_id)));
     vbox.append(&title_label);
-
-    let pct = if game.total_count > 0 {
-        game.earned_count * 100 / game.total_count
-    } else {
-        0
-    };
-    let count_label = gtk4::Label::new(Some(&format!(
-        "{}/{} · {}%",
-        game.earned_count, game.total_count, pct
-    )));
-    count_label.set_xalign(0.0);
-    count_label.add_css_class("dim-label");
-    count_label.add_css_class("caption");
-    count_label.set_ellipsize(pango::EllipsizeMode::End);
-    vbox.append(&count_label);
 
     hbox.append(&vbox);
     row.set_child(Some(&hbox));
@@ -420,7 +419,7 @@ fn build_sidebar_row(list: &gtk4::ListBox, game: &Game, state: &SharedState, sho
         row,
         icon,
         title: title_label,
-        subtitle: count_label,
+        subtitle: gtk4::Label::new(None),
     }
 }
 
@@ -439,6 +438,8 @@ fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
     updated.slug = existing.slug.clone();
     updated.playtime = existing.playtime;
     updated.lastplayed = existing.lastplayed;
+    updated.lutris_name = existing.lutris_name.clone();
+    updated.manual_unmatch = existing.manual_unmatch;
     if updated.icon_path.is_empty() {
         updated.icon_path = existing.icon_path.clone();
     }
@@ -460,6 +461,8 @@ fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
     }
     if updated.logo_size == 0 || updated.logo_size == 25 {
         updated.logo_size = existing.logo_size;
+    } else if existing.logo_size == 25 && updated.logo_size == 25 {
+        updated.logo_size = 50;
     }
 
     if !existing.achievements.is_empty() {
@@ -544,12 +547,6 @@ fn apply_game_update(state: &SharedState, mut updated: Game) {
             let rw = &s.rows[i];
             rw.title.set_text(&updated.name);
             rw.title.set_tooltip_text(Some(&format!("{} ({})", updated.name, updated.app_id)));
-            let pct = if updated.total_count > 0 {
-                updated.earned_count * 100 / updated.total_count
-            } else {
-                0
-            };
-            rw.subtitle.set_text(&format!("{}/{} · {}%", updated.earned_count, updated.total_count, pct));
             if !updated.icon_path.is_empty() {
                 crate::images::set_image(&rw.icon, &updated.icon_path);
             }
@@ -592,7 +589,12 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
         });
 
         if let Some(i) = found {
-            s.games[i] = game;
+            let mut g = game;
+            // Preserve fields that the incoming game might not have correct
+            g.hidden = s.games[i].hidden;
+            g.lutris_name = s.games[i].lutris_name.clone();
+            g.manual_unmatch = s.games[i].manual_unmatch;
+            s.games[i] = g;
         } else {
             s.games.push(game);
             s.games.sort_by(|a, b| a.name.cmp(&b.name));
@@ -795,28 +797,30 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
         row.append(&play_button(state, game.lutris_id));
         row.append(&stat_label("Last played", &format_lastplayed(game.lastplayed)));
         row.append(&stat_label("Play time", &format_playtime(game.playtime)));
-        // Trophies count with inline progress bar
-        let tbox = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
-        tbox.set_valign(gtk4::Align::Center);
-        let cap = gtk4::Label::new(Some("Trophies"));
-        cap.set_xalign(0.0);
-        cap.add_css_class("dim-label");
-        cap.add_css_class("caption");
-        tbox.append(&cap);
-        let trow = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-        trow.set_valign(gtk4::Align::Center);
-        let val = gtk4::Label::new(Some(&format!("{}/{}", game.earned_count, game.total_count)));
-        val.set_xalign(0.0);
-        val.set_valign(gtk4::Align::Center);
-        val.add_css_class("heading");
-        trow.append(&val);
-        let prog = gtk4::ProgressBar::new();
-        prog.set_fraction(fraction);
-        prog.set_valign(gtk4::Align::Center);
-        prog.set_size_request(120, -1);
-        trow.append(&prog);
-        tbox.append(&trow);
-        row.append(&tbox);
+        // Trophies count with inline progress bar (hidden when 0 achievements)
+        if game.total_count > 0 {
+            let tbox = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+            tbox.set_valign(gtk4::Align::Center);
+            let cap = gtk4::Label::new(Some("Trophies"));
+            cap.set_xalign(0.0);
+            cap.add_css_class("dim-label");
+            cap.add_css_class("caption");
+            tbox.append(&cap);
+            let trow = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+            trow.set_valign(gtk4::Align::Center);
+            let val = gtk4::Label::new(Some(&format!("{}/{}", game.earned_count, game.total_count)));
+            val.set_xalign(0.0);
+            val.set_valign(gtk4::Align::Center);
+            val.add_css_class("heading");
+            trow.append(&val);
+            let prog = gtk4::ProgressBar::new();
+            prog.set_fraction(fraction);
+            prog.set_valign(gtk4::Align::Center);
+            prog.set_size_request(120, -1);
+            trow.append(&prog);
+            tbox.append(&trow);
+            row.append(&tbox);
+        }
         row
     };
 
@@ -836,9 +840,7 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
     let overlay = gtk4::Overlay::new();
     overlay.set_vexpand(false);
     overlay.set_hexpand(true);
-
-    let initial_hero_height = ((content_width as f64) / 3.1).max(150.0) as i32;
-    overlay.set_height_request(initial_hero_height);
+    overlay.set_height_request(((content_width as f64) / 3.1).max(150.0) as i32);
 
     let hero = gtk4::Picture::for_filename(&game.hero_image_path);
     hero.set_halign(gtk4::Align::Fill);
@@ -847,22 +849,49 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
     hero.set_content_fit(gtk4::ContentFit::Cover);
     overlay.set_child(Some(&hero));
 
+    // Update height on resize
     overlay.add_tick_callback(move |o, _fc| {
-        let width = o.allocated_width();
-        let target = ((width as f64) / 3.1).max(150.0) as i32;
-        if o.height_request() != target {
-            o.set_height_request(target);
+        let w = o.allocated_width();
+        if w > 0 {
+            let target = ((w as f64) / 3.1).max(150.0) as i32;
+            if o.height_request() != target {
+                o.set_height_request(target);
+            }
         }
         glib::ControlFlow::Continue
     });
 
-    // Title at bottom of hero, above stats bar
-    title_row.set_margin_start(24);
-    title_row.set_margin_end(24);
-    title_row.set_margin_bottom(90);
-    title_row.set_valign(gtk4::Align::End);
-    title_row.set_halign(gtk4::Align::Start);
-    overlay.add_overlay(&title_row);
+    // Logo on hero (if exists) — sized once from content_width, no tick callback
+    if !game.logo_path.is_empty() {
+        let logo = gtk4::Picture::for_filename(&game.logo_path);
+        logo.set_content_fit(gtk4::ContentFit::ScaleDown);
+        let (halign, valign) = logo_position_align(&game.logo_position);
+        logo.set_halign(halign);
+        logo.set_valign(valign);
+
+        // Compute logo height from hero height (which is content_width / 3.1)
+        let hero_h = ((content_width as f64) / 3.1).max(150.0);
+        let logo_pct = game.logo_size.clamp(5, 100).max(5);
+        let logo_h = (hero_h * (logo_pct as f64 / 100.0)).max(32.0) as i32;
+        let m = 24i32;
+        logo.set_margin_start(m);
+        logo.set_margin_end(m);
+        logo.set_margin_top(m);
+        logo.set_margin_bottom(m);
+        logo.set_size_request(-1, logo_h);
+
+        overlay.add_overlay(&logo);
+    }
+
+    // Title at bottom of hero, above stats bar (only if no logo)
+    if game.logo_path.is_empty() {
+        title_row.set_margin_start(24);
+        title_row.set_margin_end(24);
+        title_row.set_margin_bottom(90);
+        title_row.set_valign(gtk4::Align::End);
+        title_row.set_halign(gtk4::Align::Start);
+        overlay.add_overlay(&title_row);
+    }
 
     // Stats bar with gradient
     let bottom = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -922,29 +951,16 @@ fn display_game(game: &Game, state: &SharedState) {
     content_box.append(&build_game_header(game, fraction, state, content_width));
 
     if game.app_id.is_empty() {
-        // Unmatched — no achievement source yet. Offer to link it to Steam.
+        // Unmatched — no achievement source yet.
         let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
         box_.set_margin_top(32);
         box_.set_margin_bottom(32);
         box_.set_halign(gtk4::Align::Center);
-        let label = gtk4::Label::new(Some("This game isn't linked to a trophy source yet."));
+        let label = gtk4::Label::new(Some("This game isn't linked to a trophy source yet.\nUse \"Match unmatched games\" in the menu to find a match."));
         label.add_css_class("dim-label");
-        let match_btn = gtk4::Button::with_label("Match to Steam");
-        match_btn.add_css_class("suggested-action");
-        match_btn.set_halign(gtk4::Align::Center);
-        let state_clone = state.clone();
-        let lutris_id = game.lutris_id;
-        let name = game.name.clone();
-        match_btn.connect_clicked(move |_| {
-            let sc = state_clone.clone();
-            let name_clone = name.clone();
-            let body = format!("Enter the Steam app ID for \u{201C}{}\u{201D}:", name);
-            prompt_for_steam_id(&state_clone, "Match to Steam", &body, move |app_id| {
-                match_game_to_steam(&sc, lutris_id, app_id.to_string(), name_clone.clone());
-            });
-        });
+        label.set_wrap(true);
+        label.set_justify(gtk4::Justification::Center);
         box_.append(&label);
-        box_.append(&match_btn);
         content_box.append(&box_);
         return;
     }
@@ -1007,6 +1023,8 @@ fn display_game(game: &Game, state: &SharedState) {
             hidden: false,
             logo_position: String::new(),
             logo_size: 0,
+            ignored: Some(0),
+            manual_unmatch: Some(0),
         };
         if let Ok(updated) = load_game(&entry, SAVE_DIR) {
             apply_game_update(&state_for_reload, updated);
@@ -1374,6 +1392,10 @@ fn create_global_stats_row(
     (row, reveal)
 }
 
+fn open_folder(path: &str) {
+    let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+}
+
 /// A two-response (cancel / confirm) alert dialog. `on_confirm` runs only when
 /// the user picks the confirm response.
 fn confirm_dialog(
@@ -1611,7 +1633,7 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
         .borrow()
         .games
         .iter()
-        .find(|g| g.app_id == game.app_id)
+        .find(|g| g.lutris_id == game.lutris_id)
         .map(|g| g.hidden)
         .unwrap_or(game.hidden);
 
@@ -1619,6 +1641,20 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
     menu.append(Some(S::EDIT_GAME_SETTINGS), Some("game.edit"));
     if !game.logo_path.is_empty() {
         menu.append(Some("Logo settings"), Some("game.logosettings"));
+    }
+    // Open folders submenu
+    let folders_menu = gio::Menu::new();
+    if game.kind == "steam" || game.kind == "sgdb" {
+        let subdir = if game.kind == "sgdb" { "steamgriddb" } else { "steam" };
+        folders_menu.append(Some("Image data"), Some("game.open_images"));
+    }
+    if game.kind == "steam" {
+        folders_menu.append(Some("Achievement status"), Some("game.open_steam_status"));
+    } else if game.kind == "gog" {
+        folders_menu.append(Some("Achievement status"), Some("game.open_gog_status"));
+    }
+    if folders_menu.n_items() > 0 {
+        menu.append_submenu(Some("Open folder"), &folders_menu);
     }
     menu.append(Some(if current_hidden { S::UNHIDE_GAME } else { S::HIDE_GAME }), Some("game.hide"));
     menu.append(Some(S::REMOVE_GAME), Some("game.remove"));
@@ -1653,10 +1689,12 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
     let row_clone = row.clone();
     hide_action.connect_activate(move |_, _| {
         let new_hidden = !current_hidden;
-        if let Err(e) = crate::db::set_game_hidden(&sc.borrow().db, gc.db_id, new_hidden) {
-            eprintln!("Failed to set hidden: {}", e);
+        if gc.db_id != 0 {
+            if let Err(e) = crate::db::set_game_hidden(&sc.borrow().db, gc.db_id, new_hidden) {
+                eprintln!("Failed to set hidden: {}", e);
+            }
         }
-        if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.app_id == gc.app_id) {
+        if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.lutris_id == gc.lutris_id) {
             g.hidden = new_hidden;
         }
         if new_hidden {
@@ -1693,6 +1731,40 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
     });
     actions.add_action(&remove_action);
 
+    // Open image data folder
+    if game_clone.kind == "steam" || game_clone.kind == "sgdb" {
+        let open_images = gio::SimpleAction::new("open_images", None);
+        let gc = game_clone.clone();
+        open_images.connect_activate(move |_, _| {
+            let subdir = if gc.kind == "sgdb" { "steamgriddb" } else { "steam" };
+            let path = format!("{}/data/{}/{}", SAVE_DIR, subdir, gc.app_id);
+            open_folder(&path);
+        });
+        actions.add_action(&open_images);
+    }
+
+    // Open Steam achievement status folder
+    if game_clone.kind == "steam" {
+        let open_status = gio::SimpleAction::new("open_steam_status", None);
+        let gc = game_clone.clone();
+        open_status.connect_activate(move |_, _| {
+            let path = format!("{}/steam/{}", SAVE_DIR, gc.app_id);
+            open_folder(&path);
+        });
+        actions.add_action(&open_status);
+    }
+
+    // Open GOG achievement status folder
+    if game_clone.kind == "gog" {
+        let open_gog = gio::SimpleAction::new("open_gog_status", None);
+        let gc = game_clone.clone();
+        open_gog.connect_activate(move |_, _| {
+            let path = format!("{}/gog/{}/{}", SAVE_DIR, crate::parser::GALAXY_ID, gc.platform_id);
+            open_folder(&path);
+        });
+        actions.add_action(&open_gog);
+    }
+
     row.insert_action_group("game", Some(&actions));
 
     popover.set_parent(row);
@@ -1700,44 +1772,124 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
 }
 
 fn show_game_settings_dialog(state: &SharedState, game: &Game) {
-    let window = state.borrow().window.clone();
-    let dialog = adw::AlertDialog::new(
-        Some(&game.name),
-        None,
-    );
+    let parent = state.borrow().window.clone();
+    let win = adw::Window::new();
+    win.set_default_width(500);
+    win.set_default_height(500);
+    win.set_transient_for(Some(&parent));
+    win.set_modal(true);
 
-    let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    box_.set_margin_top(12);
-    box_.set_margin_bottom(4);
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+
+    let header_bar = adw::HeaderBar::new();
+    header_bar.set_title_widget(Some(&gtk4::Label::new(Some(&game.name))));
+    outer.append(&header_bar);
+
+    let notebook = gtk4::Notebook::new();
+
+    // --- Settings tab ---
+    let settings_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    settings_page.set_margin_start(16);
+    settings_page.set_margin_end(16);
+    settings_page.set_margin_top(16);
+    settings_page.set_margin_bottom(16);
 
     let title_entry = gtk4::Entry::new();
     title_entry.set_placeholder_text(Some(S::GAME_TITLE));
     title_entry.set_text(&game.name);
     let title_label = gtk4::Label::new(Some(S::TITLE));
     title_label.set_halign(gtk4::Align::Start);
-    box_.append(&title_label);
-    box_.append(&title_entry);
+    settings_page.append(&title_label);
+    settings_page.append(&title_entry);
 
-    dialog.set_extra_child(Some(&box_));
+    // Unmatch button (only for matched games)
+    if game.lutris_id != 0 && !game.app_id.is_empty() {
+        let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+        settings_page.append(&sep);
 
-    dialog.add_response("cancel", S::CANCEL);
-    dialog.add_response("save", S::SAVE);
-    dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
-    dialog.set_default_response(Some("save"));
-    dialog.set_close_response("cancel");
+        let unmatch_btn = gtk4::Button::with_label("Unmatch game");
+        unmatch_btn.add_css_class("destructive-action");
+        unmatch_btn.set_halign(gtk4::Align::Start);
+        let sc = state.clone();
+        let gc = game.clone();
+        let win_clone = win.clone();
+        unmatch_btn.connect_clicked(move |_| {
+            let parent = sc.borrow().window.clone();
+            let sc2 = sc.clone();
+            let lutris_id = gc.lutris_id;
+            let name = gc.name.clone();
+            let win2 = win_clone.clone();
+            confirm_dialog(
+                &parent,
+                "Unmatch game?",
+                &format!("Unmatch \u{201C}{}\u{201D} from its trophy source? The game will remain in the list but without trophies.", name),
+                "Unmatch",
+                adw::ResponseAppearance::Destructive,
+                move || {
+                    if let Err(e) = crate::db::unmatch_game(&sc2.borrow().db, lutris_id) {
+                        eprintln!("Failed to unmatch game: {}", e);
+                    }
+                    if let Some(g) = sc2.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
+                        g.app_id.clear();
+                        g.kind.clear();
+                        g.platform_id.clear();
+                        g.achievements.clear();
+                        g.earned_count = 0;
+                        g.total_count = 0;
+                        g.icon_path.clear();
+                        g.hero_image_path.clear();
+                        g.grid_path.clear();
+                        g.header_path.clear();
+                        g.logo_path.clear();
+                        g.manual_unmatch = true;
+                        if !g.lutris_name.is_empty() {
+                            g.name = g.lutris_name.clone();
+                        }
+                    }
+                    rebuild_sidebar(&sc2);
+                    win2.close();
+                },
+            );
+        });
+        settings_page.append(&unmatch_btn);
+    }
 
+    let settings_label = gtk4::Label::new(Some("Settings"));
+    notebook.append_page(&settings_page, Some(&settings_label));
+
+    // --- Images tab (only for matched games) ---
+    if !game.app_id.is_empty() {
+        let images_page = build_image_manager_content(state, game, &win);
+        let images_label = gtk4::Label::new(Some("Images"));
+        notebook.append_page(&images_page, Some(&images_label));
+    }
+
+    outer.append(&notebook);
+
+    // Save / Close buttons
+    let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    btn_row.set_halign(gtk4::Align::End);
+    btn_row.set_margin_start(16);
+    btn_row.set_margin_end(16);
+    btn_row.set_margin_top(8);
+    btn_row.set_margin_bottom(12);
+
+    let cancel_btn = gtk4::Button::with_label(S::CANCEL);
+    let win_c = win.clone();
+    cancel_btn.connect_clicked(move |_| win_c.close());
+
+    let save_btn = gtk4::Button::with_label(S::SAVE);
+    save_btn.add_css_class("suggested-action");
     let state_clone = state.clone();
     let db_id = game.db_id;
     let app_id = game.app_id.clone();
-    dialog.connect_response(None, move |_, response| {
-        if response != "save" {
-            return;
-        }
-        let title = title_entry.text().to_string();
+    let title_entry_c = title_entry.clone();
+    let win_s = win.clone();
+    save_btn.connect_clicked(move |_| {
+        let title = title_entry_c.text().to_string();
         if let Err(e) = crate::db::update_game_title(&state_clone.borrow().db, db_id, &title) {
             eprintln!("Failed to update game: {}", e);
         }
-        // Update game in state and rebuild
         if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.app_id == app_id) {
             g.name = title.clone();
         }
@@ -1745,8 +1897,382 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
             state_clone.borrow().game_names.lock().unwrap().insert(app_id.clone(), title);
         }
         rebuild_sidebar(&state_clone);
+        win_s.close();
     });
-    dialog.present(Some(&window));
+
+    btn_row.append(&cancel_btn);
+    btn_row.append(&save_btn);
+    outer.append(&btn_row);
+
+    win.set_content(Some(&outer));
+    win.present();
+}
+
+fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &adw::Window) -> gtk4::Box {
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
+    content.set_margin_start(16);
+    content.set_margin_end(16);
+    content.set_margin_top(16);
+    content.set_margin_bottom(16);
+
+    let is_steam = game.kind == "steam";
+    let id = game.app_id.clone();
+    let data_subdir = if game.kind == "sgdb" { "steamgriddb" } else { "steam" };
+
+    for (label, file, asset, thumb_w, thumb_h) in [
+        ("Icon", "icon.png", "icon", 48, 48),
+        ("Hero", "library_hero.jpg", "hero", 96, 32),
+        ("Grid", "library_600x900.jpg", "grid", 32, 48),
+        ("Header", "header.jpg", "header", 96, 45),
+        ("Logo", "logo.png", "logo", 96, 32),
+    ] {
+        let section = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+        let lbl = gtk4::Label::new(Some(label));
+        lbl.set_halign(gtk4::Align::Start);
+        lbl.add_css_class("heading");
+        section.append(&lbl);
+
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        row.set_hexpand(true);
+
+        let img_path = format!("{}/data/{}/{}/{}", SAVE_DIR, data_subdir, id, file);
+        let preview = gtk4::Picture::for_filename(&img_path);
+        preview.set_content_fit(gtk4::ContentFit::ScaleDown);
+        preview.set_size_request(thumb_w, thumb_h);
+        let preview_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        preview_wrapper.set_size_request(thumb_w, thumb_h);
+        if std::path::Path::new(&img_path).exists() {
+            preview_wrapper.append(&preview);
+        } else {
+            let ph = gtk4::Label::new(Some("—"));
+            ph.add_css_class("dim-label");
+            preview_wrapper.append(&ph);
+        }
+        row.append(&preview_wrapper);
+
+        let btns = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+        btns.set_hexpand(true);
+        btns.set_halign(gtk4::Align::End);
+
+        let refresh_images: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({
+            let preview_wrapper = preview_wrapper.clone();
+            let img_path = img_path.clone();
+            let state_clone = state.clone();
+            let game_clone = game.clone();
+            move || {
+                while let Some(child) = preview_wrapper.first_child() {
+                    preview_wrapper.remove(&child);
+                }
+                if std::path::Path::new(&img_path).exists() {
+                    let p = gtk4::Picture::for_filename(&img_path);
+                    p.set_content_fit(gtk4::ContentFit::ScaleDown);
+                    preview_wrapper.append(&p);
+                } else {
+                    let ph = gtk4::Label::new(Some("—"));
+                    ph.add_css_class("dim-label");
+                    preview_wrapper.append(&ph);
+                }
+                let s = state_clone.borrow();
+                if let Ok(Some(entry)) = crate::db::find_by_lutris_id(&s.db, game_clone.lutris_id) {
+                    drop(s);
+                    if let Ok(updated) = crate::parser::load_game(&entry, SAVE_DIR) {
+                        apply_game_update(&state_clone, updated);
+                    }
+                }
+            }
+        });
+
+        // Browse
+        let browse_btn = gtk4::Button::with_label("Browse…");
+        let dest_path = img_path.clone();
+        let state_browse = state.clone();
+        let refresh = refresh_images.clone();
+        browse_btn.connect_clicked(move |_| {
+            let filter = gtk4::FileFilter::new();
+            filter.set_name(Some("Images"));
+            filter.add_mime_type("image/png");
+            filter.add_mime_type("image/jpeg");
+            filter.add_mime_type("image/webp");
+            filter.add_mime_type("image/x-icon");
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title("Select image");
+            dialog.set_default_filter(Some(&filter));
+            let dest = dest_path.clone();
+            let refresh_c = refresh.clone();
+            dialog.open(Some(&state_browse.borrow().window), None::<&gio::Cancellable>, move |result| {
+                if let Ok(file) = result {
+                    if let Some(path) = file.path() {
+                        let is_ico = path.extension().and_then(|e| e.to_str()) == Some("ico");
+                        if is_ico {
+                            let ico_dest = std::path::Path::new(&dest).with_extension("ico");
+                            if std::fs::copy(&path, &ico_dest).is_ok() {
+                                if let Ok(png) = crate::parser::convert_ico_to_png(&ico_dest) {
+                                    let _ = std::fs::remove_file(&ico_dest);
+                                }
+                            }
+                        } else if let Err(e) = std::fs::copy(&path, &dest) {
+                            eprintln!("Failed to copy image: {}", e);
+                        }
+                        refresh_c();
+                    }
+                }
+            });
+        });
+        btns.append(&browse_btn);
+
+        // Steam
+        if is_steam && asset != "icon" {
+            let btn = gtk4::Button::with_label("Steam");
+            let steam = state.borrow().steam.clone();
+            let id_c = id.clone();
+            let asset_c = asset.to_string();
+            let refresh = refresh_images.clone();
+            btn.connect_clicked(move |_| {
+                let _ = steam.force_download_steam(&id_c, &asset_c);
+                refresh();
+            });
+            btns.append(&btn);
+        }
+
+        // SGDB
+        let btn = gtk4::Button::with_label("SGDB…");
+        let steam = state.borrow().steam.clone();
+        let id_c = id.clone();
+        let asset_c = asset.to_string();
+        let is_steam_c = is_steam;
+        let parent = parent_win.clone();
+        let refresh = refresh_images.clone();
+        btn.connect_clicked(move |_| {
+            show_sgdb_picker(&steam, &id_c, &asset_c, is_steam_c, &parent, refresh.clone());
+        });
+        btns.append(&btn);
+
+        row.append(&btns);
+        section.append(&row);
+        content.append(&section);
+    }
+
+    let note = gtk4::Label::new(Some("Re-select the game after changing images to see updates."));
+    note.add_css_class("dim-label");
+    note.add_css_class("caption");
+    content.append(&note);
+
+    content
+}
+
+fn show_sgdb_picker(steam: &Arc<crate::steam::SteamClient>, id: &str, asset: &str, is_steam_id: bool, parent: &adw::Window, on_done: std::rc::Rc<dyn Fn()>) {
+    let picker = adw::Window::new();
+    picker.set_default_width(500);
+    picker.set_default_height(450);
+    picker.set_transient_for(Some(parent));
+    picker.set_modal(true);
+
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let header_bar = adw::HeaderBar::new();
+    header_bar.set_title_widget(Some(&gtk4::Label::new(Some(&format!("Pick {}", asset)))));
+    outer.append(&header_bar);
+
+    let scrolled = gtk4::ScrolledWindow::new();
+    scrolled.set_vexpand(true);
+    let list = gtk4::ListBox::new();
+    list.set_selection_mode(gtk4::SelectionMode::None);
+    list.set_margin_start(12);
+    list.set_margin_end(12);
+    list.set_margin_top(8);
+    list.set_margin_bottom(8);
+
+    let loading = gtk4::Label::new(Some("Loading…"));
+    loading.add_css_class("dim-label");
+    list.append(&loading);
+
+    scrolled.set_child(Some(&list));
+    outer.append(&scrolled);
+
+    let close_btn = gtk4::Button::with_label("Close");
+    close_btn.set_halign(gtk4::Align::End);
+    close_btn.set_margin_start(12);
+    close_btn.set_margin_end(12);
+    close_btn.set_margin_bottom(12);
+    let win = picker.clone();
+    close_btn.connect_clicked(move |_| win.close());
+    outer.append(&close_btn);
+
+    picker.set_content(Some(&outer));
+    picker.present();
+
+    // Fetch SGDB assets in background
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<crate::steam::SgdbAsset>>();
+    let rx = std::cell::RefCell::new(rx);
+    let steam_c = steam.clone();
+    let id_c = id.to_string();
+    let asset_c = asset.to_string();
+    std::thread::spawn(move || {
+        let results = steam_c.list_sgdb_assets(&id_c, &asset_c, is_steam_id);
+        let _ = tx.send(results);
+    });
+
+    let list_clone = list.clone();
+    let steam_clone = steam.clone();
+    let id_clone = id.to_string();
+    let asset_clone = asset.to_string();
+    let picker_clone = picker.clone();
+    let on_done = on_done.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        if let Ok(assets) = rx.borrow_mut().try_recv() {
+            while let Some(child) = list_clone.first_child() {
+                list_clone.remove(&child);
+            }
+
+            if assets.is_empty() {
+                let none = gtk4::Label::new(Some("No images found on SteamGridDB"));
+                none.add_css_class("dim-label");
+                list_clone.append(&none);
+                return glib::ControlFlow::Break;
+            }
+
+            for a in assets {
+                let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+                row.set_margin_top(4);
+                row.set_margin_bottom(4);
+
+                // Thumbnail — download to temp and show
+                let thumb_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+                let thumb_pic = gtk4::Picture::new();
+                thumb_pic.set_content_fit(gtk4::ContentFit::ScaleDown);
+                thumb_pic.set_size_request(48, 48);
+                thumb_box.append(&thumb_pic);
+                row.append(&thumb_box);
+
+                // Download thumbnail in background
+                let url_clone = a.url.clone();
+                let thumb_pic_clone = thumb_pic.clone();
+                let steam_thumb = steam_clone.clone();
+                let thumb_dir = format!("{}/data/.thumbnails", SAVE_DIR);
+                let _ = std::fs::create_dir_all(&thumb_dir);
+                let thumb_name = format!("{}/{}", thumb_dir, url_clone.rsplit('/').next().unwrap_or("thumb"));
+                let (tx_thumb, rx_thumb) = std::sync::mpsc::channel::<Option<String>>();
+                let rx_thumb = std::cell::RefCell::new(rx_thumb);
+                std::thread::spawn(move || {
+                    let final_path = if std::path::Path::new(&thumb_name).exists() {
+                        Some(thumb_name.clone())
+                    } else if steam_thumb.download_file(&url_clone, std::path::Path::new(&thumb_name)).is_ok() {
+                        // Convert ICO to PNG for display
+                        if std::path::Path::new(&thumb_name).extension().and_then(|e| e.to_str()) == Some("ico") {
+                            if let Ok(img) = image::open(&thumb_name) {
+                                let png_path = std::path::Path::new(&thumb_name).with_extension("png");
+                                if img.save(&png_path).is_ok() {
+                                    let _ = std::fs::remove_file(&thumb_name);
+                                    Some(png_path.to_string_lossy().into_owned())
+                                } else {
+                                    Some(thumb_name.clone())
+                                }
+                            } else {
+                                Some(thumb_name.clone())
+                            }
+                        } else {
+                            Some(thumb_name.clone())
+                        }
+                    } else {
+                        None
+                    };
+                    let _ = tx_thumb.send(final_path);
+                });
+                let tp = thumb_pic_clone.clone();
+                glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+                    if let Ok(path) = rx_thumb.borrow_mut().try_recv() {
+                        if let Some(p) = path {
+                            tp.set_filename(Some(&p));
+                        }
+                        glib::ControlFlow::Break
+                    } else {
+                        glib::ControlFlow::Continue
+                    }
+                });
+
+                // Info label
+                let mut info = if a.width > 0 && a.height > 0 {
+                    format!("{}×{}", a.width, a.height)
+                } else {
+                    "ICO".to_string()
+                };
+                if !a.style.is_empty() {
+                    info = format!("{} · {}", info, a.style);
+                }
+                if !a.author.is_empty() {
+                    info = format!("{} · by {}", info, a.author);
+                }
+                let label = gtk4::Label::new(Some(&info));
+                label.set_xalign(0.0);
+                label.set_hexpand(true);
+                label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+                row.append(&label);
+
+                // Download button
+                let dl_btn = gtk4::Button::with_label("Download");
+                dl_btn.add_css_class("suggested-action");
+                let url = a.url.clone();
+                let data_subdir = if is_steam_id { "steam" } else { "steamgriddb" };
+                let dest_dir = format!("{}/data/{}/{}", SAVE_DIR, data_subdir, id_clone);
+                let file_name = match asset_clone.as_str() {
+                    "icon" => {
+                        // Use mime to determine extension, fallback to URL
+                        let ext = if a.mime.contains("icon") || a.mime.contains("x-icon") {
+                            "ico"
+                        } else if a.mime.contains("png") {
+                            "png"
+                        } else if a.mime.contains("jpeg") || a.mime.contains("jpg") {
+                            "jpg"
+                        } else if a.mime.contains("webp") {
+                            "webp"
+                        } else {
+                            std::path::Path::new(&url).extension().and_then(|e| e.to_str()).unwrap_or("png")
+                        };
+                        format!("icon.{}", ext)
+                    }
+                    "hero" => "library_hero.jpg".to_string(),
+                    "grid" => "library_600x900.jpg".to_string(),
+                    "logo" => "logo.png".to_string(),
+                    _ => continue,
+                };
+                let dest = format!("{}/{}", dest_dir, file_name);
+                let steam_c = steam_clone.clone();
+                let picker_c = picker_clone.clone();
+                let on_done_c = on_done.clone();
+                dl_btn.connect_clicked(move |_| {
+                    let _ = std::fs::create_dir_all(&dest_dir);
+                    // Remove old icon files first
+                    for old_ext in ["png", "ico", "jpg", "webp"] {
+                        let old = format!("{}/icon.{}", dest_dir, old_ext);
+                        let _ = std::fs::remove_file(&old);
+                    }
+                    if steam_c.download_file(&url, std::path::Path::new(&dest)).is_ok() {
+                        if file_name.ends_with(".ico") {
+                            match crate::parser::convert_ico_to_png(std::path::Path::new(&dest)) {
+                                Ok(png_path) => eprintln!("Converted ICO to {}", png_path.display()),
+                                Err(e) => {
+                                    eprintln!("ICO conversion failed: {}, trying direct load", e);
+                                    // If conversion fails, try renaming to .png
+                                    // (some "ICO" files are actually PNG)
+                                    let png_dest = std::path::Path::new(&dest).with_extension("png");
+                                    let _ = std::fs::rename(&dest, &png_dest);
+                                }
+                            }
+                        }
+                        on_done_c();
+                        picker_c.close();
+                    } else {
+                        eprintln!("Download failed for {}", url);
+                    }
+                });
+                row.append(&dl_btn);
+
+                list_clone.append(&row);
+            }
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
 }
 
 fn show_logo_settings_dialog(state: &SharedState, game: &Game) {
@@ -2001,31 +2527,87 @@ fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: String
     let sender = state.borrow().sender.clone();
     let db = state.borrow().db.clone();
     std::thread::spawn(move || {
-        let _ = crate::db::upsert_matching(&db, lutris_id, &steam_app_id, "steam", &steam_app_id);
-        let _ = steam.generate_steam_settings(&steam_app_id);
-        if let Ok(Some(entry)) = crate::db::find_by_lutris_id(&db, lutris_id) {
-            if let Ok(mut game) = crate::parser::load_game(&entry, SAVE_DIR) {
-                if game.name.is_empty() || game.name.starts_with("App ID:") {
-                    game.name = lutris_name.clone();
+        if let Err(e) = crate::db::upsert_matching(&db, lutris_id, &steam_app_id, "steam", &steam_app_id) {
+            eprintln!("match_game_to_steam: upsert_matching failed: {}", e);
+            return;
+        }
+        if let Err(e) = steam.generate_steam_settings(&steam_app_id) {
+            eprintln!("match_game_to_steam: generate_steam_settings failed: {}", e);
+        }
+        match crate::db::find_by_lutris_id(&db, lutris_id) {
+            Ok(Some(entry)) => {
+                match crate::parser::load_game(&entry, SAVE_DIR) {
+                    Ok(mut game) => {
+                        if game.name.is_empty() || game.name.starts_with("App ID:") {
+                            game.name = lutris_name.clone();
+                        }
+                        game.lutris_id = lutris_id;
+                        let name = game.name.clone();
+                        if let Some(ref watcher) = watcher {
+                            watcher.watch(&entry, &game.achievements);
+                        }
+                        let _ = sender.send(AppMessage::NewGame(game));
+                        enrich_game_async(
+                            steam_app_id.clone(),
+                            "steam".to_string(),
+                            steam_app_id.clone(),
+                            entry.id,
+                            lutris_id,
+                            name,
+                            steam,
+                            watcher,
+                            sender,
+                        );
+                    }
+                    Err(e) => eprintln!("match_game_to_steam: load_game failed: {}", e),
                 }
-                game.lutris_id = lutris_id;
-                let name = game.name.clone();
-                if let Some(ref watcher) = watcher {
-                    watcher.watch(&entry, &game.achievements);
-                }
-                let _ = sender.send(AppMessage::NewGame(game));
-                enrich_game_async(
-                    steam_app_id.clone(),
-                    "steam".to_string(),
-                    steam_app_id.clone(),
-                    entry.id,
-                    lutris_id,
-                    name,
-                    steam,
-                    watcher,
-                    sender,
-                );
             }
+            Ok(None) => eprintln!("match_game_to_steam: find_by_lutris_id returned None for lutris_id={}", lutris_id),
+            Err(e) => eprintln!("match_game_to_steam: find_by_lutris_id error: {}", e),
+        }
+    });
+}
+
+/// Link an unmatched Lutris game to SteamGridDB (for images only, no achievements).
+fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, lutris_name: String) {
+    let steam = state.borrow().steam.clone();
+    let sender = state.borrow().sender.clone();
+    let db = state.borrow().db.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = crate::db::upsert_matching(&db, lutris_id, &sgdb_id, "sgdb", &sgdb_id) {
+            eprintln!("match_game_to_sgdb: upsert_matching failed: {}", e);
+            return;
+        }
+        // Download images from SGDB
+        let (icon, hero, grid, logo) = steam.ensure_sgdb_assets(&sgdb_id);
+
+        // Build a game entry and send it to the UI
+        if let Ok(Some(entry)) = crate::db::find_by_lutris_id(&db, lutris_id) {
+            let mut game = crate::parser::Game {
+                app_id: sgdb_id.clone(),
+                kind: "sgdb".to_string(),
+                platform_id: sgdb_id.clone(),
+                db_id: entry.id,
+                name: if entry.title.is_empty() { lutris_name.clone() } else { entry.title.clone() },
+                icon_path: icon,
+                hero_image_path: hero,
+                grid_path: grid,
+                header_path: String::new(),
+                logo_path: logo,
+                achievements: Vec::new(),
+                earned_count: 0,
+                total_count: 0,
+                hidden: entry.hidden,
+                lutris_id,
+                slug: String::new(),
+                playtime: 0.0,
+                lastplayed: 0,
+                logo_position: entry.logo_position.clone(),
+                logo_size: entry.logo_size,
+                lutris_name: lutris_name.clone(),
+                manual_unmatch: false,
+            };
+            let _ = sender.send(AppMessage::NewGame(game));
         }
     });
 }
@@ -2079,6 +2661,8 @@ pub fn enrich_game_async(
             hidden: false,
             logo_position: String::new(),
             logo_size: 0,
+            ignored: Some(0),
+            manual_unmatch: Some(0),
         };
 
         let meta_path = crate::parser::achievements_dir(SAVE_DIR, &app_id).join("achievements.json");
@@ -2104,7 +2688,7 @@ pub fn enrich_game_async(
                 game.name = details.name.clone();
             }
             let has_local_icon = !game.icon_path.is_empty();
-            let (icon_path, hero_path) = steam.ensure_assets(&app_id, Some(&details), has_local_icon);
+            let (icon_path, hero_path) = steam.ensure_assets(&app_id, has_local_icon);
             if game.icon_path.is_empty() && !icon_path.is_empty() {
                 game.icon_path = icon_path;
             }
@@ -2139,4 +2723,437 @@ pub fn enrich_game_async(
 
         let _ = sender.send(AppMessage::EnrichedGame(game));
     });
+}
+
+fn normalize_title(s: &str) -> String {
+    let lower = s.to_lowercase();
+    let alnum: String = lower
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect();
+    let words: Vec<&str> = alnum.split_whitespace().collect();
+    let suffixes = ["the", "final", "cut", "edition", "complete", "definitive", "remastered", "hd"];
+    let mut end = words.len();
+    while end > 0 && suffixes.contains(&words[end - 1]) {
+        end -= 1;
+    }
+    words[..end].join(" ")
+}
+
+fn show_mass_match_dialog(state: &SharedState) {
+    let window = state.borrow().window.clone();
+
+    // Collect unmatched games + build a title→steam_id map from data dir
+    let (unmatched, title_map) = {
+        let s = state.borrow();
+        let games = s.games.clone();
+        let unmatched: Vec<Game> = games.into_iter().filter(|g| g.app_id.is_empty() && !g.manual_unmatch).collect();
+        let data_dir = std::path::Path::new(SAVE_DIR).join("data").join("steam");
+        let mut map: Vec<(String, String)> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&data_dir) {
+            for entry in entries.flatten() {
+                let app_id = match entry.file_name().to_str() {
+                    Some(s) if s.parse::<i64>().is_ok() => s.to_string(),
+                    _ => continue,
+                };
+                if let Some(name) = crate::parser::read_app_name(SAVE_DIR, &app_id) {
+                    map.push((normalize_title(&name), app_id));
+                }
+            }
+        }
+        (unmatched, map)
+    };
+
+    if unmatched.is_empty() {
+        let d = adw::AlertDialog::new(Some("No unmatched games"), Some("Every game already has a trophy source linked."));
+        d.add_response("ok", "OK");
+        d.present(Some(&window));
+        return;
+    }
+
+    // Build dialog window
+    let dialog = adw::Window::new();
+    dialog.set_default_width(600);
+    dialog.set_default_height(500);
+    dialog.set_transient_for(Some(&window));
+    dialog.set_modal(true);
+
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+
+    let header_bar = adw::HeaderBar::new();
+    header_bar.set_title_widget(Some(&gtk4::Label::new(Some("Match unmatched games"))));
+    outer.append(&header_bar);
+
+    let header = gtk4::Label::new(Some(&format!("{} unmatched game(s)", unmatched.len())));
+    header.set_margin_top(16);
+    header.set_margin_bottom(8);
+    header.set_margin_start(16);
+    header.set_margin_end(16);
+    header.set_xalign(0.0);
+    header.add_css_class("heading");
+    outer.append(&header);
+
+    let scrolled = gtk4::ScrolledWindow::new();
+    scrolled.set_vexpand(true);
+    scrolled.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+
+    let list = gtk4::ListBox::new();
+    list.set_selection_mode(gtk4::SelectionMode::None);
+
+    // Each row: (action_box) — we update the action_box as results come in
+    let mut row_action_boxes: Vec<gtk4::Box> = Vec::new();
+
+    for game in &unmatched {
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        row.set_margin_start(12);
+        row.set_margin_end(12);
+        row.set_margin_top(6);
+        row.set_margin_bottom(6);
+
+        let name_label = gtk4::Label::new(Some(&game.name));
+        name_label.set_xalign(0.0);
+        name_label.set_hexpand(true);
+        name_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        row.append(&name_label);
+
+        let action_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+        let searching = gtk4::Label::new(Some("Searching..."));
+        searching.add_css_class("dim-label");
+        action_box.append(&searching);
+        row.append(&action_box);
+
+        list.append(&row);
+        row_action_boxes.push(action_box);
+    }
+
+    scrolled.set_child(Some(&list));
+    outer.append(&scrolled);
+
+    let close_btn = gtk4::Button::with_label("Close");
+    close_btn.set_halign(gtk4::Align::End);
+    close_btn.set_margin_top(8);
+    close_btn.set_margin_bottom(12);
+    close_btn.set_margin_start(16);
+    close_btn.set_margin_end(16);
+    let win = dialog.clone();
+    close_btn.connect_clicked(move |_| win.close());
+    outer.append(&close_btn);
+
+    dialog.set_content(Some(&outer));
+    dialog.present();
+
+    // Channel for background → UI communication
+    // Vec of (row_index, Option<matched_steam_id>, game_name, lutris_id)
+    let (tx, rx) = std::sync::mpsc::channel::<(usize, Option<String>, String, i64)>();
+    let rx = std::cell::RefCell::new(rx);
+    let remaining = std::cell::Cell::new(unmatched.len());
+
+    // Background thread: auto-match each game
+    let steam = state.borrow().steam.clone();
+    let games_for_thread: Vec<(String, i64)> = unmatched.iter().map(|g| (g.name.clone(), g.lutris_id)).collect();
+    std::thread::spawn(move || {
+        for (i, (game_name, lutris_id)) in games_for_thread.iter().enumerate() {
+            let norm = normalize_title(game_name);
+
+            // 1. Try appdetails match
+            let matched_id = if norm.is_empty() {
+                None
+            } else {
+                title_map
+                    .iter()
+                    .find(|(t, _)| t == &norm)
+                    .map(|(_, id)| id.clone())
+            };
+
+            // 2. If not found, search Steam Store
+            let final_id = if matched_id.is_some() {
+                matched_id
+            } else {
+                let results = steam.search_steam_store(game_name);
+                if results.is_empty() {
+                    None
+                } else {
+                    // Only match if normalized title matches exactly
+                    results
+                        .iter()
+                        .find(|(_, name)| normalize_title(name) == norm)
+                        .map(|(id, _)| id.clone())
+                }
+            };
+
+            let _ = tx.send((i, final_id, game_name.clone(), *lutris_id));
+        }
+    });
+
+    // Poll for results
+    let state_rx = state.clone();
+    let steam_rx = state.borrow().steam.clone();
+    let row_boxes = row_action_boxes.clone();
+    let remaining = std::cell::Cell::new(unmatched.len());
+    let parent_dialog = dialog.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        // Non-blocking: process at most one result per tick
+        if let Ok((row_idx, matched_id, game_name, lutris_id)) = rx.borrow_mut().try_recv() {
+            if row_idx < row_boxes.len() {
+                let action_box = &row_boxes[row_idx];
+                // Clear action_box
+                while let Some(child) = action_box.first_child() {
+                    action_box.remove(&child);
+                }
+
+                if let Some(sid) = matched_id {
+                    // Auto-match
+                    match_game_to_steam(&state_rx, lutris_id, sid.clone(), game_name.clone());
+
+                    let label = gtk4::Label::new(Some(&format!("Matched: {}", sid)));
+                    label.add_css_class("success-label");
+                    action_box.append(&label);
+
+                    // Undo button
+                    let undo_btn = gtk4::Button::with_label("Undo");
+                    let sc = state_rx.clone();
+                    let lid = lutris_id;
+                    undo_btn.connect_clicked(move |_| {
+                        let _ = crate::db::unmatch_game(&sc.borrow().db, lid);
+                        if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lid) {
+                            g.app_id.clear();
+                            g.kind.clear();
+                            g.achievements.clear();
+                            g.manual_unmatch = true;
+                        }
+                        rebuild_sidebar(&sc);
+                    });
+                    action_box.append(&undo_btn);
+                } else {
+                    let label = gtk4::Label::new(Some("Not found"));
+                    label.add_css_class("dim-label");
+                    action_box.append(&label);
+
+                    // Callback: update this row when a match is made
+                    let ab = action_box.clone();
+                    let on_match: std::rc::Rc<dyn Fn(&str)> = std::rc::Rc::new(move |sid| {
+                        while let Some(child) = ab.first_child() {
+                            ab.remove(&child);
+                        }
+                        let l = gtk4::Label::new(Some(&format!("Matched: {}", sid)));
+                        l.add_css_class("success-label");
+                        ab.append(&l);
+                    });
+
+                    // Enter ID button
+                    let id_btn = gtk4::Button::with_label("Enter ID");
+                    let sc = state_rx.clone();
+                    let name = game_name.clone();
+                    let lid = lutris_id;
+                    let cb = on_match.clone();
+                    id_btn.connect_clicked(move |_| {
+                        let sc2 = sc.clone();
+                        let name2 = name.clone();
+                        let cb2 = cb.clone();
+                        let body = format!("Enter the Steam app ID for \u{201C}{}\u{201D}:", name);
+                        prompt_for_steam_id(&sc, "Match to Steam", &body, move |app_id| {
+                            match_game_to_steam(&sc2, lid, app_id.to_string(), name2.clone());
+                            cb2(&app_id);
+                        });
+                    });
+                    action_box.append(&id_btn);
+
+                    // Search Steam button
+                    let steam_btn = gtk4::Button::with_label("Search Steam");
+                    let sc2 = state_rx.clone();
+                    let name2 = game_name.clone();
+                    let steam2 = steam_rx.clone();
+                    let cb2 = on_match.clone();
+                    let pd = parent_dialog.clone();
+                    steam_btn.connect_clicked(move |_| {
+                        show_search_results_dialog(&sc2, steam2.clone(), "Steam", &name2, lutris_id, SearchSource::Steam, cb2.clone(), pd.upcast_ref());
+                    });
+                    action_box.append(&steam_btn);
+
+                    // Search SGDB button
+                    let sgdb_btn = gtk4::Button::with_label("Search SGDB");
+                    let sc3 = state_rx.clone();
+                    let name3 = game_name.clone();
+                    let steam3 = steam_rx.clone();
+                    let cb3 = on_match.clone();
+                    let pd = parent_dialog.clone();
+                    sgdb_btn.connect_clicked(move |_| {
+                        show_search_results_dialog(&sc3, steam3.clone(), "SteamGridDB", &name3, lutris_id, SearchSource::SGDB, cb3.clone(), pd.upcast_ref());
+                    });
+                    action_box.append(&sgdb_btn);
+                }
+
+                let left = remaining.get();
+                if left <= 1 {
+                    return glib::ControlFlow::Break;
+                }
+                remaining.set(left - 1);
+            }
+        }
+        glib::ControlFlow::Continue
+    });
+}
+
+#[derive(Clone, Copy)]
+enum SearchSource {
+    Steam,
+    SGDB,
+}
+
+fn show_search_results_dialog(
+    state: &SharedState,
+    steam: Arc<crate::steam::SteamClient>,
+    source_name: &str,
+    game_name: &str,
+    lutris_id: i64,
+    source: SearchSource,
+    on_match: std::rc::Rc<dyn Fn(&str)>,
+    parent: &gtk4::Window,
+) {
+    let dialog = adw::Window::new();
+    dialog.set_default_width(450);
+    dialog.set_default_height(400);
+    dialog.set_transient_for(Some(parent));
+    dialog.set_modal(true);
+
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+
+    let header_bar = adw::HeaderBar::new();
+    let title_label = gtk4::Label::new(Some(&format!("Search {}", source_name)));
+    header_bar.set_title_widget(Some(&title_label));
+    outer.append(&header_bar);
+
+    let entry = gtk4::Entry::new();
+    entry.set_text(game_name);
+    entry.set_margin_start(12);
+    entry.set_margin_end(12);
+    entry.set_margin_top(12);
+    entry.set_margin_bottom(8);
+    outer.append(&entry);
+
+    let scrolled = gtk4::ScrolledWindow::new();
+    scrolled.set_vexpand(true);
+    let results_list = gtk4::ListBox::new();
+    results_list.set_selection_mode(gtk4::SelectionMode::None);
+    results_list.set_margin_start(12);
+    results_list.set_margin_end(12);
+    results_list.set_margin_bottom(8);
+
+    // Initial "Searching..." placeholder
+    let placeholder = gtk4::Label::new(Some("Searching..."));
+    placeholder.add_css_class("dim-label");
+    results_list.append(&placeholder);
+
+    scrolled.set_child(Some(&results_list));
+    outer.append(&scrolled);
+
+    let close_btn = gtk4::Button::with_label("Close");
+    close_btn.set_halign(gtk4::Align::End);
+    close_btn.set_margin_start(12);
+    close_btn.set_margin_end(12);
+    close_btn.set_margin_bottom(12);
+    let win = dialog.clone();
+    close_btn.connect_clicked(move |_| win.close());
+    outer.append(&close_btn);
+
+    dialog.set_content(Some(&outer));
+
+    // Search handler (connected BEFORE emit_activate so auto-search works)
+    let entry_clone = entry.clone();
+    let results_clone = results_list.clone();
+    let state_clone = state.clone();
+    let steam_clone = steam.clone();
+    let name_clone = game_name.to_string();
+    let dialog_clone = dialog.clone();
+    let on_match_clone = on_match.clone();
+    entry.connect_activate(move |_| {
+        let term = entry_clone.text().to_string();
+        if term.is_empty() {
+            return;
+        }
+
+        // Clear results
+        while let Some(child) = results_clone.first_child() {
+            results_clone.remove(&child);
+        }
+        let searching = gtk4::Label::new(Some("Searching..."));
+        searching.add_css_class("dim-label");
+        results_clone.append(&searching);
+
+        // Channel for background → UI
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<(String, String)>>();
+        let rx = std::cell::RefCell::new(rx);
+
+        // Background thread: only captures Send data
+        let steam = steam_clone.clone();
+        let src = source;
+        std::thread::spawn(move || {
+            let search_results = match src {
+                SearchSource::Steam => steam.search_steam_store(&term),
+                SearchSource::SGDB => steam.search_sgdb(&term),
+            };
+            let _ = tx.send(search_results);
+        });
+
+        // UI thread: poll for results
+        let sc = state_clone.clone();
+        let results = results_clone.clone();
+        let name = name_clone.clone();
+        let cb = on_match_clone.clone();
+        let dlg = dialog_clone.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            if let Ok(search_results) = rx.borrow_mut().try_recv() {
+                // Clear results
+                while let Some(child) = results.first_child() {
+                    results.remove(&child);
+                }
+
+                if search_results.is_empty() {
+                    let none = gtk4::Label::new(Some("No results found"));
+                    none.add_css_class("dim-label");
+                    results.append(&none);
+                    return glib::ControlFlow::Break;
+                }
+
+                for (app_id, result_name) in search_results {
+                    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+                    row.set_margin_top(4);
+                    row.set_margin_bottom(4);
+
+                    let label = gtk4::Label::new(Some(&format!("{} ({})", result_name, app_id)));
+                    label.set_xalign(0.0);
+                    label.set_hexpand(true);
+                    label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+                    row.append(&label);
+
+                    let match_btn = gtk4::Button::with_label("Match");
+                    match_btn.add_css_class("suggested-action");
+                    let sc2 = sc.clone();
+                    let name2 = name.clone();
+                    let sid = app_id.clone();
+                    let lid = lutris_id;
+                    let dialog_clone = dlg.clone();
+                    let callback = cb.clone();
+                    let src_type = source;
+                    match_btn.connect_clicked(move |_| {
+                        match src_type {
+                            SearchSource::Steam => match_game_to_steam(&sc2, lid, sid.clone(), name2.clone()),
+                            SearchSource::SGDB => match_game_to_sgdb(&sc2, lid, sid.clone(), name2.clone()),
+                        }
+                        callback(&sid);
+                        dialog_clone.close();
+                    });
+                    row.append(&match_btn);
+
+                    results.append(&row);
+                }
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
+    });
+
+    dialog.present();
+    entry.emit_activate();
 }

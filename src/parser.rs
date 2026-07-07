@@ -107,6 +107,10 @@ pub struct Game {
     pub logo_position: String,
     /// Logo overlay pixel size.
     pub logo_size: i32,
+    /// Original Lutris name (for restoring on unmatch).
+    pub lutris_name: String,
+    /// True if user manually unmatched — don't auto-rematch.
+    pub manual_unmatch: bool,
 }
 
 /// A Lutris game with no matched achievement source yet — shown in the sidebar
@@ -133,6 +137,8 @@ pub fn unmatched_game(lutris_id: i64, name: &str, slug: &str, playtime: f64, las
         lastplayed,
         logo_position: String::new(),
         logo_size: 0,
+        lutris_name: name.to_string(),
+        manual_unmatch: false,
     }
 }
 
@@ -169,7 +175,11 @@ fn try_convert_ico(path: &Path) -> PathBuf {
 // ---- Path helpers ----
 
 pub fn data_dir(save_dir: &str, app_id: &str) -> PathBuf {
-    Path::new(save_dir).join("data").join(app_id)
+    Path::new(save_dir).join("data").join("steam").join(app_id)
+}
+
+pub fn sgdb_data_dir(save_dir: &str, sgdb_id: &str) -> PathBuf {
+    Path::new(save_dir).join("data").join("steamgriddb").join(sgdb_id)
 }
 
 pub fn achievements_dir(save_dir: &str, app_id: &str) -> PathBuf {
@@ -275,6 +285,8 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         lastplayed: 0,
         logo_position: entry.logo_position.clone(),
         logo_size: entry.logo_size,
+        lutris_name: String::new(),
+        manual_unmatch: entry.manual_unmatch.unwrap_or(0) == 1,
     };
 
     let ach_dir = achievements_dir(save_dir, app_id);
@@ -286,34 +298,56 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         }
     }
 
-    // Icon
-    let icon_png = data_dir(save_dir, app_id).join("icon.png");
+    // Use the correct data directory based on kind
+    let image_dir = if kind == "sgdb" {
+        sgdb_data_dir(save_dir, app_id)
+    } else {
+        data_dir(save_dir, app_id)
+    };
+
+    // Icon — try .png first, then .ico (with conversion), then other formats
+    let icon_png = image_dir.join("icon.png");
     if icon_png.is_file() {
         game.icon_path = icon_png.to_string_lossy().into_owned();
     } else {
-        let icon_ico = data_dir(save_dir, app_id).join("icon.ico");
+        let icon_ico = image_dir.join("icon.ico");
         if icon_ico.is_file() {
-            if let Ok(png) = convert_ico_to_png(&icon_ico) {
-                game.icon_path = png.to_string_lossy().into_owned();
+            match convert_ico_to_png(&icon_ico) {
+                Ok(png) => game.icon_path = png.to_string_lossy().into_owned(),
+                Err(_) => {
+                    // Conversion failed — try renaming (might be PNG with .ico extension)
+                    let renamed = image_dir.join("icon.png");
+                    if std::fs::rename(&icon_ico, &renamed).is_ok() {
+                        game.icon_path = renamed.to_string_lossy().into_owned();
+                    }
+                }
+            }
+        } else {
+            // Try .jpg, .webp
+            for ext in ["jpg", "webp"] {
+                let p = image_dir.join(format!("icon.{}", ext));
+                if p.is_file() {
+                    game.icon_path = p.to_string_lossy().into_owned();
+                    break;
+                }
             }
         }
     }
 
     // Grid assets
-    let data_game_dir = data_dir(save_dir, app_id);
-    let grid = data_game_dir.join("library_600x900.jpg");
+    let grid = image_dir.join("library_600x900.jpg");
     if grid.is_file() {
         game.grid_path = grid.to_string_lossy().into_owned();
     }
-    let header = data_game_dir.join("header.jpg");
+    let header = image_dir.join("header.jpg");
     if header.is_file() {
         game.header_path = header.to_string_lossy().into_owned();
     }
-    let hero = data_game_dir.join("library_hero.jpg");
+    let hero = image_dir.join("library_hero.jpg");
     if hero.is_file() {
         game.hero_image_path = hero.to_string_lossy().into_owned();
     }
-    let logo = data_game_dir.join("logo.png");
+    let logo = image_dir.join("logo.png");
     if logo.is_file() {
         game.logo_path = logo.to_string_lossy().into_owned();
     }

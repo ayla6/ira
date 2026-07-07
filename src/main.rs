@@ -61,6 +61,9 @@ fn activate(app: &adw::Application) -> SharedState {
 
     let db = db::init_db(&format!("{}/gse.db", ui::SAVE_DIR));
 
+    // Migrate data/{app_id}/ → data/steam/{app_id}/
+    migrate_data_dir(ui::SAVE_DIR);
+
     // Populate achievement sources from existing steam/gog save dirs (first run).
     if db::load_all_games(&db).map(|v| v.is_empty()).unwrap_or(true) {
         populate_db_from_dirs(&db, ui::SAVE_DIR);
@@ -139,6 +142,8 @@ fn activate(app: &adw::Application) -> SharedState {
                     sgdb_id: None,
                     logo_position: String::new(),
                     logo_size: 0,
+                    ignored: Some(0),
+                    manual_unmatch: Some(0),
                 };
                 watcher.watch(&entry, &g.achievements);
             }
@@ -186,7 +191,7 @@ fn normalize_title(s: &str) -> String {
 /// by normalized title (one contains the other).
 fn auto_match_by_title(db: &db::DbConn, save_dir: &str, lutris_games: &[lutris::LutrisGame]) {
     // Build a map of normalized_title → steam_id from existing save dirs.
-    let data_dir = std::path::Path::new(save_dir).join("data");
+    let data_dir = std::path::Path::new(save_dir).join("data").join("steam");
     let mut title_map: Vec<(String, String)> = Vec::new(); // (normalized, steam_id)
     if let Ok(entries) = std::fs::read_dir(&data_dir) {
         for entry in entries.flatten() {
@@ -210,24 +215,32 @@ fn auto_match_by_title(db: &db::DbConn, save_dir: &str, lutris_games: &[lutris::
     }
 
     // For each unmatched Lutris game, try to find a matching save dir by title.
+    // Skip games that were manually unmatched or ignored.
     let entries = db::load_all_games(db).unwrap_or_default();
     let linked: std::collections::HashSet<i64> = entries
         .iter()
         .filter_map(|e| e.lutris_db_id)
         .collect();
+    let do_not_match: std::collections::HashSet<i64> = entries
+        .iter()
+        .filter(|e| {
+            // Check manual_unmatch or ignored columns
+            e.manual_unmatch.unwrap_or(0) == 1 || e.ignored.unwrap_or(0) == 1
+        })
+        .filter_map(|e| e.lutris_db_id)
+        .collect();
     for lg in lutris_games {
-        if linked.contains(&lg.id) {
+        if linked.contains(&lg.id) || do_not_match.contains(&lg.id) {
             continue;
         }
         let norm = normalize_title(&lg.name);
         if norm.is_empty() {
             continue;
         }
-        // Exact normalized match first, then substring (Lutris name is shorter).
+        // Exact normalized match only — substring matching is too loose.
         let match_id = title_map
             .iter()
             .find(|(t, _)| t == &norm)
-            .or_else(|| title_map.iter().find(|(t, _)| t.contains(&norm) || norm.contains(t.as_str())))
             .map(|(_, id)| id.clone());
         if let Some(steam_id) = match_id {
             if let Ok(Some(entry)) = db::find_by_steam_id(db, &steam_id) {
@@ -279,6 +292,7 @@ fn build_game_list(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
 
     // Join: Lutris games (source of truth) ← our DB (achievement matching).
     let entries = db::load_all_games(db).unwrap_or_default();
+    let ignored_ids = db::get_ignored_lutris_ids(db);
     let mut by_lutris: HashMap<i64, db::GameEntry> = entries
         .into_iter()
         .filter_map(|e| e.lutris_db_id.map(|id| (id, e)))
@@ -286,6 +300,9 @@ fn build_game_list(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
 
     let mut games = Vec::with_capacity(lutris_games.len());
     for lg in &lutris_games {
+        if ignored_ids.contains(&lg.id) {
+            continue;
+        }
         if let Some(entry) = by_lutris.remove(&lg.id) {
             match parser::load_game(&entry, save_dir) {
                 Ok(mut game) => {
@@ -293,6 +310,7 @@ fn build_game_list(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
                     game.slug = lg.slug.clone();
                     game.playtime = lg.playtime;
                     game.lastplayed = lg.lastplayed;
+                    game.lutris_name = lg.name.clone();
                     if game.name.is_empty() || game.name.starts_with("App ID:") {
                         game.name = lg.name.clone();
                     }
@@ -353,6 +371,43 @@ fn populate_db_from_dirs(db: &db::DbConn, save_dir: &str) {
                     let _ = db::add_game(db, "gog", &app_id, &product_id, &title);
                 }
             }
+        }
+    }
+}
+
+/// Move data/{app_id}/ directories to data/steam/{app_id}/.
+/// Idempotent: skips dirs that are already migrated or not numeric.
+fn migrate_data_dir(save_dir: &str) {
+    let data_dir = std::path::Path::new(save_dir).join("data");
+    let steam_dir = data_dir.join("steam");
+
+    let entries = match std::fs::read_dir(&data_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let _ = std::fs::create_dir_all(&steam_dir);
+
+    for entry in entries.flatten() {
+        let name = match entry.file_name().to_str() {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        // Skip the new subdirectories
+        if name == "steam" || name == "steamgriddb" {
+            continue;
+        }
+        // Only migrate numeric dirs (app IDs)
+        if name.parse::<i64>().is_err() {
+            continue;
+        }
+        let src = entry.path();
+        let dest = steam_dir.join(&name);
+        if dest.exists() {
+            continue;
+        }
+        if let Err(e) = std::fs::rename(&src, &dest) {
+            eprintln!("Migration: could not move {} → {}: {}", src.display(), dest.display(), e);
         }
     }
 }

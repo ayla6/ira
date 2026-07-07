@@ -51,6 +51,12 @@ pub fn init_db(db_path: &str) -> DbConn {
     let _ = conn.execute("ALTER TABLE games ADD COLUMN logo_size INTEGER NOT NULL DEFAULT 50", []);
     let _ = conn.execute("ALTER TABLE games ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE games ADD COLUMN manual_unmatch INTEGER NOT NULL DEFAULT 0", []);
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS lutris_meta (
+            lutris_id INTEGER PRIMARY KEY,
+            hidden INTEGER NOT NULL DEFAULT 0
+        );",
+    ).expect("failed to create lutris_meta table");
     Arc::new(Mutex::new(conn))
 }
 
@@ -121,6 +127,33 @@ pub fn set_game_hidden(conn: &DbConn, id: i64, hidden: bool) -> Result<(), Strin
     c.execute("UPDATE games SET hidden = ?1 WHERE id = ?2", params![hidden, id])
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Set hidden state for a Lutris game that has no DB row (unmatched).
+pub fn set_lutris_hidden(conn: &DbConn, lutris_id: i64, hidden: bool) -> Result<(), String> {
+    let c = conn.lock().map_err(|e| e.to_string())?;
+    c.execute(
+        "INSERT INTO lutris_meta (lutris_id, hidden) VALUES (?1, ?2)
+         ON CONFLICT(lutris_id) DO UPDATE SET hidden = excluded.hidden",
+        params![lutris_id, hidden],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Get the set of Lutris IDs that are hidden but have no DB row.
+pub fn get_hidden_lutris_ids(conn: &DbConn) -> std::collections::HashSet<i64> {
+    let c = match conn.lock() {
+        Ok(c) => c,
+        Err(_) => return std::collections::HashSet::new(),
+    };
+    let mut stmt = match c.prepare("SELECT lutris_id FROM lutris_meta WHERE hidden = 1") {
+        Ok(s) => s,
+        Err(_) => return std::collections::HashSet::new(),
+    };
+    stmt.query_map([], |row| row.get::<_, i64>(0))
+        .ok()
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
 }
 
 pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
@@ -244,7 +277,17 @@ pub fn upsert_matching(conn: &DbConn, lutris_db_id: i64, steam_id: &str, kind: &
         "INSERT INTO games (lutris_db_id, kind, steam_id, platform_id) VALUES (?1, ?2, ?3, ?4)",
         params![lutris_db_id, kind, steam_id, platform_id],
     ).map_err(|e| e.to_string())?;
-    Ok(c.last_insert_rowid())
+    let new_id = c.last_insert_rowid();
+    // Sync hidden state from lutris_meta (if game was hidden while unmatched)
+    if let Ok(h) = c.query_row::<bool, _, _>(
+        "SELECT hidden FROM lutris_meta WHERE lutris_id = ?1",
+        params![lutris_db_id],
+        |row| row.get::<_, i64>(0).map(|v| v != 0),
+    ) {
+        let _ = c.execute("UPDATE games SET hidden = ?1 WHERE id = ?2", params![h, new_id]);
+        let _ = c.execute("DELETE FROM lutris_meta WHERE lutris_id = ?1", params![lutris_db_id]);
+    }
+    Ok(new_id)
 }
 
 /// Look up a game by its Lutris id.

@@ -37,6 +37,7 @@ pub struct AppState {
     pub games: Vec<Game>,
     rows: Vec<SidebarRowWidgets>,
     pub game_list: gtk4::ListBox,
+    pub sidebar_scroll: gtk4::ScrolledWindow,
     pub content_scroll: gtk4::ScrolledWindow,
     pub content_box: gtk4::Box,
     pub selected_id: String,
@@ -125,6 +126,7 @@ pub fn build_ui(
         games,
         rows: Vec::new(),
         game_list: gtk4::ListBox::new(),
+        sidebar_scroll: gtk4::ScrolledWindow::new(),
         content_scroll: gtk4::ScrolledWindow::new(),
         content_box: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
         selected_id: String::new(),
@@ -268,6 +270,7 @@ fn build_window(state: &SharedState, app: &adw::Application) {
         let mut s = state.borrow_mut();
         s.window = window.clone();
         s.game_list = game_list.clone();
+        s.sidebar_scroll = sidebar_scroll.clone();
         s.content_scroll = content_scroll.clone();
         s.content_box = content_box.clone();
     }
@@ -333,6 +336,9 @@ fn build_window(state: &SharedState, app: &adw::Application) {
 
 fn rebuild_sidebar(state: &SharedState) {
     let game_list = state.borrow().game_list.clone();
+    let sidebar_scroll = state.borrow().sidebar_scroll.clone();
+    // Save scroll position so the list doesn't jump to the top on rebuild
+    let saved_scroll = sidebar_scroll.vadjustment().value();
 
     while let Some(child) = game_list.first_child() {
         game_list.remove(&child);
@@ -365,6 +371,12 @@ fn rebuild_sidebar(state: &SharedState) {
         rows.push(build_sidebar_row(&game_list, g, state, show_hidden));
     }
     state.borrow_mut().rows = rows;
+
+    // Restore scroll position after rebuild
+    let adj = sidebar_scroll.vadjustment();
+    let upper = adj.upper();
+    let max = (upper - adj.page_size()).max(0.0);
+    adj.set_value(saved_scroll.min(max));
 }
 
 fn build_sidebar_row(list: &gtk4::ListBox, game: &Game, state: &SharedState, show_hidden: bool) -> SidebarRowWidgets {
@@ -1689,14 +1701,29 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
     let row_clone = row.clone();
     hide_action.connect_activate(move |_, _| {
         let new_hidden = !current_hidden;
-        if gc.db_id != 0 {
-            if let Err(e) = crate::db::set_game_hidden(&sc.borrow().db, gc.db_id, new_hidden) {
-                eprintln!("Failed to set hidden: {}", e);
+        // Look up current db_id from state (the captured gc may be stale after enrichment)
+        let lutris_id = gc.lutris_id;
+        {
+            let s = sc.borrow();
+            if let Some(g) = s.games.iter().find(|g| g.lutris_id == lutris_id) {
+                if g.db_id != 0 {
+                    if let Err(e) = crate::db::set_game_hidden(&s.db, g.db_id, new_hidden) {
+                        eprintln!("Failed to set hidden: {}", e);
+                    }
+                } else if lutris_id != 0 {
+                    // Unmatched game — persist via lutris_meta table
+                    if let Err(e) = crate::db::set_lutris_hidden(&s.db, lutris_id, new_hidden) {
+                        eprintln!("Failed to set lutris hidden: {}", e);
+                    }
+                }
             }
         }
-        if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.lutris_id == gc.lutris_id) {
+        if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
             g.hidden = new_hidden;
         }
+        // Save scroll position — set_visible on a row can cause the ListBox to relayout
+        let scroll = sc.borrow().sidebar_scroll.clone();
+        let saved_scroll = scroll.vadjustment().value();
         if new_hidden {
             row_clone.add_css_class("hidden-game");
         } else {
@@ -1704,6 +1731,10 @@ fn show_game_context_menu(state: &SharedState, game: &Game, row: &gtk4::ListBoxR
         }
         let show_hidden = sc.borrow().cfg.show_hidden_games;
         row_clone.set_visible(!new_hidden || show_hidden);
+        // Restore scroll position after visibility change
+        let adj = scroll.vadjustment();
+        let max = (adj.upper() - adj.page_size()).max(0.0);
+        adj.set_value(saved_scroll.min(max));
     });
     actions.add_action(&hide_action);
 

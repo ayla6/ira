@@ -293,6 +293,7 @@ fn build_game_list(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
     // Join: Lutris games (source of truth) ← our DB (achievement matching).
     let entries = db::load_all_games(db).unwrap_or_default();
     let ignored_ids = db::get_ignored_lutris_ids(db);
+    let hidden_lutris_ids = db::get_hidden_lutris_ids(db);
     let mut by_lutris: HashMap<i64, db::GameEntry> = entries
         .into_iter()
         .filter_map(|e| e.lutris_db_id.map(|id| (id, e)))
@@ -320,7 +321,12 @@ fn build_game_list(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
             }
         } else {
             // Unmatched Lutris game — no achievement source yet.
-            games.push(parser::unmatched_game(lg.id, &lg.name, &lg.slug, lg.playtime, lg.lastplayed));
+            let mut game = parser::unmatched_game(lg.id, &lg.name, &lg.slug, lg.playtime, lg.lastplayed);
+            // Apply hidden state from lutris_meta (for games with no DB row)
+            if hidden_lutris_ids.contains(&lg.id) {
+                game.hidden = true;
+            }
+            games.push(game);
         }
     }
     games.sort_by(|a, b| a.name.cmp(&b.name));

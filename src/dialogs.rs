@@ -10,6 +10,8 @@ use crate::AppMessage;
 use adw::prelude::*;
 use gtk4::glib;
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
@@ -360,13 +362,44 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
         logo_page.set_margin_top(16);
         logo_page.set_margin_bottom(16);
 
-        let pos_store = gtk4::StringList::new(&logo_positions);
-        let pos_combo = gtk4::DropDown::new(Some(pos_store), None::<&gtk4::PropertyExpression>);
-        let current_idx = logo_positions.iter().position(|&p| p == game.logo_position).unwrap_or(0);
-        pos_combo.set_selected(current_idx as u32);
+        let selected_pos: Rc<RefCell<String>> = Rc::new(RefCell::new(game.logo_position.clone()));
+
+        let pos_grid = gtk4::Grid::new();
+        pos_grid.set_column_spacing(3);
+        pos_grid.set_row_spacing(3);
+        pos_grid.set_halign(gtk4::Align::Center);
+
+        let mut all_btns: Vec<gtk4::Button> = Vec::new();
+        for (i, &pos) in logo_positions.iter().enumerate() {
+            let btn = gtk4::Button::new();
+            btn.set_size_request(32, 32);
+            btn.add_css_class("logo-pos-btn");
+            if pos == game.logo_position {
+                btn.add_css_class("logo-pos-selected");
+            }
+            let row = i / 3;
+            let col = i % 3;
+            pos_grid.attach(&btn, col as i32, row as i32, 1, 1);
+            all_btns.push(btn);
+        }
+
+        let btns: Rc<Vec<gtk4::Button>> = Rc::new(all_btns);
+        for (i, &pos) in logo_positions.iter().enumerate() {
+            let btns_c = btns.clone();
+            let selected_pos_c = selected_pos.clone();
+            let pos_owned = pos.to_string();
+            btns[i].connect_clicked(move |btn| {
+                for b in btns_c.iter() {
+                    b.remove_css_class("logo-pos-selected");
+                }
+                btn.add_css_class("logo-pos-selected");
+                *selected_pos_c.borrow_mut() = pos_owned.clone();
+            });
+        }
+
         let pos_row = adw::ActionRow::new();
         pos_row.set_title("Position");
-        pos_row.add_suffix(&pos_combo);
+        pos_row.add_suffix(&pos_grid);
         logo_page.append(&pos_row);
 
         let size_pct = game.logo_size.clamp(5, 100);
@@ -380,7 +413,7 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
 
         let logo_label = gtk4::Label::new(Some("Logo"));
         notebook.append_page(&logo_page, Some(&logo_label));
-        Some((pos_combo, size_adj))
+        Some((selected_pos, size_adj))
     } else {
         None
     };
@@ -419,8 +452,8 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
             eprintln!("Failed to update game: {}", e);
         }
 
-        if let Some((ref pos_combo, ref size_adj)) = logo_controls_c {
-            let pos = logo_positions[pos_combo.selected() as usize].to_string();
+        if let Some((ref selected_pos, ref size_adj)) = logo_controls_c {
+            let pos = selected_pos.borrow().clone();
             let size = size_adj.value() as i32;
             if db_id != 0 {
                 if let Err(e) = crate::db::set_logo_settings(&state_clone.borrow().db, db_id, &pos, size) {

@@ -5,16 +5,18 @@ use crate::steam::SteamClient;
 use crate::strings as S;
 use crate::watcher::AchievementWatcher;
 use crate::AppMessage;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use gtk4::glib;
 use gtk4::pango;
 use gtk4::prelude::*;
-use adw::prelude::*;pub const SAVE_DIR: &str = "/data/Games/Saves/GSE";
+use adw::prelude::*;
+use glib::subclass::prelude::*;pub const SAVE_DIR: &str = "/data/Games/Saves/GSE";
 const EAGER_IMAGE_BUDGET: usize = 18;
 
 const APP_CSS: &str = "
@@ -38,16 +40,24 @@ const APP_CSS: &str = "
 }
 
 /* === Grid view (All Games) === */
-/* Strip FlowBox children of button-like appearance */
-.grid-flowbox flowboxchild {
+/* Strip GridView children of button-like appearance */
+gridview.game-grid {
+    background: transparent;
+    border-spacing: 0;
+}
+gridview.game-grid child {
     background: transparent;
     box-shadow: none;
     border: none;
     padding: 0;
+    margin: 0;
     outline: none;
 }
-.grid-flowbox flowboxchild:hover,
-.grid-flowbox flowboxchild:selected {
+gridview.game-grid child:hover,
+gridview.game-grid child:selected,
+gridview.game-grid child:focus,
+gridview.game-grid child:focus-visible,
+gridview.game-grid child:focus-within {
     background: transparent;
 }
 
@@ -100,6 +110,42 @@ pub struct AppState {
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;
+
+mod imp {
+    use crate::parser::Game;
+    use std::cell::RefCell;
+    use glib::subclass::prelude::*;
+
+    #[derive(Default)]
+    pub struct GameItem {
+        pub game: RefCell<Option<Game>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for GameItem {
+        const NAME: &'static str = "GameGridItem";
+        type Type = super::GameItem;
+        type ParentType = glib::Object;
+    }
+
+    impl ObjectImpl for GameItem {}
+}
+
+glib::wrapper! {
+    pub struct GameItem(ObjectSubclass<imp::GameItem>);
+}
+
+impl GameItem {
+    pub fn new(game: &Game) -> Self {
+        let obj = glib::Object::new::<Self>();
+        obj.imp().game.replace(Some(game.clone()));
+        obj
+    }
+
+    pub fn game(&self) -> Option<Game> {
+        self.imp().game.borrow().clone()
+    }
+}
 
 /// Programmatically select a sidebar row without firing the `row-selected` handler.
 fn select_row_silently(state: &SharedState, row: Option<&gtk4::ListBoxRow>) {
@@ -204,7 +250,7 @@ fn build_window(state: &SharedState, app: &adw::Application) {
     gtk4::style_context_add_provider_for_display(
         &gtk4::gdk::Display::default().expect("no default display"),
         &css,
-        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        gtk4::STYLE_PROVIDER_PRIORITY_USER,
     );
 
     let split_view = gtk4::Paned::new(gtk4::Orientation::Horizontal);
@@ -767,9 +813,112 @@ fn clear_content(state: &SharedState) {
 
 // === All Games grid view ===
 
+mod grid_imp {
+    use glib::subclass::prelude::*;
+    use gtk4::prelude::*;
+    use gtk4::subclass::widget::WidgetImpl;
+    use std::cell::{Cell, RefCell};
+
+    pub struct GridBin {
+        pub child: RefCell<Option<gtk4::GridView>>,
+        pub cover_h: Cell<i32>,
+        pub n_items: Cell<u32>,
+        pub col_nat: Cell<i32>,
+        pub prev_width: Cell<i32>,
+    }
+
+    impl Default for GridBin {
+        fn default() -> Self {
+            Self {
+                child: RefCell::new(None),
+                cover_h: Cell::new(0),
+                n_items: Cell::new(0),
+                col_nat: Cell::new(0),
+                prev_width: Cell::new(0),
+            }
+        }
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for GridBin {
+        const NAME: &'static str = "GseGridBin";
+        type Type = super::GridBin;
+        type ParentType = gtk4::Widget;
+    }
+
+    impl ObjectImpl for GridBin {
+        fn dispose(&self) {
+            if let Some(child) = self.child.take() {
+                child.unparent();
+            }
+        }
+    }
+
+    impl WidgetImpl for GridBin {
+        fn measure(&self, orientation: gtk4::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            let cover_h = self.cover_h.get();
+            let n_items = self.n_items.get();
+            let col_nat = self.col_nat.get();
+
+            if orientation == gtk4::Orientation::Vertical {
+                // for_size is always -1 (ScrolledWindow doesn't pass width).
+                // Use the width from the last size_allocate, or a default.
+                let width = if for_size > 0 {
+                    for_size
+                } else {
+                    let pw = self.prev_width.get();
+                    if pw > 1 { pw } else { 800 }
+                };
+                let n_cols = if col_nat > 0 {
+                    ((width as f64 / col_nat as f64) as u32).max(1).min(30)
+                } else {
+                    1
+                };
+                let n_rows = ((n_items as f64 / n_cols as f64).ceil() as i32).max(1);
+                let h = n_rows * cover_h;
+                (h, h, -1, -1)
+            } else {
+                let w = col_nat * 30;
+                (col_nat, w, -1, -1)
+            }
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            if let Some(child) = self.child.borrow().as_ref() {
+                child.allocate(width, height, baseline, None);
+            }
+            // If width changed, the height needs recalculation.
+            // queue_resize is deferred to the next layout cycle, so no loop.
+            let prev = self.prev_width.get();
+            if prev != width {
+                self.obj().queue_resize();
+            }
+            self.prev_width.set(width);
+        }
+    }
+}
+
+glib::wrapper! {
+    pub struct GridBin(ObjectSubclass<grid_imp::GridBin>)
+        @extends gtk4::Widget,
+        @implements gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget;
+}
+
+impl GridBin {
+    fn new(grid: &gtk4::GridView, cover_h: i32, n_items: u32, col_nat: i32) -> Self {
+        let obj: Self = glib::Object::new();
+        obj.imp().cover_h.set(cover_h);
+        obj.imp().n_items.set(n_items);
+        obj.imp().col_nat.set(col_nat);
+        grid.set_parent(&obj);
+        obj.imp().child.replace(Some(grid.clone()));
+        obj
+    }
+}
+
 /// Build and show the "All Games" grid view, similar to Steam's library.
 /// Shows a "Recently played" line at the top (latest game with horizontal
-/// header cover, others with vertical capsule covers), followed by a FlowBox
+/// header cover, others with vertical capsule covers), followed by a GridView
 /// grid of all games using vertical capsule (600x900) covers.
 fn show_grid_view(state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
@@ -814,29 +963,155 @@ fn show_grid_view(state: &SharedState) {
     heading.set_margin_bottom(8);
     outer.append(&heading);
 
-    let spacing: u32 = 12;
     let games: Vec<Game> = state.borrow().games.clone();
 
-    let flow = gtk4::FlowBox::new();
-    flow.set_selection_mode(gtk4::SelectionMode::None);
-    flow.set_homogeneous(true);
-    flow.set_min_children_per_line(1);
-    flow.set_max_children_per_line(30);
-    flow.set_row_spacing(spacing);
-    flow.set_column_spacing(spacing);
-    flow.set_hexpand(true);
-    flow.set_halign(gtk4::Align::Fill);
-    flow.add_css_class("grid-flowbox");
+    // --- Factory: creates and binds cover widgets for GridView ---
+    let factory = gtk4::SignalListItemFactory::new();
 
+    // setup: create widget template once per slot
+    let state_for_setup = state.clone();
+    factory.connect_setup(move |_, list_item_obj| {
+        let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
+        list_item.set_activatable(false);
+        list_item.set_selectable(false);
+
+        let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        vbox.set_valign(gtk4::Align::Start);
+        vbox.set_halign(gtk4::Align::Center);
+        vbox.set_margin_start(6);
+        vbox.set_margin_end(6);
+        vbox.set_margin_top(6);
+        vbox.set_margin_bottom(6);
+        vbox.set_size_request(cover_width, cover_height);
+        vbox.add_css_class("cover-item");
+        vbox.set_overflow(gtk4::Overflow::Visible);
+
+        let pic = gtk4::Picture::new();
+        pic.set_content_fit(gtk4::ContentFit::Cover);
+        pic.set_size_request(cover_width, cover_height);
+        pic.add_css_class("game-cover-pic");
+        // Set a placeholder ScaledPaintable so the Picture reports the correct
+        // natural size from the very first measure (before bind sets the real image).
+        let placeholder = crate::images::ScaledPaintable::new_empty(cover_width, cover_height);
+        pic.set_paintable(Some(&placeholder));
+        vbox.append(&pic);
+
+        // Store lutris_id on the widget so gesture handlers can read it
+        unsafe { vbox.set_data::<AtomicI64>("lutris-id", AtomicI64::new(0)) };
+
+        // Left click → switch to game
+        let sc = state_for_setup.clone();
+        let click = gtk4::GestureClick::new();
+        click.connect_pressed(move |gesture, _, _, _| {
+            let widget = gesture.widget().unwrap();
+            if let Some(ptr) = unsafe { widget.data::<AtomicI64>("lutris-id") } {
+                let lutris_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
+                if lutris_id != 0 {
+                    switch_to_game(&sc, lutris_id);
+                }
+            }
+        });
+        vbox.add_controller(click);
+
+        // Right click → context menu
+        let sc2 = state_for_setup.clone();
+        let right_click = gtk4::GestureClick::new();
+        right_click.set_button(3);
+        right_click.connect_pressed(move |gesture, _, x, y| {
+            let widget = gesture.widget().unwrap();
+            if let Some(ptr) = unsafe { widget.data::<AtomicI64>("lutris-id") } {
+                let lutris_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
+                if lutris_id != 0 {
+                    let game = sc2
+                        .borrow()
+                        .games
+                        .iter()
+                        .find(|g| g.lutris_id == lutris_id)
+                        .cloned();
+                    if let Some(game) = game {
+                        show_game_context_menu(&sc2, &game, &widget, x, y, None::<&gtk4::ListBoxRow>);
+                    }
+                }
+            }
+        });
+        vbox.add_controller(right_click);
+
+        list_item.set_child(Some(&vbox));
+    });
+
+    // bind: populate widget with game data
+    factory.connect_bind(move |_, list_item_obj| {
+        let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
+        let child = list_item.child().unwrap();
+        let vbox = child.downcast_ref::<gtk4::Box>().unwrap();
+        let first = vbox.first_child().unwrap();
+        let pic = first.downcast_ref::<gtk4::Picture>().unwrap();
+
+        let game_item = list_item
+            .item()
+            .unwrap()
+            .downcast::<GameItem>()
+            .unwrap();
+
+        if let Some(game) = game_item.game() {
+            if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("lutris-id") } {
+                unsafe { ptr.as_ref() }.store(game.lutris_id, Ordering::Relaxed);
+            }
+            if !game.grid_path.is_empty() {
+                crate::images::set_picture_natural(pic, &game.grid_path, cover_width, cover_height);
+            } else {
+                pic.set_paintable(None::<&gdk4::Texture>);
+            }
+        }
+    });
+
+    // unbind: clear widget for recycling
+    factory.connect_unbind(move |_, list_item_obj| {
+        let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
+        let child = list_item.child().unwrap();
+        let vbox = child.downcast_ref::<gtk4::Box>().unwrap();
+        let first = vbox.first_child().unwrap();
+        let pic = first.downcast_ref::<gtk4::Picture>().unwrap();
+
+        if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("lutris-id") } {
+            unsafe { ptr.as_ref() }.store(0, Ordering::Relaxed);
+        }
+        let placeholder = crate::images::ScaledPaintable::new_empty(cover_width, cover_height);
+        pic.set_paintable(Some(&placeholder));
+    });
+
+    // --- Populate model ---
+    let store = gio::ListStore::new::<GameItem>();
     for game in &games {
         if game.hidden && !show_hidden {
             continue;
         }
-        let item = build_game_cover(state, game, cover_width, cover_height);
-        flow.insert(&item, -1);
+        store.append(&GameItem::new(game));
     }
 
-    outer.append(&flow);
+    let selection_model = gtk4::NoSelection::new(Some(store.upcast::<gio::ListModel>()));
+    let grid = gtk4::GridView::new(Some(selection_model), Some(factory));
+    grid.set_min_columns(1);
+    grid.set_max_columns(30);
+    grid.set_hexpand(true);
+    grid.set_halign(gtk4::Align::Fill);
+    grid.add_css_class("game-grid");
+    grid.remove_css_class("view");
+
+    // Wrap GridView in a custom bin that overrides measure().
+    // GridView's own measure returns a wildly incorrect height (30 * min_row_height)
+    // because it lacks proper scroll adjustments when not in a ScrolledWindow.
+    // GridBin calculates the correct height: n_rows * row_height.
+    let n_items = games.iter().filter(|g| !g.hidden || show_hidden).count() as u32;
+    let row_h = cover_height + 12; // cover + 6px margins top + bottom
+    let col_nat = cover_width + 12; // cover + 6px margins start + end
+    let bin = GridBin::new(&grid, row_h, n_items, col_nat);
+    bin.set_hexpand(true);
+    bin.set_halign(gtk4::Align::Fill);
+    bin.set_vexpand(false);
+    bin.set_valign(gtk4::Align::Start);
+
+    outer.append(&bin);
     content_box.append(&outer);
 }
 
@@ -988,54 +1263,6 @@ fn build_cover(
 
     let state_clone = state.clone();
     let game_clone = game.clone();
-    let lutris_id = game.lutris_id;
-    let click = gtk4::GestureClick::new();
-    click.connect_pressed(move |_, _, _, _| {
-        switch_to_game(&state_clone, lutris_id);
-    });
-    vbox.add_controller(click);
-
-    // Right-click context menu
-    let sc = state.clone();
-    let gc = game.clone();
-    let v = vbox.clone();
-    let right_click = gtk4::GestureClick::new();
-    right_click.set_button(3);
-    right_click.connect_pressed(move |_, _, x, y| {
-        show_game_context_menu(&sc, &gc, &v, x, y, None::<&gtk4::ListBoxRow>);
-    });
-    vbox.add_controller(right_click);
-
-    vbox.upcast()
-}
-
-/// Build a single game cover for the main grid.  Uses the vertical 600x900
-/// capsule image and maintains a 2:3 aspect ratio.  Image is loaded eagerly.
-fn build_game_cover(
-    state: &SharedState,
-    game: &Game,
-    cover_width: i32,
-    cover_height: i32,
-) -> gtk4::Widget {
-    let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    vbox.set_valign(gtk4::Align::Start);
-    vbox.set_halign(gtk4::Align::Center);
-    vbox.set_size_request(cover_width, cover_height);
-    vbox.add_css_class("cover-item");
-    vbox.set_overflow(gtk4::Overflow::Visible);
-
-    let pic = gtk4::Picture::new();
-    pic.set_content_fit(gtk4::ContentFit::Cover);
-    pic.set_size_request(cover_width, cover_height);
-    pic.add_css_class("game-cover-pic");
-
-    if !game.grid_path.is_empty() {
-        crate::images::set_picture_scaled(&pic, &game.grid_path, cover_width, cover_height);
-    }
-
-    vbox.append(&pic);
-
-    let state_clone = state.clone();
     let lutris_id = game.lutris_id;
     let click = gtk4::GestureClick::new();
     click.connect_pressed(move |_, _, _, _| {

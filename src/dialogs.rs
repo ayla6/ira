@@ -890,12 +890,14 @@ fn show_sgdb_picker(steam: &Arc<crate::steam::SteamClient>, id: &str, asset: &st
                 let dest_dl = dest.clone();
                 let fn_dl = file_name.clone();
                 let dir_dl = dest_dir.clone();
-                let cb: std::rc::Rc<dyn Fn()> = std::rc::Rc::new(move || {
-                    let _ = std::fs::create_dir_all(&dir_dl);
-                    for old_ext in ["png", "ico", "jpg", "webp"] {
-                        let _ = std::fs::remove_file(&format!("{}/icon.{}", dir_dl, old_ext));
-                    }
-                    if steam_dl.download_file(&dl_url, std::path::Path::new(&dest_dl)).is_ok() {
+                    let cb: std::rc::Rc<dyn Fn()> = std::rc::Rc::new(move || {
+                        let _ = std::fs::create_dir_all(&dir_dl);
+                        if fn_dl.starts_with("icon.") {
+                            for old_ext in ["png", "ico", "jpg", "webp"] {
+                                let _ = std::fs::remove_file(&format!("{}/icon.{}", dir_dl, old_ext));
+                            }
+                        }
+                        if steam_dl.download_file(&dl_url, std::path::Path::new(&dest_dl)).is_ok() {
                         if fn_dl.ends_with(".ico") {
                             match crate::parser::convert_ico_to_png(std::path::Path::new(&dest_dl)) {
                                 Ok(png_path) => eprintln!("Converted ICO to {}", png_path.display()),

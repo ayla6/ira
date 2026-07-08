@@ -112,7 +112,6 @@ struct SidebarRowWidgets {
     row: gtk4::ListBoxRow,
     icon: gtk4::Image,
     title: gtk4::Label,
-    subtitle: gtk4::Label,
 }
 
 struct ImageLoadBudget {
@@ -529,7 +528,6 @@ fn build_sidebar_row(list: &gtk4::ListBox, game: &Game, state: &SharedState, sho
         row,
         icon,
         title: title_label,
-        subtitle: gtk4::Label::new(None),
     }
 }
 

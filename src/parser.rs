@@ -111,6 +111,14 @@ pub struct Game {
     pub lutris_name: String,
     /// True if user manually unmatched — don't auto-rematch.
     pub manual_unmatch: bool,
+    /// Sort key (empty = use name for sorting).
+    pub sort_title: String,
+}
+
+impl Game {
+    pub fn sort_key(&self) -> &str {
+        if self.sort_title.is_empty() { &self.name } else { &self.sort_title }
+    }
 }
 
 /// A Lutris game with no matched achievement source yet — shown in the sidebar
@@ -139,6 +147,7 @@ pub fn unmatched_game(lutris_id: i64, name: &str, slug: &str, playtime: f64, las
         logo_size: 0,
         lutris_name: name.to_string(),
         manual_unmatch: false,
+        sort_title: String::new(),
     }
 }
 
@@ -251,7 +260,7 @@ pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
             Err(e) => eprintln!("Skipping game {} ({}): {}", entry.steam_id, entry.kind, e),
         }
     }
-    games.sort_by(|a, b| a.name.cmp(&b.name));
+    games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
     games
 }
 
@@ -287,6 +296,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         logo_size: entry.logo_size,
         lutris_name: String::new(),
         manual_unmatch: entry.manual_unmatch.unwrap_or(0) == 1,
+        sort_title: entry.sort_title.clone(),
     };
 
     let ach_dir = achievements_dir(save_dir, app_id);

@@ -145,6 +145,7 @@ fn activate(app: &adw::Application) -> SharedState {
                         logo_size: 0,
                         ignored: Some(0),
                         manual_unmatch: Some(0),
+                        sort_title: String::new(),
                     };
                     watcher.watch(&entry, &g.achievements);
                 }
@@ -331,7 +332,7 @@ fn build_game_list(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
             games.push(game);
         }
     }
-    games.sort_by(|a, b| a.name.cmp(&b.name));
+    games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
     games
 }
 

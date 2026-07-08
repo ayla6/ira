@@ -413,6 +413,7 @@ fn build_window(state: &SharedState, app: &adw::Application) {
 }
 
 fn rebuild_sidebar(state: &SharedState) {
+    state.borrow_mut().games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
     let game_list = state.borrow().game_list.clone();
     let sidebar_scroll = state.borrow().sidebar_scroll.clone();
     // Save scroll position so the list doesn't jump to the top on rebuild
@@ -548,6 +549,7 @@ fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
     updated.lastplayed = existing.lastplayed;
     updated.lutris_name = existing.lutris_name.clone();
     updated.manual_unmatch = existing.manual_unmatch;
+    updated.sort_title = existing.sort_title.clone();
     if updated.icon_path.is_empty() {
         updated.icon_path = existing.icon_path.clone();
     }
@@ -723,7 +725,7 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
             s.games[i] = g;
         } else {
             s.games.push(game);
-            s.games.sort_by(|a, b| a.name.cmp(&b.name));
+            s.games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
         }
     }
 
@@ -1479,6 +1481,7 @@ fn display_game(game: &Game, state: &SharedState) {
                 logo_size: 0,
                 ignored: Some(0),
                 manual_unmatch: Some(0),
+                sort_title: String::new(),
             };
             if let Ok(updated) = load_game(&entry, SAVE_DIR) {
                 apply_game_update(&state_for_reload, updated);
@@ -2290,6 +2293,15 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     settings_page.append(&title_label);
     settings_page.append(&title_entry);
 
+    let sort_entry = gtk4::Entry::new();
+    sort_entry.set_placeholder_text(Some(&game.name));
+    sort_entry.set_text(&game.sort_title);
+    let sort_label = gtk4::Label::new(Some("Sort title"));
+    sort_label.set_halign(gtk4::Align::Start);
+    sort_label.set_margin_top(8);
+    settings_page.append(&sort_label);
+    settings_page.append(&sort_entry);
+
     // Unmatch button (only for matched games)
     if game.lutris_id != 0 && !game.app_id.is_empty() {
         let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
@@ -2438,12 +2450,17 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     let lutris_id = game.lutris_id;
     let app_id = game.app_id.clone();
     let title_entry_c = title_entry.clone();
+    let sort_entry_c = sort_entry.clone();
     let logo_controls_c = logo_controls.clone();
     let win_s = win.clone();
     save_btn.connect_clicked(move |_| {
         let title = title_entry_c.text().to_string();
+        let sort_title = sort_entry_c.text().to_string();
         if let Err(e) = crate::db::update_game_title(&state_clone.borrow().db, db_id, &title) {
             eprintln!("Failed to update game: {}", e);
+        }
+        if let Err(e) = crate::db::update_sort_title(&state_clone.borrow().db, db_id, &sort_title) {
+            eprintln!("Failed to update sort title: {}", e);
         }
 
         // Save logo settings if the game has a logo
@@ -2462,9 +2479,10 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
             }
         }
 
-        // Update title in game
+        // Update title and sort_title in game
         if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
             g.name = title.clone();
+            g.sort_title = sort_title.clone();
         }
         if !app_id.is_empty() {
             state_clone.borrow().game_names.lock().unwrap().insert(app_id.clone(), title);
@@ -3178,6 +3196,7 @@ fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, lutr
                 logo_size: entry.logo_size,
                 lutris_name: lutris_name.clone(),
                 manual_unmatch: false,
+                sort_title: entry.sort_title.clone(),
             };
             let _ = sender.send(AppMessage::NewGame(game));
         }
@@ -3235,6 +3254,7 @@ pub fn enrich_game_async(
             logo_size: 0,
             ignored: Some(0),
             manual_unmatch: Some(0),
+            sort_title: String::new(),
         };
 
         let Ok(mut game) = load_game(&entry, SAVE_DIR) else {

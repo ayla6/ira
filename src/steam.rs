@@ -547,7 +547,7 @@ impl SteamClient {
     }
 
     /// Force-download a specific image type from SGDB.
-    /// `asset`: "icon", "hero", "grid", "logo".
+    /// `asset`: "icon", "hero", "grid", "header", "logo".
     /// `id`: Steam app ID (uses icons/steam/ endpoint) or SGDB game ID (uses game/ endpoint).
     pub fn force_download_sgdb(&self, id: &str, asset: &str, is_steam_id: bool) -> String {
         let dir = if is_steam_id { self.game_dir(id) } else { self.sgdb_dir(id) };
@@ -557,13 +557,18 @@ impl SteamClient {
             ("icon", false) => format!("icons/game/{}", id),
             ("hero", true) => format!("heroes/steam/{}", id),
             ("hero", false) => format!("heroes/game/{}", id),
-            ("grid", true) => format!("grids/steam/{}", id),
-            ("grid", false) => format!("grids/game/{}", id),
+            ("grid", true) | ("header", true) => format!("grids/steam/{}", id),
+            ("grid", false) | ("header", false) => format!("grids/game/{}", id),
             ("logo", true) => format!("logos/steam/{}", id),
             ("logo", false) => format!("logos/game/{}", id),
             _ => return String::new(),
         };
-        let url = match self.fetch_sgdb_endpoint(&endpoint) {
+        let dims: &[&str] = match asset {
+            "grid" => &["600x900"],
+            "header" => &["460x215", "920x430"],
+            _ => &[],
+        };
+        let url = match self.fetch_sgdb_endpoint(&endpoint, dims) {
             Some(u) => u,
             None => return String::new(),
         };
@@ -587,6 +592,11 @@ impl SteamClient {
                 let _ = std::fs::remove_file(&dest);
                 self.fetch_image(&url, &dest)
             }
+            "header" => {
+                let dest = dir.join("header.jpg");
+                let _ = std::fs::remove_file(&dest);
+                self.fetch_image(&url, &dest)
+            }
             "logo" => {
                 let dest = dir.join("logo.png");
                 let _ = std::fs::remove_file(&dest);
@@ -596,11 +606,17 @@ impl SteamClient {
         }
     }
 
-    fn fetch_sgdb_endpoint(&self, endpoint: &str) -> Option<String> {
+    fn fetch_sgdb_endpoint(&self, endpoint: &str, dimensions: &[&str]) -> Option<String> {
         let sgdb_key = self.sgdb_api_key();
         if sgdb_key.is_empty() { return None; }
+        let base = format!("https://www.steamgriddb.com/api/v2/{}", endpoint);
+        let url = if dimensions.is_empty() {
+            base
+        } else {
+            format!("{}?dimensions={}", base, dimensions.join(","))
+        };
         let resp = self.http
-            .get(format!("https://www.steamgriddb.com/api/v2/{}", endpoint))
+            .get(&url)
             .header("Authorization", format!("Bearer {}", sgdb_key))
             .send().ok()?;
         if !resp.status().is_success() { return None; }
@@ -626,9 +642,10 @@ impl SteamClient {
     }
 
     /// List all available assets from SGDB for a given game and asset type.
-    /// `asset`: "icon", "hero", "grid", "logo".
+    /// `asset`: "icon", "hero", "grid", "header", "logo".
     /// `id`: Steam app ID (if is_steam_id) or SGDB game ID.
-    pub fn list_sgdb_assets(&self, id: &str, asset: &str, is_steam_id: bool) -> Vec<SgdbAsset> {
+    /// `dimensions`: Optional dimension filters (e.g. `["600x900"]`, `["460x215", "920x430"]`).
+    pub fn list_sgdb_assets(&self, id: &str, asset: &str, is_steam_id: bool, dimensions: &[&str]) -> Vec<SgdbAsset> {
         let sgdb_key = self.sgdb_api_key();
         if sgdb_key.is_empty() {
             return Vec::new();
@@ -638,14 +655,20 @@ impl SteamClient {
             ("icon", false) => format!("icons/game/{}", id),
             ("hero", true) => format!("heroes/steam/{}", id),
             ("hero", false) => format!("heroes/game/{}", id),
-            ("grid", true) => format!("grids/steam/{}", id),
-            ("grid", false) => format!("grids/game/{}", id),
+            ("grid", true) | ("header", true) => format!("grids/steam/{}", id),
+            ("grid", false) | ("header", false) => format!("grids/game/{}", id),
             ("logo", true) => format!("logos/steam/{}", id),
             ("logo", false) => format!("logos/game/{}", id),
             _ => return Vec::new(),
         };
+        let base = format!("https://www.steamgriddb.com/api/v2/{}", endpoint);
+        let url = if dimensions.is_empty() {
+            base
+        } else {
+            format!("{}?dimensions={}", base, dimensions.join(","))
+        };
         let resp = match self.http
-            .get(format!("https://www.steamgriddb.com/api/v2/{}", endpoint))
+            .get(&url)
             .header("Authorization", format!("Bearer {}", sgdb_key))
             .send()
         {

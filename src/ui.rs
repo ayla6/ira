@@ -2502,13 +2502,14 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
     let id = game.app_id.clone();
     let data_subdir = if game.kind == "sgdb" { "steamgriddb" } else { "steam" };
 
-    for (label, file, asset, thumb_w, thumb_h) in [
-        ("Icon", "icon.png", "icon", 48, 48),
-        ("Hero", "library_hero.jpg", "hero", 96, 32),
-        ("Grid", "library_600x900.jpg", "grid", 32, 48),
-        ("Header", "header.jpg", "header", 96, 45),
-        ("Logo", "logo.png", "logo", 96, 32),
-    ] {
+    let sections: [(&str, &str, &str, i32, i32, &[&str]); 5] = [
+        ("Icon", "icon.png", "icon", 48, 48, &[]),
+        ("Hero", "library_hero.jpg", "hero", 96, 32, &[]),
+        ("Capsule", "library_600x900.jpg", "grid", 32, 48, &["600x900"]),
+        ("Header", "header.jpg", "header", 96, 45, &["460x215", "920x430"]),
+        ("Logo", "logo.png", "logo", 96, 32, &[]),
+    ];
+    for &(label, file, asset, thumb_w, thumb_h, dimensions) in &sections {
         let section = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
         let lbl = gtk4::Label::new(Some(label));
         lbl.set_halign(gtk4::Align::Start);
@@ -2625,8 +2626,9 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
         let is_steam_c = is_steam;
         let parent = parent_win.clone();
         let refresh = refresh_images.clone();
+        let dims: Vec<&str> = dimensions.to_vec();
         btn.connect_clicked(move |_| {
-            show_sgdb_picker(&steam, &id_c, &asset_c, is_steam_c, &parent, refresh.clone());
+            show_sgdb_picker(&steam, &id_c, &asset_c, is_steam_c, &dims, &parent, refresh.clone());
         });
         btns.append(&btn);
 
@@ -2643,32 +2645,60 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
     content
 }
 
-fn show_sgdb_picker(steam: &Arc<crate::steam::SteamClient>, id: &str, asset: &str, is_steam_id: bool, parent: &adw::Window, on_done: std::rc::Rc<dyn Fn()>) {
+fn show_sgdb_picker(steam: &Arc<crate::steam::SteamClient>, id: &str, asset: &str, is_steam_id: bool, dimensions: &[&str], parent: &adw::Window, on_done: std::rc::Rc<dyn Fn()>) {
     let picker = adw::Window::new();
-    picker.set_default_width(500);
-    picker.set_default_height(450);
+    picker.set_default_width(600);
+    picker.set_default_height(500);
     picker.set_transient_for(Some(parent));
     picker.set_modal(true);
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header_bar = adw::HeaderBar::new();
     header_bar.set_title_widget(Some(&gtk4::Label::new(Some(&format!("Pick {}", asset)))));
+
+    let toggle_btn = gtk4::ToggleButton::new();
+    toggle_btn.set_icon_name("view-list-symbolic");
+    toggle_btn.set_tooltip_text(Some("Switch to list view"));
+    toggle_btn.add_css_class("flat");
+    header_bar.pack_end(&toggle_btn);
+
     outer.append(&header_bar);
 
     let scrolled = gtk4::ScrolledWindow::new();
     scrolled.set_vexpand(true);
-    let list = gtk4::ListBox::new();
-    list.set_selection_mode(gtk4::SelectionMode::None);
-    list.set_margin_start(12);
-    list.set_margin_end(12);
-    list.set_margin_top(8);
-    list.set_margin_bottom(8);
 
-    let loading = gtk4::Label::new(Some("Loading…"));
+    let stack = gtk4::Stack::new();
+
+    let flow = gtk4::FlowBox::new();
+    flow.set_selection_mode(gtk4::SelectionMode::None);
+    flow.set_homogeneous(true);
+    flow.set_min_children_per_line(1);
+    flow.set_max_children_per_line(8);
+    flow.set_row_spacing(8);
+    flow.set_column_spacing(8);
+    flow.set_margin_start(12);
+    flow.set_margin_end(12);
+    flow.set_margin_top(8);
+    flow.set_margin_bottom(8);
+    flow.set_halign(gtk4::Align::Fill);
+
+    let list_view = gtk4::ListBox::new();
+    list_view.set_selection_mode(gtk4::SelectionMode::None);
+    list_view.set_margin_start(12);
+    list_view.set_margin_end(12);
+    list_view.set_margin_top(8);
+    list_view.set_margin_bottom(8);
+
+    stack.add_named(&flow, Some("grid"));
+    stack.add_named(&list_view, Some("list"));
+    stack.set_visible_child_name("grid");
+
+    let loading = gtk4::Label::new(Some("Loading\u{2026}"));
     loading.add_css_class("dim-label");
-    list.append(&loading);
+    flow.append(&loading);
+    list_view.append(&gtk4::Label::new(Some("Loading\u{2026}")));
 
-    scrolled.set_child(Some(&list));
+    scrolled.set_child(Some(&stack));
     outer.append(&scrolled);
 
     let close_btn = gtk4::Button::with_label("Close");
@@ -2689,167 +2719,210 @@ fn show_sgdb_picker(steam: &Arc<crate::steam::SteamClient>, id: &str, asset: &st
     let steam_c = steam.clone();
     let id_c = id.to_string();
     let asset_c = asset.to_string();
+    let dims: Vec<String> = dimensions.iter().map(|s| s.to_string()).collect();
     std::thread::spawn(move || {
-        let results = steam_c.list_sgdb_assets(&id_c, &asset_c, is_steam_id);
+        let dims_refs: Vec<&str> = dims.iter().map(|s| s.as_str()).collect();
+        let results = steam_c.list_sgdb_assets(&id_c, &asset_c, is_steam_id, &dims_refs);
         let _ = tx.send(results);
     });
 
-    let list_clone = list.clone();
     let steam_clone = steam.clone();
     let id_clone = id.to_string();
     let asset_clone = asset.to_string();
     let picker_clone = picker.clone();
     let on_done = on_done.clone();
+
+    let stack_toggle = stack.clone();
+    toggle_btn.connect_toggled(move |btn| {
+        if btn.is_active() {
+            stack_toggle.set_visible_child_name("list");
+            btn.set_icon_name("view-grid-symbolic");
+            btn.set_tooltip_text(Some("Switch to grid view"));
+        } else {
+            stack_toggle.set_visible_child_name("grid");
+            btn.set_icon_name("view-list-symbolic");
+            btn.set_tooltip_text(Some("Switch to list view"));
+        }
+    });
+
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
         if let Ok(assets) = rx.borrow_mut().try_recv() {
-            while let Some(child) = list_clone.first_child() {
-                list_clone.remove(&child);
-            }
+            while let Some(child) = flow.first_child() { flow.remove(&child); }
+            while let Some(child) = list_view.first_child() { list_view.remove(&child); }
 
             if assets.is_empty() {
                 let none = gtk4::Label::new(Some("No images found on SteamGridDB"));
                 none.add_css_class("dim-label");
-                list_clone.append(&none);
+                flow.append(&none);
+                list_view.append(&gtk4::Label::new(Some("No images found on SteamGridDB")));
                 return glib::ControlFlow::Break;
             }
 
             for a in assets {
+                let thumb_size = if asset_clone == "header" { 138 } else { 90 };
+
+                // --- Build info text ---
+                let mut info = String::new();
+                if a.width > 0 && a.height > 0 {
+                    info = format!("{}\u{d7}{}", a.width, a.height);
+                }
+                if !a.style.is_empty() {
+                    if !info.is_empty() { info = format!("{} \u{b7} {}", info, a.style); }
+                    else { info = a.style.clone(); }
+                }
+                if !a.author.is_empty() {
+                    if !info.is_empty() { info = format!("{} \u{b7} by {}", info, a.author); }
+                    else { info = format!("by {}", a.author); }
+                }
+
+                // --- Grid item (card) ---
+                let card = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+                card.set_halign(gtk4::Align::Center);
+                card.set_valign(gtk4::Align::Start);
+                card.set_margin_top(4);
+                card.set_margin_bottom(4);
+
+                let grid_pic = gtk4::Picture::new();
+                grid_pic.set_content_fit(gtk4::ContentFit::ScaleDown);
+                grid_pic.set_size_request(thumb_size, thumb_size);
+                card.append(&grid_pic);
+
+                let ilbl = gtk4::Label::new(Some(&info));
+                ilbl.set_xalign(0.5);
+                ilbl.set_max_width_chars(20);
+                ilbl.set_wrap(true);
+                ilbl.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+                ilbl.add_css_class("dim-label");
+                card.append(&ilbl);
+
+                let gdl = gtk4::Button::with_label("Download");
+                gdl.add_css_class("suggested-action");
+                gdl.set_halign(gtk4::Align::Center);
+                card.append(&gdl);
+                flow.append(&card);
+
+                // --- List item (row) ---
                 let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
                 row.set_margin_top(4);
                 row.set_margin_bottom(4);
 
-                // Thumbnail — download to temp and show
-                let thumb_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-                let thumb_pic = gtk4::Picture::new();
-                thumb_pic.set_content_fit(gtk4::ContentFit::ScaleDown);
-                thumb_pic.set_size_request(48, 48);
-                thumb_box.append(&thumb_pic);
-                row.append(&thumb_box);
+                let list_pic = gtk4::Picture::new();
+                list_pic.set_content_fit(gtk4::ContentFit::ScaleDown);
+                list_pic.set_size_request(48, 48);
+                row.append(&list_pic);
 
-                // Download thumbnail in background
+                let rlbl = gtk4::Label::new(Some(&info));
+                rlbl.set_xalign(0.0);
+                rlbl.set_hexpand(true);
+                rlbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+                row.append(&rlbl);
+
+                let ldl = gtk4::Button::with_label("Download");
+                ldl.add_css_class("suggested-action");
+                row.append(&ldl);
+                list_view.append(&row);
+
+                // --- Download logic (shared via Rc) ---
+                let data_subdir = if is_steam_id { "steam".to_string() } else { "steamgriddb".to_string() };
+                let dest_dir = format!("{}/data/{}/{}", SAVE_DIR, data_subdir, id_clone);
+                let file_name = match asset_clone.as_str() {
+                    "icon" => {
+                        let ext = if a.mime.contains("icon") || a.mime.contains("x-icon") { "ico" }
+                        else if a.mime.contains("png") { "png" }
+                        else if a.mime.contains("jpeg") || a.mime.contains("jpg") { "jpg" }
+                        else if a.mime.contains("webp") { "webp" }
+                        else { std::path::Path::new(&a.url).extension().and_then(|e| e.to_str()).unwrap_or("png") };
+                        format!("icon.{}", ext)
+                    }
+                    "hero" => "library_hero.jpg".to_string(),
+                    "grid" => "library_600x900.jpg".to_string(),
+                    "header" => "header.jpg".to_string(),
+                    "logo" => "logo.png".to_string(),
+                    _ => continue,
+                };
+                let dest = format!("{}/{}", dest_dir, file_name);
+                let dl_url = a.url.clone();
+                let steam_dl = steam_clone.clone();
+                let picker_dl = picker_clone.clone();
+                let on_done_dl = on_done.clone();
+                let dest_dl = dest.clone();
+                let fn_dl = file_name.clone();
+                let dir_dl = dest_dir.clone();
+                let cb: std::rc::Rc<dyn Fn()> = std::rc::Rc::new(move || {
+                    let _ = std::fs::create_dir_all(&dir_dl);
+                    for old_ext in ["png", "ico", "jpg", "webp"] {
+                        let _ = std::fs::remove_file(&format!("{}/icon.{}", dir_dl, old_ext));
+                    }
+                    if steam_dl.download_file(&dl_url, std::path::Path::new(&dest_dl)).is_ok() {
+                        if fn_dl.ends_with(".ico") {
+                            match crate::parser::convert_ico_to_png(std::path::Path::new(&dest_dl)) {
+                                Ok(png_path) => eprintln!("Converted ICO to {}", png_path.display()),
+                                Err(e) => {
+                                    eprintln!("ICO conversion failed: {}, trying direct load", e);
+                                    let png_dest = std::path::Path::new(&dest_dl).with_extension("png");
+                                    let _ = std::fs::rename(&dest_dl, &png_dest);
+                                }
+                            }
+                        }
+                        on_done_dl();
+                        picker_dl.close();
+                    } else {
+                        eprintln!("Download failed for {}", dl_url);
+                    }
+                });
+                let cb_g = cb.clone();
+                gdl.connect_clicked(move |_| cb_g());
+                ldl.connect_clicked(move |_| cb());
+
+                // --- Thumbnail loader (shared for both grid/list thumbs) ---
                 let url_clone = a.url.clone();
-                let thumb_pic_clone = thumb_pic.clone();
                 let steam_thumb = steam_clone.clone();
                 let thumb_dir = format!("{}/data/.thumbnails", SAVE_DIR);
                 let _ = std::fs::create_dir_all(&thumb_dir);
                 let thumb_name = format!("{}/{}", thumb_dir, url_clone.rsplit('/').next().unwrap_or("thumb"));
+                let tsize = thumb_size;
                 let (tx_thumb, rx_thumb) = std::sync::mpsc::channel::<Option<String>>();
                 let rx_thumb = std::cell::RefCell::new(rx_thumb);
                 std::thread::spawn(move || {
                     let final_path = if std::path::Path::new(&thumb_name).exists() {
                         Some(thumb_name.clone())
                     } else if steam_thumb.download_file(&url_clone, std::path::Path::new(&thumb_name)).is_ok() {
-                        // Convert ICO to PNG for display
+                        let mut path = thumb_name.clone();
                         if std::path::Path::new(&thumb_name).extension().and_then(|e| e.to_str()) == Some("ico") {
                             if let Ok(img) = image::open(&thumb_name) {
                                 let png_path = std::path::Path::new(&thumb_name).with_extension("png");
                                 if img.save(&png_path).is_ok() {
                                     let _ = std::fs::remove_file(&thumb_name);
-                                    Some(png_path.to_string_lossy().into_owned())
-                                } else {
-                                    Some(thumb_name.clone())
+                                    path = png_path.to_string_lossy().into_owned();
                                 }
-                            } else {
-                                Some(thumb_name.clone())
                             }
-                        } else {
-                            Some(thumb_name.clone())
                         }
+                        if let Ok(img) = image::open(&path) {
+                            let (w, h) = (img.width(), img.height());
+                            if w > tsize as u32 || h > tsize as u32 {
+                                let resized = img.resize(tsize as u32, tsize as u32, image::imageops::FilterType::Lanczos3);
+                                let _ = resized.save(&path);
+                            }
+                        }
+                        Some(path)
                     } else {
                         None
                     };
                     let _ = tx_thumb.send(final_path);
                 });
-                let tp = thumb_pic_clone.clone();
+                let tp_g = grid_pic.clone();
+                let tp_l = list_pic.clone();
                 glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
                     if let Ok(path) = rx_thumb.borrow_mut().try_recv() {
                         if let Some(p) = path {
-                            tp.set_filename(Some(&p));
+                            tp_g.set_filename(Some(&p));
+                            tp_l.set_filename(Some(&p));
                         }
                         glib::ControlFlow::Break
                     } else {
                         glib::ControlFlow::Continue
                     }
                 });
-
-                // Info label
-                let mut info = if a.width > 0 && a.height > 0 {
-                    format!("{}×{}", a.width, a.height)
-                } else {
-                    "ICO".to_string()
-                };
-                if !a.style.is_empty() {
-                    info = format!("{} · {}", info, a.style);
-                }
-                if !a.author.is_empty() {
-                    info = format!("{} · by {}", info, a.author);
-                }
-                let label = gtk4::Label::new(Some(&info));
-                label.set_xalign(0.0);
-                label.set_hexpand(true);
-                label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-                row.append(&label);
-
-                // Download button
-                let dl_btn = gtk4::Button::with_label("Download");
-                dl_btn.add_css_class("suggested-action");
-                let url = a.url.clone();
-                let data_subdir = if is_steam_id { "steam" } else { "steamgriddb" };
-                let dest_dir = format!("{}/data/{}/{}", SAVE_DIR, data_subdir, id_clone);
-                let file_name = match asset_clone.as_str() {
-                    "icon" => {
-                        // Use mime to determine extension, fallback to URL
-                        let ext = if a.mime.contains("icon") || a.mime.contains("x-icon") {
-                            "ico"
-                        } else if a.mime.contains("png") {
-                            "png"
-                        } else if a.mime.contains("jpeg") || a.mime.contains("jpg") {
-                            "jpg"
-                        } else if a.mime.contains("webp") {
-                            "webp"
-                        } else {
-                            std::path::Path::new(&url).extension().and_then(|e| e.to_str()).unwrap_or("png")
-                        };
-                        format!("icon.{}", ext)
-                    }
-                    "hero" => "library_hero.jpg".to_string(),
-                    "grid" => "library_600x900.jpg".to_string(),
-                    "logo" => "logo.png".to_string(),
-                    _ => continue,
-                };
-                let dest = format!("{}/{}", dest_dir, file_name);
-                let steam_c = steam_clone.clone();
-                let picker_c = picker_clone.clone();
-                let on_done_c = on_done.clone();
-                dl_btn.connect_clicked(move |_| {
-                    let _ = std::fs::create_dir_all(&dest_dir);
-                    // Remove old icon files first
-                    for old_ext in ["png", "ico", "jpg", "webp"] {
-                        let old = format!("{}/icon.{}", dest_dir, old_ext);
-                        let _ = std::fs::remove_file(&old);
-                    }
-                    if steam_c.download_file(&url, std::path::Path::new(&dest)).is_ok() {
-                        if file_name.ends_with(".ico") {
-                            match crate::parser::convert_ico_to_png(std::path::Path::new(&dest)) {
-                                Ok(png_path) => eprintln!("Converted ICO to {}", png_path.display()),
-                                Err(e) => {
-                                    eprintln!("ICO conversion failed: {}, trying direct load", e);
-                                    // If conversion fails, try renaming to .png
-                                    // (some "ICO" files are actually PNG)
-                                    let png_dest = std::path::Path::new(&dest).with_extension("png");
-                                    let _ = std::fs::rename(&dest, &png_dest);
-                                }
-                            }
-                        }
-                        on_done_c();
-                        picker_c.close();
-                    } else {
-                        eprintln!("Download failed for {}", url);
-                    }
-                });
-                row.append(&dl_btn);
-
-                list_clone.append(&row);
             }
             glib::ControlFlow::Break
         } else {

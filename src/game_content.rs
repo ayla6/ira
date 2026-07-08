@@ -52,143 +52,147 @@ pub fn display_game(game: &Game, state: &SharedState) {
     game_vbox.set_margin_start(16);
     game_vbox.set_margin_end(16);
 
-    let view_stack = adw::ViewStack::new();
+    let has_achievements = !game.achievements.is_empty();
 
-    let view_switcher = adw::ViewSwitcher::new();
-    view_switcher.set_stack(Some(&view_stack));
-    view_switcher.set_halign(gtk4::Align::Center);
-    view_switcher.set_margin_top(12);
-    view_switcher.set_margin_bottom(12);
-    game_vbox.append(&view_switcher);
+    if has_achievements {
+        let view_stack = adw::ViewStack::new();
 
-    let switcher_spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    switcher_spacer.set_margin_bottom(12);
-    game_vbox.append(&switcher_spacer);
+        let view_switcher = adw::ViewSwitcher::new();
+        view_switcher.set_stack(Some(&view_stack));
+        view_switcher.set_halign(gtk4::Align::Center);
+        view_switcher.set_margin_top(12);
+        view_switcher.set_margin_bottom(12);
+        game_vbox.append(&view_switcher);
 
-    let progress_vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
-    let global_vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
+        let switcher_spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        switcher_spacer.set_margin_bottom(12);
+        game_vbox.append(&switcher_spacer);
 
-    let mut earned: Vec<&MergedAchievement> = Vec::new();
-    let mut locked: Vec<&MergedAchievement> = Vec::new();
-    let mut hidden: Vec<&MergedAchievement> = Vec::new();
-    for ach in &game.achievements {
-        if ach.earned {
-            earned.push(ach);
-        } else if ach.hidden {
-            hidden.push(ach);
-        } else {
-            locked.push(ach);
-        }
-    }
+        let progress_vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
+        let global_vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
 
-    earned.sort_by(|a, b| b.earned_time.cmp(&a.earned_time));
-    locked.sort_by(|a, b| a.display_name.cmp(&b.display_name));
-
-    let app_id_for_reload = game.app_id.clone();
-    let kind_for_reload = game.kind.clone();
-    let platform_id_for_reload = game.platform_id.clone();
-    let db_id_for_reload = game.db_id;
-    let lutris_id_for_reload = game.lutris_id;
-    let state_for_reload = state.clone();
-    let reload = move || {
-        let entry = GameEntry {
-            id: db_id_for_reload,
-            kind: kind_for_reload.clone(),
-            steam_id: app_id_for_reload.clone(),
-            platform_id: platform_id_for_reload.clone(),
-            title: String::new(),
-            lutris_db_id: if lutris_id_for_reload != 0 {
-                Some(lutris_id_for_reload)
+        let mut earned: Vec<&MergedAchievement> = Vec::new();
+        let mut locked: Vec<&MergedAchievement> = Vec::new();
+        let mut hidden: Vec<&MergedAchievement> = Vec::new();
+        for ach in &game.achievements {
+            if ach.earned {
+                earned.push(ach);
+            } else if ach.hidden {
+                hidden.push(ach);
             } else {
-                None
-            },
-            sgdb_id: None,
-            hidden: false,
-            logo_position: String::new(),
-            logo_size: 0,
-            ignored: Some(0),
-            manual_unmatch: Some(0),
-        };
-        if let Ok(updated) = load_game(&entry, SAVE_DIR) {
-            crate::ui::apply_game_update(&state_for_reload, updated);
-        }
-    };
-
-    let mut budget = ImageLoadBudget::new(EAGER_IMAGE_BUDGET);
-
-    if !earned.is_empty() {
-        let earned_group = adw::PreferencesGroup::new();
-        earned_group.set_title(&format!("Earned  ·  {}", earned.len()));
-        for ach in &earned {
-            earned_group.add(&create_achievement_row(ach, None, &mut budget));
-        }
-        progress_vbox.append(&earned_group);
-    }
-
-    if !locked.is_empty() || !hidden.is_empty() {
-        let locked_group = adw::PreferencesGroup::new();
-        locked_group.set_title(&format!("Locked  ·  {}", locked.len() + hidden.len()));
-        for ach in &locked {
-            let ach_clone = (*ach).clone();
-            let reload_clone = reload.clone();
-            let kind_clone = game.kind.clone();
-            let app_id_clone = game.app_id.clone();
-            let platform_id_clone = game.platform_id.clone();
-            let state_clone = state.clone();
-            locked_group.add(&create_achievement_row(
-                ach,
-                Some(Box::new(move || {
-                    crate::dialogs::confirm_mark_unlocked(
-                        &state_clone,
-                        &kind_clone,
-                        &app_id_clone,
-                        &platform_id_clone,
-                        &ach_clone,
-                        reload_clone.clone(),
-                    );
-                })),
-                &mut budget,
-            ));
-        }
-        if !hidden.is_empty() {
-            let hidden_row = adw::ActionRow::new();
-            hidden_row.set_title(&format!("... and {} hidden trophies", hidden.len()));
-            hidden_row.set_subtitle("Earn them to reveal details");
-            hidden_row.set_sensitive(false);
-            locked_group.add(&hidden_row);
-        }
-        progress_vbox.append(&locked_group);
-    }
-    budget.flush();
-
-    let global_built = std::cell::Cell::new(false);
-    let app_id_for_global = game.app_id.clone();
-    let state_for_global = state.clone();
-    let global_vbox_weak = global_vbox.downgrade();
-    view_stack.connect_notify_local(Some("visible-child-name"), move |stack, _| {
-        if stack.visible_child_name() == Some("global".into()) && !global_built.get() {
-            global_built.set(true);
-            if let Some(global_vbox) = global_vbox_weak.upgrade() {
-                let s = state_for_global.borrow();
-                if let Some(game) = s.games.iter().find(|g| g.app_id == app_id_for_global) {
-                    build_global_tab(game, &global_vbox);
-                }
+                locked.push(ach);
             }
         }
-    });
 
-    let progress_page =
-        view_stack.add_titled(&progress_vbox, Some("progress"), S::MY_PROGRESS);
-    progress_page.set_icon_name(Some("user-home-symbolic"));
+        earned.sort_by(|a, b| b.earned_time.cmp(&a.earned_time));
+        locked.sort_by(|a, b| a.display_name.cmp(&b.display_name));
 
-    let global_page =
-        view_stack.add_titled(&global_vbox, Some("global"), S::GLOBAL_STATS);
-    global_page.set_icon_name(Some("dialog-information-symbolic"));
+        let app_id_for_reload = game.app_id.clone();
+        let kind_for_reload = game.kind.clone();
+        let platform_id_for_reload = game.platform_id.clone();
+        let db_id_for_reload = game.db_id;
+        let lutris_id_for_reload = game.lutris_id;
+        let state_for_reload = state.clone();
+        let reload = move || {
+            let entry = GameEntry {
+                id: db_id_for_reload,
+                kind: kind_for_reload.clone(),
+                steam_id: app_id_for_reload.clone(),
+                platform_id: platform_id_for_reload.clone(),
+                title: String::new(),
+                lutris_db_id: if lutris_id_for_reload != 0 {
+                    Some(lutris_id_for_reload)
+                } else {
+                    None
+                },
+                sgdb_id: None,
+                hidden: false,
+                logo_position: String::new(),
+                logo_size: 0,
+                ignored: Some(0),
+                manual_unmatch: Some(0),
+            };
+            if let Ok(updated) = load_game(&entry, SAVE_DIR) {
+                crate::ui::apply_game_update(&state_for_reload, updated);
+            }
+        };
 
-    view_stack.set_vhomogeneous(false);
-    view_stack.set_margin_bottom(32);
+        let mut budget = ImageLoadBudget::new(EAGER_IMAGE_BUDGET);
 
-    game_vbox.append(&view_stack);
+        if !earned.is_empty() {
+            let earned_group = adw::PreferencesGroup::new();
+            earned_group.set_title(&format!("Earned  ·  {}", earned.len()));
+            for ach in &earned {
+                earned_group.add(&create_achievement_row(ach, None, &mut budget));
+            }
+            progress_vbox.append(&earned_group);
+        }
+
+        if !locked.is_empty() || !hidden.is_empty() {
+            let locked_group = adw::PreferencesGroup::new();
+            locked_group.set_title(&format!("Locked  ·  {}", locked.len() + hidden.len()));
+            for ach in &locked {
+                let ach_clone = (*ach).clone();
+                let reload_clone = reload.clone();
+                let kind_clone = game.kind.clone();
+                let app_id_clone = game.app_id.clone();
+                let platform_id_clone = game.platform_id.clone();
+                let state_clone = state.clone();
+                locked_group.add(&create_achievement_row(
+                    ach,
+                    Some(Box::new(move || {
+                        crate::dialogs::confirm_mark_unlocked(
+                            &state_clone,
+                            &kind_clone,
+                            &app_id_clone,
+                            &platform_id_clone,
+                            &ach_clone,
+                            reload_clone.clone(),
+                        );
+                    })),
+                    &mut budget,
+                ));
+            }
+            if !hidden.is_empty() {
+                let hidden_row = adw::ActionRow::new();
+                hidden_row.set_title(&format!("... and {} hidden trophies", hidden.len()));
+                hidden_row.set_subtitle("Earn them to reveal details");
+                hidden_row.set_sensitive(false);
+                locked_group.add(&hidden_row);
+            }
+            progress_vbox.append(&locked_group);
+        }
+        budget.flush();
+
+        let global_built = std::cell::Cell::new(false);
+        let app_id_for_global = game.app_id.clone();
+        let state_for_global = state.clone();
+        let global_vbox_weak = global_vbox.downgrade();
+        view_stack.connect_notify_local(Some("visible-child-name"), move |stack, _| {
+            if stack.visible_child_name() == Some("global".into()) && !global_built.get() {
+                global_built.set(true);
+                if let Some(global_vbox) = global_vbox_weak.upgrade() {
+                    let s = state_for_global.borrow();
+                    if let Some(game) = s.games.iter().find(|g| g.app_id == app_id_for_global) {
+                        build_global_tab(game, &global_vbox);
+                    }
+                }
+            }
+        });
+
+        let progress_page =
+            view_stack.add_titled(&progress_vbox, Some("progress"), S::MY_PROGRESS);
+        progress_page.set_icon_name(Some("user-home-symbolic"));
+
+        let global_page =
+            view_stack.add_titled(&global_vbox, Some("global"), S::GLOBAL_STATS);
+        global_page.set_icon_name(Some("dialog-information-symbolic"));
+
+        view_stack.set_vhomogeneous(false);
+        view_stack.set_margin_bottom(32);
+
+        game_vbox.append(&view_stack);
+    }
 
     let clamp = adw::Clamp::new();
     clamp.set_maximum_size(860);

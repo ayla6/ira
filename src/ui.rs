@@ -63,9 +63,11 @@ gridview.game-grid child:focus-within {
 
 .cover-item .game-cover-pic {
     transition: 100ms ease;
+    box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
 }
 .cover-item:hover .game-cover-pic {
     transform: scale(1.06);
+    box-shadow: 0 6px 24px 6px rgba(0,0,0,0.5);
 }
 
 .section-title {
@@ -684,6 +686,11 @@ fn apply_game_update(state: &SharedState, mut updated: Game) {
 
         let was_placeholder =
             s.games[i].name.is_empty() || s.games[i].name.starts_with("App ID:");
+
+        // Snapshot visual fields before merge to detect if grid-relevant data changed.
+        let old_grid_path = s.games[i].grid_path.clone();
+        let old_header_path = s.games[i].header_path.clone();
+
         merge_game_enrichment(&s.games[i], &mut updated);
 
         // Enrichment resolved a real name for a game that previously had none —
@@ -708,9 +715,12 @@ fn apply_game_update(state: &SharedState, mut updated: Game) {
 
         // Only the currently-displayed game needs a content rebuild.
         let needs_rebuild = s.selected_id == updated.lutris_id.to_string() && !s.content_unloaded;
-        // If the grid view is showing, schedule a debounced refresh so newly
-        // enriched cover images appear without rebuilding on every single update.
-        let needs_grid_refresh = s.selected_id.is_empty()
+        // Only reload the grid if cover images actually changed (e.g. newly
+        // downloaded). Skip if only achievement data or names changed.
+        let visual_changed = updated.grid_path != old_grid_path
+            || updated.header_path != old_header_path;
+        let needs_grid_refresh = visual_changed
+            && s.selected_id.is_empty()
             && !s.content_unloaded
             && !s.grid_refresh_pending;
         if needs_grid_refresh {
@@ -726,7 +736,7 @@ fn apply_game_update(state: &SharedState, mut updated: Game) {
     }
     if needs_grid_refresh {
         let state_clone = state.clone();
-        glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || {
+        glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
             let mut s = state_clone.borrow_mut();
             s.grid_refresh_pending = false;
             let should_refresh = s.selected_id.is_empty() && !s.content_unloaded;
@@ -777,12 +787,26 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
 
     if !state.borrow().content_unloaded {
         rebuild_sidebar(state);
-        // If no game is selected, re-select "All Games" and refresh the grid view
         let selected = state.borrow().selected_id.clone();
         if selected.is_empty() {
             let row = state.borrow().game_list.row_at_index(0);
             select_row_silently(state, row.as_ref());
-            show_grid_view(state);
+            // Use the same debounced refresh as apply_game_update to avoid
+            // rebuilding the grid on every single game insertion.
+            let needs_refresh = !state.borrow().grid_refresh_pending;
+            if needs_refresh {
+                state.borrow_mut().grid_refresh_pending = true;
+                let state_clone = state.clone();
+                glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
+                    let mut s = state_clone.borrow_mut();
+                    s.grid_refresh_pending = false;
+                    let should_refresh = s.selected_id.is_empty() && !s.content_unloaded;
+                    drop(s);
+                    if should_refresh {
+                        show_grid_view(&state_clone);
+                    }
+                });
+            }
         }
     }
 }
@@ -978,10 +1002,10 @@ fn show_grid_view(state: &SharedState) {
         let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
         vbox.set_valign(gtk4::Align::Start);
         vbox.set_halign(gtk4::Align::Center);
-        vbox.set_margin_start(6);
-        vbox.set_margin_end(6);
-        vbox.set_margin_top(6);
-        vbox.set_margin_bottom(6);
+        vbox.set_margin_start(8);
+        vbox.set_margin_end(8);
+        vbox.set_margin_top(8);
+        vbox.set_margin_bottom(8);
         vbox.set_size_request(cover_width, cover_height);
         vbox.add_css_class("cover-item");
         vbox.set_overflow(gtk4::Overflow::Visible);
@@ -1103,13 +1127,14 @@ fn show_grid_view(state: &SharedState) {
     // because it lacks proper scroll adjustments when not in a ScrolledWindow.
     // GridBin calculates the correct height: n_rows * row_height.
     let n_items = games.iter().filter(|g| !g.hidden || show_hidden).count() as u32;
-    let row_h = cover_height + 12; // cover + 6px margins top + bottom
-    let col_nat = cover_width + 12; // cover + 6px margins start + end
+    let row_h = cover_height + 16; // cover + 8px margins top + bottom
+    let col_nat = cover_width + 16; // cover + 8px margins start + end
     let bin = GridBin::new(&grid, row_h, n_items, col_nat);
     bin.set_hexpand(true);
     bin.set_halign(gtk4::Align::Fill);
     bin.set_vexpand(false);
     bin.set_valign(gtk4::Align::Start);
+    bin.set_overflow(gtk4::Overflow::Visible);
 
     outer.append(&bin);
     content_box.append(&outer);
@@ -1173,6 +1198,8 @@ fn build_recent_row(
     scrolled.set_hexpand(true);
     scrolled.set_vexpand(false);
     scrolled.set_valign(gtk4::Align::Start);
+    scrolled.set_margin_top(4);
+    scrolled.set_margin_bottom(4);
     scrolled.add_css_class("recent-scroll");
     scrolled.set_child(Some(&hbox));
 
@@ -1247,6 +1274,8 @@ fn build_cover(
     let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     vbox.set_valign(gtk4::Align::Start);
     vbox.set_halign(gtk4::Align::Center);
+    vbox.set_margin_top(8);
+    vbox.set_margin_bottom(8);
     vbox.add_css_class("cover-item");
     vbox.set_size_request(w, h);
     vbox.set_overflow(gtk4::Overflow::Visible);

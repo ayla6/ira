@@ -101,6 +101,7 @@ pub struct AppState {
     pub cfg: Config,
     pub steam: Arc<SteamClient>,
     pub watcher: Option<AchievementWatcher>,
+    pub lutris_watcher: Option<crate::lutris::LutrisWatcher>,
     pub db: DbConn,
     pub sender: Sender<AppMessage>,
     pub game_names: Arc<Mutex<HashMap<String, String>>>,
@@ -227,6 +228,7 @@ pub fn build_ui(
         cfg: cfg.clone(),
         steam: steam.clone(),
         watcher: watcher.clone(),
+        lutris_watcher: None,
         db,
         sender,
         game_names,
@@ -458,6 +460,22 @@ fn build_window(state: &SharedState, app: &adw::Application) {
             glib::Propagation::Proceed
         }
     });
+
+    // On focus regain, re-read pga.db so playtime/lastplayed is fresh.
+    // Uses a background thread to avoid blocking the main loop.
+    let state_clone = state.clone();
+    window.connect_notify_local(Some("is-active"), move |_, _| {
+        let is_active = state_clone.borrow().window.is_active();
+        if !is_active {
+            return;
+        }
+        let sender = state_clone.borrow().sender.clone();
+        std::thread::spawn(move || {
+            if let Ok(data) = crate::lutris::load_lutris_playtime() {
+                let _ = sender.send(AppMessage::LutrisDataChanged(data));
+            }
+        });
+    });
 }
 
 fn rebuild_sidebar(state: &SharedState) {
@@ -665,6 +683,9 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         }
         AppMessage::GameStopped(lutris_id) => {
             state.borrow().running_games.lock().unwrap().remove(&lutris_id);
+            // Re-read playtime/lastplayed from Lutris DB for this game so the
+            // display shows fresh data immediately (not stale in-memory values).
+            refresh_playtime_for(state, &[lutris_id]);
             let selected_id = state.borrow().selected_id.clone();
             if selected_id == lutris_id.to_string() {
                 if let Some(game) = state.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned() {
@@ -672,7 +693,79 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 }
             }
         }
+        AppMessage::LutrisDataChanged(data) => {
+            handle_lutris_data_changed(state, data);
+        }
     }
+}
+
+/// Re-read playtime/lastplayed from the Lutris DB for the given game IDs and
+/// update the in-memory state. If the currently-displayed game is among those
+/// updated, its display is refreshed.
+fn refresh_playtime_for(state: &SharedState, lutris_ids: &[i64]) {
+    let Ok(all) = crate::lutris::load_lutris_playtime() else { return };
+    let id_set: std::collections::HashSet<i64> = lutris_ids.iter().copied().collect();
+    let map: std::collections::HashMap<i64, (f64, i64)> = all
+        .into_iter()
+        .filter(|(id, _, _)| id_set.contains(id))
+        .map(|(id, pt, lp)| (id, (pt, lp)))
+        .collect();
+    apply_playtime_updates(state, &map);
+}
+
+/// Apply a map of `lutris_id → (playtime, lastplayed)` updates to the in-memory
+/// game list. Refreshes the display if the selected game changed, and rebuilds
+/// the grid view if it's showing (to re-sort the "recently played" row).
+fn apply_playtime_updates(state: &SharedState, updates: &std::collections::HashMap<i64, (f64, i64)>) {
+    let mut changed_ids: Vec<i64> = Vec::new();
+    let selected_lutris_id: i64;
+
+    {
+        let mut s = state.borrow_mut();
+        selected_lutris_id = s.selected_id.parse().unwrap_or(0);
+
+        for g in &mut s.games {
+            if let Some(&(playtime, lastplayed)) = updates.get(&g.lutris_id) {
+                if g.playtime != playtime || g.lastplayed != lastplayed {
+                    g.playtime = playtime;
+                    g.lastplayed = lastplayed;
+                    changed_ids.push(g.lutris_id);
+                }
+            }
+        }
+    }
+
+    if changed_ids.is_empty() {
+        return;
+    }
+
+    // Refresh the displayed game if it was one of the changed ones.
+    if changed_ids.contains(&selected_lutris_id) {
+        if let Some(game) = state
+            .borrow()
+            .games
+            .iter()
+            .find(|g| g.lutris_id == selected_lutris_id)
+            .cloned()
+        {
+            display_game(&game, state);
+        }
+    }
+
+    // If the grid view is showing, rebuild it so the "recently played" row
+    // reflects the new ordering.
+    let is_grid_showing = state.borrow().selected_id.is_empty() && !state.borrow().content_unloaded;
+    if is_grid_showing {
+        show_grid_view(state);
+    }
+}
+
+/// Handle `LutrisDataChanged` — diff the incoming playtime/lastplayed against
+/// in-memory state and apply only the changes.
+fn handle_lutris_data_changed(state: &SharedState, data: Vec<(i64, f64, i64)>) {
+    let map: std::collections::HashMap<i64, (f64, i64)> =
+        data.into_iter().map(|(id, pt, lp)| (id, (pt, lp))).collect();
+    apply_playtime_updates(state, &map);
 }
 
 fn apply_game_update(state: &SharedState, mut updated: Game) {

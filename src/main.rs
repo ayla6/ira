@@ -29,6 +29,9 @@ pub enum AppMessage {
     AddGameError(String),
     GameRemoved { app_id: String },
     GameStopped(i64),
+    /// Fired by the LutrisWatcher when pga.db changes (debounced).
+    /// Carries (lutris_id, playtime, lastplayed) for every Lutris game.
+    LutrisDataChanged(Vec<(i64, f64, i64)>),
 }
 
 fn main() {
@@ -92,6 +95,16 @@ fn activate(app: &adw::Application) -> SharedState {
         Arc::new(Mutex::new(std::collections::HashMap::new()))
     });
 
+    // Watch Lutris pga.db for playtime/lastplayed changes (external launches,
+    // game stops, etc.). Zero CPU when idle — inotify event-driven.
+    let lutris_watcher = match crate::lutris::LutrisWatcher::new(sender.clone()) {
+        Ok(w) => Some(w),
+        Err(e) => {
+            eprintln!("Lutris DB watching unavailable: {}", e);
+            None
+        }
+    };
+
     {
         let mut names = game_names.lock().unwrap();
         for g in &games {
@@ -111,6 +124,8 @@ fn activate(app: &adw::Application) -> SharedState {
         sender.clone(),
         game_names,
     );
+
+    state.borrow_mut().lutris_watcher = lutris_watcher;
 
     let receiver = RefCell::new(receiver);
     let state_clone = state.clone();

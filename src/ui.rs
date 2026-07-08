@@ -1236,7 +1236,7 @@ fn build_recent_row(
 }
 
 /// Build a clickable cover Picture (no title) that switches to the game on
-/// click.  The image is loaded already scaled to `w × h`.
+/// click.
 fn build_cover(
     state: &SharedState,
     game: &Game,
@@ -1256,7 +1256,7 @@ fn build_cover(
     pic.set_size_request(w, h);
     pic.add_css_class("game-cover-pic");
     if !image_path.is_empty() {
-        crate::images::set_picture_scaled(&pic, image_path, w, h);
+        crate::images::set_picture_natural(&pic, image_path, w, h);
     }
 
     vbox.append(&pic);

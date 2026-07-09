@@ -717,8 +717,11 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             // display shows fresh data immediately (not stale in-memory values).
             refresh_playtime_for(state, &[lutris_id]);
             let selected_id = state.borrow().selected_id.clone();
+            let game = state.borrow().games.iter()
+                .find(|g| g.lutris_id == lutris_id)
+                .cloned();
             if selected_id == lutris_id.to_string() {
-                if let Some(game) = state.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned() {
+                if let Some(game) = game {
                     display_game(&game, state);
                 }
             }
@@ -774,13 +777,13 @@ fn apply_playtime_updates(state: &SharedState, updates: &std::collections::HashM
 
     // Refresh the displayed game if it was one of the changed ones.
     if changed_ids.contains(&selected_lutris_id) {
-        if let Some(game) = state
+        let game = state
             .borrow()
             .games
             .iter()
             .find(|g| g.lutris_id == selected_lutris_id)
-            .cloned()
-        {
+            .cloned();
+        if let Some(game) = game {
             display_game(&game, state);
         }
     }
@@ -3132,8 +3135,13 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
             }
             dlc_page.append(&dlc_group);
 
+            let dlc_scroll = gtk4::ScrolledWindow::new();
+            dlc_scroll.set_child(Some(&dlc_page));
+            dlc_scroll.set_vexpand(true);
+            dlc_scroll.set_hexpand(true);
+
             sidebar.append(&sidebar_row("package-x-generic-symbolic", "DLC"));
-            stack.add_named(&dlc_page, Some("dlc"));
+            stack.add_named(&dlc_scroll, Some("dlc"));
             switches
         } else {
             Vec::new()
@@ -3256,7 +3264,10 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
         // Re-display the current game to apply logo changes live
         let selected = state_clone.borrow().selected_id.clone();
         if selected == lutris_id.to_string() {
-            if let Some(g) = state_clone.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned() {
+            let g = state_clone.borrow().games.iter()
+                .find(|g| g.lutris_id == lutris_id)
+                .cloned();
+            if let Some(g) = g {
                 display_game(&g, &state_clone);
             }
         }

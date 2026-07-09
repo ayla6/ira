@@ -105,8 +105,6 @@ impl Drop for AppSender {
     }
 }
 
-unsafe impl Send for AppSender {}
-
 fn main() {
     let app = adw::Application::new(
         Some("com.github.achievement.viewer"),

@@ -11,6 +11,7 @@ struct TextureCache {
     order: VecDeque<String>,
     total_bytes: usize,
     max_bytes: usize,
+    max_entries: usize,
 }
 
 impl TextureCache {
@@ -19,7 +20,8 @@ impl TextureCache {
             map: HashMap::new(),
             order: VecDeque::new(),
             total_bytes: 0,
-            max_bytes: 100 * 1024 * 1024, // 100 MB
+            max_bytes: 50 * 1024 * 1024, // 50 MB
+            max_entries: 150,
         }
     }
 
@@ -40,13 +42,14 @@ impl TextureCache {
 
     fn insert(&mut self, path: &str, texture: Texture) {
         let bytes = Self::texture_bytes(&texture);
-        while self.total_bytes + bytes > self.max_bytes {
+        // Evict until both limits are satisfied
+        while (self.total_bytes + bytes > self.max_bytes || self.map.len() >= self.max_entries)
+            && !self.order.is_empty()
+        {
             if let Some(old_key) = self.order.pop_front() {
                 if let Some(old_texture) = self.map.remove(&old_key) {
                     self.total_bytes -= Self::texture_bytes(&old_texture);
                 }
-            } else {
-                break;
             }
         }
         self.total_bytes += bytes;

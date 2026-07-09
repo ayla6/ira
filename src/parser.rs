@@ -383,6 +383,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
                 } else {
                     meta.icon_gray.clone()
                 };
+ 
 
                 let ach = MergedAchievement {
                     name: meta.name.clone(),

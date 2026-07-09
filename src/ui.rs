@@ -110,6 +110,9 @@ pub struct AppState {
     pub running_games: Arc<Mutex<HashMap<i64, std::process::Child>>>,
     /// Debounce flag: a grid-view refresh is scheduled via timeout.
     pub grid_refresh_pending: bool,
+    /// Increments on every display_game/show_grid_view call so idle closures
+    /// from a previous view can detect they're stale and abort.
+    pub view_generation: u32,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;
@@ -236,6 +239,7 @@ pub fn build_ui(
         restoring: false,
         running_games: Arc::new(Mutex::new(HashMap::new())),
         grid_refresh_pending: false,
+        view_generation: 0,
     }));
 
     build_window(&state, app);
@@ -595,11 +599,13 @@ fn build_sidebar_row(list: &gtk4::ListBox, game: &Game, state: &SharedState, sho
     // Right-click context menu for game settings
     let state_clone = state.clone();
     let game_clone = game.clone();
-    let row_clone = row.clone();
+    let row_weak = row.downgrade();
     let right_click = gtk4::GestureClick::new();
     right_click.set_button(3);
     right_click.connect_pressed(move |_, _, x, y| {
-        show_game_context_menu(&state_clone, &game_clone, &row_clone, x, y, Some(&row_clone));
+        if let Some(row) = row_weak.upgrade() {
+            show_game_context_menu(&state_clone, &game_clone, &row, x, y, Some(&row));
+        }
     });
     row.add_controller(right_click);
 
@@ -1126,6 +1132,7 @@ fn show_grid_view(state: &SharedState) {
     while let Some(child) = content_box.first_child() {
         content_box.remove(&child);
     }
+    crate::images::clear_texture_cache();
 
     let cover_width = state.borrow().cfg.grid_cover_width.clamp(100, 350);
     let show_hidden = state.borrow().cfg.show_hidden_games;
@@ -1464,7 +1471,6 @@ fn build_cover(
     vbox.append(&pic);
 
     let state_clone = state.clone();
-    let game_clone = game.clone();
     let lutris_id = game.lutris_id;
     let click = gtk4::GestureClick::new();
     click.connect_pressed(move |_, _, _, _| {
@@ -1475,11 +1481,13 @@ fn build_cover(
     // Right-click context menu
     let sc = state.clone();
     let gc = game.clone();
-    let v = vbox.clone();
+    let v_weak = vbox.downgrade();
     let right_click = gtk4::GestureClick::new();
     right_click.set_button(3);
     right_click.connect_pressed(move |_, _, x, y| {
-        show_game_context_menu(&sc, &gc, &v, x, y, None::<&gtk4::ListBoxRow>);
+        if let Some(v) = v_weak.upgrade() {
+            show_game_context_menu(&sc, &gc, &v, x, y, None::<&gtk4::ListBoxRow>);
+        }
     });
     vbox.add_controller(right_click);
 
@@ -1762,7 +1770,7 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
     // draw_func is only called when the widget needs repainting (e.g. on resize),
     // not 60fps like a tick callback.
     {
-        let overlay_ref = overlay.clone();
+        let overlay_weak = overlay.downgrade();
         let size_monitor = gtk4::DrawingArea::new();
         size_monitor.set_halign(gtk4::Align::Fill);
         size_monitor.set_valign(gtk4::Align::Fill);
@@ -1770,9 +1778,11 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
         size_monitor.set_vexpand(true);
         size_monitor.set_draw_func(move |_area, _cr, w, _h| {
             if w > 0 {
-                let target = ((w as f64) / 3.1).max(150.0) as i32;
-                if overlay_ref.height_request() != target {
-                    overlay_ref.set_height_request(target);
+                if let Some(overlay) = overlay_weak.upgrade() {
+                    let target = ((w as f64) / 3.1).max(150.0) as i32;
+                    if overlay.height_request() != target {
+                        overlay.set_height_request(target);
+                    }
                 }
             }
         });
@@ -1822,14 +1832,19 @@ fn display_game(game: &Game, state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
     let content_scroll = state.borrow().content_scroll.clone();
 
+    // Invalidate any in-flight idle achievement row batches from the previous view.
+    state.borrow_mut().view_generation += 1;
+    let gen = state.borrow().view_generation;
+
     // Reset scroll position BEFORE removing old content, so there's no visible jump
     content_scroll.vadjustment().set_value(0.0);
 
-    // Remove old content — widget references are dropped, but textures stay
-    // in the LRU cache for reuse when switching back.
+    // Remove old content — widget references are dropped, clearing the cache
+    // then frees textures no longer held by any widget.
     while let Some(child) = content_box.first_child() {
         content_box.remove(&child);
     }
+    crate::images::clear_texture_cache();
 
     let fraction = if game.total_count > 0 {
         game.earned_count as f64 / game.total_count as f64
@@ -1944,8 +1959,12 @@ fn display_game(game: &Game, state: &SharedState) {
                 let remaining: Vec<MergedAchievement> =
                     earned[first_n..].iter().map(|a| (*a).clone()).collect();
                 let group = earned_group.clone();
+                let state_gen = state.clone();
                 let mut i = 0;
                 glib::idle_add_local(move || {
+                    if state_gen.borrow().view_generation != gen {
+                        return glib::ControlFlow::Break;
+                    }
                     let end = (i + BATCH_SIZE).min(remaining.len());
                     let mut batch_budget = ImageLoadBudget::new(0);
                     for ach in &remaining[i..end] {
@@ -2004,6 +2023,9 @@ fn display_game(game: &Game, state: &SharedState) {
                 let state = state.clone();
                 let mut i = 0;
                 glib::idle_add_local(move || {
+                    if state.borrow().view_generation != gen {
+                        return glib::ControlFlow::Break;
+                    }
                     let end = (i + BATCH_SIZE).min(remaining.len());
                     let mut batch_budget = ImageLoadBudget::new(0);
                     for ach in &remaining[i..end] {
@@ -2036,14 +2058,17 @@ fn display_game(game: &Game, state: &SharedState) {
         let global_built = std::cell::Cell::new(false);
         let app_id_for_global = game.app_id.clone();
         let state_for_global = state.clone();
+        let gen_for_global = gen;
         let global_vbox_weak = global_vbox.downgrade();
         view_stack.connect_notify_local(Some("visible-child-name"), move |stack, _| {
             if stack.visible_child_name() == Some("global".into()) && !global_built.get() {
                 global_built.set(true);
                 if let Some(global_vbox) = global_vbox_weak.upgrade() {
                     let s = state_for_global.borrow();
-                    if let Some(game) = s.games.iter().find(|g| g.app_id == app_id_for_global) {
-                        build_global_tab(game, &global_vbox);
+                    if s.view_generation == gen_for_global {
+                        if let Some(game) = s.games.iter().find(|g| g.app_id == app_id_for_global) {
+                            build_global_tab(game, &global_vbox, &state_for_global, gen_for_global);
+                        }
                     }
                 }
             }
@@ -2071,7 +2096,7 @@ fn display_game(game: &Game, state: &SharedState) {
     content_box.append(&clamp);
 }
 
-fn build_global_tab(game: &Game, global_vbox: &gtk4::Box) {
+fn build_global_tab(game: &Game, global_vbox: &gtk4::Box, state: &SharedState, gen: u32) {
     let mut all_ach: Vec<MergedAchievement> = game.achievements.clone();
     all_ach.sort_by(|a, b| b.global_percent.partial_cmp(&a.global_percent).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -2093,8 +2118,12 @@ fn build_global_tab(game: &Game, global_vbox: &gtk4::Box) {
     if all_ach.len() > first_batch {
         let remaining = all_ach[first_batch..].to_vec();
         let group = global_group.clone();
+        let state = state.clone();
         let mut i = 0;
         glib::idle_add_local(move || {
+            if state.borrow().view_generation != gen {
+                return glib::ControlFlow::Break;
+            }
             let end = (i + 20).min(remaining.len());
             let mut batch_budget = ImageLoadBudget::new(0);
             for ach in &remaining[i..end] {

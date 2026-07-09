@@ -21,13 +21,28 @@ pub struct SteamClient {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SteamGameDetails {
+pub struct AppDetails {
+    #[serde(default, alias = "Name")]
     pub name: String,
-    #[serde(rename = "header_image")]
-    pub _header_image: String,
-    #[serde(rename = "capsule_imagev5")]
-    pub capsule_image: String,
+    #[serde(default, alias = "Languages")]
+    pub languages: Vec<String>,
+    #[serde(default, alias = "Dlcs")]
+    pub dlcs: std::collections::HashMap<String, DlcInfo>,
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DlcInfo {
+    #[serde(default, alias = "Name")]
+    pub name: String,
+    #[serde(default, alias = "AppId")]
+    pub app_id: i64,
+    #[serde(default, alias = "ImageUrl")]
+    pub image_url: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool { true }
 
 #[derive(Debug, Deserialize)]
 struct AppDetailsResponse {
@@ -39,6 +54,15 @@ struct AppDetailsResponse {
 struct AppDetailsEntry {
     success: bool,
     data: SteamGameDetails,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SteamGameDetails {
+    pub name: String,
+    #[serde(rename = "header_image")]
+    pub _header_image: String,
+    #[serde(rename = "capsule_imagev5")]
+    pub capsule_image: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -98,11 +122,6 @@ struct SteamSchemaAchievement {
     icon: String,
     #[serde(rename = "icongray")]
     icon_gray: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct NemirtingasGameInfo {
-    name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -514,6 +533,26 @@ impl SteamClient {
         (grid_path, header_path, logo_path)
     }
 
+    /// Download DLC header images for all DLCs listed in `appdetails.json`.
+    /// Images are stored in `dlc/{dlc_app_id}.jpg` within the game's data dir.
+    /// Only downloads images that don't already exist locally.
+    pub fn ensure_dlc_images(&self, app_id: &str, dlcs: &std::collections::HashMap<String, DlcInfo>) {
+        let base_dir = self.game_dir(app_id);
+        let dlc_dir = base_dir.join("dlc");
+        let _ = std::fs::create_dir_all(&dlc_dir);
+
+        for (_, dlc) in dlcs {
+            if dlc.image_url.is_empty() {
+                continue;
+            }
+            let dest = dlc_dir.join(format!("{}.jpg", dlc.app_id));
+            if dest.exists() {
+                continue;
+            }
+            let _ = self.download_file(&dlc.image_url, &dest);
+        }
+    }
+
     /// Force-download a specific image type from Steam CDN, overwriting existing.
     /// `asset`: "hero", "grid", "header", "logo".
     pub fn force_download_steam(&self, app_id: &str, asset: &str) -> String {
@@ -698,18 +737,54 @@ impl SteamClient {
         }).collect()
     }
 
-    pub fn fetch_nemirtingas_game_name(&self, app_id: &str) -> Option<String> {
+    pub fn fetch_app_details(&self, app_id: &str) -> Option<AppDetails> {
+        let cache_path = self.game_dir(app_id).join("appdetails.json");
+
+        // Try cache first
+        if let Ok(data) = std::fs::read(&cache_path) {
+            if let Ok(d) = serde_json::from_slice::<AppDetails>(&data) {
+                return Some(d);
+            }
+        }
+
+        // Try nemirtingas repo first (has full data: name, languages, DLCs)
         let url = format!("{}/{}/{}.json", NEMIRTINGAS_BASE_URL, app_id, app_id);
-        let resp = self.http.get(&url).send().ok()?;
-        if !resp.status().is_success() {
-            return None;
+        if let Ok(resp) = self.http.get(&url).send() {
+            if resp.status().is_success() {
+                if let Ok(details) = resp.json::<AppDetails>() {
+                    if !details.name.is_empty() {
+                        let _ = std::fs::create_dir_all(self.game_dir(app_id));
+                        if let Ok(b) = serde_json::to_vec(&details) {
+                            let _ = std::fs::write(&cache_path, b);
+                        }
+                        return Some(details);
+                    }
+                }
+            }
         }
-        let info: NemirtingasGameInfo = resp.json().ok()?;
-        if info.name.is_empty() {
-            None
-        } else {
-            Some(info.name)
+
+        // Fall back to Steam Store API (only has name)
+        let url = format!("https://store.steampowered.com/api/appdetails?appids={}", app_id);
+        if let Ok(resp) = self.http.get(&url).send() {
+            if let Ok(raw) = resp.json::<AppDetailsResponse>() {
+                if let Some(entry) = raw.apps.get(app_id) {
+                    if entry.success && !entry.data.name.is_empty() {
+                        let details = AppDetails {
+                            name: entry.data.name.clone(),
+                            languages: Vec::new(),
+                            dlcs: std::collections::HashMap::new(),
+                        };
+                        let _ = std::fs::create_dir_all(self.game_dir(app_id));
+                        if let Ok(b) = serde_json::to_vec(&details) {
+                            let _ = std::fs::write(&cache_path, b);
+                        }
+                        return Some(details);
+                    }
+                }
+            }
         }
+
+        None
     }
 
     fn fetch_nemirtingas_achievements(&self, app_id: &str) -> Option<Vec<NemirtingasAchievement>> {

@@ -535,21 +535,29 @@ impl SteamClient {
 
     /// Download DLC header images for all DLCs listed in `appdetails.json`.
     /// Images are stored in `dlc/{dlc_app_id}.jpg` within the game's data dir.
-    /// Only downloads images that don't already exist locally.
-    pub fn ensure_dlc_images(&self, app_id: &str, dlcs: &std::collections::HashMap<String, DlcInfo>) {
+    /// After downloading, replaces `image_url` with the local relative path
+    /// (e.g. `dlc/2924410.jpg`) so callers reference the file directly.
+    pub fn ensure_dlc_images(&self, app_id: &str, dlcs: &mut std::collections::HashMap<String, DlcInfo>) {
         let base_dir = self.game_dir(app_id);
         let dlc_dir = base_dir.join("dlc");
         let _ = std::fs::create_dir_all(&dlc_dir);
 
-        for (_, dlc) in dlcs {
+        for (_, dlc) in dlcs.iter_mut() {
             if dlc.image_url.is_empty() {
                 continue;
             }
-            let dest = dlc_dir.join(format!("{}.jpg", dlc.app_id));
-            if dest.exists() {
+            // If image_url is already a local path, skip download
+            if dlc.image_url.starts_with("dlc/") {
                 continue;
             }
-            let _ = self.download_file(&dlc.image_url, &dest);
+            let local_rel = format!("dlc/{}.jpg", dlc.app_id);
+            let dest = base_dir.join(&local_rel);
+            if !dest.exists() {
+                let _ = self.download_file(&dlc.image_url, &dest);
+            }
+            if dest.exists() {
+                dlc.image_url = local_rel;
+            }
         }
     }
 

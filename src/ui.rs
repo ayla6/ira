@@ -5,7 +5,7 @@ use crate::steam::SteamClient;
 use crate::strings as S;
 use crate::watcher::AchievementWatcher;
 use crate::AppMessage;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -28,15 +28,25 @@ const APP_CSS: &str = "
 .play-btn-label { font-size: 1.15em; }
 
 .success-label { color: @accent_color; font-weight: bold; }
-.logo-pos-btn {
-    min-width: 28px;
-    min-height: 28px;
-    padding: 2px;
-    border-radius: 6px;
+
+/* Settings dialog sidebar — same tint as headerbar */
+.settings-sidebar { background-color: @headerbar_bg_color; }
+
+/* Logo position overlay buttons on hero preview */
+.logo-pos-overlay-btn {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 4px;
+    transition: 100ms ease;
 }
-.logo-pos-selected {
-    background-color: @accent_color;
-    color: white;
+.logo-pos-overlay-btn:hover {
+    background: rgba(255,255,255,0.2);
+    border-color: rgba(255,255,255,0.4);
+}
+.logo-pos-overlay-btn.selected {
+    background: rgba(255,255,255,0.15);
+    border-color: @accent_color;
+    border-width: 2px;
 }
 
 /* === Grid view (All Games) === */
@@ -119,7 +129,7 @@ pub type SharedState = Rc<RefCell<AppState>>;
 
 mod imp {
     use crate::parser::Game;
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use glib::subclass::prelude::*;
 
     #[derive(Default)]
@@ -1805,6 +1815,10 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
 
 /// Compute logo scaled dimensions so both fit constraints:
 /// max height = logo_pct% of hero height, max width = logo_pct/2 % of hero width.
+fn logo_pixbuf_from_path(path: &str) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
+    gtk4::gdk_pixbuf::Pixbuf::from_file(path).ok()
+}
+
 fn logo_scaled_dims(hero_w: f64, hero_h: f64, src_w: f64, src_h: f64, logo_pct: i32) -> (i32, i32) {
     let max_h = hero_h * (logo_pct as f64 / 100.0);
     let max_w = hero_w * (logo_pct as f64 / 200.0);
@@ -2804,24 +2818,36 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     win.set_transient_for(Some(&parent));
     win.set_modal(true);
 
-    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-
-    let header_bar = adw::HeaderBar::new();
-    header_bar.set_title_widget(Some(&gtk4::Label::new(Some(&game.name))));
-    outer.append(&header_bar);
-
     // Load appdetails.json for DLC/language data
     let app_details = crate::parser::read_app_details(SAVE_DIR, &game.app_id);
 
-    // Sidebar + content stack
-    let paned = gtk4::Paned::new(gtk4::Orientation::Horizontal);
-    paned.set_position(180);
-    paned.set_shrink_start_child(false);
-    paned.set_resize_start_child(false);
+    // Two-pane layout: sidebar (full height, tinted) + content (with headerbar)
+    let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+
+    // --- Sidebar (full height, headerbar-tinted background) ---
+    let sidebar_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    sidebar_area.add_css_class("settings-sidebar");
+    sidebar_area.set_size_request(200, -1);
+    sidebar_area.set_vexpand(true);
 
     let sidebar = gtk4::ListBox::new();
     sidebar.add_css_class("navigation-sidebar");
-    sidebar.set_size_request(180, -1);
+    sidebar.set_margin_top(6);
+    sidebar.set_margin_bottom(6);
+    sidebar_area.append(&sidebar);
+
+    // Separator between sidebar and content
+    let sep = gtk4::Separator::new(gtk4::Orientation::Vertical);
+    outer.append(&sidebar_area);
+    outer.append(&sep);
+
+    // --- Content area (headerbar + stack + buttons) ---
+    let content_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content_area.set_hexpand(true);
+
+    let header = adw::HeaderBar::new();
+    header.set_title_widget(Some(&gtk4::Label::new(Some(&game.name))));
+    content_area.append(&header);
 
     let stack = gtk4::Stack::new();
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
@@ -2829,6 +2855,21 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     stack.set_margin_end(16);
     stack.set_margin_top(16);
     stack.set_margin_bottom(16);
+    stack.set_hexpand(true);
+
+    // Helper to create sidebar rows with icon + left-aligned label
+    fn sidebar_row(icon_name: &str, label: &str) -> gtk4::ListBoxRow {
+        let row = gtk4::ListBoxRow::new();
+        let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
+        let icon = gtk4::Image::from_icon_name(icon_name);
+        let text = gtk4::Label::new(Some(label));
+        text.set_halign(gtk4::Align::Start);
+        hbox.append(&icon);
+        hbox.append(&text);
+        row.set_child(Some(&hbox));
+        row.set_size_request(-1, 36);
+        row
+    }
 
     // --- General page ---
     let general_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -2898,32 +2939,99 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
         general_page.append(&unmatch_group);
     }
 
-    let general_row = gtk4::ListBoxRow::new();
-    general_row.set_child(Some(&gtk4::Label::new(Some("General"))));
-    general_row.set_size_request(-1, 36);
-    sidebar.append(&general_row);
+    sidebar.append(&sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
 
     // --- Logo page (only if game has a logo) ---
     let logo_positions = ["top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right"];
     let logo_controls: Option<(Rc<RefCell<String>>, gtk4::Adjustment)> = if !game.logo_path.is_empty() {
-        let logo_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+        let logo_page = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
 
         let selected_pos: Rc<RefCell<String>> = Rc::new(RefCell::new(game.logo_position.clone()));
 
+        // Create size adjustment first so the preview draw_func can read from it
+        let size_pct = game.logo_size.clamp(5, 100);
+        let size_adj = gtk4::Adjustment::new(size_pct as f64, 5.0, 100.0, 1.0, 5.0, 0.0);
+
+        // --- Preview: hero with logo + clickable position grid overlay ---
+        let preview_overlay = gtk4::Overlay::new();
+        preview_overlay.set_height_request(220);
+        preview_overlay.set_overflow(gtk4::Overflow::Hidden);
+
+        let hero_pic = gtk4::Picture::new();
+        if let Some(t) = crate::images::texture_for(&game.hero_image_path) {
+            hero_pic.set_paintable(Some(&t));
+        }
+        hero_pic.set_content_fit(gtk4::ContentFit::Cover);
+        hero_pic.set_halign(gtk4::Align::Fill);
+        hero_pic.set_valign(gtk4::Align::Fill);
+        preview_overlay.set_child(Some(&hero_pic));
+
+        // Logo drawing layer
+        let preview_draw = gtk4::DrawingArea::new();
+        preview_draw.set_halign(gtk4::Align::Fill);
+        preview_draw.set_valign(gtk4::Align::Fill);
+        preview_draw.set_hexpand(true);
+        preview_draw.set_vexpand(true);
+
+        if let Some(ref pixbuf) = logo_pixbuf_from_path(&game.logo_path) {
+            let pb_w = pixbuf.width() as f64;
+            let pb_h = pixbuf.height() as f64;
+            let pixbuf_clone = pixbuf.clone();
+            let pos_for_draw = selected_pos.clone();
+            let adj_for_draw = size_adj.clone();
+
+            preview_draw.set_draw_func(move |_area, cr, area_w, area_h| {
+                let w = area_w as f64;
+                let h = area_h as f64;
+                if w <= 0.0 || h <= 0.0 { return; }
+                let pct = adj_for_draw.value() as i32;
+                let (sw, sh) = logo_scaled_dims(w, h, pb_w, pb_h, pct);
+                let lw = sw as f64;
+                let lh = sh as f64;
+                let pos = pos_for_draw.borrow().clone();
+                let (halign, valign) = logo_position_align(&pos);
+                let x = match halign {
+                    gtk4::Align::Start => 12.0,
+                    gtk4::Align::Center => (w - lw) / 2.0,
+                    gtk4::Align::End => w - lw - 12.0,
+                    _ => 12.0,
+                };
+                let y = match valign {
+                    gtk4::Align::Start => 12.0,
+                    gtk4::Align::Center => (h - lh) / 2.0,
+                    gtk4::Align::End => h - lh - 12.0,
+                    _ => h - lh - 12.0,
+                };
+                let _ = cr.save();
+                cr.translate(x, y);
+                cr.scale(lw / pb_w, lh / pb_h);
+                cr.set_source_pixbuf(&pixbuf_clone, 0.0, 0.0);
+                let _ = cr.paint();
+                let _ = cr.restore();
+            });
+        }
+
+        preview_overlay.add_overlay(&preview_draw);
+
+        // Clickable position grid overlaid on the hero
         let pos_grid = gtk4::Grid::new();
-        pos_grid.set_column_spacing(3);
-        pos_grid.set_row_spacing(3);
-        pos_grid.set_halign(gtk4::Align::Center);
+        pos_grid.set_column_spacing(2);
+        pos_grid.set_row_spacing(2);
+        pos_grid.set_halign(gtk4::Align::Fill);
+        pos_grid.set_valign(gtk4::Align::Fill);
+        pos_grid.set_hexpand(true);
+        pos_grid.set_vexpand(true);
 
         let mut all_btns: Vec<gtk4::Button> = Vec::new();
         for (i, &pos) in logo_positions.iter().enumerate() {
             let btn = gtk4::Button::new();
-            btn.set_size_request(32, 32);
-            btn.add_css_class("logo-pos-btn");
+            btn.add_css_class("logo-pos-overlay-btn");
             if pos == game.logo_position {
-                btn.add_css_class("logo-pos-selected");
+                btn.add_css_class("selected");
             }
+            btn.set_hexpand(true);
+            btn.set_vexpand(true);
             let row = i / 3;
             let col = i % 3;
             pos_grid.attach(&btn, col as i32, row as i32, 1, 1);
@@ -2935,37 +3043,55 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
             let btns_c = btns.clone();
             let selected_pos_c = selected_pos.clone();
             let pos_owned = pos.to_string();
+            let preview_clone = preview_draw.clone();
             btns[i].connect_clicked(move |btn| {
                 for b in btns_c.iter() {
-                    b.remove_css_class("logo-pos-selected");
+                    b.remove_css_class("selected");
                 }
-                btn.add_css_class("logo-pos-selected");
+                btn.add_css_class("selected");
                 *selected_pos_c.borrow_mut() = pos_owned.clone();
+                preview_clone.queue_draw();
             });
         }
 
-        let logo_group = adw::PreferencesGroup::new();
-        logo_group.set_title("Position");
-        let pos_row = adw::ActionRow::new();
-        pos_row.add_suffix(&pos_grid);
-        logo_group.add(&pos_row);
-        logo_page.append(&logo_group);
+        preview_overlay.add_overlay(&pos_grid);
 
-        let size_pct = game.logo_size.clamp(5, 100);
-        let size_adj = gtk4::Adjustment::new(size_pct as f64, 5.0, 100.0, 5.0, 10.0, 0.0);
+        let preview_frame = gtk4::Frame::new(None::<&str>);
+        preview_frame.set_child(Some(&preview_overlay));
+        logo_page.append(&preview_frame);
+
+        let hint = gtk4::Label::new(Some("Click on the hero to position the logo"));
+        hint.add_css_class("dim-label");
+        hint.add_css_class("caption");
+        hint.set_halign(gtk4::Align::Start);
+        logo_page.append(&hint);
+
+        // --- Size: slider + spin button ---
+        let size_label = gtk4::Label::new(Some("Size (% of hero height)"));
+        size_label.set_halign(gtk4::Align::Start);
+        size_label.add_css_class("heading");
+        logo_page.append(&size_label);
+
+        let size_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        size_row.set_hexpand(true);
+
+        let size_scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, Some(&size_adj));
+        size_scale.set_draw_value(true);
+        size_scale.set_hexpand(true);
+
         let size_spin = gtk4::SpinButton::new(Some(&size_adj), 1.0, 0);
         size_spin.set_numeric(true);
-        let size_group = adw::PreferencesGroup::new();
-        let size_row = adw::ActionRow::new();
-        size_row.set_title("Size (% of hero)");
-        size_row.add_suffix(&size_spin);
-        size_group.add(&size_row);
-        logo_page.append(&size_group);
 
-        let logo_row = gtk4::ListBoxRow::new();
-        logo_row.set_child(Some(&gtk4::Label::new(Some("Logo"))));
-        logo_row.set_size_request(-1, 36);
-        sidebar.append(&logo_row);
+        let preview_draw_for_size = preview_draw.clone();
+        size_adj.connect_value_changed(move |_| {
+            preview_draw_for_size.queue_draw();
+        });
+
+        size_row.append(&size_scale);
+        size_row.append(&size_spin);
+        logo_page.append(&size_row);
+
+        sidebar.append(&sidebar_row("preferences-desktop-wallpaper-symbolic", "Logo"));
         stack.add_named(&logo_page, Some("logo"));
         Some((selected_pos, size_adj))
     } else {
@@ -2975,15 +3101,12 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     // --- Images page (only for matched games) ---
     if !game.app_id.is_empty() {
         let images_page = build_image_manager_content(state, game, &win);
-        let images_row = gtk4::ListBoxRow::new();
-        images_row.set_child(Some(&gtk4::Label::new(Some("Images"))));
-        images_row.set_size_request(-1, 36);
-        sidebar.append(&images_row);
+        sidebar.append(&sidebar_row("image-x-generic-symbolic", "Images"));
         stack.add_named(&images_page, Some("images"));
     }
 
     // --- DLC page (only if DLCs exist in appdetails.json) ---
-    let dlc_state: Rc<RefCell<Vec<(String, crate::steam::DlcInfo)>>> = if let Some(ref details) = app_details {
+    let dlc_switches: Vec<adw::SwitchRow> = if let Some(ref details) = app_details {
         if !details.dlcs.is_empty() {
             let dlc_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
             let dlc_group = adw::PreferencesGroup::new();
@@ -2992,55 +3115,63 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
             let mut dlc_list: Vec<(String, crate::steam::DlcInfo)> = details.dlcs.iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
-            dlc_list.sort_by_key(|(_, d)| dlc_list.iter().position(|(k, _)| k == &d.app_id.to_string()).unwrap_or(0));
+            dlc_list.sort_by_key(|(_, d)| d.app_id);
 
+            let mut switches: Vec<adw::SwitchRow> = Vec::new();
             for (_, dlc) in &dlc_list {
                 let row = adw::SwitchRow::new();
                 row.set_title(&dlc.name);
                 row.set_subtitle(&format!("App ID: {}", dlc.app_id));
                 row.set_active(dlc.enabled);
                 dlc_group.add(&row);
+                switches.push(row);
             }
             dlc_page.append(&dlc_group);
 
-            let dlc_row = gtk4::ListBoxRow::new();
-            dlc_row.set_child(Some(&gtk4::Label::new(Some("DLC"))));
-            dlc_row.set_size_request(-1, 36);
-            sidebar.append(&dlc_row);
+            sidebar.append(&sidebar_row("package-x-generic-symbolic", "DLC"));
             stack.add_named(&dlc_page, Some("dlc"));
-            Some(Rc::new(RefCell::new(dlc_list)))
+            switches
         } else {
-            None
+            Vec::new()
         }
     } else {
-        None
+        Vec::new()
     };
 
-    // Sidebar selection
-    if let Some(first) = sidebar.row_at_index(0) {
-        sidebar.select_row(Some(&first));
-    }
+    sidebar_area.set_hexpand(false);
+
+    // Sidebar selection — match by the label text inside the row
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
-            if let Some(name) = row.child().and_then(|c| c.downcast_ref::<gtk4::Label>().ok()).map(|l| l.text().to_string()) {
-                let page_id = match name.as_str() {
-                    "General" => "general",
-                    "Logo" => "logo",
-                    "Images" => "images",
-                    "DLC" => "dlc",
-                    _ => "general",
-                };
-                stack_clone.set_visible_child_name(Some(page_id));
+            if let Some(child) = row.child() {
+                if let Some(hbox) = child.downcast_ref::<gtk4::Box>() {
+                    if let Some(sibling) = hbox.last_child() {
+                        if let Some(label) = sibling.downcast_ref::<gtk4::Label>() {
+                            let page_id = match label.text().as_str() {
+                                "General" => "general",
+                                "Logo" => "logo",
+                                "Images" => "images",
+                                "DLC" => "dlc",
+                                _ => "general",
+                            };
+                            stack_clone.set_visible_child_name(page_id);
+                        }
+                    }
+                }
             }
         }
     });
 
-    paned.set_start_child(Some(&sidebar));
-    paned.set_end_child(Some(&stack));
-    outer.append(&paned);
+    // Select first row
+    if let Some(first) = sidebar.row_at_index(0) {
+        sidebar.select_row(Some(&first));
+    }
 
-    // Save / Close buttons
+    outer.append(&sidebar_area);
+    content_area.append(&stack);
+
+    // Save / Close buttons at the bottom of the content area
     let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     btn_row.set_halign(gtk4::Align::End);
     btn_row.set_margin_start(16);
@@ -3061,8 +3192,8 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     let title_entry_c = title_entry.clone();
     let sort_entry_c = sort_entry.clone();
     let logo_controls_c = logo_controls.clone();
-    let dlc_state_c = dlc_state.clone();
-    let app_details_c = app_details.clone();
+    let dlc_switches_c = dlc_switches.clone();
+    let app_details_c = Rc::new(RefCell::new(app_details.clone()));
     let win_s = win.clone();
     save_btn.connect_clicked(move |_| {
         let title = title_entry_c.text().to_string();
@@ -3090,19 +3221,21 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
         }
 
         // Save DLC enabled states back to appdetails.json
-        if let (Some(ref mut details), Some(ref dlc_state)) = (app_details_c.as_mut(), dlc_state_c.as_ref()) {
-            let updated_dlcs = dlc_state.borrow();
-            // Read current switch states from the group... actually we stored them in dlc_state
-            // But we need to read the switch values. Let me handle this differently.
-            // For now, just save what we have.
-            for (key, dlc) in details.dlcs.iter_mut() {
-                if let Some((_, updated)) = updated_dlcs.iter().find(|(k, _)| k == key) {
-                    dlc.enabled = updated.enabled;
+        {
+            let mut details_ref = app_details_c.borrow_mut();
+            if let Some(ref mut details) = *details_ref {
+                if !dlc_switches_c.is_empty() {
+                    let dlcs_vec: Vec<_> = details.dlcs.iter_mut().collect();
+                    for (i, (_, dlc)) in dlcs_vec.into_iter().enumerate() {
+                        if i < dlc_switches_c.len() {
+                            dlc.enabled = dlc_switches_c[i].is_active();
+                        }
+                    }
+                    let path = crate::parser::data_dir(SAVE_DIR, &app_id).join("appdetails.json");
+                    if let Ok(b) = serde_json::to_vec(&*details) {
+                        let _ = std::fs::write(&path, b);
+                    }
                 }
-            }
-            let path = crate::parser::data_dir(SAVE_DIR, &app_id).join("appdetails.json");
-            if let Ok(b) = serde_json::to_vec(details) {
-                let _ = std::fs::write(&path, b);
             }
         }
 
@@ -3129,7 +3262,8 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
 
     btn_row.append(&cancel_btn);
     btn_row.append(&save_btn);
-    outer.append(&btn_row);
+    content_area.append(&btn_row);
+    outer.append(&content_area);
 
     win.set_content(Some(&outer));
     win.present();
@@ -3148,10 +3282,10 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
 
     let sections: [(&str, &str, &str, i32, i32, &[&str]); 5] = [
         ("Icon", "icon.png", "icon", 48, 48, &[]),
-        ("Hero", "library_hero.jpg", "hero", 96, 32, &[]),
+        ("Hero", "library_hero.jpg", "hero", 96, 48, &[]),
         ("Capsule", "library_600x900.jpg", "grid", 32, 48, &["600x900"]),
-        ("Header", "header.jpg", "header", 96, 45, &["460x215", "920x430"]),
-        ("Logo", "logo.png", "logo", 96, 32, &[]),
+        ("Header", "header.jpg", "header", 96, 48, &["460x215", "920x430"]),
+        ("Logo", "logo.png", "logo", 96, 48, &[]),
     ];
     for &(label, file, asset, thumb_w, thumb_h, dimensions) in &sections {
         let section = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
@@ -3162,13 +3296,15 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
 
         let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
         row.set_hexpand(true);
+        row.set_valign(gtk4::Align::Center);
 
         let img_path = format!("{}/data/{}/{}/{}", SAVE_DIR, data_subdir, id, file);
         let preview = gtk4::Picture::for_filename(&img_path);
         preview.set_content_fit(gtk4::ContentFit::ScaleDown);
         preview.set_size_request(thumb_w, thumb_h);
         let preview_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-        preview_wrapper.set_size_request(thumb_w, thumb_h);
+        preview_wrapper.set_size_request(thumb_w, 48);
+        preview_wrapper.set_valign(gtk4::Align::Center);
         if std::path::Path::new(&img_path).exists() {
             preview_wrapper.append(&preview);
         } else {
@@ -3898,20 +4034,29 @@ pub fn enrich_game_async(
             }
 
             if game.name.starts_with("App ID:") {
-                if let Some(details) = steam.fetch_app_details(&app_id) {
+                if let Some(mut details) = steam.fetch_app_details(&app_id) {
                     if !details.name.is_empty() {
-                        game.name = details.name;
+                        game.name = details.name.clone();
                     }
-                    // Download DLC header images
+                    // Download DLC header images and replace URLs with local paths
                     if !details.dlcs.is_empty() {
-                        steam.ensure_dlc_images(&app_id, &details.dlcs);
+                        steam.ensure_dlc_images(&app_id, &mut details.dlcs);
+                        // Save updated appdetails.json with local image paths
+                        let path = crate::parser::data_dir(SAVE_DIR, &app_id).join("appdetails.json");
+                        if let Ok(b) = serde_json::to_vec(&details) {
+                            let _ = std::fs::write(&path, b);
+                        }
                     }
                 }
             } else {
                 // Name already known — still fetch app details for DLC/language data
-                if let Some(details) = steam.fetch_app_details(&app_id) {
+                if let Some(mut details) = steam.fetch_app_details(&app_id) {
                     if !details.dlcs.is_empty() {
-                        steam.ensure_dlc_images(&app_id, &details.dlcs);
+                        steam.ensure_dlc_images(&app_id, &mut details.dlcs);
+                        let path = crate::parser::data_dir(SAVE_DIR, &app_id).join("appdetails.json");
+                        if let Ok(b) = serde_json::to_vec(&details) {
+                            let _ = std::fs::write(&path, b);
+                        }
                     }
                 }
             }

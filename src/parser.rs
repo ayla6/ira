@@ -216,6 +216,13 @@ pub fn read_app_name(save_dir: &str, app_id: &str) -> Option<String> {
     if name.is_empty() { None } else { Some(name) }
 }
 
+/// Read the full `appdetails.json` (name, languages, DLCs) from disk.
+pub fn read_app_details(save_dir: &str, app_id: &str) -> Option<crate::steam::AppDetails> {
+    let path = data_dir(save_dir, app_id).join("appdetails.json");
+    let data = std::fs::read(&path).ok()?;
+    serde_json::from_slice(&data).ok()
+}
+
 fn find_icon_path(ach_dir: &Path, icon_field: &str) -> String {
     if icon_field.is_empty() {
         return String::new();

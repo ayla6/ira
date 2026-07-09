@@ -10,10 +10,9 @@ mod strings;
 mod ui;
 mod watcher;
 
-use crate::db::GameEntry;
 use crate::parser::Game;
 use crate::steam::SteamClient;
-use crate::ui::{build_ui, enrich_game_async, handle_app_message, restore_content, SharedState};
+use crate::ui::{build_ui, handle_app_message, restore_content, SharedState};
 use crate::watcher::AchievementWatcher;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -32,6 +31,8 @@ pub enum AppMessage {
     /// Fired by the LutrisWatcher when pga.db changes (debounced).
     /// Carries (lutris_id, playtime, lastplayed) for every Lutris game.
     LutrisDataChanged(Vec<(i64, f64, i64)>),
+    /// Initial game list loaded in the background.
+    GamesLoaded(Vec<Game>),
 }
 
 fn main() {
@@ -78,8 +79,6 @@ fn activate(app: &adw::Application) -> SharedState {
         &format!("{}/data", ui::SAVE_DIR),
     ));
 
-    let games = build_game_list(&db, ui::SAVE_DIR);
-
     let (sender, receiver) = mpsc::channel::<AppMessage>();
 
     let cfg_for_watcher = Arc::new(cfg.clone());
@@ -105,18 +104,11 @@ fn activate(app: &adw::Application) -> SharedState {
         }
     };
 
-    {
-        let mut names = game_names.lock().unwrap();
-        for g in &games {
-            if !g.app_id.is_empty() {
-                names.insert(g.app_id.clone(), g.name.clone());
-            }
-        }
-    }
-
+    // Build UI with empty game list — window appears immediately.
+    // Games are loaded in a background thread and populated via GamesLoaded.
     let state = build_ui(
         app,
-        games,
+        Vec::new(),
         cfg,
         steam.clone(),
         watcher.clone(),
@@ -136,47 +128,14 @@ fn activate(app: &adw::Application) -> SharedState {
         glib::ControlFlow::Continue
     });
 
-    // Watch + enrich matched games only (unmatched ones have no achievement
-    // source yet). Hold a single borrow and pass references into the watcher so
-    // we never clone the (large) achievements vectors here.
+    // Load games in background — the heavy filesystem/DB work.
     {
-        let s = state.borrow();
-        for g in &s.games {
-            if g.app_id.is_empty() {
-                continue;
-            }
-            if g.kind != "sgdb" {
-                if let Some(ref watcher) = watcher {
-                    let entry = GameEntry {
-                        id: g.db_id,
-                        kind: g.kind.clone(),
-                        steam_id: g.app_id.clone(),
-                        platform_id: g.platform_id.clone(),
-                        title: String::new(),
-                        hidden: false,
-                        lutris_db_id: if g.lutris_id != 0 { Some(g.lutris_id) } else { None },
-                        sgdb_id: None,
-                        logo_position: String::new(),
-                        logo_size: 0,
-                        ignored: Some(0),
-                        manual_unmatch: Some(0),
-                        sort_title: String::new(),
-                    };
-                    watcher.watch(&entry, &g.achievements);
-                }
-            }
-            enrich_game_async(
-                g.app_id.clone(),
-                g.kind.clone(),
-                g.platform_id.clone(),
-                g.db_id,
-                g.lutris_id,
-                g.name.clone(),
-                steam.clone(),
-                watcher.clone(),
-                sender.clone(),
-            );
-        }
+        let db = db.clone();
+        let sender = sender.clone();
+        std::thread::spawn(move || {
+            let games = build_game_list(&db, ui::SAVE_DIR);
+            let _ = sender.send(AppMessage::GamesLoaded(games));
+        });
     }
 
     if std::env::var("AV_BENCH").is_ok() {

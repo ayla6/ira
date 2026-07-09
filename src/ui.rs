@@ -372,13 +372,25 @@ fn build_window(state: &SharedState, app: &adw::Application) {
     });
 
     let state_clone = state.clone();
+    let zoom_gen: std::rc::Rc<std::cell::Cell<u32>> = std::rc::Rc::new(std::cell::Cell::new(0));
     zoom_scale.connect_value_changed(move |scale| {
         let val = scale.value() as i32;
         state_clone.borrow_mut().cfg.grid_cover_width = val;
         let _ = state_clone.borrow().cfg.save();
-        if state_clone.borrow().selected_id.is_empty() && !state_clone.borrow().content_unloaded {
-            show_grid_view(&state_clone);
+        if !state_clone.borrow().selected_id.is_empty()
+            || state_clone.borrow().content_unloaded
+        {
+            return;
         }
+        let gen = zoom_gen.get() + 1;
+        zoom_gen.set(gen);
+        let gen_cell = zoom_gen.clone();
+        let s = state_clone.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
+            if gen_cell.get() == gen {
+                show_grid_view(&s);
+            }
+        });
     });
 
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
@@ -696,6 +708,9 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         AppMessage::LutrisDataChanged(data) => {
             handle_lutris_data_changed(state, data);
         }
+        AppMessage::GamesLoaded(games) => {
+            handle_games_loaded(state, games);
+        }
     }
 }
 
@@ -766,6 +781,72 @@ fn handle_lutris_data_changed(state: &SharedState, data: Vec<(i64, f64, i64)>) {
     let map: std::collections::HashMap<i64, (f64, i64)> =
         data.into_iter().map(|(id, pt, lp)| (id, (pt, lp))).collect();
     apply_playtime_updates(state, &map);
+}
+
+/// Handle `GamesLoaded` — populate the game list, rebuild sidebar, and start
+/// watching + enriching. Called once when the background `build_game_list` completes.
+fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
+    {
+        let mut s = state.borrow_mut();
+        s.games = games;
+        let mut names = s.game_names.lock().unwrap();
+        for g in &s.games {
+            if !g.app_id.is_empty() {
+                names.insert(g.app_id.clone(), g.name.clone());
+            }
+        }
+    }
+
+    rebuild_sidebar(state);
+
+    // Re-select "All Games" and show the grid view
+    let row = state.borrow().game_list.row_at_index(0);
+    select_row_silently(state, row.as_ref());
+    show_grid_view(state);
+
+    // Watch + enrich matched games
+    let (steam, watcher, sender) = {
+        let s = state.borrow();
+        (s.steam.clone(), s.watcher.clone(), s.sender.clone())
+    };
+
+    let s = state.borrow();
+    for g in &s.games {
+        if g.app_id.is_empty() {
+            continue;
+        }
+        if g.kind != "sgdb" {
+            if let Some(ref watcher) = watcher {
+                let entry = GameEntry {
+                    id: g.db_id,
+                    kind: g.kind.clone(),
+                    steam_id: g.app_id.clone(),
+                    platform_id: g.platform_id.clone(),
+                    title: String::new(),
+                    hidden: false,
+                    lutris_db_id: if g.lutris_id != 0 { Some(g.lutris_id) } else { None },
+                    sgdb_id: None,
+                    logo_position: String::new(),
+                    logo_size: 0,
+                    ignored: Some(0),
+                    manual_unmatch: Some(0),
+                    sort_title: String::new(),
+                };
+                watcher.watch(&entry, &g.achievements);
+            }
+        }
+        enrich_game_async(
+            g.app_id.clone(),
+            g.kind.clone(),
+            g.platform_id.clone(),
+            g.db_id,
+            g.lutris_id,
+            g.name.clone(),
+            steam.clone(),
+            watcher.clone(),
+            sender.clone(),
+        );
+    }
 }
 
 fn apply_game_update(state: &SharedState, mut updated: Game) {
@@ -1045,7 +1126,6 @@ fn show_grid_view(state: &SharedState) {
     while let Some(child) = content_box.first_child() {
         content_box.remove(&child);
     }
-    crate::images::clear_texture_cache();
 
     let cover_width = state.borrow().cfg.grid_cover_width.clamp(100, 350);
     let show_hidden = state.borrow().cfg.show_hidden_games;
@@ -1606,22 +1686,26 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
         return header.upcast();
     }
 
-    // Hero overlay: hero image + logo (logo painted via DrawingArea for exact positioning)
+    // Hero overlay: hero image + logo
     let overlay = gtk4::Overlay::new();
     overlay.set_vexpand(false);
     overlay.set_hexpand(true);
     overlay.set_height_request(((content_width as f64) / 3.1).max(150.0) as i32);
 
-    let hero = gtk4::Picture::for_filename(&game.hero_image_path);
+    // Hero image — through texture cache to avoid re-decoding on every view switch
+    let hero = gtk4::Picture::new();
+    if let Some(t) = crate::images::texture_for(&game.hero_image_path) {
+        hero.set_paintable(Some(&t));
+    }
     hero.set_halign(gtk4::Align::Fill);
     hero.set_valign(gtk4::Align::Fill);
     hero.set_hexpand(true);
     hero.set_content_fit(gtk4::ContentFit::Cover);
     overlay.set_child(Some(&hero));
 
-    // Logo rendered via DrawingArea stacked on top of hero.
-    // The DrawingArea fills the full overlay so we compute the logo position
-    // exactly in draw-coordinates (Cairo) – no overlay child-allocation issues.
+    // Logo rendered via DrawingArea + Pixbuf.
+    // The draw_func receives the area dimensions on every paint, so the logo
+    // is always correctly sized — no signal handlers needed.
     if !game.logo_path.is_empty() {
         let logo_pct = game.logo_size.clamp(5, 100);
         let logo_pos = game.logo_position.clone();
@@ -1674,17 +1758,26 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
         }
     }
 
-    // Tick callback: update hero height on resize
-    overlay.add_tick_callback(move |o, _fc| {
-        let w = o.allocated_width();
-        if w > 0 {
-            let target = ((w as f64) / 3.1).max(150.0) as i32;
-            if o.height_request() != target {
-                o.set_height_request(target);
+    // Transparent DrawingArea that updates hero height on resize.
+    // draw_func is only called when the widget needs repainting (e.g. on resize),
+    // not 60fps like a tick callback.
+    {
+        let overlay_ref = overlay.clone();
+        let size_monitor = gtk4::DrawingArea::new();
+        size_monitor.set_halign(gtk4::Align::Fill);
+        size_monitor.set_valign(gtk4::Align::Fill);
+        size_monitor.set_hexpand(true);
+        size_monitor.set_vexpand(true);
+        size_monitor.set_draw_func(move |_area, _cr, w, _h| {
+            if w > 0 {
+                let target = ((w as f64) / 3.1).max(150.0) as i32;
+                if overlay_ref.height_request() != target {
+                    overlay_ref.set_height_request(target);
+                }
             }
-        }
-        glib::ControlFlow::Continue
-    });
+        });
+        overlay.add_overlay(&size_monitor);
+    }
 
     // Stats bar below hero (not overlaid)
     let stats_container = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
@@ -1732,16 +1825,11 @@ fn display_game(game: &Game, state: &SharedState) {
     // Reset scroll position BEFORE removing old content, so there's no visible jump
     content_scroll.vadjustment().set_value(0.0);
 
-    // Remove old content — this drops widget references to the previous
-    // game's textures, so clearing the cache actually frees the pixel data.
+    // Remove old content — widget references are dropped, but textures stay
+    // in the LRU cache for reuse when switching back.
     while let Some(child) = content_box.first_child() {
         content_box.remove(&child);
     }
-
-    // Clear the texture cache so the previous game's decoded images are freed.
-    // Sidebar icons stay alive (their gtk::Image widgets hold their own refs);
-    // only the cache's extra references are dropped.
-    crate::images::clear_texture_cache();
 
     let fraction = if game.total_count > 0 {
         game.earned_count as f64 / game.total_count as f64
@@ -2707,7 +2795,7 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     notebook.append_page(&settings_page, Some(&settings_label));
 
     // --- Logo tab (only if game has a logo) ---
-    let logo_positions = ["bottom-left", "bottom-center", "bottom-right", "center-left", "center", "center-right", "top-left", "top-center", "top-right"];
+    let logo_positions = ["top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right"];
     let logo_controls = if !game.logo_path.is_empty() {
         let logo_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
         logo_page.set_margin_start(16);

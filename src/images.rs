@@ -4,10 +4,65 @@ use glib::prelude::*;
 use glib::subclass::prelude::*;
 use gtk4::prelude::*;
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+
+struct TextureCache {
+    map: HashMap<String, Texture>,
+    order: VecDeque<String>,
+    total_bytes: usize,
+    max_bytes: usize,
+}
+
+impl TextureCache {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+            total_bytes: 0,
+            max_bytes: 100 * 1024 * 1024, // 100 MB
+        }
+    }
+
+    fn texture_bytes(t: &Texture) -> usize {
+        (t.width() as usize) * (t.height() as usize) * 4
+    }
+
+    fn get(&mut self, path: &str) -> Option<Texture> {
+        if let Some(t) = self.map.get(path) {
+            if let Some(pos) = self.order.iter().position(|k| k == path) {
+                self.order.remove(pos);
+                self.order.push_back(path.to_string());
+            }
+            return Some(t.clone());
+        }
+        None
+    }
+
+    fn insert(&mut self, path: &str, texture: Texture) {
+        let bytes = Self::texture_bytes(&texture);
+        while self.total_bytes + bytes > self.max_bytes {
+            if let Some(old_key) = self.order.pop_front() {
+                if let Some(old_texture) = self.map.remove(&old_key) {
+                    self.total_bytes -= Self::texture_bytes(&old_texture);
+                }
+            } else {
+                break;
+            }
+        }
+        self.total_bytes += bytes;
+        self.map.insert(path.to_string(), texture);
+        self.order.push_back(path.to_string());
+    }
+
+    fn clear(&mut self) {
+        self.map.clear();
+        self.order.clear();
+        self.total_bytes = 0;
+    }
+}
 
 thread_local! {
-    static TEXTURE_CACHE: RefCell<HashMap<String, Texture>> = RefCell::new(HashMap::new());
+    static TEXTURE_CACHE: RefCell<TextureCache> = RefCell::new(TextureCache::new());
 }
 
 pub fn texture_for(path: &str) -> Option<Texture> {
@@ -17,12 +72,12 @@ pub fn texture_for(path: &str) -> Option<Texture> {
     TEXTURE_CACHE.with(|cell| {
         let mut cache = cell.borrow_mut();
         if let Some(t) = cache.get(path) {
-            return Some(t.clone());
+            return Some(t);
         }
         match Texture::from_filename(path) {
             Ok(t) => {
                 let cloned = t.clone();
-                cache.insert(path.to_string(), t);
+                cache.insert(path, t);
                 Some(cloned)
             }
             Err(_) => None,

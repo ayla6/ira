@@ -31,6 +31,8 @@ const APP_CSS: &str = "
 
 /* Settings dialog sidebar — same tint as headerbar */
 .settings-sidebar { background-color: @headerbar_bg_color; }
+/* Settings dialog content headerbar — transparent, blends into background */
+.settings-header { background-color: transparent; box-shadow: none; }
 
 /* Logo position overlay buttons on hero preview */
 .logo-pos-overlay-btn {
@@ -2846,6 +2848,7 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     content_area.set_hexpand(true);
 
     let header = adw::HeaderBar::new();
+    header.add_css_class("settings-header");
     header.set_title_widget(Some(&gtk4::Label::new(Some(&game.name))));
     content_area.append(&header);
 
@@ -3076,11 +3079,12 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
         size_row.set_hexpand(true);
 
         let size_scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, Some(&size_adj));
-        size_scale.set_draw_value(true);
+        size_scale.set_draw_value(false);
         size_scale.set_hexpand(true);
 
-        let size_spin = gtk4::SpinButton::new(Some(&size_adj), 1.0, 0);
+        let size_spin = gtk4::SpinButton::new(Some(&size_adj), 1.0, 1);
         size_spin.set_numeric(true);
+        size_spin.set_digits(1);
 
         let preview_draw_for_size = preview_draw.clone();
         size_adj.connect_value_changed(move |_| {

@@ -35,6 +35,78 @@ pub enum AppMessage {
     GamesLoaded(Vec<Game>),
 }
 
+// === Pipe-based wakeup: eliminates 50ms polling ===
+//
+// AppSender wraps an mpsc::Sender and a pipe write-end. On send(), it pushes
+// the message through the channel AND writes a byte to the pipe, which wakes
+// up the main loop's GSource watching the read-end. Zero idle CPU.
+
+extern "C" {
+    fn g_unix_fd_source_new(fd: i32, condition: u32) -> *mut std::ffi::c_void;
+}
+
+/// Data passed to the GSource callback. Boxed and leaked — the destroy
+/// callback frees it when the source is removed (on app exit).
+struct MainLoopData {
+    read_fd: i32,
+    receiver: RefCell<mpsc::Receiver<AppMessage>>,
+    state: SharedState,
+}
+
+/// Trampoline for the GSource callback.
+/// Note: g_unix_fd_source_new's dispatch calls the callback as
+/// GUnixFDSourceFunc(fd, condition, user_data), not GSourceFunc(user_data).
+unsafe extern "C" fn source_trampoline(
+    _fd: i32,
+    _condition: u32,
+    data: glib::ffi::gpointer,
+) -> glib::ffi::gboolean {
+    let data: &MainLoopData = &*(data as *const MainLoopData);
+    // Drain the pipe so the source doesn't re-fire immediately
+    let mut buf = [0u8; 256];
+    while libc::read(data.read_fd, buf.as_mut_ptr() as *mut _, 256) > 0 {}
+    // Drain all pending messages
+    while let Ok(msg) = data.receiver.borrow_mut().try_recv() {
+        handle_app_message(&data.state, msg);
+    }
+    glib::ffi::G_SOURCE_CONTINUE
+}
+
+unsafe extern "C" fn source_destroy(data: glib::ffi::gpointer) {
+    let _ = Box::from_raw(data as *mut MainLoopData);
+}
+
+pub struct AppSender {
+    tx: mpsc::Sender<AppMessage>,
+    fd: std::os::unix::io::RawFd,
+}
+
+impl Clone for AppSender {
+    fn clone(&self) -> Self {
+        let new_fd = unsafe { libc::dup(self.fd) };
+        Self { tx: self.tx.clone(), fd: new_fd }
+    }
+}
+
+impl AppSender {
+    pub fn send(&self, msg: AppMessage) -> Result<(), mpsc::SendError<AppMessage>> {
+        let result = self.tx.send(msg);
+        if result.is_ok() {
+            let byte = [1u8; 1];
+            unsafe { libc::write(self.fd, byte.as_ptr() as *const _, 1); }
+        }
+        result
+    }
+}
+
+impl Drop for AppSender {
+    fn drop(&mut self) {
+        unsafe { libc::close(self.fd); }
+    }
+}
+
+unsafe impl Send for AppSender {}
+
 fn main() {
     let app = adw::Application::new(
         Some("com.github.achievement.viewer"),
@@ -79,7 +151,16 @@ fn activate(app: &adw::Application) -> SharedState {
         &format!("{}/data", ui::SAVE_DIR),
     ));
 
-    let (sender, receiver) = mpsc::channel::<AppMessage>();
+    // Create pipe for main-loop wakeup — eliminates 50ms polling entirely.
+    let mut pipe_fds = [0i32; 2];
+    unsafe {
+        libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC);
+    }
+    let read_fd = pipe_fds[0];
+    let write_fd = pipe_fds[1];
+
+    let (tx, rx) = mpsc::channel::<AppMessage>();
+    let sender = AppSender { tx, fd: write_fd };
 
     let cfg_for_watcher = Arc::new(cfg.clone());
     let watcher = match AchievementWatcher::new(cfg_for_watcher, sender.clone(), ui::SAVE_DIR.to_string()) {
@@ -119,14 +200,29 @@ fn activate(app: &adw::Application) -> SharedState {
 
     state.borrow_mut().lutris_watcher = lutris_watcher;
 
-    let receiver = RefCell::new(receiver);
-    let state_clone = state.clone();
-    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        while let Ok(msg) = receiver.borrow_mut().try_recv() {
-            handle_app_message(&state_clone, msg);
+    // Attach the pipe-based GSource to the main context.
+    // When AppSender::send() writes to the pipe, the main loop wakes up
+    // and drains the channel — zero idle CPU, no polling.
+    {
+        let data = Box::new(MainLoopData {
+            read_fd,
+            receiver: RefCell::new(rx),
+            state: state.clone(),
+        });
+        let data_ptr = Box::into_raw(data) as *mut std::ffi::c_void;
+        unsafe {
+        let source = g_unix_fd_source_new(read_fd, glib::ffi::G_IO_IN);
+        let func_ptr: unsafe extern "C" fn(i32, u32, glib::ffi::gpointer) -> glib::ffi::gboolean = source_trampoline;
+        glib::ffi::g_source_set_callback(
+            source as *mut glib::ffi::GSource,
+            std::mem::transmute(func_ptr),
+            data_ptr,
+            Some(source_destroy),
+        );
+            glib::ffi::g_source_attach(source as *mut glib::ffi::GSource, std::ptr::null_mut());
+            glib::ffi::g_source_unref(source as *mut glib::ffi::GSource);
         }
-        glib::ControlFlow::Continue
-    });
+    }
 
     // Load games in background — the heavy filesystem/DB work.
     {

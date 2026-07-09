@@ -6,7 +6,7 @@ use notify::{Config as NotifyConfig, EventKind, RecommendedWatcher, RecursiveMod
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::mpsc::Sender;
+use crate::AppSender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -24,7 +24,7 @@ pub struct AchievementWatcher {
 }
 
 impl AchievementWatcher {
-    pub fn new(cfg: Arc<Config>, sender: Sender<AppMessage>, save_dir: String) -> Result<Self, String> {
+    pub fn new(cfg: Arc<Config>, sender: AppSender, save_dir: String) -> Result<Self, String> {
         let state = Arc::new(Mutex::new(WatcherState {
             dir_to_game: HashMap::new(),
             last_earned: HashMap::new(),
@@ -87,7 +87,7 @@ impl AchievementWatcher {
 fn event_loop(
     rx: std::sync::mpsc::Receiver<notify::Result<notify::Event>>,
     state: Arc<Mutex<WatcherState>>,
-    sender: Sender<AppMessage>,
+    sender: AppSender,
     cfg: Arc<Config>,
 ) {
     let mut pending: HashMap<String, PathBuf> = HashMap::new();
@@ -143,7 +143,7 @@ fn process_reload(
     app_id: &str,
     game_dir: &Path,
     state: &Mutex<WatcherState>,
-    sender: &Sender<AppMessage>,
+    sender: &AppSender,
     cfg: &Config,
 ) {
     let (entry, save_dir) = {

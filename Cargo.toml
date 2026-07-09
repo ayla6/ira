@@ -18,3 +18,4 @@ image = { version = "0.25", features = ["png", "ico", "jpeg"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+libc = "0.2"

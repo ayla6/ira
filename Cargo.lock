@@ -13,6 +13,7 @@ dependencies = [
  "gtk4",
  "image",
  "libadwaita",
+ "libc",
  "notify",
  "pango",
  "reqwest",

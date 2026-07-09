@@ -9,7 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::mpsc::Sender;
+use crate::AppSender;
 use std::sync::{Arc, Mutex};
 
 use gtk4::glib;
@@ -103,7 +103,7 @@ pub struct AppState {
     pub watcher: Option<AchievementWatcher>,
     pub lutris_watcher: Option<crate::lutris::LutrisWatcher>,
     pub db: DbConn,
-    pub sender: Sender<AppMessage>,
+    pub sender: AppSender,
     pub game_names: Arc<Mutex<HashMap<String, String>>>,
     pub content_unloaded: bool,
     pub restoring: bool,
@@ -213,7 +213,7 @@ pub fn build_ui(
     steam: Arc<SteamClient>,
     watcher: Option<AchievementWatcher>,
     db: DbConn,
-    sender: Sender<AppMessage>,
+    sender: AppSender,
     game_names: Arc<Mutex<HashMap<String, String>>>,
 ) -> SharedState {
     let state = Rc::new(RefCell::new(AppState {
@@ -1926,20 +1926,48 @@ fn display_game(game: &Game, state: &SharedState) {
         };
 
         let mut budget = ImageLoadBudget::new(EAGER_IMAGE_BUDGET);
+        const FIRST_BATCH: usize = 30;
+        const BATCH_SIZE: usize = 20;
 
         if !earned.is_empty() {
             let earned_group = adw::PreferencesGroup::new();
             earned_group.set_title(&format!("Earned  ·  {}", earned.len()));
-            for ach in &earned {
+
+            let first_n = FIRST_BATCH.min(earned.len());
+            for ach in &earned[..first_n] {
                 earned_group.add(&create_achievement_row(ach, None, &mut budget));
             }
             progress_vbox.append(&earned_group);
+
+            // Defer remaining earned rows in idle batches
+            if earned.len() > first_n {
+                let remaining: Vec<MergedAchievement> =
+                    earned[first_n..].iter().map(|a| (*a).clone()).collect();
+                let group = earned_group.clone();
+                let mut i = 0;
+                glib::idle_add_local(move || {
+                    let end = (i + BATCH_SIZE).min(remaining.len());
+                    let mut batch_budget = ImageLoadBudget::new(0);
+                    for ach in &remaining[i..end] {
+                        group.add(&create_achievement_row(ach, None, &mut batch_budget));
+                    }
+                    batch_budget.flush();
+                    i = end;
+                    if i >= remaining.len() {
+                        glib::ControlFlow::Break
+                    } else {
+                        glib::ControlFlow::Continue
+                    }
+                });
+            }
         }
 
         if !locked.is_empty() || !hidden.is_empty() {
             let locked_group = adw::PreferencesGroup::new();
             locked_group.set_title(&format!("Locked  ·  {}", locked.len() + hidden.len()));
-            for ach in &locked {
+
+            let first_n = FIRST_BATCH.min(locked.len());
+            for ach in &locked[..first_n] {
                 let ach_clone = (*ach).clone();
                 let reload_clone = reload.clone();
                 let kind_clone = game.kind.clone();
@@ -1954,6 +1982,7 @@ fn display_game(game: &Game, state: &SharedState) {
                     &mut budget,
                 ));
             }
+
             if !hidden.is_empty() {
                 let hidden_row = adw::ActionRow::new();
                 hidden_row.set_title(&format!("... and {} hidden trophies", hidden.len()));
@@ -1962,6 +1991,45 @@ fn display_game(game: &Game, state: &SharedState) {
                 locked_group.add(&hidden_row);
             }
             progress_vbox.append(&locked_group);
+
+            // Defer remaining locked rows in idle batches
+            if locked.len() > first_n {
+                let remaining: Vec<MergedAchievement> =
+                    locked[first_n..].iter().map(|a| (*a).clone()).collect();
+                let group = locked_group.clone();
+                let reload = reload.clone();
+                let kind = game.kind.clone();
+                let app_id = game.app_id.clone();
+                let platform_id = game.platform_id.clone();
+                let state = state.clone();
+                let mut i = 0;
+                glib::idle_add_local(move || {
+                    let end = (i + BATCH_SIZE).min(remaining.len());
+                    let mut batch_budget = ImageLoadBudget::new(0);
+                    for ach in &remaining[i..end] {
+                        let ach_clone = ach.clone();
+                        let reload_clone = reload.clone();
+                        let kind_clone = kind.clone();
+                        let app_id_clone = app_id.clone();
+                        let platform_id_clone = platform_id.clone();
+                        let state_clone = state.clone();
+                        group.add(&create_achievement_row(
+                            ach,
+                            Some(Box::new(move || {
+                                confirm_mark_unlocked(&state_clone, &kind_clone, &app_id_clone, &platform_id_clone, &ach_clone, reload_clone.clone());
+                            })),
+                            &mut batch_budget,
+                        ));
+                    }
+                    batch_budget.flush();
+                    i = end;
+                    if i >= remaining.len() {
+                        glib::ControlFlow::Break
+                    } else {
+                        glib::ControlFlow::Continue
+                    }
+                });
+            }
         }
         budget.flush();
 
@@ -3472,7 +3540,7 @@ fn finalize_added_game(
     platform_id: &str,
     steam: Arc<SteamClient>,
     watcher: Option<AchievementWatcher>,
-    sender: Sender<AppMessage>,
+    sender: AppSender,
     db: DbConn,
 ) {
     let entry = match crate::db::find_by_steam_id(&db, app_id) {
@@ -3675,7 +3743,7 @@ pub fn enrich_game_async(
     title: String,
     steam: Arc<SteamClient>,
     watcher: Option<AchievementWatcher>,
-    sender: Sender<AppMessage>,
+    sender: AppSender,
 ) {
     std::thread::spawn(move || {
         let entry = GameEntry {

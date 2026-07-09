@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
+use crate::AppSender;
 use std::time::{Duration, Instant};
 
 use crate::AppMessage;
@@ -76,7 +76,7 @@ pub struct LutrisWatcher {
 }
 
 impl LutrisWatcher {
-    pub fn new(sender: Sender<AppMessage>) -> Result<Self, String> {
+    pub fn new(sender: AppSender) -> Result<Self, String> {
         let db_path = lutris_db_path();
 
         let (tx, rx) = std::sync::mpsc::channel();

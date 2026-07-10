@@ -77,6 +77,7 @@ fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::
     let is_ps4 = game.kind == "ps4";
 
     let view_stack = adw::ViewStack::new();
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
     if !is_ps4 {
         let view_switcher = adw::ViewSwitcher::new();
@@ -84,6 +85,7 @@ fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::
         view_switcher.set_halign(gtk4::Align::Center);
         view_switcher.set_margin_top(12);
         view_switcher.set_margin_bottom(12);
+        outer.append(&view_switcher);
         view_stack.set_margin_top(12);
     }
 
@@ -303,7 +305,8 @@ fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::
 
     view_stack.set_vhomogeneous(false);
     view_stack.set_margin_bottom(32);
-    view_stack.upcast()
+    outer.append(&view_stack);
+    outer.upcast()
 }
 
 fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_width: i32) -> gtk4::Widget {

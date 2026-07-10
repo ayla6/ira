@@ -114,6 +114,7 @@ pub struct AppState {
     pub steam: Arc<SteamClient>,
     pub watcher: Option<AchievementWatcher>,
     pub lutris_watcher: Option<crate::lutris::LutrisWatcher>,
+    pub shadps4_watcher: Option<crate::shadps4::ShadPS4Watcher>,
     pub db: DbConn,
     pub sender: AppSender,
     pub game_names: Arc<Mutex<HashMap<String, String>>>,
@@ -244,6 +245,7 @@ pub fn build_ui(
         steam: steam.clone(),
         watcher: watcher.clone(),
         lutris_watcher: None,
+        shadps4_watcher: None,
         db,
         sender,
         game_names,
@@ -729,6 +731,39 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         AppMessage::LutrisDataChanged(data) => {
             handle_lutris_data_changed(state, data);
         }
+        AppMessage::ShadPS4PlaytimeChanged => {
+            // Re-read shadPS4 playtimes and update in-memory state
+            let play_times = crate::shadps4::read_play_times();
+            let mut updated_ids = Vec::new();
+            for g in state.borrow_mut().games.iter_mut() {
+                if g.kind == "ps4" {
+                    let serial = &g.platform_id;
+                    if let Some(time_str) = play_times.get(serial) {
+                        let new_playtime = crate::shadps4::parse_playtime(time_str);
+                        if (g.playtime - new_playtime).abs() > 0.001 {
+                            g.playtime = new_playtime;
+                            updated_ids.push(g.lutris_id);
+                        }
+                    }
+                }
+            }
+            // Rebuild sidebar to update playtime display
+            if !updated_ids.is_empty() {
+                rebuild_sidebar(state);
+                // Refresh displayed game if it was updated
+                let selected_id = state.borrow().selected_id.clone();
+                if let Some(id) = updated_ids.first() {
+                    if selected_id == id.to_string() {
+                        let game = state.borrow().games.iter()
+                            .find(|g| g.lutris_id == *id)
+                            .cloned();
+                        if let Some(game) = game {
+                            display_game(&game, state);
+                        }
+                    }
+                }
+            }
+        }
         AppMessage::GamesLoaded(games) => {
             handle_games_loaded(state, games);
         }
@@ -836,7 +871,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
         if g.app_id.is_empty() {
             continue;
         }
-        if g.kind != "sgdb" {
+        if g.kind != "sgdb" && g.kind != "ps4" {
             if let Some(ref watcher) = watcher {
                 let entry = GameEntry {
                     id: g.db_id,
@@ -856,6 +891,12 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
                 watcher.watch(&entry, &g.achievements);
             }
         }
+
+        // PS4 games are fully loaded by build_shadps4_games — no enrichment needed.
+        if g.kind == "ps4" {
+            continue;
+        }
+
         enrich_game_async(
             g.app_id.clone(),
             g.kind.clone(),
@@ -4040,7 +4081,7 @@ pub fn enrich_game_async(
             return;
         };
 
-        if kind != "sgdb" {
+        if kind != "sgdb" && kind != "ps4" {
             let meta_path = crate::parser::achievements_dir(SAVE_DIR, &app_id).join("achievements.json");
             if !meta_path.exists() {
                 if let Err(e) = steam.generate_steam_settings(&app_id) {

@@ -187,6 +187,10 @@ pub fn data_dir(save_dir: &str, app_id: &str) -> PathBuf {
     Path::new(save_dir).join("data").join("steam").join(app_id)
 }
 
+pub fn ps4_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
+    Path::new(save_dir).join("data").join("ps4").join(app_id)
+}
+
 pub fn sgdb_data_dir(save_dir: &str, sgdb_id: &str) -> PathBuf {
     Path::new(save_dir).join("data").join("steamgriddb").join(sgdb_id)
 }
@@ -321,6 +325,8 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         None => {
             if kind == "sgdb" {
                 sgdb_data_dir(save_dir, app_id)
+            } else if kind == "ps4" {
+                ps4_data_dir(save_dir, app_id)
             } else {
                 data_dir(save_dir, app_id)
             }

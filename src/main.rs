@@ -1,3 +1,4 @@
+mod app;
 mod bench;
 mod config;
 mod db;
@@ -5,11 +6,13 @@ mod gamesetup;
 mod images;
 mod lutris;
 mod parser;
+mod shadps4;
 mod steam;
 mod strings;
 mod ui;
 mod watcher;
 
+pub use app::{AppMessage, AppSender};
 use crate::parser::Game;
 use crate::steam::SteamClient;
 use crate::ui::{build_ui, handle_app_message, restore_content, SharedState};
@@ -20,20 +23,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
-
-pub enum AppMessage {
-    EnrichedGame(Game),
-    NewGame(Game),
-    WatcherGameUpdated(Game),
-    AddGameError(String),
-    GameRemoved { app_id: String },
-    GameStopped(i64),
-    /// Fired by the LutrisWatcher when pga.db changes (debounced).
-    /// Carries (lutris_id, playtime, lastplayed) for every Lutris game.
-    LutrisDataChanged(Vec<(i64, f64, i64)>),
-    /// Initial game list loaded in the background.
-    GamesLoaded(Vec<Game>),
-}
 
 // === Pipe-based wakeup: eliminates 50ms polling ===
 //
@@ -74,35 +63,6 @@ unsafe extern "C" fn source_trampoline(
 
 unsafe extern "C" fn source_destroy(data: glib::ffi::gpointer) {
     let _ = Box::from_raw(data as *mut MainLoopData);
-}
-
-pub struct AppSender {
-    tx: mpsc::Sender<AppMessage>,
-    fd: std::os::unix::io::RawFd,
-}
-
-impl Clone for AppSender {
-    fn clone(&self) -> Self {
-        let new_fd = unsafe { libc::dup(self.fd) };
-        Self { tx: self.tx.clone(), fd: new_fd }
-    }
-}
-
-impl AppSender {
-    pub fn send(&self, msg: AppMessage) -> Result<(), mpsc::SendError<AppMessage>> {
-        let result = self.tx.send(msg);
-        if result.is_ok() {
-            let byte = [1u8; 1];
-            unsafe { libc::write(self.fd, byte.as_ptr() as *const _, 1); }
-        }
-        result
-    }
-}
-
-impl Drop for AppSender {
-    fn drop(&mut self) {
-        unsafe { libc::close(self.fd); }
-    }
 }
 
 fn main() {
@@ -158,7 +118,7 @@ fn activate(app: &adw::Application) -> SharedState {
     let write_fd = pipe_fds[1];
 
     let (tx, rx) = mpsc::channel::<AppMessage>();
-    let sender = AppSender { tx, fd: write_fd };
+    let sender = AppSender::new(tx, write_fd);
 
     let cfg_for_watcher = Arc::new(cfg.clone());
     let watcher = match AchievementWatcher::new(cfg_for_watcher, sender.clone(), ui::SAVE_DIR.to_string()) {
@@ -183,6 +143,15 @@ fn activate(app: &adw::Application) -> SharedState {
         }
     };
 
+    // Watch shadPS4 play_time.txt for playtime changes
+    let shadps4_watcher = match crate::shadps4::ShadPS4Watcher::new(sender.clone()) {
+        Ok(w) => Some(w),
+        Err(e) => {
+            eprintln!("shadPS4 playtime watching unavailable: {}", e);
+            None
+        }
+    };
+
     // Build UI with empty game list — window appears immediately.
     // Games are loaded in a background thread and populated via GamesLoaded.
     let state = build_ui(
@@ -197,6 +166,7 @@ fn activate(app: &adw::Application) -> SharedState {
     );
 
     state.borrow_mut().lutris_watcher = lutris_watcher;
+    state.borrow_mut().shadps4_watcher = shadps4_watcher;
 
     // Attach the pipe-based GSource to the main context.
     // When AppSender::send() writes to the pipe, the main loop wakes up
@@ -401,6 +371,50 @@ fn build_game_list(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
         }
     }
     games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
+
+    // Append shadPS4 games (not from Lutris — separate source)
+    games.extend(build_shadps4_games(&db, save_dir));
+    games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
+    games
+}
+
+/// Discover and load shadPS4 games. These are stored in the DB with kind="ps4",
+/// steam_id=NPWR_ID, platform_id=CUSA_ID. They have no Lutris link.
+fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
+    let shad_games = shadps4::discover_games();
+    let mut games = Vec::new();
+
+    for shad in &shad_games {
+        // Find or create DB entry — try by steam_id (NPWR ID), then by (kind, platform_id)
+        let entry = db::find_by_steam_id(db, &shad.npwr_id).ok().flatten()
+            .or_else(|| db::find_by_kind_platform(db, "ps4", &shad.serial).ok().flatten());
+        let (db_id, title, hidden, logo_position, logo_size, sort_title) = match entry {
+            Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title),
+            None => {
+                // Insert new entry
+                match db::add_game(db, "ps4", &shad.npwr_id, &shad.serial, &shad.title) {
+                    Ok(id) => (id, shad.title.clone(), false, "bottom-left".to_string(), 50, String::new()),
+                    Err(e) => {
+                        eprintln!("shadPS4: failed to add {} to DB: {}", shad.serial, e);
+                        continue;
+                    }
+                }
+            }
+        };
+
+        let game = shadps4::load_shadps4_game(
+            shad,
+            db_id,
+            &title,
+            hidden,
+            &logo_position,
+            logo_size,
+            &sort_title,
+            save_dir,
+        );
+        games.push(game);
+    }
+
     games
 }
 

@@ -2,6 +2,7 @@
 name = "achievement-viewer"
 version = "0.1.0"
 edition = "2021"
+default-run = "achievement-viewer"
 
 [dependencies]
 gtk4 = { version = "0.11", features = ["v4_14"] }
@@ -19,3 +20,13 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 libc = "0.2"
+
+[[bin]]
+name = "achievement-viewer"
+path = "src/main.rs"
+
+[[bin]]
+name = "av-test"
+path = "src/test_main.rs"
+
+[features]

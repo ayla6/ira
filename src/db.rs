@@ -219,10 +219,15 @@ pub fn find_by_steam_id(conn: &DbConn, steam_id: &str) -> Result<Option<GameEntr
 
 /// Find a GOG game (kind="gog") by its product id.
 pub fn find_gog_by_product_id(conn: &DbConn, product_id: &str) -> Result<Option<GameEntry>, String> {
+    find_by_kind_platform(conn, "gog", product_id)
+}
+
+/// Find a game by (kind, platform_id).
+pub fn find_by_kind_platform(conn: &DbConn, kind: &str, platform_id: &str) -> Result<Option<GameEntry>, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title FROM games WHERE kind = 'gog' AND platform_id = ?1")
+    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title FROM games WHERE kind = ?1 AND platform_id = ?2")
         .map_err(|e| e.to_string())?;
-    let mut entries = stmt.query_map(params![product_id], |row| {
+    let mut entries = stmt.query_map(params![kind, platform_id], |row| {
         Ok(GameEntry {
             id: row.get(0)?,
             kind: row.get(1)?,

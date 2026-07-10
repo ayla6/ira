@@ -24,8 +24,20 @@ const APP_CSS: &str = "
 .global-bar trough { background-color: transparent; border: none; }
 .global-bar progress { border: none; border-radius: 0; }
 .hidden-game { opacity: 0.5; }
-.popover-btn, .popover-btn > label { font-weight: normal; }
 .play-btn-label { font-size: 1.15em; }
+
+/* Popover menu rows — uniform padding and alignment */
+.popover-menu-row {
+    padding-left: 10px;
+    padding-right: 10px;
+    font-weight: normal;
+}
+.popover-menu-row button.flat {
+    padding: 0;
+}
+.popover-menu-row label {
+    font-weight: normal;
+}
 
 .success-label { color: @accent_color; font-weight: bold; }
 
@@ -311,21 +323,20 @@ fn build_window(state: &SharedState, app: &adw::Application) {
 
     let popover = gtk4::Popover::new();
     popover.set_size_request(300, -1);
-    let popover_box = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
-    popover_box.set_margin_start(16);
-    popover_box.set_margin_end(16);
-    popover_box.set_margin_top(12);
-    popover_box.set_margin_bottom(12);
+    let popover_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    popover_box.set_margin_start(12);
+    popover_box.set_margin_end(12);
+    popover_box.set_margin_top(8);
+    popover_box.set_margin_bottom(8);
 
     let settings_btn = gtk4::Button::new();
     let settings_label = gtk4::Label::new(Some(S::SETTINGS));
     settings_label.set_xalign(0.0);
     settings_btn.set_child(Some(&settings_label));
     settings_btn.add_css_class("flat");
-    settings_btn.add_css_class("popover-btn");
     settings_btn.set_halign(gtk4::Align::Fill);
-    settings_btn.set_margin_top(6);
-    settings_btn.set_margin_bottom(6);
+    settings_btn.set_size_request(-1, 36);
+    settings_btn.add_css_class("popover-menu-row");
     popover_box.append(&settings_btn);
 
     let match_btn = gtk4::Button::new();
@@ -333,20 +344,25 @@ fn build_window(state: &SharedState, app: &adw::Application) {
     match_label.set_xalign(0.0);
     match_btn.set_child(Some(&match_label));
     match_btn.add_css_class("flat");
-    match_btn.add_css_class("popover-btn");
     match_btn.set_halign(gtk4::Align::Fill);
-    match_btn.set_margin_top(6);
-    match_btn.set_margin_bottom(6);
-
-    let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
-    popover_box.append(&match_btn);
-    popover_box.append(&sep);
+    match_btn.set_size_request(-1, 36);
+    match_btn.add_css_class("popover-menu-row");
 
     let state_clone2 = state.clone();
     match_btn.connect_clicked(move |_| show_mass_match_dialog(&state_clone2));
 
-    let hidden_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    popover_box.append(&match_btn);
+
+    let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    sep.set_margin_top(4);
+    sep.set_margin_bottom(4);
+
+    popover_box.append(&sep);
+
+    let hidden_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     hidden_row.set_hexpand(true);
+    hidden_row.set_size_request(-1, 36);
+    hidden_row.add_css_class("popover-menu-row");
     let hidden_label = gtk4::Label::new(Some(S::SHOW_HIDDEN_GAMES));
     hidden_label.set_xalign(0.0);
     hidden_label.set_hexpand(true);
@@ -357,8 +373,10 @@ fn build_window(state: &SharedState, app: &adw::Application) {
     popover_box.append(&hidden_row);
 
     // Cover size zoom slider
-    let zoom_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    let zoom_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     zoom_row.set_hexpand(true);
+    zoom_row.set_size_request(-1, 36);
+    zoom_row.add_css_class("popover-menu-row");
     let zoom_label = gtk4::Label::new(Some(S::COVER_SIZE));
     zoom_label.set_xalign(0.0);
     zoom_label.set_hexpand(true);
@@ -367,6 +385,7 @@ fn build_window(state: &SharedState, app: &adw::Application) {
     zoom_scale.set_hexpand(true);
     zoom_scale.set_draw_value(false);
     zoom_scale.set_digits(0);
+    zoom_scale.set_margin_end(4);
     zoom_row.append(&zoom_label);
     zoom_row.append(&zoom_scale);
     popover_box.append(&zoom_row);

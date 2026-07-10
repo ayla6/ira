@@ -595,6 +595,7 @@ pub fn load_shadps4_game(
     sort_title: &str,
     sgdb_id: &str,
     shadps4_version: &str,
+    last_played: i64,
     save_dir: &str,
 ) -> Game {
     let npwr_id = &shad.npwr_id;
@@ -639,7 +640,7 @@ pub fn load_shadps4_game(
         lutris_id: serial_to_lutris_id(serial),
         slug: serial.clone(),
         playtime,
-        lastplayed: 0,
+        lastplayed: last_played,
         logo_position: logo_position.to_string(),
         logo_size,
         lutris_name: shad.title.clone(),

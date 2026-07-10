@@ -25,6 +25,8 @@ pub struct GameEntry {
     pub sort_title: String,
     /// Per-game shadPS4 version path (empty = use global default).
     pub shadps4_version: Option<String>,
+    /// Unix timestamp of last time the game was launched via our play button.
+    pub last_played: i64,
 }
 
 pub type DbConn = Arc<Mutex<Connection>>;
@@ -45,7 +47,8 @@ pub fn init_db(db_path: &str) -> DbConn {
             logo_size INTEGER NOT NULL DEFAULT 50,
             ignored INTEGER NOT NULL DEFAULT 0,
             manual_unmatch INTEGER NOT NULL DEFAULT 0,
-            sort_title TEXT NOT NULL DEFAULT ''
+            sort_title TEXT NOT NULL DEFAULT '',
+            last_played INTEGER NOT NULL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_kind_platform ON games(kind, platform_id);
@@ -67,6 +70,7 @@ pub fn init_db(db_path: &str) -> DbConn {
         ("manual_unmatch", "INTEGER NOT NULL DEFAULT 0"),
         ("sort_title", "TEXT NOT NULL DEFAULT ''"),
         ("shadps4_version", "TEXT NOT NULL DEFAULT ''"),
+        ("last_played", "INTEGER NOT NULL DEFAULT 0"),
     ];
     for (col, def) in &columns {
         let _ = conn.execute(&format!("ALTER TABLE games ADD COLUMN {} {}", col, def), []);
@@ -108,7 +112,7 @@ pub fn update_sort_title(conn: &DbConn, id: i64, sort_title: &str) -> Result<(),
 
 pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version FROM games WHERE ignored = 0 ORDER BY CASE WHEN sort_title != '' THEN sort_title ELSE title END")
+    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played FROM games WHERE ignored = 0 ORDER BY CASE WHEN sort_title != '' THEN sort_title ELSE title END")
         .map_err(|e| e.to_string())?;
     let entries = stmt.query_map([], |row| {
         Ok(GameEntry {
@@ -126,6 +130,7 @@ pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
             manual_unmatch: row.get(11)?,
             sort_title: row.get(12)?,
             shadps4_version: row.get(13)?,
+            last_played: row.get(14)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -194,7 +199,7 @@ pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
 
 pub fn find_by_steam_id(conn: &DbConn, steam_id: &str) -> Result<Option<GameEntry>, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version FROM games WHERE steam_id = ?1")
+    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played FROM games WHERE steam_id = ?1")
         .map_err(|e| e.to_string())?;
     let mut entries = stmt.query_map(params![steam_id], |row| {
         Ok(GameEntry {
@@ -212,6 +217,7 @@ pub fn find_by_steam_id(conn: &DbConn, steam_id: &str) -> Result<Option<GameEntr
             manual_unmatch: row.get(11)?,
             sort_title: row.get(12)?,
             shadps4_version: row.get(13)?,
+            last_played: row.get(14)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -230,7 +236,7 @@ pub fn find_gog_by_product_id(conn: &DbConn, product_id: &str) -> Result<Option<
 /// Find a game by (kind, platform_id).
 pub fn find_by_kind_platform(conn: &DbConn, kind: &str, platform_id: &str) -> Result<Option<GameEntry>, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version FROM games WHERE kind = ?1 AND platform_id = ?2")
+    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played FROM games WHERE kind = ?1 AND platform_id = ?2")
         .map_err(|e| e.to_string())?;
     let mut entries = stmt.query_map(params![kind, platform_id], |row| {
         Ok(GameEntry {
@@ -248,6 +254,7 @@ pub fn find_by_kind_platform(conn: &DbConn, kind: &str, platform_id: &str) -> Re
             manual_unmatch: row.get(11)?,
             sort_title: row.get(12)?,
             shadps4_version: row.get(13)?,
+            last_played: row.get(14)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -332,7 +339,7 @@ pub fn upsert_matching(conn: &DbConn, lutris_db_id: i64, steam_id: &str, kind: &
 /// Look up a game by its Lutris id.
 pub fn find_by_lutris_id(conn: &DbConn, lutris_db_id: i64) -> Result<Option<GameEntry>, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version FROM games WHERE lutris_db_id = ?1")
+    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played FROM games WHERE lutris_db_id = ?1")
         .map_err(|e| e.to_string())?;
     let mut entries = stmt.query_map(params![lutris_db_id], |row| {
         Ok(GameEntry {
@@ -350,6 +357,7 @@ pub fn find_by_lutris_id(conn: &DbConn, lutris_db_id: i64) -> Result<Option<Game
             manual_unmatch: row.get(11)?,
             sort_title: row.get(12)?,
             shadps4_version: row.get(13)?,
+            last_played: row.get(14)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -386,6 +394,16 @@ pub fn set_shadps4_version(conn: &DbConn, id: i64, version: &str) -> Result<(), 
     c.execute(
         "UPDATE games SET shadps4_version = ?1 WHERE id = ?2",
         params![if version.is_empty() { "" } else { version }, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn set_last_played(conn: &DbConn, id: i64, timestamp: i64) -> Result<(), String> {
+    let c = conn.lock().map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE games SET last_played = ?1 WHERE id = ?2",
+        params![timestamp, id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())

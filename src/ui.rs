@@ -947,8 +947,9 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
                     logo_size: 0,
                     ignored: Some(0),
                     manual_unmatch: Some(0),
-                    sort_title: String::new(),
+                    sort_title: g.sort_title.clone(),
                     shadps4_version: None,
+                    last_played: 0,
                 };
                 watcher.watch(&entry, &g.achievements);
             }
@@ -1619,10 +1620,11 @@ fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
     // Look up game info for PS4 launch support
     let game_info = state.borrow().games.iter()
         .find(|g| g.lutris_id == lutris_id)
-        .map(|g| (g.kind.clone(), g.game_path.clone(), g.name.clone(), g.shadps4_version.clone()))
+        .map(|g| (g.kind.clone(), g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id))
         .unwrap_or_default();
 
     let global_shadps4_exe = state.borrow().cfg.shadps4_executable.clone();
+    let state_c = state.clone();
 
     let btn = gtk4::Button::new();
     btn.set_valign(gtk4::Align::Center);
@@ -1674,7 +1676,7 @@ fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
             s.send(AppMessage::GameStopped(lutris_id)).ok();
         } else {
             drop(map);
-            let (kind, game_path, game_name, per_game_version) = &game_info;
+            let (kind, game_path, game_name, per_game_version, db_id) = &game_info;
             if kind == "ps4" {
                 // Use per-game version if set, otherwise fall back to global
                 let exe = if !per_game_version.is_empty() {
@@ -1694,6 +1696,17 @@ fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
                         icon_click.set_icon_name(Some("window-close-symbolic"));
                         label_click.set_text("Stop");
                         btn.remove_css_class("suggested-action");
+
+                        // Record last played timestamp
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as i64;
+                        let db_c = state_c.borrow().db.clone();
+                        let _ = crate::db::set_last_played(&db_c, *db_id, now);
+                        if let Some(g) = state_c.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
+                            g.lastplayed = now;
+                        }
 
                         // Monitor thread: poll for game exit
                         let rg_mon = rg.clone();
@@ -2126,6 +2139,7 @@ fn display_game(game: &Game, state: &SharedState) {
                 manual_unmatch: Some(0),
                 sort_title: String::new(),
                 shadps4_version: None,
+                last_played: 0,
             };
             if let Ok(updated) = load_game(&entry, SAVE_DIR) {
                 apply_game_update(&state_for_reload, updated);
@@ -4803,6 +4817,7 @@ pub fn enrich_game_async(
             manual_unmatch: Some(0),
             sort_title: String::new(),
             shadps4_version: None,
+            last_played: 0,
         };
 
         let Ok(mut game) = load_game(&entry, SAVE_DIR) else {

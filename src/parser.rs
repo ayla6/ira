@@ -328,7 +328,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         lutris_id: entry.lutris_db_id.unwrap_or(0),
         slug: String::new(),
         playtime: 0.0,
-        lastplayed: 0,
+        lastplayed: entry.last_played,
         logo_position: entry.logo_position.clone(),
         logo_size: entry.logo_size,
         lutris_name: String::new(),

@@ -593,6 +593,7 @@ pub fn load_shadps4_game(
     logo_position: &str,
     logo_size: i32,
     sort_title: &str,
+    sgdb_id: &str,
     save_dir: &str,
 ) -> Game {
     let npwr_id = &shad.npwr_id;
@@ -644,10 +645,15 @@ pub fn load_shadps4_game(
         manual_unmatch: false,
         sort_title: sort_title.to_string(),
         game_path: shad.game_path.to_string_lossy().into_owned(),
+        sgdb_id: sgdb_id.to_string(),
     };
 
-    // Image paths — check data/ps4/{NPWR_ID}/ first, then shadPS4 defaults
-    let image_dir = Path::new(save_dir).join("data").join("ps4").join(npwr_id);
+    // Image paths — use SGDB dir if sgdb_id is set, otherwise data/ps4/{NPWR_ID}/
+    let image_dir = if !sgdb_id.is_empty() {
+        Path::new(save_dir).join("data").join("steamgriddb").join(sgdb_id)
+    } else {
+        Path::new(save_dir).join("data").join("ps4").join(npwr_id)
+    };
 
     let icon_png = image_dir.join("icon.png");
     if icon_png.is_file() {

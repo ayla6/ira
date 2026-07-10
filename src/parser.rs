@@ -115,6 +115,8 @@ pub struct Game {
     pub sort_title: String,
     /// Path to game directory (for PS4 games — used to find eboot.bin).
     pub game_path: String,
+    /// SteamGridDB game ID (if matched) for image downloads.
+    pub sgdb_id: String,
 }
 
 impl Game {
@@ -151,6 +153,7 @@ pub fn unmatched_game(lutris_id: i64, name: &str, slug: &str, playtime: f64, las
         manual_unmatch: false,
         sort_title: String::new(),
         game_path: String::new(),
+        sgdb_id: String::new(),
     }
 }
 
@@ -312,6 +315,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         manual_unmatch: entry.manual_unmatch.unwrap_or(0) == 1,
         sort_title: entry.sort_title.clone(),
         game_path: String::new(),
+        sgdb_id: entry.sgdb_id.clone().unwrap_or_default(),
     };
 
     let ach_dir = achievements_dir(save_dir, app_id);

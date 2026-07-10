@@ -392,12 +392,12 @@ fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
         // Find or create DB entry — try by steam_id (NPWR ID), then by (kind, platform_id)
         let entry = db::find_by_steam_id(db, &shad.npwr_id).ok().flatten()
             .or_else(|| db::find_by_kind_platform(db, "ps4", &shad.serial).ok().flatten());
-        let (db_id, title, hidden, logo_position, logo_size, sort_title) = match entry {
-            Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title),
+        let (db_id, title, hidden, logo_position, logo_size, sort_title, sgdb_id) = match entry {
+            Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title, e.sgdb_id.clone().unwrap_or_default()),
             None => {
                 // Insert new entry
                 match db::add_game(db, "ps4", &shad.npwr_id, &shad.serial, &shad.title) {
-                    Ok(id) => (id, shad.title.clone(), false, "bottom-left".to_string(), 50, String::new()),
+                    Ok(id) => (id, shad.title.clone(), false, "bottom-left".to_string(), 50, String::new(), String::new()),
                     Err(e) => {
                         eprintln!("shadPS4: failed to add {} to DB: {}", shad.serial, e);
                         continue;
@@ -414,6 +414,7 @@ fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
             &logo_position,
             logo_size,
             &sort_title,
+            &sgdb_id,
             save_dir,
         );
         games.push(game);

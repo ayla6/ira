@@ -362,3 +362,14 @@ pub fn set_logo_settings(conn: &DbConn, id: i64, position: &str, size: i32) -> R
     .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+/// Set the SteamGridDB game ID for a game (enables SGDB image downloads).
+pub fn set_sgdb_id(conn: &DbConn, id: i64, sgdb_id: &str) -> Result<(), String> {
+    let c = conn.lock().map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE games SET sgdb_id = ?1 WHERE id = ?2",
+        params![if sgdb_id.is_empty() { None } else { Some(sgdb_id) }, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}

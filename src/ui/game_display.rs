@@ -12,6 +12,7 @@ use super::image_budget::ImageLoadBudget;
 use super::play_button::play_button;
 use super::message_handler::apply_game_update;
 use super::achievement_rows::{create_achievement_row, build_global_tab};
+use super::helpers::clear_children;
 
 pub fn display_game(game: &Game, state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
@@ -22,9 +23,7 @@ pub fn display_game(game: &Game, state: &SharedState) {
 
     content_scroll.vadjustment().set_value(0.0);
 
-    while let Some(child) = content_box.first_child() {
-        content_box.remove(&child);
-    }
+    clear_children(&content_box);
     crate::images::clear_texture_cache();
 
     let fraction = if game.total_count > 0 {
@@ -115,8 +114,8 @@ pub fn display_game(game: &Game, state: &SharedState) {
                 hidden: false,
                 logo_position: String::new(),
                 logo_size: 0,
-                ignored: Some(0),
-                manual_unmatch: Some(0),
+                ignored: 0,
+                manual_unmatch: 0,
                 sort_title: String::new(),
                 shadps4_version: None,
                 last_played: 0,
@@ -513,11 +512,6 @@ fn format_lastplayed(ts: i64) -> String {
     chrono::DateTime::from_timestamp(ts, 0)
         .map(|dt| dt.format("%b %-d").to_string())
         .unwrap_or_else(|| "Never".to_string())
-}
-
-#[allow(dead_code)]
-fn logo_pixbuf_from_path(path: &str) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
-    gtk4::gdk_pixbuf::Pixbuf::from_file(path).ok()
 }
 
 pub(crate) fn logo_scaled_dims(hero_w: f64, hero_h: f64, src_w: f64, src_h: f64, logo_pct: i32) -> (i32, i32) {

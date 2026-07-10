@@ -2,7 +2,8 @@ use std::path::Path;
 
 use crate::db::DbConn;
 use crate::api::SteamClient;
-use crate::platforms::gog::{GALAXY_ID, generate_galaxy_emu_config};
+use crate::parser::GALAXY_ID;
+use crate::platforms::gog::generate_galaxy_emu_config;
 
 pub fn add_gog_game_from_folder(
     galaxy_dll_folder: &str,

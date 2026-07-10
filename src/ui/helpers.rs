@@ -1,7 +1,11 @@
 use adw::prelude::{AlertDialogExt, AdwDialogExt};
+use gtk4::prelude::{BoxExt, WidgetExt};
 use crate::Game;
 use crate::strings as S;
+use crate::models::{AppMessage, AppSender};
 use std::collections::HashMap;
+use std::process::Child;
+use std::sync::{Arc, Mutex};
 
 pub fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
     if !existing.name.is_empty() && !existing.name.starts_with("App ID:") {
@@ -78,4 +82,64 @@ pub fn confirm_dialog(
         }
     });
     dialog.present(Some(parent));
+}
+
+pub trait Clearable {
+    fn clear_all_children(&self);
+}
+
+impl Clearable for gtk4::Box {
+    fn clear_all_children(&self) {
+        while let Some(child) = self.first_child() {
+            self.remove(&child);
+        }
+    }
+}
+
+impl Clearable for gtk4::ListBox {
+    fn clear_all_children(&self) {
+        while let Some(child) = self.first_child() {
+            self.remove(&child);
+        }
+    }
+}
+
+impl Clearable for gtk4::FlowBox {
+    fn clear_all_children(&self) {
+        while let Some(child) = self.first_child() {
+            self.remove(&child);
+        }
+    }
+}
+
+pub fn clear_children(w: &impl Clearable) {
+    w.clear_all_children();
+}
+
+pub fn monitor_running_game(
+    sender: AppSender,
+    running: Arc<Mutex<HashMap<i64, Child>>>,
+    lutris_id: i64,
+    child: Child,
+) {
+    running.lock().unwrap().insert(lutris_id, child);
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let mut map = running.lock().unwrap();
+            if let Some(ch) = map.get_mut(&lutris_id) {
+                match ch.try_wait() {
+                    Ok(Some(_)) | Err(_) => {
+                        map.remove(&lutris_id);
+                        drop(map);
+                        sender.send(AppMessage::GameStopped(lutris_id)).ok();
+                        return;
+                    }
+                    Ok(None) => {}
+                }
+            } else {
+                return;
+            }
+        }
+    });
 }

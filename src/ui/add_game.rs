@@ -128,10 +128,10 @@ fn finalize_added_game(
 }
 
 pub fn finish_add_game(state: &SharedState, folder: &str, app_id: &str) {
-    let steam = state.borrow().steam.clone();
-    let watcher = state.borrow().watcher.clone();
-    let sender = state.borrow().sender.clone();
-    let db = state.borrow().db.clone();
+    let (steam, watcher, sender, db) = {
+        let s = state.borrow();
+        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone())
+    };
     let folder = folder.to_string();
     let app_id = app_id.to_string();
 
@@ -147,10 +147,10 @@ pub fn finish_add_game(state: &SharedState, folder: &str, app_id: &str) {
 }
 
 pub fn finish_add_gog_game(state: &SharedState, galaxy_folder: &str, product_id: &str, game_name: &str, steam_app_id: &str) {
-    let steam = state.borrow().steam.clone();
-    let watcher = state.borrow().watcher.clone();
-    let sender = state.borrow().sender.clone();
-    let db = state.borrow().db.clone();
+    let (steam, watcher, sender, db) = {
+        let s = state.borrow();
+        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone())
+    };
     let galaxy_folder = galaxy_folder.to_string();
     let product_id = product_id.to_string();
     let game_name = game_name.to_string();

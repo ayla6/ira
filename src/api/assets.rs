@@ -195,17 +195,10 @@ impl SteamClient {
     pub fn force_download_sgdb(&self, id: &str, asset: &str, is_steam_id: bool) -> String {
         let dir = if is_steam_id { self.game_dir(id) } else { self.sgdb_dir(id) };
         let _ = std::fs::create_dir_all(&dir);
-        let endpoint = match (asset, is_steam_id) {
-            ("icon", true) => format!("icons/steam/{}", id),
-            ("icon", false) => format!("icons/game/{}", id),
-            ("hero", true) => format!("heroes/steam/{}", id),
-            ("hero", false) => format!("heroes/game/{}", id),
-            ("grid", true) | ("header", true) => format!("grids/steam/{}", id),
-            ("grid", false) | ("header", false) => format!("grids/game/{}", id),
-            ("logo", true) => format!("logos/steam/{}", id),
-            ("logo", false) => format!("logos/game/{}", id),
-            _ => return String::new(),
-        };
+    let endpoint = match crate::api::sgdb::sgdb_endpoint(asset, is_steam_id, id) {
+        Some(e) => e,
+        None => return String::new(),
+    };
         let dims: &[&str] = match asset {
             "grid" => &["600x900"],
             "header" => &["460x215", "920x430"],

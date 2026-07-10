@@ -8,6 +8,7 @@ use super::sidebar::{select_row_silently, rebuild_sidebar};
 use super::grid_view::show_grid_view;
 use super::game_display::display_game;
 use super::message_handler::clear_content;
+use super::helpers::clear_children;
 
 pub fn show_close_choice_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
@@ -70,12 +71,8 @@ fn teardown_content(state: &SharedState) {
         (s.content_box.clone(), s.game_list.clone())
     };
 
-    while let Some(child) = content_box.first_child() {
-        content_box.remove(&child);
-    }
-    while let Some(child) = game_list.first_child() {
-        game_list.remove(&child);
-    }
+    clear_children(&content_box);
+    clear_children(&game_list);
 
     let mut s = state.borrow_mut();
     s.rows.clear();

@@ -28,26 +28,10 @@ pub fn update_sort_title(conn: &DbConn, id: i64, sort_title: &str) -> Result<(),
 
 pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = c.prepare("SELECT id, kind, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played FROM games WHERE ignored = 0 ORDER BY CASE WHEN sort_title != '' THEN sort_title ELSE title END")
+    let mut stmt = c.prepare(&format!("SELECT {} FROM games WHERE ignored = 0 ORDER BY CASE WHEN sort_title != '' THEN sort_title ELSE title END", crate::db::GAME_COLUMNS))
         .map_err(|e| e.to_string())?;
     let entries = stmt.query_map([], |row| {
-        Ok(GameEntry {
-            id: row.get(0)?,
-            kind: row.get(1)?,
-            steam_id: row.get(2)?,
-            platform_id: row.get(3)?,
-            title: row.get(4)?,
-            hidden: row.get(5)?,
-            lutris_db_id: row.get(6)?,
-            sgdb_id: row.get(7)?,
-            logo_position: row.get(8)?,
-            logo_size: row.get(9)?,
-            ignored: row.get(10)?,
-            manual_unmatch: row.get(11)?,
-            sort_title: row.get(12)?,
-            shadps4_version: row.get(13)?,
-            last_played: row.get(14)?,
-        })
+        crate::db::game_entry_from_row(row)
     }).map_err(|e| e.to_string())?;
 
     let mut result = Vec::new();

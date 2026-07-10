@@ -1,17 +1,9 @@
 use std::path::{Path, PathBuf};
 use xxhash_rust::xxh3::xxh3_64;
 
-pub const GALAXY_ID: &str = "100000000000000000";
+use crate::parser::GALAXY_ID;
 
-/// GOG emulator status entry: { "unlock_time": 1234567890 }
-/// Only earned achievements appear; absent = not earned.
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct GogAchievementStatus {
-    #[serde(default)]
-    pub unlock_time: i64,
-}
-
-/// Check if a folder contains Galaxy.dll or Galaxy64.dll (case-insensitive).
+/// Check if a GOG game folder contains Galaxy.dll or Galaxy64.dll (case-insensitive).
 pub fn is_gog_game(folder: &str) -> bool {
     find_galaxy_dll(folder).is_some()
 }

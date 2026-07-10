@@ -116,22 +116,7 @@ pub fn load_shadps4_game(
         }
     }
 
-    let hero = image_dir.join("library_hero.jpg");
-    if hero.is_file() {
-        game.hero_image_path = hero.to_string_lossy().into_owned();
-    }
-    let grid = image_dir.join("library_600x900.jpg");
-    if grid.is_file() {
-        game.grid_path = grid.to_string_lossy().into_owned();
-    }
-    let header = image_dir.join("header.jpg");
-    if header.is_file() {
-        game.header_path = header.to_string_lossy().into_owned();
-    }
-    let logo = image_dir.join("logo.png");
-    if logo.is_file() {
-        game.logo_path = logo.to_string_lossy().into_owned();
-    }
+    crate::parser::populate_image_paths(&image_dir, &mut game);
 
     // Build achievements
     for def in &defs {

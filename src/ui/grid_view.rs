@@ -9,15 +9,14 @@ use super::game_item::GameItem;
 use super::grid_bin::GridBin;
 use super::message_handler::switch_to_game;
 use super::context_menu::show_game_context_menu;
+use super::helpers::clear_children;
 
 pub fn show_grid_view(state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
     let content_scroll = state.borrow().content_scroll.clone();
 
     content_scroll.vadjustment().set_value(0.0);
-    while let Some(child) = content_box.first_child() {
-        content_box.remove(&child);
-    }
+    clear_children(&content_box);
     crate::images::clear_texture_cache();
 
     let cover_width = state.borrow().cfg.grid_cover_width.clamp(100, 350);

@@ -3,25 +3,21 @@ use crate::api::types::SgdbAsset;
 use crate::api::util::urlencode;
 
 impl SteamClient {
-    pub(super) fn fetch_sgdb_icon_url(&self, app_id: &str) -> Option<String> {
+    fn sgdb_get_json(&self, url: &str) -> Option<serde_json::Value> {
         let sgdb_key = self.sgdb_api_key();
-        if sgdb_key.is_empty() {
-            return None;
-        }
-        let resp = self
-            .http
-            .get(format!("https://www.steamgriddb.com/api/v2/icons/steam/{}", app_id))
+        if sgdb_key.is_empty() { return None; }
+        let resp = self.http
+            .get(url)
             .header("Authorization", format!("Bearer {}", sgdb_key))
-            .send()
-            .ok()?;
-        if !resp.status().is_success() {
-            return None;
-        }
-        let raw: serde_json::Value = resp.json().ok()?;
-        let data = raw.get("data")?.as_array()?;
-        if data.is_empty() {
-            return None;
-        }
+            .send().ok()?;
+        if !resp.status().is_success() { return None; }
+        resp.json().ok()
+    }
+
+    pub(super) fn fetch_sgdb_icon_url(&self, app_id: &str) -> Option<String> {
+        let json = self.sgdb_get_json(&format!("https://www.steamgriddb.com/api/v2/icons/steam/{}", app_id))?;
+        let data = json.get("data")?.as_array()?;
+        if data.is_empty() { return None; }
         let mut best: Option<(&serde_json::Value, i64)> = None;
         for item in data {
             let w = item.get("width").and_then(|v| v.as_i64()).unwrap_or(9999);
@@ -38,24 +34,9 @@ impl SteamClient {
     }
 
     pub(super) fn fetch_sgdb_asset_url(&self, sgdb_id: &str, asset_type: &str) -> Option<String> {
-        let sgdb_key = self.sgdb_api_key();
-        if sgdb_key.is_empty() {
-            return None;
-        }
-        let resp = self
-            .http
-            .get(format!("https://www.steamgriddb.com/api/v2/{}/game/{}", asset_type, sgdb_id))
-            .header("Authorization", format!("Bearer {}", sgdb_key))
-            .send()
-            .ok()?;
-        if !resp.status().is_success() {
-            return None;
-        }
-        let raw: serde_json::Value = resp.json().ok()?;
-        let data = raw.get("data")?.as_array()?;
-        if data.is_empty() {
-            return None;
-        }
+        let json = self.sgdb_get_json(&format!("https://www.steamgriddb.com/api/v2/{}/game/{}", asset_type, sgdb_id))?;
+        let data = json.get("data")?.as_array()?;
+        if data.is_empty() { return None; }
         data[0].get("url")?.as_str().map(|s| s.to_string())
     }
 
@@ -94,20 +75,9 @@ impl SteamClient {
     }
 
     pub fn list_sgdb_assets(&self, id: &str, asset: &str, is_steam_id: bool, dimensions: &[&str]) -> Vec<SgdbAsset> {
-        let sgdb_key = self.sgdb_api_key();
-        if sgdb_key.is_empty() {
-            return Vec::new();
-        }
-        let endpoint = match (asset, is_steam_id) {
-            ("icon", true) => format!("icons/steam/{}", id),
-            ("icon", false) => format!("icons/game/{}", id),
-            ("hero", true) => format!("heroes/steam/{}", id),
-            ("hero", false) => format!("heroes/game/{}", id),
-            ("grid", true) | ("header", true) => format!("grids/steam/{}", id),
-            ("grid", false) | ("header", false) => format!("grids/game/{}", id),
-            ("logo", true) => format!("logos/steam/{}", id),
-            ("logo", false) => format!("logos/game/{}", id),
-            _ => return Vec::new(),
+        let endpoint = match sgdb_endpoint(asset, is_steam_id, id) {
+            Some(e) => e,
+            None => return Vec::new(),
         };
         let base = format!("https://www.steamgriddb.com/api/v2/{}", endpoint);
         let url = if dimensions.is_empty() {
@@ -115,19 +85,11 @@ impl SteamClient {
         } else {
             format!("{}?dimensions={}", base, dimensions.join(","))
         };
-        let resp = match self.http
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", sgdb_key))
-            .send()
-        {
-            Ok(r) if r.status().is_success() => r,
-            _ => return Vec::new(),
+        let json = match self.sgdb_get_json(&url) {
+            Some(j) => j,
+            None => return Vec::new(),
         };
-        let raw: serde_json::Value = match resp.json() {
-            Ok(j) => j,
-            Err(_) => return Vec::new(),
-        };
-        let data = match raw.get("data").and_then(|d| d.as_array()) {
+        let data = match json.get("data").and_then(|d| d.as_array()) {
             Some(d) => d,
             None => return Vec::new(),
         };
@@ -147,41 +109,39 @@ impl SteamClient {
     }
 
     pub fn search_sgdb(&self, term: &str) -> Vec<(String, String)> {
-        let sgdb_key = self.sgdb_api_key();
-        if sgdb_key.is_empty() {
-            return Vec::new();
-        }
         let url = format!(
             "https://www.steamgriddb.com/api/v2/search/autocomplete/{}",
             urlencode(term)
         );
-        match self.http
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", sgdb_key))
-            .send()
-        {
-            Ok(resp) => {
-                if let Ok(json) = resp.json::<serde_json::Value>() {
-                    json.get("data")
-                        .and_then(|d| d.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|item| {
-                                    let id = item.get("id")?.as_i64()?.to_string();
-                                    let name = item.get("name")?.as_str()?.to_string();
-                                    Some((id, name))
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default()
-                } else {
-                    Vec::new()
-                }
-            }
-            Err(e) => {
-                eprintln!("SGDB search failed: {}", e);
-                Vec::new()
-            }
-        }
+        let json = match self.sgdb_get_json(&url) {
+            Some(j) => j,
+            None => return Vec::new(),
+        };
+        json.get("data")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| {
+                        let id = item.get("id")?.as_i64()?.to_string();
+                        let name = item.get("name")?.as_str()?.to_string();
+                        Some((id, name))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
+}
+
+pub(super) fn sgdb_endpoint(asset: &str, is_steam_id: bool, id: &str) -> Option<String> {
+    Some(match (asset, is_steam_id) {
+        ("icon", true) => format!("icons/steam/{}", id),
+        ("icon", false) => format!("icons/game/{}", id),
+        ("hero", true) => format!("heroes/steam/{}", id),
+        ("hero", false) => format!("heroes/game/{}", id),
+        ("grid", true) | ("header", true) => format!("grids/steam/{}", id),
+        ("grid", false) | ("header", false) => format!("grids/game/{}", id),
+        ("logo", true) => format!("logos/steam/{}", id),
+        ("logo", false) => format!("logos/game/{}", id),
+        _ => return None,
+    })
 }

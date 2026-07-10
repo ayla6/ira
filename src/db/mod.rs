@@ -10,6 +10,28 @@ pub use lookup::*;
 pub use lutris_ops::*;
 pub use settings::*;
 
+pub(super) const GAME_COLUMNS: &str = "id, kind, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played";
+
+pub(super) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<crate::models::GameEntry> {
+    Ok(crate::models::GameEntry {
+        id: row.get(0)?,
+        kind: row.get(1)?,
+        steam_id: row.get(2)?,
+        platform_id: row.get(3)?,
+        title: row.get(4)?,
+        hidden: row.get(5)?,
+        lutris_db_id: row.get(6)?,
+        sgdb_id: row.get(7)?,
+        logo_position: row.get(8)?,
+        logo_size: row.get(9)?,
+        ignored: row.get(10)?,
+        manual_unmatch: row.get(11)?,
+        sort_title: row.get(12)?,
+        shadps4_version: row.get(13)?,
+        last_played: row.get(14)?,
+    })
+}
+
 pub type DbConn = Arc<Mutex<Connection>>;
 
 pub fn init_db(db_path: &str) -> DbConn {

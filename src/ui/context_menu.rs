@@ -1,7 +1,6 @@
 use gtk4::prelude::*;
 use crate::Game;
 use crate::strings as S;
-use crate::AppMessage;
 use super::state::{SharedState, SAVE_DIR};
 use super::helpers::open_folder;
 use super::dialogs::show_game_settings_dialog;
@@ -61,34 +60,7 @@ pub fn show_game_context_menu(
             let sender = sc.borrow().sender.clone();
             match std::process::Command::new("lutris").arg(&uri).spawn() {
                 Ok(child) => {
-                    rg.lock().unwrap().insert(lutris_id, child);
-                    let rg_mon = rg.clone();
-                    let s_mon = sender.clone();
-                    std::thread::spawn(move || {
-                        loop {
-                            std::thread::sleep(std::time::Duration::from_secs(2));
-                            let mut map = rg_mon.lock().unwrap();
-                            if let Some(ch) = map.get_mut(&lutris_id) {
-                                match ch.try_wait() {
-                                    Ok(Some(_)) => {
-                                        map.remove(&lutris_id);
-                                        drop(map);
-                                        s_mon.send(AppMessage::GameStopped(lutris_id)).ok();
-                                        return;
-                                    }
-                                    Ok(None) => {}
-                                    Err(_) => {
-                                        map.remove(&lutris_id);
-                                        drop(map);
-                                        s_mon.send(AppMessage::GameStopped(lutris_id)).ok();
-                                        return;
-                                    }
-                                }
-                            } else {
-                                return;
-                            }
-                        }
-                    });
+                    super::helpers::monitor_running_game(sender.clone(), rg.clone(), lutris_id, child);
                 }
                 Err(e) => {
                     eprintln!("Failed to launch {}: {}", uri, e);

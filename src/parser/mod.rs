@@ -31,6 +31,29 @@ pub fn read_app_details(save_dir: &str, app_id: &str) -> Option<crate::api::type
     serde_json::from_slice(&data).ok()
 }
 
+pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
+    let icon_png = image_dir.join("icon.png");
+    if icon_png.is_file() {
+        game.icon_path = icon_png.to_string_lossy().into_owned();
+    }
+    let grid = image_dir.join("library_600x900.jpg");
+    if grid.is_file() {
+        game.grid_path = grid.to_string_lossy().into_owned();
+    }
+    let header = image_dir.join("header.jpg");
+    if header.is_file() {
+        game.header_path = header.to_string_lossy().into_owned();
+    }
+    let hero = image_dir.join("library_hero.jpg");
+    if hero.is_file() {
+        game.hero_image_path = hero.to_string_lossy().into_owned();
+    }
+    let logo = image_dir.join("logo.png");
+    if logo.is_file() {
+        game.logo_path = logo.to_string_lossy().into_owned();
+    }
+}
+
 pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
     let entries = match crate::db::load_all_games(conn) {
         Ok(e) => e,
@@ -82,7 +105,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         logo_position: entry.logo_position.clone(),
         logo_size: entry.logo_size,
         lutris_name: String::new(),
-        manual_unmatch: entry.manual_unmatch.unwrap_or(0) == 1,
+        manual_unmatch: entry.manual_unmatch == 1,
         sort_title: entry.sort_title.clone(),
         game_path: String::new(),
         sgdb_id: entry.sgdb_id.clone().unwrap_or_default(),
@@ -136,22 +159,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         }
     }
 
-    let grid = image_dir.join("library_600x900.jpg");
-    if grid.is_file() {
-        game.grid_path = grid.to_string_lossy().into_owned();
-    }
-    let header = image_dir.join("header.jpg");
-    if header.is_file() {
-        game.header_path = header.to_string_lossy().into_owned();
-    }
-    let hero = image_dir.join("library_hero.jpg");
-    if hero.is_file() {
-        game.hero_image_path = hero.to_string_lossy().into_owned();
-    }
-    let logo = image_dir.join("logo.png");
-    if logo.is_file() {
-        game.logo_path = logo.to_string_lossy().into_owned();
-    }
+    populate_image_paths(&image_dir, &mut game);
 
     let status_path = paths::unlock_status_path(save_dir, kind, app_id, platform_id);
     let status_map = status::load_status_map(&status_path);

@@ -10,7 +10,7 @@ use super::state::SharedState;
 use super::sidebar::{select_row_silently, rebuild_sidebar};
 use super::grid_view::show_grid_view;
 use super::game_display::display_game;
-use super::helpers::merge_game_enrichment;
+use super::helpers::{merge_game_enrichment, clear_children};
 use super::enrichment::enrich_game_async;
 use super::dialogs::build_image_manager_content;
 
@@ -229,8 +229,8 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
                     sgdb_id: None,
                     logo_position: String::new(),
                     logo_size: 0,
-                    ignored: Some(0),
-                    manual_unmatch: Some(0),
+                    ignored: 0,
+                    manual_unmatch: 0,
                     sort_title: g.sort_title.clone(),
                     shadps4_version: None,
                     last_played: 0,
@@ -401,7 +401,5 @@ pub fn switch_to_game(state: &SharedState, lutris_id: i64) {
 
 pub(crate) fn clear_content(state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
-    while let Some(child) = content_box.first_child() {
-        content_box.remove(&child);
-    }
+    clear_children(&content_box);
 }

@@ -41,6 +41,39 @@ pub struct Game {
     pub shadps4_version: String,
 }
 
+impl Default for Game {
+    fn default() -> Self {
+        Game {
+            app_id: String::new(),
+            kind: String::new(),
+            platform_id: String::new(),
+            db_id: 0,
+            name: String::new(),
+            icon_path: String::new(),
+            hero_image_path: String::new(),
+            grid_path: String::new(),
+            header_path: String::new(),
+            logo_path: String::new(),
+            achievements: Vec::new(),
+            earned_count: 0,
+            total_count: 0,
+            hidden: false,
+            lutris_id: 0,
+            slug: String::new(),
+            playtime: 0.0,
+            lastplayed: 0,
+            logo_position: "bottom-left".to_string(),
+            logo_size: 50,
+            lutris_name: String::new(),
+            manual_unmatch: false,
+            sort_title: String::new(),
+            game_path: String::new(),
+            sgdb_id: String::new(),
+            shadps4_version: String::new(),
+        }
+    }
+}
+
 impl Game {
     pub fn sort_key(&self) -> &str {
         if self.sort_title.is_empty() { &self.name } else { &self.sort_title }
@@ -51,31 +84,12 @@ impl Game {
 /// with no achievements until the user matches it to a Steam/GOG app id.
 pub fn unmatched_game(lutris_id: i64, name: &str, slug: &str, playtime: f64, lastplayed: i64) -> Game {
     Game {
-        app_id: String::new(),
-        kind: String::new(),
-        platform_id: String::new(),
-        db_id: 0,
-        name: name.to_string(),
-        icon_path: String::new(),
-        hero_image_path: String::new(),
-        grid_path: String::new(),
-        header_path: String::new(),
-        logo_path: String::new(),
-        achievements: Vec::new(),
-        earned_count: 0,
-        total_count: 0,
-        hidden: false,
         lutris_id,
+        name: name.to_string(),
         slug: slug.to_string(),
         playtime,
         lastplayed,
-        logo_position: String::new(),
-        logo_size: 0,
         lutris_name: name.to_string(),
-        manual_unmatch: false,
-        sort_title: String::new(),
-        game_path: String::new(),
-        sgdb_id: String::new(),
-        shadps4_version: String::new(),
+        ..Default::default()
     }
 }

@@ -3,6 +3,7 @@ use crate::Game;
 use crate::strings as S;
 use super::state::SharedState;
 use super::context_menu::show_game_context_menu;
+use super::helpers::clear_children;
 
 pub struct SidebarRowWidgets {
     pub row: gtk4::ListBoxRow,
@@ -22,9 +23,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
     let sidebar_scroll = state.borrow().sidebar_scroll.clone();
     let saved_scroll = sidebar_scroll.vadjustment().value();
 
-    while let Some(child) = game_list.first_child() {
-        game_list.remove(&child);
-    }
+    clear_children(&game_list);
 
     let all_games_row = gtk4::ListBoxRow::new();
     all_games_row.add_css_class("all-games-row");

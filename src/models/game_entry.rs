@@ -15,9 +15,9 @@ pub struct GameEntry {
     /// Per-game logo height constraint in pixels.
     pub logo_size: i32,
     /// Set when user removes a game — prevents re-adding from Lutris.
-    pub ignored: Option<i64>,
+    pub ignored: i64,
     /// Set when user manually unmatches — prevents auto-rematching.
-    pub manual_unmatch: Option<i64>,
+    pub manual_unmatch: i64,
     /// Sort title (empty = use title for sorting).
     pub sort_title: String,
     /// Per-game shadPS4 version path (empty = use global default).

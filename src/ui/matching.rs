@@ -8,10 +8,10 @@ use super::helpers::confirm_dialog;
 use crate::strings as S;
 
 pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: String, lutris_name: String) {
-    let steam = state.borrow().steam.clone();
-    let watcher = state.borrow().watcher.clone();
-    let sender = state.borrow().sender.clone();
-    let db = state.borrow().db.clone();
+    let (steam, watcher, sender, db) = {
+        let s = state.borrow();
+        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone())
+    };
     std::thread::spawn(move || {
         if let Err(e) = crate::db::upsert_matching(&db, lutris_id, &steam_app_id, "gbe_steam", &steam_app_id) {
             eprintln!("match_game_to_steam: upsert_matching failed: {}", e);
@@ -55,9 +55,10 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
 }
 
 pub fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, lutris_name: String) {
-    let steam = state.borrow().steam.clone();
-    let sender = state.borrow().sender.clone();
-    let db = state.borrow().db.clone();
+    let (steam, sender, db) = {
+        let s = state.borrow();
+        (s.steam.clone(), s.sender.clone(), s.db.clone())
+    };
     std::thread::spawn(move || {
         if let Err(e) = crate::db::upsert_matching(&db, lutris_id, &sgdb_id, "sgdb", &sgdb_id) {
             eprintln!("match_game_to_sgdb: upsert_matching failed: {}", e);

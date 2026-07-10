@@ -10,6 +10,7 @@ use super::state::{SharedState, SAVE_DIR};
 use super::sidebar::rebuild_sidebar;
 use super::matching::{match_game_to_steam, match_game_to_sgdb};
 use super::dialogs::build_image_manager_content;
+use super::helpers::clear_children;
 
 pub fn normalize_title(s: &str) -> String {
     let lower = s.to_lowercase();
@@ -218,9 +219,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
         if let Ok((row_idx, matched, game_name, lutris_id)) = rx.borrow_mut().try_recv() {
             if row_idx < row_boxes.len() {
                 let action_box = &row_boxes[row_idx];
-                while let Some(child) = action_box.first_child() {
-                    action_box.remove(&child);
-                }
+                clear_children(action_box);
 
                 if let Some((sid, matched_name)) = matched {
                     match_game_to_steam(&state_rx, lutris_id, sid.clone(), game_name.clone());
@@ -250,9 +249,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 
                     let ab = action_box.clone();
                     let on_match: Rc<dyn Fn(&str, &str)> = Rc::new(move |sid, name| {
-                        while let Some(child) = ab.first_child() {
-                            ab.remove(&child);
-                        }
+                        clear_children(&ab);
                         let text = if name.is_empty() {
                             format!("Matched: {}", sid)
                         } else {
@@ -333,9 +330,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
             if let Ok((row_idx, matched, db_id)) = ps4_rx.borrow_mut().try_recv() {
                 if row_idx < ps4_row_boxes.len() {
                     let action_box = &ps4_row_boxes[row_idx].0;
-                    while let Some(child) = action_box.first_child() {
-                        action_box.remove(&child);
-                    }
+                    clear_children(action_box);
 
                     if let Some((sgdb_id, matched_name)) = matched {
                         let _ = crate::db::set_sgdb_id(&state_ps4.borrow().db, db_id, &sgdb_id);
@@ -393,9 +388,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
                                 let ab = ab.clone();
                                 let name = gn.clone();
                                 move || {
-                                    while let Some(child) = ab.first_child() {
-                                        ab.remove(&child);
-                                    }
+                                    clear_children(&ab);
                                     let label = gtk4::Label::new(Some(&format!("Matched to SGDB: {}", name)));
                                     label.add_css_class("success-label");
                                     ab.append(&label);
@@ -488,9 +481,7 @@ pub fn show_search_results_dialog(
             return;
         }
 
-        while let Some(child) = results_clone.first_child() {
-            results_clone.remove(&child);
-        }
+        clear_children(&results_clone);
         let searching = gtk4::Label::new(Some("Searching..."));
         searching.add_css_class("dim-label");
         results_clone.append(&searching);
@@ -515,9 +506,7 @@ pub fn show_search_results_dialog(
         let dlg = dialog_clone.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
             if let Ok(search_results) = rx.borrow_mut().try_recv() {
-                while let Some(child) = results.first_child() {
-                    results.remove(&child);
-                }
+                clear_children(&results);
 
                 if search_results.is_empty() {
                     let none = gtk4::Label::new(Some("No results found"));
@@ -614,9 +603,6 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
     let list_c = list.clone();
 
     let entry_s = entry.clone();
-    let _dialog_s = dialog.clone();
-    let _list_s = list.clone();
-    let _state_s = state.clone();
     let do_search = move || {
         let term = entry_s.text().to_string();
         if term.is_empty() {
@@ -639,9 +625,7 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
                 return glib::ControlFlow::Break;
             }
             if let Some(results) = results_poll.lock().unwrap().take() {
-                while let Some(child) = list_c2.first_child() {
-                    list_c2.remove(&child);
-                }
+                clear_children(&list_c2);
                 if results.is_empty() {
                     let row = adw::ActionRow::new();
                     row.set_title("No results found");
@@ -656,7 +640,6 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
                         match_btn.add_css_class("suggested-action");
                         match_btn.set_valign(gtk4::Align::Center);
                         let sgdb_id_c = sgdb_id.clone();
-                        let _name_c = name.clone();
                         let state_c3 = state_c2.clone();
                         let dialog_c3 = dialog_c2.clone();
                         let on_match_cb = on_match_clone.clone();

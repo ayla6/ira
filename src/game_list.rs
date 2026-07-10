@@ -50,7 +50,7 @@ fn auto_match_by_title(db: &db::DbConn, save_dir: &str, lutris_games: &[LutrisGa
     let do_not_match: std::collections::HashSet<i64> = entries
         .iter()
         .filter(|e| {
-            e.manual_unmatch.unwrap_or(0) == 1 || e.ignored.unwrap_or(0) == 1
+            e.manual_unmatch == 1 || e.ignored == 1
         })
         .filter_map(|e| e.lutris_db_id)
         .collect();

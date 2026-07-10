@@ -1,4 +1,3 @@
-use gtk4::prelude::*;
 use adw::prelude::{AlertDialogExt, AdwDialogExt};
 use crate::Game;
 use crate::strings as S;

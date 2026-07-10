@@ -86,7 +86,7 @@ fn test_trophies() {
         println!("  {} ({}): {}/{} earned", g.title, g.npwr_id, earned, defs.len());
 
         for def in defs.iter().take(3) {
-            let (earned, ts) = unlocks.get(&def.id).cloned().unwrap_or((false, 0));
+            let (earned, _ts) = unlocks.get(&def.id).cloned().unwrap_or((false, 0));
             let status = if earned { "UNLOCKED" } else { "locked" };
             println!("    [{}] {} ({}) — {}", def.ttype, def.name, def.id, status);
         }

@@ -1,5 +1,4 @@
 use gtk4::prelude::*;
-use adw::prelude::*;
 use crate::Game;
 use crate::strings as S;
 use super::state::SharedState;

@@ -45,7 +45,7 @@ pub fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
     let rg = running_games.clone();
     let s = sender.clone();
     btn.connect_clicked(move |btn| {
-        let uri = format!("lutris:rungameid/{}", lutris_id);
+        let _uri = format!("lutris:rungameid/{}", lutris_id);
         let mut map = rg.lock().unwrap();
         if let Some(mut child) = map.remove(&lutris_id) {
             drop(map);
@@ -61,7 +61,7 @@ pub fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
             s.send(AppMessage::GameStopped(lutris_id)).ok();
         } else {
             drop(map);
-            let (kind, game_path, game_name, per_game_version, db_id) = &game_info;
+            let (kind, game_path, _game_name, per_game_version, db_id) = &game_info;
             if kind == "ps4" {
                 let exe = if !per_game_version.is_empty() {
                     per_game_version.as_str()

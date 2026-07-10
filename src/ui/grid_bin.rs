@@ -1,7 +1,5 @@
 use glib::subclass::prelude::*;
 use gtk4::prelude::*;
-use gtk4::subclass::widget::WidgetImpl;
-use std::cell::{Cell, RefCell};
 
 mod grid_imp {
     use glib::subclass::prelude::*;

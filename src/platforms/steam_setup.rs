@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::db::DbConn;
 use crate::api::SteamClient;
@@ -61,7 +61,7 @@ pub fn add_game_from_folder(
     steam.generate_steam_settings(app_id)?;
 
     // Add to DB (title will be filled from appdetails.json during enrichment)
-    crate::db::add_game(db, "steam", app_id, app_id, "")?;
+    crate::db::add_game(db, "gbe_steam", app_id, app_id, "")?;
 
     Ok(saves_game_dir.to_string_lossy().into_owned())
 }

@@ -614,9 +614,9 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
     let list_c = list.clone();
 
     let entry_s = entry.clone();
-    let dialog_s = dialog.clone();
-    let list_s = list.clone();
-    let state_s = state.clone();
+    let _dialog_s = dialog.clone();
+    let _list_s = list.clone();
+    let _state_s = state.clone();
     let do_search = move || {
         let term = entry_s.text().to_string();
         if term.is_empty() {
@@ -656,7 +656,7 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
                         match_btn.add_css_class("suggested-action");
                         match_btn.set_valign(gtk4::Align::Center);
                         let sgdb_id_c = sgdb_id.clone();
-                        let name_c = name.clone();
+                        let _name_c = name.clone();
                         let state_c3 = state_c2.clone();
                         let dialog_c3 = dialog_c2.clone();
                         let on_match_cb = on_match_clone.clone();

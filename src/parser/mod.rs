@@ -9,7 +9,6 @@ pub use status::*;
 use crate::db::DbConn;
 pub use crate::models::{AchievementStatus, Game, GameEntry, MergedAchievement};
 use std::collections::HashMap;
-use std::path::Path;
 use serde::Deserialize;
 
 #[derive(Deserialize)]

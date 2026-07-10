@@ -8,7 +8,6 @@ use crate::strings as S;
 
 use gtk4::prelude::*;
 use adw::prelude::*;
-use gio::prelude::*;
 use super::state::{SharedState, SAVE_DIR};
 use super::enrichment::enrich_game_async;
 
@@ -138,7 +137,7 @@ pub fn finish_add_game(state: &SharedState, folder: &str, app_id: &str) {
 
     std::thread::spawn(move || {
         match crate::platforms::steam_setup::add_game_from_folder(&folder, &app_id, &steam, &db, SAVE_DIR) {
-            Ok(_) => finalize_added_game(&app_id, "steam", &app_id, steam, watcher, sender, db),
+            Ok(_) => finalize_added_game(&app_id, "gbe_steam", &app_id, steam, watcher, sender, db),
             Err(e) => {
                 eprintln!("Add game failed: {}", e);
                 let _ = sender.send(AppMessage::AddGameError(e));
@@ -161,7 +160,7 @@ pub fn finish_add_gog_game(state: &SharedState, galaxy_folder: &str, product_id:
         match crate::platforms::gog_setup::add_gog_game_from_folder(
             &galaxy_folder, &product_id, &game_name, &steam_app_id, &steam, &db, SAVE_DIR,
         ) {
-            Ok(_) => finalize_added_game(&steam_app_id, "gog", &product_id, steam, watcher, sender, db),
+            Ok(_) => finalize_added_game(&steam_app_id, "ne_gog", &product_id, steam, watcher, sender, db),
             Err(e) => {
                 eprintln!("GOG add game failed: {}", e);
                 let _ = sender.send(AppMessage::AddGameError(e));

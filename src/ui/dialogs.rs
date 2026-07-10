@@ -1,6 +1,5 @@
 use gtk4::prelude::*;
 use adw::prelude::*;
-use gio::prelude::*;
 use crate::config::Config;
 use crate::api::SteamClient;
 use crate::api::types::SgdbAsset;
@@ -934,7 +933,7 @@ pub fn build_image_manager_content_with_drafts(
     content.set_margin_top(16);
     content.set_margin_bottom(16);
 
-    let is_steam = game.kind == "steam" || game.kind == "gog";
+    let is_steam = game.kind == "gbe_steam" || game.kind == "ne_gog";
     let id = game.app_id.clone();
 
     let cloud_dir = if !game.sgdb_id.is_empty() {
@@ -1090,11 +1089,11 @@ pub fn build_image_manager_content_with_drafts(
             let dialog = gtk4::FileDialog::new();
             dialog.set_title("Select image");
             dialog.set_default_filter(Some(&filter));
-            let dest = dest_path_btn.clone();
+            let _dest = dest_path_btn.clone();
             let refresh_c = refresh.clone();
             let pc = pending_copies_browse.clone();
             let asset_name = asset_btn.clone();
-            let label_name = label_btn.clone();
+            let _label_name = label_btn.clone();
             dialog.open(Some(&state_browse.borrow().window), None::<&gio::Cancellable>, move |result| {
                 if let Ok(file) = result {
                     if let Some(path) = file.path() {
@@ -1143,7 +1142,7 @@ pub fn build_image_manager_content_with_drafts(
 
         if asset == "icon" && game.kind == "ps4" {
             let reset_btn = gtk4::Button::with_label("Reset");
-            let sc = state.clone();
+            let _sc = state.clone();
             let gc = game.clone();
             let refresh = refresh_images.clone();
             let pending_copies_reset = pending_copies.clone();
@@ -1431,9 +1430,9 @@ fn show_sgdb_picker(steam: &Arc<SteamClient>, id: &str, asset: &str, is_steam_id
                 let steam_dl = steam_clone.clone();
                 let picker_dl = picker_clone.clone();
                 let on_done_dl = on_done.clone();
-                let dest_dl = dest.clone();
-                let fn_dl = file_name.clone();
-                let dir_dl = dest_dir.clone();
+                let _dest_dl = dest.clone();
+                let _fn_dl = file_name.clone();
+                let _dir_dl = dest_dir.clone();
                 let asset_dl = asset_clone.clone();
                 let pending_dl = pending_copies.clone();
                 let cb: Rc<dyn Fn()> = Rc::new(move || {

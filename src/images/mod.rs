@@ -4,8 +4,7 @@ mod scaled;
 pub use scaled::ScaledPaintable;
 
 use cache::TextureCache;
-use gdk4::{Paintable, Texture};
-use gtk4::prelude::*;
+use gdk4::Texture;
 use std::cell::RefCell;
 
 thread_local! {

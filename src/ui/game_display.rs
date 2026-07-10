@@ -11,7 +11,7 @@ use super::state::{SharedState, SAVE_DIR};
 use super::image_budget::ImageLoadBudget;
 use super::play_button::play_button;
 use super::message_handler::apply_game_update;
-use super::achievement_rows::{create_achievement_row, create_global_stats_row, add_global_row, build_global_tab};
+use super::achievement_rows::{create_achievement_row, build_global_tab};
 
 pub fn display_game(game: &Game, state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
@@ -33,7 +33,7 @@ pub fn display_game(game: &Game, state: &SharedState) {
         0.0
     };
 
-    let content_width = content_scroll.allocated_width().max(600);
+    let content_width = content_scroll.width().max(600);
     content_box.append(&build_game_header(game, fraction, state, content_width));
 
     if game.app_id.is_empty() {
@@ -515,6 +515,7 @@ fn format_lastplayed(ts: i64) -> String {
         .unwrap_or_else(|| "Never".to_string())
 }
 
+#[allow(dead_code)]
 fn logo_pixbuf_from_path(path: &str) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
     gtk4::gdk_pixbuf::Pixbuf::from_file(path).ok()
 }

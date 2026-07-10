@@ -11,6 +11,7 @@ pub enum PsfValue {
 }
 
 #[repr(C)]
+#[allow(dead_code)]
 struct PsfHeader {
     magic: [u8; 4],
     version: [u8; 4],
@@ -20,6 +21,7 @@ struct PsfHeader {
 }
 
 #[repr(C)]
+#[allow(dead_code)]
 struct PsfEntry {
     key_offset: [u8; 2],
     param_fmt: [u8; 2],
@@ -34,6 +36,7 @@ fn read_u32_le(b: &[u8]) -> u32 {
 fn read_u16_le(b: &[u8]) -> u16 {
     u16::from_le_bytes([b[0], b[1]])
 }
+#[allow(dead_code)]
 fn read_u16_be(b: &[u8]) -> u16 {
     u16::from_be_bytes([b[0], b[1]])
 }

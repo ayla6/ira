@@ -1,5 +1,4 @@
 use crate::Game;
-use std::cell::RefCell;
 use gtk4::subclass::prelude::ObjectSubclassIsExt;
 
 mod imp {

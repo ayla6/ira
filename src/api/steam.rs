@@ -2,8 +2,7 @@ use std::path::Path;
 
 use crate::api::SteamClient;
 use crate::api::types::{
-    AppDetails, AppDetailsEntry, AppDetailsResponse, GlobalAchievementEntry,
-    GlobalAchievementsInner, GlobalAchievementsResponse, SteamGameDetails,
+    AppDetails, AppDetailsResponse, GlobalAchievementsResponse, SteamGameDetails,
 };
 use crate::api::util::{pick_lang, urlencode, NEMIRTINGAS_BASE_URL};
 

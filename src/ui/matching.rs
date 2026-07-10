@@ -1,10 +1,6 @@
-use gtk4::prelude::*;
-use adw::prelude::*;
 use crate::AppMessage;
-use crate::AppSender;
 use crate::Game;
 use crate::MergedAchievement;
-use crate::GameEntry;
 use crate::parser::set_achievement_earned;
 use super::state::{SharedState, SAVE_DIR};
 use super::enrichment::enrich_game_async;
@@ -17,7 +13,7 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
     let sender = state.borrow().sender.clone();
     let db = state.borrow().db.clone();
     std::thread::spawn(move || {
-        if let Err(e) = crate::db::upsert_matching(&db, lutris_id, &steam_app_id, "steam", &steam_app_id) {
+        if let Err(e) = crate::db::upsert_matching(&db, lutris_id, &steam_app_id, "gbe_steam", &steam_app_id) {
             eprintln!("match_game_to_steam: upsert_matching failed: {}", e);
             return;
         }
@@ -39,7 +35,7 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
                         let _ = sender.send(AppMessage::NewGame(game));
                         enrich_game_async(
                             steam_app_id.clone(),
-                            "steam".to_string(),
+                            "gbe_steam".to_string(),
                             steam_app_id.clone(),
                             entry.id,
                             lutris_id,
@@ -70,7 +66,7 @@ pub fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, 
         let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets(&sgdb_id);
 
         if let Ok(Some(entry)) = crate::db::find_by_lutris_id(&db, lutris_id) {
-            let mut game = Game {
+            let game = Game {
                 app_id: sgdb_id.clone(),
                 kind: "sgdb".to_string(),
                 platform_id: sgdb_id.clone(),

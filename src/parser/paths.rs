@@ -35,7 +35,7 @@ pub fn achievements_dir(save_dir: &str, app_id: &str) -> PathBuf {
 
 pub fn unlock_status_path(save_dir: &str, kind: &str, app_id: &str, platform_id: &str) -> PathBuf {
     match kind {
-        "gog" => Path::new(save_dir).join("gog").join(GALAXY_ID).join(platform_id).join("achievements.json"),
+        "ne_gog" => Path::new(save_dir).join("gog").join(GALAXY_ID).join(platform_id).join("achievements.json"),
         _ => Path::new(save_dir).join("steam").join(app_id).join("achievements.json"),
     }
 }

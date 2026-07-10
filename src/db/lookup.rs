@@ -34,7 +34,7 @@ pub fn find_by_steam_id(conn: &DbConn, steam_id: &str) -> Result<Option<GameEntr
 }
 
 pub fn find_gog_by_product_id(conn: &DbConn, product_id: &str) -> Result<Option<GameEntry>, String> {
-    find_by_kind_platform(conn, "gog", product_id)
+    find_by_kind_platform(conn, "ne_gog", product_id)
 }
 
 pub fn find_by_kind_platform(conn: &DbConn, kind: &str, platform_id: &str) -> Result<Option<GameEntry>, String> {

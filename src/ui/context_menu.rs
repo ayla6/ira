@@ -1,5 +1,4 @@
 use gtk4::prelude::*;
-use adw::prelude::*;
 use crate::Game;
 use crate::strings as S;
 use crate::AppMessage;
@@ -30,12 +29,12 @@ pub fn show_game_context_menu(
 
     menu.append(Some(S::EDIT_GAME_SETTINGS), Some("game.edit"));
     let folders_menu = gio::Menu::new();
-    if game.kind == "steam" || game.kind == "sgdb" {
+    if game.kind == "gbe_steam" || game.kind == "sgdb" {
         folders_menu.append(Some("Image data"), Some("game.open_images"));
     }
-    if game.kind == "steam" {
+    if game.kind == "gbe_steam" {
         folders_menu.append(Some("Achievement status"), Some("game.open_steam_status"));
-    } else if game.kind == "gog" {
+    } else if game.kind == "ne_gog" {
         folders_menu.append(Some("Achievement status"), Some("game.open_gog_status"));
     }
     if folders_menu.n_items() > 0 {
@@ -151,7 +150,7 @@ pub fn show_game_context_menu(
     });
     actions.add_action(&hide_action);
 
-    if game_clone.kind == "steam" || game_clone.kind == "sgdb" {
+    if game_clone.kind == "gbe_steam" || game_clone.kind == "sgdb" {
         let open_images = gio::SimpleAction::new("open_images", None);
         let gc = game_clone.clone();
         open_images.connect_activate(move |_, _| {
@@ -162,7 +161,7 @@ pub fn show_game_context_menu(
         actions.add_action(&open_images);
     }
 
-    if game_clone.kind == "steam" {
+    if game_clone.kind == "gbe_steam" {
         let open_status = gio::SimpleAction::new("open_steam_status", None);
         let gc = game_clone.clone();
         open_status.connect_activate(move |_, _| {
@@ -172,7 +171,7 @@ pub fn show_game_context_menu(
         actions.add_action(&open_status);
     }
 
-    if game_clone.kind == "gog" {
+    if game_clone.kind == "ne_gog" {
         let open_gog = gio::SimpleAction::new("open_gog_status", None);
         let gc = game_clone.clone();
         open_gog.connect_activate(move |_, _| {

@@ -13,7 +13,7 @@ pub fn populate_db_from_dirs(db: &db::DbConn, save_dir: &str) {
                 _ => continue,
             };
             let title = parser::read_app_name(save_dir, &app_id).unwrap_or_default();
-            let _ = db::add_game(db, "steam", &app_id, &app_id, &title);
+            let _ = db::add_game(db, "gbe_steam", &app_id, &app_id, &title);
         }
     }
 
@@ -42,7 +42,7 @@ pub fn populate_db_from_dirs(db: &db::DbConn, save_dir: &str) {
                         continue;
                     }
                     let title = parser::read_app_name(save_dir, &app_id).unwrap_or_default();
-                    let _ = db::add_game(db, "gog", &app_id, &product_id, &title);
+                    let _ = db::add_game(db, "ne_gog", &app_id, &product_id, &title);
                 }
             }
         }

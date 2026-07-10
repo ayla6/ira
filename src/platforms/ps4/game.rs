@@ -7,6 +7,7 @@ use crate::platforms::ps4::{
 };
 
 /// Map PS4 trophy type to rarity string
+#[allow(dead_code)]
 fn trophy_type_rarity(ttype: char) -> &'static str {
     match ttype {
         'P' => "Platinum",

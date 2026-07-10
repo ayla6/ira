@@ -824,6 +824,8 @@ pub struct ShadPs4Version {
     pub path: String,
     #[serde(rename = "type")]
     pub version_type: i32,
+    #[serde(default)]
+    pub date: String,
 }
 
 /// Read the list of available shadPS4 versions from the Qt Launcher's versions.json.

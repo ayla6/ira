@@ -2176,10 +2176,61 @@ fn display_game(game: &Game, state: &SharedState) {
             }
 
             if !hidden.is_empty() {
+                let hidden_revealed: std::rc::Rc<std::cell::Cell<bool>> = Default::default();
                 let hidden_row = adw::ActionRow::new();
                 hidden_row.set_title(&format!("... and {} hidden trophies", hidden.len()));
-                hidden_row.set_subtitle("Earn them to reveal details");
-                hidden_row.set_sensitive(false);
+                hidden_row.set_subtitle("Click to reveal");
+                hidden_row.set_activatable(true);
+                let hidden_clone: Vec<MergedAchievement> = hidden.iter().map(|a| (*a).clone()).collect();
+                let group_c = locked_group.clone();
+                let reload_c = reload.clone();
+                let kind_c = game.kind.clone();
+                let app_id_c = game.app_id.clone();
+                let platform_id_c = game.platform_id.clone();
+                let state_c = state.clone();
+                    hidden_row.connect_activated(move |_| {
+                        if hidden_revealed.get() {
+                            return;
+                        }
+                        let parent = state_c.borrow().window.clone();
+                        let dialog = adw::MessageDialog::new(Some(&parent),
+                            Some("Reveal hidden trophies?"),
+                            Some("These trophies are hidden because they have secret criteria. Showing them will reveal their names and descriptions."));
+                        dialog.add_response("cancel", S::CANCEL);
+                        dialog.add_response("reveal", "Reveal");
+                        dialog.set_response_appearance("reveal", adw::ResponseAppearance::Suggested);
+                        dialog.set_default_response(Some("cancel"));
+                        dialog.set_close_response("cancel");
+                    let hidden_dl = hidden_clone.clone();
+                    let group_dl = group_c.clone();
+                    let reload_dl = reload_c.clone();
+                    let kind_dl = kind_c.clone();
+                    let app_id_dl = app_id_c.clone();
+                    let platform_id_dl = platform_id_c.clone();
+                    let state_dl = state_c.clone();
+                    let hidden_r = hidden_revealed.clone();
+                    dialog.connect_response(None, move |_, resp| {
+                        if resp == "reveal" {
+                            hidden_r.set(true);
+                            for ach in &hidden_dl {
+                                let ach_clone = ach.clone();
+                                let reload_inner = reload_dl.clone();
+                                let kind_inner = kind_dl.clone();
+                                let app_id_inner = app_id_dl.clone();
+                                let platform_id_inner = platform_id_dl.clone();
+                                let state_inner = state_dl.clone();
+                                group_dl.add(&create_achievement_row(
+                                    ach,
+                                    Some(Box::new(move || {
+                                        confirm_mark_unlocked(&state_inner, &kind_inner, &app_id_inner, &platform_id_inner, &ach_clone, reload_inner.clone());
+                                    })),
+                                    &mut ImageLoadBudget::new(0),
+                                ));
+                            }
+                        }
+                    });
+                    dialog.present();
+                });
                 locked_group.add(&hidden_row);
             }
             progress_vbox.append(&locked_group);
@@ -2713,6 +2764,8 @@ fn show_settings_dialog(
     win.set_default_height(480);
     win.set_modal(true);
     win.set_transient_for(Some(parent));
+    // Disable close button — only Save/Cancel
+    win.set_deletable(false);
 
     let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
 
@@ -2846,15 +2899,18 @@ fn show_settings_dialog(
 
     // Version selector dropdown
     if !shadps4_versions.is_empty() {
-        let trunc = |s: &str| -> String {
-            if s.len() > 30 {
-                format!("{}…", &s[..28])
+        let trunc = |s: &str, max: usize| -> String {
+            if s.len() > max {
+                format!("{}…", &s[..max.saturating_sub(1)])
             } else {
                 s.to_string()
             }
         };
         let version_strings: Vec<String> = shadps4_versions.iter()
-            .map(|v| format!("{}  ({})", &trunc(&v.name), &trunc(&v.codename)))
+            .map(|v| {
+                let extra = if !v.date.is_empty() { v.date.clone() } else { v.codename.clone() };
+                format!("{}  ({})", v.name, trunc(&extra, 14))
+            })
             .collect();
         let version_model = gtk4::StringList::new(&version_strings.iter().map(|s| s.as_str()).collect::<Vec<_>>());
         let version_dropdown = gtk4::DropDown::new(Some(version_model), None::<&gtk4::PropertyExpression>);
@@ -3225,6 +3281,8 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     win.set_default_height(540);
     win.set_transient_for(Some(&parent));
     win.set_modal(true);
+    // Disable close button — only Save/Cancel
+    win.set_deletable(false);
 
     // Load appdetails.json for DLC/language data
     let app_details = crate::parser::read_app_details(SAVE_DIR, &game.app_id);
@@ -3306,16 +3364,18 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
             let version_group = adw::PreferencesGroup::new();
             version_group.set_title("shadPS4 Version");
 
-            let trunc = |s: &str| -> String {
-                if s.len() > 30 {
-                    format!("{}…", &s[..28])
+            let trunc = |s: &str, max: usize| -> String {
+                if s.len() > max {
+                    format!("{}…", &s[..max.saturating_sub(1)])
                 } else {
                     s.to_string()
                 }
             };
-
             let version_strings: Vec<String> = std::iter::once("Follow global".to_string())
-                .chain(shadps4_versions.iter().map(|v| format!("{}  ({})", &trunc(&v.name), &trunc(&v.codename))))
+                .chain(shadps4_versions.iter().map(|v| {
+                    let extra = if !v.date.is_empty() { v.date.clone() } else { v.codename.clone() };
+                    format!("{}  ({})", v.name, trunc(&extra, 14))
+                }))
                 .collect();
             let str_refs: Vec<&str> = version_strings.iter().map(|s| s.as_str()).collect();
             let version_model = gtk4::StringList::new(&str_refs);
@@ -3329,7 +3389,8 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
                 for v in &shadps4_versions {
                     let v_path = v.path.trim_matches('"');
                     if v_path == game.shadps4_version {
-                        found = format!("{}  ({})", &trunc(&v.name), &trunc(&v.codename));
+                        let extra = if !v.date.is_empty() { v.date.clone() } else { v.codename.clone() };
+                        found = format!("{}  ({})", v.name, trunc(&extra, 14));
                         break;
                     }
                 }
@@ -4004,22 +4065,7 @@ fn build_image_manager_content_with_drafts(
                 if let Ok(file) = result {
                     if let Some(path) = file.path() {
                         if let Some(ref pc_inner) = pc {
-                            // Draft mode: store pending copy, don't copy yet
                             pc_inner.borrow_mut().insert(asset_name.clone(), path.to_string_lossy().into_owned());
-                            refresh_c();
-                        } else {
-                            // Direct mode: copy immediately (legacy behavior)
-                            let is_ico = path.extension().and_then(|e| e.to_str()) == Some("ico");
-                            if is_ico {
-                                let ico_dest = std::path::Path::new(&dest).with_extension("ico");
-                                if std::fs::copy(&path, &ico_dest).is_ok() {
-                                    if crate::parser::convert_ico_to_png(&ico_dest).is_ok() {
-                                        let _ = std::fs::remove_file(&ico_dest);
-                                    }
-                                }
-                            } else if let Err(e) = std::fs::copy(&path, &dest) {
-                                eprintln!("Failed to copy image: {}", e);
-                            }
                             refresh_c();
                         }
                     }
@@ -4089,14 +4135,9 @@ fn build_image_manager_content_with_drafts(
                     }
                 };
                 if let Some(ref pc) = pending_copies_reset {
-                    // Draft mode: remove pending, set icon_path in pending
                     pc.borrow_mut().remove(&asset_reset);
                     if let Some(path) = default_path {
                         pc.borrow_mut().insert(asset_reset.clone(), path);
-                    }
-                } else if let Some(path) = default_path {
-                    if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == gc.db_id) {
-                        g.icon_path = path;
                     }
                 }
                 refresh();
@@ -4139,10 +4180,8 @@ fn build_image_manager_content_with_drafts(
             let did = game.db_id;
             let pw = parent_win.clone();
             unmatch_btn.connect_clicked(move |_| {
-                if pending_pc.is_some() {
-                    // Draft mode: mark unmatch in pending (use a sentinel key)
-                    pending_pc.as_ref().unwrap().borrow_mut().insert("__unmatch__".to_string(), String::new());
-                    // Rebuild the images page to show "Match" button
+                if let Some(ref pc) = pending_pc {
+                    pc.borrow_mut().insert("__unmatch__".to_string(), String::new());
                     if let Some((ref sw, ref ss, sdb_id)) = sc.borrow().settings_data.clone() {
                         if sdb_id == did && sw.is_visible() {
                             if let Some(old) = ss.child_by_name("images") {
@@ -4151,24 +4190,7 @@ fn build_image_manager_content_with_drafts(
                             if let Some(game) = sc.borrow().games.iter().find(|g| g.db_id == did).cloned() {
                                 let mut g2 = game.clone();
                                 g2.sgdb_id.clear();
-                                let new_page = build_image_manager_content_with_drafts(&sc, &g2, &pw, Some(pending_pc.clone().unwrap()));
-                                ss.add_named(&new_page, Some("images"));
-                            }
-                        }
-                    }
-                } else {
-                    // Direct mode (legacy)
-                    let _ = crate::db::set_sgdb_id(&sc.borrow().db, did, "");
-                    if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == did) {
-                        g.sgdb_id.clear();
-                    }
-                    if let Some((ref sw, ref ss, sdb_id)) = sc.borrow().settings_data.clone() {
-                        if sdb_id == did && sw.is_visible() {
-                            if let Some(old) = ss.child_by_name("images") {
-                                ss.remove(&old);
-                            }
-                            if let Some(game) = sc.borrow().games.iter().find(|g| g.db_id == did).cloned() {
-                                let new_page = build_image_manager_content_with_drafts(&sc, &game, &pw, None);
+                                let new_page = build_image_manager_content_with_drafts(&sc, &g2, &pw, Some(pc.clone()));
                                 ss.add_named(&new_page, Some("images"));
                             }
                         }
@@ -4391,34 +4413,9 @@ fn show_sgdb_picker(steam: &Arc<crate::steam::SteamClient>, id: &str, asset: &st
                 let pending_dl = pending_copies.clone();
                 let cb: std::rc::Rc<dyn Fn()> = std::rc::Rc::new(move || {
                     if let Some(ref pc) = pending_dl {
-                        // Draft mode: download to temp, store in pending_copies, don't save yet
                         let tmp = std::env::temp_dir().join(format!("sgdb_{}", asset_dl));
                         if steam_dl.download_file(&dl_url, &tmp).is_ok() {
                             pc.borrow_mut().insert(asset_dl.clone(), tmp.to_string_lossy().into_owned());
-                            on_done_dl();
-                            picker_dl.close();
-                        } else {
-                            eprintln!("Download failed for {}", dl_url);
-                        }
-                    } else {
-                        // Direct mode: download immediately (legacy behavior)
-                        let _ = std::fs::create_dir_all(&dir_dl);
-                        if fn_dl.starts_with("icon.") {
-                            for old_ext in ["png", "ico", "jpg", "webp"] {
-                                let _ = std::fs::remove_file(&format!("{}/icon.{}", dir_dl, old_ext));
-                            }
-                        }
-                        if steam_dl.download_file(&dl_url, std::path::Path::new(&dest_dl)).is_ok() {
-                            if fn_dl.ends_with(".ico") {
-                                match crate::parser::convert_ico_to_png(std::path::Path::new(&dest_dl)) {
-                                    Ok(png_path) => eprintln!("Converted ICO to {}", png_path.display()),
-                                    Err(e) => {
-                                        eprintln!("ICO conversion failed: {}, trying direct load", e);
-                                        let png_dest = std::path::Path::new(&dest_dl).with_extension("png");
-                                        let _ = std::fs::rename(&dest_dl, &png_dest);
-                                    }
-                                }
-                            }
                             on_done_dl();
                             picker_dl.close();
                         } else {

@@ -402,13 +402,16 @@ impl SteamClient {
     }
 
     /// Download all images for an SGDB game (no Steam ID).
-    /// Returns (icon_path, hero_path, grid_path, logo_path).
-    pub fn ensure_sgdb_assets(&self, sgdb_id: &str) -> (String, String, String, String) {
+    /// Returns (icon_path, hero_path, grid_path, logo_path, header_path).
+    /// If `skip_icon` is true, the icon download is skipped and an empty string is returned for it.
+    pub fn ensure_sgdb_assets(&self, sgdb_id: &str, skip_icon: bool) -> (String, String, String, String, String) {
         let dir = self.sgdb_dir(sgdb_id);
         let _ = std::fs::create_dir_all(&dir);
 
         // Icon — use SGDB icons API with small dimensions preference
-        let icon_path = {
+        let icon_path = if skip_icon {
+            String::new()
+        } else {
             let sgdb_key = self.sgdb_api_key();
             if sgdb_key.is_empty() {
                 String::new()
@@ -464,7 +467,10 @@ impl SteamClient {
             self.fetch_image(&url, &dir.join("logo.png"))
         } else { String::new() };
 
-        (icon_path, hero_path, grid_path, logo_path)
+        // Header
+        let header_path = self.force_download_sgdb(sgdb_id, "header", false);
+
+        (icon_path, hero_path, grid_path, logo_path, header_path)
     }
 
     pub fn ensure_assets(

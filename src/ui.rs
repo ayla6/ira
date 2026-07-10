@@ -126,6 +126,8 @@ pub struct AppState {
     /// Increments on every display_game/show_grid_view call so idle closures
     /// from a previous view can detect they're stale and abort.
     pub view_generation: u32,
+    /// Tracks the currently open game settings dialog for auto-refresh.
+    pub settings_data: Option<(adw::Window, gtk4::Stack, i64)>,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;
@@ -254,6 +256,7 @@ pub fn build_ui(
         running_games: Arc::new(Mutex::new(HashMap::new())),
         grid_refresh_pending: false,
         view_generation: 0,
+        settings_data: None,
     }));
 
     build_window(&state, app);
@@ -766,6 +769,45 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         }
         AppMessage::GamesLoaded(games) => {
             handle_games_loaded(state, games);
+        }
+        AppMessage::SgdbAssetsDownloaded { db_id, sgdb_id, icon, hero, grid, logo, header } => {
+            if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
+                g.sgdb_id = sgdb_id;
+                if !icon.is_empty() { g.icon_path = icon; }
+                if !hero.is_empty() { g.hero_image_path = hero; }
+                if !grid.is_empty() { g.grid_path = grid; }
+                if !logo.is_empty() { g.logo_path = logo; }
+                if !header.is_empty() { g.header_path = header; }
+            }
+            // Refresh the settings dialog's Images page if it's open for this game
+            if let Some((ref settings_win, ref settings_stack, settings_db_id)) = state.borrow().settings_data.clone() {
+                if settings_db_id == db_id && settings_win.is_visible() {
+                    if let Some(old_page) = settings_stack.child_by_name("images") {
+                        settings_stack.remove(&old_page);
+                    }
+                    let game = state.borrow().games.iter()
+                        .find(|g| g.db_id == db_id)
+                        .cloned();
+                    if let Some(game) = game {
+                        let new_page = build_image_manager_content(state, &game, &settings_win);
+                        settings_stack.add_named(&new_page, Some("images"));
+                    }
+                }
+            }
+            let selected_id = state.borrow().selected_id.clone();
+            let lutris_id = state.borrow().games.iter()
+                .find(|g| g.db_id == db_id)
+                .map(|g| g.lutris_id);
+            if let Some(lid) = lutris_id {
+                if selected_id == lid.to_string() {
+                    let game = state.borrow().games.iter()
+                        .find(|g| g.db_id == db_id)
+                        .cloned();
+                    if let Some(game) = game {
+                        display_game(&game, state);
+                    }
+                }
+            }
         }
     }
 }
@@ -1612,12 +1654,10 @@ fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
             drop(map);
             let (kind, game_path, game_name, shadps4_exe) = &game_info;
             if kind == "ps4" {
-                // Launch shadPS4 with --game <eboot.bin>
-                let eboot = std::path::Path::new(game_path).join("eboot.bin");
+                // Launch shadPS4 with game directory
                 let exe = if shadps4_exe.is_empty() { "shadps4" } else { shadps4_exe.as_str() };
                 match std::process::Command::new(exe)
-                    .arg("--game")
-                    .arg(&eboot)
+                    .arg(game_path)
                     .spawn()
                 {
                     Ok(child) => {
@@ -3176,7 +3216,7 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     sort_group.add(&sort_entry);
     general_page.append(&sort_group);
 
-    if game.lutris_id != 0 && !game.app_id.is_empty() {
+    if game.lutris_id != 0 && !game.app_id.is_empty() && game.kind != "ps4" {
         let unmatch_group = adw::PreferencesGroup::new();
         let unmatch_btn = gtk4::Button::with_label("Unmatch game");
         unmatch_btn.add_css_class("destructive-action");
@@ -3346,12 +3386,6 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
         let preview_frame = gtk4::Frame::new(None::<&str>);
         preview_frame.set_child(Some(&preview_overlay));
         logo_page.append(&preview_frame);
-
-        let hint = gtk4::Label::new(Some("Click on the hero to position the logo"));
-        hint.add_css_class("dim-label");
-        hint.add_css_class("caption");
-        hint.set_halign(gtk4::Align::Start);
-        logo_page.append(&hint);
 
         // --- Size: slider + spin button ---
         let size_label = gtk4::Label::new(Some("Size (% of hero height)"));
@@ -3563,6 +3597,16 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
 
     win.set_content(Some(&outer));
     win.present();
+
+    // Track this settings window for auto-refresh on SgdbAssetsDownloaded
+    {
+        let mut s = state.borrow_mut();
+        s.settings_data = Some((win.clone(), stack.clone(), game.db_id));
+    }
+    let state_c = state.clone();
+    win.connect_destroy(move |_| {
+        state_c.borrow_mut().settings_data = None;
+    });
 }
 
 fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &adw::Window) -> gtk4::Box {
@@ -3575,49 +3619,8 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
     let is_steam = game.kind == "steam" || game.kind == "gog";
     let id = game.app_id.clone();
 
-    // SGDB match section — shown for games that don't have a Steam app ID (PS4, SGDB-only)
-    if !is_steam && game.kind != "sgdb" {
-        let sgdb_group = adw::PreferencesGroup::new();
-        sgdb_group.set_title("SteamGridDB");
-
-        if game.sgdb_id.is_empty() {
-            let row = adw::ActionRow::new();
-            row.set_title("Not matched to SteamGridDB");
-            row.set_subtitle("Match to download images from SGDB");
-            let match_btn = gtk4::Button::with_label("Search…");
-            match_btn.add_css_class("suggested-action");
-            match_btn.set_valign(gtk4::Align::Center);
-            let state_c = state.clone();
-            let game_name = game.name.clone();
-            let db_id = game.db_id;
-            let parent = parent_win.clone();
-            match_btn.connect_clicked(move |_| {
-                show_sgdb_search_dialog(&state_c, db_id, &game_name, &parent);
-            });
-            row.add_suffix(&match_btn);
-            sgdb_group.add(&row);
-        } else {
-            let row = adw::ActionRow::new();
-            row.set_title(&format!("Matched (SGDB ID: {})", game.sgdb_id));
-            let unmatch_btn = gtk4::Button::with_label("Unmatch");
-            unmatch_btn.set_valign(gtk4::Align::Center);
-            let state_c = state.clone();
-            let db_id = game.db_id;
-            unmatch_btn.connect_clicked(move |_| {
-                let _ = crate::db::set_sgdb_id(&state_c.borrow().db, db_id, "");
-                // Clear in-memory sgdb_id
-                if let Some(g) = state_c.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
-                    g.sgdb_id.clear();
-                }
-            });
-            row.add_suffix(&unmatch_btn);
-            sgdb_group.add(&row);
-        }
-        content.append(&sgdb_group);
-    }
-
-    // Determine image directory: SGDB dir if sgdb_id is set, otherwise by kind
-    let image_dir = if !game.sgdb_id.is_empty() {
+    // Determine save directory for Browse button — use SGDB dir if matched
+    let cloud_dir = if !game.sgdb_id.is_empty() {
         crate::parser::sgdb_data_dir(SAVE_DIR, &game.sgdb_id)
     } else if game.kind == "sgdb" {
         crate::parser::sgdb_data_dir(SAVE_DIR, &id)
@@ -3626,7 +3629,44 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
     } else {
         crate::parser::data_dir(SAVE_DIR, &id)
     };
-    let img_base = image_dir.to_string_lossy().into_owned();
+    let cloud_base = cloud_dir.to_string_lossy().into_owned();
+
+    // Helper: find the best available path for an image asset.
+    // Checks: 1) game field (icon_path etc.), 2) SGDB dir, 3) native dir.
+    let find_best_path = |game: &Game, field: &str, file: &str| -> String {
+        let field_path = match field {
+            "icon" if !game.icon_path.is_empty() => game.icon_path.clone(),
+            "hero" if !game.hero_image_path.is_empty() => game.hero_image_path.clone(),
+            "grid" if !game.grid_path.is_empty() => game.grid_path.clone(),
+            "header" if !game.header_path.is_empty() => game.header_path.clone(),
+            "logo" if !game.logo_path.is_empty() => game.logo_path.clone(),
+            _ => String::new(),
+        };
+        if !field_path.is_empty() && std::path::Path::new(&field_path).is_file() {
+            return field_path;
+        }
+        // SGDB dir (if different from cloud_dir)
+        if !game.sgdb_id.is_empty() {
+            let sgdb = format!("{}/{}", crate::parser::sgdb_data_dir(SAVE_DIR, &game.sgdb_id).to_string_lossy(), file);
+            if std::path::Path::new(&sgdb).is_file() {
+                return sgdb;
+            }
+        }
+        // Native dir (per game kind)
+        let native = if game.kind == "ps4" {
+            format!("{}/{}", crate::parser::ps4_data_dir(SAVE_DIR, &id).to_string_lossy(), file)
+        } else {
+            format!("{}/{}", crate::parser::data_dir(SAVE_DIR, &id).to_string_lossy(), file)
+        };
+        if std::path::Path::new(&native).is_file() {
+            return native;
+        }
+        // For PS4 icon, also check the ps4 icon copy
+        if field == "icon" && game.kind == "ps4" && !game.icon_path.is_empty() && std::path::Path::new(&game.icon_path).is_file() {
+            return game.icon_path.clone();
+        }
+        String::new()
+    };
 
     let sections: [(&str, &str, &str, i32, i32, &[&str]); 5] = [
         ("Icon", "icon.png", "icon", 48, 48, &[]),
@@ -3646,14 +3686,14 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
         row.set_hexpand(true);
         row.set_valign(gtk4::Align::Center);
 
-        let img_path = format!("{}/{}", img_base, file);
+        let img_path = find_best_path(game, asset, file);
         let preview = gtk4::Picture::for_filename(&img_path);
         preview.set_content_fit(gtk4::ContentFit::ScaleDown);
         preview.set_size_request(thumb_w, thumb_h);
         let preview_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         preview_wrapper.set_size_request(thumb_w, 48);
         preview_wrapper.set_valign(gtk4::Align::Center);
-        if std::path::Path::new(&img_path).exists() {
+        if !img_path.is_empty() && std::path::Path::new(&img_path).is_file() {
             preview_wrapper.append(&preview);
         } else {
             let ph = gtk4::Label::new(Some("—"));
@@ -3666,17 +3706,18 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
         btns.set_hexpand(true);
         btns.set_halign(gtk4::Align::End);
 
+        let dest_path = format!("{}/{}", cloud_base, file);
         let refresh_images: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({
             let preview_wrapper = preview_wrapper.clone();
-            let img_path = img_path.clone();
+            let dest_path = dest_path.clone();
             let state_clone = state.clone();
             let game_clone = game.clone();
             move || {
                 while let Some(child) = preview_wrapper.first_child() {
                     preview_wrapper.remove(&child);
                 }
-                if std::path::Path::new(&img_path).exists() {
-                    let p = gtk4::Picture::for_filename(&img_path);
+                if std::path::Path::new(&dest_path).exists() {
+                    let p = gtk4::Picture::for_filename(&dest_path);
                     p.set_content_fit(gtk4::ContentFit::ScaleDown);
                     preview_wrapper.append(&p);
                 } else {
@@ -3696,7 +3737,7 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
 
         // Browse
         let browse_btn = gtk4::Button::with_label("Browse…");
-        let dest_path = img_path.clone();
+        let dest_path_browse = dest_path.clone();
         let state_browse = state.clone();
         let refresh = refresh_images.clone();
         browse_btn.connect_clicked(move |_| {
@@ -3767,15 +3808,92 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
             btns.append(&btn);
         }
 
+        // Reset — for PS4 icon: restore default from sce_sys/icon0.png
+        if asset == "icon" && game.kind == "ps4" {
+            let reset_btn = gtk4::Button::with_label("Reset");
+            let sc = state.clone();
+            let gc = game.clone();
+            let refresh = refresh_images.clone();
+            reset_btn.connect_clicked(move |_| {
+                let app_id = gc.app_id.clone();
+                let game_path = gc.game_path.clone();
+                let image_dir = std::path::Path::new(SAVE_DIR).join("data").join("ps4").join(&app_id);
+                let icon_png = image_dir.join("icon.png");
+                let default_path = if icon_png.is_file() {
+                    Some(icon_png.to_string_lossy().into_owned())
+                } else {
+                    let game_icon = std::path::Path::new(&game_path).join("sce_sys").join("icon0.png");
+                    if game_icon.is_file() {
+                        let _ = std::fs::create_dir_all(&image_dir);
+                        let _ = std::fs::copy(&game_icon, &icon_png);
+                        Some(icon_png.to_string_lossy().into_owned())
+                    } else {
+                        None
+                    }
+                };
+                if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == gc.db_id) {
+                    g.icon_path = default_path.clone().unwrap_or_default();
+                }
+                refresh();
+            });
+            btns.append(&reset_btn);
+        }
+
         row.append(&btns);
         section.append(&row);
         content.append(&section);
     }
 
-    let note = gtk4::Label::new(Some("Re-select the game after changing images to see updates."));
-    note.add_css_class("dim-label");
-    note.add_css_class("caption");
-    content.append(&note);
+    // SGDB buttons at the bottom
+    {
+        let btn_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        btn_box.set_halign(gtk4::Align::Center);
+        btn_box.set_margin_top(24);
+
+        if game.sgdb_id.is_empty() && !is_steam && game.kind != "sgdb" {
+            let match_btn = gtk4::Button::with_label("Match to SteamGridDB…");
+            match_btn.add_css_class("suggested-action");
+            let sc = state.clone();
+            let gn = game.name.clone();
+            let did = game.db_id;
+            let pw = parent_win.clone();
+            match_btn.connect_clicked(move |_| {
+                show_sgdb_search_dialog(&sc, did, &gn, &pw, None);
+            });
+            btn_box.append(&match_btn);
+        }
+
+        if !game.sgdb_id.is_empty() {
+            let label = gtk4::Label::new(Some(&format!("Matched (SGDB ID: {})", game.sgdb_id)));
+            label.add_css_class("success-label");
+            btn_box.append(&label);
+            let unmatch_btn = gtk4::Button::with_label("Unmatch SGDB");
+            unmatch_btn.add_css_class("destructive-action");
+            let sc = state.clone();
+            let did = game.db_id;
+            unmatch_btn.connect_clicked(move |_| {
+                let _ = crate::db::set_sgdb_id(&sc.borrow().db, did, "");
+                if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == did) {
+                    g.sgdb_id.clear();
+                }
+                // Refresh the settings dialog's Images page
+                if let Some((ref sw, ref ss, sdb_id)) = sc.borrow().settings_data.clone() {
+                    if sdb_id == did && sw.is_visible() {
+                        if let Some(old) = ss.child_by_name("images") {
+                            ss.remove(&old);
+                        }
+                        if let Some(game) = sc.borrow().games.iter().find(|g| g.db_id == did).cloned() {
+                            let new_page = build_image_manager_content(&sc, &game, &sw);
+                            ss.add_named(&new_page, Some("images"));
+                        }
+                    }
+                }
+            });
+            btn_box.append(&unmatch_btn);
+        }
+
+        content.append(&btn_box);
+    }
 
     content
 }
@@ -4287,7 +4405,7 @@ fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, lutr
             return;
         }
         // Download images from SGDB
-        let (icon, hero, grid, logo) = steam.ensure_sgdb_assets(&sgdb_id);
+        let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets(&sgdb_id, false);
 
         // Build a game entry and send it to the UI
         if let Ok(Some(entry)) = crate::db::find_by_lutris_id(&db, lutris_id) {
@@ -4300,7 +4418,7 @@ fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, lutr
                 icon_path: icon,
                 hero_image_path: hero,
                 grid_path: grid,
-                header_path: String::new(),
+                header_path: header,
                 logo_path: logo,
                 achievements: Vec::new(),
                 earned_count: 0,
@@ -4456,6 +4574,7 @@ pub fn enrich_game_async(
     });
 }
 
+/// Normalize a title for fuzzy matching: lowercase, keep only alphanumeric, strip trailing suffixes.
 fn normalize_title(s: &str) -> String {
     let lower = s.to_lowercase();
     let alnum: String = lower
@@ -4556,6 +4675,49 @@ fn show_mass_match_dialog(state: &SharedState) {
 
         list.append(&row);
         row_action_boxes.push(action_box);
+    }
+
+    // --- PS4 games without SGDB match ---
+    let ps4_unmatched: Vec<Game> = {
+        let s = state.borrow();
+        s.games.iter().filter(|g| g.kind == "ps4" && g.sgdb_id.is_empty()).cloned().collect()
+    };
+    let mut ps4_row_boxes: Vec<(gtk4::Box, i64, String)> = Vec::new();
+    if !ps4_unmatched.is_empty() {
+        let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+        sep.set_margin_top(12);
+        sep.set_margin_bottom(8);
+        list.append(&sep);
+
+        let ps4_header = gtk4::Label::new(Some(&format!("PS4 Games (match SGDB images) — {}", ps4_unmatched.len())));
+        ps4_header.set_margin_start(12);
+        ps4_header.set_margin_bottom(6);
+        ps4_header.set_xalign(0.0);
+        ps4_header.add_css_class("heading");
+        list.append(&ps4_header);
+
+        for game in &ps4_unmatched {
+            let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+            row.set_margin_start(12);
+            row.set_margin_end(12);
+            row.set_margin_top(6);
+            row.set_margin_bottom(6);
+
+            let name_label = gtk4::Label::new(Some(&game.name));
+            name_label.set_xalign(0.0);
+            name_label.set_hexpand(true);
+            name_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+            row.append(&name_label);
+
+            let action_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+            let searching = gtk4::Label::new(Some("Searching SGDB..."));
+            searching.add_css_class("dim-label");
+            action_box.append(&searching);
+            row.append(&action_box);
+
+            list.append(&row);
+            ps4_row_boxes.push((action_box, game.db_id, game.name.clone()));
+        }
     }
 
     scrolled.set_child(Some(&list));
@@ -4729,6 +4891,111 @@ fn show_mass_match_dialog(state: &SharedState) {
         }
         glib::ControlFlow::Continue
     });
+
+    // PS4 auto-match (SGDB search)
+    if !ps4_row_boxes.is_empty() {
+        let (ps4_tx, ps4_rx) = std::sync::mpsc::channel::<(usize, Option<(String, String)>, i64)>();
+        let ps4_rx = std::cell::RefCell::new(ps4_rx);
+        let ps4_row_info: Vec<(i64, String)> = ps4_row_boxes.iter().map(|(_, db_id, name)| (*db_id, name.clone())).collect();
+        let steam_ps4 = state.borrow().steam.clone();
+        let ps4_remaining = std::cell::Cell::new(ps4_row_boxes.len());
+        std::thread::spawn(move || {
+            for (i, (db_id, game_name)) in ps4_row_info.iter().enumerate() {
+                let results = steam_ps4.search_sgdb(game_name);
+                let matched = results.first().map(|(sid, name)| (sid.clone(), name.clone()));
+                let _ = ps4_tx.send((i, matched, *db_id));
+            }
+        });
+
+        let state_ps4 = state.clone();
+        let parent_dialog_ps4 = dialog.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            if let Ok((row_idx, matched, db_id)) = ps4_rx.borrow_mut().try_recv() {
+                if row_idx < ps4_row_boxes.len() {
+                    let action_box = &ps4_row_boxes[row_idx].0;
+                    while let Some(child) = action_box.first_child() {
+                        action_box.remove(&child);
+                    }
+
+                    if let Some((sgdb_id, matched_name)) = matched {
+                        let _ = crate::db::set_sgdb_id(&state_ps4.borrow().db, db_id, &sgdb_id);
+                        if let Some(g) = state_ps4.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
+                            g.sgdb_id = sgdb_id.clone();
+                        }
+                        let steam_dl = state_ps4.borrow().steam.clone();
+                        let sender = state_ps4.borrow().sender.clone();
+                        let sgdb_id_dl = sgdb_id.clone();
+                        std::thread::spawn(move || {
+                            let (icon, hero, grid, logo, header) = steam_dl.ensure_sgdb_assets(&sgdb_id_dl, true);
+                            let _ = sender.send(AppMessage::SgdbAssetsDownloaded {
+                                db_id, sgdb_id: sgdb_id_dl, icon, hero, grid, logo, header,
+                            });
+                        });
+
+                        let label = gtk4::Label::new(Some(&format!("Matched: {} ({})", matched_name, sgdb_id)));
+                        label.add_css_class("success-label");
+                        action_box.append(&label);
+
+                        let undo_btn = gtk4::Button::with_label("Undo");
+                        let sc = state_ps4.clone();
+                        undo_btn.connect_clicked(move |_| {
+                            let _ = crate::db::set_sgdb_id(&sc.borrow().db, db_id, "");
+                            if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
+                                g.sgdb_id.clear();
+                            }
+                            if let Some((ref sw, ref ss, sdb_id)) = sc.borrow().settings_data.clone() {
+                                if sdb_id == db_id && sw.is_visible() {
+                                    if let Some(old) = ss.child_by_name("images") {
+                                        ss.remove(&old);
+                                    }
+                                    if let Some(game) = sc.borrow().games.iter().find(|g| g.db_id == db_id).cloned() {
+                                        let new_page = build_image_manager_content(&sc, &game, &sw);
+                                        ss.add_named(&new_page, Some("images"));
+                                    }
+                                }
+                            }
+                        });
+                        action_box.append(&undo_btn);
+                    } else {
+                        let label = gtk4::Label::new(Some("Not found on SGDB"));
+                        label.add_css_class("dim-label");
+                        action_box.append(&label);
+
+                        let sgdb_btn = gtk4::Button::with_label("Search SGDB…");
+                        sgdb_btn.add_css_class("suggested-action");
+                        let sc = state_ps4.clone();
+                        let gn = ps4_row_boxes[row_idx].2.clone();
+                        let did = db_id;
+                        let dlg = parent_dialog_ps4.clone();
+                        let ab = action_box.clone();
+                        sgdb_btn.connect_clicked(move |_| {
+                            let cb: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({
+                                let ab = ab.clone();
+                                let name = gn.clone();
+                                move || {
+                                    while let Some(child) = ab.first_child() {
+                                        ab.remove(&child);
+                                    }
+                                    let label = gtk4::Label::new(Some(&format!("Matched to SGDB: {}", name)));
+                                    label.add_css_class("success-label");
+                                    ab.append(&label);
+                                }
+                            });
+                            show_sgdb_search_dialog(&sc, did, &gn, &dlg, Some(cb));
+                        });
+                        action_box.append(&sgdb_btn);
+                    }
+
+                    let left = ps4_remaining.get();
+                    if left <= 1 {
+                        return glib::ControlFlow::Break;
+                    }
+                    ps4_remaining.set(left - 1);
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -4897,7 +5164,7 @@ fn show_search_results_dialog(
 }
 
 /// Show a dialog to search SteamGridDB by game name and match it to a game.
-fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str, parent: &adw::Window) {
+fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str, parent: &adw::Window, on_match: Option<std::rc::Rc<dyn Fn()>>) {
     let dialog = adw::Window::new();
     dialog.set_default_width(500);
     dialog.set_default_height(400);
@@ -4939,18 +5206,33 @@ fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str, par
     let state_c = state.clone();
     let dialog_c = dialog.clone();
     let list_c = list.clone();
+
+    let entry_s = entry.clone();
+    let dialog_s = dialog.clone();
+    let list_s = list.clone();
+    let state_s = state.clone();
     let do_search = move || {
-        let term = entry.text().to_string();
+        let term = entry_s.text().to_string();
         if term.is_empty() {
             return;
         }
         let steam = state_c.borrow().steam.clone();
-        let state_c2 = state_c.clone();
-        let dialog_c2 = dialog_c.clone();
-        let list_c2 = list_c.clone();
+        let results_shared = Arc::new(std::sync::Mutex::new(None::<Vec<(String, String)>>));
+        let results_thread = results_shared.clone();
         std::thread::spawn(move || {
-            let results = steam.search_sgdb(&term);
-            glib::idle_add_local(move || {
+            let r = steam.search_sgdb(&term);
+            *results_thread.lock().unwrap() = Some(r);
+        });
+        let results_poll = results_shared.clone();
+        let list_c2 = list_c.clone();
+        let dialog_c2 = dialog_c.clone();
+        let state_c2 = state_c.clone();
+        let on_match_clone = on_match.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            if !dialog_c2.is_visible() {
+                return glib::ControlFlow::Break;
+            }
+            if let Some(results) = results_poll.lock().unwrap().take() {
                 while let Some(child) = list_c2.first_child() {
                     list_c2.remove(&child);
                 }
@@ -4971,56 +5253,62 @@ fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str, par
                         let name_c = name.clone();
                         let state_c3 = state_c2.clone();
                         let dialog_c3 = dialog_c2.clone();
+                        let on_match_cb = on_match_clone.clone();
                         match_btn.connect_clicked(move |_| {
                             let _ = crate::db::set_sgdb_id(&state_c3.borrow().db, db_id, &sgdb_id_c);
-                            // Download SGDB assets
+                            // Immediately update in-memory state for instant UI feedback
+                            if let Some(g) = state_c3.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
+                                g.sgdb_id = sgdb_id_c.clone();
+                            }
+                            // Refresh the settings dialog's Images page immediately
+                            if let Some((ref sw, ref ss, sdb_id)) = state_c3.borrow().settings_data.clone() {
+                                if sdb_id == db_id && sw.is_visible() {
+                                    if let Some(old) = ss.child_by_name("images") {
+                                        ss.remove(&old);
+                                    }
+                                    if let Some(game) = state_c3.borrow().games.iter().find(|g| g.db_id == db_id).cloned() {
+                                        let new_page = build_image_manager_content(&state_c3, &game, &sw);
+                                        ss.add_named(&new_page, Some("images"));
+                                    }
+                                }
+                            }
+                            let kind = state_c3.borrow().games.iter()
+                                .find(|g| g.db_id == db_id)
+                                .map(|g| g.kind.clone())
+                                .unwrap_or_default();
                             let steam = state_c3.borrow().steam.clone();
                             let sgdb_id_d = sgdb_id_c.clone();
-                            let state_d = state_c3.clone();
+                            let sender = state_c3.borrow().sender.clone();
+                            let db_id_for_msg = db_id;
                             std::thread::spawn(move || {
-                                let (icon, hero, grid, logo) = steam.ensure_sgdb_assets(&sgdb_id_d);
-                                glib::idle_add_local(move || {
-                                    if let Some(g) = state_d.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
-                                        g.sgdb_id = sgdb_id_d.clone();
-                                        if !icon.is_empty() { g.icon_path = icon; }
-                                        if !hero.is_empty() { g.hero_image_path = hero; }
-                                        if !grid.is_empty() { g.grid_path = grid; }
-                                        if !logo.is_empty() { g.logo_path = logo; }
-                                    }
-                                    let selected = state_d.borrow().selected_id.clone();
-                                    let lutris_id = state_d.borrow().games.iter()
-                                        .find(|g| g.db_id == db_id)
-                                        .map(|g| g.lutris_id);
-                                    if let Some(lid) = lutris_id {
-                                        if selected == lid.to_string() {
-                                            let game = state_d.borrow().games.iter()
-                                                .find(|g| g.db_id == db_id)
-                                                .cloned();
-                                            if let Some(game) = game {
-                                                display_game(&game, &state_d);
-                                            }
-                                        }
-                                    }
-                                    glib::ControlFlow::Break
+                                let skip_icon = kind == "ps4";
+                                let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets(&sgdb_id_d, skip_icon);
+                                let _ = sender.send(AppMessage::SgdbAssetsDownloaded {
+                                    db_id: db_id_for_msg,
+                                    sgdb_id: sgdb_id_d,
+                                    icon, hero, grid, logo, header,
                                 });
                             });
                             dialog_c3.close();
+                            if let Some(ref cb) = on_match_cb {
+                                cb();
+                            }
                         });
                         row.add_suffix(&match_btn);
                         list_c2.append(&row);
                     }
                 }
                 glib::ControlFlow::Break
-            });
+            } else {
+                glib::ControlFlow::Continue
+            }
         });
     };
 
-    let do_search_c = Rc::new(std::cell::RefCell::new(None::<dyn Fn() -> ()>));
-    *do_search_c.borrow_mut() = Some(do_search.clone() as dyn Fn() -> ());
-    let do_search_enter = do_search.clone();
-    entry.connect_activate(move || do_search_enter());
-    let do_search_btn = do_search.clone();
-    search_btn.connect_clicked(move |_| do_search_btn());
+    let ds = do_search.clone();
+    entry.connect_activate(move |_| ds());
+    let ds2 = do_search.clone();
+    search_btn.connect_clicked(move |_| ds2());
 
     dialog.set_content(Some(&outer));
     dialog.present();

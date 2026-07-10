@@ -15,6 +15,16 @@ pub enum AppMessage {
     ShadPS4PlaytimeChanged,
     /// Initial game list loaded in the background.
     GamesLoaded(Vec<Game>),
+    /// SGDB assets downloaded for a game.
+    SgdbAssetsDownloaded {
+        db_id: i64,
+        sgdb_id: String,
+        icon: String,
+        hero: String,
+        grid: String,
+        logo: String,
+        header: String,
+    },
 }
 
 pub struct AppSender {

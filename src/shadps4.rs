@@ -648,16 +648,29 @@ pub fn load_shadps4_game(
         sgdb_id: sgdb_id.to_string(),
     };
 
+    // PS4 default icon: always copy from the game's sce_sys/icon0.png to data/ps4/{NPWR}/icon.png
+    let ps4_data_dir = Path::new(save_dir).join("data").join("ps4").join(npwr_id);
+    let ps4_icon = ps4_data_dir.join("icon.png");
+    if !ps4_icon.is_file() {
+        let default_icon = shad.game_path.join("sce_sys").join("icon0.png");
+        if default_icon.is_file() {
+            let _ = std::fs::create_dir_all(&ps4_data_dir);
+            let _ = std::fs::copy(&default_icon, &ps4_icon);
+        }
+    }
+
     // Image paths — use SGDB dir if sgdb_id is set, otherwise data/ps4/{NPWR_ID}/
     let image_dir = if !sgdb_id.is_empty() {
         Path::new(save_dir).join("data").join("steamgriddb").join(sgdb_id)
     } else {
-        Path::new(save_dir).join("data").join("ps4").join(npwr_id)
+        ps4_data_dir.clone()
     };
 
     let icon_png = image_dir.join("icon.png");
     if icon_png.is_file() {
         game.icon_path = icon_png.to_string_lossy().into_owned();
+    } else if ps4_icon.is_file() {
+        game.icon_path = ps4_icon.to_string_lossy().into_owned();
     } else {
         // Fallback: game's sce_sys/icon0.png
         let default_icon = shad.game_path.join("sce_sys").join("icon0.png");

@@ -3127,6 +3127,7 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
             let mut switches: Vec<adw::SwitchRow> = Vec::new();
             for (_, dlc) in &dlc_list {
                 let row = adw::SwitchRow::new();
+                row.set_use_markup(false);
                 row.set_title(&dlc.name);
                 row.set_subtitle(&format!("App ID: {}", dlc.app_id));
                 row.set_active(dlc.enabled);
@@ -3180,7 +3181,6 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
         sidebar.select_row(Some(&first));
     }
 
-    outer.append(&sidebar_area);
     content_area.append(&stack);
 
     // Save / Close buttons at the bottom of the content area

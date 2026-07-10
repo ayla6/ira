@@ -20,6 +20,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
  "xxhash-rust",
 ]
 

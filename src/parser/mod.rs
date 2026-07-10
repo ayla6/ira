@@ -1,0 +1,236 @@
+mod paths;
+mod icons;
+mod status;
+
+pub use paths::*;
+pub use icons::*;
+pub use status::*;
+
+use crate::db::DbConn;
+pub use crate::models::{AchievementStatus, Game, GameEntry, MergedAchievement};
+use std::collections::HashMap;
+use std::path::Path;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct AppDetailsName {
+    #[serde(default)]
+    name: String,
+}
+
+pub fn read_app_name(save_dir: &str, app_id: &str) -> Option<String> {
+    let path = paths::data_dir(save_dir, app_id).join("appdetails.json");
+    let data = std::fs::read(&path).ok()?;
+    let details: AppDetailsName = serde_json::from_slice(&data).ok()?;
+    let name = details.name.trim().to_string();
+    if name.is_empty() { None } else { Some(name) }
+}
+
+pub fn read_app_details(save_dir: &str, app_id: &str) -> Option<crate::api::types::AppDetails> {
+    let path = paths::data_dir(save_dir, app_id).join("appdetails.json");
+    let data = std::fs::read(&path).ok()?;
+    serde_json::from_slice(&data).ok()
+}
+
+pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
+    let entries = match crate::db::load_all_games(conn) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("Failed to load games from DB: {}", e);
+            return Vec::new();
+        }
+    };
+
+    let mut games = Vec::new();
+    for entry in entries {
+        match load_game(&entry, save_dir) {
+            Ok(game) => games.push(game),
+            Err(e) => eprintln!("Skipping game {} ({}): {}", entry.steam_id, entry.kind, e),
+        }
+    }
+    games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
+    games
+}
+
+pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
+    let app_id = &entry.steam_id;
+    let kind = &entry.kind;
+    let platform_id = &entry.platform_id;
+
+    let mut game = Game {
+        app_id: app_id.to_string(),
+        kind: kind.to_string(),
+        platform_id: platform_id.to_string(),
+        db_id: entry.id,
+        name: if entry.title.is_empty() {
+            format!("App ID: {}", app_id)
+        } else {
+            entry.title.clone()
+        },
+        icon_path: String::new(),
+        hero_image_path: String::new(),
+        grid_path: String::new(),
+        header_path: String::new(),
+        logo_path: String::new(),
+        achievements: Vec::new(),
+        earned_count: 0,
+        total_count: 0,
+        hidden: entry.hidden,
+        lutris_id: entry.lutris_db_id.unwrap_or(0),
+        slug: String::new(),
+        playtime: 0.0,
+        lastplayed: entry.last_played,
+        logo_position: entry.logo_position.clone(),
+        logo_size: entry.logo_size,
+        lutris_name: String::new(),
+        manual_unmatch: entry.manual_unmatch.unwrap_or(0) == 1,
+        sort_title: entry.sort_title.clone(),
+        game_path: String::new(),
+        sgdb_id: entry.sgdb_id.clone().unwrap_or_default(),
+        shadps4_version: entry.shadps4_version.clone().unwrap_or_default(),
+    };
+
+    let ach_dir = paths::achievements_dir(save_dir, app_id);
+
+    if entry.title.is_empty() {
+        if let Some(name) = read_app_name(save_dir, app_id) {
+            game.name = name;
+        }
+    }
+
+    let image_dir = match entry.sgdb_id.as_ref().filter(|s| !s.is_empty()) {
+        Some(sgdb_id) => paths::sgdb_data_dir(save_dir, sgdb_id),
+        None => {
+            if kind == "sgdb" {
+                paths::sgdb_data_dir(save_dir, app_id)
+            } else if kind == "ps4" {
+                paths::ps4_data_dir(save_dir, app_id)
+            } else {
+                paths::data_dir(save_dir, app_id)
+            }
+        }
+    };
+
+    let icon_png = image_dir.join("icon.png");
+    if icon_png.is_file() {
+        game.icon_path = icon_png.to_string_lossy().into_owned();
+    } else {
+        let icon_ico = image_dir.join("icon.ico");
+        if icon_ico.is_file() {
+            match icons::convert_ico_to_png(&icon_ico) {
+                Ok(png) => game.icon_path = png.to_string_lossy().into_owned(),
+                Err(_) => {
+                    let renamed = image_dir.join("icon.png");
+                    if std::fs::rename(&icon_ico, &renamed).is_ok() {
+                        game.icon_path = renamed.to_string_lossy().into_owned();
+                    }
+                }
+            }
+        } else {
+            for ext in ["jpg", "webp"] {
+                let p = image_dir.join(format!("icon.{}", ext));
+                if p.is_file() {
+                    game.icon_path = p.to_string_lossy().into_owned();
+                    break;
+                }
+            }
+        }
+    }
+
+    let grid = image_dir.join("library_600x900.jpg");
+    if grid.is_file() {
+        game.grid_path = grid.to_string_lossy().into_owned();
+    }
+    let header = image_dir.join("header.jpg");
+    if header.is_file() {
+        game.header_path = header.to_string_lossy().into_owned();
+    }
+    let hero = image_dir.join("library_hero.jpg");
+    if hero.is_file() {
+        game.hero_image_path = hero.to_string_lossy().into_owned();
+    }
+    let logo = image_dir.join("logo.png");
+    if logo.is_file() {
+        game.logo_path = logo.to_string_lossy().into_owned();
+    }
+
+    let status_path = paths::unlock_status_path(save_dir, kind, app_id, platform_id);
+    let status_map = status::load_status_map(&status_path);
+
+    let meta_path = ach_dir.join("achievements.json");
+    if let Ok(meta_data) = std::fs::read(&meta_path) {
+        if let Ok(meta_list) = serde_json::from_slice::<Vec<crate::models::achievement::AchievementMeta>>(&meta_data) {
+            for meta in meta_list {
+                let status = status_map.get(&meta.name).cloned().unwrap_or_default();
+                let hidden = crate::models::achievement::parse_hidden(&meta.hidden);
+                let icon_gray = if meta.icon_gray.is_empty() {
+                    meta.icon_gray_alt.clone()
+                } else {
+                    meta.icon_gray.clone()
+                };
+
+                let ach = MergedAchievement {
+                    name: meta.name.clone(),
+                    display_name: meta.display_name.val.clone(),
+                    description: meta.description.val.clone(),
+                    hidden,
+                    earned: status.earned,
+                    earned_time: status.earned_time,
+                    icon_path: icons::find_icon_path(&ach_dir, &meta.icon),
+                    icon_gray_path: icons::find_icon_path(&ach_dir, &icon_gray),
+                    global_percent: 0.0,
+                };
+
+                game.total_count += 1;
+                if ach.earned {
+                    game.earned_count += 1;
+                }
+                game.achievements.push(ach);
+            }
+        } else {
+            eprintln!("Meta load error for {}", app_id);
+        }
+    } else {
+        let mut keys: Vec<_> = status_map.keys().cloned().collect();
+        keys.sort();
+        for name in keys {
+            let status = &status_map[&name];
+            let ach = MergedAchievement {
+                name: name.clone(),
+                display_name: name.clone(),
+                description: "No description available.".into(),
+                hidden: false,
+                earned: status.earned,
+                earned_time: status.earned_time,
+                icon_path: String::new(),
+                icon_gray_path: String::new(),
+                global_percent: 0.0,
+            };
+            game.total_count += 1;
+            if ach.earned {
+                game.earned_count += 1;
+            }
+            game.achievements.push(ach);
+        }
+    }
+
+    Ok(game)
+}
+
+pub fn set_achievement_earned(save_dir: &str, kind: &str, app_id: &str, platform_id: &str, ach_name: &str, earned: bool) -> Result<(), String> {
+    let status_path = paths::unlock_status_path(save_dir, kind, app_id, platform_id);
+    let mut status_map: HashMap<String, AchievementStatus> = HashMap::new();
+    if let Ok(data) = std::fs::read(&status_path) {
+        let _ = serde_json::from_slice::<HashMap<String, AchievementStatus>>(&data).map(|m| status_map = m);
+    }
+    status_map.insert(
+        ach_name.to_string(),
+        AchievementStatus {
+            earned,
+            earned_time: 0,
+        },
+    );
+    let b = serde_json::to_string_pretty(&status_map).map_err(|e| e.to_string())?;
+    std::fs::write(&status_path, b).map_err(|e| e.to_string())?;
+    Ok(())
+}

@@ -27,6 +27,9 @@ path = "src/main.rs"
 
 [[bin]]
 name = "av-test"
-path = "src/test_main.rs"
+path = "src/bin/test_main.rs"
+
+[dev-dependencies]
+tempfile = "3"
 
 [features]

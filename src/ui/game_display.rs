@@ -366,7 +366,7 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
     let overlay = gtk4::Overlay::new();
     overlay.set_vexpand(false);
     overlay.set_hexpand(true);
-    overlay.set_height_request(((content_width as f64) / HERO_ASPECT_RATIO).max(150.0) as i32);
+    overlay.set_height_request(((content_width as f64) / 3.1).max(150.0) as i32);
 
     let hero = gtk4::Picture::new();
     if let Some(t) = crate::images::texture_for(&game.hero_image_path) {
@@ -394,7 +394,7 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
 
             logo_area.set_draw_func(move |_area, cr, area_w, area_h| {
                 let w = area_w as f64;
-                let h = w / HERO_ASPECT_RATIO;
+                let h = area_h as f64;
                 if w <= 0.0 || h <= 0.0 {
                     return;
                 }
@@ -409,12 +409,11 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
                     gtk4::Align::End => w - lw - 24.0,
                     _ => 24.0,
                 };
-                let actual_h = area_h as f64;
                 let y = match valign {
                     gtk4::Align::Start => 24.0,
-                    gtk4::Align::Center => (actual_h - lh) / 2.0,
-                    gtk4::Align::End => actual_h - lh - 24.0,
-                    _ => actual_h - lh - 24.0,
+                    gtk4::Align::Center => (h - lh) / 2.0,
+                    gtk4::Align::End => h - lh - 24.0,
+                    _ => h - lh - 24.0,
                 };
 
                 let _ = cr.save();
@@ -439,7 +438,7 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
         size_monitor.set_draw_func(move |_area, _cr, w, _h| {
             if w > 0 {
                 if let Some(overlay) = overlay_weak.upgrade() {
-                    let target = ((w as f64) / HERO_ASPECT_RATIO).max(150.0) as i32;
+                    let target = ((w as f64) / 3.1).max(150.0) as i32;
                     if overlay.height_request() != target {
                         overlay.set_height_request(target);
                     }
@@ -499,13 +498,13 @@ fn format_lastplayed(ts: i64) -> String {
         .unwrap_or_else(|| "Never".to_string())
 }
 
-const HERO_ASPECT_RATIO: f64 = 3.1;
-
 pub(crate) fn logo_scaled_dims(hero_w: f64, hero_h: f64, src_w: f64, src_h: f64, logo_pct: i32) -> (f64, f64) {
     let max_h = hero_h * (logo_pct as f64 / 100.0);
     let max_w = hero_w * (logo_pct as f64 / 200.0);
-    let scale = (max_w / src_w).min(max_h / src_h).max(32.0 / src_w.max(src_h));
-    (src_w * scale, src_h * scale)
+    let scale = (max_w / src_w).min(max_h / src_h);
+    let w = (src_w * scale).max(32.0);
+    let h = (src_h * scale).max(32.0);
+    (w, h)
 }
 
 pub(crate) fn logo_position_align(pos: &str) -> (gtk4::Align, gtk4::Align) {

@@ -1,3 +1,5 @@
+mod secrets;
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -67,16 +69,44 @@ pub fn load_config() -> Config {
             c = loaded;
         }
     }
+    let steam_key = secrets::get_secret("steam");
+    if !steam_key.is_empty() {
+        c.steam_api_key = steam_key;
+    }
+    let sgdb_key = secrets::get_secret("steamgriddb");
+    if !sgdb_key.is_empty() {
+        c.steam_griddb_api_key = sgdb_key;
+    }
     c
 }
 
 impl Config {
     pub fn save(&self) -> Result<(), String> {
+        let steam_err = secrets::set_secret("steam", &self.steam_api_key);
+        let sgdb_err = secrets::set_secret("steamgriddb", &self.steam_griddb_api_key);
+
+        let mut plaintext = Config {
+            steam_api_key: String::new(),
+            steam_griddb_api_key: String::new(),
+            notifications_enabled: self.notifications_enabled,
+            close_to_background: self.close_to_background,
+            show_hidden_games: self.show_hidden_games,
+            grid_cover_width: self.grid_cover_width,
+            shadps4_enabled: self.shadps4_enabled,
+            shadps4_executable: self.shadps4_executable.clone(),
+        };
+        if steam_err.is_err() {
+            plaintext.steam_api_key = self.steam_api_key.clone();
+        }
+        if sgdb_err.is_err() {
+            plaintext.steam_griddb_api_key = self.steam_griddb_api_key.clone();
+        }
+
         let path = config_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        let data = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        let data = serde_json::to_string_pretty(&plaintext).map_err(|e| e.to_string())?;
         std::fs::write(&path, data).map_err(|e| e.to_string())?;
         Ok(())
     }

@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::process::Command;
 
-fn get_secret(key: &str) -> String {
+pub(crate) fn get_secret(key: &str) -> String {
     let out = Command::new("secret-tool")
         .args(["lookup", "app", "achievement-viewer", "key", key])
         .output();
@@ -11,7 +11,7 @@ fn get_secret(key: &str) -> String {
     }
 }
 
-fn set_secret(key: &str, value: &str) -> Result<(), String> {
+pub(crate) fn set_secret(key: &str, value: &str) -> Result<(), String> {
     if value.is_empty() {
         let _ = Command::new("secret-tool")
             .args(["clear", "app", "achievement-viewer", "key", key])

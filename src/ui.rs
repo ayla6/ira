@@ -2194,43 +2194,45 @@ fn display_game(game: &Game, state: &SharedState) {
                 ));
             }
 
-            if !hidden.is_empty() {
-                let hidden_revealed: std::rc::Rc<std::cell::Cell<bool>> = Default::default();
-                let hidden_row = adw::ActionRow::new();
-                hidden_row.set_title(&format!("... and {} hidden trophies", hidden.len()));
-                hidden_row.set_subtitle("Click to reveal");
-                hidden_row.set_activatable(true);
+            let hidden_expander: Option<adw::ExpanderRow> = if !hidden.is_empty() {
+                let reveal_confirmed: std::rc::Rc<std::cell::Cell<bool>> = Default::default();
+                let expander = adw::ExpanderRow::new();
+                expander.set_title(&format!("… and {} hidden trophies", hidden.len()));
+                expander.set_enable_expansion(false);
+
                 let hidden_clone: Vec<MergedAchievement> = hidden.iter().map(|a| (*a).clone()).collect();
-                let group_c = locked_group.clone();
                 let reload_c = reload.clone();
                 let kind_c = game.kind.clone();
                 let app_id_c = game.app_id.clone();
                 let platform_id_c = game.platform_id.clone();
                 let state_c = state.clone();
-                    hidden_row.connect_activated(move |_| {
-                        if hidden_revealed.get() {
-                            return;
-                        }
-                        let parent = state_c.borrow().window.clone();
-                        let dialog = adw::MessageDialog::new(Some(&parent),
-                            Some("Reveal hidden trophies?"),
-                            Some("These trophies are hidden because they have secret criteria. Showing them will reveal their names and descriptions."));
-                        dialog.add_response("cancel", S::CANCEL);
-                        dialog.add_response("reveal", "Reveal");
-                        dialog.set_response_appearance("reveal", adw::ResponseAppearance::Suggested);
-                        dialog.set_default_response(Some("cancel"));
-                        dialog.set_close_response("cancel");
+                let expander_c = expander.clone();
+
+                let click = gtk4::GestureClick::new();
+                click.connect_pressed(move |_, _, _, _| {
+                    if reveal_confirmed.get() {
+                        return;
+                    }
+                    let parent = state_c.borrow().window.clone();
+                    let dialog = adw::MessageDialog::new(Some(&parent),
+                        Some("Reveal hidden trophies?"),
+                        Some("These trophies are hidden because they have secret criteria. Showing them will reveal their names and descriptions."));
+                    dialog.add_response("cancel", S::CANCEL);
+                    dialog.add_response("reveal", "Reveal");
+                    dialog.set_response_appearance("reveal", adw::ResponseAppearance::Suggested);
+                    dialog.set_default_response(Some("cancel"));
+                    dialog.set_close_response("cancel");
                     let hidden_dl = hidden_clone.clone();
-                    let group_dl = group_c.clone();
+                    let expander_dl = expander_c.clone();
                     let reload_dl = reload_c.clone();
                     let kind_dl = kind_c.clone();
                     let app_id_dl = app_id_c.clone();
                     let platform_id_dl = platform_id_c.clone();
                     let state_dl = state_c.clone();
-                    let hidden_r = hidden_revealed.clone();
+                    let reveal_r = reveal_confirmed.clone();
                     dialog.connect_response(None, move |_, resp| {
                         if resp == "reveal" {
-                            hidden_r.set(true);
+                            reveal_r.set(true);
                             for ach in &hidden_dl {
                                 let ach_clone = ach.clone();
                                 let reload_inner = reload_dl.clone();
@@ -2238,20 +2240,44 @@ fn display_game(game: &Game, state: &SharedState) {
                                 let app_id_inner = app_id_dl.clone();
                                 let platform_id_inner = platform_id_dl.clone();
                                 let state_inner = state_dl.clone();
-                                group_dl.add(&create_achievement_row(
-                                    ach,
-                                    Some(Box::new(move || {
-                                        confirm_mark_unlocked(&state_inner, &kind_inner, &app_id_inner, &platform_id_inner, &ach_clone, reload_inner.clone());
-                                    })),
-                                    &mut ImageLoadBudget::new(0),
-                                ));
+
+                                let ach_row = adw::ActionRow::new();
+                                ach_row.set_title(&ach.display_name);
+                                ach_row.set_subtitle(&ach.description);
+
+                                let img = gtk4::Image::from_icon_name("changes-prevent-symbolic");
+                                img.set_pixel_size(24);
+                                img.set_valign(gtk4::Align::Center);
+                                if ach.earned {
+                                    if !ach.icon_path.is_empty() {
+                                        crate::images::set_image(&img, &ach.icon_path);
+                                    }
+                                } else if !ach.icon_gray_path.is_empty() {
+                                    crate::images::set_image(&img, &ach.icon_gray_path);
+                                }
+                                ach_row.add_prefix(&img);
+
+                                let mclick = gtk4::GestureClick::new();
+                                mclick.set_button(3);
+                                mclick.connect_pressed(move |_, _, _, _| {
+                                    confirm_mark_unlocked(&state_inner, &kind_inner, &app_id_inner, &platform_id_inner, &ach_clone, reload_inner.clone());
+                                });
+                                ach_row.add_controller(mclick);
+
+                                expander_dl.add_row(&ach_row);
                             }
+                            expander_dl.set_enable_expansion(true);
+                            expander_dl.set_expanded(true);
                         }
                     });
                     dialog.present();
                 });
-                locked_group.add(&hidden_row);
-            }
+                expander.add_controller(click);
+
+                Some(expander)
+            } else {
+                None
+            };
             progress_vbox.append(&locked_group);
 
             // Defer remaining locked rows in idle batches
@@ -2264,6 +2290,7 @@ fn display_game(game: &Game, state: &SharedState) {
                 let app_id = game.app_id.clone();
                 let platform_id = game.platform_id.clone();
                 let state = state.clone();
+                let mut expander = hidden_expander.clone();
                 let mut i = 0;
                 glib::idle_add_local(move || {
                     if state.borrow().view_generation != gen {
@@ -2289,11 +2316,16 @@ fn display_game(game: &Game, state: &SharedState) {
                     batch_budget.flush();
                     i = end;
                     if i >= remaining.len() {
+                        if let Some(exp) = expander.take() {
+                            group.add(&exp);
+                        }
                         glib::ControlFlow::Break
                     } else {
                         glib::ControlFlow::Continue
                     }
                 });
+            } else if let Some(exp) = hidden_expander {
+                locked_group.add(&exp);
             }
         }
         budget.flush();

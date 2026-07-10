@@ -1,11 +1,13 @@
 use adw::prelude::{AlertDialogExt, AdwDialogExt};
-use gtk4::prelude::{BoxExt, WidgetExt};
+use gtk4::prelude::*;
 use crate::Game;
 use crate::strings as S;
 use crate::models::{AppMessage, AppSender};
 use std::collections::HashMap;
 use std::process::Child;
 use std::sync::{Arc, Mutex};
+
+use super::state::SharedState;
 
 pub fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
     if !existing.name.is_empty() && !existing.name.starts_with("App ID:") {
@@ -114,6 +116,24 @@ impl Clearable for gtk4::FlowBox {
 
 pub fn clear_children(w: &impl Clearable) {
     w.clear_all_children();
+}
+
+pub fn refresh_settings_images_page(
+    state: &SharedState,
+    db_id: i64,
+    build_page: impl Fn(&SharedState, &Game, &adw::Window) -> gtk4::Widget,
+) {
+    if let Some((ref sw, ref ss, sdb_id)) = state.borrow().settings_data.clone() {
+        if sdb_id == db_id && sw.is_visible() {
+            if let Some(old) = ss.child_by_name("images") {
+                ss.remove(&old);
+            }
+            if let Some(game) = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned() {
+                let new_page = build_page(state, &game, &sw);
+                ss.add_named(&new_page, Some("images"));
+            }
+        }
+    }
 }
 
 pub fn monitor_running_game(

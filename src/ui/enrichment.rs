@@ -18,23 +18,8 @@ pub fn enrich_game_async(
     sender: AppSender,
 ) {
     std::thread::spawn(move || {
-        let entry = GameEntry {
-            id: db_id,
-            kind: kind.clone(),
-            steam_id: app_id.clone(),
-            platform_id: platform_id.clone(),
-            title,
-            lutris_db_id: if lutris_id != 0 { Some(lutris_id) } else { None },
-            sgdb_id: None,
-            hidden: false,
-            logo_position: String::new(),
-            logo_size: 0,
-            ignored: 0,
-            manual_unmatch: 0,
-            sort_title: String::new(),
-            shadps4_version: None,
-            last_played: 0,
-        };
+        let mut entry = GameEntry::for_reload(db_id, &kind, &app_id, &platform_id, lutris_id);
+        entry.title = title;
 
         let Ok(mut game) = load_game(&entry, SAVE_DIR) else {
             eprintln!("Failed reloading {}", app_id);

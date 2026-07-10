@@ -1200,23 +1200,14 @@ pub fn build_image_manager_content_with_drafts(
             let pending_pc = pending_copies.clone();
             let sc = state.clone();
             let did = game.db_id;
-            let pw = parent_win.clone();
             unmatch_btn.connect_clicked(move |_| {
                 if let Some(ref pc) = pending_pc {
                     pc.borrow_mut().insert("__unmatch__".to_string(), String::new());
-                    if let Some((ref sw, ref ss, sdb_id)) = sc.borrow().settings_data.clone() {
-                        if sdb_id == did && sw.is_visible() {
-                            if let Some(old) = ss.child_by_name("images") {
-                                ss.remove(&old);
-                            }
-                            if let Some(game) = sc.borrow().games.iter().find(|g| g.db_id == did).cloned() {
-                                let mut g2 = game.clone();
-                                g2.sgdb_id.clear();
-                                let new_page = build_image_manager_content_with_drafts(&sc, &g2, &pw, Some(pc.clone()));
-                                ss.add_named(&new_page, Some("images"));
-                            }
-                        }
-                    }
+                    super::helpers::refresh_settings_images_page(&sc, did, |s, game, win| {
+                        let mut g2 = game.clone();
+                        g2.sgdb_id.clear();
+                        build_image_manager_content_with_drafts(s, &g2, win, Some(pc.clone())).upcast()
+                    });
                 }
             });
             btn_box.append(&unmatch_btn);

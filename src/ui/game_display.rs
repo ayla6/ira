@@ -103,23 +103,7 @@ pub fn display_game(game: &Game, state: &SharedState) {
         let lutris_id_for_reload = game.lutris_id;
         let state_for_reload = state.clone();
         let reload = move || {
-            let entry = GameEntry {
-                id: db_id_for_reload,
-                kind: kind_for_reload.clone(),
-                steam_id: app_id_for_reload.clone(),
-                platform_id: platform_id_for_reload.clone(),
-                title: String::new(),
-                lutris_db_id: if lutris_id_for_reload != 0 { Some(lutris_id_for_reload) } else { None },
-                sgdb_id: None,
-                hidden: false,
-                logo_position: String::new(),
-                logo_size: 0,
-                ignored: 0,
-                manual_unmatch: 0,
-                sort_title: String::new(),
-                shadps4_version: None,
-                last_played: 0,
-            };
+            let entry = GameEntry::for_reload(db_id_for_reload, &kind_for_reload, &app_id_for_reload, &platform_id_for_reload, lutris_id_for_reload);
             if let Ok(updated) = load_game(&entry, SAVE_DIR) {
                 apply_game_update(&state_for_reload, updated);
             }

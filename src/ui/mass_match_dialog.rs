@@ -358,17 +358,9 @@ pub fn show_mass_match_dialog(state: &SharedState) {
                             if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                                 g.sgdb_id.clear();
                             }
-                            if let Some((ref sw, ref ss, sdb_id)) = sc.borrow().settings_data.clone() {
-                                if sdb_id == db_id && sw.is_visible() {
-                                    if let Some(old) = ss.child_by_name("images") {
-                                        ss.remove(&old);
-                                    }
-                                    if let Some(game) = sc.borrow().games.iter().find(|g| g.db_id == db_id).cloned() {
-                                        let new_page = build_image_manager_content(&sc, &game, &sw);
-                                        ss.add_named(&new_page, Some("images"));
-                                    }
-                                }
-                            }
+                            super::helpers::refresh_settings_images_page(&sc, db_id, |s, game, win| {
+                                build_image_manager_content(s, game, win).upcast()
+                            });
                         });
                         action_box.append(&undo_btn);
                     } else {
@@ -648,17 +640,9 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
                             if let Some(g) = state_c3.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                                 g.sgdb_id = sgdb_id_c.clone();
                             }
-                            if let Some((ref sw, ref ss, sdb_id)) = state_c3.borrow().settings_data.clone() {
-                                if sdb_id == db_id && sw.is_visible() {
-                                    if let Some(old) = ss.child_by_name("images") {
-                                        ss.remove(&old);
-                                    }
-                                    if let Some(game) = state_c3.borrow().games.iter().find(|g| g.db_id == db_id).cloned() {
-                                        let new_page = build_image_manager_content(&state_c3, &game, &sw);
-                                        ss.add_named(&new_page, Some("images"));
-                                    }
-                                }
-                            }
+                            super::helpers::refresh_settings_images_page(&state_c3, db_id, |s, game, win| {
+                                build_image_manager_content(s, game, win).upcast()
+                            });
                             let steam = state_c3.borrow().steam.clone();
                             let sgdb_id_d = sgdb_id_c.clone();
                             let sender = state_c3.borrow().sender.clone();

@@ -98,20 +98,9 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 if !logo.is_empty() { g.logo_path = logo; }
                 if !header.is_empty() { g.header_path = header; }
             }
-            if let Some((ref settings_win, ref settings_stack, settings_db_id)) = state.borrow().settings_data.clone() {
-                if settings_db_id == db_id && settings_win.is_visible() {
-                    if let Some(old_page) = settings_stack.child_by_name("images") {
-                        settings_stack.remove(&old_page);
-                    }
-                    let game = state.borrow().games.iter()
-                        .find(|g| g.db_id == db_id)
-                        .cloned();
-                    if let Some(game) = game {
-                        let new_page = build_image_manager_content(state, &game, settings_win);
-                        settings_stack.add_named(&new_page, Some("images"));
-                    }
-                }
-            }
+            super::helpers::refresh_settings_images_page(state, db_id, |s, game, win| {
+                build_image_manager_content(s, game, win).upcast()
+            });
             let selected_id = state.borrow().selected_id.clone();
             let lutris_id = state.borrow().games.iter()
                 .find(|g| g.db_id == db_id)
@@ -218,23 +207,8 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
         }
         if g.kind != "sgdb" && g.kind != "ps4" {
             if let Some(ref watcher) = watcher {
-                let entry = GameEntry {
-                    id: g.db_id,
-                    kind: g.kind.clone(),
-                    steam_id: g.app_id.clone(),
-                    platform_id: g.platform_id.clone(),
-                    title: String::new(),
-                    hidden: false,
-                    lutris_db_id: if g.lutris_id != 0 { Some(g.lutris_id) } else { None },
-                    sgdb_id: None,
-                    logo_position: String::new(),
-                    logo_size: 0,
-                    ignored: 0,
-                    manual_unmatch: 0,
-                    sort_title: g.sort_title.clone(),
-                    shadps4_version: None,
-                    last_played: 0,
-                };
+                let mut entry = GameEntry::for_reload(g.db_id, &g.kind, &g.app_id, &g.platform_id, g.lutris_id);
+                entry.sort_title = g.sort_title.clone();
                 watcher.watch(&entry, &g.achievements);
             }
         }

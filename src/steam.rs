@@ -403,14 +403,14 @@ impl SteamClient {
 
     /// Download all images for an SGDB game (no Steam ID).
     /// Returns (icon_path, hero_path, grid_path, logo_path, header_path).
-    /// If `skip_icon` is true, the icon download is skipped and an empty string is returned for it.
-    pub fn ensure_sgdb_assets(&self, sgdb_id: &str, skip_icon: bool) -> (String, String, String, String, String) {
+    /// Skips downloading any asset whose destination file already exists.
+    pub fn ensure_sgdb_assets(&self, sgdb_id: &str) -> (String, String, String, String, String) {
         let dir = self.sgdb_dir(sgdb_id);
         let _ = std::fs::create_dir_all(&dir);
 
-        // Icon — use SGDB icons API with small dimensions preference
-        let icon_path = if skip_icon {
-            String::new()
+        // Icon
+        let icon_path = if let Some(existing) = crate::parser::find_image_file(&dir, "icon") {
+            existing.to_string_lossy().into_owned()
         } else {
             let sgdb_key = self.sgdb_api_key();
             if sgdb_key.is_empty() {
@@ -424,7 +424,6 @@ impl SteamClient {
                     Ok(r) if r.status().is_success() => {
                         if let Ok(raw) = r.json::<serde_json::Value>() {
                             if let Some(data) = raw.get("data").and_then(|d| d.as_array()) {
-                                // Pick smallest <= 128
                                 let mut best: Option<(&serde_json::Value, i64)> = None;
                                 for item in data {
                                     let w = item.get("width").and_then(|v| v.as_i64()).unwrap_or(9999);
@@ -436,7 +435,7 @@ impl SteamClient {
                                 }
                                 if let Some(chosen) = best.map(|(item, _)| item) {
                                     if let Some(url) = chosen.get("url").and_then(|u| u.as_str()) {
-                                        let ext = Path::new(url).extension().and_then(|e| e.to_str()).unwrap_or("png");
+                                        let ext = crate::parser::url_extension(url);
                                         let dest = dir.join(format!("icon.{}", ext));
                                         if self.download_file(url, &dest).is_ok() {
                                             let converted = crate::parser::convert_ico_to_png(&dest).unwrap_or_else(|_| dest.clone());
@@ -453,22 +452,35 @@ impl SteamClient {
         };
 
         // Hero
-        let hero_path = if let Some(url) = self.fetch_sgdb_asset_url(sgdb_id, "heroes") {
-            self.fetch_image(&url, &dir.join("library_hero.jpg"))
+        let hero_path = if let Some(existing) = crate::parser::find_image_file(&dir, "library_hero") {
+            existing.to_string_lossy().into_owned()
+        } else if let Some(url) = self.fetch_sgdb_asset_url(sgdb_id, "heroes") {
+            let ext = crate::parser::url_extension(&url);
+            self.fetch_image(&url, &dir.join(format!("library_hero.{}", ext)))
         } else { String::new() };
 
         // Grid
-        let grid_path = if let Some(url) = self.fetch_sgdb_asset_url(sgdb_id, "grids") {
-            self.fetch_image(&url, &dir.join("library_600x900.jpg"))
+        let grid_path = if let Some(existing) = crate::parser::find_image_file(&dir, "library_600x900") {
+            existing.to_string_lossy().into_owned()
+        } else if let Some(url) = self.fetch_sgdb_asset_url(sgdb_id, "grids") {
+            let ext = crate::parser::url_extension(&url);
+            self.fetch_image(&url, &dir.join(format!("library_600x900.{}", ext)))
         } else { String::new() };
 
         // Logo
-        let logo_path = if let Some(url) = self.fetch_sgdb_asset_url(sgdb_id, "logos") {
-            self.fetch_image(&url, &dir.join("logo.png"))
+        let logo_path = if let Some(existing) = crate::parser::find_image_file(&dir, "logo") {
+            existing.to_string_lossy().into_owned()
+        } else if let Some(url) = self.fetch_sgdb_asset_url(sgdb_id, "logos") {
+            let ext = crate::parser::url_extension(&url);
+            self.fetch_image(&url, &dir.join(format!("logo.{}", ext)))
         } else { String::new() };
 
         // Header
-        let header_path = self.force_download_sgdb(sgdb_id, "header", false);
+        let header_path = if let Some(existing) = crate::parser::find_image_file(&dir, "header") {
+            existing.to_string_lossy().into_owned()
+        } else {
+            self.force_download_sgdb(sgdb_id, "header", false)
+        };
 
         (icon_path, hero_path, grid_path, logo_path, header_path)
     }

@@ -117,6 +117,8 @@ pub struct Game {
     pub game_path: String,
     /// SteamGridDB game ID (if matched) for image downloads.
     pub sgdb_id: String,
+    /// Per-game shadPS4 version path (empty = use global default).
+    pub shadps4_version: String,
 }
 
 impl Game {
@@ -154,6 +156,7 @@ pub fn unmatched_game(lutris_id: i64, name: &str, slug: &str, playtime: f64, las
         sort_title: String::new(),
         game_path: String::new(),
         sgdb_id: String::new(),
+        shadps4_version: String::new(),
     }
 }
 
@@ -199,6 +202,23 @@ pub fn ps4_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
 
 pub fn sgdb_data_dir(save_dir: &str, sgdb_id: &str) -> PathBuf {
     Path::new(save_dir).join("data").join("steamgriddb").join(sgdb_id)
+}
+
+/// Try to find an image file by trying multiple extensions.
+pub fn find_image_file(dir: &Path, base_name: &str) -> Option<PathBuf> {
+    for ext in &["png", "jpg", "jpeg", "webp"] {
+        let p = dir.join(format!("{}.{}", base_name, ext));
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Get the extension from a URL path.
+pub fn url_extension(url: &str) -> &str {
+    let path = std::path::Path::new(url);
+    path.extension().and_then(|e| e.to_str()).unwrap_or("png")
 }
 
 pub fn achievements_dir(save_dir: &str, app_id: &str) -> PathBuf {
@@ -316,6 +336,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         sort_title: entry.sort_title.clone(),
         game_path: String::new(),
         sgdb_id: entry.sgdb_id.clone().unwrap_or_default(),
+        shadps4_version: entry.shadps4_version.clone().unwrap_or_default(),
     };
 
     let ach_dir = achievements_dir(save_dir, app_id);

@@ -929,6 +929,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
                     ignored: Some(0),
                     manual_unmatch: Some(0),
                     sort_title: String::new(),
+                    shadps4_version: None,
                 };
                 watcher.watch(&entry, &g.achievements);
             }
@@ -1599,8 +1600,10 @@ fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
     // Look up game info for PS4 launch support
     let game_info = state.borrow().games.iter()
         .find(|g| g.lutris_id == lutris_id)
-        .map(|g| (g.kind.clone(), g.game_path.clone(), g.name.clone(), state.borrow().cfg.shadps4_executable.clone()))
+        .map(|g| (g.kind.clone(), g.game_path.clone(), g.name.clone(), g.shadps4_version.clone()))
         .unwrap_or_default();
+
+    let global_shadps4_exe = state.borrow().cfg.shadps4_executable.clone();
 
     let btn = gtk4::Button::new();
     btn.set_valign(gtk4::Align::Center);
@@ -1652,11 +1655,18 @@ fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
             s.send(AppMessage::GameStopped(lutris_id)).ok();
         } else {
             drop(map);
-            let (kind, game_path, game_name, shadps4_exe) = &game_info;
+            let (kind, game_path, game_name, per_game_version) = &game_info;
             if kind == "ps4" {
-                // Launch shadPS4 with game directory
-                let exe = if shadps4_exe.is_empty() { "shadps4" } else { shadps4_exe.as_str() };
+                // Use per-game version if set, otherwise fall back to global
+                let exe = if !per_game_version.is_empty() {
+                    per_game_version.as_str()
+                } else if !global_shadps4_exe.is_empty() {
+                    &global_shadps4_exe
+                } else {
+                    "shadps4"
+                };
                 match std::process::Command::new(exe)
+                    .arg("-g")
                     .arg(game_path)
                     .spawn()
                 {
@@ -2096,6 +2106,7 @@ fn display_game(game: &Game, state: &SharedState) {
                 ignored: Some(0),
                 manual_unmatch: Some(0),
                 sort_title: String::new(),
+                shadps4_version: None,
             };
             if let Ok(updated) = load_game(&entry, SAVE_DIR) {
                 apply_game_update(&state_for_reload, updated);
@@ -2829,6 +2840,73 @@ fn show_settings_dialog(
     ps4_exe_row.set_title("shadPS4 executable path");
     ps4_exe_row.set_text(&cfg.shadps4_executable);
 
+    // Detect shadPS4 versions from Qt Launcher
+    let shadps4_versions = crate::shadps4::read_shadps4_versions();
+    let detected_path = crate::shadps4::detect_shadps4_version_path();
+
+    // Version selector dropdown
+    if !shadps4_versions.is_empty() {
+        let trunc = |s: &str| -> String {
+            if s.len() > 30 {
+                format!("{}…", &s[..28])
+            } else {
+                s.to_string()
+            }
+        };
+        let version_strings: Vec<String> = shadps4_versions.iter()
+            .map(|v| format!("{}  ({})", &trunc(&v.name), &trunc(&v.codename)))
+            .collect();
+        let version_model = gtk4::StringList::new(&version_strings.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        let version_dropdown = gtk4::DropDown::new(Some(version_model), None::<&gtk4::PropertyExpression>);
+
+        // Find which version is currently selected (either in config or detected)
+        let current_exe = if cfg.shadps4_executable.is_empty() {
+            detected_path.clone().unwrap_or_default()
+        } else {
+            cfg.shadps4_executable.clone()
+        };
+        let mut selected_idx: u32 = 0;
+        if !current_exe.is_empty() {
+            for (i, v) in shadps4_versions.iter().enumerate() {
+                let v_path = v.path.trim_matches('"');
+                if v_path == current_exe {
+                    selected_idx = i as u32;
+                    break;
+                }
+            }
+        }
+        version_dropdown.set_selected(selected_idx);
+
+        let ps4_exe_row_c = ps4_exe_row.clone();
+        version_dropdown.connect_selected_notify(move |dd| {
+            let idx = dd.selected();
+            if let Some(versions) = crate::shadps4::read_shadps4_versions().into_iter().nth(idx as usize) {
+                let path = versions.path.trim_matches('"').to_string();
+                ps4_exe_row_c.set_text(&path);
+            }
+        });
+
+        let version_row = adw::ActionRow::new();
+        version_row.set_title("Version");
+        version_row.set_subtitle("Select a shadPS4 version");
+        version_dropdown.set_valign(gtk4::Align::Center);
+        version_row.add_suffix(&version_dropdown);
+        ps4_exe_group.add(&version_row);
+    }
+
+    // Auto-detect button
+    if let Some(ref detected) = detected_path {
+        let auto_btn = gtk4::Button::with_label("Auto-detect");
+        auto_btn.add_css_class("flat");
+        auto_btn.set_valign(gtk4::Align::Center);
+        let exe_row = ps4_exe_row.clone();
+        let detected_path = detected.clone();
+        auto_btn.connect_clicked(move |_| {
+            exe_row.set_text(&detected_path);
+        });
+        ps4_exe_row.add_suffix(&auto_btn);
+    }
+
     let ps4_exe_browse = gtk4::Button::with_label("Browse…");
     ps4_exe_browse.add_css_class("flat");
     ps4_exe_browse.set_valign(gtk4::Align::Center);
@@ -3051,9 +3129,13 @@ fn show_game_context_menu(
 
     let edit_action = gio::SimpleAction::new("edit", None);
     let sc = state_clone.clone();
-    let gc = game_clone.clone();
+    let lid_for_edit = game_clone.lutris_id;
     edit_action.connect_activate(move |_, _| {
-        show_game_settings_dialog(&sc, &gc);
+        // Read the latest game state from memory (may have been updated by auto-match etc.)
+        let game = sc.borrow().games.iter().find(|g| g.lutris_id == lid_for_edit).cloned();
+        if let Some(game) = game {
+            show_game_settings_dialog(&sc, &game);
+        }
     });
     actions.add_action(&edit_action);
 
@@ -3215,6 +3297,76 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     let sort_group = adw::PreferencesGroup::new();
     sort_group.add(&sort_entry);
     general_page.append(&sort_group);
+
+    // Per-game shadPS4 version selector (PS4 only)
+    let pending_version: std::rc::Rc<std::cell::RefCell<Option<String>>> = Default::default();
+    if game.kind == "ps4" {
+        let shadps4_versions = crate::shadps4::read_shadps4_versions();
+        if !shadps4_versions.is_empty() {
+            let version_group = adw::PreferencesGroup::new();
+            version_group.set_title("shadPS4 Version");
+
+            let trunc = |s: &str| -> String {
+                if s.len() > 30 {
+                    format!("{}…", &s[..28])
+                } else {
+                    s.to_string()
+                }
+            };
+
+            let version_strings: Vec<String> = std::iter::once("Follow global".to_string())
+                .chain(shadps4_versions.iter().map(|v| format!("{}  ({})", &trunc(&v.name), &trunc(&v.codename))))
+                .collect();
+            let str_refs: Vec<&str> = version_strings.iter().map(|s| s.as_str()).collect();
+            let version_model = gtk4::StringList::new(&str_refs);
+            let version_dropdown = gtk4::DropDown::new(Some(version_model), None::<&gtk4::PropertyExpression>);
+
+            // Find selected index
+            let current_ver = if game.shadps4_version.is_empty() {
+                "Follow global".to_string()
+            } else {
+                let mut found = "".to_string();
+                for v in &shadps4_versions {
+                    let v_path = v.path.trim_matches('"');
+                    if v_path == game.shadps4_version {
+                        found = format!("{}  ({})", &trunc(&v.name), &trunc(&v.codename));
+                        break;
+                    }
+                }
+                if found.is_empty() { "Follow global".to_string() } else { found }
+            };
+            let mut selected_idx = 0u32;
+            for (i, s) in version_strings.iter().enumerate() {
+                if s == &current_ver {
+                    selected_idx = i as u32;
+                    break;
+                }
+            }
+            version_dropdown.set_selected(selected_idx);
+
+            let pending_version_c = pending_version.clone();
+            version_dropdown.connect_selected_notify(move |dd| {
+                let idx = dd.selected();
+                let path = if idx == 0 {
+                    String::new()
+                } else {
+                    match crate::shadps4::read_shadps4_versions().into_iter().nth((idx - 1) as usize) {
+                        Some(v) => v.path.trim_matches('"').to_string(),
+                        None => return,
+                    }
+                };
+                *pending_version.borrow_mut() = Some(path);
+            });
+
+            let version_row = adw::ActionRow::new();
+            version_row.set_title("Version");
+            version_row.set_subtitle("Override the emulator version for this game");
+            version_dropdown.set_valign(gtk4::Align::Center);
+            version_row.add_suffix(&version_dropdown);
+            version_group.add(&version_row);
+            general_page.append(&version_group);
+        }
+    }
 
     if game.lutris_id != 0 && !game.app_id.is_empty() && game.kind != "ps4" {
         let unmatch_group = adw::PreferencesGroup::new();
@@ -3421,8 +3573,10 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     };
 
     // --- Images page (only for matched games) ---
+    let pending_copies: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, String>>> = Default::default();
+    let pending_version: std::rc::Rc<std::cell::RefCell<Option<String>>> = Default::default();
     if !game.app_id.is_empty() {
-        let images_page = build_image_manager_content(state, game, &win);
+        let images_page = build_image_manager_content_with_drafts(state, game, &win, Some(pending_copies.clone()));
         sidebar.append(&sidebar_row("image-x-generic-symbolic", "Images"));
         stack.add_named(&images_page, Some("images"));
     }
@@ -3522,6 +3676,10 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     let dlc_switches_c = dlc_switches.clone();
     let app_details_c = Rc::new(RefCell::new(app_details.clone()));
     let win_s = win.clone();
+    let pending_version_save = pending_version.clone();
+    let pending_copies_save = pending_copies.clone();
+    let sgdb_id_save = game.sgdb_id.clone();
+    let kind_save = game.kind.clone();
     save_btn.connect_clicked(move |_| {
         let title = title_entry_c.text().to_string();
         let sort_title = sort_entry_c.text().to_string();
@@ -3530,6 +3688,54 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
         }
         if let Err(e) = crate::db::update_sort_title(&state_clone.borrow().db, db_id, &sort_title) {
             eprintln!("Failed to update sort title: {}", e);
+        }
+
+        // Apply pending shadPS4 version
+        if let Some(ver) = pending_version_save.borrow().as_ref() {
+            let _ = crate::db::set_shadps4_version(&state_clone.borrow().db, db_id, ver);
+        }
+
+        // Process pending image copies
+        {
+            let pc = pending_copies_save.borrow();
+            for (asset, src_path) in pc.iter() {
+                let cloud_dir = if !sgdb_id_save.is_empty() {
+                    crate::parser::sgdb_data_dir(SAVE_DIR, &sgdb_id_save)
+                } else if kind_save == "sgdb" {
+                    crate::parser::sgdb_data_dir(SAVE_DIR, &app_id)
+                } else if kind_save == "ps4" {
+                    crate::parser::ps4_data_dir(SAVE_DIR, &app_id)
+                } else {
+                    crate::parser::data_dir(SAVE_DIR, &app_id)
+                };
+                let file_name = match asset.as_str() {
+                    "icon" => "icon.png",
+                    "hero" => "library_hero.jpg",
+                    "grid" => "library_600x900.jpg",
+                    "header" => "header.jpg",
+                    "logo" => "logo.png",
+                    _ => continue,
+                };
+                let dest = cloud_dir.join(file_name);
+                let is_ico = src_path.ends_with(".ico");
+                if is_ico {
+                    let ico_dest = dest.with_extension("ico");
+                    if std::fs::copy(&src_path, &ico_dest).is_ok() {
+                        let _ = crate::parser::convert_ico_to_png(&ico_dest);
+                    }
+                } else if let Err(e) = std::fs::copy(&src_path, &dest) {
+                    eprintln!("Failed to copy {}: {}", asset, e);
+                }
+            }
+        }
+
+        // Handle pending unmatch
+        if pending_copies_save.borrow().contains_key("__unmatch__") {
+            let _ = crate::db::set_sgdb_id(&state_clone.borrow().db, db_id, "");
+            if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
+                g.sgdb_id.clear();
+            }
+            pending_copies_save.borrow_mut().remove("__unmatch__");
         }
 
         // Save logo settings if the game has a logo
@@ -3570,6 +3776,9 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
         if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
             g.name = title.clone();
             g.sort_title = sort_title.clone();
+            if let Some(ver) = pending_version_save.borrow().as_ref() {
+                g.shadps4_version = ver.clone();
+            }
         }
         if !app_id.is_empty() {
             state_clone.borrow().game_names.lock().unwrap().insert(app_id.clone(), title);
@@ -3610,6 +3819,15 @@ fn show_game_settings_dialog(state: &SharedState, game: &Game) {
 }
 
 fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &adw::Window) -> gtk4::Box {
+    build_image_manager_content_with_drafts(state, game, parent_win, None)
+}
+
+fn build_image_manager_content_with_drafts(
+    state: &SharedState,
+    game: &Game,
+    parent_win: &adw::Window,
+    pending_copies: Option<std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, String>>>>,
+) -> gtk4::Box {
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
     content.set_margin_start(16);
     content.set_margin_end(16);
@@ -3632,7 +3850,6 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
     let cloud_base = cloud_dir.to_string_lossy().into_owned();
 
     // Helper: find the best available path for an image asset.
-    // Checks: 1) game field (icon_path etc.), 2) SGDB dir, 3) native dir.
     let find_best_path = |game: &Game, field: &str, file: &str| -> String {
         let field_path = match field {
             "icon" if !game.icon_path.is_empty() => game.icon_path.clone(),
@@ -3645,14 +3862,12 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
         if !field_path.is_empty() && std::path::Path::new(&field_path).is_file() {
             return field_path;
         }
-        // SGDB dir (if different from cloud_dir)
         if !game.sgdb_id.is_empty() {
             let sgdb = format!("{}/{}", crate::parser::sgdb_data_dir(SAVE_DIR, &game.sgdb_id).to_string_lossy(), file);
             if std::path::Path::new(&sgdb).is_file() {
                 return sgdb;
             }
         }
-        // Native dir (per game kind)
         let native = if game.kind == "ps4" {
             format!("{}/{}", crate::parser::ps4_data_dir(SAVE_DIR, &id).to_string_lossy(), file)
         } else {
@@ -3661,7 +3876,6 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
         if std::path::Path::new(&native).is_file() {
             return native;
         }
-        // For PS4 icon, also check the ps4 icon copy
         if field == "icon" && game.kind == "ps4" && !game.icon_path.is_empty() && std::path::Path::new(&game.icon_path).is_file() {
             return game.icon_path.clone();
         }
@@ -3686,7 +3900,21 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
         row.set_hexpand(true);
         row.set_valign(gtk4::Align::Center);
 
-        let img_path = find_best_path(game, asset, file);
+        // Determine the preview path: draft > best path from game fields
+        let img_path = {
+            let draft_path = pending_copies.as_ref()
+                .and_then(|pc| pc.borrow().get(asset).cloned());
+            if let Some(ref src) = draft_path {
+                if std::path::Path::new(src).is_file() {
+                    src.clone()
+                } else {
+                    find_best_path(game, asset, file)
+                }
+            } else {
+                find_best_path(game, asset, file)
+            }
+        };
+
         let preview = gtk4::Picture::for_filename(&img_path);
         preview.set_content_fit(gtk4::ContentFit::ScaleDown);
         preview.set_size_request(thumb_w, thumb_h);
@@ -3712,12 +3940,25 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
             let dest_path = dest_path.clone();
             let state_clone = state.clone();
             let game_clone = game.clone();
+            let pending_copies = pending_copies.clone();
+            let asset_c = asset.to_string();
             move || {
                 while let Some(child) = preview_wrapper.first_child() {
                     preview_wrapper.remove(&child);
                 }
-                if std::path::Path::new(&dest_path).exists() {
-                    let p = gtk4::Picture::for_filename(&dest_path);
+                // Check pending copy first, then dest_path, then placeholder
+                let preview_src = pending_copies.as_ref()
+                    .and_then(|pc| pc.borrow().get(&asset_c).cloned())
+                    .filter(|p| std::path::Path::new(p).is_file())
+                    .or_else(|| {
+                        if std::path::Path::new(&dest_path).exists() {
+                            Some(dest_path.clone())
+                        } else {
+                            None
+                        }
+                    });
+                if let Some(path) = preview_src {
+                    let p = gtk4::Picture::for_filename(&path);
                     p.set_content_fit(gtk4::ContentFit::ScaleDown);
                     preview_wrapper.append(&p);
                 } else {
@@ -3737,9 +3978,13 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
 
         // Browse
         let browse_btn = gtk4::Button::with_label("Browse…");
-        let dest_path_browse = dest_path.clone();
         let state_browse = state.clone();
         let refresh = refresh_images.clone();
+        let dest_path_btn = dest_path.clone();
+        let pending_copies_btn = pending_copies.clone();
+        let asset_btn = asset.to_string();
+        let label_btn = label.to_string();
+        let pending_copies_browse = pending_copies_btn.clone();
         browse_btn.connect_clicked(move |_| {
             let filter = gtk4::FileFilter::new();
             filter.set_name(Some("Images"));
@@ -3750,23 +3995,33 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
             let dialog = gtk4::FileDialog::new();
             dialog.set_title("Select image");
             dialog.set_default_filter(Some(&filter));
-            let dest = dest_path.clone();
+            let dest = dest_path_btn.clone();
             let refresh_c = refresh.clone();
+            let pc = pending_copies_browse.clone();
+            let asset_name = asset_btn.clone();
+            let label_name = label_btn.clone();
             dialog.open(Some(&state_browse.borrow().window), None::<&gio::Cancellable>, move |result| {
                 if let Ok(file) = result {
                     if let Some(path) = file.path() {
-                        let is_ico = path.extension().and_then(|e| e.to_str()) == Some("ico");
-                        if is_ico {
-                            let ico_dest = std::path::Path::new(&dest).with_extension("ico");
-                            if std::fs::copy(&path, &ico_dest).is_ok() {
-                                if let Ok(png) = crate::parser::convert_ico_to_png(&ico_dest) {
-                                    let _ = std::fs::remove_file(&ico_dest);
+                        if let Some(ref pc_inner) = pc {
+                            // Draft mode: store pending copy, don't copy yet
+                            pc_inner.borrow_mut().insert(asset_name.clone(), path.to_string_lossy().into_owned());
+                            refresh_c();
+                        } else {
+                            // Direct mode: copy immediately (legacy behavior)
+                            let is_ico = path.extension().and_then(|e| e.to_str()) == Some("ico");
+                            if is_ico {
+                                let ico_dest = std::path::Path::new(&dest).with_extension("ico");
+                                if std::fs::copy(&path, &ico_dest).is_ok() {
+                                    if crate::parser::convert_ico_to_png(&ico_dest).is_ok() {
+                                        let _ = std::fs::remove_file(&ico_dest);
+                                    }
                                 }
+                            } else if let Err(e) = std::fs::copy(&path, &dest) {
+                                eprintln!("Failed to copy image: {}", e);
                             }
-                        } else if let Err(e) = std::fs::copy(&path, &dest) {
-                            eprintln!("Failed to copy image: {}", e);
+                            refresh_c();
                         }
-                        refresh_c();
                     }
                 }
             });
@@ -3787,7 +4042,7 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
             btns.append(&btn);
         }
 
-        // SGDB button — use sgdb_id if set, otherwise query by Steam app ID for Steam/GOG games
+        // SGDB button
         let sgdb_id_for_picker = if !game.sgdb_id.is_empty() {
             game.sgdb_id.clone()
         } else {
@@ -3803,7 +4058,7 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
             let dims: Vec<&str> = dimensions.to_vec();
             let sgdb_id_c = sgdb_id_for_picker.clone();
             btn.connect_clicked(move |_| {
-                show_sgdb_picker(&steam, &sgdb_id_c, &asset_c, sgdb_is_steam_id, &dims, &parent, refresh.clone());
+                show_sgdb_picker(&steam, &sgdb_id_c, &asset_c, sgdb_is_steam_id, &dims, &parent, refresh.clone(), pending_copies_btn.clone());
             });
             btns.append(&btn);
         }
@@ -3814,6 +4069,8 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
             let sc = state.clone();
             let gc = game.clone();
             let refresh = refresh_images.clone();
+            let pending_copies_reset = pending_copies.clone();
+            let asset_reset = asset.to_string();
             reset_btn.connect_clicked(move |_| {
                 let app_id = gc.app_id.clone();
                 let game_path = gc.game_path.clone();
@@ -3831,8 +4088,16 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
                         None
                     }
                 };
-                if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == gc.db_id) {
-                    g.icon_path = default_path.clone().unwrap_or_default();
+                if let Some(ref pc) = pending_copies_reset {
+                    // Draft mode: remove pending, set icon_path in pending
+                    pc.borrow_mut().remove(&asset_reset);
+                    if let Some(path) = default_path {
+                        pc.borrow_mut().insert(asset_reset.clone(), path);
+                    }
+                } else if let Some(path) = default_path {
+                    if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == gc.db_id) {
+                        g.icon_path = path;
+                    }
                 }
                 refresh();
             });
@@ -3869,22 +4134,43 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
             btn_box.append(&label);
             let unmatch_btn = gtk4::Button::with_label("Unmatch SGDB");
             unmatch_btn.add_css_class("destructive-action");
+            let pending_pc = pending_copies.clone();
             let sc = state.clone();
             let did = game.db_id;
+            let pw = parent_win.clone();
             unmatch_btn.connect_clicked(move |_| {
-                let _ = crate::db::set_sgdb_id(&sc.borrow().db, did, "");
-                if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == did) {
-                    g.sgdb_id.clear();
-                }
-                // Refresh the settings dialog's Images page
-                if let Some((ref sw, ref ss, sdb_id)) = sc.borrow().settings_data.clone() {
-                    if sdb_id == did && sw.is_visible() {
-                        if let Some(old) = ss.child_by_name("images") {
-                            ss.remove(&old);
+                if pending_pc.is_some() {
+                    // Draft mode: mark unmatch in pending (use a sentinel key)
+                    pending_pc.as_ref().unwrap().borrow_mut().insert("__unmatch__".to_string(), String::new());
+                    // Rebuild the images page to show "Match" button
+                    if let Some((ref sw, ref ss, sdb_id)) = sc.borrow().settings_data.clone() {
+                        if sdb_id == did && sw.is_visible() {
+                            if let Some(old) = ss.child_by_name("images") {
+                                ss.remove(&old);
+                            }
+                            if let Some(game) = sc.borrow().games.iter().find(|g| g.db_id == did).cloned() {
+                                let mut g2 = game.clone();
+                                g2.sgdb_id.clear();
+                                let new_page = build_image_manager_content_with_drafts(&sc, &g2, &pw, Some(pending_pc.clone().unwrap()));
+                                ss.add_named(&new_page, Some("images"));
+                            }
                         }
-                        if let Some(game) = sc.borrow().games.iter().find(|g| g.db_id == did).cloned() {
-                            let new_page = build_image_manager_content(&sc, &game, &sw);
-                            ss.add_named(&new_page, Some("images"));
+                    }
+                } else {
+                    // Direct mode (legacy)
+                    let _ = crate::db::set_sgdb_id(&sc.borrow().db, did, "");
+                    if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == did) {
+                        g.sgdb_id.clear();
+                    }
+                    if let Some((ref sw, ref ss, sdb_id)) = sc.borrow().settings_data.clone() {
+                        if sdb_id == did && sw.is_visible() {
+                            if let Some(old) = ss.child_by_name("images") {
+                                ss.remove(&old);
+                            }
+                            if let Some(game) = sc.borrow().games.iter().find(|g| g.db_id == did).cloned() {
+                                let new_page = build_image_manager_content_with_drafts(&sc, &game, &pw, None);
+                                ss.add_named(&new_page, Some("images"));
+                            }
                         }
                     }
                 }
@@ -3898,7 +4184,7 @@ fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &ad
     content
 }
 
-fn show_sgdb_picker(steam: &Arc<crate::steam::SteamClient>, id: &str, asset: &str, is_steam_id: bool, dimensions: &[&str], parent: &adw::Window, on_done: std::rc::Rc<dyn Fn()>) {
+fn show_sgdb_picker(steam: &Arc<crate::steam::SteamClient>, id: &str, asset: &str, is_steam_id: bool, dimensions: &[&str], parent: &adw::Window, on_done: std::rc::Rc<dyn Fn()>, pending_copies: Option<std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, String>>>>) {
     let picker = adw::Window::new();
     picker.set_default_width(600);
     picker.set_default_height(500);
@@ -4101,28 +4387,43 @@ fn show_sgdb_picker(steam: &Arc<crate::steam::SteamClient>, id: &str, asset: &st
                 let dest_dl = dest.clone();
                 let fn_dl = file_name.clone();
                 let dir_dl = dest_dir.clone();
+                let asset_dl = asset_clone.clone();
+                let pending_dl = pending_copies.clone();
                 let cb: std::rc::Rc<dyn Fn()> = std::rc::Rc::new(move || {
-                    let _ = std::fs::create_dir_all(&dir_dl);
-                    if fn_dl.starts_with("icon.") {
-                        for old_ext in ["png", "ico", "jpg", "webp"] {
-                            let _ = std::fs::remove_file(&format!("{}/icon.{}", dir_dl, old_ext));
+                    if let Some(ref pc) = pending_dl {
+                        // Draft mode: download to temp, store in pending_copies, don't save yet
+                        let tmp = std::env::temp_dir().join(format!("sgdb_{}", asset_dl));
+                        if steam_dl.download_file(&dl_url, &tmp).is_ok() {
+                            pc.borrow_mut().insert(asset_dl.clone(), tmp.to_string_lossy().into_owned());
+                            on_done_dl();
+                            picker_dl.close();
+                        } else {
+                            eprintln!("Download failed for {}", dl_url);
                         }
-                    }
-                    if steam_dl.download_file(&dl_url, std::path::Path::new(&dest_dl)).is_ok() {
-                        if fn_dl.ends_with(".ico") {
-                            match crate::parser::convert_ico_to_png(std::path::Path::new(&dest_dl)) {
-                                Ok(png_path) => eprintln!("Converted ICO to {}", png_path.display()),
-                                Err(e) => {
-                                    eprintln!("ICO conversion failed: {}, trying direct load", e);
-                                    let png_dest = std::path::Path::new(&dest_dl).with_extension("png");
-                                    let _ = std::fs::rename(&dest_dl, &png_dest);
-                                }
+                    } else {
+                        // Direct mode: download immediately (legacy behavior)
+                        let _ = std::fs::create_dir_all(&dir_dl);
+                        if fn_dl.starts_with("icon.") {
+                            for old_ext in ["png", "ico", "jpg", "webp"] {
+                                let _ = std::fs::remove_file(&format!("{}/icon.{}", dir_dl, old_ext));
                             }
                         }
-                        on_done_dl();
-                        picker_dl.close();
-                    } else {
-                        eprintln!("Download failed for {}", dl_url);
+                        if steam_dl.download_file(&dl_url, std::path::Path::new(&dest_dl)).is_ok() {
+                            if fn_dl.ends_with(".ico") {
+                                match crate::parser::convert_ico_to_png(std::path::Path::new(&dest_dl)) {
+                                    Ok(png_path) => eprintln!("Converted ICO to {}", png_path.display()),
+                                    Err(e) => {
+                                        eprintln!("ICO conversion failed: {}, trying direct load", e);
+                                        let png_dest = std::path::Path::new(&dest_dl).with_extension("png");
+                                        let _ = std::fs::rename(&dest_dl, &png_dest);
+                                    }
+                                }
+                            }
+                            on_done_dl();
+                            picker_dl.close();
+                        } else {
+                            eprintln!("Download failed for {}", dl_url);
+                        }
                     }
                 });
                 let cb_g = cb.clone();
@@ -4405,7 +4706,7 @@ fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, lutr
             return;
         }
         // Download images from SGDB
-        let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets(&sgdb_id, false);
+        let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets(&sgdb_id);
 
         // Build a game entry and send it to the UI
         if let Ok(Some(entry)) = crate::db::find_by_lutris_id(&db, lutris_id) {
@@ -4435,6 +4736,7 @@ fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, lutr
                 sort_title: entry.sort_title.clone(),
                 game_path: String::new(),
                 sgdb_id: String::new(),
+                shadps4_version: String::new(),
             };
             let _ = sender.send(AppMessage::NewGame(game));
         }
@@ -4493,6 +4795,7 @@ pub fn enrich_game_async(
             ignored: Some(0),
             manual_unmatch: Some(0),
             sort_title: String::new(),
+            shadps4_version: None,
         };
 
         let Ok(mut game) = load_game(&entry, SAVE_DIR) else {
@@ -4926,7 +5229,7 @@ fn show_mass_match_dialog(state: &SharedState) {
                         let sender = state_ps4.borrow().sender.clone();
                         let sgdb_id_dl = sgdb_id.clone();
                         std::thread::spawn(move || {
-                            let (icon, hero, grid, logo, header) = steam_dl.ensure_sgdb_assets(&sgdb_id_dl, true);
+                            let (icon, hero, grid, logo, header) = steam_dl.ensure_sgdb_assets(&sgdb_id_dl);
                             let _ = sender.send(AppMessage::SgdbAssetsDownloaded {
                                 db_id, sgdb_id: sgdb_id_dl, icon, hero, grid, logo, header,
                             });
@@ -5272,17 +5575,12 @@ fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str, par
                                     }
                                 }
                             }
-                            let kind = state_c3.borrow().games.iter()
-                                .find(|g| g.db_id == db_id)
-                                .map(|g| g.kind.clone())
-                                .unwrap_or_default();
                             let steam = state_c3.borrow().steam.clone();
                             let sgdb_id_d = sgdb_id_c.clone();
                             let sender = state_c3.borrow().sender.clone();
                             let db_id_for_msg = db_id;
                             std::thread::spawn(move || {
-                                let skip_icon = kind == "ps4";
-                                let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets(&sgdb_id_d, skip_icon);
+                                let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets(&sgdb_id_d);
                                 let _ = sender.send(AppMessage::SgdbAssetsDownloaded {
                                     db_id: db_id_for_msg,
                                     sgdb_id: sgdb_id_d,

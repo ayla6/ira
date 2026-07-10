@@ -550,9 +550,7 @@ fn build_game_logo_page(game: &Game) -> Option<(gtk4::Box, Rc<RefCell<String>>, 
             let h = area_h as f64;
             if w <= 0.0 || h <= 0.0 { return; }
             let pct = adj_for_draw.value() as i32;
-            let (sw, sh) = super::game_display::logo_scaled_dims(w, h, pb_w, pb_h, pct);
-            let lw = sw as f64;
-            let lh = sh as f64;
+            let (lw, lh) = super::game_display::logo_scaled_dims(w, h, pb_w, pb_h, pct);
             let pos = pos_for_draw.borrow().clone();
             let (halign, valign) = super::game_display::logo_position_align(&pos);
             let x = match halign {

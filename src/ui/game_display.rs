@@ -399,9 +399,7 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
                     return;
                 }
 
-                let (sw, sh) = logo_scaled_dims(w, h, pb_w, pb_h, logo_pct);
-                let lw = sw as f64;
-                let lh = sh as f64;
+                let (lw, lh) = logo_scaled_dims(w, h, pb_w, pb_h, logo_pct);
 
                 let (halign, valign) = logo_position_align(&logo_pos);
 
@@ -500,12 +498,12 @@ fn format_lastplayed(ts: i64) -> String {
         .unwrap_or_else(|| "Never".to_string())
 }
 
-pub(crate) fn logo_scaled_dims(hero_w: f64, hero_h: f64, src_w: f64, src_h: f64, logo_pct: i32) -> (i32, i32) {
+pub(crate) fn logo_scaled_dims(hero_w: f64, hero_h: f64, src_w: f64, src_h: f64, logo_pct: i32) -> (f64, f64) {
     let max_h = hero_h * (logo_pct as f64 / 100.0);
     let max_w = hero_w * (logo_pct as f64 / 200.0);
     let scale = (max_w / src_w).min(max_h / src_h);
-    let w = (src_w * scale).max(32.0) as i32;
-    let h = (src_h * scale).max(32.0) as i32;
+    let w = (src_w * scale).max(32.0);
+    let h = (src_h * scale).max(32.0);
     (w, h)
 }
 

@@ -643,6 +643,7 @@ pub fn load_shadps4_game(
         lutris_name: shad.title.clone(),
         manual_unmatch: false,
         sort_title: sort_title.to_string(),
+        game_path: shad.game_path.to_string_lossy().into_owned(),
     };
 
     // Image paths — check data/ps4/{NPWR_ID}/ first, then shadPS4 defaults

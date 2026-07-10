@@ -16,6 +16,10 @@ pub struct Config {
     pub show_hidden_games: bool,
     #[serde(default = "default_grid_cover_width")]
     pub grid_cover_width: i32,
+    #[serde(default)]
+    pub shadps4_enabled: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub shadps4_executable: String,
 }
 
 impl Default for Config {
@@ -27,6 +31,8 @@ impl Default for Config {
             close_to_background: false,
             show_hidden_games: false,
             grid_cover_width: DEFAULT_GRID_COVER_WIDTH,
+            shadps4_enabled: false,
+            shadps4_executable: String::new(),
         }
     }
 }
@@ -121,6 +127,8 @@ impl Config {
             close_to_background: self.close_to_background,
             show_hidden_games: self.show_hidden_games,
             grid_cover_width: self.grid_cover_width,
+            shadps4_enabled: self.shadps4_enabled,
+            shadps4_executable: self.shadps4_executable.clone(),
         };
         if steam_err.is_err() {
             plaintext.steam_api_key = self.steam_api_key.clone();

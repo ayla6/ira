@@ -1554,6 +1554,12 @@ fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
     let running_games = state.borrow().running_games.clone();
     let sender = state.borrow().sender.clone();
 
+    // Look up game info for PS4 launch support
+    let game_info = state.borrow().games.iter()
+        .find(|g| g.lutris_id == lutris_id)
+        .map(|g| (g.kind.clone(), g.game_path.clone(), g.name.clone(), state.borrow().cfg.shadps4_executable.clone()))
+        .unwrap_or_default();
+
     let btn = gtk4::Button::new();
     btn.set_valign(gtk4::Align::Center);
     btn.set_size_request(130, 48);
@@ -1604,46 +1610,98 @@ fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
             s.send(AppMessage::GameStopped(lutris_id)).ok();
         } else {
             drop(map);
-            match std::process::Command::new("lutris").arg(&uri).spawn() {
-                Ok(child) => {
-                    rg.lock().unwrap().insert(lutris_id, child);
-                    icon_click.set_icon_name(Some("window-close-symbolic"));
-                    label_click.set_text("Stop");
-                    btn.remove_css_class("suggested-action");
+            let (kind, game_path, game_name, shadps4_exe) = &game_info;
+            if kind == "ps4" {
+                // Launch shadPS4 with --game <eboot.bin>
+                let eboot = std::path::Path::new(game_path).join("eboot.bin");
+                let exe = if shadps4_exe.is_empty() { "shadps4" } else { shadps4_exe.as_str() };
+                match std::process::Command::new(exe)
+                    .arg("--game")
+                    .arg(&eboot)
+                    .spawn()
+                {
+                    Ok(child) => {
+                        rg.lock().unwrap().insert(lutris_id, child);
+                        icon_click.set_icon_name(Some("window-close-symbolic"));
+                        label_click.set_text("Stop");
+                        btn.remove_css_class("suggested-action");
 
-                    // Monitor thread: poll for game exit
-                    let rg_mon = rg.clone();
-                    let s_mon = s.clone();
-                    let id = lutris_id;
-                    std::thread::spawn(move || {
-                        loop {
-                            std::thread::sleep(std::time::Duration::from_secs(2));
-                            let mut map = rg_mon.lock().unwrap();
-                            if let Some(child) = map.get_mut(&id) {
-                                match child.try_wait() {
-                                    Ok(Some(_)) => {
-                                        map.remove(&id);
-                                        drop(map);
-                                        s_mon.send(AppMessage::GameStopped(id)).ok();
-                                        return;
+                        // Monitor thread: poll for game exit
+                        let rg_mon = rg.clone();
+                        let s_mon = s.clone();
+                        let id = lutris_id;
+                        std::thread::spawn(move || {
+                            loop {
+                                std::thread::sleep(std::time::Duration::from_secs(2));
+                                let mut map = rg_mon.lock().unwrap();
+                                if let Some(child) = map.get_mut(&id) {
+                                    match child.try_wait() {
+                                        Ok(Some(_)) => {
+                                            map.remove(&id);
+                                            drop(map);
+                                            s_mon.send(AppMessage::GameStopped(id)).ok();
+                                            return;
+                                        }
+                                        Ok(None) => {}
+                                        Err(_) => {
+                                            map.remove(&id);
+                                            drop(map);
+                                            s_mon.send(AppMessage::GameStopped(id)).ok();
+                                            return;
+                                        }
                                     }
-                                    Ok(None) => {}
-                                    Err(_) => {
-                                        map.remove(&id);
-                                        drop(map);
-                                        s_mon.send(AppMessage::GameStopped(id)).ok();
-                                        return;
-                                    }
+                                } else {
+                                    return;
                                 }
-                            } else {
-                                // Already removed (user stopped)
-                                return;
                             }
-                        }
-                    });
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to launch shadPS4: {}", e);
+                    }
                 }
-                Err(e) => {
-                    eprintln!("Failed to launch {}: {}", uri, e);
+            } else {
+                let uri = format!("lutris:rungameid/{}", lutris_id);
+                match std::process::Command::new("lutris").arg(&uri).spawn() {
+                    Ok(child) => {
+                        rg.lock().unwrap().insert(lutris_id, child);
+                        icon_click.set_icon_name(Some("window-close-symbolic"));
+                        label_click.set_text("Stop");
+                        btn.remove_css_class("suggested-action");
+
+                        // Monitor thread: poll for game exit
+                        let rg_mon = rg.clone();
+                        let s_mon = s.clone();
+                        let id = lutris_id;
+                        std::thread::spawn(move || {
+                            loop {
+                                std::thread::sleep(std::time::Duration::from_secs(2));
+                                let mut map = rg_mon.lock().unwrap();
+                                if let Some(child) = map.get_mut(&id) {
+                                    match child.try_wait() {
+                                        Ok(Some(_)) => {
+                                            map.remove(&id);
+                                            drop(map);
+                                            s_mon.send(AppMessage::GameStopped(id)).ok();
+                                            return;
+                                        }
+                                        Ok(None) => {}
+                                        Err(_) => {
+                                            map.remove(&id);
+                                            drop(map);
+                                            s_mon.send(AppMessage::GameStopped(id)).ok();
+                                            return;
+                                        }
+                                    }
+                                } else {
+                                    return;
+                                }
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to launch {}: {}", uri, e);
+                    }
                 }
             }
         }
@@ -1941,18 +1999,22 @@ fn display_game(game: &Game, state: &SharedState) {
     let has_achievements = !game.achievements.is_empty();
 
     if has_achievements {
+        let is_ps4 = game.kind == "ps4";
+
         let view_stack = adw::ViewStack::new();
 
-        let view_switcher = adw::ViewSwitcher::new();
-        view_switcher.set_stack(Some(&view_stack));
-        view_switcher.set_halign(gtk4::Align::Center);
-        view_switcher.set_margin_top(12);
-        view_switcher.set_margin_bottom(12);
-        game_vbox.append(&view_switcher);
+        if !is_ps4 {
+            let view_switcher = adw::ViewSwitcher::new();
+            view_switcher.set_stack(Some(&view_stack));
+            view_switcher.set_halign(gtk4::Align::Center);
+            view_switcher.set_margin_top(12);
+            view_switcher.set_margin_bottom(12);
+            game_vbox.append(&view_switcher);
 
-        let switcher_spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-        switcher_spacer.set_margin_bottom(12);
-        game_vbox.append(&switcher_spacer);
+            let switcher_spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+            switcher_spacer.set_margin_bottom(12);
+            game_vbox.append(&switcher_spacer);
+        }
 
         let progress_vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
         let global_vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
@@ -2115,30 +2177,32 @@ fn display_game(game: &Game, state: &SharedState) {
         }
         budget.flush();
 
-        let global_built = std::cell::Cell::new(false);
-        let app_id_for_global = game.app_id.clone();
-        let state_for_global = state.clone();
-        let gen_for_global = gen;
-        let global_vbox_weak = global_vbox.downgrade();
-        view_stack.connect_notify_local(Some("visible-child-name"), move |stack, _| {
-            if stack.visible_child_name() == Some("global".into()) && !global_built.get() {
-                global_built.set(true);
-                if let Some(global_vbox) = global_vbox_weak.upgrade() {
-                    let s = state_for_global.borrow();
-                    if s.view_generation == gen_for_global {
-                        if let Some(game) = s.games.iter().find(|g| g.app_id == app_id_for_global) {
-                            build_global_tab(game, &global_vbox, &state_for_global, gen_for_global);
-                        }
-                    }
-                }
-            }
-        });
-
         let progress_page = view_stack.add_titled(&progress_vbox, Some("progress"), S::MY_PROGRESS);
         progress_page.set_icon_name(Some("user-home-symbolic"));
 
-        let global_page = view_stack.add_titled(&global_vbox, Some("global"), S::GLOBAL_STATS);
-        global_page.set_icon_name(Some("dialog-information-symbolic"));
+        if !is_ps4 {
+            let global_built = std::cell::Cell::new(false);
+            let app_id_for_global = game.app_id.clone();
+            let state_for_global = state.clone();
+            let gen_for_global = gen;
+            let global_vbox_weak = global_vbox.downgrade();
+            view_stack.connect_notify_local(Some("visible-child-name"), move |stack, _| {
+                if stack.visible_child_name() == Some("global".into()) && !global_built.get() {
+                    global_built.set(true);
+                    if let Some(global_vbox) = global_vbox_weak.upgrade() {
+                        let s = state_for_global.borrow();
+                        if s.view_generation == gen_for_global {
+                            if let Some(game) = s.games.iter().find(|g| g.app_id == app_id_for_global) {
+                                build_global_tab(game, &global_vbox, &state_for_global, gen_for_global);
+                            }
+                        }
+                    }
+                }
+            });
+
+            let global_page = view_stack.add_titled(&global_vbox, Some("global"), S::GLOBAL_STATS);
+            global_page.set_icon_name(Some("dialog-information-symbolic"));
+        }
 
         view_stack.set_vhomogeneous(false);
         view_stack.set_margin_bottom(32);
@@ -2593,41 +2657,63 @@ fn show_settings_dialog(
     steam: Arc<SteamClient>,
     state: &SharedState,
 ) {
-    let dialog = adw::Window::new();
-    dialog.set_title(Some(S::SETTINGS));
-    dialog.set_default_size(450, 360);
-    dialog.set_modal(true);
-    dialog.set_transient_for(Some(parent));
+    let win = adw::Window::new();
+    win.set_default_width(640);
+    win.set_default_height(480);
+    win.set_modal(true);
+    win.set_transient_for(Some(parent));
 
-    let toolbar_view = adw::ToolbarView::new();
-    toolbar_view.add_top_bar(&adw::HeaderBar::new());
+    let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
 
-    let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    // --- Sidebar ---
+    let sidebar_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    sidebar_area.add_css_class("settings-sidebar");
+    sidebar_area.set_size_request(180, -1);
+    sidebar_area.set_vexpand(true);
 
-    let group = adw::PreferencesGroup::new();
-    group.set_title(S::API_KEYS);
-    group.set_margin_top(16);
-    group.set_margin_bottom(16);
-    group.set_margin_start(16);
-    group.set_margin_end(16);
+    let sidebar = gtk4::ListBox::new();
+    sidebar.add_css_class("navigation-sidebar");
+    sidebar.set_margin_top(6);
+    sidebar.set_margin_bottom(6);
+    sidebar_area.append(&sidebar);
 
-    let steam_entry = adw::EntryRow::new();
-    steam_entry.set_title(S::STEAM_WEB_API_KEY);
-    steam_entry.set_text(&cfg.steam_api_key);
-    steam_entry.set_input_purpose(gtk4::InputPurpose::Password);
-    group.add(&steam_entry);
+    let sep = gtk4::Separator::new(gtk4::Orientation::Vertical);
+    outer.append(&sidebar_area);
+    outer.append(&sep);
 
-    let sgdb_entry = adw::EntryRow::new();
-    sgdb_entry.set_title(S::STEAMGRIDDB_KEY);
-    sgdb_entry.set_text(&cfg.steam_griddb_api_key);
-    sgdb_entry.set_input_purpose(gtk4::InputPurpose::Password);
-    group.add(&sgdb_entry);
+    // --- Content ---
+    let content_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content_area.set_hexpand(true);
+
+    let header = adw::HeaderBar::new();
+    header.add_css_class("settings-header");
+    content_area.append(&header);
+
+    let stack = gtk4::Stack::new();
+    stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
+    stack.set_margin_start(16);
+    stack.set_margin_end(16);
+    stack.set_margin_top(16);
+    stack.set_margin_bottom(16);
+
+    fn settings_sidebar_row(icon: &str, label: &str) -> gtk4::ListBoxRow {
+        let row = gtk4::ListBoxRow::new();
+        let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
+        let icon = gtk4::Image::from_icon_name(icon);
+        let text = gtk4::Label::new(Some(label));
+        text.set_halign(gtk4::Align::Start);
+        hbox.append(&icon);
+        hbox.append(&text);
+        row.set_child(Some(&hbox));
+        row.set_size_request(-1, 36);
+        row
+    }
+
+    // === General page ===
+    let general_page = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
 
     let notif_group = adw::PreferencesGroup::new();
     notif_group.set_title(S::LIVE_UPDATES);
-    notif_group.set_margin_top(16);
-    notif_group.set_margin_start(16);
-    notif_group.set_margin_end(16);
 
     let notif_row = adw::SwitchRow::new();
     notif_row.set_title(S::NOTIFY_ON_UNLOCKS);
@@ -2641,15 +2727,164 @@ fn show_settings_dialog(
     bg_row.set_active(cfg.close_to_background);
     notif_group.add(&bg_row);
 
+    general_page.append(&notif_group);
+
+    let hidden_group = adw::PreferencesGroup::new();
+    let hidden_row = adw::SwitchRow::new();
+    hidden_row.set_title(S::SHOW_HIDDEN_GAMES);
+    hidden_row.set_active(cfg.show_hidden_games);
+    hidden_group.add(&hidden_row);
+    general_page.append(&hidden_group);
+
+    let grid_group = adw::PreferencesGroup::new();
+    let grid_adj = gtk4::Adjustment::new(cfg.grid_cover_width as f64, 120.0, 320.0, 10.0, 20.0, 0.0);
+    let grid_spin = gtk4::SpinButton::new(Some(&grid_adj), 1.0, 0);
+    let grid_row = adw::ActionRow::new();
+    grid_row.set_title(S::COVER_SIZE);
+    grid_row.add_suffix(&grid_spin);
+    grid_group.add(&grid_row);
+    general_page.append(&grid_group);
+
+    sidebar.append(&settings_sidebar_row("preferences-system-symbolic", "General"));
+    stack.add_named(&general_page, Some("general"));
+
+    // === API Keys page ===
+    let api_page = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
+
+    let key_group = adw::PreferencesGroup::new();
+    key_group.set_title(S::API_KEYS);
+
+    let steam_entry = adw::EntryRow::new();
+    steam_entry.set_title(S::STEAM_WEB_API_KEY);
+    steam_entry.set_text(&cfg.steam_api_key);
+    steam_entry.set_input_purpose(gtk4::InputPurpose::Password);
+    key_group.add(&steam_entry);
+
+    let sgdb_entry = adw::EntryRow::new();
+    sgdb_entry.set_title(S::STEAMGRIDDB_KEY);
+    sgdb_entry.set_text(&cfg.steam_griddb_api_key);
+    sgdb_entry.set_input_purpose(gtk4::InputPurpose::Password);
+    key_group.add(&sgdb_entry);
+
+    api_page.append(&key_group);
+
+    sidebar.append(&settings_sidebar_row("dialog-password-symbolic", "API Keys"));
+    stack.add_named(&api_page, Some("api"));
+
+    // === shadPS4 page ===
+    let ps4_page = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
+
+    let ps4_enable_group = adw::PreferencesGroup::new();
+    let ps4_enable_row = adw::SwitchRow::new();
+    ps4_enable_row.set_title("Enable shadPS4 integration");
+    ps4_enable_row.set_subtitle("Scan shadPS4 install directories for PS4 games");
+    ps4_enable_row.set_active(cfg.shadps4_enabled);
+    ps4_enable_group.add(&ps4_enable_row);
+    ps4_page.append(&ps4_enable_group);
+
+    let ps4_exe_group = adw::PreferencesGroup::new();
+    ps4_exe_group.set_title("Emulator");
+
+    let ps4_exe_row = adw::EntryRow::new();
+    ps4_exe_row.set_title("shadPS4 executable path");
+    ps4_exe_row.set_text(&cfg.shadps4_executable);
+
+    let ps4_exe_browse = gtk4::Button::with_label("Browse…");
+    ps4_exe_browse.add_css_class("flat");
+    ps4_exe_browse.set_valign(gtk4::Align::Center);
+    {
+        let ps4_exe_row = ps4_exe_row.clone();
+        let parent = win.clone();
+        ps4_exe_browse.connect_clicked(move |_| {
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title("Select shadPS4 executable");
+            let filter = gtk4::FileFilter::new();
+            filter.set_name(Some("Executable"));
+            filter.add_mime_type("application/x-executable");
+            filter.add_pattern("*");
+            dialog.set_default_filter(Some(&filter));
+            let row = ps4_exe_row.clone();
+            dialog.open(Some(&parent), None::<&gio::Cancellable>, move |result| {
+                if let Ok(file) = result {
+                    if let Some(path) = file.path() {
+                        row.set_text(&path.to_string_lossy());
+                    }
+                }
+            });
+        });
+    }
+    ps4_exe_row.add_suffix(&ps4_exe_browse);
+    ps4_exe_group.add(&ps4_exe_row);
+    ps4_page.append(&ps4_exe_group);
+
+    // Show install dirs from shadPS4 config (read-only)
+    let ps4_dirs_group = adw::PreferencesGroup::new();
+    ps4_dirs_group.set_title("Install directories");
+    ps4_dirs_group.set_description(Some("Managed by shadPS4"));
+    let install_dirs = crate::shadps4::read_install_dirs();
+    if install_dirs.is_empty() {
+        let empty_row = adw::ActionRow::new();
+        empty_row.set_title("No install directories configured");
+        empty_row.set_sensitive(false);
+        ps4_dirs_group.add(&empty_row);
+    } else {
+        for dir in &install_dirs {
+            let dir_row = adw::ActionRow::new();
+            dir_row.set_title(&dir.display().to_string());
+            dir_row.set_sensitive(false);
+            ps4_dirs_group.add(&dir_row);
+        }
+    }
+    ps4_page.append(&ps4_dirs_group);
+
+    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "shadPS4"));
+    stack.add_named(&ps4_page, Some("ps4"));
+
+    // --- Sidebar selection ---
+    let stack_clone = stack.clone();
+    sidebar.connect_row_selected(move |_, row| {
+        if let Some(row) = row {
+            if let Some(child) = row.child() {
+                if let Some(hbox) = child.downcast_ref::<gtk4::Box>() {
+                    if let Some(sibling) = hbox.last_child() {
+                        if let Some(label) = sibling.downcast_ref::<gtk4::Label>() {
+                            let page_id = match label.text().as_str() {
+                                "General" => "general",
+                                "API Keys" => "api",
+                                "shadPS4" => "ps4",
+                                _ => "general",
+                            };
+                            stack_clone.set_visible_child_name(page_id);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    if let Some(first) = sidebar.row_at_index(0) {
+        sidebar.select_row(Some(&first));
+    }
+
+    content_area.append(&stack);
+
+    // --- Save/Cancel buttons ---
+    let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    btn_row.set_halign(gtk4::Align::End);
+    btn_row.set_margin_start(16);
+    btn_row.set_margin_end(16);
+    btn_row.set_margin_top(8);
+    btn_row.set_margin_bottom(12);
+
+    let cancel_btn = gtk4::Button::with_label(S::CANCEL);
+    let win_c = win.clone();
+    cancel_btn.connect_clicked(move |_| win_c.close());
+
     let save_btn = gtk4::Button::with_label(S::SAVE);
     save_btn.add_css_class("suggested-action");
-    save_btn.set_margin_top(8);
-    save_btn.set_margin_bottom(16);
-    save_btn.set_margin_start(16);
-    save_btn.set_margin_end(16);
 
     let state_clone = state.clone();
-    let dialog_clone = dialog.clone();
+    let win_clone = win.clone();
     let steam_clone = steam.clone();
     save_btn.connect_clicked(move |_| {
         let mut s = state_clone.borrow_mut();
@@ -2657,6 +2892,10 @@ fn show_settings_dialog(
         s.cfg.steam_griddb_api_key = sgdb_entry.text().to_string();
         s.cfg.notifications_enabled = notif_row.is_active();
         s.cfg.close_to_background = bg_row.is_active();
+        s.cfg.show_hidden_games = hidden_row.is_active();
+        s.cfg.grid_cover_width = grid_spin.value() as i32;
+        s.cfg.shadps4_enabled = ps4_enable_row.is_active();
+        s.cfg.shadps4_executable = ps4_exe_row.text().to_string();
 
         steam_clone.update_keys(&s.cfg.steam_api_key, &s.cfg.steam_griddb_api_key);
 
@@ -2666,15 +2905,16 @@ fn show_settings_dialog(
         if let Err(e) = cfg.save() {
             eprintln!("Failed to save config: {}", e);
         }
-        dialog_clone.destroy();
+        win_clone.close();
     });
 
-    box_.append(&group);
-    box_.append(&notif_group);
-    box_.append(&save_btn);
-    toolbar_view.set_content(Some(&box_));
-    dialog.set_content(Some(&toolbar_view));
-    dialog.present();
+    btn_row.append(&cancel_btn);
+    btn_row.append(&save_btn);
+    content_area.append(&btn_row);
+    outer.append(&content_area);
+
+    win.set_content(Some(&outer));
+    win.present();
 }
 
 fn show_game_context_menu(
@@ -4016,6 +4256,7 @@ fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, lutr
                 lutris_name: lutris_name.clone(),
                 manual_unmatch: false,
                 sort_title: entry.sort_title.clone(),
+                game_path: String::new(),
             };
             let _ = sender.send(AppMessage::NewGame(game));
         }

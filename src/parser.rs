@@ -113,6 +113,8 @@ pub struct Game {
     pub manual_unmatch: bool,
     /// Sort key (empty = use name for sorting).
     pub sort_title: String,
+    /// Path to game directory (for PS4 games — used to find eboot.bin).
+    pub game_path: String,
 }
 
 impl Game {
@@ -148,6 +150,7 @@ pub fn unmatched_game(lutris_id: i64, name: &str, slug: &str, playtime: f64, las
         lutris_name: name.to_string(),
         manual_unmatch: false,
         sort_title: String::new(),
+        game_path: String::new(),
     }
 }
 
@@ -308,6 +311,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         lutris_name: String::new(),
         manual_unmatch: entry.manual_unmatch.unwrap_or(0) == 1,
         sort_title: entry.sort_title.clone(),
+        game_path: String::new(),
     };
 
     let ach_dir = achievements_dir(save_dir, app_id);

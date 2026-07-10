@@ -154,6 +154,7 @@ fn activate(app: &adw::Application) -> SharedState {
 
     // Build UI with empty game list — window appears immediately.
     // Games are loaded in a background thread and populated via GamesLoaded.
+    let shadps4_enabled = cfg.shadps4_enabled;
     let state = build_ui(
         app,
         Vec::new(),
@@ -196,8 +197,9 @@ fn activate(app: &adw::Application) -> SharedState {
     {
         let db = db.clone();
         let sender = sender.clone();
+        let shadps4_enabled = shadps4_enabled;
         std::thread::spawn(move || {
-            let games = build_game_list(&db, ui::SAVE_DIR);
+            let games = build_game_list(&db, ui::SAVE_DIR, shadps4_enabled);
             let _ = sender.send(AppMessage::GamesLoaded(games));
         });
     }
@@ -299,7 +301,7 @@ fn auto_match_by_title(db: &db::DbConn, save_dir: &str, lutris_games: &[lutris::
 /// unmatched ones appear with just their Lutris metadata until the user matches
 /// them. Lutris games with a `service` (steam/gog) are auto-linked to existing
 /// achievement sources by `service_id`.
-fn build_game_list(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
+fn build_game_list(db: &db::DbConn, save_dir: &str, shadps4_enabled: bool) -> Vec<Game> {
     let lutris_games = match lutris::load_lutris_games() {
         Ok(g) => g,
         Err(e) => {
@@ -373,7 +375,9 @@ fn build_game_list(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
     games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
 
     // Append shadPS4 games (not from Lutris — separate source)
-    games.extend(build_shadps4_games(&db, save_dir));
+    if shadps4_enabled {
+        games.extend(build_shadps4_games(&db, save_dir));
+    }
     games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
     games
 }

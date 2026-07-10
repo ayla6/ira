@@ -107,6 +107,41 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     menu_btn.add_css_class("flat");
     header_bar.pack_end(&menu_btn);
 
+    let (popover, settings_btn) = build_menu_popover(state);
+    menu_btn.set_popover(Some(&popover));
+
+    let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    add_btn.set_tooltip_text(Some(S::ADD_GAME));
+    add_btn.add_css_class("flat");
+    add_btn.set_sensitive(false);
+    header_bar.pack_start(&add_btn);
+
+    let toolbar_view = adw::ToolbarView::new();
+    toolbar_view.add_top_bar(&header_bar);
+    toolbar_view.set_content(Some(&split_view));
+    window.set_content(Some(&toolbar_view));
+
+    {
+        let mut s = state.borrow_mut();
+        s.window = window.clone();
+        s.game_list = game_list.clone();
+        s.sidebar_scroll = sidebar_scroll.clone();
+        s.content_scroll = content_scroll.clone();
+        s.content_box = content_box.clone();
+    }
+
+    rebuild_sidebar(state);
+
+    if !state.borrow().content_unloaded {
+        let row = state.borrow().game_list.row_at_index(0);
+        select_row_silently(state, row.as_ref());
+        show_grid_view(state);
+    }
+
+    connect_window_signals(state, &window, &game_list, &add_btn, &settings_btn);
+}
+
+fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
     let popover = gtk4::Popover::new();
     popover.set_size_request(300, -1);
     let popover_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -142,7 +177,6 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
     sep.set_margin_top(4);
     sep.set_margin_bottom(4);
-
     popover_box.append(&sep);
 
     let hidden_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
@@ -176,7 +210,6 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     popover_box.append(&zoom_row);
 
     popover.set_child(Some(&popover_box));
-    menu_btn.set_popover(Some(&popover));
 
     let state_clone = state.clone();
     hidden_switch.connect_active_notify(move |sw| {
@@ -217,34 +250,16 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
         });
     });
 
-    let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_btn.set_tooltip_text(Some(S::ADD_GAME));
-    add_btn.add_css_class("flat");
-    add_btn.set_sensitive(false);
-    header_bar.pack_start(&add_btn);
+    (popover, settings_btn)
+}
 
-    let toolbar_view = adw::ToolbarView::new();
-    toolbar_view.add_top_bar(&header_bar);
-    toolbar_view.set_content(Some(&split_view));
-    window.set_content(Some(&toolbar_view));
-
-    {
-        let mut s = state.borrow_mut();
-        s.window = window.clone();
-        s.game_list = game_list.clone();
-        s.sidebar_scroll = sidebar_scroll.clone();
-        s.content_scroll = content_scroll.clone();
-        s.content_box = content_box.clone();
-    }
-
-    rebuild_sidebar(state);
-
-    if !state.borrow().content_unloaded {
-        let row = state.borrow().game_list.row_at_index(0);
-        select_row_silently(state, row.as_ref());
-        show_grid_view(state);
-    }
-
+fn connect_window_signals(
+    state: &SharedState,
+    window: &adw::ApplicationWindow,
+    game_list: &gtk4::ListBox,
+    add_btn: &gtk4::Button,
+    settings_btn: &gtk4::Button,
+) {
     let state_clone = state.clone();
     game_list.connect_row_selected(move |_list, row| {
         let s = state_clone.borrow();

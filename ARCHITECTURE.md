@@ -112,3 +112,26 @@ tests/                       # Integration tests
 - **`platforms/` = game sources** — each platform has its own file/folder
 - **`mod.rs` re-exports** — all existing `crate::foo::*` import paths stay valid
 - **Flat for <80 lines** — tiny files stay flat (app.rs, strings.rs, bench.rs)
+
+## Game kind values
+
+The `kind` field in the DB distinguishes emulator-specific game sources:
+
+| Kind       | Meaning                                  | Achievements from       |
+|------------|------------------------------------------|-------------------------|
+| `gbe_steam`| Goldberg Steam Emulator                  | `steam/{app_id}/`       |
+| `ne_gog`   | Nemirtingas GOG Emulator                 | `gog/{GALAXY_ID}/{pid}/`|
+| `sgdb`     | SteamGridDB-only (images, no achievements)| —                      |
+| `ps4`      | shadPS4 emulator                         | trophy XML + npbind     |
+
+**Filesystem paths use `"steam"` and `"gog"` directories** — these are NOT the
+same as the DB `kind` values. Only the `kind` column was renamed; on-disk paths
+are unchanged for backward compatibility.
+
+## Shared helpers
+
+- `clear_children()` in `ui/helpers.rs` — replaces inline `while let Some(child)` loops
+- `monitor_running_game()` in `ui/helpers.rs` — spawns child-process poll thread
+- `game_entry_from_row()` + `GAME_COLUMNS` in `db/mod.rs` — shared row mapping
+- `populate_image_paths()` in `parser/mod.rs` — shared 5-asset path probing
+- `sgdb_get_json()` / `sgdb_endpoint()` in `api/sgdb.rs` — shared SGDB request boilerplate

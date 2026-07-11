@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use super::state::{SharedState, SAVE_DIR};
+use super::state::SharedState;
 use super::sidebar::rebuild_sidebar;
 use super::game_display::display_game;
 use super::message_handler::apply_game_update;
@@ -659,8 +659,9 @@ pub fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     win.set_transient_for(Some(&parent));
     win.set_modal(true);
     win.set_deletable(false);
+    let save_dir = state.borrow().save_dir.clone();
 
-    let app_details = crate::parser::read_app_details(SAVE_DIR, &game.app_id);
+    let app_details = crate::parser::read_app_details(&save_dir, &game.app_id);
 
     let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
 
@@ -810,6 +811,7 @@ pub fn show_game_settings_dialog(state: &SharedState, game: &Game) {
     let pending_copies_save = pending_copies.clone();
     let sgdb_id_save = game.sgdb_id.clone();
     let kind_save = game.kind.clone();
+    let save_dir_c = save_dir.clone();
     save_btn.connect_clicked(move |_| {
         let title = title_entry_c.text().to_string();
         let sort_title = sort_entry_c.text().to_string();
@@ -828,13 +830,13 @@ pub fn show_game_settings_dialog(state: &SharedState, game: &Game) {
             let pc = pending_copies_save.borrow();
             for (asset, src_path) in pc.iter() {
                 let cloud_dir = if !sgdb_id_save.is_empty() {
-                    crate::parser::sgdb_data_dir(SAVE_DIR, &sgdb_id_save)
+                    crate::parser::sgdb_data_dir(&save_dir_c, &sgdb_id_save)
                 } else if kind_save == "sgdb" {
-                    crate::parser::sgdb_data_dir(SAVE_DIR, &app_id)
+                    crate::parser::sgdb_data_dir(&save_dir_c, &app_id)
                 } else if kind_save == "ps4" {
-                    crate::parser::ps4_data_dir(SAVE_DIR, &app_id)
+                    crate::parser::ps4_data_dir(&save_dir_c, &app_id)
                 } else {
-                    crate::parser::data_dir(SAVE_DIR, &app_id)
+                    crate::parser::data_dir(&save_dir_c, &app_id)
                 };
                 let file_name = match asset.as_str() {
                     "icon" => "icon.png",
@@ -889,7 +891,7 @@ pub fn show_game_settings_dialog(state: &SharedState, game: &Game) {
                             dlc.enabled = dlc_switches_c[i].is_active();
                         }
                     }
-                    let path = crate::parser::data_dir(SAVE_DIR, &app_id).join("appdetails.json");
+                    let path = crate::parser::data_dir(&save_dir_c, &app_id).join("appdetails.json");
                     if let Ok(b) = serde_json::to_vec(&*details) {
                         let _ = std::fs::write(&path, b);
                     }
@@ -1019,7 +1021,7 @@ pub fn build_image_manager_content_with_drafts(
     content
 }
 
-fn find_best_image_path(game: &Game, field: &str, file: &str, id: &str) -> String {
+fn find_best_image_path(game: &Game, field: &str, file: &str, id: &str, save_dir: &str) -> String {
     let field_path = match field {
         "icon" if !game.icon_path.is_empty() => game.icon_path.clone(),
         "hero" if !game.hero_image_path.is_empty() => game.hero_image_path.clone(),
@@ -1032,15 +1034,15 @@ fn find_best_image_path(game: &Game, field: &str, file: &str, id: &str) -> Strin
         return field_path;
     }
     if !game.sgdb_id.is_empty() {
-        let sgdb = format!("{}/{}", crate::parser::sgdb_data_dir(SAVE_DIR, &game.sgdb_id).to_string_lossy(), file);
+        let sgdb = format!("{}/{}", crate::parser::sgdb_data_dir(save_dir, &game.sgdb_id).to_string_lossy(), file);
         if std::path::Path::new(&sgdb).is_file() {
             return sgdb;
         }
     }
     let native = if game.kind == "ps4" {
-        format!("{}/{}", crate::parser::ps4_data_dir(SAVE_DIR, &id).to_string_lossy(), file)
+        format!("{}/{}", crate::parser::ps4_data_dir(save_dir, &id).to_string_lossy(), file)
     } else {
-        format!("{}/{}", crate::parser::data_dir(SAVE_DIR, &id).to_string_lossy(), file)
+        format!("{}/{}", crate::parser::data_dir(save_dir, &id).to_string_lossy(), file)
     };
     if std::path::Path::new(&native).is_file() {
         return native;
@@ -1059,6 +1061,7 @@ fn make_refresh_closure(
     pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
     asset_type: &str,
 ) -> Rc<dyn Fn()> {
+    let save_dir = state.borrow().save_dir.clone();
     Rc::new({
         let preview_wrapper = preview_wrapper.clone();
         let dest_path = dest_path.to_string();
@@ -1090,7 +1093,7 @@ fn make_refresh_closure(
             let s = state_clone.borrow();
             if let Ok(Some(entry)) = crate::db::find_by_lutris_id(&s.db, game_clone.lutris_id) {
                 drop(s);
-                if let Ok(updated) = crate::parser::load_game(&entry, SAVE_DIR) {
+                if let Ok(updated) = crate::parser::load_game(&entry, &save_dir) {
                     apply_game_update(&state_clone, updated);
                 }
             }
@@ -1112,15 +1115,16 @@ fn build_image_section(
 ) -> gtk4::Box {
     let is_steam = game.kind == "gbe_steam" || game.kind == "ne_gog";
     let id = game.app_id.clone();
+    let save_dir = state.borrow().save_dir.clone();
 
     let cloud_dir = if !game.sgdb_id.is_empty() {
-        crate::parser::sgdb_data_dir(SAVE_DIR, &game.sgdb_id)
+        crate::parser::sgdb_data_dir(&save_dir, &game.sgdb_id)
     } else if game.kind == "sgdb" {
-        crate::parser::sgdb_data_dir(SAVE_DIR, &id)
+        crate::parser::sgdb_data_dir(&save_dir, &id)
     } else if game.kind == "ps4" {
-        crate::parser::ps4_data_dir(SAVE_DIR, &id)
+        crate::parser::ps4_data_dir(&save_dir, &id)
     } else {
-        crate::parser::data_dir(SAVE_DIR, &id)
+        crate::parser::data_dir(&save_dir, &id)
     };
     let cloud_base = cloud_dir.to_string_lossy().into_owned();
 
@@ -1141,10 +1145,10 @@ fn build_image_section(
             if std::path::Path::new(src).is_file() {
                 src.clone()
             } else {
-                find_best_image_path(game, asset_type, file_base, &id)
+                find_best_image_path(game, asset_type, file_base, &id, &save_dir)
             }
         } else {
-            find_best_image_path(game, asset_type, file_base, &id)
+            find_best_image_path(game, asset_type, file_base, &id, &save_dir)
         }
     };
 
@@ -1230,11 +1234,12 @@ fn build_image_section(
         let parent = parent_win.clone();
         let refresh = refresh_images.clone();
         let dims_vec: Vec<&str> = dims.to_vec();
-        let sgdb_id_c = sgdb_id_for_picker.clone();
-        btn.connect_clicked(move |_| {
-            show_sgdb_picker(&steam, &sgdb_id_c, &asset_c, sgdb_is_steam_id, &dims_vec, &parent, refresh.clone(), pending_copies_btn.clone());
-        });
-        btns.append(&btn);
+    let sgdb_id_c = sgdb_id_for_picker.clone();
+    let save_dir_c = save_dir.clone();
+    btn.connect_clicked(move |_| {
+        show_sgdb_picker(&steam, &sgdb_id_c, &asset_c, sgdb_is_steam_id, &dims_vec, &parent, refresh.clone(), pending_copies_btn.clone(), &save_dir_c);
+    });
+    btns.append(&btn);
     }
 
     if asset_type == "icon" && game.kind == "ps4" {
@@ -1243,10 +1248,11 @@ fn build_image_section(
         let refresh = refresh_images.clone();
         let pending_copies_reset = pending_copies.clone();
         let asset_reset = asset_type.to_string();
+        let save_dir_c2 = save_dir.clone();
         reset_btn.connect_clicked(move |_| {
             let app_id = gc.app_id.clone();
             let game_path = gc.game_path.clone();
-            let image_dir = std::path::Path::new(SAVE_DIR).join("data").join("ps4").join(&app_id);
+            let image_dir = std::path::Path::new(&save_dir_c2).join("data").join("ps4").join(&app_id);
             let icon_png = image_dir.join("icon.png");
             let default_path = if icon_png.is_file() {
                 Some(icon_png.to_string_lossy().into_owned())
@@ -1281,6 +1287,7 @@ fn build_sgdb_asset_card(
     asset_type: &str,
     steam: &Arc<SteamClient>,
     on_download: Rc<dyn Fn()>,
+    save_dir: &str,
 ) -> (gtk4::Widget, gtk4::Widget) {
     let thumb_size = if asset_type == "header" { 138 } else { 90 };
 
@@ -1346,7 +1353,7 @@ fn build_sgdb_asset_card(
 
     let url_clone = a.url.clone();
     let steam_thumb = steam.clone();
-    let thumb_dir = format!("{}/data/.thumbnails", SAVE_DIR);
+    let thumb_dir = format!("{}/data/.thumbnails", save_dir);
     let _ = std::fs::create_dir_all(&thumb_dir);
     let thumb_name = format!("{}/{}", thumb_dir, url_clone.rsplit('/').next().unwrap_or("thumb"));
     let tsize = thumb_size;
@@ -1396,12 +1403,13 @@ fn build_sgdb_asset_card(
     (card.upcast::<gtk4::Widget>(), row.upcast::<gtk4::Widget>())
 }
 
-fn show_sgdb_picker(steam: &Arc<SteamClient>, id: &str, asset: &str, is_steam_id: bool, dimensions: &[&str], parent: &adw::Window, on_done: Rc<dyn Fn()>, pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>) {
+fn show_sgdb_picker(steam: &Arc<SteamClient>, id: &str, asset: &str, is_steam_id: bool, dimensions: &[&str], parent: &adw::Window, on_done: Rc<dyn Fn()>, pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>, save_dir: &str) {
     let picker = adw::Window::new();
     picker.set_default_width(600);
     picker.set_default_height(500);
     picker.set_transient_for(Some(parent));
     picker.set_modal(true);
+    let save_dir_owned = save_dir.to_string();
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header_bar = adw::HeaderBar::new();
@@ -1481,6 +1489,7 @@ fn show_sgdb_picker(steam: &Arc<SteamClient>, id: &str, asset: &str, is_steam_id
     let asset_clone = asset.to_string();
     let picker_clone = picker.clone();
     let on_done = on_done.clone();
+    let save_dir_clone = save_dir_owned.clone();
 
     let stack_toggle = stack.clone();
     toggle_btn.connect_toggled(move |btn| {
@@ -1510,7 +1519,7 @@ fn show_sgdb_picker(steam: &Arc<SteamClient>, id: &str, asset: &str, is_steam_id
 
             for a in assets {
                 let data_subdir = if is_steam_id { "steam".to_string() } else { "steamgriddb".to_string() };
-                let dest_dir = format!("{}/data/{}/{}", SAVE_DIR, data_subdir, id_clone);
+                let dest_dir = format!("{}/data/{}/{}", save_dir_clone, data_subdir, id_clone);
                 let file_name = match asset_clone.as_str() {
                     "icon" => {
                         let ext = if a.mime.contains("icon") || a.mime.contains("x-icon") { "ico" }
@@ -1546,7 +1555,7 @@ fn show_sgdb_picker(steam: &Arc<SteamClient>, id: &str, asset: &str, is_steam_id
                     }
                 });
 
-                let (grid_card, list_row) = build_sgdb_asset_card(&a, &asset_clone, &steam_clone, on_download);
+                let (grid_card, list_row) = build_sgdb_asset_card(&a, &asset_clone, &steam_clone, on_download, &save_dir_clone);
                 flow.append(&grid_card);
                 list_view.append(&list_row);
             }

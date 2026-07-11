@@ -9,8 +9,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-pub const SAVE_DIR: &str = "/data/Games/Saves/GSE";
-
 pub struct AppState {
     pub window: adw::ApplicationWindow,
     pub games: Vec<Game>,
@@ -34,6 +32,7 @@ pub struct AppState {
     pub grid_refresh_pending: bool,
     pub view_generation: u32,
     pub settings_data: Option<(adw::Window, gtk4::Stack, i64)>,
+    pub save_dir: String,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;

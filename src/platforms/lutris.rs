@@ -25,8 +25,21 @@ pub struct LutrisGame {
 }
 
 pub fn lutris_db_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".local").join("share").join("lutris").join("pga.db")
+    xdg_data_dir_fallback("lutris").join("pga.db")
+}
+
+fn xdg_data_dir_fallback(app: &str) -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        let p = PathBuf::from(xdg).join(app);
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".local").join("share").join(app)
+    } else {
+        PathBuf::from(".").join(".local").join("share").join(app)
+    }
 }
 
 /// Read every game from the Lutris database, ordered by name.

@@ -4,7 +4,6 @@ use crate::AppMessage;
 use crate::AppSender;
 use crate::GameEntry;
 use crate::parser::load_game;
-use super::state::SAVE_DIR;
 
 pub fn enrich_game_async(
     app_id: String,
@@ -16,18 +15,19 @@ pub fn enrich_game_async(
     steam: std::sync::Arc<SteamClient>,
     watcher: Option<AchievementWatcher>,
     sender: AppSender,
+    save_dir: String,
 ) {
     std::thread::spawn(move || {
         let mut entry = GameEntry::for_reload(db_id, &kind, &app_id, &platform_id, lutris_id);
         entry.title = title;
 
-        let Ok(mut game) = load_game(&entry, SAVE_DIR) else {
+        let Ok(mut game) = load_game(&entry, &save_dir) else {
             eprintln!("Failed reloading {}", app_id);
             return;
         };
 
         if kind != "sgdb" && kind != "ps4" {
-            let meta_path = crate::parser::achievements_dir(SAVE_DIR, &app_id).join("achievements.json");
+            let meta_path = crate::parser::achievements_dir(&save_dir, &app_id).join("achievements.json");
             if !meta_path.exists() {
                 if let Err(e) = steam.generate_steam_settings(&app_id) {
                     eprintln!("Could not generate achievements for {}: {}", app_id, e);
@@ -41,7 +41,7 @@ pub fn enrich_game_async(
                     }
                     if !details.dlcs.is_empty() {
                         steam.ensure_dlc_images(&app_id, &mut details.dlcs);
-                        let path = crate::parser::data_dir(SAVE_DIR, &app_id).join("appdetails.json");
+                        let path = crate::parser::data_dir(&save_dir, &app_id).join("appdetails.json");
                         if let Ok(b) = serde_json::to_vec(&details) {
                             let _ = std::fs::write(&path, b);
                         }
@@ -51,7 +51,7 @@ pub fn enrich_game_async(
                 if let Some(mut details) = steam.fetch_app_details(&app_id) {
                     if !details.dlcs.is_empty() {
                         steam.ensure_dlc_images(&app_id, &mut details.dlcs);
-                        let path = crate::parser::data_dir(SAVE_DIR, &app_id).join("appdetails.json");
+                        let path = crate::parser::data_dir(&save_dir, &app_id).join("appdetails.json");
                         if let Ok(b) = serde_json::to_vec(&details) {
                             let _ = std::fs::write(&path, b);
                         }

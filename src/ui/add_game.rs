@@ -8,7 +8,7 @@ use crate::strings as S;
 
 use gtk4::prelude::*;
 use adw::prelude::*;
-use super::state::{SharedState, SAVE_DIR};
+use super::state::SharedState;
 use super::enrichment::enrich_game_async;
 
 pub fn show_add_game_dialog(state: &SharedState) {
@@ -96,6 +96,7 @@ fn finalize_added_game(
     watcher: Option<AchievementWatcher>,
     sender: AppSender,
     db: DbConn,
+    save_dir: String,
 ) {
     let entry = match crate::db::find_by_steam_id(&db, app_id) {
         Ok(Some(e)) => e,
@@ -104,7 +105,7 @@ fn finalize_added_game(
             return;
         }
     };
-    match load_game(&entry, SAVE_DIR) {
+    match load_game(&entry, &save_dir) {
         Ok(game) => {
             if let Some(ref watcher) = watcher {
                 watcher.watch(&entry, &game.achievements);
@@ -121,6 +122,7 @@ fn finalize_added_game(
                 steam,
                 watcher,
                 sender,
+                save_dir,
             );
         }
         Err(e) => eprintln!("Failed to load newly added game: {}", e),
@@ -128,16 +130,16 @@ fn finalize_added_game(
 }
 
 pub fn finish_add_game(state: &SharedState, folder: &str, app_id: &str) {
-    let (steam, watcher, sender, db) = {
+    let (steam, watcher, sender, db, save_dir) = {
         let s = state.borrow();
-        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone())
+        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone())
     };
     let folder = folder.to_string();
     let app_id = app_id.to_string();
 
     std::thread::spawn(move || {
-        match crate::platforms::steam_setup::add_game_from_folder(&folder, &app_id, &steam, &db, SAVE_DIR) {
-            Ok(_) => finalize_added_game(&app_id, "gbe_steam", &app_id, steam, watcher, sender, db),
+        match crate::platforms::steam_setup::add_game_from_folder(&folder, &app_id, &steam, &db, &save_dir) {
+            Ok(_) => finalize_added_game(&app_id, "gbe_steam", &app_id, steam, watcher, sender, db, save_dir),
             Err(e) => {
                 eprintln!("Add game failed: {}", e);
                 let _ = sender.send(AppMessage::AddGameError(e));
@@ -147,9 +149,9 @@ pub fn finish_add_game(state: &SharedState, folder: &str, app_id: &str) {
 }
 
 pub fn finish_add_gog_game(state: &SharedState, galaxy_folder: &str, product_id: &str, game_name: &str, steam_app_id: &str) {
-    let (steam, watcher, sender, db) = {
+    let (steam, watcher, sender, db, save_dir) = {
         let s = state.borrow();
-        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone())
+        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone())
     };
     let galaxy_folder = galaxy_folder.to_string();
     let product_id = product_id.to_string();
@@ -158,9 +160,9 @@ pub fn finish_add_gog_game(state: &SharedState, galaxy_folder: &str, product_id:
 
     std::thread::spawn(move || {
         match crate::platforms::gog_setup::add_gog_game_from_folder(
-            &galaxy_folder, &product_id, &game_name, &steam_app_id, &steam, &db, SAVE_DIR,
+            &galaxy_folder, &product_id, &game_name, &steam_app_id, &steam, &db, &save_dir,
         ) {
-            Ok(_) => finalize_added_game(&steam_app_id, "ne_gog", &product_id, steam, watcher, sender, db),
+            Ok(_) => finalize_added_game(&steam_app_id, "ne_gog", &product_id, steam, watcher, sender, db, save_dir),
             Err(e) => {
                 eprintln!("GOG add game failed: {}", e);
                 let _ = sender.send(AppMessage::AddGameError(e));

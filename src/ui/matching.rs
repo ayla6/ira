@@ -2,15 +2,15 @@ use crate::AppMessage;
 use crate::Game;
 use crate::MergedAchievement;
 use crate::parser::set_achievement_earned;
-use super::state::{SharedState, SAVE_DIR};
+use super::state::SharedState;
 use super::enrichment::enrich_game_async;
 use super::helpers::confirm_dialog;
 use crate::strings as S;
 
 pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: String, lutris_name: String) {
-    let (steam, watcher, sender, db) = {
+    let (steam, watcher, sender, db, save_dir) = {
         let s = state.borrow();
-        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone())
+        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone())
     };
     std::thread::spawn(move || {
         if let Err(e) = crate::db::upsert_matching(&db, lutris_id, &steam_app_id, "gbe_steam", &steam_app_id) {
@@ -22,7 +22,7 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
         }
         match crate::db::find_by_lutris_id(&db, lutris_id) {
             Ok(Some(entry)) => {
-                match crate::parser::load_game(&entry, SAVE_DIR) {
+                match crate::parser::load_game(&entry, &save_dir) {
                     Ok(mut game) => {
                         if game.name.is_empty() || game.name.starts_with("App ID:") {
                             game.name = lutris_name.clone();
@@ -43,6 +43,7 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
                             steam,
                             watcher,
                             sender,
+                            save_dir,
                         );
                     }
                     Err(e) => eprintln!("match_game_to_steam: load_game failed: {}", e),
@@ -106,6 +107,7 @@ pub fn confirm_mark_unlocked(state: &SharedState, kind: &str, app_id: &str, plat
     let kind = kind.to_string();
     let app_id = app_id.to_string();
     let platform_id = platform_id.to_string();
+    let save_dir = state.borrow().save_dir.clone();
     confirm_dialog(
         &window,
         S::MARK_UNLOCKED,
@@ -117,7 +119,7 @@ pub fn confirm_mark_unlocked(state: &SharedState, kind: &str, app_id: &str, plat
         S::MARK_AS_UNLOCKED,
         adw::ResponseAppearance::Destructive,
         move || {
-            if let Err(e) = set_achievement_earned(SAVE_DIR, &kind, &app_id, &platform_id, &ach_name, true) {
+            if let Err(e) = set_achievement_earned(&save_dir, &kind, &app_id, &platform_id, &ach_name, true) {
                 eprintln!("Failed to mark achievement as unlocked: {}", e);
                 return;
             }

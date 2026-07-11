@@ -227,6 +227,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
             steam.clone(),
             watcher.clone(),
             sender.clone(),
+            state.borrow().save_dir.clone(),
         );
     }
 }

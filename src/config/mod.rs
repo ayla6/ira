@@ -21,6 +21,8 @@ pub struct Config {
     pub shadps4_enabled: bool,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub shadps4_executable: String,
+    #[serde(default = "default_save_dir")]
+    pub save_dir: String,
 }
 
 impl Default for Config {
@@ -34,6 +36,7 @@ impl Default for Config {
             grid_cover_width: DEFAULT_GRID_COVER_WIDTH,
             shadps4_enabled: false,
             shadps4_executable: String::new(),
+            save_dir: default_save_dir(),
         }
     }
 }
@@ -45,6 +48,25 @@ fn default_grid_cover_width() -> i32 {
 
 fn default_true() -> bool {
     true
+}
+
+/// XDG-compliant data directory: `$XDG_DATA_HOME` or `~/.local/share`.
+fn default_save_dir() -> String {
+    xdg_data_dir()
+        .join("achievement-viewer")
+        .to_string_lossy()
+        .to_string()
+}
+
+/// Returns the XDG data home directory (`$XDG_DATA_HOME` or `~/.local/share`).
+pub fn xdg_data_dir() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        PathBuf::from(xdg)
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".local").join("share")
+    } else {
+        PathBuf::from(".")
+    }
 }
 
 fn config_path() -> PathBuf {
@@ -94,6 +116,7 @@ impl Config {
             grid_cover_width: self.grid_cover_width,
             shadps4_enabled: self.shadps4_enabled,
             shadps4_executable: self.shadps4_executable.clone(),
+            save_dir: self.save_dir.clone(),
         };
         if steam_err.is_err() {
             plaintext.steam_api_key = self.steam_api_key.clone();

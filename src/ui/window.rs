@@ -33,6 +33,7 @@ pub fn build_ui(
     sender: AppSender,
     game_names: Arc<Mutex<HashMap<String, String>>>,
 ) -> SharedState {
+    let save_dir = cfg.save_dir.clone();
     let state = Rc::new(RefCell::new(AppState {
         window: adw::ApplicationWindow::new(app),
         games,
@@ -56,6 +57,7 @@ pub fn build_ui(
         grid_refresh_pending: false,
         view_generation: 0,
         settings_data: None,
+        save_dir,
     }));
 
     build_window(&state, app);

@@ -1,7 +1,7 @@
 use gtk4::prelude::*;
 use crate::Game;
 use crate::strings as S;
-use super::state::{SharedState, SAVE_DIR};
+use super::state::SharedState;
 use super::helpers::open_folder;
 use super::dialogs::show_game_settings_dialog;
 
@@ -125,9 +125,10 @@ pub fn show_game_context_menu(
     if game_clone.kind == "gbe_steam" || game_clone.kind == "sgdb" {
         let open_images = gio::SimpleAction::new("open_images", None);
         let gc = game_clone.clone();
+        let save_dir = state_clone.borrow().save_dir.clone();
         open_images.connect_activate(move |_, _| {
             let subdir = if gc.kind == "sgdb" { "steamgriddb" } else { "steam" };
-            let path = format!("{}/data/{}/{}", SAVE_DIR, subdir, gc.app_id);
+            let path = format!("{}/data/{}/{}", save_dir, subdir, gc.app_id);
             open_folder(&path);
         });
         actions.add_action(&open_images);
@@ -136,8 +137,9 @@ pub fn show_game_context_menu(
     if game_clone.kind == "gbe_steam" {
         let open_status = gio::SimpleAction::new("open_steam_status", None);
         let gc = game_clone.clone();
+        let save_dir = state_clone.borrow().save_dir.clone();
         open_status.connect_activate(move |_, _| {
-            let path = format!("{}/steam/{}", SAVE_DIR, gc.app_id);
+            let path = format!("{}/steam/{}", save_dir, gc.app_id);
             open_folder(&path);
         });
         actions.add_action(&open_status);
@@ -146,8 +148,9 @@ pub fn show_game_context_menu(
     if game_clone.kind == "ne_gog" {
         let open_gog = gio::SimpleAction::new("open_gog_status", None);
         let gc = game_clone.clone();
+        let save_dir = state_clone.borrow().save_dir.clone();
         open_gog.connect_activate(move |_, _| {
-            let path = format!("{}/gog/{}/{}", SAVE_DIR, crate::parser::GALAXY_ID, gc.platform_id);
+            let path = format!("{}/gog/{}/{}", save_dir, crate::parser::GALAXY_ID, gc.platform_id);
             open_folder(&path);
         });
         actions.add_action(&open_gog);

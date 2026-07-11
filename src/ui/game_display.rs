@@ -7,7 +7,7 @@ use crate::parser::load_game;
 use crate::strings as S;
 use std::cell::Cell;
 
-use super::state::{SharedState, SAVE_DIR};
+use super::state::SharedState;
 use super::image_budget::ImageLoadBudget;
 use super::play_button::play_button;
 use super::message_handler::apply_game_update;
@@ -114,9 +114,10 @@ fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::
     let db_id_for_reload = game.db_id;
     let lutris_id_for_reload = game.lutris_id;
     let state_for_reload = state.clone();
+    let save_dir = state.borrow().save_dir.clone();
     let reload = move || {
         let entry = GameEntry::for_reload(db_id_for_reload, &kind_for_reload, &app_id_for_reload, &platform_id_for_reload, lutris_id_for_reload);
-        if let Ok(updated) = load_game(&entry, SAVE_DIR) {
+        if let Ok(updated) = load_game(&entry, &save_dir) {
             apply_game_update(&state_for_reload, updated);
         }
     };

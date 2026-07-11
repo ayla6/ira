@@ -7,7 +7,7 @@ use crate::migration::{migrate_data_dir, populate_db_from_dirs};
 use crate::models::{AppMessage, AppSender};
 use crate::platforms::lutris_watcher::LutrisWatcher;
 use crate::platforms::ps4::ShadPS4Watcher;
-use crate::ui::{build_ui, handle_app_message, SharedState, SAVE_DIR};
+use crate::ui::{build_ui, handle_app_message, SharedState};
 use crate::watcher::AchievementWatcher;
 use gtk4::glib;
 use std::cell::RefCell;
@@ -45,18 +45,18 @@ unsafe extern "C" fn source_destroy(data: glib::ffi::gpointer) {
 pub fn activate(app: &adw::Application) -> SharedState {
     let cfg = config::load_config();
 
-    let db = db::init_db(&format!("{}/gse.db", SAVE_DIR));
+    let db = db::init_db(&format!("{}/gse.db", cfg.save_dir));
 
-    migrate_data_dir(SAVE_DIR);
+    migrate_data_dir(&cfg.save_dir);
 
     if db::load_all_games(&db).map(|v| v.is_empty()).unwrap_or(true) {
-        populate_db_from_dirs(&db, SAVE_DIR);
+        populate_db_from_dirs(&db, &cfg.save_dir);
     }
 
     let steam = Arc::new(SteamClient::new(
         cfg.steam_api_key.clone(),
         cfg.steam_griddb_api_key.clone(),
-        &format!("{}/data", SAVE_DIR),
+        &format!("{}/data", cfg.save_dir),
     ));
 
     let mut pipe_fds = [0i32; 2];
@@ -70,7 +70,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
     let sender = AppSender::new(tx, write_fd);
 
     let cfg_for_watcher = Arc::new(cfg.clone());
-    let watcher = match AchievementWatcher::new(cfg_for_watcher, sender.clone(), SAVE_DIR.to_string()) {
+    let watcher = match AchievementWatcher::new(cfg_for_watcher, sender.clone(), cfg.save_dir.clone()) {
         Ok(w) => Some(w),
         Err(e) => {
             eprintln!("Live achievement watching unavailable: {}", e);
@@ -99,6 +99,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
     };
 
     let shadps4_enabled = cfg.shadps4_enabled;
+    let save_dir = cfg.save_dir.clone();
     let state = build_ui(
         app,
         Vec::new(),
@@ -137,9 +138,9 @@ pub fn activate(app: &adw::Application) -> SharedState {
     {
         let db = db.clone();
         let sender = sender.clone();
-        let shadps4_enabled = shadps4_enabled;
+        let save_dir = save_dir.clone();
         std::thread::spawn(move || {
-            let games = build_game_list(&db, SAVE_DIR, shadps4_enabled);
+            let games = build_game_list(&db, &save_dir, shadps4_enabled);
             let _ = sender.send(AppMessage::GamesLoaded(games));
         });
     }

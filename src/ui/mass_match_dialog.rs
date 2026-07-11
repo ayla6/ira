@@ -6,7 +6,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use super::state::{SharedState, SAVE_DIR};
+use super::state::SharedState;
 use super::sidebar::rebuild_sidebar;
 use super::matching::{match_game_to_steam, match_game_to_sgdb};
 use super::dialogs::build_image_manager_content;
@@ -40,7 +40,8 @@ pub fn show_mass_match_dialog(state: &SharedState) {
         let s = state.borrow();
         let games = s.games.clone();
         let unmatched: Vec<Game> = games.into_iter().filter(|g| g.app_id.is_empty() && !g.manual_unmatch).collect();
-        let data_dir = std::path::Path::new(SAVE_DIR).join("data").join("steam");
+        let save_dir = &s.save_dir;
+        let data_dir = std::path::Path::new(save_dir).join("data").join("steam");
         let mut map: Vec<(String, String, String)> = Vec::new();
         if let Ok(entries) = std::fs::read_dir(&data_dir) {
             for entry in entries.flatten() {
@@ -48,7 +49,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
                     Some(s) if s.parse::<i64>().is_ok() => s.to_string(),
                     _ => continue,
                 };
-                if let Some(name) = crate::parser::read_app_name(SAVE_DIR, &app_id) {
+                if let Some(name) = crate::parser::read_app_name(save_dir, &app_id) {
                     map.push((normalize_title(&name), app_id, name));
                 }
             }

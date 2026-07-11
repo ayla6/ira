@@ -19,7 +19,7 @@ mod mass_match_dialog;
 mod add_game;
 mod matching;
 
-pub use state::{AppState, SharedState, malloc_trim, SAVE_DIR};
+pub use state::{AppState, SharedState, malloc_trim};
 pub use window::build_ui;
 pub use message_handler::{handle_app_message, switch_to_game};
 pub use background::{hide_to_background, restore_content};

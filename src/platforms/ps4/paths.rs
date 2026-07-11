@@ -3,7 +3,12 @@ use std::path::PathBuf;
 /// shadPS4 user data directory.
 /// Linux: ~/.local/share/shadPS4/
 pub fn shadps4_user_dir() -> PathBuf {
-    xdg_data_dir_fallback("shadPS4")
+    xdg::BaseDirectories::new()
+        .map(|b| b.get_data_home().join("shadPS4"))
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            PathBuf::from(home).join(".local").join("share").join("shadPS4")
+        })
 }
 
 /// Path to play_time.txt
@@ -23,18 +28,4 @@ pub fn user_trophy_path(npwr_id: &str) -> PathBuf {
         .join("1000")
         .join("trophy")
         .join(format!("{}.xml", npwr_id))
-}
-
-fn xdg_data_dir_fallback(app: &str) -> PathBuf {
-    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-        let p = PathBuf::from(xdg).join(app);
-        if p.exists() {
-            return p;
-        }
-    }
-    if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home).join(".local").join("share").join(app)
-    } else {
-        PathBuf::from(".").join(".local").join("share").join(app)
-    }
 }

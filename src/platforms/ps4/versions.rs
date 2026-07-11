@@ -2,17 +2,12 @@ use std::path::PathBuf;
 
 /// Path to the shadPS4 Qt Launcher data directory.
 fn shadps4qt_dir() -> PathBuf {
-    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-        let p = PathBuf::from(xdg).join("shadPS4QtLauncher");
-        if p.exists() {
-            return p;
-        }
-    }
-    if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home).join(".local").join("share").join("shadPS4QtLauncher")
-    } else {
-        PathBuf::from(".").join(".local").join("share").join("shadPS4QtLauncher")
-    }
+    xdg::BaseDirectories::new()
+        .map(|b| b.get_data_home().join("shadPS4QtLauncher"))
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            PathBuf::from(home).join(".local").join("share").join("shadPS4QtLauncher")
+        })
 }
 
 /// A version entry from versions.json.

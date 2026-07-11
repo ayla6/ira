@@ -50,38 +50,24 @@ fn default_true() -> bool {
     true
 }
 
-/// XDG-compliant data directory: `$XDG_DATA_HOME` or `~/.local/share`.
 fn default_save_dir() -> String {
-    xdg_data_dir()
+    xdg_dir(xdg::BaseDirectories::new().ok().map(|b| b.get_data_home()))
         .join("achievement-viewer")
         .to_string_lossy()
         .to_string()
 }
 
-/// Returns the XDG data home directory (`$XDG_DATA_HOME` or `~/.local/share`).
-pub fn xdg_data_dir() -> PathBuf {
-    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-        PathBuf::from(xdg)
-    } else if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home).join(".local").join("share")
-    } else {
-        PathBuf::from(".")
-    }
-}
-
 fn config_path() -> PathBuf {
-    let dir = dirs();
-    dir.join("achievement-viewer").join("config.json")
+    xdg::BaseDirectories::new()
+        .map(|b| b.get_config_home().join("achievement-viewer").join("config.json"))
+        .unwrap_or_else(|_| PathBuf::from(".").join(".config").join("achievement-viewer").join("config.json"))
 }
 
-fn dirs() -> PathBuf {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        PathBuf::from(xdg)
-    } else if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home).join(".config")
-    } else {
-        PathBuf::from(".")
-    }
+fn xdg_dir(xdg_home: Option<PathBuf>) -> PathBuf {
+    xdg_home.unwrap_or_else(|| {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home).join(".local").join("share")
+    })
 }
 
 pub fn load_config() -> Config {

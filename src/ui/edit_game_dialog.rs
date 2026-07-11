@@ -278,6 +278,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
     // --- API Emulator page ---
     let emu_exe = saved_launch.exe.clone();
+    let emu_working_dir = saved_launch.working_dir.clone();
     let emu_trophy_source = game.trophy_source.clone();
     let emu_app_id = game.app_id.clone();
     let emu_save_dir = state.borrow().save_dir.clone();
@@ -376,15 +377,19 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         let folders_group = adw::PreferencesGroup::new();
         folders_group.set_title("Folders");
 
-        let game_folder = std::path::Path::new(&emu_exe).parent().map(|p| p.to_path_buf());
+        let game_folder = if !emu_working_dir.is_empty() {
+            Some(std::path::PathBuf::from(&emu_working_dir))
+        } else {
+            std::path::Path::new(&emu_exe).parent().map(|p| p.to_path_buf())
+        };
         if let Some(ref gf) = game_folder {
             let row = adw::ActionRow::new();
             row.set_title("Game folder");
             row.set_subtitle(&gf.to_string_lossy());
+            let path = gf.clone();
             let open_btn = gtk4::Button::with_label("Open");
             open_btn.add_css_class("flat");
             open_btn.set_valign(gtk4::Align::Center);
-            let path = gf.clone();
             open_btn.connect_clicked(move |_| {
                 let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
             });
@@ -393,20 +398,20 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         }
 
         if let Some(ref prefix) = emu_wine_prefix {
-            if std::path::Path::new(prefix).join("system.reg").is_file() {
-                let row = adw::ActionRow::new();
-                row.set_title("Wine prefix");
-                row.set_subtitle(prefix);
-                let open_btn = gtk4::Button::with_label("Open");
-                open_btn.add_css_class("flat");
-                open_btn.set_valign(gtk4::Align::Center);
-                let path = prefix.clone();
-                open_btn.connect_clicked(move |_| {
-                    let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
-                });
-                row.add_suffix(&open_btn);
-                folders_group.add(&row);
-            }
+            let pfx_exists = std::path::Path::new(prefix).is_dir();
+            let row = adw::ActionRow::new();
+            row.set_title("Wine prefix");
+            row.set_subtitle(prefix);
+            let open_btn = gtk4::Button::with_label("Open");
+            open_btn.add_css_class("flat");
+            open_btn.set_valign(gtk4::Align::Center);
+            open_btn.set_sensitive(pfx_exists);
+            let path = prefix.clone();
+            open_btn.connect_clicked(move |_| {
+                let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+            });
+            row.add_suffix(&open_btn);
+            folders_group.add(&row);
         }
 
         {

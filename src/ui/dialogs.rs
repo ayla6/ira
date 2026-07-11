@@ -295,7 +295,7 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("applications-games-symbolic", "shadPS4"));
     stack.add_named(&ps4_page, Some("ps4"));
 
-    let (wine_pages, wine_widgets) = super::wine_config_widget::build_wine_config_pages(&cfg.default_wine_config);
+    let (wine_pages, wine_widgets) = super::wine_config_widget::build_wine_config_pages(&cfg.default_wine_config, None);
     sidebar.append(&sidebar_separator());
     for wp in &wine_pages {
         sidebar.append(&settings_sidebar_row(wp.icon, wp.label));
@@ -305,7 +305,6 @@ pub fn show_settings_dialog(
     let profiles_page = super::profile_dialog::build_profiles_page(state, &win);
     sidebar.append(&settings_sidebar_row("system-users-symbolic", "Wine Profiles"));
     stack.add_named(&profiles_page, Some("profiles"));
-    sidebar.append(&sidebar_separator());
 
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
@@ -391,7 +390,7 @@ pub(super) fn build_game_general_page(
     state: &SharedState,
     game: &Game,
     win: &adw::Window,
-) -> (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>) {
+) -> (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>, Option<adw::EntryRow>) {
     let general_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let title_entry = adw::EntryRow::new();
@@ -549,7 +548,22 @@ pub(super) fn build_game_general_page(
             let row = adw::EntryRow::new();
             row.set_title("Steam App ID");
             row.set_text(&game.app_id);
+            let search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
+            search_btn.set_valign(gtk4::Align::Center);
+            search_btn.set_tooltip_text(Some("Search Steam Store"));
+            search_btn.add_css_class("flat");
+            let sc = state.clone();
+            let game_name = game.name.clone();
+            let lutris_id = game.lutris_id;
+            let win_c = win.clone();
+            let row_c = row.clone();
+            search_btn.connect_clicked(move |_| {
+                show_steam_id_search_popup(&sc, &game_name, lutris_id, &win_c, &row_c);
+            });
+            row.add_suffix(&search_btn);
             ids_group.add(&row);
+            general_page.append(&ids_group);
+            return (general_page, title_entry, sort_entry, pending_version, Some(row));
         } else if game.trophy_source == crate::models::NGE {
             let row = adw::EntryRow::new();
             row.set_title("GOG Product ID");
@@ -559,7 +573,136 @@ pub(super) fn build_game_general_page(
         general_page.append(&ids_group);
     }
 
-    (general_page, title_entry, sort_entry, pending_version)
+    (general_page, title_entry, sort_entry, pending_version, None)
+}
+
+fn show_steam_id_search_popup(
+    state: &SharedState,
+    game_name: &str,
+    lutris_id: i64,
+    parent: &adw::Window,
+    app_id_row: &adw::EntryRow,
+) {
+    let dialog = adw::Window::new();
+    dialog.set_default_width(500);
+    dialog.set_default_height(400);
+    dialog.set_modal(true);
+    dialog.set_transient_for(Some(parent));
+    dialog.set_title(Some("Search Steam Store"));
+
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let header = adw::HeaderBar::new();
+    outer.append(&header);
+
+    let search_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    search_box.set_margin_start(12);
+    search_box.set_margin_end(12);
+    search_box.set_margin_top(8);
+    let entry = gtk4::Entry::new();
+    entry.set_placeholder_text(Some("Game name…"));
+    entry.set_text(game_name);
+    entry.set_hexpand(true);
+    let search_btn = gtk4::Button::with_label("Search");
+    search_btn.add_css_class("suggested-action");
+    search_box.append(&entry);
+    search_box.append(&search_btn);
+    outer.append(&search_box);
+
+    let scrolled = gtk4::ScrolledWindow::new();
+    scrolled.set_vexpand(true);
+    scrolled.set_margin_top(8);
+    let list = gtk4::ListBox::new();
+    list.set_margin_start(12);
+    list.set_margin_end(12);
+    list.set_margin_top(8);
+    list.set_margin_bottom(12);
+    list.set_valign(gtk4::Align::Start);
+    list.add_css_class("boxed-list");
+    scrolled.set_child(Some(&list));
+    outer.append(&scrolled);
+
+    let close_btn = gtk4::Button::with_label("Close");
+    close_btn.set_halign(gtk4::Align::End);
+    close_btn.set_margin_start(12);
+    close_btn.set_margin_end(12);
+    close_btn.set_margin_bottom(12);
+    let win_c = dialog.clone();
+    close_btn.connect_clicked(move |_| win_c.close());
+    outer.append(&close_btn);
+
+    dialog.set_content(Some(&outer));
+
+    let state_c = state.clone();
+    let list_c = list.clone();
+    let dialog_c = dialog.clone();
+    let row_c = app_id_row.clone();
+    let lutris_id_c = lutris_id;
+
+    let entry_s = entry.clone();
+    let do_search = move || {
+        let term = entry_s.text().to_string();
+        if term.is_empty() {
+            return;
+        }
+        let steam = state_c.borrow().steam.clone();
+        let results_shared = Arc::new(std::sync::Mutex::new(None::<Vec<(String, String)>>));
+        let results_thread = results_shared.clone();
+        std::thread::spawn(move || {
+            let r = steam.search_steam_store(&term);
+            *results_thread.lock().unwrap() = Some(r);
+        });
+        let results_poll = results_shared.clone();
+        let list_c2 = list_c.clone();
+        let dialog_c2 = dialog_c.clone();
+        let row_c2 = row_c.clone();
+        let sc2 = state_c.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            if !dialog_c2.is_visible() {
+                return glib::ControlFlow::Break;
+            }
+            if let Some(results) = results_poll.lock().unwrap().take() {
+                clear_children(&list_c2);
+                if results.is_empty() {
+                    let row = adw::ActionRow::new();
+                    row.set_title("No results found");
+                    row.set_sensitive(false);
+                    list_c2.append(&row);
+                } else {
+                    for (app_id, name) in &results {
+                        let row = adw::ActionRow::new();
+                        row.set_title(name);
+                        row.set_subtitle(&format!("App ID: {}", app_id));
+                        let match_btn = gtk4::Button::with_label("Match");
+                        match_btn.add_css_class("suggested-action");
+                        match_btn.set_valign(gtk4::Align::Center);
+                        let sc3 = sc2.clone();
+                        let sid = app_id.clone();
+                        let matched_name = name.clone();
+                        let row_update = row_c2.clone();
+                        let dlg = dialog_c2.clone();
+                        match_btn.connect_clicked(move |_| {
+                            super::matching::match_game_to_steam(&sc3, lutris_id_c, sid.clone(), matched_name.clone());
+                            row_update.set_text(&sid);
+                            dlg.close();
+                        });
+                        row.add_suffix(&match_btn);
+                        list_c2.append(&row);
+                    }
+                }
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
+    };
+
+    let ds = do_search.clone();
+    entry.connect_activate(move |_| ds());
+    let ds2 = do_search.clone();
+    search_btn.connect_clicked(move |_| ds2());
+
+    dialog.present();
+    do_search();
 }
 
 pub(super) fn build_game_logo_page(game: &Game) -> Option<(gtk4::Box, Rc<RefCell<String>>, gtk4::Adjustment)> {

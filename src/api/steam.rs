@@ -85,8 +85,10 @@ impl SteamClient {
         };
 
         let mut m = std::collections::HashMap::new();
-        for a in raw.achievementpercentages.achievements {
-            m.insert(a.name, a.percent);
+        if let Some(inner) = raw.achievementpercentages {
+            for a in inner.achievements {
+                m.insert(a.name, a.percent);
+            }
         }
         let _ = std::fs::create_dir_all(self.game_dir(app_id));
         if let Ok(b) = serde_json::to_vec(&m) {

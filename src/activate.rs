@@ -3,7 +3,6 @@ use crate::bench::run_bench;
 use crate::config;
 use crate::db;
 use crate::game_list::build_game_list;
-use crate::migration::{migrate_data_dir, populate_db_from_dirs};
 use crate::models::{AppMessage, AppSender};
 use crate::platforms::lutris_watcher::LutrisWatcher;
 use crate::platforms::ps4::ShadPS4Watcher;
@@ -46,12 +45,6 @@ pub fn activate(app: &adw::Application) -> SharedState {
     let cfg = config::load_config();
 
     let db = db::init_db(&format!("{}/gse.db", cfg.save_dir));
-
-    migrate_data_dir(&cfg.save_dir);
-
-    if db::load_all_games(&db).map(|v| v.is_empty()).unwrap_or(true) {
-        populate_db_from_dirs(&db, &cfg.save_dir);
-    }
 
     let steam = Arc::new(SteamClient::new(
         cfg.steam_api_key.clone(),

@@ -20,28 +20,32 @@ pub fn build_env(
 ) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = std::env::vars().collect();
 
-    for (k, v) in &launch.env_vars {
-        env.retain(|(ek, _)| ek != k);
-        env.push((k.clone(), v.clone()));
-    }
+    let has_wine = wine.map_or(false, |w| w.enabled);
 
-    if !launch.ld_preload.is_empty() {
-        let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
-        let merged = match existing {
-            Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_preload, prev),
-            _ => launch.ld_preload.clone(),
-        };
-        env.retain(|(k, _)| k != "LD_PRELOAD");
-        env.push(("LD_PRELOAD".to_string(), merged));
-    }
-    if !launch.ld_library_path.is_empty() {
-        let existing = env.iter().find(|(k, _)| k == "LD_LIBRARY_PATH").map(|(_, v)| v.clone());
-        let merged = match existing {
-            Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_library_path, prev),
-            _ => launch.ld_library_path.clone(),
-        };
-        env.retain(|(k, _)| k != "LD_LIBRARY_PATH");
-        env.push(("LD_LIBRARY_PATH".to_string(), merged));
+    if !has_wine {
+        for (k, v) in &launch.env_vars {
+            env.retain(|(ek, _)| ek != k);
+            env.push((k.clone(), v.clone()));
+        }
+
+        if !launch.ld_preload.is_empty() {
+            let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
+            let merged = match existing {
+                Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_preload, prev),
+                _ => launch.ld_preload.clone(),
+            };
+            env.retain(|(k, _)| k != "LD_PRELOAD");
+            env.push(("LD_PRELOAD".to_string(), merged));
+        }
+        if !launch.ld_library_path.is_empty() {
+            let existing = env.iter().find(|(k, _)| k == "LD_LIBRARY_PATH").map(|(_, v)| v.clone());
+            let merged = match existing {
+                Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_library_path, prev),
+                _ => launch.ld_library_path.clone(),
+            };
+            env.retain(|(k, _)| k != "LD_LIBRARY_PATH");
+            env.push(("LD_LIBRARY_PATH".to_string(), merged));
+        }
     }
 
     if let Some(w) = wine {

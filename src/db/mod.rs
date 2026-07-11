@@ -76,7 +76,8 @@ pub fn init_db(db_path: &str) -> DbConn {
         CREATE TABLE IF NOT EXISTS game_configs (
             game_id INTEGER NOT NULL UNIQUE,
             launch_config TEXT NOT NULL DEFAULT '',
-            wine_config TEXT NOT NULL DEFAULT ''
+            wine_config TEXT NOT NULL DEFAULT '',
+            profile_id INTEGER
         );
         CREATE TABLE IF NOT EXISTS play_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,8 +97,6 @@ pub fn init_db(db_path: &str) -> DbConn {
             arch TEXT NOT NULL DEFAULT 'auto'
         );",
     ).expect("failed to create tables");
-
-    let _ = conn.execute("ALTER TABLE game_configs ADD COLUMN profile_id INTEGER", ());
 
     Arc::new(Mutex::new(conn))
 }

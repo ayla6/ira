@@ -115,6 +115,10 @@ pub fn clear_children(w: &impl Clearable) {
     w.clear_all_children();
 }
 
+pub fn esc(s: &str) -> String {
+    glib::markup_escape_text(s).to_string()
+}
+
 pub fn refresh_settings_images_page(
     state: &SharedState,
     db_id: i64,

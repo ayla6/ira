@@ -56,7 +56,7 @@ pub fn launch_game(
             eprintln!("Warning: wine version mismatch for prefix {}. Configured: '{}', expected: '{}'", pfx, wine.version, std::fs::read_to_string(&version_file).unwrap_or_default().trim());
         }
 
-        if !prefix_ready || !version_matches {
+        if !prefix_ready {
             for reg_cmd in wine_launch::build_wine_reg_commands(wine, &wine_exe) {
                 let mut child = std::process::Command::new(&reg_cmd[0]);
                 for arg in &reg_cmd[1..] {

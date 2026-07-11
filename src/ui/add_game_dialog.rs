@@ -56,9 +56,9 @@ pub fn show_add_game_dialog(state: &SharedState) {
     stack.add_named(&general_page, Some("general"));
 
     let (wine_pages, wine_widgets) = {
-        let cfg = state.borrow().cfg.default_wine_config.clone();
-        let cfg = if cfg.enabled { cfg } else { WineConfig { enabled: true, ..cfg } };
-        super::wine_config_widget::build_wine_config_pages(&cfg)
+        let dft = state.borrow().cfg.default_wine_config.clone();
+        let cfg = if dft.enabled { dft.clone() } else { WineConfig { enabled: true, ..dft.clone() } };
+        super::wine_config_widget::build_wine_config_pages(&cfg, Some(&dft))
     };
 
     let sep1 = super::dialogs::sidebar_separator();

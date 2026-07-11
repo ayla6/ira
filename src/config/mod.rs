@@ -26,6 +26,8 @@ pub struct Config {
     pub save_dir: String,
     #[serde(default)]
     pub default_wine_config: WineConfig,
+    #[serde(default)]
+    pub default_native_env_vars: Vec<(String, String)>,
 }
 
 impl Default for Config {
@@ -41,6 +43,7 @@ impl Default for Config {
             shadps4_executable: String::new(),
             save_dir: default_save_dir(),
             default_wine_config: WineConfig::default(),
+            default_native_env_vars: Vec::new(),
         }
     }
 }
@@ -109,6 +112,7 @@ impl Config {
             shadps4_executable: self.shadps4_executable.clone(),
             save_dir: self.save_dir.clone(),
             default_wine_config: self.default_wine_config.clone(),
+            default_native_env_vars: self.default_native_env_vars.clone(),
         };
         if steam_err.is_err() {
             plaintext.steam_api_key = self.steam_api_key.clone();

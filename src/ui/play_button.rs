@@ -17,7 +17,7 @@ pub fn stop_game(state: &SharedState, lutris_id: i64) {
 }
 
 pub fn launch_game(state: &SharedState, lutris_id: i64) -> Result<(), String> {
-    let (running_games, sender, game_info, global_shadps4_exe, db, save_dir) = {
+    let (running_games, sender, game_info, global_shadps4_exe, db, save_dir, app_default_wine, default_native_env_vars) = {
         let s = state.borrow();
         (
             s.running_games.clone(),
@@ -29,6 +29,8 @@ pub fn launch_game(state: &SharedState, lutris_id: i64) -> Result<(), String> {
             s.cfg.shadps4_executable.clone(),
             s.db.clone(),
             s.save_dir.clone(),
+            s.cfg.default_wine_config.clone(),
+            s.cfg.default_native_env_vars.clone(),
         )
     };
 
@@ -68,7 +70,7 @@ pub fn launch_game(state: &SharedState, lutris_id: i64) -> Result<(), String> {
             Err(e) => return Err(format!("Failed to launch shadPS4: {}", e)),
         }
     } else {
-        let (launch, mut wine, profile_id) = crate::db::get_game_config(&db, db_id)
+        let (mut launch, mut wine, profile_id) = crate::db::get_game_config(&db, db_id)
             .ok()
             .flatten()
             .unwrap_or_default();
@@ -80,6 +82,17 @@ pub fn launch_game(state: &SharedState, lutris_id: i64) -> Result<(), String> {
                 wine.prefix = profile.prefix;
                 wine.arch = profile.arch;
             }
+        }
+
+        wine = wine.merge_with_default(&app_default_wine);
+
+        if !default_native_env_vars.is_empty() {
+            let mut merged = default_native_env_vars.clone();
+            for (k, v) in &launch.env_vars {
+                merged.retain(|(ek, _)| ek != k);
+                merged.push((k.clone(), v.clone()));
+            }
+            launch.env_vars = merged;
         }
 
         if !launch.exe.is_empty() {

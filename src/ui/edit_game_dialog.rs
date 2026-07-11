@@ -8,15 +8,22 @@ use super::state::SharedState;
 use super::add_game_dialog::{build_env_var_row, collect_env_vars};
 
 pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
-    let (game, config) = {
+    let (game, config, app_default_wine) = {
         let s = state.borrow();
         let game = s.games.iter().find(|g| g.db_id == db_id).cloned();
         let config = crate::db::get_game_config(&s.db, db_id).ok().flatten();
-        (game, config)
+        let app_default_wine = s.cfg.default_wine_config.clone();
+        (game, config, app_default_wine)
     };
     let Some(game) = game else { return };
     let has_config = config.is_some();
-    let (saved_launch, saved_wine, saved_profile_id) = config.clone().unwrap_or_default();
+    let (saved_launch, mut saved_wine, saved_profile_id) = config.clone().unwrap_or_default();
+
+    if !has_config {
+        saved_wine = app_default_wine.clone();
+    } else {
+        saved_wine = saved_wine.merge_with_default(&app_default_wine);
+    }
 
     let parent = state.borrow().window.clone();
     let win = adw::Window::new();
@@ -61,7 +68,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     stack.set_hexpand(true);
 
     // --- General page ---
-    let (general_page, title_entry, sort_entry, pending_version) =
+    let (general_page, title_entry, sort_entry, pending_version, app_id_entry) =
         super::dialogs::build_game_general_page(state, &game, &win);
     sidebar.append(&super::dialogs::settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
@@ -186,17 +193,17 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
     // --- Launch Config + Wine Config (only if game has a config) ---
     let launch_config_widgets = if has_config {
-        build_launch_config_page(&saved_launch, &win, &sidebar, &stack)
+        build_launch_config_page(&saved_launch, &win, &sidebar, &stack, !saved_wine.enabled)
     } else {
         None
     };
 
-    if has_config && saved_wine.enabled {
+    if saved_wine.enabled {
         sidebar.append(&super::dialogs::sidebar_separator());
     }
 
-    let wine_widgets_opt = if has_config && saved_wine.enabled {
-        let (wine_pages, ww) = crate::ui::wine_config_widget::build_wine_config_pages(&saved_wine);
+    let wine_widgets_opt = if saved_wine.enabled {
+        let (wine_pages, ww) = crate::ui::wine_config_widget::build_wine_config_pages(&saved_wine, Some(&app_default_wine));
         for wp in &wine_pages {
             sidebar.append(&super::dialogs::settings_sidebar_row(wp.icon, wp.label));
             stack.add_named(&wp.page, Some(wp.label));
@@ -206,7 +213,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         None
     };
 
-    if has_config && saved_wine.enabled {
+    if saved_wine.enabled {
         sidebar.append(&super::dialogs::sidebar_separator());
     }
 
@@ -245,8 +252,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             let mut switches: Vec<adw::SwitchRow> = Vec::new();
             for (_, dlc) in &dlc_list {
                 let row = adw::SwitchRow::new();
-                row.set_use_markup(false);
-                row.set_title(&dlc.name);
+                row.set_title(&super::helpers::esc(&dlc.name));
                 row.set_subtitle(&format!("App ID: {}", dlc.app_id));
                 row.set_active(dlc.enabled);
                 dlc_group.add(&row);
@@ -323,10 +329,13 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let db_id_s = db_id;
     let lutris_id = game.lutris_id;
     let app_id = game.app_id.clone();
+    let trophy_source = game.trophy_source.clone();
     let save_dir_c = save_dir.clone();
     let logo_controls_c = logo_controls.clone();
     let dlc_switches_c = dlc_switches.clone();
     let pending_copies_c = pending_copies.clone();
+    let old_wine = saved_wine.clone();
+    let app_default_wine_c = app_default_wine.clone();
 
     save_btn.connect_clicked(move |_| {
         let title = title_entry.text().to_string();
@@ -339,6 +348,15 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         }
         if let Err(e) = crate::db::update_sort_title(&db, db_id_s, &sort_title) {
             eprintln!("Failed to update sort title: {}", e);
+        }
+
+        if let Some(ref app_id_row) = app_id_entry {
+            let new_app_id = app_id_row.text().to_string();
+            if new_app_id != app_id {
+                if let Err(e) = crate::db::update_game_ids(&db, db_id_s, &new_app_id, &trophy_source, &new_app_id) {
+                    eprintln!("Failed to update app ID: {}", e);
+                }
+            }
         }
 
         if let Some(ver) = pending_version.borrow().as_ref() {
@@ -355,7 +373,22 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 ld_preload: lc.ld_preload_entry.text().to_string(),
                 ld_library_path: lc.ld_path_entry.text().to_string(),
             };
-            let wine = wine_widgets_opt.as_ref().map_or(WineConfig::default(), |ww| ww.to_wine_config());
+            let mut wine = wine_widgets_opt.as_ref().map_or(WineConfig::default(), |ww| ww.to_wine_config());
+
+            if wine.dll_overrides != app_default_wine_c.dll_overrides {
+                if !wine.overridden_fields.contains(&"dll_overrides".to_string()) {
+                    wine.overridden_fields.push("dll_overrides".to_string());
+                }
+            } else {
+                wine.overridden_fields.retain(|f| f != "dll_overrides");
+            }
+            if wine.wine_env_vars != app_default_wine_c.wine_env_vars {
+                if !wine.overridden_fields.contains(&"wine_env_vars".to_string()) {
+                    wine.overridden_fields.push("wine_env_vars".to_string());
+                }
+            } else {
+                wine.overridden_fields.retain(|f| f != "wine_env_vars");
+            }
             let new_profile_id = if let Some(ref profile_row) = profile_row {
                 if profile_row.selected() > 0 {
                     profiles.get((profile_row.selected() - 1) as usize).map(|p| p.id)
@@ -368,31 +401,39 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             let _ = crate::db::save_game_config(&db, db_id_s, &launch, &wine, new_profile_id);
 
             if wine.enabled {
-                let pfx = crate::launcher::wine_launch::wine_prefix(&wine);
-                let prefix_ready = std::path::Path::new(&pfx).join("system.reg").is_file();
-                if prefix_ready {
-                    let wine_exe = crate::launcher::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path);
-                    if let Ok(wine_exe) = wine_exe {
-                        let reg_cmds = crate::launcher::wine_launch::build_wine_reg_commands(&wine, &wine_exe);
-                        let env = crate::launcher::wine_launch::build_wine_env(&wine, &wine_exe);
-                        std::thread::spawn(move || {
-                            for reg_cmd in reg_cmds {
-                                let mut child = std::process::Command::new(&reg_cmd[0]);
-                                for arg in &reg_cmd[1..] {
-                                    child.arg(arg);
-                                }
-                                child.envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
-                                match child.status() {
-                                    Ok(s) if !s.success() && s.code() != Some(1) => {
-                                        eprintln!("Wine reg command failed (exit {:?}): {:?}", s.code(), reg_cmd);
+                let reg_changed = wine.mouse_warp_override != old_wine.mouse_warp_override
+                    || wine.virtual_desktop != old_wine.virtual_desktop
+                    || wine.virtual_desktop_res != old_wine.virtual_desktop_res
+                    || wine.dpi_enabled != old_wine.dpi_enabled
+                    || wine.dpi != old_wine.dpi
+                    || wine.show_crash_dialogs != old_wine.show_crash_dialogs
+                    || wine.audio != old_wine.audio;
+
+                if reg_changed {
+                    let pfx = crate::launcher::wine_launch::wine_prefix(&wine);
+                    let prefix_ready = std::path::Path::new(&pfx).join("system.reg").is_file();
+                    if prefix_ready {
+                        let wine_exe = crate::launcher::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path);
+                        if let Ok(wine_exe) = wine_exe {
+                            let reg_cmds = crate::launcher::wine_launch::build_wine_reg_commands(&wine, &wine_exe);
+                            let env = crate::launcher::wine_launch::build_wine_env(&wine, &wine_exe);
+                            std::thread::spawn(move || {
+                                for reg_cmd in reg_cmds {
+                                    let mut child = std::process::Command::new(&reg_cmd[0]);
+                                    for arg in &reg_cmd[1..] {
+                                        child.arg(arg);
                                     }
-                                    Err(e) => {
-                                        eprintln!("Failed to run wine reg command: {}", e);
+                                    child.envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+                                    match child.status() {
+                                        Ok(s) if !s.success() && s.code() != Some(1) => {
+                                            eprintln!("Wine reg command failed (exit {:?}): {:?}", s.code(), reg_cmd);
+                                        }
+                                        Err(e) => eprintln!("Failed to run wine reg command: {}", e),
+                                        _ => {}
                                     }
-                                    _ => {}
                                 }
-                            }
-                        });
+                            });
+                        }
                     }
                 }
             }
@@ -485,10 +526,13 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         super::sidebar::rebuild_sidebar(&state_clone);
 
         let selected = state_clone.borrow().selected_id.clone();
-        if selected == lutris_id.to_string() {
-            if let Some(g) = state_clone.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned() {
-                crate::ui::game_display::display_game(&g, &state_clone);
-            }
+        let game_after_save = if selected == lutris_id.to_string() {
+            state_clone.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned()
+        } else {
+            None
+        };
+        if let Some(g) = game_after_save {
+            crate::ui::game_display::display_game(&g, &state_clone);
         }
 
         win_s.close();
@@ -517,6 +561,7 @@ fn build_launch_config_page(
     win: &adw::Window,
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
+    show_advanced: bool,
 ) -> Option<LaunchConfigWidgets> {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
@@ -581,55 +626,67 @@ fn build_launch_config_page(
     lc_group.add(&wd_entry);
 
     page.append(&lc_group);
-
-    // Environment Variables
-    let env_group = adw::PreferencesGroup::new();
-    env_group.set_title("Environment Variables");
-    let env_vars_box = gtk4::ListBox::new();
-    env_vars_box.add_css_class("boxed-list");
-    for (k, v) in &launch.env_vars {
-        let row = build_env_var_row(k, v);
-        env_vars_box.append(&row);
-    }
-    env_group.add(&env_vars_box);
-
-    let add_env_btn = gtk4::Button::with_label("Add variable");
-    add_env_btn.add_css_class("flat");
-    let env_box_c = env_vars_box.clone();
-    add_env_btn.connect_clicked(move |_| {
-        env_box_c.append(&build_env_var_row("", ""));
-    });
-    env_group.add(&add_env_btn);
-    page.append(&env_group);
-
-    // LD_PRELOAD / LD_LIBRARY_PATH
-    let expander = adw::ExpanderRow::new();
-    expander.set_title("Advanced");
-    expander.set_expanded(!launch.ld_preload.is_empty() || !launch.ld_library_path.is_empty());
-
-    let preload_entry = adw::EntryRow::new();
-    preload_entry.set_title("LD_PRELOAD");
-    preload_entry.set_text(&launch.ld_preload);
-    expander.add_row(&preload_entry);
-
-    let path_entry = adw::EntryRow::new();
-    path_entry.set_title("LD_LIBRARY_PATH");
-    path_entry.set_text(&launch.ld_library_path);
-    expander.add_row(&path_entry);
-
-    let ld_group = adw::PreferencesGroup::new();
-    ld_group.add(&expander);
-    page.append(&ld_group);
-
     sidebar.append(&super::dialogs::settings_sidebar_row("preferences-other-symbolic", "Launch Config"));
     stack.add_named(&page, Some("launch"));
+
+    let env_vars_box;
+    let ld_preload_entry;
+    let ld_path_entry;
+
+    if show_advanced {
+        let native_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+
+        let env_group = adw::PreferencesGroup::new();
+        env_group.set_title("Environment Variables");
+        env_vars_box = gtk4::ListBox::new();
+        env_vars_box.add_css_class("boxed-list");
+        for (k, v) in &launch.env_vars {
+            let row = build_env_var_row(k, v);
+            env_vars_box.append(&row);
+        }
+        env_group.add(&env_vars_box);
+
+        let add_env_btn = gtk4::Button::with_label("Add variable");
+        add_env_btn.add_css_class("flat");
+        let env_box_c = env_vars_box.clone();
+        add_env_btn.connect_clicked(move |_| {
+            env_box_c.append(&build_env_var_row("", ""));
+        });
+        env_group.add(&add_env_btn);
+        native_page.append(&env_group);
+
+        let expander = adw::ExpanderRow::new();
+        expander.set_title("Advanced");
+        expander.set_expanded(!launch.ld_preload.is_empty() || !launch.ld_library_path.is_empty());
+
+        ld_preload_entry = adw::EntryRow::new();
+        ld_preload_entry.set_title("LD_PRELOAD");
+        ld_preload_entry.set_text(&launch.ld_preload);
+        expander.add_row(&ld_preload_entry);
+
+        ld_path_entry = adw::EntryRow::new();
+        ld_path_entry.set_title("LD_LIBRARY_PATH");
+        ld_path_entry.set_text(&launch.ld_library_path);
+        expander.add_row(&ld_path_entry);
+
+        let ld_group = adw::PreferencesGroup::new();
+        ld_group.add(&expander);
+        native_page.append(&ld_group);
+
+        sidebar.append(&super::dialogs::settings_sidebar_row("preferences-other-symbolic", "Advanced"));
+        stack.add_named(&native_page, Some("advanced"));
+    } else {
+        env_vars_box = gtk4::ListBox::new();
+        ld_preload_entry = adw::EntryRow::new();
+        ld_path_entry = adw::EntryRow::new();
+    }
 
     Some(LaunchConfigWidgets {
         exe_entry,
         args_entry,
         wd_entry,
         env_vars_box,
-        ld_preload_entry: preload_entry,
-        ld_path_entry: path_entry,
+        ld_preload_entry,
+        ld_path_entry,
     })
 }

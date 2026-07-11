@@ -4,7 +4,6 @@ pub mod config;
 pub mod db;
 pub mod game_list;
 pub mod images;
-pub mod migration;
 pub mod models;
 pub mod launcher;
 pub mod parser;

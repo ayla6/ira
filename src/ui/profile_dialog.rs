@@ -1,6 +1,10 @@
 use gtk4::prelude::*;
 use adw::prelude::*;
 use super::state::SharedState;
+use std::rc::Rc;
+use std::cell::RefCell;
+
+type ListRef = Rc<RefCell<gtk4::ListBox>>;
 
 pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> gtk4::Box {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -10,13 +14,46 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> g
 
     let list = gtk4::ListBox::new();
     list.add_css_class("boxed-list");
+    let list_rc: ListRef = Rc::new(RefCell::new(list.clone()));
 
-    let profiles = crate::db::get_all_profiles(&state.borrow().db).unwrap_or_default();
     let db = state.borrow().db.clone();
     let window = state.borrow().window.clone();
     let state_clone = state.clone();
     let settings_win_clone = settings_win.clone();
 
+    repopulate_profiles(&list_rc, &db, &window, &state_clone, &settings_win_clone);
+
+    group.add(&list);
+
+    let add_btn = gtk4::Button::with_label("Create Profile");
+    add_btn.add_css_class("flat");
+    let win_add = window.clone();
+    let db_add = db.clone();
+    let sc_add = state_clone.clone();
+    let sw_add = settings_win_clone.clone();
+    let list_rc_add = list_rc.clone();
+    add_btn.connect_clicked(move |_| {
+        show_profile_dialog(&win_add, &db_add, None, &sc_add, &sw_add, list_rc_add.clone());
+    });
+    group.add(&add_btn);
+
+    page.append(&group);
+    page
+}
+
+fn repopulate_profiles(
+    list_rc: &ListRef,
+    db: &crate::db::DbConn,
+    window: &adw::ApplicationWindow,
+    state: &SharedState,
+    settings_win: &adw::Window,
+) {
+    let list = list_rc.borrow().clone();
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+
+    let profiles = crate::db::get_all_profiles(db).unwrap_or_default();
     for p in &profiles {
         let row = adw::ActionRow::new();
         row.set_title(&p.name);
@@ -27,10 +64,11 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> g
         let p_edit = p.clone();
         let win_edit = window.clone();
         let db_edit = db.clone();
-        let sc_edit = state_clone.clone();
-        let sw_edit = settings_win_clone.clone();
+        let sc_edit = state.clone();
+        let sw_edit = settings_win.clone();
+        let list_rc_edit = list_rc.clone();
         edit_btn.connect_clicked(move |_| {
-            show_profile_dialog(&win_edit, &db_edit, Some(p_edit.clone()), &sc_edit, &sw_edit);
+            show_profile_dialog(&win_edit, &db_edit, Some(p_edit.clone()), &sc_edit, &sw_edit, list_rc_edit.clone());
         });
         row.add_suffix(&edit_btn);
 
@@ -38,8 +76,9 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> g
         del_btn.add_css_class("flat");
         let p_id = p.id;
         let db_del = db.clone();
-        let sc_del = state_clone.clone();
-        let sw_del = settings_win_clone.clone();
+        let sw_del = settings_win.clone();
+        let list_rc_del = list_rc.clone();
+        let row_for_del = row.clone();
         del_btn.connect_clicked(move |_| {
             let alert = adw::AlertDialog::new(
                 Some("Delete Profile"),
@@ -51,52 +90,23 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> g
             alert.set_default_response(Some("cancel"));
             alert.set_close_response("cancel");
             let db_c = db_del.clone();
-            let sc_c = sc_del.clone();
-            let sw_c = sw_del.clone();
+            let list_c = list_rc_del.clone();
+            let row_c = row_for_del.clone();
             alert.connect_response(None, move |_, response| {
                 if response == "delete" {
                     if let Err(e) = crate::db::delete_profile(&db_c, p_id) {
                         eprintln!("Failed to delete profile: {}", e);
                     } else {
-                        sw_c.close();
-                        refresh_settings(&sc_c);
+                        list_c.borrow().remove(&row_c);
                     }
                 }
             });
-            alert.present(None::<&gtk4::Widget>);
+            alert.present(Some(&sw_del));
         });
         row.add_suffix(&del_btn);
 
         list.append(&row);
     }
-
-    group.add(&list);
-
-    let add_btn = gtk4::Button::with_label("Create Profile");
-    add_btn.add_css_class("flat");
-    let win_add = window.clone();
-    let db_add = db.clone();
-    let sc_add = state_clone.clone();
-    let sw_add = settings_win_clone.clone();
-    add_btn.connect_clicked(move |_| {
-        show_profile_dialog(&win_add, &db_add, None, &sc_add, &sw_add);
-    });
-    group.add(&add_btn);
-
-    page.append(&group);
-    page
-}
-
-fn refresh_settings(state: &SharedState) {
-    let sc = state.clone();
-    glib::idle_add_local_once(move || {
-        let s = sc.borrow();
-        let window = s.window.clone();
-        let cfg = s.cfg.clone();
-        let steam = s.steam.clone();
-        drop(s);
-        crate::ui::dialogs::show_settings_dialog(&window, cfg, steam, &sc);
-    });
 }
 
 fn show_profile_dialog(
@@ -105,6 +115,7 @@ fn show_profile_dialog(
     existing: Option<crate::models::WineProfile>,
     state: &SharedState,
     settings_win: &adw::Window,
+    list_rc: ListRef,
 ) {
     let win = adw::Window::new();
     win.set_default_width(450);
@@ -218,8 +229,10 @@ fn show_profile_dialog(
     let win_c2 = win.clone();
     let db_c = db.clone();
     let versions_c = versions.clone();
-    let sc = state.clone();
+    let parent_c = parent.clone();
+    let sc_c = state.clone();
     let sw_c = settings_win.clone();
+    let list_rc_c = list_rc.clone();
     save_btn.connect_clicked(move |_| {
         let name = name_c.text().to_string();
         if name.is_empty() {
@@ -244,7 +257,6 @@ fn show_profile_dialog(
             }
         }
         win_c2.close();
-        sw_c.close();
-        refresh_settings(&sc);
+        repopulate_profiles(&list_rc_c, &db_c, &parent_c, &sc_c, &sw_c);
     });
 }

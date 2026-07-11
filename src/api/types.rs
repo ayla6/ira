@@ -58,7 +58,8 @@ pub struct SteamGameDetails {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct GlobalAchievementsResponse {
-    pub achievementpercentages: GlobalAchievementsInner,
+    #[serde(default)]
+    pub achievementpercentages: Option<GlobalAchievementsInner>,
 }
 
 #[derive(Debug, Deserialize)]

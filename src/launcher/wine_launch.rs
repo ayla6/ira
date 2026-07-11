@@ -78,6 +78,21 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
         env.push(("PROTONPATH".to_string(), proton_path));
     }
 
+    if wine.dxvk_frame_rate > 0 {
+        env.push(("DXVK_FRAME_RATE".to_string(), wine.dxvk_frame_rate.to_string()));
+    }
+    if wine.proton_wow64 {
+        env.push(("PROTON_USE_WOW64".to_string(), "1".to_string()));
+    }
+    if wine.proton_ntsync {
+        env.push(("PROTON_USE_NTSYNC".to_string(), "1".to_string()));
+    }
+
+    for (k, v) in &wine.wine_env_vars {
+        env.retain(|(ek, _)| ek != k);
+        env.push((k.clone(), v.clone()));
+    }
+
     env
 }
 

@@ -197,8 +197,8 @@ fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::
                 let state_inner = state.clone();
 
                 let ach_row = adw::ActionRow::new();
-                ach_row.set_title(&ach.display_name);
-                ach_row.set_subtitle(&ach.description);
+                ach_row.set_title(&super::helpers::esc(&ach.display_name));
+                ach_row.set_subtitle(&super::helpers::esc(&ach.description));
                 ach_row.set_activatable(true);
 
                 let img = gtk4::Image::from_icon_name("changes-prevent-symbolic");

@@ -99,6 +99,94 @@ pub fn write_nge_dlc_config(settings_dir: &Path, details: &AppDetails) -> Result
         .map_err(|e| format!("Failed to write NGE config: {}", e))
 }
 
+pub fn write_gse_language(settings_dir: &Path, language: &str) -> Result<(), String> {
+    let path = settings_dir.join("configs.user.ini");
+    let mut content = String::new();
+    if path.exists() {
+        content = std::fs::read_to_string(&path).unwrap_or_default();
+    }
+    if !content.contains("[user::general]") {
+        content.push_str("[user::general]\n");
+    }
+    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+    let mut found = false;
+    for line in lines.iter_mut() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("language=") {
+            *line = format!("language={}", language);
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        let general_idx = lines.iter().position(|l| l.trim() == "[user::general]");
+        if let Some(idx) = general_idx {
+            lines.insert(idx + 1, format!("language={}", language));
+        } else {
+            lines.push(format!("[user::general]\nlanguage={}", language));
+        }
+    }
+    lines.push(String::new());
+    std::fs::write(&path, lines.join("\n"))
+        .map_err(|e| format!("Failed to write configs.user.ini: {}", e))
+}
+
+pub fn write_nge_language(settings_dir: &Path, language: &str) -> Result<(), String> {
+    let config_path = settings_dir.join("NemirtingasGalaxyEmu.json");
+    let data = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read NGE config: {}", e))?;
+    let mut json: serde_json::Value = serde_json::from_str(&data)
+        .map_err(|e| format!("Failed to parse NGE config: {}", e))?;
+
+    if let Some(galaxy) = json.get_mut("GalaxyEmu") {
+        if let Some(user) = galaxy.get_mut("User") {
+            user["Language"] = serde_json::Value::String(language.to_string());
+            if let Some(langs) = user.get_mut("Languages") {
+                if let Some(arr) = langs.as_array_mut() {
+                    arr.clear();
+                    arr.push(serde_json::Value::String(language.to_string()));
+                }
+            }
+        }
+    } else {
+        json["language"] = serde_json::Value::String(language.to_string());
+    }
+
+    let out = serde_json::to_string_pretty(&json)
+        .map_err(|e| format!("Failed to serialize NGE config: {}", e))?;
+    std::fs::write(&config_path, out)
+        .map_err(|e| format!("Failed to write NGE config: {}", e))
+}
+
+pub fn write_language_configs(
+    trophy_source: &str,
+    game_exe: &str,
+    save_dir: &str,
+    app_id: &str,
+    language: &str,
+) {
+    if language.is_empty() {
+        return;
+    }
+    match trophy_source {
+        crate::models::GSE => {
+            if let Some(settings_dir) = find_steam_settings(game_exe, save_dir, app_id) {
+                if let Err(e) = write_gse_language(&settings_dir, language) {
+                    eprintln!("Language config write failed: {}", e);
+                }
+            }
+        }
+        crate::models::NGE => {
+            if let Some(settings_dir) = find_galaxy_settings(game_exe) {
+                if let Err(e) = write_nge_language(&settings_dir, language) {
+                    eprintln!("Language config write failed: {}", e);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 pub fn write_dlc_configs(
     trophy_source: &str,
     game_exe: &str,

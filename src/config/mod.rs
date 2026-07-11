@@ -28,8 +28,6 @@ pub struct Config {
     pub default_wine_config: WineConfig,
     #[serde(default)]
     pub default_native_env_vars: Vec<(String, String)>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub api_emulator_dir: String,
 }
 
 impl Default for Config {
@@ -46,7 +44,6 @@ impl Default for Config {
             save_dir: default_save_dir(),
             default_wine_config: WineConfig::default(),
             default_native_env_vars: Vec::new(),
-            api_emulator_dir: String::new(),
         }
     }
 }
@@ -116,7 +113,6 @@ impl Config {
             save_dir: self.save_dir.clone(),
             default_wine_config: self.default_wine_config.clone(),
             default_native_env_vars: self.default_native_env_vars.clone(),
-            api_emulator_dir: self.api_emulator_dir.clone(),
         };
         if steam_err.is_err() {
             plaintext.steam_api_key = self.steam_api_key.clone();

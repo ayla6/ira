@@ -239,51 +239,49 @@ fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, a
     (page, ps4_enable_row, ps4_exe_row)
 }
 
-fn build_emulators_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, adw::EntryRow) {
+fn build_api_emulators_page(cfg: &Config) -> gtk4::Box {
     let page = settings_page_container();
 
-    let group = adw::PreferencesGroup::new();
-    group.set_title("Emulator Files");
-    group.set_description(Some("Folder containing Goldberg and Nemirtingas emulator files"));
+    let emu_dir = crate::platforms::api_emulators::api_emulators_dir(&cfg.save_dir);
+    let _ = std::fs::create_dir_all(&emu_dir);
 
-    let dir_row = adw::EntryRow::new();
-    dir_row.set_title("Emulator files directory");
-    dir_row.set_text(&cfg.api_emulator_dir);
+    let group = adw::PreferencesGroup::new();
+    group.set_title("API Emulator Files");
+    group.set_description(Some("Drop emulator files into the structure below"));
+
+    let dir_row = adw::ActionRow::new();
+    dir_row.set_title("Directory");
+    dir_row.set_subtitle(&emu_dir.to_string_lossy());
     dir_row.set_sensitive(false);
 
-    let browse_btn = gtk4::Button::with_label("Browse…");
-    browse_btn.add_css_class("flat");
-    browse_btn.set_valign(gtk4::Align::Center);
+    let open_btn = gtk4::Button::with_label("Open");
+    open_btn.add_css_class("flat");
+    open_btn.set_valign(gtk4::Align::Center);
     {
-        let dir_row = dir_row.clone();
-        let parent = win.clone();
-        browse_btn.connect_clicked(move |_| {
-            let dialog = gtk4::FileDialog::new();
-            dialog.set_title("Select emulator files directory");
-            let row = dir_row.clone();
-            dialog.select_folder(Some(&parent), None::<&gio::Cancellable>, move |result| {
-                if let Ok(file) = result {
-                    if let Some(path) = file.path() {
-                        row.set_text(&path.to_string_lossy());
-                    }
-                }
-            });
+        let path = emu_dir.clone();
+        open_btn.connect_clicked(move |_| {
+            let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
         });
     }
-    dir_row.add_suffix(&browse_btn);
+    dir_row.add_suffix(&open_btn);
     group.add(&dir_row);
     page.append(&group);
 
-    let info_group = adw::PreferencesGroup::new();
-    info_group.set_title("Expected Structure");
-    let info = adw::ActionRow::new();
-    info.set_title("gse/regular/x64/libsteam_api.so");
-    info.set_subtitle("gse/regular/x86/, gse/experimental/, gse/tools/generate_interfaces, nge/x64/, nge/x86/");
-    info.set_sensitive(false);
-    info_group.add(&info);
-    page.append(&info_group);
+    let structure_group = adw::PreferencesGroup::new();
+    structure_group.set_title("Expected Structure");
+    let steam_row = adw::ActionRow::new();
+    steam_row.set_title("steam/linux/x64/steamapi/libsteam_api.so");
+    steam_row.set_subtitle("steam/linux/x64/steamclient/steamclient.so\nsteam/windows/x64/steamapi/steamapi64.dll\nsteam/windows/x64/steamclient/steamclient64.dll");
+    steam_row.set_sensitive(false);
+    structure_group.add(&steam_row);
+    let gog_row = adw::ActionRow::new();
+    gog_row.set_title("gog/new/x64/Galaxy64.dll");
+    gog_row.set_subtitle("gog/old/x86/Galaxy.dll\nPlace multiple versions in a folder, the newest is used");
+    gog_row.set_sensitive(false);
+    structure_group.add(&gog_row);
+    page.append(&structure_group);
 
-    (page, dir_row)
+    page
 }
 
 pub fn show_settings_dialog(
@@ -354,9 +352,9 @@ pub fn show_settings_dialog(
     stack.add_named(&profiles_page, Some("profiles"));
 
     sidebar.append(&sidebar_separator());
-    let (emu_page, emu_dir_entry) = build_emulators_page(&cfg, &win);
-    sidebar.append(&settings_sidebar_row("applications-engineering-symbolic", "Emulators"));
-    stack.add_named(&emu_page, Some("emulators"));
+    let emu_page = build_api_emulators_page(&cfg);
+    sidebar.append(&settings_sidebar_row("applications-engineering-symbolic", "API Emulators"));
+    stack.add_named(&emu_page, Some("api_emulators"));
 
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
@@ -373,7 +371,7 @@ pub fn show_settings_dialog(
                                 "Graphics" => "Graphics",
                                 "Wine Advanced" => "Wine Advanced",
                                 "Wine Profiles" => "profiles",
-                                "Emulators" => "emulators",
+                                "API Emulators" => "api_emulators",
                                 _ => "general",
                             };
                             stack_clone.set_visible_child_name(page_id);
@@ -418,7 +416,6 @@ pub fn show_settings_dialog(
         s.cfg.shadps4_enabled = ps4_enable_row.is_active();
         s.cfg.shadps4_executable = ps4_exe_row.text().to_string();
         s.cfg.default_wine_config = wine_widgets.to_wine_config();
-        s.cfg.api_emulator_dir = emu_dir_entry.text().to_string();
 
         steam_clone.update_keys(&s.cfg.steam_api_key, &s.cfg.steam_griddb_api_key);
 

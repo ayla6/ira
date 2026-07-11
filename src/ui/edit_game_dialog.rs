@@ -275,11 +275,11 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         Vec::new()
     };
 
-    // --- Emulator page ---
+    // --- API Emulator page ---
     let emu_exe = saved_launch.exe.clone();
     let emu_trophy_source = game.trophy_source.clone();
     let emu_app_id = game.app_id.clone();
-    let emu_api_dir = state.borrow().cfg.api_emulator_dir.clone();
+    let emu_save_dir = state.borrow().save_dir.clone();
     let emu_language_row: Option<adw::ComboRow> = {
     if (emu_trophy_source == crate::models::GSE || emu_trophy_source == crate::models::NGE) && !emu_exe.is_empty() {
         let emu_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -288,21 +288,13 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
         let status_row = adw::ActionRow::new();
         let is_installed = if emu_trophy_source == crate::models::GSE {
-            crate::platforms::api_emulator::is_gse_installed(&emu_exe)
+            crate::platforms::api_emulators::is_gse_installed(&emu_exe)
         } else {
-            crate::platforms::api_emulator::is_nge_installed(&emu_exe)
+            crate::platforms::api_emulators::is_nge_installed(&emu_exe)
         };
-        status_row.set_title(if is_installed { "Emulator installed" } else { "Emulator not installed" });
+        status_row.set_title(if is_installed { "API emulator installed" } else { "API emulator not installed" });
         status_row.set_sensitive(false);
         status_group.add(&status_row);
-
-        if emu_api_dir.is_empty() {
-            let warn_row = adw::ActionRow::new();
-            warn_row.set_title("No emulator directory configured");
-            warn_row.set_subtitle("Set the emulator files directory in Settings → Emulators");
-            warn_row.set_sensitive(false);
-            status_group.add(&warn_row);
-        }
 
         emu_page.append(&status_group);
 
@@ -310,42 +302,42 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         action_group.set_title("Actions");
 
         if is_installed {
-            let uninstall_btn = gtk4::Button::with_label("Uninstall emulator");
+            let uninstall_btn = gtk4::Button::with_label("Uninstall API emulator");
             uninstall_btn.add_css_class("destructive-action");
             let exe_c = emu_exe.clone();
             let ts_c = emu_trophy_source.clone();
             let status_c = status_row.clone();
             uninstall_btn.connect_clicked(move |_| {
                 let result = if ts_c == crate::models::GSE {
-                    crate::platforms::api_emulator::uninstall_gse(&exe_c)
+                    crate::platforms::api_emulators::uninstall_gse(&exe_c)
                 } else {
-                    crate::platforms::api_emulator::uninstall_nge(&exe_c)
+                    crate::platforms::api_emulators::uninstall_nge(&exe_c)
                 };
                 match result {
                     Ok(()) => {
-                        status_c.set_title("Emulator not installed");
+                        status_c.set_title("API emulator not installed");
                     }
                     Err(e) => eprintln!("Uninstall failed: {}", e),
                 }
             });
             action_group.add(&uninstall_btn);
-        } else if !emu_api_dir.is_empty() {
-            let install_btn = gtk4::Button::with_label("Install emulator");
+        } else {
+            let install_btn = gtk4::Button::with_label("Install API emulator");
             install_btn.add_css_class("suggested-action");
             let exe_c = emu_exe.clone();
             let ts_c = emu_trophy_source.clone();
             let app_id_c = emu_app_id.clone();
-            let api_dir_c = emu_api_dir.clone();
+            let save_dir_c = emu_save_dir.clone();
             let status_c = status_row.clone();
             install_btn.connect_clicked(move |_| {
                 let result = if ts_c == crate::models::GSE {
-                    crate::platforms::api_emulator::install_gse(&api_dir_c, "regular", &exe_c, &app_id_c)
+                    crate::platforms::api_emulators::install_gse(&save_dir_c, &exe_c, &app_id_c)
                 } else {
-                    crate::platforms::api_emulator::install_nge(&api_dir_c, &exe_c, &app_id_c)
+                    crate::platforms::api_emulators::install_nge(&save_dir_c, &exe_c, &app_id_c)
                 };
                 match result {
                     Ok(()) => {
-                        status_c.set_title("Emulator installed");
+                        status_c.set_title("API emulator installed");
                     }
                     Err(e) => eprintln!("Install failed: {}", e),
                 }
@@ -385,7 +377,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             "ukrainian", "vietnamese",
         ]);
         let lang_row = adw::ComboRow::new();
-        lang_row.set_title("Emulator language");
+        lang_row.set_title("API emulator language");
         lang_row.set_subtitle("Language reported to the game by the API emulator");
         lang_row.set_model(Some(&lang_model));
         lang_row.set_selected(0);
@@ -398,7 +390,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         emu_scroll.set_hexpand(true);
         sidebar.append(&super::dialogs::sidebar_separator());
         sidebar.append(&super::dialogs::settings_sidebar_row("applications-engineering-symbolic", "API Emulator"));
-        stack.add_named(&emu_scroll, Some("emulator"));
+        stack.add_named(&emu_scroll, Some("api_emulator"));
         Some(lang_row)
     } else {
         None
@@ -422,7 +414,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                                 "Images" => "images",
                                 "Logo" => "logo",
                                 "DLC" => "dlc",
-                                "API Emulator" => "emulator",
+                                "API Emulator" => "api_emulator",
                                 _ => "general",
                             };
                             stack_clone.set_visible_child_name(page_id);
@@ -640,7 +632,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     if let Ok(b) = serde_json::to_vec(&details) {
                         let _ = std::fs::write(&path, b);
                     }
-                    crate::platforms::api_emulator::write_dlc_configs(
+                    crate::platforms::api_emulators::write_dlc_configs(
                         &trophy_source, &game_exe, &save_dir_c, &app_id, &details,
                     );
                 }
@@ -658,7 +650,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             ];
             let idx = lang_row.selected() as usize;
             if let Some(&lang) = langs.get(idx) {
-                crate::platforms::api_emulator::write_language_configs(
+                crate::platforms::api_emulators::write_language_configs(
                     &trophy_source, &game_exe, &save_dir_c, &app_id, lang,
                 );
             }

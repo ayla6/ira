@@ -283,41 +283,75 @@ fn find_api_emu_dll_folder(game_exe: &str, dll_names: &[&str]) -> Option<PathBuf
     None
 }
 
+pub fn api_emulators_dir(save_dir: &str) -> PathBuf {
+    Path::new(save_dir).join("api_emulators")
+}
+
+fn detect_arch(game_exe: &str) -> &'static str {
+    if game_exe.ends_with(".exe") || game_exe.ends_with(".bat") {
+        let is64 = game_exe.contains("64") || std::fs::metadata(game_exe)
+            .map(|m| m.len() > 1_500_000).unwrap_or(false);
+        if is64 { "x64" } else { "x86" }
+    } else {
+        if std::env::consts::ARCH == "x86_64" { "x64" } else { "x86" }
+    }
+}
+
+fn is_windows(game_exe: &str) -> bool {
+    game_exe.ends_with(".exe") || game_exe.ends_with(".bat")
+}
+
+fn find_latest_file(dir: &Path) -> Option<PathBuf> {
+    let mut latest: Option<(std::time::SystemTime, PathBuf)> = None;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                if let Ok(meta) = entry.metadata() {
+                    if let Ok(mtime) = meta.modified() {
+                        if latest.as_ref().map(|(t, _)| mtime > *t).unwrap_or(true) {
+                            latest = Some((mtime, entry.path()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    latest.map(|(_, p)| p)
+}
+
 pub fn install_gse(
-    emu_dir: &str,
-    variant: &str,
+    save_dir: &str,
     game_exe: &str,
     app_id: &str,
 ) -> Result<(), String> {
-    let variant_dir = Path::new(emu_dir).join("gse").join(variant);
-    let (arch_files, src_arch) = if game_exe.ends_with(".exe") || game_exe.ends_with(".bat") {
-        let is64 = game_exe.contains("64") || std::fs::metadata(game_exe)
-            .map(|m| m.len() > 1_500_000).unwrap_or(false);
-        if is64 {
-            (GSE_WIN_FILES_X64, "x64")
-        } else {
-            (GSE_WIN_FILES_X86, "x86")
-        }
-    } else {
-        let is64 = std::env::consts::ARCH == "x86_64";
-        if is64 {
-            (GSE_LINUX_FILES, "x64")
-        } else {
-            (GSE_LINUX_FILES, "x86")
-        }
-    };
+    let emu_root = api_emulators_dir(save_dir).join("steam");
+    let arch = detect_arch(game_exe);
+    let platform = if is_windows(game_exe) { "windows" } else { "linux" };
 
-    let src_dir = variant_dir.join(src_arch);
-    let dll_folder = find_api_emu_dll_folder(game_exe, arch_files)
+    let dll_folder = find_api_emu_dll_folder(game_exe, GSE_LINUX_FILES)
+        .or_else(|| find_api_emu_dll_folder(game_exe, GSE_WIN_FILES_X64))
+        .or_else(|| find_api_emu_dll_folder(game_exe, GSE_WIN_FILES_X86))
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
-    for file in arch_files {
-        let dst = dll_folder.join(file);
+    let files: &[(&str, &str)] = if is_windows(game_exe) {
+        if arch == "x64" {
+            &[("steamapi", "steamapi64.dll"), ("steamclient", "steamclient64.dll")]
+        } else {
+            &[("steamapi", "steam_api.dll"), ("steamclient", "steamclient.dll")]
+        }
+    } else {
+        &[("steamapi", "libsteam_api.so"), ("steamclient", "steamclient.so")]
+    };
+
+    for (sub, filename) in files {
+        let src_dir = emu_root.join(platform).join(arch).join(sub);
+        let dst = dll_folder.join(filename);
         backup_file(&dst)?;
-        let src = src_dir.join(file);
-        if src.exists() {
-            copy_file(&src, &dst)?;
+        if src_dir.is_dir() {
+            if let Some(src) = find_latest_file(&src_dir) {
+                copy_file(&src, &dst)?;
+            }
         }
     }
 
@@ -329,7 +363,7 @@ pub fn install_gse(
         std::fs::write(&appid_path, app_id).map_err(|e| format!("write steam_appid.txt: {}", e))?;
     }
 
-    let tools_dir = Path::new(emu_dir).join("gse").join("tools");
+    let tools_dir = emu_root.join("tools");
     let gen_interfaces = tools_dir.join("generate_interfaces");
     if gen_interfaces.is_file() {
         let dst = dll_folder.join("generate_interfaces");
@@ -338,11 +372,20 @@ pub fn install_gse(
         }
     }
 
+    let ach_dir = crate::parser::achievements_dir(save_dir, app_id);
+    if !ach_dir.exists() {
+        if let Some(parent) = ach_dir.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        #[cfg(unix)]
+        let _ = std::os::unix::fs::symlink(&settings_dir, &ach_dir);
+    }
+
     Ok(())
 }
 
 pub fn uninstall_gse(game_exe: &str) -> Result<(), String> {
-    let all_files = [GSE_LINUX_FILES, GSE_WIN_FILES_X64, GSE_WIN_FILES_X86].concat();
+    let all_files: Vec<&str> = [GSE_LINUX_FILES, GSE_WIN_FILES_X64, GSE_WIN_FILES_X86].concat();
     let dll_folder = find_api_emu_dll_folder(game_exe, &all_files)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
@@ -355,39 +398,32 @@ pub fn uninstall_gse(game_exe: &str) -> Result<(), String> {
 }
 
 pub fn install_nge(
-    emu_dir: &str,
+    save_dir: &str,
     game_exe: &str,
     product_id: &str,
 ) -> Result<(), String> {
-    let src_dir = Path::new(emu_dir).join("nge");
-    let (arch_files, src_arch) = if game_exe.ends_with(".exe") || game_exe.ends_with(".bat") {
-        let is64 = game_exe.contains("64") || std::fs::metadata(game_exe)
-            .map(|m| m.len() > 1_500_000).unwrap_or(false);
-        if is64 {
-            (NGE_WIN_FILES_X64, "x64")
-        } else {
-            (NGE_WIN_FILES_X86, "x86")
-        }
-    } else {
-        return Err("Nemirtingas emulator is Windows-only (no Linux .so)".to_string());
-    };
+    if !is_windows(game_exe) {
+        return Err("Nemirtingas API emulator is Windows-only (no Linux .so)".to_string());
+    }
 
-    let src_arch_dir = if src_dir.join(src_arch).is_dir() {
-        src_dir.join(src_arch)
-    } else {
-        src_dir
-    };
+    let emu_root = api_emulators_dir(save_dir).join("gog");
+    let arch = detect_arch(game_exe);
+    let filename = if arch == "x64" { "Galaxy64.dll" } else { "Galaxy.dll" };
 
-    let dll_folder = find_api_emu_dll_folder(game_exe, arch_files)
+    let dll_folder = find_api_emu_dll_folder(game_exe, NGE_WIN_FILES_X64)
+        .or_else(|| find_api_emu_dll_folder(game_exe, NGE_WIN_FILES_X86))
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
-    for file in arch_files {
-        let dst = dll_folder.join(file);
-        backup_file(&dst)?;
-        let src = src_arch_dir.join(file);
-        if src.exists() {
-            copy_file(&src, &dst)?;
+    for variant in &["new", "old"] {
+        let src_dir = emu_root.join(variant).join(arch);
+        if src_dir.is_dir() {
+            if let Some(src) = find_latest_file(&src_dir) {
+                let dst = dll_folder.join(filename);
+                backup_file(&dst)?;
+                copy_file(&src, &dst)?;
+                break;
+            }
         }
     }
 
@@ -403,7 +439,7 @@ pub fn install_nge(
 }
 
 pub fn uninstall_nge(game_exe: &str) -> Result<(), String> {
-    let all_files = [NGE_WIN_FILES_X64, NGE_WIN_FILES_X86].concat();
+    let all_files: Vec<&str> = [NGE_WIN_FILES_X64, NGE_WIN_FILES_X86].concat();
     let dll_folder = find_api_emu_dll_folder(game_exe, &all_files)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
@@ -416,7 +452,7 @@ pub fn uninstall_nge(game_exe: &str) -> Result<(), String> {
 }
 
 pub fn is_gse_installed(game_exe: &str) -> bool {
-    let all_files = [GSE_LINUX_FILES, GSE_WIN_FILES_X64, GSE_WIN_FILES_X86].concat();
+    let all_files: Vec<&str> = [GSE_LINUX_FILES, GSE_WIN_FILES_X64, GSE_WIN_FILES_X86].concat();
     if let Some(folder) = find_api_emu_dll_folder(game_exe, &all_files) {
         folder.join("steam_settings").is_dir()
     } else {
@@ -425,7 +461,7 @@ pub fn is_gse_installed(game_exe: &str) -> bool {
 }
 
 pub fn is_nge_installed(game_exe: &str) -> bool {
-    let all_files = [NGE_WIN_FILES_X64, NGE_WIN_FILES_X86].concat();
+    let all_files: Vec<&str> = [NGE_WIN_FILES_X64, NGE_WIN_FILES_X86].concat();
     if let Some(folder) = find_api_emu_dll_folder(game_exe, &all_files) {
         folder.join("ngalaxye_settings").is_dir()
     } else {

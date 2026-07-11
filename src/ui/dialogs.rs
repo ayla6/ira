@@ -271,7 +271,7 @@ fn build_api_emulators_page(cfg: &Config) -> gtk4::Box {
     structure_group.set_title("Expected Structure");
     let steam_row = adw::ActionRow::new();
     steam_row.set_title("steam/linux/x64/steamapi/libsteam_api.so");
-    steam_row.set_subtitle("steam/linux/x64/steamclient/steamclient.so\nsteam/windows/x64/steamapi/steamapi64.dll\nsteam/windows/x64/steamclient/steamclient64.dll");
+    steam_row.set_subtitle("steam/linux/x64/steamclient/steamclient.so\nsteam/windows/x64/steamapi/steamapi64.dll\nsteam/windows/x64/steamclient/steamclient64.dll\nsteam/generate_interfaces");
     steam_row.set_sensitive(false);
     structure_group.add(&steam_row);
     let gog_row = adw::ActionRow::new();

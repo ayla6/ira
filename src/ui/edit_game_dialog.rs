@@ -357,13 +357,14 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             gen_btn.connect_clicked(move |_| {
                 let game_dir = std::path::Path::new(&exe_c).parent();
                 if let Some(dir) = game_dir {
-                    let gen_path = dir.join("generate_interfaces");
+                    let settings_dir = dir.join("steam_settings");
+                    let gen_path = settings_dir.join("generate_interfaces");
                     if gen_path.is_file() {
                         let _ = std::process::Command::new(&gen_path)
-                            .current_dir(dir)
+                            .current_dir(&settings_dir)
                             .status();
                     } else {
-                        eprintln!("generate_interfaces tool not found in game folder");
+                        eprintln!("generate_interfaces not found in steam_settings folder");
                     }
                 }
             });

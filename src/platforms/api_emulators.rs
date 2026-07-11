@@ -363,10 +363,9 @@ pub fn install_gse(
         std::fs::write(&appid_path, app_id).map_err(|e| format!("write steam_appid.txt: {}", e))?;
     }
 
-    let tools_dir = emu_root.join("tools");
-    let gen_interfaces = tools_dir.join("generate_interfaces");
+    let gen_interfaces = emu_root.join("generate_interfaces");
     if gen_interfaces.is_file() {
-        let dst = dll_folder.join("generate_interfaces");
+        let dst = settings_dir.join("generate_interfaces");
         if !dst.exists() {
             let _ = copy_file(&gen_interfaces, &dst);
         }

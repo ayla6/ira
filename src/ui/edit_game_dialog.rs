@@ -336,6 +336,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let pending_copies_c = pending_copies.clone();
     let old_wine = saved_wine.clone();
     let app_default_wine_c = app_default_wine.clone();
+    let game_exe = saved_launch.exe.clone();
 
     save_btn.connect_clicked(move |_| {
         let title = title_entry.text().to_string();
@@ -507,6 +508,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     if let Ok(b) = serde_json::to_vec(&details) {
                         let _ = std::fs::write(&path, b);
                     }
+                    crate::platforms::emulator::write_dlc_configs(
+                        &trophy_source, &game_exe, &save_dir_c, &app_id, &details,
+                    );
                 }
             }
         }

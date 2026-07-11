@@ -6,8 +6,16 @@ use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
 use std::os::unix::process::CommandExt;
 use std::time::Duration;
+use std::path::Path;
 
 const PR_SET_CHILD_SUBREAPER: i32 = 36;
+
+const WINE_BG_PROCESSES: &[&str] = &[
+    "wineserver", "services.exe", "winedevice.exe", "plugplay.exe",
+    "explorer.exe", "wineconsole", "svchost.exe", "rpcss.exe",
+    "rundll32.exe", "mscorsvw.exe", "iexplore.exe", "winedbg.exe",
+    "tabtip.exe", "conhost.exe",
+];
 
 fn set_subreaper() {
     let ret = unsafe { libc::prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) };
@@ -50,20 +58,14 @@ pub fn monitor_process(
     game_id: i64,
     running_games: Arc<Mutex<HashMap<i64, i32>>>,
 ) {
-    let mut exited = false;
-    while !exited {
+    loop {
         std::thread::sleep(Duration::from_secs(2));
-
         reap_zombies(child_pid);
 
         match child.try_wait() {
-            Ok(Some(_status)) => {
-                exited = true;
-            }
+            Ok(Some(_status)) => break,
             Ok(None) => {}
-            Err(_) => {
-                exited = true;
-            }
+            Err(_) => break,
         }
     }
 
@@ -81,7 +83,6 @@ pub fn monitor_process(
         if let Err(e) = record_session(&db, game_id, started_at, ended_at) {
             eprintln!("Failed to record play session: {}", e);
         }
-
         let _ = sender.send(AppMessage::SessionRecorded {
             game_id,
             duration_seconds: duration,
@@ -90,11 +91,7 @@ pub fn monitor_process(
         });
     }
 
-    {
-        let mut map = running_games.lock().unwrap();
-        map.remove(&lutris_id);
-    }
-
+    running_games.lock().unwrap().remove(&lutris_id);
     let _ = sender.send(AppMessage::GameStopped(lutris_id));
 }
 
@@ -108,4 +105,126 @@ fn reap_zombies(pgid: i32) {
             break;
         }
     }
+}
+
+fn proc_name(pid: i32) -> Option<String> {
+    let stat = std::fs::read_to_string(format!("/proc/{}/stat", pid)).ok()?;
+    let start = stat.rfind(')').unwrap_or(0);
+    let after_comm = &stat[start + 1..];
+    let mut parts = after_comm.split_whitespace();
+    parts.next()?;
+    let comm = parts.next()?;
+    Some(comm.to_string())
+}
+
+fn proc_children(pid: i32) -> Vec<i32> {
+    let mut children = Vec::new();
+    let task_dir = format!("/proc/{}/task", pid);
+    if let Ok(tasks) = std::fs::read_dir(&task_dir) {
+        for task in tasks.flatten() {
+            let children_path = task.path().join("children");
+            if let Ok(data) = std::fs::read_to_string(&children_path) {
+                for pid_str in data.split_whitespace() {
+                    if let Ok(child_pid) = pid_str.parse::<i32>() {
+                        children.push(child_pid);
+                    }
+                }
+            }
+        }
+    }
+    children
+}
+
+fn collect_descendants(pid: i32) -> Vec<i32> {
+    let mut all = Vec::new();
+    let mut stack = vec![pid];
+    while let Some(p) = stack.pop() {
+        let children = proc_children(p);
+        for child in children {
+            if !all.contains(&child) {
+                all.push(child);
+                stack.push(child);
+            }
+        }
+    }
+    all
+}
+
+fn is_wine_bg(pid: i32) -> bool {
+    if let Some(name) = proc_name(pid) {
+        let name_lower = name.to_lowercase();
+        let name_trunc = if name_lower.len() > 15 { &name_lower[..15] } else { &name_lower };
+        return WINE_BG_PROCESSES.iter().any(|bg| {
+            let bg_lower = bg.to_lowercase();
+            let bg_trunc = if bg_lower.len() > 15 { &bg_lower[..15] } else { &bg_lower };
+            name_trunc == bg_trunc
+        });
+    }
+    false
+}
+
+fn kill_process_tree(pid: i32, sig: i32) {
+    let descendants = collect_descendants(pid);
+    for d in &descendants {
+        unsafe { libc::kill(*d, sig); }
+    }
+    unsafe { libc::kill(pid, sig); }
+}
+
+pub fn stop_game_with_wine(pid: i32, wine_exe: Option<&str>, wine_prefix: Option<&str>, env: &[(String, String)]) {
+    unsafe { libc::kill(-pid, libc::SIGTERM); }
+
+    let wine_exe = wine_exe.map(|s| s.to_string());
+    let wine_prefix = wine_prefix.map(|s| s.to_string());
+    let env: Vec<(String, String)> = env.to_vec();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(2));
+
+        let alive = unsafe { libc::kill(-pid, 0) } == 0;
+        if !alive {
+            return;
+        }
+
+        if let (Some(exe), Some(prefix)) = (&wine_exe, &wine_prefix) {
+            let wineserver = find_wineserver(exe);
+            if let Some(ws) = wineserver {
+                let mut cmd = Command::new(&ws);
+                cmd.arg("-k");
+                cmd.env("WINEPREFIX", prefix);
+                for (k, v) in env {
+                    cmd.env(k, v);
+                }
+                let _ = cmd.status();
+            }
+        }
+
+        std::thread::sleep(Duration::from_secs(3));
+
+        let still_alive = unsafe { libc::kill(-pid, 0) } == 0;
+        if still_alive {
+            unsafe { libc::kill(-pid, libc::SIGKILL); }
+            std::thread::sleep(Duration::from_millis(500));
+            kill_process_tree(pid, libc::SIGKILL);
+        }
+    });
+}
+
+fn find_wineserver(wine_exe: &str) -> Option<String> {
+    let wine_dir = Path::new(wine_exe).parent()?;
+    let candidate = wine_dir.join("wineserver");
+    if candidate.is_file() {
+        return Some(candidate.to_string_lossy().into_owned());
+    }
+    if wine_exe.contains("/proton") || wine_exe.contains("/umu") {
+        let proton_dir = wine_dir.parent().or_else(|| wine_dir.parent())?;
+        let ws = proton_dir.join("files/bin/wineserver");
+        if ws.is_file() {
+            return Some(ws.to_string_lossy().into_owned());
+        }
+        let ws2 = proton_dir.join("dist/bin/wineserver");
+        if ws2.is_file() {
+            return Some(ws2.to_string_lossy().into_owned());
+        }
+    }
+    None
 }

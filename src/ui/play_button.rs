@@ -5,14 +5,33 @@ use super::state::SharedState;
 pub fn stop_game(state: &SharedState, lutris_id: i64) {
     let pid = state.borrow().running_games.lock().unwrap().remove(&lutris_id);
     if let Some(pid) = pid {
-        unsafe { libc::kill(-pid, libc::SIGTERM); }
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(5));
-            let alive = unsafe { libc::kill(-pid, 0) } == 0;
-            if alive {
-                unsafe { libc::kill(-pid, libc::SIGKILL); }
-            }
-        });
+        let (wine_exe, wine_prefix, env) = {
+            let s = state.borrow();
+            let game = s.games.iter().find(|g| g.lutris_id == lutris_id);
+            let db_id = game.map(|g| g.db_id).unwrap_or(0);
+            let config = crate::db::get_game_config(&s.db, db_id).ok().flatten();
+            let app_default = s.cfg.default_wine_config.clone();
+            let (exe, prefix, env_vars) = if let Some((_, mut wine, _)) = config {
+                wine = wine.merge_with_default(&app_default);
+                if wine.enabled {
+                    let exe = crate::launcher::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path).ok();
+                    let prefix = crate::launcher::wine_launch::wine_prefix(&wine);
+                    let env = crate::launcher::wine_launch::build_wine_env(&wine, exe.as_deref().unwrap_or(""));
+                    (exe, Some(prefix), env)
+                } else {
+                    (None, None, Vec::new())
+                }
+            } else {
+                (None, None, Vec::new())
+            };
+            (exe, prefix, env_vars)
+        };
+        crate::launcher::wrapper::stop_game_with_wine(
+            pid,
+            wine_exe.as_deref(),
+            wine_prefix.as_deref(),
+            &env,
+        );
     }
 }
 

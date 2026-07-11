@@ -35,6 +35,9 @@ pub(super) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<crate
 pub type DbConn = Arc<Mutex<Connection>>;
 
 pub fn init_db(db_path: &str) -> DbConn {
+    if let Some(parent) = std::path::Path::new(db_path).parent() {
+        std::fs::create_dir_all(parent).expect("failed to create database directory");
+    }
     let conn = Connection::open(db_path).expect("failed to open database");
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS games (

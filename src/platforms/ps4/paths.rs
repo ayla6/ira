@@ -4,8 +4,9 @@ use std::path::PathBuf;
 /// Linux: ~/.local/share/shadPS4/
 pub fn shadps4_user_dir() -> PathBuf {
     xdg::BaseDirectories::new()
-        .map(|b| b.get_data_home().join("shadPS4"))
-        .unwrap_or_else(|_| {
+        .get_data_home()
+        .map(|p| p.join("shadPS4"))
+        .unwrap_or_else(|| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
             PathBuf::from(home).join(".local").join("share").join("shadPS4")
         })

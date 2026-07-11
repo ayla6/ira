@@ -51,7 +51,7 @@ fn default_true() -> bool {
 }
 
 fn default_save_dir() -> String {
-    xdg_dir(xdg::BaseDirectories::new().ok().map(|b| b.get_data_home()))
+    xdg_dir(xdg::BaseDirectories::new().get_data_home())
         .join("achievement-viewer")
         .to_string_lossy()
         .to_string()
@@ -59,8 +59,9 @@ fn default_save_dir() -> String {
 
 fn config_path() -> PathBuf {
     xdg::BaseDirectories::new()
-        .map(|b| b.get_config_home().join("achievement-viewer").join("config.json"))
-        .unwrap_or_else(|_| PathBuf::from(".").join(".config").join("achievement-viewer").join("config.json"))
+        .get_config_home()
+        .map(|p| p.join("achievement-viewer").join("config.json"))
+        .unwrap_or_else(|| PathBuf::from(".").join(".config").join("achievement-viewer").join("config.json"))
 }
 
 fn xdg_dir(xdg_home: Option<PathBuf>) -> PathBuf {

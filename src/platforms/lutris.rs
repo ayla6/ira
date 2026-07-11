@@ -26,8 +26,9 @@ pub struct LutrisGame {
 
 pub fn lutris_db_path() -> PathBuf {
     xdg::BaseDirectories::new()
-        .map(|b| b.get_data_home().join("lutris").join("pga.db"))
-        .unwrap_or_else(|_| {
+        .get_data_home()
+        .map(|p| p.join("lutris").join("pga.db"))
+        .unwrap_or_else(|| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
             PathBuf::from(home).join(".local").join("share").join("lutris").join("pga.db")
         })

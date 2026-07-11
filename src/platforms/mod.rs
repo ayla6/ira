@@ -5,6 +5,6 @@ pub mod steam;
 pub mod steam_setup;
 pub mod gog;
 pub mod gog_setup;
-pub mod emulator;
+pub mod api_emulator;
 pub mod ps4;
 pub mod watcher_util;

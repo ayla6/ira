@@ -508,7 +508,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     if let Ok(b) = serde_json::to_vec(&details) {
                         let _ = std::fs::write(&path, b);
                     }
-                    crate::platforms::emulator::write_dlc_configs(
+                    crate::platforms::api_emulator::write_dlc_configs(
                         &trophy_source, &game_exe, &save_dir_c, &app_id, &details,
                     );
                 }

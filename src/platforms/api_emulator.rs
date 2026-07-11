@@ -164,7 +164,7 @@ fn copy_file(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn find_emu_dll_folder(game_exe: &str, dll_names: &[&str]) -> Option<PathBuf> {
+fn find_api_emu_dll_folder(game_exe: &str, dll_names: &[&str]) -> Option<PathBuf> {
     let exe_path = Path::new(game_exe);
     let start = exe_path.parent()?;
     if let Ok(entries) = std::fs::read_dir(start) {
@@ -220,7 +220,7 @@ pub fn install_gse(
     };
 
     let src_dir = variant_dir.join(src_arch);
-    let dll_folder = find_emu_dll_folder(game_exe, arch_files)
+    let dll_folder = find_api_emu_dll_folder(game_exe, arch_files)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
@@ -255,7 +255,7 @@ pub fn install_gse(
 
 pub fn uninstall_gse(game_exe: &str) -> Result<(), String> {
     let all_files = [GSE_LINUX_FILES, GSE_WIN_FILES_X64, GSE_WIN_FILES_X86].concat();
-    let dll_folder = find_emu_dll_folder(game_exe, &all_files)
+    let dll_folder = find_api_emu_dll_folder(game_exe, &all_files)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
@@ -290,7 +290,7 @@ pub fn install_nge(
         src_dir
     };
 
-    let dll_folder = find_emu_dll_folder(game_exe, arch_files)
+    let dll_folder = find_api_emu_dll_folder(game_exe, arch_files)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
@@ -316,7 +316,7 @@ pub fn install_nge(
 
 pub fn uninstall_nge(game_exe: &str) -> Result<(), String> {
     let all_files = [NGE_WIN_FILES_X64, NGE_WIN_FILES_X86].concat();
-    let dll_folder = find_emu_dll_folder(game_exe, &all_files)
+    let dll_folder = find_api_emu_dll_folder(game_exe, &all_files)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
@@ -329,7 +329,7 @@ pub fn uninstall_nge(game_exe: &str) -> Result<(), String> {
 
 pub fn is_gse_installed(game_exe: &str) -> bool {
     let all_files = [GSE_LINUX_FILES, GSE_WIN_FILES_X64, GSE_WIN_FILES_X86].concat();
-    if let Some(folder) = find_emu_dll_folder(game_exe, &all_files) {
+    if let Some(folder) = find_api_emu_dll_folder(game_exe, &all_files) {
         folder.join("steam_settings").is_dir()
     } else {
         false
@@ -338,7 +338,7 @@ pub fn is_gse_installed(game_exe: &str) -> bool {
 
 pub fn is_nge_installed(game_exe: &str) -> bool {
     let all_files = [NGE_WIN_FILES_X64, NGE_WIN_FILES_X86].concat();
-    if let Some(folder) = find_emu_dll_folder(game_exe, &all_files) {
+    if let Some(folder) = find_api_emu_dll_folder(game_exe, &all_files) {
         folder.join("ngalaxye_settings").is_dir()
     } else {
         false

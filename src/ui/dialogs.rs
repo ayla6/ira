@@ -239,6 +239,53 @@ fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, a
     (page, ps4_enable_row, ps4_exe_row)
 }
 
+fn build_emulators_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, adw::EntryRow) {
+    let page = settings_page_container();
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Emulator Files");
+    group.set_description(Some("Folder containing Goldberg and Nemirtingas emulator files"));
+
+    let dir_row = adw::EntryRow::new();
+    dir_row.set_title("Emulator files directory");
+    dir_row.set_text(&cfg.api_emulator_dir);
+    dir_row.set_sensitive(false);
+
+    let browse_btn = gtk4::Button::with_label("Browse…");
+    browse_btn.add_css_class("flat");
+    browse_btn.set_valign(gtk4::Align::Center);
+    {
+        let dir_row = dir_row.clone();
+        let parent = win.clone();
+        browse_btn.connect_clicked(move |_| {
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title("Select emulator files directory");
+            let row = dir_row.clone();
+            dialog.select_folder(Some(&parent), None::<&gio::Cancellable>, move |result| {
+                if let Ok(file) = result {
+                    if let Some(path) = file.path() {
+                        row.set_text(&path.to_string_lossy());
+                    }
+                }
+            });
+        });
+    }
+    dir_row.add_suffix(&browse_btn);
+    group.add(&dir_row);
+    page.append(&group);
+
+    let info_group = adw::PreferencesGroup::new();
+    info_group.set_title("Expected Structure");
+    let info = adw::ActionRow::new();
+    info.set_title("gse/regular/x64/libsteam_api.so");
+    info.set_subtitle("gse/regular/x86/, gse/experimental/, gse/tools/generate_interfaces, nge/x64/, nge/x86/");
+    info.set_sensitive(false);
+    info_group.add(&info);
+    page.append(&info_group);
+
+    (page, dir_row)
+}
+
 pub fn show_settings_dialog(
     parent: &adw::ApplicationWindow,
     cfg: Config,
@@ -306,6 +353,11 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("system-users-symbolic", "Wine Profiles"));
     stack.add_named(&profiles_page, Some("profiles"));
 
+    sidebar.append(&sidebar_separator());
+    let (emu_page, emu_dir_entry) = build_emulators_page(&cfg, &win);
+    sidebar.append(&settings_sidebar_row("applications-engineering-symbolic", "Emulators"));
+    stack.add_named(&emu_page, Some("emulators"));
+
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
@@ -321,6 +373,7 @@ pub fn show_settings_dialog(
                                 "Graphics" => "Graphics",
                                 "Wine Advanced" => "Wine Advanced",
                                 "Wine Profiles" => "profiles",
+                                "Emulators" => "emulators",
                                 _ => "general",
                             };
                             stack_clone.set_visible_child_name(page_id);
@@ -365,6 +418,7 @@ pub fn show_settings_dialog(
         s.cfg.shadps4_enabled = ps4_enable_row.is_active();
         s.cfg.shadps4_executable = ps4_exe_row.text().to_string();
         s.cfg.default_wine_config = wine_widgets.to_wine_config();
+        s.cfg.api_emulator_dir = emu_dir_entry.text().to_string();
 
         steam_clone.update_keys(&s.cfg.steam_api_key, &s.cfg.steam_griddb_api_key);
 

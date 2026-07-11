@@ -4,13 +4,15 @@ use crate::db::{DbConn, record_session};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
+use std::os::unix::process::CommandExt;
 use std::time::Duration;
 
 const PR_SET_CHILD_SUBREAPER: i32 = 36;
 
 fn set_subreaper() {
-    unsafe {
-        libc::prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+    let ret = unsafe { libc::prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) };
+    if ret != 0 {
+        eprintln!("Warning: failed to set child subreaper (prctl returned {})", ret);
     }
 }
 
@@ -33,13 +35,14 @@ pub fn spawn_game(
     }
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::null());
+    cmd.process_group(0);
 
     cmd.spawn().map_err(|e| format!("Failed to spawn game process: {}", e))
 }
 
 pub fn monitor_process(
     mut child: Child,
-    _child_pid: i32,
+    child_pid: i32,
     sender: &AppSender,
     lutris_id: i64,
     started_at: i64,
@@ -51,7 +54,7 @@ pub fn monitor_process(
     while !exited {
         std::thread::sleep(Duration::from_secs(2));
 
-        reap_zombies();
+        reap_zombies(child_pid);
 
         match child.try_wait() {
             Ok(Some(_status)) => {
@@ -64,7 +67,7 @@ pub fn monitor_process(
         }
     }
 
-    let _ = reap_zombies_once();
+    reap_zombies(child_pid);
 
     let ended_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -73,11 +76,18 @@ pub fn monitor_process(
     let duration = ended_at - started_at;
 
     if duration < 5 {
-        eprintln!("Game {} exited after {}s — possible crash", lutris_id, duration);
-    }
+        eprintln!("Game {} exited after {}s — possible crash, not recording session", lutris_id, duration);
+    } else {
+        if let Err(e) = record_session(&db, game_id, started_at, ended_at) {
+            eprintln!("Failed to record play session: {}", e);
+        }
 
-    if let Err(e) = record_session(&db, game_id, started_at, ended_at) {
-        eprintln!("Failed to record play session: {}", e);
+        let _ = sender.send(AppMessage::SessionRecorded {
+            game_id,
+            duration_seconds: duration,
+            started_at,
+            ended_at,
+        });
     }
 
     {
@@ -85,35 +95,17 @@ pub fn monitor_process(
         map.remove(&lutris_id);
     }
 
-    let _ = sender.send(AppMessage::SessionRecorded {
-        game_id,
-        duration_seconds: duration,
-        started_at,
-        ended_at,
-    });
     let _ = sender.send(AppMessage::GameStopped(lutris_id));
 }
 
-fn reap_zombies() {
+fn reap_zombies(pgid: i32) {
     loop {
         let ret = unsafe {
             let mut status: i32 = 0;
-            libc::waitpid(-1, &mut status as *mut i32, libc::WNOHANG)
+            libc::waitpid(-pgid, &mut status as *mut i32, libc::WNOHANG)
         };
         if ret <= 0 {
             break;
-        }
-    }
-}
-
-fn reap_zombies_once() -> Option<i32> {
-    unsafe {
-        let mut status: i32 = 0;
-        let ret = libc::waitpid(-1, &mut status as *mut i32, libc::WNOHANG);
-        if ret > 0 {
-            Some(status)
-        } else {
-            None
         }
     }
 }

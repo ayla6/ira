@@ -2,6 +2,7 @@ mod secrets;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use crate::models::WineConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -23,6 +24,8 @@ pub struct Config {
     pub shadps4_executable: String,
     #[serde(default = "default_save_dir")]
     pub save_dir: String,
+    #[serde(default)]
+    pub default_wine_config: WineConfig,
 }
 
 impl Default for Config {
@@ -37,6 +40,7 @@ impl Default for Config {
             shadps4_enabled: false,
             shadps4_executable: String::new(),
             save_dir: default_save_dir(),
+            default_wine_config: WineConfig::default(),
         }
     }
 }
@@ -104,6 +108,7 @@ impl Config {
             shadps4_enabled: self.shadps4_enabled,
             shadps4_executable: self.shadps4_executable.clone(),
             save_dir: self.save_dir.clone(),
+            default_wine_config: self.default_wine_config.clone(),
         };
         if steam_err.is_err() {
             plaintext.steam_api_key = self.steam_api_key.clone();

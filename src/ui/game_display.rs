@@ -480,15 +480,8 @@ fn stat_label(caption: &str, value: &str) -> gtk4::Box {
 }
 
 pub fn format_playtime(hours: f64) -> String {
-    let total = (hours * 60.0).round() as u64;
-    let h = total / 60;
-    let m = total % 60;
-    match (h, m) {
-        (0, 0) => "0min".to_string(),
-        (0, m) => format!("{}min", m),
-        (h, 0) => format!("{}h", h),
-        (h, m) => format!("{}h{:02}min", h, m),
-    }
+    let seconds = (hours * 3600.0).round() as i64;
+    super::helpers::format_duration(seconds)
 }
 
 fn format_lastplayed(ts: i64) -> String {

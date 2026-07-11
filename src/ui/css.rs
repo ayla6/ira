@@ -79,4 +79,22 @@ gridview.game-grid child:focus-within {
     background: transparent;
     border: none;
 }
+
+.sidebar-separator-row {
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+.sidebar-separator-row:hover,
+.sidebar-separator-row:selected {
+    background: transparent;
+}
+.sidebar-separator-row > separator {
+    margin-top: 4px;
+    margin-bottom: 4px;
+    min-height: 1px;
+}
 ";

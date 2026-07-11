@@ -2,15 +2,6 @@ use crate::models::GameLaunchConfig;
 use crate::models::WineConfig;
 use crate::launcher::wine_launch;
 
-const PR_SET_CHILD_SUBREAPER: i32 = 36;
-
-/// Sets this process as a subreaper so orphaned grandchildren
-/// (e.g. Wine services, gamescope) get reparented to us and we can
-/// waitpid them to prevent zombies. Called once at startup.
-pub fn init_subreaper() {
-    unsafe { libc::prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); }
-}
-
 fn has_exec(name: &str) -> bool {
     std::env::var_os("PATH")
         .and_then(|p| {
@@ -30,7 +21,27 @@ pub fn build_env(
     let mut env: Vec<(String, String)> = std::env::vars().collect();
 
     for (k, v) in &launch.env_vars {
+        env.retain(|(ek, _)| ek != k);
         env.push((k.clone(), v.clone()));
+    }
+
+    if !launch.ld_preload.is_empty() {
+        let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
+        let merged = match existing {
+            Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_preload, prev),
+            _ => launch.ld_preload.clone(),
+        };
+        env.retain(|(k, _)| k != "LD_PRELOAD");
+        env.push(("LD_PRELOAD".to_string(), merged));
+    }
+    if !launch.ld_library_path.is_empty() {
+        let existing = env.iter().find(|(k, _)| k == "LD_LIBRARY_PATH").map(|(_, v)| v.clone());
+        let merged = match existing {
+            Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_library_path, prev),
+            _ => launch.ld_library_path.clone(),
+        };
+        env.retain(|(k, _)| k != "LD_LIBRARY_PATH");
+        env.push(("LD_LIBRARY_PATH".to_string(), merged));
     }
 
     if let Some(w) = wine {

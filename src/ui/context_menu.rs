@@ -4,7 +4,7 @@ use crate::AppMessage;
 use crate::strings as S;
 use super::state::SharedState;
 use super::helpers::open_folder;
-use super::dialogs::show_game_settings_dialog;
+use super::edit_game_dialog::show_edit_game_dialog;
 
 pub fn show_game_context_menu(
     state: &SharedState,
@@ -29,6 +29,7 @@ pub fn show_game_context_menu(
 
     menu.append(Some(S::EDIT_GAME_SETTINGS), Some("game.edit"));
     menu.append(Some(S::VIEW_PLAY_HISTORY), Some("game.play_history"));
+
     let folders_menu = gio::Menu::new();
     if crate::models::has_steam_enrichment(&game.trophy_source) || !game.sgdb_id.is_empty() {
         folders_menu.append(Some("Image data"), Some("game.open_images"));
@@ -75,12 +76,9 @@ pub fn show_game_context_menu(
 
     let edit_action = gio::SimpleAction::new("edit", None);
     let sc = state_clone.clone();
-    let lid_for_edit = game_clone.lutris_id;
+    let db_id_for_edit = game_clone.db_id;
     edit_action.connect_activate(move |_, _| {
-        let game = sc.borrow().games.iter().find(|g| g.lutris_id == lid_for_edit).cloned();
-        if let Some(game) = game {
-            show_game_settings_dialog(&sc, &game);
-        }
+        show_edit_game_dialog(&sc, db_id_for_edit);
     });
     actions.add_action(&edit_action);
 

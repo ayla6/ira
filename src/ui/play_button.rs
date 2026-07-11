@@ -5,7 +5,14 @@ use super::state::SharedState;
 pub fn stop_game(state: &SharedState, lutris_id: i64) {
     let pid = state.borrow().running_games.lock().unwrap().remove(&lutris_id);
     if let Some(pid) = pid {
-        unsafe { libc::kill(pid, libc::SIGTERM); }
+        unsafe { libc::kill(-pid, libc::SIGTERM); }
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            let alive = unsafe { libc::kill(-pid, 0) } == 0;
+            if alive {
+                unsafe { libc::kill(-pid, libc::SIGKILL); }
+            }
+        });
     }
 }
 
@@ -29,7 +36,7 @@ pub fn launch_game(state: &SharedState, lutris_id: i64) -> Result<(), String> {
         return Ok(());
     }
 
-    let (kind, game_path, game_name, per_game_version, db_id) = &game_info;
+    let (kind, game_path, game_name, per_game_version, db_id) = game_info;
 
     let started_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -44,44 +51,65 @@ pub fn launch_game(state: &SharedState, lutris_id: i64) -> Result<(), String> {
         } else {
             "shadps4"
         };
-        match std::process::Command::new(exe).arg("-g").arg(game_path).spawn() {
+        let cmd = vec![exe.to_string(), "-g".to_string(), game_path.to_string()];
+        match crate::launcher::wrapper::spawn_game(&cmd, &[], None) {
             Ok(child) => {
                 let pid = child.id() as i32;
                 running_games.lock().unwrap().insert(lutris_id, pid);
-                super::helpers::monitor_running_game(
-                    sender, running_games, lutris_id, child, db.clone(), *db_id, started_at,
-                );
+                let sender_c = sender.clone();
+                let db_c = db.clone();
+                let rg = running_games.clone();
+                std::thread::spawn(move || {
+                    crate::launcher::wrapper::monitor_process(
+                        child, pid, &sender_c, lutris_id, started_at, db_c, db_id, rg,
+                    );
+                });
             }
             Err(e) => return Err(format!("Failed to launch shadPS4: {}", e)),
         }
     } else {
-        let (launch, wine) = crate::db::get_game_config(&db, *db_id)
+        let (launch, mut wine, profile_id) = crate::db::get_game_config(&db, db_id)
             .ok()
             .flatten()
             .unwrap_or_default();
 
+        if let Some(pid) = profile_id {
+            if let Ok(Some(profile)) = crate::db::get_profile(&db, pid) {
+                wine.version = profile.wine_version;
+                wine.custom_wine_path = profile.custom_wine_path;
+                wine.prefix = profile.prefix;
+                wine.arch = profile.arch;
+            }
+        }
+
         if !launch.exe.is_empty() {
             let wine_opt = if wine.enabled { Some(&wine) } else { None };
             crate::launcher::launch_game(
-                &launch, wine_opt, game_name, sender, *db_id, lutris_id,
+                &launch, wine_opt, &game_name, sender, db_id, lutris_id,
                 db.clone(), &save_dir, running_games,
             )?;
         } else {
             let uri = format!("lutris:rungameid/{}", lutris_id);
-            match std::process::Command::new("lutris").arg(&uri).spawn() {
+            let cmd = vec!["lutris".to_string(), uri.clone()];
+            match crate::launcher::wrapper::spawn_game(&cmd, &[], None) {
                 Ok(child) => {
                     let pid = child.id() as i32;
                     running_games.lock().unwrap().insert(lutris_id, pid);
-                    super::helpers::monitor_running_game(
-                        sender, running_games, lutris_id, child, db.clone(), *db_id, started_at,
-                    );
+                    let sender_c = sender.clone();
+                    let db_c = db.clone();
+                    let rg = running_games.clone();
+                    std::thread::spawn(move || {
+                        crate::launcher::wrapper::monitor_process(
+                            child, pid, &sender_c, lutris_id, started_at, db_c, db_id, rg,
+                        );
+                    });
                 }
                 Err(e) => return Err(format!("Failed to launch {}: {}", uri, e)),
             }
         }
     }
 
-    let _ = crate::db::set_last_played(&db, *db_id, started_at);
+    let _ = crate::db::set_last_played(&db, db_id, started_at);
     if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
         g.lastplayed = started_at;
     }

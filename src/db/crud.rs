@@ -19,6 +19,15 @@ pub fn update_game_title(conn: &DbConn, id: i64, title: &str) -> Result<(), Stri
     Ok(())
 }
 
+pub fn update_game_ids(conn: &DbConn, id: i64, steam_id: &str, trophy_source: &str, platform_id: &str) -> Result<(), String> {
+    let c = conn.lock().map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE games SET steam_id = ?1, trophy_source = ?2, platform_id = ?3 WHERE id = ?4",
+        params![steam_id, trophy_source, platform_id, id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn update_sort_title(conn: &DbConn, id: i64, sort_title: &str) -> Result<(), String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
     c.execute("UPDATE games SET sort_title = ?1 WHERE id = ?2", params![sort_title, id])

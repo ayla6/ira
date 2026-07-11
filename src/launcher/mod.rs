@@ -37,8 +37,45 @@ pub fn launch_game(
         } else {
             shlex::split(&launch.args).ok_or_else(|| "Failed to parse arguments".to_string())?
         };
-        let mut cmd = wine_launch::build_wine_command(&wine_exe, &launch.exe, &args);
+        let mut cmd = wine_launch::build_wine_command(&wine_exe, &launch.exe, &args, wine);
         let env = env_builder::build_env(launch, Some(wine), &wine_exe, save_dir, game_id, &mut cmd);
+
+        let pfx = wine_launch::wine_prefix(wine);
+        let prefix_ready = std::path::Path::new(&pfx).join("system.reg").is_file();
+
+        let version_file = std::path::Path::new(&pfx).join(".av_wine_version");
+        let version_matches = if version_file.is_file() {
+            std::fs::read_to_string(&version_file)
+                .map(|v| v.trim() == wine.version)
+                .unwrap_or(false)
+        } else {
+            false
+        };
+
+        if prefix_ready && !version_matches {
+            eprintln!("Warning: wine version mismatch for prefix {}. Configured: '{}', expected: '{}'", pfx, wine.version, std::fs::read_to_string(&version_file).unwrap_or_default().trim());
+        }
+
+        if !prefix_ready || !version_matches {
+            for reg_cmd in wine_launch::build_wine_reg_commands(wine, &wine_exe) {
+                let mut child = std::process::Command::new(&reg_cmd[0]);
+                for arg in &reg_cmd[1..] {
+                    child.arg(arg);
+                }
+                child.envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+                match child.status() {
+                    Ok(s) if !s.success() && s.code() != Some(1) => {
+                        eprintln!("Wine reg command failed (exit {:?}): {:?}", s.code(), reg_cmd);
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to run wine reg command: {}", e);
+                    }
+                    _ => {}
+                }
+            }
+            let _ = std::fs::write(&version_file, &wine.version);
+        }
+
         (cmd, env)
     } else {
         native_launch::validate_executable(&launch.exe)?;

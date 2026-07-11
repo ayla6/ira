@@ -2,20 +2,21 @@ use crate::db::DbConn;
 use crate::models::{GameLaunchConfig, WineConfig};
 use rusqlite::params;
 
-pub fn get_game_config(conn: &DbConn, game_id: i64) -> Result<Option<(GameLaunchConfig, WineConfig)>, String> {
+pub fn get_game_config(conn: &DbConn, game_id: i64) -> Result<Option<(GameLaunchConfig, WineConfig, Option<i64>)>, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = c
-        .prepare("SELECT launch_config, wine_config FROM game_configs WHERE game_id = ?1")
+        .prepare("SELECT launch_config, wine_config, profile_id FROM game_configs WHERE game_id = ?1")
         .map_err(|e| e.to_string())?;
     let mut rows = stmt.query_map(params![game_id], |row| {
         let launch_str: String = row.get(0)?;
         let wine_str: String = row.get(1)?;
-        Ok((launch_str, wine_str))
+        let profile_id: Option<i64> = row.get(2)?;
+        Ok((launch_str, wine_str, profile_id))
     })
     .map_err(|e| e.to_string())?;
 
     match rows.next() {
-        Some(Ok((launch_str, wine_str))) => {
+        Some(Ok((launch_str, wine_str, profile_id))) => {
             let launch: GameLaunchConfig = if launch_str.is_empty() {
                 GameLaunchConfig::default()
             } else {
@@ -26,7 +27,7 @@ pub fn get_game_config(conn: &DbConn, game_id: i64) -> Result<Option<(GameLaunch
             } else {
                 serde_json::from_str(&wine_str).map_err(|e| e.to_string())?
             };
-            Ok(Some((launch, wine)))
+            Ok(Some((launch, wine, profile_id)))
         }
         Some(Err(e)) => Err(e.to_string()),
         None => Ok(None),
@@ -38,14 +39,15 @@ pub fn save_game_config(
     game_id: i64,
     launch: &GameLaunchConfig,
     wine: &WineConfig,
+    profile_id: Option<i64>,
 ) -> Result<(), String> {
     let launch_str = serde_json::to_string(launch).map_err(|e| e.to_string())?;
     let wine_str = serde_json::to_string(wine).map_err(|e| e.to_string())?;
     let c = conn.lock().map_err(|e| e.to_string())?;
     c.execute(
-        "INSERT INTO game_configs (game_id, launch_config, wine_config) VALUES (?1, ?2, ?3)
-         ON CONFLICT(game_id) DO UPDATE SET launch_config = excluded.launch_config, wine_config = excluded.wine_config",
-        params![game_id, launch_str, wine_str],
+        "INSERT INTO game_configs (game_id, launch_config, wine_config, profile_id) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(game_id) DO UPDATE SET launch_config = excluded.launch_config, wine_config = excluded.wine_config, profile_id = excluded.profile_id",
+        params![game_id, launch_str, wine_str, profile_id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -78,10 +80,10 @@ mod tests {
         let launch = GameLaunchConfig::default();
         let wine = WineConfig::default();
 
-        save_game_config(&conn, 1, &launch, &wine).unwrap();
+        save_game_config(&conn, 1, &launch, &wine, None).unwrap();
         let result = get_game_config(&conn, 1).unwrap();
         assert!(result.is_some());
-        let (_saved_launch, saved_wine) = result.unwrap();
+        let (_saved_launch, saved_wine, _pid) = result.unwrap();
         assert!(saved_wine.enabled);
         assert_eq!(saved_wine.version, "system");
     }
@@ -99,11 +101,11 @@ mod tests {
         let launch = GameLaunchConfig::default();
         let mut wine = WineConfig::default();
         wine.version = "ge-proton".to_string();
-        save_game_config(&conn, 1, &launch, &wine).unwrap();
+        save_game_config(&conn, 1, &launch, &wine, None).unwrap();
 
         let mut wine2 = WineConfig::default();
         wine2.version = "winehq-staging".to_string();
-        save_game_config(&conn, 1, &launch, &wine2).unwrap();
+        save_game_config(&conn, 1, &launch, &wine2, None).unwrap();
 
         let result = get_game_config(&conn, 1).unwrap().unwrap();
         assert_eq!(result.1.version, "winehq-staging");
@@ -114,7 +116,7 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let launch = GameLaunchConfig::default();
         let wine = WineConfig::default();
-        save_game_config(&conn, 1, &launch, &wine).unwrap();
+        save_game_config(&conn, 1, &launch, &wine, None).unwrap();
         delete_game_config(&conn, 1).unwrap();
         let result = get_game_config(&conn, 1).unwrap();
         assert!(result.is_none());
@@ -138,7 +140,7 @@ mod tests {
         wine.vkd3d = false;
         wine.dll_overrides = vec![("d3d11".to_string(), "native,builtin".to_string())];
 
-        save_game_config(&conn, 1, &launch, &wine).unwrap();
+        save_game_config(&conn, 1, &launch, &wine, None).unwrap();
         let result = get_game_config(&conn, 1).unwrap().unwrap();
 
         assert_eq!(result.0.exe, "/home/user/game.exe");

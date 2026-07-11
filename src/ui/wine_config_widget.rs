@@ -2,11 +2,12 @@ use gtk4::prelude::*;
 use adw::prelude::*;
 use crate::models::WineConfig;
 
+#[derive(Clone)]
 pub struct WineConfigWidgets {
-    pub version: adw::ComboRow,
-    pub custom_wine_path: adw::EntryRow,
-    pub arch: adw::ComboRow,
-    pub prefix: adw::EntryRow,
+    pub version: String,
+    pub custom_wine_path: String,
+    pub arch: String,
+    pub prefix: String,
     pub esync: adw::SwitchRow,
     pub fsync: adw::SwitchRow,
     pub dxvk: adw::SwitchRow,
@@ -62,55 +63,21 @@ fn make_section(title: &str) -> adw::PreferencesGroup {
     g
 }
 
-pub fn build_wine_config_page(wine: &WineConfig) -> (gtk4::Box, WineConfigWidgets) {
-    let page = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+fn make_page() -> gtk4::Box {
+    gtk4::Box::new(gtk4::Orientation::Vertical, 12)
+}
 
-    // --- Wine Version ---
-    let version_group = make_section("Wine Version");
+pub struct WinePage {
+    pub icon: &'static str,
+    pub label: &'static str,
+    pub page: gtk4::Box,
+}
 
-    let (version, _version_model) = {
-        let versions = crate::launcher::wine_launch::detect_wine_versions();
-        let labels: Vec<&str> = versions.iter().map(|(l, _)| l.as_str()).collect();
-        let model = gtk4::StringList::new(&labels);
-        let row = adw::ComboRow::new();
-        row.set_title("Wine version");
-        row.set_model(Some(&model));
+pub fn build_wine_config_pages(wine: &WineConfig) -> (Vec<WinePage>, WineConfigWidgets) {
+    let mut pages = Vec::new();
 
-        let selected = versions.iter().position(|(_, v)| v == &wine.version).unwrap_or(0);
-        row.set_selected(selected as u32);
-
-        (row, model)
-    };
-    version_group.add(&version);
-
-    let custom_wine_path = build_entry_row("Custom Wine path", &wine.custom_wine_path);
-    custom_wine_path.set_visible(wine.version == "custom");
-    custom_wine_path.set_hexpand(true);
-    version_group.add(&custom_wine_path);
-
-    let (arch, _arch_model) = build_combo_row("Prefix architecture", &[("Auto", "auto"), ("32-bit (win32)", "win32"), ("64-bit (win64)", "win64")]);
-    {
-        let idx = match wine.arch.as_str() {
-            "win32" => 1,
-            "win64" => 2,
-            _ => 0,
-        };
-        arch.set_selected(idx);
-    }
-    version_group.add(&arch);
-
-    page.append(&version_group);
-
-    // --- Wine Prefix ---
-    let prefix_group = make_section("Wine Prefix");
-    let prefix = build_entry_row("Prefix path", &wine.prefix);
-    prefix_group.add(&prefix);
-
-    let desktop_integration = build_switch_row("Integrate system files", "Integrate desktop environment", wine.desktop_integration);
-    prefix_group.add(&desktop_integration);
-    page.append(&prefix_group);
-
-    // --- Performance ---
+    // --- Performance page ---
+    let perf_page = make_page();
     let perf_group = make_section("Performance");
     let esync = build_switch_row("Esync", "Eventfd synchronization (requires fd limit check)", wine.esync);
     perf_group.add(&esync);
@@ -127,9 +94,11 @@ pub fn build_wine_config_page(wine: &WineConfig) -> (gtk4::Box, WineConfigWidget
     let gamescope_flags = build_entry_row("Gamescope flags", &wine.gamescope_flags);
     gamescope_flags.set_visible(wine.gamescope);
     perf_group.add(&gamescope_flags);
-    page.append(&perf_group);
+    perf_page.append(&perf_group);
+    pages.push(WinePage { icon: "power-profile-performance-symbolic", label: "Performance", page: perf_page });
 
-    // --- Graphics ---
+    // --- Graphics page ---
+    let gfx_page = make_page();
     let gfx_group = make_section("Graphics");
     let dxvk = build_switch_row("DXVK", "DirectX 9/10/11 to Vulkan translation", wine.dxvk);
     gfx_group.add(&dxvk);
@@ -141,21 +110,13 @@ pub fn build_wine_config_page(wine: &WineConfig) -> (gtk4::Box, WineConfigWidget
     gfx_group.add(&dxvk_nvapi);
     let (graphics, _gfx_model) = build_combo_row("Graphics backend", &[("Auto", "auto"), ("Wayland", "wayland"), ("X11", "x11")]);
     {
-        let idx = match wine.graphics.as_str() {
-            "wayland" => 1,
-            "x11" => 2,
-            _ => 0,
-        };
+        let idx = match wine.graphics.as_str() { "wayland" => 1, "x11" => 2, _ => 0 };
         graphics.set_selected(idx);
     }
     gfx_group.add(&graphics);
     let (mouse_warp_override, _warp_model) = build_combo_row("Mouse warp override", &[("Enable", "enable"), ("Disable", "disable"), ("Force", "force")]);
     {
-        let idx = match wine.mouse_warp_override.as_str() {
-            "disable" => 1,
-            "force" => 2,
-            _ => 0,
-        };
+        let idx = match wine.mouse_warp_override.as_str() { "disable" => 1, "force" => 2, _ => 0 };
         mouse_warp_override.set_selected(idx);
     }
     gfx_group.add(&mouse_warp_override);
@@ -168,50 +129,42 @@ pub fn build_wine_config_page(wine: &WineConfig) -> (gtk4::Box, WineConfigWidget
     gfx_group.add(&dpi_enabled);
     let dpi_adj = gtk4::Adjustment::new(wine.dpi as f64, 96.0, 384.0, 1.0, 10.0, 0.0);
     let dpi = gtk4::SpinButton::new(Some(&dpi_adj), 1.0, 0);
-    dpi.set_visible(wine.dpi_enabled);
     let dpi_row = adw::ActionRow::new();
     dpi_row.set_title("DPI");
     dpi_row.add_suffix(&dpi);
+    dpi_row.set_visible(wine.dpi_enabled);
     gfx_group.add(&dpi_row);
     let (audio, _audio_model) = build_combo_row("Audio driver", &[("Auto", "auto"), ("ALSA", "alsa"), ("PulseAudio", "pulse"), ("OSS", "oss")]);
     {
-        let idx = match wine.audio.as_str() {
-            "alsa" => 1,
-            "pulse" => 2,
-            "oss" => 3,
-            _ => 0,
-        };
+        let idx = match wine.audio.as_str() { "alsa" => 1, "pulse" => 2, "oss" => 3, _ => 0 };
         audio.set_selected(idx);
     }
     gfx_group.add(&audio);
-    page.append(&gfx_group);
+    gfx_page.append(&gfx_group);
+    pages.push(WinePage { icon: "video-display-symbolic", label: "Graphics", page: gfx_page });
 
-    // --- Anti-Cheat ---
+    // --- Advanced page (Anti-Cheat + Debugging + DLL Overrides) ---
+    let adv_page = make_page();
     let ac_group = make_section("Anti-Cheat");
     let battleye = build_switch_row("BattlEye", "Enable BattlEye anti-cheat support", wine.battleye);
     ac_group.add(&battleye);
     let eac = build_switch_row("Easy Anti-Cheat", "Enable Easy Anti-Cheat support", wine.eac);
     ac_group.add(&eac);
-    page.append(&ac_group);
+    let desktop_integration = build_switch_row("Integrate system files", "Integrate desktop environment", wine.desktop_integration);
+    ac_group.add(&desktop_integration);
+    adv_page.append(&ac_group);
 
-    // --- Debugging ---
     let dbg_group = make_section("Debugging");
     let (show_debug, _dbg_model) = build_combo_row("Output debugging info", &[("Disabled (-all)", "-all"), ("Enabled", ""), ("Show FPS", "+fps"), ("Full (+all)", "+all")]);
     {
-        let idx = match wine.show_debug.as_str() {
-            "" => 1,
-            "+fps" => 2,
-            "+all" => 3,
-            _ => 0,
-        };
+        let idx = match wine.show_debug.as_str() { "" => 1, "+fps" => 2, "+all" => 3, _ => 0 };
         show_debug.set_selected(idx);
     }
     dbg_group.add(&show_debug);
     let show_crash_dialogs = build_switch_row("Show crash dialogs", "Display Wine crash dialogs when programs crash", wine.show_crash_dialogs);
     dbg_group.add(&show_crash_dialogs);
-    page.append(&dbg_group);
+    adv_page.append(&dbg_group);
 
-    // --- DLL Overrides ---
     let dll_group = make_section("DLL Overrides");
     let dll_label = gtk4::Label::new(Some("Configure DLL load order for native/builtin Wine DLLs"));
     dll_label.set_xalign(0.0);
@@ -235,57 +188,33 @@ pub fn build_wine_config_page(wine: &WineConfig) -> (gtk4::Box, WineConfigWidget
         box_clone.append(&row);
     });
     dll_group.add(&add_dll_btn);
-    page.append(&dll_group);
+    adv_page.append(&dll_group);
+    pages.push(WinePage { icon: "preferences-other-symbolic", label: "Wine Advanced", page: adv_page });
 
     // --- Visibility toggles ---
     {
-        let cw = custom_wine_path.clone();
-        let arch_r = arch.clone();
-        let vkd3d_r = vkd3d.clone();
-        let vd_r = virtual_desktop.clone();
-        version.connect_selected_notify(move |row| {
-            let idx = row.selected() as usize;
-            let versions = crate::launcher::wine_launch::detect_wine_versions();
-            let is_proton = versions.get(idx).map(|(_, v)| v.contains("proton")).unwrap_or(false);
-            cw.set_visible(idx > 0 && versions.get(idx).map(|(_, v)| v == "custom").unwrap_or(false));
-            arch_r.set_visible(!is_proton);
-            vkd3d_r.set_visible(!is_proton);
-            vd_r.set_visible(!is_proton);
-        });
+        let gf = gamescope_flags.clone();
+        gamescope.connect_active_notify(move |sw| { gf.set_visible(sw.is_active()); });
+    }
+    {
+        let vr = virtual_desktop_res.clone();
+        virtual_desktop.connect_active_notify(move |sw| { vr.set_visible(sw.is_active()); });
+    }
+    {
+        let dr = dpi_row.clone();
+        dpi_enabled.connect_active_notify(move |sw| { dr.set_visible(sw.is_active()); });
     }
 
     let widgets = WineConfigWidgets {
-        version,
-        custom_wine_path,
-        arch,
-        prefix,
-        esync,
-        fsync,
-        dxvk,
-        vkd3d,
-        d3d_extras,
-        dxvk_nvapi,
-        fsr,
-        battleye,
-        eac,
-        show_debug,
-        audio,
-        graphics,
-        desktop_integration,
-        show_crash_dialogs,
-        mouse_warp_override,
-        virtual_desktop,
-        virtual_desktop_res,
-        dpi_enabled,
-        dpi,
-        gamemode,
-        mangohud,
-        gamescope,
-        gamescope_flags,
-        dll_overrides_box,
+        version: wine.version.clone(), custom_wine_path: wine.custom_wine_path.clone(),
+        arch: wine.arch.clone(), prefix: wine.prefix.clone(),
+        esync, fsync, dxvk, vkd3d, d3d_extras,
+        dxvk_nvapi, fsr, battleye, eac, show_debug, audio, graphics, desktop_integration,
+        show_crash_dialogs, mouse_warp_override, virtual_desktop, virtual_desktop_res,
+        dpi_enabled, dpi, gamemode, mangohud, gamescope, gamescope_flags, dll_overrides_box,
     };
 
-    (page, widgets)
+    (pages, widgets)
 }
 
 fn build_dll_override_row(name: &str, value: &str) -> gtk4::ListBoxRow {
@@ -372,13 +301,6 @@ fn collect_dll_overrides(box_: &gtk4::ListBox) -> Vec<(String, String)> {
 
 impl WineConfigWidgets {
     pub fn to_wine_config(&self) -> WineConfig {
-        let version_idx = self.version.selected() as usize;
-        let versions = crate::launcher::wine_launch::detect_wine_versions();
-        let version_value = versions.get(version_idx).map(|(_, v)| v.clone()).unwrap_or_else(|| "system".to_string());
-
-        let arch_idx = self.arch.selected() as usize;
-        let arch_value = match arch_idx { 1 => "win32", 2 => "win64", _ => "auto" };
-
         let dbg_idx = self.show_debug.selected() as usize;
         let dbg_value = match dbg_idx { 1 => "", 2 => "+fps", 3 => "+all", _ => "-all" };
 
@@ -393,10 +315,10 @@ impl WineConfigWidgets {
 
         WineConfig {
             enabled: true,
-            prefix: self.prefix.text().to_string(),
-            version: version_value,
-            custom_wine_path: self.custom_wine_path.text().to_string(),
-            arch: arch_value.to_string(),
+            prefix: self.prefix.clone(),
+            version: self.version.clone(),
+            custom_wine_path: self.custom_wine_path.clone(),
+            arch: self.arch.clone(),
             esync: self.esync.is_active(),
             fsync: self.fsync.is_active(),
             dxvk: self.dxvk.is_active(),

@@ -7,12 +7,14 @@ mod lutris_ops;
 mod settings;
 mod game_config;
 mod sessions;
+mod profiles;
 pub use crud::*;
 pub use lookup::*;
 pub use lutris_ops::*;
 pub use settings::*;
 pub use game_config::*;
 pub use sessions::*;
+pub use profiles::*;
 
 pub(super) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played";
 
@@ -84,8 +86,18 @@ pub fn init_db(db_path: &str) -> DbConn {
             duration_seconds INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_sessions_game_id ON play_sessions(game_id);
-        CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON play_sessions(started_at);",
+        CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON play_sessions(started_at);
+        CREATE TABLE IF NOT EXISTS wine_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            wine_version TEXT NOT NULL DEFAULT 'system',
+            custom_wine_path TEXT NOT NULL DEFAULT '',
+            prefix TEXT NOT NULL DEFAULT '',
+            arch TEXT NOT NULL DEFAULT 'auto'
+        );",
     ).expect("failed to create tables");
+
+    let _ = conn.execute("ALTER TABLE game_configs ADD COLUMN profile_id INTEGER", ());
 
     Arc::new(Mutex::new(conn))
 }

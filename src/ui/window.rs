@@ -115,7 +115,6 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.set_tooltip_text(Some(S::ADD_GAME));
     add_btn.add_css_class("flat");
-    add_btn.set_sensitive(false);
     header_bar.pack_start(&add_btn);
 
     let toolbar_view = adw::ToolbarView::new();

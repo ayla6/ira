@@ -2,11 +2,7 @@ use adw::prelude::{AlertDialogExt, AdwDialogExt};
 use gtk4::prelude::*;
 use crate::Game;
 use crate::strings as S;
-use crate::models::{AppMessage, AppSender};
-use crate::db::DbConn;
 use std::collections::HashMap;
-use std::process::Child;
-use std::sync::{Arc, Mutex};
 
 use super::state::SharedState;
 
@@ -137,47 +133,59 @@ pub fn refresh_settings_images_page(
     }
 }
 
-pub fn monitor_running_game(
-    sender: AppSender,
-    running: Arc<Mutex<HashMap<i64, i32>>>,
-    lutris_id: i64,
-    mut child: Child,
-    db: DbConn,
-    game_id: i64,
-    started_at: i64,
-) {
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            match child.try_wait() {
-                Ok(Some(_)) | Err(_) => {
-                    running.lock().unwrap().remove(&lutris_id);
+pub fn format_duration(seconds: i64) -> String {
+    let total_mins = ((seconds.max(0) as f64) / 60.0).round() as u64;
+    let h = total_mins / 60;
+    let m = total_mins % 60;
+    match (h, m) {
+        (0, 0) => "0min".to_string(),
+        (0, m) => format!("{}min", m),
+        (h, 0) => format!("{}h", h),
+        (h, m) => format!("{}h{:02}min", h, m),
+    }
+}
 
-                    let ended_at = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs() as i64;
-                    let duration = ended_at - started_at;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-                    if duration < 5 {
-                        eprintln!("Game {} exited after {}s — possible crash", lutris_id, duration);
-                    }
+    #[test]
+    fn test_format_duration_zero() {
+        assert_eq!(format_duration(0), "0min");
+    }
 
-                    if let Err(e) = crate::db::record_session(&db, game_id, started_at, ended_at) {
-                        eprintln!("Failed to record play session: {}", e);
-                    }
+    #[test]
+    fn test_format_duration_negative() {
+        assert_eq!(format_duration(-10), "0min");
+    }
 
-                    let _ = sender.send(AppMessage::SessionRecorded {
-                        game_id,
-                        duration_seconds: duration,
-                        started_at,
-                        ended_at,
-                    });
-                    let _ = sender.send(AppMessage::GameStopped(lutris_id));
-                    return;
-                }
-                Ok(None) => {}
-            }
-        }
-    });
+    #[test]
+    fn test_format_duration_sub_minute_rounds_up() {
+        assert_eq!(format_duration(30), "1min");
+        assert_eq!(format_duration(45), "1min");
+    }
+
+    #[test]
+    fn test_format_duration_minutes() {
+        assert_eq!(format_duration(300), "5min");
+        assert_eq!(format_duration(600), "10min");
+    }
+
+    #[test]
+    fn test_format_duration_hours() {
+        assert_eq!(format_duration(3600), "1h");
+        assert_eq!(format_duration(7200), "2h");
+    }
+
+    #[test]
+    fn test_format_duration_hours_minutes() {
+        assert_eq!(format_duration(7500), "2h05min");
+        assert_eq!(format_duration(9000), "2h30min");
+    }
+
+    #[test]
+    fn test_format_duration_rounds_near_hour() {
+        assert_eq!(format_duration(3570), "1h");
+        assert_eq!(format_duration(3630), "1h01min");
+    }
 }

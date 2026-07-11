@@ -98,6 +98,29 @@ pub struct LaunchConfig {
     pub wine: Option<WineConfig>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WineProfile {
+    pub id: i64,
+    pub name: String,
+    pub wine_version: String,
+    pub custom_wine_path: String,
+    pub prefix: String,
+    pub arch: String,
+}
+
+impl Default for WineProfile {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            name: String::new(),
+            wine_version: "system".to_string(),
+            custom_wine_path: String::new(),
+            prefix: String::new(),
+            arch: "auto".to_string(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

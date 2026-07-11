@@ -2,16 +2,7 @@ use gtk4::prelude::*;
 use adw::prelude::*;
 use crate::strings as S;
 use super::state::SharedState;
-
-fn format_duration(seconds: i64) -> String {
-    let hours = seconds / 3600;
-    let mins = (seconds % 3600) / 60;
-    if hours > 0 {
-        format!("{} {} {} {}", hours, S::HOURS, mins, S::MINUTES)
-    } else {
-        format!("{} {}", mins, S::MINUTES)
-    }
-}
+use super::helpers::format_duration;
 
 fn format_datetime(timestamp: i64) -> String {
     let secs = if timestamp > 1_000_000_000_000 { timestamp / 1000 } else { timestamp };
@@ -119,38 +110,56 @@ pub fn show_daily_history_dialog(state: &SharedState) {
     let days = crate::db::get_playtime_by_day(&state.borrow().db, from, now)
         .unwrap_or_default();
 
+    let game_names: std::collections::HashMap<i64, String> = state.borrow().games.iter()
+        .map(|g| (g.db_id, g.name.clone()))
+        .collect();
+
+    let db = state.borrow().db.clone();
+
     if days.is_empty() {
         let empty_label = gtk4::Label::new(Some(S::NO_SESSIONS));
         empty_label.set_xalign(0.0);
         empty_label.set_opacity(0.6);
         box_.append(&empty_label);
     } else {
-        let list = gtk4::ListBox::new();
-        list.add_css_class("boxed-list");
+        let all_sessions = crate::db::get_sessions_range(&db, from, now).unwrap_or_default();
+        let sessions_by_date: std::collections::HashMap<chrono::NaiveDate, Vec<&crate::models::PlaySession>> = {
+            let mut map: std::collections::HashMap<chrono::NaiveDate, Vec<&crate::models::PlaySession>> = std::collections::HashMap::new();
+            for s in &all_sessions {
+                let secs = if s.started_at > 1_000_000_000_000 { s.started_at / 1000 } else { s.started_at };
+                if let Some(dt) = chrono::DateTime::from_timestamp(secs, 0) {
+                    let date = dt.date_naive();
+                    map.entry(date).or_default().push(s);
+                }
+            }
+            map
+        };
+
+        let group = adw::PreferencesGroup::new();
 
         for (date, total_secs) in &days {
-            let row = gtk4::ListBoxRow::new();
-            let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-            hbox.set_margin_start(8);
-            hbox.set_margin_end(8);
-            hbox.set_margin_top(6);
-            hbox.set_margin_bottom(6);
+            let expander = adw::ExpanderRow::new();
+            let title = format!("{} — {}", date.format("%Y-%m-%d"), format_duration(*total_secs));
+            expander.set_title(&title);
 
-            let date_label = gtk4::Label::new(Some(&date.format("%Y-%m-%d").to_string()));
-            date_label.set_xalign(0.0);
-            date_label.set_hexpand(true);
-            hbox.append(&date_label);
+            if let Some(sessions) = sessions_by_date.get(date) {
+                for session in sessions {
+                    let child = adw::ActionRow::new();
+                    let name = game_names.get(&session.game_id).cloned().unwrap_or_default();
+                    child.set_title(&name);
+                    child.set_subtitle(&format_datetime(session.started_at));
+                    let dur = gtk4::Label::new(Some(&format_duration(session.duration_seconds)));
+                    dur.add_css_class("dim-label");
+                    child.add_suffix(&dur);
+                    expander.add_row(&child);
+                }
+            }
 
-            let dur_label = gtk4::Label::new(Some(&format_duration(*total_secs)));
-            dur_label.add_css_class("dim-label");
-            hbox.append(&dur_label);
-
-            row.set_child(Some(&hbox));
-            list.append(&row);
+            group.add(&expander);
         }
 
         let scroll = gtk4::ScrolledWindow::new();
-        scroll.set_child(Some(&list));
+        scroll.set_child(Some(&group));
         scroll.set_vexpand(true);
         box_.append(&scroll);
     }

@@ -12,7 +12,6 @@ use std::sync::Arc;
 
 use super::state::SharedState;
 use super::sidebar::rebuild_sidebar;
-use super::game_display::display_game;
 use super::message_handler::apply_game_update;
 use super::helpers::{confirm_dialog, clear_children};
 use super::mass_match_dialog::show_sgdb_search_dialog;
@@ -21,7 +20,7 @@ fn settings_page_container() -> gtk4::Box {
     gtk4::Box::new(gtk4::Orientation::Vertical, 16)
 }
 
-fn settings_sidebar_row(icon: &str, label: &str) -> gtk4::ListBoxRow {
+pub(super) fn settings_sidebar_row(icon: &str, label: &str) -> gtk4::ListBoxRow {
     let row = gtk4::ListBoxRow::new();
     let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
     let icon = gtk4::Image::from_icon_name(icon);
@@ -31,6 +30,16 @@ fn settings_sidebar_row(icon: &str, label: &str) -> gtk4::ListBoxRow {
     hbox.append(&text);
     row.set_child(Some(&hbox));
     row.set_size_request(-1, 36);
+    row
+}
+
+pub(super) fn sidebar_separator() -> gtk4::ListBoxRow {
+    let row = gtk4::ListBoxRow::new();
+    let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    row.set_child(Some(&sep));
+    row.set_selectable(false);
+    row.set_sensitive(false);
+    row.add_css_class("sidebar-separator-row");
     row
 }
 
@@ -286,6 +295,18 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("applications-games-symbolic", "shadPS4"));
     stack.add_named(&ps4_page, Some("ps4"));
 
+    let (wine_pages, wine_widgets) = super::wine_config_widget::build_wine_config_pages(&cfg.default_wine_config);
+    sidebar.append(&sidebar_separator());
+    for wp in &wine_pages {
+        sidebar.append(&settings_sidebar_row(wp.icon, wp.label));
+        stack.add_named(&wp.page, Some(wp.label));
+    }
+
+    let profiles_page = super::profile_dialog::build_profiles_page(state, &win);
+    sidebar.append(&settings_sidebar_row("system-users-symbolic", "Wine Profiles"));
+    stack.add_named(&profiles_page, Some("profiles"));
+    sidebar.append(&sidebar_separator());
+
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
@@ -297,6 +318,10 @@ pub fn show_settings_dialog(
                                 "General" => "general",
                                 "API Keys" => "api",
                                 "shadPS4" => "ps4",
+                                "Performance" => "Performance",
+                                "Graphics" => "Graphics",
+                                "Wine Advanced" => "Wine Advanced",
+                                "Wine Profiles" => "profiles",
                                 _ => "general",
                             };
                             stack_clone.set_visible_child_name(page_id);
@@ -340,6 +365,7 @@ pub fn show_settings_dialog(
         s.cfg.grid_cover_width = grid_spin.value() as i32;
         s.cfg.shadps4_enabled = ps4_enable_row.is_active();
         s.cfg.shadps4_executable = ps4_exe_row.text().to_string();
+        s.cfg.default_wine_config = wine_widgets.to_wine_config();
 
         steam_clone.update_keys(&s.cfg.steam_api_key, &s.cfg.steam_griddb_api_key);
 
@@ -361,7 +387,7 @@ pub fn show_settings_dialog(
     win.present();
 }
 
-fn build_game_general_page(
+pub(super) fn build_game_general_page(
     state: &SharedState,
     game: &Game,
     win: &adw::Window,
@@ -505,10 +531,38 @@ fn build_game_general_page(
         general_page.append(&unmatch_group);
     }
 
+    if game.trophy_source == crate::models::GSE || game.trophy_source == crate::models::NGE || game.kind == "ps4" {
+        let ids_group = adw::PreferencesGroup::new();
+        ids_group.set_title("Service IDs");
+        if game.kind == "ps4" {
+            let row = adw::ActionRow::new();
+            row.set_title("NPWR Code");
+            row.set_subtitle(&game.app_id);
+            row.set_sensitive(false);
+            ids_group.add(&row);
+            let serial_row = adw::ActionRow::new();
+            serial_row.set_title("Game Serial");
+            serial_row.set_subtitle(&game.platform_id);
+            serial_row.set_sensitive(false);
+            ids_group.add(&serial_row);
+        } else if game.trophy_source == crate::models::GSE {
+            let row = adw::EntryRow::new();
+            row.set_title("Steam App ID");
+            row.set_text(&game.app_id);
+            ids_group.add(&row);
+        } else if game.trophy_source == crate::models::NGE {
+            let row = adw::EntryRow::new();
+            row.set_title("GOG Product ID");
+            row.set_text(&game.app_id);
+            ids_group.add(&row);
+        }
+        general_page.append(&ids_group);
+    }
+
     (general_page, title_entry, sort_entry, pending_version)
 }
 
-fn build_game_logo_page(game: &Game) -> Option<(gtk4::Box, Rc<RefCell<String>>, gtk4::Adjustment)> {
+pub(super) fn build_game_logo_page(game: &Game) -> Option<(gtk4::Box, Rc<RefCell<String>>, gtk4::Adjustment)> {
     if game.logo_path.is_empty() {
         return None;
     }
@@ -652,294 +706,7 @@ fn build_game_logo_page(game: &Game) -> Option<(gtk4::Box, Rc<RefCell<String>>, 
     Some((logo_page, selected_pos, size_adj))
 }
 
-pub fn show_game_settings_dialog(state: &SharedState, game: &Game) {
-    let parent = state.borrow().window.clone();
-    let win = adw::Window::new();
-    win.set_default_width(720);
-    win.set_default_height(540);
-    win.set_transient_for(Some(&parent));
-    win.set_modal(true);
-    win.set_deletable(false);
-    let save_dir = state.borrow().save_dir.clone();
 
-    let app_details = crate::parser::read_app_details(&save_dir, &game.app_id);
-
-    let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-
-    let sidebar_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    sidebar_area.add_css_class("settings-sidebar");
-    sidebar_area.set_size_request(200, -1);
-    sidebar_area.set_vexpand(true);
-
-    let sidebar = gtk4::ListBox::new();
-    sidebar.add_css_class("navigation-sidebar");
-    sidebar.set_margin_top(6);
-    sidebar.set_margin_bottom(6);
-    sidebar_area.append(&sidebar);
-
-    let sep = gtk4::Separator::new(gtk4::Orientation::Vertical);
-    outer.append(&sidebar_area);
-    outer.append(&sep);
-
-    let content_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    content_area.set_hexpand(true);
-
-    let header = adw::HeaderBar::new();
-    header.add_css_class("settings-header");
-    header.set_title_widget(Some(&gtk4::Label::new(Some(&game.name))));
-    content_area.append(&header);
-
-    let stack = gtk4::Stack::new();
-    stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
-    stack.set_margin_start(16);
-    stack.set_margin_end(16);
-    stack.set_margin_top(16);
-    stack.set_margin_bottom(16);
-    stack.set_hexpand(true);
-
-    let (general_page, title_entry, sort_entry, pending_version) =
-        build_game_general_page(state, game, &win);
-    sidebar.append(&settings_sidebar_row("preferences-system-symbolic", "General"));
-    stack.add_named(&general_page, Some("general"));
-
-    let logo_controls: Option<(Rc<RefCell<String>>, gtk4::Adjustment)> = if let Some((logo_page, selected_pos, size_adj)) = build_game_logo_page(game) {
-        sidebar.append(&settings_sidebar_row("preferences-desktop-wallpaper-symbolic", "Logo"));
-        stack.add_named(&logo_page, Some("logo"));
-        Some((selected_pos, size_adj))
-    } else {
-        None
-    };
-
-    let pending_copies: Rc<RefCell<HashMap<String, String>>> = Default::default();
-    if !game.app_id.is_empty() {
-        let images_page = build_image_manager_content_with_drafts(state, game, &win, Some(pending_copies.clone()));
-        sidebar.append(&settings_sidebar_row("image-x-generic-symbolic", "Images"));
-        stack.add_named(&images_page, Some("images"));
-    }
-
-    let dlc_switches: Vec<adw::SwitchRow> = if let Some(ref details) = app_details {
-        if !details.dlcs.is_empty() {
-            let dlc_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-            let dlc_group = adw::PreferencesGroup::new();
-            dlc_group.set_title(&format!("DLCs  ·  {}", details.dlcs.len()));
-
-            let mut dlc_list: Vec<(String, crate::api::types::DlcInfo)> = details.dlcs.iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-            dlc_list.sort_by_key(|(_, d)| d.app_id);
-
-            let mut switches: Vec<adw::SwitchRow> = Vec::new();
-            for (_, dlc) in &dlc_list {
-                let row = adw::SwitchRow::new();
-                row.set_use_markup(false);
-                row.set_title(&dlc.name);
-                row.set_subtitle(&format!("App ID: {}", dlc.app_id));
-                row.set_active(dlc.enabled);
-                dlc_group.add(&row);
-                switches.push(row);
-            }
-            dlc_page.append(&dlc_group);
-
-            let dlc_scroll = gtk4::ScrolledWindow::new();
-            dlc_scroll.set_child(Some(&dlc_page));
-            dlc_scroll.set_vexpand(true);
-            dlc_scroll.set_hexpand(true);
-
-            sidebar.append(&settings_sidebar_row("package-x-generic-symbolic", "DLC"));
-            stack.add_named(&dlc_scroll, Some("dlc"));
-            switches
-        } else {
-            Vec::new()
-        }
-    } else {
-        Vec::new()
-    };
-
-    sidebar_area.set_hexpand(false);
-
-    let stack_clone = stack.clone();
-    sidebar.connect_row_selected(move |_, row| {
-        if let Some(row) = row {
-            if let Some(child) = row.child() {
-                if let Some(hbox) = child.downcast_ref::<gtk4::Box>() {
-                    if let Some(sibling) = hbox.last_child() {
-                        if let Some(label) = sibling.downcast_ref::<gtk4::Label>() {
-                            let page_id = match label.text().as_str() {
-                                "General" => "general",
-                                "Logo" => "logo",
-                                "Images" => "images",
-                                "DLC" => "dlc",
-                                _ => "general",
-                            };
-                            stack_clone.set_visible_child_name(page_id);
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    if let Some(first) = sidebar.row_at_index(0) {
-        sidebar.select_row(Some(&first));
-    }
-
-    content_area.append(&stack);
-
-    let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    btn_row.set_halign(gtk4::Align::End);
-    btn_row.set_margin_start(16);
-    btn_row.set_margin_end(16);
-    btn_row.set_margin_top(8);
-    btn_row.set_margin_bottom(12);
-
-    let cancel_btn = gtk4::Button::with_label(S::CANCEL);
-    let win_c = win.clone();
-    cancel_btn.connect_clicked(move |_| win_c.close());
-
-    let save_btn = gtk4::Button::with_label(S::SAVE);
-    save_btn.add_css_class("suggested-action");
-    let state_clone = state.clone();
-    let db_id = game.db_id;
-    let lutris_id = game.lutris_id;
-    let app_id = game.app_id.clone();
-    let title_entry_c = title_entry.clone();
-    let sort_entry_c = sort_entry.clone();
-    let logo_controls_c = logo_controls.clone();
-    let dlc_switches_c = dlc_switches.clone();
-    let app_details_c = Rc::new(RefCell::new(app_details.clone()));
-    let win_s = win.clone();
-    let pending_version_save = pending_version.clone();
-    let pending_copies_save = pending_copies.clone();
-    let sgdb_id_save = game.sgdb_id.clone();
-    let kind_save = game.kind.clone();
-    let save_dir_c = save_dir.clone();
-    save_btn.connect_clicked(move |_| {
-        let title = title_entry_c.text().to_string();
-        let sort_title = sort_entry_c.text().to_string();
-        if let Err(e) = crate::db::update_game_title(&state_clone.borrow().db, db_id, &title) {
-            eprintln!("Failed to update game: {}", e);
-        }
-        if let Err(e) = crate::db::update_sort_title(&state_clone.borrow().db, db_id, &sort_title) {
-            eprintln!("Failed to update sort title: {}", e);
-        }
-
-        if let Some(ver) = pending_version_save.borrow().as_ref() {
-            let _ = crate::db::set_shadps4_version(&state_clone.borrow().db, db_id, ver);
-        }
-
-        {
-            let pc = pending_copies_save.borrow();
-            for (asset, src_path) in pc.iter() {
-                let cloud_dir = if !sgdb_id_save.is_empty() {
-                    crate::parser::sgdb_data_dir(&save_dir_c, &sgdb_id_save)
-                } else if kind_save == "ps4" {
-                    crate::parser::ps4_data_dir(&save_dir_c, &app_id)
-                } else {
-                    crate::parser::data_dir(&save_dir_c, &app_id)
-                };
-                let file_name = match asset.as_str() {
-                    "icon" => "icon.png",
-                    "hero" => "library_hero.jpg",
-                    "grid" => "library_600x900.jpg",
-                    "header" => "header.jpg",
-                    "logo" => "logo.png",
-                    _ => continue,
-                };
-                let dest = cloud_dir.join(file_name);
-                let is_ico = src_path.ends_with(".ico");
-                if is_ico {
-                    let ico_dest = dest.with_extension("ico");
-                    if std::fs::copy(&src_path, &ico_dest).is_ok() {
-                        let _ = crate::parser::convert_ico_to_png(&ico_dest);
-                    }
-                } else if let Err(e) = std::fs::copy(&src_path, &dest) {
-                    eprintln!("Failed to copy {}: {}", asset, e);
-                }
-            }
-        }
-
-        if pending_copies_save.borrow().contains_key("__unmatch__") {
-            let _ = crate::db::set_sgdb_id(&state_clone.borrow().db, db_id, "");
-            if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
-                g.sgdb_id.clear();
-            }
-            pending_copies_save.borrow_mut().remove("__unmatch__");
-        }
-
-        if let Some((ref selected_pos, ref size_adj)) = logo_controls_c {
-            let pos = selected_pos.borrow().clone();
-            let size = size_adj.value() as i32;
-            if db_id != 0 {
-                if let Err(e) = crate::db::set_logo_settings(&state_clone.borrow().db, db_id, &pos, size) {
-                    eprintln!("Failed to update logo settings: {}", e);
-                }
-            }
-            if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
-                g.logo_position = pos;
-                g.logo_size = size;
-            }
-        }
-
-        {
-            let mut details_ref = app_details_c.borrow_mut();
-            if let Some(ref mut details) = *details_ref {
-                if !dlc_switches_c.is_empty() {
-                    let dlcs_vec: Vec<_> = details.dlcs.iter_mut().collect();
-                    for (i, (_, dlc)) in dlcs_vec.into_iter().enumerate() {
-                        if i < dlc_switches_c.len() {
-                            dlc.enabled = dlc_switches_c[i].is_active();
-                        }
-                    }
-                    let path = crate::parser::data_dir(&save_dir_c, &app_id).join("appdetails.json");
-                    if let Ok(b) = serde_json::to_vec(&*details) {
-                        let _ = std::fs::write(&path, b);
-                    }
-                }
-            }
-        }
-
-        if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
-            g.name = title.clone();
-            g.sort_title = sort_title.clone();
-            if let Some(ver) = pending_version_save.borrow().as_ref() {
-                g.shadps4_version = ver.clone();
-            }
-        }
-        if !app_id.is_empty() {
-            state_clone.borrow().game_names.lock().unwrap().insert(app_id.clone(), title);
-        }
-        rebuild_sidebar(&state_clone);
-
-        let selected = state_clone.borrow().selected_id.clone();
-        if selected == lutris_id.to_string() {
-            let g = state_clone.borrow().games.iter()
-                .find(|g| g.lutris_id == lutris_id)
-                .cloned();
-            if let Some(g) = g {
-                display_game(&g, &state_clone);
-            }
-        }
-
-        win_s.close();
-    });
-
-    btn_row.append(&cancel_btn);
-    btn_row.append(&save_btn);
-    content_area.append(&btn_row);
-    outer.append(&content_area);
-
-    win.set_content(Some(&outer));
-    win.present();
-
-    {
-        let mut s = state.borrow_mut();
-        s.settings_data = Some((win.clone(), stack.clone(), game.db_id));
-    }
-    let state_c = state.clone();
-    win.connect_destroy(move |_| {
-        state_c.borrow_mut().settings_data = None;
-    });
-}
 
 pub fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &adw::Window) -> gtk4::Box {
     build_image_manager_content_with_drafts(state, game, parent_win, None)

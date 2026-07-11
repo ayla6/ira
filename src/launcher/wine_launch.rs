@@ -6,18 +6,24 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
     env.push(("WINEDEBUG".to_string(), wine.show_debug.clone()));
     env.push(("WINE".to_string(), wine_exe.to_string()));
 
-    let prefix = if wine.prefix.is_empty() {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-        format!("{}/.wine", home)
+    let pfx = wine_prefix(wine);
+    let arch = if wine.arch != "auto" {
+        wine.arch.clone()
     } else {
-        wine.prefix.clone()
+        detect_arch(&pfx, wine_exe)
     };
-    let arch = detect_arch(&prefix, wine_exe);
-    env.push(("WINEPREFIX".to_string(), prefix));
+    env.push(("WINEPREFIX".to_string(), pfx));
     env.push(("WINEARCH".to_string(), arch));
 
     env.push(("WINEESYNC".to_string(), if wine.esync { "1" } else { "0" }.to_string()));
     env.push(("WINEFSYNC".to_string(), if wine.fsync { "1" } else { "0" }.to_string()));
+
+    if wine.esync && !is_esync_limit_set() {
+        eprintln!("Warning: esync enabled but fs.file-max too low (< 1,000,000). Games may crash.");
+    }
+    if wine.fsync && !is_fsync_supported() {
+        eprintln!("Warning: fsync enabled but kernel doesn't support it. Falling back to esync.");
+    }
 
     if !wine.esync {
         env.push(("PROTON_NO_ESYNC".to_string(), "1".to_string()));
@@ -39,6 +45,22 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
         env.push(("WINE_LARGE_ADDRESS_AWARE".to_string(), "1".to_string()));
     }
 
+    if wine.vkd3d {
+        env.push(("PROTON_ENABLE_VKD3D".to_string(), "1".to_string()));
+    }
+
+    if wine.d3d_extras {
+        env.push(("PROTON_ENABLE_D3D_EXTRAS".to_string(), "1".to_string()));
+    }
+
+    if wine.battleye {
+        env.push(("PROTON_BATTLEYE_LAUNCHER".to_string(), "1".to_string()));
+    }
+
+    if wine.eac {
+        env.push(("PROTON_EAC_LAUNCHER".to_string(), "1".to_string()));
+    }
+
     if wine.show_debug == "-all" || wine.show_debug.is_empty() {
         env.push(("DXVK_LOG_LEVEL".to_string(), "error".to_string()));
     } else if wine.show_debug == "+all" {
@@ -47,7 +69,7 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
         env.push(("DXVK_LOG_LEVEL".to_string(), "info".to_string()));
     }
 
-    let overrides_str = format_dll_overrides(&wine.dll_overrides);
+    let overrides_str = format_dll_overrides(&wine.dll_overrides, wine.desktop_integration);
     if !overrides_str.is_empty() {
         env.push(("WINEDLLOVERRIDES".to_string(), overrides_str));
     }
@@ -59,22 +81,28 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
     env
 }
 
-pub fn format_dll_overrides(overrides: &[(String, String)]) -> String {
+pub fn format_dll_overrides(overrides: &[(String, String)], desktop_integration: bool) -> String {
     let mut entries: Vec<String> = Vec::new();
 
-    let mut seen_default = false;
+    let mut user_set_winemenubuilder = false;
     for (dll, value) in overrides {
         if dll == "winemenubuilder" {
-            seen_default = true;
+            user_set_winemenubuilder = true;
         }
-        let normalized = value
-            .replace("builtin", "b")
-            .replace("native", "n")
-            .replace("disabled", "")
-            .replace(" ", "");
+        let normalized: String = value
+            .split(',')
+            .map(|token| {
+                let t = token.trim();
+                if t == "builtin" { "b" }
+                else if t == "native" { "n" }
+                else if t == "disabled" { "" }
+                else { t }
+            })
+            .collect::<Vec<&str>>()
+            .join(",");
         entries.push(format!("{}={}", dll, normalized));
     }
-    if !seen_default {
+    if !user_set_winemenubuilder && !desktop_integration {
         entries.push("winemenubuilder=".to_string());
     }
     entries.join(";")
@@ -89,6 +117,38 @@ fn get_proton_path(version: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+fn steam_data_dirs() -> Vec<String> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    vec![
+        format!("{}/.steam/debian-installation", home),
+        format!("{}/.steam", home),
+        format!("{}/.local/share/steam", home),
+        format!("{}/.local/share/Steam", home),
+        format!("{}/snap/steam/common/.local/share/Steam", home),
+        format!("{}/.steam/steam", home),
+        format!("{}/.var/app/com.valvesoftware.Steam/.local/share/Steam", home),
+        format!("{}/.var/app/com.valvesoftware.Steam/.local/share/steam", home),
+        format!("{}/.var/app/com.valvesoftware.Steam/data/steam", home),
+        format!("{}/.var/app/com.valvesoftware.Steam/data/Steam", home),
+        "/usr/share/steam".to_string(),
+        "/usr/local/share/steam".to_string(),
+    ]
+}
+
+fn find_proton_wine(dir: &std::path::Path) -> Option<String> {
+    if dir.join("proton").is_file() {
+        let dist_wine = dir.join("dist").join("bin").join("wine");
+        if dist_wine.is_file() {
+            return Some(dist_wine.to_string_lossy().to_string());
+        }
+    }
+    let files_wine = dir.join("files").join("bin").join("wine");
+    if files_wine.is_file() {
+        return Some(files_wine.to_string_lossy().to_string());
+    }
+    None
 }
 
 pub fn find_wine_binary(version: &str, custom_path: &str) -> Result<String, String> {
@@ -127,26 +187,88 @@ pub fn find_wine_binary(version: &str, custom_path: &str) -> Result<String, Stri
             if std::path::Path::new(p).is_file() { Ok(p.to_string()) }
             else { Err("Wine Development not found at /usr/lib/wine-development/wine".to_string()) }
         }
+        "ge-proton" => {
+            which::which("umu-run")
+                .map(|p| p.to_string_lossy().to_string())
+                .map_err(|_| "umu-run not found in PATH. Install umu-launcher.".to_string())
+        }
         _ => {
+            if version.starts_with("wine-") {
+                let sys_path = format!("/usr/lib/{}/bin/wine", version);
+                if std::path::Path::new(&sys_path).is_file() {
+                    return Ok(sys_path);
+                }
+            }
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
             let lutris_path = format!(
                 "{}/.local/share/lutris/runners/wine/{}/bin/wine",
-                std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()),
-                version
+                home, version
             );
             if std::path::Path::new(&lutris_path).is_file() {
                 return Ok(lutris_path);
             }
             let our_path = format!(
                 "{}/runners/wine/{}/bin/wine",
-                std::env::var("HOME").unwrap_or_else(|_| "/root".to_string()),
-                version
+                home, version
             );
             if std::path::Path::new(&our_path).is_file() {
                 return Ok(our_path);
             }
+            for dir in steam_data_dirs() {
+                for sub in &["compatibilitytools.d", "steamapps/common"] {
+                    let p = std::path::Path::new(&dir).join(sub).join(version);
+                    if let Some(wine) = find_proton_wine(&p) {
+                        return Ok(wine);
+                    }
+                }
+            }
             Err(format!("Wine version '{}' not found. Check Lutris runner dir or set a custom Wine path.", version))
         }
     }
+}
+
+fn scan_proton_versions() -> Vec<(String, String)> {
+    let mut versions: Vec<(String, String)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    let extra = std::env::var("STEAM_EXTRA_COMPAT_TOOLS_PATHS").ok();
+    let extra_paths: Vec<String> = extra
+        .as_deref()
+        .map(|s| s.split(':').map(String::from).collect())
+        .unwrap_or_default();
+
+    for dir in steam_data_dirs().iter().chain(extra_paths.iter()) {
+        for sub in &["compatibilitytools.d", "steamapps/common"] {
+            let d = std::path::Path::new(dir).join(sub);
+            if let Ok(entries) = std::fs::read_dir(&d) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.join("proton").is_file() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if seen.insert(name.clone()) {
+                            versions.push((name.clone(), name));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    let lutris_wine = format!("{}/.local/share/lutris/runners/wine", home);
+    if let Ok(entries) = std::fs::read_dir(&lutris_wine) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.join("proton").is_file() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if seen.insert(name.clone()) {
+                    versions.push((name.clone(), name));
+                }
+            }
+        }
+    }
+
+    versions
 }
 
 pub fn detect_wine_versions() -> Vec<(String, String)> {
@@ -165,7 +287,17 @@ pub fn detect_wine_versions() -> Vec<(String, String)> {
         }
     }
 
-    versions.push(("GE-Proton (Latest)".to_string(), "ge-proton".to_string()));
+    if let Ok(entries) = std::fs::read_dir("/usr/lib") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("wine-") {
+                let wine_path = entry.path().join("bin").join("wine");
+                if wine_path.is_file() && !versions.iter().any(|(_, v)| *v == name) {
+                    versions.push((format!("System {}", name), name));
+                }
+            }
+        }
+    }
 
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     let lutris_runner_dir = format!("{}/.local/share/lutris/runners/wine", home);
@@ -179,18 +311,184 @@ pub fn detect_wine_versions() -> Vec<(String, String)> {
         }
     }
 
+    for (label, vers) in scan_proton_versions() {
+        if !versions.iter().any(|(_, v)| *v == vers) {
+            versions.push((label, vers));
+        }
+    }
+
+    if which::which("umu-run").is_ok() {
+        versions.push(("GE-Proton (Latest)".to_string(), "ge-proton".to_string()));
+    }
+
     versions
 }
 
-pub fn build_wine_command(wine_exe: &str, game_exe: &str, args: &[String]) -> Vec<String> {
+pub fn build_wine_command(wine_exe: &str, game_exe: &str, args: &[String], wine: &WineConfig) -> Vec<String> {
     let mut cmd = vec![wine_exe.to_string()];
-    if game_exe.ends_with(".msi") {
+    if wine.virtual_desktop {
+        let res = if wine.virtual_desktop_res.is_empty() {
+            "Default,1920x1080".to_string()
+        } else {
+            format!("Default,{}", wine.virtual_desktop_res)
+        };
+        cmd.push("explorer".to_string());
+        cmd.push(format!("/desktop={}", res));
+    }
+    if game_exe.to_ascii_lowercase().ends_with(".msi") {
         cmd.push("msiexec".to_string());
         cmd.push("/i".to_string());
     }
     cmd.push(game_exe.to_string());
     cmd.extend_from_slice(args);
     cmd
+}
+
+pub fn wine_prefix(wine: &WineConfig) -> String {
+    if wine.prefix.is_empty() {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+        format!("{}/.wine", home)
+    } else {
+        wine.prefix.clone()
+    }
+}
+
+pub fn build_wine_reg_commands(wine: &WineConfig, wine_exe: &str) -> Vec<Vec<String>> {
+    let mut commands: Vec<Vec<String>> = Vec::new();
+
+    let pfx = wine_prefix(wine);
+    let prefix_initialized = std::path::Path::new(&pfx).join("system.reg").is_file();
+    if !prefix_initialized {
+        commands.push(vec![
+            wine_exe.to_string(),
+            "wineboot".to_string(),
+            "--init".to_string(),
+        ]);
+    }
+
+    commands.push(vec![
+        wine_exe.to_string(),
+        "reg".to_string(),
+        "add".to_string(),
+        r"HKCU\Software\Wine\X11 Driver".to_string(),
+        "/v".to_string(),
+        "MouseWarpOverride".to_string(),
+        "/t".to_string(),
+        "REG_SZ".to_string(),
+        "/d".to_string(),
+        wine.mouse_warp_override.clone(),
+        "/f".to_string(),
+    ]);
+
+    let desktop_name = "Default";
+    if wine.virtual_desktop {
+        let res = if wine.virtual_desktop_res.is_empty() {
+            "1920x1080".to_string()
+        } else {
+            wine.virtual_desktop_res.clone()
+        };
+        commands.push(vec![
+            wine_exe.to_string(),
+            "reg".to_string(),
+            "add".to_string(),
+            r"HKCU\Software\Wine\Explorer".to_string(),
+            "/v".to_string(),
+            "Desktop".to_string(),
+            "/t".to_string(),
+            "REG_SZ".to_string(),
+            "/d".to_string(),
+            desktop_name.to_string(),
+            "/f".to_string(),
+        ]);
+        commands.push(vec![
+            wine_exe.to_string(),
+            "reg".to_string(),
+            "add".to_string(),
+            r"HKCU\Software\Wine\Explorer\Desktops".to_string(),
+            "/v".to_string(),
+            desktop_name.to_string(),
+            "/t".to_string(),
+            "REG_SZ".to_string(),
+            "/d".to_string(),
+            res,
+            "/f".to_string(),
+        ]);
+    } else {
+        commands.push(vec![
+            wine_exe.to_string(),
+            "reg".to_string(),
+            "delete".to_string(),
+            r"HKCU\Software\Wine\Explorer".to_string(),
+            "/v".to_string(),
+            "Desktop".to_string(),
+            "/f".to_string(),
+        ]);
+        commands.push(vec![
+            wine_exe.to_string(),
+            "reg".to_string(),
+            "delete".to_string(),
+            r"HKCU\Software\Wine\Explorer\Desktops".to_string(),
+            "/v".to_string(),
+            desktop_name.to_string(),
+            "/f".to_string(),
+        ]);
+    }
+
+    if wine.dpi_enabled {
+        commands.push(vec![
+            wine_exe.to_string(),
+            "reg".to_string(),
+            "add".to_string(),
+            r"HKCU\Software\Wine\Fonts".to_string(),
+            "/v".to_string(),
+            "LogPixels".to_string(),
+            "/t".to_string(),
+            "REG_DWORD".to_string(),
+            "/d".to_string(),
+            format!("{}", wine.dpi),
+            "/f".to_string(),
+        ]);
+    } else {
+        commands.push(vec![
+            wine_exe.to_string(),
+            "reg".to_string(),
+            "delete".to_string(),
+            r"HKCU\Software\Wine\Fonts".to_string(),
+            "/v".to_string(),
+            "LogPixels".to_string(),
+            "/f".to_string(),
+        ]);
+    }
+
+    commands.push(vec![
+        wine_exe.to_string(),
+        "reg".to_string(),
+        "add".to_string(),
+        r"HKCU\Software\Wine\WineDbg".to_string(),
+        "/v".to_string(),
+        "ShowCrashDialog".to_string(),
+        "/t".to_string(),
+        "REG_SZ".to_string(),
+        "/d".to_string(),
+        if wine.show_crash_dialogs { "1" } else { "0" }.to_string(),
+        "/f".to_string(),
+    ]);
+
+    commands.push(vec![
+        wine_exe.to_string(),
+        "reg".to_string(),
+        "add".to_string(),
+        r"HKCU\Software\Wine\Drivers".to_string(),
+        "/v".to_string(),
+        "Audio".to_string(),
+        "/t".to_string(),
+        "REG_SZ".to_string(),
+        "/d".to_string(),
+        wine.audio.clone(),
+        "/f".to_string(),
+    ]);
+
+    commands
 }
 
 pub fn detect_arch(prefix: &str, _wine_exe: &str) -> String {
@@ -216,15 +514,12 @@ pub fn is_esync_limit_set() -> bool {
 }
 
 pub fn is_fsync_supported() -> bool {
-    if let Ok(content) = std::fs::read_to_string("/proc/sys/kernel/max_user_futexes") {
-        if let Ok(max) = content.trim().parse::<u64>() {
-            return max > 0;
-        }
-    }
-    if let Ok(uts) = std::fs::read_to_string("/proc/sys/kernel/ostype") {
-        let release = uts.trim();
-        if let Some(ver) = release.split('.').next().and_then(|s| s.parse::<u32>().ok()) {
-            return ver >= 5;
+    if let Ok(content) = std::fs::read_to_string("/proc/sys/kernel/osrelease") {
+        let parts: Vec<&str> = content.trim().split('.').collect();
+        if parts.len() >= 2 {
+            let major: u32 = parts[0].parse().unwrap_or(0);
+            let minor: u32 = parts[1].parse().unwrap_or(0);
+            return (major, minor) >= (5, 16);
         }
     }
     false
@@ -236,8 +531,14 @@ mod tests {
 
     #[test]
     fn test_format_dll_overrides_empty() {
-        let result = format_dll_overrides(&[]);
+        let result = format_dll_overrides(&[], false);
         assert_eq!(result, "winemenubuilder=");
+    }
+
+    #[test]
+    fn test_format_dll_overrides_enabled() {
+        let result = format_dll_overrides(&[], true);
+        assert_eq!(result, "");
     }
 
     #[test]
@@ -245,7 +546,7 @@ mod tests {
         let overrides = vec![
             ("d3d11".to_string(), "native,builtin".to_string()),
         ];
-        let result = format_dll_overrides(&overrides);
+        let result = format_dll_overrides(&overrides, false);
         assert_eq!(result, "d3d11=n,b;winemenubuilder=");
     }
 
@@ -256,7 +557,7 @@ mod tests {
             ("d3d9".to_string(), "builtin,native".to_string()),
             ("winemenubuilder".to_string(), "".to_string()),
         ];
-        let result = format_dll_overrides(&overrides);
+        let result = format_dll_overrides(&overrides, false);
         assert_eq!(result, "d3d11=n,b;d3d9=b,n;winemenubuilder=");
     }
 
@@ -265,7 +566,7 @@ mod tests {
         let overrides = vec![
             ("d3d11".to_string(), "disabled".to_string()),
         ];
-        let result = format_dll_overrides(&overrides);
+        let result = format_dll_overrides(&overrides, false);
         assert!(result.starts_with("d3d11=;"));
     }
 
@@ -274,7 +575,7 @@ mod tests {
         let overrides = vec![
             ("d3d11".to_string(), "native".to_string()),
         ];
-        let result = format_dll_overrides(&overrides);
+        let result = format_dll_overrides(&overrides, false);
         assert_eq!(result, "d3d11=n;winemenubuilder=");
     }
 
@@ -283,7 +584,7 @@ mod tests {
         let overrides = vec![
             ("d3d11".to_string(), "builtin".to_string()),
         ];
-        let result = format_dll_overrides(&overrides);
+        let result = format_dll_overrides(&overrides, false);
         assert_eq!(result, "d3d11=b;winemenubuilder=");
     }
 

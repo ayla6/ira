@@ -515,10 +515,16 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             eprintln!("Failed to update sort title: {}", e);
         }
 
+        let mut app_id_changed = false;
+        let mut new_app_id_val = String::new();
         if let Some(ref app_id_row) = app_id_entry {
-            let new_app_id = app_id_row.text().to_string();
-            if new_app_id != app_id {
-                if let Err(e) = crate::db::update_game_ids(&db, db_id_s, &new_app_id, &trophy_source, &new_app_id) {
+            let new_id = app_id_row.text().to_string();
+            if new_id != app_id {
+                app_id_changed = true;
+                new_app_id_val = new_id.clone();
+                let ts = if new_id.is_empty() { "" } else { &trophy_source };
+                let pid = if new_id.is_empty() { "" } else { &new_id };
+                if let Err(e) = crate::db::update_game_ids(&db, db_id_s, &new_id, ts, pid) {
                     eprintln!("Failed to update app ID: {}", e);
                 }
             }
@@ -696,9 +702,30 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             if let Some(ver) = pending_version.borrow().as_ref() {
                 g.shadps4_version = ver.clone();
             }
+            if app_id_changed {
+                if new_app_id_val.is_empty() {
+                    g.app_id.clear();
+                    g.trophy_source.clear();
+                    g.platform_id.clear();
+                    g.achievements.clear();
+                    g.earned_count = 0;
+                    g.total_count = 0;
+                    g.manual_unmatch = true;
+                    if !g.lutris_name.is_empty() && g.name == format!("App ID: {}", app_id) {
+                        g.name = g.lutris_name.clone();
+                    }
+                } else {
+                    state_clone.borrow().game_names.lock().unwrap().remove(&app_id);
+                    g.app_id = new_app_id_val.clone();
+                    g.platform_id = new_app_id_val.clone();
+                    g.manual_unmatch = false;
+                }
+            }
         }
-        if !app_id.is_empty() {
-            state_clone.borrow().game_names.lock().unwrap().insert(app_id.clone(), title);
+        if !new_app_id_val.is_empty() {
+            state_clone.borrow().game_names.lock().unwrap().insert(new_app_id_val.clone(), title);
+        } else if app_id_changed {
+            state_clone.borrow().game_names.lock().unwrap().remove(&app_id);
         }
 
         super::sidebar::rebuild_sidebar(&state_clone);

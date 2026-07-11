@@ -17,6 +17,9 @@ mod dialogs;
 mod context_menu;
 mod mass_match_dialog;
 mod add_game;
+mod add_game_dialog;
+mod play_history;
+mod wine_config_widget;
 mod matching;
 
 pub use state::{AppState, SharedState, malloc_trim};

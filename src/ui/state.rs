@@ -28,7 +28,7 @@ pub struct AppState {
     pub game_names: Arc<Mutex<HashMap<String, String>>>,
     pub content_unloaded: bool,
     pub restoring: bool,
-    pub running_games: Arc<Mutex<HashMap<i64, std::process::Child>>>,
+    pub running_games: Arc<Mutex<HashMap<i64, i32>>>,
     pub grid_refresh_pending: bool,
     pub view_generation: u32,
     pub settings_data: Option<(adw::Window, gtk4::Stack, i64)>,

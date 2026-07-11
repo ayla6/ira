@@ -3,6 +3,7 @@ use gtk4::prelude::*;
 use crate::Game;
 use crate::strings as S;
 use crate::models::{AppMessage, AppSender};
+use crate::db::DbConn;
 use std::collections::HashMap;
 use std::process::Child;
 use std::sync::{Arc, Mutex};
@@ -138,27 +139,44 @@ pub fn refresh_settings_images_page(
 
 pub fn monitor_running_game(
     sender: AppSender,
-    running: Arc<Mutex<HashMap<i64, Child>>>,
+    running: Arc<Mutex<HashMap<i64, i32>>>,
     lutris_id: i64,
-    child: Child,
+    mut child: Child,
+    db: DbConn,
+    game_id: i64,
+    started_at: i64,
 ) {
-    running.lock().unwrap().insert(lutris_id, child);
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(std::time::Duration::from_secs(2));
-            let mut map = running.lock().unwrap();
-            if let Some(ch) = map.get_mut(&lutris_id) {
-                match ch.try_wait() {
-                    Ok(Some(_)) | Err(_) => {
-                        map.remove(&lutris_id);
-                        drop(map);
-                        sender.send(AppMessage::GameStopped(lutris_id)).ok();
-                        return;
+            match child.try_wait() {
+                Ok(Some(_)) | Err(_) => {
+                    running.lock().unwrap().remove(&lutris_id);
+
+                    let ended_at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64;
+                    let duration = ended_at - started_at;
+
+                    if duration < 5 {
+                        eprintln!("Game {} exited after {}s — possible crash", lutris_id, duration);
                     }
-                    Ok(None) => {}
+
+                    if let Err(e) = crate::db::record_session(&db, game_id, started_at, ended_at) {
+                        eprintln!("Failed to record play session: {}", e);
+                    }
+
+                    let _ = sender.send(AppMessage::SessionRecorded {
+                        game_id,
+                        duration_seconds: duration,
+                        started_at,
+                        ended_at,
+                    });
+                    let _ = sender.send(AppMessage::GameStopped(lutris_id));
+                    return;
                 }
-            } else {
-                return;
+                Ok(None) => {}
             }
         }
     });

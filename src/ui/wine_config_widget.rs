@@ -1,0 +1,426 @@
+use gtk4::prelude::*;
+use adw::prelude::*;
+use crate::models::WineConfig;
+
+pub struct WineConfigWidgets {
+    pub version: adw::ComboRow,
+    pub custom_wine_path: adw::EntryRow,
+    pub arch: adw::ComboRow,
+    pub prefix: adw::EntryRow,
+    pub esync: adw::SwitchRow,
+    pub fsync: adw::SwitchRow,
+    pub dxvk: adw::SwitchRow,
+    pub vkd3d: adw::SwitchRow,
+    pub d3d_extras: adw::SwitchRow,
+    pub dxvk_nvapi: adw::SwitchRow,
+    pub fsr: adw::SwitchRow,
+    pub battleye: adw::SwitchRow,
+    pub eac: adw::SwitchRow,
+    pub show_debug: adw::ComboRow,
+    pub audio: adw::ComboRow,
+    pub graphics: adw::ComboRow,
+    pub desktop_integration: adw::SwitchRow,
+    pub show_crash_dialogs: adw::SwitchRow,
+    pub mouse_warp_override: adw::ComboRow,
+    pub virtual_desktop: adw::SwitchRow,
+    pub virtual_desktop_res: adw::EntryRow,
+    pub dpi_enabled: adw::SwitchRow,
+    pub dpi: gtk4::SpinButton,
+    pub gamemode: adw::SwitchRow,
+    pub mangohud: adw::SwitchRow,
+    pub gamescope: adw::SwitchRow,
+    pub gamescope_flags: adw::EntryRow,
+    pub dll_overrides_box: gtk4::ListBox,
+}
+
+fn build_combo_row(title: &str, options: &[(&str, &str)]) -> (adw::ComboRow, gtk4::StringList) {
+    let model = gtk4::StringList::new(&options.iter().map(|(l, _)| *l).collect::<Vec<_>>());
+    let row = adw::ComboRow::new();
+    row.set_title(title);
+    row.set_model(Some(&model));
+    (row, model)
+}
+
+fn build_switch_row(title: &str, subtitle: &str, active: bool) -> adw::SwitchRow {
+    let row = adw::SwitchRow::new();
+    row.set_title(title);
+    row.set_subtitle(subtitle);
+    row.set_active(active);
+    row
+}
+
+fn build_entry_row(title: &str, text: &str) -> adw::EntryRow {
+    let row = adw::EntryRow::new();
+    row.set_title(title);
+    row.set_text(text);
+    row
+}
+
+fn make_section(title: &str) -> adw::PreferencesGroup {
+    let g = adw::PreferencesGroup::new();
+    g.set_title(title);
+    g
+}
+
+pub fn build_wine_config_page(wine: &WineConfig) -> (gtk4::Box, WineConfigWidgets) {
+    let page = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+
+    // --- Wine Version ---
+    let version_group = make_section("Wine Version");
+
+    let (version, _version_model) = {
+        let versions = crate::launcher::wine_launch::detect_wine_versions();
+        let labels: Vec<&str> = versions.iter().map(|(l, _)| l.as_str()).collect();
+        let model = gtk4::StringList::new(&labels);
+        let row = adw::ComboRow::new();
+        row.set_title("Wine version");
+        row.set_model(Some(&model));
+
+        let selected = versions.iter().position(|(_, v)| v == &wine.version).unwrap_or(0);
+        row.set_selected(selected as u32);
+
+        (row, model)
+    };
+    version_group.add(&version);
+
+    let custom_wine_path = build_entry_row("Custom Wine path", &wine.custom_wine_path);
+    custom_wine_path.set_visible(wine.version == "custom");
+    custom_wine_path.set_hexpand(true);
+    version_group.add(&custom_wine_path);
+
+    let (arch, _arch_model) = build_combo_row("Prefix architecture", &[("Auto", "auto"), ("32-bit (win32)", "win32"), ("64-bit (win64)", "win64")]);
+    {
+        let idx = match wine.arch.as_str() {
+            "win32" => 1,
+            "win64" => 2,
+            _ => 0,
+        };
+        arch.set_selected(idx);
+    }
+    version_group.add(&arch);
+
+    page.append(&version_group);
+
+    // --- Wine Prefix ---
+    let prefix_group = make_section("Wine Prefix");
+    let prefix = build_entry_row("Prefix path", &wine.prefix);
+    prefix_group.add(&prefix);
+
+    let desktop_integration = build_switch_row("Integrate system files", "Integrate desktop environment", wine.desktop_integration);
+    prefix_group.add(&desktop_integration);
+    page.append(&prefix_group);
+
+    // --- Performance ---
+    let perf_group = make_section("Performance");
+    let esync = build_switch_row("Esync", "Eventfd synchronization (requires fd limit check)", wine.esync);
+    perf_group.add(&esync);
+    let fsync = build_switch_row("Fsync", "Fast synchronization (kernel support required)", wine.fsync);
+    perf_group.add(&fsync);
+    let fsr = build_switch_row("FSR", "AMD FidelityFX Super Resolution", wine.fsr);
+    perf_group.add(&fsr);
+    let gamemode = build_switch_row("Gamemode", "Feral Interactive GameMode", wine.gamemode);
+    perf_group.add(&gamemode);
+    let mangohud = build_switch_row("MangoHud", "Performance overlay", wine.mangohud);
+    perf_group.add(&mangohud);
+    let gamescope = build_switch_row("Gamescope", "Valve Gamescope compositor", wine.gamescope);
+    perf_group.add(&gamescope);
+    let gamescope_flags = build_entry_row("Gamescope flags", &wine.gamescope_flags);
+    gamescope_flags.set_visible(wine.gamescope);
+    perf_group.add(&gamescope_flags);
+    page.append(&perf_group);
+
+    // --- Graphics ---
+    let gfx_group = make_section("Graphics");
+    let dxvk = build_switch_row("DXVK", "DirectX 9/10/11 to Vulkan translation", wine.dxvk);
+    gfx_group.add(&dxvk);
+    let vkd3d = build_switch_row("VKD3D", "DirectX 12 to Vulkan translation", wine.vkd3d);
+    gfx_group.add(&vkd3d);
+    let d3d_extras = build_switch_row("D3D Extras", "Additional Direct3D components", wine.d3d_extras);
+    gfx_group.add(&d3d_extras);
+    let dxvk_nvapi = build_switch_row("DXVK-NVAPI / DLSS", "NVIDIA DLSS support via DXVK", wine.dxvk_nvapi);
+    gfx_group.add(&dxvk_nvapi);
+    let (graphics, _gfx_model) = build_combo_row("Graphics backend", &[("Auto", "auto"), ("Wayland", "wayland"), ("X11", "x11")]);
+    {
+        let idx = match wine.graphics.as_str() {
+            "wayland" => 1,
+            "x11" => 2,
+            _ => 0,
+        };
+        graphics.set_selected(idx);
+    }
+    gfx_group.add(&graphics);
+    let (mouse_warp_override, _warp_model) = build_combo_row("Mouse warp override", &[("Enable", "enable"), ("Disable", "disable"), ("Force", "force")]);
+    {
+        let idx = match wine.mouse_warp_override.as_str() {
+            "disable" => 1,
+            "force" => 2,
+            _ => 0,
+        };
+        mouse_warp_override.set_selected(idx);
+    }
+    gfx_group.add(&mouse_warp_override);
+    let virtual_desktop = build_switch_row("Virtual desktop", "Run in a virtual desktop window", wine.virtual_desktop);
+    gfx_group.add(&virtual_desktop);
+    let virtual_desktop_res = build_entry_row("Virtual desktop resolution", &wine.virtual_desktop_res);
+    virtual_desktop_res.set_visible(wine.virtual_desktop);
+    gfx_group.add(&virtual_desktop_res);
+    let dpi_enabled = build_switch_row("Enable DPI scaling", "Override DPI settings", wine.dpi_enabled);
+    gfx_group.add(&dpi_enabled);
+    let dpi_adj = gtk4::Adjustment::new(wine.dpi as f64, 96.0, 384.0, 1.0, 10.0, 0.0);
+    let dpi = gtk4::SpinButton::new(Some(&dpi_adj), 1.0, 0);
+    dpi.set_visible(wine.dpi_enabled);
+    let dpi_row = adw::ActionRow::new();
+    dpi_row.set_title("DPI");
+    dpi_row.add_suffix(&dpi);
+    gfx_group.add(&dpi_row);
+    let (audio, _audio_model) = build_combo_row("Audio driver", &[("Auto", "auto"), ("ALSA", "alsa"), ("PulseAudio", "pulse"), ("OSS", "oss")]);
+    {
+        let idx = match wine.audio.as_str() {
+            "alsa" => 1,
+            "pulse" => 2,
+            "oss" => 3,
+            _ => 0,
+        };
+        audio.set_selected(idx);
+    }
+    gfx_group.add(&audio);
+    page.append(&gfx_group);
+
+    // --- Anti-Cheat ---
+    let ac_group = make_section("Anti-Cheat");
+    let battleye = build_switch_row("BattlEye", "Enable BattlEye anti-cheat support", wine.battleye);
+    ac_group.add(&battleye);
+    let eac = build_switch_row("Easy Anti-Cheat", "Enable Easy Anti-Cheat support", wine.eac);
+    ac_group.add(&eac);
+    page.append(&ac_group);
+
+    // --- Debugging ---
+    let dbg_group = make_section("Debugging");
+    let (show_debug, _dbg_model) = build_combo_row("Output debugging info", &[("Disabled (-all)", "-all"), ("Enabled", ""), ("Show FPS", "+fps"), ("Full (+all)", "+all")]);
+    {
+        let idx = match wine.show_debug.as_str() {
+            "" => 1,
+            "+fps" => 2,
+            "+all" => 3,
+            _ => 0,
+        };
+        show_debug.set_selected(idx);
+    }
+    dbg_group.add(&show_debug);
+    let show_crash_dialogs = build_switch_row("Show crash dialogs", "Display Wine crash dialogs when programs crash", wine.show_crash_dialogs);
+    dbg_group.add(&show_crash_dialogs);
+    page.append(&dbg_group);
+
+    // --- DLL Overrides ---
+    let dll_group = make_section("DLL Overrides");
+    let dll_label = gtk4::Label::new(Some("Configure DLL load order for native/builtin Wine DLLs"));
+    dll_label.set_xalign(0.0);
+    dll_label.add_css_class("dim-label");
+    dll_label.set_margin_bottom(8);
+    dll_group.add(&dll_label);
+
+    let dll_overrides_box = gtk4::ListBox::new();
+    dll_overrides_box.add_css_class("boxed-list");
+    for (name, value) in &wine.dll_overrides {
+        let row = build_dll_override_row(name, value);
+        dll_overrides_box.append(&row);
+    }
+    dll_group.add(&dll_overrides_box);
+
+    let add_dll_btn = gtk4::Button::with_label("Add override");
+    add_dll_btn.add_css_class("flat");
+    let box_clone = dll_overrides_box.clone();
+    add_dll_btn.connect_clicked(move |_| {
+        let row = build_dll_override_row("", "native,builtin");
+        box_clone.append(&row);
+    });
+    dll_group.add(&add_dll_btn);
+    page.append(&dll_group);
+
+    // --- Visibility toggles ---
+    {
+        let cw = custom_wine_path.clone();
+        let arch_r = arch.clone();
+        let vkd3d_r = vkd3d.clone();
+        let vd_r = virtual_desktop.clone();
+        version.connect_selected_notify(move |row| {
+            let idx = row.selected() as usize;
+            let versions = crate::launcher::wine_launch::detect_wine_versions();
+            let is_proton = versions.get(idx).map(|(_, v)| v.contains("proton")).unwrap_or(false);
+            cw.set_visible(idx > 0 && versions.get(idx).map(|(_, v)| v == "custom").unwrap_or(false));
+            arch_r.set_visible(!is_proton);
+            vkd3d_r.set_visible(!is_proton);
+            vd_r.set_visible(!is_proton);
+        });
+    }
+
+    let widgets = WineConfigWidgets {
+        version,
+        custom_wine_path,
+        arch,
+        prefix,
+        esync,
+        fsync,
+        dxvk,
+        vkd3d,
+        d3d_extras,
+        dxvk_nvapi,
+        fsr,
+        battleye,
+        eac,
+        show_debug,
+        audio,
+        graphics,
+        desktop_integration,
+        show_crash_dialogs,
+        mouse_warp_override,
+        virtual_desktop,
+        virtual_desktop_res,
+        dpi_enabled,
+        dpi,
+        gamemode,
+        mangohud,
+        gamescope,
+        gamescope_flags,
+        dll_overrides_box,
+    };
+
+    (page, widgets)
+}
+
+fn build_dll_override_row(name: &str, value: &str) -> gtk4::ListBoxRow {
+    let row = gtk4::ListBoxRow::new();
+    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    hbox.set_margin_start(8);
+    hbox.set_margin_end(8);
+    hbox.set_margin_top(4);
+    hbox.set_margin_bottom(4);
+
+    let name_entry = gtk4::Entry::new();
+    name_entry.set_placeholder_text(Some("DLL name (e.g. d3d11)"));
+    name_entry.set_text(name);
+    name_entry.set_hexpand(true);
+    hbox.append(&name_entry);
+
+    let model = gtk4::StringList::new(&["native,builtin", "builtin,native", "native", "builtin", "disabled"]);
+    let value_combo = gtk4::DropDown::new(Some(model), None::<&gtk4::PropertyExpression>);
+    {
+        let idx = match value {
+            "n,b" | "native,builtin" => 0,
+            "b,n" | "builtin,native" => 1,
+            "n" | "native" => 2,
+            "b" | "builtin" => 3,
+            "" | "d" | "disabled" => 4,
+            _ => 0,
+        };
+        value_combo.set_selected(idx as u32);
+    }
+    hbox.append(&value_combo);
+
+    let remove_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
+    remove_btn.add_css_class("flat");
+    remove_btn.add_css_class("circular");
+    let row_clone = row.clone();
+    remove_btn.connect_clicked(move |_| {
+        row_clone.parent().and_then(|p| p.downcast::<gtk4::ListBox>().ok()).map(|list| {
+            row_clone.unparent();
+            list.remove(&row_clone);
+        });
+    });
+    hbox.append(&remove_btn);
+
+    row.set_child(Some(&hbox));
+    row
+}
+
+fn collect_dll_overrides(box_: &gtk4::ListBox) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    let mut child = box_.first_child();
+    while let Some(w) = child {
+        if let Some(row) = w.downcast_ref::<gtk4::ListBoxRow>() {
+            if let Some(hbox) = row.child().and_then(|c| c.downcast::<gtk4::Box>().ok()) {
+                let children: Vec<gtk4::Widget> = {
+                    let mut v = Vec::new();
+                    let mut ch = hbox.first_child();
+                    while let Some(c) = ch.clone() {
+                        v.push(c.clone());
+                        ch = c.next_sibling();
+                    }
+                    v
+                };
+                if children.len() >= 2 {
+                    let name_entry = children[0].clone();
+                    let value_combo = children[1].clone();
+                    if let Some(entry) = name_entry.downcast_ref::<gtk4::Entry>() {
+                        if let Some(combo) = value_combo.downcast_ref::<gtk4::DropDown>() {
+                            let name = entry.text().to_string();
+                            if !name.is_empty() {
+                                let labels = ["native,builtin", "builtin,native", "native", "builtin", "disabled"];
+                                let idx = combo.selected() as usize;
+                                let value = labels.get(idx).unwrap_or(&"native,builtin").to_string();
+                                result.push((name, value));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        child = w.next_sibling();
+    }
+    result
+}
+
+impl WineConfigWidgets {
+    pub fn to_wine_config(&self) -> WineConfig {
+        let version_idx = self.version.selected() as usize;
+        let versions = crate::launcher::wine_launch::detect_wine_versions();
+        let version_value = versions.get(version_idx).map(|(_, v)| v.clone()).unwrap_or_else(|| "system".to_string());
+
+        let arch_idx = self.arch.selected() as usize;
+        let arch_value = match arch_idx { 1 => "win32", 2 => "win64", _ => "auto" };
+
+        let dbg_idx = self.show_debug.selected() as usize;
+        let dbg_value = match dbg_idx { 1 => "", 2 => "+fps", 3 => "+all", _ => "-all" };
+
+        let audio_idx = self.audio.selected() as usize;
+        let audio_value = match audio_idx { 1 => "alsa", 2 => "pulse", 3 => "oss", _ => "auto" };
+
+        let gfx_idx = self.graphics.selected() as usize;
+        let gfx_value = match gfx_idx { 1 => "wayland", 2 => "x11", _ => "auto" };
+
+        let warp_idx = self.mouse_warp_override.selected() as usize;
+        let warp_value = match warp_idx { 1 => "disable", 2 => "force", _ => "enable" };
+
+        WineConfig {
+            enabled: true,
+            prefix: self.prefix.text().to_string(),
+            version: version_value,
+            custom_wine_path: self.custom_wine_path.text().to_string(),
+            arch: arch_value.to_string(),
+            esync: self.esync.is_active(),
+            fsync: self.fsync.is_active(),
+            dxvk: self.dxvk.is_active(),
+            vkd3d: self.vkd3d.is_active(),
+            d3d_extras: self.d3d_extras.is_active(),
+            dxvk_nvapi: self.dxvk_nvapi.is_active(),
+            fsr: self.fsr.is_active(),
+            battleye: self.battleye.is_active(),
+            eac: self.eac.is_active(),
+            show_debug: dbg_value.to_string(),
+            dll_overrides: collect_dll_overrides(&self.dll_overrides_box),
+            audio: audio_value.to_string(),
+            graphics: gfx_value.to_string(),
+            desktop_integration: self.desktop_integration.is_active(),
+            show_crash_dialogs: self.show_crash_dialogs.is_active(),
+            mouse_warp_override: warp_value.to_string(),
+            virtual_desktop: self.virtual_desktop.is_active(),
+            virtual_desktop_res: self.virtual_desktop_res.text().to_string(),
+            dpi_enabled: self.dpi_enabled.is_active(),
+            dpi: self.dpi.value() as i32,
+            gamemode: self.gamemode.is_active(),
+            mangohud: self.mangohud.is_active(),
+            gamescope: self.gamescope.is_active(),
+            gamescope_flags: self.gamescope_flags.text().to_string(),
+        }
+    }
+}

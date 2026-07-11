@@ -20,7 +20,7 @@ use super::grid_view::show_grid_view;
 use super::message_handler::switch_to_game;
 use super::dialogs::show_settings_dialog;
 use super::mass_match_dialog::show_mass_match_dialog;
-use super::add_game::show_add_game_dialog;
+use super::add_game_dialog::show_add_game_dialog;
 use super::background::show_close_choice_dialog;
 
 pub fn build_ui(
@@ -175,6 +175,20 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
     match_btn.connect_clicked(move |_| show_mass_match_dialog(&state_clone2));
 
     popover_box.append(&match_btn);
+
+    let history_btn = gtk4::Button::new();
+    let history_label = gtk4::Label::new(Some(S::PLAY_HISTORY));
+    history_label.set_xalign(0.0);
+    history_btn.set_child(Some(&history_label));
+    history_btn.add_css_class("flat");
+    history_btn.set_halign(gtk4::Align::Fill);
+    history_btn.set_size_request(-1, 36);
+    history_btn.add_css_class("popover-menu-row");
+
+    let state_clone_hist = state.clone();
+    history_btn.connect_clicked(move |_| super::play_history::show_daily_history_dialog(&state_clone_hist));
+
+    popover_box.append(&history_btn);
 
     let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
     sep.set_margin_top(4);

@@ -1,5 +1,6 @@
 use gtk4::prelude::*;
 use crate::Game;
+use crate::AppMessage;
 use crate::strings as S;
 use super::state::SharedState;
 use super::helpers::open_folder;
@@ -27,6 +28,7 @@ pub fn show_game_context_menu(
     menu.prepend_item(&play_item);
 
     menu.append(Some(S::EDIT_GAME_SETTINGS), Some("game.edit"));
+    menu.append(Some(S::VIEW_PLAY_HISTORY), Some("game.play_history"));
     let folders_menu = gio::Menu::new();
     if crate::models::has_steam_enrichment(&game.trophy_source) || !game.sgdb_id.is_empty() {
         folders_menu.append(Some("Image data"), Some("game.open_images"));
@@ -54,16 +56,17 @@ pub fn show_game_context_menu(
     let gc = game_clone.clone();
     play_action.connect_activate(move |_, _| {
         let lutris_id = gc.lutris_id;
-        if lutris_id != 0 {
-            let uri = format!("lutris:rungameid/{}", lutris_id);
-            let rg = sc.borrow().running_games.clone();
-            let sender = sc.borrow().sender.clone();
-            match std::process::Command::new("lutris").arg(&uri).spawn() {
-                Ok(child) => {
-                    super::helpers::monitor_running_game(sender.clone(), rg.clone(), lutris_id, child);
+        let is_running = sc.borrow().running_games.lock().unwrap().contains_key(&lutris_id);
+        if is_running {
+            super::play_button::stop_game(&sc, lutris_id);
+        } else {
+            match super::play_button::launch_game(&sc, lutris_id) {
+                Ok(()) => {
+                    let _ = sc.borrow().sender.send(AppMessage::GameStarted(lutris_id));
                 }
                 Err(e) => {
-                    eprintln!("Failed to launch {}: {}", uri, e);
+                    eprintln!("Failed to launch game: {}", e);
+                    let _ = sc.borrow().sender.send(AppMessage::AddGameError(e));
                 }
             }
         }
@@ -80,6 +83,14 @@ pub fn show_game_context_menu(
         }
     });
     actions.add_action(&edit_action);
+
+    let play_hist_action = gio::SimpleAction::new("play_history", None);
+    let sc = state_clone.clone();
+    let db_id_for_hist = game_clone.db_id;
+    play_hist_action.connect_activate(move |_, _| {
+        super::play_history::show_play_history_dialog(&sc, db_id_for_hist);
+    });
+    actions.add_action(&play_hist_action);
 
     let hide_action = gio::SimpleAction::new("hide", None);
     let sc = state_clone.clone();

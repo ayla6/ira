@@ -280,6 +280,11 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let emu_trophy_source = game.trophy_source.clone();
     let emu_app_id = game.app_id.clone();
     let emu_save_dir = state.borrow().save_dir.clone();
+    let emu_wine_prefix = if saved_wine.enabled {
+        Some(crate::launcher::wine_launch::wine_prefix(&saved_wine))
+    } else {
+        None
+    };
     let emu_language_row: Option<adw::ComboRow> = {
     if (emu_trophy_source == crate::models::GSE || emu_trophy_source == crate::models::NGE) && !emu_exe.is_empty() {
         let emu_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -366,6 +371,60 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         }
 
         emu_page.append(&action_group);
+
+        let folders_group = adw::PreferencesGroup::new();
+        folders_group.set_title("Folders");
+
+        let game_folder = std::path::Path::new(&emu_exe).parent().map(|p| p.to_path_buf());
+        if let Some(ref gf) = game_folder {
+            let row = adw::ActionRow::new();
+            row.set_title("Game folder");
+            row.set_subtitle(&gf.to_string_lossy());
+            let open_btn = gtk4::Button::with_label("Open");
+            open_btn.add_css_class("flat");
+            open_btn.set_valign(gtk4::Align::Center);
+            let path = gf.clone();
+            open_btn.connect_clicked(move |_| {
+                let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+            });
+            row.add_suffix(&open_btn);
+            folders_group.add(&row);
+        }
+
+        if let Some(ref prefix) = emu_wine_prefix {
+            if std::path::Path::new(prefix).join("system.reg").is_file() {
+                let row = adw::ActionRow::new();
+                row.set_title("Wine prefix");
+                row.set_subtitle(prefix);
+                let open_btn = gtk4::Button::with_label("Open");
+                open_btn.add_css_class("flat");
+                open_btn.set_valign(gtk4::Align::Center);
+                let path = prefix.clone();
+                open_btn.connect_clicked(move |_| {
+                    let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+                });
+                row.add_suffix(&open_btn);
+                folders_group.add(&row);
+            }
+        }
+
+        {
+            let emu_dir = crate::platforms::api_emulators::api_emulators_dir(&emu_save_dir);
+            let row = adw::ActionRow::new();
+            row.set_title("API emulator files");
+            row.set_subtitle(&emu_dir.to_string_lossy());
+            let open_btn = gtk4::Button::with_label("Open");
+            open_btn.add_css_class("flat");
+            open_btn.set_valign(gtk4::Align::Center);
+            let path = emu_dir.clone();
+            open_btn.connect_clicked(move |_| {
+                let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+            });
+            row.add_suffix(&open_btn);
+            folders_group.add(&row);
+        }
+
+        emu_page.append(&folders_group);
 
         let lang_group = adw::PreferencesGroup::new();
         lang_group.set_title("Language");

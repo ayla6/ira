@@ -11,9 +11,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use super::state::SharedState;
-use super::sidebar::rebuild_sidebar;
 use super::message_handler::apply_game_update;
-use super::helpers::{confirm_dialog, clear_children};
+use super::helpers::clear_children;
 use super::mass_match_dialog::show_sgdb_search_dialog;
 
 fn settings_page_container() -> gtk4::Box {
@@ -531,56 +530,7 @@ pub(super) fn build_game_general_page(
         }
     }
 
-    if game.lutris_id != 0 && !game.app_id.is_empty() && game.kind != "ps4" {
-        let unmatch_group = adw::PreferencesGroup::new();
-        let unmatch_btn = gtk4::Button::with_label("Unmatch game");
-        unmatch_btn.add_css_class("destructive-action");
-        unmatch_btn.set_halign(gtk4::Align::Start);
-        let sc = state.clone();
-        let gc = game.clone();
-        let win_clone = win.clone();
-        unmatch_btn.connect_clicked(move |_| {
-            let parent = sc.borrow().window.clone();
-            let sc2 = sc.clone();
-            let lutris_id = gc.lutris_id;
-            let name = gc.name.clone();
-            let win2 = win_clone.clone();
-            confirm_dialog(
-                &parent,
-                "Unmatch game?",
-                &format!("Unmatch \u{201C}{}\u{201D} from its trophy source? The game will remain in the list but without trophies.", name),
-                "Unmatch",
-                adw::ResponseAppearance::Destructive,
-                move || {
-                    if let Err(e) = crate::db::unmatch_game(&sc2.borrow().db, lutris_id) {
-                        eprintln!("Failed to unmatch game: {}", e);
-                    }
-                    if let Some(g) = sc2.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
-                        g.app_id.clear();
-                        g.kind.clear();
-                        g.trophy_source.clear();
-                        g.platform_id.clear();
-                        g.achievements.clear();
-                        g.earned_count = 0;
-                        g.total_count = 0;
-                        g.icon_path.clear();
-                        g.hero_image_path.clear();
-                        g.grid_path.clear();
-                        g.header_path.clear();
-                        g.logo_path.clear();
-                        g.manual_unmatch = true;
-                        if !g.lutris_name.is_empty() {
-                            g.name = g.lutris_name.clone();
-                        }
-                    }
-                    rebuild_sidebar(&sc2);
-                    win2.close();
-                },
-            );
-        });
-        unmatch_group.add(&unmatch_btn);
-        general_page.append(&unmatch_group);
-    }
+    let mut app_id_entry: Option<adw::EntryRow> = None;
 
     if game.trophy_source == crate::models::GSE || game.trophy_source == crate::models::NGE || game.kind == "ps4" {
         let ids_group = adw::PreferencesGroup::new();
@@ -614,13 +564,13 @@ pub(super) fn build_game_general_page(
             });
             row.add_suffix(&search_btn);
             ids_group.add(&row);
-            general_page.append(&ids_group);
-            return (general_page, title_entry, sort_entry, pending_version, Some(row), None);
+            app_id_entry = Some(row);
         } else if game.trophy_source == crate::models::NGE {
             let row = adw::EntryRow::new();
             row.set_title("GOG Product ID");
             row.set_text(&game.app_id);
             ids_group.add(&row);
+            app_id_entry = Some(row);
         }
         general_page.append(&ids_group);
     }
@@ -641,7 +591,7 @@ pub(super) fn build_game_general_page(
         None
     };
 
-    (general_page, title_entry, sort_entry, pending_version, None, language_row)
+    (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row)
 }
 
 fn show_steam_id_search_popup(
@@ -750,6 +700,125 @@ fn show_steam_id_search_popup(
                         let dlg = dialog_c2.clone();
                         match_btn.connect_clicked(move |_| {
                             super::matching::match_game_to_steam(&sc3, lutris_id_c, sid.clone(), matched_name.clone());
+                            row_update.set_text(&sid);
+                            dlg.close();
+                        });
+                        row.add_suffix(&match_btn);
+                        list_c2.append(&row);
+                    }
+                }
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
+    };
+
+    let ds = do_search.clone();
+    entry.connect_activate(move |_| ds());
+    let ds2 = do_search.clone();
+    search_btn.connect_clicked(move |_| ds2());
+
+    dialog.present();
+    do_search();
+}
+
+pub(super) fn show_steam_id_search_popup_add(
+    state: &SharedState,
+    game_name: &str,
+    parent: &adw::Window,
+    app_id_row: &adw::EntryRow,
+) {
+    let dialog = adw::Window::new();
+    dialog.set_default_width(500);
+    dialog.set_default_height(400);
+    dialog.set_modal(true);
+    dialog.set_transient_for(Some(parent));
+    dialog.set_title(Some("Search Steam Store"));
+
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let header = adw::HeaderBar::new();
+    outer.append(&header);
+
+    let search_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    search_box.set_margin_start(12);
+    search_box.set_margin_end(12);
+    search_box.set_margin_top(8);
+    let entry = gtk4::Entry::new();
+    entry.set_placeholder_text(Some("Game name…"));
+    entry.set_text(game_name);
+    entry.set_hexpand(true);
+    let search_btn = gtk4::Button::with_label("Search");
+    search_btn.add_css_class("suggested-action");
+    search_box.append(&entry);
+    search_box.append(&search_btn);
+    outer.append(&search_box);
+
+    let scrolled = gtk4::ScrolledWindow::new();
+    scrolled.set_vexpand(true);
+    scrolled.set_margin_top(8);
+    let list = gtk4::ListBox::new();
+    list.set_margin_start(12);
+    list.set_margin_end(12);
+    list.set_margin_top(8);
+    list.set_margin_bottom(12);
+    list.set_valign(gtk4::Align::Start);
+    list.add_css_class("boxed-list");
+    scrolled.set_child(Some(&list));
+    outer.append(&scrolled);
+
+    let close_btn = gtk4::Button::with_label("Close");
+    close_btn.set_halign(gtk4::Align::End);
+    close_btn.set_margin_start(12);
+    close_btn.set_margin_end(12);
+    close_btn.set_margin_bottom(12);
+    let win_c = dialog.clone();
+    close_btn.connect_clicked(move |_| win_c.close());
+    outer.append(&close_btn);
+
+    dialog.set_content(Some(&outer));
+
+    let state_c = state.clone();
+    let list_c = list.clone();
+    let dialog_c = dialog.clone();
+    let row_c = app_id_row.clone();
+
+    let entry_s = entry.clone();
+    let do_search = move || {
+        let term = entry_s.text().to_string();
+        if term.is_empty() { return; }
+        let steam = state_c.borrow().steam.clone();
+        let results_shared = Arc::new(std::sync::Mutex::new(None::<Vec<(String, String)>>));
+        let results_thread = results_shared.clone();
+        std::thread::spawn(move || {
+            let r = steam.search_steam_store(&term);
+            *results_thread.lock().unwrap() = Some(r);
+        });
+        let results_poll = results_shared.clone();
+        let list_c2 = list_c.clone();
+        let dialog_c2 = dialog_c.clone();
+        let row_c2 = row_c.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            if !dialog_c2.is_visible() { return glib::ControlFlow::Break; }
+            if let Some(results) = results_poll.lock().unwrap().take() {
+                clear_children(&list_c2);
+                if results.is_empty() {
+                    let row = adw::ActionRow::new();
+                    row.set_title("No results found");
+                    row.set_sensitive(false);
+                    list_c2.append(&row);
+                } else {
+                    for (app_id, name) in &results {
+                        let row = adw::ActionRow::new();
+                        row.set_title(name);
+                        row.set_subtitle(&format!("App ID: {}", app_id));
+                        let match_btn = gtk4::Button::with_label("Select");
+                        match_btn.add_css_class("suggested-action");
+                        match_btn.set_valign(gtk4::Align::Center);
+                        let sid = app_id.clone();
+                        let row_update = row_c2.clone();
+                        let dlg = dialog_c2.clone();
+                        match_btn.connect_clicked(move |_| {
                             row_update.set_text(&sid);
                             dlg.close();
                         });

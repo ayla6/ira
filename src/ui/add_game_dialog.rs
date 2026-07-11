@@ -51,7 +51,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
 
     let profiles = crate::db::get_all_profiles(&db).unwrap_or_default();
     let (general_page, name_entry, kind_row, exe_entry, args_entry, wd_entry, detect_btn, profile_row, steam_id_entry, gog_id_entry) =
-        build_general_page(&win, &profiles);
+        build_general_page(&win, &profiles, state);
     sidebar.append(&super::dialogs::settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
 
@@ -297,7 +297,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
     });
 }
 
-fn build_general_page(win: &adw::Window, profiles: &[crate::models::WineProfile]) -> (gtk4::Box, adw::EntryRow, adw::ComboRow, adw::EntryRow, adw::EntryRow, adw::EntryRow, gtk4::Button, adw::ComboRow, adw::EntryRow, adw::EntryRow) {
+fn build_general_page(win: &adw::Window, profiles: &[crate::models::WineProfile], state: &super::state::SharedState) -> (gtk4::Box, adw::EntryRow, adw::ComboRow, adw::EntryRow, adw::EntryRow, adw::EntryRow, gtk4::Button, adw::ComboRow, adw::EntryRow, adw::EntryRow) {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let info_group = adw::PreferencesGroup::new();
@@ -388,9 +388,51 @@ fn build_general_page(win: &adw::Window, profiles: &[crate::models::WineProfile]
     ids_group.set_title("Service IDs");
     let steam_id_entry = adw::EntryRow::new();
     steam_id_entry.set_title("Steam App ID");
+    let steam_search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
+    steam_search_btn.set_valign(gtk4::Align::Center);
+    steam_search_btn.set_tooltip_text(Some("Search Steam Store"));
+    steam_search_btn.add_css_class("flat");
+    {
+        let sc = state.clone();
+        let win_c = win.clone();
+        let row_c = steam_id_entry.clone();
+        let name_c = String::new();
+        steam_search_btn.connect_clicked(move |_| {
+            super::dialogs::show_steam_id_search_popup_add(&sc, &name_c, &win_c, &row_c);
+        });
+    }
+    steam_id_entry.add_suffix(&steam_search_btn);
     ids_group.add(&steam_id_entry);
     let gog_id_entry = adw::EntryRow::new();
     gog_id_entry.set_title("GOG Product ID");
+    let gog_browse_btn = gtk4::Button::from_icon_name("folder-open-symbolic");
+    gog_browse_btn.set_valign(gtk4::Align::Center);
+    gog_browse_btn.set_tooltip_text(Some("Detect from game folder"));
+    gog_browse_btn.add_css_class("flat");
+    {
+        let win_c = win.clone();
+        let row_c = gog_id_entry.clone();
+        let name_row = name_entry.clone();
+        gog_browse_btn.connect_clicked(move |_| {
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title("Select game folder");
+            let row = row_c.clone();
+            let name_row = name_row.clone();
+            dialog.select_folder(Some(&win_c), None::<&gio::Cancellable>, move |result| {
+                if let Ok(file) = result {
+                    if let Some(path) = file.path() {
+                        if let Some((_, product_id, name)) = crate::platforms::gog::find_gog_info(&path.to_string_lossy()) {
+                            row.set_text(&product_id);
+                            if name_row.text().is_empty() {
+                                name_row.set_text(&name);
+                            }
+                        }
+                    }
+                }
+            });
+        });
+    }
+    gog_id_entry.add_suffix(&gog_browse_btn);
     ids_group.add(&gog_id_entry);
     page.append(&ids_group);
 

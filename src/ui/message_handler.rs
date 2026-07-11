@@ -53,8 +53,26 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 }
             }
         }
+        AppMessage::GameStarted(lutris_id) => {
+            let selected_id = state.borrow().selected_id.clone();
+            if selected_id == lutris_id.to_string() {
+                let game = state.borrow().games.iter()
+                    .find(|g| g.lutris_id == lutris_id)
+                    .cloned();
+                if let Some(game) = game {
+                    display_game(&game, state);
+                }
+            }
+        }
         AppMessage::LutrisDataChanged(data) => {
             handle_lutris_data_changed(state, data);
+        }
+        AppMessage::SessionRecorded { game_id, duration_seconds, .. } => {
+            let mut s = state.borrow_mut();
+            if let Some(g) = s.games.iter_mut().find(|g| g.db_id == game_id) {
+                g.playtime += (duration_seconds as f64) / 3600.0;
+            }
+            drop(s);
         }
         AppMessage::ShadPS4PlaytimeChanged => {
             let play_times = crate::platforms::ps4::read_play_times();

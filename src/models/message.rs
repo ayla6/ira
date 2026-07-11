@@ -8,6 +8,7 @@ pub enum AppMessage {
     AddGameError(String),
     GameRemoved { app_id: String },
     GameStopped(i64),
+    GameStarted(i64),
     /// Fired by the LutrisWatcher when pga.db changes (debounced).
     /// Carries (lutris_id, playtime, lastplayed) for every Lutris game.
     LutrisDataChanged(Vec<(i64, f64, i64)>),
@@ -16,6 +17,12 @@ pub enum AppMessage {
     /// Initial game list loaded in the background.
     GamesLoaded(Vec<Game>),
     /// SGDB assets downloaded for a game.
+    SessionRecorded {
+        game_id: i64,
+        duration_seconds: i64,
+        started_at: i64,
+        ended_at: i64,
+    },
     SgdbAssetsDownloaded {
         db_id: i64,
         sgdb_id: String,

@@ -31,6 +31,29 @@ pub fn show_game_context_menu(
     menu.append(Some(S::VIEW_PLAY_HISTORY), Some("game.play_history"));
 
     let folders_menu = gio::Menu::new();
+
+    let (game_folder, wine_prefix) = {
+        let s = state.borrow();
+        let config = crate::db::get_game_config(&s.db, game.db_id).ok().flatten();
+        let app_default = s.cfg.default_wine_config.clone();
+        let (launch, mut wine, _) = config.unwrap_or_default();
+        wine = wine.merge_with_default(&app_default);
+        let game_dir = if !launch.working_dir.is_empty() {
+            Some(launch.working_dir)
+        } else if !launch.exe.is_empty() {
+            std::path::Path::new(&launch.exe).parent().map(|p| p.to_string_lossy().to_string())
+        } else {
+            None
+        };
+        (game_dir, if wine.enabled { Some(crate::launcher::wine_launch::wine_prefix(&wine)) } else { None })
+    };
+
+    if game_folder.is_some() {
+        folders_menu.append(Some("Game folder"), Some("game.open_game_folder"));
+    }
+    if wine_prefix.is_some() {
+        folders_menu.append(Some("Wine prefix"), Some("game.open_wine_prefix"));
+    }
     if crate::models::has_steam_enrichment(&game.trophy_source) || !game.sgdb_id.is_empty() {
         folders_menu.append(Some("Image data"), Some("game.open_images"));
     }
@@ -130,6 +153,24 @@ pub fn show_game_context_menu(
         }
     });
     actions.add_action(&hide_action);
+
+    if let Some(ref gf) = game_folder {
+        let open_game_folder = gio::SimpleAction::new("open_game_folder", None);
+        let path = gf.clone();
+        open_game_folder.connect_activate(move |_, _| {
+            open_folder(&path);
+        });
+        actions.add_action(&open_game_folder);
+    }
+
+    if let Some(ref pfx) = wine_prefix {
+        let open_wine_prefix = gio::SimpleAction::new("open_wine_prefix", None);
+        let path = pfx.clone();
+        open_wine_prefix.connect_activate(move |_, _| {
+            open_folder(&path);
+        });
+        actions.add_action(&open_wine_prefix);
+    }
 
     if crate::models::has_steam_enrichment(&game_clone.trophy_source) || !game_clone.sgdb_id.is_empty() {
         let open_images = gio::SimpleAction::new("open_images", None);

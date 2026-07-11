@@ -2,12 +2,12 @@ use crate::db::DbConn;
 use crate::models::GameEntry;
 use rusqlite::params;
 
-pub fn add_game(conn: &DbConn, kind: &str, steam_id: &str, platform_id: &str, title: &str) -> Result<i64, String> {
+pub fn add_game(conn: &DbConn, kind: &str, trophy_source: &str, steam_id: &str, platform_id: &str, title: &str) -> Result<i64, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
     c.execute(
-        "INSERT INTO games (kind, steam_id, platform_id, title) VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO games (kind, trophy_source, steam_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(steam_id) DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
-        params![kind, steam_id, platform_id, title],
+        params![kind, trophy_source, steam_id, platform_id, title],
     ).map_err(|e| e.to_string())?;
     Ok(c.last_insert_rowid())
 }

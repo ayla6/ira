@@ -18,7 +18,22 @@ pub fn find_by_steam_id(conn: &DbConn, steam_id: &str) -> Result<Option<GameEntr
 }
 
 pub fn find_gog_by_product_id(conn: &DbConn, product_id: &str) -> Result<Option<GameEntry>, String> {
-    find_by_kind_platform(conn, "ne_gog", product_id)
+    find_by_trophy_platform(conn, "nge", product_id)
+}
+
+pub fn find_by_trophy_platform(conn: &DbConn, trophy_source: &str, platform_id: &str) -> Result<Option<GameEntry>, String> {
+    let c = conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = c.prepare(&format!("SELECT {} FROM games WHERE trophy_source = ?1 AND platform_id = ?2", crate::db::GAME_COLUMNS))
+        .map_err(|e| e.to_string())?;
+    let mut entries = stmt.query_map(params![trophy_source, platform_id], |row| {
+        crate::db::game_entry_from_row(row)
+    }).map_err(|e| e.to_string())?;
+
+    if let Some(entry) = entries.next() {
+        Ok(Some(entry.map_err(|e| e.to_string())?))
+    } else {
+        Ok(None)
+    }
 }
 
 pub fn find_by_kind_platform(conn: &DbConn, kind: &str, platform_id: &str) -> Result<Option<GameEntry>, String> {

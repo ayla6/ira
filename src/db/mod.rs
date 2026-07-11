@@ -10,25 +10,26 @@ pub use lookup::*;
 pub use lutris_ops::*;
 pub use settings::*;
 
-pub(super) const GAME_COLUMNS: &str = "id, kind, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played";
+pub(super) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played";
 
 pub(super) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<crate::models::GameEntry> {
     Ok(crate::models::GameEntry {
         id: row.get(0)?,
         kind: row.get(1)?,
-        steam_id: row.get(2)?,
-        platform_id: row.get(3)?,
-        title: row.get(4)?,
-        hidden: row.get(5)?,
-        lutris_db_id: row.get(6)?,
-        sgdb_id: row.get(7)?,
-        logo_position: row.get(8)?,
-        logo_size: row.get(9)?,
-        ignored: row.get(10)?,
-        manual_unmatch: row.get(11)?,
-        sort_title: row.get(12)?,
-        shadps4_version: row.get(13)?,
-        last_played: row.get(14)?,
+        trophy_source: row.get(2)?,
+        steam_id: row.get(3)?,
+        platform_id: row.get(4)?,
+        title: row.get(5)?,
+        hidden: row.get(6)?,
+        lutris_db_id: row.get(7)?,
+        sgdb_id: row.get(8)?,
+        logo_position: row.get(9)?,
+        logo_size: row.get(10)?,
+        ignored: row.get(11)?,
+        manual_unmatch: row.get(12)?,
+        sort_title: row.get(13)?,
+        shadps4_version: row.get(14)?,
+        last_played: row.get(15)?,
     })
 }
 
@@ -43,6 +44,7 @@ pub fn init_db(db_path: &str) -> DbConn {
         "CREATE TABLE IF NOT EXISTS games (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             kind TEXT NOT NULL,
+            trophy_source TEXT NOT NULL DEFAULT '',
             steam_id TEXT NOT NULL,
             platform_id TEXT NOT NULL,
             title TEXT NOT NULL DEFAULT '',
@@ -57,8 +59,9 @@ pub fn init_db(db_path: &str) -> DbConn {
             shadps4_version TEXT NOT NULL DEFAULT '',
             last_played INTEGER NOT NULL DEFAULT 0
         );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_games_kind_platform ON games(kind, platform_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_games_trophy_platform ON games(trophy_source, platform_id) WHERE trophy_source != '';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps4_serial ON games(kind, platform_id) WHERE kind = 'ps4';
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_lutris_db_id ON games(lutris_db_id) WHERE lutris_db_id IS NOT NULL;
         CREATE TABLE IF NOT EXISTS lutris_meta (
             lutris_id INTEGER PRIMARY KEY,

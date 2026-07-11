@@ -481,6 +481,7 @@ fn build_game_general_page(
                     if let Some(g) = sc2.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
                         g.app_id.clear();
                         g.kind.clear();
+                        g.trophy_source.clear();
                         g.platform_id.clear();
                         g.achievements.clear();
                         g.earned_count = 0;
@@ -831,8 +832,6 @@ pub fn show_game_settings_dialog(state: &SharedState, game: &Game) {
             for (asset, src_path) in pc.iter() {
                 let cloud_dir = if !sgdb_id_save.is_empty() {
                     crate::parser::sgdb_data_dir(&save_dir_c, &sgdb_id_save)
-                } else if kind_save == "sgdb" {
-                    crate::parser::sgdb_data_dir(&save_dir_c, &app_id)
                 } else if kind_save == "ps4" {
                     crate::parser::ps4_data_dir(&save_dir_c, &app_id)
                 } else {
@@ -958,7 +957,7 @@ pub fn build_image_manager_content_with_drafts(
     content.set_margin_top(16);
     content.set_margin_bottom(16);
 
-    let is_steam = game.kind == "gbe_steam" || game.kind == "ne_gog";
+    let is_steam = crate::models::has_steam_enrichment(&game.trophy_source);
 
     let sections: [(&str, &str, &str, i32, i32, &[&str]); 5] = [
         ("Icon", "icon.png", "icon", 48, 48, &[]),
@@ -980,7 +979,7 @@ pub fn build_image_manager_content_with_drafts(
         btn_box.set_halign(gtk4::Align::Center);
         btn_box.set_margin_top(24);
 
-        if game.sgdb_id.is_empty() && !is_steam && game.kind != "sgdb" {
+        if game.sgdb_id.is_empty() && !is_steam {
             let match_btn = gtk4::Button::with_label("Match to SteamGridDB…");
             match_btn.add_css_class("suggested-action");
             let sc = state.clone();
@@ -1113,14 +1112,12 @@ fn build_image_section(
     parent_win: &adw::Window,
     pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
 ) -> gtk4::Box {
-    let is_steam = game.kind == "gbe_steam" || game.kind == "ne_gog";
+    let is_steam = crate::models::has_steam_enrichment(&game.trophy_source);
     let id = game.app_id.clone();
     let save_dir = state.borrow().save_dir.clone();
 
     let cloud_dir = if !game.sgdb_id.is_empty() {
         crate::parser::sgdb_data_dir(&save_dir, &game.sgdb_id)
-    } else if game.kind == "sgdb" {
-        crate::parser::sgdb_data_dir(&save_dir, &id)
     } else if game.kind == "ps4" {
         crate::parser::ps4_data_dir(&save_dir, &id)
     } else {

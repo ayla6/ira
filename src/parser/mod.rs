@@ -82,6 +82,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     let mut game = Game {
         app_id: app_id.to_string(),
         kind: kind.to_string(),
+        trophy_source: entry.trophy_source.clone(),
         platform_id: platform_id.to_string(),
         db_id: entry.id,
         name: if entry.title.is_empty() {
@@ -123,10 +124,10 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     let image_dir = match entry.sgdb_id.as_ref().filter(|s| !s.is_empty()) {
         Some(sgdb_id) => paths::sgdb_data_dir(save_dir, sgdb_id),
         None => {
-            if kind == "sgdb" {
-                paths::sgdb_data_dir(save_dir, app_id)
-            } else if kind == "ps4" {
+            if kind == "ps4" {
                 paths::ps4_data_dir(save_dir, app_id)
+            } else if entry.trophy_source.is_empty() {
+                paths::sgdb_data_dir(save_dir, app_id)
             } else {
                 paths::data_dir(save_dir, app_id)
             }
@@ -161,7 +162,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
 
     populate_image_paths(&image_dir, &mut game);
 
-    let status_path = paths::unlock_status_path(save_dir, kind, app_id, platform_id);
+    let status_path = paths::unlock_status_path(save_dir, &entry.trophy_source, app_id, platform_id);
     let status_map = status::load_status_map(&status_path);
 
     let meta_path = ach_dir.join("achievements.json");
@@ -224,8 +225,8 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     Ok(game)
 }
 
-pub fn set_achievement_earned(save_dir: &str, kind: &str, app_id: &str, platform_id: &str, ach_name: &str, earned: bool) -> Result<(), String> {
-    let status_path = paths::unlock_status_path(save_dir, kind, app_id, platform_id);
+pub fn set_achievement_earned(save_dir: &str, trophy_source: &str, app_id: &str, platform_id: &str, ach_name: &str, earned: bool) -> Result<(), String> {
+    let status_path = paths::unlock_status_path(save_dir, trophy_source, app_id, platform_id);
     let mut status_map: HashMap<String, AchievementStatus> = HashMap::new();
     if let Ok(data) = std::fs::read(&status_path) {
         let _ = serde_json::from_slice::<HashMap<String, AchievementStatus>>(&data).map(|m| status_map = m);

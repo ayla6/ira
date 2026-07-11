@@ -4,6 +4,7 @@ use super::achievement::MergedAchievement;
 pub struct Game {
     pub app_id: String,
     pub kind: String,
+    pub trophy_source: String,
     pub platform_id: String,
     pub db_id: i64,
     pub name: String,
@@ -46,6 +47,7 @@ impl Default for Game {
         Game {
             app_id: String::new(),
             kind: String::new(),
+            trophy_source: String::new(),
             platform_id: String::new(),
             db_id: 0,
             name: String::new(),

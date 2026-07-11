@@ -90,7 +90,7 @@ pub fn prompt_for_steam_id_gog(state: &SharedState, galaxy_folder: &str, product
 
 fn finalize_added_game(
     app_id: &str,
-    kind: &str,
+    trophy_source: &str,
     platform_id: &str,
     steam: std::sync::Arc<SteamClient>,
     watcher: Option<AchievementWatcher>,
@@ -114,7 +114,7 @@ fn finalize_added_game(
             let _ = sender.send(AppMessage::NewGame(game));
             enrich_game_async(
                 app_id.to_string(),
-                kind.to_string(),
+                trophy_source.to_string(),
                 platform_id.to_string(),
                 entry.id,
                 0,
@@ -138,8 +138,9 @@ pub fn finish_add_game(state: &SharedState, folder: &str, app_id: &str) {
     let app_id = app_id.to_string();
 
     std::thread::spawn(move || {
-        match crate::platforms::steam_setup::add_game_from_folder(&folder, &app_id, &steam, &db, &save_dir) {
-            Ok(_) => finalize_added_game(&app_id, "gbe_steam", &app_id, steam, watcher, sender, db, save_dir),
+        let kind = crate::models::WINE;
+        match crate::platforms::steam_setup::add_game_from_folder(&folder, &app_id, kind, &steam, &db, &save_dir) {
+            Ok(_) => finalize_added_game(&app_id, "gse", &app_id, steam, watcher, sender, db, save_dir),
             Err(e) => {
                 eprintln!("Add game failed: {}", e);
                 let _ = sender.send(AppMessage::AddGameError(e));
@@ -162,7 +163,7 @@ pub fn finish_add_gog_game(state: &SharedState, galaxy_folder: &str, product_id:
         match crate::platforms::gog_setup::add_gog_game_from_folder(
             &galaxy_folder, &product_id, &game_name, &steam_app_id, &steam, &db, &save_dir,
         ) {
-            Ok(_) => finalize_added_game(&steam_app_id, "ne_gog", &product_id, steam, watcher, sender, db, save_dir),
+            Ok(_) => finalize_added_game(&steam_app_id, "nge", &product_id, steam, watcher, sender, db, save_dir),
             Err(e) => {
                 eprintln!("GOG add game failed: {}", e);
                 let _ = sender.send(AppMessage::AddGameError(e));

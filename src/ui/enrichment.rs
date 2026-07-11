@@ -3,11 +3,12 @@ use crate::watcher::AchievementWatcher;
 use crate::AppMessage;
 use crate::AppSender;
 use crate::GameEntry;
+use crate::models::has_steam_enrichment;
 use crate::parser::load_game;
 
 pub fn enrich_game_async(
     app_id: String,
-    kind: String,
+    trophy_source: String,
     platform_id: String,
     db_id: i64,
     lutris_id: i64,
@@ -18,7 +19,7 @@ pub fn enrich_game_async(
     save_dir: String,
 ) {
     std::thread::spawn(move || {
-        let mut entry = GameEntry::for_reload(db_id, &kind, &app_id, &platform_id, lutris_id);
+        let mut entry = GameEntry::for_reload(db_id, "", &trophy_source, &app_id, &platform_id, lutris_id);
         entry.title = title;
 
         let Ok(mut game) = load_game(&entry, &save_dir) else {
@@ -26,7 +27,7 @@ pub fn enrich_game_async(
             return;
         };
 
-        if kind != "sgdb" && kind != "ps4" {
+        if has_steam_enrichment(&trophy_source) {
             let meta_path = crate::parser::achievements_dir(&save_dir, &app_id).join("achievements.json");
             if !meta_path.exists() {
                 if let Err(e) = steam.generate_steam_settings(&app_id) {

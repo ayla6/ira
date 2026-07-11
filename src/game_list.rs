@@ -159,7 +159,7 @@ fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
         let (db_id, title, hidden, logo_position, logo_size, sort_title, sgdb_id, shadps4_version, last_played) = match entry {
             Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title, e.sgdb_id.clone().unwrap_or_default(), e.shadps4_version.clone().unwrap_or_default(), e.last_played),
             None => {
-                match db::add_game(db, "ps4", &shad.npwr_id, &shad.serial, &shad.title) {
+                match db::add_game(db, "ps4", "", &shad.npwr_id, &shad.serial, &shad.title) {
                     Ok(id) => (id, shad.title.clone(), false, "bottom-left".to_string(), 50, String::new(), String::new(), String::new(), 0),
                     Err(e) => {
                         eprintln!("shadPS4: failed to add {} to DB: {}", shad.serial, e);

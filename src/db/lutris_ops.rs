@@ -51,13 +51,13 @@ pub fn set_lutris_db_id(conn: &DbConn, id: i64, lutris_db_id: i64) -> Result<(),
 pub fn unmatch_game(conn: &DbConn, lutris_db_id: i64) -> Result<(), String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
     c.execute(
-        "UPDATE games SET lutris_db_id = NULL, manual_unmatch = 1 WHERE lutris_db_id = ?1",
+        "UPDATE games SET lutris_db_id = NULL, manual_unmatch = 1, trophy_source = '' WHERE lutris_db_id = ?1",
         params![lutris_db_id],
     ).map_err(|e| e.to_string())?;
     Ok(())
 }
 
-pub fn upsert_matching(conn: &DbConn, lutris_db_id: i64, steam_id: &str, kind: &str, platform_id: &str) -> Result<i64, String> {
+pub fn upsert_matching(conn: &DbConn, lutris_db_id: i64, steam_id: &str, kind: &str, trophy_source: &str, platform_id: &str) -> Result<i64, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
     let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
 
@@ -69,8 +69,8 @@ pub fn upsert_matching(conn: &DbConn, lutris_db_id: i64, steam_id: &str, kind: &
 
     if let Some(id) = existing_by_steam {
         tx.execute(
-            "UPDATE games SET lutris_db_id = ?1, kind = ?2, platform_id = ?3 WHERE id = ?4",
-            params![lutris_db_id, kind, platform_id, id],
+            "UPDATE games SET lutris_db_id = ?1, kind = ?2, trophy_source = ?3, platform_id = ?4 WHERE id = ?5",
+            params![lutris_db_id, kind, trophy_source, platform_id, id],
         ).map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
         return Ok(id);
@@ -84,16 +84,16 @@ pub fn upsert_matching(conn: &DbConn, lutris_db_id: i64, steam_id: &str, kind: &
 
     if let Some(id) = existing_by_lutris {
         tx.execute(
-            "UPDATE games SET steam_id = ?1, kind = ?2, platform_id = ?3 WHERE id = ?4",
-            params![steam_id, kind, platform_id, id],
+            "UPDATE games SET steam_id = ?1, kind = ?2, trophy_source = ?3, platform_id = ?4 WHERE id = ?5",
+            params![steam_id, kind, trophy_source, platform_id, id],
         ).map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
         return Ok(id);
     }
 
     tx.execute(
-        "INSERT INTO games (lutris_db_id, kind, steam_id, platform_id) VALUES (?1, ?2, ?3, ?4)",
-        params![lutris_db_id, kind, steam_id, platform_id],
+        "INSERT INTO games (lutris_db_id, kind, trophy_source, steam_id, platform_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![lutris_db_id, kind, trophy_source, steam_id, platform_id],
     ).map_err(|e| e.to_string())?;
     let new_id = tx.last_insert_rowid();
     if let Ok(h) = tx.query_row::<bool, _, _>(

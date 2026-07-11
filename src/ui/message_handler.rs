@@ -205,9 +205,9 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
         if g.app_id.is_empty() {
             continue;
         }
-        if g.kind != "sgdb" && g.kind != "ps4" {
+        if crate::models::has_steam_enrichment(&g.trophy_source) {
             if let Some(ref watcher) = watcher {
-                let mut entry = GameEntry::for_reload(g.db_id, &g.kind, &g.app_id, &g.platform_id, g.lutris_id);
+                let mut entry = GameEntry::for_reload(g.db_id, &g.kind, &g.trophy_source, &g.app_id, &g.platform_id, g.lutris_id);
                 entry.sort_title = g.sort_title.clone();
                 watcher.watch(&entry, &g.achievements);
             }
@@ -219,7 +219,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
 
         enrich_game_async(
             g.app_id.clone(),
-            g.kind.clone(),
+            g.trophy_source.clone(),
             g.platform_id.clone(),
             g.db_id,
             g.lutris_id,

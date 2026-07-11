@@ -55,6 +55,7 @@ pub fn load_shadps4_game(
     let mut game = Game {
         app_id: npwr_id.clone(),
         kind: "ps4".to_string(),
+        trophy_source: String::new(),
         platform_id: serial.clone(),
         db_id,
         name: if title.is_empty() {

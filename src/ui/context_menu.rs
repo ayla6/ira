@@ -28,12 +28,12 @@ pub fn show_game_context_menu(
 
     menu.append(Some(S::EDIT_GAME_SETTINGS), Some("game.edit"));
     let folders_menu = gio::Menu::new();
-    if game.kind == "gbe_steam" || game.kind == "sgdb" {
+    if crate::models::has_steam_enrichment(&game.trophy_source) || !game.sgdb_id.is_empty() {
         folders_menu.append(Some("Image data"), Some("game.open_images"));
     }
-    if game.kind == "gbe_steam" {
+    if game.trophy_source == crate::models::GSE {
         folders_menu.append(Some("Achievement status"), Some("game.open_steam_status"));
-    } else if game.kind == "ne_gog" {
+    } else if game.trophy_source == crate::models::NGE {
         folders_menu.append(Some("Achievement status"), Some("game.open_gog_status"));
     }
     if folders_menu.n_items() > 0 {
@@ -122,19 +122,19 @@ pub fn show_game_context_menu(
     });
     actions.add_action(&hide_action);
 
-    if game_clone.kind == "gbe_steam" || game_clone.kind == "sgdb" {
+    if crate::models::has_steam_enrichment(&game_clone.trophy_source) || !game_clone.sgdb_id.is_empty() {
         let open_images = gio::SimpleAction::new("open_images", None);
         let gc = game_clone.clone();
         let save_dir = state_clone.borrow().save_dir.clone();
         open_images.connect_activate(move |_, _| {
-            let subdir = if gc.kind == "sgdb" { "steamgriddb" } else { "steam" };
+            let subdir = if !gc.sgdb_id.is_empty() { "steamgriddb" } else { "steam" };
             let path = format!("{}/data/{}/{}", save_dir, subdir, gc.app_id);
             open_folder(&path);
         });
         actions.add_action(&open_images);
     }
 
-    if game_clone.kind == "gbe_steam" {
+    if game_clone.trophy_source == crate::models::GSE {
         let open_status = gio::SimpleAction::new("open_steam_status", None);
         let gc = game_clone.clone();
         let save_dir = state_clone.borrow().save_dir.clone();
@@ -145,7 +145,7 @@ pub fn show_game_context_menu(
         actions.add_action(&open_status);
     }
 
-    if game_clone.kind == "ne_gog" {
+    if game_clone.trophy_source == crate::models::NGE {
         let open_gog = gio::SimpleAction::new("open_gog_status", None);
         let gc = game_clone.clone();
         let save_dir = state_clone.borrow().save_dir.clone();

@@ -68,8 +68,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     stack.set_hexpand(true);
 
     // --- General page ---
-    let (general_page, title_entry, sort_entry, pending_version, app_id_entry) =
-        super::dialogs::build_game_general_page(state, &game, &win);
+    let languages = app_details.as_ref().map(|d| d.languages.clone()).unwrap_or_default();
+    let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row) =
+        super::dialogs::build_game_general_page(state, &game, &win, &languages);
     sidebar.append(&super::dialogs::settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
 
@@ -285,7 +286,6 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     } else {
         None
     };
-    let emu_language_row: Option<adw::ComboRow> = {
     if (emu_trophy_source == crate::models::GSE || emu_trophy_source == crate::models::NGE) && !emu_exe.is_empty() {
         let emu_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
         let status_group = adw::PreferencesGroup::new();
@@ -426,23 +426,6 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
         emu_page.append(&folders_group);
 
-        let lang_group = adw::PreferencesGroup::new();
-        lang_group.set_title("Language");
-        let lang_model = gtk4::StringList::new(&[
-            "english", "arabic", "bulgarian", "schinese", "tchinese", "czech", "danish",
-            "dutch", "finnish", "french", "german", "greek", "hungarian", "italian",
-            "japanese", "korean", "norwegian", "polish", "portuguese", "brazilian",
-            "romanian", "russian", "spanish", "latam", "swedish", "thai", "turkish",
-            "ukrainian", "vietnamese",
-        ]);
-        let lang_row = adw::ComboRow::new();
-        lang_row.set_title("API emulator language");
-        lang_row.set_subtitle("Language reported to the game by the API emulator");
-        lang_row.set_model(Some(&lang_model));
-        lang_row.set_selected(0);
-        lang_group.add(&lang_row);
-        emu_page.append(&lang_group);
-
         let emu_scroll = gtk4::ScrolledWindow::new();
         emu_scroll.set_child(Some(&emu_page));
         emu_scroll.set_vexpand(true);
@@ -450,11 +433,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         sidebar.append(&super::dialogs::sidebar_separator());
         sidebar.append(&super::dialogs::settings_sidebar_row("applications-engineering-symbolic", "API Emulator"));
         stack.add_named(&emu_scroll, Some("api_emulator"));
-        Some(lang_row)
-    } else {
-        None
     }
-    };
 
     // --- Sidebar navigation ---
     let stack_clone = stack.clone();
@@ -519,7 +498,8 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let old_wine = saved_wine.clone();
     let app_default_wine_c = app_default_wine.clone();
     let game_exe = saved_launch.exe.clone();
-    let emu_language_c = emu_language_row.clone();
+    let language_row_c = language_row.clone();
+    let languages_c = languages.clone();
 
     save_btn.connect_clicked(move |_| {
         let title = title_entry.text().to_string();
@@ -698,17 +678,10 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             }
         }
 
-        // Emulator language
-        if let Some(ref lang_row) = emu_language_c {
-            let langs = [
-                "english", "arabic", "bulgarian", "schinese", "tchinese", "czech", "danish",
-                "dutch", "finnish", "french", "german", "greek", "hungarian", "italian",
-                "japanese", "korean", "norwegian", "polish", "portuguese", "brazilian",
-                "romanian", "russian", "spanish", "latam", "swedish", "thai", "turkish",
-                "ukrainian", "vietnamese",
-            ];
+        // Game language
+        if let Some(ref lang_row) = language_row_c {
             let idx = lang_row.selected() as usize;
-            if let Some(&lang) = langs.get(idx) {
+            if let Some(lang) = languages_c.get(idx) {
                 crate::platforms::api_emulators::write_language_configs(
                     &trophy_source, &game_exe, &save_dir_c, &app_id, lang,
                 );

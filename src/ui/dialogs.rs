@@ -441,7 +441,8 @@ pub(super) fn build_game_general_page(
     state: &SharedState,
     game: &Game,
     win: &adw::Window,
-) -> (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>, Option<adw::EntryRow>) {
+    languages: &[String],
+) -> (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>, Option<adw::EntryRow>, Option<adw::ComboRow>) {
     let general_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let title_entry = adw::EntryRow::new();
@@ -614,7 +615,7 @@ pub(super) fn build_game_general_page(
             row.add_suffix(&search_btn);
             ids_group.add(&row);
             general_page.append(&ids_group);
-            return (general_page, title_entry, sort_entry, pending_version, Some(row));
+            return (general_page, title_entry, sort_entry, pending_version, Some(row), None);
         } else if game.trophy_source == crate::models::NGE {
             let row = adw::EntryRow::new();
             row.set_title("GOG Product ID");
@@ -624,7 +625,23 @@ pub(super) fn build_game_general_page(
         general_page.append(&ids_group);
     }
 
-    (general_page, title_entry, sort_entry, pending_version, None)
+    let language_row = if !languages.is_empty() && (game.trophy_source == crate::models::GSE || game.trophy_source == crate::models::NGE) {
+        let lang_group = adw::PreferencesGroup::new();
+        lang_group.set_title("Language");
+        let model = gtk4::StringList::new(&languages.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        let row = adw::ComboRow::new();
+        row.set_title("Game language");
+        row.set_subtitle("Language reported to the game by the API emulator");
+        row.set_model(Some(&model));
+        row.set_selected(0);
+        lang_group.add(&row);
+        general_page.append(&lang_group);
+        Some(row)
+    } else {
+        None
+    };
+
+    (general_page, title_entry, sort_entry, pending_version, None, language_row)
 }
 
 fn show_steam_id_search_popup(

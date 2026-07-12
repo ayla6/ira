@@ -3,6 +3,8 @@
 
 mod game;
 mod game_entry;
+mod group;
+mod sort_mode;
 pub mod achievement;
 pub mod launch_config;
 pub mod variant;
@@ -12,6 +14,8 @@ mod kind;
 
 pub use game::{Game, unmatched_game};
 pub use game_entry::GameEntry;
+pub use group::{Group, GroupSelection};
+pub use sort_mode::SortMode;
 pub use launch_config::{GameLaunchConfig, WineConfig, LaunchConfig, WineProfile};
 pub use session::PlaySession;
 pub use variant::GameVariant;

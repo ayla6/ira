@@ -278,7 +278,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
                             crate::ui::enrichment::enrich_game_async(
                                 game.app_id.clone(), game.trophy_source.clone(), game.platform_id.clone(),
                                 game.db_id, game.lutris_id, g_name,
-                                steam_c, watcher_c, sender_c, save_dir_c,
+                                steam_c, watcher_c, sender_c, save_dir_c, db_c,
                             );
                         }
                     }

@@ -218,6 +218,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
         (s.steam.clone(), s.watcher.clone(), s.sender.clone())
     };
 
+    let db = state.borrow().db.clone();
     let s = state.borrow();
     for g in &s.games {
         if g.app_id.is_empty() {
@@ -246,6 +247,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
             watcher.clone(),
             sender.clone(),
             state.borrow().save_dir.clone(),
+            db.clone(),
         );
     }
 }
@@ -276,8 +278,8 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
 
         s.game_names.lock().unwrap().insert(app_id.clone(), updated.name.clone());
 
-        if i < s.rows.len() {
-            let rw = &s.rows[i];
+        let row_widgets: Vec<super::sidebar::SidebarRowWidgets> = s.rows.get(&updated.lutris_id).cloned().unwrap_or_default();
+        for rw in &row_widgets {
             rw.title.set_text(&updated.name);
             rw.title.set_tooltip_text(Some(&format!("{} ({})", updated.name, updated.app_id)));
             if !updated.icon_path.is_empty() {
@@ -348,7 +350,12 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
             s.games[i] = g;
         } else {
             s.games.push(game);
-            s.games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
+            let sort_mode = crate::models::SortMode::from_str(&s.cfg.sort_mode);
+            let sort_descending = s.cfg.sort_descending;
+            s.games.sort_by(|a, b| {
+                let ord = sort_mode.compare(a, b);
+                if sort_descending { ord.reverse() } else { ord }
+            });
         }
     }
 
@@ -379,26 +386,22 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
 pub fn switch_to_game(state: &SharedState, lutris_id: i64) {
     state.borrow_mut().selected_id = lutris_id.to_string();
 
-    let game_list = state.borrow().game_list.clone();
     let sidebar_scroll = state.borrow().sidebar_scroll.clone();
-    let idx = state.borrow().games.iter().position(|g| g.lutris_id == lutris_id);
-    if let Some(idx) = idx {
-        let row = game_list.row_at_index((idx + 1) as i32);
-        select_row_silently(state, row.as_ref());
 
-        // Scroll the selected row into view if it's not visible
-        if let Some(ref row) = row {
-            if let Some(bounds) = row.compute_bounds(&sidebar_scroll) {
-                let adj = sidebar_scroll.vadjustment();
-                let row_y = bounds.y() as f64;
-                let row_h = bounds.height() as f64;
-                let scroll = adj.value();
-                let page = adj.page_size();
-                if row_y < scroll {
-                    adj.set_value(row_y);
-                } else if row_y + row_h > scroll + page {
-                    adj.set_value(row_y + row_h - page);
-                }
+    let row = state.borrow().rows.get(&lutris_id).and_then(|v| v.first()).map(|rw| rw.row.clone());
+    if let Some(row) = row {
+        select_row_silently(state, Some(&row));
+
+        if let Some(bounds) = row.compute_bounds(&sidebar_scroll) {
+            let adj = sidebar_scroll.vadjustment();
+            let row_y = bounds.y() as f64;
+            let row_h = bounds.height() as f64;
+            let scroll = adj.value();
+            let page = adj.page_size();
+            if row_y < scroll {
+                adj.set_value(row_y);
+            } else if row_y + row_h > scroll + page {
+                adj.set_value(row_y + row_h - page);
             }
         }
     }

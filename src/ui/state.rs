@@ -4,15 +4,16 @@ use crate::api::SteamClient;
 use crate::watcher::AchievementWatcher;
 use crate::AppSender;
 use crate::Game;
+use crate::models::{Group, GroupSelection};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 pub struct AppState {
     pub window: adw::ApplicationWindow,
     pub games: Vec<Game>,
-    pub rows: Vec<super::sidebar::SidebarRowWidgets>,
+    pub rows: HashMap<i64, Vec<super::sidebar::SidebarRowWidgets>>,
     pub game_list: gtk4::ListBox,
     pub sidebar_scroll: gtk4::ScrolledWindow,
     pub content_scroll: gtk4::ScrolledWindow,
@@ -33,6 +34,12 @@ pub struct AppState {
     pub view_generation: u32,
     pub settings_data: Option<(adw::Window, gtk4::Stack, i64)>,
     pub save_dir: String,
+    pub search_query: String,
+    pub selected_group: GroupSelection,
+    pub groups: Vec<Group>,
+    pub search_entry: gtk4::SearchEntry,
+    pub sort_label: gtk4::Label,
+    pub collapsed_collections: HashSet<i64>,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;

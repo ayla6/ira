@@ -54,6 +54,44 @@ pub struct SteamGameDetails {
     pub _header_image: String,
     #[serde(rename = "capsule_imagev5")]
     pub capsule_image: String,
+    #[serde(default)]
+    pub release_date: Option<SteamReleaseDate>,
+    #[serde(default)]
+    pub metacritic: Option<SteamMetacritic>,
+    #[serde(default)]
+    pub recommendations: Option<SteamRecommendations>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SteamReleaseDate {
+    pub coming_soon: bool,
+    pub date: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SteamMetacritic {
+    pub score: i32,
+    #[serde(default)]
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SteamRecommendations {
+    pub total: i32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SteamReviewSummary {
+    pub review_score: i32,
+    pub total_positive: i32,
+    pub total_negative: i32,
+    pub total_reviews: i32,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct SteamReviewsResponse {
+    pub success: i32,
+    pub query_summary: SteamReviewSummary,
 }
 
 #[derive(Debug, Deserialize)]

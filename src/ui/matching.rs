@@ -44,6 +44,7 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
                             watcher,
                             sender,
                             save_dir,
+                            db,
                         );
                     }
                     Err(e) => eprintln!("match_game_to_steam: load_game failed: {}", e),
@@ -96,6 +97,11 @@ pub fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, 
                 game_path: String::new(),
                 sgdb_id: String::new(),
                 shadps4_version: String::new(),
+                release_date: entry.release_date.clone(),
+                release_timestamp: entry.release_timestamp,
+                metacritic_score: entry.metacritic_score,
+                steam_review_score: entry.steam_review_score,
+                steam_review_count: entry.steam_review_count,
             };
             let _ = sender.send(AppMessage::NewGame(game));
         }

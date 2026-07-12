@@ -40,6 +40,16 @@ pub struct Game {
     pub sgdb_id: String,
     /// Per-game shadPS4 version path (empty = use global default).
     pub shadps4_version: String,
+    /// Raw release date string from Steam API (e.g. "15 Sep, 2014").
+    pub release_date: String,
+    /// Parsed release date as Unix timestamp (0 = unknown).
+    pub release_timestamp: i64,
+    /// Metacritic score 0-100 (-1 = no data).
+    pub metacritic_score: i64,
+    /// Steam review score 0-10 (-1 = no data).
+    pub steam_review_score: i64,
+    /// Total Steam review count.
+    pub steam_review_count: i64,
 }
 
 impl Default for Game {
@@ -72,6 +82,11 @@ impl Default for Game {
             game_path: String::new(),
             sgdb_id: String::new(),
             shadps4_version: String::new(),
+            release_date: String::new(),
+            release_timestamp: 0,
+            metacritic_score: -1,
+            steam_review_score: -1,
+            steam_review_count: 0,
         }
     }
 }
@@ -79,6 +94,14 @@ impl Default for Game {
 impl Game {
     pub fn sort_key(&self) -> &str {
         if self.sort_title.is_empty() { &self.name } else { &self.sort_title }
+    }
+
+    pub fn completion_pct(&self) -> f64 {
+        if self.total_count == 0 {
+            0.0
+        } else {
+            self.earned_count as f64 / self.total_count as f64 * 100.0
+        }
     }
 }
 

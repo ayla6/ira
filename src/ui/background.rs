@@ -100,11 +100,9 @@ pub fn restore_content(state: &SharedState) {
     if let Some(game) = game {
         display_game(&game, state);
 
-        let game_list = state.borrow().game_list.clone();
-        let idx = state.borrow().games.iter().position(|g| g.lutris_id == lutris_id);
-        if let Some(idx) = idx {
-            let row = game_list.row_at_index((idx + 1) as i32);
-            select_row_silently(state, row.as_ref());
+        let row = state.borrow().rows.get(&lutris_id).and_then(|v| v.first()).map(|rw| rw.row.clone());
+        if let Some(row) = row {
+            select_row_silently(state, Some(&row));
         }
     } else {
         state.borrow_mut().selected_id.clear();

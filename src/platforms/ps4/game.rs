@@ -84,6 +84,11 @@ pub fn load_shadps4_game(
         game_path: shad.game_path.to_string_lossy().into_owned(),
         sgdb_id: sgdb_id.to_string(),
         shadps4_version: shadps4_version.to_string(),
+        release_date: String::new(),
+        release_timestamp: 0,
+        metacritic_score: -1,
+        steam_review_score: -1,
+        steam_review_count: 0,
     };
 
     // PS4 default icon: always copy from the game's sce_sys/icon0.png to data/ps4/{NPWR}/icon.png

@@ -25,6 +25,16 @@ pub struct GameEntry {
     pub shadps4_version: Option<String>,
     /// Unix timestamp of last time the game was launched via our play button.
     pub last_played: i64,
+    /// Raw release date string from Steam API (e.g. "15 Sep, 2014").
+    pub release_date: String,
+    /// Parsed release date as Unix timestamp (0 = unknown).
+    pub release_timestamp: i64,
+    /// Metacritic score 0-100 (-1 = no data).
+    pub metacritic_score: i64,
+    /// Steam review score 0-10 (-1 = no data).
+    pub steam_review_score: i64,
+    /// Total Steam review count.
+    pub steam_review_count: i64,
 }
 
 impl GameEntry {
@@ -48,6 +58,11 @@ impl GameEntry {
             sort_title: String::new(),
             shadps4_version: None,
             last_played: 0,
+            release_date: String::new(),
+            release_timestamp: 0,
+            metacritic_score: -1,
+            steam_review_score: -1,
+            steam_review_count: 0,
         }
     }
 }

@@ -9,6 +9,9 @@ mod game_config;
 mod sessions;
 mod profiles;
 mod variants;
+mod groups;
+mod metadata;
+mod migration;
 pub use crud::*;
 pub use lookup::*;
 pub use lutris_ops::*;
@@ -17,8 +20,10 @@ pub use game_config::*;
 pub use sessions::*;
 pub use profiles::*;
 pub use variants::*;
+pub use groups::*;
+pub use metadata::*;
 
-pub(super) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played";
+pub(super) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count";
 
 pub(super) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<crate::models::GameEntry> {
     Ok(crate::models::GameEntry {
@@ -38,6 +43,11 @@ pub(super) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<crate
         sort_title: row.get(13)?,
         shadps4_version: row.get(14)?,
         last_played: row.get(15)?,
+        release_date: row.get(16)?,
+        release_timestamp: row.get(17)?,
+        metacritic_score: row.get(18)?,
+        steam_review_score: row.get(19)?,
+        steam_review_count: row.get(20)?,
     })
 }
 
@@ -97,8 +107,20 @@ pub fn init_db(db_path: &str) -> DbConn {
             custom_wine_path TEXT NOT NULL DEFAULT '',
             prefix TEXT NOT NULL DEFAULT '',
             arch TEXT NOT NULL DEFAULT 'auto'
-        );",
+        );
+        CREATE TABLE IF NOT EXISTS groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        );
+        CREATE TABLE IF NOT EXISTS game_groups (
+            game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+            group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+            PRIMARY KEY (game_id, group_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_game_groups_group ON game_groups(group_id);",
     ).expect("failed to create tables");
+
+    migration::run_schema_migrations(&conn);
 
     let conn = Arc::new(Mutex::new(conn));
     create_variants_table(&conn);

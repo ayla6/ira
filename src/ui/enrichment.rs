@@ -1,4 +1,5 @@
 use crate::api::SteamClient;
+use crate::db::DbConn;
 use crate::watcher::AchievementWatcher;
 use crate::AppMessage;
 use crate::AppSender;
@@ -17,6 +18,7 @@ pub fn enrich_game_async(
     watcher: Option<AchievementWatcher>,
     sender: AppSender,
     save_dir: String,
+    db: DbConn,
 ) {
     std::thread::spawn(move || {
         let mut entry = GameEntry::for_reload(db_id, "", &trophy_source, &app_id, &platform_id, lutris_id);
@@ -87,6 +89,33 @@ pub fn enrich_game_async(
                     }
                 }
             }
+
+            if let Some(details) = steam.fetch_steam_store_data(&app_id) {
+                if let Some(rd) = details.release_date {
+                    if !rd.coming_soon {
+                        game.release_date = rd.date.clone();
+                        game.release_timestamp = crate::parser::parse_steam_release_date(&rd.date);
+                    }
+                }
+                if let Some(mc) = details.metacritic {
+                    game.metacritic_score = mc.score as i64;
+                }
+            }
+
+            if let Some(review) = steam.fetch_steam_reviews(&app_id) {
+                game.steam_review_score = review.review_score as i64;
+                game.steam_review_count = review.total_reviews as i64;
+            }
+
+            let _ = crate::db::store_game_metadata(
+                &db,
+                game.db_id,
+                &game.release_date,
+                game.release_timestamp,
+                game.metacritic_score,
+                game.steam_review_score,
+                game.steam_review_count,
+            );
 
             if let Some(ref watcher) = watcher {
                 watcher.watch(&entry, &game.achievements);

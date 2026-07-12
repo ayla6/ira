@@ -1,6 +1,7 @@
 use gtk4::prelude::*;
 use crate::Game;
 use crate::strings as S;
+use crate::models::GroupSelection;
 
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -10,6 +11,7 @@ use super::grid_bin::GridBin;
 use super::message_handler::switch_to_game;
 use super::context_menu::show_game_context_menu;
 use super::helpers::clear_children;
+use super::filter::filtered_games;
 
 pub fn show_grid_view(state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
@@ -29,28 +31,49 @@ pub fn show_grid_view(state: &SharedState) {
     outer.set_margin_top(16);
     outer.set_margin_bottom(32);
 
-    let mut recent: Vec<Game> = state
-        .borrow()
-        .games
-        .iter()
-        .filter(|g| g.lastplayed > 0 && (!g.hidden || show_hidden))
-        .cloned()
-        .collect();
-    recent.sort_by(|a, b| b.lastplayed.cmp(&a.lastplayed));
-    recent.truncate(8);
+    let searching = !state.borrow().search_query.is_empty();
+    let selected_group = state.borrow().selected_group.clone();
+    let show_recent = !searching && selected_group == GroupSelection::AllGames;
 
-    if !recent.is_empty() {
-        outer.append(&build_recent_row(state, &recent, cover_height));
+    let games = filtered_games(state);
+
+    if show_recent {
+        let mut recent: Vec<Game> = state
+            .borrow()
+            .games
+            .iter()
+            .filter(|g| g.lastplayed > 0 && (!g.hidden || show_hidden))
+            .cloned()
+            .collect();
+        recent.sort_by(|a, b| b.lastplayed.cmp(&a.lastplayed));
+        recent.truncate(8);
+
+        if !recent.is_empty() {
+            outer.append(&build_recent_row(state, &recent, cover_height));
+        }
     }
 
-    let heading = gtk4::Label::new(Some(S::ALL_GAMES));
+    let heading_text = if searching {
+        format!("Search: \"{}\"", state.borrow().search_query)
+    } else {
+        match &selected_group {
+            GroupSelection::AllGames => S::ALL_GAMES.to_string(),
+            GroupSelection::Uncategorized => "Uncategorized".to_string(),
+            GroupSelection::Collection(id) => {
+                state.borrow().groups.iter()
+                    .find(|g| g.id == *id)
+                    .map(|g| g.name.clone())
+                    .unwrap_or_else(|| S::ALL_GAMES.to_string())
+            }
+        }
+    };
+
+    let heading = gtk4::Label::new(Some(&heading_text));
     heading.set_xalign(0.0);
     heading.add_css_class("section-title");
-    heading.set_margin_top(if recent.is_empty() { 0 } else { 20 });
+    heading.set_margin_top(if show_recent && state.borrow().games.iter().any(|g| g.lastplayed > 0 && (!g.hidden || show_hidden)) { 20 } else { 0 });
     heading.set_margin_bottom(8);
     outer.append(&heading);
-
-    let games: Vec<Game> = state.borrow().games.clone();
 
     let factory = gtk4::SignalListItemFactory::new();
 
@@ -160,9 +183,6 @@ pub fn show_grid_view(state: &SharedState) {
 
     let store = gio::ListStore::new::<GameItem>();
     for game in &games {
-        if game.hidden && !show_hidden {
-            continue;
-        }
         store.append(&GameItem::new(game));
     }
 
@@ -175,7 +195,7 @@ pub fn show_grid_view(state: &SharedState) {
     grid.add_css_class("game-grid");
     grid.remove_css_class("view");
 
-    let n_items = games.iter().filter(|g| !g.hidden || show_hidden).count() as u32;
+    let n_items = games.len() as u32;
     let row_h = cover_height + 16;
     let col_nat = cover_width + 16;
     let bin = GridBin::new(&grid, row_h, n_items, col_nat);

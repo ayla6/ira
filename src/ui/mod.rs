@@ -23,6 +23,8 @@ mod play_history;
 mod wine_config_widget;
 mod profile_dialog;
 mod matching;
+mod filter;
+mod group_dialog;
 
 pub use state::{AppState, SharedState, malloc_trim};
 pub use window::build_ui;

@@ -75,7 +75,7 @@ fn auto_match_by_title(db: &db::DbConn, save_dir: &str, lutris_games: &[LutrisGa
     }
 }
 
-pub fn build_game_list(db: &db::DbConn, save_dir: &str, shadps4_enabled: bool) -> Vec<Game> {
+pub fn build_game_list(db: &db::DbConn, save_dir: &str, shadps4_enabled: bool, sort_mode: crate::models::SortMode, sort_descending: bool) -> Vec<Game> {
     let lutris_games = match load_lutris_games() {
         Ok(g) => g,
         Err(e) => {
@@ -140,12 +140,18 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, shadps4_enabled: bool) -
             games.push(game);
         }
     }
-    games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
+    games.sort_by(|a, b| {
+        let ord = sort_mode.compare(a, b);
+        if sort_descending { ord.reverse() } else { ord }
+    });
 
     if shadps4_enabled {
         games.extend(build_shadps4_games(&db, save_dir));
     }
-    games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
+    games.sort_by(|a, b| {
+        let ord = sort_mode.compare(a, b);
+        if sort_descending { ord.reverse() } else { ord }
+    });
     games
 }
 

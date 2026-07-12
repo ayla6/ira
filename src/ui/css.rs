@@ -97,4 +97,21 @@ gridview.game-grid child:focus-within {
     margin-bottom: 4px;
     min-height: 1px;
 }
+
+.sidebar-section-header {
+    font-size: 0.75em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.6;
+}
+
+.sidebar-collection-header {
+    font-size: 1em;
+}
+
+.dim-label {
+    opacity: 0.55;
+    font-size: 0.85em;
+}
 ";

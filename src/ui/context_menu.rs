@@ -1,4 +1,5 @@
 use gtk4::prelude::*;
+use adw::prelude::{AlertDialogExt, AdwDialogExt};
 use crate::Game;
 use crate::AppMessage;
 use crate::strings as S;
@@ -73,6 +74,29 @@ pub fn show_game_context_menu(
     if folders_menu.n_items() > 0 {
         menu.append_submenu(Some("Open folder"), &folders_menu);
     }
+
+    let collections_menu = gio::Menu::new();
+    let groups = state.borrow().groups.clone();
+    let game_groups = {
+        let db = state.borrow().db.clone();
+        crate::db::get_groups_for_game(&db, game.db_id).unwrap_or_default()
+    };
+    for g in &groups {
+        let label = if game_groups.iter().any(|gg| gg.id == g.id) {
+            format!("✓ {}", g.name)
+        } else {
+            g.name.clone()
+        };
+        let item = gio::MenuItem::new(Some(&label), None);
+        item.set_action_and_target_value(Some("game.toggle_group"), Some(&g.id.to_variant()));
+        collections_menu.append_item(&item);
+    }
+    if !groups.is_empty() {
+        collections_menu.append_section(None, &gio::Menu::new());
+    }
+    collections_menu.append(Some("Add to new collection…"), Some("game.new_collection"));
+    menu.append_submenu(Some("Collections"), &collections_menu);
+
     menu.append(Some(if current_hidden { S::UNHIDE_GAME } else { S::HIDE_GAME }), Some("game.hide"));
 
     let popover = gtk4::PopoverMenu::from_model(Some(&menu));
@@ -213,6 +237,75 @@ pub fn show_game_context_menu(
         });
         actions.add_action(&open_gog);
     }
+
+    let toggle_group = gio::SimpleAction::new("toggle_group", Some(&i64::static_variant_type()));
+    let sc = state_clone.clone();
+    let gc = game_clone.clone();
+    toggle_group.connect_activate(move |_, param| {
+        let group_id = param.and_then(|p| p.get::<i64>()).unwrap_or(0);
+        let db = sc.borrow().db.clone();
+        let existing = crate::db::get_groups_for_game(&db, gc.db_id).unwrap_or_default();
+        if existing.iter().any(|g| g.id == group_id) {
+            if let Err(e) = crate::db::remove_game_from_group(&db, gc.db_id, group_id) {
+                eprintln!("Failed to remove game from group: {}", e);
+            }
+        } else {
+            if let Err(e) = crate::db::add_game_to_group(&db, gc.db_id, group_id) {
+                eprintln!("Failed to add game to group: {}", e);
+            }
+        }
+        super::sidebar::rebuild_sidebar(&sc);
+    });
+    actions.add_action(&toggle_group);
+
+    let new_collection = gio::SimpleAction::new("new_collection", None);
+    let sc = state_clone.clone();
+    let gc = game_clone.clone();
+    new_collection.connect_activate(move |_, _| {
+        let window = sc.borrow().window.clone();
+        let dialog = adw::AlertDialog::new(Some("New Collection"), Some("Enter a name for the collection:"));
+        let entry = gtk4::Entry::new();
+        entry.set_placeholder_text(Some("Collection name"));
+        entry.set_margin_start(12);
+        entry.set_margin_end(12);
+        entry.set_margin_top(8);
+        entry.set_margin_bottom(8);
+        dialog.set_extra_child(Some(&entry));
+        dialog.add_response("cancel", S::CANCEL);
+        dialog.add_response("create", "Create");
+        dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("create"));
+        dialog.set_close_response("cancel");
+
+        let entry_clone = entry.clone();
+        let sc = sc.clone();
+        let gc = gc.clone();
+        dialog.connect_response(None, move |_, resp| {
+            if resp != "create" {
+                return;
+            }
+            let name = entry_clone.text().trim().to_string();
+            if name.is_empty() {
+                return;
+            }
+            let db = sc.borrow().db.clone();
+            match crate::db::create_group(&db, &name) {
+                Ok(group_id) => {
+                    if let Err(e) = crate::db::add_game_to_group(&db, gc.db_id, group_id) {
+                        eprintln!("Failed to add game to new group: {}", e);
+                    }
+                    let groups = crate::db::get_all_groups(&db).unwrap_or_default();
+                    sc.borrow_mut().groups = groups;
+                    super::sidebar::rebuild_sidebar(&sc);
+                }
+                Err(e) => {
+                    eprintln!("Failed to create group: {}", e);
+                }
+            }
+        });
+        dialog.present(Some(&window));
+    });
+    actions.add_action(&new_collection);
 
     parent.insert_action_group("game", Some(&actions));
 

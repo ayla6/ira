@@ -5,11 +5,12 @@ use crate::strings as S;
 use crate::watcher::AchievementWatcher;
 use crate::AppMessage;
 use crate::AppSender;
+use crate::models::{GroupSelection, SortMode};
 use gtk4::prelude::*;
 use adw::prelude::*;
 use crate::Game;
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -34,10 +35,14 @@ pub fn build_ui(
     game_names: Arc<Mutex<HashMap<String, String>>>,
 ) -> SharedState {
     let save_dir = cfg.save_dir.clone();
+    let groups = crate::db::get_all_groups(&db).unwrap_or_else(|e| {
+        eprintln!("Failed to load groups: {}", e);
+        Vec::new()
+    });
     let state = Rc::new(RefCell::new(AppState {
         window: adw::ApplicationWindow::new(app),
         games,
-        rows: Vec::new(),
+        rows: HashMap::new(),
         game_list: gtk4::ListBox::new(),
         sidebar_scroll: gtk4::ScrolledWindow::new(),
         content_scroll: gtk4::ScrolledWindow::new(),
@@ -58,6 +63,12 @@ pub fn build_ui(
         view_generation: 0,
         settings_data: None,
         save_dir,
+        search_query: String::new(),
+        selected_group: GroupSelection::AllGames,
+        groups,
+        search_entry: gtk4::SearchEntry::new(),
+        sort_label: gtk4::Label::new(Some(SortMode::Alphabetical.display_label())),
+        collapsed_collections: HashSet::new(),
     }));
 
     build_window(&state, app);
@@ -91,6 +102,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
 
     let game_list = gtk4::ListBox::new();
     game_list.add_css_class("navigation-sidebar");
+    game_list.set_activate_on_single_click(false);
     sidebar_scroll.set_child(Some(&game_list));
 
     split_view.set_start_child(Some(&sidebar_scroll));
@@ -103,11 +115,23 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
 
     let header_bar = adw::HeaderBar::new();
 
+    let search_entry = gtk4::SearchEntry::new();
+    search_entry.set_placeholder_text(Some(S::SEARCH_GAMES));
+    search_entry.set_hexpand(false);
+    search_entry.set_max_width_chars(100);
+    header_bar.set_title_widget(Some(&search_entry));
+
     let menu_btn = gtk4::MenuButton::new();
     menu_btn.set_icon_name("open-menu-symbolic");
     menu_btn.set_tooltip_text(Some(S::MENU));
     menu_btn.add_css_class("flat");
     header_bar.pack_end(&menu_btn);
+
+    let (_sort_popover, sort_btn, sort_label) = build_sort_popover(state);
+    sort_btn.set_icon_name("view-sort-descending-symbolic");
+    sort_btn.set_tooltip_text(Some(S::SORT_BY));
+    sort_btn.add_css_class("flat");
+    header_bar.pack_end(&sort_btn);
 
     let (popover, settings_btn) = build_menu_popover(state);
     menu_btn.set_popover(Some(&popover));
@@ -129,6 +153,8 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
         s.sidebar_scroll = sidebar_scroll.clone();
         s.content_scroll = content_scroll.clone();
         s.content_box = content_box.clone();
+        s.search_entry = search_entry.clone();
+        s.sort_label = sort_label;
     }
 
     rebuild_sidebar(state);
@@ -139,7 +165,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
         show_grid_view(state);
     }
 
-    connect_window_signals(state, &window, &game_list, &add_btn, &settings_btn);
+    connect_window_signals(state, &window, &game_list, &add_btn, &settings_btn, &search_entry);
 }
 
 fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
@@ -231,13 +257,7 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
         let active = sw.is_active();
         state_clone.borrow_mut().cfg.show_hidden_games = active;
         let _ = state_clone.borrow().cfg.save();
-        let s = state_clone.borrow();
-        for (i, g) in s.games.iter().enumerate() {
-            if i < s.rows.len() {
-                s.rows[i].row.set_visible(!g.hidden || active);
-            }
-        }
-        drop(s);
+        rebuild_sidebar(&state_clone);
         if state_clone.borrow().selected_id.is_empty() && !state_clone.borrow().content_unloaded {
             show_grid_view(&state_clone);
         }
@@ -268,12 +288,77 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
     (popover, settings_btn)
 }
 
+fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, gtk4::Label) {
+    let popover = gtk4::Popover::new();
+    popover.set_size_request(200, -1);
+    let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    vbox.set_margin_start(8);
+    vbox.set_margin_end(8);
+    vbox.set_margin_top(8);
+    vbox.set_margin_bottom(8);
+
+    let current_mode = SortMode::from_str(&state.borrow().cfg.sort_mode);
+    let mut first_btn: Option<gtk4::CheckButton> = None;
+
+    for mode in SortMode::ALL {
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        row.set_size_request(-1, 36);
+
+        let check = gtk4::CheckButton::new();
+        if *mode == current_mode {
+            check.set_active(true);
+        }
+        if let Some(ref first) = first_btn {
+            check.set_group(Some(first));
+        } else {
+            first_btn = Some(check.clone());
+        }
+
+        let label = gtk4::Label::new(Some(mode.display_label()));
+        label.set_xalign(0.0);
+        label.set_hexpand(true);
+
+        row.append(&check);
+        row.append(&label);
+        vbox.append(&row);
+
+        let state_clone = state.clone();
+        let check_clone = check.clone();
+        let mode_key = mode.as_str().to_string();
+        check.connect_toggled(move |_| {
+            if check_clone.is_active() {
+                let mode_str = SortMode::from_str(&mode_key);
+                state_clone.borrow_mut().cfg.sort_mode = mode_str.as_str().to_string();
+                let _ = state_clone.borrow().cfg.save();
+                state_clone.borrow().sort_label.set_text(mode_str.display_label());
+                rebuild_sidebar(&state_clone);
+                if state_clone.borrow().selected_id.is_empty()
+                    && !state_clone.borrow().content_unloaded
+                {
+                    show_grid_view(&state_clone);
+                }
+            }
+        });
+    }
+
+    popover.set_child(Some(&vbox));
+
+    let btn = gtk4::MenuButton::new();
+    btn.set_popover(Some(&popover));
+
+    let sort_label = gtk4::Label::new(Some(current_mode.display_label()));
+    sort_label.set_visible(false);
+
+    (popover, btn, sort_label)
+}
+
 fn connect_window_signals(
     state: &SharedState,
     window: &adw::ApplicationWindow,
     game_list: &gtk4::ListBox,
     add_btn: &gtk4::Button,
     settings_btn: &gtk4::Button,
+    search_entry: &gtk4::SearchEntry,
 ) {
     let state_clone = state.clone();
     game_list.connect_row_selected(move |_list, row| {
@@ -282,38 +367,58 @@ fn connect_window_signals(
             return;
         }
         let Some(row) = row else { return; };
-        let idx = row.index();
-        if idx == 0 {
-            drop(s);
+        let name = row.widget_name().to_string();
+        drop(s);
+
+        if name == "all-games" {
             state_clone.borrow_mut().selected_id.clear();
+            state_clone.borrow_mut().selected_group = GroupSelection::AllGames;
             show_grid_view(&state_clone);
-        } else if idx >= 1 {
-            let game_idx = (idx - 1) as usize;
-            if game_idx < s.games.len() {
-                let lutris_id = s.games[game_idx].lutris_id;
-                drop(s);
+        } else if name == "collection:0" {
+            state_clone.borrow_mut().selected_id.clear();
+            state_clone.borrow_mut().selected_group = GroupSelection::Uncategorized;
+            show_grid_view(&state_clone);
+        } else if let Some(id_str) = name.strip_prefix("collection:") {
+            if let Ok(id) = id_str.parse::<i64>() {
+                state_clone.borrow_mut().selected_id.clear();
+                state_clone.borrow_mut().selected_group = GroupSelection::Collection(id);
+                show_grid_view(&state_clone);
+            }
+        } else if let Some(id_str) = name.strip_prefix("game:") {
+            if let Ok(lutris_id) = id_str.parse::<i64>() {
                 switch_to_game(&state_clone, lutris_id);
             }
         }
     });
 
-    // Double-click on sidebar row plays the game
     let state_clone = state.clone();
     game_list.connect_row_activated(move |_list, row| {
-        let idx = row.index();
-        if idx >= 1 {
-            let s = state_clone.borrow();
-            let game_idx = (idx - 1) as usize;
-            if game_idx < s.games.len() {
-                let lutris_id = s.games[game_idx].lutris_id;
-                let db_id = s.games[game_idx].db_id;
-                let vid = crate::db::get_default_variant(&s.db, db_id);
-                drop(s);
-                if !state_clone.borrow().running_games.lock().unwrap().contains_key(&lutris_id) {
-                    let _ = super::play_button::launch_game(&state_clone, lutris_id, vid);
-                    let _ = state_clone.borrow().sender.send(crate::AppMessage::GameStarted(lutris_id));
+        let name = row.widget_name().to_string();
+        if let Some(id_str) = name.strip_prefix("game:") {
+            if let Ok(lutris_id) = id_str.parse::<i64>() {
+                let s = state_clone.borrow();
+                if let Some(game) = s.games.iter().find(|g| g.lutris_id == lutris_id) {
+                    let db_id = game.db_id;
+                    let vid = crate::db::get_default_variant(&s.db, db_id);
+                    drop(s);
+                    if !state_clone.borrow().running_games.lock().unwrap().contains_key(&lutris_id) {
+                        let _ = super::play_button::launch_game(&state_clone, lutris_id, vid);
+                        let _ = state_clone.borrow().sender.send(crate::AppMessage::GameStarted(lutris_id));
+                    }
                 }
             }
+        }
+    });
+
+    let state_clone = state.clone();
+    search_entry.connect_search_changed(move |entry| {
+        let text = entry.text().to_string();
+        state_clone.borrow_mut().search_query = text;
+        rebuild_sidebar(&state_clone);
+        if state_clone.borrow().selected_id.is_empty()
+            && !state_clone.borrow().content_unloaded
+        {
+            show_grid_view(&state_clone);
         }
     });
 

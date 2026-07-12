@@ -2,7 +2,8 @@ use std::path::Path;
 
 use crate::api::SteamClient;
 use crate::api::types::{
-    AppDetails, AppDetailsResponse, GlobalAchievementsResponse, SteamGameDetails,
+    AppDetails, AppDetailsResponse, GlobalAchievementsResponse, SteamGameDetails, SteamReviewSummary,
+    SteamReviewsResponse,
 };
 use crate::api::util::{pick_lang, urlencode, NEMIRTINGAS_BASE_URL};
 
@@ -95,6 +96,58 @@ impl SteamClient {
             let _ = std::fs::write(&cache_path, b);
         }
         Some(m)
+    }
+
+    pub fn fetch_steam_reviews(&self, app_id: &str) -> Option<SteamReviewSummary> {
+        let url = format!(
+            "https://store.steampowered.com/appreviews/{}?json=1&num_per_page=0&purchase_type=all&language=all",
+            app_id
+        );
+        let resp = match self.http.get(&url).send() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Steam reviews unavailable for {}: {}", app_id, e);
+                return None;
+            }
+        };
+        let raw: SteamReviewsResponse = match resp.json() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Steam reviews decode error for {}: {}", app_id, e);
+                return None;
+            }
+        };
+        if raw.success != 1 {
+            eprintln!("Steam reviews returned success=0 for {}", app_id);
+            return None;
+        }
+        Some(raw.query_summary)
+    }
+
+    pub fn fetch_steam_store_data(&self, app_id: &str) -> Option<SteamGameDetails> {
+        let url = format!("https://store.steampowered.com/api/appdetails?appids={}", app_id);
+        let resp = match self.http.get(&url).send() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Steam store data unavailable for {}: {}", app_id, e);
+                return None;
+            }
+        };
+        let raw: AppDetailsResponse = match resp.json() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Steam store data decode error for {}: {}", app_id, e);
+                return None;
+            }
+        };
+        let entry = match raw.apps.get(app_id) {
+            Some(e) if e.success => e,
+            _ => {
+                eprintln!("No store data for app {}", app_id);
+                return None;
+            }
+        };
+        Some(entry.data.clone())
     }
 
     pub fn fetch_app_details(&self, app_id: &str) -> Option<AppDetails> {

@@ -41,6 +41,22 @@ pub fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
         updated.logo_size = existing.logo_size;
     }
 
+    if updated.release_date.is_empty() {
+        updated.release_date = existing.release_date.clone();
+    }
+    if updated.release_timestamp == 0 {
+        updated.release_timestamp = existing.release_timestamp;
+    }
+    if updated.metacritic_score < 0 {
+        updated.metacritic_score = existing.metacritic_score;
+    }
+    if updated.steam_review_score < 0 {
+        updated.steam_review_score = existing.steam_review_score;
+    }
+    if updated.steam_review_count == 0 {
+        updated.steam_review_count = existing.steam_review_count;
+    }
+
     if !existing.achievements.is_empty() {
         let existing_pcts: HashMap<String, f64> = existing
             .achievements

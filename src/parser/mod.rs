@@ -1,10 +1,12 @@
 mod paths;
 mod icons;
 mod status;
+mod date;
 
 pub use paths::*;
 pub use icons::*;
 pub use status::*;
+pub use date::*;
 
 use crate::db::DbConn;
 pub use crate::models::{AchievementStatus, Game, GameEntry, MergedAchievement};
@@ -111,6 +113,11 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         game_path: String::new(),
         sgdb_id: entry.sgdb_id.clone().unwrap_or_default(),
         shadps4_version: entry.shadps4_version.clone().unwrap_or_default(),
+        release_date: entry.release_date.clone(),
+        release_timestamp: entry.release_timestamp,
+        metacritic_score: entry.metacritic_score,
+        steam_review_score: entry.steam_review_score,
+        steam_review_count: entry.steam_review_count,
     };
 
     let ach_dir = paths::achievements_dir(save_dir, app_id);

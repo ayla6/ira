@@ -1,12 +1,12 @@
-use achievement_viewer::activate::activate;
-use achievement_viewer::ui::{restore_content, SharedState};
+use ira::activate::activate;
+use ira::ui::{restore_content, SharedState};
 use gtk4::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 fn main() {
     let app = adw::Application::new(
-        Some("com.github.achievement.viewer"),
+        Some("com.github.ira"),
         gio::ApplicationFlags::empty(),
     );
 

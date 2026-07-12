@@ -17,7 +17,7 @@ pub fn notify_unlock(game_name: &str, ach: &MergedAchievement) {
     std::thread::spawn(move || {
         let _ = Command::new("notify-send")
             .args([
-                "--app-name=NotLutris",
+                "--app-name=Ira",
                 &format!("--icon={}", icon),
                 &title,
                 &body,

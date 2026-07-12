@@ -1,8 +1,8 @@
 [package]
-name = "achievement-viewer"
+name = "ira"
 version = "0.1.0"
 edition = "2021"
-default-run = "achievement-viewer"
+default-run = "ira"
 
 [dependencies]
 gtk4 = { version = "0.11", features = ["v4_14"] }
@@ -26,11 +26,11 @@ shlex = "1.3"
 which = "7.0"
 
 [[bin]]
-name = "achievement-viewer"
+name = "ira"
 path = "src/main.rs"
 
 [[bin]]
-name = "av-test"
+name = "ira-test"
 path = "src/bin/test_main.rs"
 
 [dev-dependencies]

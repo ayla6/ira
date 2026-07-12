@@ -72,7 +72,7 @@ fn default_true() -> bool {
 
 fn default_save_dir() -> String {
     xdg_dir(xdg::BaseDirectories::new().get_data_home())
-        .join("achievement-viewer")
+        .join("ira")
         .to_string_lossy()
         .to_string()
 }
@@ -80,8 +80,8 @@ fn default_save_dir() -> String {
 fn config_path() -> PathBuf {
     xdg::BaseDirectories::new()
         .get_config_home()
-        .map(|p| p.join("achievement-viewer").join("config.json"))
-        .unwrap_or_else(|| PathBuf::from(".").join(".config").join("achievement-viewer").join("config.json"))
+        .map(|p| p.join("ira").join("config.json"))
+        .unwrap_or_else(|| PathBuf::from(".").join(".config").join("ira").join("config.json"))
 }
 
 fn xdg_dir(xdg_home: Option<PathBuf>) -> PathBuf {

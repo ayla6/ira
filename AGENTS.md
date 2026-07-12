@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidelines for working on achievement-viewer (NotLutris).
+Guidelines for working on Ira.
 
 ## Project overview
 
@@ -14,7 +14,7 @@ SteamGridDB provides image assets.
 
 ```
 cargo build                    # Build the main binary
-cargo build --bin av-test      # Build the test binary
+cargo build --bin ira-test     # Build the test binary
 cargo test                     # Run all tests
 cargo build 2>&1 | grep warning # Check for warnings (should be zero)
 ```

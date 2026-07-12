@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo test --test npbind_parsing
 
-use achievement_viewer::platforms::ps4;
+use ira::platforms::ps4;
 
 #[test]
 fn test_parse_npbind_short_file() {

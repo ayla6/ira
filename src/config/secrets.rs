@@ -3,7 +3,7 @@ use std::process::Command;
 
 pub(crate) fn get_secret(key: &str) -> String {
     let out = Command::new("secret-tool")
-        .args(["lookup", "app", "achievement-viewer", "key", key])
+        .args(["lookup", "app", "ira", "key", key])
         .output();
     match out {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
@@ -14,16 +14,16 @@ pub(crate) fn get_secret(key: &str) -> String {
 pub(crate) fn set_secret(key: &str, value: &str) -> Result<(), String> {
     if value.is_empty() {
         let _ = Command::new("secret-tool")
-            .args(["clear", "app", "achievement-viewer", "key", key])
+            .args(["clear", "app", "ira", "key", key])
             .output();
         return Ok(());
     }
     let mut cmd = Command::new("secret-tool");
     cmd.args([
         "store",
-        "--label=Achievement Viewer Key",
+        "--label=Ira Key",
         "app",
-        "achievement-viewer",
+        "ira",
         "key",
         key,
     ]);

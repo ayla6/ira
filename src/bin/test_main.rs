@@ -1,7 +1,7 @@
 // Test binary — run non-UI tests without initializing GTK.
-// Usage: cargo run --bin av-test [psf|npbind|discover|trophies|playtime|all]
+// Usage: cargo run --bin ira-test [psf|npbind|discover|trophies|playtime|all]
 
-use achievement_viewer::platforms::ps4;
+use ira::platforms::ps4;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -21,7 +21,7 @@ fn main() {
             test_playtime();
         }
         _ => {
-            eprintln!("Usage: av-test [psf|npbind|discover|trophies|playtime|all]");
+            eprintln!("Usage: ira-test [psf|npbind|discover|trophies|playtime|all]");
             std::process::exit(1);
         }
     }

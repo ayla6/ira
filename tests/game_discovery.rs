@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo test --test game_discovery
 
-use achievement_viewer::platforms::ps4;
+use ira::platforms::ps4;
 
 #[test]
 fn test_read_install_dirs_no_config() {

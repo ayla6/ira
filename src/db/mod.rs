@@ -102,5 +102,14 @@ pub fn init_db(db_path: &str) -> DbConn {
 
     let conn = Arc::new(Mutex::new(conn));
     create_variants_table(&conn);
+    {
+        let c = conn.lock().expect("db lock");
+        let _ = c.execute_batch(
+            "CREATE TABLE IF NOT EXISTS game_default_variant (
+                game_id INTEGER PRIMARY KEY,
+                variant_id INTEGER
+            );"
+        );
+    }
     conn
 }

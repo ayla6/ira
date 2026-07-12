@@ -105,7 +105,6 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
 
         wine = wine.merge_with_default(&app_default_wine);
 
-        // If a variant is selected, override launch config values
         if let Some(vid) = variant_id {
             if let Ok(variants) = crate::db::get_variants(&db, db_id) {
                 if let Some(var) = variants.iter().find(|v| v.id == vid) {
@@ -169,40 +168,86 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
     Ok(())
 }
 
-pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Box {
+pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Widget {
     let running_games = state.borrow().running_games.clone();
     let sender = state.borrow().sender.clone();
     let st = state.clone();
 
-    let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
-    outer.set_valign(gtk4::Align::Center);
-
-    // Variant selector dropdown
     let variants = crate::db::get_variants(&state.borrow().db, db_id).unwrap_or_default();
     let has_variants = !variants.is_empty();
-    let variant_ids: Vec<i64> = variants.iter().map(|v| v.id).collect();
-    let variant_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
+    let default_vid = crate::db::get_default_variant(&state.borrow().db, db_id);
 
-    let var_dropdown = if has_variants {
-        let mut items = vec!["Base game".to_string()];
-        items.extend(variant_names.iter().cloned());
-        let strings: Vec<&str> = items.iter().map(|s| s.as_str()).collect();
-        let model = gtk4::StringList::new(&strings);
-        let dd = gtk4::DropDown::builder().build();
-        dd.set_model(Some(&model));
-        dd.set_valign(gtk4::Align::Center);
-        dd
-    } else {
-        gtk4::DropDown::builder().build()
+    let variant_ids: Vec<Option<i64>> = {
+        let mut v: Vec<Option<i64>> = vec![None];
+        for var in &variants {
+            v.push(Some(var.id));
+        }
+        v
+    };
+    let variant_labels: Vec<String> = {
+        let mut v: Vec<String> = vec!["Base game".to_string()];
+        for var in &variants {
+            v.push(var.name.clone());
+        }
+        v
     };
 
-    if has_variants {
-        outer.append(&var_dropdown);
+    let is_running = running_games.lock().unwrap().contains_key(&lutris_id);
+
+    if !has_variants {
+        let btn = gtk4::Button::new();
+        btn.set_valign(gtk4::Align::Center);
+        btn.set_size_request(130, 48);
+
+        let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+        hbox.set_valign(gtk4::Align::Center);
+        hbox.set_halign(gtk4::Align::Center);
+
+        let icon = gtk4::Image::from_icon_name("media-playback-start-symbolic");
+        icon.set_pixel_size(20);
+        hbox.append(&icon);
+
+        let label = gtk4::Label::new(Some("Play"));
+        label.add_css_class("play-btn-label");
+        hbox.append(&label);
+
+        btn.set_child(Some(&hbox));
+
+        if is_running {
+            icon.set_icon_name(Some("window-close-symbolic"));
+            label.set_text("Stop");
+        } else {
+            btn.add_css_class("suggested-action");
+        }
+
+        let icon_click = icon.clone();
+        let label_click = label.clone();
+        btn.connect_clicked(move |btn| {
+            let is_running = st.borrow().running_games.lock().unwrap().contains_key(&lutris_id);
+            if is_running {
+                stop_game(&st, lutris_id);
+                icon_click.set_icon_name(Some("media-playback-start-symbolic"));
+                label_click.set_text("Play");
+                btn.add_css_class("suggested-action");
+            } else {
+                match launch_game(&st, lutris_id, None) {
+                    Ok(()) => {
+                        icon_click.set_icon_name(Some("window-close-symbolic"));
+                        label_click.set_text("Stop");
+                        btn.remove_css_class("suggested-action");
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to launch game: {}", e);
+                        let _ = sender.send(AppMessage::AddGameError(e));
+                    }
+                }
+            }
+        });
+
+        return btn.upcast();
     }
 
-    let btn = gtk4::Button::new();
-    btn.set_valign(gtk4::Align::Center);
-    btn.set_size_request(130, 48);
+    let split = adw::SplitButton::new();
 
     let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     hbox.set_valign(gtk4::Align::Center);
@@ -216,37 +261,61 @@ pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Box
     label.add_css_class("play-btn-label");
     hbox.append(&label);
 
-    btn.set_child(Some(&hbox));
+    split.set_child(Some(&hbox));
+    split.set_size_request(130, 48);
+    split.set_valign(gtk4::Align::Center);
 
-    let is_running = running_games.lock().unwrap().contains_key(&lutris_id);
     if is_running {
         icon.set_icon_name(Some("window-close-symbolic"));
         label.set_text("Stop");
     } else {
-        btn.add_css_class("suggested-action");
+        split.add_css_class("suggested-action");
     }
+
+    let popover = gtk4::Popover::new();
+    let list = gtk4::ListBox::new();
+    list.set_margin_start(6);
+    list.set_margin_end(6);
+    list.set_margin_top(6);
+    list.set_margin_bottom(6);
+    list.add_css_class("boxed-list");
+
+    let selected_idx = variant_ids
+        .iter()
+        .position(|v| *v == default_vid)
+        .unwrap_or(0);
+
+    for (i, name) in variant_labels.iter().enumerate() {
+        let row = gtk4::ListBoxRow::new();
+        let lbl = gtk4::Label::new(Some(name));
+        lbl.set_xalign(0.0);
+        lbl.set_margin_start(8);
+        lbl.set_margin_end(8);
+        lbl.set_margin_top(6);
+        lbl.set_margin_bottom(6);
+        row.set_child(Some(&lbl));
+        if i == selected_idx {
+            row.add_css_class("selected");
+        }
+        list.append(&row);
+    }
+
+    popover.set_child(Some(&list));
+    split.set_popover(Some(&popover));
 
     let icon_click = icon.clone();
     let label_click = label.clone();
-    btn.connect_clicked(move |btn| {
-        let is_running = st.borrow().running_games.lock().unwrap().contains_key(&lutris_id);
+    let st_launch = st.clone();
+    split.connect_clicked(move |btn| {
+        let is_running = st_launch.borrow().running_games.lock().unwrap().contains_key(&lutris_id);
         if is_running {
-            stop_game(&st, lutris_id);
+            stop_game(&st_launch, lutris_id);
             icon_click.set_icon_name(Some("media-playback-start-symbolic"));
             label_click.set_text("Play");
             btn.add_css_class("suggested-action");
         } else {
-            let variant_id = if has_variants {
-                let sel = var_dropdown.selected();
-                if sel > 0 {
-                    Some(variant_ids[(sel as usize) - 1])
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            match launch_game(&st, lutris_id, variant_id) {
+            let vid = crate::db::get_default_variant(&st_launch.borrow().db, db_id);
+            match launch_game(&st_launch, lutris_id, vid) {
                 Ok(()) => {
                     icon_click.set_icon_name(Some("window-close-symbolic"));
                     label_click.set_text("Stop");
@@ -260,6 +329,18 @@ pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Box
         }
     });
 
-    outer.append(&btn);
-    outer
+    let st_popover = st.clone();
+    let popover_clone = popover.clone();
+    list.connect_row_selected(move |_, row| {
+        if let Some(row) = row {
+            let idx = row.index() as usize;
+            if idx < variant_ids.len() {
+                let vid = variant_ids[idx];
+                crate::db::set_default_variant(&st_popover.borrow().db, db_id, vid);
+            }
+        }
+        popover_clone.popdown();
+    });
+
+    split.upcast()
 }

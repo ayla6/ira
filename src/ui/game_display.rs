@@ -324,6 +324,7 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
     let stats_row = {
         let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
         row.set_valign(gtk4::Align::Center);
+        row.set_hexpand(true);
         row.append(&play_button(state, game.lutris_id, game.db_id));
         row.append(&stat_label("Last played", &format_lastplayed(game.lastplayed)));
         row.append(&stat_label("Play time", &format_playtime(game.playtime)));
@@ -354,6 +355,23 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
     };
 
     let has_hero = !game.hero_image_path.is_empty();
+
+    let settings_btn = {
+        let btn = gtk4::Button::from_icon_name("preferences-system-symbolic");
+        btn.add_css_class("flat");
+        btn.set_valign(gtk4::Align::Center);
+        btn.set_tooltip_text(Some("Settings"));
+        let st = state.clone();
+        btn.connect_clicked(move |_| {
+            let (win, cfg, steam) = {
+                let s = st.borrow();
+                (s.window.clone(), s.cfg.clone(), s.steam.clone())
+            };
+            super::dialogs::show_settings_dialog(&win, cfg, steam, &st);
+        });
+        btn
+    };
+
     if !has_hero {
         let header = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
         header.set_margin_top(24);
@@ -361,7 +379,10 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
         header.set_margin_start(24);
         header.set_margin_end(24);
         header.append(&title_row);
-        header.append(&stats_row);
+        let stats_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
+        stats_wrapper.append(&stats_row);
+        stats_wrapper.append(&settings_btn);
+        header.append(&stats_wrapper);
         return header.upcast();
     }
 
@@ -456,6 +477,7 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
     stats_container.set_margin_top(12);
     stats_container.set_margin_bottom(12);
     stats_container.append(&stats_row);
+    stats_container.append(&settings_btn);
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     outer.append(&overlay);

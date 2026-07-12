@@ -523,12 +523,16 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         let all_emu_vers = all_emu_vers.clone();
         move |v: crate::models::GameVariant| {
             let group = adw::PreferencesGroup::new();
-            group.set_header_suffix(Some(&{
-                let del_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
-                del_btn.add_css_class("flat");
-                del_btn.add_css_class("error");
-                del_btn
-            }));
+            let del_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
+            del_btn.add_css_class("flat");
+            del_btn.add_css_class("error");
+            del_btn.set_valign(gtk4::Align::Center);
+            let container_c = container.clone();
+            let group_c = group.clone();
+            del_btn.connect_clicked(move |_| {
+                container_c.remove(&group_c);
+            });
+            group.set_header_suffix(Some(&del_btn));
 
             let name_entry = adw::EntryRow::new();
             name_entry.set_title("Variant name");
@@ -953,6 +957,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         {
             let _ = crate::db::delete_all_variants(&db, db_id_s);
             for vw in var_widgets_save.borrow().iter() {
+                if vw._group.parent().is_none() { continue; }
                 let name = vw._name.text().to_string();
                 if name.is_empty() { continue; }
                 let emu_idx = vw._emu_ver.selected();

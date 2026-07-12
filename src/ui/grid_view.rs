@@ -1,7 +1,7 @@
 use gtk4::prelude::*;
 use crate::Game;
 use crate::strings as S;
-use crate::models::GroupSelection;
+use crate::models::{GroupSelection, SortMode};
 
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -12,6 +12,42 @@ use super::message_handler::switch_to_game;
 use super::context_menu::show_game_context_menu;
 use super::helpers::clear_children;
 use super::filter::filtered_games;
+
+fn badge_text(game: &Game, mode: SortMode) -> Option<String> {
+    match mode {
+        SortMode::Alphabetical => None,
+        SortMode::Completion => {
+            if game.total_count == 0 { None }
+            else { Some(format!("{}%", (game.completion_pct() as u8))) }
+        }
+        SortMode::HoursPlayed => {
+            if game.playtime <= 0.0 { None }
+            else { Some(super::game_display::format_playtime(game.playtime)) }
+        }
+        SortMode::LastPlayed => {
+            if game.lastplayed == 0 { None }
+            else {
+                chrono::DateTime::from_timestamp(game.lastplayed, 0)
+                    .map(|dt| dt.format("%b %-d").to_string())
+            }
+        }
+        SortMode::ReleaseDate => {
+            if game.release_timestamp == 0 { None }
+            else {
+                chrono::DateTime::from_timestamp(game.release_timestamp, 0)
+                    .map(|dt| dt.format("%Y").to_string())
+            }
+        }
+        SortMode::MetacriticScore => {
+            if game.metacritic_score < 0 { None }
+            else { Some(game.metacritic_score.to_string()) }
+        }
+        SortMode::SteamReview => {
+            if game.steam_review_score < 0 { None }
+            else { Some(format!("{}%", game.steam_review_score)) }
+        }
+    }
+}
 
 pub fn show_grid_view(state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
@@ -75,6 +111,8 @@ pub fn show_grid_view(state: &SharedState) {
     heading.set_margin_bottom(8);
     outer.append(&heading);
 
+    let sort_mode = SortMode::from_str(&state.borrow().cfg.sort_mode);
+
     let factory = gtk4::SignalListItemFactory::new();
 
     let state_for_setup = state.clone();
@@ -94,13 +132,18 @@ pub fn show_grid_view(state: &SharedState) {
         vbox.add_css_class("cover-item");
         vbox.set_overflow(gtk4::Overflow::Visible);
 
+        let overlay = gtk4::Overlay::new();
+        overlay.set_overflow(gtk4::Overflow::Visible);
+
         let pic = gtk4::Picture::new();
         pic.set_content_fit(gtk4::ContentFit::Cover);
         pic.set_size_request(cover_width, cover_height);
         pic.add_css_class("game-cover-pic");
         let placeholder = crate::images::ScaledPaintable::new_empty(cover_width, cover_height);
         pic.set_paintable(Some(&placeholder));
-        vbox.append(&pic);
+        overlay.set_child(Some(&pic));
+
+        vbox.append(&overlay);
 
         unsafe { vbox.set_data::<AtomicI64>("lutris-id", AtomicI64::new(0)) };
 
@@ -146,8 +189,10 @@ pub fn show_grid_view(state: &SharedState) {
         let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
         let child = list_item.child().unwrap();
         let vbox = child.downcast_ref::<gtk4::Box>().unwrap();
-        let first = vbox.first_child().unwrap();
-        let pic = first.downcast_ref::<gtk4::Picture>().unwrap();
+        let overlay_widget = vbox.first_child().unwrap();
+        let overlay = overlay_widget.downcast_ref::<gtk4::Overlay>().unwrap();
+        let pic_widget = overlay.child().unwrap();
+        let pic = pic_widget.downcast_ref::<gtk4::Picture>().unwrap();
 
         let game_item = list_item
             .item()
@@ -164,6 +209,16 @@ pub fn show_grid_view(state: &SharedState) {
             } else {
                 pic.set_paintable(None::<&gdk4::Texture>);
             }
+
+            if let Some(text) = badge_text(&game, sort_mode) {
+                let badge = gtk4::Label::new(Some(&text));
+                badge.set_valign(gtk4::Align::End);
+                badge.set_halign(gtk4::Align::Center);
+                badge.set_margin_bottom(-12);
+                badge.add_css_class("cover-badge");
+                overlay.add_overlay(&badge);
+                unsafe { vbox.set_data::<gtk4::Label>("badge", badge) };
+            }
         }
     });
 
@@ -171,14 +226,20 @@ pub fn show_grid_view(state: &SharedState) {
         let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
         let child = list_item.child().unwrap();
         let vbox = child.downcast_ref::<gtk4::Box>().unwrap();
-        let first = vbox.first_child().unwrap();
-        let pic = first.downcast_ref::<gtk4::Picture>().unwrap();
+        let overlay_widget = vbox.first_child().unwrap();
+        let overlay = overlay_widget.downcast_ref::<gtk4::Overlay>().unwrap();
+        let pic_widget = overlay.child().unwrap();
+        let pic = pic_widget.downcast_ref::<gtk4::Picture>().unwrap();
 
         if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("lutris-id") } {
             unsafe { ptr.as_ref() }.store(0, Ordering::Relaxed);
         }
         let placeholder = crate::images::ScaledPaintable::new_empty(cover_width, cover_height);
         pic.set_paintable(Some(&placeholder));
+
+        if let Some(badge) = unsafe { vbox.steal_data::<gtk4::Label>("badge") } {
+            overlay.remove_overlay(&badge);
+        }
     });
 
     let store = gio::ListStore::new::<GameItem>();

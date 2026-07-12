@@ -67,6 +67,14 @@ gridview.game-grid child:focus-within {
     box-shadow: 0 6px 24px 6px rgba(0,0,0,0.5);
 }
 
+.cover-badge {
+    background-color: rgba(0, 0, 0, 0.75);
+    color: white;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-weight: 600;
+}
+
 .section-title {
     font-weight: 700;
     font-size: 1.25em;
@@ -112,6 +120,5 @@ gridview.game-grid child:focus-within {
 
 .dim-label {
     opacity: 0.55;
-    font-size: 0.85em;
 }
 ";

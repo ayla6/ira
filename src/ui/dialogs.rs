@@ -306,20 +306,6 @@ fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRow, gtk4::St
     version_group.add(&version_row);
     page.append(&version_group);
 
-    let structure_group = adw::PreferencesGroup::new();
-    structure_group.set_title("Expected Structure");
-    let steam_row = adw::ActionRow::new();
-    steam_row.set_title("steam/<version>/");
-    steam_row.set_subtitle("  libsteam_api.so    \u{2192} Linux x86\n  libsteam_api64.so  \u{2192} Linux x64\n  steamclient.so      \u{2192} Linux x86\n  steamclient64.so    \u{2192} Linux x64\n  steam_api.dll       \u{2192} Windows x86\n  steam_api64.dll     \u{2192} Windows x64\n  steamclient.dll     \u{2192} Windows x86\n  steamclient64.dll   \u{2192} Windows x64\n  generate_interfaces (in steam/ root)");
-    steam_row.set_sensitive(false);
-    structure_group.add(&steam_row);
-    let gog_row = adw::ActionRow::new();
-    gog_row.set_title("gog/<version>/");
-    gog_row.set_subtitle("  Galaxy.dll    \u{2192} Windows x86\n  Galaxy64.dll  \u{2192} Windows x64");
-    gog_row.set_sensitive(false);
-    structure_group.add(&gog_row);
-    page.append(&structure_group);
-
     (page, version_row, version_model)
 }
 

@@ -175,33 +175,19 @@ pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Wid
 
     let variants = crate::db::get_variants(&state.borrow().db, db_id).unwrap_or_default();
     let has_variants = !variants.is_empty();
-    let default_vid = crate::db::get_default_variant(&state.borrow().db, db_id);
-
-    let variant_ids: Vec<Option<i64>> = {
-        let mut v: Vec<Option<i64>> = vec![None];
-        for var in &variants {
-            v.push(Some(var.id));
-        }
-        v
-    };
-    let variant_labels: Vec<String> = {
-        let mut v: Vec<String> = vec!["Base game".to_string()];
-        for var in &variants {
-            v.push(var.name.clone());
-        }
-        v
-    };
 
     let is_running = running_games.lock().unwrap().contains_key(&lutris_id);
 
     if !has_variants {
         let btn = gtk4::Button::new();
         btn.set_valign(gtk4::Align::Center);
-        btn.set_size_request(130, 48);
+        btn.set_height_request(48);
 
         let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
         hbox.set_valign(gtk4::Align::Center);
         hbox.set_halign(gtk4::Align::Center);
+        hbox.set_margin_start(16);
+        hbox.set_margin_end(16);
 
         let icon = gtk4::Image::from_icon_name("media-playback-start-symbolic");
         icon.set_pixel_size(20);
@@ -209,6 +195,7 @@ pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Wid
 
         let label = gtk4::Label::new(Some("Play"));
         label.add_css_class("play-btn-label");
+        label.set_width_chars(5);
         hbox.append(&label);
 
         btn.set_child(Some(&hbox));
@@ -252,6 +239,8 @@ pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Wid
     let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     hbox.set_valign(gtk4::Align::Center);
     hbox.set_halign(gtk4::Align::Center);
+    hbox.set_margin_start(16);
+    hbox.set_margin_end(16);
 
     let icon = gtk4::Image::from_icon_name("media-playback-start-symbolic");
     icon.set_pixel_size(20);
@@ -259,11 +248,13 @@ pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Wid
 
     let label = gtk4::Label::new(Some("Play"));
     label.add_css_class("play-btn-label");
+    label.set_width_chars(5);
     hbox.append(&label);
 
     split.set_child(Some(&hbox));
-    split.set_size_request(130, 48);
+    split.set_height_request(48);
     split.set_valign(gtk4::Align::Center);
+    split.set_dropdown_tooltip("Select variant");
 
     if is_running {
         icon.set_icon_name(Some("window-close-symbolic"));
@@ -272,36 +263,45 @@ pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Wid
         split.add_css_class("suggested-action");
     }
 
-    let popover = gtk4::Popover::new();
-    let list = gtk4::ListBox::new();
-    list.set_margin_start(6);
-    list.set_margin_end(6);
-    list.set_margin_top(6);
-    list.set_margin_bottom(6);
-    list.add_css_class("boxed-list");
+    let default_vid = crate::db::get_default_variant(&state.borrow().db, db_id);
+    let default_target = match default_vid {
+        Some(vid) => format!("{}", vid),
+        None => "none".to_string(),
+    };
 
-    let selected_idx = variant_ids
-        .iter()
-        .position(|v| *v == default_vid)
-        .unwrap_or(0);
+    let actions = gio::SimpleActionGroup::new();
+    let action = gio::SimpleAction::new_stateful(
+        "variant",
+        Some(&glib::VariantTy::STRING),
+        &glib::Variant::from(&default_target),
+    );
 
-    for (i, name) in variant_labels.iter().enumerate() {
-        let row = gtk4::ListBoxRow::new();
-        let lbl = gtk4::Label::new(Some(name));
-        lbl.set_xalign(0.0);
-        lbl.set_margin_start(8);
-        lbl.set_margin_end(8);
-        lbl.set_margin_top(6);
-        lbl.set_margin_bottom(6);
-        row.set_child(Some(&lbl));
-        if i == selected_idx {
-            row.add_css_class("selected");
+    // Only save to DB and explicitly trigger change_state — the default
+    // handler calls change_state after activate, but calling it here too
+    // ensures the state updates immediately so the menu re-renders.
+    let st_c = st.clone();
+    action.connect_activate(move |action, param| {
+        if let Some(param) = param {
+            let target_str = param.get::<String>().unwrap_or_default();
+            let vid = if target_str == "none" {
+                None
+            } else {
+                target_str.parse::<i64>().ok()
+            };
+            crate::db::set_default_variant(&st_c.borrow().db, db_id, vid);
+            action.change_state(param);
         }
-        list.append(&row);
+    });
+    actions.add_action(&action);
+
+    let menu = gio::Menu::new();
+    menu.append(Some("Base game"), Some("play.variant::none"));
+    for var in &variants {
+        menu.append(Some(&var.name), Some(&format!("play.variant::{}", var.id)));
     }
 
-    popover.set_child(Some(&list));
-    split.set_popover(Some(&popover));
+    split.insert_action_group("play", Some(&actions));
+    split.set_menu_model(Some(&menu));
 
     let icon_click = icon.clone();
     let label_click = label.clone();
@@ -327,19 +327,6 @@ pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Wid
                 }
             }
         }
-    });
-
-    let st_popover = st.clone();
-    let popover_clone = popover.clone();
-    list.connect_row_selected(move |_, row| {
-        if let Some(row) = row {
-            let idx = row.index() as usize;
-            if idx < variant_ids.len() {
-                let vid = variant_ids[idx];
-                crate::db::set_default_variant(&st_popover.borrow().db, db_id, vid);
-            }
-        }
-        popover_clone.popdown();
     });
 
     split.upcast()

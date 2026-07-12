@@ -163,48 +163,93 @@ fn is_wine_bg(pid: i32) -> bool {
     false
 }
 
+#[allow(dead_code)]
 fn kill_process_tree(pid: i32, sig: i32) {
     let descendants = collect_descendants(pid);
     for d in &descendants {
+        let name = proc_name(*d).unwrap_or_default();
+        let bg = is_wine_bg(*d);
+        eprintln!("  kill_process_tree: pid {} ({}) wine_bg={}", d, name, bg);
         unsafe { libc::kill(*d, sig); }
     }
     unsafe { libc::kill(pid, sig); }
 }
 
 pub fn stop_game_with_wine(pid: i32, wine_exe: Option<&str>, wine_prefix: Option<&str>, env: &[(String, String)]) {
-    unsafe { libc::kill(-pid, libc::SIGTERM); }
+    // Collect descendants BEFORE sending signals — the process tree may
+    // change after the game exits (children get reparented).
+    let descendants = collect_descendants(pid);
+
+    // Step 1: SIGTERM just the game PID (not the whole group) so the
+    // game can exit cleanly while wine infrastructure stays alive.
+    unsafe { libc::kill(pid, libc::SIGTERM); }
 
     let wine_exe = wine_exe.map(|s| s.to_string());
     let wine_prefix = wine_prefix.map(|s| s.to_string());
     let env: Vec<(String, String)> = env.to_vec();
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(2));
-
-        let alive = unsafe { libc::kill(-pid, 0) } == 0;
-        if !alive {
-            return;
+        // Step 2: Wait for the game to exit (poll for up to 5 seconds).
+        for _ in 0..50 {
+            let alive = unsafe { libc::kill(pid, 0) } == 0;
+            if !alive { break; }
+            std::thread::sleep(Duration::from_millis(100));
         }
 
+        // Step 3: Run `wineserver -k` while the wine infrastructure is
+        // still alive so it can coordinate a graceful shutdown.
         if let (Some(exe), Some(prefix)) = (&wine_exe, &wine_prefix) {
             let wineserver = find_wineserver(exe);
-            if let Some(ws) = wineserver {
-                let mut cmd = Command::new(&ws);
+            if let Some(ws) = &wineserver {
+                eprintln!("stop: running wineserver -k for prefix {}", prefix);
+                let mut cmd = Command::new(ws);
                 cmd.arg("-k");
                 cmd.env("WINEPREFIX", prefix);
-                for (k, v) in env {
+                for (k, v) in &env {
                     cmd.env(k, v);
                 }
                 let _ = cmd.status();
             }
         }
 
+        // Step 4: Wait for wineserver cleanup.
         std::thread::sleep(Duration::from_secs(3));
 
-        let still_alive = unsafe { libc::kill(-pid, 0) } == 0;
-        if still_alive {
-            unsafe { libc::kill(-pid, libc::SIGKILL); }
-            std::thread::sleep(Duration::from_millis(500));
-            kill_process_tree(pid, libc::SIGKILL);
+        // Step 5: SIGTERM any remaining stragglers, identifying wine bg
+        // processes via is_wine_bg() for diagnostics.
+        for d in &descendants {
+            let alive = unsafe { libc::kill(*d, 0) } == 0;
+            if alive {
+                let name = proc_name(*d).unwrap_or_default();
+                let bg = is_wine_bg(*d);
+                if bg {
+                    eprintln!("stop: wine bg straggler SIGTERM pid {} ({})", d, name);
+                } else {
+                    eprintln!("stop: non-wine straggler SIGTERM pid {} ({})", d, name);
+                }
+                unsafe { libc::kill(*d, libc::SIGTERM); }
+            }
+        }
+
+        // Step 6: Wait 2s for stragglers to exit.
+        std::thread::sleep(Duration::from_secs(2));
+
+        // Step 7: Final fallback — SIGKILL any survivors.
+        for d in &descendants {
+            let alive = unsafe { libc::kill(*d, 0) } == 0;
+            if alive {
+                eprintln!(
+                    "stop: force killing pid {} ({}) wine_bg={}",
+                    d, proc_name(*d).unwrap_or_default(), is_wine_bg(*d)
+                );
+                unsafe { libc::kill(*d, libc::SIGKILL); }
+            }
+        }
+
+        // Kill the original game PID if somehow still alive.
+        let alive = unsafe { libc::kill(pid, 0) } == 0;
+        if alive {
+            eprintln!("stop: force killing game pid {}", pid);
+            unsafe { libc::kill(pid, libc::SIGKILL); }
         }
     });
 }

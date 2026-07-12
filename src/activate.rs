@@ -46,6 +46,8 @@ pub fn activate(app: &adw::Application) -> SharedState {
 
     let db = db::init_db(&format!("{}/gse.db", cfg.save_dir));
 
+    crate::platforms::api_emulators::ensure_skeleton(&cfg.save_dir);
+
     let steam = Arc::new(SteamClient::new(
         cfg.steam_api_key.clone(),
         cfg.steam_griddb_api_key.clone(),

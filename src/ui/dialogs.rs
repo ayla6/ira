@@ -583,7 +583,22 @@ pub(super) fn build_game_general_page(
         row.set_title("Game language");
         row.set_subtitle("Language reported to the game by the API emulator");
         row.set_model(Some(&model));
-        row.set_selected(0);
+
+        let save_dir = state.borrow().save_dir.clone();
+        let game_exe = {
+            let config = crate::db::get_game_config(&state.borrow().db, game.db_id).ok().flatten();
+            config.map(|(l, _, _)| l.exe).unwrap_or_default()
+        };
+        let current_lang = crate::platforms::api_emulators::read_current_language(
+            &game.trophy_source, &game_exe, &save_dir, &game.app_id,
+        );
+        let selected = current_lang
+            .as_ref()
+            .and_then(|lang| languages.iter().position(|l| l == lang))
+            .map(|i| i as u32)
+            .unwrap_or(0);
+        row.set_selected(selected);
+
         lang_group.add(&row);
         general_page.append(&lang_group);
         Some(row)

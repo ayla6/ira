@@ -335,9 +335,10 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             let app_id_c = emu_app_id.clone();
             let save_dir_c = emu_save_dir.clone();
             let status_c = status_row.clone();
+            let langs_c = languages.clone();
             install_btn.connect_clicked(move |_| {
                 let result = if ts_c == crate::models::GSE {
-                    crate::platforms::api_emulators::install_gse(&save_dir_c, &exe_c, &app_id_c)
+                    crate::platforms::api_emulators::install_gse(&save_dir_c, &exe_c, &app_id_c, &langs_c)
                 } else {
                     crate::platforms::api_emulators::install_nge(&save_dir_c, &exe_c, &app_id_c)
                 };

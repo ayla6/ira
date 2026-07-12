@@ -99,6 +99,49 @@ pub fn write_nge_dlc_config(settings_dir: &Path, details: &AppDetails) -> Result
         .map_err(|e| format!("Failed to write NGE config: {}", e))
 }
 
+pub fn read_gse_language(settings_dir: &Path) -> Option<String> {
+    let path = settings_dir.join("configs.user.ini");
+    let content = std::fs::read_to_string(&path).ok()?;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(val) = trimmed.strip_prefix("language=") {
+            return Some(val.trim().to_string());
+        }
+    }
+    None
+}
+
+pub fn read_nge_language(settings_dir: &Path) -> Option<String> {
+    let config_path = settings_dir.join("NemirtingasGalaxyEmu.json");
+    let data = std::fs::read_to_string(&config_path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&data).ok()?;
+    if let Some(galaxy) = json.get("GalaxyEmu") {
+        if let Some(user) = galaxy.get("User") {
+            return user.get("Language").and_then(|v| v.as_str()).map(|s| s.to_string());
+        }
+    }
+    json.get("language").and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
+pub fn read_current_language(
+    trophy_source: &str,
+    game_exe: &str,
+    save_dir: &str,
+    app_id: &str,
+) -> Option<String> {
+    match trophy_source {
+        crate::models::GSE => {
+            find_steam_settings(game_exe, save_dir, app_id)
+                .and_then(|dir| read_gse_language(&dir))
+        }
+        crate::models::NGE => {
+            find_galaxy_settings(game_exe)
+                .and_then(|dir| read_nge_language(&dir))
+        }
+        _ => None,
+    }
+}
+
 pub fn write_gse_language(settings_dir: &Path, language: &str) -> Result<(), String> {
     let path = settings_dir.join("configs.user.ini");
     let mut content = String::new();
@@ -252,6 +295,27 @@ fn copy_file(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+pub fn ensure_skeleton(save_dir: &str) {
+    let root = api_emulators_dir(save_dir);
+    let subdirs = [
+        "steam/linux/x86/steamapi",
+        "steam/linux/x86/steamclient",
+        "steam/linux/x64/steamapi",
+        "steam/linux/x64/steamclient",
+        "steam/windows/x86/steamapi",
+        "steam/windows/x86/steamclient",
+        "steam/windows/x64/steamapi",
+        "steam/windows/x64/steamclient",
+        "gog/old/x86",
+        "gog/old/x64",
+        "gog/new/x86",
+        "gog/new/x64",
+    ];
+    for sub in &subdirs {
+        let _ = std::fs::create_dir_all(root.join(sub));
+    }
+}
+
 fn find_api_emu_dll_folder(game_exe: &str, dll_names: &[&str]) -> Option<PathBuf> {
     let exe_path = Path::new(game_exe);
     let start = exe_path.parent()?;
@@ -323,6 +387,7 @@ pub fn install_gse(
     save_dir: &str,
     game_exe: &str,
     app_id: &str,
+    languages: &[String],
 ) -> Result<(), String> {
     let emu_root = api_emulators_dir(save_dir).join("steam");
     let arch = detect_arch(game_exe);
@@ -361,6 +426,12 @@ pub fn install_gse(
     let appid_path = settings_dir.join("steam_appid.txt");
     if !appid_path.exists() {
         std::fs::write(&appid_path, app_id).map_err(|e| format!("write steam_appid.txt: {}", e))?;
+    }
+
+    let lang_path = settings_dir.join("supported_languages.txt");
+    if !lang_path.exists() && !languages.is_empty() {
+        let content = languages.join("\n") + "\n";
+        let _ = std::fs::write(&lang_path, content);
     }
 
     let gen_interfaces = emu_root.join("generate_interfaces");

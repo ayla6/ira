@@ -503,24 +503,14 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         _exe: adw::EntryRow,
         _wd: adw::EntryRow,
         _args: adw::EntryRow,
-        _emu_ver: adw::ComboRow,
-        _emu_model: gtk4::StringList,
         _group: adw::PreferencesGroup,
     }
 
     let var_widgets: Rc<RefCell<Vec<VarW>>> = Rc::new(RefCell::new(Vec::new()));
 
-    // Find unique GSE version list for emu_version dropdown
-    let gse_vers = crate::platforms::api_emulators::list_gse_versions(&state.borrow().save_dir);
-    let gog_vers = crate::platforms::api_emulators::list_gog_versions(&state.borrow().save_dir);
-    let mut all_emu_vers: Vec<String> = Vec::new();
-    for v in &gse_vers { if !all_emu_vers.contains(v) { all_emu_vers.push(v.clone()); } }
-    for v in &gog_vers { if !all_emu_vers.contains(v) { all_emu_vers.push(v.clone()); } }
-
     let add_variant_fn = {
         let var_widgets = var_widgets.clone();
         let container = variant_container.clone();
-        let all_emu_vers = all_emu_vers.clone();
         move |v: crate::models::GameVariant| {
             let group = adw::PreferencesGroup::new();
             let del_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
@@ -593,24 +583,6 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             args_entry.set_text(&v.args);
             group.add(&args_entry);
 
-            // Emu version dropdown
-            let (emu_ver_row, emu_model) = if !all_emu_vers.is_empty() {
-                let strings: Vec<&str> = all_emu_vers.iter().map(|s| s.as_str()).collect();
-                let model = gtk4::StringList::new(&strings);
-                let row = adw::ComboRow::new();
-                row.set_title("API emulator version");
-                row.set_model(Some(&model));
-                if !v.emu_version.is_empty() {
-                    if let Some(idx) = all_emu_vers.iter().position(|x| x == &v.emu_version) {
-                        row.set_selected(idx as u32);
-                    }
-                }
-                group.add(&row);
-                (Some(row), model)
-            } else {
-                (None, gtk4::StringList::new(&[] as &[&str]))
-            };
-
             container.append(&group);
 
             var_widgets.borrow_mut().push(VarW {
@@ -618,8 +590,6 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 _exe: exe_entry,
                 _wd: wd_entry,
                 _args: args_entry,
-                _emu_ver: emu_ver_row.unwrap_or_else(|| adw::ComboRow::new()),
-                _emu_model: emu_model,
                 _group: group,
             });
         }
@@ -960,8 +930,6 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 if vw._group.parent().is_none() { continue; }
                 let name = vw._name.text().to_string();
                 if name.is_empty() { continue; }
-                let emu_idx = vw._emu_ver.selected();
-                let emu_ver = vw._emu_model.string(emu_idx).map(|s| s.to_string()).unwrap_or_default();
                 let variant = crate::models::GameVariant {
                     id: 0,
                     game_id: db_id_s,
@@ -970,8 +938,6 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     working_dir: vw._wd.text().to_string(),
                     args: vw._args.text().to_string(),
                     env_vars: Vec::new(),
-                    emu_version: if emu_ver.starts_with("(no") { String::new() } else { emu_ver },
-                    emu_installed: false,
                 };
                 let _ = crate::db::add_variant(&db, &variant);
             }

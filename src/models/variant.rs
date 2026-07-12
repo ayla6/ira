@@ -10,8 +10,6 @@ pub struct GameVariant {
     pub args: String,
     #[serde(default)]
     pub env_vars: Vec<(String, String)>,
-    pub emu_version: String,
-    pub emu_installed: bool,
 }
 
 impl Default for GameVariant {
@@ -24,8 +22,6 @@ impl Default for GameVariant {
             working_dir: String::new(),
             args: String::new(),
             env_vars: Vec::new(),
-            emu_version: String::new(),
-            emu_installed: false,
         }
     }
 }

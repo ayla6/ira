@@ -317,7 +317,7 @@ fn is_windows(game_exe: &str) -> bool {
 //       steamclient.so              ← Linux x86
 //       steamclient64.so            ← Linux x64
 //       steam_api.dll               ← Windows x86
-//       steamapi64.dll              ← Windows x64
+//       steam_api64.dll             ← Windows x64
 //       steamclient.dll             ← Windows x86
 //       steamclient64.dll           ← Windows x64
 //   gog/
@@ -328,7 +328,7 @@ fn is_windows(game_exe: &str) -> bool {
 const GSE_VERSION_FILES: &[&str] = &[
     "libsteam_api.so", "libsteam_api64.so",
     "steamclient.so", "steamclient64.so",
-    "steam_api.dll", "steamapi64.dll",
+    "steam_api.dll", "steam_api64.dll",
     "steamclient.dll", "steamclient64.dll",
 ];
 
@@ -338,7 +338,7 @@ fn gse_file_map(is_64: bool, is_win: bool) -> &'static [(&'static str, &'static 
     if is_win {
         if is_64 {
             &[
-                ("steamapi64.dll", "steamapi64.dll"),
+                ("steam_api64.dll", "steam_api64.dll"),
                 ("steamclient64.dll", "steamclient64.dll"),
             ]
         } else {
@@ -401,14 +401,38 @@ fn find_api_emu_dll_folder(game_exe: &str, dll_names: &[&str]) -> Option<PathBuf
 
 /// Check if the game folder contains original Steam API DLLs
 pub fn has_original_steam_dlls(game_exe: &str) -> bool {
-    let dlls = &["libsteam_api.so", "steam_api.dll", "steamapi64.dll"];
-    find_api_emu_dll_folder(game_exe, dlls).is_some()
+    let dlls = &["libsteam_api.so", "steam_api.dll", "steam_api64.dll"];
+    let result = find_api_emu_dll_folder(game_exe, dlls);
+    if result.is_none() {
+        let search_dir = Path::new(game_exe).parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        eprintln!("has_original_steam_dlls: no Steam DLL found in {} (exe={})", search_dir.display(), game_exe);
+        if let Ok(entries) = std::fs::read_dir(&search_dir) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    eprintln!("  file: {}", name);
+                }
+            }
+        }
+    }
+    result.is_some()
 }
 
 /// Check if the game folder contains original GOG Galaxy DLLs
 pub fn has_original_gog_dlls(game_exe: &str) -> bool {
-    let dlls = &["Galaxy.dll", "Galaxy64.dll"];
-    find_api_emu_dll_folder(game_exe, dlls).is_some()
+    let dlls = &["galaxy.dll", "galaxy64.dll"];
+    let result = find_api_emu_dll_folder(game_exe, dlls);
+    if result.is_none() {
+        let search_dir = Path::new(game_exe).parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        eprintln!("has_original_gog_dlls: no Galaxy DLL found in {} (exe={})", search_dir.display(), game_exe);
+        if let Ok(entries) = std::fs::read_dir(&search_dir) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    eprintln!("  file: {}", name);
+                }
+            }
+        }
+    }
+    result.is_some()
 }
 
 /// List available GSE versions under api_emulators/steam/

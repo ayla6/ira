@@ -380,10 +380,27 @@ pub fn switch_to_game(state: &SharedState, lutris_id: i64) {
     state.borrow_mut().selected_id = lutris_id.to_string();
 
     let game_list = state.borrow().game_list.clone();
+    let sidebar_scroll = state.borrow().sidebar_scroll.clone();
     let idx = state.borrow().games.iter().position(|g| g.lutris_id == lutris_id);
     if let Some(idx) = idx {
         let row = game_list.row_at_index((idx + 1) as i32);
         select_row_silently(state, row.as_ref());
+
+        // Scroll the selected row into view if it's not visible
+        if let Some(ref row) = row {
+            if let Some(bounds) = row.compute_bounds(&sidebar_scroll) {
+                let adj = sidebar_scroll.vadjustment();
+                let row_y = bounds.y() as f64;
+                let row_h = bounds.height() as f64;
+                let scroll = adj.value();
+                let page = adj.page_size();
+                if row_y < scroll {
+                    adj.set_value(row_y);
+                } else if row_y + row_h > scroll + page {
+                    adj.set_value(row_y + row_h - page);
+                }
+            }
+        }
     }
 
     let game = state.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned();

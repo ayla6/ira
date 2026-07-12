@@ -297,6 +297,26 @@ fn connect_window_signals(
         }
     });
 
+    // Double-click on sidebar row plays the game
+    let state_clone = state.clone();
+    game_list.connect_row_activated(move |_list, row| {
+        let idx = row.index();
+        if idx >= 1 {
+            let s = state_clone.borrow();
+            let game_idx = (idx - 1) as usize;
+            if game_idx < s.games.len() {
+                let lutris_id = s.games[game_idx].lutris_id;
+                let db_id = s.games[game_idx].db_id;
+                let vid = crate::db::get_default_variant(&s.db, db_id);
+                drop(s);
+                if !state_clone.borrow().running_games.lock().unwrap().contains_key(&lutris_id) {
+                    let _ = super::play_button::launch_game(&state_clone, lutris_id, vid);
+                    let _ = state_clone.borrow().sender.send(crate::AppMessage::GameStarted(lutris_id));
+                }
+            }
+        }
+    });
+
     let state_clone = state.clone();
     add_btn.connect_clicked(move |_| {
         show_add_game_dialog(&state_clone);

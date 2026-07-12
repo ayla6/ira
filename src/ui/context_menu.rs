@@ -36,7 +36,15 @@ pub fn show_game_context_menu(
         let s = state.borrow();
         let config = crate::db::get_game_config(&s.db, game.db_id).ok().flatten();
         let app_default = s.cfg.default_wine_config.clone();
-        let (launch, mut wine, _) = config.unwrap_or_default();
+        let (launch, mut wine, profile_id) = config.unwrap_or_default();
+        if let Some(pid) = profile_id {
+            if let Ok(Some(profile)) = crate::db::get_profile(&s.db, pid) {
+                wine.version = profile.wine_version;
+                wine.custom_wine_path = profile.custom_wine_path;
+                wine.prefix = profile.prefix;
+                wine.arch = profile.arch;
+            }
+        }
         wine = wine.merge_with_default(&app_default);
         let game_dir = if !launch.working_dir.is_empty() {
             Some(launch.working_dir)

@@ -328,8 +328,52 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             });
             action_group.add(&uninstall_btn);
         } else {
+            let versions = if emu_trophy_source == crate::models::GSE {
+                crate::platforms::api_emulators::list_gse_versions(&emu_save_dir)
+            } else {
+                crate::platforms::api_emulators::list_gog_versions(&emu_save_dir)
+            };
+            let has_dlls = if emu_trophy_source == crate::models::GSE {
+                crate::platforms::api_emulators::has_original_steam_dlls(&emu_exe)
+            } else {
+                crate::platforms::api_emulators::has_original_gog_dlls(&emu_exe)
+            };
+
+            if !has_dlls {
+                let missing_row = adw::ActionRow::new();
+                missing_row.set_title("No original Steam/GOG DLLs detected in game folder");
+                missing_row.set_subtitle("Install the game first and make sure it has the original API DLLs");
+                missing_row.set_sensitive(false);
+                action_group.add(&missing_row);
+            }
+
+            let version_row = if !versions.is_empty() {
+                let vr = adw::ComboRow::new();
+                vr.set_title("Emulator version");
+                vr.set_subtitle("Version directory to use for installation");
+                let strings: Vec<&str> = versions.iter().map(|s| s.as_str()).collect();
+                let model = gtk4::StringList::new(&strings);
+                vr.set_model(Some(&model));
+                let default_ver = &state.borrow().cfg.default_api_emu_version;
+                if !default_ver.is_empty() {
+                    if let Some(idx) = versions.iter().position(|v| v == default_ver) {
+                        vr.set_selected(idx as u32);
+                    }
+                }
+                action_group.add(&vr);
+                Some(vr)
+            } else {
+                let no_ver_row = adw::ActionRow::new();
+                no_ver_row.set_title("No emulator versions available");
+                no_ver_row.set_subtitle("Place version directories in api_emulators/");
+                no_ver_row.set_sensitive(false);
+                action_group.add(&no_ver_row);
+                None
+            };
+
             let install_btn = gtk4::Button::with_label("Install API emulator");
             install_btn.add_css_class("suggested-action");
+            install_btn.set_sensitive(has_dlls);
             let exe_c = emu_exe.clone();
             let ts_c = emu_trophy_source.clone();
             let app_id_c = emu_app_id.clone();
@@ -337,10 +381,14 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             let status_c = status_row.clone();
             let langs_c = languages.clone();
             install_btn.connect_clicked(move |_| {
+                let ver = version_row.as_ref().map(|vr| {
+                    let idx = vr.selected() as usize;
+                    if idx < versions.len() { versions[idx].clone() } else { String::new() }
+                }).unwrap_or_default();
                 let result = if ts_c == crate::models::GSE {
-                    crate::platforms::api_emulators::install_gse(&save_dir_c, &exe_c, &app_id_c, &langs_c)
+                    crate::platforms::api_emulators::install_gse(&save_dir_c, &exe_c, &app_id_c, &langs_c, &ver)
                 } else {
-                    crate::platforms::api_emulators::install_nge(&save_dir_c, &exe_c, &app_id_c)
+                    crate::platforms::api_emulators::install_nge(&save_dir_c, &exe_c, &app_id_c, &ver)
                 };
                 match result {
                     Ok(()) => {
@@ -442,6 +490,159 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         stack.add_named(&emu_scroll, Some("api_emulator"));
     }
 
+    // --- Variants page ---
+    let variants: Vec<crate::models::GameVariant> = crate::db::get_variants(&state.borrow().db, db_id).unwrap_or_default();
+    let variant_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    let variant_container = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+    variant_container.set_margin_start(12);
+    variant_container.set_margin_end(12);
+    variant_page.append(&variant_container);
+
+    struct VarW {
+        _name: adw::EntryRow,
+        _exe: adw::EntryRow,
+        _wd: adw::EntryRow,
+        _args: adw::EntryRow,
+        _emu_ver: adw::ComboRow,
+        _emu_model: gtk4::StringList,
+        _group: adw::PreferencesGroup,
+    }
+
+    let var_widgets: Rc<RefCell<Vec<VarW>>> = Rc::new(RefCell::new(Vec::new()));
+
+    // Find unique GSE version list for emu_version dropdown
+    let gse_vers = crate::platforms::api_emulators::list_gse_versions(&state.borrow().save_dir);
+    let gog_vers = crate::platforms::api_emulators::list_gog_versions(&state.borrow().save_dir);
+    let mut all_emu_vers: Vec<String> = Vec::new();
+    for v in &gse_vers { if !all_emu_vers.contains(v) { all_emu_vers.push(v.clone()); } }
+    for v in &gog_vers { if !all_emu_vers.contains(v) { all_emu_vers.push(v.clone()); } }
+
+    let add_variant_fn = {
+        let var_widgets = var_widgets.clone();
+        let container = variant_container.clone();
+        let all_emu_vers = all_emu_vers.clone();
+        move |v: crate::models::GameVariant| {
+            let group = adw::PreferencesGroup::new();
+            group.set_header_suffix(Some(&{
+                let del_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
+                del_btn.add_css_class("flat");
+                del_btn.add_css_class("error");
+                del_btn
+            }));
+
+            let name_entry = adw::EntryRow::new();
+            name_entry.set_title("Variant name");
+            name_entry.set_text(&v.name);
+            group.add(&name_entry);
+
+            let exe_entry = adw::EntryRow::new();
+            exe_entry.set_title("Executable");
+            exe_entry.set_text(&v.exe);
+            let browse = gtk4::Button::from_icon_name("folder-open-symbolic");
+            browse.add_css_class("flat");
+            browse.set_valign(gtk4::Align::Center);
+            let exe_c = exe_entry.clone();
+            browse.connect_clicked(move |_| {
+                let dialog = gtk4::FileDialog::new();
+                dialog.set_title("Select variant executable");
+                let filter = gtk4::FileFilter::new();
+                filter.add_mime_type("application/x-executable");
+                filter.add_pattern("*");
+                dialog.set_default_filter(Some(&filter));
+                let entry = exe_c.clone();
+                dialog.open(None::<&adw::Window>, None::<&gio::Cancellable>, move |result| {
+                    if let Ok(file) = result {
+                        if let Some(path) = file.path() {
+                            entry.set_text(&path.to_string_lossy());
+                        }
+                    }
+                });
+            });
+            exe_entry.add_suffix(&browse);
+            group.add(&exe_entry);
+
+            let wd_entry = adw::EntryRow::new();
+            wd_entry.set_title("Working directory");
+            wd_entry.set_text(&v.working_dir);
+            let wd_browse = gtk4::Button::from_icon_name("folder-open-symbolic");
+            wd_browse.add_css_class("flat");
+            wd_browse.set_valign(gtk4::Align::Center);
+            let wd_c = wd_entry.clone();
+            wd_browse.connect_clicked(move |_| {
+                let dialog = gtk4::FileDialog::new();
+                dialog.set_title("Select working directory");
+                dialog.set_default_filter(Some(&gtk4::FileFilter::new()));
+                let entry = wd_c.clone();
+                dialog.select_folder(None::<&adw::Window>, None::<&gio::Cancellable>, move |result| {
+                    if let Ok(file) = result {
+                        if let Some(path) = file.path() {
+                            entry.set_text(&path.to_string_lossy());
+                        }
+                    }
+                });
+            });
+            wd_entry.add_suffix(&wd_browse);
+            group.add(&wd_entry);
+
+            let args_entry = adw::EntryRow::new();
+            args_entry.set_title("Arguments");
+            args_entry.set_text(&v.args);
+            group.add(&args_entry);
+
+            // Emu version dropdown
+            let (emu_ver_row, emu_model) = if !all_emu_vers.is_empty() {
+                let strings: Vec<&str> = all_emu_vers.iter().map(|s| s.as_str()).collect();
+                let model = gtk4::StringList::new(&strings);
+                let row = adw::ComboRow::new();
+                row.set_title("API emulator version");
+                row.set_model(Some(&model));
+                if !v.emu_version.is_empty() {
+                    if let Some(idx) = all_emu_vers.iter().position(|x| x == &v.emu_version) {
+                        row.set_selected(idx as u32);
+                    }
+                }
+                group.add(&row);
+                (Some(row), model)
+            } else {
+                (None, gtk4::StringList::new(&[] as &[&str]))
+            };
+
+            container.append(&group);
+
+            var_widgets.borrow_mut().push(VarW {
+                _name: name_entry,
+                _exe: exe_entry,
+                _wd: wd_entry,
+                _args: args_entry,
+                _emu_ver: emu_ver_row.unwrap_or_else(|| adw::ComboRow::new()),
+                _emu_model: emu_model,
+                _group: group,
+            });
+        }
+    };
+
+    for v in &variants {
+        add_variant_fn(v.clone());
+    }
+
+    let add_btn = gtk4::Button::with_label("Add variant");
+    add_btn.add_css_class("suggested-action");
+    add_btn.set_margin_top(8);
+    {
+        let add_variant_fn = add_variant_fn;
+        let new_v = crate::models::GameVariant { game_id: db_id, ..Default::default() };
+        add_btn.connect_clicked(move |_| add_variant_fn(new_v.clone()));
+    }
+    variant_page.append(&add_btn);
+
+    let variant_scroll = gtk4::ScrolledWindow::new();
+    variant_scroll.set_child(Some(&variant_page));
+    variant_scroll.set_vexpand(true);
+    variant_scroll.set_hexpand(true);
+    sidebar.append(&super::dialogs::sidebar_separator());
+    sidebar.append(&super::dialogs::settings_sidebar_row("application-x-executable-symbolic", "Variants"));
+    stack.add_named(&variant_scroll, Some("variants"));
+
     // --- Sidebar navigation ---
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
@@ -460,6 +661,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                                 "Logo" => "logo",
                                 "DLC" => "dlc",
                                 "API Emulator" => "api_emulator",
+                                "Variants" => "variants",
                                 _ => "general",
                             };
                             stack_clone.set_visible_child_name(page_id);
@@ -498,6 +700,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let lutris_id = game.lutris_id;
     let app_id = game.app_id.clone();
     let trophy_source = game.trophy_source.clone();
+    let var_widgets_save = var_widgets.clone();
     let save_dir_c = save_dir.clone();
     let logo_controls_c = logo_controls.clone();
     let dlc_switches_c = dlc_switches.clone();
@@ -744,6 +947,29 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         };
         if let Some(g) = game_after_save {
             crate::ui::game_display::display_game(&g, &state_clone);
+        }
+
+        // Save variants
+        {
+            let _ = crate::db::delete_all_variants(&db, db_id_s);
+            for vw in var_widgets_save.borrow().iter() {
+                let name = vw._name.text().to_string();
+                if name.is_empty() { continue; }
+                let emu_idx = vw._emu_ver.selected();
+                let emu_ver = vw._emu_model.string(emu_idx).map(|s| s.to_string()).unwrap_or_default();
+                let variant = crate::models::GameVariant {
+                    id: 0,
+                    game_id: db_id_s,
+                    name,
+                    exe: vw._exe.text().to_string(),
+                    working_dir: vw._wd.text().to_string(),
+                    args: vw._args.text().to_string(),
+                    env_vars: Vec::new(),
+                    emu_version: if emu_ver.starts_with("(no") { String::new() } else { emu_ver },
+                    emu_installed: false,
+                };
+                let _ = crate::db::add_variant(&db, &variant);
+            }
         }
 
         win_s.close();

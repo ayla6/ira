@@ -238,7 +238,7 @@ fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, a
     (page, ps4_enable_row, ps4_exe_row)
 }
 
-fn build_api_emulators_page(cfg: &Config) -> gtk4::Box {
+fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRow, gtk4::StringList) {
     let page = settings_page_container();
 
     let emu_dir = crate::platforms::api_emulators::api_emulators_dir(&cfg.save_dir);
@@ -266,21 +266,61 @@ fn build_api_emulators_page(cfg: &Config) -> gtk4::Box {
     group.add(&dir_row);
     page.append(&group);
 
+    // Default version dropdown
+    let version_group = adw::PreferencesGroup::new();
+    version_group.set_title("Default Version");
+    version_group.set_description(Some("Version to use when installing API emulators on games"));
+
+    let gse_versions = crate::platforms::api_emulators::list_gse_versions(&cfg.save_dir);
+    let gog_versions = crate::platforms::api_emulators::list_gog_versions(&cfg.save_dir);
+    let mut all_versions: Vec<String> = Vec::new();
+    for v in &gse_versions {
+        if !all_versions.contains(v) {
+            all_versions.push(v.clone());
+        }
+    }
+    for v in &gog_versions {
+        if !all_versions.contains(v) {
+            all_versions.push(v.clone());
+        }
+    }
+
+    let version_model = if all_versions.is_empty() {
+        let strings = vec!["(no versions installed)"];
+        gtk4::StringList::new(&strings)
+    } else {
+        let strings: Vec<&str> = all_versions.iter().map(|s| s.as_str()).collect();
+        gtk4::StringList::new(&strings)
+    };
+    let version_row = adw::ComboRow::new();
+    version_row.set_title("Emulator version");
+    version_row.set_subtitle("Default version directory to use when installing");
+    version_row.set_model(Some(&version_model));
+    if !cfg.default_api_emu_version.is_empty() {
+        if let Some(idx) = all_versions.iter().position(|v| v == &cfg.default_api_emu_version) {
+            version_row.set_selected(idx as u32);
+        }
+    } else if !all_versions.is_empty() {
+        version_row.set_selected(0);
+    }
+    version_group.add(&version_row);
+    page.append(&version_group);
+
     let structure_group = adw::PreferencesGroup::new();
     structure_group.set_title("Expected Structure");
     let steam_row = adw::ActionRow::new();
-    steam_row.set_title("steam/linux/x64/steamapi/libsteam_api.so");
-    steam_row.set_subtitle("steam/linux/x64/steamclient/steamclient.so\nsteam/windows/x64/steamapi/steamapi64.dll\nsteam/windows/x64/steamclient/steamclient64.dll\nsteam/generate_interfaces");
+    steam_row.set_title("steam/<version>/");
+    steam_row.set_subtitle("  libsteam_api.so    \u{2192} Linux x86\n  libsteam_api64.so  \u{2192} Linux x64\n  steamclient.so      \u{2192} Linux x86\n  steamclient64.so    \u{2192} Linux x64\n  steam_api.dll       \u{2192} Windows x86\n  steamapi64.dll      \u{2192} Windows x64\n  steamclient.dll     \u{2192} Windows x86\n  steamclient64.dll   \u{2192} Windows x64\n  generate_interfaces (in steam/ root)");
     steam_row.set_sensitive(false);
     structure_group.add(&steam_row);
     let gog_row = adw::ActionRow::new();
-    gog_row.set_title("gog/new/x64/Galaxy64.dll");
-    gog_row.set_subtitle("gog/old/x86/Galaxy.dll\nPlace multiple versions in a folder, the newest is used");
+    gog_row.set_title("gog/<version>/");
+    gog_row.set_subtitle("  Galaxy.dll    \u{2192} Windows x86\n  Galaxy64.dll  \u{2192} Windows x64");
     gog_row.set_sensitive(false);
     structure_group.add(&gog_row);
     page.append(&structure_group);
 
-    page
+    (page, version_row, version_model)
 }
 
 pub fn show_settings_dialog(
@@ -351,7 +391,7 @@ pub fn show_settings_dialog(
     stack.add_named(&profiles_page, Some("profiles"));
 
     sidebar.append(&sidebar_separator());
-    let emu_page = build_api_emulators_page(&cfg);
+    let (emu_page, emu_version_row, emu_version_model) = build_api_emulators_page(&cfg);
     sidebar.append(&settings_sidebar_row("applications-engineering-symbolic", "API Emulators"));
     stack.add_named(&emu_page, Some("api_emulators"));
 
@@ -415,6 +455,12 @@ pub fn show_settings_dialog(
         s.cfg.shadps4_enabled = ps4_enable_row.is_active();
         s.cfg.shadps4_executable = ps4_exe_row.text().to_string();
         s.cfg.default_wine_config = wine_widgets.to_wine_config();
+
+        let idx = emu_version_row.selected();
+        let ver = emu_version_model.string(idx).map(|s| s.to_string()).unwrap_or_default();
+        if !ver.is_empty() && !ver.starts_with("(no versions") {
+            s.cfg.default_api_emu_version = ver.to_string();
+        }
 
         steam_clone.update_keys(&s.cfg.steam_api_key, &s.cfg.steam_griddb_api_key);
 

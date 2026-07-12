@@ -28,10 +28,9 @@ impl SteamClient {
         );
         let resp = self.http.get(&url).send().map_err(|e| e.to_string())?;
         let raw: SteamSchemaResponse = resp.json().map_err(|e| e.to_string())?;
-        let achs = raw.game.available_game_stats.achievements;
-        if achs.is_empty() {
-            return Err(format!("Steam returned 0 achievements for app {}", app_id));
-        }
+        let achs = raw.game.available_game_stats
+            .map(|s| s.achievements)
+            .unwrap_or_default();
         Ok(achs)
     }
 }

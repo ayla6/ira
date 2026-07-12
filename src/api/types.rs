@@ -93,8 +93,8 @@ pub(crate) struct SteamSchemaResponse {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct SteamSchemaGame {
-    #[serde(rename = "availableGameStats")]
-    pub available_game_stats: SteamSchemaStats,
+    #[serde(rename = "availableGameStats", default)]
+    pub available_game_stats: Option<SteamSchemaStats>,
 }
 
 #[derive(Debug, Deserialize)]

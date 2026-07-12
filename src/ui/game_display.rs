@@ -324,7 +324,7 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
     let stats_row = {
         let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
         row.set_valign(gtk4::Align::Center);
-        row.append(&play_button(state, game.lutris_id));
+        row.append(&play_button(state, game.lutris_id, game.db_id));
         row.append(&stat_label("Last played", &format_lastplayed(game.lastplayed)));
         row.append(&stat_label("Play time", &format_playtime(game.playtime)));
         if game.total_count > 0 {

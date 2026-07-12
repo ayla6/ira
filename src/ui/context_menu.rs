@@ -84,7 +84,7 @@ pub fn show_game_context_menu(
         if is_running {
             super::play_button::stop_game(&sc, lutris_id);
         } else {
-            match super::play_button::launch_game(&sc, lutris_id) {
+            match super::play_button::launch_game(&sc, lutris_id, None) {
                 Ok(()) => {
                     let _ = sc.borrow().sender.send(AppMessage::GameStarted(lutris_id));
                 }

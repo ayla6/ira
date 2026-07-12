@@ -35,7 +35,7 @@ pub fn stop_game(state: &SharedState, lutris_id: i64) {
     }
 }
 
-pub fn launch_game(state: &SharedState, lutris_id: i64) -> Result<(), String> {
+pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>) -> Result<(), String> {
     let (running_games, sender, game_info, global_shadps4_exe, db, save_dir, app_default_wine, default_native_env_vars) = {
         let s = state.borrow();
         (
@@ -105,6 +105,26 @@ pub fn launch_game(state: &SharedState, lutris_id: i64) -> Result<(), String> {
 
         wine = wine.merge_with_default(&app_default_wine);
 
+        // If a variant is selected, override launch config values
+        if let Some(vid) = variant_id {
+            if let Ok(variants) = crate::db::get_variants(&db, db_id) {
+                if let Some(var) = variants.iter().find(|v| v.id == vid) {
+                    if !var.exe.is_empty() {
+                        launch.exe = var.exe.clone();
+                    }
+                    if !var.working_dir.is_empty() {
+                        launch.working_dir = var.working_dir.clone();
+                    }
+                    if !var.args.is_empty() {
+                        launch.args = var.args.clone();
+                    }
+                    if !var.env_vars.is_empty() {
+                        launch.env_vars = var.env_vars.clone();
+                    }
+                }
+            }
+        }
+
         if !default_native_env_vars.is_empty() {
             let mut merged = default_native_env_vars.clone();
             for (k, v) in &launch.env_vars {
@@ -149,9 +169,36 @@ pub fn launch_game(state: &SharedState, lutris_id: i64) -> Result<(), String> {
     Ok(())
 }
 
-pub fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
+pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Box {
     let running_games = state.borrow().running_games.clone();
     let sender = state.borrow().sender.clone();
+    let st = state.clone();
+
+    let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+    outer.set_valign(gtk4::Align::Center);
+
+    // Variant selector dropdown
+    let variants = crate::db::get_variants(&state.borrow().db, db_id).unwrap_or_default();
+    let has_variants = !variants.is_empty();
+    let variant_ids: Vec<i64> = variants.iter().map(|v| v.id).collect();
+    let variant_names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
+
+    let var_dropdown = if has_variants {
+        let mut items = vec!["Base game".to_string()];
+        items.extend(variant_names.iter().cloned());
+        let strings: Vec<&str> = items.iter().map(|s| s.as_str()).collect();
+        let model = gtk4::StringList::new(&strings);
+        let dd = gtk4::DropDown::builder().build();
+        dd.set_model(Some(&model));
+        dd.set_valign(gtk4::Align::Center);
+        dd
+    } else {
+        gtk4::DropDown::builder().build()
+    };
+
+    if has_variants {
+        outer.append(&var_dropdown);
+    }
 
     let btn = gtk4::Button::new();
     btn.set_valign(gtk4::Align::Center);
@@ -181,7 +228,6 @@ pub fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
 
     let icon_click = icon.clone();
     let label_click = label.clone();
-    let st = state.clone();
     btn.connect_clicked(move |btn| {
         let is_running = st.borrow().running_games.lock().unwrap().contains_key(&lutris_id);
         if is_running {
@@ -190,7 +236,17 @@ pub fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
             label_click.set_text("Play");
             btn.add_css_class("suggested-action");
         } else {
-            match launch_game(&st, lutris_id) {
+            let variant_id = if has_variants {
+                let sel = var_dropdown.selected();
+                if sel > 0 {
+                    Some(variant_ids[(sel as usize) - 1])
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            match launch_game(&st, lutris_id, variant_id) {
                 Ok(()) => {
                     icon_click.set_icon_name(Some("window-close-symbolic"));
                     label_click.set_text("Stop");
@@ -204,5 +260,6 @@ pub fn play_button(state: &SharedState, lutris_id: i64) -> gtk4::Button {
         }
     });
 
-    btn
+    outer.append(&btn);
+    outer
 }

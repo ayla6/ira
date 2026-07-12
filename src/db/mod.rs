@@ -8,6 +8,7 @@ mod settings;
 mod game_config;
 mod sessions;
 mod profiles;
+mod variants;
 pub use crud::*;
 pub use lookup::*;
 pub use lutris_ops::*;
@@ -15,6 +16,7 @@ pub use settings::*;
 pub use game_config::*;
 pub use sessions::*;
 pub use profiles::*;
+pub use variants::*;
 
 pub(super) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played";
 
@@ -98,5 +100,7 @@ pub fn init_db(db_path: &str) -> DbConn {
         );",
     ).expect("failed to create tables");
 
-    Arc::new(Mutex::new(conn))
+    let conn = Arc::new(Mutex::new(conn));
+    create_variants_table(&conn);
+    conn
 }

@@ -128,7 +128,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
                 let Ok(file) = result else { return };
                 let Some(path) = file.path() else { return };
                 let folder = path.to_string_lossy().into_owned();
-                if let Some(app_id) = crate::platforms::steam_setup::detect_app_id(&folder) {
+                if let Some(app_id) = crate::platforms::steam::detect_app_id(&folder) {
                     sid.set_text(&app_id);
                 }
                 if crate::platforms::gog::is_gog_game(&folder) {
@@ -498,7 +498,7 @@ fn add_game_to_db(
     if !app_id.is_empty() && app_id.parse::<i64>().is_ok() {
         let folder = std::path::Path::new(&launch_config.exe).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
         if !folder.is_empty() {
-            let _ = crate::platforms::steam_setup::add_game_from_folder(&folder, app_id, kind, steam, db, save_dir);
+            let _ = crate::platforms::steam::add_game_from_folder(&folder, app_id, kind, steam, db, save_dir);
         }
     }
     Ok(game_id)

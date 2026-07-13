@@ -16,11 +16,12 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         (game, config, app_default_wine)
     };
     let Some(game) = game else { return };
+    let is_native_platform = game.kind == "steam" || game.kind == "ps4";
     let has_config = config.is_some();
     let (saved_launch, mut saved_wine, saved_profile_id) = config.clone().unwrap_or_default();
 
     if !has_config {
-        saved_wine = app_default_wine.clone();
+        saved_wine = WineConfig::default();
     } else {
         saved_wine = saved_wine.merge_with_default(&app_default_wine);
     }
@@ -74,7 +75,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     sidebar.append(&super::dialogs::settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
 
-    let is_lutris_unmanaged = game.lutris_id != 0 && !has_config;
+    let is_lutris_unmanaged = !game.lutris_name.is_empty() && !has_config;
     if is_lutris_unmanaged {
         let convert_group = adw::PreferencesGroup::new();
         let convert_btn = gtk4::Button::with_label("Convert to managed game");
@@ -192,18 +193,19 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         None
     };
 
-    // --- Launch Config + Wine Config (only if game has a config) ---
-    let launch_config_widgets = if has_config {
+    // --- Launch Config + Wine Config (not for steam/ps4; lutris only if it has a saved config) ---
+    let show_launch_config = !is_native_platform && (game.kind != "lutris" || has_config);
+    let launch_config_widgets = if show_launch_config {
         build_launch_config_page(&saved_launch, &win, &sidebar, &stack, !saved_wine.enabled)
     } else {
         None
     };
 
-    if saved_wine.enabled {
+    if saved_wine.enabled && show_launch_config {
         sidebar.append(&super::dialogs::sidebar_separator());
     }
 
-    let wine_widgets_opt = if saved_wine.enabled {
+    let wine_widgets_opt = if saved_wine.enabled && show_launch_config {
         let (wine_pages, ww) = crate::ui::wine_config_widget::build_wine_config_pages(&saved_wine, Some(&app_default_wine));
         for wp in &wine_pages {
             sidebar.append(&super::dialogs::settings_sidebar_row(wp.icon, wp.label));
@@ -214,7 +216,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         None
     };
 
-    if saved_wine.enabled {
+    if saved_wine.enabled && show_launch_config {
         sidebar.append(&super::dialogs::sidebar_separator());
     }
 
@@ -553,9 +555,11 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     variant_scroll.set_child(Some(&variant_page));
     variant_scroll.set_vexpand(true);
     variant_scroll.set_hexpand(true);
-    sidebar.append(&super::dialogs::sidebar_separator());
-    sidebar.append(&super::dialogs::settings_sidebar_row("application-x-executable-symbolic", "Variants"));
-    stack.add_named(&variant_scroll, Some("variants"));
+    if !is_native_platform && (game.kind != "lutris" || has_config || !variants.is_empty()) {
+        sidebar.append(&super::dialogs::sidebar_separator());
+        sidebar.append(&super::dialogs::settings_sidebar_row("application-x-executable-symbolic", "Variants"));
+        stack.add_named(&variant_scroll, Some("variants"));
+    }
 
     // --- Sidebar navigation ---
     let stack_clone = stack.clone();

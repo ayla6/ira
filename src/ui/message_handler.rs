@@ -107,6 +107,22 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         AppMessage::GamesLoaded(games) => {
             handle_games_loaded(state, games);
         }
+        AppMessage::ReloadGames => {
+            let db = state.borrow().db.clone();
+            let save_dir = state.borrow().save_dir.clone();
+            let sender = state.borrow().sender.clone();
+            let cfg = state.borrow().cfg.clone();
+            let shadps4_enabled = cfg.shadps4_enabled;
+            let steam_enabled = cfg.steam_enabled;
+            let sort_mode = crate::models::SortMode::from_str(&cfg.sort_mode);
+            let sort_descending = cfg.sort_descending;
+            std::thread::spawn(move || {
+                let games = crate::game_list::build_game_list(
+                    &db, &save_dir, shadps4_enabled, steam_enabled, sort_mode, sort_descending,
+                );
+                let _ = sender.send(AppMessage::GamesLoaded(games));
+            });
+        }
         AppMessage::SgdbAssetsDownloaded { db_id, sgdb_id, icon, hero, grid, logo, header } => {
             if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                 g.sgdb_id = sgdb_id;

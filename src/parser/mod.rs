@@ -101,7 +101,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         earned_count: 0,
         total_count: 0,
         hidden: entry.hidden,
-        lutris_id: entry.lutris_db_id.unwrap_or(0),
+        lutris_id: entry.lutris_db_id.unwrap_or(-entry.id),
         slug: String::new(),
         playtime: 0.0,
         lastplayed: entry.last_played,
@@ -169,63 +169,112 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
 
     populate_image_paths(&image_dir, &mut game);
 
-    let status_path = paths::unlock_status_path(save_dir, &entry.trophy_source, app_id, platform_id);
-    let status_map = status::load_status_map(&status_path);
+    let is_steam_native = entry.trophy_source == crate::models::STEAM_NATIVE;
+    let steam_native_data = if is_steam_native {
+        crate::platforms::steam::read_steam_achievements_full(app_id, save_dir)
+    } else {
+        crate::platforms::steam::SteamAchievementData { achievements: Vec::new(), n_total: 0, n_achieved: 0 }
+    };
 
     let meta_path = ach_dir.join("achievements.json");
-    if let Ok(meta_data) = std::fs::read(&meta_path) {
-        if let Ok(meta_list) = serde_json::from_slice::<Vec<crate::models::achievement::AchievementMeta>>(&meta_data) {
-            for meta in meta_list {
-                let status = status_map.get(&meta.name).cloned().unwrap_or_default();
-                let hidden = crate::models::achievement::parse_hidden(&meta.hidden);
-                let icon_gray = if meta.icon_gray.is_empty() {
-                    meta.icon_gray_alt.clone()
-                } else {
-                    meta.icon_gray.clone()
-                };
+    let has_meta = meta_path.is_file();
 
+    if is_steam_native && steam_native_data.n_total > 0 {
+        game.total_count = steam_native_data.n_total;
+        game.earned_count = steam_native_data.n_achieved;
+    }
+
+    if !has_meta && !steam_native_data.achievements.is_empty() {
+        let icons_dir = ach_dir.join("achievement_images");
+        for ach in &steam_native_data.achievements {
+            let icon_path = if !ach.icon_url.is_empty() {
+                let icon_file = icons_dir.join(format!("{}.jpg", ach.id));
+                if icon_file.is_file() {
+                    icon_file.to_string_lossy().into_owned()
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+            let merged = MergedAchievement {
+                name: ach.id.clone(),
+                display_name: ach.display_name.clone(),
+                description: ach.description.clone(),
+                hidden: ach.hidden,
+                earned: ach.earned,
+                earned_time: ach.earned_time,
+                icon_path,
+                icon_gray_path: String::new(),
+                global_percent: ach.global_percent,
+            };
+            game.achievements.push(merged);
+        }
+    } else {
+        let status_map = if entry.trophy_source == crate::models::STEAM_NATIVE {
+            steam_native_data.achievements.iter()
+                .map(|a| (a.id.clone(), crate::models::AchievementStatus { earned: a.earned, earned_time: a.earned_time }))
+                .collect()
+        } else {
+            let status_path = paths::unlock_status_path(save_dir, &entry.trophy_source, app_id, platform_id);
+            status::load_status_map(&status_path)
+        };
+
+        let meta_path = ach_dir.join("achievements.json");
+        if let Ok(meta_data) = std::fs::read(&meta_path) {
+            if let Ok(meta_list) = serde_json::from_slice::<Vec<crate::models::achievement::AchievementMeta>>(&meta_data) {
+                for meta in meta_list {
+                    let status = status_map.get(&meta.name).cloned().unwrap_or_default();
+                    let hidden = crate::models::achievement::parse_hidden(&meta.hidden);
+                    let icon_gray = if meta.icon_gray.is_empty() {
+                        meta.icon_gray_alt.clone()
+                    } else {
+                        meta.icon_gray.clone()
+                    };
+
+                    let ach = MergedAchievement {
+                        name: meta.name.clone(),
+                        display_name: meta.display_name.val.clone(),
+                        description: meta.description.val.clone(),
+                        hidden,
+                        earned: status.earned,
+                        earned_time: status.earned_time,
+                        icon_path: icons::find_icon_path(&ach_dir, &meta.icon),
+                        icon_gray_path: icons::find_icon_path(&ach_dir, &icon_gray),
+                        global_percent: 0.0,
+                    };
+
+                    if !is_steam_native {
+                        game.total_count += 1;
+                        if ach.earned { game.earned_count += 1; }
+                    }
+                    game.achievements.push(ach);
+                }
+            } else {
+                eprintln!("Meta load error for {}", app_id);
+            }
+        } else {
+            let mut keys: Vec<_> = status_map.keys().cloned().collect();
+            keys.sort();
+            for name in keys {
+                let status = &status_map[&name];
                 let ach = MergedAchievement {
-                    name: meta.name.clone(),
-                    display_name: meta.display_name.val.clone(),
-                    description: meta.description.val.clone(),
-                    hidden,
+                    name: name.clone(),
+                    display_name: name.clone(),
+                    description: "No description available.".into(),
+                    hidden: false,
                     earned: status.earned,
                     earned_time: status.earned_time,
-                    icon_path: icons::find_icon_path(&ach_dir, &meta.icon),
-                    icon_gray_path: icons::find_icon_path(&ach_dir, &icon_gray),
+                    icon_path: String::new(),
+                    icon_gray_path: String::new(),
                     global_percent: 0.0,
                 };
-
                 game.total_count += 1;
                 if ach.earned {
                     game.earned_count += 1;
                 }
                 game.achievements.push(ach);
             }
-        } else {
-            eprintln!("Meta load error for {}", app_id);
-        }
-    } else {
-        let mut keys: Vec<_> = status_map.keys().cloned().collect();
-        keys.sort();
-        for name in keys {
-            let status = &status_map[&name];
-            let ach = MergedAchievement {
-                name: name.clone(),
-                display_name: name.clone(),
-                description: "No description available.".into(),
-                hidden: false,
-                earned: status.earned,
-                earned_time: status.earned_time,
-                icon_path: String::new(),
-                icon_gray_path: String::new(),
-                global_percent: 0.0,
-            };
-            game.total_count += 1;
-            if ach.earned {
-                game.earned_count += 1;
-            }
-            game.achievements.push(ach);
         }
     }
 

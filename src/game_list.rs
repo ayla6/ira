@@ -3,6 +3,7 @@ use crate::models::Game;
 use crate::parser;
 use crate::platforms::lutris::{load_lutris_games, LutrisGame};
 use crate::platforms::ps4::{discover_games, load_shadps4_game};
+use crate::platforms::steam;
 
 fn normalize_title(s: &str) -> String {
     let lower = s.to_lowercase();
@@ -75,7 +76,12 @@ fn auto_match_by_title(db: &db::DbConn, save_dir: &str, lutris_games: &[LutrisGa
     }
 }
 
-pub fn build_game_list(db: &db::DbConn, save_dir: &str, shadps4_enabled: bool, sort_mode: crate::models::SortMode, sort_descending: bool) -> Vec<Game> {
+pub fn build_game_list(db: &db::DbConn, save_dir: &str, shadps4_enabled: bool, steam_enabled: bool, sort_mode: crate::models::SortMode, sort_descending: bool) -> Vec<Game> {
+    let steam_games = if steam_enabled { steam::discover_games() } else { Vec::new() };
+    if steam_enabled {
+        cleanup_steam_entries(db, &steam_games);
+    }
+
     let lutris_games = match load_lutris_games() {
         Ok(g) => g,
         Err(e) => {
@@ -148,6 +154,9 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, shadps4_enabled: bool, s
     if shadps4_enabled {
         games.extend(build_shadps4_games(&db, save_dir));
     }
+    if steam_enabled {
+        games.extend(build_steam_games(&db, save_dir, &steam_games));
+    }
     games.sort_by(|a, b| {
         let ord = sort_mode.compare(a, b);
         if sort_descending { ord.reverse() } else { ord }
@@ -189,6 +198,69 @@ fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
             save_dir,
         );
         games.push(game);
+    }
+
+    games
+}
+
+fn cleanup_steam_entries(db: &db::DbConn, discovered: &[steam::SteamGame]) {
+    let discovered_ids: std::collections::HashSet<String> = discovered.iter()
+        .map(|g| g.app_id.clone())
+        .collect();
+
+    let all_entries = db::load_all_games(db).unwrap_or_default();
+    for entry in &all_entries {
+        if entry.kind == crate::models::STEAM && !discovered_ids.contains(&entry.steam_id) {
+            let _ = db::remove_game(db, entry.id);
+        }
+    }
+}
+
+pub fn reimport_steam_games(db: &db::DbConn) {
+    let all_entries = db::load_all_games(db).unwrap_or_default();
+    for entry in &all_entries {
+        if entry.kind == crate::models::STEAM {
+            let _ = db::remove_game(db, entry.id);
+        }
+    }
+}
+
+fn build_steam_games(db: &db::DbConn, save_dir: &str, steam_games: &[steam::SteamGame]) -> Vec<Game> {
+    let mut games = Vec::new();
+
+    for sg in steam_games {
+        if sg.app_id.is_empty() {
+            continue;
+        }
+        let entry = db::find_by_steam_id(db, &sg.app_id).ok().flatten();
+        if entry.is_none() {
+            let kind = crate::models::STEAM;
+            let trophy_source = crate::models::STEAM_NATIVE;
+            if let Err(e) = db::add_game(db, kind, trophy_source, &sg.app_id, &sg.app_id, &sg.name) {
+                eprintln!("Steam: failed to add {} to DB: {}", sg.app_id, e);
+                continue;
+            }
+        }
+
+        let db_entry = db::find_by_steam_id(db, &sg.app_id).ok().flatten();
+        if let Some(e) = db_entry {
+            match parser::load_game(&e, save_dir) {
+                Ok(mut game) => {
+                    if game.name.is_empty() || game.name.starts_with("App ID:") {
+                        if !sg.name.is_empty() {
+                            game.name = sg.name.clone();
+                        }
+                    }
+                    game.game_path = sg.install_dir.to_string_lossy().into_owned();
+                    if let Some((pt, lp)) = steam::read_playtime(&sg.app_id) {
+                        game.playtime = pt;
+                        game.lastplayed = lp;
+                    }
+                    games.push(game);
+                }
+                Err(e) => eprintln!("Steam: failed to load {}: {}", sg.app_id, e),
+            }
+        }
     }
 
     games

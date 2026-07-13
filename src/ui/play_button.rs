@@ -43,7 +43,7 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
             s.sender.clone(),
             s.games.iter()
                 .find(|g| g.lutris_id == lutris_id)
-                .map(|g| (g.kind.clone(), g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id))
+                .map(|g| (g.kind.clone(), g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone()))
                 .unwrap_or_default(),
             s.cfg.shadps4_executable.clone(),
             s.db.clone(),
@@ -57,7 +57,7 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
         return Ok(());
     }
 
-    let (kind, game_path, game_name, per_game_version, db_id) = game_info;
+    let (kind, game_path, game_name, per_game_version, db_id, app_id) = game_info;
 
     let started_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -87,6 +87,19 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
                 });
             }
             Err(e) => return Err(format!("Failed to launch shadPS4: {}", e)),
+        }
+    } else if kind == "steam" {
+        let cmd = vec!["steam".to_string(), "-applaunch".to_string(), app_id.clone()];
+        match crate::launcher::wrapper::spawn_game(&cmd, &[], None) {
+            Ok(_child) => {
+            }
+            Err(_) => {
+                let uri = format!("steam://run/{}", app_id);
+                let cmd = vec!["xdg-open".to_string(), uri];
+                if let Err(e) = crate::launcher::wrapper::spawn_game(&cmd, &[], None) {
+                    return Err(format!("Failed to launch Steam game: {}", e));
+                }
+            }
         }
     } else {
         let (mut launch, mut wine, profile_id) = crate::db::get_game_config(&db, db_id)

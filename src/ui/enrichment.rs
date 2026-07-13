@@ -71,6 +71,12 @@ pub fn enrich_game_async(
                 game.hero_image_path = hero_path;
             }
 
+            if game.icon_path.is_empty() && trophy_source == crate::models::STEAM_NATIVE {
+                if let Some(png) = fetch_steam_game_icon(&app_id, &save_dir, &steam) {
+                    game.icon_path = png;
+                }
+            }
+
             let (grid_path, header_path, logo_path) = steam.ensure_grids(&app_id);
             if game.grid_path.is_empty() && !grid_path.is_empty() {
                 game.grid_path = grid_path;
@@ -124,4 +130,67 @@ pub fn enrich_game_async(
 
         let _ = sender.send(AppMessage::EnrichedGame(game));
     });
+}
+
+/// Fetch the game icon from Steam's local clienticon cache or CDN.
+/// 1. Look up clienticon hash from appinfo.vdf
+/// 2. Try local steam/games/<hash>.ico
+/// 3. Fall back to Steam CDN download
+/// 4. Convert ICO to PNG and save to the game's data directory
+fn fetch_steam_game_icon(
+    app_id: &str,
+    save_dir: &str,
+    steam: &std::sync::Arc<crate::api::SteamClient>,
+) -> Option<String> {
+    let app_id_num: u32 = app_id.parse().ok()?;
+    let clienticon = crate::platforms::steam::get_clienticon(app_id_num)?;
+    if clienticon.is_empty() { return None; }
+
+    let dest_png = crate::parser::data_dir(save_dir, app_id).join("icon.png");
+    if dest_png.is_file() { return Some(dest_png.to_string_lossy().into_owned()); }
+
+    let _ = std::fs::create_dir_all(dest_png.parent()?);
+
+    let ico_in_games = crate::platforms::steam::steam_install_dir()
+        .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
+
+    let ico_bytes = if let Some(ref path) = ico_in_games {
+        if path.is_file() {
+            std::fs::read(path).ok()
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let ico_bytes = match ico_bytes {
+        Some(b) => b,
+        None => {
+            let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", app_id, clienticon);
+            let tmp = dest_png.with_extension("tmp_ico");
+            if steam.download_file(&url, &tmp).is_err() {
+                return None;
+            }
+            match std::fs::read(&tmp) {
+                Ok(b) => { let _ = std::fs::remove_file(&tmp); b }
+                Err(_) => { let _ = std::fs::remove_file(&tmp); return None; }
+            }
+        }
+    };
+
+    let tmp_ico = dest_png.with_extension("ico");
+    if std::fs::write(&tmp_ico, &ico_bytes).is_err() { return None; }
+
+    match crate::parser::convert_ico_to_png(&tmp_ico) {
+        Ok(png_path) => {
+            let _ = std::fs::rename(&png_path, &dest_png);
+            let _ = std::fs::remove_file(&tmp_ico);
+            Some(dest_png.to_string_lossy().into_owned())
+        }
+        Err(_) => {
+            let _ = std::fs::remove_file(&tmp_ico);
+            None
+        }
+    }
 }

@@ -530,12 +530,9 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
         btn.set_valign(gtk4::Align::Center);
         btn.set_tooltip_text(Some("Settings"));
         let st = state.clone();
+        let edit_db_id = game.db_id;
         btn.connect_clicked(move |_| {
-            let (win, cfg, steam) = {
-                let s = st.borrow();
-                (s.window.clone(), s.cfg.clone(), s.steam.clone())
-            };
-            super::dialogs::show_settings_dialog(&win, cfg, steam, &st);
+            super::edit_game_dialog::show_edit_game_dialog(&st, edit_db_id);
         });
         btn
     };

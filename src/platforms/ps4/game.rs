@@ -72,7 +72,7 @@ pub fn load_shadps4_game(
         earned_count: 0,
         total_count: 0,
         hidden,
-        lutris_id: serial_to_lutris_id(serial),
+        lutris_id: -db_id,
         slug: serial.clone(),
         playtime,
         lastplayed: last_played,
@@ -160,16 +160,4 @@ pub fn load_shadps4_game(
     }
 
     game
-}
-
-/// Generate a stable synthetic lutris_id from a CUSA ID.
-/// Uses negative range to avoid collision with real Lutris IDs.
-pub fn serial_to_lutris_id(serial: &str) -> i64 {
-    let hash = serial.bytes().fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
-    -((hash % 1_000_000) as i64 + 2_000_000)
-}
-
-/// Check if a lutris_id is a shadPS4 synthetic ID.
-pub fn is_shadps4_id(lutris_id: i64) -> bool {
-    lutris_id <= -2_000_000
 }

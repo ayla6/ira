@@ -118,7 +118,8 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     let search_entry = gtk4::SearchEntry::new();
     search_entry.set_placeholder_text(Some(S::SEARCH_GAMES));
     search_entry.set_hexpand(false);
-    search_entry.set_max_width_chars(100);
+    search_entry.set_max_width_chars(90);
+    search_entry.set_width_chars(50);
     header_bar.set_title_widget(Some(&search_entry));
 
     let menu_btn = gtk4::MenuButton::new();

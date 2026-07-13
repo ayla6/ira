@@ -238,6 +238,73 @@ fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, a
     (page, ps4_enable_row, ps4_exe_row)
 }
 
+fn build_steam_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow) {
+    let page = settings_page_container();
+
+    let enable_group = adw::PreferencesGroup::new();
+    let enable_row = adw::SwitchRow::new();
+    enable_row.set_title("Enable Steam integration");
+    enable_row.set_subtitle("Scan your Steam library for installed games and achievements");
+    enable_row.set_active(cfg.steam_enabled);
+    enable_group.add(&enable_row);
+    page.append(&enable_group);
+
+    let info_group = adw::PreferencesGroup::new();
+    info_group.set_title("Steam installation");
+
+    let steam_dir = crate::platforms::steam::steam_install_dir();
+    let dir_row = adw::ActionRow::new();
+    dir_row.set_title("Steam directory");
+    match &steam_dir {
+        Some(path) => dir_row.set_subtitle(&path.display().to_string()),
+        None => {
+            dir_row.set_subtitle("Steam not found");
+            dir_row.set_sensitive(false);
+        }
+    }
+    info_group.add(&dir_row);
+
+    let user_ids = crate::platforms::steam::get_steam_user_ids();
+    let user_row = adw::ActionRow::new();
+    user_row.set_title("Steam user IDs");
+    if user_ids.is_empty() {
+        user_row.set_subtitle("None found");
+        user_row.set_sensitive(false);
+    } else {
+        user_row.set_subtitle(&user_ids.join(", "));
+    }
+    info_group.add(&user_row);
+    page.append(&info_group);
+
+    (page, enable_row)
+}
+
+fn build_debug_page(state: &SharedState) -> gtk4::Box {
+    let page = settings_page_container();
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Steam");
+
+    let reimport_row = adw::ActionRow::new();
+    reimport_row.set_title("Reimport Steam games");
+    reimport_row.set_subtitle("Remove all native Steam games from the database and re-discover them");
+    let reimport_btn = gtk4::Button::with_label("Reimport");
+    reimport_btn.add_css_class("suggested-action");
+    reimport_btn.set_valign(gtk4::Align::Center);
+    reimport_row.add_suffix(&reimport_btn);
+    group.add(&reimport_row);
+
+    let state_clone = state.clone();
+    reimport_btn.connect_clicked(move |_| {
+        let db = state_clone.borrow().db.clone();
+        crate::game_list::reimport_steam_games(&db);
+        let _ = state_clone.borrow().sender.send(crate::AppMessage::ReloadGames);
+    });
+
+    page.append(&group);
+    page
+}
+
 fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRow, gtk4::StringList) {
     let page = settings_page_container();
 
@@ -365,6 +432,10 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("applications-games-symbolic", "shadPS4"));
     stack.add_named(&ps4_page, Some("ps4"));
 
+    let (steam_page, steam_enable_row) = build_steam_settings_page(&cfg);
+    sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Steam"));
+    stack.add_named(&steam_page, Some("steam"));
+
     let (wine_pages, wine_widgets) = super::wine_config_widget::build_wine_config_pages(&cfg.default_wine_config, None);
     sidebar.append(&sidebar_separator());
     for wp in &wine_pages {
@@ -381,6 +452,10 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("applications-engineering-symbolic", "API Emulators"));
     stack.add_named(&emu_page, Some("api_emulators"));
 
+    let debug_page = build_debug_page(state);
+    sidebar.append(&settings_sidebar_row("preferences-developer-symbolic", "Debug"));
+    stack.add_named(&debug_page, Some("debug"));
+
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
@@ -392,11 +467,13 @@ pub fn show_settings_dialog(
                                 "General" => "general",
                                 "API Keys" => "api",
                                 "shadPS4" => "ps4",
+                "Steam" => "steam",
                                 "Performance" => "Performance",
                                 "Graphics" => "Graphics",
                                 "Wine Advanced" => "Wine Advanced",
                                 "Wine Profiles" => "profiles",
                                 "API Emulators" => "api_emulators",
+                                "Debug" => "debug",
                                 _ => "general",
                             };
                             stack_clone.set_visible_child_name(page_id);
@@ -440,6 +517,7 @@ pub fn show_settings_dialog(
         s.cfg.grid_cover_width = grid_spin.value() as i32;
         s.cfg.shadps4_enabled = ps4_enable_row.is_active();
         s.cfg.shadps4_executable = ps4_exe_row.text().to_string();
+        s.cfg.steam_enabled = steam_enable_row.is_active();
         s.cfg.default_wine_config = wine_widgets.to_wine_config();
 
         let idx = emu_version_row.selected();
@@ -1307,6 +1385,49 @@ fn build_image_section(
         let refresh = refresh_images.clone();
         btn.connect_clicked(move |_| {
             let _ = steam.force_download_steam(&id_c, &asset_c);
+            refresh();
+        });
+        btns.append(&btn);
+    }
+
+    if is_steam && asset_type == "icon" && game.trophy_source == crate::models::STEAM_NATIVE {
+        let btn = gtk4::Button::with_label("Steam");
+        let steam = state.borrow().steam.clone();
+        let id_c = id.clone();
+        let save_dir_c = save_dir.clone();
+        let refresh = refresh_images.clone();
+        btn.connect_clicked(move |_| {
+            if let Ok(app_id_num) = id_c.parse::<u32>() {
+                if let Some(clienticon) = crate::platforms::steam::get_clienticon(app_id_num) {
+                    let dest = crate::parser::data_dir(&save_dir_c, &id_c).join("icon.png");
+                    let _ = std::fs::create_dir_all(dest.parent().unwrap());
+                    let ico_path = crate::platforms::steam::steam_install_dir()
+                        .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
+                    let got = if let Some(ref p) = ico_path {
+                        if p.is_file() {
+                            if let Ok(ico_data) = std::fs::read(p) {
+                                let tmp = dest.with_extension("ico");
+                                if std::fs::write(&tmp, &ico_data).is_ok() {
+                                    let r = crate::parser::convert_ico_to_png(&tmp).ok()
+                                        .and_then(|png| { let _ = std::fs::rename(&png, &dest); std::fs::remove_file(&tmp).ok(); Some(()) });
+                                    let _ = std::fs::remove_file(&tmp);
+                                    r.is_some()
+                                } else { false }
+                            } else { false }
+                        } else { false }
+                    } else { false };
+                    if !got {
+                        let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
+                        let tmp = dest.with_extension("ico");
+                        if steam.download_file(&url, &tmp).is_ok() {
+                            if let Ok(png) = crate::parser::convert_ico_to_png(&tmp) {
+                                let _ = std::fs::rename(&png, &dest);
+                            }
+                            let _ = std::fs::remove_file(&tmp);
+                        }
+                    }
+                }
+            }
             refresh();
         });
         btns.append(&btn);

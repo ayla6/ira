@@ -7,6 +7,9 @@ use std::collections::HashMap;
 use super::state::SharedState;
 
 pub fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
+    updated.kind = existing.kind.clone();
+    updated.game_path = existing.game_path.clone();
+
     if !existing.name.is_empty() && !existing.name.starts_with("App ID:") {
         updated.name = existing.name.clone();
     }

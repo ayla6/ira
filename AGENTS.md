@@ -91,6 +91,9 @@ Level 6:           main.rs           — entry point only
   `NOT NULL DEFAULT 0`, the Rust field is `i64`, not `Option<i64>`.
 - **Implement `Default` for any struct with 10+ fields.** Construction sites
   use `..Default::default()` instead of spelling out 20 empty strings.
+- **Never use `#[allow(dead_code)]` to suppress warnings.** Either use the
+  field/function or remove it. Serde fields that exist only for deserialization
+  should be prefixed with `_` (e.g. `_success`) if truly unused.
 
 ### Error handling
 - **`Result<T, String>` for all fallible operations.** Consistent across the crate.

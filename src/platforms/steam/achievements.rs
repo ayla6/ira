@@ -120,16 +120,18 @@ fn parse_schema(data: &[u8]) -> Result<std::collections::HashMap<usize, String>,
 
     let mut pos = 0;
     while pos < data.len() {
-        let bits_idx = find_bytes(data, b"bits\x00", pos).ok_or("no bits field")?;
+        let Some(bits_idx) = find_bytes(data, b"bits\x00", pos) else { break; };
 
         let val_start = skip_nulls(data, bits_idx + 5);
         let val_end = data[val_start..].iter()
             .position(|&b| b == 0)
             .ok_or("bits value not null-terminated")?;
-        let bits_val: usize = std::str::from_utf8(&data[val_start..val_start + val_end])
-            .map_err(|e| e.to_string())?
-            .parse()
-            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let bits_str = std::str::from_utf8(&data[val_start..val_start + val_end])
+            .map_err(|e| e.to_string())?;
+        let Ok(bits_val) = bits_str.parse::<usize>() else {
+            pos = val_start + val_end;
+            continue;
+        };
 
         let next_bits = find_bytes(data, b"bits\x00", val_start)
             .unwrap_or(data.len());

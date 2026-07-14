@@ -143,9 +143,7 @@ pub fn build_ra_games_threaded(db: &db::DbConn, save_dir: &str, ra_config: &RaCo
         let sender = sender.clone();
         move || {
             let games = retroachievements::build_ra_games(&db, &save_dir, &ra_config);
-            for game in games {
-                let _ = sender.send(crate::AppMessage::NewGame(game));
-            }
+            let _ = sender.send(crate::AppMessage::RAGamesLoaded(games));
         }
     });
 }

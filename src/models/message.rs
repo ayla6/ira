@@ -16,6 +16,8 @@ pub enum AppMessage {
     ShadPS4PlaytimeChanged,
     /// Initial game list loaded in the background.
     GamesLoaded(Vec<Game>),
+    /// RA games loaded in the background (batch, appended to existing list).
+    RAGamesLoaded(Vec<Game>),
     /// Reload the entire game list (e.g. after Steam reimport).
     ReloadGames,
     /// SGDB assets downloaded for a game.

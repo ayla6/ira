@@ -127,6 +127,9 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         AppMessage::GamesLoaded(games) => {
             handle_games_loaded(state, games);
         }
+        AppMessage::RAGamesLoaded(games) => {
+            handle_ra_games_loaded(state, games);
+        }
         AppMessage::ReloadGames => {
             let db = state.borrow().db.clone();
             let save_dir = state.borrow().save_dir.clone();
@@ -341,6 +344,54 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
             ra_token.clone(),
             ra_password.clone(),
         );
+    }
+}
+
+fn handle_ra_games_loaded(state: &SharedState, games: Vec<Game>) {
+    {
+        let mut s = state.borrow_mut();
+        for g in &games {
+            if !g.app_id.is_empty() {
+                s.game_names.lock().unwrap().insert(g.app_id.clone(), g.name.clone());
+            }
+            let found = s.games.iter().position(|existing| existing.db_id == g.db_id);
+            if let Some(i) = found {
+                let mut g_clone = g.clone();
+                g_clone.hidden = s.games[i].hidden;
+                g_clone.lutris_name = s.games[i].lutris_name.clone();
+                g_clone.manual_unmatch = s.games[i].manual_unmatch;
+                s.games[i] = g_clone;
+            } else {
+                s.games.push(g.clone());
+            }
+        }
+        let sort_mode = crate::models::SortMode::from_str(&s.cfg.sort_mode);
+        let sort_descending = s.cfg.sort_descending;
+        s.games.sort_by(|a, b| {
+            let ord = sort_mode.compare(a, b);
+            if sort_descending { ord.reverse() } else { ord }
+        });
+    }
+
+    rebuild_sidebar(state);
+    let selected = state.borrow().selected_id.clone();
+    if selected.is_empty() {
+        let row = state.borrow().game_list.row_at_index(0);
+        select_row_silently(state, row.as_ref());
+        let needs_refresh = !state.borrow().grid_refresh_pending;
+        if needs_refresh {
+            state.borrow_mut().grid_refresh_pending = true;
+            let state_clone = state.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
+                let mut s = state_clone.borrow_mut();
+                s.grid_refresh_pending = false;
+                let should_refresh = s.selected_id.is_empty() && !s.content_unloaded;
+                drop(s);
+                if should_refresh {
+                    show_grid_view(&state_clone);
+                }
+            });
+        }
     }
 }
 

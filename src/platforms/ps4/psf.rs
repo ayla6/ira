@@ -44,6 +44,10 @@ fn read_u16_be(b: &[u8]) -> u16 {
 /// Parse a param.sfo file, returning a map of key → value.
 pub fn parse_psf(path: &Path) -> Result<HashMap<String, PsfValue>, String> {
     let data = std::fs::read(path).map_err(|e| format!("read {}: {}", path.display(), e))?;
+    parse_psf_bytes(&data)
+}
+
+pub fn parse_psf_bytes(data: &[u8]) -> Result<HashMap<String, PsfValue>, String> {
     if data.len() < 20 {
         return Err("param.sfo too short".into());
     }

@@ -156,16 +156,41 @@ pub fn build_ra_games(
         for (rom_name, rom_path) in &roms {
             let rom_path_str = rom_path.to_string_lossy().into_owned();
 
-            // First: try to find an existing entry by ROM path — this prevents
-            // re-matching on every restart which could change the app_id and
-            // orphan the old entry (losing sgdb_id, trophy_source, etc.)
+            // Read disc serial for stable identification
+            let serial = crate::platforms::rom_serial::read_serial(rom_path);
+            let display_name = serial.as_deref().unwrap_or(rom_name);
+
+            // Try RA matching using the serial (if available) or ROM name
+            let matched_id = if client.is_some() {
+                match_rom_to_game(display_name, &ra_games)
+                    .or_else(|| match_rom_to_game(rom_name, &ra_games))
+            } else {
+                None
+            };
+            let (app_id, title, trophy_source) = match matched_id {
+                Some(id) => {
+                    let t = ra_games
+                        .iter()
+                        .find(|g| g.id == id)
+                        .map(|g| g.title.clone())
+                        .unwrap_or_else(|| rom_name.clone());
+                    (id.to_string(), t, RA.to_string())
+                }
+                None => (serial.clone().unwrap_or_else(|| rom_name.clone()), display_name.to_string(), String::new()),
+            };
+
+            // Find existing entry: by rom_path first, then by steam_id (app_id)
             let existing = crate::db::find_by_rom_path(db, &rom_path_str)
                 .ok()
-                .flatten();
+                .flatten()
+                .or_else(|| crate::db::find_by_steam_id(db, &app_id).ok().flatten());
 
             let game = match existing {
                 Some(e) => {
-                    // Found by ROM path — use the existing entry as-is
+                    // Found existing entry — use it, preserving all DB data
+                    if e.rom_path.is_empty() {
+                        let _ = crate::db::set_rom_path(db, e.id, &rom_path_str);
+                    }
                     let mut g = crate::parser::load_game(&e, save_dir)
                         .unwrap_or_else(|_| Game {
                             app_id: e.steam_id.clone(),
@@ -173,7 +198,7 @@ pub fn build_ra_games(
                             trophy_source: e.trophy_source.clone(),
                             platform_id: e.platform_id.clone(),
                             db_id: e.id,
-                            name: if e.title.is_empty() { rom_name.clone() } else { e.title.clone() },
+                            name: if e.title.is_empty() { title.clone() } else { e.title.clone() },
                             ..Default::default()
                         });
                     g.game_path = rom_path_str.clone();
@@ -181,24 +206,7 @@ pub fn build_ra_games(
                     g
                 }
                 None => {
-                    // New ROM — try RA matching
-                    let matched_id = if client.is_some() {
-                        match_rom_to_game(rom_name, &ra_games)
-                    } else {
-                        None
-                    };
-                    let (app_id, title, trophy_source) = match matched_id {
-                        Some(id) => {
-                            let title = ra_games
-                                .iter()
-                                .find(|g| g.id == id)
-                                .map(|g| g.title.clone())
-                                .unwrap_or_else(|| rom_name.clone());
-                            (id.to_string(), title, RA.to_string())
-                        }
-                        None => (rom_name.clone(), rom_name.clone(), String::new()),
-                    };
-
+                    // New ROM — create entry
                     match crate::db::add_game(db, RETRO, &trophy_source, &app_id, console.name, &title) {
                         Ok(id) => {
                             let _ = crate::db::set_rom_path(db, id, &rom_path_str);

@@ -1,5 +1,5 @@
 mod paths;
-mod psf;
+pub mod psf;
 mod npbind;
 mod discovery;
 mod playtime;

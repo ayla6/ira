@@ -24,6 +24,8 @@ pub struct Config {
     pub shadps4_executable: String,
     #[serde(default)]
     pub steam_enabled: bool,
+    #[serde(default = "default_true")]
+    pub lutris_enabled: bool,
     #[serde(default = "default_save_dir")]
     pub save_dir: String,
     #[serde(default)]
@@ -50,6 +52,7 @@ impl Default for Config {
             shadps4_enabled: false,
             shadps4_executable: String::new(),
             steam_enabled: false,
+            lutris_enabled: true,
             save_dir: default_save_dir(),
             default_wine_config: WineConfig::default(),
             default_native_env_vars: Vec::new(),
@@ -127,6 +130,7 @@ impl Config {
             shadps4_enabled: self.shadps4_enabled,
             shadps4_executable: self.shadps4_executable.clone(),
             steam_enabled: self.steam_enabled,
+            lutris_enabled: self.lutris_enabled,
             save_dir: self.save_dir.clone(),
             default_wine_config: self.default_wine_config.clone(),
             default_native_env_vars: self.default_native_env_vars.clone(),

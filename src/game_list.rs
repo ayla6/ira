@@ -76,7 +76,7 @@ fn auto_match_by_title(db: &db::DbConn, save_dir: &str, lutris_games: &[LutrisGa
     }
 }
 
-pub fn build_game_list(db: &db::DbConn, save_dir: &str, shadps4_enabled: bool, steam_enabled: bool, sort_mode: crate::models::SortMode, sort_descending: bool) -> Vec<Game> {
+pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, shadps4_enabled: bool, steam_enabled: bool, sort_mode: crate::models::SortMode, sort_descending: bool) -> Vec<Game> {
     let steam_games = if steam_enabled { steam::discover_games() } else { Vec::new() };
     if steam_enabled && !steam_games.is_empty() {
         cleanup_steam_entries(db, &steam_games);
@@ -87,6 +87,31 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, shadps4_enabled: bool, s
         eprintln!("[steam] Discovered {} games, {} playtimes", steam_games.len(), steam_playtimes.len());
     }
 
+    let mut games = if lutris_enabled {
+        build_lutris_games(db, save_dir)
+    } else {
+        parser::load_games(db, save_dir)
+    };
+
+    games.sort_by(|a, b| {
+        let ord = sort_mode.compare(a, b);
+        if sort_descending { ord.reverse() } else { ord }
+    });
+
+    if shadps4_enabled {
+        games.extend(build_shadps4_games(&db, save_dir));
+    }
+    if steam_enabled {
+        games.extend(build_steam_games(&db, save_dir, &steam_games, &steam_playtimes));
+    }
+    games.sort_by(|a, b| {
+        let ord = sort_mode.compare(a, b);
+        if sort_descending { ord.reverse() } else { ord }
+    });
+    games
+}
+
+fn build_lutris_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
     let lutris_games = match load_lutris_games() {
         Ok(g) => g,
         Err(e) => {
@@ -151,21 +176,6 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, shadps4_enabled: bool, s
             games.push(game);
         }
     }
-    games.sort_by(|a, b| {
-        let ord = sort_mode.compare(a, b);
-        if sort_descending { ord.reverse() } else { ord }
-    });
-
-    if shadps4_enabled {
-        games.extend(build_shadps4_games(&db, save_dir));
-    }
-    if steam_enabled {
-        games.extend(build_steam_games(&db, save_dir, &steam_games, &steam_playtimes));
-    }
-    games.sort_by(|a, b| {
-        let ord = sort_mode.compare(a, b);
-        if sort_descending { ord.reverse() } else { ord }
-    });
     games
 }
 

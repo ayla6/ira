@@ -42,7 +42,7 @@ pub(super) fn sidebar_separator() -> gtk4::ListBoxRow {
     row
 }
 
-fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow, gtk4::SpinButton) {
+fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow, gtk4::SpinButton, adw::SwitchRow) {
     let page = settings_page_container();
 
     let notif_group = adw::PreferencesGroup::new();
@@ -59,8 +59,16 @@ fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw:
     bg_row.set_subtitle(S::CLOSE_TO_BG_SUBTITLE);
     bg_row.set_active(cfg.close_to_background);
     notif_group.add(&bg_row);
-
     page.append(&notif_group);
+
+    let sources_group = adw::PreferencesGroup::new();
+    sources_group.set_title("Game sources");
+    let lutris_row = adw::SwitchRow::new();
+    lutris_row.set_title("Lutris integration");
+    lutris_row.set_subtitle("Load games from Lutris database");
+    lutris_row.set_active(cfg.lutris_enabled);
+    sources_group.add(&lutris_row);
+    page.append(&sources_group);
 
     let hidden_group = adw::PreferencesGroup::new();
     let hidden_row = adw::SwitchRow::new();
@@ -78,7 +86,7 @@ fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw:
     grid_group.add(&grid_row);
     page.append(&grid_group);
 
-    (page, notif_row, bg_row, hidden_row, grid_spin)
+    (page, notif_row, bg_row, hidden_row, grid_spin, lutris_row)
 }
 
 fn build_api_keys_page(cfg: &Config) -> (gtk4::Box, adw::EntryRow, adw::EntryRow) {
@@ -420,7 +428,7 @@ pub fn show_settings_dialog(
     stack.set_margin_top(16);
     stack.set_margin_bottom(16);
 
-    let (general_page, notif_row, bg_row, hidden_row, grid_spin) = build_general_settings_page(&cfg);
+    let (general_page, notif_row, bg_row, hidden_row, grid_spin, lutris_row) = build_general_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
 
@@ -518,6 +526,7 @@ pub fn show_settings_dialog(
         s.cfg.shadps4_enabled = ps4_enable_row.is_active();
         s.cfg.shadps4_executable = ps4_exe_row.text().to_string();
         s.cfg.steam_enabled = steam_enable_row.is_active();
+        s.cfg.lutris_enabled = lutris_row.is_active();
         s.cfg.default_wine_config = wine_widgets.to_wine_config();
 
         let idx = emu_version_row.selected();

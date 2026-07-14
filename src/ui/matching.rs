@@ -8,9 +8,9 @@ use super::helpers::confirm_dialog;
 use crate::strings as S;
 
 pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: String, lutris_name: String) {
-    let (steam, watcher, sender, db, save_dir, ra_username, ra_token) = {
+    let (steam, watcher, sender, db, save_dir, ra_username, ra_token, ra_password) = {
         let s = state.borrow();
-        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone())
+        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
     };
     std::thread::spawn(move || {
         if let Err(e) = crate::db::upsert_matching(&db, lutris_id, &steam_app_id, "lutris", "gse", &steam_app_id) {
@@ -47,6 +47,7 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
                             db,
                             ra_username,
                             ra_token,
+                            ra_password,
                         );
                     }
                     Err(e) => eprintln!("match_game_to_steam: load_game failed: {}", e),

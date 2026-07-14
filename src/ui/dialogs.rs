@@ -305,7 +305,7 @@ fn build_steam_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow) {
     (page, enable_row)
 }
 
-fn build_ra_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow, adw::EntryRow) {
+fn build_ra_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow, adw::EntryRow, adw::EntryRow) {
     let page = settings_page_container();
 
     let enable_group = adw::PreferencesGroup::new();
@@ -324,13 +324,18 @@ fn build_ra_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::Entr
     username_row.set_text(&cfg.ra_username);
     creds_group.add(&username_row);
 
+    let password_row = adw::PasswordEntryRow::new();
+    password_row.set_title("Password");
+    password_row.set_text(&cfg.ra_password);
+    creds_group.add(&password_row);
+
     let token_row = adw::PasswordEntryRow::new();
-    token_row.set_title("API Token");
+    token_row.set_title("API Token (optional — auto-fetched from password)");
     token_row.set_text(&cfg.ra_token);
     creds_group.add(&token_row);
     page.append(&creds_group);
 
-    (page, enable_row, username_row, token_row.upcast())
+    (page, enable_row, username_row, password_row.upcast(), token_row.upcast())
 }
 
 struct ConsolePageWidgets {
@@ -645,7 +650,7 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Steam"));
     stack.add_named(&steam_page, Some("steam"));
 
-    let (ra_page, ra_enable_row, ra_username_row, ra_token_row) = build_ra_settings_page(&cfg);
+    let (ra_page, ra_enable_row, ra_username_row, ra_password_row, ra_token_row) = build_ra_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("applications-science-symbolic", "RetroAchievements"));
     stack.add_named(&ra_page, Some("ra"));
 
@@ -750,6 +755,7 @@ pub fn show_settings_dialog(
         s.cfg.lutris_enabled = lutris_enable_row.is_active();
         s.cfg.ra_enabled = ra_enable_row.is_active();
         s.cfg.ra_username = ra_username_row.text().to_string();
+        s.cfg.ra_password = ra_password_row.text().to_string();
         s.cfg.ra_token = ra_token_row.text().to_string();
         s.cfg.psx_enabled = psx_widgets.enable_row.is_active();
         s.cfg.ra_psx_folder = psx_widgets.folder_row.text().to_string();

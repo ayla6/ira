@@ -24,11 +24,12 @@ pub fn enrich_game_async(
     db: DbConn,
     ra_username: String,
     ra_token: String,
+    ra_password: String,
 ) {
     std::thread::spawn(move || {
         if trophy_source == crate::models::RA {
             let _guard = RA_ENRICH_LOCK.lock().unwrap();
-            enrich_ra(&app_id, &trophy_source, &platform_id, db_id, lutris_id, &title, &save_dir, &sender, &ra_username, &ra_token);
+            enrich_ra(&app_id, &trophy_source, &platform_id, db_id, lutris_id, &title, &save_dir, &sender, &ra_username, &ra_token, &ra_password);
             return;
         }
 
@@ -219,14 +220,15 @@ fn enrich_ra(
     sender: &AppSender,
     ra_username: &str,
     ra_token: &str,
+    ra_password: &str,
 ) {
     if crate::platforms::retroachievements::RaClient::auth_is_broken() {
         return;
     }
 
-    if ra_username.is_empty() || ra_token.is_empty() {
-        eprintln!("RA: skipping enrichment for {} — username_len={} token_len={}",
-            app_id, ra_username.len(), ra_token.len());
+    if ra_username.is_empty() || (ra_token.is_empty() && ra_password.is_empty()) {
+        eprintln!("RA: skipping enrichment for {} — username_len={} token_len={} password_len={}",
+            app_id, ra_username.len(), ra_token.len(), ra_password.len());
         return;
     }
 
@@ -242,7 +244,7 @@ fn enrich_ra(
         game.name = title.to_string();
     }
 
-    crate::platforms::retroachievements::enrich_ra_game(&mut game, save_dir, ra_username, ra_token);
+    crate::platforms::retroachievements::enrich_ra_game(&mut game, save_dir, ra_username, ra_token, ra_password);
 
     let _ = sender.send(AppMessage::EnrichedGame(game));
 }

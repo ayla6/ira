@@ -26,8 +26,8 @@ pub struct RaClient {
 }
 
 impl RaClient {
-    pub fn new(username: &str, token: &str) -> Self {
-        RaClient {
+    pub fn new(username: &str, token: &str, password: &str) -> Self {
+        let mut client = RaClient {
             http: reqwest::blocking::Client::builder()
                 .timeout(Duration::from_secs(20))
                 .build()
@@ -35,18 +35,50 @@ impl RaClient {
             username: username.to_string(),
             token: token.to_string(),
             last_request: Mutex::new(std::time::Instant::now() - Duration::from_secs(1)),
+        };
+
+        if !password.is_empty() {
+            match client.login_with_password(password) {
+                Ok(fresh_token) => {
+                    eprintln!("RA: login successful, got fresh token (len {})", fresh_token.len());
+                    client.token = fresh_token;
+                }
+                Err(e) => {
+                    eprintln!("RA: login failed: {}", e);
+                }
+            }
         }
+
+        client
+    }
+
+    fn login_with_password(&self, password: &str) -> Result<String, String> {
+        let params = [
+            ("r", "login2"),
+            ("u", &self.username),
+            ("p", password),
+        ];
+        let text = self.get_raw(&params)?;
+        let resp: LoginResponse = serde_json::from_str(&text)
+            .map_err(|e| format!("parse login response: {}", e))?;
+        if resp.token.is_empty() {
+            return Err("login returned empty token".to_string());
+        }
+        Ok(resp.token)
     }
 
     pub fn from_config(cfg: &RaConfig) -> Option<Self> {
-        if cfg.username.is_empty() || cfg.token.is_empty() {
-            eprintln!("RA: username='{}' token_len={} — skipping RA API calls",
-                cfg.username, cfg.token.len());
-            None
-        } else {
-            eprintln!("RA: creating client for user '{}' (token length {})", cfg.username, cfg.token.len());
-            Some(Self::new(&cfg.username, &cfg.token))
+        if cfg.username.is_empty() {
+            eprintln!("RA: username is empty, skipping");
+            return None;
         }
+        if cfg.password.is_empty() && cfg.token.is_empty() {
+            eprintln!("RA: no password or token set, skipping");
+            return None;
+        }
+        eprintln!("RA: creating client for user '{}' (password_len={}, token_len={})",
+            cfg.username, cfg.password.len(), cfg.token.len());
+        Some(Self::new(&cfg.username, &cfg.token, &cfg.password))
     }
 
     pub fn auth_is_broken() -> bool {
@@ -60,6 +92,23 @@ impl RaClient {
             std::thread::sleep(Duration::from_millis(RA_RATE_LIMIT_MS) - elapsed);
         }
         *last = std::time::Instant::now();
+    }
+
+    fn get_raw(&self, params: &[(&str, &str)]) -> Result<String, String> {
+        self.rate_limit();
+        let url = reqwest::Url::parse_with_params(RA_BASE_URL, params)
+            .map_err(|e| e.to_string())?;
+        let resp = self
+            .http
+            .get(url.clone())
+            .send()
+            .map_err(|e| e.to_string())?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(format!("HTTP {} for {}", status, url));
+        }
+        resp.text().map_err(|e| e.to_string())
     }
 
     fn get(&self, params: &[(&str, &str)]) -> Result<String, String> {
@@ -92,7 +141,7 @@ impl RaClient {
             return Err(format!("HTTP {}", status));
         }
         if !status.is_success() {
-            return Err(format!("HTTP {}", status));
+            return Err(format!("HTTP {} for {}", status, url));
         }
 
         RA_AUTH_FAILURES.store(0, Ordering::Relaxed);
@@ -241,6 +290,16 @@ impl RaClient {
 }
 
 #[derive(Debug, Deserialize)]
+struct LoginResponse {
+    #[serde(default)]
+    _success: bool,
+    #[serde(default)]
+    _error: String,
+    #[serde(default, rename = "Token")]
+    token: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct ConsoleGamesResponse {
     #[serde(default)]
     _success: bool,
@@ -376,12 +435,12 @@ pub fn build_ra_achievements(
     (achievements, icon_path, icon_gray_path)
 }
 
-pub fn enrich_ra_game(game: &mut Game, save_dir: &str, username: &str, token: &str) {
+pub fn enrich_ra_game(game: &mut Game, save_dir: &str, username: &str, token: &str, password: &str) {
     if RaClient::auth_is_broken() {
         return;
     }
 
-    let client = RaClient::new(username, token);
+    let client = RaClient::new(username, token, password);
 
     let game_data = match client.fetch_game_data(save_dir, &game.app_id) {
         Ok(d) => d,

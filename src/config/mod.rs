@@ -9,6 +9,7 @@ pub struct RaConfig {
     pub ra_enabled: bool,
     pub username: String,
     pub token: String,
+    pub password: String,
     pub psx_enabled: bool,
     pub psx_folder: String,
     pub psx_executable: String,
@@ -63,6 +64,8 @@ pub struct Config {
     pub ra_username: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_token: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ra_password: String,
     #[serde(default)]
     pub psx_enabled: bool,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -111,6 +114,7 @@ impl Default for Config {
             ra_enabled: false,
             ra_username: String::new(),
             ra_token: String::new(),
+            ra_password: String::new(),
             psx_enabled: false,
             ra_psx_folder: String::new(),
             ra_psx_executable: String::new(),
@@ -190,6 +194,10 @@ pub fn load_config() -> Config {
     if !ra_token.is_empty() {
         c.ra_token = ra_token;
     }
+    let ra_password = secrets::get_secret("ra_password");
+    if !ra_password.is_empty() {
+        c.ra_password = ra_password;
+    }
     if needs_migration {
         let _ = c.save();
     }
@@ -202,6 +210,7 @@ impl Config {
             ra_enabled: self.ra_enabled,
             username: self.ra_username.clone(),
             token: self.ra_token.clone(),
+            password: self.ra_password.clone(),
             psx_enabled: self.psx_enabled,
             psx_folder: self.ra_psx_folder.clone(),
             psx_executable: self.ra_psx_executable.clone(),
@@ -221,11 +230,13 @@ impl Config {
         let steam_err = secrets::set_secret("steam", &self.steam_api_key);
         let sgdb_err = secrets::set_secret("steamgriddb", &self.steam_griddb_api_key);
         let ra_err = secrets::set_secret("ra_token", &self.ra_token);
+        let ra_pw_err = secrets::set_secret("ra_password", &self.ra_password);
 
         let mut plaintext = Config {
             steam_api_key: String::new(),
             steam_griddb_api_key: String::new(),
             ra_token: String::new(),
+            ra_password: String::new(),
             notifications_enabled: self.notifications_enabled,
             close_to_background: self.close_to_background,
             show_hidden_games: self.show_hidden_games,
@@ -263,6 +274,9 @@ impl Config {
         }
         if ra_err.is_err() {
             plaintext.ra_token = self.ra_token.clone();
+        }
+        if ra_pw_err.is_err() {
+            plaintext.ra_password = self.ra_password.clone();
         }
 
         let path = config_path();

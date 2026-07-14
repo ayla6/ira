@@ -278,9 +278,9 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
         (s.steam.clone(), s.watcher.clone(), s.sender.clone())
     };
 
-    let (ra_username, ra_token) = {
+    let (ra_username, ra_token, ra_password) = {
         let s = state.borrow();
-        (s.cfg.ra_username.clone(), s.cfg.ra_token.clone())
+        (s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
     };
 
     let db = state.borrow().db.clone();
@@ -319,6 +319,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
             db.clone(),
             ra_username.clone(),
             ra_token.clone(),
+            ra_password.clone(),
         );
     }
 }

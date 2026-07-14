@@ -826,7 +826,7 @@ pub(super) fn build_game_general_page(
     game: &Game,
     win: &adw::Window,
     languages: &[String],
-) -> (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>, Option<adw::EntryRow>, Option<adw::ComboRow>) {
+) -> (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>, Option<adw::EntryRow>, Option<adw::ComboRow>, Rc<RefCell<Option<String>>>) {
     let general_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let title_entry = adw::EntryRow::new();
@@ -915,6 +915,54 @@ pub(super) fn build_game_general_page(
         }
     }
 
+    let pending_ra_core: Rc<RefCell<Option<String>>> = Default::default();
+    if game.kind == "retro" {
+        let cores = crate::platforms::emulator_detect::detect_ra_cores();
+        if !cores.is_empty() {
+            let core_group = adw::PreferencesGroup::new();
+            core_group.set_title("RetroArch Core");
+
+            let mut core_names: Vec<String> = vec!["Follow global".to_string()];
+            core_names.extend(cores.iter().map(|c| c.display_name.clone()));
+            let str_refs: Vec<&str> = core_names.iter().map(|s| s.as_str()).collect();
+            let core_model = gtk4::StringList::new(&str_refs);
+            let core_dropdown = gtk4::DropDown::new(Some(core_model), None::<&gtk4::PropertyExpression>);
+
+            let mut selected_idx: u32 = 0;
+            if !game.ra_core.is_empty() {
+                for (i, c) in cores.iter().enumerate() {
+                    if c.path == game.ra_core {
+                        selected_idx = (i + 1) as u32;
+                        break;
+                    }
+                }
+            }
+            core_dropdown.set_selected(selected_idx);
+
+            let pending_ra_core_c = pending_ra_core.clone();
+            core_dropdown.connect_selected_notify(move |dd| {
+                let idx = dd.selected();
+                let path = if idx == 0 {
+                    String::new()
+                } else {
+                    match crate::platforms::emulator_detect::detect_ra_cores().into_iter().nth((idx - 1) as usize) {
+                        Some(c) => c.path,
+                        None => return,
+                    }
+                };
+                *pending_ra_core_c.borrow_mut() = Some(path);
+            });
+
+            let core_row = adw::ActionRow::new();
+            core_row.set_title("Core");
+            core_row.set_subtitle("Override the RetroArch core for this game");
+            core_dropdown.set_valign(gtk4::Align::Center);
+            core_row.add_suffix(&core_dropdown);
+            core_group.add(&core_row);
+            general_page.append(&core_group);
+        }
+    }
+
     let mut app_id_entry: Option<adw::EntryRow> = None;
 
     if game.trophy_source == crate::models::GSE || game.trophy_source == crate::models::NGE || game.kind == "ps4" {
@@ -991,7 +1039,7 @@ pub(super) fn build_game_general_page(
         None
     };
 
-    (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row)
+    (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core)
 }
 
 fn show_steam_id_search_popup(

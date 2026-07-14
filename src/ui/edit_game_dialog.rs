@@ -70,7 +70,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
     // --- General page ---
     let languages = app_details.as_ref().map(|d| d.languages.clone()).unwrap_or_default();
-    let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row) =
+    let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core) =
         super::dialogs::build_game_general_page(state, &game, &win, &languages);
     sidebar.append(&super::dialogs::settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
@@ -661,6 +661,10 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             let _ = crate::db::set_shadps4_version(&db, db_id_s, ver);
         }
 
+        if let Some(core) = pending_ra_core.borrow().as_ref() {
+            let _ = crate::db::set_ra_core(&db, db_id_s, core);
+        }
+
         // Save launch config + wine config
         if let Some(ref lc) = launch_config_widgets {
             let launch = GameLaunchConfig {
@@ -828,6 +832,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             g.sort_title = sort_title.clone();
             if let Some(ver) = pending_version.borrow().as_ref() {
                 g.shadps4_version = ver.clone();
+            }
+            if let Some(core) = pending_ra_core.borrow().as_ref() {
+                g.ra_core = core.clone();
             }
             if app_id_changed {
                 if new_app_id_val.is_empty() {

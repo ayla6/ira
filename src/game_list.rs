@@ -89,6 +89,8 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, sh
         eprintln!("[steam] Discovered {} games, {} playtimes", steam_games.len(), steam_playtimes.len());
     }
 
+    let ra_any_console = ra_config.psx_enabled || ra_config.ps2_enabled || ra_config.psp_enabled;
+
     let mut games = if lutris_enabled {
         build_lutris_games(db, save_dir)
     } else {
@@ -98,7 +100,7 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, sh
     games.retain(|g| {
         if !steam_enabled && g.kind == "steam" { return false; }
         if !shadps4_enabled && g.kind == "ps4" { return false; }
-        if !ra_config.enabled && g.kind == "retro" { return false; }
+        if !ra_any_console && g.kind == "retro" { return false; }
         true
     });
 
@@ -113,7 +115,7 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, sh
     if steam_enabled {
         games.extend(build_steam_games(&db, save_dir, &steam_games, &steam_playtimes));
     }
-    if ra_config.enabled {
+    if ra_any_console {
         games.extend(retroachievements::build_ra_games(&db, save_dir, ra_config));
     }
     games.sort_by(|a, b| {

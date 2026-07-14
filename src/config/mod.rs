@@ -6,15 +6,21 @@ use crate::models::WineConfig;
 
 #[derive(Debug, Clone, Default)]
 pub struct RaConfig {
-    pub enabled: bool,
+    pub ra_enabled: bool,
     pub username: String,
     pub token: String,
+    pub psx_enabled: bool,
     pub psx_folder: String,
     pub psx_executable: String,
+    pub psx_ra_core: String,
+    pub ps2_enabled: bool,
     pub ps2_folder: String,
     pub ps2_executable: String,
+    pub ps2_ra_core: String,
+    pub psp_enabled: bool,
     pub psp_folder: String,
     pub psp_executable: String,
+    pub psp_ra_core: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,18 +63,30 @@ pub struct Config {
     pub ra_username: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_token: String,
+    #[serde(default)]
+    pub psx_enabled: bool,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_psx_folder: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_psx_executable: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ra_psx_ra_core: String,
+    #[serde(default)]
+    pub ps2_enabled: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_ps2_folder: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_ps2_executable: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ra_ps2_ra_core: String,
+    #[serde(default)]
+    pub psp_enabled: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_psp_folder: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_psp_executable: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ra_psp_ra_core: String,
 }
 
 impl Default for Config {
@@ -93,12 +111,18 @@ impl Default for Config {
             ra_enabled: false,
             ra_username: String::new(),
             ra_token: String::new(),
+            psx_enabled: false,
             ra_psx_folder: String::new(),
             ra_psx_executable: String::new(),
+            ra_psx_ra_core: String::new(),
+            ps2_enabled: false,
             ra_ps2_folder: String::new(),
             ra_ps2_executable: String::new(),
+            ra_ps2_ra_core: String::new(),
+            psp_enabled: false,
             ra_psp_folder: String::new(),
             ra_psp_executable: String::new(),
+            ra_psp_ra_core: String::new(),
         }
     }
 }
@@ -139,9 +163,19 @@ fn xdg_dir(xdg_home: Option<PathBuf>) -> PathBuf {
 
 pub fn load_config() -> Config {
     let mut c = Config::default();
+    let mut needs_migration = false;
     if let Ok(data) = std::fs::read(config_path()) {
         if let Ok(loaded) = serde_json::from_slice::<Config>(&data) {
             c = loaded;
+            // One-off migration: if ra_enabled was set but per-console enables don't exist yet,
+            // copy ra_enabled to all three console toggles.
+            let raw: serde_json::Value = serde_json::from_slice(&data).unwrap_or(serde_json::Value::Null);
+            if raw.get("psx_enabled").is_none() && c.ra_enabled {
+                c.psx_enabled = true;
+                c.ps2_enabled = true;
+                c.psp_enabled = true;
+                needs_migration = true;
+            }
         }
     }
     let steam_key = secrets::get_secret("steam");
@@ -156,21 +190,30 @@ pub fn load_config() -> Config {
     if !ra_token.is_empty() {
         c.ra_token = ra_token;
     }
+    if needs_migration {
+        let _ = c.save();
+    }
     c
 }
 
 impl Config {
     pub fn ra_config(&self) -> RaConfig {
         RaConfig {
-            enabled: self.ra_enabled,
+            ra_enabled: self.ra_enabled,
             username: self.ra_username.clone(),
             token: self.ra_token.clone(),
+            psx_enabled: self.psx_enabled,
             psx_folder: self.ra_psx_folder.clone(),
             psx_executable: self.ra_psx_executable.clone(),
+            psx_ra_core: self.ra_psx_ra_core.clone(),
+            ps2_enabled: self.ps2_enabled,
             ps2_folder: self.ra_ps2_folder.clone(),
             ps2_executable: self.ra_ps2_executable.clone(),
+            ps2_ra_core: self.ra_ps2_ra_core.clone(),
+            psp_enabled: self.psp_enabled,
             psp_folder: self.ra_psp_folder.clone(),
             psp_executable: self.ra_psp_executable.clone(),
+            psp_ra_core: self.ra_psp_ra_core.clone(),
         }
     }
 
@@ -199,12 +242,18 @@ impl Config {
             sort_descending: self.sort_descending,
             ra_enabled: self.ra_enabled,
             ra_username: self.ra_username.clone(),
+            psx_enabled: self.psx_enabled,
             ra_psx_folder: self.ra_psx_folder.clone(),
             ra_psx_executable: self.ra_psx_executable.clone(),
+            ra_psx_ra_core: self.ra_psx_ra_core.clone(),
+            ps2_enabled: self.ps2_enabled,
             ra_ps2_folder: self.ra_ps2_folder.clone(),
             ra_ps2_executable: self.ra_ps2_executable.clone(),
+            ra_ps2_ra_core: self.ra_ps2_ra_core.clone(),
+            psp_enabled: self.psp_enabled,
             ra_psp_folder: self.ra_psp_folder.clone(),
             ra_psp_executable: self.ra_psp_executable.clone(),
+            ra_psp_ra_core: self.ra_psp_ra_core.clone(),
         };
         if steam_err.is_err() {
             plaintext.steam_api_key = self.steam_api_key.clone();

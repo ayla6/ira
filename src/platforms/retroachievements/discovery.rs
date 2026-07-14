@@ -21,7 +21,7 @@ struct ConsoleConfig {
 
 fn console_configs(cfg: &RaConfig) -> Vec<ConsoleConfig> {
     let mut consoles = Vec::new();
-    if !cfg.psx_folder.is_empty() {
+    if cfg.psx_enabled && !cfg.psx_folder.is_empty() {
         consoles.push(ConsoleConfig {
             id: CONSOLE_PSX,
             name: "psx",
@@ -29,7 +29,7 @@ fn console_configs(cfg: &RaConfig) -> Vec<ConsoleConfig> {
             extensions: PSX_EXTENSIONS,
         });
     }
-    if !cfg.ps2_folder.is_empty() {
+    if cfg.ps2_enabled && !cfg.ps2_folder.is_empty() {
         consoles.push(ConsoleConfig {
             id: CONSOLE_PS2,
             name: "ps2",
@@ -37,7 +37,7 @@ fn console_configs(cfg: &RaConfig) -> Vec<ConsoleConfig> {
             extensions: PS2_EXTENSIONS,
         });
     }
-    if !cfg.psp_folder.is_empty() {
+    if cfg.psp_enabled && !cfg.psp_folder.is_empty() {
         consoles.push(ConsoleConfig {
             id: CONSOLE_PSP,
             name: "psp",
@@ -136,27 +136,36 @@ pub fn build_ra_games(
     save_dir: &str,
     cfg: &RaConfig,
 ) -> Vec<Game> {
-    let client = match RaClient::from_config(cfg) {
-        Some(c) => c,
-        None => return Vec::new(),
+    let has_credentials = !cfg.username.is_empty() && !cfg.token.is_empty();
+    let client = if cfg.ra_enabled && has_credentials {
+        RaClient::from_config(cfg)
+    } else {
+        None
     };
 
     let consoles = console_configs(cfg);
     let mut games = Vec::new();
 
     for console in &consoles {
-        let ra_games = match client.fetch_console_games(save_dir, console.id) {
-            Ok(g) => g,
-            Err(e) => {
-                eprintln!("RA: failed to fetch game list for {}: {}", console.name, e);
-                continue;
-            }
+        let ra_games = match &client {
+            Some(c) => match c.fetch_console_games(save_dir, console.id) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("RA: failed to fetch game list for {}: {}", console.name, e);
+                    continue;
+                }
+            },
+            None => Vec::new(),
         };
 
         let roms = scan_roms(&console.folder, console.extensions);
 
         for (rom_name, rom_path) in &roms {
-            let matched_id = match_rom_to_game(rom_name, &ra_games);
+            let matched_id = if client.is_some() {
+                match_rom_to_game(rom_name, &ra_games)
+            } else {
+                None
+            };
             let (app_id, title, trophy_source) = match matched_id {
                 Some(id) => {
                     let title = ra_games

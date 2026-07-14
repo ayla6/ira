@@ -144,9 +144,22 @@ pub fn show_grid_view(state: &SharedState) {
         pic.set_paintable(Some(&placeholder));
         overlay.set_child(Some(&pic));
 
+        let name_label = gtk4::Label::new(None);
+        name_label.set_wrap(true);
+        name_label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+        name_label.set_max_width_chars(15);
+        name_label.set_halign(gtk4::Align::Center);
+        name_label.set_valign(gtk4::Align::Center);
+        name_label.set_margin_start(6);
+        name_label.set_margin_end(6);
+        name_label.add_css_class("cover-name-fallback");
+        name_label.set_visible(false);
+        overlay.add_overlay(&name_label);
+
         vbox.append(&overlay);
 
         unsafe { vbox.set_data::<AtomicI64>("game-db-id", AtomicI64::new(0)) };
+        unsafe { vbox.set_data::<gtk4::Label>("name-label", name_label.clone()) };
 
         let sc = state_for_setup.clone();
         let click = gtk4::GestureClick::new();
@@ -196,6 +209,9 @@ pub fn show_grid_view(state: &SharedState) {
         let pic_widget = overlay.child().unwrap();
         let pic = pic_widget.downcast_ref::<gtk4::Picture>().unwrap();
 
+        let name_label = unsafe { vbox.data::<gtk4::Label>("name-label") }
+            .map(|ptr| unsafe { ptr.as_ref() }.clone());
+
         let game_item = list_item
             .item()
             .unwrap()
@@ -208,9 +224,16 @@ pub fn show_grid_view(state: &SharedState) {
             }
             if !game.grid_path.is_empty() {
                 crate::images::set_picture_natural(pic, &game.grid_path, cover_width, cover_height);
+                if let Some(ref label) = name_label {
+                    label.set_visible(false);
+                }
             } else {
                 let placeholder = crate::images::ScaledPaintable::new_empty(cover_width, cover_height);
                 pic.set_paintable(Some(&placeholder));
+                if let Some(ref label) = name_label {
+                    label.set_text(&game.name);
+                    label.set_visible(true);
+                }
             }
 
             if let Some(text) = badge_text(&game, sort_mode) {
@@ -234,11 +257,17 @@ pub fn show_grid_view(state: &SharedState) {
         let pic_widget = overlay.child().unwrap();
         let pic = pic_widget.downcast_ref::<gtk4::Picture>().unwrap();
 
-        if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("lutris-id") } {
+        if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-db-id") } {
             unsafe { ptr.as_ref() }.store(0, Ordering::Relaxed);
         }
         let placeholder = crate::images::ScaledPaintable::new_empty(cover_width, cover_height);
         pic.set_paintable(Some(&placeholder));
+
+        if let Some(label) = unsafe { vbox.data::<gtk4::Label>("name-label") } {
+            let label = unsafe { label.as_ref() };
+            label.set_text("");
+            label.set_visible(false);
+        }
 
         if let Some(badge) = unsafe { vbox.steal_data::<gtk4::Label>("badge") } {
             overlay.remove_overlay(&badge);

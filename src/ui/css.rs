@@ -69,11 +69,17 @@ gridview.game-grid child:focus-within {
     box-shadow: 0 6px 24px 6px rgba(0,0,0,0.5);
 }
 
-.cover-badge {
+ .cover-badge {
     background-color: rgba(0, 0, 0, 0.75);
     color: white;
     border-radius: 4px;
     padding: 2px 8px;
+    font-weight: 600;
+}
+
+.cover-name-fallback {
+    color: @theme_fg_color;
+    opacity: 0.7;
     font-weight: 600;
 }
 

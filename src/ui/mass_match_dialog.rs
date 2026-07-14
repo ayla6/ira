@@ -296,18 +296,26 @@ fn handle_unified_sgdb_result(
         let sc = state.clone();
         undo_btn.connect_clicked(move |_| {
             let _ = crate::db::set_sgdb_id(&sc.borrow().db, db_id, "");
-            if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
-                g.sgdb_id.clear();
-                g.icon_path.clear();
-                g.hero_image_path.clear();
-                g.grid_path.clear();
-                g.header_path.clear();
-                g.logo_path.clear();
+            {
+                let mut s = sc.borrow_mut();
+                if let Some(g) = s.games.iter_mut().find(|g| g.db_id == db_id) {
+                    g.sgdb_id.clear();
+                    g.icon_path.clear();
+                    g.hero_image_path.clear();
+                    g.grid_path.clear();
+                    g.header_path.clear();
+                    g.logo_path.clear();
+                }
             }
-            let s = sc.borrow();
-            if let Some(entry) = crate::db::find_by_steam_id(&s.db, &s.games.iter().find(|g| g.db_id == db_id).map(|g| g.app_id.clone()).unwrap_or_default()).ok().flatten() {
-                if let Ok(game) = crate::parser::load_game(&entry, &s.save_dir) {
-                    if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
+            let (db, save_dir, app_id) = {
+                let s = sc.borrow();
+                let app_id = s.games.iter().find(|g| g.db_id == db_id).map(|g| g.app_id.clone()).unwrap_or_default();
+                (s.db.clone(), s.save_dir.clone(), app_id)
+            };
+            if let Some(entry) = crate::db::find_by_steam_id(&db, &app_id).ok().flatten() {
+                if let Ok(game) = crate::parser::load_game(&entry, &save_dir) {
+                    let mut s = sc.borrow_mut();
+                    if let Some(g) = s.games.iter_mut().find(|g| g.db_id == db_id) {
                         g.icon_path = game.icon_path;
                         g.hero_image_path = game.hero_image_path;
                         g.grid_path = game.grid_path;

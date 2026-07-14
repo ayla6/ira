@@ -51,6 +51,9 @@ fn badge_text(game: &Game, mode: SortMode) -> Option<String> {
 }
 
 pub fn show_grid_view(state: &SharedState) {
+    state.borrow_mut().selected_id.clear();
+    super::sidebar::apply_selected_highlight(state);
+
     let content_box = state.borrow().content_box.clone();
     let content_scroll = state.borrow().content_scroll.clone();
 

@@ -19,8 +19,15 @@ pub fn enrich_game_async(
     sender: AppSender,
     save_dir: String,
     db: DbConn,
+    ra_username: String,
+    ra_token: String,
 ) {
     std::thread::spawn(move || {
+        if trophy_source == crate::models::RA {
+            enrich_ra(&app_id, &trophy_source, &platform_id, db_id, lutris_id, &title, &save_dir, &sender, &ra_username, &ra_token);
+            return;
+        }
+
         let mut entry = GameEntry::for_reload(db_id, "", &trophy_source, &app_id, &platform_id, lutris_id);
         entry.title = title;
 
@@ -195,4 +202,33 @@ fn fetch_steam_game_icon(
             None
         }
     }
+}
+
+fn enrich_ra(
+    app_id: &str,
+    trophy_source: &str,
+    platform_id: &str,
+    db_id: i64,
+    lutris_id: i64,
+    title: &str,
+    save_dir: &str,
+    sender: &AppSender,
+    ra_username: &str,
+    ra_token: &str,
+) {
+    let entry = GameEntry::for_reload(db_id, crate::models::RETRO, trophy_source, app_id, platform_id, lutris_id);
+    let mut game = match load_game(&entry, save_dir) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("RA: failed to load game {}: {}", app_id, e);
+            return;
+        }
+    };
+    if !title.is_empty() {
+        game.name = title.to_string();
+    }
+
+    crate::platforms::retroachievements::enrich_ra_game(&mut game, save_dir, ra_username, ra_token);
+
+    let _ = sender.send(AppMessage::EnrichedGame(game));
 }

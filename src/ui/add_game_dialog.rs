@@ -5,9 +5,9 @@ use adw::prelude::*;
 use super::state::SharedState;
 
 pub fn show_add_game_dialog(state: &SharedState) {
-    let (window, db, sender, steam, watcher, save_dir) = {
+    let (window, db, sender, steam, watcher, save_dir, ra_username, ra_token) = {
         let s = state.borrow();
-        (s.window.clone(), s.db.clone(), s.sender.clone(), s.steam.clone(), s.watcher.clone(), s.save_dir.clone())
+        (s.window.clone(), s.db.clone(), s.sender.clone(), s.steam.clone(), s.watcher.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone())
     };
 
     let win = adw::Window::new();
@@ -261,6 +261,8 @@ pub fn show_add_game_dialog(state: &SharedState) {
         let steam_c = steam.clone();
         let watcher_c = watcher.clone();
         let save_dir_c = save_dir.clone();
+        let ra_username_c = ra_username.clone();
+        let ra_token_c = ra_token.clone();
 
         std::thread::spawn(move || {
             match add_game_to_db(&db_c, &name_c, &kind_c, &ts_c, &app_id_c, &platform_id, &launch_config, &wine_config, selected_profile_id, &steam_c, &save_dir_c) {
@@ -279,6 +281,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
                                 game.app_id.clone(), game.trophy_source.clone(), game.platform_id.clone(),
                                 game.db_id, game.lutris_id, g_name,
                                 steam_c, watcher_c, sender_c, save_dir_c, db_c,
+                                ra_username_c, ra_token_c,
                             );
                         }
                     }

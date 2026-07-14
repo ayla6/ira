@@ -1,8 +1,10 @@
 use crate::db;
+use crate::config::RaConfig;
 use crate::models::Game;
 use crate::parser;
 use crate::platforms::lutris::{load_lutris_games, LutrisGame};
 use crate::platforms::ps4::{discover_games, load_shadps4_game};
+use crate::platforms::retroachievements;
 use crate::platforms::steam;
 
 fn normalize_title(s: &str) -> String {
@@ -76,7 +78,7 @@ fn auto_match_by_title(db: &db::DbConn, save_dir: &str, lutris_games: &[LutrisGa
     }
 }
 
-pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, shadps4_enabled: bool, steam_enabled: bool, sort_mode: crate::models::SortMode, sort_descending: bool) -> Vec<Game> {
+pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, shadps4_enabled: bool, steam_enabled: bool, ra_config: &RaConfig, sort_mode: crate::models::SortMode, sort_descending: bool) -> Vec<Game> {
     let steam_games = if steam_enabled { steam::discover_games() } else { Vec::new() };
     if steam_enabled && !steam_games.is_empty() {
         cleanup_steam_entries(db, &steam_games);
@@ -90,8 +92,15 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, sh
     let mut games = if lutris_enabled {
         build_lutris_games(db, save_dir)
     } else {
-        parser::load_games(db, save_dir)
+        load_non_lutris_games(db, save_dir)
     };
+
+    games.retain(|g| {
+        if !steam_enabled && g.kind == "steam" { return false; }
+        if !shadps4_enabled && g.kind == "ps4" { return false; }
+        if !ra_config.enabled && g.kind == "retro" { return false; }
+        true
+    });
 
     games.sort_by(|a, b| {
         let ord = sort_mode.compare(a, b);
@@ -103,6 +112,9 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, sh
     }
     if steam_enabled {
         games.extend(build_steam_games(&db, save_dir, &steam_games, &steam_playtimes));
+    }
+    if ra_config.enabled {
+        games.extend(retroachievements::build_ra_games(&db, save_dir, ra_config));
     }
     games.sort_by(|a, b| {
         let ord = sort_mode.compare(a, b);
@@ -218,6 +230,18 @@ fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
     games
 }
 
+/// Load DB games that are NOT linked to Lutris (lutris_db_id is None).
+/// Used when Lutris is disabled — Lutris-linked games are hidden but
+/// their DB entries are preserved untouched.
+fn load_non_lutris_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
+    let entries = db::load_all_games(db).unwrap_or_default();
+    entries
+        .into_iter()
+        .filter(|e| e.lutris_db_id.is_none())
+        .filter_map(|e| parser::load_game(&e, save_dir).ok())
+        .collect()
+}
+
 fn cleanup_steam_entries(db: &db::DbConn, discovered: &[steam::SteamGame]) {
     let discovered_ids: std::collections::HashSet<String> = discovered.iter()
         .map(|g| g.app_id.clone())
@@ -226,17 +250,6 @@ fn cleanup_steam_entries(db: &db::DbConn, discovered: &[steam::SteamGame]) {
     let all_entries = db::load_all_games(db).unwrap_or_default();
     for entry in &all_entries {
         if entry.kind == crate::models::STEAM && !discovered_ids.contains(&entry.steam_id) {
-            let _ = db::remove_game(db, entry.id);
-        }
-    }
-}
-
-/// Remove all native Steam games from the DB so they get re-discovered
-/// on the next `build_game_list` call.
-pub fn reimport_steam_games(db: &db::DbConn) {
-    let all_entries = db::load_all_games(db).unwrap_or_default();
-    for entry in &all_entries {
-        if entry.kind == crate::models::STEAM {
             let _ = db::remove_game(db, entry.id);
         }
     }

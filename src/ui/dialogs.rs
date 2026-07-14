@@ -42,7 +42,7 @@ pub(super) fn sidebar_separator() -> gtk4::ListBoxRow {
     row
 }
 
-fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow, gtk4::SpinButton, adw::SwitchRow) {
+fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow, gtk4::SpinButton) {
     let page = settings_page_container();
 
     let notif_group = adw::PreferencesGroup::new();
@@ -61,15 +61,6 @@ fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw:
     notif_group.add(&bg_row);
     page.append(&notif_group);
 
-    let sources_group = adw::PreferencesGroup::new();
-    sources_group.set_title("Game sources");
-    let lutris_row = adw::SwitchRow::new();
-    lutris_row.set_title("Lutris integration");
-    lutris_row.set_subtitle("Load games from Lutris database");
-    lutris_row.set_active(cfg.lutris_enabled);
-    sources_group.add(&lutris_row);
-    page.append(&sources_group);
-
     let hidden_group = adw::PreferencesGroup::new();
     let hidden_row = adw::SwitchRow::new();
     hidden_row.set_title(S::SHOW_HIDDEN_GAMES);
@@ -86,7 +77,36 @@ fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw:
     grid_group.add(&grid_row);
     page.append(&grid_group);
 
-    (page, notif_row, bg_row, hidden_row, grid_spin, lutris_row)
+    (page, notif_row, bg_row, hidden_row, grid_spin)
+}
+
+fn build_lutris_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow) {
+    let page = settings_page_container();
+
+    let enable_group = adw::PreferencesGroup::new();
+    let enable_row = adw::SwitchRow::new();
+    enable_row.set_title("Enable Lutris integration");
+    enable_row.set_subtitle("Load games from the Lutris database");
+    enable_row.set_active(cfg.lutris_enabled);
+    enable_group.add(&enable_row);
+    page.append(&enable_group);
+
+    let info_group = adw::PreferencesGroup::new();
+    info_group.set_title("Lutris installation");
+
+    let lutris_dir = std::path::Path::new(&std::env::var("HOME").unwrap_or_default()).join(".local/share/lutris");
+    let dir_row = adw::ActionRow::new();
+    dir_row.set_title("Lutris data directory");
+    if lutris_dir.is_dir() {
+        dir_row.set_subtitle(&lutris_dir.display().to_string());
+    } else {
+        dir_row.set_subtitle("Lutris not found");
+        dir_row.set_sensitive(false);
+    }
+    info_group.add(&dir_row);
+    page.append(&info_group);
+
+    (page, enable_row)
 }
 
 fn build_api_keys_page(cfg: &Config) -> (gtk4::Box, adw::EntryRow, adw::EntryRow) {
@@ -287,30 +307,66 @@ fn build_steam_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow) {
     (page, enable_row)
 }
 
-fn build_debug_page(state: &SharedState) -> gtk4::Box {
+fn build_ra_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow, adw::EntryRow, [adw::EntryRow; 3], [adw::EntryRow; 3]) {
     let page = settings_page_container();
 
-    let group = adw::PreferencesGroup::new();
-    group.set_title("Steam");
+    let enable_group = adw::PreferencesGroup::new();
+    let enable_row = adw::SwitchRow::new();
+    enable_row.set_title("Enable RetroAchievements");
+    enable_row.set_subtitle("Discover retro games and fetch achievements from retroachievements.org");
+    enable_row.set_active(cfg.ra_enabled);
+    enable_group.add(&enable_row);
+    page.append(&enable_group);
 
-    let reimport_row = adw::ActionRow::new();
-    reimport_row.set_title("Reimport Steam games");
-    reimport_row.set_subtitle("Remove all native Steam games from the database and re-discover them");
-    let reimport_btn = gtk4::Button::with_label("Reimport");
-    reimport_btn.add_css_class("suggested-action");
-    reimport_btn.set_valign(gtk4::Align::Center);
-    reimport_row.add_suffix(&reimport_btn);
-    group.add(&reimport_row);
+    let creds_group = adw::PreferencesGroup::new();
+    creds_group.set_title("Account");
 
-    let state_clone = state.clone();
-    reimport_btn.connect_clicked(move |_| {
-        let db = state_clone.borrow().db.clone();
-        crate::game_list::reimport_steam_games(&db);
-        let _ = state_clone.borrow().sender.send(crate::AppMessage::ReloadGames);
-    });
+    let username_row = adw::EntryRow::new();
+    username_row.set_title("Username");
+    username_row.set_text(&cfg.ra_username);
+    creds_group.add(&username_row);
 
-    page.append(&group);
-    page
+    let token_row = adw::EntryRow::new();
+    token_row.set_title("API Token");
+    token_row.set_text(&cfg.ra_token);
+    token_row.set_input_purpose(gtk4::InputPurpose::Password);
+    creds_group.add(&token_row);
+    page.append(&creds_group);
+
+    let consoles = ["PSX (PlayStation)", "PS2 (PlayStation 2)", "PSP"];
+    let folders = [&cfg.ra_psx_folder, &cfg.ra_ps2_folder, &cfg.ra_psp_folder];
+    let executables = [&cfg.ra_psx_executable, &cfg.ra_ps2_executable, &cfg.ra_psp_executable];
+    let defaults = ["duckstation-qt", "pcsx2-qt", "ppsspp"];
+
+    let mut folder_rows = Vec::new();
+    let mut exe_rows = Vec::new();
+
+    for (i, name) in consoles.iter().enumerate() {
+        let group = adw::PreferencesGroup::new();
+        group.set_title(*name);
+
+        let folder_row = adw::EntryRow::new();
+        folder_row.set_title("ROM folder");
+        folder_row.set_text(folders[i]);
+        group.add(&folder_row);
+        folder_rows.push(folder_row);
+
+        let exe_row = adw::EntryRow::new();
+        exe_row.set_title("Emulator executable");
+        exe_row.set_text(executables[i]);
+        if executables[i].is_empty() {
+            exe_row.set_text(defaults[i]);
+        }
+        group.add(&exe_row);
+        exe_rows.push(exe_row);
+
+        page.append(&group);
+    }
+
+    let folder_arr: [adw::EntryRow; 3] = folder_rows.try_into().unwrap();
+    let exe_arr: [adw::EntryRow; 3] = exe_rows.try_into().unwrap();
+
+    (page, enable_row, username_row, token_row, folder_arr, exe_arr)
 }
 
 fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRow, gtk4::StringList) {
@@ -428,13 +484,17 @@ pub fn show_settings_dialog(
     stack.set_margin_top(16);
     stack.set_margin_bottom(16);
 
-    let (general_page, notif_row, bg_row, hidden_row, grid_spin, lutris_row) = build_general_settings_page(&cfg);
+    let (general_page, notif_row, bg_row, hidden_row, grid_spin) = build_general_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
 
     let (api_page, steam_entry, sgdb_entry) = build_api_keys_page(&cfg);
     sidebar.append(&settings_sidebar_row("dialog-password-symbolic", "API Keys"));
     stack.add_named(&api_page, Some("api"));
+
+    let (lutris_page, lutris_enable_row) = build_lutris_settings_page(&cfg);
+    sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Lutris"));
+    stack.add_named(&lutris_page, Some("lutris"));
 
     let (ps4_page, ps4_enable_row, ps4_exe_row) = build_shadps4_settings_page(&cfg, &win);
     sidebar.append(&settings_sidebar_row("applications-games-symbolic", "shadPS4"));
@@ -443,6 +503,10 @@ pub fn show_settings_dialog(
     let (steam_page, steam_enable_row) = build_steam_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Steam"));
     stack.add_named(&steam_page, Some("steam"));
+
+    let (ra_page, ra_enable_row, ra_username_row, ra_token_row, ra_folder_rows, ra_exe_rows) = build_ra_settings_page(&cfg);
+    sidebar.append(&settings_sidebar_row("applications-science-symbolic", "RetroAchievements"));
+    stack.add_named(&ra_page, Some("ra"));
 
     let (wine_pages, wine_widgets) = super::wine_config_widget::build_wine_config_pages(&cfg.default_wine_config, None);
     sidebar.append(&sidebar_separator());
@@ -460,10 +524,6 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("applications-engineering-symbolic", "API Emulators"));
     stack.add_named(&emu_page, Some("api_emulators"));
 
-    let debug_page = build_debug_page(state);
-    sidebar.append(&settings_sidebar_row("preferences-developer-symbolic", "Debug"));
-    stack.add_named(&debug_page, Some("debug"));
-
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
@@ -474,14 +534,15 @@ pub fn show_settings_dialog(
                             let page_id = match label.text().as_str() {
                                 "General" => "general",
                                 "API Keys" => "api",
+                                "Lutris" => "lutris",
                                 "shadPS4" => "ps4",
-                "Steam" => "steam",
+                                "Steam" => "steam",
+                                "RetroAchievements" => "ra",
                                 "Performance" => "Performance",
                                 "Graphics" => "Graphics",
                                 "Wine Advanced" => "Wine Advanced",
                                 "Wine Profiles" => "profiles",
                                 "API Emulators" => "api_emulators",
-                                "Debug" => "debug",
                                 _ => "general",
                             };
                             stack_clone.set_visible_child_name(page_id);
@@ -526,7 +587,16 @@ pub fn show_settings_dialog(
         s.cfg.shadps4_enabled = ps4_enable_row.is_active();
         s.cfg.shadps4_executable = ps4_exe_row.text().to_string();
         s.cfg.steam_enabled = steam_enable_row.is_active();
-        s.cfg.lutris_enabled = lutris_row.is_active();
+        s.cfg.lutris_enabled = lutris_enable_row.is_active();
+        s.cfg.ra_enabled = ra_enable_row.is_active();
+        s.cfg.ra_username = ra_username_row.text().to_string();
+        s.cfg.ra_token = ra_token_row.text().to_string();
+        s.cfg.ra_psx_folder = ra_folder_rows[0].text().to_string();
+        s.cfg.ra_psx_executable = ra_exe_rows[0].text().to_string();
+        s.cfg.ra_ps2_folder = ra_folder_rows[1].text().to_string();
+        s.cfg.ra_ps2_executable = ra_exe_rows[1].text().to_string();
+        s.cfg.ra_psp_folder = ra_folder_rows[2].text().to_string();
+        s.cfg.ra_psp_executable = ra_exe_rows[2].text().to_string();
         s.cfg.default_wine_config = wine_widgets.to_wine_config();
 
         let idx = emu_version_row.selected();

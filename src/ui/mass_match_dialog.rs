@@ -36,10 +36,14 @@ pub enum SearchSource {
 pub fn show_mass_match_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
 
-    let (unmatched, title_map) = {
+    let (needs_matching, title_map) = {
         let s = state.borrow();
         let games = s.games.clone();
-        let unmatched: Vec<Game> = games.into_iter().filter(|g| g.app_id.is_empty() && !g.manual_unmatch).collect();
+        let needs_matching: Vec<Game> = games.into_iter().filter(|g| {
+            (g.app_id.is_empty() && !g.manual_unmatch)
+            || (g.kind == "retro" && g.trophy_source.is_empty())
+            || g.sgdb_id.is_empty()
+        }).collect();
         let save_dir = &s.save_dir;
         let data_dir = std::path::Path::new(save_dir).join("data").join("steam");
         let mut map: Vec<(String, String, String)> = Vec::new();
@@ -54,11 +58,11 @@ pub fn show_mass_match_dialog(state: &SharedState) {
                 }
             }
         }
-        (unmatched, map)
+        (needs_matching, map)
     };
 
-    if unmatched.is_empty() {
-        let d = adw::AlertDialog::new(Some("No unmatched games"), Some("Every game already has a trophy source linked."));
+    if needs_matching.is_empty() {
+        let d = adw::AlertDialog::new(Some("Nothing to match"), Some("Every game already has a trophy source and image assets linked."));
         d.add_response("ok", "OK");
         d.present(Some(&window));
         return;
@@ -76,7 +80,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     header_bar.set_title_widget(Some(&gtk4::Label::new(Some("Match unmatched games"))));
     outer.append(&header_bar);
 
-    let header = gtk4::Label::new(Some(&format!("{} unmatched game(s)", unmatched.len())));
+    let header = gtk4::Label::new(Some(&format!("{} game(s) to match", needs_matching.len())));
     header.set_margin_top(16);
     header.set_margin_bottom(8);
     header.set_margin_start(16);
@@ -94,33 +98,16 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 
     let mut row_action_boxes: Vec<gtk4::Box> = Vec::new();
 
-    for game in &unmatched {
-        let action_box = create_match_row(&list, &game.name, "Searching...");
+    for game in &needs_matching {
+        let searching_text = if game.app_id.is_empty() && !g_manual_unmatch(game) {
+            "Searching Steam..."
+        } else if game.kind == "retro" && game.trophy_source.is_empty() {
+            "Searching RA..."
+        } else {
+            "Searching SGDB..."
+        };
+        let action_box = create_match_row(&list, &game.name, searching_text);
         row_action_boxes.push(action_box);
-    }
-
-    let ps4_unmatched: Vec<Game> = {
-        let s = state.borrow();
-        s.games.iter().filter(|g| g.kind == "ps4" && g.sgdb_id.is_empty()).cloned().collect()
-    };
-    let mut ps4_row_boxes: Vec<(gtk4::Box, i64, String)> = Vec::new();
-    if !ps4_unmatched.is_empty() {
-        let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
-        sep.set_margin_top(12);
-        sep.set_margin_bottom(8);
-        list.append(&sep);
-
-        let ps4_header = gtk4::Label::new(Some(&format!("PS4 Games (match SGDB images) — {}", ps4_unmatched.len())));
-        ps4_header.set_margin_start(12);
-        ps4_header.set_margin_bottom(6);
-        ps4_header.set_xalign(0.0);
-        ps4_header.add_css_class("heading");
-        list.append(&ps4_header);
-
-        for game in &ps4_unmatched {
-            let action_box = create_match_row(&list, &game.name, "Searching SGDB...");
-            ps4_row_boxes.push((action_box, game.db_id, game.name.clone()));
-        }
     }
 
     scrolled.set_child(Some(&list));
@@ -139,98 +126,209 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     dialog.set_content(Some(&outer));
     dialog.present();
 
-    let (tx, rx) = std::sync::mpsc::channel::<(usize, Option<(String, String)>, String, i64)>();
-    let rx = std::cell::RefCell::new(rx);
-    let remaining = Cell::new(unmatched.len());
-
     let steam = state.borrow().steam.clone();
-    let games_for_thread: Vec<(String, i64)> = unmatched.iter().map(|g| (g.name.clone(), g.lutris_id)).collect();
-    std::thread::spawn(move || {
-        for (i, (game_name, lutris_id)) in games_for_thread.iter().enumerate() {
-            let norm = normalize_title(game_name);
 
-            let matched: Option<(String, String)> = if norm.is_empty() {
-                None
-            } else {
-                title_map
-                    .iter()
-                    .find(|(t, _, _)| t == &norm)
-                    .map(|(_, id, name)| (id.clone(), name.clone()))
-            };
+    // --- Steam auto-batch thread (Lutris games without app_id) ---
+    let steam_games: Vec<(String, i64, i64, String)> = needs_matching.iter()
+        .filter(|g| g.app_id.is_empty() && !g.manual_unmatch)
+        .enumerate()
+        .map(|(_row_idx, g)| (g.name.clone(), g.lutris_id, g.db_id, g.kind.clone()))
+        .map(|(name, lutris_id, db_id, kind)| (name, lutris_id, db_id, kind))
+        .collect();
+    let steam_row_indices: Vec<usize> = needs_matching.iter().enumerate()
+        .filter(|(_, g)| g.app_id.is_empty() && !g.manual_unmatch)
+        .map(|(i, _)| i)
+        .collect();
 
-            let final_match = if matched.is_some() {
-                matched
-            } else {
-                let results = steam.search_steam_store(game_name);
-                if results.is_empty() {
+    let (steam_tx, steam_rx) = std::sync::mpsc::channel::<(usize, Option<(String, String)>, String, i64)>();
+    let steam_rx = std::cell::RefCell::new(steam_rx);
+    let steam_remaining = Cell::new(steam_games.len());
+
+    {
+        let steam_games = steam_games.clone();
+        let title_map = title_map.clone();
+        let steam = steam.clone();
+        std::thread::spawn(move || {
+            for (i, (game_name, lutris_id, _db_id, _kind)) in steam_games.iter().enumerate() {
+                let norm = normalize_title(game_name);
+
+                let matched: Option<(String, String)> = if norm.is_empty() {
                     None
                 } else {
-                    results
+                    title_map
                         .iter()
-                        .find(|(_, name)| normalize_title(name) == norm)
-                        .map(|(id, name)| (id.clone(), name.clone()))
-                }
-            };
+                        .find(|(t, _, _)| t == &norm)
+                        .map(|(_, id, name)| (id.clone(), name.clone()))
+                };
 
-            let _ = tx.send((i, final_match, game_name.clone(), *lutris_id));
-        }
-    });
+                let final_match = if matched.is_some() {
+                    matched
+                } else {
+                    let results = steam.search_steam_store(game_name);
+                    if results.is_empty() {
+                        None
+                    } else {
+                        results
+                            .iter()
+                            .find(|(_, name)| normalize_title(name) == norm)
+                            .map(|(id, name)| (id.clone(), name.clone()))
+                    }
+                };
+
+                let _ = steam_tx.send((i, final_match, game_name.clone(), *lutris_id));
+            }
+        });
+    }
 
     let state_rx = state.clone();
-    let steam_rx = state.borrow().steam.clone();
+    let steam_rx_steam = state.borrow().steam.clone();
     let row_boxes = row_action_boxes.clone();
     let parent_dialog = dialog.clone();
+    let steam_row_indices = steam_row_indices.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        if let Ok((row_idx, matched, game_name, lutris_id)) = rx.borrow_mut().try_recv() {
-            if row_idx < row_boxes.len() {
-                handle_steam_search_result(
-                    &state_rx, &row_boxes[row_idx], &steam_rx,
-                    &game_name, lutris_id, matched, &parent_dialog,
-                );
-
-                let left = remaining.get();
-                if left <= 1 {
-                    return glib::ControlFlow::Break;
+        if let Ok((idx, matched, game_name, lutris_id)) = steam_rx.borrow_mut().try_recv() {
+            if let Some(&row_idx) = steam_row_indices.get(idx) {
+                if row_idx < row_boxes.len() {
+                    handle_steam_search_result(
+                        &state_rx, &row_boxes[row_idx], &steam_rx_steam,
+                        &game_name, lutris_id, matched, &parent_dialog,
+                    );
                 }
-                remaining.set(left - 1);
             }
+            let left = steam_remaining.get();
+            if left <= 1 {
+                return glib::ControlFlow::Break;
+            }
+            steam_remaining.set(left - 1);
         }
         glib::ControlFlow::Continue
     });
 
-    if !ps4_row_boxes.is_empty() {
-        let (ps4_tx, ps4_rx) = std::sync::mpsc::channel::<(usize, Option<(String, String)>, i64)>();
-        let ps4_rx = std::cell::RefCell::new(ps4_rx);
-        let ps4_row_info: Vec<(i64, String)> = ps4_row_boxes.iter().map(|(_, db_id, name)| (*db_id, name.clone())).collect();
-        let steam_ps4 = state.borrow().steam.clone();
-        let ps4_remaining = Cell::new(ps4_row_boxes.len());
+    // --- SGDB auto-batch thread (ALL games without sgdb_id) ---
+    let sgdb_games: Vec<(String, i64, usize)> = needs_matching.iter().enumerate()
+        .filter(|(_, g)| g.sgdb_id.is_empty())
+        .map(|(row_idx, g)| (g.name.clone(), g.db_id, row_idx))
+        .collect();
+    let (sgdb_tx, sgdb_rx) = std::sync::mpsc::channel::<(usize, Option<(String, String)>, i64, String)>();
+    let sgdb_rx = std::cell::RefCell::new(sgdb_rx);
+    let sgdb_remaining = Cell::new(sgdb_games.len());
+
+    {
+        let sgdb_games = sgdb_games.clone();
+        let steam_sgdb = state.borrow().steam.clone();
         std::thread::spawn(move || {
-            for (i, (db_id, game_name)) in ps4_row_info.iter().enumerate() {
-                let results = steam_ps4.search_sgdb(game_name);
+            for (i, (game_name, db_id, _row_idx)) in sgdb_games.iter().enumerate() {
+                let results = steam_sgdb.search_sgdb(game_name);
                 let matched = results.first().map(|(sid, name)| (sid.clone(), name.clone()));
-                let _ = ps4_tx.send((i, matched, *db_id));
+                let _ = sgdb_tx.send((i, matched, *db_id, game_name.clone()));
             }
         });
+    }
 
-        let state_ps4 = state.clone();
-        let parent_dialog_ps4 = dialog.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-            if let Ok((row_idx, matched, db_id)) = ps4_rx.borrow_mut().try_recv() {
-                if row_idx < ps4_row_boxes.len() {
-                    handle_sgdb_search_result(
-                        &state_ps4, &ps4_row_boxes[row_idx].0, db_id,
-                        &ps4_row_boxes[row_idx].2, matched, &parent_dialog_ps4,
+    let state_sgdb = state.clone();
+    let parent_dialog_sgdb = dialog.clone();
+    let sgdb_row_boxes = row_action_boxes.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        if let Ok((idx, matched, db_id, game_name)) = sgdb_rx.borrow_mut().try_recv() {
+            if let Some(row_idx) = sgdb_games.get(idx).map(|(_, _, r)| *r) {
+                if row_idx < sgdb_row_boxes.len() {
+                    handle_unified_sgdb_result(
+                        &state_sgdb, &sgdb_row_boxes[row_idx], db_id,
+                        &game_name, matched, &parent_dialog_sgdb,
                     );
-
-                    let left = ps4_remaining.get();
-                    if left <= 1 {
-                        return glib::ControlFlow::Break;
-                    }
-                    ps4_remaining.set(left - 1);
                 }
             }
-            glib::ControlFlow::Continue
+            let left = sgdb_remaining.get();
+            if left <= 1 {
+                return glib::ControlFlow::Break;
+            }
+            sgdb_remaining.set(left - 1);
+        }
+        glib::ControlFlow::Continue
+    });
+}
+
+fn g_manual_unmatch(g: &Game) -> bool {
+    g.manual_unmatch
+}
+
+fn handle_unified_sgdb_result(
+    state: &SharedState,
+    action_box: &gtk4::Box,
+    db_id: i64,
+    game_name: &str,
+    matched: Option<(String, String)>,
+    parent_dialog: &adw::Window,
+) {
+    // Only update if the action box still shows a searching state
+    // (don't overwrite a Steam match result)
+    let has_result = action_box.last_child().is_some_and(|c| {
+        c.downcast_ref::<gtk4::Label>().is_some_and(|l| l.text().starts_with("Matched") || l.text().starts_with("Not found") || l.text().starts_with("Enter"))
+    });
+    if has_result {
+        // Steam result already shown — just add SGDB status beside it
+        // Skip for now; the user can manually search SGDB
+        return;
+    }
+
+    clear_children(action_box);
+
+    if let Some((sgdb_id, matched_name)) = matched {
+        let _ = crate::db::set_sgdb_id(&state.borrow().db, db_id, &sgdb_id);
+        if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
+            g.sgdb_id = sgdb_id.clone();
+        }
+        let steam_dl = state.borrow().steam.clone();
+        let sender = state.borrow().sender.clone();
+        let sgdb_id_dl = sgdb_id.clone();
+        std::thread::spawn(move || {
+            let (icon, hero, grid, logo, header) = steam_dl.ensure_sgdb_assets(&sgdb_id_dl);
+            let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
+                db_id, sgdb_id: sgdb_id_dl, icon, hero, grid, logo, header,
+            });
         });
+
+        let label = gtk4::Label::new(Some(&format!("SGDB: {}", matched_name)));
+        label.add_css_class("success-label");
+        action_box.append(&label);
+
+        let undo_btn = gtk4::Button::with_label("Undo SGDB");
+        let sc = state.clone();
+        undo_btn.connect_clicked(move |_| {
+            let _ = crate::db::set_sgdb_id(&sc.borrow().db, db_id, "");
+            if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
+                g.sgdb_id.clear();
+            }
+            super::helpers::refresh_settings_images_page(&sc, db_id, |s, game, win| {
+                build_image_manager_content(s, game, win).upcast()
+            });
+        });
+        action_box.append(&undo_btn);
+    } else {
+        let label = gtk4::Label::new(Some("SGDB: not found"));
+        label.add_css_class("dim-label");
+        action_box.append(&label);
+
+        let sgdb_btn = gtk4::Button::with_label("Search SGDB…");
+        let sc = state.clone();
+        let gn = game_name.to_string();
+        let did = db_id;
+        let dlg = parent_dialog.clone();
+        let ab = action_box.clone();
+        sgdb_btn.connect_clicked(move |_| {
+            let cb: Rc<dyn Fn()> = Rc::new({
+                let ab = ab.clone();
+                let name = gn.clone();
+                move || {
+                    clear_children(&ab);
+                    let label = gtk4::Label::new(Some(&format!("Matched to SGDB: {}", name)));
+                    label.add_css_class("success-label");
+                    ab.append(&label);
+                }
+            });
+            show_sgdb_search_dialog(&sc, did, &gn, &dlg, Some(cb));
+        });
+        action_box.append(&sgdb_btn);
     }
 }
 
@@ -341,76 +439,6 @@ fn handle_steam_search_result(
         let pd = parent_dialog.clone();
         sgdb_btn.connect_clicked(move |_| {
             show_search_results_dialog(&sc3, steam3.clone(), "SteamGridDB", &name3, lutris_id, SearchSource::SGDB, cb3.clone(), pd.upcast_ref());
-        });
-        action_box.append(&sgdb_btn);
-    }
-}
-
-fn handle_sgdb_search_result(
-    state: &SharedState,
-    action_box: &gtk4::Box,
-    db_id: i64,
-    game_name: &str,
-    matched: Option<(String, String)>,
-    parent_dialog: &adw::Window,
-) {
-    clear_children(action_box);
-
-    if let Some((sgdb_id, matched_name)) = matched {
-        let _ = crate::db::set_sgdb_id(&state.borrow().db, db_id, &sgdb_id);
-        if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
-            g.sgdb_id = sgdb_id.clone();
-        }
-        let steam_dl = state.borrow().steam.clone();
-        let sender = state.borrow().sender.clone();
-        let sgdb_id_dl = sgdb_id.clone();
-        std::thread::spawn(move || {
-            let (icon, hero, grid, logo, header) = steam_dl.ensure_sgdb_assets(&sgdb_id_dl);
-            let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
-                db_id, sgdb_id: sgdb_id_dl, icon, hero, grid, logo, header,
-            });
-        });
-
-        let label = gtk4::Label::new(Some(&format!("Matched: {} ({})", matched_name, sgdb_id)));
-        label.add_css_class("success-label");
-        action_box.append(&label);
-
-        let undo_btn = gtk4::Button::with_label("Undo");
-        let sc = state.clone();
-        undo_btn.connect_clicked(move |_| {
-            let _ = crate::db::set_sgdb_id(&sc.borrow().db, db_id, "");
-            if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
-                g.sgdb_id.clear();
-            }
-            super::helpers::refresh_settings_images_page(&sc, db_id, |s, game, win| {
-                build_image_manager_content(s, game, win).upcast()
-            });
-        });
-        action_box.append(&undo_btn);
-    } else {
-        let label = gtk4::Label::new(Some("Not found on SGDB"));
-        label.add_css_class("dim-label");
-        action_box.append(&label);
-
-        let sgdb_btn = gtk4::Button::with_label("Search SGDB…");
-        sgdb_btn.add_css_class("suggested-action");
-        let sc = state.clone();
-        let gn = game_name.to_string();
-        let did = db_id;
-        let dlg = parent_dialog.clone();
-        let ab = action_box.clone();
-        sgdb_btn.connect_clicked(move |_| {
-            let cb: Rc<dyn Fn()> = Rc::new({
-                let ab = ab.clone();
-                let name = gn.clone();
-                move || {
-                    clear_children(&ab);
-                    let label = gtk4::Label::new(Some(&format!("Matched to SGDB: {}", name)));
-                    label.add_css_class("success-label");
-                    ab.append(&label);
-                }
-            });
-            show_sgdb_search_dialog(&sc, did, &gn, &dlg, Some(cb));
         });
         action_box.append(&sgdb_btn);
     }

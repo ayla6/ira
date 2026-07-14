@@ -220,6 +220,16 @@ fn enrich_ra(
     ra_username: &str,
     ra_token: &str,
 ) {
+    if crate::platforms::retroachievements::RaClient::auth_is_broken() {
+        return;
+    }
+
+    if ra_username.is_empty() || ra_token.is_empty() {
+        eprintln!("RA: skipping enrichment for {} — username_len={} token_len={}",
+            app_id, ra_username.len(), ra_token.len());
+        return;
+    }
+
     let entry = GameEntry::for_reload(db_id, crate::models::RETRO, trophy_source, app_id, platform_id, lutris_id);
     let mut game = match load_game(&entry, save_dir) {
         Ok(g) => g,

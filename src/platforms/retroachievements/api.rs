@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use serde::Deserialize;
@@ -12,6 +13,10 @@ const RA_BASE_URL: &str = "https://retroachievements.org/dorequest.php";
 const RA_BADGE_URL: &str = "https://media.retroachievements.org/Badge";
 const UNLOCKS_CACHE_SECS: u64 = 3600;
 const RA_RATE_LIMIT_MS: u64 = 500;
+const RA_MAX_AUTH_FAILURES: u32 = 3;
+
+static RA_AUTH_BROKEN: AtomicBool = AtomicBool::new(false);
+static RA_AUTH_FAILURES: AtomicU32 = AtomicU32::new(0);
 
 pub struct RaClient {
     http: reqwest::blocking::Client,
@@ -35,10 +40,17 @@ impl RaClient {
 
     pub fn from_config(cfg: &RaConfig) -> Option<Self> {
         if cfg.username.is_empty() || cfg.token.is_empty() {
+            eprintln!("RA: username='{}' token_len={} — skipping RA API calls",
+                cfg.username, cfg.token.len());
             None
         } else {
+            eprintln!("RA: creating client for user '{}' (token length {})", cfg.username, cfg.token.len());
             Some(Self::new(&cfg.username, &cfg.token))
         }
+    }
+
+    pub fn auth_is_broken() -> bool {
+        RA_AUTH_BROKEN.load(Ordering::Relaxed)
     }
 
     fn rate_limit(&self) {
@@ -51,17 +63,39 @@ impl RaClient {
     }
 
     fn get(&self, params: &[(&str, &str)]) -> Result<String, String> {
+        if RA_AUTH_BROKEN.load(Ordering::Relaxed) {
+            return Err("RA auth broken — too many 401 errors, stopping".to_string());
+        }
+
         self.rate_limit();
         let url = reqwest::Url::parse_with_params(RA_BASE_URL, params)
             .map_err(|e| e.to_string())?;
         let resp = self
             .http
-            .get(url)
+            .get(url.clone())
             .send()
             .map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            return Err(format!("HTTP {}", resp.status()));
+
+        let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            let failures = RA_AUTH_FAILURES.fetch_add(1, Ordering::Relaxed) + 1;
+            eprintln!("RA: 401 Unauthorized (failure {}/{}) for {}", failures, RA_MAX_AUTH_FAILURES, url);
+            if failures >= RA_MAX_AUTH_FAILURES {
+                RA_AUTH_BROKEN.store(true, Ordering::Relaxed);
+                eprintln!("RA: auth marked as broken after {} failures — stopping all RA API calls", failures);
+            }
+            return Err(format!("HTTP {}", status));
         }
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            eprintln!("RA: 429 rate limited, backing off");
+            std::thread::sleep(Duration::from_secs(5));
+            return Err(format!("HTTP {}", status));
+        }
+        if !status.is_success() {
+            return Err(format!("HTTP {}", status));
+        }
+
+        RA_AUTH_FAILURES.store(0, Ordering::Relaxed);
         resp.text().map_err(|e| e.to_string())
     }
 
@@ -98,9 +132,9 @@ impl RaClient {
 
         let params = [
             ("r", "patch"),
-            ("g", game_id),
             ("u", &self.username),
             ("t", &self.token),
+            ("g", game_id),
         ];
         let text = self.get(&params)?;
         let resp: GameDataResponse = serde_json::from_str(&text)
@@ -133,10 +167,10 @@ impl RaClient {
 
         let params = [
             ("r", "unlocks"),
-            ("g", game_id),
-            ("h", "1"),
             ("u", &self.username),
             ("t", &self.token),
+            ("g", game_id),
+            ("h", "1"),
         ];
         let text = self.get(&params)?;
         let resp: UnlocksResponse = serde_json::from_str(&text)
@@ -343,6 +377,10 @@ pub fn build_ra_achievements(
 }
 
 pub fn enrich_ra_game(game: &mut Game, save_dir: &str, username: &str, token: &str) {
+    if RaClient::auth_is_broken() {
+        return;
+    }
+
     let client = RaClient::new(username, token);
 
     let game_data = match client.fetch_game_data(save_dir, &game.app_id) {

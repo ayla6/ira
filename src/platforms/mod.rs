@@ -7,4 +7,5 @@ pub mod gog_setup;
 pub mod api_emulators;
 pub mod ps4;
 pub mod retroachievements;
+pub mod emulator_detect;
 pub mod watcher_util;

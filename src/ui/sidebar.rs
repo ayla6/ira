@@ -21,6 +21,36 @@ pub fn select_row_silently(state: &SharedState, row: Option<&gtk4::ListBoxRow>) 
     state.borrow_mut().restoring = false;
 }
 
+/// Scroll the sidebar so that `row` is visible. Defers to an idle callback
+/// to ensure the row has been allocated. Uses `allocation()` (position within
+/// the ListBox) instead of `compute_bounds()` which returns unreliable values.
+#[allow(deprecated)]
+pub fn scroll_to_row(state: &SharedState, lutris_id: i64) {
+    let sidebar_scroll = state.borrow().sidebar_scroll.clone();
+    let row = state.borrow().rows.get(&lutris_id)
+        .and_then(|v| v.first())
+        .map(|rw| rw.row.clone());
+
+    if let Some(row) = row {
+        glib::idle_add_local_once(move || {
+            let alloc = row.allocation();
+            if alloc.height() <= 0 {
+                return;
+            }
+            let adj = sidebar_scroll.vadjustment();
+            let row_y = alloc.y() as f64;
+            let row_h = alloc.height() as f64;
+            let scroll = adj.value();
+            let page = adj.page_size();
+            if row_y < scroll {
+                adj.set_value(row_y - 8.0);
+            } else if row_y + row_h > scroll + page {
+                adj.set_value(row_y + row_h - page + 8.0);
+            }
+        });
+    }
+}
+
 fn find_row_by_name(list: &gtk4::ListBox, name: &str) -> Option<gtk4::ListBoxRow> {
     let mut i = 0;
     while let Some(row) = list.row_at_index(i) {

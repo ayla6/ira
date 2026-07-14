@@ -80,6 +80,27 @@ pub fn open_folder(path: &str) {
     let _ = std::process::Command::new("xdg-open").arg(path).spawn();
 }
 
+pub fn open_file_location(file_path: &str) {
+    let path = std::path::Path::new(file_path);
+    let dir = path.parent().map(|p| p.to_string_lossy().to_string());
+    let uri = format!("file://{}", file_path);
+    let dbus_result = std::process::Command::new("dbus-send")
+        .args([
+            "--session", "--print-reply", "--dest=org.freedesktop.FileManager1",
+            "/org/freedesktop/FileManager1", "org.freedesktop.FileManager1.ShowItems",
+            &format!("array:string:{}", uri),
+            "string:",
+        ])
+        .output();
+    match dbus_result {
+        Ok(o) if o.status.success() => return,
+        _ => {}
+    }
+    if let Some(dir) = dir {
+        open_folder(&dir);
+    }
+}
+
 pub fn confirm_dialog(
     parent: &adw::ApplicationWindow,
     title: &str,

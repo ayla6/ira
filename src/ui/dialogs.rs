@@ -847,6 +847,16 @@ pub(super) fn build_game_general_page(
     sort_group.add(&sort_entry);
     general_page.append(&sort_group);
 
+    if !game.game_path.is_empty() && game.kind != "steam" {
+        let path_group = adw::PreferencesGroup::new();
+        let path_row = adw::ActionRow::new();
+        path_row.set_title("Game file");
+        path_row.set_subtitle(&game.game_path);
+        path_row.set_sensitive(false);
+        path_group.add(&path_row);
+        general_page.append(&path_group);
+    }
+
     let pending_version: Rc<RefCell<Option<String>>> = Default::default();
     if game.kind == "ps4" {
         let shadps4_versions = crate::platforms::ps4::read_shadps4_versions();

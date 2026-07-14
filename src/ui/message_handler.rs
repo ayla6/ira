@@ -42,6 +42,12 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         }
         AppMessage::GameStopped(lutris_id) => {
             state.borrow().running_games.lock().unwrap().remove(&lutris_id);
+            {
+                let rows = state.borrow().rows.get(&lutris_id).cloned().unwrap_or_default();
+                for rw in &rows {
+                    rw.row.remove_css_class("playing-game");
+                }
+            }
             let is_steam = state.borrow().games.iter()
                 .find(|g| g.lutris_id == lutris_id)
                 .map(|g| g.kind == "steam")
@@ -62,6 +68,12 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             }
         }
         AppMessage::GameStarted(lutris_id) => {
+            {
+                let rows = state.borrow().rows.get(&lutris_id).cloned().unwrap_or_default();
+                for rw in &rows {
+                    rw.row.add_css_class("playing-game");
+                }
+            }
             let selected_id = state.borrow().selected_id.clone();
             if selected_id == lutris_id.to_string() {
                 let game = state.borrow().games.iter()

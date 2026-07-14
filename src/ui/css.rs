@@ -2,7 +2,8 @@ pub const APP_CSS: &str = "
 .sidebar-row-title { min-width: 0; }
 .global-bar trough { background-color: transparent; border: none; }
 .global-bar progress { border: none; border-radius: 0; }
-.hidden-game { opacity: 0.5; }
+ .hidden-game { opacity: 0.5; }
+ .playing-game { color: @accent_color; background-color: alpha(@accent_color, 0.1); }
 .play-btn-label { font-size: 1.15em; }
 
 .popover-menu-row {

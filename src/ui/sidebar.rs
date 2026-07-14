@@ -326,6 +326,12 @@ pub fn build_sidebar_row(
     if game.hidden {
         row.add_css_class("hidden-game");
     }
+    {
+        let is_running = state.borrow().running_games.lock().unwrap().contains_key(&game.lutris_id);
+        if is_running {
+            row.add_css_class("playing-game");
+        }
+    }
 
     let state_clone = state.clone();
     let game_clone = game.clone();

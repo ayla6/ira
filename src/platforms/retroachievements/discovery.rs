@@ -180,12 +180,7 @@ pub fn build_ra_games(
 
             let entry = crate::db::find_by_steam_id(db, &app_id)
                 .ok()
-                .flatten()
-                .or_else(|| {
-                    crate::db::find_by_kind_platform(db, RETRO, console.name)
-                        .ok()
-                        .flatten()
-                });
+                .flatten();
 
             let (db_id, db_title) = match entry {
                 Some(e) => (e.id, e.title),

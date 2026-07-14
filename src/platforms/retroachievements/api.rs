@@ -17,6 +17,7 @@ const RA_MAX_AUTH_FAILURES: u32 = 3;
 
 static RA_AUTH_BROKEN: AtomicBool = AtomicBool::new(false);
 static RA_AUTH_FAILURES: AtomicU32 = AtomicU32::new(0);
+static RA_CACHED_TOKEN: Mutex<Option<String>> = Mutex::new(None);
 
 pub struct RaClient {
     http: reqwest::blocking::Client,
@@ -37,11 +38,21 @@ impl RaClient {
             last_request: Mutex::new(std::time::Instant::now() - Duration::from_secs(1)),
         };
 
+        // Check for cached token from a previous login this session
+        {
+            let cached = RA_CACHED_TOKEN.lock().unwrap();
+            if let Some(ref t) = *cached {
+                client.token = t.clone();
+                return client;
+            }
+        }
+
         if !password.is_empty() {
             match client.login_with_password(password) {
                 Ok(fresh_token) => {
                     eprintln!("RA: login successful, got fresh token (len {})", fresh_token.len());
-                    client.token = fresh_token;
+                    client.token = fresh_token.clone();
+                    *RA_CACHED_TOKEN.lock().unwrap() = Some(fresh_token);
                 }
                 Err(e) => {
                     eprintln!("RA: login failed: {}", e);

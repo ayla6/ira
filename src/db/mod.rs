@@ -79,7 +79,6 @@ pub fn init_db(db_path: &str) -> DbConn {
             last_played INTEGER NOT NULL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_games_trophy_platform ON games(trophy_source, platform_id) WHERE trophy_source != '';
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps4_serial ON games(kind, platform_id) WHERE kind = 'ps4';
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_lutris_db_id ON games(lutris_db_id) WHERE lutris_db_id IS NOT NULL;
         CREATE TABLE IF NOT EXISTS lutris_meta (

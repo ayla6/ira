@@ -31,6 +31,8 @@ pub fn run_schema_migrations(conn: &Connection) {
     ensure_column(conn, "games", "steam_review_score", "INTEGER NOT NULL DEFAULT -1");
     ensure_column(conn, "games", "steam_review_count", "INTEGER NOT NULL DEFAULT 0");
     ensure_column(conn, "games", "ra_core", "TEXT NOT NULL DEFAULT ''");
+    // Drop obsolete unique index that prevented multiple retro games per console
+    let _ = conn.execute("DROP INDEX IF EXISTS idx_games_trophy_platform", []);
 }
 
 #[cfg(test)]

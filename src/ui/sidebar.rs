@@ -21,6 +21,26 @@ pub fn select_row_silently(state: &SharedState, row: Option<&gtk4::ListBoxRow>) 
     state.borrow_mut().restoring = false;
 }
 
+/// Add `selected-game` CSS class to all sidebar rows matching the
+/// currently selected lutris_id, and remove it from all others.
+pub fn apply_selected_highlight(state: &SharedState) {
+    let selected_id = state.borrow().selected_id.clone();
+    let selected_lutris: i64 = selected_id.parse().unwrap_or(0);
+    let all_rows: Vec<(i64, Vec<SidebarRowWidgets>)> = state.borrow().rows.iter()
+        .map(|(k, v)| (*k, v.clone()))
+        .collect();
+    for (lid, rows) in &all_rows {
+        let is_selected = *lid == selected_lutris && selected_lutris != 0;
+        for rw in rows {
+            if is_selected {
+                rw.row.add_css_class("selected-game");
+            } else {
+                rw.row.remove_css_class("selected-game");
+            }
+        }
+    }
+}
+
 /// Scroll the sidebar so that `row` is visible. Defers to an idle callback
 /// to ensure the row has been allocated. Uses `allocation()` (position within
 /// the ListBox) instead of `compute_bounds()` which returns unreliable values.
@@ -253,6 +273,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
     adj.set_value(saved_scroll.min(max));
 
     restore_selection(state, &game_list, searching);
+    apply_selected_highlight(state);
     state.borrow_mut().restoring = false;
 }
 

@@ -4,6 +4,7 @@ pub const APP_CSS: &str = "
 .global-bar progress { border: none; border-radius: 0; }
  .hidden-game { opacity: 0.5; }
  .playing-game { color: @accent_color; background-color: alpha(@accent_color, 0.1); }
+ .selected-game { background-color: alpha(@theme_fg_color, 0.08); }
 .play-btn-label { font-size: 1.15em; }
 
 .popover-menu-row {

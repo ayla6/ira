@@ -7,7 +7,7 @@ use crate::images;
 use crate::strings as S;
 use std::collections::{HashMap, HashSet};
 use super::state::SharedState;
-use super::sidebar::{select_row_silently, rebuild_sidebar};
+use super::sidebar::{select_row_silently, rebuild_sidebar, apply_selected_highlight};
 use super::grid_view::show_grid_view;
 use super::game_display::display_game;
 use super::helpers::{merge_game_enrichment, clear_children};
@@ -450,7 +450,7 @@ pub fn switch_to_game(state: &SharedState, lutris_id: i64) {
         select_row_silently(state, Some(&row));
     }
 
-    super::sidebar::scroll_to_row(state, lutris_id);
+    apply_selected_highlight(state);
 
     let game = state.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned();
     if let Some(game) = game {

@@ -9,6 +9,7 @@ use super::state::SharedState;
 use super::game_item::GameItem;
 use super::grid_bin::GridBin;
 use super::message_handler::switch_to_game;
+use super::sidebar::scroll_to_row;
 use super::context_menu::show_game_context_menu;
 use super::helpers::clear_children;
 use super::filter::filtered_games;
@@ -155,6 +156,7 @@ pub fn show_grid_view(state: &SharedState) {
                 let lutris_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
                 if lutris_id != 0 {
                     switch_to_game(&sc, lutris_id);
+                    scroll_to_row(&sc, lutris_id);
                 }
             }
         });
@@ -416,6 +418,7 @@ fn build_cover(
     let click = gtk4::GestureClick::new();
     click.connect_pressed(move |_, _, _, _| {
         switch_to_game(&state_clone, lutris_id);
+        scroll_to_row(&state_clone, lutris_id);
     });
     vbox.add_controller(click);
 

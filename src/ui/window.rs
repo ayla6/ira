@@ -60,6 +60,7 @@ pub fn build_ui(
         restoring: false,
         running_games: Arc::new(Mutex::new(HashMap::new())),
         grid_refresh_pending: false,
+        sidebar_rebuild_pending: false,
         view_generation: 0,
         settings_data: None,
         save_dir,

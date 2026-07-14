@@ -29,12 +29,18 @@ pub fn enrich_game_async(
     std::thread::spawn(move || {
         if trophy_source == crate::models::RA {
             let _guard = RA_ENRICH_LOCK.lock().unwrap();
-            enrich_ra(&app_id, &trophy_source, &platform_id, db_id, lutris_id, &title, &save_dir, &sender, &ra_username, &ra_token, &ra_password);
+            enrich_ra(&app_id, &trophy_source, &platform_id, db_id, lutris_id, &title, &save_dir, &sender, &ra_username, &ra_token, &ra_password, &db);
             return;
         }
 
-        let mut entry = GameEntry::for_reload(db_id, "", &trophy_source, &app_id, &platform_id);
-        entry.title = title;
+        let entry = crate::db::find_by_steam_id(&db, &app_id)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| {
+                let mut e = GameEntry::for_reload(db_id, "", &trophy_source, &app_id, &platform_id);
+                e.title = title.clone();
+                e
+            });
 
         if has_steam_enrichment(&trophy_source) {
             let meta_path = crate::parser::achievements_dir(&save_dir, &app_id).join("achievements.json");
@@ -221,6 +227,7 @@ fn enrich_ra(
     ra_username: &str,
     ra_token: &str,
     ra_password: &str,
+    db: &DbConn,
 ) {
     if crate::platforms::retroachievements::RaClient::auth_is_broken() {
         return;
@@ -232,7 +239,10 @@ fn enrich_ra(
         return;
     }
 
-    let entry = GameEntry::for_reload(db_id, crate::models::RETRO, trophy_source, app_id, platform_id);
+    let entry = crate::db::find_by_steam_id(&db, app_id)
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| GameEntry::for_reload(db_id, crate::models::RETRO, trophy_source, app_id, platform_id));
     let mut game = match load_game(&entry, save_dir) {
         Ok(g) => g,
         Err(e) => {

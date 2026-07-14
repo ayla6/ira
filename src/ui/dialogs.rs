@@ -932,6 +932,7 @@ pub(super) fn build_game_general_page(
     let pending_emulator: Rc<RefCell<Option<String>>> = Default::default();
     if game.kind == "retro" {
         let emulators = crate::platforms::emulator_detect::detect_emulators(&game.platform_id);
+        let cores = crate::platforms::emulator_detect::detect_ra_cores();
         if !emulators.is_empty() {
             let emu_group = adw::PreferencesGroup::new();
             emu_group.set_title("Emulator");
@@ -953,8 +954,68 @@ pub(super) fn build_game_general_page(
             }
             emu_dropdown.set_selected(selected_emu);
 
+            let emu_row = adw::ActionRow::new();
+            emu_row.set_title("Emulator");
+            emu_row.set_subtitle("Override the emulator for this game");
+            emu_dropdown.set_valign(gtk4::Align::Center);
+            emu_row.add_suffix(&emu_dropdown);
+            emu_group.add(&emu_row);
+
+            let core_row = if !cores.is_empty() {
+                let mut core_names: Vec<String> = vec!["Follow global".to_string()];
+                core_names.extend(cores.iter().map(|c| c.display_name.clone()));
+                let str_refs: Vec<&str> = core_names.iter().map(|s| s.as_str()).collect();
+                let core_model = gtk4::StringList::new(&str_refs);
+                let core_dropdown = gtk4::DropDown::new(Some(core_model), None::<&gtk4::PropertyExpression>);
+
+                let mut selected_idx: u32 = 0;
+                if !game.ra_core.is_empty() {
+                    for (i, c) in cores.iter().enumerate() {
+                        if c.path == game.ra_core {
+                            selected_idx = (i + 1) as u32;
+                            break;
+                        }
+                    }
+                }
+                core_dropdown.set_selected(selected_idx);
+
+                let pending_ra_core_c = pending_ra_core.clone();
+                let cores_clone = cores.clone();
+                core_dropdown.connect_selected_notify(move |dd| {
+                    let idx = dd.selected();
+                    let path = if idx == 0 {
+                        String::new()
+                    } else {
+                        match cores_clone.get((idx - 1) as usize) {
+                            Some(c) => c.path.clone(),
+                            None => return,
+                        }
+                    };
+                    *pending_ra_core_c.borrow_mut() = Some(path);
+                });
+
+                let cr = adw::ActionRow::new();
+                cr.set_title("RetroArch Core");
+                cr.set_subtitle("Override the RetroArch core for this game");
+                core_dropdown.set_valign(gtk4::Align::Center);
+                cr.add_suffix(&core_dropdown);
+
+                let is_ra = if game.emulator_override.is_empty() {
+                    emulators.iter().any(|e| crate::platforms::emulator_detect::is_retroarch(&e.launch_command))
+                } else {
+                    crate::platforms::emulator_detect::is_retroarch(&game.emulator_override)
+                };
+                cr.set_visible(is_ra);
+
+                emu_group.add(&cr);
+                Some(cr)
+            } else {
+                None
+            };
+
             let pending_emu_c = pending_emulator.clone();
             let emus_clone = emulators.clone();
+            let core_row_clone = core_row.clone();
             emu_dropdown.connect_selected_notify(move |dd| {
                 let idx = dd.selected();
                 let cmd = if idx == 0 {
@@ -966,60 +1027,21 @@ pub(super) fn build_game_general_page(
                     }
                 };
                 *pending_emu_c.borrow_mut() = Some(cmd);
-            });
 
-            let emu_row = adw::ActionRow::new();
-            emu_row.set_title("Emulator");
-            emu_row.set_subtitle("Override the emulator for this game");
-            emu_dropdown.set_valign(gtk4::Align::Center);
-            emu_row.add_suffix(&emu_dropdown);
-            emu_group.add(&emu_row);
-            general_page.append(&emu_group);
-        }
-
-        let cores = crate::platforms::emulator_detect::detect_ra_cores();
-        if !cores.is_empty() {
-            let core_group = adw::PreferencesGroup::new();
-            core_group.set_title("RetroArch Core");
-
-            let mut core_names: Vec<String> = vec!["Follow global".to_string()];
-            core_names.extend(cores.iter().map(|c| c.display_name.clone()));
-            let str_refs: Vec<&str> = core_names.iter().map(|s| s.as_str()).collect();
-            let core_model = gtk4::StringList::new(&str_refs);
-            let core_dropdown = gtk4::DropDown::new(Some(core_model), None::<&gtk4::PropertyExpression>);
-
-            let mut selected_idx: u32 = 0;
-            if !game.ra_core.is_empty() {
-                for (i, c) in cores.iter().enumerate() {
-                    if c.path == game.ra_core {
-                        selected_idx = (i + 1) as u32;
-                        break;
-                    }
+                if let Some(ref cr) = core_row_clone {
+                    let is_ra = if idx == 0 {
+                        emus_clone.iter().any(|e| crate::platforms::emulator_detect::is_retroarch(&e.launch_command))
+                    } else {
+                        match emus_clone.get((idx - 1) as usize) {
+                            Some(e) => crate::platforms::emulator_detect::is_retroarch(&e.launch_command),
+                            None => false,
+                        }
+                    };
+                    cr.set_visible(is_ra);
                 }
-            }
-            core_dropdown.set_selected(selected_idx);
-
-            let pending_ra_core_c = pending_ra_core.clone();
-            core_dropdown.connect_selected_notify(move |dd| {
-                let idx = dd.selected();
-                let path = if idx == 0 {
-                    String::new()
-                } else {
-                    match crate::platforms::emulator_detect::detect_ra_cores().into_iter().nth((idx - 1) as usize) {
-                        Some(c) => c.path,
-                        None => return,
-                    }
-                };
-                *pending_ra_core_c.borrow_mut() = Some(path);
             });
 
-            let core_row = adw::ActionRow::new();
-            core_row.set_title("Core");
-            core_row.set_subtitle("Override the RetroArch core for this game");
-            core_dropdown.set_valign(gtk4::Align::Center);
-            core_row.add_suffix(&core_dropdown);
-            core_group.add(&core_row);
-            general_page.append(&core_group);
+            general_page.append(&emu_group);
         }
     }
 

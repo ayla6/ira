@@ -7,6 +7,7 @@ pub struct DetectedEmulator {
     pub launch_command: String,
 }
 
+#[derive(Clone)]
 pub struct RaCore {
     pub display_name: String,
     pub path: String,

@@ -441,25 +441,33 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
     }
 
     if !state.borrow().content_unloaded {
-        rebuild_sidebar(state);
-        let selected = state.borrow().selected_id.clone();
-        if selected.is_empty() {
-            let row = state.borrow().game_list.row_at_index(0);
-            select_row_silently(state, row.as_ref());
-            let needs_refresh = !state.borrow().grid_refresh_pending;
-            if needs_refresh {
-                state.borrow_mut().grid_refresh_pending = true;
-                let state_clone = state.clone();
-                glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
-                    let mut s = state_clone.borrow_mut();
-                    s.grid_refresh_pending = false;
-                    let should_refresh = s.selected_id.is_empty() && !s.content_unloaded;
-                    drop(s);
-                    if should_refresh {
-                        show_grid_view(&state_clone);
-                    }
-                });
-            }
+        let needs_rebuild = !state.borrow().sidebar_rebuild_pending;
+        if needs_rebuild {
+            state.borrow_mut().sidebar_rebuild_pending = true;
+            let state_clone = state.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
+                state_clone.borrow_mut().sidebar_rebuild_pending = false;
+                rebuild_sidebar(&state_clone);
+                let selected = state_clone.borrow().selected_id.clone();
+                if selected.is_empty() {
+                    let row = state_clone.borrow().game_list.row_at_index(0);
+                    select_row_silently(&state_clone, row.as_ref());
+                }
+                let needs_refresh = !state_clone.borrow().grid_refresh_pending;
+                if needs_refresh {
+                    state_clone.borrow_mut().grid_refresh_pending = true;
+                    let sc = state_clone.clone();
+                    glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
+                        let mut s = sc.borrow_mut();
+                        s.grid_refresh_pending = false;
+                        let should_refresh = s.selected_id.is_empty() && !s.content_unloaded;
+                        drop(s);
+                        if should_refresh {
+                            show_grid_view(&sc);
+                        }
+                    });
+                }
+            });
         }
     }
 

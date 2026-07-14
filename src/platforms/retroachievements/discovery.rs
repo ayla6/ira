@@ -121,13 +121,6 @@ fn match_rom_to_game(rom_name: &str, games: &[RaGameEntry]) -> Option<u32> {
         }
     }
 
-    for g in games {
-        let game_norm = normalize_name(&g.title);
-        if !game_norm.is_empty() && (rom_norm.contains(&game_norm) || game_norm.contains(&rom_norm)) {
-            return Some(g.id);
-        }
-    }
-
     None
 }
 

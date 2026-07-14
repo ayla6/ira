@@ -35,6 +35,8 @@ pub struct GameEntry {
     pub steam_review_score: i64,
     /// Total Steam review count.
     pub steam_review_count: i64,
+    /// Per-game RetroArch core override (empty = use global default).
+    pub ra_core: String,
 }
 
 impl GameEntry {
@@ -63,6 +65,7 @@ impl GameEntry {
             metacritic_score: -1,
             steam_review_score: -1,
             steam_review_count: 0,
+            ra_core: String::new(),
         }
     }
 }

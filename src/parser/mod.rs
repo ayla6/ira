@@ -118,6 +118,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         metacritic_score: entry.metacritic_score,
         steam_review_score: entry.steam_review_score,
         steam_review_count: entry.steam_review_count,
+        ra_core: entry.ra_core.clone(),
     };
 
     let ach_dir = paths::achievements_dir(save_dir, app_id);

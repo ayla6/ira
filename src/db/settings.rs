@@ -47,3 +47,13 @@ pub fn set_last_played(conn: &DbConn, id: i64, timestamp: i64) -> Result<(), Str
     .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+pub fn set_ra_core(conn: &DbConn, id: i64, core: &str) -> Result<(), String> {
+    let c = conn.lock().map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE games SET ra_core = ?1 WHERE id = ?2",
+        params![core, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}

@@ -104,6 +104,7 @@ pub fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, 
                 metacritic_score: entry.metacritic_score,
                 steam_review_score: entry.steam_review_score,
                 steam_review_count: entry.steam_review_count,
+                ra_core: entry.ra_core.clone(),
             };
             let _ = sender.send(AppMessage::NewGame(game));
         }

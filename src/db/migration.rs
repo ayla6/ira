@@ -30,6 +30,7 @@ pub fn run_schema_migrations(conn: &Connection) {
     ensure_column(conn, "games", "metacritic_score", "INTEGER NOT NULL DEFAULT -1");
     ensure_column(conn, "games", "steam_review_score", "INTEGER NOT NULL DEFAULT -1");
     ensure_column(conn, "games", "steam_review_count", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(conn, "games", "ra_core", "TEXT NOT NULL DEFAULT ''");
 }
 
 #[cfg(test)]
@@ -73,6 +74,7 @@ mod tests {
         assert!(column_exists(&conn, "games", "release_timestamp"));
         assert!(column_exists(&conn, "games", "metacritic_score"));
         assert!(column_exists(&conn, "games", "steam_review_score"));
-        assert!(column_exists(&conn, "games", "steam_review_count"));
-    }
+    assert!(column_exists(&conn, "games", "steam_review_count"));
+    assert!(column_exists(&conn, "games", "ra_core"));
+}
 }

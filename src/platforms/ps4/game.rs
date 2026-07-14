@@ -77,6 +77,7 @@ pub fn load_shadps4_game(
         metacritic_score: -1,
         steam_review_score: -1,
         steam_review_count: 0,
+        ra_core: String::new(),
     };
 
     // PS4 default icon: always copy from the game's sce_sys/icon0.png to data/ps4/{NPWR}/icon.png

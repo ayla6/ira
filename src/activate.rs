@@ -139,9 +139,15 @@ pub fn activate(app: &adw::Application) -> SharedState {
         let db = db.clone();
         let sender = sender.clone();
         let save_dir = save_dir.clone();
+        let ra_config_clone = ra_config.clone();
         std::thread::spawn(move || {
-                let games = build_game_list(&db, &save_dir, lutris_enabled, shadps4_enabled, steam_enabled, &ra_config, sort_mode, sort_descending);
+            let games = build_game_list(&db, &save_dir, lutris_enabled, shadps4_enabled, steam_enabled, &ra_config, sort_mode, sort_descending);
             let _ = sender.send(AppMessage::GamesLoaded(games));
+            // Load RA games in the background — they'll arrive via NewGame messages
+            let ra_any_console = ra_config_clone.psx_enabled || ra_config_clone.ps2_enabled || ra_config_clone.psp_enabled;
+            if ra_any_console {
+                crate::game_list::build_ra_games_threaded(&db, &save_dir, &ra_config_clone, &sender);
+            }
         });
     }
 

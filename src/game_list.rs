@@ -127,14 +127,27 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, sh
     if steam_enabled {
         games.extend(build_steam_games(&db, save_dir, &steam_games, &steam_playtimes));
     }
-    if ra_any_console {
-        games.extend(retroachievements::build_ra_games(&db, save_dir, ra_config));
-    }
+    // RA games are loaded separately in the background — see build_ra_games_threaded
     games.sort_by(|a, b| {
         let ord = sort_mode.compare(a, b);
         if sort_descending { ord.reverse() } else { ord }
     });
     games
+}
+
+pub fn build_ra_games_threaded(db: &db::DbConn, save_dir: &str, ra_config: &RaConfig, sender: &crate::AppSender) {
+    std::thread::spawn({
+        let db = db.clone();
+        let save_dir = save_dir.to_string();
+        let ra_config = ra_config.clone();
+        let sender = sender.clone();
+        move || {
+            let games = retroachievements::build_ra_games(&db, &save_dir, &ra_config);
+            for game in games {
+                let _ = sender.send(crate::AppMessage::NewGame(game));
+            }
+        }
+    });
 }
 
 fn build_lutris_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {

@@ -182,28 +182,39 @@ pub fn build_ra_games(
                 .ok()
                 .flatten();
 
-            let (db_id, db_title) = match entry {
-                Some(e) => (e.id, e.title),
-                None => match crate::db::add_game(db, RETRO, &trophy_source, &app_id, console.name, &title) {
-                    Ok(id) => (id, title.clone()),
-                    Err(e) => {
-                        eprintln!("RA: failed to add {} to DB: {}", rom_name, e);
-                        continue;
+            let game = match entry {
+                Some(e) => {
+                    let mut g = crate::parser::load_game(&e, save_dir)
+                        .unwrap_or_else(|_| Game {
+                            app_id: app_id.clone(),
+                            kind: RETRO.to_string(),
+                            trophy_source: trophy_source.clone(),
+                            platform_id: console.name.to_string(),
+                            db_id: e.id,
+                            name: if e.title.is_empty() { title.clone() } else { e.title.clone() },
+                            ..Default::default()
+                        });
+                    g.game_path = rom_path.to_string_lossy().into_owned();
+                    g
+                }
+                None => {
+                    match crate::db::add_game(db, RETRO, &trophy_source, &app_id, console.name, &title) {
+                        Ok(_id) => Game {
+                            app_id: app_id.clone(),
+                            kind: RETRO.to_string(),
+                            trophy_source: trophy_source.clone(),
+                            platform_id: console.name.to_string(),
+                            db_id: _id,
+                            name: title.clone(),
+                            game_path: rom_path.to_string_lossy().into_owned(),
+                            ..Default::default()
+                        },
+                        Err(e) => {
+                            eprintln!("RA: failed to add {} to DB: {}", rom_name, e);
+                            continue;
+                        }
                     }
-                },
-            };
-
-            let final_title = if db_title.is_empty() { title } else { db_title };
-
-            let game = Game {
-                app_id: app_id.clone(),
-                kind: RETRO.to_string(),
-                trophy_source: trophy_source.clone(),
-                platform_id: console.name.to_string(),
-                db_id,
-                name: final_title,
-                game_path: rom_path.to_string_lossy().into_owned(),
-                ..Default::default()
+                }
             };
             games.push(game);
         }

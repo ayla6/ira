@@ -143,6 +143,10 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                     &db, &save_dir, lutris_enabled, shadps4_enabled, steam_enabled, &ra_config, sort_mode, sort_descending,
                 );
                 let _ = sender.send(AppMessage::GamesLoaded(games));
+                let ra_any_console = ra_config.psx_enabled || ra_config.ps2_enabled || ra_config.psp_enabled;
+                if ra_any_console {
+                    crate::game_list::build_ra_games_threaded(&db, &save_dir, &ra_config, &sender);
+                }
             });
         }
         AppMessage::SgdbAssetsDownloaded { db_id, sgdb_id, icon, hero, grid, logo, header } => {
@@ -409,6 +413,7 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
 
 fn insert_or_update_game(state: &SharedState, game: Game) {
     let app_id = game.app_id.clone();
+    let needs_enrichment = game.kind == "retro" && !game.trophy_source.is_empty() && !game.app_id.is_empty();
 
     {
         let mut s = state.borrow_mut();
@@ -455,6 +460,41 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
                     }
                 });
             }
+        }
+    }
+
+    if needs_enrichment {
+        let (ra_username, ra_token, ra_password, steam, watcher, sender, save_dir, db) = {
+            let s = state.borrow();
+            (
+                s.cfg.ra_username.clone(),
+                s.cfg.ra_token.clone(),
+                s.cfg.ra_password.clone(),
+                s.steam.clone(),
+                s.watcher.clone(),
+                s.sender.clone(),
+                s.save_dir.clone(),
+                s.db.clone(),
+            )
+        };
+        let g = state.borrow().games.iter().find(|g| g.app_id == app_id).cloned();
+        if let Some(g) = g {
+            enrich_game_async(
+                g.app_id.clone(),
+                g.trophy_source.clone(),
+                g.platform_id.clone(),
+                g.db_id,
+                g.lutris_id,
+                g.name.clone(),
+                steam,
+                watcher,
+                sender,
+                save_dir,
+                db,
+                ra_username,
+                ra_token,
+                ra_password,
+            );
         }
     }
 }

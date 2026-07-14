@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-/// Look up app types for specific app IDs from Steam's appinfo.vdf binary cache.
+/// Look up app types from Steam's appinfo.vdf binary cache.
+/// Scans the file once for all requested app IDs instead of per-app.
 pub fn get_app_types(app_ids: &[u32]) -> HashMap<u32, String> {
     let mut result = HashMap::new();
     if app_ids.is_empty() {
@@ -19,14 +20,13 @@ pub fn get_app_types(app_ids: &[u32]) -> HashMap<u32, String> {
     let type_pattern = [0x01u8, idx_bytes[0], idx_bytes[1], idx_bytes[2], idx_bytes[3]];
 
     let scan_end = st_offset.min(data.len());
+    let requested: std::collections::HashSet<u32> = app_ids.iter().copied().collect();
 
-    for &app_id in app_ids {
-        let id_bytes = app_id.to_le_bytes();
-        let search_pattern = [0x08u8, id_bytes[0], id_bytes[1], id_bytes[2], id_bytes[3]];
-
-        let mut pos = 24;
-        while pos + 5 <= scan_end {
-            if data[pos..pos+5] == search_pattern {
+    let mut pos = 24;
+    while pos + 5 <= scan_end {
+        if data[pos] == 0x08 {
+            let app_id = u32::from_le_bytes([data[pos+1], data[pos+2], data[pos+3], data[pos+4]]);
+            if requested.contains(&app_id) && !result.contains_key(&app_id) {
                 let search_start = pos + 5;
                 let search_end = (search_start + 3000).min(scan_end);
                 let search_region = &data[search_start..search_end];
@@ -37,10 +37,9 @@ pub fn get_app_types(app_ids: &[u32]) -> HashMap<u32, String> {
                         result.insert(app_id, value);
                     }
                 }
-                break;
             }
-            pos += 1;
         }
+        pos += 1;
     }
 
     result

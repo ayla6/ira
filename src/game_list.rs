@@ -78,9 +78,11 @@ fn auto_match_by_title(db: &db::DbConn, save_dir: &str, lutris_games: &[LutrisGa
 
 pub fn build_game_list(db: &db::DbConn, save_dir: &str, shadps4_enabled: bool, steam_enabled: bool, sort_mode: crate::models::SortMode, sort_descending: bool) -> Vec<Game> {
     let steam_games = if steam_enabled { steam::discover_games() } else { Vec::new() };
-    if steam_enabled {
+    if steam_enabled && !steam_games.is_empty() {
         cleanup_steam_entries(db, &steam_games);
     }
+
+    let steam_playtimes = if steam_enabled { steam::read_all_playtimes() } else { std::collections::HashMap::new() };
 
     let lutris_games = match load_lutris_games() {
         Ok(g) => g,
@@ -155,7 +157,7 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, shadps4_enabled: bool, s
         games.extend(build_shadps4_games(&db, save_dir));
     }
     if steam_enabled {
-        games.extend(build_steam_games(&db, save_dir, &steam_games));
+        games.extend(build_steam_games(&db, save_dir, &steam_games, &steam_playtimes));
     }
     games.sort_by(|a, b| {
         let ord = sort_mode.compare(a, b);
@@ -216,6 +218,8 @@ fn cleanup_steam_entries(db: &db::DbConn, discovered: &[steam::SteamGame]) {
     }
 }
 
+/// Remove all native Steam games from the DB so they get re-discovered
+/// on the next `build_game_list` call.
 pub fn reimport_steam_games(db: &db::DbConn) {
     let all_entries = db::load_all_games(db).unwrap_or_default();
     for entry in &all_entries {
@@ -225,7 +229,7 @@ pub fn reimport_steam_games(db: &db::DbConn) {
     }
 }
 
-fn build_steam_games(db: &db::DbConn, save_dir: &str, steam_games: &[steam::SteamGame]) -> Vec<Game> {
+fn build_steam_games(db: &db::DbConn, save_dir: &str, steam_games: &[steam::SteamGame], playtimes: &std::collections::HashMap<String, (f64, i64)>) -> Vec<Game> {
     let mut games = Vec::new();
 
     for sg in steam_games {
@@ -252,7 +256,7 @@ fn build_steam_games(db: &db::DbConn, save_dir: &str, steam_games: &[steam::Stea
                         }
                     }
                     game.game_path = sg.install_dir.to_string_lossy().into_owned();
-                    if let Some((pt, lp)) = steam::read_playtime(&sg.app_id) {
+                    if let Some(&(pt, lp)) = playtimes.get(&sg.app_id) {
                         game.playtime = pt;
                         game.lastplayed = lp;
                     }

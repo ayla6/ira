@@ -42,7 +42,15 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         }
         AppMessage::GameStopped(lutris_id) => {
             state.borrow().running_games.lock().unwrap().remove(&lutris_id);
-            refresh_playtime_for(state, &[lutris_id]);
+            let is_steam = state.borrow().games.iter()
+                .find(|g| g.lutris_id == lutris_id)
+                .map(|g| g.kind == "steam")
+                .unwrap_or(false);
+            if is_steam {
+                refresh_steam_playtimes_for(state, &[lutris_id]);
+            } else {
+                refresh_playtime_for(state, &[lutris_id]);
+            }
             let selected_id = state.borrow().selected_id.clone();
             let game = state.borrow().games.iter()
                 .find(|g| g.lutris_id == lutris_id)
@@ -160,6 +168,28 @@ fn refresh_playtime_for(state: &SharedState, lutris_ids: &[i64]) {
         .into_iter()
         .filter(|(id, _, _)| id_set.contains(id))
         .map(|(id, pt, lp)| (id, (pt, lp)))
+        .collect();
+    apply_playtime_updates(state, &map);
+}
+
+fn refresh_steam_playtimes_for(state: &SharedState, lutris_ids: &[i64]) {
+    let id_set: HashSet<i64> = lutris_ids.iter().copied().collect();
+    let app_ids: Vec<(i64, String)> = {
+        let s = state.borrow();
+        s.games.iter()
+            .filter(|g| id_set.contains(&g.lutris_id) && g.kind == "steam")
+            .map(|g| (g.lutris_id, g.app_id.clone()))
+            .collect()
+    };
+    if app_ids.is_empty() {
+        return;
+    }
+
+    let all_playtimes = crate::platforms::steam::read_all_playtimes();
+    let map: HashMap<i64, (f64, i64)> = app_ids.iter()
+        .filter_map(|(lid, app_id)| {
+            all_playtimes.get(app_id).map(|&(pt, lp)| (*lid, (pt, lp)))
+        })
         .collect();
     apply_playtime_updates(state, &map);
 }

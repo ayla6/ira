@@ -1,7 +1,5 @@
-use std::collections::HashMap;
 use std::path::Path;
 
-use crate::models::AchievementStatus;
 use super::paths;
 
 /// Full achievement data from the Steam librarycache.
@@ -88,18 +86,6 @@ fn parse_librarycache_full(path: &Path) -> Result<(Vec<SteamAchievement>, usize,
     }
 
     Ok((result, n_total, n_achieved))
-}
-
-/// Simple unlock-state-only read (for compatibility with load_game's status_map path).
-pub fn read_steam_achievements(app_id: &str, save_dir: &str) -> HashMap<String, AchievementStatus> {
-    read_steam_achievements_full(app_id, save_dir)
-        .achievements
-        .into_iter()
-        .map(|a| (
-            a.id,
-            AchievementStatus { earned: a.earned, earned_time: a.earned_time },
-        ))
-        .collect()
 }
 
 #[cfg(test)]

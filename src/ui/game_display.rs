@@ -10,7 +10,6 @@ use std::cell::Cell;
 use super::state::SharedState;
 use super::image_budget::ImageLoadBudget;
 use super::play_button::play_button;
-use super::message_handler::apply_game_update;
 use super::achievement_rows::{create_achievement_row, build_global_tab};
 use super::helpers::clear_children;
 
@@ -114,13 +113,17 @@ fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::
     let platform_id_for_reload = game.platform_id.clone();
     let db_id_for_reload = game.db_id;
     let lutris_id_for_reload = game.lutris_id;
-    let state_for_reload = state.clone();
+    let sender = state.borrow().sender.clone();
     let save_dir = state.borrow().save_dir.clone();
     let reload = move || {
         let entry = GameEntry::for_reload(db_id_for_reload, &kind_for_reload, &trophy_source_for_reload, &app_id_for_reload, &platform_id_for_reload, lutris_id_for_reload);
-        if let Ok(updated) = load_game(&entry, &save_dir) {
-            apply_game_update(&state_for_reload, updated);
-        }
+        let sender = sender.clone();
+        let save_dir = save_dir.clone();
+        std::thread::spawn(move || {
+            if let Ok(updated) = load_game(&entry, &save_dir) {
+                let _ = sender.send(crate::AppMessage::EnrichedGame(updated));
+            }
+        });
     };
 
     let mut budget = ImageLoadBudget::new(18);
@@ -356,8 +359,10 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
 
     let has_hero = !game.hero_image_path.is_empty();
 
-    // Wine tools button (only shown if wine is enabled)
-    let wine_enabled = {
+    // Wine tools button (only shown if wine is enabled — skip DB lookup for native platforms)
+    let wine_enabled = if game.kind == "steam" || game.kind == "ps4" {
+        false
+    } else {
         let s = state.borrow();
         let config = crate::db::get_game_config(&s.db, game.db_id).ok().flatten();
         let app_default = s.cfg.default_wine_config.clone();

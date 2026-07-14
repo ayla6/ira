@@ -52,6 +52,8 @@ pub struct Game {
     pub steam_review_count: i64,
     /// Per-game RetroArch core override (empty = use global default).
     pub ra_core: String,
+    /// Per-game emulator override (empty = use global default).
+    pub emulator_override: String,
 }
 
 impl Default for Game {
@@ -90,6 +92,7 @@ impl Default for Game {
             steam_review_score: -1,
             steam_review_count: 0,
             ra_core: String::new(),
+            emulator_override: String::new(),
         }
     }
 }

@@ -2,12 +2,12 @@ use crate::AppMessage;
 use gtk4::prelude::*;
 use super::state::SharedState;
 
-pub fn stop_game(state: &SharedState, lutris_id: i64) {
-    let pid = state.borrow().running_games.lock().unwrap().remove(&lutris_id);
+pub fn stop_game(state: &SharedState, game_id: i64) {
+    let pid = state.borrow().running_games.lock().unwrap().remove(&game_id);
     if let Some(pid) = pid {
         let (wine_exe, wine_prefix, env) = {
             let s = state.borrow();
-            let game = s.games.iter().find(|g| g.lutris_id == lutris_id);
+            let game = s.games.iter().find(|g| g.db_id == game_id);
             let db_id = game.map(|g| g.db_id).unwrap_or(0);
             let config = crate::db::get_game_config(&s.db, db_id).ok().flatten();
             let app_default = s.cfg.default_wine_config.clone();
@@ -35,15 +35,15 @@ pub fn stop_game(state: &SharedState, lutris_id: i64) {
     }
 }
 
-pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>) -> Result<(), String> {
+pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -> Result<(), String> {
     let (running_games, sender, game_info, global_shadps4_exe, db, save_dir, app_default_wine, default_native_env_vars, ra_psx_exe, ra_ps2_exe, ra_psp_exe, ra_psx_core, ra_ps2_core, ra_psp_core) = {
         let s = state.borrow();
         (
             s.running_games.clone(),
             s.sender.clone(),
             s.games.iter()
-                .find(|g| g.lutris_id == lutris_id)
-                .map(|g| (g.kind.clone(), g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone(), g.platform_id.clone(), g.ra_core.clone()))
+                .find(|g| g.db_id == game_id)
+                .map(|g| (g.kind.clone(), g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone(), g.platform_id.clone(), g.ra_core.clone(), g.emulator_override.clone()))
                 .unwrap_or_default(),
             s.cfg.shadps4_executable.clone(),
             s.db.clone(),
@@ -59,11 +59,11 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
         )
     };
 
-    if running_games.lock().unwrap().contains_key(&lutris_id) {
+    if running_games.lock().unwrap().contains_key(&game_id) {
         return Ok(());
     }
 
-    let (kind, game_path, game_name, per_game_version, db_id, app_id, platform_id, per_game_ra_core) = game_info;
+    let (kind, game_path, game_name, per_game_version, db_id, app_id, platform_id, per_game_ra_core, per_game_emu) = game_info;
 
     let started_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -71,16 +71,18 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
         .as_secs() as i64;
 
     if kind == "retro" {
-        let exe = match platform_id.as_str() {
+        let global_exe = match platform_id.as_str() {
             "psx" => &ra_psx_exe,
             "ps2" => &ra_ps2_exe,
             "psp" => &ra_psp_exe,
             _ => return Err(format!("Unknown retro platform: {}", platform_id)),
         };
-        let exe = if exe.is_empty() {
+        let exe = if !per_game_emu.is_empty() {
+            &per_game_emu
+        } else if global_exe.is_empty() {
             return Err(format!("No emulator configured for {}", platform_id));
         } else {
-            exe.as_str()
+            global_exe.as_str()
         };
         let global_core = match platform_id.as_str() {
             "psx" => &ra_psx_core,
@@ -97,13 +99,13 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
         match crate::launcher::wrapper::spawn_game(&cmd, &[], None) {
             Ok(child) => {
                 let pid = child.id() as i32;
-                running_games.lock().unwrap().insert(lutris_id, pid);
+                running_games.lock().unwrap().insert(game_id, pid);
                 let sender_c = sender.clone();
                 let db_c = db.clone();
                 let rg = running_games.clone();
                 std::thread::spawn(move || {
                     crate::launcher::wrapper::monitor_process(
-                        child, pid, &sender_c, lutris_id, started_at, db_c, db_id, rg,
+                        child, pid, &sender_c, game_id, started_at, db_c, rg,
                     );
                 });
             }
@@ -121,13 +123,13 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
         match crate::launcher::wrapper::spawn_game(&cmd, &[], None) {
             Ok(child) => {
                 let pid = child.id() as i32;
-                running_games.lock().unwrap().insert(lutris_id, pid);
+                running_games.lock().unwrap().insert(game_id, pid);
                 let sender_c = sender.clone();
                 let db_c = db.clone();
                 let rg = running_games.clone();
                 std::thread::spawn(move || {
                     crate::launcher::wrapper::monitor_process(
-                        child, pid, &sender_c, lutris_id, started_at, db_c, db_id, rg,
+                        child, pid, &sender_c, game_id, started_at, db_c, rg,
                     );
                 });
             }
@@ -194,22 +196,22 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
         if !launch.exe.is_empty() {
             let wine_opt = if wine.enabled { Some(&wine) } else { None };
             crate::launcher::launch_game(
-                &launch, wine_opt, &game_name, sender, db_id, lutris_id,
+                &launch, wine_opt, &game_name, sender, game_id,
                 db.clone(), &save_dir, running_games,
             )?;
         } else {
-            let uri = format!("lutris:rungameid/{}", lutris_id);
+            let uri = format!("lutris:rungameid/{}", game_id);
             let cmd = vec!["lutris".to_string(), uri.clone()];
             match crate::launcher::wrapper::spawn_game(&cmd, &[], None) {
                 Ok(child) => {
                     let pid = child.id() as i32;
-                    running_games.lock().unwrap().insert(lutris_id, pid);
+                    running_games.lock().unwrap().insert(game_id, pid);
                     let sender_c = sender.clone();
                     let db_c = db.clone();
                     let rg = running_games.clone();
                     std::thread::spawn(move || {
                         crate::launcher::wrapper::monitor_process(
-                            child, pid, &sender_c, lutris_id, started_at, db_c, db_id, rg,
+                            child, pid, &sender_c, game_id, started_at, db_c, rg,
                         );
                     });
                 }
@@ -219,14 +221,14 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
     }
 
     let _ = crate::db::set_last_played(&db, db_id, started_at);
-    if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
+    if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == game_id) {
         g.lastplayed = started_at;
     }
 
     Ok(())
 }
 
-pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Widget {
+pub fn play_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
     let running_games = state.borrow().running_games.clone();
     let sender = state.borrow().sender.clone();
     let st = state.clone();
@@ -234,7 +236,7 @@ pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Wid
     let variants = crate::db::get_variants(&state.borrow().db, db_id).unwrap_or_default();
     let has_variants = !variants.is_empty();
 
-    let is_running = running_games.lock().unwrap().contains_key(&lutris_id);
+    let is_running = running_games.lock().unwrap().contains_key(&db_id);
 
     if !has_variants {
         let btn = gtk4::Button::new();
@@ -268,14 +270,14 @@ pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Wid
         let icon_click = icon.clone();
         let label_click = label.clone();
         btn.connect_clicked(move |btn| {
-            let is_running = st.borrow().running_games.lock().unwrap().contains_key(&lutris_id);
+            let is_running = st.borrow().running_games.lock().unwrap().contains_key(&db_id);
             if is_running {
-                stop_game(&st, lutris_id);
+                stop_game(&st, db_id);
                 icon_click.set_icon_name(Some("media-playback-start-symbolic"));
                 label_click.set_text("Play");
                 btn.add_css_class("suggested-action");
             } else {
-                match launch_game(&st, lutris_id, None) {
+                match launch_game(&st, db_id, None) {
                     Ok(()) => {
                         icon_click.set_icon_name(Some("window-close-symbolic"));
                         label_click.set_text("Stop");
@@ -365,15 +367,15 @@ pub fn play_button(state: &SharedState, lutris_id: i64, db_id: i64) -> gtk4::Wid
     let label_click = label.clone();
     let st_launch = st.clone();
     split.connect_clicked(move |btn| {
-        let is_running = st_launch.borrow().running_games.lock().unwrap().contains_key(&lutris_id);
+        let is_running = st_launch.borrow().running_games.lock().unwrap().contains_key(&db_id);
         if is_running {
-            stop_game(&st_launch, lutris_id);
+            stop_game(&st_launch, db_id);
             icon_click.set_icon_name(Some("media-playback-start-symbolic"));
             label_click.set_text("Play");
             btn.add_css_class("suggested-action");
         } else {
             let vid = crate::db::get_default_variant(&st_launch.borrow().db, db_id);
-            match launch_game(&st_launch, lutris_id, vid) {
+            match launch_game(&st_launch, db_id, vid) {
                 Ok(()) => {
                     icon_click.set_icon_name(Some("window-close-symbolic"));
                     label_click.set_text("Stop");

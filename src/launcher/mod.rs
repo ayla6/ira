@@ -16,7 +16,6 @@ pub fn launch_game(
     _game_name: &str,
     sender: AppSender,
     game_id: i64,
-    lutris_id: i64,
     db: DbConn,
     save_dir: &str,
     running_games: Arc<Mutex<HashMap<i64, i32>>>,
@@ -98,13 +97,13 @@ pub fn launch_game(
     let child = wrapper::spawn_game(&command, &env, game_dir.as_deref())?;
     let child_pid = child.id() as i32;
 
-    running_games.lock().map_err(|e| e.to_string())?.insert(lutris_id, child_pid);
+    running_games.lock().map_err(|e| e.to_string())?.insert(game_id, child_pid);
 
     let sender_c = sender.clone();
     let db_c = db.clone();
     let rg = running_games.clone();
     std::thread::spawn(move || {
-        wrapper::monitor_process(child, child_pid, &sender_c, lutris_id, started_at, db_c, game_id, rg);
+        wrapper::monitor_process(child, child_pid, &sender_c, game_id, started_at, db_c, rg);
     });
 
     Ok(child_pid)

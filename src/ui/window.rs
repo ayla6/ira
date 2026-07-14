@@ -386,8 +386,8 @@ fn connect_window_signals(
                 show_grid_view(&state_clone);
             }
         } else if let Some(id_str) = name.strip_prefix("game:") {
-            if let Ok(lutris_id) = id_str.parse::<i64>() {
-                switch_to_game(&state_clone, lutris_id);
+            if let Ok(db_id) = id_str.parse::<i64>() {
+                switch_to_game(&state_clone, db_id);
             }
         }
     });
@@ -396,15 +396,14 @@ fn connect_window_signals(
     game_list.connect_row_activated(move |_list, row| {
         let name = row.widget_name().to_string();
         if let Some(id_str) = name.strip_prefix("game:") {
-            if let Ok(lutris_id) = id_str.parse::<i64>() {
+            if let Ok(db_id) = id_str.parse::<i64>() {
                 let s = state_clone.borrow();
-                if let Some(game) = s.games.iter().find(|g| g.lutris_id == lutris_id) {
-                    let db_id = game.db_id;
+                if s.games.iter().any(|g| g.db_id == db_id) {
                     let vid = crate::db::get_default_variant(&s.db, db_id);
                     drop(s);
-                    if !state_clone.borrow().running_games.lock().unwrap().contains_key(&lutris_id) {
-                        let _ = super::play_button::launch_game(&state_clone, lutris_id, vid);
-                        let _ = state_clone.borrow().sender.send(crate::AppMessage::GameStarted(lutris_id));
+                    if !state_clone.borrow().running_games.lock().unwrap().contains_key(&db_id) {
+                        let _ = super::play_button::launch_game(&state_clone, db_id, vid);
+                        let _ = state_clone.borrow().sender.send(crate::AppMessage::GameStarted(db_id));
                     }
                 }
             }

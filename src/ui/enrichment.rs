@@ -33,7 +33,7 @@ pub fn enrich_game_async(
             return;
         }
 
-        let mut entry = GameEntry::for_reload(db_id, "", &trophy_source, &app_id, &platform_id, lutris_id);
+        let mut entry = GameEntry::for_reload(db_id, "", &trophy_source, &app_id, &platform_id);
         entry.title = title;
 
         if has_steam_enrichment(&trophy_source) {
@@ -214,7 +214,7 @@ fn enrich_ra(
     trophy_source: &str,
     platform_id: &str,
     db_id: i64,
-    lutris_id: i64,
+    _lutris_id: i64,
     title: &str,
     save_dir: &str,
     sender: &AppSender,
@@ -232,7 +232,7 @@ fn enrich_ra(
         return;
     }
 
-    let entry = GameEntry::for_reload(db_id, crate::models::RETRO, trophy_source, app_id, platform_id, lutris_id);
+    let entry = GameEntry::for_reload(db_id, crate::models::RETRO, trophy_source, app_id, platform_id);
     let mut game = match load_game(&entry, save_dir) {
         Ok(g) => g,
         Err(e) => {

@@ -23,7 +23,7 @@ pub use variants::*;
 pub use groups::*;
 pub use metadata::*;
 
-pub(super) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core";
+pub(super) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override";
 
 pub(super) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<crate::models::GameEntry> {
     Ok(crate::models::GameEntry {
@@ -49,6 +49,7 @@ pub(super) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<crate
         steam_review_score: row.get(19)?,
         steam_review_count: row.get(20)?,
         ra_core: row.get(21)?,
+        emulator_override: row.get(22)?,
     })
 }
 

@@ -40,44 +40,44 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             drop(s);
             rebuild_sidebar(state);
         }
-        AppMessage::GameStopped(lutris_id) => {
-            state.borrow().running_games.lock().unwrap().remove(&lutris_id);
+        AppMessage::GameStopped(db_id) => {
+            state.borrow().running_games.lock().unwrap().remove(&db_id);
             {
-                let rows = state.borrow().rows.get(&lutris_id).cloned().unwrap_or_default();
+                let rows = state.borrow().rows.get(&db_id).cloned().unwrap_or_default();
                 for rw in &rows {
                     rw.row.remove_css_class("playing-game");
                 }
             }
             let is_steam = state.borrow().games.iter()
-                .find(|g| g.lutris_id == lutris_id)
+                .find(|g| g.db_id == db_id)
                 .map(|g| g.kind == "steam")
                 .unwrap_or(false);
             if is_steam {
-                refresh_steam_playtimes_for(state, &[lutris_id]);
+                refresh_steam_playtimes_for(state, &[db_id]);
             } else {
-                refresh_playtime_for(state, &[lutris_id]);
+                refresh_playtime_for(state, &[db_id]);
             }
             let selected_id = state.borrow().selected_id.clone();
             let game = state.borrow().games.iter()
-                .find(|g| g.lutris_id == lutris_id)
+                .find(|g| g.db_id == db_id)
                 .cloned();
-            if selected_id == lutris_id.to_string() {
+            if selected_id == db_id.to_string() {
                 if let Some(game) = game {
                     display_game(&game, state);
                 }
             }
         }
-        AppMessage::GameStarted(lutris_id) => {
+        AppMessage::GameStarted(db_id) => {
             {
-                let rows = state.borrow().rows.get(&lutris_id).cloned().unwrap_or_default();
+                let rows = state.borrow().rows.get(&db_id).cloned().unwrap_or_default();
                 for rw in &rows {
                     rw.row.add_css_class("playing-game");
                 }
             }
             let selected_id = state.borrow().selected_id.clone();
-            if selected_id == lutris_id.to_string() {
+            if selected_id == db_id.to_string() {
                 let game = state.borrow().games.iter()
-                    .find(|g| g.lutris_id == lutris_id)
+                    .find(|g| g.db_id == db_id)
                     .cloned();
                 if let Some(game) = game {
                     display_game(&game, state);
@@ -104,7 +104,7 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                         let new_playtime = crate::platforms::ps4::parse_playtime(time_str);
                         if (g.playtime - new_playtime).abs() > 0.001 {
                             g.playtime = new_playtime;
-                            updated_ids.push(g.lutris_id);
+                            updated_ids.push(g.db_id);
                         }
                     }
                 }
@@ -115,7 +115,7 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 if let Some(id) = updated_ids.first() {
                     if selected_id == id.to_string() {
                         let game = state.borrow().games.iter()
-                            .find(|g| g.lutris_id == *id)
+                            .find(|g| g.db_id == *id)
                             .cloned();
                         if let Some(game) = game {
                             display_game(&game, state);
@@ -158,41 +158,50 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 build_image_manager_content(s, game, win).upcast()
             });
             let selected_id = state.borrow().selected_id.clone();
-            let lutris_id = state.borrow().games.iter()
-                .find(|g| g.db_id == db_id)
-                .map(|g| g.lutris_id);
-            if let Some(lid) = lutris_id {
-                if selected_id == lid.to_string() {
-                    let game = state.borrow().games.iter()
-                        .find(|g| g.db_id == db_id)
-                        .cloned();
-                    if let Some(game) = game {
-                        display_game(&game, state);
-                    }
+            if selected_id == db_id.to_string() {
+                let game = state.borrow().games.iter()
+                    .find(|g| g.db_id == db_id)
+                    .cloned();
+                if let Some(game) = game {
+                    display_game(&game, state);
                 }
             }
         }
     }
 }
 
-fn refresh_playtime_for(state: &SharedState, lutris_ids: &[i64]) {
+fn refresh_playtime_for(state: &SharedState, db_ids: &[i64]) {
+    let lutris_ids: Vec<i64> = {
+        let s = state.borrow();
+        db_ids.iter()
+            .filter_map(|&db_id| s.games.iter().find(|g| g.db_id == db_id).map(|g| g.lutris_id))
+            .filter(|&id| id != 0)
+            .collect()
+    };
     let Ok(all) = crate::platforms::lutris::load_lutris_playtime() else { return };
     let id_set: HashSet<i64> = lutris_ids.iter().copied().collect();
-    let map: HashMap<i64, (f64, i64)> = all
+    let lutris_map: HashMap<i64, (f64, i64)> = all
         .into_iter()
         .filter(|(id, _, _)| id_set.contains(id))
         .map(|(id, pt, lp)| (id, (pt, lp)))
         .collect();
-    apply_playtime_updates(state, &map);
+    let db_map: HashMap<i64, (f64, i64)> = {
+        let s = state.borrow();
+        s.games.iter()
+            .filter(|g| id_set.contains(&g.lutris_id))
+            .filter_map(|g| lutris_map.get(&g.lutris_id).map(|&v| (g.db_id, v)))
+            .collect()
+    };
+    apply_playtime_updates_db(state, &db_map);
 }
 
-fn refresh_steam_playtimes_for(state: &SharedState, lutris_ids: &[i64]) {
-    let id_set: HashSet<i64> = lutris_ids.iter().copied().collect();
+fn refresh_steam_playtimes_for(state: &SharedState, db_ids: &[i64]) {
+    let id_set: HashSet<i64> = db_ids.iter().copied().collect();
     let app_ids: Vec<(i64, String)> = {
         let s = state.borrow();
         s.games.iter()
-            .filter(|g| id_set.contains(&g.lutris_id) && g.kind == "steam")
-            .map(|g| (g.lutris_id, g.app_id.clone()))
+            .filter(|g| id_set.contains(&g.db_id) && g.kind == "steam")
+            .map(|g| (g.db_id, g.app_id.clone()))
             .collect()
     };
     if app_ids.is_empty() {
@@ -201,42 +210,42 @@ fn refresh_steam_playtimes_for(state: &SharedState, lutris_ids: &[i64]) {
 
     let all_playtimes = crate::platforms::steam::read_all_playtimes();
     let map: HashMap<i64, (f64, i64)> = app_ids.iter()
-        .filter_map(|(lid, app_id)| {
-            all_playtimes.get(app_id).map(|&(pt, lp)| (*lid, (pt, lp)))
+        .filter_map(|(db_id, app_id)| {
+            all_playtimes.get(app_id).map(|&(pt, lp)| (*db_id, (pt, lp)))
         })
         .collect();
-    apply_playtime_updates(state, &map);
+    apply_playtime_updates_db(state, &map);
 }
 
-fn apply_playtime_updates(state: &SharedState, updates: &HashMap<i64, (f64, i64)>) {
-    let mut changed_ids: Vec<i64> = Vec::new();
-    let selected_lutris_id: i64;
+fn apply_playtime_updates_db(state: &SharedState, updates: &HashMap<i64, (f64, i64)>) {
+    let mut changed_db_ids: Vec<i64> = Vec::new();
+    let selected_db_id: i64;
 
     {
         let mut s = state.borrow_mut();
-        selected_lutris_id = s.selected_id.parse().unwrap_or(0);
+        selected_db_id = s.selected_id.parse().unwrap_or(0);
 
         for g in &mut s.games {
-            if let Some(&(playtime, lastplayed)) = updates.get(&g.lutris_id) {
+            if let Some(&(playtime, lastplayed)) = updates.get(&g.db_id) {
                 if g.playtime != playtime || g.lastplayed != lastplayed {
                     g.playtime = playtime;
                     g.lastplayed = lastplayed;
-                    changed_ids.push(g.lutris_id);
+                    changed_db_ids.push(g.db_id);
                 }
             }
         }
     }
 
-    if changed_ids.is_empty() {
+    if changed_db_ids.is_empty() {
         return;
     }
 
-    if changed_ids.contains(&selected_lutris_id) {
+    if changed_db_ids.contains(&selected_db_id) {
         let game = state
             .borrow()
             .games
             .iter()
-            .find(|g| g.lutris_id == selected_lutris_id)
+            .find(|g| g.db_id == selected_db_id)
             .cloned();
         if let Some(game) = game {
             display_game(&game, state);
@@ -250,9 +259,16 @@ fn apply_playtime_updates(state: &SharedState, updates: &HashMap<i64, (f64, i64)
 }
 
 fn handle_lutris_data_changed(state: &SharedState, data: Vec<(i64, f64, i64)>) {
-    let map: HashMap<i64, (f64, i64)> =
+    let lutris_map: HashMap<i64, (f64, i64)> =
         data.into_iter().map(|(id, pt, lp)| (id, (pt, lp))).collect();
-    apply_playtime_updates(state, &map);
+    let db_map: HashMap<i64, (f64, i64)> = {
+        let s = state.borrow();
+        s.games.iter()
+            .filter(|g| g.lutris_id != 0)
+            .filter_map(|g| lutris_map.get(&g.lutris_id).map(|&v| (g.db_id, v)))
+            .collect()
+    };
+    apply_playtime_updates_db(state, &db_map);
 }
 
 fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
@@ -291,7 +307,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
         }
         if crate::models::has_steam_enrichment(&g.trophy_source) {
             if let Some(ref watcher) = watcher {
-                let mut entry = GameEntry::for_reload(g.db_id, &g.kind, &g.trophy_source, &g.app_id, &g.platform_id, g.lutris_id);
+                let mut entry = GameEntry::for_reload(g.db_id, &g.kind, &g.trophy_source, &g.app_id, &g.platform_id);
                 entry.sort_title = g.sort_title.clone();
                 watcher.watch(&entry, &g.achievements);
             }
@@ -350,7 +366,7 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
 
         s.game_names.lock().unwrap().insert(app_id.clone(), updated.name.clone());
 
-        let row_widgets: Vec<super::sidebar::SidebarRowWidgets> = s.rows.get(&updated.lutris_id).cloned().unwrap_or_default();
+        let row_widgets: Vec<super::sidebar::SidebarRowWidgets> = s.rows.get(&updated.db_id).cloned().unwrap_or_default();
         for rw in &row_widgets {
             rw.title.set_text(&updated.name);
             rw.title.set_tooltip_text(Some(&format!("{} ({})", updated.name, updated.app_id)));
@@ -359,7 +375,7 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
             }
         }
 
-        let needs_rebuild = s.selected_id == updated.lutris_id.to_string() && !s.content_unloaded;
+        let needs_rebuild = s.selected_id == updated.db_id.to_string() && !s.content_unloaded;
         let visual_changed = updated.grid_path != old_grid_path
             || updated.header_path != old_header_path;
         let needs_grid_refresh = visual_changed
@@ -393,7 +409,6 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
 
 fn insert_or_update_game(state: &SharedState, game: Game) {
     let app_id = game.app_id.clone();
-    let lutris_id = game.lutris_id;
 
     {
         let mut s = state.borrow_mut();
@@ -401,18 +416,7 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
             s.game_names.lock().unwrap().insert(app_id.clone(), game.name.clone());
         }
 
-        let found = if lutris_id != 0 {
-            s.games.iter().position(|g| g.lutris_id == lutris_id)
-        } else {
-            None
-        };
-        let found = found.or_else(|| {
-            if !app_id.is_empty() {
-                s.games.iter().position(|g| g.app_id == app_id)
-            } else {
-                None
-            }
-        });
+        let found = s.games.iter().position(|g| g.db_id == game.db_id);
 
         if let Some(i) = found {
             let mut g = game;
@@ -455,17 +459,17 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
     }
 }
 
-pub fn switch_to_game(state: &SharedState, lutris_id: i64) {
-    state.borrow_mut().selected_id = lutris_id.to_string();
+pub fn switch_to_game(state: &SharedState, db_id: i64) {
+    state.borrow_mut().selected_id = db_id.to_string();
 
-    let row = state.borrow().rows.get(&lutris_id).and_then(|v| v.first()).map(|rw| rw.row.clone());
+    let row = state.borrow().rows.get(&db_id).and_then(|v| v.first()).map(|rw| rw.row.clone());
     if let Some(row) = row {
         select_row_silently(state, Some(&row));
     }
 
     apply_selected_highlight(state);
 
-    let game = state.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned();
+    let game = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
     if let Some(game) = game {
         display_game(&game, state);
     }

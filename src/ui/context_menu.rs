@@ -19,7 +19,7 @@ pub fn show_game_context_menu(
         .borrow()
         .games
         .iter()
-        .find(|g| g.lutris_id == game.lutris_id)
+        .find(|g| g.db_id == game.db_id)
         .map(|g| g.hidden)
         .unwrap_or(game.hidden);
 
@@ -111,14 +111,14 @@ pub fn show_game_context_menu(
     let sc = state_clone.clone();
     let gc = game_clone.clone();
     play_action.connect_activate(move |_, _| {
-        let lutris_id = gc.lutris_id;
-        let is_running = sc.borrow().running_games.lock().unwrap().contains_key(&lutris_id);
+        let db_id = gc.db_id;
+        let is_running = sc.borrow().running_games.lock().unwrap().contains_key(&db_id);
         if is_running {
-            super::play_button::stop_game(&sc, lutris_id);
+            super::play_button::stop_game(&sc, db_id);
         } else {
-            match super::play_button::launch_game(&sc, lutris_id, None) {
+            match super::play_button::launch_game(&sc, db_id, None) {
                 Ok(()) => {
-                    let _ = sc.borrow().sender.send(AppMessage::GameStarted(lutris_id));
+                    let _ = sc.borrow().sender.send(AppMessage::GameStarted(db_id));
                 }
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);
@@ -151,22 +151,22 @@ pub fn show_game_context_menu(
     let row = sidebar_row.map(|r| r.clone());
     hide_action.connect_activate(move |_, _| {
         let new_hidden = !current_hidden;
+        let db_id = gc.db_id;
         let lutris_id = gc.lutris_id;
         {
             let s = sc.borrow();
-            if let Some(g) = s.games.iter().find(|g| g.lutris_id == lutris_id) {
-                if g.db_id != 0 {
-                    if let Err(e) = crate::db::set_game_hidden(&s.db, g.db_id, new_hidden) {
-                        eprintln!("Failed to set hidden: {}", e);
-                    }
-                } else if lutris_id != 0 {
+            if let Some(g) = s.games.iter().find(|g| g.db_id == db_id) {
+                if let Err(e) = crate::db::set_game_hidden(&s.db, g.db_id, new_hidden) {
+                    eprintln!("Failed to set hidden: {}", e);
+                }
+                if lutris_id != 0 {
                     if let Err(e) = crate::db::set_lutris_hidden(&s.db, lutris_id, new_hidden) {
                         eprintln!("Failed to set lutris hidden: {}", e);
                     }
                 }
             }
         }
-        if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
+        if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
             g.hidden = new_hidden;
         }
         if let Some(ref row_clone) = row {

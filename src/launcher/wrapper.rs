@@ -52,10 +52,9 @@ pub fn monitor_process(
     mut child: Child,
     child_pid: i32,
     sender: &AppSender,
-    lutris_id: i64,
+    game_id: i64,
     started_at: i64,
     db: DbConn,
-    game_id: i64,
     running_games: Arc<Mutex<HashMap<i64, i32>>>,
 ) {
     loop {
@@ -78,7 +77,7 @@ pub fn monitor_process(
     let duration = ended_at - started_at;
 
     if duration < 5 {
-        eprintln!("Game {} exited after {}s — possible crash, not recording session", lutris_id, duration);
+        eprintln!("Game {} exited after {}s — possible crash, not recording session", game_id, duration);
     } else {
         if let Err(e) = record_session(&db, game_id, started_at, ended_at) {
             eprintln!("Failed to record play session: {}", e);
@@ -91,8 +90,8 @@ pub fn monitor_process(
         });
     }
 
-    running_games.lock().unwrap().remove(&lutris_id);
-    let _ = sender.send(AppMessage::GameStopped(lutris_id));
+    running_games.lock().unwrap().remove(&game_id);
+    let _ = sender.send(AppMessage::GameStopped(game_id));
 }
 
 fn reap_zombies(pgid: i32) {

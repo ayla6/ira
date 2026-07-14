@@ -829,7 +829,7 @@ pub(super) fn build_game_general_page(
     game: &Game,
     win: &adw::Window,
     languages: &[String],
-) -> (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>, Option<adw::EntryRow>, Option<adw::ComboRow>, Rc<RefCell<Option<String>>>) {
+) -> (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>, Option<adw::EntryRow>, Option<adw::ComboRow>, Rc<RefCell<Option<String>>>, Rc<RefCell<Option<String>>>) {
     let general_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let title_entry = adw::EntryRow::new();
@@ -919,7 +919,54 @@ pub(super) fn build_game_general_page(
     }
 
     let pending_ra_core: Rc<RefCell<Option<String>>> = Default::default();
+    let pending_emulator: Rc<RefCell<Option<String>>> = Default::default();
     if game.kind == "retro" {
+        let emulators = crate::platforms::emulator_detect::detect_emulators(&game.platform_id);
+        if !emulators.is_empty() {
+            let emu_group = adw::PreferencesGroup::new();
+            emu_group.set_title("Emulator");
+
+            let mut emu_names: Vec<String> = vec!["Follow global".to_string()];
+            emu_names.extend(emulators.iter().map(|e| e.display_name.clone()));
+            let str_refs: Vec<&str> = emu_names.iter().map(|s| s.as_str()).collect();
+            let emu_model = gtk4::StringList::new(&str_refs);
+            let emu_dropdown = gtk4::DropDown::new(Some(emu_model), None::<&gtk4::PropertyExpression>);
+
+            let mut selected_emu: u32 = 0;
+            if !game.emulator_override.is_empty() {
+                for (i, e) in emulators.iter().enumerate() {
+                    if e.launch_command == game.emulator_override {
+                        selected_emu = (i + 1) as u32;
+                        break;
+                    }
+                }
+            }
+            emu_dropdown.set_selected(selected_emu);
+
+            let pending_emu_c = pending_emulator.clone();
+            let emus_clone = emulators.clone();
+            emu_dropdown.connect_selected_notify(move |dd| {
+                let idx = dd.selected();
+                let cmd = if idx == 0 {
+                    String::new()
+                } else {
+                    match emus_clone.get((idx - 1) as usize) {
+                        Some(e) => e.launch_command.clone(),
+                        None => return,
+                    }
+                };
+                *pending_emu_c.borrow_mut() = Some(cmd);
+            });
+
+            let emu_row = adw::ActionRow::new();
+            emu_row.set_title("Emulator");
+            emu_row.set_subtitle("Override the emulator for this game");
+            emu_dropdown.set_valign(gtk4::Align::Center);
+            emu_row.add_suffix(&emu_dropdown);
+            emu_group.add(&emu_row);
+            general_page.append(&emu_group);
+        }
+
         let cores = crate::platforms::emulator_detect::detect_ra_cores();
         if !cores.is_empty() {
             let core_group = adw::PreferencesGroup::new();
@@ -1042,7 +1089,7 @@ pub(super) fn build_game_general_page(
         None
     };
 
-    (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core)
+    (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator)
 }
 
 fn show_steam_id_search_popup(

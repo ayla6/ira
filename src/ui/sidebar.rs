@@ -22,15 +22,15 @@ pub fn select_row_silently(state: &SharedState, row: Option<&gtk4::ListBoxRow>) 
 }
 
 /// Add `selected-game` CSS class to all sidebar rows matching the
-/// currently selected lutris_id, and remove it from all others.
+/// currently selected db_id, and remove it from all others.
 pub fn apply_selected_highlight(state: &SharedState) {
     let selected_id = state.borrow().selected_id.clone();
-    let selected_lutris: i64 = selected_id.parse().unwrap_or(0);
+    let selected_db_id: i64 = selected_id.parse().unwrap_or(0);
     let all_rows: Vec<(i64, Vec<SidebarRowWidgets>)> = state.borrow().rows.iter()
         .map(|(k, v)| (*k, v.clone()))
         .collect();
-    for (lid, rows) in &all_rows {
-        let is_selected = *lid == selected_lutris && selected_lutris != 0;
+    for (db_id, rows) in &all_rows {
+        let is_selected = *db_id == selected_db_id && selected_db_id != 0;
         for rw in rows {
             if is_selected {
                 rw.row.add_css_class("selected-game");
@@ -45,9 +45,9 @@ pub fn apply_selected_highlight(state: &SharedState) {
 /// to ensure the row has been allocated. Uses `allocation()` (position within
 /// the ListBox) instead of `compute_bounds()` which returns unreliable values.
 #[allow(deprecated)]
-pub fn scroll_to_row(state: &SharedState, lutris_id: i64) {
+pub fn scroll_to_row(state: &SharedState, db_id: i64) {
     let sidebar_scroll = state.borrow().sidebar_scroll.clone();
-    let row = state.borrow().rows.get(&lutris_id)
+    let row = state.borrow().rows.get(&db_id)
         .and_then(|v| v.first())
         .map(|rw| rw.row.clone());
 
@@ -225,7 +225,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
             if !is_collapsed {
                 for game in &collection_games {
                     let rw = build_sidebar_row(&game_list, game, state, show_hidden, 0);
-                    all_rows.push((game.lutris_id, rw));
+                    all_rows.push((game.db_id, rw));
                 }
             }
         }
@@ -249,7 +249,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
             if !is_collapsed {
                 for game in &uncategorized {
                     let rw = build_sidebar_row(&game_list, game, state, show_hidden, 0);
-                    all_rows.push((game.lutris_id, rw));
+                    all_rows.push((game.db_id, rw));
                 }
             }
         }
@@ -257,13 +257,13 @@ pub fn rebuild_sidebar(state: &SharedState) {
         let games = filtered_games(state);
         for game in &games {
             let rw = build_sidebar_row(&game_list, game, state, show_hidden, 10);
-            all_rows.push((game.lutris_id, rw));
+            all_rows.push((game.db_id, rw));
         }
     }
 
     let mut rows: std::collections::HashMap<i64, Vec<SidebarRowWidgets>> = std::collections::HashMap::new();
-    for (lutris_id, rw) in all_rows {
-        rows.entry(lutris_id).or_default().push(rw);
+    for (db_id, rw) in all_rows {
+        rows.entry(db_id).or_default().push(rw);
     }
     state.borrow_mut().rows = rows;
 
@@ -282,8 +282,8 @@ fn restore_selection(state: &SharedState, game_list: &gtk4::ListBox, _searching:
     let selected_group = state.borrow().selected_group.clone();
 
     if !selected_id.is_empty() {
-        if let Ok(lutris_id) = selected_id.parse::<i64>() {
-            if let Some(rows) = state.borrow().rows.get(&lutris_id) {
+        if let Ok(db_id) = selected_id.parse::<i64>() {
+            if let Some(rows) = state.borrow().rows.get(&db_id) {
                 if let Some(first) = rows.first() {
                     let row = first.row.clone();
                     game_list.select_row(Some(&row));
@@ -317,7 +317,7 @@ pub fn build_sidebar_row(
     _indent: i32,
 ) -> SidebarRowWidgets {
     let row = gtk4::ListBoxRow::new();
-    row.set_widget_name(&format!("game:{}", game.lutris_id));
+    row.set_widget_name(&format!("game:{}", game.db_id));
 
     let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     hbox.set_margin_top(4);
@@ -348,7 +348,7 @@ pub fn build_sidebar_row(
         row.add_css_class("hidden-game");
     }
     {
-        let is_running = state.borrow().running_games.lock().unwrap().contains_key(&game.lutris_id);
+        let is_running = state.borrow().running_games.lock().unwrap().contains_key(&game.db_id);
         if is_running {
             row.add_css_class("playing-game");
         }

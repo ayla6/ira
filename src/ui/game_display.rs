@@ -119,11 +119,11 @@ fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::
     let trophy_source_for_reload = game.trophy_source.clone();
     let platform_id_for_reload = game.platform_id.clone();
     let db_id_for_reload = game.db_id;
-    let lutris_id_for_reload = game.lutris_id;
+
     let sender = state.borrow().sender.clone();
     let save_dir = state.borrow().save_dir.clone();
     let reload = move || {
-        let entry = GameEntry::for_reload(db_id_for_reload, &kind_for_reload, &trophy_source_for_reload, &app_id_for_reload, &platform_id_for_reload, lutris_id_for_reload);
+        let entry = GameEntry::for_reload(db_id_for_reload, &kind_for_reload, &trophy_source_for_reload, &app_id_for_reload, &platform_id_for_reload);
         let sender = sender.clone();
         let save_dir = save_dir.clone();
         std::thread::spawn(move || {
@@ -335,7 +335,7 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
         let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
         row.set_valign(gtk4::Align::Center);
         row.set_hexpand(true);
-        row.append(&play_button(state, game.lutris_id, game.db_id));
+        row.append(&play_button(state, game.db_id));
         row.append(&stat_label("Last played", &format_lastplayed(game.lastplayed)));
         row.append(&stat_label("Play time", &format_playtime(game.playtime)));
         if game.total_count > 0 {

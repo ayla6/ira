@@ -60,7 +60,7 @@ pub fn load_shadps4_game(
         earned_count: 0,
         total_count: 0,
         hidden,
-        lutris_id: -db_id,
+        lutris_id: 0,
         slug: serial.clone(),
         playtime,
         lastplayed: last_played,
@@ -78,6 +78,7 @@ pub fn load_shadps4_game(
         steam_review_score: -1,
         steam_review_count: 0,
         ra_core: String::new(),
+        emulator_override: String::new(),
     };
 
     // PS4 default icon: always copy from the game's sce_sys/icon0.png to data/ps4/{NPWR}/icon.png

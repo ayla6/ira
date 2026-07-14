@@ -16,7 +16,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         (game, config, app_default_wine)
     };
     let Some(game) = game else { return };
-    let is_native_platform = game.kind == "steam" || game.kind == "ps4";
+    let show_wine = game.kind == crate::models::WINE;
     let has_config = config.is_some();
     let (saved_launch, mut saved_wine, saved_profile_id) = config.clone().unwrap_or_default();
 
@@ -70,7 +70,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
     // --- General page ---
     let languages = app_details.as_ref().map(|d| d.languages.clone()).unwrap_or_default();
-    let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core) =
+    let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator) =
         super::dialogs::build_game_general_page(state, &game, &win, &languages);
     sidebar.append(&super::dialogs::settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
@@ -193,19 +193,20 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         None
     };
 
-    // --- Launch Config + Wine Config (not for steam/ps4; lutris only if it has a saved config) ---
-    let show_launch_config = !is_native_platform && (game.kind != "lutris" || has_config);
+    // --- Launch Config (not for steam/ps4/retro; lutris only if it has a saved config) ---
+    let show_launch_config = !show_wine && game.kind != "steam" && game.kind != "ps4" && game.kind != "retro" && (game.kind != "lutris" || has_config);
     let launch_config_widgets = if show_launch_config {
-        build_launch_config_page(&saved_launch, &win, &sidebar, &stack, !saved_wine.enabled)
+        build_launch_config_page(&saved_launch, &win, &sidebar, &stack, true)
     } else {
         None
     };
 
-    if saved_wine.enabled && show_launch_config {
+    // --- Wine Config (only for wine kind) ---
+    if show_wine && saved_wine.enabled {
         sidebar.append(&super::dialogs::sidebar_separator());
     }
 
-    let wine_widgets_opt = if saved_wine.enabled && show_launch_config {
+    let wine_widgets_opt = if show_wine && saved_wine.enabled {
         let (wine_pages, ww) = crate::ui::wine_config_widget::build_wine_config_pages(&saved_wine, Some(&app_default_wine));
         for wp in &wine_pages {
             sidebar.append(&super::dialogs::settings_sidebar_row(wp.icon, wp.label));
@@ -216,7 +217,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         None
     };
 
-    if saved_wine.enabled && show_launch_config {
+    if show_wine && saved_wine.enabled {
         sidebar.append(&super::dialogs::sidebar_separator());
     }
 
@@ -555,7 +556,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     variant_scroll.set_child(Some(&variant_page));
     variant_scroll.set_vexpand(true);
     variant_scroll.set_hexpand(true);
-    if !is_native_platform && (game.kind != "lutris" || has_config || !variants.is_empty()) {
+    if game.kind != "steam" && game.kind != "ps4" && game.kind != "retro" && (game.kind != "lutris" || has_config || !variants.is_empty()) {
         sidebar.append(&super::dialogs::sidebar_separator());
         sidebar.append(&super::dialogs::settings_sidebar_row("application-x-executable-symbolic", "Variants"));
         stack.add_named(&variant_scroll, Some("variants"));
@@ -615,7 +616,6 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let state_clone = state.clone();
     let win_s = win.clone();
     let db_id_s = db_id;
-    let lutris_id = game.lutris_id;
     let app_id = game.app_id.clone();
     let trophy_source = game.trophy_source.clone();
     let var_widgets_save = var_widgets.clone();
@@ -663,6 +663,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
         if let Some(core) = pending_ra_core.borrow().as_ref() {
             let _ = crate::db::set_ra_core(&db, db_id_s, core);
+        }
+        if let Some(emu) = pending_emulator.borrow().as_ref() {
+            let _ = crate::db::set_emulator_override(&db, db_id_s, emu);
         }
 
         // Save launch config + wine config
@@ -773,7 +776,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
         if pending_copies_c.borrow().contains_key("__unmatch__") {
             let _ = crate::db::set_sgdb_id(&db, db_id_s, "");
-            if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
+            if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id_s) {
                 g.sgdb_id.clear();
             }
             pending_copies_c.borrow_mut().remove("__unmatch__");
@@ -787,7 +790,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     eprintln!("Failed to update logo settings: {}", e);
                 }
             }
-            if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
+            if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id_s) {
                 g.logo_position = pos;
                 g.logo_size = size;
             }
@@ -827,7 +830,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         }
 
         // Update in-memory state
-        if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
+        if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id_s) {
             g.name = title.clone();
             g.sort_title = sort_title.clone();
             if let Some(ver) = pending_version.borrow().as_ref() {
@@ -835,6 +838,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             }
             if let Some(core) = pending_ra_core.borrow().as_ref() {
                 g.ra_core = core.clone();
+            }
+            if let Some(emu) = pending_emulator.borrow().as_ref() {
+                g.emulator_override = emu.clone();
             }
             if app_id_changed {
                 if new_app_id_val.is_empty() {
@@ -865,8 +871,8 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         super::sidebar::rebuild_sidebar(&state_clone);
 
         let selected = state_clone.borrow().selected_id.clone();
-        let game_after_save = if selected == lutris_id.to_string() {
-            state_clone.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned()
+        let game_after_save = if selected == db_id_s.to_string() {
+            state_clone.borrow().games.iter().find(|g| g.db_id == db_id_s).cloned()
         } else {
             None
         };

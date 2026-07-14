@@ -95,12 +95,12 @@ pub fn restore_content(state: &SharedState) {
         return;
     }
 
-    let lutris_id: i64 = selected_id.parse().unwrap_or(0);
-    let game = state.borrow().games.iter().find(|g| g.lutris_id == lutris_id).cloned();
+    let db_id: i64 = selected_id.parse().unwrap_or(0);
+    let game = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
     if let Some(game) = game {
         display_game(&game, state);
 
-        let row = state.borrow().rows.get(&lutris_id).and_then(|v| v.first()).map(|rw| rw.row.clone());
+        let row = state.borrow().rows.get(&db_id).and_then(|v| v.first()).map(|rw| rw.row.clone());
         if let Some(row) = row {
             select_row_silently(state, Some(&row));
         }

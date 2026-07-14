@@ -101,7 +101,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         earned_count: 0,
         total_count: 0,
         hidden: entry.hidden,
-        lutris_id: entry.lutris_db_id.unwrap_or(-entry.id),
+        lutris_id: entry.lutris_db_id.unwrap_or(0),
         slug: String::new(),
         playtime: 0.0,
         lastplayed: entry.last_played,
@@ -119,6 +119,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         steam_review_score: entry.steam_review_score,
         steam_review_count: entry.steam_review_count,
         ra_core: entry.ra_core.clone(),
+        emulator_override: entry.emulator_override.clone(),
     };
 
     let ach_dir = paths::achievements_dir(save_dir, app_id);

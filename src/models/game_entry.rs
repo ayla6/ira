@@ -37,12 +37,14 @@ pub struct GameEntry {
     pub steam_review_count: i64,
     /// Per-game RetroArch core override (empty = use global default).
     pub ra_core: String,
+    /// Per-game emulator override (empty = use global default).
+    pub emulator_override: String,
 }
 
 impl GameEntry {
     /// Build a minimal GameEntry for reloading a game from disk.
     /// Callers can override specific fields (e.g. `entry.title = ...`) as needed.
-    pub fn for_reload(db_id: i64, kind: &str, trophy_source: &str, steam_id: &str, platform_id: &str, lutris_id: i64) -> Self {
+    pub fn for_reload(db_id: i64, kind: &str, trophy_source: &str, steam_id: &str, platform_id: &str) -> Self {
         GameEntry {
             id: db_id,
             kind: kind.to_string(),
@@ -51,7 +53,7 @@ impl GameEntry {
             platform_id: platform_id.to_string(),
             title: String::new(),
             hidden: false,
-            lutris_db_id: if lutris_id != 0 { Some(lutris_id) } else { None },
+            lutris_db_id: None,
             sgdb_id: None,
             logo_position: String::new(),
             logo_size: 0,
@@ -66,6 +68,7 @@ impl GameEntry {
             steam_review_score: -1,
             steam_review_count: 0,
             ra_core: String::new(),
+            emulator_override: String::new(),
         }
     }
 }

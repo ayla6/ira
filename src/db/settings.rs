@@ -57,3 +57,13 @@ pub fn set_ra_core(conn: &DbConn, id: i64, core: &str) -> Result<(), String> {
     .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+pub fn set_emulator_override(conn: &DbConn, id: i64, emulator: &str) -> Result<(), String> {
+    let c = conn.lock().map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE games SET emulator_override = ?1 WHERE id = ?2",
+        params![emulator, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}

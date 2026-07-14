@@ -27,8 +27,8 @@ pub fn run_bench(state: SharedState) {
         std::process::exit(1);
     }
 
-    let app_a = games[0].lutris_id;
-    let app_b = games[1].lutris_id;
+    let app_a = games[0].db_id;
+    let app_b = games[1].db_id;
 
     log("startup");
 

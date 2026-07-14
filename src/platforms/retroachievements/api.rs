@@ -50,12 +50,13 @@ impl RaClient {
         *last = std::time::Instant::now();
     }
 
-    fn get(&self, params: &str) -> Result<String, String> {
+    fn get(&self, params: &[(&str, &str)]) -> Result<String, String> {
         self.rate_limit();
-        let url = format!("{}?{}", RA_BASE_URL, params);
+        let url = reqwest::Url::parse_with_params(RA_BASE_URL, params)
+            .map_err(|e| e.to_string())?;
         let resp = self
             .http
-            .get(&url)
+            .get(url)
             .send()
             .map_err(|e| e.to_string())?;
         if !resp.status().is_success() {
@@ -74,7 +75,7 @@ impl RaClient {
             }
         }
 
-        let params = format!("r=systemgames&s={}", console_id);
+        let params = [("r", "systemgames"), ("s", &console_id.to_string())];
         let text = self.get(&params)?;
         let resp: ConsoleGamesResponse = serde_json::from_str(&text)
             .map_err(|e| format!("parse console games: {}", e))?;
@@ -95,10 +96,12 @@ impl RaClient {
             }
         }
 
-        let params = format!(
-            "r=patch&g={}&u={}&t={}",
-            game_id, self.username, self.token
-        );
+        let params = [
+            ("r", "patch"),
+            ("g", game_id),
+            ("u", &self.username),
+            ("t", &self.token),
+        ];
         let text = self.get(&params)?;
         let resp: GameDataResponse = serde_json::from_str(&text)
             .map_err(|e| format!("parse game data: {}", e))?;
@@ -128,10 +131,13 @@ impl RaClient {
             }
         }
 
-        let params = format!(
-            "r=unlocks&g={}&h=1&u={}&t={}",
-            game_id, self.username, self.token
-        );
+        let params = [
+            ("r", "unlocks"),
+            ("g", game_id),
+            ("h", "1"),
+            ("u", &self.username),
+            ("t", &self.token),
+        ];
         let text = self.get(&params)?;
         let resp: UnlocksResponse = serde_json::from_str(&text)
             .map_err(|e| format!("parse unlocks: {}", e))?;

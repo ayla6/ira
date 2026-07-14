@@ -73,6 +73,7 @@ pub struct MergedAchievement {
     pub icon_path: String,
     pub icon_gray_path: String,
     pub global_percent: f64,
+    pub trophy_type: char,
 }
 
 pub(crate) fn parse_hidden(v: &serde_json::Value) -> bool {

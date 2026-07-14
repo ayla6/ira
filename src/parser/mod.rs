@@ -218,6 +218,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
                 icon_path,
                 icon_gray_path: String::new(),
                 global_percent: ach.global_percent,
+                trophy_type: '\0',
             });
         }
     } else if has_meta {
@@ -247,6 +248,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
                 icon_path: icons::find_icon_path(&ach_dir, &meta.icon),
                 icon_gray_path: icons::find_icon_path(&ach_dir, &icon_gray),
                 global_percent: 0.0,
+                trophy_type: '\0',
             });
         }
     } else {
@@ -264,6 +266,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
                 icon_path: String::new(),
                 icon_gray_path: String::new(),
                 global_percent: 0.0,
+                trophy_type: '\0',
             });
         }
     }

@@ -6,18 +6,6 @@ use crate::platforms::ps4::{
     read_play_times, parse_playtime, ShadPS4Game,
 };
 
-/// Map PS4 trophy type to rarity string
-#[allow(dead_code)]
-fn trophy_type_rarity(ttype: char) -> &'static str {
-    match ttype {
-        'P' => "Platinum",
-        'G' => "Gold",
-        'S' => "Silver",
-        'B' => "Bronze",
-        _ => "Bronze",
-    }
-}
-
 /// Load a shadPS4 game as a Game struct with achievements.
 pub fn load_shadps4_game(
     shad: &ShadPS4Game,
@@ -150,6 +138,7 @@ pub fn load_shadps4_game(
             icon_path: icon_str.clone(),
             icon_gray_path: icon_str, // PS4 doesn't have gray icons — reuse same
             global_percent: 0.0,
+            trophy_type: def.ttype,
         };
 
         game.total_count += 1;

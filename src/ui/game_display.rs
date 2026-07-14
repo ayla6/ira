@@ -72,6 +72,10 @@ pub fn display_game(game: &Game, state: &SharedState) {
     content_box.append(&clamp);
 }
 
+fn trophy_rank(t: char) -> u8 {
+    match t { 'B' => 0, 'S' => 1, 'G' => 2, 'P' => 3, _ => 4 }
+}
+
 fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::Widget {
     let is_ps4 = game.kind == "ps4";
 
@@ -105,7 +109,10 @@ fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::
     }
 
     earned.sort_by(|a, b| b.earned_time.cmp(&a.earned_time));
-    locked.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+    locked.sort_by(|a, b| {
+        trophy_rank(a.trophy_type).cmp(&trophy_rank(b.trophy_type))
+            .then_with(|| a.display_name.cmp(&b.display_name))
+    });
 
     let app_id_for_reload = game.app_id.clone();
     let kind_for_reload = game.kind.clone();

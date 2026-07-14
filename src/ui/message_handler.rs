@@ -301,6 +301,10 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
             continue;
         }
 
+        if g.kind == "retro" && g.trophy_source.is_empty() {
+            continue;
+        }
+
         enrich_game_async(
             g.app_id.clone(),
             g.trophy_source.clone(),

@@ -475,15 +475,12 @@ fn build_console_settings_page(
     }
     exe_row.add_suffix(&exe_browse);
     emu_group.add(&exe_row);
-    page.append(&emu_group);
 
+    // RetroArch core dropdown — inside the emulator group, shown when emulator is RetroArch
     let is_ra = crate::platforms::emulator_detect::is_retroarch(executable);
     if is_ra {
         let cores = crate::platforms::emulator_detect::detect_ra_cores();
         if !cores.is_empty() {
-            let core_group = adw::PreferencesGroup::new();
-            core_group.set_title("RetroArch Core");
-
             let mut core_names: Vec<String> = vec!["None (auto-detect)".to_string()];
             core_names.extend(cores.iter().map(|c| c.display_name.clone()));
             let core_model = gtk4::StringList::new(&core_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
@@ -501,17 +498,17 @@ fn build_console_settings_page(
             dropdown.set_selected(selected_idx);
 
             let core_row = adw::ActionRow::new();
-            core_row.set_title("Core");
-            core_row.set_subtitle("Select a RetroArch core for this console");
+            core_row.set_title("RetroArch core");
+            core_row.set_subtitle("Select a core for this console");
             dropdown.set_valign(gtk4::Align::Center);
             core_row.add_suffix(&dropdown);
-            core_group.add(&core_row);
-            page.append(&core_group);
+            emu_group.add(&core_row);
 
             core_dropdown = Some(dropdown);
         }
     }
 
+    page.append(&emu_group);
     (page, ConsolePageWidgets { enable_row, folder_row, exe_row, core_dropdown })
 }
 

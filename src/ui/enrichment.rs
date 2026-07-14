@@ -6,6 +6,9 @@ use crate::AppSender;
 use crate::GameEntry;
 use crate::models::has_steam_enrichment;
 use crate::parser::load_game;
+use std::sync::Mutex;
+
+static RA_ENRICH_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn enrich_game_async(
     app_id: String,
@@ -24,6 +27,7 @@ pub fn enrich_game_async(
 ) {
     std::thread::spawn(move || {
         if trophy_source == crate::models::RA {
+            let _guard = RA_ENRICH_LOCK.lock().unwrap();
             enrich_ra(&app_id, &trophy_source, &platform_id, db_id, lutris_id, &title, &save_dir, &sender, &ra_username, &ra_token);
             return;
         }

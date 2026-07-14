@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::time::Duration;
+use std::sync::Mutex;
 
 use serde::Deserialize;
 
@@ -10,11 +11,13 @@ use crate::platforms::retroachievements::paths;
 const RA_BASE_URL: &str = "https://retroachievements.org/dorequest.php";
 const RA_BADGE_URL: &str = "https://media.retroachievements.org/Badge";
 const UNLOCKS_CACHE_SECS: u64 = 3600;
+const RA_RATE_LIMIT_MS: u64 = 500;
 
 pub struct RaClient {
     http: reqwest::blocking::Client,
     username: String,
     token: String,
+    last_request: Mutex<std::time::Instant>,
 }
 
 impl RaClient {
@@ -26,6 +29,7 @@ impl RaClient {
                 .expect("failed to build RA HTTP client"),
             username: username.to_string(),
             token: token.to_string(),
+            last_request: Mutex::new(std::time::Instant::now() - Duration::from_secs(1)),
         }
     }
 
@@ -37,12 +41,21 @@ impl RaClient {
         }
     }
 
-    fn post(&self, body: &str) -> Result<String, String> {
+    fn rate_limit(&self) {
+        let mut last = self.last_request.lock().unwrap();
+        let elapsed = last.elapsed();
+        if elapsed < Duration::from_millis(RA_RATE_LIMIT_MS) {
+            std::thread::sleep(Duration::from_millis(RA_RATE_LIMIT_MS) - elapsed);
+        }
+        *last = std::time::Instant::now();
+    }
+
+    fn get(&self, params: &str) -> Result<String, String> {
+        self.rate_limit();
+        let url = format!("{}?{}", RA_BASE_URL, params);
         let resp = self
             .http
-            .post(RA_BASE_URL)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body.to_string())
+            .get(&url)
             .send()
             .map_err(|e| e.to_string())?;
         if !resp.status().is_success() {
@@ -61,8 +74,8 @@ impl RaClient {
             }
         }
 
-        let body = format!("r=systemgames&s={}", console_id);
-        let text = self.post(&body)?;
+        let params = format!("r=systemgames&s={}", console_id);
+        let text = self.get(&params)?;
         let resp: ConsoleGamesResponse = serde_json::from_str(&text)
             .map_err(|e| format!("parse console games: {}", e))?;
 
@@ -82,11 +95,11 @@ impl RaClient {
             }
         }
 
-        let body = format!(
+        let params = format!(
             "r=patch&g={}&u={}&t={}",
             game_id, self.username, self.token
         );
-        let text = self.post(&body)?;
+        let text = self.get(&params)?;
         let resp: GameDataResponse = serde_json::from_str(&text)
             .map_err(|e| format!("parse game data: {}", e))?;
 
@@ -115,11 +128,11 @@ impl RaClient {
             }
         }
 
-        let body = format!(
+        let params = format!(
             "r=unlocks&g={}&h=1&u={}&t={}",
             game_id, self.username, self.token
         );
-        let text = self.post(&body)?;
+        let text = self.get(&params)?;
         let resp: UnlocksResponse = serde_json::from_str(&text)
             .map_err(|e| format!("parse unlocks: {}", e))?;
 

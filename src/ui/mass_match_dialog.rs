@@ -42,7 +42,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
         let needs_matching: Vec<Game> = games.into_iter().filter(|g| {
             (g.app_id.is_empty() && !g.manual_unmatch)
             || (g.kind == "retro" && g.trophy_source.is_empty())
-            || g.sgdb_id.is_empty()
+            || (g.sgdb_id.is_empty() && g.app_id.is_empty())
         }).collect();
         let save_dir = &s.save_dir;
         let data_dir = std::path::Path::new(save_dir).join("data").join("steam");
@@ -206,7 +206,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 
     // --- SGDB auto-batch thread (ALL games without sgdb_id) ---
     let sgdb_games: Vec<(String, i64, usize)> = needs_matching.iter().enumerate()
-        .filter(|(_, g)| g.sgdb_id.is_empty())
+        .filter(|(_, g)| g.sgdb_id.is_empty() && g.app_id.is_empty())
         .map(|(row_idx, g)| (g.name.clone(), g.db_id, row_idx))
         .collect();
     let (sgdb_tx, sgdb_rx) = std::sync::mpsc::channel::<(usize, Option<(String, String)>, i64, String)>();

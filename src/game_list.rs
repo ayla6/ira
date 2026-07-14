@@ -97,12 +97,24 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, sh
         load_non_lutris_games(db, save_dir)
     };
 
+    // Filter out disabled sources
     games.retain(|g| {
         if !steam_enabled && g.kind == "steam" { return false; }
         if !shadps4_enabled && g.kind == "ps4" { return false; }
         if !ra_any_console && g.kind == "retro" { return false; }
         true
     });
+
+    // Remove games that will be re-added by platform builders to avoid duplicates
+    if shadps4_enabled {
+        games.retain(|g| g.kind != "ps4");
+    }
+    if steam_enabled {
+        games.retain(|g| g.kind != "steam");
+    }
+    if ra_any_console {
+        games.retain(|g| g.kind != "retro");
+    }
 
     games.sort_by(|a, b| {
         let ord = sort_mode.compare(a, b);

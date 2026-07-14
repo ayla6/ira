@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+#[derive(Debug, Clone)]
 pub struct DetectedEmulator {
     pub display_name: String,
     pub launch_command: String,

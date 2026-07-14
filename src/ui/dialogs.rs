@@ -115,21 +115,19 @@ fn build_api_keys_page(cfg: &Config) -> (gtk4::Box, adw::EntryRow, adw::EntryRow
     let key_group = adw::PreferencesGroup::new();
     key_group.set_title(S::API_KEYS);
 
-    let steam_entry = adw::EntryRow::new();
+    let steam_entry = adw::PasswordEntryRow::new();
     steam_entry.set_title(S::STEAM_WEB_API_KEY);
     steam_entry.set_text(&cfg.steam_api_key);
-    steam_entry.set_input_purpose(gtk4::InputPurpose::Password);
     key_group.add(&steam_entry);
 
-    let sgdb_entry = adw::EntryRow::new();
+    let sgdb_entry = adw::PasswordEntryRow::new();
     sgdb_entry.set_title(S::STEAMGRIDDB_KEY);
     sgdb_entry.set_text(&cfg.steam_griddb_api_key);
-    sgdb_entry.set_input_purpose(gtk4::InputPurpose::Password);
     key_group.add(&sgdb_entry);
 
     page.append(&key_group);
 
-    (page, steam_entry, sgdb_entry)
+    (page, steam_entry.upcast(), sgdb_entry.upcast())
 }
 
 fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
@@ -137,7 +135,7 @@ fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, a
 
     let ps4_enable_group = adw::PreferencesGroup::new();
     let ps4_enable_row = adw::SwitchRow::new();
-    ps4_enable_row.set_title("Enable shadPS4 integration");
+    ps4_enable_row.set_title("Enable PS4 integration");
     ps4_enable_row.set_subtitle("Scan shadPS4 install directories for PS4 games");
     ps4_enable_row.set_active(cfg.shadps4_enabled);
     ps4_enable_group.add(&ps4_enable_row);
@@ -307,13 +305,13 @@ fn build_steam_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow) {
     (page, enable_row)
 }
 
-fn build_ra_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow, adw::EntryRow, [adw::EntryRow; 3], [adw::EntryRow; 3]) {
+fn build_ra_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow, adw::EntryRow) {
     let page = settings_page_container();
 
     let enable_group = adw::PreferencesGroup::new();
     let enable_row = adw::SwitchRow::new();
     enable_row.set_title("Enable RetroAchievements");
-    enable_row.set_subtitle("Discover retro games and fetch achievements from retroachievements.org");
+    enable_row.set_subtitle("Fetch achievements for matched retro games from retroachievements.org");
     enable_row.set_active(cfg.ra_enabled);
     enable_group.add(&enable_row);
     page.append(&enable_group);
@@ -326,47 +324,195 @@ fn build_ra_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::Entr
     username_row.set_text(&cfg.ra_username);
     creds_group.add(&username_row);
 
-    let token_row = adw::EntryRow::new();
+    let token_row = adw::PasswordEntryRow::new();
     token_row.set_title("API Token");
     token_row.set_text(&cfg.ra_token);
-    token_row.set_input_purpose(gtk4::InputPurpose::Password);
     creds_group.add(&token_row);
     page.append(&creds_group);
 
-    let consoles = ["PSX (PlayStation)", "PS2 (PlayStation 2)", "PSP"];
-    let folders = [&cfg.ra_psx_folder, &cfg.ra_ps2_folder, &cfg.ra_psp_folder];
-    let executables = [&cfg.ra_psx_executable, &cfg.ra_ps2_executable, &cfg.ra_psp_executable];
-    let defaults = ["duckstation-qt", "pcsx2-qt", "ppsspp"];
+    (page, enable_row, username_row, token_row.upcast())
+}
 
-    let mut folder_rows = Vec::new();
-    let mut exe_rows = Vec::new();
+struct ConsolePageWidgets {
+    enable_row: adw::SwitchRow,
+    folder_row: adw::EntryRow,
+    exe_row: adw::EntryRow,
+    core_dropdown: Option<gtk4::DropDown>,
+}
 
-    for (i, name) in consoles.iter().enumerate() {
-        let group = adw::PreferencesGroup::new();
-        group.set_title(*name);
+fn build_console_settings_page(
+    _cfg: &Config,
+    win: &adw::Window,
+    console_name: &str,
+    console_id: &str,
+    enabled: bool,
+    folder: &str,
+    executable: &str,
+    ra_core: &str,
+) -> (gtk4::Box, ConsolePageWidgets) {
+    let page = settings_page_container();
 
-        let folder_row = adw::EntryRow::new();
-        folder_row.set_title("ROM folder");
-        folder_row.set_text(folders[i]);
-        group.add(&folder_row);
-        folder_rows.push(folder_row);
+    let enable_group = adw::PreferencesGroup::new();
+    let enable_row = adw::SwitchRow::new();
+    enable_row.set_title(&format!("Enable {} ROM discovery", console_name));
+    enable_row.set_subtitle(&format!("Scan for {} ROM files in the configured folder", console_name));
+    enable_row.set_active(enabled);
+    enable_group.add(&enable_row);
+    page.append(&enable_group);
 
-        let exe_row = adw::EntryRow::new();
-        exe_row.set_title("Emulator executable");
-        exe_row.set_text(executables[i]);
-        if executables[i].is_empty() {
-            exe_row.set_text(defaults[i]);
+    let rom_group = adw::PreferencesGroup::new();
+    rom_group.set_title("ROMs");
+
+    let folder_row = adw::EntryRow::new();
+    folder_row.set_title("ROM folder");
+    folder_row.set_text(folder);
+
+    let folder_browse = gtk4::Button::with_label("Browse…");
+    folder_browse.add_css_class("flat");
+    folder_browse.set_valign(gtk4::Align::Center);
+    {
+        let folder_row = folder_row.clone();
+        let parent = win.clone();
+        folder_browse.connect_clicked(move |_| {
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title("Select ROM folder");
+            let row = folder_row.clone();
+            dialog.select_folder(Some(&parent), None::<&gio::Cancellable>, move |result| {
+                if let Ok(file) = result {
+                    if let Some(path) = file.path() {
+                        row.set_text(&path.to_string_lossy());
+                    }
+                }
+            });
+        });
+    }
+    folder_row.add_suffix(&folder_browse);
+    rom_group.add(&folder_row);
+    page.append(&rom_group);
+
+    let emu_group = adw::PreferencesGroup::new();
+    emu_group.set_title("Emulator");
+
+    let detected_emulators = crate::platforms::emulator_detect::detect_emulators(console_id);
+
+    let exe_row = adw::EntryRow::new();
+    exe_row.set_title("Emulator executable");
+    exe_row.set_text(executable);
+
+    let mut core_dropdown: Option<gtk4::DropDown> = None;
+
+    if !detected_emulators.is_empty() {
+        let emu_names: Vec<String> = detected_emulators.iter()
+            .map(|e| e.display_name.clone())
+            .collect();
+        let emu_model = gtk4::StringList::new(&emu_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        let emu_dropdown = gtk4::DropDown::new(Some(emu_model), None::<&gtk4::PropertyExpression>);
+
+        let mut selected_idx: u32 = 0;
+        if !executable.is_empty() {
+            for (i, e) in detected_emulators.iter().enumerate() {
+                if e.launch_command == executable {
+                    selected_idx = i as u32;
+                    break;
+                }
+            }
         }
-        group.add(&exe_row);
-        exe_rows.push(exe_row);
+        emu_dropdown.set_selected(selected_idx);
 
-        page.append(&group);
+        let exe_row_c = exe_row.clone();
+        let emus_clone = detected_emulators.clone();
+        emu_dropdown.connect_selected_notify(move |dd| {
+            let idx = dd.selected() as usize;
+            if let Some(e) = emus_clone.get(idx) {
+                exe_row_c.set_text(&e.launch_command);
+            }
+        });
+
+        let emu_select_row = adw::ActionRow::new();
+        emu_select_row.set_title("Detected emulators");
+        emu_dropdown.set_valign(gtk4::Align::Center);
+        emu_select_row.add_suffix(&emu_dropdown);
+        emu_group.add(&emu_select_row);
     }
 
-    let folder_arr: [adw::EntryRow; 3] = folder_rows.try_into().unwrap();
-    let exe_arr: [adw::EntryRow; 3] = exe_rows.try_into().unwrap();
+    let auto_btn = gtk4::Button::with_label("Auto-detect");
+    auto_btn.add_css_class("flat");
+    auto_btn.set_valign(gtk4::Align::Center);
+    {
+        let exe_row = exe_row.clone();
+        let emus_clone = detected_emulators.clone();
+        auto_btn.connect_clicked(move |_| {
+            if let Some(e) = emus_clone.first() {
+                exe_row.set_text(&e.launch_command);
+            }
+        });
+    }
+    exe_row.add_suffix(&auto_btn);
 
-    (page, enable_row, username_row, token_row, folder_arr, exe_arr)
+    let exe_browse = gtk4::Button::with_label("Browse…");
+    exe_browse.add_css_class("flat");
+    exe_browse.set_valign(gtk4::Align::Center);
+    {
+        let exe_row = exe_row.clone();
+        let parent = win.clone();
+        exe_browse.connect_clicked(move |_| {
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title("Select emulator executable");
+            let filter = gtk4::FileFilter::new();
+            filter.set_name(Some("Executable"));
+            filter.add_mime_type("application/x-executable");
+            filter.add_pattern("*");
+            dialog.set_default_filter(Some(&filter));
+            let row = exe_row.clone();
+            dialog.open(Some(&parent), None::<&gio::Cancellable>, move |result| {
+                if let Ok(file) = result {
+                    if let Some(path) = file.path() {
+                        row.set_text(&path.to_string_lossy());
+                    }
+                }
+            });
+        });
+    }
+    exe_row.add_suffix(&exe_browse);
+    emu_group.add(&exe_row);
+    page.append(&emu_group);
+
+    let is_ra = crate::platforms::emulator_detect::is_retroarch(executable);
+    if is_ra {
+        let cores = crate::platforms::emulator_detect::detect_ra_cores();
+        if !cores.is_empty() {
+            let core_group = adw::PreferencesGroup::new();
+            core_group.set_title("RetroArch Core");
+
+            let mut core_names: Vec<String> = vec!["None (auto-detect)".to_string()];
+            core_names.extend(cores.iter().map(|c| c.display_name.clone()));
+            let core_model = gtk4::StringList::new(&core_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+            let dropdown = gtk4::DropDown::new(Some(core_model), None::<&gtk4::PropertyExpression>);
+
+            let mut selected_idx: u32 = 0;
+            if !ra_core.is_empty() {
+                for (i, c) in cores.iter().enumerate() {
+                    if c.path == ra_core {
+                        selected_idx = (i + 1) as u32;
+                        break;
+                    }
+                }
+            }
+            dropdown.set_selected(selected_idx);
+
+            let core_row = adw::ActionRow::new();
+            core_row.set_title("Core");
+            core_row.set_subtitle("Select a RetroArch core for this console");
+            dropdown.set_valign(gtk4::Align::Center);
+            core_row.add_suffix(&dropdown);
+            core_group.add(&core_row);
+            page.append(&core_group);
+
+            core_dropdown = Some(dropdown);
+        }
+    }
+
+    (page, ConsolePageWidgets { enable_row, folder_row, exe_row, core_dropdown })
 }
 
 fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRow, gtk4::StringList) {
@@ -492,21 +638,35 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("dialog-password-symbolic", "API Keys"));
     stack.add_named(&api_page, Some("api"));
 
+    sidebar.append(&sidebar_separator());
+
     let (lutris_page, lutris_enable_row) = build_lutris_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Lutris"));
     stack.add_named(&lutris_page, Some("lutris"));
-
-    let (ps4_page, ps4_enable_row, ps4_exe_row) = build_shadps4_settings_page(&cfg, &win);
-    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "shadPS4"));
-    stack.add_named(&ps4_page, Some("ps4"));
 
     let (steam_page, steam_enable_row) = build_steam_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Steam"));
     stack.add_named(&steam_page, Some("steam"));
 
-    let (ra_page, ra_enable_row, ra_username_row, ra_token_row, ra_folder_rows, ra_exe_rows) = build_ra_settings_page(&cfg);
+    let (ra_page, ra_enable_row, ra_username_row, ra_token_row) = build_ra_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("applications-science-symbolic", "RetroAchievements"));
     stack.add_named(&ra_page, Some("ra"));
+
+    let (psx_page, psx_widgets) = build_console_settings_page(&cfg, &win, "PS1", "psx", cfg.psx_enabled, &cfg.ra_psx_folder, &cfg.ra_psx_executable, &cfg.ra_psx_ra_core);
+    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS1"));
+    stack.add_named(&psx_page, Some("ps1"));
+
+    let (ps2_page, ps2_widgets) = build_console_settings_page(&cfg, &win, "PS2", "ps2", cfg.ps2_enabled, &cfg.ra_ps2_folder, &cfg.ra_ps2_executable, &cfg.ra_ps2_ra_core);
+    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS2"));
+    stack.add_named(&ps2_page, Some("ps2"));
+
+    let (ps4_page, ps4_enable_row, ps4_exe_row) = build_shadps4_settings_page(&cfg, &win);
+    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS4"));
+    stack.add_named(&ps4_page, Some("ps4"));
+
+    let (psp_page, psp_widgets) = build_console_settings_page(&cfg, &win, "PSP", "psp", cfg.psp_enabled, &cfg.ra_psp_folder, &cfg.ra_psp_executable, &cfg.ra_psp_ra_core);
+    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PSP"));
+    stack.add_named(&psp_page, Some("psp"));
 
     let (wine_pages, wine_widgets) = super::wine_config_widget::build_wine_config_pages(&cfg.default_wine_config, None);
     sidebar.append(&sidebar_separator());
@@ -535,9 +695,12 @@ pub fn show_settings_dialog(
                                 "General" => "general",
                                 "API Keys" => "api",
                                 "Lutris" => "lutris",
-                                "shadPS4" => "ps4",
                                 "Steam" => "steam",
                                 "RetroAchievements" => "ra",
+                                "PS1" => "ps1",
+                                "PS2" => "ps2",
+                                "PS4" => "ps4",
+                                "PSP" => "psp",
                                 "Performance" => "Performance",
                                 "Graphics" => "Graphics",
                                 "Wine Advanced" => "Wine Advanced",
@@ -591,12 +754,45 @@ pub fn show_settings_dialog(
         s.cfg.ra_enabled = ra_enable_row.is_active();
         s.cfg.ra_username = ra_username_row.text().to_string();
         s.cfg.ra_token = ra_token_row.text().to_string();
-        s.cfg.ra_psx_folder = ra_folder_rows[0].text().to_string();
-        s.cfg.ra_psx_executable = ra_exe_rows[0].text().to_string();
-        s.cfg.ra_ps2_folder = ra_folder_rows[1].text().to_string();
-        s.cfg.ra_ps2_executable = ra_exe_rows[1].text().to_string();
-        s.cfg.ra_psp_folder = ra_folder_rows[2].text().to_string();
-        s.cfg.ra_psp_executable = ra_exe_rows[2].text().to_string();
+        s.cfg.psx_enabled = psx_widgets.enable_row.is_active();
+        s.cfg.ra_psx_folder = psx_widgets.folder_row.text().to_string();
+        s.cfg.ra_psx_executable = psx_widgets.exe_row.text().to_string();
+        if let Some(ref dd) = psx_widgets.core_dropdown {
+            if dd.selected() > 0 {
+                let cores = crate::platforms::emulator_detect::detect_ra_cores();
+                if let Some(c) = cores.get((dd.selected() - 1) as usize) {
+                    s.cfg.ra_psx_ra_core = c.path.clone();
+                }
+            } else {
+                s.cfg.ra_psx_ra_core = String::new();
+            }
+        }
+        s.cfg.ps2_enabled = ps2_widgets.enable_row.is_active();
+        s.cfg.ra_ps2_folder = ps2_widgets.folder_row.text().to_string();
+        s.cfg.ra_ps2_executable = ps2_widgets.exe_row.text().to_string();
+        if let Some(ref dd) = ps2_widgets.core_dropdown {
+            if dd.selected() > 0 {
+                let cores = crate::platforms::emulator_detect::detect_ra_cores();
+                if let Some(c) = cores.get((dd.selected() - 1) as usize) {
+                    s.cfg.ra_ps2_ra_core = c.path.clone();
+                }
+            } else {
+                s.cfg.ra_ps2_ra_core = String::new();
+            }
+        }
+        s.cfg.psp_enabled = psp_widgets.enable_row.is_active();
+        s.cfg.ra_psp_folder = psp_widgets.folder_row.text().to_string();
+        s.cfg.ra_psp_executable = psp_widgets.exe_row.text().to_string();
+        if let Some(ref dd) = psp_widgets.core_dropdown {
+            if dd.selected() > 0 {
+                let cores = crate::platforms::emulator_detect::detect_ra_cores();
+                if let Some(c) = cores.get((dd.selected() - 1) as usize) {
+                    s.cfg.ra_psp_ra_core = c.path.clone();
+                }
+            } else {
+                s.cfg.ra_psp_ra_core = String::new();
+            }
+        }
         s.cfg.default_wine_config = wine_widgets.to_wine_config();
 
         let idx = emu_version_row.selected();

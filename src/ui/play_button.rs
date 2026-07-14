@@ -36,14 +36,14 @@ pub fn stop_game(state: &SharedState, lutris_id: i64) {
 }
 
 pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>) -> Result<(), String> {
-    let (running_games, sender, game_info, global_shadps4_exe, db, save_dir, app_default_wine, default_native_env_vars, ra_psx_exe, ra_ps2_exe, ra_psp_exe) = {
+    let (running_games, sender, game_info, global_shadps4_exe, db, save_dir, app_default_wine, default_native_env_vars, ra_psx_exe, ra_ps2_exe, ra_psp_exe, ra_psx_core, ra_ps2_core, ra_psp_core) = {
         let s = state.borrow();
         (
             s.running_games.clone(),
             s.sender.clone(),
             s.games.iter()
                 .find(|g| g.lutris_id == lutris_id)
-                .map(|g| (g.kind.clone(), g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone(), g.platform_id.clone()))
+                .map(|g| (g.kind.clone(), g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone(), g.platform_id.clone(), g.ra_core.clone()))
                 .unwrap_or_default(),
             s.cfg.shadps4_executable.clone(),
             s.db.clone(),
@@ -53,6 +53,9 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
             s.cfg.ra_psx_executable.clone(),
             s.cfg.ra_ps2_executable.clone(),
             s.cfg.ra_psp_executable.clone(),
+            s.cfg.ra_psx_ra_core.clone(),
+            s.cfg.ra_ps2_ra_core.clone(),
+            s.cfg.ra_psp_ra_core.clone(),
         )
     };
 
@@ -60,7 +63,7 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
         return Ok(());
     }
 
-    let (kind, game_path, game_name, per_game_version, db_id, app_id, platform_id) = game_info;
+    let (kind, game_path, game_name, per_game_version, db_id, app_id, platform_id, per_game_ra_core) = game_info;
 
     let started_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -69,12 +72,28 @@ pub fn launch_game(state: &SharedState, lutris_id: i64, variant_id: Option<i64>)
 
     if kind == "retro" {
         let exe = match platform_id.as_str() {
-            "psx" => if !ra_psx_exe.is_empty() { ra_psx_exe } else { "duckstation-qt".to_string() },
-            "ps2" => if !ra_ps2_exe.is_empty() { ra_ps2_exe } else { "pcsx2-qt".to_string() },
-            "psp" => if !ra_psp_exe.is_empty() { ra_psp_exe } else { "ppsspp".to_string() },
+            "psx" => &ra_psx_exe,
+            "ps2" => &ra_ps2_exe,
+            "psp" => &ra_psp_exe,
             _ => return Err(format!("Unknown retro platform: {}", platform_id)),
         };
-        let cmd = vec![exe, game_path.clone()];
+        let exe = if exe.is_empty() {
+            return Err(format!("No emulator configured for {}", platform_id));
+        } else {
+            exe.as_str()
+        };
+        let global_core = match platform_id.as_str() {
+            "psx" => &ra_psx_core,
+            "ps2" => &ra_ps2_core,
+            "psp" => &ra_psp_core,
+            _ => "",
+        };
+        let core = if !per_game_ra_core.is_empty() {
+            &per_game_ra_core
+        } else {
+            global_core
+        };
+        let cmd = crate::platforms::emulator_detect::build_launch_command(exe, &game_path, core);
         match crate::launcher::wrapper::spawn_game(&cmd, &[], None) {
             Ok(child) => {
                 let pid = child.id() as i32;

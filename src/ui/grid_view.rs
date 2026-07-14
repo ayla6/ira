@@ -146,17 +146,17 @@ pub fn show_grid_view(state: &SharedState) {
 
         vbox.append(&overlay);
 
-        unsafe { vbox.set_data::<AtomicI64>("lutris-id", AtomicI64::new(0)) };
+        unsafe { vbox.set_data::<AtomicI64>("game-db-id", AtomicI64::new(0)) };
 
         let sc = state_for_setup.clone();
         let click = gtk4::GestureClick::new();
         click.connect_pressed(move |gesture, _, _, _| {
             let widget = gesture.widget().unwrap();
-            if let Some(ptr) = unsafe { widget.data::<AtomicI64>("lutris-id") } {
-                let lutris_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
-                if lutris_id != 0 {
-                    switch_to_game(&sc, lutris_id);
-                    scroll_to_row(&sc, lutris_id);
+            if let Some(ptr) = unsafe { widget.data::<AtomicI64>("game-db-id") } {
+                let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
+                if db_id != 0 {
+                    switch_to_game(&sc, db_id);
+                    scroll_to_row(&sc, db_id);
                 }
             }
         });
@@ -167,14 +167,14 @@ pub fn show_grid_view(state: &SharedState) {
         right_click.set_button(3);
         right_click.connect_pressed(move |gesture, _, x, y| {
             let widget = gesture.widget().unwrap();
-            if let Some(ptr) = unsafe { widget.data::<AtomicI64>("lutris-id") } {
-                let lutris_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
-                if lutris_id != 0 {
+            if let Some(ptr) = unsafe { widget.data::<AtomicI64>("game-db-id") } {
+                let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
+                if db_id != 0 {
                     let game = sc2
                         .borrow()
                         .games
                         .iter()
-                        .find(|g| g.lutris_id == lutris_id)
+                        .find(|g| g.db_id == db_id)
                         .cloned();
                     if let Some(game) = game {
                         show_game_context_menu(&sc2, &game, &widget, x, y, None::<&gtk4::ListBoxRow>);
@@ -203,13 +203,14 @@ pub fn show_grid_view(state: &SharedState) {
             .unwrap();
 
         if let Some(game) = game_item.game() {
-            if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("lutris-id") } {
-                unsafe { ptr.as_ref() }.store(game.lutris_id, Ordering::Relaxed);
+            if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-db-id") } {
+                unsafe { ptr.as_ref() }.store(game.db_id, Ordering::Relaxed);
             }
             if !game.grid_path.is_empty() {
                 crate::images::set_picture_natural(pic, &game.grid_path, cover_width, cover_height);
             } else {
-                pic.set_paintable(None::<&gdk4::Texture>);
+                let placeholder = crate::images::ScaledPaintable::new_empty(cover_width, cover_height);
+                pic.set_paintable(Some(&placeholder));
             }
 
             if let Some(text) = badge_text(&game, sort_mode) {
@@ -414,11 +415,11 @@ fn build_cover(
     vbox.append(&pic);
 
     let state_clone = state.clone();
-    let lutris_id = game.lutris_id;
+    let db_id = game.db_id;
     let click = gtk4::GestureClick::new();
     click.connect_pressed(move |_, _, _, _| {
-        switch_to_game(&state_clone, lutris_id);
-        scroll_to_row(&state_clone, lutris_id);
+        switch_to_game(&state_clone, db_id);
+        scroll_to_row(&state_clone, db_id);
     });
     vbox.add_controller(click);
 

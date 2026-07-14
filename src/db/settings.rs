@@ -67,3 +67,13 @@ pub fn set_emulator_override(conn: &DbConn, id: i64, emulator: &str) -> Result<(
     .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+pub fn set_rom_path(conn: &DbConn, id: i64, rom_path: &str) -> Result<(), String> {
+    let c = conn.lock().map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE games SET rom_path = ?1 WHERE id = ?2",
+        params![rom_path, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}

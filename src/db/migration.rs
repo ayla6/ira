@@ -32,6 +32,7 @@ pub fn run_schema_migrations(conn: &Connection) {
     ensure_column(conn, "games", "steam_review_count", "INTEGER NOT NULL DEFAULT 0");
     ensure_column(conn, "games", "ra_core", "TEXT NOT NULL DEFAULT ''");
     ensure_column(conn, "games", "emulator_override", "TEXT NOT NULL DEFAULT ''");
+    ensure_column(conn, "games", "rom_path", "TEXT NOT NULL DEFAULT ''");
     // Drop obsolete unique indexes that prevented multiple retro games per console
     let _ = conn.execute("DROP INDEX IF EXISTS idx_games_trophy_platform", []);
     let _ = conn.execute("DROP INDEX IF EXISTS idx_games_kind_platform", []);

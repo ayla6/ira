@@ -120,6 +120,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         steam_review_count: entry.steam_review_count,
         ra_core: entry.ra_core.clone(),
         emulator_override: entry.emulator_override.clone(),
+        rom_path: entry.rom_path.clone(),
     };
 
     let ach_dir = paths::achievements_dir(save_dir, app_id);

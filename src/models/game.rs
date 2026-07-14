@@ -54,6 +54,8 @@ pub struct Game {
     pub ra_core: String,
     /// Per-game emulator override (empty = use global default).
     pub emulator_override: String,
+    /// Path to the ROM file (for retro games).
+    pub rom_path: String,
 }
 
 impl Default for Game {
@@ -93,6 +95,7 @@ impl Default for Game {
             steam_review_count: 0,
             ra_core: String::new(),
             emulator_override: String::new(),
+            rom_path: String::new(),
         }
     }
 }

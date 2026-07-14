@@ -154,54 +154,66 @@ pub fn build_ra_games(
         let roms = scan_roms(&console.folder, console.extensions);
 
         for (rom_name, rom_path) in &roms {
-            let matched_id = if client.is_some() {
-                match_rom_to_game(rom_name, &ra_games)
-            } else {
-                None
-            };
-            let (app_id, title, trophy_source) = match matched_id {
-                Some(id) => {
-                    let title = ra_games
-                        .iter()
-                        .find(|g| g.id == id)
-                        .map(|g| g.title.clone())
-                        .unwrap_or_else(|| rom_name.clone());
-                    (id.to_string(), title, RA.to_string())
-                }
-                None => (rom_name.clone(), rom_name.clone(), String::new()),
-            };
+            let rom_path_str = rom_path.to_string_lossy().into_owned();
 
-            let entry = crate::db::find_by_steam_id(db, &app_id)
+            // First: try to find an existing entry by ROM path — this prevents
+            // re-matching on every restart which could change the app_id and
+            // orphan the old entry (losing sgdb_id, trophy_source, etc.)
+            let existing = crate::db::find_by_rom_path(db, &rom_path_str)
                 .ok()
                 .flatten();
 
-            let game = match entry {
+            let game = match existing {
                 Some(e) => {
+                    // Found by ROM path — use the existing entry as-is
                     let mut g = crate::parser::load_game(&e, save_dir)
                         .unwrap_or_else(|_| Game {
-                            app_id: app_id.clone(),
+                            app_id: e.steam_id.clone(),
                             kind: RETRO.to_string(),
-                            trophy_source: trophy_source.clone(),
-                            platform_id: console.name.to_string(),
+                            trophy_source: e.trophy_source.clone(),
+                            platform_id: e.platform_id.clone(),
                             db_id: e.id,
-                            name: if e.title.is_empty() { title.clone() } else { e.title.clone() },
+                            name: if e.title.is_empty() { rom_name.clone() } else { e.title.clone() },
                             ..Default::default()
                         });
-                    g.game_path = rom_path.to_string_lossy().into_owned();
+                    g.game_path = rom_path_str.clone();
+                    g.rom_path = rom_path_str;
                     g
                 }
                 None => {
+                    // New ROM — try RA matching
+                    let matched_id = if client.is_some() {
+                        match_rom_to_game(rom_name, &ra_games)
+                    } else {
+                        None
+                    };
+                    let (app_id, title, trophy_source) = match matched_id {
+                        Some(id) => {
+                            let title = ra_games
+                                .iter()
+                                .find(|g| g.id == id)
+                                .map(|g| g.title.clone())
+                                .unwrap_or_else(|| rom_name.clone());
+                            (id.to_string(), title, RA.to_string())
+                        }
+                        None => (rom_name.clone(), rom_name.clone(), String::new()),
+                    };
+
                     match crate::db::add_game(db, RETRO, &trophy_source, &app_id, console.name, &title) {
-                        Ok(_id) => Game {
-                            app_id: app_id.clone(),
-                            kind: RETRO.to_string(),
-                            trophy_source: trophy_source.clone(),
-                            platform_id: console.name.to_string(),
-                            db_id: _id,
-                            name: title.clone(),
-                            game_path: rom_path.to_string_lossy().into_owned(),
-                            ..Default::default()
-                        },
+                        Ok(id) => {
+                            let _ = crate::db::set_rom_path(db, id, &rom_path_str);
+                            Game {
+                                app_id: app_id.clone(),
+                                kind: RETRO.to_string(),
+                                trophy_source: trophy_source.clone(),
+                                platform_id: console.name.to_string(),
+                                db_id: id,
+                                name: title.clone(),
+                                game_path: rom_path_str.clone(),
+                                rom_path: rom_path_str,
+                                ..Default::default()
+                            }
+                        }
                         Err(e) => {
                             eprintln!("RA: failed to add {} to DB: {}", rom_name, e);
                             continue;

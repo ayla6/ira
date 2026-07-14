@@ -321,7 +321,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
             continue;
         }
 
-        if g.kind == "retro" && g.trophy_source.is_empty() {
+        if g.kind == "retro" {
             continue;
         }
 
@@ -413,7 +413,7 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
 
 fn insert_or_update_game(state: &SharedState, game: Game) {
     let app_id = game.app_id.clone();
-    let needs_enrichment = game.kind == "retro" && !game.trophy_source.is_empty() && !game.app_id.is_empty();
+    let needs_enrichment = false;
 
     {
         let mut s = state.borrow_mut();
@@ -520,6 +520,38 @@ pub fn switch_to_game(state: &SharedState, db_id: i64) {
     let game = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
     if let Some(game) = game {
         display_game(&game, state);
+
+        if game.kind == "retro" && !game.trophy_source.is_empty() && game.total_count == 0 && !game.app_id.is_empty() {
+            let (ra_username, ra_token, ra_password, steam, watcher, sender, save_dir, db) = {
+                let s = state.borrow();
+                (
+                    s.cfg.ra_username.clone(),
+                    s.cfg.ra_token.clone(),
+                    s.cfg.ra_password.clone(),
+                    s.steam.clone(),
+                    s.watcher.clone(),
+                    s.sender.clone(),
+                    s.save_dir.clone(),
+                    s.db.clone(),
+                )
+            };
+            enrich_game_async(
+                game.app_id.clone(),
+                game.trophy_source.clone(),
+                game.platform_id.clone(),
+                game.db_id,
+                game.lutris_id,
+                game.name.clone(),
+                steam,
+                watcher,
+                sender,
+                save_dir,
+                db,
+                ra_username,
+                ra_token,
+                ra_password,
+            );
+        }
     }
 }
 

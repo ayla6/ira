@@ -298,10 +298,38 @@ fn handle_unified_sgdb_result(
             let _ = crate::db::set_sgdb_id(&sc.borrow().db, db_id, "");
             if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                 g.sgdb_id.clear();
+                g.icon_path.clear();
+                g.hero_image_path.clear();
+                g.grid_path.clear();
+                g.header_path.clear();
+                g.logo_path.clear();
+            }
+            let s = sc.borrow();
+            if let Some(entry) = crate::db::find_by_steam_id(&s.db, &s.games.iter().find(|g| g.db_id == db_id).map(|g| g.app_id.clone()).unwrap_or_default()).ok().flatten() {
+                if let Ok(game) = crate::parser::load_game(&entry, &s.save_dir) {
+                    if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
+                        g.icon_path = game.icon_path;
+                        g.hero_image_path = game.hero_image_path;
+                        g.grid_path = game.grid_path;
+                        g.header_path = game.header_path;
+                        g.logo_path = game.logo_path;
+                    }
+                }
+            }
+            let selected_id = sc.borrow().selected_id.clone();
+            if selected_id == db_id.to_string() {
+                let game = sc.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
+                if let Some(game) = game {
+                    super::game_display::display_game(&game, &sc);
+                }
             }
             super::helpers::refresh_settings_images_page(&sc, db_id, |s, game, win| {
                 build_image_manager_content(s, game, win).upcast()
             });
+            let is_grid_showing = sc.borrow().selected_id.is_empty() && !sc.borrow().content_unloaded;
+            if is_grid_showing {
+                super::grid_view::show_grid_view(&sc);
+            }
         });
         action_box.append(&undo_btn);
     } else {

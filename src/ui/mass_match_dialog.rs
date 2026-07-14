@@ -228,7 +228,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     let state_sgdb = state.clone();
     let parent_dialog_sgdb = dialog.clone();
     let sgdb_row_boxes = row_action_boxes.clone();
-    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+    glib::timeout_add_local(std::time::Duration::from_millis(150), move || {
         if let Ok((idx, matched, db_id, game_name)) = sgdb_rx.borrow_mut().try_recv() {
             if let Some(row_idx) = sgdb_games.get(idx).map(|(_, _, r)| *r) {
                 if row_idx < sgdb_row_boxes.len() {
@@ -282,6 +282,7 @@ fn handle_unified_sgdb_result(
         let sender = state.borrow().sender.clone();
         let sgdb_id_dl = sgdb_id.clone();
         std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
             let (icon, hero, grid, logo, header) = steam_dl.ensure_sgdb_assets(&sgdb_id_dl);
             let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
                 db_id, sgdb_id: sgdb_id_dl, icon, hero, grid, logo, header,

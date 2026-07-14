@@ -140,7 +140,7 @@ pub fn build_ra_games(
     let mut games = Vec::new();
 
     for console in &consoles {
-        let ra_games = match &client {
+        let ra_games_raw = match &client {
             Some(c) => match c.fetch_console_games(save_dir, console.id) {
                 Ok(g) => g,
                 Err(e) => {
@@ -150,6 +150,11 @@ pub fn build_ra_games(
             },
             None => Vec::new(),
         };
+        // Filter out subset/challenge games (they contain "~" in the title on RA)
+        let ra_games: Vec<RaGameEntry> = ra_games_raw
+            .into_iter()
+            .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset]"))
+            .collect();
 
         let roms = scan_roms(&console.folder, console.extensions);
 
@@ -182,8 +187,9 @@ pub fn build_ra_games(
                     g
                 }
                 None => {
-                    // New ROM — read serial, try RA matching, create entry
+                    // New ROM — read serial and title from disc, try RA matching
                     let serial = crate::platforms::rom_serial::read_serial(rom_path);
+                    let disc_title = crate::platforms::rom_serial::read_title(rom_path);
                     let display_name = serial.as_deref().unwrap_or(rom_name);
 
                     let matched_id = if client.is_some() {
@@ -198,10 +204,10 @@ pub fn build_ra_games(
                                 .iter()
                                 .find(|g| g.id == id)
                                 .map(|g| g.title.clone())
-                                .unwrap_or_else(|| rom_name.clone());
+                                .unwrap_or_else(|| disc_title.clone().unwrap_or_else(|| rom_name.clone()));
                             (id.to_string(), t, RA.to_string())
                         }
-                        None => (serial.clone().unwrap_or_else(|| rom_name.clone()), display_name.to_string(), String::new()),
+                        None => (serial.clone().unwrap_or_else(|| rom_name.clone()), disc_title.clone().unwrap_or_else(|| rom_name.clone()), String::new()),
                     };
 
                     // Double-check: maybe entry exists under steam_id but not rom_path

@@ -24,11 +24,6 @@ pub fn enrich_game_async(
         let mut entry = GameEntry::for_reload(db_id, "", &trophy_source, &app_id, &platform_id, lutris_id);
         entry.title = title;
 
-        let Ok(mut game) = load_game(&entry, &save_dir) else {
-            eprintln!("Failed reloading {}", app_id);
-            return;
-        };
-
         if has_steam_enrichment(&trophy_source) {
             let meta_path = crate::parser::achievements_dir(&save_dir, &app_id).join("achievements.json");
             if !meta_path.exists() {
@@ -36,7 +31,14 @@ pub fn enrich_game_async(
                     eprintln!("Could not generate achievements for {}: {}", app_id, e);
                 }
             }
+        }
 
+        let Ok(mut game) = load_game(&entry, &save_dir) else {
+            eprintln!("Failed reloading {}", app_id);
+            return;
+        };
+
+        if has_steam_enrichment(&trophy_source) {
             if game.name.starts_with("App ID:") {
                 if let Some(mut details) = steam.fetch_app_details(&app_id) {
                     if !details.name.is_empty() {

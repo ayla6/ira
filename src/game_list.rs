@@ -83,6 +83,9 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, shadps4_enabled: bool, s
     }
 
     let steam_playtimes = if steam_enabled { steam::read_all_playtimes() } else { std::collections::HashMap::new() };
+    if steam_enabled {
+        eprintln!("[steam] Discovered {} games, {} playtimes", steam_games.len(), steam_playtimes.len());
+    }
 
     let lutris_games = match load_lutris_games() {
         Ok(g) => g,

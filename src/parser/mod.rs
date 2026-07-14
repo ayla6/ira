@@ -180,9 +180,16 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     let has_meta = meta_path.is_file();
 
     let status_map = if is_steam_native {
-        steam_native_data.achievements.iter()
-            .map(|a| (a.id.clone(), AchievementStatus { earned: a.earned, earned_time: a.earned_time }))
-            .collect()
+        let mut map: HashMap<String, AchievementStatus> = crate::platforms::steam::read_user_stats(app_id)
+            .into_iter()
+            .map(|(name, (earned, earned_time))| (name, AchievementStatus { earned, earned_time }))
+            .collect();
+        for ach in &steam_native_data.achievements {
+            map.entry(ach.id.clone())
+                .and_modify(|s| { if s.earned_time == 0 { s.earned_time = ach.earned_time; } })
+                .or_insert(AchievementStatus { earned: ach.earned, earned_time: ach.earned_time });
+        }
+        map
     } else {
         let status_path = paths::unlock_status_path(save_dir, &entry.trophy_source, app_id, platform_id);
         status::load_status_map(&status_path)

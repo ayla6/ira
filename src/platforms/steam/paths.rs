@@ -97,40 +97,63 @@ pub fn librarycache_path(steam_id: &str, app_id: &str) -> Option<PathBuf> {
     librarycache_dir(steam_id).map(|d| d.join(format!("{}.json", app_id)))
 }
 
+/// Path to the appcache/stats directory containing UserGameStatsSchema and UserGameStats files.
+pub fn stats_dir() -> Option<PathBuf> {
+    steam_install_dir().map(|d| d.join("appcache").join("stats"))
+}
+
+/// Path to the schema file: UserGameStatsSchema_<appid>.bin
+pub fn stats_schema_path(app_id: &str) -> Option<PathBuf> {
+    stats_dir().map(|d| d.join(format!("UserGameStatsSchema_{}.bin", app_id)))
+}
+
+/// Path to the user stats file: UserGameStats_<steam_id>_<appid>.bin
+pub fn stats_user_path(steam_id: &str, app_id: &str) -> Option<PathBuf> {
+    stats_dir().map(|d| d.join(format!("UserGameStats_{}_{}.bin", steam_id, app_id)))
+}
+
 /// Read playtime (hours) and last played (unix timestamp) for ALL apps from
 /// localconfig.vdf in a single pass. Returns a map keyed by app_id string.
+/// Tries all Steam user IDs, preferring the most recent one.
 pub fn read_all_playtimes() -> HashMap<String, (f64, i64)> {
     let mut result = HashMap::new();
 
-    let Some(steam_id) = get_most_recent_user_id() else {
-        eprintln!("[steam] read_all_playtimes: no Steam user ID found");
-        return result;
-    };
     let Some(install) = steam_install_dir() else {
         eprintln!("[steam] read_all_playtimes: Steam install dir not found");
         return result;
     };
-    let path = install.join("userdata").join(&steam_id).join("config").join("localconfig.vdf");
 
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        eprintln!("[steam] read_all_playtimes: cannot read {}", path.display());
+    let mut user_ids = get_steam_user_ids();
+    if user_ids.is_empty() {
+        eprintln!("[steam] read_all_playtimes: no Steam user IDs found in userdata/");
         return result;
-    };
-    let Some(parsed) = super::vdf::parse_vdf(&text) else {
-        eprintln!("[steam] read_all_playtimes: VDF parse failed for {}", path.display());
-        return result;
-    };
+    }
 
-    let Some(apps) = super::vdf::get_value(&parsed, "Software")
-        .and_then(|s| super::vdf::get_value(s, "Valve"))
-        .and_then(|v| super::vdf::get_value(v, "Steam"))
-        .and_then(|s| super::vdf::get_value(s, "apps"))
-    else {
-        eprintln!("[steam] read_all_playtimes: Software/Valve/Steam/apps not found in localconfig.vdf");
-        return result;
-    };
+    if let Some(recent) = get_most_recent_user_id() {
+        user_ids.retain(|id| id != &recent);
+        user_ids.insert(0, recent);
+    }
 
-    if let super::vdf::VdfValue::Obj(app_map) = apps {
+    for steam_id in &user_ids {
+        let path = install.join("userdata").join(steam_id).join("config").join("localconfig.vdf");
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Some(parsed) = super::vdf::parse_vdf(&text) else {
+            eprintln!("[steam] read_all_playtimes: VDF parse failed for {}", path.display());
+            continue;
+        };
+
+        let apps = super::vdf::get_value(&parsed, "Software")
+            .and_then(|s| super::vdf::get_value(s, "Valve"))
+            .and_then(|v| super::vdf::get_value(v, "Steam"))
+            .and_then(|s| super::vdf::get_value(s, "apps"));
+
+        let Some(super::vdf::VdfValue::Obj(app_map)) = apps else {
+            eprintln!("[steam] read_all_playtimes: Software/Valve/Steam/apps not found for user {}", steam_id);
+            continue;
+        };
+
         for (app_id, value) in app_map {
             if let super::vdf::VdfValue::Obj(_) = value {
                 let pt = super::vdf::get_str(value, "Playtime")
@@ -144,6 +167,14 @@ pub fn read_all_playtimes() -> HashMap<String, (f64, i64)> {
                 }
             }
         }
+
+        if !result.is_empty() {
+            break;
+        }
+    }
+
+    if result.is_empty() {
+        eprintln!("[steam] read_all_playtimes: no playtimes found for any of {} user(s)", user_ids.len());
     }
 
     result

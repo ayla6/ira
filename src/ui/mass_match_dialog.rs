@@ -331,12 +331,11 @@ fn handle_unified_sgdb_result(
                     g.logo_path.clear();
                 }
             }
-            let (db, save_dir, app_id) = {
+            let (db, save_dir) = {
                 let s = sc.borrow();
-                let app_id = s.games.iter().find(|g| g.db_id == db_id).map(|g| g.app_id.clone()).unwrap_or_default();
-                (s.db.clone(), s.save_dir.clone(), app_id)
+                (s.db.clone(), s.save_dir.clone())
             };
-            if let Some(entry) = crate::db::find_by_steam_id(&db, &app_id).ok().flatten() {
+            if let Some(entry) = crate::db::find_by_db_id(&db, db_id).ok().flatten() {
                 if let Ok(game) = crate::parser::load_game(&entry, &save_dir) {
                     let mut s = sc.borrow_mut();
                     if let Some(g) = s.games.iter_mut().find(|g| g.db_id == db_id) {
@@ -881,7 +880,7 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                 let on_match_c = on_match.clone();
                 match_btn.connect_clicked(move |_| {
                     let app_id = ra_id.to_string();
-                    let _ = crate::db::update_game_ids(&sc.borrow().db, db_id, &app_id, crate::models::RA, "");
+                    let _ = crate::db::update_game_ids(&sc.borrow().db, db_id, "", &app_id, crate::models::RA, "");
                     if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                         g.app_id = app_id.clone();
                         g.trophy_source = crate::models::RA.to_string();

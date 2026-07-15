@@ -210,12 +210,12 @@ fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
     let mut games = Vec::new();
 
     for shad in &shad_games {
-        let entry = db::find_by_steam_id(db, &shad.npwr_id).ok().flatten()
+        let entry = db::find_by_game_id(db, &shad.npwr_id).ok().flatten()
             .or_else(|| db::find_by_kind_platform(db, "ps4", &shad.serial).ok().flatten());
         let (db_id, title, hidden, logo_position, logo_size, sort_title, sgdb_id, shadps4_version, last_played) = match entry {
             Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title, e.sgdb_id.clone().unwrap_or_default(), e.shadps4_version.clone().unwrap_or_default(), e.last_played),
             None => {
-                match db::add_game(db, "ps4", "", &shad.npwr_id, &shad.serial, &shad.title) {
+                match db::add_game(db, "ps4", "", "", &shad.npwr_id, &shad.serial, &shad.title) {
                     Ok(id) => (id, shad.title.clone(), false, "bottom-left".to_string(), 50, String::new(), String::new(), String::new(), 0),
                     Err(e) => {
                         eprintln!("shadPS4: failed to add {} to DB: {}", shad.serial, e);
@@ -280,7 +280,7 @@ fn build_steam_games(db: &db::DbConn, save_dir: &str, steam_games: &[steam::Stea
         if entry.is_none() {
             let kind = crate::models::STEAM;
             let trophy_source = crate::models::STEAM_NATIVE;
-            if let Err(e) = db::add_game(db, kind, trophy_source, &sg.app_id, &sg.app_id, &sg.name) {
+            if let Err(e) = db::add_game(db, kind, trophy_source, &sg.app_id, "", &sg.app_id, &sg.name) {
                 eprintln!("Steam: failed to add {} to DB: {}", sg.app_id, e);
                 continue;
             }

@@ -179,14 +179,14 @@ pub fn build_ra_games(
                         None => (serial.clone().unwrap_or_else(|| rom_name.clone()), rom_name.clone(), String::new()),
                     };
 
-                    let existing_by_id = crate::db::find_by_steam_id(db, &app_id).ok().flatten();
+                    let existing_by_id = crate::db::find_by_game_id(db, &app_id).ok().flatten();
                     if let Some(e) = existing_by_id {
                         if e.rom_path.is_empty() {
                             let _ = crate::db::set_rom_path(db, e.id, &rom_path_str);
                         }
                         let mut g = crate::parser::load_game(&e, save_dir)
                             .unwrap_or_else(|_| Game {
-                                app_id: e.steam_id.clone(),
+                                app_id: e.game_id.clone(),
                                 kind: RETRO.to_string(),
                                 trophy_source: e.trophy_source.clone(),
                                 platform_id: e.platform_id.clone(),
@@ -198,7 +198,7 @@ pub fn build_ra_games(
                         g.rom_path = rom_path_str;
                         g
                     } else {
-                        match crate::db::add_game(db, RETRO, &trophy_source, &app_id, console.def.id, &title) {
+                        match crate::db::add_game(db, RETRO, &trophy_source, "", &app_id, console.def.id, &title) {
                             Ok(id) => {
                                 let _ = crate::db::set_rom_path(db, id, &rom_path_str);
                                 Game {

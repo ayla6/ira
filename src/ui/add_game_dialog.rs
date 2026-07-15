@@ -267,8 +267,8 @@ pub fn show_add_game_dialog(state: &SharedState) {
 
         std::thread::spawn(move || {
             match add_game_to_db(&db_c, &name_c, &kind_c, &ts_c, &app_id_c, &platform_id, &launch_config, &wine_config, selected_profile_id, &steam_c, &save_dir_c) {
-                Ok(_game_id) => {
-                    let entry = crate::db::find_by_steam_id(&db_c, &app_id_c).ok().flatten();
+                Ok(game_id) => {
+                    let entry = crate::db::find_by_db_id(&db_c, game_id).ok().flatten();
                     if let Some(entry) = entry {
                         if let Ok(mut game) = crate::parser::load_game(&entry, &save_dir_c) {
                             game.name = name_c.clone();
@@ -497,7 +497,8 @@ fn add_game_to_db(
     steam: &crate::api::SteamClient,
     save_dir: &str,
 ) -> Result<i64, String> {
-    let game_id = crate::db::add_game(db, kind, trophy_source, app_id, platform_id, name)?;
+    let (steam_id, game_id) = if kind == "ps4" || kind == "retro" { ("", app_id) } else { (app_id, "") };
+    let game_id = crate::db::add_game(db, kind, trophy_source, steam_id, game_id, platform_id, name)?;
     crate::db::save_game_config(db, game_id, launch_config, wine_config, profile_id)?;
     if !app_id.is_empty() && app_id.parse::<i64>().is_ok() {
         let folder = std::path::Path::new(&launch_config.exe).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();

@@ -43,7 +43,7 @@ pub fn add_gog_game_from_folder(
     steam.generate_steam_settings(steam_app_id)?;
 
     // Add to DB
-    crate::db::add_game(db, "lutris", "nge", steam_app_id, product_id, game_name)?;
+    crate::db::add_game(db, "lutris", "nge", steam_app_id, "", product_id, game_name)?;
 
     Ok(gog_game_dir.to_string_lossy().into_owned())
 }

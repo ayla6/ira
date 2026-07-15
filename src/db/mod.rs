@@ -23,7 +23,7 @@ pub use variants::*;
 pub use groups::*;
 pub use metadata::*;
 
-pub(super) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path";
+pub(super) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, game_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path";
 
 pub(super) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<crate::models::GameEntry> {
     Ok(crate::models::GameEntry {
@@ -31,26 +31,27 @@ pub(super) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<crate
         kind: row.get(1)?,
         trophy_source: row.get(2)?,
         steam_id: row.get(3)?,
-        platform_id: row.get(4)?,
-        title: row.get(5)?,
-        hidden: row.get(6)?,
-        lutris_db_id: row.get(7)?,
-        sgdb_id: row.get(8)?,
-        logo_position: row.get(9)?,
-        logo_size: row.get(10)?,
-        ignored: row.get(11)?,
-        manual_unmatch: row.get(12)?,
-        sort_title: row.get(13)?,
-        shadps4_version: row.get(14)?,
-        last_played: row.get(15)?,
-        release_date: row.get(16)?,
-        release_timestamp: row.get(17)?,
-        metacritic_score: row.get(18)?,
-        steam_review_score: row.get(19)?,
-        steam_review_count: row.get(20)?,
-        ra_core: row.get(21)?,
-        emulator_override: row.get(22)?,
-        rom_path: row.get(23)?,
+        game_id: row.get(4)?,
+        platform_id: row.get(5)?,
+        title: row.get(6)?,
+        hidden: row.get(7)?,
+        lutris_db_id: row.get(8)?,
+        sgdb_id: row.get(9)?,
+        logo_position: row.get(10)?,
+        logo_size: row.get(11)?,
+        ignored: row.get(12)?,
+        manual_unmatch: row.get(13)?,
+        sort_title: row.get(14)?,
+        shadps4_version: row.get(15)?,
+        last_played: row.get(16)?,
+        release_date: row.get(17)?,
+        release_timestamp: row.get(18)?,
+        metacritic_score: row.get(19)?,
+        steam_review_score: row.get(20)?,
+        steam_review_count: row.get(21)?,
+        ra_core: row.get(22)?,
+        emulator_override: row.get(23)?,
+        rom_path: row.get(24)?,
     })
 }
 
@@ -66,7 +67,8 @@ pub fn init_db(db_path: &str) -> DbConn {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             kind TEXT NOT NULL,
             trophy_source TEXT NOT NULL DEFAULT '',
-            steam_id TEXT NOT NULL,
+            steam_id TEXT NOT NULL DEFAULT '',
+            game_id TEXT NOT NULL DEFAULT '',
             platform_id TEXT NOT NULL,
             title TEXT NOT NULL DEFAULT '',
             hidden INTEGER NOT NULL DEFAULT 0,
@@ -81,6 +83,7 @@ pub fn init_db(db_path: &str) -> DbConn {
             last_played INTEGER NOT NULL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_games_game_id ON games(game_id) WHERE game_id != '';
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps4_serial ON games(kind, platform_id) WHERE kind = 'ps4';
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_lutris_db_id ON games(lutris_db_id) WHERE lutris_db_id IS NOT NULL;
         CREATE TABLE IF NOT EXISTS lutris_meta (

@@ -618,6 +618,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let db_id_s = db_id;
     let app_id = game.app_id.clone();
     let trophy_source = game.trophy_source.clone();
+    let game_kind = game.kind.clone();
     let var_widgets_save = var_widgets.clone();
     let save_dir_c = save_dir.clone();
     let logo_controls_c = logo_controls.clone();
@@ -651,7 +652,8 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 new_app_id_val = new_id.clone();
                 let ts = if new_id.is_empty() { "" } else { &trophy_source };
                 let pid = if new_id.is_empty() { "" } else { &new_id };
-                if let Err(e) = crate::db::update_game_ids(&db, db_id_s, &new_id, ts, pid) {
+                let (steam_id, game_id): (&str, &str) = if game_kind == "ps4" || game_kind == "retro" { ("", &new_id) } else { (&new_id, "") };
+                if let Err(e) = crate::db::update_game_ids(&db, db_id_s, steam_id, game_id, ts, pid) {
                     eprintln!("Failed to update app ID: {}", e);
                 }
             }

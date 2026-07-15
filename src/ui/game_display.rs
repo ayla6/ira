@@ -119,11 +119,13 @@ fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::
     let trophy_source_for_reload = game.trophy_source.clone();
     let platform_id_for_reload = game.platform_id.clone();
     let db_id_for_reload = game.db_id;
+    let is_retro_or_ps4 = kind_for_reload == "ps4" || kind_for_reload == "retro";
 
     let sender = state.borrow().sender.clone();
     let save_dir = state.borrow().save_dir.clone();
     let reload = move || {
-        let entry = GameEntry::for_reload(db_id_for_reload, &kind_for_reload, &trophy_source_for_reload, &app_id_for_reload, &platform_id_for_reload);
+        let (steam_id, game_id): (&str, &str) = if is_retro_or_ps4 { ("", &app_id_for_reload) } else { (&app_id_for_reload, "") };
+        let entry = GameEntry::for_reload(db_id_for_reload, &kind_for_reload, &trophy_source_for_reload, steam_id, game_id, &platform_id_for_reload);
         let sender = sender.clone();
         let save_dir = save_dir.clone();
         std::thread::spawn(move || {

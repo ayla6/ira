@@ -282,7 +282,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
         }
         if crate::models::has_steam_enrichment(&g.trophy_source) {
             if let Some(ref watcher) = watcher {
-                let mut entry = GameEntry::for_reload(g.db_id, &g.kind, &g.trophy_source, &g.app_id, &g.platform_id);
+                let mut entry = GameEntry::for_reload(g.db_id, &g.kind, &g.trophy_source, &g.app_id, "", &g.platform_id);
                 entry.sort_title = g.sort_title.clone();
                 watcher.watch(&entry, &g.achievements);
             }

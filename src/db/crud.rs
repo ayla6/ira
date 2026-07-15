@@ -2,13 +2,21 @@ use crate::db::DbConn;
 use crate::models::GameEntry;
 use rusqlite::params;
 
-pub fn add_game(conn: &DbConn, kind: &str, trophy_source: &str, steam_id: &str, platform_id: &str, title: &str) -> Result<i64, String> {
+pub fn add_game(conn: &DbConn, kind: &str, trophy_source: &str, steam_id: &str, game_id: &str, platform_id: &str, title: &str) -> Result<i64, String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
-    c.execute(
-        "INSERT INTO games (kind, trophy_source, steam_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(steam_id) DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
-        params![kind, trophy_source, steam_id, platform_id, title],
-    ).map_err(|e| e.to_string())?;
+    if !steam_id.is_empty() {
+        c.execute(
+            "INSERT INTO games (kind, trophy_source, steam_id, game_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(steam_id) DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
+            params![kind, trophy_source, steam_id, game_id, platform_id, title],
+        ).map_err(|e| e.to_string())?;
+    } else {
+        c.execute(
+            "INSERT INTO games (kind, trophy_source, steam_id, game_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(game_id) DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
+            params![kind, trophy_source, steam_id, game_id, platform_id, title],
+        ).map_err(|e| e.to_string())?;
+    }
     Ok(c.last_insert_rowid())
 }
 
@@ -19,11 +27,11 @@ pub fn update_game_title(conn: &DbConn, id: i64, title: &str) -> Result<(), Stri
     Ok(())
 }
 
-pub fn update_game_ids(conn: &DbConn, id: i64, steam_id: &str, trophy_source: &str, platform_id: &str) -> Result<(), String> {
+pub fn update_game_ids(conn: &DbConn, id: i64, steam_id: &str, game_id: &str, trophy_source: &str, platform_id: &str) -> Result<(), String> {
     let c = conn.lock().map_err(|e| e.to_string())?;
     c.execute(
-        "UPDATE games SET steam_id = ?1, trophy_source = ?2, platform_id = ?3 WHERE id = ?4",
-        params![steam_id, trophy_source, platform_id, id],
+        "UPDATE games SET steam_id = ?1, game_id = ?2, trophy_source = ?3, platform_id = ?4 WHERE id = ?5",
+        params![steam_id, game_id, trophy_source, platform_id, id],
     ).map_err(|e| e.to_string())?;
     Ok(())
 }

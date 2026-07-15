@@ -66,7 +66,7 @@ pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
     for entry in entries {
         match load_game(&entry, save_dir) {
             Ok(game) => games.push(game),
-            Err(e) => eprintln!("Skipping game {} ({}): {}", entry.steam_id, entry.kind, e),
+            Err(e) => eprintln!("Skipping game {} ({}): {}", if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id }, entry.kind, e),
         }
     }
     games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
@@ -74,7 +74,7 @@ pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
 }
 
 pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
-    let app_id = &entry.steam_id;
+    let app_id = if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id };
     let kind = &entry.kind;
     let platform_id = &entry.platform_id;
 

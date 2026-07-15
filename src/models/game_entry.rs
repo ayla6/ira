@@ -4,6 +4,7 @@ pub struct GameEntry {
     pub kind: String,
     pub trophy_source: String,
     pub steam_id: String,
+    pub game_id: String,
     pub platform_id: String,
     pub title: String,
     pub hidden: bool,
@@ -46,12 +47,13 @@ pub struct GameEntry {
 impl GameEntry {
     /// Build a minimal GameEntry for reloading a game from disk.
     /// Callers can override specific fields (e.g. `entry.title = ...`) as needed.
-    pub fn for_reload(db_id: i64, kind: &str, trophy_source: &str, steam_id: &str, platform_id: &str) -> Self {
+    pub fn for_reload(db_id: i64, kind: &str, trophy_source: &str, steam_id: &str, game_id: &str, platform_id: &str) -> Self {
         GameEntry {
             id: db_id,
             kind: kind.to_string(),
             trophy_source: trophy_source.to_string(),
             steam_id: steam_id.to_string(),
+            game_id: game_id.to_string(),
             platform_id: platform_id.to_string(),
             title: String::new(),
             hidden: false,

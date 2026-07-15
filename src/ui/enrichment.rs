@@ -33,11 +33,11 @@ pub fn enrich_game_async(
             return;
         }
 
-        let entry = crate::db::find_by_steam_id(&db, &app_id)
+        let entry = crate::db::find_by_db_id(&db, db_id)
             .ok()
             .flatten()
             .unwrap_or_else(|| {
-                let mut e = GameEntry::for_reload(db_id, "", &trophy_source, &app_id, &platform_id);
+                let mut e = GameEntry::for_reload(db_id, "", &trophy_source, &app_id, "", &platform_id);
                 e.title = title.clone();
                 e
             });
@@ -239,10 +239,10 @@ fn enrich_ra(
         return;
     }
 
-    let entry = crate::db::find_by_steam_id(&db, app_id)
+    let entry = crate::db::find_by_game_id(&db, app_id)
         .ok()
         .flatten()
-        .unwrap_or_else(|| GameEntry::for_reload(db_id, crate::models::RETRO, trophy_source, app_id, platform_id));
+        .unwrap_or_else(|| GameEntry::for_reload(db_id, crate::models::RETRO, trophy_source, "", app_id, platform_id));
     let mut game = match load_game(&entry, save_dir) {
         Ok(g) => g,
         Err(e) => {

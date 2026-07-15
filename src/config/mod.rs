@@ -14,14 +14,17 @@ pub struct RaConfig {
     pub psx_folder: String,
     pub psx_executable: String,
     pub psx_ra_core: String,
+    pub psx_fullscreen: bool,
     pub ps2_enabled: bool,
     pub ps2_folder: String,
     pub ps2_executable: String,
     pub ps2_ra_core: String,
+    pub ps2_fullscreen: bool,
     pub psp_enabled: bool,
     pub psp_folder: String,
     pub psp_executable: String,
     pub psp_ra_core: String,
+    pub psp_fullscreen: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +93,12 @@ pub struct Config {
     pub ra_psp_executable: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_psp_ra_core: String,
+    #[serde(default)]
+    pub ra_psx_fullscreen: bool,
+    #[serde(default)]
+    pub ra_ps2_fullscreen: bool,
+    #[serde(default)]
+    pub ra_psp_fullscreen: bool,
 }
 
 impl Default for Config {
@@ -119,14 +128,17 @@ impl Default for Config {
             ra_psx_folder: String::new(),
             ra_psx_executable: String::new(),
             ra_psx_ra_core: String::new(),
+            ra_psx_fullscreen: false,
             ps2_enabled: false,
             ra_ps2_folder: String::new(),
             ra_ps2_executable: String::new(),
             ra_ps2_ra_core: String::new(),
+            ra_ps2_fullscreen: false,
             psp_enabled: false,
             ra_psp_folder: String::new(),
             ra_psp_executable: String::new(),
             ra_psp_ra_core: String::new(),
+            ra_psp_fullscreen: false,
         }
     }
 }
@@ -215,14 +227,17 @@ impl Config {
             psx_folder: self.ra_psx_folder.clone(),
             psx_executable: self.ra_psx_executable.clone(),
             psx_ra_core: self.ra_psx_ra_core.clone(),
+            psx_fullscreen: self.ra_psx_fullscreen,
             ps2_enabled: self.ps2_enabled,
             ps2_folder: self.ra_ps2_folder.clone(),
             ps2_executable: self.ra_ps2_executable.clone(),
             ps2_ra_core: self.ra_ps2_ra_core.clone(),
+            ps2_fullscreen: self.ra_ps2_fullscreen,
             psp_enabled: self.psp_enabled,
             psp_folder: self.ra_psp_folder.clone(),
             psp_executable: self.ra_psp_executable.clone(),
             psp_ra_core: self.ra_psp_ra_core.clone(),
+            psp_fullscreen: self.ra_psp_fullscreen,
         }
     }
 
@@ -265,6 +280,9 @@ impl Config {
             ra_psp_folder: self.ra_psp_folder.clone(),
             ra_psp_executable: self.ra_psp_executable.clone(),
             ra_psp_ra_core: self.ra_psp_ra_core.clone(),
+            ra_psx_fullscreen: self.ra_psx_fullscreen,
+            ra_ps2_fullscreen: self.ra_ps2_fullscreen,
+            ra_psp_fullscreen: self.ra_psp_fullscreen,
         };
         if steam_err.is_err() {
             plaintext.steam_api_key = self.steam_api_key.clone();

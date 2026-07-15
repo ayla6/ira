@@ -36,7 +36,7 @@ pub fn stop_game(state: &SharedState, game_id: i64) {
 }
 
 pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -> Result<(), String> {
-    let (running_games, sender, game_info, global_shadps4_exe, db, save_dir, app_default_wine, default_native_env_vars, ra_psx_exe, ra_ps2_exe, ra_psp_exe, ra_psx_core, ra_ps2_core, ra_psp_core) = {
+    let (running_games, sender, game_info, global_shadps4_exe, db, save_dir, app_default_wine, default_native_env_vars, ra_psx_exe, ra_ps2_exe, ra_psp_exe, ra_psx_core, ra_ps2_core, ra_psp_core, ra_psx_fs, ra_ps2_fs, ra_psp_fs) = {
         let s = state.borrow();
         (
             s.running_games.clone(),
@@ -56,6 +56,9 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             s.cfg.ra_psx_ra_core.clone(),
             s.cfg.ra_ps2_ra_core.clone(),
             s.cfg.ra_psp_ra_core.clone(),
+            s.cfg.ra_psx_fullscreen,
+            s.cfg.ra_ps2_fullscreen,
+            s.cfg.ra_psp_fullscreen,
         )
     };
 
@@ -95,7 +98,13 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         } else {
             global_core
         };
-        let cmd = crate::platforms::emulator_detect::build_launch_command(exe, &game_path, core);
+        let fullscreen = match platform_id.as_str() {
+            "psx" => ra_psx_fs,
+            "ps2" => ra_ps2_fs,
+            "psp" => ra_psp_fs,
+            _ => false,
+        };
+        let cmd = crate::platforms::emulator_detect::build_launch_command(exe, &game_path, core, fullscreen);
         match crate::launcher::wrapper::spawn_game(&cmd, &[], None) {
             Ok(child) => {
                 let pid = child.id() as i32;

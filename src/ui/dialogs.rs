@@ -343,6 +343,7 @@ struct ConsolePageWidgets {
     folder_row: adw::EntryRow,
     exe_row: adw::EntryRow,
     core_dropdown: Option<gtk4::DropDown>,
+    fullscreen_row: adw::SwitchRow,
 }
 
 fn build_console_settings_page(
@@ -354,6 +355,7 @@ fn build_console_settings_page(
     folder: &str,
     executable: &str,
     ra_core: &str,
+    fullscreen: bool,
 ) -> (gtk4::Box, ConsolePageWidgets) {
     let page = settings_page_container();
 
@@ -513,8 +515,14 @@ fn build_console_settings_page(
         }
     }
 
+    let fullscreen_row = adw::SwitchRow::new();
+    fullscreen_row.set_title("Start games in fullscreen");
+    fullscreen_row.set_subtitle("Launch the emulator in fullscreen mode");
+    fullscreen_row.set_active(fullscreen);
+    emu_group.add(&fullscreen_row);
+
     page.append(&emu_group);
-    (page, ConsolePageWidgets { enable_row, folder_row, exe_row, core_dropdown })
+    (page, ConsolePageWidgets { enable_row, folder_row, exe_row, core_dropdown, fullscreen_row })
 }
 
 fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRow, gtk4::StringList) {
@@ -654,11 +662,11 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("applications-science-symbolic", "RetroAchievements"));
     stack.add_named(&ra_page, Some("ra"));
 
-    let (psx_page, psx_widgets) = build_console_settings_page(&cfg, &win, "PS1", "psx", cfg.psx_enabled, &cfg.ra_psx_folder, &cfg.ra_psx_executable, &cfg.ra_psx_ra_core);
+    let (psx_page, psx_widgets) = build_console_settings_page(&cfg, &win, "PS1", "psx", cfg.psx_enabled, &cfg.ra_psx_folder, &cfg.ra_psx_executable, &cfg.ra_psx_ra_core, cfg.ra_psx_fullscreen);
     sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS1"));
     stack.add_named(&psx_page, Some("ps1"));
 
-    let (ps2_page, ps2_widgets) = build_console_settings_page(&cfg, &win, "PS2", "ps2", cfg.ps2_enabled, &cfg.ra_ps2_folder, &cfg.ra_ps2_executable, &cfg.ra_ps2_ra_core);
+    let (ps2_page, ps2_widgets) = build_console_settings_page(&cfg, &win, "PS2", "ps2", cfg.ps2_enabled, &cfg.ra_ps2_folder, &cfg.ra_ps2_executable, &cfg.ra_ps2_ra_core, cfg.ra_ps2_fullscreen);
     sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS2"));
     stack.add_named(&ps2_page, Some("ps2"));
 
@@ -666,7 +674,7 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS4"));
     stack.add_named(&ps4_page, Some("ps4"));
 
-    let (psp_page, psp_widgets) = build_console_settings_page(&cfg, &win, "PSP", "psp", cfg.psp_enabled, &cfg.ra_psp_folder, &cfg.ra_psp_executable, &cfg.ra_psp_ra_core);
+    let (psp_page, psp_widgets) = build_console_settings_page(&cfg, &win, "PSP", "psp", cfg.psp_enabled, &cfg.ra_psp_folder, &cfg.ra_psp_executable, &cfg.ra_psp_ra_core, cfg.ra_psp_fullscreen);
     sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PSP"));
     stack.add_named(&psp_page, Some("psp"));
 
@@ -760,6 +768,7 @@ pub fn show_settings_dialog(
         s.cfg.psx_enabled = psx_widgets.enable_row.is_active();
         s.cfg.ra_psx_folder = psx_widgets.folder_row.text().to_string();
         s.cfg.ra_psx_executable = psx_widgets.exe_row.text().to_string();
+        s.cfg.ra_psx_fullscreen = psx_widgets.fullscreen_row.is_active();
         if let Some(ref dd) = psx_widgets.core_dropdown {
             if dd.selected() > 0 {
                 let cores = crate::platforms::emulator_detect::detect_ra_cores();
@@ -773,6 +782,7 @@ pub fn show_settings_dialog(
         s.cfg.ps2_enabled = ps2_widgets.enable_row.is_active();
         s.cfg.ra_ps2_folder = ps2_widgets.folder_row.text().to_string();
         s.cfg.ra_ps2_executable = ps2_widgets.exe_row.text().to_string();
+        s.cfg.ra_ps2_fullscreen = ps2_widgets.fullscreen_row.is_active();
         if let Some(ref dd) = ps2_widgets.core_dropdown {
             if dd.selected() > 0 {
                 let cores = crate::platforms::emulator_detect::detect_ra_cores();
@@ -786,6 +796,7 @@ pub fn show_settings_dialog(
         s.cfg.psp_enabled = psp_widgets.enable_row.is_active();
         s.cfg.ra_psp_folder = psp_widgets.folder_row.text().to_string();
         s.cfg.ra_psp_executable = psp_widgets.exe_row.text().to_string();
+        s.cfg.ra_psp_fullscreen = psp_widgets.fullscreen_row.is_active();
         if let Some(ref dd) = psp_widgets.core_dropdown {
             if dd.selected() > 0 {
                 let cores = crate::platforms::emulator_detect::detect_ra_cores();

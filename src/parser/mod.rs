@@ -34,25 +34,22 @@ pub fn read_app_details(save_dir: &str, app_id: &str) -> Option<crate::api::type
 }
 
 pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
-    let icon_png = image_dir.join("icon.png");
-    if icon_png.is_file() {
-        game.icon_path = icon_png.to_string_lossy().into_owned();
+    if game.icon_path.is_empty() {
+        if let Some(p) = paths::find_image_file(image_dir, "icon") {
+            game.icon_path = p.to_string_lossy().into_owned();
+        }
     }
-    let grid = image_dir.join("library_600x900.jpg");
-    if grid.is_file() {
-        game.grid_path = grid.to_string_lossy().into_owned();
+    if let Some(p) = paths::find_image_file(image_dir, "library_600x900") {
+        game.grid_path = p.to_string_lossy().into_owned();
     }
-    let header = image_dir.join("header.jpg");
-    if header.is_file() {
-        game.header_path = header.to_string_lossy().into_owned();
+    if let Some(p) = paths::find_image_file(image_dir, "header") {
+        game.header_path = p.to_string_lossy().into_owned();
     }
-    let hero = image_dir.join("library_hero.jpg");
-    if hero.is_file() {
-        game.hero_image_path = hero.to_string_lossy().into_owned();
+    if let Some(p) = paths::find_image_file(image_dir, "library_hero") {
+        game.hero_image_path = p.to_string_lossy().into_owned();
     }
-    let logo = image_dir.join("logo.png");
-    if logo.is_file() {
-        game.logo_path = logo.to_string_lossy().into_owned();
+    if let Some(p) = paths::find_image_file(image_dir, "logo") {
+        game.logo_path = p.to_string_lossy().into_owned();
     }
 }
 

@@ -11,44 +11,15 @@ pub fn show_add_game_dialog(state: &SharedState) {
         (s.window.clone(), s.db.clone(), s.sender.clone(), s.steam.clone(), s.watcher.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
     };
 
-    let win = adw::Window::new();
-    win.set_title(Some("Add Game"));
-    win.set_default_size(720, 540);
-    win.set_transient_for(Some(&window));
-    win.set_modal(true);
+    let layout = super::helpers::dialog_layout(&window);
+    layout.window.set_title(Some("Add Game"));
+    layout.header.set_title_widget(Some(&gtk4::Label::new(Some("Add Game"))));
+    layout.stack.set_vexpand(true);
 
-    let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-
-    let sidebar_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    sidebar_area.add_css_class("settings-sidebar");
-    sidebar_area.set_size_request(200, -1);
-    sidebar_area.set_vexpand(true);
-    let sidebar = gtk4::ListBox::new();
-    sidebar.add_css_class("navigation-sidebar");
-    sidebar.set_margin_top(6);
-    sidebar.set_margin_bottom(6);
-    sidebar_area.append(&sidebar);
-
-    let sep = gtk4::Separator::new(gtk4::Orientation::Vertical);
-    outer.append(&sidebar_area);
-    outer.append(&sep);
-
-    let content_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    content_area.set_hexpand(true);
-
-    let header = adw::HeaderBar::new();
-    header.add_css_class("settings-header");
-    header.set_title_widget(Some(&gtk4::Label::new(Some("Add Game"))));
-    content_area.append(&header);
-
-    let stack = gtk4::Stack::new();
-    stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
-    stack.set_margin_start(16);
-    stack.set_margin_end(16);
-    stack.set_margin_top(16);
-    stack.set_margin_bottom(16);
-    stack.set_hexpand(true);
-    stack.set_vexpand(true);
+    let win = layout.window;
+    let sidebar = layout.sidebar;
+    let stack = layout.stack;
+    let content_area = layout.content_area;
 
     let profiles = crate::db::get_all_profiles(&db).unwrap_or_default();
     let (general_page, name_entry, kind_row, exe_entry, args_entry, wd_entry, detect_btn, profile_row, steam_id_entry, gog_id_entry) =
@@ -138,8 +109,6 @@ pub fn show_add_game_dialog(state: &SharedState) {
         sidebar.select_row(Some(&first));
     }
 
-    content_area.append(&stack);
-
     let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     btn_row.set_halign(gtk4::Align::End);
     btn_row.set_margin_start(16);
@@ -158,8 +127,6 @@ pub fn show_add_game_dialog(state: &SharedState) {
     btn_row.append(&add_btn);
     content_area.append(&btn_row);
 
-    outer.append(&content_area);
-    win.set_content(Some(&outer));
     win.present();
 
     let state_c = state.clone();

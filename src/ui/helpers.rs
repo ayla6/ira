@@ -1,10 +1,70 @@
-use adw::prelude::{AlertDialogExt, AdwDialogExt};
+use adw::prelude::{AdwDialogExt, AdwWindowExt, AlertDialogExt};
 use gtk4::prelude::*;
 use crate::Game;
 use crate::strings as S;
 use std::collections::HashMap;
 
 use super::state::SharedState;
+
+pub struct DialogLayout {
+    pub window: adw::Window,
+    pub sidebar: gtk4::ListBox,
+    pub stack: gtk4::Stack,
+    pub header: adw::HeaderBar,
+    pub content_area: gtk4::Box,
+    pub sidebar_area: gtk4::Box,
+}
+
+pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
+    let win = adw::Window::new();
+    win.set_default_size(720, 540);
+    win.set_modal(true);
+    win.set_transient_for(Some(parent));
+
+    let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+
+    let sidebar_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    sidebar_area.add_css_class("settings-sidebar");
+    sidebar_area.set_size_request(200, -1);
+    sidebar_area.set_vexpand(true);
+
+    let sidebar = gtk4::ListBox::new();
+    sidebar.add_css_class("navigation-sidebar");
+    sidebar.set_margin_top(6);
+    sidebar.set_margin_bottom(6);
+    sidebar_area.append(&sidebar);
+
+    let sep = gtk4::Separator::new(gtk4::Orientation::Vertical);
+    outer.append(&sidebar_area);
+    outer.append(&sep);
+
+    let content_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content_area.set_hexpand(true);
+
+    let header = adw::HeaderBar::new();
+    header.add_css_class("settings-header");
+    content_area.append(&header);
+
+    let stack = gtk4::Stack::new();
+    stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
+    stack.set_margin_start(16);
+    stack.set_margin_end(16);
+    stack.set_margin_top(16);
+    stack.set_margin_bottom(16);
+
+    content_area.append(&stack);
+    outer.append(&content_area);
+    win.set_content(Some(&outer));
+
+    DialogLayout {
+        window: win,
+        sidebar,
+        stack,
+        header,
+        content_area,
+        sidebar_area,
+    }
+}
 
 pub fn make_browse_button(
     parent: Option<&adw::Window>,

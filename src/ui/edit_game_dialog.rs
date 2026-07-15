@@ -27,46 +27,18 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     }
 
     let parent = state.borrow().window.clone();
-    let win = adw::Window::new();
-    win.set_default_width(720);
-    win.set_default_height(540);
-    win.set_transient_for(Some(&parent));
-    win.set_modal(true);
-    win.set_deletable(false);
     let save_dir = state.borrow().save_dir.clone();
     let app_details = crate::parser::read_app_details(&save_dir, &game.app_id);
 
-    let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    let layout = super::helpers::dialog_layout(&parent);
+    layout.window.set_deletable(false);
+    layout.stack.set_hexpand(true);
+    layout.header.set_title_widget(Some(&gtk4::Label::new(Some(&game.name))));
 
-    let sidebar_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    sidebar_area.add_css_class("settings-sidebar");
-    sidebar_area.set_size_request(200, -1);
-    sidebar_area.set_vexpand(true);
-    let sidebar = gtk4::ListBox::new();
-    sidebar.add_css_class("navigation-sidebar");
-    sidebar.set_margin_top(6);
-    sidebar.set_margin_bottom(6);
-    sidebar_area.append(&sidebar);
-
-    let sep = gtk4::Separator::new(gtk4::Orientation::Vertical);
-    outer.append(&sidebar_area);
-    outer.append(&sep);
-
-    let content_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    content_area.set_hexpand(true);
-
-    let header = adw::HeaderBar::new();
-    header.add_css_class("settings-header");
-    header.set_title_widget(Some(&gtk4::Label::new(Some(&game.name))));
-    content_area.append(&header);
-
-    let stack = gtk4::Stack::new();
-    stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
-    stack.set_margin_start(16);
-    stack.set_margin_end(16);
-    stack.set_margin_top(16);
-    stack.set_margin_bottom(16);
-    stack.set_hexpand(true);
+    let win = layout.window;
+    let sidebar = layout.sidebar;
+    let stack = layout.stack;
+    let content_area = layout.content_area;
 
     // --- General page ---
     let languages = app_details.as_ref().map(|d| d.languages.clone()).unwrap_or_default();
@@ -576,8 +548,6 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         sidebar.select_row(Some(&first));
     }
 
-    content_area.append(&stack);
-
     // --- Save / Cancel ---
     let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     btn_row.set_halign(gtk4::Align::End);
@@ -889,9 +859,6 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     btn_row.append(&cancel_btn);
     btn_row.append(&save_btn);
     content_area.append(&btn_row);
-    outer.append(&content_area);
-
-    win.set_content(Some(&outer));
     win.present();
 }
 

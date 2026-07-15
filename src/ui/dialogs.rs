@@ -130,6 +130,40 @@ fn build_api_keys_page(cfg: &Config) -> (gtk4::Box, adw::EntryRow, adw::EntryRow
     (page, steam_entry.upcast(), sgdb_entry.upcast())
 }
 
+fn build_shadps4_version_dropdown(current_path: &str, include_global: bool) -> gtk4::DropDown {
+    let shadps4_versions = crate::platforms::ps4::read_shadps4_versions();
+    let trunc = |s: &str, max: usize| -> String {
+        if s.len() > max {
+            format!("{}…", &s[..max.saturating_sub(1)])
+        } else {
+            s.to_string()
+        }
+    };
+    let mut version_strings: Vec<String> = Vec::new();
+    if include_global {
+        version_strings.push("Follow global".to_string());
+    }
+    for v in &shadps4_versions {
+        let extra = if !v.date.is_empty() { v.date.clone() } else { v.codename.clone() };
+        version_strings.push(format!("{}  ({})", v.name, trunc(&extra, 14)));
+    }
+    let version_model = super::helpers::string_list_from(&version_strings);
+    let version_dropdown = gtk4::DropDown::new(Some(version_model), None::<&gtk4::PropertyExpression>);
+
+    let mut selected_idx: u32 = 0;
+    if !current_path.is_empty() {
+        for (i, v) in shadps4_versions.iter().enumerate() {
+            let v_path = v.path.trim_matches('"');
+            if v_path == current_path {
+                selected_idx = if include_global { (i + 1) as u32 } else { i as u32 };
+                break;
+            }
+        }
+    }
+    version_dropdown.set_selected(selected_idx);
+    version_dropdown
+}
+
 fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
     let page = settings_page_container();
 
@@ -152,38 +186,12 @@ fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, a
     let detected_path = crate::platforms::ps4::detect_shadps4_version_path();
 
     if !shadps4_versions.is_empty() {
-        let trunc = |s: &str, max: usize| -> String {
-            if s.len() > max {
-                format!("{}…", &s[..max.saturating_sub(1)])
-            } else {
-                s.to_string()
-            }
-        };
-        let version_strings: Vec<String> = shadps4_versions.iter()
-            .map(|v| {
-                let extra = if !v.date.is_empty() { v.date.clone() } else { v.codename.clone() };
-                format!("{}  ({})", v.name, trunc(&extra, 14))
-            })
-            .collect();
-        let version_model = super::helpers::string_list_from(&version_strings);
-        let version_dropdown = gtk4::DropDown::new(Some(version_model), None::<&gtk4::PropertyExpression>);
-
         let current_exe = if cfg.shadps4_executable.is_empty() {
             detected_path.clone().unwrap_or_default()
         } else {
             cfg.shadps4_executable.clone()
         };
-        let mut selected_idx: u32 = 0;
-        if !current_exe.is_empty() {
-            for (i, v) in shadps4_versions.iter().enumerate() {
-                let v_path = v.path.trim_matches('"');
-                if v_path == current_exe {
-                    selected_idx = i as u32;
-                    break;
-                }
-            }
-        }
-        version_dropdown.set_selected(selected_idx);
+        let version_dropdown = build_shadps4_version_dropdown(&current_exe, false);
 
         let ps4_exe_row_c = ps4_exe_row.clone();
         version_dropdown.connect_selected_notify(move |dd| {
@@ -558,43 +566,15 @@ pub fn show_settings_dialog(
     steam: Arc<SteamClient>,
     state: &SharedState,
 ) {
-    let win = adw::Window::new();
-    win.set_default_width(640);
-    win.set_default_height(480);
-    win.set_modal(true);
-    win.set_transient_for(Some(parent));
-    win.set_deletable(false);
+    let layout = super::helpers::dialog_layout(parent);
+    layout.window.set_default_size(640, 480);
+    layout.window.set_deletable(false);
+    layout.sidebar_area.set_size_request(180, -1);
 
-    let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-
-    let sidebar_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    sidebar_area.add_css_class("settings-sidebar");
-    sidebar_area.set_size_request(180, -1);
-    sidebar_area.set_vexpand(true);
-
-    let sidebar = gtk4::ListBox::new();
-    sidebar.add_css_class("navigation-sidebar");
-    sidebar.set_margin_top(6);
-    sidebar.set_margin_bottom(6);
-    sidebar_area.append(&sidebar);
-
-    let sep = gtk4::Separator::new(gtk4::Orientation::Vertical);
-    outer.append(&sidebar_area);
-    outer.append(&sep);
-
-    let content_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    content_area.set_hexpand(true);
-
-    let header = adw::HeaderBar::new();
-    header.add_css_class("settings-header");
-    content_area.append(&header);
-
-    let stack = gtk4::Stack::new();
-    stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
-    stack.set_margin_start(16);
-    stack.set_margin_end(16);
-    stack.set_margin_top(16);
-    stack.set_margin_bottom(16);
+    let win = layout.window;
+    let sidebar = layout.sidebar;
+    let stack = layout.stack;
+    let content_area = layout.content_area;
 
     let (general_page, notif_row, bg_row, hidden_row, grid_spin) = build_general_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("preferences-system-symbolic", "General"));
@@ -689,8 +669,6 @@ pub fn show_settings_dialog(
         sidebar.select_row(Some(&first));
     }
 
-    content_area.append(&stack);
-
     let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     btn_row.set_halign(gtk4::Align::End);
     btn_row.set_margin_start(16);
@@ -767,9 +745,6 @@ pub fn show_settings_dialog(
     btn_row.append(&cancel_btn);
     btn_row.append(&save_btn);
     content_area.append(&btn_row);
-    outer.append(&content_area);
-
-    win.set_content(Some(&outer));
     win.present();
 }
 
@@ -814,44 +789,7 @@ pub(super) fn build_game_general_page(
             let version_group = adw::PreferencesGroup::new();
             version_group.set_title("shadPS4 Version");
 
-            let trunc = |s: &str, max: usize| -> String {
-                if s.len() > max {
-                    format!("{}…", &s[..max.saturating_sub(1)])
-                } else {
-                    s.to_string()
-                }
-            };
-            let version_strings: Vec<String> = std::iter::once("Follow global".to_string())
-                .chain(shadps4_versions.iter().map(|v| {
-                    let extra = if !v.date.is_empty() { v.date.clone() } else { v.codename.clone() };
-                    format!("{}  ({})", v.name, trunc(&extra, 14))
-                }))
-                .collect();
-            let version_model = super::helpers::string_list_from(&version_strings);
-            let version_dropdown = gtk4::DropDown::new(Some(version_model), None::<&gtk4::PropertyExpression>);
-
-            let current_ver = if game.shadps4_version.is_empty() {
-                "Follow global".to_string()
-            } else {
-                let mut found = "".to_string();
-                for v in &shadps4_versions {
-                    let v_path = v.path.trim_matches('"');
-                    if v_path == game.shadps4_version {
-                        let extra = if !v.date.is_empty() { v.date.clone() } else { v.codename.clone() };
-                        found = format!("{}  ({})", v.name, trunc(&extra, 14));
-                        break;
-                    }
-                }
-                if found.is_empty() { "Follow global".to_string() } else { found }
-            };
-            let mut selected_idx = 0u32;
-            for (i, s) in version_strings.iter().enumerate() {
-                if s == &current_ver {
-                    selected_idx = i as u32;
-                    break;
-                }
-            }
-            version_dropdown.set_selected(selected_idx);
+            let version_dropdown = build_shadps4_version_dropdown(&game.shadps4_version, true);
 
             let pending_version_c = pending_version.clone();
             version_dropdown.connect_selected_notify(move |dd| {

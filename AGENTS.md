@@ -5,9 +5,8 @@ Guidelines for working on Ira.
 ## Project overview
 
 Rust GTK4 + libadwaita desktop app for viewing game achievements across multiple
-emulator platforms (Goldberg Steam Emulator, Nemirtingas GOG Emulator, shadPS4).
-Lutris is the source of truth for most of the game list, but not all — shadPS4
-games are discovered independently, and future platforms may also bypass Lutris.
+emulator platforms (Goldberg Steam Emulator, Nemirtingas GOG Emulator, shadPS4) and RetroAchievements.
+It has many sources of games, having its own Lutris like system of adding games, pulling games from Lutris itself, and also console emulators.
 SteamGridDB provides image assets.
 
 ## Build & test commands

@@ -5,6 +5,7 @@ pub mod steam;
 pub mod gog;
 pub mod gog_setup;
 pub mod api_emulators;
+pub mod consoles;
 pub mod ps4;
 pub mod retroachievements;
 pub mod emulator_detect;

@@ -138,12 +138,12 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             let shadps4_enabled = cfg.shadps4_enabled;
             let steam_enabled = cfg.steam_enabled;
             let lutris_enabled = cfg.lutris_enabled;
-            let ra_config = cfg.ra_config();
+            let cfg_clone = cfg.clone();
             let sort_mode = crate::models::SortMode::from_str(&cfg.sort_mode);
             let sort_descending = cfg.sort_descending;
             std::thread::spawn(move || {
                 let games = crate::game_list::build_game_list(
-                    &db, &save_dir, lutris_enabled, shadps4_enabled, steam_enabled, &ra_config, sort_mode, sort_descending,
+                    &db, &save_dir, lutris_enabled, shadps4_enabled, steam_enabled, &cfg_clone, sort_mode, sort_descending,
                 );
                 let _ = sender.send(AppMessage::GamesLoaded(games));
             });

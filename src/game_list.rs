@@ -1,5 +1,5 @@
 use crate::db;
-use crate::config::RaConfig;
+use crate::config::Config;
 use crate::models::Game;
 use crate::parser;
 use crate::platforms::lutris::{load_lutris_games, LutrisGame};
@@ -78,7 +78,7 @@ fn auto_match_by_title(db: &db::DbConn, save_dir: &str, lutris_games: &[LutrisGa
     }
 }
 
-pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, shadps4_enabled: bool, steam_enabled: bool, ra_config: &RaConfig, sort_mode: crate::models::SortMode, sort_descending: bool) -> Vec<Game> {
+pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, shadps4_enabled: bool, steam_enabled: bool, cfg: &Config, sort_mode: crate::models::SortMode, sort_descending: bool) -> Vec<Game> {
     let steam_games = if steam_enabled { steam::discover_games() } else { Vec::new() };
     if steam_enabled && !steam_games.is_empty() {
         cleanup_steam_entries(db, &steam_games);
@@ -89,7 +89,7 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, sh
         eprintln!("[steam] Discovered {} games, {} playtimes", steam_games.len(), steam_playtimes.len());
     }
 
-    let ra_any_console = ra_config.psx_enabled || ra_config.ps2_enabled || ra_config.psp_enabled;
+    let ra_any_console = cfg.any_console_enabled();
 
     let mut games = if lutris_enabled {
         build_lutris_games(db, save_dir)
@@ -128,7 +128,7 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, sh
         games.extend(build_steam_games(&db, save_dir, &steam_games, &steam_playtimes));
     }
     if ra_any_console {
-        games.extend(retroachievements::build_ra_games(&db, save_dir, ra_config));
+        games.extend(retroachievements::build_ra_games(&db, save_dir, cfg));
     }
     games.sort_by(|a, b| {
         let ord = sort_mode.compare(a, b);
@@ -137,7 +137,7 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, sh
     games
 }
 
-pub fn build_ra_games_threaded(_db: &db::DbConn, _save_dir: &str, _ra_config: &RaConfig, _sender: &crate::AppSender) {
+pub fn build_ra_games_threaded(_db: &db::DbConn, _save_dir: &str, _cfg: &Config, _sender: &crate::AppSender) {
     // No longer used — RA games are loaded synchronously in build_game_list
 }
 

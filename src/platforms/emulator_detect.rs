@@ -52,32 +52,13 @@ fn detect_native(names: &[&str], display_name: &str) -> Option<DetectedEmulator>
 
 pub fn detect_emulators(console: &str) -> Vec<DetectedEmulator> {
     let mut result = Vec::new();
-    match console {
-        "psx" => {
-            if let Some(e) = detect_native(&["duckstation-qt", "duckstation"], "DuckStation") {
-                result.push(e);
-            }
-            if let Some(e) = detect_flatpak("org.duckstation.DuckStation", "DuckStation") {
-                result.push(e);
-            }
+    if let Some(def) = crate::platforms::consoles::find_console(console) {
+        if let Some(e) = detect_native(def.binary_names, def.emu_display_name) {
+            result.push(e);
         }
-        "ps2" => {
-            if let Some(e) = detect_native(&["pcsx2-qt", "pcsx2"], "PCSX2") {
-                result.push(e);
-            }
-            if let Some(e) = detect_flatpak("net.pcsx2.PCSX2", "PCSX2") {
-                result.push(e);
-            }
+        if let Some(e) = detect_flatpak(def.flatpak_id, def.emu_display_name) {
+            result.push(e);
         }
-        "psp" => {
-            if let Some(e) = detect_native(&["ppsspp", "PPSSPPSDL"], "PPSSPP") {
-                result.push(e);
-            }
-            if let Some(e) = detect_flatpak("org.ppsspp.PPSSPP", "PPSSPP") {
-                result.push(e);
-            }
-        }
-        _ => {}
     }
     if let Some(e) = detect_native(&["retroarch"], "RetroArch") {
         result.push(e);

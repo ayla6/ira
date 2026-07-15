@@ -807,11 +807,9 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
 }
 
 pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, platform_id: &str, parent: &adw::Window, on_match: Option<Rc<dyn Fn()>>) {
-    let console_id = match platform_id {
-        "psx" => crate::platforms::retroachievements::discovery::CONSOLE_PSX,
-        "ps2" => crate::platforms::retroachievements::discovery::CONSOLE_PS2,
-        "psp" => crate::platforms::retroachievements::discovery::CONSOLE_PSP,
-        _ => return,
+    let console_id = match crate::platforms::consoles::find_console(platform_id) {
+        Some(c) => c.ra_console_id,
+        None => return,
     };
 
     let dialog = adw::Window::new();

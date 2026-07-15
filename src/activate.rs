@@ -96,7 +96,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
     let shadps4_enabled = cfg.shadps4_enabled;
     let steam_enabled = cfg.steam_enabled;
     let lutris_enabled = cfg.lutris_enabled;
-    let ra_config = cfg.ra_config();
+    let ra_config = cfg.clone();
     let save_dir = cfg.save_dir.clone();
     let sort_mode = crate::models::SortMode::from_str(&cfg.sort_mode);
     let sort_descending = cfg.sort_descending;

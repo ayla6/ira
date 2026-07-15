@@ -347,23 +347,17 @@ struct ConsolePageWidgets {
 }
 
 fn build_console_settings_page(
-    _cfg: &Config,
     win: &adw::Window,
-    console_name: &str,
-    console_id: &str,
-    enabled: bool,
-    folder: &str,
-    executable: &str,
-    ra_core: &str,
-    fullscreen: bool,
+    def: &crate::platforms::consoles::ConsoleDef,
+    cc: &crate::config::ConsoleConfig,
 ) -> (gtk4::Box, ConsolePageWidgets) {
     let page = settings_page_container();
 
     let enable_group = adw::PreferencesGroup::new();
     let enable_row = adw::SwitchRow::new();
-    enable_row.set_title(&format!("Enable {} ROM discovery", console_name));
-    enable_row.set_subtitle(&format!("Scan for {} ROM files in the configured folder", console_name));
-    enable_row.set_active(enabled);
+    enable_row.set_title(&format!("Enable {} ROM discovery", def.display_name));
+    enable_row.set_subtitle(&format!("Scan for {} ROM files in the configured folder", def.display_name));
+    enable_row.set_active(cc.enabled);
     enable_group.add(&enable_row);
     page.append(&enable_group);
 
@@ -372,7 +366,7 @@ fn build_console_settings_page(
 
     let folder_row = adw::EntryRow::new();
     folder_row.set_title("ROM folder");
-    folder_row.set_text(folder);
+    folder_row.set_text(&cc.folder);
 
     let folder_browse = gtk4::Button::with_label("Browse…");
     folder_browse.add_css_class("flat");
@@ -400,11 +394,11 @@ fn build_console_settings_page(
     let emu_group = adw::PreferencesGroup::new();
     emu_group.set_title("Emulator");
 
-    let detected_emulators = crate::platforms::emulator_detect::detect_emulators(console_id);
+    let detected_emulators = crate::platforms::emulator_detect::detect_emulators(def.id);
 
     let exe_row = adw::EntryRow::new();
     exe_row.set_title("Emulator executable");
-    exe_row.set_text(executable);
+    exe_row.set_text(&cc.executable);
 
     let mut core_dropdown: Option<gtk4::DropDown> = None;
 
@@ -416,9 +410,9 @@ fn build_console_settings_page(
         let emu_dropdown = gtk4::DropDown::new(Some(emu_model), None::<&gtk4::PropertyExpression>);
 
         let mut selected_idx: u32 = 0;
-        if !executable.is_empty() {
+        if !cc.executable.is_empty() {
             for (i, e) in detected_emulators.iter().enumerate() {
-                if e.launch_command == executable {
+                if e.launch_command == cc.executable {
                     selected_idx = i as u32;
                     break;
                 }
@@ -484,7 +478,7 @@ fn build_console_settings_page(
     emu_group.add(&exe_row);
 
     // RetroArch core dropdown — inside the emulator group, shown when emulator is RetroArch
-    let is_ra = crate::platforms::emulator_detect::is_retroarch(executable);
+    let is_ra = crate::platforms::emulator_detect::is_retroarch(&cc.executable);
     if is_ra {
         let cores = crate::platforms::emulator_detect::detect_ra_cores();
         if !cores.is_empty() {
@@ -494,9 +488,9 @@ fn build_console_settings_page(
             let dropdown = gtk4::DropDown::new(Some(core_model), None::<&gtk4::PropertyExpression>);
 
             let mut selected_idx: u32 = 0;
-            if !ra_core.is_empty() {
+            if !cc.ra_core.is_empty() {
                 for (i, c) in cores.iter().enumerate() {
-                    if c.path == ra_core {
+                    if c.path == cc.ra_core {
                         selected_idx = (i + 1) as u32;
                         break;
                     }
@@ -518,7 +512,7 @@ fn build_console_settings_page(
     let fullscreen_row = adw::SwitchRow::new();
     fullscreen_row.set_title("Start games in fullscreen");
     fullscreen_row.set_subtitle("Launch the emulator in fullscreen mode");
-    fullscreen_row.set_active(fullscreen);
+    fullscreen_row.set_active(cc.fullscreen);
     emu_group.add(&fullscreen_row);
 
     page.append(&emu_group);
@@ -662,21 +656,24 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("applications-science-symbolic", "RetroAchievements"));
     stack.add_named(&ra_page, Some("ra"));
 
-    let (psx_page, psx_widgets) = build_console_settings_page(&cfg, &win, "PS1", "psx", cfg.psx_enabled, &cfg.ra_psx_folder, &cfg.ra_psx_executable, &cfg.ra_psx_ra_core, cfg.ra_psx_fullscreen);
-    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS1"));
-    stack.add_named(&psx_page, Some("ps1"));
+    let mut console_widgets: Vec<(&'static str, ConsolePageWidgets)> = Vec::new();
+    let mut ps4_enable_row: Option<adw::SwitchRow> = None;
+    let mut ps4_exe_row: Option<adw::EntryRow> = None;
+    for def in crate::platforms::consoles::CONSOLES {
+        let cc = cfg.console(def.id);
+        let (page, widgets) = build_console_settings_page(&win, def, cc);
+        sidebar.append(&settings_sidebar_row("applications-games-symbolic", def.display_name));
+        stack.add_named(&page, Some(def.display_name.to_lowercase().as_str()));
+        console_widgets.push((def.id, widgets));
 
-    let (ps2_page, ps2_widgets) = build_console_settings_page(&cfg, &win, "PS2", "ps2", cfg.ps2_enabled, &cfg.ra_ps2_folder, &cfg.ra_ps2_executable, &cfg.ra_ps2_ra_core, cfg.ra_ps2_fullscreen);
-    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS2"));
-    stack.add_named(&ps2_page, Some("ps2"));
-
-    let (ps4_page, ps4_enable_row, ps4_exe_row) = build_shadps4_settings_page(&cfg, &win);
-    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS4"));
-    stack.add_named(&ps4_page, Some("ps4"));
-
-    let (psp_page, psp_widgets) = build_console_settings_page(&cfg, &win, "PSP", "psp", cfg.psp_enabled, &cfg.ra_psp_folder, &cfg.ra_psp_executable, &cfg.ra_psp_ra_core, cfg.ra_psp_fullscreen);
-    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PSP"));
-    stack.add_named(&psp_page, Some("psp"));
+        if def.id == "ps2" {
+            let (ps4_page, ps4_en, ps4_exe) = build_shadps4_settings_page(&cfg, &win);
+            sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS4"));
+            stack.add_named(&ps4_page, Some("ps4"));
+            ps4_enable_row = Some(ps4_en);
+            ps4_exe_row = Some(ps4_exe);
+        }
+    }
 
     let (wine_pages, wine_widgets) = super::wine_config_widget::build_wine_config_pages(&cfg.default_wine_config, None);
     sidebar.append(&sidebar_separator());
@@ -757,54 +754,33 @@ pub fn show_settings_dialog(
         s.cfg.close_to_background = bg_row.is_active();
         s.cfg.show_hidden_games = hidden_row.is_active();
         s.cfg.grid_cover_width = grid_spin.value() as i32;
-        s.cfg.shadps4_enabled = ps4_enable_row.is_active();
-        s.cfg.shadps4_executable = ps4_exe_row.text().to_string();
+        if let Some(row) = &ps4_enable_row {
+            s.cfg.shadps4_enabled = row.is_active();
+        }
+        if let Some(row) = &ps4_exe_row {
+            s.cfg.shadps4_executable = row.text().to_string();
+        }
         s.cfg.steam_enabled = steam_enable_row.is_active();
         s.cfg.lutris_enabled = lutris_enable_row.is_active();
         s.cfg.ra_enabled = ra_enable_row.is_active();
         s.cfg.ra_username = ra_username_row.text().to_string();
         s.cfg.ra_password = ra_password_row.text().to_string();
         s.cfg.ra_token = ra_token_row.text().to_string();
-        s.cfg.psx_enabled = psx_widgets.enable_row.is_active();
-        s.cfg.ra_psx_folder = psx_widgets.folder_row.text().to_string();
-        s.cfg.ra_psx_executable = psx_widgets.exe_row.text().to_string();
-        s.cfg.ra_psx_fullscreen = psx_widgets.fullscreen_row.is_active();
-        if let Some(ref dd) = psx_widgets.core_dropdown {
-            if dd.selected() > 0 {
-                let cores = crate::platforms::emulator_detect::detect_ra_cores();
-                if let Some(c) = cores.get((dd.selected() - 1) as usize) {
-                    s.cfg.ra_psx_ra_core = c.path.clone();
+        for (console_id, widgets) in &console_widgets {
+            let cc = s.cfg.console_mut(console_id);
+            cc.enabled = widgets.enable_row.is_active();
+            cc.folder = widgets.folder_row.text().to_string();
+            cc.executable = widgets.exe_row.text().to_string();
+            cc.fullscreen = widgets.fullscreen_row.is_active();
+            if let Some(ref dd) = widgets.core_dropdown {
+                if dd.selected() > 0 {
+                    let cores = crate::platforms::emulator_detect::detect_ra_cores();
+                    if let Some(c) = cores.get((dd.selected() - 1) as usize) {
+                        cc.ra_core = c.path.clone();
+                    }
+                } else {
+                    cc.ra_core = String::new();
                 }
-            } else {
-                s.cfg.ra_psx_ra_core = String::new();
-            }
-        }
-        s.cfg.ps2_enabled = ps2_widgets.enable_row.is_active();
-        s.cfg.ra_ps2_folder = ps2_widgets.folder_row.text().to_string();
-        s.cfg.ra_ps2_executable = ps2_widgets.exe_row.text().to_string();
-        s.cfg.ra_ps2_fullscreen = ps2_widgets.fullscreen_row.is_active();
-        if let Some(ref dd) = ps2_widgets.core_dropdown {
-            if dd.selected() > 0 {
-                let cores = crate::platforms::emulator_detect::detect_ra_cores();
-                if let Some(c) = cores.get((dd.selected() - 1) as usize) {
-                    s.cfg.ra_ps2_ra_core = c.path.clone();
-                }
-            } else {
-                s.cfg.ra_ps2_ra_core = String::new();
-            }
-        }
-        s.cfg.psp_enabled = psp_widgets.enable_row.is_active();
-        s.cfg.ra_psp_folder = psp_widgets.folder_row.text().to_string();
-        s.cfg.ra_psp_executable = psp_widgets.exe_row.text().to_string();
-        s.cfg.ra_psp_fullscreen = psp_widgets.fullscreen_row.is_active();
-        if let Some(ref dd) = psp_widgets.core_dropdown {
-            if dd.selected() > 0 {
-                let cores = crate::platforms::emulator_detect::detect_ra_cores();
-                if let Some(c) = cores.get((dd.selected() - 1) as usize) {
-                    s.cfg.ra_psp_ra_core = c.path.clone();
-                }
-            } else {
-                s.cfg.ra_psp_ra_core = String::new();
             }
         }
         s.cfg.default_wine_config = wine_widgets.to_wine_config();

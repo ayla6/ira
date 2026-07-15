@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use serde::Deserialize;
 
-use crate::config::RaConfig;
+use crate::config::Config;
 use crate::models::{Game, MergedAchievement};
 use crate::platforms::retroachievements::paths;
 
@@ -78,18 +78,18 @@ impl RaClient {
         Ok(resp.token)
     }
 
-    pub fn from_config(cfg: &RaConfig) -> Option<Self> {
-        if cfg.username.is_empty() {
+    pub fn from_config(cfg: &Config) -> Option<Self> {
+        if cfg.ra_username.is_empty() {
             eprintln!("RA: username is empty, skipping");
             return None;
         }
-        if cfg.password.is_empty() && cfg.token.is_empty() {
+        if cfg.ra_password.is_empty() && cfg.ra_token.is_empty() {
             eprintln!("RA: no password or token set, skipping");
             return None;
         }
         eprintln!("RA: creating client for user '{}' (password_len={}, token_len={})",
-            cfg.username, cfg.password.len(), cfg.token.len());
-        Some(Self::new(&cfg.username, &cfg.token, &cfg.password))
+            cfg.ra_username, cfg.ra_password.len(), cfg.ra_token.len());
+        Some(Self::new(&cfg.ra_username, &cfg.ra_token, &cfg.ra_password))
     }
 
     pub fn auth_is_broken() -> bool {

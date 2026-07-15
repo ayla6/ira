@@ -36,7 +36,7 @@ pub fn stop_game(state: &SharedState, game_id: i64) {
 }
 
 pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -> Result<(), String> {
-    let (running_games, sender, game_info, global_shadps4_exe, db, save_dir, app_default_wine, default_native_env_vars, ra_psx_exe, ra_ps2_exe, ra_psp_exe, ra_psx_core, ra_ps2_core, ra_psp_core, ra_psx_fs, ra_ps2_fs, ra_psp_fs) = {
+    let (running_games, sender, game_info, global_shadps4_exe, db, save_dir, app_default_wine, default_native_env_vars, cfg_clone) = {
         let s = state.borrow();
         (
             s.running_games.clone(),
@@ -50,15 +50,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             s.save_dir.clone(),
             s.cfg.default_wine_config.clone(),
             s.cfg.default_native_env_vars.clone(),
-            s.cfg.ra_psx_executable.clone(),
-            s.cfg.ra_ps2_executable.clone(),
-            s.cfg.ra_psp_executable.clone(),
-            s.cfg.ra_psx_ra_core.clone(),
-            s.cfg.ra_ps2_ra_core.clone(),
-            s.cfg.ra_psp_ra_core.clone(),
-            s.cfg.ra_psx_fullscreen,
-            s.cfg.ra_ps2_fullscreen,
-            s.cfg.ra_psp_fullscreen,
+            s.cfg.clone(),
         )
     };
 
@@ -74,37 +66,20 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         .as_secs() as i64;
 
     if kind == "retro" {
-        let global_exe = match platform_id.as_str() {
-            "psx" => &ra_psx_exe,
-            "ps2" => &ra_ps2_exe,
-            "psp" => &ra_psp_exe,
-            _ => return Err(format!("Unknown retro platform: {}", platform_id)),
-        };
+        let cc = cfg_clone.console(&platform_id);
         let exe = if !per_game_emu.is_empty() {
             &per_game_emu
-        } else if global_exe.is_empty() {
+        } else if cc.executable.is_empty() {
             return Err(format!("No emulator configured for {}", platform_id));
         } else {
-            global_exe.as_str()
-        };
-        let global_core = match platform_id.as_str() {
-            "psx" => &ra_psx_core,
-            "ps2" => &ra_ps2_core,
-            "psp" => &ra_psp_core,
-            _ => "",
+            &cc.executable
         };
         let core = if !per_game_ra_core.is_empty() {
             &per_game_ra_core
         } else {
-            global_core
+            &cc.ra_core
         };
-        let fullscreen = match platform_id.as_str() {
-            "psx" => ra_psx_fs,
-            "ps2" => ra_ps2_fs,
-            "psp" => ra_psp_fs,
-            _ => false,
-        };
-        let cmd = crate::platforms::emulator_detect::build_launch_command(exe, &game_path, core, fullscreen);
+        let cmd = crate::platforms::emulator_detect::build_launch_command(exe, &game_path, core, cc.fullscreen);
         match crate::launcher::wrapper::spawn_game(&cmd, &[], None) {
             Ok(child) => {
                 let pid = child.id() as i32;

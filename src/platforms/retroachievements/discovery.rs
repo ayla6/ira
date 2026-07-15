@@ -1,49 +1,25 @@
 use std::path::{Path, PathBuf};
 
-use crate::config::RaConfig;
+use crate::config::Config;
 use crate::models::{Game, RETRO, RA};
+use crate::platforms::consoles::{CONSOLES, ConsoleDef};
 use crate::platforms::retroachievements::api::{RaClient, RaGameEntry};
 
-pub const CONSOLE_PSX: u32 = 12;
-pub const CONSOLE_PS2: u32 = 21;
-pub const CONSOLE_PSP: u32 = 41;
-
-const PSX_EXTENSIONS: &[&str] = &["bin", "cue", "chd", "pbp", "iso", "ecm"];
-const PS2_EXTENSIONS: &[&str] = &["iso", "bin", "cue", "chd", "gz", "elf"];
-const PSP_EXTENSIONS: &[&str] = &["iso", "cso", "pbp", "prx"];
-
-struct ConsoleConfig {
-    id: u32,
-    name: &'static str,
+struct ActiveConsole {
+    def: &'static ConsoleDef,
     folder: String,
-    extensions: &'static [&'static str],
 }
 
-fn console_configs(cfg: &RaConfig) -> Vec<ConsoleConfig> {
+fn active_consoles(cfg: &Config) -> Vec<ActiveConsole> {
     let mut consoles = Vec::new();
-    if cfg.psx_enabled && !cfg.psx_folder.is_empty() {
-        consoles.push(ConsoleConfig {
-            id: CONSOLE_PSX,
-            name: "psx",
-            folder: cfg.psx_folder.clone(),
-            extensions: PSX_EXTENSIONS,
-        });
-    }
-    if cfg.ps2_enabled && !cfg.ps2_folder.is_empty() {
-        consoles.push(ConsoleConfig {
-            id: CONSOLE_PS2,
-            name: "ps2",
-            folder: cfg.ps2_folder.clone(),
-            extensions: PS2_EXTENSIONS,
-        });
-    }
-    if cfg.psp_enabled && !cfg.psp_folder.is_empty() {
-        consoles.push(ConsoleConfig {
-            id: CONSOLE_PSP,
-            name: "psp",
-            folder: cfg.psp_folder.clone(),
-            extensions: PSP_EXTENSIONS,
-        });
+    for def in CONSOLES {
+        let cc = cfg.console(def.id);
+        if cc.enabled && !cc.folder.is_empty() {
+            consoles.push(ActiveConsole {
+                def,
+                folder: cc.folder.clone(),
+            });
+        }
     }
     consoles
 }
@@ -127,48 +103,45 @@ fn match_rom_to_game(rom_name: &str, games: &[RaGameEntry]) -> Option<u32> {
 pub fn build_ra_games(
     db: &crate::db::DbConn,
     save_dir: &str,
-    cfg: &RaConfig,
+    cfg: &Config,
 ) -> Vec<Game> {
-    let has_credentials = !cfg.username.is_empty() && !cfg.token.is_empty();
+    let has_credentials = !cfg.ra_username.is_empty() && !cfg.ra_token.is_empty();
     let client = if cfg.ra_enabled && has_credentials {
         RaClient::from_config(cfg)
     } else {
         None
     };
 
-    let consoles = console_configs(cfg);
+    let consoles = active_consoles(cfg);
     let mut games = Vec::new();
 
     for console in &consoles {
         let ra_games_raw = match &client {
-            Some(c) => match c.fetch_console_games(save_dir, console.id) {
+            Some(c) => match c.fetch_console_games(save_dir, console.def.ra_console_id) {
                 Ok(g) => g,
                 Err(e) => {
-                    eprintln!("RA: failed to fetch game list for {}: {}", console.name, e);
+                    eprintln!("RA: failed to fetch game list for {}: {}", console.def.id, e);
                     continue;
                 }
             },
             None => Vec::new(),
         };
-        // Filter out subset/challenge games (they contain "~" or "[Subset" in the title on RA)
         let ra_games: Vec<RaGameEntry> = ra_games_raw
             .into_iter()
             .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset"))
             .collect();
 
-        let roms = scan_roms(&console.folder, console.extensions);
+        let roms = scan_roms(&console.folder, console.def.extensions);
 
         for (rom_name, rom_path) in &roms {
             let rom_path_str = rom_path.to_string_lossy().into_owned();
 
-            // First: try to find an existing entry by ROM path (fast, no ISO reading)
             let existing = crate::db::find_by_rom_path(db, &rom_path_str)
                 .ok()
                 .flatten();
 
             let game = match existing {
                 Some(e) => {
-                    // Found existing entry — use it, preserving all DB data
                     if e.rom_path.is_empty() {
                         let _ = crate::db::set_rom_path(db, e.id, &rom_path_str);
                     }
@@ -187,7 +160,6 @@ pub fn build_ra_games(
                     g
                 }
                 None => {
-                    // New ROM — read serial for stable ID, try RA matching
                     let serial = crate::platforms::rom_serial::read_serial(rom_path);
 
                     let matched_id = if client.is_some() {
@@ -207,7 +179,6 @@ pub fn build_ra_games(
                         None => (serial.clone().unwrap_or_else(|| rom_name.clone()), rom_name.clone(), String::new()),
                     };
 
-                    // Double-check: maybe entry exists under steam_id but not rom_path
                     let existing_by_id = crate::db::find_by_steam_id(db, &app_id).ok().flatten();
                     if let Some(e) = existing_by_id {
                         if e.rom_path.is_empty() {
@@ -227,14 +198,14 @@ pub fn build_ra_games(
                         g.rom_path = rom_path_str;
                         g
                     } else {
-                        match crate::db::add_game(db, RETRO, &trophy_source, &app_id, console.name, &title) {
+                        match crate::db::add_game(db, RETRO, &trophy_source, &app_id, console.def.id, &title) {
                             Ok(id) => {
                                 let _ = crate::db::set_rom_path(db, id, &rom_path_str);
                                 Game {
                                     app_id: app_id.clone(),
                                     kind: RETRO.to_string(),
                                     trophy_source: trophy_source.clone(),
-                                    platform_id: console.name.to_string(),
+                                    platform_id: console.def.id.to_string(),
                                     db_id: id,
                                     name: title.clone(),
                                     game_path: rom_path_str.clone(),

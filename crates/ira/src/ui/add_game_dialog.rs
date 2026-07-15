@@ -1,0 +1,526 @@
+use ira_models::{GameLaunchConfig, WineConfig};
+use crate::AppMessage;
+use gtk4::prelude::*;
+use adw::prelude::*;
+use std::rc::Rc;
+use super::state::SharedState;
+
+pub fn show_add_game_dialog(state: &SharedState) {
+    let (window, db, sender, steam, watcher, save_dir, ra_username, ra_token, ra_password) = {
+        let s = state.borrow();
+        (s.window.clone(), s.db.clone(), s.sender.clone(), s.steam.clone(), s.watcher.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
+    };
+
+    let layout = super::helpers::dialog_layout(&window);
+    layout.window.set_title(Some("Add Game"));
+    layout.header.set_title_widget(Some(&gtk4::Label::new(Some("Add Game"))));
+    layout.stack.set_vexpand(true);
+
+    let win = layout.window;
+    let sidebar = layout.sidebar;
+    let stack = layout.stack;
+    let content_area = layout.content_area;
+
+    let profiles = ira_db::get_all_profiles(&db).unwrap_or_default();
+    let (general_page, name_entry, kind_row, exe_entry, args_entry, wd_entry, detect_btn, profile_row, steam_id_entry, gog_id_entry) =
+        build_general_page(&win, &profiles, state);
+    sidebar.append(&super::dialogs::settings_sidebar_row("preferences-system-symbolic", "General"));
+    stack.add_named(&general_page, Some("general"));
+
+    let (wine_pages, wine_widgets) = {
+        let dft = state.borrow().cfg.default_wine_config.clone();
+        let cfg = if dft.enabled { dft.clone() } else { WineConfig { enabled: true, ..dft.clone() } };
+        super::wine_config_widget::build_wine_config_pages(&cfg, Some(&dft))
+    };
+
+    let sep1 = super::dialogs::sidebar_separator();
+    sidebar.append(&sep1);
+
+    let mut wine_sidebar_rows: Vec<gtk4::ListBoxRow> = Vec::new();
+    for wp in &wine_pages {
+        let row = super::dialogs::settings_sidebar_row(wp.icon, wp.label);
+        sidebar.append(&row);
+        stack.add_named(&wp.page, Some(wp.label));
+        wine_sidebar_rows.push(row);
+    }
+
+    let sep2 = super::dialogs::sidebar_separator();
+    sidebar.append(&sep2);
+
+    {
+        let rows = wine_sidebar_rows.clone();
+        let sep1_c = sep1.clone();
+        let sep2_c = sep2.clone();
+        let profile_row_c = profile_row.clone();
+        kind_row.connect_selected_notify(move |row| {
+            let visible = row.selected() == 1;
+            for r in &rows {
+                r.set_visible(visible);
+            }
+            sep1_c.set_visible(visible);
+            sep2_c.set_visible(visible);
+            profile_row_c.set_visible(visible);
+        });
+        let visible = kind_row.selected() == 1;
+        for r in &wine_sidebar_rows {
+            r.set_visible(visible);
+        }
+        sep1.set_visible(visible);
+        sep2.set_visible(visible);
+        profile_row.set_visible(visible);
+    }
+
+    let (env_page, env_vars_box, ld_preload_entry, ld_library_entry) = build_env_page();
+    sidebar.append(&super::dialogs::settings_sidebar_row("preferences-other-symbolic", "Environment"));
+    stack.add_named(&env_page, Some("env"));
+
+    let detect_group = adw::PreferencesGroup::new();
+    detect_group.set_title("Quick detect");
+    let detect_row = adw::ActionRow::new();
+    detect_row.set_title("Select game folder to auto-detect");
+    detect_row.add_suffix(&detect_btn);
+    detect_group.add(&detect_row);
+    general_page.append(&detect_group);
+
+    let stack_clone = stack.clone();
+    sidebar.connect_row_selected(move |_, row| {
+        if let Some(row) = row {
+            if let Some(child) = row.child() {
+                if let Some(hbox) = child.downcast_ref::<gtk4::Box>() {
+                    if let Some(sibling) = hbox.last_child() {
+                        if let Some(label) = sibling.downcast_ref::<gtk4::Label>() {
+                            let page_id = match label.text().as_str() {
+                                "General" => "general",
+                                "Performance" => "Performance",
+                                "Graphics" => "Graphics",
+                                "Wine Advanced" => "Wine Advanced",
+                                "Environment" => "env",
+                                _ => "general",
+                            };
+                            stack_clone.set_visible_child_name(page_id);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    if let Some(first) = sidebar.row_at_index(0) {
+        sidebar.select_row(Some(&first));
+    }
+
+    let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    btn_row.set_halign(gtk4::Align::End);
+    btn_row.set_margin_start(16);
+    btn_row.set_margin_end(16);
+    btn_row.set_margin_top(8);
+    btn_row.set_margin_bottom(12);
+
+    let cancel_btn = gtk4::Button::with_label("Cancel");
+    let win_c = win.clone();
+    cancel_btn.connect_clicked(move |_| win_c.close());
+
+    let add_btn = gtk4::Button::with_label("Add Game");
+    add_btn.add_css_class("suggested-action");
+
+    btn_row.append(&cancel_btn);
+    btn_row.append(&add_btn);
+    content_area.append(&btn_row);
+
+    win.present();
+
+    let state_c = state.clone();
+    add_btn.connect_clicked(move |_| {
+        name_entry.remove_css_class("error");
+        exe_entry.remove_css_class("error");
+
+        let name = name_entry.text().to_string();
+        if name.is_empty() {
+            name_entry.add_css_class("error");
+            return;
+        }
+        let exe_path = exe_entry.text().to_string();
+        if exe_path.is_empty() {
+            exe_entry.add_css_class("error");
+            return;
+        }
+        if !std::path::Path::new(&exe_path).is_file() {
+            exe_entry.add_css_class("error");
+            return;
+        }
+        let is_wine = kind_row.selected() == 1;
+        let args = args_entry.text().to_string();
+        let wd = wd_entry.text().to_string();
+        let steam_app_id = steam_id_entry.text().to_string();
+        let gog_product_id = gog_id_entry.text().to_string();
+
+        let trophy_source = if !steam_app_id.is_empty() { ira_models::GSE } else if !gog_product_id.is_empty() { ira_models::NGE } else { "" };
+        let kind = if is_wine { ira_models::WINE } else { ira_models::LINUX };
+        let platform_id = if !steam_app_id.is_empty() { steam_app_id.clone() } else if !gog_product_id.is_empty() { gog_product_id.clone() } else { format!("manual_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()) };
+
+        let selected_profile_id = if is_wine && profile_row.selected() > 0 {
+            profiles.get((profile_row.selected() - 1) as usize).map(|p| p.id)
+        } else {
+            None
+        };
+
+        let launch_config = GameLaunchConfig {
+            exe: exe_path,
+            args,
+            working_dir: wd,
+            env_vars: collect_env_vars(&env_vars_box),
+            ld_preload: ld_preload_entry.text().to_string(),
+            ld_library_path: ld_library_entry.text().to_string(),
+        };
+        let wine_config = if is_wine { wine_widgets.to_wine_config() } else { WineConfig::default() };
+
+        let db_c = db.clone();
+        let sender_c = sender.clone();
+        let name_c = name.clone();
+        let app_id_c = platform_id.clone();
+        let kind_c = kind.to_string();
+        let ts_c = trophy_source.to_string();
+        let steam_c = steam.clone();
+        let watcher_c = watcher.clone();
+        let save_dir_c = save_dir.clone();
+        let ra_username_c = ra_username.clone();
+        let ra_token_c = ra_token.clone();
+        let ra_password_c = ra_password.clone();
+
+        std::thread::spawn(move || {
+            match add_game_to_db(AddGameToDbParams {
+                db: &db_c, name: &name_c, kind: &kind_c,
+                trophy_source: &ts_c, app_id: &app_id_c, platform_id: &platform_id,
+                launch_config: &launch_config, wine_config: &wine_config,
+                profile_id: selected_profile_id, steam: &steam_c, save_dir: &save_dir_c,
+            }) {
+                Ok(game_id) => {
+                    let entry = ira_db::find_by_db_id(&db_c, game_id).ok().flatten();
+                    if let Some(entry) = entry {
+                        if let Ok(mut game) = crate::game_loader::load_game(&entry, &save_dir_c) {
+                            game.name = name_c.clone();
+                            let _ = ira_db::update_game_title(&db_c, game.db_id, &name_c);
+                            if let Some(ref w) = watcher_c {
+                                w.watch(&entry, &game.achievements);
+                            }
+                            let _ = sender_c.send(AppMessage::NewGame(game.clone()));
+                            let g_name = game.name.clone();
+                            crate::ui::enrichment::enrich_game_async(crate::ui::enrichment::EnrichGameParams {
+                                app_id: game.app_id.clone(),
+                                trophy_source: game.trophy_source.clone(),
+                                platform_id: game.platform_id.clone(),
+                                db_id: game.db_id,
+                                title: g_name,
+                                steam: steam_c,
+                                watcher: watcher_c,
+                                sender: sender_c,
+                                save_dir: save_dir_c,
+                                db: db_c,
+                                ra_username: ra_username_c,
+                                ra_token: ra_token_c,
+                                ra_password: ra_password_c,
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to add game: {}", e);
+                    let _ = sender_c.send(AppMessage::AddGameError(e));
+                }
+            }
+        });
+
+        let win_c2 = win.clone();
+        let sc2 = state_c.clone();
+        win_c2.close();
+        let _ = sc2;
+    });
+}
+
+fn build_general_page(win: &adw::Window, profiles: &[ira_models::WineProfile], state: &super::state::SharedState) -> (gtk4::Box, adw::EntryRow, adw::ComboRow, adw::EntryRow, adw::EntryRow, adw::EntryRow, gtk4::Button, adw::ComboRow, adw::EntryRow, adw::EntryRow) {
+    let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+
+    let info_group = adw::PreferencesGroup::new();
+    info_group.set_title("Game Info");
+
+    let name_entry = adw::EntryRow::new();
+    name_entry.set_title("Name");
+    info_group.add(&name_entry);
+
+    let kind_model = gtk4::StringList::new(&["Native Linux", "Wine (Windows)"]);
+    let kind_row = adw::ComboRow::new();
+    kind_row.set_title("Kind");
+    kind_row.set_model(Some(&kind_model));
+    kind_row.set_selected(1);
+    info_group.add(&kind_row);
+
+    let exe_entry = adw::EntryRow::new();
+    exe_entry.set_title("Executable");
+
+    let exe_browse = super::helpers::make_browse_button(
+        Some(win),
+        "Select executable",
+        false,
+        Some(("Executable", &["application/x-executable", "application/x-msdos-program"])),
+        {
+            let entry = exe_entry.clone();
+            move |path| entry.set_text(&path.to_string_lossy())
+        },
+    );
+    exe_entry.add_suffix(&exe_browse);
+    info_group.add(&exe_entry);
+
+    let args_entry = adw::EntryRow::new();
+    args_entry.set_title("Arguments");
+    info_group.add(&args_entry);
+
+    let wd_entry = adw::EntryRow::new();
+    wd_entry.set_title("Working directory");
+
+    let wd_browse = super::helpers::make_browse_button(
+        Some(win),
+        "Select working directory",
+        true,
+        None,
+        {
+            let entry = wd_entry.clone();
+            move |path| entry.set_text(&path.to_string_lossy())
+        },
+    );
+    wd_entry.add_suffix(&wd_browse);
+    info_group.add(&wd_entry);
+
+    let profile_labels: Vec<String> = std::iter::once("Custom (per-game)".to_string())
+        .chain(profiles.iter().map(|p| p.name.clone()))
+        .collect();
+    let profile_model = super::helpers::string_list_from(&profile_labels);
+    let profile_row = adw::ComboRow::new();
+    profile_row.set_title("Wine Profile");
+    profile_row.set_subtitle("Links wine version + prefix together");
+    profile_row.set_model(Some(&profile_model));
+    info_group.add(&profile_row);
+
+    page.append(&info_group);
+
+    let ids_group = adw::PreferencesGroup::new();
+    ids_group.set_title("Service IDs");
+    let steam_id_entry = adw::EntryRow::new();
+    steam_id_entry.set_title("Steam App ID");
+    let steam_search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
+    steam_search_btn.set_valign(gtk4::Align::Center);
+    steam_search_btn.set_tooltip_text(Some("Search Steam Store"));
+    steam_search_btn.add_css_class("flat");
+    {
+        let sc = state.clone();
+        let win_c = win.clone();
+        let row_c = steam_id_entry.clone();
+        let name_c = String::new();
+        steam_search_btn.connect_clicked(move |_| {
+            let on_select = Rc::new(|_: &str| {});
+            super::dialogs::show_steam_id_search_popup(&sc, &name_c, &win_c, &row_c, "Select", on_select);
+        });
+    }
+    steam_id_entry.add_suffix(&steam_search_btn);
+    ids_group.add(&steam_id_entry);
+    let gog_id_entry = adw::EntryRow::new();
+    gog_id_entry.set_title("GOG Product ID");
+    let gog_browse_btn = super::helpers::make_browse_button(
+        Some(win),
+        "Select game folder",
+        true,
+        None,
+        {
+            let row = gog_id_entry.clone();
+            let name_row = name_entry.clone();
+            move |path| {
+                if let Some((_, product_id, name)) = ira_platforms::gog::find_gog_info(&path.to_string_lossy()) {
+                    row.set_text(&product_id);
+                    if name_row.text().is_empty() {
+                        name_row.set_text(&name);
+                    }
+                }
+            }
+        },
+    );
+    gog_id_entry.add_suffix(&gog_browse_btn);
+    ids_group.add(&gog_id_entry);
+    page.append(&ids_group);
+
+    let detect_btn = super::helpers::make_browse_button(
+        Some(win),
+        "Select game folder",
+        true,
+        None,
+        {
+            let n = name_entry.clone();
+            let exe = exe_entry.clone();
+            let sid = steam_id_entry.clone();
+            let gid = gog_id_entry.clone();
+            move |path| {
+                let folder = path.to_string_lossy().into_owned();
+                if let Some(app_id) = ira_platforms::steam::detect_app_id(&folder) {
+                    sid.set_text(&app_id);
+                }
+                if ira_platforms::gog::is_gog_game(&folder) {
+                    if let Some((_info_dir, product_id, game_name)) = ira_platforms::gog::find_gog_info(&folder) {
+                        gid.set_text(&product_id);
+                        if n.text().is_empty() {
+                            n.set_text(&game_name);
+                        }
+                    }
+                }
+                if exe.text().is_empty() {
+                    if let Ok(entries) = std::fs::read_dir(&folder) {
+                        for e in entries.flatten() {
+                            let p = e.path();
+                            if let Some(ext) = p.extension() {
+                                if ext == "exe" || ext == "x86_64" || ext == "AppRun" || ext == "sh" {
+                                    exe.set_text(&p.to_string_lossy());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    );
+
+    (page, name_entry, kind_row, exe_entry, args_entry, wd_entry, detect_btn, profile_row, steam_id_entry, gog_id_entry)
+}
+
+fn build_env_page() -> (gtk4::Box, gtk4::ListBox, adw::EntryRow, adw::EntryRow) {
+    let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+
+    let env_group = adw::PreferencesGroup::new();
+    env_group.set_title("Environment Variables");
+
+    let env_vars_box = gtk4::ListBox::new();
+    env_vars_box.add_css_class("boxed-list");
+    env_group.add(&env_vars_box);
+
+    let add_env_btn = gtk4::Button::with_label("Add variable");
+    add_env_btn.add_css_class("flat");
+    let env_box_clone = env_vars_box.clone();
+    add_env_btn.connect_clicked(move |_| {
+        env_box_clone.append(&build_env_var_row("", ""));
+    });
+    env_group.add(&add_env_btn);
+    page.append(&env_group);
+
+    let expander = adw::ExpanderRow::new();
+    expander.set_title("Advanced");
+    expander.set_expanded(false);
+
+    let ld_preload_entry = adw::EntryRow::new();
+    ld_preload_entry.set_title("LD_PRELOAD");
+    expander.add_row(&ld_preload_entry);
+
+    let ld_library_entry = adw::EntryRow::new();
+    ld_library_entry.set_title("LD_LIBRARY_PATH");
+    expander.add_row(&ld_library_entry);
+
+    let ld_group = adw::PreferencesGroup::new();
+    ld_group.add(&expander);
+    page.append(&ld_group);
+
+    (page, env_vars_box, ld_preload_entry, ld_library_entry)
+}
+
+struct AddGameToDbParams<'a> {
+    db: &'a ira_db::DbConn,
+    name: &'a str,
+    kind: &'a str,
+    trophy_source: &'a str,
+    app_id: &'a str,
+    platform_id: &'a str,
+    launch_config: &'a GameLaunchConfig,
+    wine_config: &'a WineConfig,
+    profile_id: Option<i64>,
+    steam: &'a ira_api::SteamClient,
+    save_dir: &'a str,
+}
+
+fn add_game_to_db(params: AddGameToDbParams) -> Result<i64, String> {
+    let AddGameToDbParams { db, name, kind, trophy_source, app_id, platform_id, launch_config, wine_config, profile_id, steam, save_dir } = params;
+    let (steam_id, game_id) = if kind == ira_models::PS4 || kind == ira_models::RETRO { ("", app_id) } else { (app_id, "") };
+    let game_id = ira_db::add_game(db, kind, trophy_source, steam_id, game_id, platform_id, name)?;
+    ira_db::save_game_config(db, game_id, launch_config, wine_config, profile_id)?;
+    if !app_id.is_empty() && app_id.parse::<i64>().is_ok() {
+        let folder = std::path::Path::new(&launch_config.exe).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        if !folder.is_empty() {
+            let _ = ira_platforms::steam::add_game_from_folder(&folder, app_id, kind, steam, db, save_dir);
+        }
+    }
+    Ok(game_id)
+}
+
+pub(super) fn build_env_var_row(key: &str, value: &str) -> gtk4::ListBoxRow {
+    let row = gtk4::ListBoxRow::new();
+    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    hbox.set_margin_start(8);
+    hbox.set_margin_end(8);
+    hbox.set_margin_top(4);
+    hbox.set_margin_bottom(4);
+
+    let key_entry = gtk4::Entry::new();
+    key_entry.set_placeholder_text(Some("Variable name (e.g. FOO)"));
+    key_entry.set_text(key);
+    key_entry.set_hexpand(true);
+    hbox.append(&key_entry);
+
+    let val_entry = gtk4::Entry::new();
+    val_entry.set_placeholder_text(Some("Value"));
+    val_entry.set_text(value);
+    val_entry.set_hexpand(true);
+    hbox.append(&val_entry);
+
+    let remove_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
+    remove_btn.add_css_class("flat");
+    remove_btn.add_css_class("circular");
+    let row_clone = row.clone();
+    remove_btn.connect_clicked(move |_| {
+        if let Some(list) = row_clone.parent().and_then(|p| p.downcast::<gtk4::ListBox>().ok()) {
+            row_clone.unparent();
+            list.remove(&row_clone);
+        }
+    });
+    hbox.append(&remove_btn);
+
+    row.set_child(Some(&hbox));
+    row
+}
+
+pub(super) fn collect_env_vars(box_: &gtk4::ListBox) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    let mut child = box_.first_child();
+    while let Some(w) = child {
+        if let Some(row) = w.downcast_ref::<gtk4::ListBoxRow>() {
+            if let Some(hbox) = row.child().and_then(|c| c.downcast::<gtk4::Box>().ok()) {
+                let children: Vec<gtk4::Widget> = {
+                    let mut v = Vec::new();
+                    let mut ch = hbox.first_child();
+                    while let Some(c) = ch.clone() {
+                        v.push(c.clone());
+                        ch = c.next_sibling();
+                    }
+                    v
+                };
+                if children.len() >= 2 {
+                    let key_w = &children[0];
+                    let val_w = &children[1];
+                    if let Some(key) = key_w.downcast_ref::<gtk4::Entry>() {
+                        if let Some(val) = val_w.downcast_ref::<gtk4::Entry>() {
+                            let k = key.text().to_string();
+                            if !k.is_empty() {
+                                result.push((k, val.text().to_string()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        child = w.next_sibling();
+    }
+    result
+}

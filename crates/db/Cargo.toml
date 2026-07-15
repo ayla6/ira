@@ -1,0 +1,16 @@
+[package]
+name = "ira-db"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = "0.4"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde_json = "1"
+ira-models = { path = "../models" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

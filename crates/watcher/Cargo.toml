@@ -1,0 +1,13 @@
+[package]
+name = "ira-watcher"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+notify = "9.0.0-rc.4"
+ira-models = { path = "../models" }
+ira-config = { path = "../config" }
+ira-parser = { path = "../parser" }
+
+[lints]
+workspace = true

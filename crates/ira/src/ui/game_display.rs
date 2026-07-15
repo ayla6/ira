@@ -1,0 +1,744 @@
+use gtk4::prelude::*;
+use adw::prelude::*;
+use crate::GameEntry;
+use crate::Game;
+use crate::MergedAchievement;
+use crate::game_loader::load_game;
+use crate::strings as S;
+use std::cell::Cell;
+
+use super::state::SharedState;
+use super::image_budget::ImageLoadBudget;
+use super::play_button::play_button;
+use super::achievement_rows::{create_achievement_row, build_global_tab};
+use super::helpers::clear_children;
+
+pub fn display_game(game: &Game, state: &SharedState) {
+    let content_box = state.borrow().content_box.clone();
+    let content_scroll = state.borrow().content_scroll.clone();
+
+    state.borrow_mut().view_generation += 1;
+    let gen = state.borrow().view_generation;
+
+    content_scroll.vadjustment().set_value(0.0);
+
+    clear_children(&content_box);
+    ira_images::clear_texture_cache();
+
+    let fraction = if game.total_count > 0 {
+        game.earned_count as f64 / game.total_count as f64
+    } else {
+        0.0
+    };
+
+    let content_width = content_scroll.width().max(600);
+    content_box.append(&build_game_header(game, fraction, state, content_width));
+
+    if game.app_id.is_empty() {
+        let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
+        box_.set_margin_top(32);
+        box_.set_margin_bottom(32);
+        box_.set_halign(gtk4::Align::Center);
+        let label = gtk4::Label::new(Some("This game isn't linked to a trophy source yet.\nUse \"Match unmatched games\" in the menu to find a match."));
+        label.add_css_class("dim-label");
+        label.set_wrap(true);
+        label.set_justify(gtk4::Justification::Center);
+        box_.append(&label);
+        content_box.append(&box_);
+        return;
+    }
+
+    let spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    spacer.set_margin_top(12);
+    content_box.append(&spacer);
+
+    let game_vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    game_vbox.set_margin_start(16);
+    game_vbox.set_margin_end(16);
+
+    let has_achievements = !game.achievements.is_empty();
+
+    if has_achievements {
+        game_vbox.append(&build_achievements_view(game, state, gen));
+    }
+
+    let clamp = adw::Clamp::new();
+    clamp.set_maximum_size(860);
+    clamp.set_tightening_threshold(860);
+    clamp.set_margin_start(16);
+    clamp.set_margin_end(16);
+    clamp.set_child(Some(&game_vbox));
+
+    content_box.append(&clamp);
+}
+
+fn trophy_rank(t: char) -> u8 {
+    match t { 'B' => 0, 'S' => 1, 'G' => 2, 'P' => 3, _ => 4 }
+}
+
+fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::Widget {
+    let is_ps4 = game.kind == ira_models::PS4;
+
+    let view_stack = adw::ViewStack::new();
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+
+    if !is_ps4 {
+        let view_switcher = adw::ViewSwitcher::new();
+        view_switcher.set_stack(Some(&view_stack));
+        view_switcher.set_halign(gtk4::Align::Center);
+        view_switcher.set_margin_top(12);
+        view_switcher.set_margin_bottom(12);
+        outer.append(&view_switcher);
+        view_stack.set_margin_top(12);
+    }
+
+    let progress_vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
+    let global_vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
+
+    let mut earned: Vec<&MergedAchievement> = Vec::new();
+    let mut locked: Vec<&MergedAchievement> = Vec::new();
+    let mut hidden: Vec<&MergedAchievement> = Vec::new();
+    for ach in &game.achievements {
+        if ach.earned {
+            earned.push(ach);
+        } else if ach.hidden {
+            hidden.push(ach);
+        } else {
+            locked.push(ach);
+        }
+    }
+
+    earned.sort_by(|a, b| b.earned_time.cmp(&a.earned_time));
+    locked.sort_by(|a, b| {
+        trophy_rank(a.trophy_type).cmp(&trophy_rank(b.trophy_type))
+            .then_with(|| a.display_name.cmp(&b.display_name))
+    });
+
+    let app_id_for_reload = game.app_id.clone();
+    let kind_for_reload = game.kind.clone();
+    let trophy_source_for_reload = game.trophy_source.clone();
+    let platform_id_for_reload = game.platform_id.clone();
+    let db_id_for_reload = game.db_id;
+    let is_retro_or_ps4 = kind_for_reload == ira_models::PS4 || kind_for_reload == ira_models::RETRO;
+
+    let sender = state.borrow().sender.clone();
+    let save_dir = state.borrow().save_dir.clone();
+    let reload = move || {
+        let (steam_id, game_id): (&str, &str) = if is_retro_or_ps4 { ("", &app_id_for_reload) } else { (&app_id_for_reload, "") };
+        let entry = GameEntry::for_reload(db_id_for_reload, &kind_for_reload, &trophy_source_for_reload, steam_id, game_id, &platform_id_for_reload);
+        let sender = sender.clone();
+        let save_dir = save_dir.clone();
+        std::thread::spawn(move || {
+            if let Ok(updated) = load_game(&entry, &save_dir) {
+                let _ = sender.send(crate::AppMessage::EnrichedGame(updated));
+            }
+        });
+    };
+
+    let mut budget = ImageLoadBudget::new(18);
+    const FIRST_BATCH: usize = 30;
+    const BATCH_SIZE: usize = 20;
+
+    if !earned.is_empty() {
+        let earned_group = adw::PreferencesGroup::new();
+        earned_group.set_title(&format!("Earned  ·  {}", earned.len()));
+
+        let first_n = FIRST_BATCH.min(earned.len());
+        for ach in &earned[..first_n] {
+            earned_group.add(&create_achievement_row(ach, None, &mut budget));
+        }
+        progress_vbox.append(&earned_group);
+
+        if earned.len() > first_n {
+            let remaining: Vec<MergedAchievement> =
+                earned[first_n..].iter().map(|a| (*a).clone()).collect();
+            let group = earned_group.clone();
+            let state_gen = state.clone();
+            let mut i = 0;
+            glib::idle_add_local(move || {
+                if state_gen.borrow().view_generation != gen {
+                    return glib::ControlFlow::Break;
+                }
+                let end = (i + BATCH_SIZE).min(remaining.len());
+                let mut batch_budget = ImageLoadBudget::new(0);
+                for ach in &remaining[i..end] {
+                    group.add(&create_achievement_row(ach, None, &mut batch_budget));
+                }
+                batch_budget.flush();
+                i = end;
+                if i >= remaining.len() {
+                    glib::ControlFlow::Break
+                } else {
+                    glib::ControlFlow::Continue
+                }
+            });
+        }
+    }
+
+    if !locked.is_empty() || !hidden.is_empty() {
+        let locked_group = adw::PreferencesGroup::new();
+        locked_group.set_title(&format!("Locked  ·  {}", locked.len() + hidden.len()));
+
+        let first_n = FIRST_BATCH.min(locked.len());
+        for ach in &locked[..first_n] {
+            let ach_clone = (*ach).clone();
+            let reload_clone = reload.clone();
+            let trophy_source_clone = game.trophy_source.clone();
+            let app_id_clone = game.app_id.clone();
+            let platform_id_clone = game.platform_id.clone();
+            let state_clone = state.clone();
+            locked_group.add(&create_achievement_row(
+                ach,
+                Some(Box::new(move || {
+                    super::matching::confirm_mark_unlocked(&state_clone, &trophy_source_clone, &app_id_clone, &platform_id_clone, &ach_clone, reload_clone.clone());
+                })),
+                &mut budget,
+            ));
+        }
+
+        let hidden_expander: Option<adw::ExpanderRow> = if !hidden.is_empty() {
+            let expander = adw::ExpanderRow::new();
+            expander.set_title(&format!("… and {} hidden trophies", hidden.len()));
+
+            for ach in hidden.iter() {
+                let ach_clone = (*ach).clone();
+                let reload_inner = reload.clone();
+                let trophy_source_inner = game.trophy_source.clone();
+                let app_id_inner = game.app_id.clone();
+                let platform_id_inner = game.platform_id.clone();
+                let state_inner = state.clone();
+
+                let ach_row = adw::ActionRow::new();
+                ach_row.set_title(&super::helpers::esc(&ach.display_name));
+                ach_row.set_subtitle(&super::helpers::esc(&ach.description));
+                ach_row.set_activatable(true);
+
+                let img = gtk4::Image::from_icon_name("changes-prevent-symbolic");
+                img.set_pixel_size(24);
+                img.set_valign(gtk4::Align::Center);
+                if ach.earned {
+                    if !ach.icon_path.is_empty() {
+                        ira_images::set_image(&img, &ach.icon_path);
+                    }
+                } else if !ach.icon_gray_path.is_empty() {
+                    ira_images::set_image(&img, &ach.icon_gray_path);
+                }
+                ach_row.add_prefix(&img);
+
+                let mclick = gtk4::GestureClick::new();
+                mclick.set_button(3);
+                mclick.connect_pressed(move |_, _, _, _| {
+                    super::matching::confirm_mark_unlocked(&state_inner, &trophy_source_inner, &app_id_inner, &platform_id_inner, &ach_clone, reload_inner.clone());
+                });
+                ach_row.add_controller(mclick);
+
+                expander.add_row(&ach_row);
+            }
+
+            Some(expander)
+        } else {
+            None
+        };
+        progress_vbox.append(&locked_group);
+
+        if locked.len() > first_n {
+            let remaining: Vec<MergedAchievement> =
+                locked[first_n..].iter().map(|a| (*a).clone()).collect();
+            let group = locked_group.clone();
+            let reload = reload.clone();
+            let trophy_source = game.trophy_source.clone();
+            let app_id = game.app_id.clone();
+            let platform_id = game.platform_id.clone();
+            let state = state.clone();
+            let mut expander = hidden_expander.clone();
+            let mut i = 0;
+            glib::idle_add_local(move || {
+                if state.borrow().view_generation != gen {
+                    return glib::ControlFlow::Break;
+                }
+                let end = (i + BATCH_SIZE).min(remaining.len());
+                let mut batch_budget = ImageLoadBudget::new(0);
+                for ach in &remaining[i..end] {
+                    let ach_clone = ach.clone();
+                    let reload_clone = reload.clone();
+                    let trophy_source_clone = trophy_source.clone();
+                    let app_id_clone = app_id.clone();
+                    let platform_id_clone = platform_id.clone();
+                    let state_clone = state.clone();
+                    group.add(&create_achievement_row(
+                        ach,
+                        Some(Box::new(move || {
+                            super::matching::confirm_mark_unlocked(&state_clone, &trophy_source_clone, &app_id_clone, &platform_id_clone, &ach_clone, reload_clone.clone());
+                        })),
+                        &mut batch_budget,
+                    ));
+                }
+                batch_budget.flush();
+                i = end;
+                if i >= remaining.len() {
+                    if let Some(exp) = expander.take() {
+                        group.add(&exp);
+                    }
+                    glib::ControlFlow::Break
+                } else {
+                    glib::ControlFlow::Continue
+                }
+            });
+        } else if let Some(exp) = hidden_expander {
+            locked_group.add(&exp);
+        }
+    }
+    budget.flush();
+
+    let progress_page = view_stack.add_titled(&progress_vbox, Some("progress"), S::MY_PROGRESS);
+    progress_page.set_icon_name(Some("user-home-symbolic"));
+
+    if !is_ps4 {
+        let global_built = Cell::new(false);
+        let app_id_for_global = game.app_id.clone();
+        let state_for_global = state.clone();
+        let gen_for_global = gen;
+        let global_vbox_weak = global_vbox.downgrade();
+        view_stack.connect_notify_local(Some("visible-child-name"), move |stack, _| {
+            if stack.visible_child_name() == Some("global".into()) && !global_built.get() {
+                global_built.set(true);
+                if let Some(global_vbox) = global_vbox_weak.upgrade() {
+                    let s = state_for_global.borrow();
+                    if s.view_generation == gen_for_global {
+                        if let Some(game) = s.games.iter().find(|g| g.app_id == app_id_for_global) {
+                            build_global_tab(game, &global_vbox, &state_for_global, gen_for_global);
+                        }
+                    }
+                }
+            }
+        });
+
+        let global_page = view_stack.add_titled(&global_vbox, Some("global"), S::GLOBAL_STATS);
+        global_page.set_icon_name(Some("dialog-information-symbolic"));
+    }
+
+    view_stack.set_vhomogeneous(false);
+    view_stack.set_margin_bottom(32);
+    outer.append(&view_stack);
+    outer.upcast()
+}
+
+fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_width: i32) -> gtk4::Widget {
+    let title_row = {
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 14);
+        let title_label = gtk4::Label::new(Some(&game.name));
+        title_label.set_xalign(0.0);
+        title_label.add_css_class("title-1");
+        row.append(&title_label);
+        row
+    };
+
+    let stats_row = {
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
+        row.set_valign(gtk4::Align::Center);
+        row.set_hexpand(true);
+        row.append(&play_button(state, game.db_id));
+        row.append(&stat_label("Last played", &format_last_played(game.last_played)));
+        row.append(&stat_label("Play time", &format_playtime(game.playtime)));
+        if game.total_count > 0 {
+            let tbox = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+            tbox.set_valign(gtk4::Align::Center);
+            let cap = gtk4::Label::new(Some("Trophies"));
+            cap.set_xalign(0.0);
+            cap.add_css_class("dim-label");
+            cap.add_css_class("caption");
+            tbox.append(&cap);
+            let trow = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+            trow.set_valign(gtk4::Align::Center);
+            let val = gtk4::Label::new(Some(&format!("{}/{}", game.earned_count, game.total_count)));
+            val.set_xalign(0.0);
+            val.set_valign(gtk4::Align::Center);
+            val.add_css_class("heading");
+            trow.append(&val);
+            let prog = gtk4::ProgressBar::new();
+            prog.set_fraction(fraction);
+            prog.set_valign(gtk4::Align::Center);
+            prog.set_size_request(120, -1);
+            trow.append(&prog);
+            tbox.append(&trow);
+            row.append(&tbox);
+        }
+        row
+    };
+
+    let has_hero = !game.hero_image_path.is_empty();
+
+    // Wine tools button (only shown if wine is enabled — skip DB lookup for native platforms)
+    let wine_enabled = if game.kind == ira_models::STEAM || game.kind == ira_models::PS4 {
+        false
+    } else {
+        let s = state.borrow();
+        let config = ira_db::get_game_config(&s.db, game.db_id).ok().flatten();
+        let app_default = s.cfg.default_wine_config.clone();
+        let (_, mut wine, profile_id) = config.unwrap_or_default();
+        if let Some(pid) = profile_id {
+            if let Ok(Some(profile)) = ira_db::get_profile(&s.db, pid) {
+                wine.version = profile.wine_version;
+                wine.custom_wine_path = profile.custom_wine_path;
+                wine.prefix = profile.prefix;
+                wine.arch = profile.arch;
+            }
+        }
+        wine = wine.merge_with_default(&app_default);
+        wine.enabled
+    };
+
+    let wine_btn = if wine_enabled {
+        let menu = gio::Menu::new();
+        menu.append(Some("Winetricks"), Some("wine.winetricks"));
+        menu.append(Some("Wine Task Manager"), Some("wine.taskmgr"));
+        menu.append(Some("Wine Control Panel"), Some("wine.control"));
+        menu.append(Some("Wine registry"), Some("wine.regedit"));
+        menu.append(Some("Wine configuration"), Some("wine.winecfg"));
+        menu.append(Some("Open Wine console"), Some("wine.console"));
+        menu.append(Some("Open Bash terminal"), Some("wine.bash"));
+        menu.append(Some("Run EXE inside Wine prefix"), Some("wine.run_exe"));
+
+        let btn = gtk4::MenuButton::new();
+        btn.set_icon_name("applications-engineering-symbolic");
+        btn.add_css_class("flat");
+        btn.set_valign(gtk4::Align::Center);
+        btn.set_tooltip_text(Some("Wine tools"));
+        btn.set_menu_model(Some(&menu));
+
+        let actions = gio::SimpleActionGroup::new();
+        let st = state.clone();
+        let db_id = game.db_id;
+
+        let st_winetricks = st.clone();
+        let winetricks = gio::SimpleAction::new("winetricks", None);
+        winetricks.connect_activate(move |_, _| {
+            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_winetricks, db_id);
+            if wine_exe.is_some() {
+                let mut cmd = std::process::Command::new("winetricks");
+                cmd.env("WINEPREFIX", &prefix);
+                for (k, v) in &env { cmd.env(k, v); }
+                let _ = cmd.spawn();
+            }
+        });
+        actions.add_action(&winetricks);
+
+        let st_taskmgr = st.clone();
+        let taskmgr = gio::SimpleAction::new("taskmgr", None);
+        taskmgr.connect_activate(move |_, _| {
+            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_taskmgr, db_id);
+            if let Some(exe) = wine_exe {
+                let mut cmd = std::process::Command::new(&exe);
+                cmd.arg("taskmgr").env("WINEPREFIX", &prefix);
+                for (k, v) in &env { cmd.env(k, v); }
+                let _ = cmd.spawn();
+            }
+        });
+        actions.add_action(&taskmgr);
+
+        let st_control = st.clone();
+        let control = gio::SimpleAction::new("control", None);
+        control.connect_activate(move |_, _| {
+            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_control, db_id);
+            if let Some(exe) = wine_exe {
+                let mut cmd = std::process::Command::new(&exe);
+                cmd.arg("control").env("WINEPREFIX", &prefix);
+                for (k, v) in &env { cmd.env(k, v); }
+                let _ = cmd.spawn();
+            }
+        });
+        actions.add_action(&control);
+
+        let st_regedit = st.clone();
+        let regedit = gio::SimpleAction::new("regedit", None);
+        regedit.connect_activate(move |_, _| {
+            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_regedit, db_id);
+            if let Some(exe) = wine_exe {
+                let mut cmd = std::process::Command::new(&exe);
+                cmd.arg("regedit").env("WINEPREFIX", &prefix);
+                for (k, v) in &env { cmd.env(k, v); }
+                let _ = cmd.spawn();
+            }
+        });
+        actions.add_action(&regedit);
+
+        let st_winecfg = st.clone();
+        let winecfg = gio::SimpleAction::new("winecfg", None);
+        winecfg.connect_activate(move |_, _| {
+            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_winecfg, db_id);
+            if let Some(exe) = wine_exe {
+                let mut cmd = std::process::Command::new(&exe);
+                cmd.arg("winecfg").env("WINEPREFIX", &prefix);
+                for (k, v) in &env { cmd.env(k, v); }
+                let _ = cmd.spawn();
+            }
+        });
+        actions.add_action(&winecfg);
+
+        let st_console = st.clone();
+        let console = gio::SimpleAction::new("console", None);
+        console.connect_activate(move |_, _| {
+            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_console, db_id);
+            if let Some(exe) = wine_exe {
+                let mut cmd = std::process::Command::new(&exe);
+                cmd.arg("wineconsole").env("WINEPREFIX", &prefix);
+                for (k, v) in &env { cmd.env(k, v); }
+                let _ = cmd.spawn();
+            }
+        });
+        actions.add_action(&console);
+
+        let st_bash = st.clone();
+        let bash = gio::SimpleAction::new("bash", None);
+        bash.connect_activate(move |_, _| {
+            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_bash, db_id);
+            let term = std::env::var("TERMINAL").unwrap_or_else(|_| "x-terminal-emulator".to_string());
+            let mut cmd = std::process::Command::new(&term);
+            cmd.arg("-e").arg("bash");
+            cmd.env("WINEPREFIX", &prefix);
+            if let Some(ref exe) = wine_exe {
+                let wine_dir = std::path::Path::new(exe).parent();
+                if let Some(dir) = wine_dir {
+                    cmd.env("PATH", format!("{}:{}", dir.display(), std::env::var("PATH").unwrap_or_default()));
+                }
+            }
+            for (k, v) in &env { cmd.env(k, v); }
+            let _ = cmd.spawn();
+        });
+        actions.add_action(&bash);
+
+        let st_runexe = st.clone();
+        let run_exe = gio::SimpleAction::new("run_exe", None);
+        run_exe.connect_activate(move |_, _| {
+            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_runexe, db_id);
+            let dialog = gtk4::FileDialog::new();
+            dialog.set_title("Select EXE to run in Wine prefix");
+            let filter = gtk4::FileFilter::new();
+            filter.add_pattern("*.exe");
+            filter.add_pattern("*.msi");
+            dialog.set_default_filter(Some(&filter));
+            dialog.open(None::<&adw::ApplicationWindow>, None::<&gio::Cancellable>, move |result| {
+                if let Ok(file) = result {
+                    if let Some(path) = file.path() {
+                        if let Some(ref exe) = wine_exe {
+                            let mut cmd = std::process::Command::new(exe);
+                            cmd.arg(&path).env("WINEPREFIX", &prefix);
+                            for (k, v) in &env { cmd.env(k, v); }
+                            let _ = cmd.spawn();
+                        }
+                    }
+                }
+            });
+        });
+        actions.add_action(&run_exe);
+
+        btn.insert_action_group("wine", Some(&actions));
+        Some(btn)
+    } else {
+        None
+    };
+
+    let settings_btn = {
+        let btn = gtk4::Button::from_icon_name("preferences-system-symbolic");
+        btn.add_css_class("flat");
+        btn.set_valign(gtk4::Align::Center);
+        btn.set_tooltip_text(Some("Settings"));
+        let st = state.clone();
+        let edit_db_id = game.db_id;
+        btn.connect_clicked(move |_| {
+            super::edit_game_dialog::show_edit_game_dialog(&st, edit_db_id);
+        });
+        btn
+    };
+
+    if !has_hero {
+        let header = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+        header.set_margin_top(24);
+        header.set_margin_bottom(8);
+        header.set_margin_start(24);
+        header.set_margin_end(24);
+        header.append(&title_row);
+        let stats_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
+        stats_wrapper.append(&stats_row);
+        let btn_group = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        if let Some(ref wb) = wine_btn { btn_group.append(wb); }
+        btn_group.append(&settings_btn);
+        stats_wrapper.append(&btn_group);
+        header.append(&stats_wrapper);
+        return header.upcast();
+    }
+
+    let overlay = gtk4::Overlay::new();
+    overlay.set_vexpand(false);
+    overlay.set_hexpand(true);
+    overlay.set_height_request(((content_width as f64) / 3.1).max(150.0) as i32);
+
+    let hero = gtk4::Picture::new();
+    if let Some(t) = ira_images::texture_for(&game.hero_image_path) {
+        hero.set_paintable(Some(&t));
+    }
+    hero.set_halign(gtk4::Align::Fill);
+    hero.set_valign(gtk4::Align::Fill);
+    hero.set_hexpand(true);
+    hero.set_content_fit(gtk4::ContentFit::Cover);
+    overlay.set_child(Some(&hero));
+
+    if !game.logo_path.is_empty() {
+        let logo_pct = game.logo_size.clamp(5, 100);
+        let logo_pos = game.logo_position.clone();
+
+        if let Ok(pixbuf) = gtk4::gdk_pixbuf::Pixbuf::from_file(&game.logo_path) {
+            let pb_w = pixbuf.width() as f64;
+            let pb_h = pixbuf.height() as f64;
+
+            let logo_area = gtk4::DrawingArea::new();
+            logo_area.set_halign(gtk4::Align::Fill);
+            logo_area.set_valign(gtk4::Align::Fill);
+            logo_area.set_hexpand(true);
+            logo_area.set_vexpand(true);
+
+            logo_area.set_draw_func(move |_area, cr, area_w, area_h| {
+                let w = area_w as f64;
+                let h = area_h as f64;
+                if w <= 0.0 || h <= 0.0 {
+                    return;
+                }
+
+                let (lw, lh) = logo_scaled_dims(w, h, pb_w, pb_h, logo_pct);
+
+                let (halign, valign) = logo_position_align(&logo_pos);
+
+                let x = match halign {
+                    gtk4::Align::Start => 24.0,
+                    gtk4::Align::Center => (w - lw) / 2.0,
+                    gtk4::Align::End => w - lw - 24.0,
+                    _ => 24.0,
+                };
+                let y = match valign {
+                    gtk4::Align::Start => 24.0,
+                    gtk4::Align::Center => (h - lh) / 2.0,
+                    gtk4::Align::End => h - lh - 24.0,
+                    _ => h - lh - 24.0,
+                };
+
+                let _ = cr.save();
+                cr.translate(x, y);
+                cr.scale(lw / pb_w, lh / pb_h);
+                cr.set_source_pixbuf(&pixbuf, 0.0, 0.0);
+                let _ = cr.paint();
+                let _ = cr.restore();
+            });
+
+            overlay.add_overlay(&logo_area);
+        }
+    }
+
+    {
+        let overlay_weak = overlay.downgrade();
+        let size_monitor = gtk4::DrawingArea::new();
+        size_monitor.set_halign(gtk4::Align::Fill);
+        size_monitor.set_valign(gtk4::Align::Fill);
+        size_monitor.set_hexpand(true);
+        size_monitor.set_vexpand(true);
+        size_monitor.set_draw_func(move |_area, _cr, w, _h| {
+            if w > 0 {
+                if let Some(overlay) = overlay_weak.upgrade() {
+                    let target = ((w as f64) / 3.1).max(150.0) as i32;
+                    if overlay.height_request() != target {
+                        overlay.set_height_request(target);
+                    }
+                }
+            }
+        });
+        overlay.add_overlay(&size_monitor);
+    }
+
+    let stats_container = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
+    stats_container.set_margin_start(24);
+    stats_container.set_margin_end(24);
+    stats_container.set_margin_top(12);
+    stats_container.set_margin_bottom(12);
+    stats_container.append(&stats_row);
+    let btn_group = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+    if let Some(ref wb) = wine_btn { btn_group.append(wb); }
+    btn_group.append(&settings_btn);
+    stats_container.append(&btn_group);
+
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    outer.append(&overlay);
+    outer.append(&stats_container);
+    outer.upcast()
+}
+
+fn stat_label(caption: &str, value: &str) -> gtk4::Box {
+    let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    vbox.set_valign(gtk4::Align::Center);
+    vbox.set_size_request(110, -1);
+    let cap = gtk4::Label::new(Some(caption));
+    cap.set_xalign(0.0);
+    cap.add_css_class("dim-label");
+    cap.add_css_class("caption");
+    vbox.append(&cap);
+    let val = gtk4::Label::new(Some(value));
+    val.set_xalign(0.0);
+    val.add_css_class("heading");
+    vbox.append(&val);
+    vbox
+}
+
+pub fn format_playtime(hours: f64) -> String {
+    let seconds = (hours * 3600.0).round() as i64;
+    super::helpers::format_duration(seconds)
+}
+
+fn format_last_played(ts: i64) -> String {
+    if ts == 0 {
+        return "Never".to_string();
+    }
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|dt| dt.format("%b %-d").to_string())
+        .unwrap_or_else(|| "Never".to_string())
+}
+
+pub(crate) fn logo_scaled_dims(hero_w: f64, hero_h: f64, src_w: f64, src_h: f64, logo_pct: i32) -> (f64, f64) {
+    let max_h = hero_h * (logo_pct as f64 / 100.0);
+    let max_w = hero_w * (logo_pct as f64 / 200.0);
+    let scale = (max_w / src_w).min(max_h / src_h);
+    let w = (src_w * scale).max(32.0);
+    let h = (src_h * scale).max(32.0);
+    (w, h)
+}
+
+pub(crate) fn logo_position_align(pos: &str) -> (gtk4::Align, gtk4::Align) {
+    match pos {
+        "bottom-center" => (gtk4::Align::Center, gtk4::Align::End),
+        "bottom-right" => (gtk4::Align::End, gtk4::Align::End),
+        "center-left" => (gtk4::Align::Start, gtk4::Align::Center),
+        "center" => (gtk4::Align::Center, gtk4::Align::Center),
+        "center-right" => (gtk4::Align::End, gtk4::Align::Center),
+        "top-left" => (gtk4::Align::Start, gtk4::Align::Start),
+        "top-center" => (gtk4::Align::Center, gtk4::Align::Start),
+        "top-right" => (gtk4::Align::End, gtk4::Align::Start),
+        _ => (gtk4::Align::Start, gtk4::Align::End),
+    }
+}
+
+fn get_wine_cmd_env(state: &SharedState, db_id: i64) -> (Option<String>, String, Vec<(String, String)>) {
+    let s = state.borrow();
+    let config = ira_db::get_game_config(&s.db, db_id).ok().flatten();
+    let app_default = s.cfg.default_wine_config.clone();
+    let (_, mut wine, profile_id) = config.unwrap_or_default();
+    if let Some(pid) = profile_id {
+        if let Ok(Some(profile)) = ira_db::get_profile(&s.db, pid) {
+            wine.version = profile.wine_version;
+            wine.custom_wine_path = profile.custom_wine_path;
+            wine.prefix = profile.prefix;
+            wine.arch = profile.arch;
+        }
+    }
+    wine = wine.merge_with_default(&app_default);
+    let prefix = ira_launcher::wine_launch::wine_prefix(&wine);
+    let env = ira_launcher::wine_launch::build_wine_env(&wine, "");
+    let exe = ira_launcher::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path).ok();
+    (exe, prefix, env)
+}

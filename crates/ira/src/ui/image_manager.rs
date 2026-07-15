@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use super::helpers::{clear_children, make_browse_button, refresh_settings_images_page};
-use super::mass_match_dialog::show_sgdb_search_dialog;
+use super::sgdb_match_dialog::show_sgdb_search_dialog;
 use super::message_handler::apply_game_update;
 use super::state::SharedState;
 

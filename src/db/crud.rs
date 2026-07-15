@@ -7,13 +7,13 @@ pub fn add_game(conn: &DbConn, kind: &str, trophy_source: &str, steam_id: &str, 
     if !steam_id.is_empty() {
         c.execute(
             "INSERT INTO games (kind, trophy_source, steam_id, game_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(steam_id) DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
+             ON CONFLICT(steam_id) WHERE steam_id != '' DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
             params![kind, trophy_source, steam_id, game_id, platform_id, title],
         ).map_err(|e| e.to_string())?;
     } else {
         c.execute(
             "INSERT INTO games (kind, trophy_source, steam_id, game_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(game_id) DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
+             ON CONFLICT(game_id) WHERE game_id != '' DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
             params![kind, trophy_source, steam_id, game_id, platform_id, title],
         ).map_err(|e| e.to_string())?;
     }

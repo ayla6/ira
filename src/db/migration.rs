@@ -39,6 +39,12 @@ pub fn run_schema_migrations(conn: &Connection) {
         "UPDATE games SET game_id = steam_id, steam_id = '' WHERE kind IN ('ps4', 'retro') AND steam_id != '' AND game_id = ''",
         [],
     );
+    // Recreate steam_id index as partial (old versions had non-partial unique index)
+    let _ = conn.execute("DROP INDEX IF EXISTS idx_games_steam_id", []);
+    let _ = conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != ''",
+        [],
+    );
     // Drop obsolete unique indexes that prevented multiple retro games per console
     let _ = conn.execute("DROP INDEX IF EXISTS idx_games_trophy_platform", []);
     let _ = conn.execute("DROP INDEX IF EXISTS idx_games_kind_platform", []);

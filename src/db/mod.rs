@@ -94,7 +94,6 @@ pub fn init_db(db_path: &str) -> DbConn {
             last_played INTEGER NOT NULL DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_games_game_id ON games(game_id) WHERE game_id != '';
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps4_serial ON games(kind, platform_id) WHERE kind = 'ps4';
         CREATE UNIQUE INDEX IF NOT EXISTS idx_games_lutris_db_id ON games(lutris_db_id) WHERE lutris_db_id IS NOT NULL;
         CREATE TABLE IF NOT EXISTS lutris_meta (
@@ -137,6 +136,11 @@ pub fn init_db(db_path: &str) -> DbConn {
     ).expect("failed to create tables");
 
     migration::run_schema_migrations(&conn);
+
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_games_game_id ON games(game_id) WHERE game_id != ''",
+        [],
+    ).expect("failed to create game_id index");
 
     let conn = Arc::new(Mutex::new(conn));
     create_variants_table(&conn);

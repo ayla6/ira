@@ -320,7 +320,7 @@ impl SteamClient {
             }
         }
 
-        println!("Generated achievements for app {}: {} achievements", app_id, out.len());
+        eprintln!("Generated achievements for app {}: {} achievements", app_id, out.len());
         Ok(())
     }
 }

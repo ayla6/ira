@@ -38,7 +38,6 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
                             crate::models::GSE.to_string(),
                             steam_app_id.clone(),
                             entry.id,
-                            lutris_id,
                             name,
                             steam,
                             watcher,

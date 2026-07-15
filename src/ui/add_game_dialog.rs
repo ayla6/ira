@@ -235,7 +235,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
                             let g_name = game.name.clone();
                             crate::ui::enrichment::enrich_game_async(
                                 game.app_id.clone(), game.trophy_source.clone(), game.platform_id.clone(),
-                                game.db_id, game.lutris_id, g_name,
+                                game.db_id, g_name,
                                 steam_c, watcher_c, sender_c, save_dir_c, db_c,
                                 ra_username_c, ra_token_c, ra_password_c,
                             );

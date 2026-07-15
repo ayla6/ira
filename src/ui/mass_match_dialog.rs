@@ -897,7 +897,7 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                     if let Some(g) = g {
                         super::enrichment::enrich_game_async(
                             g.app_id.clone(), g.trophy_source.clone(), g.platform_id.clone(),
-                            g.db_id, g.lutris_id, g.name.clone(), steam, watcher, sender, save_dir, db,
+                            g.db_id, g.name.clone(), steam, watcher, sender, save_dir, db,
                             ra_username, ra_token, ra_password,
                         );
                     }

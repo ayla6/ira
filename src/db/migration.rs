@@ -34,17 +34,6 @@ pub fn run_schema_migrations(conn: &Connection) {
     ensure_column(conn, "games", "emulator_override", "TEXT NOT NULL DEFAULT ''");
     ensure_column(conn, "games", "rom_path", "TEXT NOT NULL DEFAULT ''");
     ensure_column(conn, "games", "game_id", "TEXT NOT NULL DEFAULT ''");
-    // Migrate existing PS4/Retro rows: move their steam_id (NPWR/RA ID) to game_id
-    let _ = conn.execute(
-        "UPDATE games SET game_id = steam_id, steam_id = '' WHERE kind IN ('ps4', 'retro') AND steam_id != '' AND game_id = ''",
-        [],
-    );
-    // Recreate steam_id index as partial (old versions had non-partial unique index)
-    let _ = conn.execute("DROP INDEX IF EXISTS idx_games_steam_id", []);
-    let _ = conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != ''",
-        [],
-    );
     // Drop obsolete unique indexes that prevented multiple retro games per console
     let _ = conn.execute("DROP INDEX IF EXISTS idx_games_trophy_platform", []);
     let _ = conn.execute("DROP INDEX IF EXISTS idx_games_kind_platform", []);

@@ -176,25 +176,25 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
     let perf_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     let perf_group = make_section("Performance");
     let proton_ntsync = build_switch_row("NTSync", "Use the ntsync kernel driver for synchronization (PROTON_USE_NTSYNC)", wine.proton_ntsync);
-    if dft.is_some() { track_switch(&proton_ntsync, "proton_ntsync", dft.unwrap().proton_ntsync, &overridden); }
+    if let Some(dd) = dft { track_switch(&proton_ntsync, "proton_ntsync", dd.proton_ntsync, &overridden); }
     perf_group.add(&proton_ntsync);
     let esync = build_switch_row("Esync", "Eventfd synchronization (requires fd limit check)", wine.esync);
-    if dft.is_some() { track_switch(&esync, "esync", dft.unwrap().esync, &overridden); }
+    if let Some(dd) = dft { track_switch(&esync, "esync", dd.esync, &overridden); }
     perf_group.add(&esync);
     let fsync = build_switch_row("Fsync", "Fast synchronization (kernel support required)", wine.fsync);
-    if dft.is_some() { track_switch(&fsync, "fsync", dft.unwrap().fsync, &overridden); }
+    if let Some(dd) = dft { track_switch(&fsync, "fsync", dd.fsync, &overridden); }
     perf_group.add(&fsync);
     let fsr = build_switch_row("FSR", "AMD FidelityFX Super Resolution", wine.fsr);
-    if dft.is_some() { track_switch(&fsr, "fsr", dft.unwrap().fsr, &overridden); }
+    if let Some(dd) = dft { track_switch(&fsr, "fsr", dd.fsr, &overridden); }
     perf_group.add(&fsr);
     let gamemode = build_switch_row("Gamemode", "Feral Interactive GameMode", wine.gamemode);
-    if dft.is_some() { track_switch(&gamemode, "gamemode", dft.unwrap().gamemode, &overridden); }
+    if let Some(dd) = dft { track_switch(&gamemode, "gamemode", dd.gamemode, &overridden); }
     perf_group.add(&gamemode);
     let mangohud = build_switch_row("MangoHud", "Performance overlay", wine.mangohud);
-    if dft.is_some() { track_switch(&mangohud, "mangohud", dft.unwrap().mangohud, &overridden); }
+    if let Some(dd) = dft { track_switch(&mangohud, "mangohud", dd.mangohud, &overridden); }
     perf_group.add(&mangohud);
     let gamescope = build_switch_row("Gamescope", "Valve Gamescope compositor", wine.gamescope);
-    if dft.is_some() { track_switch(&gamescope, "gamescope", dft.unwrap().gamescope, &overridden); }
+    if let Some(dd) = dft { track_switch(&gamescope, "gamescope", dd.gamescope, &overridden); }
     perf_group.add(&gamescope);
     let gamescope_flags = build_entry_row("Gamescope flags", &wine.gamescope_flags);
     gamescope_flags.set_visible(wine.gamescope);
@@ -213,7 +213,7 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
     perf_group.add(&dxvk_fr_row);
 
     let proton_wow64 = build_switch_row("WoW64", "Run 32-bit Windows apps via WoW64 thunking (PROTON_USE_WOW64)", wine.proton_wow64);
-    if dft.is_some() { track_switch(&proton_wow64, "proton_wow64", dft.unwrap().proton_wow64, &overridden); }
+    if let Some(dd) = dft { track_switch(&proton_wow64, "proton_wow64", dd.proton_wow64, &overridden); }
     perf_group.add(&proton_wow64);
 
     perf_page.append(&perf_group);
@@ -223,16 +223,16 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
     let gfx_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     let gfx_group = make_section("Graphics");
     let dxvk = build_switch_row("DXVK", "DirectX 9/10/11 to Vulkan translation", wine.dxvk);
-    if dft.is_some() { track_switch(&dxvk, "dxvk", dft.unwrap().dxvk, &overridden); }
+    if let Some(dd) = dft { track_switch(&dxvk, "dxvk", dd.dxvk, &overridden); }
     gfx_group.add(&dxvk);
     let vkd3d = build_switch_row("VKD3D", "DirectX 12 to Vulkan translation", wine.vkd3d);
-    if dft.is_some() { track_switch(&vkd3d, "vkd3d", dft.unwrap().vkd3d, &overridden); }
+    if let Some(dd) = dft { track_switch(&vkd3d, "vkd3d", dd.vkd3d, &overridden); }
     gfx_group.add(&vkd3d);
     let d3d_extras = build_switch_row("D3D Extras", "Additional Direct3D components", wine.d3d_extras);
-    if dft.is_some() { track_switch(&d3d_extras, "d3d_extras", dft.unwrap().d3d_extras, &overridden); }
+    if let Some(dd) = dft { track_switch(&d3d_extras, "d3d_extras", dd.d3d_extras, &overridden); }
     gfx_group.add(&d3d_extras);
     let dxvk_nvapi = build_switch_row("DXVK-NVAPI / DLSS", "NVIDIA DLSS support via DXVK", wine.dxvk_nvapi);
-    if dft.is_some() { track_switch(&dxvk_nvapi, "dxvk_nvapi", dft.unwrap().dxvk_nvapi, &overridden); }
+    if let Some(dd) = dft { track_switch(&dxvk_nvapi, "dxvk_nvapi", dd.dxvk_nvapi, &overridden); }
     gfx_group.add(&dxvk_nvapi);
     let (graphics, _gfx_model) = build_combo_row("Graphics backend", &[("Auto", "auto"), ("Wayland", "wayland"), ("X11", "x11")]);
     {
@@ -247,13 +247,13 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
     }
     gfx_group.add(&mouse_warp_override);
     let virtual_desktop = build_switch_row("Virtual desktop", "Run in a virtual desktop window", wine.virtual_desktop);
-    if dft.is_some() { track_switch(&virtual_desktop, "virtual_desktop", dft.unwrap().virtual_desktop, &overridden); }
+    if let Some(dd) = dft { track_switch(&virtual_desktop, "virtual_desktop", dd.virtual_desktop, &overridden); }
     gfx_group.add(&virtual_desktop);
     let virtual_desktop_res = build_entry_row("Virtual desktop resolution", &wine.virtual_desktop_res);
     virtual_desktop_res.set_visible(wine.virtual_desktop);
     gfx_group.add(&virtual_desktop_res);
     let dpi_enabled = build_switch_row("Enable DPI scaling", "Override DPI settings", wine.dpi_enabled);
-    if dft.is_some() { track_switch(&dpi_enabled, "dpi_enabled", dft.unwrap().dpi_enabled, &overridden); }
+    if let Some(dd) = dft { track_switch(&dpi_enabled, "dpi_enabled", dd.dpi_enabled, &overridden); }
     gfx_group.add(&dpi_enabled);
     let dpi_adj = gtk4::Adjustment::new(wine.dpi as f64, 96.0, 384.0, 1.0, 10.0, 0.0);
     let dpi = gtk4::SpinButton::new(Some(&dpi_adj), 1.0, 0);
@@ -278,13 +278,13 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
     let adv_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     let ac_group = make_section("Anti-Cheat");
     let battleye = build_switch_row("BattlEye", "Enable BattlEye anti-cheat support", wine.battleye);
-    if dft.is_some() { track_switch(&battleye, "battleye", dft.unwrap().battleye, &overridden); }
+    if let Some(dd) = dft { track_switch(&battleye, "battleye", dd.battleye, &overridden); }
     ac_group.add(&battleye);
     let eac = build_switch_row("Easy Anti-Cheat", "Enable Easy Anti-Cheat support", wine.eac);
-    if dft.is_some() { track_switch(&eac, "eac", dft.unwrap().eac, &overridden); }
+    if let Some(dd) = dft { track_switch(&eac, "eac", dd.eac, &overridden); }
     ac_group.add(&eac);
     let desktop_integration = build_switch_row("Integrate system files", "Integrate desktop environment", wine.desktop_integration);
-    if dft.is_some() { track_switch(&desktop_integration, "desktop_integration", dft.unwrap().desktop_integration, &overridden); }
+    if let Some(dd) = dft { track_switch(&desktop_integration, "desktop_integration", dd.desktop_integration, &overridden); }
     ac_group.add(&desktop_integration);
     adv_page.append(&ac_group);
 
@@ -296,7 +296,7 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
     }
     dbg_group.add(&show_debug);
     let show_crash_dialogs = build_switch_row("Show crash dialogs", "Display Wine crash dialogs when programs crash", wine.show_crash_dialogs);
-    if dft.is_some() { track_switch(&show_crash_dialogs, "show_crash_dialogs", dft.unwrap().show_crash_dialogs, &overridden); }
+    if let Some(dd) = dft { track_switch(&show_crash_dialogs, "show_crash_dialogs", dd.show_crash_dialogs, &overridden); }
     dbg_group.add(&show_crash_dialogs);
     adv_page.append(&dbg_group);
 

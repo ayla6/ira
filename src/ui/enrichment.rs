@@ -15,7 +15,6 @@ pub fn enrich_game_async(
     trophy_source: String,
     platform_id: String,
     db_id: i64,
-    lutris_id: i64,
     title: String,
     steam: std::sync::Arc<SteamClient>,
     watcher: Option<AchievementWatcher>,
@@ -29,7 +28,7 @@ pub fn enrich_game_async(
     std::thread::spawn(move || {
         if trophy_source == crate::models::RA {
             let _guard = RA_ENRICH_LOCK.lock().unwrap();
-            enrich_ra(&app_id, &trophy_source, &platform_id, db_id, lutris_id, &title, &save_dir, &sender, &ra_username, &ra_token, &ra_password, &db);
+            enrich_ra(&app_id, &trophy_source, &platform_id, db_id, &title, &save_dir, &sender, &ra_username, &ra_token, &ra_password, &db);
             return;
         }
 
@@ -220,7 +219,6 @@ fn enrich_ra(
     trophy_source: &str,
     platform_id: &str,
     db_id: i64,
-    _lutris_id: i64,
     title: &str,
     save_dir: &str,
     sender: &AppSender,

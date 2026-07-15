@@ -1,3 +1,5 @@
+use super::state::SharedState;
+
 pub struct ImageLoadBudget {
     remaining: usize,
     deferred: Vec<(gtk4::Image, String)>,
@@ -20,13 +22,17 @@ impl ImageLoadBudget {
         }
     }
 
-    pub fn flush(self) {
+    pub fn flush(self, state: &SharedState, gen: u32) {
         if self.deferred.is_empty() {
             return;
         }
         let reqs = self.deferred;
         let mut i = 0usize;
+        let state = state.clone();
         glib::idle_add_local(move || {
+            if state.borrow().view_generation != gen {
+                return glib::ControlFlow::Break;
+            }
             let end = (i + 12).min(reqs.len());
             for (img, path) in &reqs[i..end] {
                 ira_images::set_image(img, path);

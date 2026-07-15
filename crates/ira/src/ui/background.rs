@@ -4,7 +4,7 @@ use crate::strings as S;
 use super::state::SharedState;
 use super::state::malloc_trim;
 use super::window::build_window;
-use super::sidebar::{select_row_silently, rebuild_sidebar};
+use super::sidebar::{select_row_silently, rebuild_sidebar, find_game_index};
 use super::grid_view::show_grid_view;
 use super::game_display::display_game;
 use super::message_handler::clear_content;
@@ -66,16 +66,16 @@ pub fn hide_to_background(state: &SharedState) {
 }
 
 fn teardown_content(state: &SharedState) {
-    let (content_box, game_list) = {
+    let (content_box, grid_header, sidebar_store) = {
         let s = state.borrow();
-        (s.content_box.clone(), s.game_list.clone())
+        (s.content_box.clone(), s.grid_header.clone(), s.sidebar_store.clone())
     };
 
     clear_children(&content_box);
-    clear_children(&game_list);
+    clear_children(&grid_header);
+    sidebar_store.remove_all();
 
     let mut s = state.borrow_mut();
-    s.rows.clear();
     s.content_unloaded = true;
 }
 
@@ -89,8 +89,7 @@ pub fn restore_content(state: &SharedState) {
 
     if selected_id.is_empty() {
         clear_content(state);
-        let row = state.borrow().game_list.row_at_index(0);
-        select_row_silently(state, row.as_ref());
+        select_row_silently(state, Some(0));
         show_grid_view(state);
         return;
     }
@@ -100,15 +99,12 @@ pub fn restore_content(state: &SharedState) {
     if let Some(game) = game {
         display_game(&game, state);
 
-        let row = state.borrow().rows.get(&db_id).and_then(|v| v.first()).map(|rw| rw.row.clone());
-        if let Some(row) = row {
-            select_row_silently(state, Some(&row));
-        }
+        let index = find_game_index(state, db_id);
+        select_row_silently(state, index);
     } else {
         state.borrow_mut().selected_id.clear();
         clear_content(state);
-        let row = state.borrow().game_list.row_at_index(0);
-        select_row_silently(state, row.as_ref());
+        select_row_silently(state, Some(0));
         show_grid_view(state);
     }
 }

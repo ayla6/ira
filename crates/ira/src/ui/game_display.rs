@@ -9,10 +9,13 @@ use super::achievement_view::build_achievements_view;
 pub fn display_game(game: &Game, state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
     let content_scroll = state.borrow().content_scroll.clone();
+    let grid_header = state.borrow().grid_header.clone();
 
     state.borrow_mut().view_generation += 1;
     let gen = state.borrow().view_generation;
 
+    clear_children(&grid_header);
+    content_scroll.set_child(Some(&content_box));
     content_scroll.vadjustment().set_value(0.0);
 
     clear_children(&content_box);

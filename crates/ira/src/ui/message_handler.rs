@@ -3,11 +3,10 @@ use adw::prelude::*;
 use crate::AppMessage;
 use crate::GameEntry;
 use crate::Game;
-use ira_images as images;
 use crate::strings as S;
 use std::collections::{HashMap, HashSet};
 use super::state::SharedState;
-use super::sidebar::{select_row_silently, rebuild_sidebar, apply_selected_highlight};
+use super::sidebar::{select_row_silently, rebuild_sidebar, find_game_index, update_sidebar_game, set_sidebar_playing};
 use super::grid_view::show_grid_view;
 use super::game_display::display_game;
 use super::helpers::{merge_game_enrichment, clear_children};
@@ -35,12 +34,7 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         }
         AppMessage::GameStopped(db_id) => {
             state.borrow().running_games.lock().unwrap().remove(&db_id);
-            {
-                let rows = state.borrow().rows.get(&db_id).cloned().unwrap_or_default();
-                for rw in &rows {
-                    rw.row.remove_css_class("playing-game");
-                }
-            }
+            set_sidebar_playing(state, db_id, false);
             let is_steam = state.borrow().games.iter()
                 .find(|g| g.db_id == db_id)
                 .map(|g| g.kind == ira_models::GameKind::Steam)
@@ -61,12 +55,7 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             }
         }
         AppMessage::GameStarted(db_id) => {
-            {
-                let rows = state.borrow().rows.get(&db_id).cloned().unwrap_or_default();
-                for rw in &rows {
-                    rw.row.add_css_class("playing-game");
-                }
-            }
+            set_sidebar_playing(state, db_id, true);
             let selected_id = state.borrow().selected_id.clone();
             if selected_id == db_id.to_string() {
                 let game = state.borrow().games.iter()
@@ -260,8 +249,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
 
     rebuild_sidebar(state);
 
-    let row = state.borrow().game_list.row_at_index(0);
-    select_row_silently(state, row.as_ref());
+    select_row_silently(state, Some(0));
     show_grid_view(state);
 
     let (steam, watcher, sender) = {
@@ -317,7 +305,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
 pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
     let app_id = updated.app_id.clone();
 
-    let (game_for_display, needs_grid_refresh) = {
+    let (game_for_display, needs_grid_refresh, sidebar_update) = {
         let mut s = state.borrow_mut();
         let Some(i) = s.games.iter().position(|g| g.app_id == app_id) else {
             return;
@@ -340,14 +328,12 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
 
         s.game_names.lock().unwrap().insert(app_id.clone(), updated.name.clone());
 
-        let row_widgets: Vec<super::sidebar::SidebarRowWidgets> = s.rows.get(&updated.db_id).cloned().unwrap_or_default();
-        for rw in &row_widgets {
-            rw.title.set_text(&updated.name);
-            rw.title.set_tooltip_text(Some(&format!("{} ({})", updated.name, updated.app_id)));
-            if !updated.icon_path.is_empty() {
-                images::set_image(&rw.icon, &updated.icon_path);
-            }
-        }
+        let icon_path = if updated.icon_path.is_empty() {
+            String::new()
+        } else {
+            updated.icon_path.clone()
+        };
+        let sidebar_update = (updated.db_id, updated.name.clone(), icon_path);
 
         let needs_rebuild = s.selected_id == updated.db_id.to_string() && !s.content_unloaded;
         let visual_changed = updated.grid_path != old_grid_path
@@ -361,8 +347,11 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
         }
         let game = if needs_rebuild { Some(updated.clone()) } else { None };
         s.games[i] = updated;
-        (game, needs_grid_refresh)
+        (game, needs_grid_refresh, sidebar_update)
     };
+
+    let (db_id, name, icon_path) = sidebar_update;
+    update_sidebar_game(state, db_id, &name, &icon_path);
 
     if let Some(game) = game_for_display {
         display_game(&game, state);
@@ -419,8 +408,7 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
                 rebuild_sidebar(&state_clone);
                 let selected = state_clone.borrow().selected_id.clone();
                 if selected.is_empty() {
-                    let row = state_clone.borrow().game_list.row_at_index(0);
-                    select_row_silently(&state_clone, row.as_ref());
+                    select_row_silently(&state_clone, Some(0));
                 }
                 let needs_refresh = !state_clone.borrow().grid_refresh_pending;
                 if needs_refresh {
@@ -444,12 +432,9 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
 pub fn switch_to_game(state: &SharedState, db_id: i64) {
     state.borrow_mut().selected_id = db_id.to_string();
 
-    let row = state.borrow().rows.get(&db_id).and_then(|v| v.first()).map(|rw| rw.row.clone());
-    if let Some(row) = row {
-        select_row_silently(state, Some(&row));
+    if let Some(index) = find_game_index(state, db_id) {
+        select_row_silently(state, Some(index));
     }
-
-    apply_selected_highlight(state);
 
     let game = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
     if let Some(game) = game {
@@ -490,5 +475,7 @@ pub fn switch_to_game(state: &SharedState, db_id: i64) {
 
 pub(crate) fn clear_content(state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
+    let grid_header = state.borrow().grid_header.clone();
     clear_children(&content_box);
+    clear_children(&grid_header);
 }

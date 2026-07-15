@@ -52,24 +52,22 @@ fn badge_text(game: &Game, mode: SortMode) -> Option<String> {
 
 pub fn show_grid_view(state: &SharedState) {
     state.borrow_mut().selected_id.clear();
-    super::sidebar::apply_selected_highlight(state);
 
-    let content_box = state.borrow().content_box.clone();
     let content_scroll = state.borrow().content_scroll.clone();
+    let grid_header = state.borrow().grid_header.clone();
 
     content_scroll.vadjustment().set_value(0.0);
-    clear_children(&content_box);
+    clear_children(&grid_header);
     ira_images::clear_texture_cache();
 
     let cover_width = state.borrow().cfg.grid_cover_width.clamp(100, 350);
     let show_hidden = state.borrow().cfg.show_hidden_games;
     let cover_height = ((cover_width as f64) * 1.5) as i32;
 
-    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    outer.set_margin_start(16);
-    outer.set_margin_end(16);
-    outer.set_margin_top(16);
-    outer.set_margin_bottom(32);
+    let header_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    header_box.set_margin_start(16);
+    header_box.set_margin_end(16);
+    header_box.set_margin_top(16);
 
     let searching = !state.borrow().search_query.is_empty();
     let selected_group = state.borrow().selected_group.clone();
@@ -89,7 +87,7 @@ pub fn show_grid_view(state: &SharedState) {
         recent.truncate(8);
 
         if !recent.is_empty() {
-            outer.append(&build_recent_row(state, &recent, cover_height));
+            header_box.append(&build_recent_row(state, &recent, cover_height));
         }
     }
 
@@ -113,7 +111,7 @@ pub fn show_grid_view(state: &SharedState) {
     heading.add_css_class("section-title");
     heading.set_margin_top(if show_recent && state.borrow().games.iter().any(|g| g.last_played > 0 && (!g.hidden || show_hidden)) { 20 } else { 0 });
     heading.set_margin_bottom(8);
-    outer.append(&heading);
+    header_box.append(&heading);
 
     let sort_mode = state.borrow().cfg.sort_mode;
 
@@ -294,15 +292,13 @@ pub fn show_grid_view(state: &SharedState) {
     let n_items = games.len() as u32;
     let row_h = cover_height + 16;
     let col_nat = cover_width + 16;
-    let bin = GridBin::new(&grid, row_h, n_items, col_nat);
+    let bin = GridBin::new(&grid, &header_box.upcast(), row_h, n_items, col_nat);
     bin.set_hexpand(true);
     bin.set_halign(gtk4::Align::Fill);
-    bin.set_vexpand(false);
-    bin.set_valign(gtk4::Align::Start);
-    bin.set_overflow(gtk4::Overflow::Visible);
+    bin.set_vexpand(true);
+    bin.set_valign(gtk4::Align::Fill);
 
-    outer.append(&bin);
-    content_box.append(&outer);
+    content_scroll.set_child(Some(&bin));
 }
 
 fn build_recent_row(

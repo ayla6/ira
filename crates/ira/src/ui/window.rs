@@ -43,14 +43,19 @@ pub fn build_ui(
         eprintln!("Failed to load groups: {}", e);
         Vec::new()
     });
+    let sidebar_store = gio::ListStore::new::<super::sidebar_item::SidebarItem>();
+    let sidebar_selection = super::game_selection_model::GameSelectionModel::new(Some(&sidebar_store));
+    let sidebar_view = gtk4::ListView::new(None::<super::game_selection_model::GameSelectionModel>, None::<gtk4::SignalListItemFactory>);
     let state = Rc::new(RefCell::new(AppState {
         window: adw::ApplicationWindow::new(app),
         games,
-        rows: HashMap::new(),
-        game_list: gtk4::ListBox::new(),
+        sidebar_store,
+        sidebar_selection,
+        sidebar_view,
         sidebar_scroll: gtk4::ScrolledWindow::new(),
         content_scroll: gtk4::ScrolledWindow::new(),
         content_box: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
+        grid_header: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
         selected_id: String::new(),
         cfg: cfg.clone(),
         steam: ctx.steam.clone(),
@@ -105,18 +110,26 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     sidebar_scroll.set_size_request(220, -1);
     sidebar_scroll.set_vexpand(true);
 
-    let game_list = gtk4::ListBox::new();
-    game_list.add_css_class("navigation-sidebar");
-    game_list.set_activate_on_single_click(false);
-    sidebar_scroll.set_child(Some(&game_list));
+    let sidebar_store = gio::ListStore::new::<super::sidebar_item::SidebarItem>();
+    let sidebar_selection = super::game_selection_model::GameSelectionModel::new(Some(&sidebar_store));
+    let factory = super::sidebar::build_factory(state);
+    let sidebar_view = gtk4::ListView::new(Some(sidebar_selection.clone()), Some(factory));
+    sidebar_view.add_css_class("navigation-sidebar");
+    sidebar_view.set_show_separators(false);
+    sidebar_scroll.set_child(Some(&sidebar_view));
 
     split_view.set_start_child(Some(&sidebar_scroll));
 
     let content_scroll = gtk4::ScrolledWindow::new();
     content_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    content_scroll.set_vexpand(true);
     let content_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    content_scroll.set_child(Some(&content_box));
-    split_view.set_end_child(Some(&content_scroll));
+    let grid_header = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+
+    let content_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content_area.append(&grid_header);
+    content_area.append(&content_scroll);
+    split_view.set_end_child(Some(&content_area));
 
     let header_bar = adw::HeaderBar::new();
 
@@ -155,10 +168,13 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     {
         let mut s = state.borrow_mut();
         s.window = window.clone();
-        s.game_list = game_list.clone();
+        s.sidebar_store = sidebar_store.clone();
+        s.sidebar_selection = sidebar_selection.clone();
+        s.sidebar_view = sidebar_view.clone();
         s.sidebar_scroll = sidebar_scroll.clone();
         s.content_scroll = content_scroll.clone();
         s.content_box = content_box.clone();
+        s.grid_header = grid_header.clone();
         s.search_entry = search_entry.clone();
         s.sort_label = sort_label;
     }
@@ -166,12 +182,11 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     rebuild_sidebar(state);
 
     if !state.borrow().content_unloaded {
-        let row = state.borrow().game_list.row_at_index(0);
-        select_row_silently(state, row.as_ref());
+        select_row_silently(state, Some(0));
         show_grid_view(state);
     }
 
-    connect_window_signals(state, &window, &game_list, &add_btn, &settings_btn, &search_entry);
+    connect_window_signals(state, &window, &sidebar_view, &sidebar_selection, &add_btn, &settings_btn, &search_entry);
 }
 
 fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
@@ -360,70 +375,92 @@ fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, 
 fn connect_window_signals(
     state: &SharedState,
     window: &adw::ApplicationWindow,
-    game_list: &gtk4::ListBox,
+    sidebar_view: &gtk4::ListView,
+    sidebar_selection: &super::game_selection_model::GameSelectionModel,
     add_btn: &gtk4::Button,
     settings_btn: &gtk4::Button,
     search_entry: &gtk4::SearchEntry,
 ) {
     let state_clone = state.clone();
-    game_list.connect_row_selected(move |_list, row| {
+    sidebar_selection.connect_selection_changed(move |model, _position, _n_items| {
         let s = state_clone.borrow();
         if s.restoring {
             return;
         }
-        let Some(row) = row else { return; };
-        let name = row.widget_name().to_string();
+        let position = model.clicked_position();
+        if position == gtk4::INVALID_LIST_POSITION {
+            return;
+        }
+        let store = s.sidebar_store.clone();
+        let Some(item) = store.item(position).and_then(|o| o.downcast::<super::sidebar_item::SidebarItem>().ok()) else {
+            return;
+        };
+        let kind = item.kind();
+        let db_id = item.db_id();
+        let group_id = item.group_id();
         drop(s);
 
-        if name == "all-games" {
-            state_clone.borrow_mut().selected_id.clear();
-            state_clone.borrow_mut().selected_group = GroupSelection::AllGames;
-            show_grid_view(&state_clone);
-        } else if name == "collection:0" {
-            state_clone.borrow_mut().selected_id.clear();
-            state_clone.borrow_mut().selected_group = GroupSelection::Uncategorized;
-            show_grid_view(&state_clone);
-        } else if let Some(id_str) = name.strip_prefix("collection:") {
-            if let Ok(id) = id_str.parse::<i64>() {
+        match kind {
+            super::sidebar_item::SidebarItemKind::AllGames => {
                 state_clone.borrow_mut().selected_id.clear();
-                state_clone.borrow_mut().selected_group = GroupSelection::Collection(id);
+                state_clone.borrow_mut().selected_group = GroupSelection::AllGames;
                 show_grid_view(&state_clone);
             }
-        } else if let Some(id_str) = name.strip_prefix("game:") {
-            if let Ok(db_id) = id_str.parse::<i64>() {
+            super::sidebar_item::SidebarItemKind::CollectionHeader => {
+                state_clone.borrow_mut().selected_id.clear();
+                state_clone.borrow_mut().selected_group = GroupSelection::Collection(group_id);
+                show_grid_view(&state_clone);
+            }
+            super::sidebar_item::SidebarItemKind::UncategorizedHeader => {
+                state_clone.borrow_mut().selected_id.clear();
+                state_clone.borrow_mut().selected_group = GroupSelection::Uncategorized;
+                show_grid_view(&state_clone);
+            }
+            super::sidebar_item::SidebarItemKind::Game => {
                 switch_to_game(&state_clone, db_id);
             }
         }
     });
 
     let state_clone = state.clone();
-    game_list.connect_row_activated(move |_list, row| {
-        let name = row.widget_name().to_string();
-        if let Some(id_str) = name.strip_prefix("game:") {
-            if let Ok(db_id) = id_str.parse::<i64>() {
-                let s = state_clone.borrow();
-                if s.games.iter().any(|g| g.db_id == db_id) {
-                    let vid = ira_db::get_default_variant(&s.db, db_id);
-                    drop(s);
-                    if !state_clone.borrow().running_games.lock().unwrap().contains_key(&db_id) {
-                        let _ = super::play_button::launch_game(&state_clone, db_id, vid);
-                        let _ = state_clone.borrow().sender.send(crate::AppMessage::GameStarted(db_id));
-                    }
+    sidebar_view.connect_activate(move |_view, position| {
+        let store = state_clone.borrow().sidebar_store.clone();
+        let Some(item) = store.item(position).and_then(|o| o.downcast::<super::sidebar_item::SidebarItem>().ok()) else {
+            return;
+        };
+        if item.kind() == super::sidebar_item::SidebarItemKind::Game {
+            let db_id = item.db_id();
+            let s = state_clone.borrow();
+            if s.games.iter().any(|g| g.db_id == db_id) {
+                let vid = ira_db::get_default_variant(&s.db, db_id);
+                drop(s);
+                if !state_clone.borrow().running_games.lock().unwrap().contains_key(&db_id) {
+                    let _ = super::play_button::launch_game(&state_clone, db_id, vid);
+                    let _ = state_clone.borrow().sender.send(crate::AppMessage::GameStarted(db_id));
                 }
             }
         }
     });
 
     let state_clone = state.clone();
+    let search_gen: Rc<Cell<u32>> = Rc::new(Cell::new(0));
     search_entry.connect_search_changed(move |entry| {
         let text = entry.text().to_string();
         state_clone.borrow_mut().search_query = text;
-        rebuild_sidebar(&state_clone);
-        if state_clone.borrow().selected_id.is_empty()
-            && !state_clone.borrow().content_unloaded
-        {
-            show_grid_view(&state_clone);
-        }
+        let gen = search_gen.get() + 1;
+        search_gen.set(gen);
+        let gen_cell = search_gen.clone();
+        let s = state_clone.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
+            if gen_cell.get() == gen {
+                rebuild_sidebar(&s);
+                if s.borrow().selected_id.is_empty()
+                    && !s.borrow().content_unloaded
+                {
+                    show_grid_view(&s);
+                }
+            }
+        });
     });
 
     let state_clone = state.clone();

@@ -20,7 +20,7 @@ pub fn build_global_tab(game: &crate::Game, global_vbox: &gtk4::Box, state: &Sha
         add_global_row(&global_group, ach, &mut budget);
     }
     global_vbox.append(&global_group);
-    budget.flush();
+    budget.flush(state, gen);
 
     if all_ach.len() > first_batch {
         let remaining = all_ach[first_batch..].to_vec();
@@ -36,7 +36,7 @@ pub fn build_global_tab(game: &crate::Game, global_vbox: &gtk4::Box, state: &Sha
             for ach in &remaining[i..end] {
                 add_global_row(&group, ach, &mut batch_budget);
             }
-            batch_budget.flush();
+            batch_budget.flush(&state, gen);
             i = end;
             if i >= remaining.len() {
                 glib::ControlFlow::Break

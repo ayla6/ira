@@ -103,7 +103,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                 for ach in &remaining[i..end] {
                     group.add(&create_achievement_row(ach, None, &mut batch_budget));
                 }
-                batch_budget.flush();
+                batch_budget.flush(&state_gen, gen);
                 i = end;
                 if i >= remaining.len() {
                     glib::ControlFlow::Break
@@ -212,7 +212,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                         &mut batch_budget,
                     ));
                 }
-                batch_budget.flush();
+                batch_budget.flush(&state, gen);
                 i = end;
                 if i >= remaining.len() {
                     if let Some(exp) = expander.take() {
@@ -227,7 +227,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
             locked_group.add(&exp);
         }
     }
-    budget.flush();
+    budget.flush(state, gen);
 
     let progress_page = view_stack.add_titled(&progress_vbox, Some("progress"), S::MY_PROGRESS);
     progress_page.set_icon_name(Some("user-home-symbolic"));

@@ -1,4 +1,5 @@
 use ira_config::Config;
+use super::game_selection_model::GameSelectionModel;
 use ira_db::DbConn;
 use ira_api::SteamClient;
 use ira_watcher::AchievementWatcher;
@@ -13,11 +14,13 @@ use std::sync::{Arc, Mutex};
 pub struct AppState {
     pub window: adw::ApplicationWindow,
     pub games: Vec<Game>,
-    pub rows: HashMap<i64, Vec<super::sidebar::SidebarRowWidgets>>,
-    pub game_list: gtk4::ListBox,
+    pub sidebar_store: gio::ListStore,
+    pub sidebar_selection: GameSelectionModel,
+    pub sidebar_view: gtk4::ListView,
     pub sidebar_scroll: gtk4::ScrolledWindow,
     pub content_scroll: gtk4::ScrolledWindow,
     pub content_box: gtk4::Box,
+    pub grid_header: gtk4::Box,
     pub selected_id: String,
     pub cfg: Config,
     pub steam: Arc<SteamClient>,

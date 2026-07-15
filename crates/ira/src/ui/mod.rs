@@ -2,6 +2,8 @@ pub mod state;
 mod css;
 mod game_item;
 mod grid_bin;
+mod game_selection_model;
+mod sidebar_item;
 mod window;
 mod sidebar;
 mod grid_view;

@@ -150,10 +150,10 @@ pub fn build_ra_games(
             },
             None => Vec::new(),
         };
-        // Filter out subset/challenge games (they contain "~" in the title on RA)
+        // Filter out subset/challenge games (they contain "~" or "[Subset" in the title on RA)
         let ra_games: Vec<RaGameEntry> = ra_games_raw
             .into_iter()
-            .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset]"))
+            .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset"))
             .collect();
 
         let roms = scan_roms(&console.folder, console.extensions);

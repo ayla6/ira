@@ -375,23 +375,10 @@ fn handle_ra_games_loaded(state: &SharedState, games: Vec<Game>) {
 
     rebuild_sidebar(state);
     let selected = state.borrow().selected_id.clone();
-    if selected.is_empty() {
+    if selected.is_empty() && !state.borrow().content_unloaded {
         let row = state.borrow().game_list.row_at_index(0);
         select_row_silently(state, row.as_ref());
-        let needs_refresh = !state.borrow().grid_refresh_pending;
-        if needs_refresh {
-            state.borrow_mut().grid_refresh_pending = true;
-            let state_clone = state.clone();
-            glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
-                let mut s = state_clone.borrow_mut();
-                s.grid_refresh_pending = false;
-                let should_refresh = s.selected_id.is_empty() && !s.content_unloaded;
-                drop(s);
-                if should_refresh {
-                    show_grid_view(&state_clone);
-                }
-            });
-        }
+        show_grid_view(state);
     }
 }
 

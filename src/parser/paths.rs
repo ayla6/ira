@@ -14,6 +14,10 @@ pub fn sgdb_data_dir(save_dir: &str, sgdb_id: &str) -> PathBuf {
     Path::new(save_dir).join("data").join("steamgriddb").join(sgdb_id)
 }
 
+pub fn ra_icon_path(save_dir: &str, game_id: &str) -> PathBuf {
+    Path::new(save_dir).join("data").join("ra").join(format!("game_{}_icon.png", game_id))
+}
+
 pub fn find_image_file(dir: &Path, base_name: &str) -> Option<PathBuf> {
     for ext in &["png", "jpg", "jpeg", "webp"] {
         let p = dir.join(format!("{}.{}", base_name, ext));

@@ -133,19 +133,22 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
 
     let image_dir = if kind == "ps4" {
         paths::ps4_data_dir(save_dir, app_id)
-    } else if crate::models::has_steam_enrichment(&entry.trophy_source)
-        || entry.trophy_source == crate::models::RA
-        || entry.sgdb_id.as_deref().filter(|s| !s.is_empty()).is_none()
-    {
+    } else if crate::models::has_steam_enrichment(&entry.trophy_source) {
         paths::data_dir(save_dir, app_id)
-    } else {
+    } else if entry.sgdb_id.as_deref().filter(|s| !s.is_empty()).is_some() {
         paths::sgdb_data_dir(save_dir, entry.sgdb_id.as_deref().unwrap())
+    } else {
+        paths::data_dir(save_dir, app_id)
     };
 
     let icon_png = image_dir.join("icon.png");
     if icon_png.is_file() {
         game.icon_path = icon_png.to_string_lossy().into_owned();
     } else {
+        let ra_icon = paths::ra_icon_path(save_dir, app_id);
+        if ra_icon.is_file() {
+            game.icon_path = ra_icon.to_string_lossy().into_owned();
+        }
         let icon_ico = image_dir.join("icon.ico");
         if icon_ico.is_file() {
             match icons::convert_ico_to_png(&icon_ico) {

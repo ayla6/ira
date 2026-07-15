@@ -295,6 +295,9 @@ fn handle_unified_sgdb_result(
 
         let undo_btn = gtk4::Button::with_label("Undo SGDB");
         let sc = state.clone();
+        let action_box_c = action_box.clone();
+        let parent_c = parent_dialog.clone();
+        let game_name_c = game_name.to_string();
         undo_btn.connect_clicked(move |_| {
             let _ = crate::db::set_sgdb_id(&sc.borrow().db, db_id, "");
             {
@@ -339,6 +342,30 @@ fn handle_unified_sgdb_result(
             if is_grid_showing {
                 super::grid_view::show_grid_view(&sc);
             }
+            // Update the mass match row to show unmatched state with manual search
+            clear_children(&action_box_c);
+            let label = gtk4::Label::new(Some("SGDB: unmatched"));
+            label.add_css_class("dim-label");
+            action_box_c.append(&label);
+            let sgdb_btn = gtk4::Button::with_label("Search SGDB…");
+            let sc2 = sc.clone();
+            let gn = game_name_c.clone();
+            let dlg = parent_c.clone();
+            let ab = action_box_c.clone();
+            sgdb_btn.connect_clicked(move |_| {
+                let cb: Rc<dyn Fn()> = Rc::new({
+                    let ab = ab.clone();
+                    let name = gn.clone();
+                    move || {
+                        clear_children(&ab);
+                        let label = gtk4::Label::new(Some(&format!("Matched to SGDB: {}", name)));
+                        label.add_css_class("success-label");
+                        ab.append(&label);
+                    }
+                });
+                show_sgdb_search_dialog(&sc2, db_id, &gn, &dlg, Some(cb));
+            });
+            action_box_c.append(&sgdb_btn);
         });
         action_box.append(&undo_btn);
     } else {

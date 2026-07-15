@@ -6,6 +6,7 @@ pub struct ConsoleDef {
     pub binary_names: &'static [&'static str],
     pub flatpak_id: &'static str,
     pub emu_display_name: &'static str,
+    pub fullscreen_flag: &'static str,
 }
 
 pub const CONSOLES: &[ConsoleDef] = &[
@@ -17,6 +18,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
         binary_names: &["duckstation-qt", "duckstation"],
         flatpak_id: "org.duckstation.DuckStation",
         emu_display_name: "DuckStation",
+        fullscreen_flag: "--fullscreen",
     },
     ConsoleDef {
         id: "ps2",
@@ -26,6 +28,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
         binary_names: &["pcsx2-qt", "pcsx2"],
         flatpak_id: "net.pcsx2.PCSX2",
         emu_display_name: "PCSX2",
+        fullscreen_flag: "-fullscreen",
     },
     ConsoleDef {
         id: "psp",
@@ -35,6 +38,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
         binary_names: &["ppsspp", "PPSSPPSDL"],
         flatpak_id: "org.ppsspp.PPSSPP",
         emu_display_name: "PPSSPP",
+        fullscreen_flag: "--fullscreen",
     },
 ];
 

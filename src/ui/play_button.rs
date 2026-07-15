@@ -79,7 +79,10 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         } else {
             &cc.ra_core
         };
-        let cmd = crate::platforms::emulator_detect::build_launch_command(exe, &game_path, core, cc.fullscreen);
+        let fullscreen_flag = crate::platforms::consoles::find_console(&platform_id)
+            .map(|d| d.fullscreen_flag)
+            .unwrap_or("--fullscreen");
+        let cmd = crate::platforms::emulator_detect::build_launch_command(exe, &game_path, core, cc.fullscreen, fullscreen_flag);
         match crate::launcher::wrapper::spawn_game(&cmd, &[], None) {
             Ok(child) => {
                 let pid = child.id() as i32;

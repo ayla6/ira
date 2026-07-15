@@ -119,6 +119,7 @@ pub fn build_launch_command(
     rom_path: &str,
     ra_core: &str,
     fullscreen: bool,
+    fullscreen_flag: &str,
 ) -> Vec<String> {
     let mut cmd = if let Some(flatpak_id) = exe.strip_prefix("flatpak:") {
         if is_retroarch(exe) && !ra_core.is_empty() {
@@ -142,7 +143,7 @@ pub fn build_launch_command(
         vec![exe.to_string()]
     };
     if fullscreen {
-        cmd.push("--fullscreen".to_string());
+        cmd.push(fullscreen_flag.to_string());
     }
     cmd.push(rom_path.to_string());
     cmd
@@ -170,37 +171,43 @@ mod tests {
 
     #[test]
     fn test_build_launch_command_native() {
-        let cmd = build_launch_command("/usr/bin/duckstation-qt", "/games/rom.bin", "", false);
+        let cmd = build_launch_command("/usr/bin/duckstation-qt", "/games/rom.bin", "", false, "--fullscreen");
         assert_eq!(cmd, vec!["/usr/bin/duckstation-qt", "/games/rom.bin"]);
     }
 
     #[test]
     fn test_build_launch_command_flatpak() {
-        let cmd = build_launch_command("flatpak:org.duckstation.DuckStation", "/games/rom.bin", "", false);
+        let cmd = build_launch_command("flatpak:org.duckstation.DuckStation", "/games/rom.bin", "", false, "--fullscreen");
         assert_eq!(cmd, vec!["flatpak", "run", "org.duckstation.DuckStation", "/games/rom.bin"]);
     }
 
     #[test]
     fn test_build_launch_command_retroarch_native_with_core() {
-        let cmd = build_launch_command("/usr/bin/retroarch", "/games/rom.bin", "/usr/lib/libretro/mednafen_psx_hw_libretro.so", false);
+        let cmd = build_launch_command("/usr/bin/retroarch", "/games/rom.bin", "/usr/lib/libretro/mednafen_psx_hw_libretro.so", false, "--fullscreen");
         assert_eq!(cmd, vec!["/usr/bin/retroarch", "-L", "/usr/lib/libretro/mednafen_psx_hw_libretro.so", "/games/rom.bin"]);
     }
 
     #[test]
     fn test_build_launch_command_fullscreen() {
-        let cmd = build_launch_command("/usr/bin/duckstation-qt", "/games/rom.bin", "", true);
+        let cmd = build_launch_command("/usr/bin/duckstation-qt", "/games/rom.bin", "", true, "--fullscreen");
         assert_eq!(cmd, vec!["/usr/bin/duckstation-qt", "--fullscreen", "/games/rom.bin"]);
     }
 
     #[test]
+    fn test_build_launch_command_pcsx2_fullscreen() {
+        let cmd = build_launch_command("/usr/bin/pcsx2-qt", "/games/rom.iso", "", true, "-fullscreen");
+        assert_eq!(cmd, vec!["/usr/bin/pcsx2-qt", "-fullscreen", "/games/rom.iso"]);
+    }
+
+    #[test]
     fn test_build_launch_command_retroarch_flatpak_with_core() {
-        let cmd = build_launch_command("flatpak:org.libretro.RetroArch", "/games/rom.bin", "/path/to/core.so", false);
+        let cmd = build_launch_command("flatpak:org.libretro.RetroArch", "/games/rom.bin", "/path/to/core.so", false, "--fullscreen");
         assert_eq!(cmd, vec!["flatpak", "run", "org.libretro.RetroArch", "-L", "/path/to/core.so", "/games/rom.bin"]);
     }
 
     #[test]
     fn test_build_launch_command_retroarch_no_core() {
-        let cmd = build_launch_command("/usr/bin/retroarch", "/games/rom.bin", "", false);
+        let cmd = build_launch_command("/usr/bin/retroarch", "/games/rom.bin", "", false, "--fullscreen");
         assert_eq!(cmd, vec!["/usr/bin/retroarch", "/games/rom.bin"]);
     }
 

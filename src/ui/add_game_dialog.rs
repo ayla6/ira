@@ -312,8 +312,7 @@ fn build_general_page(win: &adw::Window, profiles: &[crate::models::WineProfile]
     let profile_labels: Vec<String> = std::iter::once("Custom (per-game)".to_string())
         .chain(profiles.iter().map(|p| p.name.clone()))
         .collect();
-    let str_refs: Vec<&str> = profile_labels.iter().map(|s| s.as_str()).collect();
-    let profile_model = gtk4::StringList::new(&str_refs);
+    let profile_model = super::helpers::string_list_from(&profile_labels);
     let profile_row = adw::ComboRow::new();
     profile_row.set_title("Wine Profile");
     profile_row.set_subtitle("Links wine version + prefix together");

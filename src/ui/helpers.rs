@@ -220,6 +220,11 @@ pub fn refresh_settings_images_page(
     }
 }
 
+pub fn string_list_from(strings: &[String]) -> gtk4::StringList {
+    let str_refs: Vec<&str> = strings.iter().map(|s| s.as_str()).collect();
+    gtk4::StringList::new(&str_refs)
+}
+
 pub fn format_duration(seconds: i64) -> String {
     let total_mins = ((seconds.max(0) as f64) / 60.0).round() as u64;
     let h = total_mins / 60;

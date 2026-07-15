@@ -165,7 +165,7 @@ fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, a
                 format!("{}  ({})", v.name, trunc(&extra, 14))
             })
             .collect();
-        let version_model = gtk4::StringList::new(&version_strings.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        let version_model = super::helpers::string_list_from(&version_strings);
         let version_dropdown = gtk4::DropDown::new(Some(version_model), None::<&gtk4::PropertyExpression>);
 
         let current_exe = if cfg.shadps4_executable.is_empty() {
@@ -383,7 +383,7 @@ fn build_console_settings_page(
         let emu_names: Vec<String> = detected_emulators.iter()
             .map(|e| e.display_name.clone())
             .collect();
-        let emu_model = gtk4::StringList::new(&emu_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        let emu_model = super::helpers::string_list_from(&emu_names);
         let emu_dropdown = gtk4::DropDown::new(Some(emu_model), None::<&gtk4::PropertyExpression>);
 
         let mut selected_idx: u32 = 0;
@@ -447,7 +447,7 @@ fn build_console_settings_page(
         if !cores.is_empty() {
             let mut core_names: Vec<String> = vec!["None (auto-detect)".to_string()];
             core_names.extend(cores.iter().map(|c| c.display_name.clone()));
-            let core_model = gtk4::StringList::new(&core_names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+            let core_model = super::helpers::string_list_from(&core_names);
             let dropdown = gtk4::DropDown::new(Some(core_model), None::<&gtk4::PropertyExpression>);
 
             let mut selected_idx: u32 = 0;
@@ -533,8 +533,7 @@ fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRow, gtk4::St
         let strings = vec!["(no versions installed)"];
         gtk4::StringList::new(&strings)
     } else {
-        let strings: Vec<&str> = all_versions.iter().map(|s| s.as_str()).collect();
-        gtk4::StringList::new(&strings)
+        super::helpers::string_list_from(&all_versions)
     };
     let version_row = adw::ComboRow::new();
     version_row.set_title("Emulator version");
@@ -828,8 +827,7 @@ pub(super) fn build_game_general_page(
                     format!("{}  ({})", v.name, trunc(&extra, 14))
                 }))
                 .collect();
-            let str_refs: Vec<&str> = version_strings.iter().map(|s| s.as_str()).collect();
-            let version_model = gtk4::StringList::new(&str_refs);
+            let version_model = super::helpers::string_list_from(&version_strings);
             let version_dropdown = gtk4::DropDown::new(Some(version_model), None::<&gtk4::PropertyExpression>);
 
             let current_ver = if game.shadps4_version.is_empty() {
@@ -890,8 +888,7 @@ pub(super) fn build_game_general_page(
 
             let mut emu_names: Vec<String> = vec!["Follow global".to_string()];
             emu_names.extend(emulators.iter().map(|e| e.display_name.clone()));
-            let str_refs: Vec<&str> = emu_names.iter().map(|s| s.as_str()).collect();
-            let emu_model = gtk4::StringList::new(&str_refs);
+            let emu_model = super::helpers::string_list_from(&emu_names);
             let emu_dropdown = gtk4::DropDown::new(Some(emu_model), None::<&gtk4::PropertyExpression>);
 
             let mut selected_emu: u32 = 0;
@@ -915,8 +912,7 @@ pub(super) fn build_game_general_page(
             let core_row = if !cores.is_empty() {
                 let mut core_names: Vec<String> = vec!["Follow global".to_string()];
                 core_names.extend(cores.iter().map(|c| c.display_name.clone()));
-                let str_refs: Vec<&str> = core_names.iter().map(|s| s.as_str()).collect();
-                let core_model = gtk4::StringList::new(&str_refs);
+                let core_model = super::helpers::string_list_from(&core_names);
                 let core_dropdown = gtk4::DropDown::new(Some(core_model), None::<&gtk4::PropertyExpression>);
 
                 let mut selected_idx: u32 = 0;
@@ -1049,7 +1045,7 @@ pub(super) fn build_game_general_page(
     let language_row = if !languages.is_empty() && (game.trophy_source == crate::models::GSE || game.trophy_source == crate::models::NGE) {
         let lang_group = adw::PreferencesGroup::new();
         lang_group.set_title("Language");
-        let model = gtk4::StringList::new(&languages.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        let model = super::helpers::string_list_from(&languages);
         let row = adw::ComboRow::new();
         row.set_title("Game language");
         row.set_subtitle("Language reported to the game by the API emulator");

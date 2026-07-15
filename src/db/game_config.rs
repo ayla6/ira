@@ -63,7 +63,7 @@ pub fn delete_game_config(conn: &DbConn, game_id: i64) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::init_db;
+    use super::super::init_db;
     use tempfile::TempDir;
 
     fn setup_db() -> (DbConn, TempDir) {

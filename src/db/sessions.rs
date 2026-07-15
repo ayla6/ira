@@ -112,7 +112,7 @@ pub fn delete_sessions_for_game(conn: &DbConn, game_id: i64) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::init_db;
+    use super::super::init_db;
     use tempfile::TempDir;
 
     fn setup_db() -> (DbConn, TempDir) {

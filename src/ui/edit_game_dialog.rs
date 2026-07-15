@@ -171,8 +171,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         let profile_labels: Vec<String> = std::iter::once("Custom (per-game)".to_string())
             .chain(profiles.iter().map(|p| p.name.clone()))
             .collect();
-        let str_refs: Vec<&str> = profile_labels.iter().map(|s| s.as_str()).collect();
-        let profile_model = gtk4::StringList::new(&str_refs);
+        let profile_model = super::helpers::string_list_from(&profile_labels);
         let pr = adw::ComboRow::new();
         pr.set_title("Wine Profile");
         pr.set_subtitle("Links wine version + prefix together");
@@ -352,8 +351,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 let vr = adw::ComboRow::new();
                 vr.set_title("Emulator version");
                 vr.set_subtitle("Version directory to use for installation");
-                let strings: Vec<&str> = versions.iter().map(|s| s.as_str()).collect();
-                let model = gtk4::StringList::new(&strings);
+                let model = super::helpers::string_list_from(&versions);
                 vr.set_model(Some(&model));
                 let default_ver = &state.borrow().cfg.default_api_emu_version;
                 if !default_ver.is_empty() {

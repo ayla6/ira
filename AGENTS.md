@@ -16,10 +16,24 @@ SteamGridDB provides image assets.
 cargo build                    # Build the main binary
 cargo build --bin ira-test     # Build the test binary
 cargo test                     # Run all tests
+cargo clippy -- -D warnings    # Zero clippy warnings
 cargo build 2>&1 | grep warning # Check for warnings (should be zero)
 ```
 
 **Always run `cargo build` and `cargo test` before committing.** Zero warnings is the baseline.
+
+### Dead code checks
+
+```bash
+rg '#\[allow\(dead_code\)\]' src/    # Must return nothing
+rg '#\[allow\(unused\)\]' src/        # Must return nothing
+```
+
+`#[allow(...)]` suppressions are forbidden. Either use the code or delete it.
+If the code is actively being implemented (WIP, will be wired up in the next
+commit), bear with the warning until it's connected — do not suppress it.
+Serde fields that exist only for deserialization should be prefixed with `_`
+(e.g. `_success`) instead of using `#[allow(dead_code)]`.
 
 ## Architecture: unidirectional dependency flow
 
@@ -37,8 +51,7 @@ Level 2:           api/              — imports from models, parser
 Level 3:           watcher/          — imports from models, parser, db
 Level 4:           ui/               — imports from everything below
 Level 5:           activate.rs       — top-level orchestration
-                   game_list.rs
-                   migration.rs
+                    game_list.rs
 Level 6:           main.rs           — entry point only
 ```
 
@@ -72,6 +85,15 @@ Level 6:           main.rs           — entry point only
 
 ## Code organization
 
+### Migration lifecycle
+
+**Before the first release:** one-time data migrations (e.g. `UPDATE games SET
+game_id = steam_id ...`) should be removed once confirmed working on the user's
+database. Schema migrations (`ensure_column`) stay forever — data migrations
+don't. Mark them with a comment like `// PRE-RELEASE: remove after v0.X` so
+they're easy to grep for. After release, schema migrations are the only
+permanent migration mechanism.
+
 ### File size
 - **Soft cap: 100 lines per function.** If longer, extract sub-functions.
 - **Hard cap: 200 lines per function.** No exceptions — split it.
@@ -87,6 +109,14 @@ Level 6:           main.rs           — entry point only
 - **Use enums for closed sets.** Game kinds (`gbe_steam`, `ne_gog`, `sgdb`, `ps4`)
   should eventually be an enum, not string literals. Asset types (`icon`, `hero`,
   `grid`, `header`, `logo`) same.
+- **Always use defined constants for closed sets.** If `models/kind.rs` defines
+  `pub const STEAM: &str = "steam"`, never write `"steam"` as a literal in
+  comparisons or assignments. Raw string literals for closed sets are typo-prone
+  and make refactoring harder.
+- **Fields are named for what they store, not what they were originally used
+  for.** If `steam_id` stores NPWR IDs and RA game IDs, it's misnamed. Either
+  rename it or add a separate column. Field names are API contracts —
+  repurposing them silently is a bug.
 - **`Option` only for genuinely nullable fields.** If the DB column is
   `NOT NULL DEFAULT 0`, the Rust field is `i64`, not `Option<i64>`.
 - **Implement `Default` for any struct with 10+ fields.** Construction sites
@@ -104,6 +134,16 @@ Level 6:           main.rs           — entry point only
   fall back. (Exception: `get_ignored_lutris_ids` / `get_hidden_lutris_ids` —
   these are best-effort and returning empty on error is acceptable, but
   `eprintln!` the error first.)
+
+### Message variants
+- **Every `AppMessage` variant must be both sent and handled.** Before merging
+  a new variant, verify the send site exists. During review, grep for
+  `AppMessage::VariantName` — if it only appears in the enum definition and the
+  match arm, it's dead code.
+
+### Lookups
+- **When you have `db_id`, use `find_by_db_id`.** Never look up a secondary key
+  (steam_id, game_id, etc.) just to resolve the primary key you already have.
 
 ## UI guidelines
 
@@ -231,7 +271,9 @@ chore(*): rename kind values steam→gbe_steam, gog→ne_gog
 
 ```bash
 cargo build         # must succeed with zero warnings
+cargo clippy -- -D warnings   # zero clippy warnings
 cargo test          # all tests must pass
+rg '#\[allow' src/  # must return nothing
 git status          # review staged files
 git diff --cached   # review the actual diff
 ```
@@ -254,12 +296,17 @@ Adds GAME_COLUMNS constant so column list stays in sync."
 ## Code review checklist
 
 - [ ] Zero compiler warnings
+- [ ] `cargo clippy -- -D warnings` passes
 - [ ] `cargo test` passes
+- [ ] No `#[allow(...)]` suppressions (`rg '#\[allow' src/` returns nothing)
 - [ ] No duplication (3+ occurrences = extract a helper)
 - [ ] No dead code or unused captures
 - [ ] Functions under 100 lines
 - [ ] New logic has at least one test
 - [ ] `Option` fields match schema nullability
 - [ ] No circular imports between sibling files
+- [ ] No raw string literals for closed sets (use constants from `models/kind.rs`)
+- [ ] `mod.rs` files contain only `mod`/`pub use` declarations
+- [ ] Every `AppMessage` variant is both sent and handled
 - [ ] Commit message follows conventional format
 - [ ] No secrets in the diff

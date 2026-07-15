@@ -30,13 +30,13 @@ pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
 
 pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     let app_id = if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id };
-    let kind = &entry.kind;
+    let kind = entry.kind;
     let platform_id = &entry.platform_id;
 
     let mut game = Game {
         app_id: app_id.to_string(),
-        kind: kind.to_string(),
-        trophy_source: entry.trophy_source.clone(),
+        kind,
+        trophy_source: entry.trophy_source,
         platform_id: platform_id.to_string(),
         db_id: entry.id,
         name: if entry.title.is_empty() {
@@ -83,9 +83,9 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         }
     }
 
-    let image_dir = if kind == ira_models::PS4 {
+    let image_dir = if kind == ira_models::GameKind::Ps4 {
         ira_parser::ps4_data_dir(save_dir, app_id)
-    } else if ira_models::has_steam_enrichment(&entry.trophy_source) {
+    } else if entry.trophy_source.has_steam_enrichment() {
         ira_parser::data_dir(save_dir, app_id)
     } else if entry.sgdb_id.as_deref().filter(|s| !s.is_empty()).is_some() {
         ira_parser::sgdb_data_dir(save_dir, entry.sgdb_id.as_deref().unwrap())
@@ -125,7 +125,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
 
     ira_parser::populate_image_paths(&image_dir, &mut game);
 
-    let is_steam_native = entry.trophy_source == ira_models::STEAM_NATIVE;
+    let is_steam_native = entry.trophy_source == ira_models::TrophySource::SteamNative;
     let steam_native_data = if is_steam_native {
         ira_platforms::steam::read_steam_achievements_full(app_id, save_dir)
     } else {
@@ -147,7 +147,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         }
         map
     } else {
-        let status_path = ira_parser::unlock_status_path(save_dir, &entry.trophy_source, app_id, platform_id);
+        let status_path = ira_parser::unlock_status_path(save_dir, entry.trophy_source, app_id, platform_id);
         ira_parser::load_status_map(&status_path)
     };
 

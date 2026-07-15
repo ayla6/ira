@@ -53,7 +53,7 @@ pub(super) fn handle_steam_search_result(
             let _ = ira_db::unmatch_game(&sc.borrow().db, lutris_id);
             if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.lutris_id == lutris_id) {
                 g.app_id.clear();
-                g.kind.clear();
+                g.kind = ira_models::GameKind::default();
                 g.achievements.clear();
                 g.manual_unmatch = true;
             }

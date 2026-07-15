@@ -156,8 +156,8 @@ pub fn show_add_game_dialog(state: &SharedState) {
         let steam_app_id = steam_id_entry.text().to_string();
         let gog_product_id = gog_id_entry.text().to_string();
 
-        let trophy_source = if !steam_app_id.is_empty() { ira_models::GSE } else if !gog_product_id.is_empty() { ira_models::NGE } else { "" };
-        let kind = if is_wine { ira_models::WINE } else { ira_models::LINUX };
+        let trophy_source = if !steam_app_id.is_empty() { ira_models::TrophySource::Gse } else if !gog_product_id.is_empty() { ira_models::TrophySource::Nge } else { ira_models::TrophySource::Empty };
+        let kind = if is_wine { ira_models::GameKind::Wine } else { ira_models::GameKind::Linux };
         let platform_id = if !steam_app_id.is_empty() { steam_app_id.clone() } else if !gog_product_id.is_empty() { gog_product_id.clone() } else { format!("manual_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()) };
 
         let selected_profile_id = if is_wine && profile_row.selected() > 0 {
@@ -180,8 +180,8 @@ pub fn show_add_game_dialog(state: &SharedState) {
         let sender_c = sender.clone();
         let name_c = name.clone();
         let app_id_c = platform_id.clone();
-        let kind_c = kind.to_string();
-        let ts_c = trophy_source.to_string();
+        let kind_c = kind;
+        let ts_c = trophy_source;
         let steam_c = steam.clone();
         let watcher_c = watcher.clone();
         let save_dir_c = save_dir.clone();
@@ -191,8 +191,8 @@ pub fn show_add_game_dialog(state: &SharedState) {
 
         std::thread::spawn(move || {
             match add_game_to_db(AddGameToDbParams {
-                db: &db_c, name: &name_c, kind: &kind_c,
-                trophy_source: &ts_c, app_id: &app_id_c, platform_id: &platform_id,
+                db: &db_c, name: &name_c, kind: kind_c,
+                trophy_source: ts_c, app_id: &app_id_c, platform_id: &platform_id,
                 launch_config: &launch_config, wine_config: &wine_config,
                 profile_id: selected_profile_id, steam: &steam_c, save_dir: &save_dir_c,
             }) {
@@ -209,7 +209,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
                             let g_name = game.name.clone();
                             crate::ui::enrichment::enrich_game_async(crate::ui::enrichment::EnrichGameParams {
                                 app_id: game.app_id.clone(),
-                                trophy_source: game.trophy_source.clone(),
+                                trophy_source: game.trophy_source,
                                 platform_id: game.platform_id.clone(),
                                 db_id: game.db_id,
                                 title: g_name,

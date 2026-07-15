@@ -46,8 +46,8 @@ pub fn load_shadps4_game(
     // Build game
     let mut game = Game {
         app_id: npwr_id.clone(),
-        kind: ira_models::PS4.to_string(),
-        trophy_source: String::new(),
+        kind: ira_models::GameKind::Ps4,
+        trophy_source: ira_models::TrophySource::Empty,
         platform_id: serial.clone(),
         db_id,
         name: if meta.title.is_empty() {

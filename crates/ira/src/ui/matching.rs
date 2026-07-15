@@ -13,7 +13,7 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
         (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
     };
     std::thread::spawn(move || {
-        if let Err(e) = ira_db::upsert_matching(&db, lutris_id, &steam_app_id, ira_models::LUTRIS, ira_models::GSE, &steam_app_id) {
+        if let Err(e) = ira_db::upsert_matching(&db, lutris_id, &steam_app_id, ira_models::GameKind::Lutris.as_str(), ira_models::TrophySource::Gse.as_str(), &steam_app_id) {
             eprintln!("match_game_to_steam: upsert_matching failed: {}", e);
             return;
         }
@@ -35,7 +35,7 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
                         let _ = sender.send(AppMessage::NewGame(game));
                         enrich_game_async(crate::ui::enrichment::EnrichGameParams {
                             app_id: steam_app_id.clone(),
-                            trophy_source: ira_models::GSE.to_string(),
+                            trophy_source: ira_models::TrophySource::Gse,
                             platform_id: steam_app_id.clone(),
                             db_id: entry.id,
                             title: name,
@@ -64,7 +64,7 @@ pub fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, 
         (s.steam.clone(), s.sender.clone(), s.db.clone())
     };
     std::thread::spawn(move || {
-        if let Err(e) = ira_db::upsert_matching(&db, lutris_id, &sgdb_id, ira_models::LUTRIS, "", &sgdb_id) {
+        if let Err(e) = ira_db::upsert_matching(&db, lutris_id, &sgdb_id, ira_models::GameKind::Lutris.as_str(), "", &sgdb_id) {
             eprintln!("match_game_to_sgdb: upsert_matching failed: {}", e);
             return;
         }
@@ -73,8 +73,8 @@ pub fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, 
         if let Ok(Some(entry)) = ira_db::find_by_lutris_id(&db, lutris_id) {
             let game = Game {
                 app_id: sgdb_id.clone(),
-                kind: ira_models::LUTRIS.to_string(),
-                trophy_source: String::new(),
+                kind: ira_models::GameKind::Lutris,
+                trophy_source: ira_models::TrophySource::Empty,
                 platform_id: sgdb_id.clone(),
                 db_id: entry.id,
                 name: if entry.title.is_empty() { lutris_name.clone() } else { entry.title.clone() },
@@ -113,10 +113,9 @@ pub fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, 
     });
 }
 
-pub fn confirm_mark_unlocked(state: &SharedState, trophy_source: &str, app_id: &str, platform_id: &str, ach: &MergedAchievement, reload: impl Fn() + 'static) {
+pub fn confirm_mark_unlocked(state: &SharedState, trophy_source: ira_models::TrophySource, app_id: &str, platform_id: &str, ach: &MergedAchievement, reload: impl Fn() + 'static) {
     let window = state.borrow().window.clone();
     let ach_name = ach.name.clone();
-    let trophy_source = trophy_source.to_string();
     let app_id = app_id.to_string();
     let platform_id = platform_id.to_string();
     let save_dir = state.borrow().save_dir.clone();
@@ -131,7 +130,7 @@ pub fn confirm_mark_unlocked(state: &SharedState, trophy_source: &str, app_id: &
         S::MARK_AS_UNLOCKED,
         adw::ResponseAppearance::Destructive,
         move || {
-            if let Err(e) = set_achievement_earned(&save_dir, &trophy_source, &app_id, &platform_id, &ach_name, true) {
+            if let Err(e) = set_achievement_earned(&save_dir, trophy_source, &app_id, &platform_id, &ach_name, true) {
                 eprintln!("Failed to mark achievement as unlocked: {}", e);
                 return;
             }

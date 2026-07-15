@@ -23,7 +23,7 @@ pub fn detect_app_id(folder: &str) -> Option<String> {
 pub fn add_game_from_folder(
     folder: &str,
     app_id: &str,
-    kind: &str,
+    kind: ira_models::GameKind,
     steam: &SteamClient,
     db: &DbConn,
     save_dir: &str,
@@ -62,7 +62,7 @@ pub fn add_game_from_folder(
     steam.generate_steam_settings(app_id)?;
 
     // Add to DB (title will be filled from appdetails.json during enrichment)
-    ira_db::add_game(db, kind, ira_models::GSE, app_id, "", app_id, "")?;
+    ira_db::add_game(db, kind, ira_models::TrophySource::Gse, app_id, "", app_id, "")?;
 
     Ok(saves_game_dir.to_string_lossy().into_owned())
 }

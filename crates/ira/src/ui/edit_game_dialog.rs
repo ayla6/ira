@@ -17,7 +17,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         (game, config, app_default_wine)
     };
     let Some(game) = game else { return };
-    let show_wine = game.kind == ira_models::WINE;
+    let show_wine = game.kind == ira_models::GameKind::Wine;
     let has_config = config.is_some();
     let (saved_launch, mut saved_wine, saved_profile_id) = config.clone().unwrap_or_default();
 
@@ -55,7 +55,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let profile_row = build_profile_dropdown(has_config, saved_wine.enabled, saved_profile_id, &profiles, &general_page);
 
     // --- Launch Config (not for steam/ps4/retro; lutris only if it has a saved config) ---
-    let show_launch_config = !show_wine && game.kind != ira_models::STEAM && game.kind != ira_models::PS4 && game.kind != ira_models::RETRO && (game.kind != ira_models::LUTRIS || has_config);
+    let show_launch_config = !show_wine && game.kind != ira_models::GameKind::Steam && game.kind != ira_models::GameKind::Ps4 && game.kind != ira_models::GameKind::Retro && (game.kind != ira_models::GameKind::Lutris || has_config);
     let launch_config_widgets = if show_launch_config {
         build_launch_config_page(&saved_launch, &win, &sidebar, &stack, true)
     } else {
@@ -110,7 +110,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     build_api_emulator_page(
         super::edit_game_pages::ApiEmuPageParams {
             emu_exe: &saved_launch.exe,
-            emu_trophy_source: &game.trophy_source,
+            emu_trophy_source: game.trophy_source,
             emu_app_id: &game.app_id,
             save_dir: &emu_save_dir,
         },
@@ -121,7 +121,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     );
 
     // --- Variants page ---
-    let var_widgets = build_variants_page(state, db_id, &game.kind, has_config, &sidebar, &stack);
+    let var_widgets = build_variants_page(state, db_id, game.kind, has_config, &sidebar, &stack);
 
     // --- Sidebar navigation ---
     let stack_clone = stack.clone();
@@ -176,8 +176,8 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let win_s = win.clone();
     let db_id_s = db_id;
     let app_id = game.app_id.clone();
-    let trophy_source = game.trophy_source.clone();
-    let game_kind = game.kind.clone();
+    let trophy_source = game.trophy_source;
+    let game_kind = game.kind;
     let var_widgets_save = var_widgets.clone();
     let save_dir_c = save_dir.clone();
     let logo_controls_c = logo_controls.clone();
@@ -209,9 +209,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             if new_id != app_id {
                 app_id_changed = true;
                 new_app_id_val = new_id.clone();
-                let ts = if new_id.is_empty() { "" } else { &trophy_source };
+                let ts = if new_id.is_empty() { ira_models::TrophySource::Empty } else { trophy_source };
                 let pid = if new_id.is_empty() { "" } else { &new_id };
-                let (steam_id, game_id): (&str, &str) = if game_kind == ira_models::PS4 || game_kind == ira_models::RETRO { ("", &new_id) } else { (&new_id, "") };
+                let (steam_id, game_id): (&str, &str) = if game_kind == ira_models::GameKind::Ps4 || game_kind == ira_models::GameKind::Retro { ("", &new_id) } else { (&new_id, "") };
                 if let Err(e) = ira_db::update_game_ids(&db, db_id_s, steam_id, game_id, ts, pid) {
                     eprintln!("Failed to update app ID: {}", e);
                 }
@@ -374,7 +374,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                         let _ = std::fs::write(&path, b);
                     }
                     ira_platforms::api_emulators::write_dlc_configs(
-                        &trophy_source, &game_exe, &save_dir_c, &app_id, &details,
+                        trophy_source, &game_exe, &save_dir_c, &app_id, &details,
                     );
                 }
             }
@@ -385,7 +385,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             let idx = lang_row.selected() as usize;
             if let Some(lang) = languages_c.get(idx) {
                 ira_platforms::api_emulators::write_language_configs(
-                    &trophy_source, &game_exe, &save_dir_c, &app_id, lang,
+                    trophy_source, &game_exe, &save_dir_c, &app_id, lang,
                 );
             }
         }
@@ -406,7 +406,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             if app_id_changed {
                 if new_app_id_val.is_empty() {
                     g.app_id.clear();
-                    g.trophy_source.clear();
+                    g.trophy_source = ira_models::TrophySource::Empty;
                     g.platform_id.clear();
                     g.achievements.clear();
                     g.earned_count = 0;

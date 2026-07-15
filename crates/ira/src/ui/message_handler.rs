@@ -43,7 +43,7 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             }
             let is_steam = state.borrow().games.iter()
                 .find(|g| g.db_id == db_id)
-                .map(|g| g.kind == ira_models::STEAM)
+                .map(|g| g.kind == ira_models::GameKind::Steam)
                 .unwrap_or(false);
             if is_steam {
                 refresh_steam_playtimes_for(state, &[db_id]);
@@ -91,7 +91,7 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             let play_times = ira_platforms::ps4::read_play_times();
             let mut updated_ids = Vec::new();
             for g in state.borrow_mut().games.iter_mut() {
-                if g.kind == ira_models::PS4 {
+                if g.kind == ira_models::GameKind::Ps4 {
                     let serial = &g.platform_id;
                     if let Some(time_str) = play_times.get(serial) {
                         let new_playtime = ira_platforms::ps4::parse_playtime(time_str);
@@ -175,7 +175,7 @@ fn refresh_steam_playtimes_for(state: &SharedState, db_ids: &[i64]) {
     let app_ids: Vec<(i64, String)> = {
         let s = state.borrow();
         s.games.iter()
-            .filter(|g| id_set.contains(&g.db_id) && g.kind == ira_models::STEAM)
+            .filter(|g| id_set.contains(&g.db_id) && g.kind == ira_models::GameKind::Steam)
             .map(|g| (g.db_id, g.app_id.clone()))
             .collect()
     };
@@ -280,25 +280,25 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
         if g.app_id.is_empty() {
             continue;
         }
-        if ira_models::has_steam_enrichment(&g.trophy_source) {
+        if g.trophy_source.has_steam_enrichment() {
             if let Some(ref watcher) = watcher {
-                let mut entry = GameEntry::for_reload(g.db_id, &g.kind, &g.trophy_source, &g.app_id, "", &g.platform_id);
+                let mut entry = GameEntry::for_reload(g.db_id, g.kind, g.trophy_source, &g.app_id, "", &g.platform_id);
                 entry.sort_title = g.sort_title.clone();
                 watcher.watch(&entry, &g.achievements);
             }
         }
 
-        if g.kind == ira_models::PS4 {
+        if g.kind == ira_models::GameKind::Ps4 {
             continue;
         }
 
-        if g.kind == ira_models::RETRO {
+        if g.kind == ira_models::GameKind::Retro {
             continue;
         }
 
         enrich_game_async(crate::ui::enrichment::EnrichGameParams {
             app_id: g.app_id.clone(),
-            trophy_source: g.trophy_source.clone(),
+            trophy_source: g.trophy_source,
             platform_id: g.platform_id.clone(),
             db_id: g.db_id,
             title: g.name.clone(),
@@ -455,7 +455,7 @@ pub fn switch_to_game(state: &SharedState, db_id: i64) {
     if let Some(game) = game {
         display_game(&game, state);
 
-        if game.kind == ira_models::RETRO && !game.trophy_source.is_empty() && game.total_count == 0 && !game.app_id.is_empty() {
+        if game.kind == ira_models::GameKind::Retro && game.trophy_source != ira_models::TrophySource::Empty && game.total_count == 0 && !game.app_id.is_empty() {
             let (ra_username, ra_token, ra_password, steam, watcher, sender, save_dir, db) = {
                 let s = state.borrow();
                 (
@@ -471,7 +471,7 @@ pub fn switch_to_game(state: &SharedState, db_id: i64) {
             };
             enrich_game_async(crate::ui::enrichment::EnrichGameParams {
                 app_id: game.app_id.clone(),
-                trophy_source: game.trophy_source.clone(),
+                trophy_source: game.trophy_source,
                 platform_id: game.platform_id.clone(),
                 db_id: game.db_id,
                 title: game.name.clone(),

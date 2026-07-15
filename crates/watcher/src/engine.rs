@@ -59,7 +59,7 @@ impl AchievementWatcher {
 
         let watch_dir = unlock_status_path(
             &self.state.lock().unwrap().save_dir,
-            &entry.trophy_source,
+            entry.trophy_source,
             &entry.steam_id,
             &entry.platform_id,
         )

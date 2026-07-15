@@ -12,7 +12,7 @@ use super::image_budget::ImageLoadBudget;
 use super::achievement_rows::{create_achievement_row, build_global_tab};
 
 pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::Widget {
-    let is_ps4 = game.kind == ira_models::PS4;
+    let is_ps4 = game.kind == ira_models::GameKind::Ps4;
 
     let view_stack = adw::ViewStack::new();
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -54,17 +54,17 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
     }
 
     let app_id_for_reload = game.app_id.clone();
-    let kind_for_reload = game.kind.clone();
-    let trophy_source_for_reload = game.trophy_source.clone();
+    let kind_for_reload = game.kind;
+    let trophy_source_for_reload = game.trophy_source;
     let platform_id_for_reload = game.platform_id.clone();
     let db_id_for_reload = game.db_id;
-    let is_retro_or_ps4 = kind_for_reload == ira_models::PS4 || kind_for_reload == ira_models::RETRO;
+    let is_retro_or_ps4 = kind_for_reload == ira_models::GameKind::Ps4 || kind_for_reload == ira_models::GameKind::Retro;
 
     let sender = state.borrow().sender.clone();
     let save_dir = state.borrow().save_dir.clone();
     let reload = move || {
         let (steam_id, game_id): (&str, &str) = if is_retro_or_ps4 { ("", &app_id_for_reload) } else { (&app_id_for_reload, "") };
-        let entry = GameEntry::for_reload(db_id_for_reload, &kind_for_reload, &trophy_source_for_reload, steam_id, game_id, &platform_id_for_reload);
+        let entry = GameEntry::for_reload(db_id_for_reload, kind_for_reload, trophy_source_for_reload, steam_id, game_id, &platform_id_for_reload);
         let sender = sender.clone();
         let save_dir = save_dir.clone();
         std::thread::spawn(move || {
@@ -122,14 +122,14 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
         for ach in &locked[..first_n] {
             let ach_clone = (*ach).clone();
             let reload_clone = reload.clone();
-            let trophy_source_clone = game.trophy_source.clone();
+            let trophy_source_clone = game.trophy_source;
             let app_id_clone = game.app_id.clone();
             let platform_id_clone = game.platform_id.clone();
             let state_clone = state.clone();
             locked_group.add(&create_achievement_row(
                 ach,
                 Some(Box::new(move || {
-                    super::matching::confirm_mark_unlocked(&state_clone, &trophy_source_clone, &app_id_clone, &platform_id_clone, &ach_clone, reload_clone.clone());
+                    super::matching::confirm_mark_unlocked(&state_clone, trophy_source_clone, &app_id_clone, &platform_id_clone, &ach_clone, reload_clone.clone());
                 })),
                 &mut budget,
             ));
@@ -142,7 +142,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
             for ach in hidden.iter() {
                 let ach_clone = (*ach).clone();
                 let reload_inner = reload.clone();
-                let trophy_source_inner = game.trophy_source.clone();
+                let trophy_source_inner = game.trophy_source;
                 let app_id_inner = game.app_id.clone();
                 let platform_id_inner = game.platform_id.clone();
                 let state_inner = state.clone();
@@ -167,7 +167,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                 let mclick = gtk4::GestureClick::new();
                 mclick.set_button(3);
                 mclick.connect_pressed(move |_, _, _, _| {
-                    super::matching::confirm_mark_unlocked(&state_inner, &trophy_source_inner, &app_id_inner, &platform_id_inner, &ach_clone, reload_inner.clone());
+                    super::matching::confirm_mark_unlocked(&state_inner, trophy_source_inner, &app_id_inner, &platform_id_inner, &ach_clone, reload_inner.clone());
                 });
                 ach_row.add_controller(mclick);
 
@@ -185,7 +185,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                 locked[first_n..].iter().map(|a| (*a).clone()).collect();
             let group = locked_group.clone();
             let reload = reload.clone();
-            let trophy_source = game.trophy_source.clone();
+            let trophy_source = game.trophy_source;
             let app_id = game.app_id.clone();
             let platform_id = game.platform_id.clone();
             let state = state.clone();
@@ -200,14 +200,14 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                 for ach in &remaining[i..end] {
                     let ach_clone = ach.clone();
                     let reload_clone = reload.clone();
-                    let trophy_source_clone = trophy_source.clone();
+                    let trophy_source_clone = trophy_source;
                     let app_id_clone = app_id.clone();
                     let platform_id_clone = platform_id.clone();
                     let state_clone = state.clone();
                     group.add(&create_achievement_row(
                         ach,
                         Some(Box::new(move || {
-                            super::matching::confirm_mark_unlocked(&state_clone, &trophy_source_clone, &app_id_clone, &platform_id_clone, &ach_clone, reload_clone.clone());
+                            super::matching::confirm_mark_unlocked(&state_clone, trophy_source_clone, &app_id_clone, &platform_id_clone, &ach_clone, reload_clone.clone());
                         })),
                         &mut batch_budget,
                     ));

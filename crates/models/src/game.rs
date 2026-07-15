@@ -1,10 +1,11 @@
 use super::achievement::MergedAchievement;
+use super::kind::{GameKind, TrophySource};
 
 #[derive(Debug, Clone)]
 pub struct Game {
     pub app_id: String,
-    pub kind: String,
-    pub trophy_source: String,
+    pub kind: GameKind,
+    pub trophy_source: TrophySource,
     pub platform_id: String,
     pub db_id: i64,
     pub name: String,
@@ -62,8 +63,8 @@ impl Default for Game {
     fn default() -> Self {
         Game {
             app_id: String::new(),
-            kind: String::new(),
-            trophy_source: String::new(),
+            kind: GameKind::default(),
+            trophy_source: TrophySource::default(),
             platform_id: String::new(),
             db_id: 0,
             name: String::new(),

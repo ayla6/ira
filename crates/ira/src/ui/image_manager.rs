@@ -27,7 +27,7 @@ pub fn build_image_manager_content_with_drafts(
     content.set_margin_top(16);
     content.set_margin_bottom(16);
 
-    let is_steam = ira_models::has_steam_enrichment(&game.trophy_source);
+    let is_steam = game.trophy_source.has_steam_enrichment();
 
     let sections: [SectionEntry; 5] = [
         ("Icon", "icon.png", "icon", 48, 48, &[]),
@@ -111,7 +111,7 @@ fn find_best_image_path(game: &Game, field: &str, file: &str, id: &str, save_dir
             return sgdb;
         }
     }
-    let native = if game.kind == ira_models::PS4 {
+    let native = if game.kind == ira_models::GameKind::Ps4 {
         format!("{}/{}", ira_parser::ps4_data_dir(save_dir, id).to_string_lossy(), file)
     } else {
         format!("{}/{}", ira_parser::data_dir(save_dir, id).to_string_lossy(), file)
@@ -119,7 +119,7 @@ fn find_best_image_path(game: &Game, field: &str, file: &str, id: &str, save_dir
     if std::path::Path::new(&native).is_file() {
         return native;
     }
-    if field == "icon" && game.kind == ira_models::PS4 && !game.icon_path.is_empty() && std::path::Path::new(&game.icon_path).is_file() {
+    if field == "icon" && game.kind == ira_models::GameKind::Ps4 && !game.icon_path.is_empty() && std::path::Path::new(&game.icon_path).is_file() {
         return game.icon_path.clone();
     }
     String::new()
@@ -188,13 +188,13 @@ struct BuildImageSectionParams<'a> {
 
 fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     let BuildImageSectionParams { label, file_base, asset_type, thumb_w, thumb_h, dims, game, state, parent_win, pending_copies } = params;
-    let is_steam = ira_models::has_steam_enrichment(&game.trophy_source);
+    let is_steam = game.trophy_source.has_steam_enrichment();
     let id = game.app_id.clone();
     let save_dir = state.borrow().save_dir.clone();
 
     let cloud_dir = if !game.sgdb_id.is_empty() {
         ira_parser::sgdb_data_dir(&save_dir, &game.sgdb_id)
-    } else if game.kind == ira_models::PS4 {
+    } else if game.kind == ira_models::GameKind::Ps4 {
         ira_parser::ps4_data_dir(&save_dir, &id)
     } else {
         ira_parser::data_dir(&save_dir, &id)
@@ -281,7 +281,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         btns.append(&btn);
     }
 
-    if is_steam && asset_type == "icon" && game.trophy_source == ira_models::STEAM_NATIVE {
+    if is_steam && asset_type == "icon" && game.trophy_source == ira_models::TrophySource::SteamNative {
         let btn = gtk4::Button::with_label("Steam");
         let steam = state.borrow().steam.clone();
         let id_c = id.clone();
@@ -351,7 +351,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     btns.append(&btn);
     }
 
-    if asset_type == "icon" && game.kind == ira_models::PS4 {
+    if asset_type == "icon" && game.kind == ira_models::GameKind::Ps4 {
         let reset_btn = gtk4::Button::with_label("Reset");
         let gc = game.clone();
         let refresh = refresh_images.clone();

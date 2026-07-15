@@ -43,7 +43,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             s.sender.clone(),
             s.games.iter()
                 .find(|g| g.db_id == game_id)
-                .map(|g| (g.kind.clone(), g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone(), g.platform_id.clone(), g.ra_core.clone(), g.emulator_override.clone()))
+                .map(|g| (g.kind, g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone(), g.platform_id.clone(), g.ra_core.clone(), g.emulator_override.clone()))
                 .unwrap_or_default(),
             s.cfg.shadps4_executable.clone(),
             s.db.clone(),
@@ -65,7 +65,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         .unwrap_or_default()
         .as_secs() as i64;
 
-    if kind == ira_models::RETRO {
+    if kind == ira_models::GameKind::Retro {
         let cc = cfg_clone.console(&platform_id);
         let exe = if !per_game_emu.is_empty() {
             &per_game_emu
@@ -98,7 +98,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             }
             Err(e) => return Err(format!("Failed to launch {}: {}", game_name, e)),
         }
-    } else if kind == ira_models::PS4 {
+    } else if kind == ira_models::GameKind::Ps4 {
         let exe = if !per_game_version.is_empty() {
             per_game_version.as_str()
         } else if !global_shadps4_exe.is_empty() {
@@ -122,7 +122,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             }
             Err(e) => return Err(format!("Failed to launch shadPS4: {}", e)),
         }
-    } else if kind == ira_models::STEAM {
+    } else if kind == ira_models::GameKind::Steam {
         let cmd = vec!["steam".to_string(), "-applaunch".to_string(), app_id.clone()];
         match ira_launcher::wrapper::spawn_game(&cmd, &[], None) {
             Ok(_child) => {

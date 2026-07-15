@@ -1,9 +1,11 @@
 use crate::DbConn;
-use ira_models::GameEntry;
+use ira_models::{GameEntry, GameKind, TrophySource};
 use rusqlite::params;
 
-pub fn add_game(conn: &DbConn, kind: &str, trophy_source: &str, steam_id: &str, game_id: &str, platform_id: &str, title: &str) -> Result<i64, String> {
+pub fn add_game(conn: &DbConn, kind: GameKind, trophy_source: TrophySource, steam_id: &str, game_id: &str, platform_id: &str, title: &str) -> Result<i64, String> {
     let c = crate::lock_db(conn)?;
+    let kind = kind.as_str();
+    let trophy_source = trophy_source.as_str();
     if !steam_id.is_empty() {
         c.execute(
             "INSERT INTO games (kind, trophy_source, steam_id, game_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -27,11 +29,11 @@ pub fn update_game_title(conn: &DbConn, id: i64, title: &str) -> Result<(), Stri
     Ok(())
 }
 
-pub fn update_game_ids(conn: &DbConn, id: i64, steam_id: &str, game_id: &str, trophy_source: &str, platform_id: &str) -> Result<(), String> {
+pub fn update_game_ids(conn: &DbConn, id: i64, steam_id: &str, game_id: &str, trophy_source: TrophySource, platform_id: &str) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.execute(
         "UPDATE games SET steam_id = ?1, game_id = ?2, trophy_source = ?3, platform_id = ?4 WHERE id = ?5",
-        params![steam_id, game_id, trophy_source, platform_id, id],
+        params![steam_id, game_id, trophy_source.as_str(), platform_id, id],
     ).map_err(|e| e.to_string())?;
     Ok(())
 }

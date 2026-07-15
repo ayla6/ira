@@ -36,7 +36,7 @@ pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
     }
 }
 
-pub fn set_achievement_earned(save_dir: &str, trophy_source: &str, app_id: &str, platform_id: &str, ach_name: &str, earned: bool) -> Result<(), String> {
+pub fn set_achievement_earned(save_dir: &str, trophy_source: ira_models::TrophySource, app_id: &str, platform_id: &str, ach_name: &str, earned: bool) -> Result<(), String> {
     let status_path = super::paths::unlock_status_path(save_dir, trophy_source, app_id, platform_id);
     let mut status_map: HashMap<String, AchievementStatus> = HashMap::new();
     if let Ok(data) = std::fs::read(&status_path) {

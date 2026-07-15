@@ -108,21 +108,21 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
 
     // Filter out disabled sources
     games.retain(|g| {
-        if !options.steam_enabled && g.kind == ira_models::STEAM { return false; }
-        if !options.shadps4_enabled && g.kind == ira_models::PS4 { return false; }
-        if !ra_any_console && g.kind == ira_models::RETRO { return false; }
+        if !options.steam_enabled && g.kind == ira_models::GameKind::Steam { return false; }
+        if !options.shadps4_enabled && g.kind == ira_models::GameKind::Ps4 { return false; }
+        if !ra_any_console && g.kind == ira_models::GameKind::Retro { return false; }
         true
     });
 
     // Remove games that will be re-added by platform builders to avoid duplicates
     if options.shadps4_enabled {
-        games.retain(|g| g.kind != ira_models::PS4);
+        games.retain(|g| g.kind != ira_models::GameKind::Ps4);
     }
     if options.steam_enabled {
-        games.retain(|g| g.kind != ira_models::STEAM);
+        games.retain(|g| g.kind != ira_models::GameKind::Steam);
     }
     if ra_any_console {
-        games.retain(|g| g.kind != ira_models::RETRO);
+        games.retain(|g| g.kind != ira_models::GameKind::Retro);
     }
 
     games.sort_by(|a, b| {
@@ -159,7 +159,7 @@ fn build_lutris_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
         if lg.service_id.is_empty() {
             continue;
         }
-        let entry = if lg.service == ira_models::STEAM {
+        let entry = if ira_models::GameKind::from_string(&lg.service) == ira_models::GameKind::Steam {
             db::find_by_steam_id(db, &lg.service_id).ok().flatten()
         } else if lg.service == "gog" {
             db::find_gog_by_product_id(db, &lg.service_id).ok().flatten()
@@ -220,11 +220,11 @@ fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
 
     for shad in &shad_games {
         let entry = db::find_by_game_id(db, &shad.npwr_id).ok().flatten()
-            .or_else(|| db::find_by_kind_platform(db, ira_models::PS4, &shad.serial).ok().flatten());
+            .or_else(|| db::find_by_kind_platform(db, ira_models::GameKind::Ps4, &shad.serial).ok().flatten());
         let (db_id, title, hidden, logo_position, logo_size, sort_title, sgdb_id, shadps4_version, last_played) = match entry {
             Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title, e.sgdb_id.clone().unwrap_or_default(), e.shadps4_version.clone(), e.last_played),
             None => {
-                match db::add_game(db, ira_models::PS4, "", "", &shad.npwr_id, &shad.serial, &shad.title) {
+                match db::add_game(db, ira_models::GameKind::Ps4, ira_models::TrophySource::Empty, "", &shad.npwr_id, &shad.serial, &shad.title) {
                     Ok(id) => (id, shad.title.clone(), false, "bottom-left".to_string(), 50, String::new(), String::new(), String::new(), 0),
                     Err(e) => {
                         eprintln!("shadPS4: failed to add {} to DB: {}", shad.serial, e);
@@ -274,7 +274,7 @@ fn cleanup_steam_entries(db: &db::DbConn, discovered: &[steam::SteamGame]) {
 
     let all_entries = db::load_all_games(db).unwrap_or_default();
     for entry in &all_entries {
-        if entry.kind == ira_models::STEAM && !discovered_ids.contains(&entry.steam_id) {
+        if entry.kind == ira_models::GameKind::Steam && !discovered_ids.contains(&entry.steam_id) {
             let _ = db::remove_game(db, entry.id);
         }
     }
@@ -289,8 +289,8 @@ fn build_steam_games(db: &db::DbConn, save_dir: &str, steam_games: &[steam::Stea
         }
         let entry = db::find_by_steam_id(db, &sg.app_id).ok().flatten();
         if entry.is_none() {
-            let kind = ira_models::STEAM;
-            let trophy_source = ira_models::STEAM_NATIVE;
+            let kind = ira_models::GameKind::Steam;
+            let trophy_source = ira_models::TrophySource::SteamNative;
             if let Err(e) = db::add_game(db, kind, trophy_source, &sg.app_id, "", &sg.app_id, &sg.name) {
                 eprintln!("Steam: failed to add {} to DB: {}", sg.app_id, e);
                 continue;

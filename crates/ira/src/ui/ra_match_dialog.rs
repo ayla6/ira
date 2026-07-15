@@ -81,10 +81,10 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                 let on_match_c = on_match.clone();
                 match_btn.connect_clicked(move |_| {
                     let app_id = ra_id.to_string();
-                    let _ = ira_db::update_game_ids(&sc.borrow().db, db_id, "", &app_id, ira_models::RA, "");
+                    let _ = ira_db::update_game_ids(&sc.borrow().db, db_id, "", &app_id, ira_models::TrophySource::Ra, "");
                     if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                         g.app_id = app_id.clone();
-                        g.trophy_source = ira_models::RA.to_string();
+                        g.trophy_source = ira_models::TrophySource::Ra;
                         g.name = ra_title.clone();
                         g.total_count = 0;
                         g.achievements.clear();
@@ -98,7 +98,7 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                     if let Some(g) = g {
                         enrich_game_async(EnrichGameParams {
                             app_id: g.app_id.clone(),
-                            trophy_source: g.trophy_source.clone(),
+                            trophy_source: g.trophy_source,
                             platform_id: g.platform_id.clone(),
                             db_id: g.db_id,
                             title: g.name.clone(),

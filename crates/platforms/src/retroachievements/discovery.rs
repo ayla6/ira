@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use ira_config::Config;
-use ira_models::{Game, RETRO, RA};
+use ira_models::{Game, GameKind, TrophySource};
 use crate::consoles::{CONSOLES, ConsoleDef};
 use crate::retroachievements::api::{RaClient, RaGameEntry};
 
@@ -149,8 +149,8 @@ pub fn build_ra_games(
                     let mut g = load_game(&e, save_dir)
                         .unwrap_or_else(|_| Game {
                             app_id: e.steam_id.clone(),
-                            kind: RETRO.to_string(),
-                            trophy_source: e.trophy_source.clone(),
+                            kind: GameKind::Retro,
+                            trophy_source: e.trophy_source,
                             platform_id: e.platform_id.clone(),
                             db_id: e.id,
                             name: if e.title.is_empty() { rom_name.clone() } else { e.title.clone() },
@@ -175,9 +175,9 @@ pub fn build_ra_games(
                                 .find(|g| g.id == id)
                                 .map(|g| g.title.clone())
                                 .unwrap_or_else(|| rom_name.clone());
-                            (id.to_string(), t, RA.to_string())
+                            (id.to_string(), t, TrophySource::Ra)
                         }
-                        None => (serial.clone().unwrap_or_else(|| rom_name.clone()), rom_name.clone(), String::new()),
+                        None => (serial.clone().unwrap_or_else(|| rom_name.clone()), rom_name.clone(), TrophySource::Empty),
                     };
 
                     let existing_by_id = ira_db::find_by_game_id(db, &app_id).ok().flatten();
@@ -188,8 +188,8 @@ pub fn build_ra_games(
                         let mut g = load_game(&e, save_dir)
                             .unwrap_or_else(|_| Game {
                                 app_id: e.game_id.clone(),
-                                kind: RETRO.to_string(),
-                                trophy_source: e.trophy_source.clone(),
+                                kind: GameKind::Retro,
+                                trophy_source: e.trophy_source,
                                 platform_id: e.platform_id.clone(),
                                 db_id: e.id,
                                 name: if e.title.is_empty() { title.clone() } else { e.title.clone() },
@@ -199,13 +199,13 @@ pub fn build_ra_games(
                         g.rom_path = rom_path_str;
                         g
                     } else {
-                        match ira_db::add_game(db, RETRO, &trophy_source, "", &app_id, console.def.id, &title) {
+                        match ira_db::add_game(db, GameKind::Retro, trophy_source, "", &app_id, console.def.id, &title) {
                             Ok(id) => {
                                 let _ = ira_db::set_rom_path(db, id, &rom_path_str);
                                 Game {
                                     app_id: app_id.clone(),
-                                    kind: RETRO.to_string(),
-                                    trophy_source: trophy_source.clone(),
+                                    kind: GameKind::Retro,
+                                    trophy_source,
                                     platform_id: console.def.id.to_string(),
                                     db_id: id,
                                     name: title.clone(),

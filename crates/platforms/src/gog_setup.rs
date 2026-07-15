@@ -43,7 +43,7 @@ pub fn add_gog_game_from_folder(
     steam.generate_steam_settings(steam_app_id)?;
 
     // Add to DB
-    ira_db::add_game(db, ira_models::LUTRIS, ira_models::NGE, steam_app_id, "", product_id, game_name)?;
+    ira_db::add_game(db, ira_models::GameKind::Lutris, ira_models::TrophySource::Nge, steam_app_id, "", product_id, game_name)?;
 
     Ok(gog_game_dir.to_string_lossy().into_owned())
 }

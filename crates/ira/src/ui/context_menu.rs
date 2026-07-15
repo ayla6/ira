@@ -57,12 +57,12 @@ pub fn show_game_context_menu(
         } else {
             None
         };
-        let game_file = if !game.game_path.is_empty() && game.kind != ira_models::STEAM {
+        let game_file = if !game.game_path.is_empty() && game.kind != ira_models::GameKind::Steam {
             Some(game.game_path.clone())
         } else {
             None
         };
-        let show_wine = game.kind == ira_models::WINE && wine.enabled;
+        let show_wine = game.kind == ira_models::GameKind::Wine && wine.enabled;
         (game_dir, game_file, if show_wine { Some(ira_launcher::wine_launch::wine_prefix(&wine)) } else { None })
     };
 
@@ -72,12 +72,12 @@ pub fn show_game_context_menu(
     if wine_prefix.is_some() {
         folders_menu.append(Some("Wine prefix"), Some("game.open_wine_prefix"));
     }
-    if ira_models::has_steam_enrichment(&game.trophy_source) || !game.sgdb_id.is_empty() {
+    if game.trophy_source.has_steam_enrichment() || !game.sgdb_id.is_empty() {
         folders_menu.append(Some("Image data"), Some("game.open_images"));
     }
-    if game.trophy_source == ira_models::GSE {
+    if game.trophy_source == ira_models::TrophySource::Gse {
         folders_menu.append(Some("Achievement status"), Some("game.open_steam_status"));
-    } else if game.trophy_source == ira_models::NGE {
+    } else if game.trophy_source == ira_models::TrophySource::Nge {
         folders_menu.append(Some("Achievement status"), Some("game.open_gog_status"));
     }
     if folders_menu.n_items() > 0 {
@@ -218,7 +218,7 @@ pub fn show_game_context_menu(
         actions.add_action(&open_wine_prefix);
     }
 
-    if ira_models::has_steam_enrichment(&game_clone.trophy_source) || !game_clone.sgdb_id.is_empty() {
+    if game_clone.trophy_source.has_steam_enrichment() || !game_clone.sgdb_id.is_empty() {
         let open_images = gio::SimpleAction::new("open_images", None);
         let gc = game_clone.clone();
         let save_dir = state_clone.borrow().save_dir.clone();
@@ -230,7 +230,7 @@ pub fn show_game_context_menu(
         actions.add_action(&open_images);
     }
 
-    if game_clone.trophy_source == ira_models::GSE {
+    if game_clone.trophy_source == ira_models::TrophySource::Gse {
         let open_status = gio::SimpleAction::new("open_steam_status", None);
         let gc = game_clone.clone();
         let save_dir = state_clone.borrow().save_dir.clone();
@@ -241,7 +241,7 @@ pub fn show_game_context_menu(
         actions.add_action(&open_status);
     }
 
-    if game_clone.trophy_source == ira_models::NGE {
+    if game_clone.trophy_source == ira_models::TrophySource::Nge {
         let open_gog = gio::SimpleAction::new("open_gog_status", None);
         let gc = game_clone.clone();
         let save_dir = state_clone.borrow().save_dir.clone();

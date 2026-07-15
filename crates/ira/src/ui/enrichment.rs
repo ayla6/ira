@@ -4,7 +4,7 @@ use ira_watcher::AchievementWatcher;
 use crate::AppMessage;
 use crate::AppSender;
 use crate::GameEntry;
-use ira_models::has_steam_enrichment;
+
 use crate::game_loader::load_game;
 use std::sync::Mutex;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ static RA_ENRICH_LOCK: Mutex<()> = Mutex::new(());
 
 pub struct EnrichGameParams {
     pub app_id: String,
-    pub trophy_source: String,
+    pub trophy_source: ira_models::TrophySource,
     pub platform_id: String,
     pub db_id: i64,
     pub title: String,
@@ -30,10 +30,10 @@ pub struct EnrichGameParams {
 pub fn enrich_game_async(params: EnrichGameParams) {
     let EnrichGameParams { app_id, trophy_source, platform_id, db_id, title, steam, watcher, sender, save_dir, db, ra_username, ra_token, ra_password } = params;
     std::thread::spawn(move || {
-        if trophy_source == ira_models::RA {
+        if trophy_source == ira_models::TrophySource::Ra {
             let _guard = RA_ENRICH_LOCK.lock().unwrap();
             enrich_ra(EnrichRaParams {
-                app_id: &app_id, trophy_source: &trophy_source, platform_id: &platform_id,
+                app_id: &app_id, trophy_source: trophy_source.as_str(), platform_id: &platform_id,
                 db_id, title: &title, save_dir: &save_dir, sender: &sender,
                 ra_username: &ra_username, ra_token: &ra_token, ra_password: &ra_password, db: &db,
             });
@@ -44,12 +44,12 @@ pub fn enrich_game_async(params: EnrichGameParams) {
             .ok()
             .flatten()
             .unwrap_or_else(|| {
-                let mut e = GameEntry::for_reload(db_id, "", &trophy_source, &app_id, "", &platform_id);
+                let mut e = GameEntry::for_reload(db_id, ira_models::GameKind::Other, trophy_source, &app_id, "", &platform_id);
                 e.title = title.clone();
                 e
             });
 
-        if has_steam_enrichment(&trophy_source) {
+        if trophy_source.has_steam_enrichment() {
             let meta_path = ira_parser::achievements_dir(&save_dir, &app_id).join("achievements.json");
             if !meta_path.exists() {
                 if let Err(e) = steam.generate_steam_settings(&app_id) {
@@ -63,7 +63,7 @@ pub fn enrich_game_async(params: EnrichGameParams) {
             return;
         };
 
-        if has_steam_enrichment(&trophy_source) {
+        if trophy_source.has_steam_enrichment() {
             if game.name.starts_with("App ID:") {
                 if let Some(mut details) = steam.fetch_app_details(&app_id) {
                     if !details.name.is_empty() {
@@ -98,7 +98,7 @@ pub fn enrich_game_async(params: EnrichGameParams) {
                 game.hero_image_path = hero_path;
             }
 
-            if game.icon_path.is_empty() && trophy_source == ira_models::STEAM_NATIVE {
+            if game.icon_path.is_empty() && trophy_source == ira_models::TrophySource::SteamNative {
                 if let Some(png) = fetch_steam_game_icon(&app_id, &save_dir, &steam) {
                     game.icon_path = png;
                 }
@@ -251,7 +251,7 @@ fn enrich_ra(params: EnrichRaParams) {
     let entry = ira_db::find_by_game_id(db, app_id)
         .ok()
         .flatten()
-        .unwrap_or_else(|| GameEntry::for_reload(db_id, ira_models::RETRO, trophy_source, "", app_id, platform_id));
+        .unwrap_or_else(|| GameEntry::for_reload(db_id, ira_models::GameKind::Retro, ira_models::TrophySource::from_string(trophy_source), "", app_id, platform_id));
     let mut game = match load_game(&entry, save_dir) {
         Ok(g) => g,
         Err(e) => {

@@ -28,8 +28,8 @@ pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, game_i
 pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<ira_models::GameEntry> {
     Ok(ira_models::GameEntry {
         id: row.get(0)?,
-        kind: row.get(1)?,
-        trophy_source: row.get(2)?,
+        kind: ira_models::GameKind::from_string(&row.get::<_, String>(1)?),
+        trophy_source: ira_models::TrophySource::from_string(&row.get::<_, String>(2)?),
         steam_id: row.get(3)?,
         game_id: row.get(4)?,
         platform_id: row.get(5)?,

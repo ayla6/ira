@@ -110,7 +110,7 @@ pub fn make_browse_button(
 }
 
 pub fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
-    updated.kind = existing.kind.clone();
+    updated.kind = existing.kind;
     updated.game_path = existing.game_path.clone();
 
     if !existing.name.is_empty() && !existing.name.starts_with("App ID:") {

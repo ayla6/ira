@@ -33,7 +33,7 @@ pub(super) fn build_game_general_page(
     sort_group.add(&sort_entry);
     general_page.append(&sort_group);
 
-    if !game.game_path.is_empty() && game.kind != ira_models::STEAM {
+    if !game.game_path.is_empty() && game.kind != ira_models::GameKind::Steam {
         let path_group = adw::PreferencesGroup::new();
         let path_row = adw::ActionRow::new();
         path_row.set_title("Game file");
@@ -45,7 +45,7 @@ pub(super) fn build_game_general_page(
     }
 
     let pending_version: Rc<RefCell<Option<String>>> = Default::default();
-    if game.kind == ira_models::PS4 {
+    if game.kind == ira_models::GameKind::Ps4 {
         let shadps4_versions = ira_platforms::ps4::read_shadps4_versions();
         if !shadps4_versions.is_empty() {
             let version_group = adw::PreferencesGroup::new();
@@ -79,7 +79,7 @@ pub(super) fn build_game_general_page(
 
     let pending_ra_core: Rc<RefCell<Option<String>>> = Default::default();
     let pending_emulator: Rc<RefCell<Option<String>>> = Default::default();
-    if game.kind == ira_models::RETRO {
+    if game.kind == ira_models::GameKind::Retro {
         let emulators = ira_platforms::emulator_detect::detect_emulators(&game.platform_id);
         let cores = ira_platforms::emulator_detect::detect_ra_cores();
         if !emulators.is_empty() {
@@ -191,10 +191,10 @@ pub(super) fn build_game_general_page(
 
     let mut app_id_entry: Option<adw::EntryRow> = None;
 
-    if game.trophy_source == ira_models::GSE || game.trophy_source == ira_models::NGE || game.kind == ira_models::PS4 {
+    if game.trophy_source == ira_models::TrophySource::Gse || game.trophy_source == ira_models::TrophySource::Nge || game.kind == ira_models::GameKind::Ps4 {
         let ids_group = adw::PreferencesGroup::new();
         ids_group.set_title("Service IDs");
-    if game.kind == ira_models::PS4 {
+    if game.kind == ira_models::GameKind::Ps4 {
             let row = adw::ActionRow::new();
             row.set_title("NPWR Code");
             row.set_subtitle(&game.app_id);
@@ -205,7 +205,7 @@ pub(super) fn build_game_general_page(
             serial_row.set_subtitle(&game.platform_id);
             serial_row.set_sensitive(false);
             ids_group.add(&serial_row);
-        } else if game.trophy_source == ira_models::GSE {
+        } else if game.trophy_source == ira_models::TrophySource::Gse {
             let row = adw::EntryRow::new();
             row.set_title("Steam App ID");
             row.set_text(&game.app_id);
@@ -232,7 +232,7 @@ pub(super) fn build_game_general_page(
             row.add_suffix(&search_btn);
             ids_group.add(&row);
             app_id_entry = Some(row);
-        } else if game.trophy_source == ira_models::NGE {
+        } else if game.trophy_source == ira_models::TrophySource::Nge {
             let row = adw::EntryRow::new();
             row.set_title("GOG Product ID");
             row.set_text(&game.app_id);
@@ -242,7 +242,7 @@ pub(super) fn build_game_general_page(
         general_page.append(&ids_group);
     }
 
-    let language_row = if !languages.is_empty() && (game.trophy_source == ira_models::GSE || game.trophy_source == ira_models::NGE) {
+    let language_row = if !languages.is_empty() && (game.trophy_source == ira_models::TrophySource::Gse || game.trophy_source == ira_models::TrophySource::Nge) {
         let lang_group = adw::PreferencesGroup::new();
         lang_group.set_title("Language");
         let model = super::helpers::string_list_from(languages);
@@ -257,7 +257,7 @@ pub(super) fn build_game_general_page(
             config.map(|(l, _, _)| l.exe).unwrap_or_default()
         };
         let current_lang = ira_platforms::api_emulators::read_current_language(
-            &game.trophy_source, &game_exe, &save_dir, &game.app_id,
+            game.trophy_source, &game_exe, &save_dir, &game.app_id,
         );
         let selected = current_lang
             .as_ref()

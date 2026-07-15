@@ -1,33 +1,130 @@
-// Kinds (how the game is managed/launched)
-pub const LUTRIS: &str = "lutris";
-pub const WINE: &str = "wine";
-pub const LINUX: &str = "linux";
-pub const PS4: &str = "ps4";
-pub const SGDB: &str = "sgdb";
-pub const STEAM: &str = "steam";
-pub const RETRO: &str = "retro";
+use serde::{Deserialize, Serialize};
 
-// Trophy sources (where achievements come from)
-pub const GSE: &str = "gse";
-pub const NGE: &str = "nge";
-pub const STEAM_NATIVE: &str = "steam";
-pub const RA: &str = "ra";
-
-pub fn has_steam_enrichment(trophy_source: &str) -> bool {
-    trophy_source == GSE || trophy_source == NGE || trophy_source == STEAM_NATIVE
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GameKind {
+    Lutris,
+    Wine,
+    Linux,
+    #[default]
+    Other,
+    Ps4,
+    Sgdb,
+    Steam,
+    Retro,
 }
 
-pub fn kind_display_name(kind: &str) -> &str {
-    match kind {
-        LUTRIS => "Lutris",
-        WINE => "Windows",
-        LINUX => "Linux",
-        PS4 => "PS4",
-        SGDB => "SteamGridDB",
-        STEAM => "Steam",
-        RETRO => "Retro",
-        "other" => "Other",
-        _ => "Other",
+impl GameKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GameKind::Lutris => "lutris",
+            GameKind::Wine => "wine",
+            GameKind::Linux => "linux",
+            GameKind::Ps4 => "ps4",
+            GameKind::Sgdb => "sgdb",
+            GameKind::Steam => "steam",
+            GameKind::Retro => "retro",
+            GameKind::Other => "other",
+        }
+    }
+
+    pub fn from_string(s: &str) -> Self {
+        match s {
+            "lutris" => GameKind::Lutris,
+            "wine" => GameKind::Wine,
+            "linux" => GameKind::Linux,
+            "ps4" => GameKind::Ps4,
+            "sgdb" => GameKind::Sgdb,
+            "steam" => GameKind::Steam,
+            "retro" => GameKind::Retro,
+            _ => GameKind::Other,
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            GameKind::Lutris => "Lutris",
+            GameKind::Wine => "Windows",
+            GameKind::Linux => "Linux",
+            GameKind::Ps4 => "PS4",
+            GameKind::Sgdb => "SteamGridDB",
+            GameKind::Steam => "Steam",
+            GameKind::Retro => "Retro",
+            GameKind::Other => "Other",
+        }
+    }
+}
+
+impl std::fmt::Display for GameKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for GameKind {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for GameKind {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(GameKind::from_string(&s))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TrophySource {
+    #[default]
+    Empty,
+    Gse,
+    Nge,
+    SteamNative,
+    Ra,
+}
+
+impl TrophySource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TrophySource::Empty => "",
+            TrophySource::Gse => "gse",
+            TrophySource::Nge => "nge",
+            TrophySource::SteamNative => "steam",
+            TrophySource::Ra => "ra",
+        }
+    }
+
+    pub fn from_string(s: &str) -> Self {
+        match s {
+            "gse" => TrophySource::Gse,
+            "nge" => TrophySource::Nge,
+            "steam" => TrophySource::SteamNative,
+            "ra" => TrophySource::Ra,
+            _ => TrophySource::Empty,
+        }
+    }
+
+    pub fn has_steam_enrichment(self) -> bool {
+        matches!(self, TrophySource::Gse | TrophySource::Nge | TrophySource::SteamNative)
+    }
+}
+
+impl std::fmt::Display for TrophySource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for TrophySource {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for TrophySource {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(TrophySource::from_string(&s))
     }
 }
 
@@ -36,77 +133,72 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_game_kind_roundtrip() {
+        for kind in [GameKind::Lutris, GameKind::Wine, GameKind::Linux, GameKind::Ps4, GameKind::Sgdb, GameKind::Steam, GameKind::Retro, GameKind::Other] {
+            let s = kind.as_str();
+            let back = GameKind::from_string(s);
+            assert_eq!(kind, back);
+        }
+    }
+
+    #[test]
+    fn test_game_kind_unknown() {
+        assert_eq!(GameKind::from_string("garbage"), GameKind::Other);
+    }
+
+    #[test]
+    fn test_game_kind_default() {
+        assert_eq!(GameKind::default(), GameKind::Other);
+    }
+
+    #[test]
+    fn test_trophy_source_roundtrip() {
+        for ts in [TrophySource::Gse, TrophySource::Nge, TrophySource::SteamNative, TrophySource::Ra, TrophySource::Empty] {
+            let s = ts.as_str();
+            let back = TrophySource::from_string(s);
+            assert_eq!(ts, back);
+        }
+    }
+
+    #[test]
+    fn test_trophy_source_unknown() {
+        assert_eq!(TrophySource::from_string("garbage"), TrophySource::Empty);
+    }
+
+    #[test]
     fn test_has_steam_enrichment_gse() {
-        assert!(has_steam_enrichment(GSE));
+        assert!(TrophySource::Gse.has_steam_enrichment());
     }
 
     #[test]
     fn test_has_steam_enrichment_nge() {
-        assert!(has_steam_enrichment(NGE));
+        assert!(TrophySource::Nge.has_steam_enrichment());
     }
 
     #[test]
     fn test_has_steam_enrichment_steam() {
-        assert!(has_steam_enrichment(STEAM_NATIVE));
+        assert!(TrophySource::SteamNative.has_steam_enrichment());
     }
 
     #[test]
     fn test_has_steam_enrichment_ra() {
-        assert!(!has_steam_enrichment(RA));
+        assert!(!TrophySource::Ra.has_steam_enrichment());
     }
 
     #[test]
     fn test_has_steam_enrichment_empty() {
-        assert!(!has_steam_enrichment(""));
+        assert!(!TrophySource::Empty.has_steam_enrichment());
     }
 
     #[test]
-    fn test_has_steam_enrichment_unknown() {
-        assert!(!has_steam_enrichment("unknown"));
-    }
-
-    #[test]
-    fn test_kind_display_name_lutris() {
-        assert_eq!(kind_display_name(LUTRIS), "Lutris");
-    }
-
-    #[test]
-    fn test_kind_display_name_wine() {
-        assert_eq!(kind_display_name(WINE), "Windows");
-    }
-
-    #[test]
-    fn test_kind_display_name_linux() {
-        assert_eq!(kind_display_name(LINUX), "Linux");
-    }
-
-    #[test]
-    fn test_kind_display_name_ps4() {
-        assert_eq!(kind_display_name(PS4), "PS4");
-    }
-
-    #[test]
-    fn test_kind_display_name_sgdb() {
-        assert_eq!(kind_display_name(SGDB), "SteamGridDB");
-    }
-
-    #[test]
-    fn test_kind_display_name_steam() {
-        assert_eq!(kind_display_name(STEAM), "Steam");
-    }
-
-    #[test]
-    fn test_kind_display_name_retro() {
-        assert_eq!(kind_display_name(RETRO), "Retro");
-    }
-
-    #[test]
-    fn test_kind_display_name_other() {
-        assert_eq!(kind_display_name("other"), "Other");
-    }
-
-    #[test]
-    fn test_kind_display_name_unknown() {
-        assert_eq!(kind_display_name("unknown"), "Other");
+    fn test_kind_display_name_all() {
+        assert_eq!(GameKind::Lutris.display_name(), "Lutris");
+        assert_eq!(GameKind::Wine.display_name(), "Windows");
+        assert_eq!(GameKind::Linux.display_name(), "Linux");
+        assert_eq!(GameKind::Ps4.display_name(), "PS4");
+        assert_eq!(GameKind::Sgdb.display_name(), "SteamGridDB");
+        assert_eq!(GameKind::Steam.display_name(), "Steam");
+        assert_eq!(GameKind::Retro.display_name(), "Retro");
+        assert_eq!(GameKind::Other.display_name(), "Other");
     }
 }

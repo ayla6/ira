@@ -52,7 +52,7 @@ pub(super) fn build_dlc_page(
 
 pub(super) struct ApiEmuPageParams<'a> {
     pub emu_exe: &'a str,
-    pub emu_trophy_source: &'a str,
+    pub emu_trophy_source: ira_models::TrophySource,
     pub emu_app_id: &'a str,
     pub save_dir: &'a str,
 }
@@ -66,7 +66,7 @@ pub(super) fn build_api_emulator_page(
 ) {
     let (emu_exe, emu_trophy_source, emu_app_id, save_dir) = 
         (params.emu_exe, params.emu_trophy_source, params.emu_app_id, params.save_dir);
-    if (emu_trophy_source != ira_models::GSE && emu_trophy_source != ira_models::NGE) || emu_exe.is_empty() {
+    if (emu_trophy_source != ira_models::TrophySource::Gse && emu_trophy_source != ira_models::TrophySource::Nge) || emu_exe.is_empty() {
         return;
     }
 
@@ -79,7 +79,7 @@ pub(super) fn build_api_emulator_page(
     status_group.set_title("Status");
 
     let status_row = adw::ActionRow::new();
-    let is_installed = if emu_trophy_source == ira_models::GSE {
+    let is_installed = if emu_trophy_source == ira_models::TrophySource::Gse {
         ira_platforms::api_emulators::is_gse_installed(emu_exe)
     } else {
         ira_platforms::api_emulators::is_nge_installed(emu_exe)
@@ -97,10 +97,10 @@ pub(super) fn build_api_emulator_page(
         let uninstall_btn = gtk4::Button::with_label("Uninstall API emulator");
         uninstall_btn.add_css_class("destructive-action");
         let exe_c = emu_exe.to_string();
-        let ts_c = emu_trophy_source.to_string();
         let status_c = status_row.clone();
+        let ts_c = emu_trophy_source;
         uninstall_btn.connect_clicked(move |_| {
-            let result = if ts_c == ira_models::GSE {
+            let result = if ts_c == ira_models::TrophySource::Gse {
                 ira_platforms::api_emulators::uninstall_gse(&exe_c)
             } else {
                 ira_platforms::api_emulators::uninstall_nge(&exe_c)
@@ -114,12 +114,12 @@ pub(super) fn build_api_emulator_page(
         });
         action_group.add(&uninstall_btn);
     } else {
-        let versions = if emu_trophy_source == ira_models::GSE {
+        let versions = if emu_trophy_source == ira_models::TrophySource::Gse {
             ira_platforms::api_emulators::list_gse_versions(save_dir)
         } else {
             ira_platforms::api_emulators::list_gog_versions(save_dir)
         };
-        let has_dlls = if emu_trophy_source == ira_models::GSE {
+        let has_dlls = if emu_trophy_source == ira_models::TrophySource::Gse {
             ira_platforms::api_emulators::has_original_steam_dlls(emu_exe)
         } else {
             ira_platforms::api_emulators::has_original_gog_dlls(emu_exe)
@@ -160,17 +160,17 @@ pub(super) fn build_api_emulator_page(
         install_btn.add_css_class("suggested-action");
         install_btn.set_sensitive(has_dlls);
         let exe_c = emu_exe.to_string();
-        let ts_c = emu_trophy_source.to_string();
         let app_id_c = emu_app_id.to_string();
         let save_dir_c = save_dir.to_string();
         let status_c = status_row.clone();
         let langs_c = languages.to_vec();
+        let ts_c = emu_trophy_source;
         install_btn.connect_clicked(move |_| {
             let ver = version_row.as_ref().map(|vr| {
                 let idx = vr.selected() as usize;
                 if idx < versions.len() { versions[idx].clone() } else { String::new() }
             }).unwrap_or_default();
-            let result = if ts_c == ira_models::GSE {
+            let result = if ts_c == ira_models::TrophySource::Gse {
                 ira_platforms::api_emulators::install_gse(&save_dir_c, &exe_c, &app_id_c, &langs_c, &ver)
             } else {
                 ira_platforms::api_emulators::install_nge(&save_dir_c, &exe_c, &app_id_c, &ver)
@@ -185,7 +185,7 @@ pub(super) fn build_api_emulator_page(
         action_group.add(&install_btn);
     }
 
-    if emu_trophy_source == ira_models::GSE && is_installed {
+    if emu_trophy_source == ira_models::TrophySource::Gse && is_installed {
         let gen_btn = gtk4::Button::with_label("Generate steam_interfaces.txt");
         gen_btn.add_css_class("flat");
         let exe_c = emu_exe.to_string();
@@ -228,7 +228,7 @@ pub(super) struct VarW {
 pub(super) fn build_variants_page(
     state: &SharedState,
     db_id: i64,
-    game_kind: &str,
+    game_kind: ira_models::GameKind,
     has_config: bool,
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
@@ -330,7 +330,7 @@ pub(super) fn build_variants_page(
     variant_scroll.set_child(Some(&variant_page));
     variant_scroll.set_vexpand(true);
     variant_scroll.set_hexpand(true);
-    if game_kind != ira_models::STEAM && game_kind != ira_models::PS4 && game_kind != ira_models::RETRO && (game_kind != ira_models::LUTRIS || has_config || !variants.is_empty()) {
+    if game_kind != ira_models::GameKind::Steam && game_kind != ira_models::GameKind::Ps4 && game_kind != ira_models::GameKind::Retro && (game_kind != ira_models::GameKind::Lutris || has_config || !variants.is_empty()) {
         sidebar.append(&settings_dialog::sidebar_separator());
         sidebar.append(&settings_dialog::settings_sidebar_row("application-x-executable-symbolic", "Variants"));
         stack.add_named(&variant_scroll, Some("variants"));

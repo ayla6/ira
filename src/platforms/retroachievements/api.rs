@@ -180,6 +180,20 @@ impl RaClient {
         Ok(resp.response)
     }
 
+    pub fn search_ra_games(save_dir: &str, console_id: u32, query: &str) -> Vec<RaGameEntry> {
+        let cache = paths::console_games_path(save_dir, console_id);
+        if let Ok(data) = std::fs::read(&cache) {
+            if let Ok(resp) = serde_json::from_slice::<ConsoleGamesResponse>(&data) {
+                let q = query.to_lowercase();
+                return resp.response.into_iter()
+                    .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset"))
+                    .filter(|g| g.title.to_lowercase().contains(&q))
+                    .collect();
+            }
+        }
+        Vec::new()
+    }
+
     pub fn fetch_game_data(&self, save_dir: &str, game_id: &str) -> Result<RaGameData, String> {
         let cache = paths::game_data_path(save_dir, game_id);
         if cache.is_file() {

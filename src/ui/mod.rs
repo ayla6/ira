@@ -16,6 +16,7 @@ mod background;
 mod dialogs;
 mod context_menu;
 mod mass_match_dialog;
+pub use mass_match_dialog::show_ra_search_dialog;
 mod add_game;
 mod add_game_dialog;
 mod edit_game_dialog;

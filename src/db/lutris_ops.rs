@@ -17,7 +17,7 @@ pub fn get_ignored_lutris_ids(conn: &DbConn) -> std::collections::HashSet<i64> {
 }
 
 pub fn set_lutris_hidden(conn: &DbConn, lutris_id: i64, hidden: bool) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute(
         "INSERT INTO lutris_meta (lutris_id, hidden) VALUES (?1, ?2)
          ON CONFLICT(lutris_id) DO UPDATE SET hidden = excluded.hidden",
@@ -42,14 +42,14 @@ pub fn get_hidden_lutris_ids(conn: &DbConn) -> std::collections::HashSet<i64> {
 }
 
 pub fn set_lutris_db_id(conn: &DbConn, id: i64, lutris_db_id: i64) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute("UPDATE games SET lutris_db_id = ?1 WHERE id = ?2", params![lutris_db_id, id])
         .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub fn unmatch_game(conn: &DbConn, lutris_db_id: i64) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute(
         "UPDATE games SET lutris_db_id = NULL, manual_unmatch = 1, trophy_source = '' WHERE lutris_db_id = ?1",
         params![lutris_db_id],
@@ -58,7 +58,7 @@ pub fn unmatch_game(conn: &DbConn, lutris_db_id: i64) -> Result<(), String> {
 }
 
 pub fn upsert_matching(conn: &DbConn, lutris_db_id: i64, steam_id: &str, kind: &str, trophy_source: &str, platform_id: &str) -> Result<i64, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
 
     let existing_by_steam: Option<i64> = tx.query_row(

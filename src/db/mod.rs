@@ -57,6 +57,17 @@ pub(super) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<crate
 
 pub type DbConn = Arc<Mutex<Connection>>;
 
+pub(super) fn lock_db(conn: &DbConn) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
+    conn.lock().map_err(|e| e.to_string())
+}
+
+pub(super) fn update_field(conn: &DbConn, id: i64, column: &str, value: &dyn rusqlite::types::ToSql) -> Result<(), String> {
+    let c = lock_db(conn)?;
+    let sql = format!("UPDATE games SET {} = ?1 WHERE id = ?2", column);
+    c.execute(&sql, rusqlite::params![value, id]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn init_db(db_path: &str) -> DbConn {
     if let Some(parent) = std::path::Path::new(db_path).parent() {
         std::fs::create_dir_all(parent).expect("failed to create database directory");

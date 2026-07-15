@@ -3,30 +3,32 @@ use crate::models::Group;
 use rusqlite::params;
 
 pub fn create_group(conn: &DbConn, name: &str) -> Result<i64, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute("INSERT INTO groups (name) VALUES (?1)", params![name])
         .map_err(|e| e.to_string())?;
     Ok(c.last_insert_rowid())
 }
 
 pub fn rename_group(conn: &DbConn, id: i64, name: &str) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute("UPDATE groups SET name = ?1 WHERE id = ?2", params![name, id])
         .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub fn delete_group(conn: &DbConn, id: i64) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
-    c.execute("DELETE FROM game_groups WHERE group_id = ?1", params![id])
+    let c = crate::db::lock_db(conn)?;
+    let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM game_groups WHERE group_id = ?1", params![id])
         .map_err(|e| e.to_string())?;
-    c.execute("DELETE FROM groups WHERE id = ?1", params![id])
+    tx.execute("DELETE FROM groups WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub fn get_all_groups(conn: &DbConn) -> Result<Vec<Group>, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     let mut stmt = c
         .prepare("SELECT id, name FROM groups ORDER BY name COLLATE NOCASE")
         .map_err(|e| e.to_string())?;
@@ -46,7 +48,7 @@ pub fn get_all_groups(conn: &DbConn) -> Result<Vec<Group>, String> {
 }
 
 pub fn add_game_to_group(conn: &DbConn, game_id: i64, group_id: i64) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute(
         "INSERT OR IGNORE INTO game_groups (game_id, group_id) VALUES (?1, ?2)",
         params![game_id, group_id],
@@ -56,7 +58,7 @@ pub fn add_game_to_group(conn: &DbConn, game_id: i64, group_id: i64) -> Result<(
 }
 
 pub fn remove_game_from_group(conn: &DbConn, game_id: i64, group_id: i64) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute(
         "DELETE FROM game_groups WHERE game_id = ?1 AND group_id = ?2",
         params![game_id, group_id],
@@ -66,7 +68,7 @@ pub fn remove_game_from_group(conn: &DbConn, game_id: i64, group_id: i64) -> Res
 }
 
 pub fn get_groups_for_game(conn: &DbConn, game_id: i64) -> Result<Vec<Group>, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     let mut stmt = c
         .prepare(
             "SELECT g.id, g.name FROM groups g
@@ -91,7 +93,7 @@ pub fn get_groups_for_game(conn: &DbConn, game_id: i64) -> Result<Vec<Group>, St
 }
 
 pub fn get_game_ids_in_group(conn: &DbConn, group_id: i64) -> Result<Vec<i64>, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     let mut stmt = c
         .prepare("SELECT game_id FROM game_groups WHERE group_id = ?1")
         .map_err(|e| e.to_string())?;

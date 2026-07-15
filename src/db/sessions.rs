@@ -4,7 +4,7 @@ use rusqlite::params;
 
 pub fn record_session(conn: &DbConn, game_id: i64, started_at: i64, ended_at: i64) -> Result<i64, String> {
     let duration = ended_at - started_at;
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute(
         "INSERT INTO play_sessions (game_id, started_at, ended_at, duration_seconds) VALUES (?1, ?2, ?3, ?4)",
         params![game_id, started_at, ended_at, duration],
@@ -14,7 +14,7 @@ pub fn record_session(conn: &DbConn, game_id: i64, started_at: i64, ended_at: i6
 }
 
 pub fn get_sessions_for_game(conn: &DbConn, game_id: i64) -> Result<Vec<PlaySession>, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     let mut stmt = c
         .prepare("SELECT id, game_id, started_at, ended_at, duration_seconds FROM play_sessions WHERE game_id = ?1 ORDER BY started_at DESC")
         .map_err(|e| e.to_string())?;
@@ -48,7 +48,7 @@ pub fn get_sessions_for_date(conn: &DbConn, date: chrono::NaiveDate) -> Result<V
 }
 
 pub fn get_sessions_range(conn: &DbConn, from: i64, to: i64) -> Result<Vec<PlaySession>, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     let mut stmt = c
         .prepare("SELECT id, game_id, started_at, ended_at, duration_seconds FROM play_sessions WHERE started_at >= ?1 AND started_at < ?2 ORDER BY started_at DESC")
         .map_err(|e| e.to_string())?;
@@ -71,7 +71,7 @@ pub fn get_sessions_range(conn: &DbConn, from: i64, to: i64) -> Result<Vec<PlayS
 }
 
 pub fn get_total_playtime_for_game(conn: &DbConn, game_id: i64) -> Result<i64, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     let mut stmt = c
         .prepare("SELECT COALESCE(SUM(duration_seconds), 0) FROM play_sessions WHERE game_id = ?1")
         .map_err(|e| e.to_string())?;
@@ -82,7 +82,7 @@ pub fn get_total_playtime_for_game(conn: &DbConn, game_id: i64) -> Result<i64, S
 }
 
 pub fn get_playtime_by_day(conn: &DbConn, from: i64, to: i64) -> Result<Vec<(chrono::NaiveDate, i64)>, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     let mut stmt = c
         .prepare("SELECT date(started_at, 'unixepoch') AS day, SUM(duration_seconds) FROM play_sessions WHERE started_at >= ?1 AND started_at < ?2 GROUP BY day ORDER BY day DESC")
         .map_err(|e| e.to_string())?;
@@ -103,7 +103,7 @@ pub fn get_playtime_by_day(conn: &DbConn, from: i64, to: i64) -> Result<Vec<(chr
 }
 
 pub fn delete_sessions_for_game(conn: &DbConn, game_id: i64) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute("DELETE FROM play_sessions WHERE game_id = ?1", params![game_id])
         .map_err(|e| e.to_string())?;
     Ok(())

@@ -3,7 +3,7 @@ use crate::models::{GameLaunchConfig, WineConfig};
 use rusqlite::params;
 
 pub fn get_game_config(conn: &DbConn, game_id: i64) -> Result<Option<(GameLaunchConfig, WineConfig, Option<i64>)>, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     let mut stmt = c
         .prepare("SELECT launch_config, wine_config, profile_id FROM game_configs WHERE game_id = ?1")
         .map_err(|e| e.to_string())?;
@@ -43,7 +43,7 @@ pub fn save_game_config(
 ) -> Result<(), String> {
     let launch_str = serde_json::to_string(launch).map_err(|e| e.to_string())?;
     let wine_str = serde_json::to_string(wine).map_err(|e| e.to_string())?;
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute(
         "INSERT INTO game_configs (game_id, launch_config, wine_config, profile_id) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(game_id) DO UPDATE SET launch_config = excluded.launch_config, wine_config = excluded.wine_config, profile_id = excluded.profile_id",
@@ -54,7 +54,7 @@ pub fn save_game_config(
 }
 
 pub fn delete_game_config(conn: &DbConn, game_id: i64) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute("DELETE FROM game_configs WHERE game_id = ?1", params![game_id])
         .map_err(|e| e.to_string())?;
     Ok(())

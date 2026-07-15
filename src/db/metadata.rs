@@ -10,7 +10,7 @@ pub fn store_game_metadata(
     steam_review_score: i64,
     steam_review_count: i64,
 ) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute(
         "UPDATE games SET
             release_date = ?1,

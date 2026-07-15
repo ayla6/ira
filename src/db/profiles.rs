@@ -10,7 +10,7 @@ pub fn add_profile(
     prefix: &str,
     arch: &str,
 ) -> Result<i64, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute(
         "INSERT INTO wine_profiles (name, wine_version, custom_wine_path, prefix, arch) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![name, wine_version, custom_wine_path, prefix, arch],
@@ -19,7 +19,7 @@ pub fn add_profile(
 }
 
 pub fn get_all_profiles(conn: &DbConn) -> Result<Vec<WineProfile>, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     let mut stmt = c.prepare(
         "SELECT id, name, wine_version, custom_wine_path, prefix, arch FROM wine_profiles ORDER BY name",
     ).map_err(|e| e.to_string())?;
@@ -49,7 +49,7 @@ pub fn update_profile(
     prefix: &str,
     arch: &str,
 ) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute(
         "UPDATE wine_profiles SET name = ?1, wine_version = ?2, custom_wine_path = ?3, prefix = ?4, arch = ?5 WHERE id = ?6",
         params![name, wine_version, custom_wine_path, prefix, arch, id],
@@ -58,14 +58,14 @@ pub fn update_profile(
 }
 
 pub fn delete_profile(conn: &DbConn, id: i64) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute("DELETE FROM wine_profiles WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub fn get_profile(conn: &DbConn, id: i64) -> Result<Option<WineProfile>, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     let mut stmt = c.prepare(
         "SELECT id, name, wine_version, custom_wine_path, prefix, arch FROM wine_profiles WHERE id = ?1",
     ).map_err(|e| e.to_string())?;

@@ -18,7 +18,7 @@ pub fn create_variants_table(conn: &DbConn) {
 }
 
 pub fn get_variants(conn: &DbConn, game_id: i64) -> Result<Vec<GameVariant>, String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     let mut stmt = c.prepare(
         "SELECT id, game_id, name, exe, working_dir, args, env_vars FROM game_variants WHERE game_id = ?1 ORDER BY id"
     ).map_err(|e| e.to_string())?;
@@ -45,7 +45,7 @@ pub fn get_variants(conn: &DbConn, game_id: i64) -> Result<Vec<GameVariant>, Str
 
 pub fn add_variant(conn: &DbConn, variant: &GameVariant) -> Result<i64, String> {
     let env_str = serde_json::to_string(&variant.env_vars).map_err(|e| e.to_string())?;
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute(
         "INSERT INTO game_variants (game_id, name, exe, working_dir, args, env_vars) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![variant.game_id, variant.name, variant.exe, variant.working_dir, variant.args, env_str],
@@ -55,7 +55,7 @@ pub fn add_variant(conn: &DbConn, variant: &GameVariant) -> Result<i64, String> 
 
 pub fn update_variant(conn: &DbConn, variant: &GameVariant) -> Result<(), String> {
     let env_str = serde_json::to_string(&variant.env_vars).map_err(|e| e.to_string())?;
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute(
         "UPDATE game_variants SET name=?1, exe=?2, working_dir=?3, args=?4, env_vars=?5 WHERE id=?6",
         params![variant.name, variant.exe, variant.working_dir, variant.args, env_str, variant.id],
@@ -64,7 +64,7 @@ pub fn update_variant(conn: &DbConn, variant: &GameVariant) -> Result<(), String
 }
 
 pub fn delete_variant(conn: &DbConn, variant_id: i64) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute("DELETE FROM game_variants WHERE id = ?1", params![variant_id])
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -96,7 +96,7 @@ pub fn set_default_variant(conn: &DbConn, game_id: i64, variant_id: Option<i64>)
 }
 
 pub fn delete_all_variants(conn: &DbConn, game_id: i64) -> Result<(), String> {
-    let c = conn.lock().map_err(|e| e.to_string())?;
+    let c = crate::db::lock_db(conn)?;
     c.execute("DELETE FROM game_variants WHERE game_id = ?1", params![game_id])
         .map_err(|e| e.to_string())?;
     Ok(())

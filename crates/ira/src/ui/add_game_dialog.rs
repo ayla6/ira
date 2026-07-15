@@ -24,7 +24,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
     let profiles = ira_db::get_all_profiles(&db).unwrap_or_default();
     let (general_page, name_entry, kind_row, exe_entry, args_entry, wd_entry, detect_btn, profile_row, steam_id_entry, gog_id_entry) =
         build_general_page(&win, &profiles, state);
-    sidebar.append(&super::dialogs::settings_sidebar_row("preferences-system-symbolic", "General"));
+    sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
 
     let (wine_pages, wine_widgets) = {
@@ -33,18 +33,18 @@ pub fn show_add_game_dialog(state: &SharedState) {
         super::wine_config_widget::build_wine_config_pages(&cfg, Some(&dft))
     };
 
-    let sep1 = super::dialogs::sidebar_separator();
+    let sep1 = super::settings_dialog::sidebar_separator();
     sidebar.append(&sep1);
 
     let mut wine_sidebar_rows: Vec<gtk4::ListBoxRow> = Vec::new();
     for wp in &wine_pages {
-        let row = super::dialogs::settings_sidebar_row(wp.icon, wp.label);
+        let row = super::settings_dialog::settings_sidebar_row(wp.icon, wp.label);
         sidebar.append(&row);
         stack.add_named(&wp.page, Some(wp.label));
         wine_sidebar_rows.push(row);
     }
 
-    let sep2 = super::dialogs::sidebar_separator();
+    let sep2 = super::settings_dialog::sidebar_separator();
     sidebar.append(&sep2);
 
     {
@@ -71,7 +71,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
     }
 
     let (env_page, env_vars_box, ld_preload_entry, ld_library_entry) = build_env_page();
-    sidebar.append(&super::dialogs::settings_sidebar_row("preferences-other-symbolic", "Environment"));
+    sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Environment"));
     stack.add_named(&env_page, Some("env"));
 
     let detect_group = adw::PreferencesGroup::new();
@@ -317,7 +317,7 @@ fn build_general_page(win: &adw::Window, profiles: &[ira_models::WineProfile], s
         let name_c = String::new();
         steam_search_btn.connect_clicked(move |_| {
             let on_select = Rc::new(|_: &str| {});
-            super::dialogs::show_steam_id_search_popup(&sc, &name_c, &win_c, &row_c, "Select", on_select);
+            super::steam_search::show_steam_id_search_popup(&sc, &name_c, &win_c, &row_c, "Select", on_select);
         });
     }
     steam_id_entry.add_suffix(&steam_search_btn);

@@ -12,7 +12,7 @@ use super::grid_view::show_grid_view;
 use super::game_display::display_game;
 use super::helpers::{merge_game_enrichment, clear_children};
 use super::enrichment::enrich_game_async;
-use super::dialogs::build_image_manager_content;
+use super::image_manager::build_image_manager_content;
 
 pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
     match msg {

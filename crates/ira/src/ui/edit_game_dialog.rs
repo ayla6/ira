@@ -43,8 +43,8 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     // --- General page ---
     let languages = app_details.as_ref().map(|d| d.languages.clone()).unwrap_or_default();
     let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator) =
-        super::dialogs::build_game_general_page(state, &game, &win, &languages);
-    sidebar.append(&super::dialogs::settings_sidebar_row("preferences-system-symbolic", "General"));
+        super::game_settings::build_game_general_page(state, &game, &win, &languages);
+    sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
 
     let is_lutris_unmanaged = !game.lutris_name.is_empty() && !has_config;
@@ -174,13 +174,13 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
     // --- Wine Config (only for wine kind) ---
     if show_wine && saved_wine.enabled {
-        sidebar.append(&super::dialogs::sidebar_separator());
+        sidebar.append(&super::settings_dialog::sidebar_separator());
     }
 
     let wine_widgets_opt = if show_wine && saved_wine.enabled {
         let (wine_pages, ww) = crate::ui::wine_config_widget::build_wine_config_pages(&saved_wine, Some(&app_default_wine));
         for wp in &wine_pages {
-            sidebar.append(&super::dialogs::settings_sidebar_row(wp.icon, wp.label));
+            sidebar.append(&super::settings_dialog::settings_sidebar_row(wp.icon, wp.label));
             stack.add_named(&wp.page, Some(wp.label));
         }
         Some(ww)
@@ -189,23 +189,23 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     };
 
     if show_wine && saved_wine.enabled {
-        sidebar.append(&super::dialogs::sidebar_separator());
+        sidebar.append(&super::settings_dialog::sidebar_separator());
     }
 
     // --- Images page ---
     let pending_copies: Rc<RefCell<HashMap<String, String>>> = Default::default();
     if !game.app_id.is_empty() {
-        let images_page = super::dialogs::build_image_manager_content_with_drafts(
+        let images_page = super::image_manager::build_image_manager_content_with_drafts(
             state, &game, &win, Some(pending_copies.clone()),
         );
-        sidebar.append(&super::dialogs::settings_sidebar_row("image-x-generic-symbolic", "Images"));
+        sidebar.append(&super::settings_dialog::settings_sidebar_row("image-x-generic-symbolic", "Images"));
         stack.add_named(&images_page, Some("images"));
     }
 
     // --- Logo page ---
     let logo_controls: Option<(Rc<RefCell<String>>, gtk4::Adjustment)> =
-        if let Some((logo_page, selected_pos, size_adj)) = super::dialogs::build_game_logo_page(&game) {
-            sidebar.append(&super::dialogs::settings_sidebar_row("preferences-desktop-wallpaper-symbolic", "Logo"));
+        if let Some((logo_page, selected_pos, size_adj)) = super::game_logo::build_game_logo_page(&game) {
+            sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-desktop-wallpaper-symbolic", "Logo"));
             stack.add_named(&logo_page, Some("logo"));
             Some((selected_pos, size_adj))
         } else {
@@ -240,7 +240,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             dlc_scroll.set_vexpand(true);
             dlc_scroll.set_hexpand(true);
 
-            sidebar.append(&super::dialogs::settings_sidebar_row("package-x-generic-symbolic", "DLC"));
+            sidebar.append(&super::settings_dialog::settings_sidebar_row("package-x-generic-symbolic", "DLC"));
             stack.add_named(&dlc_scroll, Some("dlc"));
             switches
         } else {
@@ -398,8 +398,8 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         emu_scroll.set_child(Some(&emu_page));
         emu_scroll.set_vexpand(true);
         emu_scroll.set_hexpand(true);
-        sidebar.append(&super::dialogs::sidebar_separator());
-        sidebar.append(&super::dialogs::settings_sidebar_row("applications-engineering-symbolic", "API Emulator"));
+        sidebar.append(&super::settings_dialog::sidebar_separator());
+        sidebar.append(&super::settings_dialog::settings_sidebar_row("applications-engineering-symbolic", "API Emulator"));
         stack.add_named(&emu_scroll, Some("api_emulator"));
     }
 
@@ -510,8 +510,8 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     variant_scroll.set_vexpand(true);
     variant_scroll.set_hexpand(true);
     if game.kind != ira_models::STEAM && game.kind != ira_models::PS4 && game.kind != ira_models::RETRO && (game.kind != ira_models::LUTRIS || has_config || !variants.is_empty()) {
-        sidebar.append(&super::dialogs::sidebar_separator());
-        sidebar.append(&super::dialogs::settings_sidebar_row("application-x-executable-symbolic", "Variants"));
+        sidebar.append(&super::settings_dialog::sidebar_separator());
+        sidebar.append(&super::settings_dialog::settings_sidebar_row("application-x-executable-symbolic", "Variants"));
         stack.add_named(&variant_scroll, Some("variants"));
     }
 
@@ -923,7 +923,7 @@ fn build_launch_config_page(
     lc_group.add(&wd_entry);
 
     page.append(&lc_group);
-    sidebar.append(&super::dialogs::settings_sidebar_row("preferences-other-symbolic", "Launch Config"));
+    sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Launch Config"));
     stack.add_named(&page, Some("launch"));
 
     let env_vars_box;
@@ -970,7 +970,7 @@ fn build_launch_config_page(
         ld_group.add(&expander);
         native_page.append(&ld_group);
 
-        sidebar.append(&super::dialogs::settings_sidebar_row("preferences-other-symbolic", "Advanced"));
+        sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Advanced"));
         stack.add_named(&native_page, Some("advanced"));
     } else {
         env_vars_box = gtk4::ListBox::new();

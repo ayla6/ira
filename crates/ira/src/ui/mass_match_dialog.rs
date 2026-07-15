@@ -9,7 +9,7 @@ use std::sync::Arc;
 use super::state::SharedState;
 use super::sidebar::rebuild_sidebar;
 use super::matching::{match_game_to_steam, match_game_to_sgdb};
-use super::dialogs::build_image_manager_content;
+use super::image_manager::build_image_manager_content;
 use super::helpers::clear_children;
 
 type MatchCallback = Rc<dyn Fn(&str, &str)>;

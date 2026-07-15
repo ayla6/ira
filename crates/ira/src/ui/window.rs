@@ -19,7 +19,7 @@ use super::css::APP_CSS;
 use super::sidebar::{rebuild_sidebar, select_row_silently};
 use super::grid_view::show_grid_view;
 use super::message_handler::switch_to_game;
-use super::dialogs::show_settings_dialog;
+use super::settings_dialog::show_settings_dialog;
 use super::mass_match_dialog::show_mass_match_dialog;
 use super::add_game_dialog::show_add_game_dialog;
 use super::background::show_close_choice_dialog;

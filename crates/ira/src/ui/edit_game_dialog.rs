@@ -108,10 +108,12 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     // --- API Emulator page ---
     let emu_save_dir = state.borrow().save_dir.clone();
     build_api_emulator_page(
-        &saved_launch.exe,
-        &game.trophy_source,
-        &game.app_id,
-        &emu_save_dir,
+        super::edit_game_pages::ApiEmuPageParams {
+            emu_exe: &saved_launch.exe,
+            emu_trophy_source: &game.trophy_source,
+            emu_app_id: &game.app_id,
+            save_dir: &emu_save_dir,
+        },
         state,
         &languages,
         &sidebar,

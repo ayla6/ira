@@ -50,16 +50,22 @@ pub(super) fn build_dlc_page(
     }
 }
 
+pub(super) struct ApiEmuPageParams<'a> {
+    pub emu_exe: &'a str,
+    pub emu_trophy_source: &'a str,
+    pub emu_app_id: &'a str,
+    pub save_dir: &'a str,
+}
+
 pub(super) fn build_api_emulator_page(
-    emu_exe: &str,
-    emu_trophy_source: &str,
-    emu_app_id: &str,
-    save_dir: &str,
+    params: ApiEmuPageParams,
     state: &SharedState,
     languages: &[String],
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
 ) {
+    let (emu_exe, emu_trophy_source, emu_app_id, save_dir) = 
+        (params.emu_exe, params.emu_trophy_source, params.emu_app_id, params.save_dir);
     if (emu_trophy_source != ira_models::GSE && emu_trophy_source != ira_models::NGE) || emu_exe.is_empty() {
         return;
     }

@@ -84,3 +84,43 @@ pub(crate) fn parse_hidden(v: &serde_json::Value) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_hidden_string_0() {
+        assert!(!parse_hidden(&serde_json::Value::String("0".to_string())));
+    }
+
+    #[test]
+    fn test_parse_hidden_string_1() {
+        assert!(parse_hidden(&serde_json::Value::String("1".to_string())));
+    }
+
+    #[test]
+    fn test_parse_hidden_string_empty() {
+        assert!(!parse_hidden(&serde_json::Value::String(String::new())));
+    }
+
+    #[test]
+    fn test_parse_hidden_string_yes() {
+        assert!(!parse_hidden(&serde_json::Value::String("yes".to_string())));
+    }
+
+    #[test]
+    fn test_parse_hidden_string_no() {
+        assert!(!parse_hidden(&serde_json::Value::String("no".to_string())));
+    }
+
+    #[test]
+    fn test_parse_hidden_string_true() {
+        assert!(parse_hidden(&serde_json::Value::String("true".to_string())));
+    }
+
+    #[test]
+    fn test_parse_hidden_string_false() {
+        assert!(!parse_hidden(&serde_json::Value::String("false".to_string())));
+    }
+}

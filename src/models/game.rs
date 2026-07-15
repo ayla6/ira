@@ -127,3 +127,73 @@ pub fn unmatched_game(lutris_id: i64, name: &str, slug: &str, playtime: f64, las
         ..Default::default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sort_key_uses_sort_title_when_non_empty() {
+        let g = Game {
+            sort_title: "Alpha".to_string(),
+            name: "Zeta".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(g.sort_key(), "Alpha");
+    }
+
+    #[test]
+    fn test_sort_key_falls_back_to_name() {
+        let g = Game {
+            sort_title: String::new(),
+            name: "Zeta".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(g.sort_key(), "Zeta");
+    }
+
+    #[test]
+    fn test_completion_pct_total_zero() {
+        let g = Game::default();
+        assert_eq!(g.completion_pct(), 0.0);
+    }
+
+    #[test]
+    fn test_completion_pct_some_earned() {
+        let g = Game {
+            earned_count: 5,
+            total_count: 10,
+            ..Default::default()
+        };
+        assert!((g.completion_pct() - 50.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_completion_pct_none_earned() {
+        let g = Game {
+            earned_count: 0,
+            total_count: 10,
+            ..Default::default()
+        };
+        assert_eq!(g.completion_pct(), 0.0);
+    }
+
+    #[test]
+    fn test_unmatched_game_creates_correct_entry() {
+        let g = unmatched_game(42, "Test Game", "test-game-slug", 12.5, 1000);
+        assert_eq!(g.lutris_id, 42);
+        assert_eq!(g.name, "Test Game");
+        assert_eq!(g.slug, "test-game-slug");
+        assert_eq!(g.playtime, 12.5);
+        assert_eq!(g.last_played, 1000);
+        assert_eq!(g.lutris_name, "Test Game");
+        assert_eq!(g.app_id, "");
+        assert_eq!(g.db_id, 0);
+        assert_eq!(g.earned_count, 0);
+        assert_eq!(g.total_count, 0);
+        assert!(!g.hidden);
+        assert_eq!(g.logo_position, "bottom-left");
+        assert_eq!(g.logo_size, 50);
+        assert!(!g.manual_unmatch);
+    }
+}

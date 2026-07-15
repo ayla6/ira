@@ -145,3 +145,63 @@ pub(super) fn sgdb_endpoint(asset: &str, is_steam_id: bool, id: &str) -> Option<
         _ => return None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sgdb_endpoint_icon_steam() {
+        assert_eq!(sgdb_endpoint("icon", true, "12345").as_deref(), Some("icons/steam/12345"));
+    }
+
+    #[test]
+    fn test_sgdb_endpoint_icon_game() {
+        assert_eq!(sgdb_endpoint("icon", false, "12345").as_deref(), Some("icons/game/12345"));
+    }
+
+    #[test]
+    fn test_sgdb_endpoint_hero_steam() {
+        assert_eq!(sgdb_endpoint("hero", true, "67890").as_deref(), Some("heroes/steam/67890"));
+    }
+
+    #[test]
+    fn test_sgdb_endpoint_hero_game() {
+        assert_eq!(sgdb_endpoint("hero", false, "67890").as_deref(), Some("heroes/game/67890"));
+    }
+
+    #[test]
+    fn test_sgdb_endpoint_grid_steam() {
+        assert_eq!(sgdb_endpoint("grid", true, "abc").as_deref(), Some("grids/steam/abc"));
+    }
+
+    #[test]
+    fn test_sgdb_endpoint_grid_game() {
+        assert_eq!(sgdb_endpoint("grid", false, "abc").as_deref(), Some("grids/game/abc"));
+    }
+
+    #[test]
+    fn test_sgdb_endpoint_header_steam() {
+        assert_eq!(sgdb_endpoint("header", true, "def").as_deref(), Some("grids/steam/def"));
+    }
+
+    #[test]
+    fn test_sgdb_endpoint_header_game() {
+        assert_eq!(sgdb_endpoint("header", false, "def").as_deref(), Some("grids/game/def"));
+    }
+
+    #[test]
+    fn test_sgdb_endpoint_logo_steam() {
+        assert_eq!(sgdb_endpoint("logo", true, "xyz").as_deref(), Some("logos/steam/xyz"));
+    }
+
+    #[test]
+    fn test_sgdb_endpoint_logo_game() {
+        assert_eq!(sgdb_endpoint("logo", false, "xyz").as_deref(), Some("logos/game/xyz"));
+    }
+
+    #[test]
+    fn test_sgdb_endpoint_invalid_asset() {
+        assert_eq!(sgdb_endpoint("banner", true, "123"), None);
+    }
+}

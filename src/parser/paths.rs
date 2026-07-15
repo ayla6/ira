@@ -43,3 +43,47 @@ pub fn unlock_status_path(save_dir: &str, trophy_source: &str, app_id: &str, pla
         _ => Path::new(save_dir).join("steam").join(app_id).join("achievements.json"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_url_extension_png() {
+        assert_eq!(url_extension("image.png"), "png");
+    }
+
+    #[test]
+    fn test_url_extension_jpg() {
+        assert_eq!(url_extension("photo.jpg"), "jpg");
+    }
+
+    #[test]
+    fn test_url_extension_no_extension() {
+        assert_eq!(url_extension("image"), "png");
+    }
+
+    #[test]
+    fn test_url_extension_complex_url() {
+        let url = "https://example.com/path/icon.png?w=200&h=200";
+        let ext = url_extension(url);
+        assert!(ext.contains("png"));
+    }
+
+    #[test]
+    fn test_find_image_file_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test_icon.png");
+        fs::write(&file_path, "fake png content").unwrap();
+        let result = find_image_file(dir.path(), "test_icon");
+        assert_eq!(result, Some(file_path));
+    }
+
+    #[test]
+    fn test_find_image_file_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = find_image_file(dir.path(), "nonexistent");
+        assert_eq!(result, None);
+    }
+}

@@ -146,10 +146,6 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                     &db, &save_dir, lutris_enabled, shadps4_enabled, steam_enabled, &ra_config, sort_mode, sort_descending,
                 );
                 let _ = sender.send(AppMessage::GamesLoaded(games));
-                let ra_any_console = ra_config.psx_enabled || ra_config.ps2_enabled || ra_config.psp_enabled;
-                if ra_any_console {
-                    crate::game_list::build_ra_games_threaded(&db, &save_dir, &ra_config, &sender);
-                }
             });
         }
         AppMessage::SgdbAssetsDownloaded { db_id, sgdb_id, icon, hero, grid, logo, header } => {

@@ -187,14 +187,11 @@ pub fn build_ra_games(
                     g
                 }
                 None => {
-                    // New ROM — read serial and title from disc, try RA matching
+                    // New ROM — read serial for stable ID, try RA matching
                     let serial = crate::platforms::rom_serial::read_serial(rom_path);
-                    let disc_title = crate::platforms::rom_serial::read_title(rom_path);
-                    let display_name = serial.as_deref().unwrap_or(rom_name);
 
                     let matched_id = if client.is_some() {
-                        match_rom_to_game(display_name, &ra_games)
-                            .or_else(|| match_rom_to_game(rom_name, &ra_games))
+                        match_rom_to_game(rom_name, &ra_games)
                     } else {
                         None
                     };
@@ -204,10 +201,10 @@ pub fn build_ra_games(
                                 .iter()
                                 .find(|g| g.id == id)
                                 .map(|g| g.title.clone())
-                                .unwrap_or_else(|| disc_title.clone().unwrap_or_else(|| rom_name.clone()));
+                                .unwrap_or_else(|| rom_name.clone());
                             (id.to_string(), t, RA.to_string())
                         }
-                        None => (serial.clone().unwrap_or_else(|| rom_name.clone()), disc_title.clone().unwrap_or_else(|| rom_name.clone()), String::new()),
+                        None => (serial.clone().unwrap_or_else(|| rom_name.clone()), rom_name.clone(), String::new()),
                     };
 
                     // Double-check: maybe entry exists under steam_id but not rom_path

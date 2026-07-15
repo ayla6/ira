@@ -851,7 +851,8 @@ pub(super) fn build_game_general_page(
         let path_group = adw::PreferencesGroup::new();
         let path_row = adw::ActionRow::new();
         path_row.set_title("Game file");
-        path_row.set_subtitle(&game.game_path);
+        let escaped = glib::markup_escape_text(&game.game_path).to_string();
+        path_row.set_subtitle(&escaped);
         path_row.set_sensitive(false);
         path_group.add(&path_row);
         general_page.append(&path_group);
@@ -1000,11 +1001,8 @@ pub(super) fn build_game_general_page(
                 core_dropdown.set_valign(gtk4::Align::Center);
                 cr.add_suffix(&core_dropdown);
 
-                let is_ra = if game.emulator_override.is_empty() {
-                    emulators.iter().any(|e| crate::platforms::emulator_detect::is_retroarch(&e.launch_command))
-                } else {
-                    crate::platforms::emulator_detect::is_retroarch(&game.emulator_override)
-                };
+                let is_ra = !game.emulator_override.is_empty()
+                    && crate::platforms::emulator_detect::is_retroarch(&game.emulator_override);
                 cr.set_visible(is_ra);
 
                 emu_group.add(&cr);
@@ -1030,7 +1028,7 @@ pub(super) fn build_game_general_page(
 
                 if let Some(ref cr) = core_row_clone {
                     let is_ra = if idx == 0 {
-                        emus_clone.iter().any(|e| crate::platforms::emulator_detect::is_retroarch(&e.launch_command))
+                        false
                     } else {
                         match emus_clone.get((idx - 1) as usize) {
                             Some(e) => crate::platforms::emulator_detect::is_retroarch(&e.launch_command),

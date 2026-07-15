@@ -9,6 +9,28 @@ emulator platforms (Goldberg Steam Emulator, Nemirtingas GOG Emulator, shadPS4) 
 It has many sources of games, having its own Lutris like system of adding games, pulling games from Lutris itself, and also console emulators.
 SteamGridDB provides image assets.
 
+## Reference sources
+
+The `references/` directory (gitignored) contains source code for related
+projects and libraries. Use these when you need to understand how something
+works or find patterns to adapt:
+
+- `gtk/` — GTK4 C source code. When a GTK widget or selection model doesn't
+  do what you need, read the C source here, understand how it works, and
+  create a custom subclass that fits. gtk4-rs exposes `*Impl` traits
+  (e.g. `SelectionModelImpl`, `ListModelImpl`) that let you implement
+  GObject interfaces from Rust. See `game_selection_model.rs` for an
+  example: a custom `SelectionModel` cloned from `GtkSingleSelection` that
+  selects all items with the same `db_id`.
+- `libadwaita/` — libadwaita C source.
+- `lutris/` — Lutris source (game import, playtime, paths).
+- `pcsx2/`, `ppsspp/`, `duckstation/` — emulator sources (memory card,
+  save data, achievement formats).
+- `shadps4-qtlauncher/` — shadPS4 launcher (PS4 trophy parsing).
+- `retro-achievements-docs/`, `retro-achievements-rcheevos/` — RetroAchievements
+  API docs and C library.
+- `steam-rom-manager/` — Steam grid asset management in relation to ROMs.
+
 ## Build & test commands
 
 ```

@@ -13,11 +13,12 @@ SteamGridDB provides image assets.
 ## Build & test commands
 
 ```
-cargo build                    # Build the main binary
-cargo build --bin ira-test     # Build the test binary
-cargo test                     # Run all tests
-cargo clippy -- -D warnings    # Zero clippy warnings
-cargo build 2>&1 | grep warning # Check for warnings (should be zero)
+cargo build                         # Build the main binary
+cargo build --bin ira-test          # Build the test binary
+cargo test                          # Run all tests (all crates)
+cargo test -p ira-db                # Run tests for a specific crate
+cargo clippy --all-targets -- -D warnings   # Zero clippy warnings
+cargo build 2>&1 | grep warning     # Check for warnings (should be zero)
 ```
 
 **Always run `cargo build` and `cargo test` before committing.** Zero warnings is the baseline.
@@ -25,8 +26,7 @@ cargo build 2>&1 | grep warning # Check for warnings (should be zero)
 ### Dead code checks
 
 ```bash
-rg '#\[allow\(dead_code\)\]' src/    # Must return nothing
-rg '#\[allow\(unused\)\]' src/        # Must return nothing
+rg '#\[allow' crates/    # Must return nothing
 ```
 
 `#[allow(...)]` suppressions are forbidden. Either use the code or delete it.
@@ -35,53 +35,71 @@ commit), bear with the warning until it's connected — do not suppress it.
 Serde fields that exist only for deserialization should be prefixed with `_`
 (e.g. `_success`) instead of using `#[allow(dead_code)]`.
 
-## Architecture: unidirectional dependency flow
+## Architecture: Cargo workspace
 
-Dependencies flow **upward only**. A module may import from modules below it, never
-above or sideways in a way that creates a cycle.
+The project is a Cargo workspace with 10 crates under `crates/`. Dependencies
+flow **upward only** — a crate may depend on crates below it, never above or
+sideways in a way that creates a cycle. The compiler enforces this.
 
 ```
-Level 0 (leaf):    models/          — only serde/std imports, nothing from this crate
-Level 1:           config/           — imports from models
-                   db/               — imports from models
-                   parser/           — imports from models
-Level 2:           api/              — imports from models, parser
-                   platforms/        — imports from models, db, parser, api
-                   images/           — imports from models (GTK only)
-Level 3:           watcher/          — imports from models, parser, db
-Level 4:           ui/               — imports from everything below
-Level 5:           activate.rs       — top-level orchestration
-                    game_list.rs
-Level 6:           main.rs           — entry point only
+Level 0 (leaf):    ira-models       — pure types, only serde/std/chrono
+Level 1:            ira-db           — depends on ira-models
+                   ira-parser       — depends on ira-models
+                   ira-config       — depends on ira-models
+Level 2:            ira-api          — depends on ira-models, ira-parser
+                   ira-platforms    — depends on ira-models, ira-db, ira-parser, ira-api, ira-config
+                   ira-images       — depends on ira-models (GTK only)
+Level 3:            ira-watcher      — depends on ira-models, ira-config, ira-parser
+Level 4:            ira-launcher     — depends on ira-models, ira-db
+Level 5:            ira (main app)   — depends on everything above
 ```
 
-### Rules for file independence
+The main `ira` crate contains: `ui/`, `activate.rs`, `game_list.rs`,
+`game_loader.rs`, `strings.rs`, `bench.rs`, `main.rs`, and integration tests.
 
-1. **No reaching across module boundaries for internals.** If `ui/dialogs.rs` needs
-   a function from `parser/`, it uses `crate::parser::function_name()` (the public
-   re-export), never `crate::parser::paths::function_name()` (the internal module).
+### Crate boundaries
 
-2. **`mod.rs` files contain only re-exports and module declarations.** No business
-   logic. If `mod.rs` grows past ~30 lines, move logic into a named file.
+1. **Cross-crate imports use the `ira_X::` prefix.** For example,
+   `ira_models::Game`, `ira_db::DbConn`, `ira_parser::data_dir`.
+   Within a crate, use `crate::` for self-references.
 
-3. **`pub(super)` for methods shared within a module directory.** If `api/assets.rs`
-   needs a method defined in `api/download.rs`, that method is `pub(super)` — visible
-   to siblings in `api/` but not to `ui/` or `platforms/`.
+2. **`lib.rs` files (crate roots) contain only re-exports and module
+   declarations.** No business logic. If `lib.rs` grows past ~30 lines,
+   move logic into a named file.
 
-4. **`pub(crate)` for items needed by other modules but not externally.** Use this
-   sparingly — if a type is needed by 3+ modules, it probably belongs in `models/`.
+3. **`pub(crate)` for items shared within a crate but not externally.** If
+   `api/assets.rs` needs a method defined in `api/download.rs`, that method
+   is `pub(crate)` — visible to siblings in the same crate but not to other
+   crates.
+
+4. **`pub` for items needed by other crates.** Use this sparingly — if a type
+   is needed by 3+ crates, it probably belongs in `ira-models`.
 
 5. **One responsibility per file.** If the filename needs "and", split it.
    `db/crud.rs` (write operations) and `db/lookup.rs` (read operations) — not
    `db/crud_and_lookup.rs`.
 
-6. **No circular `use` between sibling files.** If `ui/sidebar.rs` needs something
-   from `ui/helpers.rs` and `ui/helpers.rs` needs something from `ui/sidebar.rs`,
-   extract the shared dependency into a third file or move it up to `ui/mod.rs`.
+6. **No circular `use` between sibling files.** If `ui/sidebar.rs` needs
+   something from `ui/helpers.rs` and `ui/helpers.rs` needs something from
+   `ui/sidebar.rs`, extract the shared dependency into a third file or move
+   it up to `ui/mod.rs`.
 
 7. **Prefer `super::` over `crate::` within a module.** Inside `ui/`, use
    `super::helpers::clear_children()` not `crate::ui::helpers::clear_children()`.
    This keeps the dependency local and makes refactoring easier.
+
+### Dependency injection for circular-breaking patterns
+
+The `game_loader` module in the main `ira` crate contains `load_game` and
+`load_games`, which orchestrate data from multiple crates (db, parser,
+platforms). The watcher and retroachievements modules need `load_game` but
+cannot depend on the main crate. They accept it as a closure parameter:
+
+```rust
+// watcher accepts load_game as a closure
+pub fn new(cfg: Arc<Config>, sender: AppSender, save_dir: String,
+           load_game: Arc<dyn Fn(&GameEntry, &str) -> Result<Game, String> + Send + Sync>)
+```
 
 ## Code organization
 
@@ -102,8 +120,8 @@ permanent migration mechanism.
 ### Duplication
 - **Extract on the 3rd occurrence** of any pattern, not the 5th.
 - If you copy-paste more than 5 lines, ask: "should this be a helper?"
-- Shared helpers go in the module's `helpers.rs` (for `ui/`) or `mod.rs`
-  (for smaller modules).
+- Shared helpers go in the module's `helpers.rs` (for `ui/`) or `lib.rs`
+  (for smaller crates).
 
 ### Types
 - **Use enums for closed sets.** Game kinds (`gbe_steam`, `ne_gog`, `sgdb`, `ps4`)
@@ -126,7 +144,7 @@ permanent migration mechanism.
   should be prefixed with `_` (e.g. `_success`) if truly unused.
 
 ### Error handling
-- **`Result<T, String>` for all fallible operations.** Consistent across the crate.
+- **`Result<T, String>` for all fallible operations.** Consistent across all crates.
 - **Never swallow errors silently.** At minimum `eprintln!` before returning a default.
 - **DB multi-step mutations use transactions.** Wrap in `c.unchecked_transaction()`
   / `tx.commit()`.
@@ -171,18 +189,18 @@ permanent migration mechanism.
 ## Testing
 
 ### What to test
-- **`models/`** — pure types, `Default` impls, `sort_key()`, `unmatched_game()`.
-- **`parser/`** — `load_status_map` with Goldberg and GOG format fixtures,
+- **`ira-models`** — pure types, `Default` impls, `sort_key()`, `unmatched_game()`.
+- **`ira-parser`** — `load_status_map` with Goldberg and GOG format fixtures,
   `convert_ico_to_png`, path helpers.
-- **`db/`** — CRUD operations with a `tempfile` database, migration correctness.
-- **`platforms/ps4/`** — PSF parsing, npbind parsing, trophy XML, playtime parsing
-  (already have integration tests in `tests/`).
-- **`api/`** — SGDB endpoint construction, `pick_lang`, `urlencode`. Mock HTTP
+- **`ira-db`** — CRUD operations with a `tempfile` database, migration correctness.
+- **`ira-platforms` (ps4)** — PSF parsing, npbind parsing, trophy XML, playtime parsing
+  (integration tests in `crates/ira/tests/`).
+- **`ira-api`** — SGDB endpoint construction, `pick_lang`, `urlencode`. Mock HTTP
   with fixture JSON files (no real network calls in tests).
 
 ### How to test
-- **Integration tests** in `tests/` — one file per concern, each is a separate
-  binary. Use `tempfile` for filesystem fixtures.
+- **Integration tests** in `crates/ira/tests/` — one file per concern, each is a
+  separate binary. Use `tempfile` for filesystem fixtures.
 - **Unit tests** in `#[cfg(test)] mod tests` at the bottom of source files —
   for pure functions only.
 - **Test names**: `test_<function>_<scenario>` — e.g. `test_parse_playtime_hms`,
@@ -227,8 +245,8 @@ Use conventional commits:
 - `chore` — build, config, dependencies, tooling
 - `style` — formatting, CSS, whitespace (no logic change)
 
-**Scopes:** module name — `ui`, `db`, `api`, `platforms`, `parser`, `models`,
-`config`, `watcher`, `images`, or `*` for cross-cutting.
+**Scopes:** crate name — `ui`, `db`, `api`, `platforms`, `parser`, `models`,
+`config`, `watcher`, `images`, `launcher`, or `*` for cross-cutting.
 
 **Examples:**
 ```
@@ -270,12 +288,12 @@ chore(*): rename kind values steam→gbe_steam, gog→ne_gog
 ### Before committing
 
 ```bash
-cargo build         # must succeed with zero warnings
-cargo clippy -- -D warnings   # zero clippy warnings
-cargo test          # all tests must pass
-rg '#\[allow' src/  # must return nothing
-git status          # review staged files
-git diff --cached   # review the actual diff
+cargo build                              # must succeed with zero warnings
+cargo clippy --all-targets -- -D warnings # zero clippy warnings
+cargo test                               # all tests must pass
+rg '#\[allow' crates/                    # must return nothing
+git status                               # review staged files
+git diff --cached                        # review the actual diff
 ```
 
 ### Commit workflow
@@ -296,17 +314,17 @@ Adds GAME_COLUMNS constant so column list stays in sync."
 ## Code review checklist
 
 - [ ] Zero compiler warnings
-- [ ] `cargo clippy -- -D warnings` passes
+- [ ] `cargo clippy --all-targets -- -D warnings` passes
 - [ ] `cargo test` passes
-- [ ] No `#[allow(...)]` suppressions (`rg '#\[allow' src/` returns nothing)
+- [ ] No `#[allow(...)]` suppressions (`rg '#\[allow' crates/` returns nothing)
 - [ ] No duplication (3+ occurrences = extract a helper)
 - [ ] No dead code or unused captures
 - [ ] Functions under 100 lines
 - [ ] New logic has at least one test
 - [ ] `Option` fields match schema nullability
 - [ ] No circular imports between sibling files
-- [ ] No raw string literals for closed sets (use constants from `models/kind.rs`)
-- [ ] `mod.rs` files contain only `mod`/`pub use` declarations
+- [ ] No raw string literals for closed sets (use constants from `ira-models`)
+- [ ] `lib.rs` files contain only `mod`/`pub use` declarations
 - [ ] Every `AppMessage` variant is both sent and handled
 - [ ] Commit message follows conventional format
 - [ ] No secrets in the diff

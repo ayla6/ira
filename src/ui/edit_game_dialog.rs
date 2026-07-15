@@ -475,26 +475,16 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             let exe_entry = adw::EntryRow::new();
             exe_entry.set_title("Executable");
             exe_entry.set_text(&v.exe);
-            let browse = gtk4::Button::from_icon_name("folder-open-symbolic");
-            browse.add_css_class("flat");
-            browse.set_valign(gtk4::Align::Center);
-            let exe_c = exe_entry.clone();
-            browse.connect_clicked(move |_| {
-                let dialog = gtk4::FileDialog::new();
-                dialog.set_title("Select variant executable");
-                let filter = gtk4::FileFilter::new();
-                filter.add_mime_type("application/x-executable");
-                filter.add_pattern("*");
-                dialog.set_default_filter(Some(&filter));
-                let entry = exe_c.clone();
-                dialog.open(None::<&adw::Window>, None::<&gio::Cancellable>, move |result| {
-                    if let Ok(file) = result {
-                        if let Some(path) = file.path() {
-                            entry.set_text(&path.to_string_lossy());
-                        }
-                    }
-                });
-            });
+            let browse = super::helpers::make_browse_button(
+                None,
+                "Select variant executable",
+                false,
+                Some(("Executable", &["application/x-executable"])),
+                {
+                    let entry = exe_entry.clone();
+                    move |path| entry.set_text(&path.to_string_lossy())
+                },
+            );
             exe_entry.add_suffix(&browse);
             group.add(&exe_entry);
 
@@ -506,23 +496,16 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             let wd_entry = adw::EntryRow::new();
             wd_entry.set_title("Working directory");
             wd_entry.set_text(&v.working_dir);
-            let wd_browse = gtk4::Button::from_icon_name("folder-open-symbolic");
-            wd_browse.add_css_class("flat");
-            wd_browse.set_valign(gtk4::Align::Center);
-            let wd_c = wd_entry.clone();
-            wd_browse.connect_clicked(move |_| {
-                let dialog = gtk4::FileDialog::new();
-                dialog.set_title("Select working directory");
-                dialog.set_default_filter(Some(&gtk4::FileFilter::new()));
-                let entry = wd_c.clone();
-                dialog.select_folder(None::<&adw::Window>, None::<&gio::Cancellable>, move |result| {
-                    if let Ok(file) = result {
-                        if let Some(path) = file.path() {
-                            entry.set_text(&path.to_string_lossy());
-                        }
-                    }
-                });
-            });
+            let wd_browse = super::helpers::make_browse_button(
+                None,
+                "Select working directory",
+                true,
+                None,
+                {
+                    let entry = wd_entry.clone();
+                    move |path| entry.set_text(&path.to_string_lossy())
+                },
+            );
             wd_entry.add_suffix(&wd_browse);
             group.add(&wd_entry);
 
@@ -939,27 +922,16 @@ fn build_launch_config_page(
     exe_entry.set_title("Executable path");
     exe_entry.set_text(&launch.exe);
 
-    let exe_browse = gtk4::Button::from_icon_name("folder-open-symbolic");
-    exe_browse.add_css_class("flat");
-    exe_browse.set_valign(gtk4::Align::Center);
-    let exe_entry_b = exe_entry.clone();
-    let win_b = win.clone();
-    exe_browse.connect_clicked(move |_| {
-        let dialog = gtk4::FileDialog::new();
-        dialog.set_title("Select executable");
-        let filter = gtk4::FileFilter::new();
-        filter.add_mime_type("application/x-executable");
-        filter.add_pattern("*");
-        dialog.set_default_filter(Some(&filter));
-        let entry = exe_entry_b.clone();
-        dialog.open(Some(&win_b), None::<&gio::Cancellable>, move |result| {
-            if let Ok(file) = result {
-                if let Some(path) = file.path() {
-                    entry.set_text(&path.to_string_lossy());
-                }
-            }
-        });
-    });
+    let exe_browse = super::helpers::make_browse_button(
+        Some(win),
+        "Select executable",
+        false,
+        Some(("Executable", &["application/x-executable"])),
+        {
+            let entry = exe_entry.clone();
+            move |path| entry.set_text(&path.to_string_lossy())
+        },
+    );
     exe_entry.add_suffix(&exe_browse);
     lc_group.add(&exe_entry);
 
@@ -972,23 +944,16 @@ fn build_launch_config_page(
     wd_entry.set_title("Working directory");
     wd_entry.set_text(&launch.working_dir);
 
-    let wd_browse = gtk4::Button::from_icon_name("folder-open-symbolic");
-    wd_browse.add_css_class("flat");
-    wd_browse.set_valign(gtk4::Align::Center);
-    let wd_entry_b = wd_entry.clone();
-    let win_wd = win.clone();
-    wd_browse.connect_clicked(move |_| {
-        let dialog = gtk4::FileDialog::new();
-        dialog.set_title("Select working directory");
-        let entry = wd_entry_b.clone();
-        dialog.select_folder(Some(&win_wd), None::<&gio::Cancellable>, move |result| {
-            if let Ok(file) = result {
-                if let Some(path) = file.path() {
-                    entry.set_text(&path.to_string_lossy());
-                }
-            }
-        });
-    });
+    let wd_browse = super::helpers::make_browse_button(
+        Some(win),
+        "Select working directory",
+        true,
+        None,
+        {
+            let entry = wd_entry.clone();
+            move |path| entry.set_text(&path.to_string_lossy())
+        },
+    );
     wd_entry.add_suffix(&wd_browse);
     lc_group.add(&wd_entry);
 

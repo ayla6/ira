@@ -6,6 +6,49 @@ use std::collections::HashMap;
 
 use super::state::SharedState;
 
+pub fn make_browse_button(
+    parent: Option<&adw::Window>,
+    title: &str,
+    select_folder: bool,
+    filter: Option<(&str, &[&str])>,
+    on_select: impl Fn(&std::path::Path) + 'static,
+) -> gtk4::Button {
+    let browse = gtk4::Button::with_label("Browse…");
+    browse.add_css_class("flat");
+    browse.set_valign(gtk4::Align::Center);
+    let parent = parent.cloned();
+    let title = title.to_string();
+    let filter = filter.map(|(name, mimes)| (name.to_string(), mimes.iter().map(|s| s.to_string()).collect::<Vec<_>>()));
+    let on_select = std::rc::Rc::new(on_select);
+    browse.connect_clicked(move |_| {
+        let dialog = gtk4::FileDialog::new();
+        dialog.set_title(&title);
+        if let Some((name, mimes)) = &filter {
+            let f = gtk4::FileFilter::new();
+            f.set_name(Some(name));
+            for mime in mimes {
+                f.add_mime_type(mime);
+            }
+            f.add_pattern("*");
+            dialog.set_default_filter(Some(&f));
+        }
+        let on_select = on_select.clone();
+        let cb = move |result: Result<gio::File, glib::Error>| {
+            if let Ok(file) = result {
+                if let Some(path) = file.path() {
+                    on_select(&path);
+                }
+            }
+        };
+        if select_folder {
+            dialog.select_folder(parent.as_ref(), None::<&gio::Cancellable>, cb);
+        } else {
+            dialog.open(parent.as_ref(), None::<&gio::Cancellable>, cb);
+        }
+    });
+    browse
+}
+
 pub fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
     updated.kind = existing.kind.clone();
     updated.game_path = existing.game_path.clone();

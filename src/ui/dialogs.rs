@@ -214,30 +214,16 @@ fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, a
         ps4_exe_row.add_suffix(&auto_btn);
     }
 
-    let ps4_exe_browse = gtk4::Button::with_label("Browse…");
-    ps4_exe_browse.add_css_class("flat");
-    ps4_exe_browse.set_valign(gtk4::Align::Center);
-    {
-        let ps4_exe_row = ps4_exe_row.clone();
-        let parent = win.clone();
-        ps4_exe_browse.connect_clicked(move |_| {
-            let dialog = gtk4::FileDialog::new();
-            dialog.set_title("Select shadPS4 executable");
-            let filter = gtk4::FileFilter::new();
-            filter.set_name(Some("Executable"));
-            filter.add_mime_type("application/x-executable");
-            filter.add_pattern("*");
-            dialog.set_default_filter(Some(&filter));
+    let ps4_exe_browse = super::helpers::make_browse_button(
+        Some(win),
+        "Select shadPS4 executable",
+        false,
+        Some(("Executable", &["application/x-executable"])),
+        {
             let row = ps4_exe_row.clone();
-            dialog.open(Some(&parent), None::<&gio::Cancellable>, move |result| {
-                if let Ok(file) = result {
-                    if let Some(path) = file.path() {
-                        row.set_text(&path.to_string_lossy());
-                    }
-                }
-            });
-        });
-    }
+            move |path| row.set_text(&path.to_string_lossy())
+        },
+    );
     ps4_exe_row.add_suffix(&ps4_exe_browse);
     ps4_exe_group.add(&ps4_exe_row);
     page.append(&ps4_exe_group);
@@ -368,25 +354,16 @@ fn build_console_settings_page(
     folder_row.set_title("ROM folder");
     folder_row.set_text(&cc.folder);
 
-    let folder_browse = gtk4::Button::with_label("Browse…");
-    folder_browse.add_css_class("flat");
-    folder_browse.set_valign(gtk4::Align::Center);
-    {
-        let folder_row = folder_row.clone();
-        let parent = win.clone();
-        folder_browse.connect_clicked(move |_| {
-            let dialog = gtk4::FileDialog::new();
-            dialog.set_title("Select ROM folder");
+    let folder_browse = super::helpers::make_browse_button(
+        Some(win),
+        "Select ROM folder",
+        true,
+        None,
+        {
             let row = folder_row.clone();
-            dialog.select_folder(Some(&parent), None::<&gio::Cancellable>, move |result| {
-                if let Ok(file) = result {
-                    if let Some(path) = file.path() {
-                        row.set_text(&path.to_string_lossy());
-                    }
-                }
-            });
-        });
-    }
+            move |path| row.set_text(&path.to_string_lossy())
+        },
+    );
     folder_row.add_suffix(&folder_browse);
     rom_group.add(&folder_row);
     page.append(&rom_group);
@@ -450,30 +427,16 @@ fn build_console_settings_page(
     }
     exe_row.add_suffix(&auto_btn);
 
-    let exe_browse = gtk4::Button::with_label("Browse…");
-    exe_browse.add_css_class("flat");
-    exe_browse.set_valign(gtk4::Align::Center);
-    {
-        let exe_row = exe_row.clone();
-        let parent = win.clone();
-        exe_browse.connect_clicked(move |_| {
-            let dialog = gtk4::FileDialog::new();
-            dialog.set_title("Select emulator executable");
-            let filter = gtk4::FileFilter::new();
-            filter.set_name(Some("Executable"));
-            filter.add_mime_type("application/x-executable");
-            filter.add_pattern("*");
-            dialog.set_default_filter(Some(&filter));
+    let exe_browse = super::helpers::make_browse_button(
+        Some(win),
+        "Select emulator executable",
+        false,
+        Some(("Executable", &["application/x-executable"])),
+        {
             let row = exe_row.clone();
-            dialog.open(Some(&parent), None::<&gio::Cancellable>, move |result| {
-                if let Ok(file) = result {
-                    if let Some(path) = file.path() {
-                        row.set_text(&path.to_string_lossy());
-                    }
-                }
-            });
-        });
-    }
+            move |path| row.set_text(&path.to_string_lossy())
+        },
+    );
     exe_row.add_suffix(&exe_browse);
     emu_group.add(&exe_row);
 
@@ -1622,36 +1585,23 @@ fn build_image_section(
         &preview_wrapper, &dest_path, state, game, pending_copies.clone(), asset_type,
     );
 
-    let browse_btn = gtk4::Button::with_label("Browse…");
-    let state_browse = state.clone();
-    let refresh = refresh_images.clone();
-    let pending_copies_btn = pending_copies.clone();
-    let asset_btn = asset_type.to_string();
-    let pending_copies_browse = pending_copies_btn.clone();
-    browse_btn.connect_clicked(move |_| {
-        let filter = gtk4::FileFilter::new();
-        filter.set_name(Some("Images"));
-        filter.add_mime_type("image/png");
-        filter.add_mime_type("image/jpeg");
-        filter.add_mime_type("image/webp");
-        filter.add_mime_type("image/x-icon");
-        let dialog = gtk4::FileDialog::new();
-        dialog.set_title("Select image");
-        dialog.set_default_filter(Some(&filter));
-        let refresh_c = refresh.clone();
-        let pc = pending_copies_browse.clone();
-        let asset_name = asset_btn.clone();
-        dialog.open(Some(&state_browse.borrow().window), None::<&gio::Cancellable>, move |result| {
-            if let Ok(file) = result {
-                if let Some(path) = file.path() {
-                    if let Some(ref pc_inner) = pc {
-                        pc_inner.borrow_mut().insert(asset_name.clone(), path.to_string_lossy().into_owned());
-                        refresh_c();
-                    }
+    let browse_btn = super::helpers::make_browse_button(
+        Some(parent_win),
+        "Select image",
+        false,
+        Some(("Images", &["image/png", "image/jpeg", "image/webp", "image/x-icon"])),
+        {
+            let pc = pending_copies.clone();
+            let refresh = refresh_images.clone();
+            let asset_name = asset_type.to_string();
+            move |path| {
+                if let Some(ref pc_inner) = pc {
+                    pc_inner.borrow_mut().insert(asset_name.clone(), path.to_string_lossy().into_owned());
+                    refresh();
                 }
             }
-        });
-    });
+        },
+    );
     btns.append(&browse_btn);
 
     if is_steam && asset_type != "icon" {
@@ -1716,6 +1666,7 @@ fn build_image_section(
         id.clone()
     };
     let sgdb_is_steam_id = is_steam && game.sgdb_id.is_empty();
+    let pending_copies_btn = pending_copies.clone();
     if !sgdb_id_for_picker.is_empty() {
         let btn = gtk4::Button::with_label("SGDB…");
         let steam = state.borrow().steam.clone();

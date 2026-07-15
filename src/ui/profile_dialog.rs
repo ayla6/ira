@@ -168,23 +168,16 @@ fn show_profile_dialog(
     prefix_entry.set_title("Wine prefix path (empty = default ~/.wine)");
     if let Some(p) = existing.as_ref() { prefix_entry.set_text(&p.prefix); }
 
-    let prefix_browse = gtk4::Button::from_icon_name("folder-open-symbolic");
-    prefix_browse.add_css_class("flat");
-    prefix_browse.set_valign(gtk4::Align::Center);
-    let pe_b = prefix_entry.clone();
-    let win_b = win.clone();
-    prefix_browse.connect_clicked(move |_| {
-        let dialog = gtk4::FileDialog::new();
-        dialog.set_title("Select wine prefix");
-        let entry = pe_b.clone();
-        dialog.select_folder(Some(&win_b), None::<&gio::Cancellable>, move |result| {
-            if let Ok(file) = result {
-                if let Some(path) = file.path() {
-                    entry.set_text(&path.to_string_lossy());
-                }
-            }
-        });
-    });
+    let prefix_browse = super::helpers::make_browse_button(
+        Some(&win),
+        "Select wine prefix",
+        true,
+        None,
+        {
+            let entry = prefix_entry.clone();
+            move |path| entry.set_text(&path.to_string_lossy())
+        },
+    );
     prefix_entry.add_suffix(&prefix_browse);
     group.add(&prefix_entry);
 

@@ -111,52 +111,6 @@ pub fn show_add_game_dialog(state: &SharedState) {
     detect_group.add(&detect_row);
     general_page.append(&detect_group);
 
-    {
-        let sc = state.clone();
-        let n_detect = name_entry.clone();
-        let exe_detect = exe_entry.clone();
-        let sid_detect = steam_id_entry.clone();
-        let gid_detect = gog_id_entry.clone();
-        detect_btn.connect_clicked(move |_| {
-            let file_dialog = gtk4::FileDialog::new();
-            file_dialog.set_title("Select game folder");
-            let sc_c = sc.clone();
-            let n = n_detect.clone();
-            let exe = exe_detect.clone();
-            let sid = sid_detect.clone();
-            let gid = gid_detect.clone();
-            file_dialog.select_folder(Some(&sc_c.borrow().window), None::<&gio::Cancellable>, move |result| {
-                let Ok(file) = result else { return };
-                let Some(path) = file.path() else { return };
-                let folder = path.to_string_lossy().into_owned();
-                if let Some(app_id) = crate::platforms::steam::detect_app_id(&folder) {
-                    sid.set_text(&app_id);
-                }
-                if crate::platforms::gog::is_gog_game(&folder) {
-                    if let Some((_info_dir, product_id, game_name)) = crate::platforms::gog::find_gog_info(&folder) {
-                        gid.set_text(&product_id);
-                        if n.text().is_empty() {
-                            n.set_text(&game_name);
-                        }
-                    }
-                }
-                if exe.text().is_empty() {
-                    if let Ok(entries) = std::fs::read_dir(&folder) {
-                        for e in entries.flatten() {
-                            let p = e.path();
-                            if let Some(ext) = p.extension() {
-                                if ext == "exe" || ext == "x86_64" || ext == "AppRun" || ext == "sh" {
-                                    exe.set_text(&p.to_string_lossy());
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        });
-    }
-
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
@@ -322,30 +276,16 @@ fn build_general_page(win: &adw::Window, profiles: &[crate::models::WineProfile]
     let exe_entry = adw::EntryRow::new();
     exe_entry.set_title("Executable");
 
-    let exe_browse = gtk4::Button::from_icon_name("folder-open-symbolic");
-    exe_browse.add_css_class("flat");
-    exe_browse.set_valign(gtk4::Align::Center);
-    let exe_entry_b = exe_entry.clone();
-    let win_b = win.clone();
-    exe_browse.connect_clicked(move |_| {
-        let dialog = gtk4::FileDialog::new();
-        dialog.set_title("Select executable");
-        let filter = gtk4::FileFilter::new();
-        filter.add_mime_type("application/x-executable");
-        filter.add_mime_type("application/x-msdos-program");
-        filter.add_pattern("*.exe");
-        filter.add_pattern("*.msi");
-        filter.add_pattern("*");
-        dialog.set_default_filter(Some(&filter));
-        let entry = exe_entry_b.clone();
-        dialog.open(Some(&win_b), None::<&gio::Cancellable>, move |result| {
-            if let Ok(file) = result {
-                if let Some(path) = file.path() {
-                    entry.set_text(&path.to_string_lossy());
-                }
-            }
-        });
-    });
+    let exe_browse = super::helpers::make_browse_button(
+        Some(win),
+        "Select executable",
+        false,
+        Some(("Executable", &["application/x-executable", "application/x-msdos-program"])),
+        {
+            let entry = exe_entry.clone();
+            move |path| entry.set_text(&path.to_string_lossy())
+        },
+    );
     exe_entry.add_suffix(&exe_browse);
     info_group.add(&exe_entry);
 
@@ -356,23 +296,16 @@ fn build_general_page(win: &adw::Window, profiles: &[crate::models::WineProfile]
     let wd_entry = adw::EntryRow::new();
     wd_entry.set_title("Working directory");
 
-    let wd_browse = gtk4::Button::from_icon_name("folder-open-symbolic");
-    wd_browse.add_css_class("flat");
-    wd_browse.set_valign(gtk4::Align::Center);
-    let wd_entry_b = wd_entry.clone();
-    let win_wd = win.clone();
-    wd_browse.connect_clicked(move |_| {
-        let dialog = gtk4::FileDialog::new();
-        dialog.set_title("Select working directory");
-        let entry = wd_entry_b.clone();
-        dialog.select_folder(Some(&win_wd), None::<&gio::Cancellable>, move |result| {
-            if let Ok(file) = result {
-                if let Some(path) = file.path() {
-                    entry.set_text(&path.to_string_lossy());
-                }
-            }
-        });
-    });
+    let wd_browse = super::helpers::make_browse_button(
+        Some(win),
+        "Select working directory",
+        true,
+        None,
+        {
+            let entry = wd_entry.clone();
+            move |path| entry.set_text(&path.to_string_lossy())
+        },
+    );
     wd_entry.add_suffix(&wd_browse);
     info_group.add(&wd_entry);
 
@@ -411,39 +344,67 @@ fn build_general_page(win: &adw::Window, profiles: &[crate::models::WineProfile]
     ids_group.add(&steam_id_entry);
     let gog_id_entry = adw::EntryRow::new();
     gog_id_entry.set_title("GOG Product ID");
-    let gog_browse_btn = gtk4::Button::from_icon_name("folder-open-symbolic");
-    gog_browse_btn.set_valign(gtk4::Align::Center);
-    gog_browse_btn.set_tooltip_text(Some("Detect from game folder"));
-    gog_browse_btn.add_css_class("flat");
-    {
-        let win_c = win.clone();
-        let row_c = gog_id_entry.clone();
-        let name_row = name_entry.clone();
-        gog_browse_btn.connect_clicked(move |_| {
-            let dialog = gtk4::FileDialog::new();
-            dialog.set_title("Select game folder");
-            let row = row_c.clone();
-            let name_row = name_row.clone();
-            dialog.select_folder(Some(&win_c), None::<&gio::Cancellable>, move |result| {
-                if let Ok(file) = result {
-                    if let Some(path) = file.path() {
-                        if let Some((_, product_id, name)) = crate::platforms::gog::find_gog_info(&path.to_string_lossy()) {
-                            row.set_text(&product_id);
-                            if name_row.text().is_empty() {
-                                name_row.set_text(&name);
-                            }
-                        }
+    let gog_browse_btn = super::helpers::make_browse_button(
+        Some(win),
+        "Select game folder",
+        true,
+        None,
+        {
+            let row = gog_id_entry.clone();
+            let name_row = name_entry.clone();
+            move |path| {
+                if let Some((_, product_id, name)) = crate::platforms::gog::find_gog_info(&path.to_string_lossy()) {
+                    row.set_text(&product_id);
+                    if name_row.text().is_empty() {
+                        name_row.set_text(&name);
                     }
                 }
-            });
-        });
-    }
+            }
+        },
+    );
     gog_id_entry.add_suffix(&gog_browse_btn);
     ids_group.add(&gog_id_entry);
     page.append(&ids_group);
 
-    let detect_btn = gtk4::Button::with_label("Browse");
-    detect_btn.add_css_class("flat");
+    let detect_btn = super::helpers::make_browse_button(
+        Some(win),
+        "Select game folder",
+        true,
+        None,
+        {
+            let n = name_entry.clone();
+            let exe = exe_entry.clone();
+            let sid = steam_id_entry.clone();
+            let gid = gog_id_entry.clone();
+            move |path| {
+                let folder = path.to_string_lossy().into_owned();
+                if let Some(app_id) = crate::platforms::steam::detect_app_id(&folder) {
+                    sid.set_text(&app_id);
+                }
+                if crate::platforms::gog::is_gog_game(&folder) {
+                    if let Some((_info_dir, product_id, game_name)) = crate::platforms::gog::find_gog_info(&folder) {
+                        gid.set_text(&product_id);
+                        if n.text().is_empty() {
+                            n.set_text(&game_name);
+                        }
+                    }
+                }
+                if exe.text().is_empty() {
+                    if let Ok(entries) = std::fs::read_dir(&folder) {
+                        for e in entries.flatten() {
+                            let p = e.path();
+                            if let Some(ext) = p.extension() {
+                                if ext == "exe" || ext == "x86_64" || ext == "AppRun" || ext == "sh" {
+                                    exe.set_text(&p.to_string_lossy());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    );
 
     (page, name_entry, kind_row, exe_entry, args_entry, wd_entry, detect_btn, profile_row, steam_id_entry, gog_id_entry)
 }

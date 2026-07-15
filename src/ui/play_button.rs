@@ -209,7 +209,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
 
     let _ = crate::db::set_last_played(&db, db_id, started_at);
     if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == game_id) {
-        g.lastplayed = started_at;
+        g.last_played = started_at;
     }
 
     Ok(())

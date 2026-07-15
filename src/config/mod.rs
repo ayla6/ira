@@ -44,8 +44,8 @@ pub struct Config {
     pub default_native_env_vars: Vec<(String, String)>,
     #[serde(default)]
     pub default_api_emu_version: String,
-    #[serde(default = "default_sort_mode")]
-    pub sort_mode: String,
+    #[serde(default)]
+    pub sort_mode: crate::models::SortMode,
     #[serde(default)]
     pub sort_descending: bool,
     #[serde(default)]
@@ -81,7 +81,7 @@ impl Default for Config {
             default_wine_config: WineConfig::default(),
             default_native_env_vars: Vec::new(),
             default_api_emu_version: String::new(),
-            sort_mode: default_sort_mode(),
+            sort_mode: crate::models::SortMode::default(),
             sort_descending: false,
             ra_enabled: false,
             ra_username: String::new(),
@@ -95,10 +95,6 @@ impl Default for Config {
 const DEFAULT_GRID_COVER_WIDTH: i32 = 200;
 fn default_grid_cover_width() -> i32 {
     DEFAULT_GRID_COVER_WIDTH
-}
-
-fn default_sort_mode() -> String {
-    "alphabetical".to_string()
 }
 
 fn default_true() -> bool {

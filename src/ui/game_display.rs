@@ -338,7 +338,7 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
         row.set_valign(gtk4::Align::Center);
         row.set_hexpand(true);
         row.append(&play_button(state, game.db_id));
-        row.append(&stat_label("Last played", &format_lastplayed(game.lastplayed)));
+        row.append(&stat_label("Last played", &format_last_played(game.last_played)));
         row.append(&stat_label("Play time", &format_playtime(game.playtime)));
         if game.total_count > 0 {
             let tbox = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
@@ -691,7 +691,7 @@ pub fn format_playtime(hours: f64) -> String {
     super::helpers::format_duration(seconds)
 }
 
-fn format_lastplayed(ts: i64) -> String {
+fn format_last_played(ts: i64) -> String {
     if ts == 0 {
         return "Never".to_string();
     }

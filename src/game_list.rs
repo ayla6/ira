@@ -53,7 +53,7 @@ fn auto_match_by_title(db: &db::DbConn, save_dir: &str, lutris_games: &[LutrisGa
     let do_not_match: std::collections::HashSet<i64> = entries
         .iter()
         .filter(|e| {
-            e.manual_unmatch == 1 || e.ignored == 1
+            e.manual_unmatch || e.ignored == 1
         })
         .filter_map(|e| e.lutris_db_id)
         .collect();
@@ -185,7 +185,7 @@ fn build_lutris_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
                     game.lutris_id = lg.id;
                     game.slug = lg.slug.clone();
                     game.playtime = lg.playtime;
-                    game.lastplayed = lg.lastplayed;
+                    game.last_played = lg.lastplayed;
                     game.lutris_name = lg.name.clone();
                     if game.name.is_empty() || game.name.starts_with("App ID:") {
                         game.name = lg.name.clone();
@@ -213,7 +213,7 @@ fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
         let entry = db::find_by_game_id(db, &shad.npwr_id).ok().flatten()
             .or_else(|| db::find_by_kind_platform(db, "ps4", &shad.serial).ok().flatten());
         let (db_id, title, hidden, logo_position, logo_size, sort_title, sgdb_id, shadps4_version, last_played) = match entry {
-            Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title, e.sgdb_id.clone().unwrap_or_default(), e.shadps4_version.clone().unwrap_or_default(), e.last_played),
+            Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title, e.sgdb_id.clone().unwrap_or_default(), e.shadps4_version.clone(), e.last_played),
             None => {
                 match db::add_game(db, "ps4", "", "", &shad.npwr_id, &shad.serial, &shad.title) {
                     Ok(id) => (id, shad.title.clone(), false, "bottom-left".to_string(), 50, String::new(), String::new(), String::new(), 0),
@@ -298,7 +298,7 @@ fn build_steam_games(db: &db::DbConn, save_dir: &str, steam_games: &[steam::Stea
                     game.game_path = sg.install_dir.to_string_lossy().into_owned();
                     if let Some(&(pt, lp)) = playtimes.get(&sg.app_id) {
                         game.playtime = pt;
-                        game.lastplayed = lp;
+                        game.last_played = lp;
                     }
                     games.push(game);
                 }

@@ -1,4 +1,4 @@
-use crate::models::{GroupSelection, SortMode};
+use crate::models::GroupSelection;
 use crate::Game;
 use std::collections::HashSet;
 use super::state::SharedState;
@@ -7,7 +7,7 @@ pub fn filtered_games(state: &SharedState) -> Vec<Game> {
     let (sort_mode, sort_descending, search, show_hidden, selected_group, games, db) = {
         let s = state.borrow();
         (
-            SortMode::from_str(&s.cfg.sort_mode),
+            s.cfg.sort_mode,
             s.cfg.sort_descending,
             s.search_query.to_lowercase(),
             s.cfg.show_hidden_games,

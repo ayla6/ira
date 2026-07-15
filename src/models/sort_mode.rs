@@ -2,8 +2,9 @@ use std::cmp::Ordering;
 
 use super::Game;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortMode {
+    #[default]
     Alphabetical,
     Completion,
     HoursPlayed,
@@ -74,7 +75,7 @@ impl SortMode {
                     .then_with(|| a.sort_key().cmp(b.sort_key()))
             }
             SortMode::LastPlayed => {
-                b.lastplayed.cmp(&a.lastplayed)
+                b.last_played.cmp(&a.last_played)
                     .then_with(|| a.sort_key().cmp(b.sort_key()))
             }
             SortMode::ReleaseDate => {
@@ -90,6 +91,19 @@ impl SortMode {
                     .then_with(|| a.sort_key().cmp(b.sort_key()))
             }
         }
+    }
+}
+
+impl serde::Serialize for SortMode {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SortMode {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(SortMode::from_str(&s))
     }
 }
 

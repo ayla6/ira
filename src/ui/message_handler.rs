@@ -202,9 +202,9 @@ fn apply_playtime_updates_db(state: &SharedState, updates: &HashMap<i64, (f64, i
 
         for g in &mut s.games {
             if let Some(&(playtime, lastplayed)) = updates.get(&g.db_id) {
-                if g.playtime != playtime || g.lastplayed != lastplayed {
+                if g.playtime != playtime || g.last_played != lastplayed {
                     g.playtime = playtime;
-                    g.lastplayed = lastplayed;
+                    g.last_played = lastplayed;
                     changed_db_ids.push(g.db_id);
                 }
             }
@@ -401,7 +401,7 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
             s.games[i] = g;
         } else {
             s.games.push(game);
-            let sort_mode = crate::models::SortMode::from_str(&s.cfg.sort_mode);
+            let sort_mode = s.cfg.sort_mode;
             let sort_descending = s.cfg.sort_descending;
             s.games.sort_by(|a, b| {
                 let ord = sort_mode.compare(a, b);

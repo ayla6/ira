@@ -23,7 +23,7 @@ pub struct Game {
     /// Playtime in hours (from Lutris).
     pub playtime: f64,
     /// Unix timestamp of last play (from Lutris).
-    pub lastplayed: i64,
+    pub last_played: i64,
     /// Logo overlay position (e.g. "bottom-left", "center", etc.).
     pub logo_position: String,
     /// Logo overlay pixel size.
@@ -79,7 +79,7 @@ impl Default for Game {
             lutris_id: 0,
             slug: String::new(),
             playtime: 0.0,
-            lastplayed: 0,
+            last_played: 0,
             logo_position: "bottom-left".to_string(),
             logo_size: 50,
             lutris_name: String::new(),
@@ -116,13 +116,13 @@ impl Game {
 
 /// A Lutris game with no matched achievement source yet — shown in the sidebar
 /// with no achievements until the user matches it to a Steam/GOG app id.
-pub fn unmatched_game(lutris_id: i64, name: &str, slug: &str, playtime: f64, lastplayed: i64) -> Game {
+pub fn unmatched_game(lutris_id: i64, name: &str, slug: &str, playtime: f64, last_played: i64) -> Game {
     Game {
         lutris_id,
         name: name.to_string(),
         slug: slug.to_string(),
         playtime,
-        lastplayed,
+        last_played,
         lutris_name: name.to_string(),
         ..Default::default()
     }

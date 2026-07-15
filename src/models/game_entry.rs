@@ -19,11 +19,11 @@ pub struct GameEntry {
     /// Set when user removes a game — prevents re-adding from Lutris.
     pub ignored: i64,
     /// Set when user manually unmatches — prevents auto-rematching.
-    pub manual_unmatch: i64,
+    pub manual_unmatch: bool,
     /// Sort title (empty = use title for sorting).
     pub sort_title: String,
     /// Per-game shadPS4 version path (empty = use global default).
-    pub shadps4_version: Option<String>,
+    pub shadps4_version: String,
     /// Unix timestamp of last time the game was launched via our play button.
     pub last_played: i64,
     /// Raw release date string from Steam API (e.g. "15 Sep, 2014").
@@ -62,9 +62,9 @@ impl GameEntry {
             logo_position: String::new(),
             logo_size: 0,
             ignored: 0,
-            manual_unmatch: 0,
+            manual_unmatch: false,
             sort_title: String::new(),
-            shadps4_version: None,
+            shadps4_version: String::new(),
             last_played: 0,
             release_date: String::new(),
             release_timestamp: 0,

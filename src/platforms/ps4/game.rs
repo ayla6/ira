@@ -63,7 +63,7 @@ pub fn load_shadps4_game(
         lutris_id: 0,
         slug: serial.clone(),
         playtime,
-        lastplayed: last_played,
+        last_played,
         logo_position: logo_position.to_string(),
         logo_size,
         lutris_name: shad.title.clone(),

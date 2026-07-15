@@ -299,7 +299,7 @@ fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, 
     vbox.set_margin_top(8);
     vbox.set_margin_bottom(8);
 
-    let current_mode = SortMode::from_str(&state.borrow().cfg.sort_mode);
+    let current_mode = state.borrow().cfg.sort_mode;
     let mut first_btn: Option<gtk4::CheckButton> = None;
 
     for mode in SortMode::ALL {
@@ -326,13 +326,12 @@ fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, 
 
         let state_clone = state.clone();
         let check_clone = check.clone();
-        let mode_key = mode.as_str().to_string();
+        let mode_c = *mode;
         check.connect_toggled(move |_| {
             if check_clone.is_active() {
-                let mode_str = SortMode::from_str(&mode_key);
-                state_clone.borrow_mut().cfg.sort_mode = mode_str.as_str().to_string();
+                state_clone.borrow_mut().cfg.sort_mode = mode_c;
                 let _ = state_clone.borrow().cfg.save();
-                state_clone.borrow().sort_label.set_text(mode_str.display_label());
+                state_clone.borrow().sort_label.set_text(mode_c.display_label());
                 rebuild_sidebar(&state_clone);
                 if state_clone.borrow().selected_id.is_empty()
                     && !state_clone.borrow().content_unloaded

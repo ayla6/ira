@@ -26,9 +26,9 @@ fn badge_text(game: &Game, mode: SortMode) -> Option<String> {
             else { Some(super::game_display::format_playtime(game.playtime)) }
         }
         SortMode::LastPlayed => {
-            if game.lastplayed == 0 { None }
+            if game.last_played == 0 { None }
             else {
-                chrono::DateTime::from_timestamp(game.lastplayed, 0)
+                chrono::DateTime::from_timestamp(game.last_played, 0)
                     .map(|dt| dt.format("%b %-d").to_string())
             }
         }
@@ -82,10 +82,10 @@ pub fn show_grid_view(state: &SharedState) {
             .borrow()
             .games
             .iter()
-            .filter(|g| g.lastplayed > 0 && (!g.hidden || show_hidden))
+            .filter(|g| g.last_played > 0 && (!g.hidden || show_hidden))
             .cloned()
             .collect();
-        recent.sort_by(|a, b| b.lastplayed.cmp(&a.lastplayed));
+        recent.sort_by(|a, b| b.last_played.cmp(&a.last_played));
         recent.truncate(8);
 
         if !recent.is_empty() {
@@ -111,11 +111,11 @@ pub fn show_grid_view(state: &SharedState) {
     let heading = gtk4::Label::new(Some(&heading_text));
     heading.set_xalign(0.0);
     heading.add_css_class("section-title");
-    heading.set_margin_top(if show_recent && state.borrow().games.iter().any(|g| g.lastplayed > 0 && (!g.hidden || show_hidden)) { 20 } else { 0 });
+    heading.set_margin_top(if show_recent && state.borrow().games.iter().any(|g| g.last_played > 0 && (!g.hidden || show_hidden)) { 20 } else { 0 });
     heading.set_margin_bottom(8);
     outer.append(&heading);
 
-    let sort_mode = SortMode::from_str(&state.borrow().cfg.sort_mode);
+    let sort_mode = state.borrow().cfg.sort_mode;
 
     let factory = gtk4::SignalListItemFactory::new();
 

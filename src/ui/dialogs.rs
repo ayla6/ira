@@ -834,7 +834,7 @@ pub(super) fn build_game_general_page(
     sort_group.add(&sort_entry);
     general_page.append(&sort_group);
 
-    if !game.game_path.is_empty() && game.kind != "steam" {
+    if !game.game_path.is_empty() && game.kind != crate::models::STEAM {
         let path_group = adw::PreferencesGroup::new();
         let path_row = adw::ActionRow::new();
         path_row.set_title("Game file");
@@ -846,7 +846,7 @@ pub(super) fn build_game_general_page(
     }
 
     let pending_version: Rc<RefCell<Option<String>>> = Default::default();
-    if game.kind == "ps4" {
+    if game.kind == crate::models::PS4 {
         let shadps4_versions = crate::platforms::ps4::read_shadps4_versions();
         if !shadps4_versions.is_empty() {
             let version_group = adw::PreferencesGroup::new();
@@ -918,7 +918,7 @@ pub(super) fn build_game_general_page(
 
     let pending_ra_core: Rc<RefCell<Option<String>>> = Default::default();
     let pending_emulator: Rc<RefCell<Option<String>>> = Default::default();
-    if game.kind == "retro" {
+    if game.kind == crate::models::RETRO {
         let emulators = crate::platforms::emulator_detect::detect_emulators(&game.platform_id);
         let cores = crate::platforms::emulator_detect::detect_ra_cores();
         if !emulators.is_empty() {
@@ -1032,10 +1032,10 @@ pub(super) fn build_game_general_page(
 
     let mut app_id_entry: Option<adw::EntryRow> = None;
 
-    if game.trophy_source == crate::models::GSE || game.trophy_source == crate::models::NGE || game.kind == "ps4" {
+    if game.trophy_source == crate::models::GSE || game.trophy_source == crate::models::NGE || game.kind == crate::models::PS4 {
         let ids_group = adw::PreferencesGroup::new();
         ids_group.set_title("Service IDs");
-        if game.kind == "ps4" {
+    if game.kind == crate::models::PS4 {
             let row = adw::ActionRow::new();
             row.set_title("NPWR Code");
             row.set_subtitle(&game.app_id);
@@ -1600,7 +1600,7 @@ fn find_best_image_path(game: &Game, field: &str, file: &str, id: &str, save_dir
             return sgdb;
         }
     }
-    let native = if game.kind == "ps4" {
+    let native = if game.kind == crate::models::PS4 {
         format!("{}/{}", crate::parser::ps4_data_dir(save_dir, &id).to_string_lossy(), file)
     } else {
         format!("{}/{}", crate::parser::data_dir(save_dir, &id).to_string_lossy(), file)
@@ -1608,7 +1608,7 @@ fn find_best_image_path(game: &Game, field: &str, file: &str, id: &str, save_dir
     if std::path::Path::new(&native).is_file() {
         return native;
     }
-    if field == "icon" && game.kind == "ps4" && !game.icon_path.is_empty() && std::path::Path::new(&game.icon_path).is_file() {
+    if field == "icon" && game.kind == crate::models::PS4 && !game.icon_path.is_empty() && std::path::Path::new(&game.icon_path).is_file() {
         return game.icon_path.clone();
     }
     String::new()
@@ -1680,7 +1680,7 @@ fn build_image_section(
 
     let cloud_dir = if !game.sgdb_id.is_empty() {
         crate::parser::sgdb_data_dir(&save_dir, &game.sgdb_id)
-    } else if game.kind == "ps4" {
+    } else if game.kind == crate::models::PS4 {
         crate::parser::ps4_data_dir(&save_dir, &id)
     } else {
         crate::parser::data_dir(&save_dir, &id)
@@ -1844,7 +1844,7 @@ fn build_image_section(
     btns.append(&btn);
     }
 
-    if asset_type == "icon" && game.kind == "ps4" {
+    if asset_type == "icon" && game.kind == crate::models::PS4 {
         let reset_btn = gtk4::Button::with_label("Reset");
         let gc = game.clone();
         let refresh = refresh_images.clone();

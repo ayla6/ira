@@ -13,7 +13,7 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
         (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
     };
     std::thread::spawn(move || {
-        if let Err(e) = crate::db::upsert_matching(&db, lutris_id, &steam_app_id, "lutris", "gse", &steam_app_id) {
+        if let Err(e) = crate::db::upsert_matching(&db, lutris_id, &steam_app_id, crate::models::LUTRIS, crate::models::GSE, &steam_app_id) {
             eprintln!("match_game_to_steam: upsert_matching failed: {}", e);
             return;
         }
@@ -35,7 +35,7 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
                         let _ = sender.send(AppMessage::NewGame(game));
                         enrich_game_async(
                             steam_app_id.clone(),
-                            "gse".to_string(),
+                            crate::models::GSE.to_string(),
                             steam_app_id.clone(),
                             entry.id,
                             lutris_id,
@@ -65,7 +65,7 @@ pub fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, 
         (s.steam.clone(), s.sender.clone(), s.db.clone())
     };
     std::thread::spawn(move || {
-        if let Err(e) = crate::db::upsert_matching(&db, lutris_id, &sgdb_id, "lutris", "", &sgdb_id) {
+        if let Err(e) = crate::db::upsert_matching(&db, lutris_id, &sgdb_id, crate::models::LUTRIS, "", &sgdb_id) {
             eprintln!("match_game_to_sgdb: upsert_matching failed: {}", e);
             return;
         }
@@ -74,7 +74,7 @@ pub fn match_game_to_sgdb(state: &SharedState, lutris_id: i64, sgdb_id: String, 
         if let Ok(Some(entry)) = crate::db::find_by_lutris_id(&db, lutris_id) {
             let game = Game {
                 app_id: sgdb_id.clone(),
-                kind: "lutris".to_string(),
+                kind: crate::models::LUTRIS.to_string(),
                 trophy_source: String::new(),
                 platform_id: sgdb_id.clone(),
                 db_id: entry.id,

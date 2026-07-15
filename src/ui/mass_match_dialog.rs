@@ -41,8 +41,8 @@ pub fn show_mass_match_dialog(state: &SharedState) {
         let games = s.games.clone();
         let needs_matching: Vec<Game> = games.into_iter().filter(|g| {
             (g.app_id.is_empty() && !g.manual_unmatch)
-            || (g.kind == "retro" && g.trophy_source.is_empty())
-            || (g.sgdb_id.is_empty() && (g.app_id.is_empty() || g.kind == "retro"))
+            || (g.kind == crate::models::RETRO && g.trophy_source.is_empty())
+            || (g.sgdb_id.is_empty() && (g.app_id.is_empty() || g.kind == crate::models::RETRO))
         }).collect();
         let save_dir = &s.save_dir;
         let data_dir = std::path::Path::new(save_dir).join("data").join("steam");
@@ -99,7 +99,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     let mut row_action_boxes: Vec<gtk4::Box> = Vec::new();
 
     for game in needs_matching.iter() {
-        let action_box = if game.kind == "retro" && game.trophy_source.is_empty() {
+        let action_box = if game.kind == crate::models::RETRO && game.trophy_source.is_empty() {
             let ac = create_match_row(&list, &game.name, "RA: not matched");
             let inner = ac.clone();
             let sc = state.clone();
@@ -226,7 +226,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 
     // --- SGDB auto-batch thread (games without sgdb_id, including RA-matched retro games) ---
     let sgdb_games: Vec<(String, i64, usize)> = needs_matching.iter().enumerate()
-        .filter(|(_, g)| g.sgdb_id.is_empty() && (g.app_id.is_empty() || g.kind == "retro"))
+        .filter(|(_, g)| g.sgdb_id.is_empty() && (g.app_id.is_empty() || g.kind == crate::models::RETRO))
         .map(|(row_idx, g)| (g.name.clone(), g.db_id, row_idx))
         .collect();
     let (sgdb_tx, sgdb_rx) = std::sync::mpsc::channel::<(usize, Option<(String, String)>, i64, String)>();

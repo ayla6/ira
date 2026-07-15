@@ -128,7 +128,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         }
     }
 
-    let image_dir = if kind == "ps4" {
+    let image_dir = if kind == crate::models::PS4 {
         paths::ps4_data_dir(save_dir, app_id)
     } else if crate::models::has_steam_enrichment(&entry.trophy_source) {
         paths::data_dir(save_dir, app_id)

@@ -65,7 +65,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         .unwrap_or_default()
         .as_secs() as i64;
 
-    if kind == "retro" {
+    if kind == crate::models::RETRO {
         let cc = cfg_clone.console(&platform_id);
         let exe = if !per_game_emu.is_empty() {
             &per_game_emu
@@ -98,7 +98,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             }
             Err(e) => return Err(format!("Failed to launch {}: {}", game_name, e)),
         }
-    } else if kind == "ps4" {
+    } else if kind == crate::models::PS4 {
         let exe = if !per_game_version.is_empty() {
             per_game_version.as_str()
         } else if !global_shadps4_exe.is_empty() {
@@ -122,7 +122,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             }
             Err(e) => return Err(format!("Failed to launch shadPS4: {}", e)),
         }
-    } else if kind == "steam" {
+    } else if kind == crate::models::STEAM {
         let cmd = vec!["steam".to_string(), "-applaunch".to_string(), app_id.clone()];
         match crate::launcher::wrapper::spawn_game(&cmd, &[], None) {
             Ok(_child) => {

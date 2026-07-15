@@ -62,7 +62,7 @@ pub fn add_game_from_folder(
     steam.generate_steam_settings(app_id)?;
 
     // Add to DB (title will be filled from appdetails.json during enrichment)
-    crate::db::add_game(db, kind, "gse", app_id, "", app_id, "")?;
+    crate::db::add_game(db, kind, crate::models::GSE, app_id, "", app_id, "")?;
 
     Ok(saves_game_dir.to_string_lossy().into_owned())
 }

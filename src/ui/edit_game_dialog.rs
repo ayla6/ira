@@ -194,7 +194,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     };
 
     // --- Launch Config (not for steam/ps4/retro; lutris only if it has a saved config) ---
-    let show_launch_config = !show_wine && game.kind != "steam" && game.kind != "ps4" && game.kind != "retro" && (game.kind != "lutris" || has_config);
+    let show_launch_config = !show_wine && game.kind != crate::models::STEAM && game.kind != crate::models::PS4 && game.kind != crate::models::RETRO && (game.kind != crate::models::LUTRIS || has_config);
     let launch_config_widgets = if show_launch_config {
         build_launch_config_page(&saved_launch, &win, &sidebar, &stack, true)
     } else {
@@ -556,7 +556,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     variant_scroll.set_child(Some(&variant_page));
     variant_scroll.set_vexpand(true);
     variant_scroll.set_hexpand(true);
-    if game.kind != "steam" && game.kind != "ps4" && game.kind != "retro" && (game.kind != "lutris" || has_config || !variants.is_empty()) {
+    if game.kind != crate::models::STEAM && game.kind != crate::models::PS4 && game.kind != crate::models::RETRO && (game.kind != crate::models::LUTRIS || has_config || !variants.is_empty()) {
         sidebar.append(&super::dialogs::sidebar_separator());
         sidebar.append(&super::dialogs::settings_sidebar_row("application-x-executable-symbolic", "Variants"));
         stack.add_named(&variant_scroll, Some("variants"));
@@ -652,7 +652,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 new_app_id_val = new_id.clone();
                 let ts = if new_id.is_empty() { "" } else { &trophy_source };
                 let pid = if new_id.is_empty() { "" } else { &new_id };
-                let (steam_id, game_id): (&str, &str) = if game_kind == "ps4" || game_kind == "retro" { ("", &new_id) } else { (&new_id, "") };
+                let (steam_id, game_id): (&str, &str) = if game_kind == crate::models::PS4 || game_kind == crate::models::RETRO { ("", &new_id) } else { (&new_id, "") };
                 if let Err(e) = crate::db::update_game_ids(&db, db_id_s, steam_id, game_id, ts, pid) {
                     eprintln!("Failed to update app ID: {}", e);
                 }

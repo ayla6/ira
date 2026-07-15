@@ -57,7 +57,7 @@ pub fn show_game_context_menu(
         } else {
             None
         };
-        let game_file = if !game.game_path.is_empty() && game.kind != "steam" {
+        let game_file = if !game.game_path.is_empty() && game.kind != crate::models::STEAM {
             Some(game.game_path.clone())
         } else {
             None

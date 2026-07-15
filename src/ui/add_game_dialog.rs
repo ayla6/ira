@@ -232,8 +232,8 @@ pub fn show_add_game_dialog(state: &SharedState) {
         let steam_app_id = steam_id_entry.text().to_string();
         let gog_product_id = gog_id_entry.text().to_string();
 
-        let trophy_source = if !steam_app_id.is_empty() { "gse" } else if !gog_product_id.is_empty() { "nge" } else { "" };
-        let kind = if is_wine { "wine" } else { "linux" };
+        let trophy_source = if !steam_app_id.is_empty() { crate::models::GSE } else if !gog_product_id.is_empty() { crate::models::NGE } else { "" };
+        let kind = if is_wine { crate::models::WINE } else { crate::models::LINUX };
         let platform_id = if !steam_app_id.is_empty() { steam_app_id.clone() } else if !gog_product_id.is_empty() { gog_product_id.clone() } else { format!("manual_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()) };
 
         let selected_profile_id = if is_wine && profile_row.selected() > 0 {
@@ -497,7 +497,7 @@ fn add_game_to_db(
     steam: &crate::api::SteamClient,
     save_dir: &str,
 ) -> Result<i64, String> {
-    let (steam_id, game_id) = if kind == "ps4" || kind == "retro" { ("", app_id) } else { (app_id, "") };
+    let (steam_id, game_id) = if kind == crate::models::PS4 || kind == crate::models::RETRO { ("", app_id) } else { (app_id, "") };
     let game_id = crate::db::add_game(db, kind, trophy_source, steam_id, game_id, platform_id, name)?;
     crate::db::save_game_config(db, game_id, launch_config, wine_config, profile_id)?;
     if !app_id.is_empty() && app_id.parse::<i64>().is_ok() {

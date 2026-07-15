@@ -77,7 +77,7 @@ fn trophy_rank(t: char) -> u8 {
 }
 
 fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::Widget {
-    let is_ps4 = game.kind == "ps4";
+    let is_ps4 = game.kind == crate::models::PS4;
 
     let view_stack = adw::ViewStack::new();
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -119,7 +119,7 @@ fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::
     let trophy_source_for_reload = game.trophy_source.clone();
     let platform_id_for_reload = game.platform_id.clone();
     let db_id_for_reload = game.db_id;
-    let is_retro_or_ps4 = kind_for_reload == "ps4" || kind_for_reload == "retro";
+    let is_retro_or_ps4 = kind_for_reload == crate::models::PS4 || kind_for_reload == crate::models::RETRO;
 
     let sender = state.borrow().sender.clone();
     let save_dir = state.borrow().save_dir.clone();
@@ -369,7 +369,7 @@ fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_wi
     let has_hero = !game.hero_image_path.is_empty();
 
     // Wine tools button (only shown if wine is enabled — skip DB lookup for native platforms)
-    let wine_enabled = if game.kind == "steam" || game.kind == "ps4" {
+    let wine_enabled = if game.kind == crate::models::STEAM || game.kind == crate::models::PS4 {
         false
     } else {
         let s = state.borrow();

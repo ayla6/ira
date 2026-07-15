@@ -48,7 +48,7 @@ pub fn find_by_db_id(conn: &DbConn, db_id: i64) -> Result<Option<GameEntry>, Str
 }
 
 pub fn find_gog_by_product_id(conn: &DbConn, product_id: &str) -> Result<Option<GameEntry>, String> {
-    find_by_trophy_platform(conn, "nge", product_id)
+    find_by_trophy_platform(conn, crate::models::NGE, product_id)
 }
 
 pub fn find_by_trophy_platform(conn: &DbConn, trophy_source: &str, platform_id: &str) -> Result<Option<GameEntry>, String> {

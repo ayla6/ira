@@ -21,6 +21,8 @@ mod steam_search_dialog;
 mod sgdb_match_dialog;
 mod ra_match_dialog;
 pub use ra_match_dialog::show_ra_search_dialog;
+mod settings_pages;
+mod settings_console;
 mod settings_dialog;
 mod game_settings;
 mod steam_search;

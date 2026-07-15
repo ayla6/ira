@@ -1,0 +1,16 @@
+# Clippy configuration for Ira
+# https://rust-lang.github.io/rust-clippy/master/index.html#configuration
+
+# AGENTS.md: soft cap 100 lines per function, hard cap 200 lines.
+# Cognitive complexity helps catch functions that are too tangled even if short.
+cognitive-complexity-threshold = 25
+
+# AGENTS.md: functions should be small and focused.
+# Functions exceeding 7 args should use parameter structs.
+too-many-arguments-threshold = 7
+
+# AGENTS.md: factor complex types into type definitions.
+type-complexity-threshold = 250
+
+# AGENTS.md: extract on the 3rd occurrence — warn early on enum variant naming.
+enum-variant-name-threshold = 3

@@ -37,4 +37,10 @@ path = "src/bin/test_main.rs"
 [dev-dependencies]
 tempfile = "3"
 
+[lints.clippy]
+# Good-practice restriction lints (not in clippy::all by default)
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+
 [features]

@@ -28,6 +28,7 @@ mod game_settings;
 mod steam_search;
 mod game_logo;
 mod image_manager;
+mod sgdb_picker;
 pub use settings_dialog::show_settings_dialog;
 pub use image_manager::{build_image_manager_content, build_image_manager_content_with_drafts};
 mod add_game;

@@ -24,10 +24,6 @@ cargo build 2>&1 | grep warning     # Check for warnings (should be zero)
 
 ### Dead code checks
 
-```bash
-rg '#\[allow' crates/    # Must return nothing
-```
-
 `#[allow(...)]` suppressions are forbidden. Either use the code or delete it.
 If the code is actively being implemented (WIP, will be wired up in the next
 commit), bear with the warning until it's connected — do not suppress it.

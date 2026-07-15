@@ -2,6 +2,7 @@ use crate::models::{GameLaunchConfig, WineConfig};
 use crate::AppMessage;
 use gtk4::prelude::*;
 use adw::prelude::*;
+use std::rc::Rc;
 use super::state::SharedState;
 
 pub fn show_add_game_dialog(state: &SharedState) {
@@ -402,7 +403,8 @@ fn build_general_page(win: &adw::Window, profiles: &[crate::models::WineProfile]
         let row_c = steam_id_entry.clone();
         let name_c = String::new();
         steam_search_btn.connect_clicked(move |_| {
-            super::dialogs::show_steam_id_search_popup_add(&sc, &name_c, &win_c, &row_c);
+            let on_select = Rc::new(|_: &str| {});
+            super::dialogs::show_steam_id_search_popup(&sc, &name_c, &win_c, &row_c, "Select", on_select);
         });
     }
     steam_id_entry.add_suffix(&steam_search_btn);

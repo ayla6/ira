@@ -143,8 +143,7 @@ pub(crate) struct SteamSchemaStats {
 #[derive(Debug, Deserialize)]
 pub(crate) struct SteamSchemaAchievement {
     pub name: String,
-    #[allow(dead_code)]
-    pub defaultvalue: i64,
+    pub _defaultvalue: i64,
     #[serde(rename = "displayName")]
     pub display_name: String,
     pub hidden: i64,

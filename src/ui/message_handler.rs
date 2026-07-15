@@ -33,13 +33,6 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             dialog.set_close_response("ok");
             dialog.present(Some(&window));
         }
-        AppMessage::GameRemoved { app_id } => {
-            let mut s = state.borrow_mut();
-            s.games.retain(|g| g.app_id != app_id);
-            s.game_names.lock().unwrap().remove(&app_id);
-            drop(s);
-            rebuild_sidebar(state);
-        }
         AppMessage::GameStopped(db_id) => {
             state.borrow().running_games.lock().unwrap().remove(&db_id);
             {
@@ -126,27 +119,6 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         }
         AppMessage::GamesLoaded(games) => {
             handle_games_loaded(state, games);
-        }
-        AppMessage::RAGamesLoaded(games) => {
-            handle_ra_games_loaded(state, games);
-        }
-        AppMessage::ReloadGames => {
-            let db = state.borrow().db.clone();
-            let save_dir = state.borrow().save_dir.clone();
-            let sender = state.borrow().sender.clone();
-            let cfg = state.borrow().cfg.clone();
-            let shadps4_enabled = cfg.shadps4_enabled;
-            let steam_enabled = cfg.steam_enabled;
-            let lutris_enabled = cfg.lutris_enabled;
-            let cfg_clone = cfg.clone();
-            let sort_mode = crate::models::SortMode::from_str(&cfg.sort_mode);
-            let sort_descending = cfg.sort_descending;
-            std::thread::spawn(move || {
-                let games = crate::game_list::build_game_list(
-                    &db, &save_dir, lutris_enabled, shadps4_enabled, steam_enabled, &cfg_clone, sort_mode, sort_descending,
-                );
-                let _ = sender.send(AppMessage::GamesLoaded(games));
-            });
         }
         AppMessage::SgdbAssetsDownloaded { db_id, sgdb_id, icon, hero, grid, logo, header } => {
             if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
@@ -343,41 +315,6 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
     }
 }
 
-fn handle_ra_games_loaded(state: &SharedState, games: Vec<Game>) {
-    {
-        let mut s = state.borrow_mut();
-        for g in &games {
-            if !g.app_id.is_empty() {
-                s.game_names.lock().unwrap().insert(g.app_id.clone(), g.name.clone());
-            }
-            let found = s.games.iter().position(|existing| existing.db_id == g.db_id);
-            if let Some(i) = found {
-                let mut g_clone = g.clone();
-                g_clone.hidden = s.games[i].hidden;
-                g_clone.lutris_name = s.games[i].lutris_name.clone();
-                g_clone.manual_unmatch = s.games[i].manual_unmatch;
-                s.games[i] = g_clone;
-            } else {
-                s.games.push(g.clone());
-            }
-        }
-        let sort_mode = crate::models::SortMode::from_str(&s.cfg.sort_mode);
-        let sort_descending = s.cfg.sort_descending;
-        s.games.sort_by(|a, b| {
-            let ord = sort_mode.compare(a, b);
-            if sort_descending { ord.reverse() } else { ord }
-        });
-    }
-
-    rebuild_sidebar(state);
-    let selected = state.borrow().selected_id.clone();
-    if selected.is_empty() && !state.borrow().content_unloaded {
-        let row = state.borrow().game_list.row_at_index(0);
-        select_row_silently(state, row.as_ref());
-        show_grid_view(state);
-    }
-}
-
 pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
     let app_id = updated.app_id.clone();
 
@@ -447,7 +384,6 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
 
 fn insert_or_update_game(state: &SharedState, game: Game) {
     let app_id = game.app_id.clone();
-    let needs_enrichment = false;
 
     {
         let mut s = state.borrow_mut();
@@ -502,41 +438,6 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
                     });
                 }
             });
-        }
-    }
-
-    if needs_enrichment {
-        let (ra_username, ra_token, ra_password, steam, watcher, sender, save_dir, db) = {
-            let s = state.borrow();
-            (
-                s.cfg.ra_username.clone(),
-                s.cfg.ra_token.clone(),
-                s.cfg.ra_password.clone(),
-                s.steam.clone(),
-                s.watcher.clone(),
-                s.sender.clone(),
-                s.save_dir.clone(),
-                s.db.clone(),
-            )
-        };
-        let g = state.borrow().games.iter().find(|g| g.app_id == app_id).cloned();
-        if let Some(g) = g {
-            enrich_game_async(
-                g.app_id.clone(),
-                g.trophy_source.clone(),
-                g.platform_id.clone(),
-                g.db_id,
-                g.lutris_id,
-                g.name.clone(),
-                steam,
-                watcher,
-                sender,
-                save_dir,
-                db,
-                ra_username,
-                ra_token,
-                ra_password,
-            );
         }
     }
 }

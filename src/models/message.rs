@@ -6,7 +6,6 @@ pub enum AppMessage {
     NewGame(Game),
     WatcherGameUpdated(Game),
     AddGameError(String),
-    GameRemoved { app_id: String },
     GameStopped(i64),
     GameStarted(i64),
     /// Fired by the LutrisWatcher when pga.db changes (debounced).
@@ -16,10 +15,6 @@ pub enum AppMessage {
     ShadPS4PlaytimeChanged,
     /// Initial game list loaded in the background.
     GamesLoaded(Vec<Game>),
-    /// RA games loaded in the background (batch, appended to existing list).
-    RAGamesLoaded(Vec<Game>),
-    /// Reload the entire game list (e.g. after Steam reimport).
-    ReloadGames,
     /// SGDB assets downloaded for a game.
     SessionRecorded {
         game_id: i64,

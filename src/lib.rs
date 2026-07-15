@@ -13,4 +13,4 @@ pub mod ui;
 pub mod watcher;
 pub mod api;
 
-pub use models::{AchievementStatus, AppMessage, AppSender, Game, GameEntry, GameLaunchConfig, WineConfig, LaunchConfig, MergedAchievement, PlaySession, StringOrMap, unmatched_game};
+pub use models::{AchievementStatus, AppMessage, AppSender, Game, GameEntry, GameLaunchConfig, WineConfig, MergedAchievement, PlaySession, StringOrMap, unmatched_game};

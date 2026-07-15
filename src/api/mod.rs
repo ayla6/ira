@@ -1,6 +1,5 @@
 pub mod assets;
 pub mod download;
-pub mod gog;
 pub mod nemirtingas;
 pub mod sgdb;
 pub mod steam;

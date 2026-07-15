@@ -10,35 +10,11 @@ pub enum PsfValue {
     Binary(Vec<u8>),
 }
 
-#[repr(C)]
-#[allow(dead_code)]
-struct PsfHeader {
-    magic: [u8; 4],
-    version: [u8; 4],
-    key_table_offset: [u8; 4],
-    data_table_offset: [u8; 4],
-    index_entries: [u8; 4],
-}
-
-#[repr(C)]
-#[allow(dead_code)]
-struct PsfEntry {
-    key_offset: [u8; 2],
-    param_fmt: [u8; 2],
-    param_len: [u8; 4],
-    param_max_len: [u8; 4],
-    data_offset: [u8; 4],
-}
-
 fn read_u32_le(b: &[u8]) -> u32 {
     u32::from_le_bytes([b[0], b[1], b[2], b[3]])
 }
 fn read_u16_le(b: &[u8]) -> u16 {
     u16::from_le_bytes([b[0], b[1]])
-}
-#[allow(dead_code)]
-fn read_u16_be(b: &[u8]) -> u16 {
-    u16::from_be_bytes([b[0], b[1]])
 }
 
 /// Parse a param.sfo file, returning a map of key → value.

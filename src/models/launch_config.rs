@@ -152,12 +152,6 @@ impl WineConfig {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct LaunchConfig {
-    pub game: GameLaunchConfig,
-    pub wine: Option<WineConfig>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WineProfile {
     pub id: i64,

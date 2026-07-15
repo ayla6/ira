@@ -162,18 +162,6 @@ fn is_wine_bg(pid: i32) -> bool {
     false
 }
 
-#[allow(dead_code)]
-fn kill_process_tree(pid: i32, sig: i32) {
-    let descendants = collect_descendants(pid);
-    for d in &descendants {
-        let name = proc_name(*d).unwrap_or_default();
-        let bg = is_wine_bg(*d);
-        eprintln!("  kill_process_tree: pid {} ({}) wine_bg={}", d, name, bg);
-        unsafe { libc::kill(*d, sig); }
-    }
-    unsafe { libc::kill(pid, sig); }
-}
-
 pub fn stop_game_with_wine(pid: i32, wine_exe: Option<&str>, wine_prefix: Option<&str>, env: &[(String, String)]) {
     // Collect descendants BEFORE sending signals — the process tree may
     // change after the game exits (children get reparented).

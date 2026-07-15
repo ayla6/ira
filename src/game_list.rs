@@ -137,10 +137,6 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, sh
     games
 }
 
-pub fn build_ra_games_threaded(_db: &db::DbConn, _save_dir: &str, _cfg: &Config, _sender: &crate::AppSender) {
-    // No longer used — RA games are loaded synchronously in build_game_list
-}
-
 fn build_lutris_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
     let lutris_games = match load_lutris_games() {
         Ok(g) => g,

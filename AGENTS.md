@@ -121,6 +121,8 @@ permanent migration mechanism.
 - If you copy-paste more than 5 lines, ask: "should this be a helper?"
 - Shared helpers go in the module's `helpers.rs` (for `ui/`) or `lib.rs`
   (for smaller crates).
+- If you need a paragraph-long comment to justify why the workaround is OK,
+  the code is wrong — fix the code.
 
 ### Types
 - **Use enums for closed sets.** Game kinds (`gbe_steam`, `ne_gog`, `sgdb`, `ps4`)

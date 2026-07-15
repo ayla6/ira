@@ -26,9 +26,7 @@ impl SteamClient {
                                 let mut best: Option<(&serde_json::Value, i64)> = None;
                                 for item in data {
                                     let w = item.get("width").and_then(|v| v.as_i64()).unwrap_or(9999);
-                                    if w <= 128 && (best.is_none() || w < best.unwrap().1) {
-                                        best = Some((item, w));
-                                    } else if best.is_none() {
+                                    if best.is_none() || (w <= 128 && w < best.unwrap().1) {
                                         best = Some((item, w));
                                     }
                                 }

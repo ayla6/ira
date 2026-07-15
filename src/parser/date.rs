@@ -32,7 +32,7 @@ pub fn parse_steam_release_date(date: &str) -> i64 {
 fn extract_year(s: &str) -> Option<i64> {
     for part in s.split_whitespace() {
         if let Ok(y) = part.parse::<i32>() {
-            if y >= 1900 && y <= 2100 {
+            if (1900..=2100).contains(&y) {
                 return NaiveDate::from_ymd_opt(y, 1, 1)
                     .and_then(|d| d.and_hms_opt(0, 0, 0))
                     .map(|dt| dt.and_utc().timestamp());

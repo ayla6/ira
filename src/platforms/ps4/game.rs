@@ -6,18 +6,22 @@ use crate::platforms::ps4::{
     read_play_times, parse_playtime, ShadPS4Game,
 };
 
+pub struct ShadPS4GameMeta {
+    pub title: String,
+    pub hidden: bool,
+    pub logo_position: String,
+    pub logo_size: i32,
+    pub sort_title: String,
+    pub sgdb_id: String,
+    pub shadps4_version: String,
+    pub last_played: i64,
+}
+
 /// Load a shadPS4 game as a Game struct with achievements.
 pub fn load_shadps4_game(
     shad: &ShadPS4Game,
     db_id: i64,
-    title: &str,
-    hidden: bool,
-    logo_position: &str,
-    logo_size: i32,
-    sort_title: &str,
-    sgdb_id: &str,
-    shadps4_version: &str,
-    last_played: i64,
+    meta: &ShadPS4GameMeta,
     save_dir: &str,
 ) -> Game {
     let npwr_id = &shad.npwr_id;
@@ -46,10 +50,10 @@ pub fn load_shadps4_game(
         trophy_source: String::new(),
         platform_id: serial.clone(),
         db_id,
-        name: if title.is_empty() {
+        name: if meta.title.is_empty() {
             shad.title.clone()
         } else {
-            title.to_string()
+            meta.title.clone()
         },
         icon_path: String::new(),
         hero_image_path: String::new(),
@@ -59,19 +63,19 @@ pub fn load_shadps4_game(
         achievements: Vec::new(),
         earned_count: 0,
         total_count: 0,
-        hidden,
+        hidden: meta.hidden,
         lutris_id: 0,
         slug: serial.clone(),
         playtime,
-        last_played,
-        logo_position: logo_position.to_string(),
-        logo_size,
+        last_played: meta.last_played,
+        logo_position: meta.logo_position.clone(),
+        logo_size: meta.logo_size,
         lutris_name: shad.title.clone(),
         manual_unmatch: false,
-        sort_title: sort_title.to_string(),
+        sort_title: meta.sort_title.clone(),
         game_path: shad.game_path.to_string_lossy().into_owned(),
-        sgdb_id: sgdb_id.to_string(),
-        shadps4_version: shadps4_version.to_string(),
+        sgdb_id: meta.sgdb_id.clone(),
+        shadps4_version: meta.shadps4_version.clone(),
         release_date: String::new(),
         release_timestamp: 0,
         metacritic_score: -1,
@@ -94,8 +98,8 @@ pub fn load_shadps4_game(
     }
 
     // Image paths — use SGDB dir if sgdb_id is set, otherwise data/ps4/{NPWR_ID}/
-    let image_dir = if !sgdb_id.is_empty() {
-        Path::new(save_dir).join("data").join("steamgriddb").join(sgdb_id)
+    let image_dir = if !meta.sgdb_id.is_empty() {
+        Path::new(save_dir).join("data").join("steamgriddb").join(&meta.sgdb_id)
     } else {
         ps4_data_dir.clone()
     };

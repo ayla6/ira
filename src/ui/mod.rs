@@ -28,7 +28,7 @@ mod filter;
 mod group_dialog;
 
 pub use state::{AppState, SharedState, malloc_trim};
-pub use window::build_ui;
+pub use window::{build_ui, AppContext};
 pub use message_handler::{handle_app_message, switch_to_game};
 pub use background::{hide_to_background, restore_content};
 pub use enrichment::enrich_game_async;

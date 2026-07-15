@@ -24,18 +24,22 @@ use super::mass_match_dialog::show_mass_match_dialog;
 use super::add_game_dialog::show_add_game_dialog;
 use super::background::show_close_choice_dialog;
 
+pub struct AppContext {
+    pub steam: Arc<SteamClient>,
+    pub watcher: Option<AchievementWatcher>,
+    pub db: DbConn,
+    pub sender: AppSender,
+    pub game_names: Arc<Mutex<HashMap<String, String>>>,
+}
+
 pub fn build_ui(
     app: &adw::Application,
     games: Vec<Game>,
     cfg: Config,
-    steam: Arc<SteamClient>,
-    watcher: Option<AchievementWatcher>,
-    db: DbConn,
-    sender: AppSender,
-    game_names: Arc<Mutex<HashMap<String, String>>>,
+    ctx: AppContext,
 ) -> SharedState {
     let save_dir = cfg.save_dir.clone();
-    let groups = crate::db::get_all_groups(&db).unwrap_or_else(|e| {
+    let groups = crate::db::get_all_groups(&ctx.db).unwrap_or_else(|e| {
         eprintln!("Failed to load groups: {}", e);
         Vec::new()
     });
@@ -49,13 +53,13 @@ pub fn build_ui(
         content_box: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
         selected_id: String::new(),
         cfg: cfg.clone(),
-        steam: steam.clone(),
-        watcher: watcher.clone(),
+        steam: ctx.steam.clone(),
+        watcher: ctx.watcher.clone(),
         lutris_watcher: None,
         shadps4_watcher: None,
-        db,
-        sender,
-        game_names,
+        db: ctx.db,
+        sender: ctx.sender,
+        game_names: ctx.game_names,
         content_unloaded: false,
         restoring: false,
         running_games: Arc::new(Mutex::new(HashMap::new())),

@@ -273,7 +273,7 @@ pub fn refresh_settings_images_page(
                 ss.remove(&old);
             }
             if let Some(game) = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned() {
-                let new_page = build_page(state, &game, &sw);
+                let new_page = build_page(state, &game, sw);
                 ss.add_named(&new_page, Some("images"));
             }
         }

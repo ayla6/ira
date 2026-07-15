@@ -404,10 +404,10 @@ fn build_env_var_row(name: &str, value: &str) -> gtk4::ListBoxRow {
     remove_btn.add_css_class("circular");
     let row_clone = row.clone();
     remove_btn.connect_clicked(move |_| {
-        row_clone.parent().and_then(|p| p.downcast::<gtk4::ListBox>().ok()).map(|list| {
+        if let Some(list) = row_clone.parent().and_then(|p| p.downcast::<gtk4::ListBox>().ok()) {
             row_clone.unparent();
             list.remove(&row_clone);
-        });
+        }
     });
     hbox.append(&remove_btn);
 
@@ -482,10 +482,10 @@ fn build_dll_override_row(name: &str, value: &str) -> gtk4::ListBoxRow {
     remove_btn.add_css_class("circular");
     let row_clone = row.clone();
     remove_btn.connect_clicked(move |_| {
-        row_clone.parent().and_then(|p| p.downcast::<gtk4::ListBox>().ok()).map(|list| {
+        if let Some(list) = row_clone.parent().and_then(|p| p.downcast::<gtk4::ListBox>().ok()) {
             row_clone.unparent();
             list.remove(&row_clone);
-        });
+        }
     });
     hbox.append(&remove_btn);
 

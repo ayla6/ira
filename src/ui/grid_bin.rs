@@ -56,7 +56,7 @@ mod grid_imp {
                     if pw > 1 { pw } else { 800 }
                 };
                 let n_cols = if col_nat > 0 {
-                    ((width as f64 / col_nat as f64) as u32).max(1).min(30)
+                    ((width as f64 / col_nat as f64) as u32).clamp(1, 30)
                 } else {
                     1
                 };

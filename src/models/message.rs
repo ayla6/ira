@@ -50,13 +50,11 @@ impl AppSender {
         Self { tx, fd }
     }
 
-    pub fn send(&self, msg: AppMessage) -> Result<(), mpsc::SendError<AppMessage>> {
-        let result = self.tx.send(msg);
-        if result.is_ok() {
-            let byte = [1u8; 1];
-            unsafe { libc::write(self.fd, byte.as_ptr() as *const _, 1); }
-        }
-        result
+    pub fn send(&self, msg: AppMessage) -> Result<(), String> {
+        self.tx.send(msg).map_err(|e| e.to_string())?;
+        let byte = [1u8; 1];
+        unsafe { libc::write(self.fd, byte.as_ptr() as *const _, 1); }
+        Ok(())
     }
 }
 

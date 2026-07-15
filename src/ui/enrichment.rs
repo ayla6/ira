@@ -7,28 +7,36 @@ use crate::GameEntry;
 use crate::models::has_steam_enrichment;
 use crate::parser::load_game;
 use std::sync::Mutex;
+use std::sync::Arc;
 
 static RA_ENRICH_LOCK: Mutex<()> = Mutex::new(());
 
-pub fn enrich_game_async(
-    app_id: String,
-    trophy_source: String,
-    platform_id: String,
-    db_id: i64,
-    title: String,
-    steam: std::sync::Arc<SteamClient>,
-    watcher: Option<AchievementWatcher>,
-    sender: AppSender,
-    save_dir: String,
-    db: DbConn,
-    ra_username: String,
-    ra_token: String,
-    ra_password: String,
-) {
+pub struct EnrichGameParams {
+    pub app_id: String,
+    pub trophy_source: String,
+    pub platform_id: String,
+    pub db_id: i64,
+    pub title: String,
+    pub steam: Arc<SteamClient>,
+    pub watcher: Option<AchievementWatcher>,
+    pub sender: AppSender,
+    pub save_dir: String,
+    pub db: DbConn,
+    pub ra_username: String,
+    pub ra_token: String,
+    pub ra_password: String,
+}
+
+pub fn enrich_game_async(params: EnrichGameParams) {
+    let EnrichGameParams { app_id, trophy_source, platform_id, db_id, title, steam, watcher, sender, save_dir, db, ra_username, ra_token, ra_password } = params;
     std::thread::spawn(move || {
         if trophy_source == crate::models::RA {
             let _guard = RA_ENRICH_LOCK.lock().unwrap();
-            enrich_ra(&app_id, &trophy_source, &platform_id, db_id, &title, &save_dir, &sender, &ra_username, &ra_token, &ra_password, &db);
+            enrich_ra(EnrichRaParams {
+                app_id: &app_id, trophy_source: &trophy_source, platform_id: &platform_id,
+                db_id, title: &title, save_dir: &save_dir, sender: &sender,
+                ra_username: &ra_username, ra_token: &ra_token, ra_password: &ra_password, db: &db,
+            });
             return;
         }
 
@@ -214,19 +222,22 @@ fn fetch_steam_game_icon(
     }
 }
 
-fn enrich_ra(
-    app_id: &str,
-    trophy_source: &str,
-    platform_id: &str,
+struct EnrichRaParams<'a> {
+    app_id: &'a str,
+    trophy_source: &'a str,
+    platform_id: &'a str,
     db_id: i64,
-    title: &str,
-    save_dir: &str,
-    sender: &AppSender,
-    ra_username: &str,
-    ra_token: &str,
-    ra_password: &str,
-    db: &DbConn,
-) {
+    title: &'a str,
+    save_dir: &'a str,
+    sender: &'a AppSender,
+    ra_username: &'a str,
+    ra_token: &'a str,
+    ra_password: &'a str,
+    db: &'a DbConn,
+}
+
+fn enrich_ra(params: EnrichRaParams) {
+    let EnrichRaParams { app_id, trophy_source, platform_id, db_id, title, save_dir, sender, ra_username, ra_token, ra_password, db } = params;
     if crate::platforms::retroachievements::RaClient::auth_is_broken() {
         return;
     }
@@ -237,7 +248,7 @@ fn enrich_ra(
         return;
     }
 
-    let entry = crate::db::find_by_game_id(&db, app_id)
+    let entry = crate::db::find_by_game_id(db, app_id)
         .ok()
         .flatten()
         .unwrap_or_else(|| GameEntry::for_reload(db_id, crate::models::RETRO, trophy_source, "", app_id, platform_id));

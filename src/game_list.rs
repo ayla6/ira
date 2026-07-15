@@ -1,11 +1,19 @@
 use crate::db;
 use crate::config::Config;
-use crate::models::Game;
+use crate::models::{Game, SortMode};
 use crate::parser;
 use crate::platforms::lutris::{load_lutris_games, LutrisGame};
-use crate::platforms::ps4::{discover_games, load_shadps4_game};
+use crate::platforms::ps4::{discover_games, load_shadps4_game, ShadPS4GameMeta};
 use crate::platforms::retroachievements;
 use crate::platforms::steam;
+
+pub struct GameListOptions {
+    pub lutris_enabled: bool,
+    pub shadps4_enabled: bool,
+    pub steam_enabled: bool,
+    pub sort_mode: SortMode,
+    pub sort_descending: bool,
+}
 
 fn normalize_title(s: &str) -> String {
     let lower = s.to_lowercase();
@@ -78,20 +86,20 @@ fn auto_match_by_title(db: &db::DbConn, save_dir: &str, lutris_games: &[LutrisGa
     }
 }
 
-pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, shadps4_enabled: bool, steam_enabled: bool, cfg: &Config, sort_mode: crate::models::SortMode, sort_descending: bool) -> Vec<Game> {
-    let steam_games = if steam_enabled { steam::discover_games() } else { Vec::new() };
-    if steam_enabled && !steam_games.is_empty() {
+pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &GameListOptions) -> Vec<Game> {
+    let steam_games = if options.steam_enabled { steam::discover_games() } else { Vec::new() };
+    if options.steam_enabled && !steam_games.is_empty() {
         cleanup_steam_entries(db, &steam_games);
     }
 
-    let steam_playtimes = if steam_enabled { steam::read_all_playtimes() } else { std::collections::HashMap::new() };
-    if steam_enabled {
+    let steam_playtimes = if options.steam_enabled { steam::read_all_playtimes() } else { std::collections::HashMap::new() };
+    if options.steam_enabled {
         eprintln!("[steam] Discovered {} games, {} playtimes", steam_games.len(), steam_playtimes.len());
     }
 
     let ra_any_console = cfg.any_console_enabled();
 
-    let mut games = if lutris_enabled {
+    let mut games = if options.lutris_enabled {
         build_lutris_games(db, save_dir)
     } else {
         load_non_lutris_games(db, save_dir)
@@ -99,17 +107,17 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, sh
 
     // Filter out disabled sources
     games.retain(|g| {
-        if !steam_enabled && g.kind == crate::models::STEAM { return false; }
-        if !shadps4_enabled && g.kind == crate::models::PS4 { return false; }
+        if !options.steam_enabled && g.kind == crate::models::STEAM { return false; }
+        if !options.shadps4_enabled && g.kind == crate::models::PS4 { return false; }
         if !ra_any_console && g.kind == crate::models::RETRO { return false; }
         true
     });
 
     // Remove games that will be re-added by platform builders to avoid duplicates
-    if shadps4_enabled {
+    if options.shadps4_enabled {
         games.retain(|g| g.kind != crate::models::PS4);
     }
-    if steam_enabled {
+    if options.steam_enabled {
         games.retain(|g| g.kind != crate::models::STEAM);
     }
     if ra_any_console {
@@ -117,22 +125,22 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, lutris_enabled: bool, sh
     }
 
     games.sort_by(|a, b| {
-        let ord = sort_mode.compare(a, b);
-        if sort_descending { ord.reverse() } else { ord }
+        let ord = options.sort_mode.compare(a, b);
+        if options.sort_descending { ord.reverse() } else { ord }
     });
 
-    if shadps4_enabled {
-        games.extend(build_shadps4_games(&db, save_dir));
+    if options.shadps4_enabled {
+        games.extend(build_shadps4_games(db, save_dir));
     }
-    if steam_enabled {
-        games.extend(build_steam_games(&db, save_dir, &steam_games, &steam_playtimes));
+    if options.steam_enabled {
+        games.extend(build_steam_games(db, save_dir, &steam_games, &steam_playtimes));
     }
     if ra_any_console {
-        games.extend(retroachievements::build_ra_games(&db, save_dir, cfg));
+        games.extend(retroachievements::build_ra_games(db, save_dir, cfg));
     }
     games.sort_by(|a, b| {
-        let ord = sort_mode.compare(a, b);
-        if sort_descending { ord.reverse() } else { ord }
+        let ord = options.sort_mode.compare(a, b);
+        if options.sort_descending { ord.reverse() } else { ord }
     });
     games
 }
@@ -228,14 +236,16 @@ fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
         let game = load_shadps4_game(
             shad,
             db_id,
-            &title,
-            hidden,
-            &logo_position,
-            logo_size,
-            &sort_title,
-            &sgdb_id,
-            &shadps4_version,
-            last_played,
+            &ShadPS4GameMeta {
+                title,
+                hidden,
+                logo_position,
+                logo_size,
+                sort_title,
+                sgdb_id,
+                shadps4_version,
+                last_played,
+            },
             save_dir,
         );
         games.push(game);
@@ -290,11 +300,10 @@ fn build_steam_games(db: &db::DbConn, save_dir: &str, steam_games: &[steam::Stea
         if let Some(e) = db_entry {
             match parser::load_game(&e, save_dir) {
                 Ok(mut game) => {
-                    if game.name.is_empty() || game.name.starts_with("App ID:") {
-                        if !sg.name.is_empty() {
+                    if (game.name.is_empty() || game.name.starts_with("App ID:"))
+                        && !sg.name.is_empty() {
                             game.name = sg.name.clone();
                         }
-                    }
                     game.game_path = sg.install_dir.to_string_lossy().into_owned();
                     if let Some(&(pt, lp)) = playtimes.get(&sg.app_id) {
                         game.playtime = pt;

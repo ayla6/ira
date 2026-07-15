@@ -30,7 +30,7 @@ pub fn get_app_types(app_ids: &[u32]) -> HashMap<u32, String> {
                 let search_start = pos + 5;
                 let search_end = (search_start + 3000).min(scan_end);
                 let search_region = &data[search_start..search_end];
-                if let Some(rel) = search_region.windows(5).position(|w| w == &type_pattern) {
+                if let Some(rel) = search_region.windows(5).position(|w| w == type_pattern) {
                     let value_start = search_start + rel + 5;
                     if let Some(null_pos) = data[value_start..].iter().position(|&b| b == 0) {
                         let value = String::from_utf8_lossy(&data[value_start..value_start + null_pos]).to_string();
@@ -68,7 +68,7 @@ pub fn get_clienticon(app_id: u32) -> Option<String> {
             let search_start = pos + 5;
             let search_end = (search_start + 5000).min(scan_end);
             let search_region = &data[search_start..search_end];
-            if let Some(rel) = search_region.windows(5).position(|w| w == &ci_pattern) {
+            if let Some(rel) = search_region.windows(5).position(|w| w == ci_pattern) {
                 let value_start = search_start + rel + 5;
                 if let Some(null_pos) = data[value_start..].iter().position(|&b| b == 0) {
                     return Some(String::from_utf8_lossy(&data[value_start..value_start + null_pos]).to_string());

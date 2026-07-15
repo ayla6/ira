@@ -24,7 +24,7 @@ pub fn parse_library_folders() -> Vec<PathBuf> {
     };
 
     let mut result = Vec::new();
-    for (_, value) in &folders {
+    for value in folders.values() {
         match value {
             VdfValue::Str(path) => {
                 if Path::new(path).is_dir() {

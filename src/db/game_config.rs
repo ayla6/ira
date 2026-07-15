@@ -99,12 +99,16 @@ mod tests {
     fn test_update_existing_config() {
         let (conn, _tmp) = setup_db();
         let launch = GameLaunchConfig::default();
-        let mut wine = WineConfig::default();
-        wine.version = "ge-proton".to_string();
+        let wine = WineConfig {
+            version: "ge-proton".to_string(),
+            ..Default::default()
+        };
         save_game_config(&conn, 1, &launch, &wine, None).unwrap();
 
-        let mut wine2 = WineConfig::default();
-        wine2.version = "winehq-staging".to_string();
+        let wine2 = WineConfig {
+            version: "winehq-staging".to_string(),
+            ..Default::default()
+        };
         save_game_config(&conn, 1, &launch, &wine2, None).unwrap();
 
         let result = get_game_config(&conn, 1).unwrap().unwrap();
@@ -125,20 +129,24 @@ mod tests {
     #[test]
     fn test_config_roundtrip_full_fields() {
         let (conn, _tmp) = setup_db();
-        let mut launch = GameLaunchConfig::default();
-        launch.exe = "/home/user/game.exe".to_string();
-        launch.args = "--windowed".to_string();
-        launch.working_dir = "/home/user".to_string();
-        launch.env_vars = vec![("MY_VAR".to_string(), "value".to_string())];
+        let launch = GameLaunchConfig {
+            exe: "/home/user/game.exe".to_string(),
+            args: "--windowed".to_string(),
+            working_dir: "/home/user".to_string(),
+            env_vars: vec![("MY_VAR".to_string(), "value".to_string())],
+            ..Default::default()
+        };
 
-        let mut wine = WineConfig::default();
-        wine.enabled = true;
-        wine.prefix = "/home/user/wineprefix".to_string();
-        wine.version = "winehq-devel".to_string();
-        wine.esync = true;
-        wine.dxvk = true;
-        wine.vkd3d = false;
-        wine.dll_overrides = vec![("d3d11".to_string(), "native,builtin".to_string())];
+        let wine = WineConfig {
+            enabled: true,
+            prefix: "/home/user/wineprefix".to_string(),
+            version: "winehq-devel".to_string(),
+            esync: true,
+            dxvk: true,
+            vkd3d: false,
+            dll_overrides: vec![("d3d11".to_string(), "native,builtin".to_string())],
+            ..Default::default()
+        };
 
         save_game_config(&conn, 1, &launch, &wine, None).unwrap();
         let result = get_game_config(&conn, 1).unwrap().unwrap();

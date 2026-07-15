@@ -15,6 +15,9 @@ use super::message_handler::apply_game_update;
 use super::helpers::clear_children;
 use super::mass_match_dialog::show_sgdb_search_dialog;
 
+type GameGeneralPageResult = (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>, Option<adw::EntryRow>, Option<adw::ComboRow>, Rc<RefCell<Option<String>>>, Rc<RefCell<Option<String>>>);
+type SectionEntry = (&'static str, &'static str, &'static str, i32, i32, &'static [&'static str]);
+
 fn settings_page_container() -> gtk4::Box {
     gtk4::Box::new(gtk4::Orientation::Vertical, 16)
 }
@@ -753,7 +756,7 @@ pub(super) fn build_game_general_page(
     game: &Game,
     win: &adw::Window,
     languages: &[String],
-) -> (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>, Option<adw::EntryRow>, Option<adw::ComboRow>, Rc<RefCell<Option<String>>>, Rc<RefCell<Option<String>>>) {
+) -> GameGeneralPageResult {
     let general_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let title_entry = adw::EntryRow::new();
@@ -983,7 +986,7 @@ pub(super) fn build_game_general_page(
     let language_row = if !languages.is_empty() && (game.trophy_source == crate::models::GSE || game.trophy_source == crate::models::NGE) {
         let lang_group = adw::PreferencesGroup::new();
         lang_group.set_title("Language");
-        let model = super::helpers::string_list_from(&languages);
+        let model = super::helpers::string_list_from(languages);
         let row = adw::ComboRow::new();
         row.set_title("Game language");
         row.set_subtitle("Language reported to the game by the API emulator");
@@ -1172,7 +1175,7 @@ pub(super) fn build_game_logo_page(game: &Game) -> Option<(gtk4::Box, Rc<RefCell
     preview_draw.set_hexpand(true);
     preview_draw.set_vexpand(true);
 
-    if let Some(ref pixbuf) = gtk4::gdk_pixbuf::Pixbuf::from_file(&game.logo_path).ok() {
+    if let Ok(ref pixbuf) = gtk4::gdk_pixbuf::Pixbuf::from_file(&game.logo_path) {
         let pb_w = pixbuf.width() as f64;
         let pb_h = pixbuf.height() as f64;
         let pixbuf_clone = pixbuf.clone();
@@ -1305,7 +1308,7 @@ pub fn build_image_manager_content_with_drafts(
 
     let is_steam = crate::models::has_steam_enrichment(&game.trophy_source);
 
-    let sections: [(&str, &str, &str, i32, i32, &[&str]); 5] = [
+    let sections: [SectionEntry; 5] = [
         ("Icon", "icon.png", "icon", 48, 48, &[]),
         ("Hero", "library_hero.jpg", "hero", 96, 48, &[]),
         ("Capsule", "library_600x900.jpg", "grid", 32, 48, &["600x900"]),
@@ -1313,10 +1316,12 @@ pub fn build_image_manager_content_with_drafts(
         ("Logo", "logo.png", "logo", 96, 48, &[]),
     ];
     for &(label, file, asset, thumb_w, thumb_h, dimensions) in &sections {
-        let section = build_image_section(
-            label, file, asset, thumb_w, thumb_h, dimensions,
-            game, state, parent_win, pending_copies.clone(),
-        );
+        let section = build_image_section(BuildImageSectionParams {
+            label, file_base: file, asset_type: asset,
+            thumb_w, thumb_h, dims: dimensions,
+            game, state, parent_win,
+            pending_copies: pending_copies.clone(),
+        });
         content.append(&section);
     }
 
@@ -1385,9 +1390,9 @@ fn find_best_image_path(game: &Game, field: &str, file: &str, id: &str, save_dir
         }
     }
     let native = if game.kind == crate::models::PS4 {
-        format!("{}/{}", crate::parser::ps4_data_dir(save_dir, &id).to_string_lossy(), file)
+        format!("{}/{}", crate::parser::ps4_data_dir(save_dir, id).to_string_lossy(), file)
     } else {
-        format!("{}/{}", crate::parser::data_dir(save_dir, &id).to_string_lossy(), file)
+        format!("{}/{}", crate::parser::data_dir(save_dir, id).to_string_lossy(), file)
     };
     if std::path::Path::new(&native).is_file() {
         return native;
@@ -1446,18 +1451,21 @@ fn make_refresh_closure(
     })
 }
 
-fn build_image_section(
-    label: &str,
-    file_base: &str,
-    asset_type: &str,
+struct BuildImageSectionParams<'a> {
+    label: &'a str,
+    file_base: &'a str,
+    asset_type: &'a str,
     thumb_w: i32,
     thumb_h: i32,
-    dims: &[&'static str],
-    game: &Game,
-    state: &SharedState,
-    parent_win: &adw::Window,
+    dims: &'a [&'static str],
+    game: &'a Game,
+    state: &'a SharedState,
+    parent_win: &'a adw::Window,
     pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
-) -> gtk4::Box {
+}
+
+fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
+    let BuildImageSectionParams { label, file_base, asset_type, thumb_w, thumb_h, dims, game, state, parent_win, pending_copies } = params;
     let is_steam = crate::models::has_steam_enrichment(&game.trophy_source);
     let id = game.app_id.clone();
     let save_dir = state.borrow().save_dir.clone();
@@ -1570,7 +1578,7 @@ fn build_image_section(
                                 let tmp = dest.with_extension("ico");
                                 if std::fs::write(&tmp, &ico_data).is_ok() {
                                     let r = crate::parser::convert_ico_to_png(&tmp).ok()
-                                        .and_then(|png| { let _ = std::fs::rename(&png, &dest); std::fs::remove_file(&tmp).ok(); Some(()) });
+                                        .map(|png| { let _ = std::fs::rename(&png, &dest); std::fs::remove_file(&tmp).ok();  });
                                     let _ = std::fs::remove_file(&tmp);
                                     r.is_some()
                                 } else { false }
@@ -1611,7 +1619,12 @@ fn build_image_section(
     let sgdb_id_c = sgdb_id_for_picker.clone();
     let save_dir_c = save_dir.clone();
     btn.connect_clicked(move |_| {
-        show_sgdb_picker(&steam, &sgdb_id_c, &asset_c, sgdb_is_steam_id, &dims_vec, &parent, refresh.clone(), pending_copies_btn.clone(), &save_dir_c);
+        show_sgdb_picker(ShowSgdbPickerParams {
+            steam: &steam, id: &sgdb_id_c, asset: &asset_c,
+            is_steam_id: sgdb_is_steam_id, dimensions: &dims_vec,
+            parent: &parent, on_done: refresh.clone(),
+            pending_copies: pending_copies_btn.clone(), save_dir: &save_dir_c,
+        });
     });
     btns.append(&btn);
     }
@@ -1777,7 +1790,20 @@ fn build_sgdb_asset_card(
     (card.upcast::<gtk4::Widget>(), row.upcast::<gtk4::Widget>())
 }
 
-fn show_sgdb_picker(steam: &Arc<SteamClient>, id: &str, asset: &str, is_steam_id: bool, dimensions: &[&str], parent: &adw::Window, on_done: Rc<dyn Fn()>, pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>, save_dir: &str) {
+struct ShowSgdbPickerParams<'a> {
+    steam: &'a Arc<SteamClient>,
+    id: &'a str,
+    asset: &'a str,
+    is_steam_id: bool,
+    dimensions: &'a [&'a str],
+    parent: &'a adw::Window,
+    on_done: Rc<dyn Fn()>,
+    pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
+    save_dir: &'a str,
+}
+
+fn show_sgdb_picker(params: ShowSgdbPickerParams) {
+    let ShowSgdbPickerParams { steam, id, asset, is_steam_id, dimensions, parent, on_done, pending_copies, save_dir } = params;
     let picker = adw::Window::new();
     picker.set_default_width(600);
     picker.set_default_height(500);

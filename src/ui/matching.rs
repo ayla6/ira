@@ -33,12 +33,12 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
                             watcher.watch(&entry, &game.achievements);
                         }
                         let _ = sender.send(AppMessage::NewGame(game));
-                        enrich_game_async(
-                            steam_app_id.clone(),
-                            crate::models::GSE.to_string(),
-                            steam_app_id.clone(),
-                            entry.id,
-                            name,
+                        enrich_game_async(crate::ui::enrichment::EnrichGameParams {
+                            app_id: steam_app_id.clone(),
+                            trophy_source: crate::models::GSE.to_string(),
+                            platform_id: steam_app_id.clone(),
+                            db_id: entry.id,
+                            title: name,
                             steam,
                             watcher,
                             sender,
@@ -47,7 +47,7 @@ pub fn match_game_to_steam(state: &SharedState, lutris_id: i64, steam_app_id: St
                             ra_username,
                             ra_token,
                             ra_password,
-                        );
+                        });
                     }
                     Err(e) => eprintln!("match_game_to_steam: load_game failed: {}", e),
                 }

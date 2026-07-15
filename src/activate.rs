@@ -104,11 +104,13 @@ pub fn activate(app: &adw::Application) -> SharedState {
         app,
         Vec::new(),
         cfg,
-        steam.clone(),
-        watcher.clone(),
-        db.clone(),
-        sender.clone(),
-        game_names,
+        crate::ui::AppContext {
+            steam: steam.clone(),
+            watcher: watcher.clone(),
+            db: db.clone(),
+            sender: sender.clone(),
+            game_names,
+        },
     );
 
     state.borrow_mut().lutris_watcher = lutris_watcher;
@@ -126,7 +128,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
         let func_ptr: unsafe extern "C" fn(i32, u32, glib::ffi::gpointer) -> glib::ffi::gboolean = source_trampoline;
         glib::ffi::g_source_set_callback(
             source as *mut glib::ffi::GSource,
-            std::mem::transmute(func_ptr),
+            std::mem::transmute::<unsafe extern "C" fn(i32, u32, glib::ffi::gpointer) -> glib::ffi::gboolean, glib::ffi::GSourceFunc>(func_ptr),
             data_ptr,
             Some(source_destroy),
         );
@@ -140,7 +142,14 @@ pub fn activate(app: &adw::Application) -> SharedState {
         let sender = sender.clone();
         let save_dir = save_dir.clone();
         std::thread::spawn(move || {
-            let games = build_game_list(&db, &save_dir, lutris_enabled, shadps4_enabled, steam_enabled, &ra_config, sort_mode, sort_descending);
+            let opts = crate::game_list::GameListOptions {
+                lutris_enabled,
+                shadps4_enabled,
+                steam_enabled,
+                sort_mode,
+                sort_descending,
+            };
+            let games = build_game_list(&db, &save_dir, &ra_config, &opts);
             let _ = sender.send(AppMessage::GamesLoaded(games));
         });
     }

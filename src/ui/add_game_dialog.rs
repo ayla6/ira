@@ -188,7 +188,12 @@ pub fn show_add_game_dialog(state: &SharedState) {
         let ra_password_c = ra_password.clone();
 
         std::thread::spawn(move || {
-            match add_game_to_db(&db_c, &name_c, &kind_c, &ts_c, &app_id_c, &platform_id, &launch_config, &wine_config, selected_profile_id, &steam_c, &save_dir_c) {
+            match add_game_to_db(AddGameToDbParams {
+                db: &db_c, name: &name_c, kind: &kind_c,
+                trophy_source: &ts_c, app_id: &app_id_c, platform_id: &platform_id,
+                launch_config: &launch_config, wine_config: &wine_config,
+                profile_id: selected_profile_id, steam: &steam_c, save_dir: &save_dir_c,
+            }) {
                 Ok(game_id) => {
                     let entry = crate::db::find_by_db_id(&db_c, game_id).ok().flatten();
                     if let Some(entry) = entry {
@@ -200,12 +205,21 @@ pub fn show_add_game_dialog(state: &SharedState) {
                             }
                             let _ = sender_c.send(AppMessage::NewGame(game.clone()));
                             let g_name = game.name.clone();
-                            crate::ui::enrichment::enrich_game_async(
-                                game.app_id.clone(), game.trophy_source.clone(), game.platform_id.clone(),
-                                game.db_id, g_name,
-                                steam_c, watcher_c, sender_c, save_dir_c, db_c,
-                                ra_username_c, ra_token_c, ra_password_c,
-                            );
+                            crate::ui::enrichment::enrich_game_async(crate::ui::enrichment::EnrichGameParams {
+                                app_id: game.app_id.clone(),
+                                trophy_source: game.trophy_source.clone(),
+                                platform_id: game.platform_id.clone(),
+                                db_id: game.db_id,
+                                title: g_name,
+                                steam: steam_c,
+                                watcher: watcher_c,
+                                sender: sender_c,
+                                save_dir: save_dir_c,
+                                db: db_c,
+                                ra_username: ra_username_c,
+                                ra_token: ra_token_c,
+                                ra_password: ra_password_c,
+                            });
                         }
                     }
                 }
@@ -413,19 +427,22 @@ fn build_env_page() -> (gtk4::Box, gtk4::ListBox, adw::EntryRow, adw::EntryRow) 
     (page, env_vars_box, ld_preload_entry, ld_library_entry)
 }
 
-fn add_game_to_db(
-    db: &crate::db::DbConn,
-    name: &str,
-    kind: &str,
-    trophy_source: &str,
-    app_id: &str,
-    platform_id: &str,
-    launch_config: &GameLaunchConfig,
-    wine_config: &WineConfig,
+struct AddGameToDbParams<'a> {
+    db: &'a crate::db::DbConn,
+    name: &'a str,
+    kind: &'a str,
+    trophy_source: &'a str,
+    app_id: &'a str,
+    platform_id: &'a str,
+    launch_config: &'a GameLaunchConfig,
+    wine_config: &'a WineConfig,
     profile_id: Option<i64>,
-    steam: &crate::api::SteamClient,
-    save_dir: &str,
-) -> Result<i64, String> {
+    steam: &'a crate::api::SteamClient,
+    save_dir: &'a str,
+}
+
+fn add_game_to_db(params: AddGameToDbParams) -> Result<i64, String> {
+    let AddGameToDbParams { db, name, kind, trophy_source, app_id, platform_id, launch_config, wine_config, profile_id, steam, save_dir } = params;
     let (steam_id, game_id) = if kind == crate::models::PS4 || kind == crate::models::RETRO { ("", app_id) } else { (app_id, "") };
     let game_id = crate::db::add_game(db, kind, trophy_source, steam_id, game_id, platform_id, name)?;
     crate::db::save_game_config(db, game_id, launch_config, wine_config, profile_id)?;
@@ -463,10 +480,10 @@ pub(super) fn build_env_var_row(key: &str, value: &str) -> gtk4::ListBoxRow {
     remove_btn.add_css_class("circular");
     let row_clone = row.clone();
     remove_btn.connect_clicked(move |_| {
-        row_clone.parent().and_then(|p| p.downcast::<gtk4::ListBox>().ok()).map(|list| {
+        if let Some(list) = row_clone.parent().and_then(|p| p.downcast::<gtk4::ListBox>().ok()) {
             row_clone.unparent();
             list.remove(&row_clone);
-        });
+        }
     });
     hbox.append(&remove_btn);
 

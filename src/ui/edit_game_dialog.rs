@@ -718,10 +718,10 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 let is_ico = src_path.ends_with(".ico");
                 if is_ico {
                     let ico_dest = dest.with_extension("ico");
-                    if std::fs::copy(&src_path, &ico_dest).is_ok() {
+                    if std::fs::copy(src_path, &ico_dest).is_ok() {
                         let _ = crate::parser::convert_ico_to_png(&ico_dest);
                     }
-                } else if let Err(e) = std::fs::copy(&src_path, &dest) {
+                } else if let Err(e) = std::fs::copy(src_path, &dest) {
                     eprintln!("Failed to copy {}: {}", asset, e);
                 }
             }

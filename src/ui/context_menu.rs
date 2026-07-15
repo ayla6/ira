@@ -157,7 +157,7 @@ pub fn show_game_context_menu(
     let hide_action = gio::SimpleAction::new("hide", None);
     let sc = state_clone.clone();
     let gc = game_clone.clone();
-    let row = sidebar_row.map(|r| r.clone());
+    let row = sidebar_row.cloned();
     hide_action.connect_activate(move |_, _| {
         let new_hidden = !current_hidden;
         let db_id = gc.db_id;

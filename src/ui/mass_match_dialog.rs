@@ -12,6 +12,8 @@ use super::matching::{match_game_to_steam, match_game_to_sgdb};
 use super::dialogs::build_image_manager_content;
 use super::helpers::clear_children;
 
+type MatchCallback = Rc<dyn Fn(&str, &str)>;
+
 pub fn normalize_title(s: &str) -> String {
     let lower = s.to_lowercase();
     let alnum: String = lower
@@ -30,7 +32,7 @@ pub fn normalize_title(s: &str) -> String {
 #[derive(Clone, Copy)]
 pub enum SearchSource {
     Steam,
-    SGDB,
+    Sgdb,
 }
 
 pub fn show_mass_match_dialog(state: &SharedState) {
@@ -151,9 +153,8 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     // --- Steam auto-batch thread (Lutris games without app_id) ---
     let steam_games: Vec<(String, i64, i64, String)> = needs_matching.iter()
         .filter(|g| g.app_id.is_empty() && !g.manual_unmatch)
-        .enumerate()
-        .map(|(_row_idx, g)| (g.name.clone(), g.lutris_id, g.db_id, g.kind.clone()))
-        .map(|(name, lutris_id, db_id, kind)| (name, lutris_id, db_id, kind))
+        
+        .map(|g| (g.name.clone(), g.lutris_id, g.db_id, g.kind.clone()))
         .collect();
     let steam_row_indices: Vec<usize> = needs_matching.iter().enumerate()
         .filter(|(_, g)| g.app_id.is_empty() && !g.manual_unmatch)
@@ -475,7 +476,7 @@ fn handle_steam_search_result(
         action_box.append(&label);
 
         let ab = action_box.clone();
-        let on_match: Rc<dyn Fn(&str, &str)> = Rc::new(move |sid, name| {
+        let on_match: MatchCallback = Rc::new(move |sid, name| {
             clear_children(&ab);
             let text = if name.is_empty() {
                 format!("Matched: {}", sid)
@@ -498,7 +499,7 @@ fn handle_steam_search_result(
             let body = format!("Enter the Steam app ID for \u{201C}{}\u{201D}:", name);
             super::add_game::prompt_for_steam_id(&sc, "Match to Steam", &body, move |app_id| {
                 match_game_to_steam(&sc2, lutris_id, app_id.to_string(), name2.clone());
-                cb2(&app_id, "");
+                cb2(app_id, "");
             });
         });
         action_box.append(&id_btn);
@@ -510,7 +511,11 @@ fn handle_steam_search_result(
         let cb2 = on_match.clone();
         let pd = parent_dialog.clone();
         steam_btn.connect_clicked(move |_| {
-            show_search_results_dialog(&sc2, steam2.clone(), "Steam", &name2, lutris_id, SearchSource::Steam, cb2.clone(), pd.upcast_ref());
+            show_search_results_dialog(SearchResultsDialogParams {
+                state: &sc2, steam: steam2.clone(), source_name: "Steam",
+                game_name: &name2, lutris_id, source: SearchSource::Steam,
+                on_match: cb2.clone(), parent: pd.upcast_ref(),
+            });
         });
         action_box.append(&steam_btn);
 
@@ -521,22 +526,30 @@ fn handle_steam_search_result(
         let cb3 = on_match.clone();
         let pd = parent_dialog.clone();
         sgdb_btn.connect_clicked(move |_| {
-            show_search_results_dialog(&sc3, steam3.clone(), "SteamGridDB", &name3, lutris_id, SearchSource::SGDB, cb3.clone(), pd.upcast_ref());
+            show_search_results_dialog(SearchResultsDialogParams {
+                state: &sc3, steam: steam3.clone(), source_name: "SteamGridDB",
+                game_name: &name3, lutris_id, source: SearchSource::Sgdb,
+                on_match: cb3.clone(), parent: pd.upcast_ref(),
+            });
         });
         action_box.append(&sgdb_btn);
     }
 }
 
-pub fn show_search_results_dialog(
-    state: &SharedState,
+pub(super) struct SearchResultsDialogParams<'a> {
+    state: &'a SharedState,
     steam: Arc<SteamClient>,
-    source_name: &str,
-    game_name: &str,
+    source_name: &'a str,
+    game_name: &'a str,
     lutris_id: i64,
     source: SearchSource,
-    on_match: Rc<dyn Fn(&str, &str)>,
-    parent: &gtk4::Window,
-) {
+    on_match: MatchCallback,
+    parent: &'a gtk4::Window,
+}
+
+pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
+    let SearchResultsDialogParams { state, steam, source_name, game_name, lutris_id, source, on_match, parent } = params;
+
     let dialog = adw::Window::new();
     dialog.set_default_width(450);
     dialog.set_default_height(400);
@@ -610,7 +623,7 @@ pub fn show_search_results_dialog(
         std::thread::spawn(move || {
             let search_results = match src {
                 SearchSource::Steam => steam.search_steam_store(&term),
-                SearchSource::SGDB => steam.search_sgdb(&term),
+                SearchSource::Sgdb => steam.search_sgdb(&term),
             };
             let _ = tx.send(search_results);
         });
@@ -655,7 +668,7 @@ pub fn show_search_results_dialog(
                     match_btn.connect_clicked(move |_| {
                         match src_type {
                             SearchSource::Steam => match_game_to_steam(&sc2, lid, sid.clone(), name2.clone()),
-                            SearchSource::SGDB => match_game_to_sgdb(&sc2, lid, sid.clone(), name2.clone()),
+                            SearchSource::Sgdb => match_game_to_sgdb(&sc2, lid, sid.clone(), name2.clone()),
                         }
                         callback(&sid, &matched_name);
                         dialog_clone.close();
@@ -895,11 +908,15 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                     };
                     let g = sc.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
                     if let Some(g) = g {
-                        super::enrichment::enrich_game_async(
-                            g.app_id.clone(), g.trophy_source.clone(), g.platform_id.clone(),
-                            g.db_id, g.name.clone(), steam, watcher, sender, save_dir, db,
+                        super::enrichment::enrich_game_async(super::enrichment::EnrichGameParams {
+                            app_id: g.app_id.clone(),
+                            trophy_source: g.trophy_source.clone(),
+                            platform_id: g.platform_id.clone(),
+                            db_id: g.db_id,
+                            title: g.name.clone(),
+                            steam, watcher, sender, save_dir, db,
                             ra_username, ra_token, ra_password,
-                        );
+                        });
                     }
                     if let Some(ref cb) = on_match_c { cb(); }
                     dc.close();

@@ -58,8 +58,8 @@ fn test_parse_user_trophies_simple() {
     let unlocks = ps4::parse_user_trophies(tmp.path());
 
     assert_eq!(unlocks.len(), 3);
-    assert_eq!(unlocks.get("0").unwrap().0, true);
+    assert!(unlocks.get("0").unwrap().0);
     assert_eq!(unlocks.get("0").unwrap().1, 1234567890);
-    assert_eq!(unlocks.get("1").unwrap().0, false);
-    assert_eq!(unlocks.get("2").unwrap().0, true);
+    assert!(!unlocks.get("1").unwrap().0);
+    assert!(unlocks.get("2").unwrap().0);
 }

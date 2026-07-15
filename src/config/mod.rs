@@ -132,22 +132,22 @@ pub fn load_config() -> Config {
         let raw: serde_json::Value = serde_json::from_slice(&data).unwrap_or(serde_json::Value::Null);
         if raw.get("consoles").is_none() {
             for def in crate::platforms::consoles::CONSOLES {
-                let enabled = raw.get(&format!("{}_enabled", def.id))
+                let enabled = raw.get(format!("{}_enabled", def.id))
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let folder = raw.get(&format!("ra_{}_folder", def.id))
+                let folder = raw.get(format!("ra_{}_folder", def.id))
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let executable = raw.get(&format!("ra_{}_executable", def.id))
+                let executable = raw.get(format!("ra_{}_executable", def.id))
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let ra_core = raw.get(&format!("ra_{}_ra_core", def.id))
+                let ra_core = raw.get(format!("ra_{}_ra_core", def.id))
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let fullscreen = raw.get(&format!("ra_{}_fullscreen", def.id))
+                let fullscreen = raw.get(format!("ra_{}_fullscreen", def.id))
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 c.consoles.insert(def.id.to_string(), ConsoleConfig {
@@ -222,7 +222,7 @@ impl Config {
             default_wine_config: self.default_wine_config.clone(),
             default_native_env_vars: self.default_native_env_vars.clone(),
             default_api_emu_version: self.default_api_emu_version.clone(),
-            sort_mode: self.sort_mode.clone(),
+            sort_mode: self.sort_mode,
             sort_descending: self.sort_descending,
             ra_enabled: self.ra_enabled,
             ra_username: self.ra_username.clone(),

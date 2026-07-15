@@ -102,7 +102,7 @@ pub fn read_user_stats(app_id: &str) -> std::collections::HashMap<String, (bool,
 
     if result.is_empty() {
         eprintln!("[steam] read_user_stats: no user stats file found for {} (tried {} users)", app_id, user_ids.len());
-        for (_, name) in &bit_to_name {
+        for name in bit_to_name.values() {
             result.insert(name.clone(), (false, 0));
         }
     }

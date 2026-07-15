@@ -5,22 +5,26 @@ use crate::AppSender;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 
+pub struct LaunchContext {
+    pub game_name: String,
+    pub sender: AppSender,
+    pub game_id: i64,
+    pub db: DbConn,
+    pub save_dir: String,
+    pub running_games: Arc<Mutex<HashMap<i64, i32>>>,
+}
+
 pub fn launch_game(
     launch: &GameLaunchConfig,
     wine: Option<&WineConfig>,
-    _game_name: &str,
-    sender: AppSender,
-    game_id: i64,
-    db: DbConn,
-    save_dir: &str,
-    running_games: Arc<Mutex<HashMap<i64, i32>>>,
+    ctx: &LaunchContext,
 ) -> Result<i32, String> {
     let started_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
 
-    let (command, env) = if wine.map_or(false, |w| w.enabled) {
+    let (command, env) = if wine.is_some_and(|w| w.enabled) {
         let wine = wine.unwrap();
         let wine_exe = super::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path)?;
         if launch.exe.is_empty() {
@@ -32,7 +36,7 @@ pub fn launch_game(
             shlex::split(&launch.args).ok_or_else(|| "Failed to parse arguments".to_string())?
         };
         let mut cmd = super::wine_launch::build_wine_command(&wine_exe, &launch.exe, &args, wine);
-        let env = super::env_builder::build_env(launch, Some(wine), &wine_exe, save_dir, game_id, &mut cmd);
+        let env = super::env_builder::build_env(launch, Some(wine), &wine_exe, &ctx.save_dir, ctx.game_id, &mut cmd);
 
         let pfx = super::wine_launch::wine_prefix(wine);
         let prefix_ready = std::path::Path::new(&pfx).join("system.reg").is_file();
@@ -79,7 +83,7 @@ pub fn launch_game(
             shlex::split(&launch.args).ok_or_else(|| "Failed to parse arguments".to_string())?
         };
         let mut cmd = super::native_launch::build_native_command(&launch.exe, &args);
-        let env = super::env_builder::build_env(launch, None, "", save_dir, game_id, &mut cmd);
+        let env = super::env_builder::build_env(launch, None, "", &ctx.save_dir, ctx.game_id, &mut cmd);
         (cmd, env)
     };
 
@@ -92,11 +96,12 @@ pub fn launch_game(
     let child = super::wrapper::spawn_game(&command, &env, game_dir.as_deref())?;
     let child_pid = child.id() as i32;
 
-    running_games.lock().map_err(|e| e.to_string())?.insert(game_id, child_pid);
+    ctx.running_games.lock().map_err(|e| e.to_string())?.insert(ctx.game_id, child_pid);
 
-    let sender_c = sender.clone();
-    let db_c = db.clone();
-    let rg = running_games.clone();
+    let game_id = ctx.game_id;
+    let sender_c = ctx.sender.clone();
+    let db_c = ctx.db.clone();
+    let rg = ctx.running_games.clone();
     std::thread::spawn(move || {
         super::wrapper::monitor_process(child, child_pid, &sender_c, game_id, started_at, db_c, rg);
     });

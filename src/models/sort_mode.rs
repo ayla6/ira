@@ -27,7 +27,7 @@ impl SortMode {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse_sort_mode(s: &str) -> Self {
         match s {
             "completion" => SortMode::Completion,
             "hours_played" => SortMode::HoursPlayed,
@@ -103,7 +103,7 @@ impl serde::Serialize for SortMode {
 impl<'de> serde::Deserialize<'de> for SortMode {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let s = String::deserialize(d)?;
-        Ok(SortMode::from_str(&s))
+        Ok(SortMode::parse_sort_mode(&s))
     }
 }
 
@@ -130,14 +130,14 @@ mod tests {
     fn test_sort_mode_roundtrip() {
         for mode in SortMode::ALL {
             let s = mode.as_str();
-            let back = SortMode::from_str(s);
+            let back = SortMode::parse_sort_mode(s);
             assert_eq!(*mode, back);
         }
     }
 
     #[test]
     fn test_sort_mode_unknown_defaults_alphabetical() {
-        assert_eq!(SortMode::from_str("garbage"), SortMode::Alphabetical);
+        assert_eq!(SortMode::parse_sort_mode("garbage"), SortMode::Alphabetical);
     }
 
     #[test]

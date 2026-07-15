@@ -20,7 +20,7 @@ pub fn build_env(
 ) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = std::env::vars().collect();
 
-    let has_wine = wine.map_or(false, |w| w.enabled);
+    let has_wine = wine.is_some_and(|w| w.enabled);
 
     if !has_wine {
         for (k, v) in &launch.env_vars {
@@ -60,7 +60,7 @@ pub fn build_env(
     env.push(("__GL_SHADER_DISK_CACHE".to_string(), "1".to_string()));
     env.push(("__GL_SHADER_DISK_CACHE_PATH".to_string(), shader_dir));
 
-    let has_wine = wine.map_or(false, |w| w.enabled);
+    let has_wine = wine.is_some_and(|w| w.enabled);
     let mut extra_prefix: Vec<String> = Vec::new();
 
     if has_wine && wine.unwrap().gamemode && has_exec("gamemoderun") {
@@ -81,12 +81,12 @@ pub fn build_env(
         }
         gs_args.push("--".to_string());
         gs_args.extend(extra_prefix);
-        gs_args.extend(command.drain(..));
+        gs_args.append(command);
         *command = gs_args;
     } else {
         let mut final_cmd: Vec<String> = Vec::new();
         final_cmd.extend(extra_prefix);
-        final_cmd.extend(command.drain(..));
+        final_cmd.append(command);
         *command = final_cmd;
     }
 

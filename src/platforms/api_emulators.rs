@@ -33,7 +33,7 @@ pub fn write_gse_dlc_config(settings_dir: &Path, details: &AppDetails) -> Result
     let any_disabled = details.dlcs.values().any(|d| !d.enabled);
     if any_disabled {
         content.push_str("unlock_all=0\n");
-        for (_, dlc) in &details.dlcs {
+        for dlc in details.dlcs.values() {
             if dlc.enabled {
                 content.push_str(&format!("{}={}\n", dlc.app_id, dlc.name));
             }
@@ -526,9 +526,7 @@ pub fn install_gse(
     version: &str,
 ) -> Result<(), String> {
     if !has_original_steam_dlls(game_exe) {
-        return Err(format!(
-            "No original Steam DLL found in game folder. Cannot install API emulator."
-        ));
+        return Err("No original Steam DLL found in game folder. Cannot install API emulator.".to_string());
     }
 
     let version_dir = resolve_gse_version(save_dir, version)?;
@@ -619,9 +617,7 @@ pub fn install_nge(
     }
 
     if !has_original_gog_dlls(game_exe) {
-        return Err(format!(
-            "No original GOG Galaxy DLL found in game folder. Cannot install API emulator."
-        ));
+        return Err("No original GOG Galaxy DLL found in game folder. Cannot install API emulator.".to_string());
     }
 
     let version_dir = resolve_gog_version(save_dir, version)?;

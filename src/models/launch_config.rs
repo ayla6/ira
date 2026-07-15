@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct GameLaunchConfig {
     pub exe: String,
     pub args: String,
@@ -10,18 +11,6 @@ pub struct GameLaunchConfig {
     pub ld_library_path: String,
 }
 
-impl Default for GameLaunchConfig {
-    fn default() -> Self {
-        Self {
-            exe: String::new(),
-            args: String::new(),
-            working_dir: String::new(),
-            env_vars: Vec::new(),
-            ld_preload: String::new(),
-            ld_library_path: String::new(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WineConfig {
@@ -221,9 +210,11 @@ mod tests {
 
     #[test]
     fn test_merge_with_default() {
-        let mut per_game = WineConfig::default();
-        per_game.esync = false;
-        per_game.overridden_fields = vec!["esync".to_string()];
+        let per_game = WineConfig {
+            esync: false,
+            overridden_fields: vec!["esync".to_string()],
+            ..Default::default()
+        };
         let default = WineConfig::default();
         let merged = per_game.merge_with_default(&default);
         assert!(!merged.esync);
@@ -233,9 +224,11 @@ mod tests {
 
     #[test]
     fn test_game_launch_config_serde_roundtrip() {
-        let mut cfg = GameLaunchConfig::default();
-        cfg.exe = "/home/user/game.exe".to_string();
-        cfg.args = "-foo bar".to_string();
+        let cfg = GameLaunchConfig {
+            exe: "/home/user/game.exe".to_string(),
+            args: "-foo bar".to_string(),
+            ..Default::default()
+        };
         let json = serde_json::to_string(&cfg).unwrap();
         let deserialized: GameLaunchConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.exe, "/home/user/game.exe");

@@ -296,21 +296,21 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
             continue;
         }
 
-        enrich_game_async(
-            g.app_id.clone(),
-            g.trophy_source.clone(),
-            g.platform_id.clone(),
-            g.db_id,
-            g.name.clone(),
-            steam.clone(),
-            watcher.clone(),
-            sender.clone(),
-            state.borrow().save_dir.clone(),
-            db.clone(),
-            ra_username.clone(),
-            ra_token.clone(),
-            ra_password.clone(),
-        );
+        enrich_game_async(crate::ui::enrichment::EnrichGameParams {
+            app_id: g.app_id.clone(),
+            trophy_source: g.trophy_source.clone(),
+            platform_id: g.platform_id.clone(),
+            db_id: g.db_id,
+            title: g.name.clone(),
+            steam: steam.clone(),
+            watcher: watcher.clone(),
+            sender: sender.clone(),
+            save_dir: state.borrow().save_dir.clone(),
+            db: db.clone(),
+            ra_username: ra_username.clone(),
+            ra_token: ra_token.clone(),
+            ra_password: ra_password.clone(),
+        });
     }
 }
 
@@ -469,12 +469,12 @@ pub fn switch_to_game(state: &SharedState, db_id: i64) {
                     s.db.clone(),
                 )
             };
-            enrich_game_async(
-                game.app_id.clone(),
-                game.trophy_source.clone(),
-                game.platform_id.clone(),
-                game.db_id,
-                game.name.clone(),
+            enrich_game_async(crate::ui::enrichment::EnrichGameParams {
+                app_id: game.app_id.clone(),
+                trophy_source: game.trophy_source.clone(),
+                platform_id: game.platform_id.clone(),
+                db_id: game.db_id,
+                title: game.name.clone(),
                 steam,
                 watcher,
                 sender,
@@ -483,7 +483,7 @@ pub fn switch_to_game(state: &SharedState, db_id: i64) {
                 ra_username,
                 ra_token,
                 ra_password,
-            );
+            });
         }
     }
 }

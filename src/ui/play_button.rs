@@ -183,8 +183,16 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         if !launch.exe.is_empty() {
             let wine_opt = if wine.enabled { Some(&wine) } else { None };
             crate::launcher::launch_game(
-                &launch, wine_opt, &game_name, sender, game_id,
-                db.clone(), &save_dir, running_games,
+                &launch,
+                wine_opt,
+                &crate::launcher::LaunchContext {
+                    game_name: game_name.clone(),
+                    sender,
+                    game_id,
+                    db: db.clone(),
+                    save_dir: save_dir.clone(),
+                    running_games: running_games.clone(),
+                },
             )?;
         } else {
             let uri = format!("lutris:rungameid/{}", game_id);
@@ -319,7 +327,7 @@ pub fn play_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
     let actions = gio::SimpleActionGroup::new();
     let action = gio::SimpleAction::new_stateful(
         "variant",
-        Some(&glib::VariantTy::STRING),
+        Some(glib::VariantTy::STRING),
         &glib::Variant::from(&default_target),
     );
 

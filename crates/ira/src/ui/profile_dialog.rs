@@ -6,7 +6,7 @@ use std::cell::RefCell;
 
 type ListRef = Rc<RefCell<gtk4::ListBox>>;
 
-pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> gtk4::Box {
+pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> gtk4::ScrolledWindow {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let group = adw::PreferencesGroup::new();
@@ -14,6 +14,7 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> g
 
     let list = gtk4::ListBox::new();
     list.add_css_class("boxed-list");
+    list.set_valign(gtk4::Align::Start);
     let list_rc: ListRef = Rc::new(RefCell::new(list.clone()));
 
     let db = state.borrow().db.clone();
@@ -27,6 +28,7 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> g
 
     let add_btn = gtk4::Button::with_label("Create Profile");
     add_btn.add_css_class("flat");
+    add_btn.set_margin_top(12);
     let win_add = window.clone();
     let db_add = db.clone();
     let sc_add = state_clone.clone();
@@ -38,7 +40,12 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> g
     group.add(&add_btn);
 
     page.append(&group);
-    page
+
+    let sw = gtk4::ScrolledWindow::new();
+    sw.set_hexpand(true);
+    sw.set_vexpand(true);
+    sw.set_child(Some(&page));
+    sw
 }
 
 fn repopulate_profiles(
@@ -57,7 +64,7 @@ fn repopulate_profiles(
     for p in &profiles {
         let row = adw::ActionRow::new();
         row.set_title(&p.name);
-        row.set_subtitle(&format!("{} — {}", p.wine_version, if p.prefix.is_empty() { "(default prefix)" } else { &p.prefix }));
+        row.set_subtitle(&format!("{} — {}{}", p.wine_version, if p.prefix.is_empty() { "(default prefix)" } else { &p.prefix }, if p.umu_enabled { " — UMU" } else { "" }));
 
         let edit_btn = gtk4::Button::from_icon_name("document-edit-symbolic");
         edit_btn.add_css_class("flat");
@@ -195,6 +202,12 @@ fn show_profile_dialog(
     }
     group.add(&arch_row);
 
+    let umu_row = adw::SwitchRow::new();
+    umu_row.set_title("UMU Launcher");
+    umu_row.set_subtitle("Launch via umu-run (required for Proton versions)");
+    if let Some(p) = existing.as_ref() { umu_row.set_active(p.umu_enabled); }
+    group.add(&umu_row);
+
     content.append(&group);
 
     let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
@@ -219,6 +232,7 @@ fn show_profile_dialog(
     let version_row_c = version_row.clone();
     let prefix_c = prefix_entry.clone();
     let arch_row_c = arch_row.clone();
+    let umu_row_c = umu_row.clone();
     let win_c2 = win.clone();
     let db_c = db.clone();
     let versions_c = versions.clone();
@@ -240,12 +254,29 @@ fn show_profile_dialog(
             2 => "win64".to_string(),
             _ => "auto".to_string(),
         };
+        let umu_enabled = umu_row_c.is_active();
         if let Some(p) = existing.as_ref() {
-            if let Err(e) = ira_db::update_profile(&db_c, p.id, &name, &wine_version, "", &prefix, &arch) {
+            let mut updated = p.clone();
+            updated.name = name;
+            updated.wine_version = wine_version;
+            updated.custom_wine_path = String::new();
+            updated.prefix = prefix;
+            updated.arch = arch;
+            updated.umu_enabled = umu_enabled;
+            if let Err(e) = ira_db::update_profile(&db_c, &updated) {
                 eprintln!("Failed to update profile: {}", e);
             }
         } else {
-            if let Err(e) = ira_db::add_profile(&db_c, &name, &wine_version, "", &prefix, &arch) {
+            let new_profile = ira_models::WineProfile {
+                id: 0,
+                name,
+                wine_version,
+                custom_wine_path: String::new(),
+                prefix,
+                arch,
+                umu_enabled,
+            };
+            if let Err(e) = ira_db::add_profile(&db_c, &new_profile) {
                 eprintln!("Failed to add profile: {}", e);
             }
         }

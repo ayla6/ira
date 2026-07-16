@@ -40,7 +40,6 @@ pub struct WineConfigWidgets {
     pub proton_wow64: adw::SwitchRow,
     pub proton_ntsync: adw::SwitchRow,
     pub wine_env_vars_box: gtk4::ListBox,
-    pub umu_enabled: adw::SwitchRow,
     pub dll_overrides_box: gtk4::ListBox,
     pub overridden: OverrideList,
 }
@@ -99,10 +98,6 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
     let proton_wow64 = build_switch_row("WoW64", "Run 32-bit Windows apps via WoW64 thunking (PROTON_USE_WOW64)", wine.proton_wow64);
     if let Some(dd) = dft { track_switch(&proton_wow64, "proton_wow64", dd.proton_wow64, &overridden); }
     perf_group.add(&proton_wow64);
-
-    let umu_enabled = build_switch_row("UMU Launcher", "Launch via umu-run (required for Proton versions)", wine.umu_enabled);
-    if let Some(dd) = dft { track_switch(&umu_enabled, "umu_enabled", dd.umu_enabled, &overridden); }
-    perf_group.add(&umu_enabled);
 
     perf_page.append(&perf_group);
     pages.push(WinePage { icon: "power-profile-performance-symbolic", label: "Performance", page: page_with_content(perf_page) });
@@ -260,7 +255,7 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
         dxvk_nvapi, fsr, battleye, eac, show_debug, audio, graphics, desktop_integration,
         show_crash_dialogs, mouse_warp_override, virtual_desktop, virtual_desktop_res,
         dpi_enabled, dpi, gamemode, mangohud, gamescope, gamescope_flags,
-        dxvk_frame_rate, proton_wow64, proton_ntsync, wine_env_vars_box, umu_enabled, dll_overrides_box,
+        dxvk_frame_rate, proton_wow64, proton_ntsync, wine_env_vars_box, dll_overrides_box,
         overridden,
     };
 
@@ -315,7 +310,7 @@ impl WineConfigWidgets {
             proton_wow64: self.proton_wow64.is_active(),
             proton_ntsync: self.proton_ntsync.is_active(),
             wine_env_vars: collect_env_vars(&self.wine_env_vars_box),
-            umu_enabled: self.umu_enabled.is_active(),
+            umu_enabled: false,
             overridden_fields: self.overridden.borrow().clone(),
         }
     }

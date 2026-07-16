@@ -64,6 +64,7 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
                 wine.custom_wine_path = profile.custom_wine_path;
                 wine.prefix = profile.prefix;
                 wine.arch = profile.arch;
+                wine.umu_enabled = profile.umu_enabled;
             }
         }
         wine = wine.merge_with_default(&app_default);
@@ -395,6 +396,7 @@ fn get_wine_cmd_env(state: &SharedState, db_id: i64) -> (Option<String>, String,
             wine.custom_wine_path = profile.custom_wine_path;
             wine.prefix = profile.prefix;
             wine.arch = profile.arch;
+            wine.umu_enabled = profile.umu_enabled;
         }
     }
     wine = wine.merge_with_default(&app_default);

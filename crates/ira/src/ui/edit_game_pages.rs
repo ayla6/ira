@@ -424,7 +424,16 @@ pub(super) fn build_lutris_conversion(
                                     Some(p.id)
                                 } else {
                                     let profile_name = format!("{} ({})", gn, wine.version);
-                                    ira_db::add_profile(&db, &profile_name, &wine.version, &wine.custom_wine_path, &wine.prefix, &wine.arch).ok()
+                                    let new_profile = ira_models::WineProfile {
+                                        id: 0,
+                                        name: profile_name,
+                                        wine_version: wine.version.clone(),
+                                        custom_wine_path: wine.custom_wine_path.clone(),
+                                        prefix: wine.prefix.clone(),
+                                        arch: wine.arch.clone(),
+                                        umu_enabled: wine.umu_enabled,
+                                    };
+                                    ira_db::add_profile(&db, &new_profile).ok()
                                 }
                             };
                             let _ = ira_db::save_game_config(&db, db_id, &launch, &wine, profile_id);

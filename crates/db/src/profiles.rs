@@ -2,18 +2,11 @@ use crate::DbConn;
 use ira_models::WineProfile;
 use rusqlite::params;
 
-pub fn add_profile(
-    conn: &DbConn,
-    name: &str,
-    wine_version: &str,
-    custom_wine_path: &str,
-    prefix: &str,
-    arch: &str,
-) -> Result<i64, String> {
+pub fn add_profile(conn: &DbConn, profile: &WineProfile) -> Result<i64, String> {
     let c = crate::lock_db(conn)?;
     c.execute(
-        "INSERT INTO wine_profiles (name, wine_version, custom_wine_path, prefix, arch) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![name, wine_version, custom_wine_path, prefix, arch],
+        "INSERT INTO wine_profiles (name, wine_version, custom_wine_path, prefix, arch, umu_enabled) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![profile.name, profile.wine_version, profile.custom_wine_path, profile.prefix, profile.arch, profile.umu_enabled],
     ).map_err(|e| e.to_string())?;
     Ok(c.last_insert_rowid())
 }
@@ -21,7 +14,7 @@ pub fn add_profile(
 pub fn get_all_profiles(conn: &DbConn) -> Result<Vec<WineProfile>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c.prepare(
-        "SELECT id, name, wine_version, custom_wine_path, prefix, arch FROM wine_profiles ORDER BY name",
+        "SELECT id, name, wine_version, custom_wine_path, prefix, arch, umu_enabled FROM wine_profiles ORDER BY name",
     ).map_err(|e| e.to_string())?;
     let rows = stmt.query_map([], |row| {
         Ok(WineProfile {
@@ -31,6 +24,7 @@ pub fn get_all_profiles(conn: &DbConn) -> Result<Vec<WineProfile>, String> {
             custom_wine_path: row.get(3)?,
             prefix: row.get(4)?,
             arch: row.get(5)?,
+            umu_enabled: row.get(6)?,
         })
     }).map_err(|e| e.to_string())?;
     let mut result = Vec::new();
@@ -40,19 +34,11 @@ pub fn get_all_profiles(conn: &DbConn) -> Result<Vec<WineProfile>, String> {
     Ok(result)
 }
 
-pub fn update_profile(
-    conn: &DbConn,
-    id: i64,
-    name: &str,
-    wine_version: &str,
-    custom_wine_path: &str,
-    prefix: &str,
-    arch: &str,
-) -> Result<(), String> {
+pub fn update_profile(conn: &DbConn, profile: &WineProfile) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.execute(
-        "UPDATE wine_profiles SET name = ?1, wine_version = ?2, custom_wine_path = ?3, prefix = ?4, arch = ?5 WHERE id = ?6",
-        params![name, wine_version, custom_wine_path, prefix, arch, id],
+        "UPDATE wine_profiles SET name = ?1, wine_version = ?2, custom_wine_path = ?3, prefix = ?4, arch = ?5, umu_enabled = ?6 WHERE id = ?7",
+        params![profile.name, profile.wine_version, profile.custom_wine_path, profile.prefix, profile.arch, profile.umu_enabled, profile.id],
     ).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -67,7 +53,7 @@ pub fn delete_profile(conn: &DbConn, id: i64) -> Result<(), String> {
 pub fn get_profile(conn: &DbConn, id: i64) -> Result<Option<WineProfile>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c.prepare(
-        "SELECT id, name, wine_version, custom_wine_path, prefix, arch FROM wine_profiles WHERE id = ?1",
+        "SELECT id, name, wine_version, custom_wine_path, prefix, arch, umu_enabled FROM wine_profiles WHERE id = ?1",
     ).map_err(|e| e.to_string())?;
     let mut rows = stmt.query_map(params![id], |row| {
         Ok(WineProfile {
@@ -77,6 +63,7 @@ pub fn get_profile(conn: &DbConn, id: i64) -> Result<Option<WineProfile>, String
             custom_wine_path: row.get(3)?,
             prefix: row.get(4)?,
             arch: row.get(5)?,
+            umu_enabled: row.get(6)?,
         })
     }).map_err(|e| e.to_string())?;
     if let Some(row) = rows.next() {

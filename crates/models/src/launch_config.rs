@@ -95,7 +95,7 @@ impl Default for WineConfig {
             proton_wow64: true,
             proton_ntsync: true,
             wine_env_vars: Vec::new(),
-            umu_enabled: false,
+            umu_enabled: true,
             overridden_fields: Vec::new(),
         }
     }
@@ -139,7 +139,7 @@ impl WineConfig {
             proton_wow64: if has("proton_wow64") { self.proton_wow64 } else { default.proton_wow64 },
             proton_ntsync: if has("proton_ntsync") { self.proton_ntsync } else { default.proton_ntsync },
             wine_env_vars: if has("wine_env_vars") { self.wine_env_vars.clone() } else { default.wine_env_vars.clone() },
-            umu_enabled: if has("umu_enabled") { self.umu_enabled } else { default.umu_enabled },
+            umu_enabled: self.umu_enabled,
             overridden_fields: self.overridden_fields.clone(),
         }
     }
@@ -153,6 +153,8 @@ pub struct WineProfile {
     pub custom_wine_path: String,
     pub prefix: String,
     pub arch: String,
+    #[serde(default)]
+    pub umu_enabled: bool,
 }
 
 impl Default for WineProfile {
@@ -164,6 +166,7 @@ impl Default for WineProfile {
             custom_wine_path: String::new(),
             prefix: String::new(),
             arch: "auto".to_string(),
+            umu_enabled: true,
         }
     }
 }

@@ -149,6 +149,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
                 wine.custom_wine_path = profile.custom_wine_path;
                 wine.prefix = profile.prefix;
                 wine.arch = profile.arch;
+                wine.umu_enabled = profile.umu_enabled;
             }
         }
 

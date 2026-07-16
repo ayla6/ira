@@ -58,7 +58,6 @@ pub fn show_grid_view(state: &SharedState) {
 
     content_scroll.vadjustment().set_value(0.0);
     clear_children(&grid_header);
-    ira_images::clear_texture_cache();
 
     let cover_width = state.borrow().cfg.grid_cover_width.clamp(100, 350);
     let show_hidden = state.borrow().cfg.show_hidden_games;

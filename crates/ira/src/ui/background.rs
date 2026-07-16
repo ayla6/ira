@@ -55,8 +55,6 @@ pub fn hide_to_background(state: &SharedState) {
     let win = state.borrow().window.clone();
     win.set_visible(false);
 
-    ira_images::clear_texture_cache();
-
     unsafe { malloc_trim(0); }
 
     glib::timeout_add_local(std::time::Duration::from_millis(300), || {

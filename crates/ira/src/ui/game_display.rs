@@ -19,7 +19,6 @@ pub fn display_game(game: &Game, state: &SharedState) {
     content_scroll.vadjustment().set_value(0.0);
 
     clear_children(&content_box);
-    ira_images::clear_texture_cache();
 
     let fraction = if game.total_count > 0 {
         game.earned_count as f64 / game.total_count as f64

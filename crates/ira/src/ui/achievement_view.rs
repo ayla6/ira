@@ -113,7 +113,6 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
             });
         }
     }
-
     if !locked.is_empty() || !hidden.is_empty() {
         let locked_group = adw::PreferencesGroup::new();
         locked_group.set_title(&format!("Locked  ·  {}", locked.len() + hidden.len()));

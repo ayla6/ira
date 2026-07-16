@@ -8,11 +8,11 @@ use std::collections::{HashMap, HashSet};
 use super::state::SharedState;
 use super::sidebar::{select_row_silently, rebuild_sidebar, find_game_index, update_sidebar_game, set_sidebar_playing};
 use super::grid_view::show_grid_view;
+use super::game_item::GameItem;
 use super::game_display::display_game;
 use super::helpers::{merge_game_enrichment, clear_children};
 use super::enrichment::enrich_game_async;
 use super::image_manager::build_image_manager_content;
-
 pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
     match msg {
         AppMessage::EnrichedGame(game) | AppMessage::WatcherGameUpdated(game) => {
@@ -215,11 +215,6 @@ fn apply_playtime_updates_db(state: &SharedState, updates: &HashMap<i64, (f64, i
             display_game(&game, state);
         }
     }
-
-    let is_grid_showing = state.borrow().selected_id.is_empty() && !state.borrow().content_unloaded;
-    if is_grid_showing {
-        show_grid_view(state);
-    }
 }
 
 fn handle_lutris_data_changed(state: &SharedState, data: Vec<(i64, f64, i64)>) {
@@ -305,7 +300,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
 pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
     let app_id = updated.app_id.clone();
 
-    let (game_for_display, needs_grid_refresh, sidebar_update) = {
+    let (game_for_display, game_for_grid, sidebar_update) = {
         let mut s = state.borrow_mut();
         let Some(i) = s.games.iter().position(|g| g.app_id == app_id) else {
             return;
@@ -338,16 +333,13 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
         let needs_rebuild = s.selected_id == updated.db_id.to_string() && !s.content_unloaded;
         let visual_changed = updated.grid_path != old_grid_path
             || updated.header_path != old_header_path;
-        let needs_grid_refresh = visual_changed
+        let needs_grid_update = visual_changed
             && s.selected_id.is_empty()
-            && !s.content_unloaded
-            && !s.grid_refresh_pending;
-        if needs_grid_refresh {
-            s.grid_refresh_pending = true;
-        }
+            && !s.content_unloaded;
+        let game_for_grid = if needs_grid_update { Some(updated.clone()) } else { None };
         let game = if needs_rebuild { Some(updated.clone()) } else { None };
         s.games[i] = updated;
-        (game, needs_grid_refresh, sidebar_update)
+        (game, game_for_grid, sidebar_update)
     };
 
     let (db_id, name, icon_path) = sidebar_update;
@@ -356,17 +348,16 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
     if let Some(game) = game_for_display {
         display_game(&game, state);
     }
-    if needs_grid_refresh {
-        let state_clone = state.clone();
-        glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
-            let mut s = state_clone.borrow_mut();
-            s.grid_refresh_pending = false;
-            let should_refresh = s.selected_id.is_empty() && !s.content_unloaded;
-            drop(s);
-            if should_refresh {
-                show_grid_view(&state_clone);
+    if let Some(g) = game_for_grid {
+        let store = state.borrow().grid_store.clone();
+        for i in 0..store.n_items() {
+            if let Some(item) = store.item(i).and_then(|o| o.downcast::<GameItem>().ok()) {
+                if item.game().is_some_and(|gi| gi.db_id == g.db_id) {
+                    store.splice(i, 1, &[GameItem::new(&g)]);
+                    break;
+                }
             }
-        });
+        }
     }
 }
 
@@ -409,20 +400,6 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
                 let selected = state_clone.borrow().selected_id.clone();
                 if selected.is_empty() {
                     select_row_silently(&state_clone, Some(0));
-                }
-                let needs_refresh = !state_clone.borrow().grid_refresh_pending;
-                if needs_refresh {
-                    state_clone.borrow_mut().grid_refresh_pending = true;
-                    let sc = state_clone.clone();
-                    glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
-                        let mut s = sc.borrow_mut();
-                        s.grid_refresh_pending = false;
-                        let should_refresh = s.selected_id.is_empty() && !s.content_unloaded;
-                        drop(s);
-                        if should_refresh {
-                            show_grid_view(&sc);
-                        }
-                    });
                 }
             });
         }

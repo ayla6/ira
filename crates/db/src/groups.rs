@@ -112,22 +112,23 @@ mod tests {
     use super::*;
 
     fn temp_db() -> DbConn {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE games (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL);
-             CREATE TABLE groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
-             CREATE TABLE game_groups (
-                 game_id INTEGER NOT NULL,
-                 group_id INTEGER NOT NULL,
-                 PRIMARY KEY (game_id, group_id)
-             );",
-        )
-        .unwrap();
-        Arc::new(Mutex::new(conn))
+        let manager = r2d2_sqlite::SqliteConnectionManager::memory();
+        let pool = r2d2::Pool::builder().max_size(4).build(manager).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE games (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL);
+                 CREATE TABLE groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
+                 CREATE TABLE game_groups (
+                     game_id INTEGER NOT NULL,
+                     group_id INTEGER NOT NULL,
+                     PRIMARY KEY (game_id, group_id)
+                 );",
+            )
+            .unwrap();
+        }
+        pool
     }
-
-    use rusqlite::Connection;
-    use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_create_and_load_group() {

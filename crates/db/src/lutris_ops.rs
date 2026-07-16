@@ -2,7 +2,7 @@ use crate::DbConn;
 use rusqlite::params;
 
 pub fn get_ignored_lutris_ids(conn: &DbConn) -> std::collections::HashSet<i64> {
-    let c = match conn.lock() {
+    let c = match crate::lock_db(conn) {
         Ok(c) => c,
         Err(e) => { eprintln!("get_ignored_lutris_ids: {}", e); return std::collections::HashSet::new(); }
     };
@@ -27,7 +27,7 @@ pub fn set_lutris_hidden(conn: &DbConn, lutris_id: i64, hidden: bool) -> Result<
 }
 
 pub fn get_hidden_lutris_ids(conn: &DbConn) -> std::collections::HashSet<i64> {
-    let c = match conn.lock() {
+    let c = match crate::lock_db(conn) {
         Ok(c) => c,
         Err(e) => { eprintln!("get_hidden_lutris_ids: {}", e); return std::collections::HashSet::new(); }
     };

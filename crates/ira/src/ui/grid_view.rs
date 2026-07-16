@@ -3,6 +3,8 @@ use crate::Game;
 use crate::strings as S;
 use ira_models::{GroupSelection, SortMode};
 
+use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use super::state::SharedState;
@@ -13,6 +15,47 @@ use super::sidebar::scroll_to_row;
 use super::context_menu::show_game_context_menu;
 use super::helpers::clear_children;
 use super::filter::filtered_games;
+
+struct PendingCover {
+    pic: gtk4::Picture,
+    path: String,
+    w: i32,
+    h: i32,
+    db_id: i64,
+    vbox: gtk4::Box,
+}
+
+thread_local! {
+    static COVER_QUEUE: RefCell<VecDeque<PendingCover>> = const { RefCell::new(VecDeque::new()) };
+    static COVER_PROCESSOR_RUNNING: Cell<bool> = const { Cell::new(false) };
+}
+
+fn queue_cover_load(pic: gtk4::Picture, path: String, w: i32, h: i32, db_id: i64, vbox: gtk4::Box) {
+    COVER_QUEUE.with(|q| q.borrow_mut().push_back(PendingCover { pic, path, w, h, db_id, vbox }));
+    COVER_PROCESSOR_RUNNING.with(|r| {
+        if !r.get() {
+            r.set(true);
+            glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+                let req = COVER_QUEUE.with(|q| q.borrow_mut().pop_front());
+                if let Some(req) = req {
+                    let stale = unsafe { req.vbox.data::<AtomicI64>("game-db-id") }
+                        .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed) != req.db_id)
+                        .unwrap_or(false);
+                    if !stale {
+                        ira_images::set_picture_natural(&req.pic, &req.path, req.w, req.h);
+                    }
+                }
+                let empty = COVER_QUEUE.with(|q| q.borrow().is_empty());
+                if empty {
+                    COVER_PROCESSOR_RUNNING.with(|r| r.set(false));
+                    glib::ControlFlow::Break
+                } else {
+                    glib::ControlFlow::Continue
+                }
+            });
+        }
+    });
+}
 
 fn badge_text(game: &Game, mode: SortMode) -> Option<String> {
     match mode {
@@ -223,7 +266,7 @@ pub fn show_grid_view(state: &SharedState) {
                 unsafe { ptr.as_ref() }.store(game.db_id, Ordering::Relaxed);
             }
             if !game.grid_path.is_empty() {
-                ira_images::set_picture_natural(pic, &game.grid_path, cover_width, cover_height);
+                queue_cover_load(pic.clone(), game.grid_path.clone(), cover_width, cover_height, game.db_id, vbox.clone());
                 if let Some(ref label) = name_label {
                     label.set_visible(false);
                 }
@@ -278,6 +321,7 @@ pub fn show_grid_view(state: &SharedState) {
     for game in &games {
         store.append(&GameItem::new(game));
     }
+    state.borrow_mut().grid_store = store.clone();
 
     let selection_model = gtk4::NoSelection::new(Some(store.upcast::<gio::ListModel>()));
     let grid = gtk4::GridView::new(Some(selection_model), Some(factory));
@@ -436,7 +480,7 @@ fn build_cover(
     pic.set_size_request(w, h);
     pic.add_css_class("game-cover-pic");
     if !image_path.is_empty() {
-        ira_images::set_picture_natural(&pic, image_path, w, h);
+        queue_cover_load(pic.clone(), image_path.to_string(), w, h, game.db_id, gtk4::Box::new(gtk4::Orientation::Vertical, 0));
     }
 
     vbox.append(&pic);

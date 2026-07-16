@@ -16,8 +16,8 @@ impl TextureCache {
             map: HashMap::new(),
             order: VecDeque::new(),
             total_bytes: 0,
-            max_bytes: 50 * 1024 * 1024,
-            max_entries: 150,
+            max_bytes: 400 * 1024 * 1024,
+            max_entries: 500,
         }
     }
 

@@ -269,7 +269,8 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
         let logo_pct = game.logo_size.clamp(5, 100);
         let logo_pos = game.logo_position.clone();
 
-        if let Ok(pixbuf) = gtk4::gdk_pixbuf::Pixbuf::from_file(&game.logo_path) {
+        let pixbuf_result = gtk4::gdk_pixbuf::Pixbuf::from_file(&game.logo_path);
+        if let Ok(pixbuf) = pixbuf_result {
             let pb_w = pixbuf.width() as f64;
             let pb_h = pixbuf.height() as f64;
 
@@ -314,7 +315,6 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
             overlay.add_overlay(&logo_area);
         }
     }
-
     {
         let overlay_weak = overlay.downgrade();
         let size_monitor = gtk4::DrawingArea::new();
@@ -334,7 +334,6 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
         });
         overlay.add_overlay(&size_monitor);
     }
-
     let stats_container = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
     stats_container.set_margin_start(24);
     stats_container.set_margin_end(24);

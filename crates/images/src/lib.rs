@@ -6,7 +6,6 @@ pub use scaled::ScaledPaintable;
 use cache::TextureCache;
 use gdk4::Texture;
 use std::cell::RefCell;
-
 thread_local! {
     static TEXTURE_CACHE: RefCell<TextureCache> = RefCell::new(TextureCache::new());
 }

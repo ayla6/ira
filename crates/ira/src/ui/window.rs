@@ -43,6 +43,7 @@ pub fn build_ui(
         eprintln!("Failed to load groups: {}", e);
         Vec::new()
     });
+
     let sidebar_store = gio::ListStore::new::<super::sidebar_item::SidebarItem>();
     let sidebar_selection = super::game_selection_model::GameSelectionModel::new(Some(&sidebar_store));
     let sidebar_view = gtk4::ListView::new(None::<super::game_selection_model::GameSelectionModel>, None::<gtk4::SignalListItemFactory>);
@@ -68,7 +69,7 @@ pub fn build_ui(
         content_unloaded: false,
         restoring: false,
         running_games: Arc::new(Mutex::new(HashMap::new())),
-        grid_refresh_pending: false,
+        grid_store: gio::ListStore::new::<crate::ui::game_item::GameItem>(),
         sidebar_rebuild_pending: false,
         view_generation: 0,
         settings_data: None,
@@ -82,8 +83,10 @@ pub fn build_ui(
     }));
 
     build_window(&state, app);
+
     let win = state.borrow().window.clone();
     win.present();
+
     state
 }
 

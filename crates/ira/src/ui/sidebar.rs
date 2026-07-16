@@ -7,6 +7,35 @@ use super::context_menu::show_game_context_menu;
 use super::helpers::clear_children;
 use super::sidebar_item::{SidebarItem, SidebarItemKind};
 use std::collections::{HashMap, HashSet};
+use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
+
+thread_local! {
+    static ICON_QUEUE: RefCell<VecDeque<(gtk4::Image, String)>> = const { RefCell::new(VecDeque::new()) };
+    static ICON_PROCESSOR_RUNNING: Cell<bool> = const { Cell::new(false) };
+}
+
+fn queue_icon_load(icon: gtk4::Image, path: String) {
+    ICON_QUEUE.with(|q| q.borrow_mut().push_back((icon, path)));
+    ICON_PROCESSOR_RUNNING.with(|r| {
+        if !r.get() {
+            r.set(true);
+            glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+                let req = ICON_QUEUE.with(|q| q.borrow_mut().pop_front());
+                if let Some((icon, path)) = req {
+                    ira_images::set_image(&icon, &path);
+                }
+                let empty = ICON_QUEUE.with(|q| q.borrow().is_empty());
+                if empty {
+                    ICON_PROCESSOR_RUNNING.with(|r| r.set(false));
+                    glib::ControlFlow::Break
+                } else {
+                    glib::ControlFlow::Continue
+                }
+            });
+        }
+    });
+}
 
 pub fn select_row_silently(state: &SharedState, index: Option<u32>) {
     state.borrow_mut().restoring = true;
@@ -45,6 +74,9 @@ pub fn update_sidebar_game(state: &SharedState, db_id: i64, name: &str, icon_pat
     for i in 0..store.n_items() {
         if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()) {
             if item.kind() == SidebarItemKind::Game && item.db_id() == db_id {
+                if item.name() == name && item.icon_path() == icon_path {
+                    return;
+                }
                 let new_item = SidebarItem::new_game(
                     db_id, name, icon_path, item.hidden(), item.playing(),
                 );
@@ -358,12 +390,11 @@ pub fn build_factory(state: &SharedState) -> gtk4::SignalListItemFactory {
                 row.remove_css_class("playing-game");
 
                 row.set_margin_start(24);
-                let icon = if item.icon_path().is_empty() {
-                    gtk4::Image::from_icon_name("application-x-executable")
-                } else {
-                    ira_images::new_image_from_file(&item.icon_path())
-                };
+                let icon = gtk4::Image::from_icon_name("application-x-executable");
                 icon.set_pixel_size(24);
+                if !item.icon_path().is_empty() {
+                    queue_icon_load(icon.clone(), item.icon_path());
+                }
                 row.append(&icon);
 
                 let title_label = gtk4::Label::new(Some(&item.name()));

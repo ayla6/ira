@@ -3,7 +3,7 @@ use ira_models::GameVariant;
 use rusqlite::params;
 
 pub fn create_variants_table(conn: &DbConn) {
-    let c = conn.lock().expect("db lock");
+    let c = crate::lock_db(conn).expect("db lock");
     c.execute_batch(
         "CREATE TABLE IF NOT EXISTS game_variants (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,7 +71,7 @@ pub fn delete_variant(conn: &DbConn, variant_id: i64) -> Result<(), String> {
 }
 
 pub fn get_default_variant(conn: &DbConn, game_id: i64) -> Option<i64> {
-    let c = conn.lock().ok()?;
+    let c = crate::lock_db(conn).ok()?;
     c.query_row(
         "SELECT variant_id FROM game_default_variant WHERE game_id = ?1",
         params![game_id],
@@ -80,7 +80,7 @@ pub fn get_default_variant(conn: &DbConn, game_id: i64) -> Option<i64> {
 }
 
 pub fn set_default_variant(conn: &DbConn, game_id: i64, variant_id: Option<i64>) {
-    let Ok(c) = conn.lock() else { return; };
+    let Ok(c) = crate::lock_db(conn) else { return; };
     if let Some(vid) = variant_id {
         let _ = c.execute(
             "INSERT INTO game_default_variant (game_id, variant_id) VALUES (?1, ?2)

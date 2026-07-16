@@ -5,7 +5,6 @@ use super::state::SharedState;
 use super::helpers::clear_children;
 use super::game_header::build_game_header;
 use super::achievement_view::build_achievements_view;
-
 pub fn display_game(game: &Game, state: &SharedState) {
     let content_box = state.borrow().content_box.clone();
     let content_scroll = state.borrow().content_scroll.clone();
@@ -27,7 +26,9 @@ pub fn display_game(game: &Game, state: &SharedState) {
     };
 
     let content_width = content_scroll.width().max(600);
-    content_box.append(&build_game_header(game, fraction, state, content_width));
+
+    let header_widget = build_game_header(game, fraction, state, content_width);
+    content_box.append(&header_widget);
 
     if game.app_id.is_empty() {
         let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 16);

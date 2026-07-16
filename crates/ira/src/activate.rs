@@ -100,6 +100,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
     let save_dir = cfg.save_dir.clone();
     let sort_mode = cfg.sort_mode;
     let sort_descending = cfg.sort_descending;
+
     let state = build_ui(
         app,
         Vec::new(),

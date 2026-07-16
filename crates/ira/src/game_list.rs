@@ -94,9 +94,6 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
     }
 
     let steam_playtimes = if options.steam_enabled { steam::read_all_playtimes() } else { std::collections::HashMap::new() };
-    if options.steam_enabled {
-        eprintln!("[steam] Discovered {} games, {} playtimes", steam_games.len(), steam_playtimes.len());
-    }
 
     let ra_any_console = cfg.any_console_enabled();
 
@@ -106,15 +103,12 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
         load_non_lutris_games(db, save_dir)
     };
 
-    // Filter out disabled sources
     games.retain(|g| {
         if !options.steam_enabled && g.kind == ira_models::GameKind::Steam { return false; }
         if !options.shadps4_enabled && g.kind == ira_models::GameKind::Ps4 { return false; }
         if !ra_any_console && g.kind == ira_models::GameKind::Retro { return false; }
         true
     });
-
-    // Remove games that will be re-added by platform builders to avoid duplicates
     if options.shadps4_enabled {
         games.retain(|g| g.kind != ira_models::GameKind::Ps4);
     }
@@ -124,7 +118,6 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
     if ra_any_console {
         games.retain(|g| g.kind != ira_models::GameKind::Retro);
     }
-
     games.sort_by(|a, b| {
         let ord = options.sort_mode.compare(a, b);
         if options.sort_descending { ord.reverse() } else { ord }
@@ -143,6 +136,7 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
         let ord = options.sort_mode.compare(a, b);
         if options.sort_descending { ord.reverse() } else { ord }
     });
+
     games
 }
 

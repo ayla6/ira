@@ -78,4 +78,34 @@ impl GameEntry {
             rom_path: String::new(),
         }
     }
+
+    pub fn from_game(g: &super::game::Game) -> Self {
+        GameEntry {
+            id: g.db_id,
+            kind: g.kind,
+            trophy_source: g.trophy_source,
+            steam_id: if g.app_id.is_empty() { String::new() } else { g.app_id.clone() },
+            game_id: g.app_id.clone(),
+            platform_id: g.platform_id.clone(),
+            title: g.name.clone(),
+            hidden: g.hidden,
+            lutris_db_id: if g.lutris_id > 0 { Some(g.lutris_id) } else { None },
+            sgdb_id: if g.sgdb_id.is_empty() { None } else { Some(g.sgdb_id.clone()) },
+            logo_position: g.logo_position.clone(),
+            logo_size: g.logo_size,
+            ignored: 0,
+            manual_unmatch: g.manual_unmatch,
+            sort_title: g.sort_title.clone(),
+            shadps4_version: g.shadps4_version.clone(),
+            last_played: g.last_played,
+            release_date: g.release_date.clone(),
+            release_timestamp: g.release_timestamp,
+            metacritic_score: g.metacritic_score,
+            steam_review_score: g.steam_review_score,
+            steam_review_count: g.steam_review_count,
+            ra_core: g.ra_core.clone(),
+            emulator_override: g.emulator_override.clone(),
+            rom_path: g.rom_path.clone(),
+        }
+    }
 }

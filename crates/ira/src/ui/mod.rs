@@ -1,4 +1,4 @@
-pub mod state;
+mod state;
 mod css;
 mod game_item;
 mod grid_bin;

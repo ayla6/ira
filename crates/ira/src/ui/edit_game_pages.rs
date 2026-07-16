@@ -6,6 +6,69 @@ use crate::AppMessage;
 use super::helpers;
 use super::settings_dialog;
 use super::state::SharedState;
+use ira_db::DbConn;
+
+/// Converts a single Lutris game to a managed game by reading its Lutris config
+/// and saving a GameLaunchConfig + WineConfig to the database.
+/// Returns Ok(()) on success, Err(message) on failure.
+pub fn convert_lutris_to_managed(
+    db: &DbConn,
+    db_id: i64,
+    lutris_id: i64,
+    game_name: &str,
+) -> Result<(), String> {
+    let (_runner, _directory, config) = ira_platforms::lutris_config::read_lutris_game_config(lutris_id)?;
+
+    let launch = GameLaunchConfig {
+        exe: config.game.exe.clone(),
+        args: config.game.args.clone(),
+        working_dir: config.game.working_dir.clone(),
+        env_vars: config.system.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        ..Default::default()
+    };
+    let wine = WineConfig {
+        enabled: true,
+        prefix: config.game.prefix.clone(),
+        version: if config.wine.version.is_empty() { "system".to_string() } else { config.wine.version.clone() },
+        arch: if config.game.arch.is_empty() { "auto".to_string() } else { config.game.arch.clone() },
+        esync: config.wine.esync,
+        fsync: config.wine.fsync,
+        dxvk: config.wine.dxvk,
+        vkd3d: config.wine.vkd3d,
+        d3d_extras: config.wine.d3d_extras,
+        dxvk_nvapi: config.wine.dxvk_nvapi,
+        fsr: config.wine.fsr,
+        battleye: config.wine.battleye,
+        eac: config.wine.eac,
+        show_debug: if config.wine.show_debug.is_empty() { "-all".to_string() } else { config.wine.show_debug.clone() },
+        dll_overrides: config.wine.overrides.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        gamemode: config.system.gamemode,
+        mangohud: config.system.mangohud,
+        gamescope: config.system.gamescope,
+        gamescope_flags: config.system.gamescope_flags.clone(),
+        ..Default::default()
+    };
+    let profile_id = {
+        let profiles = ira_db::get_all_profiles(db).unwrap_or_default();
+        let existing = profiles.iter().find(|p| p.prefix == wine.prefix);
+        if let Some(p) = existing {
+            Some(p.id)
+        } else {
+            let profile_name = format!("{} ({})", game_name, wine.version);
+            let new_profile = WineProfile {
+                id: 0,
+                name: profile_name,
+                wine_version: wine.version.clone(),
+                custom_wine_path: wine.custom_wine_path.clone(),
+                prefix: wine.prefix.clone(),
+                arch: wine.arch.clone(),
+                umu_enabled: wine.umu_enabled,
+            };
+            ira_db::add_profile(db, &new_profile).ok()
+        }
+    };
+    ira_db::save_game_config(db, db_id, &launch, &wine, profile_id).map_err(|e| e.to_string())
+}
 
 pub(super) fn build_dlc_page(
     app_details: &Option<AppDetails>,
@@ -386,61 +449,8 @@ pub(super) fn build_lutris_conversion(
                 let gn = game_name.clone();
                 w_close.close();
                 std::thread::spawn(move || {
-                    match ira_platforms::lutris_config::read_lutris_game_config(lutris_id) {
-                        Ok((_runner, _directory, config)) => {
-                            let launch = GameLaunchConfig {
-                                exe: config.game.exe.clone(),
-                                args: config.game.args.clone(),
-                                working_dir: config.game.working_dir.clone(),
-                                env_vars: config.system.env.iter().map(|(k,v)| (k.clone(), v.clone())).collect(),
-                                ..Default::default()
-                            };
-                            let wine = WineConfig {
-                                enabled: true,
-                                prefix: config.game.prefix.clone(),
-                                version: if config.wine.version.is_empty() { "system".to_string() } else { config.wine.version.clone() },
-                                arch: if config.game.arch.is_empty() { "auto".to_string() } else { config.game.arch.clone() },
-                                esync: config.wine.esync,
-                                fsync: config.wine.fsync,
-                                dxvk: config.wine.dxvk,
-                                vkd3d: config.wine.vkd3d,
-                                d3d_extras: config.wine.d3d_extras,
-                                dxvk_nvapi: config.wine.dxvk_nvapi,
-                                fsr: config.wine.fsr,
-                                battleye: config.wine.battleye,
-                                eac: config.wine.eac,
-                                show_debug: if config.wine.show_debug.is_empty() { "-all".to_string() } else { config.wine.show_debug.clone() },
-                                dll_overrides: config.wine.overrides.iter().map(|(k,v)| (k.clone(), v.clone())).collect(),
-                                gamemode: config.system.gamemode,
-                                mangohud: config.system.mangohud,
-                                gamescope: config.system.gamescope,
-                                gamescope_flags: config.system.gamescope_flags.clone(),
-                                ..Default::default()
-                            };
-                            let profile_id = {
-                                let profiles = ira_db::get_all_profiles(&db).unwrap_or_default();
-                                let existing = profiles.iter().find(|p| p.prefix == wine.prefix && p.wine_version == wine.version);
-                                if let Some(p) = existing {
-                                    Some(p.id)
-                                } else {
-                                    let profile_name = format!("{} ({})", gn, wine.version);
-                                    let new_profile = ira_models::WineProfile {
-                                        id: 0,
-                                        name: profile_name,
-                                        wine_version: wine.version.clone(),
-                                        custom_wine_path: wine.custom_wine_path.clone(),
-                                        prefix: wine.prefix.clone(),
-                                        arch: wine.arch.clone(),
-                                        umu_enabled: wine.umu_enabled,
-                                    };
-                                    ira_db::add_profile(&db, &new_profile).ok()
-                                }
-                            };
-                            let _ = ira_db::save_game_config(&db, db_id, &launch, &wine, profile_id);
-                        }
-                        Err(e) => {
-                            let _ = sender.send(AppMessage::AddGameError(e));
-                        }
+                    if let Err(e) = convert_lutris_to_managed(&db, db_id, lutris_id, &gn) {
+                        let _ = sender.send(AppMessage::AddGameError(e));
                     }
                 });
             }

@@ -50,7 +50,7 @@ pub fn show_settings_dialog(
 
     sidebar.append(&sidebar_separator());
 
-    let (lutris_page, lutris_enable_row) = build_lutris_settings_page(&cfg);
+    let (lutris_page, lutris_enable_row) = build_lutris_settings_page(&cfg, state);
     sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Lutris"));
     stack.add_named(&lutris_page, Some("lutris"));
 

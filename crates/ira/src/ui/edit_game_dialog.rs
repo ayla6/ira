@@ -54,7 +54,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
     let profile_row = build_profile_dropdown(has_config, saved_wine.enabled, saved_profile_id, &profiles, &general_page);
 
-    // --- Launch Config (not for steam/ps4/retro; lutris only if it has a saved config) ---
+    // --- Launch Config (not for steam/ps4/retro/wine; lutris only if it has a saved config) ---
     let show_launch_config = !show_wine && game.kind != ira_models::GameKind::Steam && game.kind != ira_models::GameKind::Ps4 && game.kind != ira_models::GameKind::Retro && (game.kind != ira_models::GameKind::Lutris || has_config);
     let launch_config_widgets = if show_launch_config {
         build_launch_config_page(&saved_launch, &win, &sidebar, &stack, true)
@@ -62,12 +62,13 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         None
     };
 
-    // --- Wine Config (only for wine kind) ---
-    if show_wine && saved_wine.enabled {
+    // --- Wine Config (for any game with wine enabled) ---
+    let show_wine_tabs = saved_wine.enabled;
+    if show_wine_tabs {
         sidebar.append(&super::settings_dialog::sidebar_separator());
     }
 
-    let wine_widgets_opt = if show_wine && saved_wine.enabled {
+    let wine_widgets_opt = if show_wine_tabs {
         let (wine_pages, ww) = crate::ui::wine_config_widget::build_wine_config_pages(&saved_wine, Some(&app_default_wine));
         for wp in &wine_pages {
             sidebar.append(&super::settings_dialog::settings_sidebar_row(wp.icon, wp.label));
@@ -78,7 +79,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         None
     };
 
-    if show_wine && saved_wine.enabled {
+    if show_wine_tabs {
         sidebar.append(&super::settings_dialog::sidebar_separator());
     }
 
@@ -134,6 +135,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                             let page_id = match label.text().as_str() {
                                 "General" => "general",
                                 "Launch Config" => "launch",
+                                "Advanced" => "advanced",
                                 "Performance" => "Performance",
                                 "Graphics" => "Graphics",
                                 "Wine Advanced" => "Wine Advanced",

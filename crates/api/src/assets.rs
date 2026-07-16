@@ -57,10 +57,9 @@ impl SteamClient {
 
         let grid_path = if let Some(existing) = ira_parser::find_image_file(&dir, "library_600x900") {
             existing.to_string_lossy().into_owned()
-        } else if let Some(url) = self.fetch_sgdb_asset_url(sgdb_id, "grids") {
-            let ext = ira_parser::url_extension(&url);
-            self.fetch_image(&url, &dir.join(format!("library_600x900.{}", ext)))
-        } else { String::new() };
+        } else {
+            self.force_download_sgdb(sgdb_id, "grid", false)
+        };
 
         let logo_path = if let Some(existing) = ira_parser::find_image_file(&dir, "logo") {
             existing.to_string_lossy().into_owned()

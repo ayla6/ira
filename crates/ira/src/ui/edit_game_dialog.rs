@@ -100,8 +100,12 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             None
         };
 
-    // --- DLC page ---
-    let dlc_switches = build_dlc_page(&app_details, &sidebar, &stack);
+    // --- DLC page (not for Steam — can't know which DLCs the user owns) ---
+    let dlc_switches = if game.kind != ira_models::GameKind::Steam {
+        build_dlc_page(&app_details, &sidebar, &stack)
+    } else {
+        Vec::new()
+    };
 
     // --- API Emulator page ---
     let emu_save_dir = state.borrow().save_dir.clone();

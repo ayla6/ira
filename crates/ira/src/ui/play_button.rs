@@ -83,7 +83,8 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             .map(|d| d.fullscreen_flag)
             .unwrap_or("--fullscreen");
         let cmd = ira_platforms::emulator_detect::build_launch_command(exe, &game_path, core, cc.fullscreen, fullscreen_flag);
-        match ira_launcher::wrapper::spawn_game(&cmd, &[], None) {
+        let log_path = ira_launcher::wrapper::game_log_path(&save_dir, game_id);
+        match ira_launcher::wrapper::spawn_game(&cmd, &[], None, Some(&log_path)) {
             Ok(child) => {
                 let pid = child.id() as i32;
                 running_games.lock().unwrap().insert(game_id, pid);
@@ -107,7 +108,8 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             "shadps4"
         };
         let cmd = vec![exe.to_string(), "-g".to_string(), game_path.to_string()];
-        match ira_launcher::wrapper::spawn_game(&cmd, &[], None) {
+        let log_path = ira_launcher::wrapper::game_log_path(&save_dir, game_id);
+        match ira_launcher::wrapper::spawn_game(&cmd, &[], None, Some(&log_path)) {
             Ok(child) => {
                 let pid = child.id() as i32;
                 running_games.lock().unwrap().insert(game_id, pid);
@@ -124,13 +126,13 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         }
     } else if kind == ira_models::GameKind::Steam {
         let cmd = vec!["steam".to_string(), "-applaunch".to_string(), app_id.clone()];
-        match ira_launcher::wrapper::spawn_game(&cmd, &[], None) {
+        match ira_launcher::wrapper::spawn_game(&cmd, &[], None, None) {
             Ok(_child) => {
             }
             Err(_) => {
                 let uri = format!("steam://run/{}", app_id);
                 let cmd = vec!["xdg-open".to_string(), uri];
-                if let Err(e) = ira_launcher::wrapper::spawn_game(&cmd, &[], None) {
+                if let Err(e) = ira_launcher::wrapper::spawn_game(&cmd, &[], None, None) {
                     return Err(format!("Failed to launch Steam game: {}", e));
                 }
             }
@@ -197,7 +199,8 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         } else {
             let uri = format!("lutris:rungameid/{}", game_id);
             let cmd = vec!["lutris".to_string(), uri.clone()];
-            match ira_launcher::wrapper::spawn_game(&cmd, &[], None) {
+            let log_path = ira_launcher::wrapper::game_log_path(&save_dir, game_id);
+            match ira_launcher::wrapper::spawn_game(&cmd, &[], None, Some(&log_path)) {
                 Ok(child) => {
                     let pid = child.id() as i32;
                     running_games.lock().unwrap().insert(game_id, pid);

@@ -49,6 +49,7 @@ mod profile_dialog;
 mod matching;
 mod filter;
 mod group_dialog;
+mod log_viewer;
 
 pub use state::{AppState, SharedState, malloc_trim};
 pub use window::{build_ui, AppContext};

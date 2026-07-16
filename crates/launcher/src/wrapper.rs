@@ -28,6 +28,7 @@ pub fn spawn_game(
     command: &[String],
     env: &[(String, String)],
     cwd: Option<&str>,
+    log_path: Option<&str>,
 ) -> Result<Child, String> {
     set_subreaper();
 
@@ -41,11 +42,37 @@ pub fn spawn_game(
     for (key, val) in env {
         cmd.env(key, val);
     }
-    cmd.stdout(Stdio::null());
-    cmd.stderr(Stdio::null());
+    if let Some(path) = log_path {
+        if let Some(parent) = Path::new(path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::File::create(path) {
+            Ok(f) => {
+                cmd.stdout(Stdio::from(f.try_clone().unwrap_or_else(|_| {
+                    std::fs::OpenOptions::new().write(true).open("/dev/null").unwrap()
+                })));
+                cmd.stderr(Stdio::from(f));
+            }
+            Err(_) => {
+                cmd.stdout(Stdio::null());
+                cmd.stderr(Stdio::null());
+            }
+        }
+    } else {
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::null());
+    }
     cmd.process_group(0);
 
     cmd.spawn().map_err(|e| format!("Failed to spawn game process: {}", e))
+}
+
+pub fn game_log_path(save_dir: &str, game_id: i64) -> String {
+    Path::new(save_dir)
+        .join("logs")
+        .join(format!("{}.log", game_id))
+        .to_string_lossy()
+        .into_owned()
 }
 
 pub fn monitor_process(

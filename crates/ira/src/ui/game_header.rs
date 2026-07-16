@@ -221,16 +221,33 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
     };
 
     let settings_btn = {
-        let btn = gtk4::Button::from_icon_name("preferences-system-symbolic");
+        let menu = gio::Menu::new();
+        menu.append(Some("View Log"), Some("game.view_log"));
+
+        let btn = adw::SplitButton::new();
+        btn.set_icon_name("preferences-system-symbolic");
         btn.add_css_class("flat");
         btn.set_valign(gtk4::Align::Center);
         btn.set_tooltip_text(Some("Settings"));
+        btn.set_menu_model(Some(&menu));
+
         let st = state.clone();
         let edit_db_id = game.db_id;
         btn.connect_clicked(move |_| {
             super::edit_game_dialog::show_edit_game_dialog(&st, edit_db_id);
         });
-        btn
+
+        let actions = gio::SimpleActionGroup::new();
+        let st_log = state.clone();
+        let log_db_id = game.db_id;
+        let log_action = gio::SimpleAction::new("view_log", None);
+        log_action.connect_activate(move |_, _| {
+            super::log_viewer::show_log_dialog(&st_log, log_db_id);
+        });
+        actions.add_action(&log_action);
+        btn.insert_action_group("game", Some(&actions));
+
+        btn.upcast::<gtk4::Widget>()
     };
 
     if !has_hero {

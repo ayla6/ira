@@ -52,6 +52,8 @@ pub struct WineConfig {
     #[serde(default)]
     pub wine_env_vars: Vec<(String, String)>,
     #[serde(default)]
+    pub umu_enabled: bool,
+    #[serde(default)]
     pub overridden_fields: Vec<String>,
 }
 
@@ -93,6 +95,7 @@ impl Default for WineConfig {
             proton_wow64: true,
             proton_ntsync: true,
             wine_env_vars: Vec::new(),
+            umu_enabled: false,
             overridden_fields: Vec::new(),
         }
     }
@@ -136,6 +139,7 @@ impl WineConfig {
             proton_wow64: if has("proton_wow64") { self.proton_wow64 } else { default.proton_wow64 },
             proton_ntsync: if has("proton_ntsync") { self.proton_ntsync } else { default.proton_ntsync },
             wine_env_vars: if has("wine_env_vars") { self.wine_env_vars.clone() } else { default.wine_env_vars.clone() },
+            umu_enabled: if has("umu_enabled") { self.umu_enabled } else { default.umu_enabled },
             overridden_fields: self.overridden_fields.clone(),
         }
     }

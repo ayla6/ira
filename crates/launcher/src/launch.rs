@@ -35,7 +35,17 @@ pub fn launch_game(
         } else {
             shlex::split(&launch.args).ok_or_else(|| "Failed to parse arguments".to_string())?
         };
-        let mut cmd = super::wine_launch::build_wine_command(&wine_exe, &launch.exe, &args, wine);
+
+        let mut cmd = if wine.umu_enabled {
+            let mut c = vec!["umu-run".to_string()];
+            if !launch.exe.is_empty() {
+                c.push(launch.exe.clone());
+            }
+            c.extend_from_slice(&args);
+            c
+        } else {
+            super::wine_launch::build_wine_command(&wine_exe, &launch.exe, &args, wine)
+        };
         let env = super::env_builder::build_env(launch, Some(wine), &wine_exe, &ctx.save_dir, ctx.game_id, &mut cmd);
 
         let pfx = super::wine_launch::wine_prefix(wine);
@@ -54,7 +64,7 @@ pub fn launch_game(
             eprintln!("Warning: wine version mismatch for prefix {}. Configured: '{}', expected: '{}'", pfx, wine.version, std::fs::read_to_string(&version_file).unwrap_or_default().trim());
         }
 
-        if !prefix_ready {
+        if !prefix_ready && !wine.umu_enabled {
             for reg_cmd in super::wine_launch::build_wine_reg_commands(wine, &wine_exe) {
                 let mut child = std::process::Command::new(&reg_cmd[0]);
                 for arg in &reg_cmd[1..] {
@@ -93,7 +103,8 @@ pub fn launch_game(
         Some(launch.working_dir.clone())
     };
 
-    let child = super::wrapper::spawn_game(&command, &env, game_dir.as_deref())?;
+    let log_path = super::wrapper::game_log_path(&ctx.save_dir, ctx.game_id);
+    let child = super::wrapper::spawn_game(&command, &env, game_dir.as_deref(), Some(&log_path))?;
     let child_pid = child.id() as i32;
 
     ctx.running_games.lock().map_err(|e| e.to_string())?.insert(ctx.game_id, child_pid);

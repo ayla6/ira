@@ -18,19 +18,15 @@ pub struct Game {
     pub earned_count: usize,
     pub total_count: usize,
     pub hidden: bool,
-    /// Lutris internal game id (0 = not linked / unmatched).
-    pub lutris_id: i64,
     pub slug: String,
-    /// Playtime in hours (from Lutris).
+    /// Playtime in hours.
     pub playtime: f64,
-    /// Unix timestamp of last play (from Lutris).
+    /// Unix timestamp of last play.
     pub last_played: i64,
     /// Logo overlay position (e.g. "bottom-left", "center", etc.).
     pub logo_position: String,
     /// Logo overlay pixel size.
     pub logo_size: i32,
-    /// Original Lutris name (for restoring on unmatch).
-    pub lutris_name: String,
     /// True if user manually unmatched — don't auto-rematch.
     pub manual_unmatch: bool,
     /// Sort key (empty = use name for sorting).
@@ -77,13 +73,11 @@ impl Default for Game {
             earned_count: 0,
             total_count: 0,
             hidden: false,
-            lutris_id: 0,
             slug: String::new(),
             playtime: 0.0,
             last_played: 0,
             logo_position: "bottom-left".to_string(),
             logo_size: 50,
-            lutris_name: String::new(),
             manual_unmatch: false,
             sort_title: String::new(),
             game_path: String::new(),
@@ -112,20 +106,6 @@ impl Game {
         } else {
             self.earned_count as f64 / self.total_count as f64 * 100.0
         }
-    }
-}
-
-/// A Lutris game with no matched achievement source yet — shown in the sidebar
-/// with no achievements until the user matches it to a Steam/GOG app id.
-pub fn unmatched_game(lutris_id: i64, name: &str, slug: &str, playtime: f64, last_played: i64) -> Game {
-    Game {
-        lutris_id,
-        name: name.to_string(),
-        slug: slug.to_string(),
-        playtime,
-        last_played,
-        lutris_name: name.to_string(),
-        ..Default::default()
     }
 }
 
@@ -179,22 +159,4 @@ mod tests {
         assert_eq!(g.completion_pct(), 0.0);
     }
 
-    #[test]
-    fn test_unmatched_game_creates_correct_entry() {
-        let g = unmatched_game(42, "Test Game", "test-game-slug", 12.5, 1000);
-        assert_eq!(g.lutris_id, 42);
-        assert_eq!(g.name, "Test Game");
-        assert_eq!(g.slug, "test-game-slug");
-        assert_eq!(g.playtime, 12.5);
-        assert_eq!(g.last_played, 1000);
-        assert_eq!(g.lutris_name, "Test Game");
-        assert_eq!(g.app_id, "");
-        assert_eq!(g.db_id, 0);
-        assert_eq!(g.earned_count, 0);
-        assert_eq!(g.total_count, 0);
-        assert!(!g.hidden);
-        assert_eq!(g.logo_position, "bottom-left");
-        assert_eq!(g.logo_size, 50);
-        assert!(!g.manual_unmatch);
-    }
 }

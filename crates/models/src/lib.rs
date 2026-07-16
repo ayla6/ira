@@ -14,7 +14,7 @@ mod kind;
 mod consoles;
 mod app_details;
 
-pub use game::{Game, unmatched_game};
+pub use game::Game;
 pub use consoles::{ConsoleDef, CONSOLES, find_console};
 pub use app_details::{AppDetails, DlcInfo};
 pub use game_entry::GameEntry;

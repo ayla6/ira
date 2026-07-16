@@ -4,7 +4,6 @@ use ira_config as config;
 use ira_db as db;
 use crate::game_list::build_game_list;
 use ira_models::{AppMessage, AppSender};
-use ira_platforms::lutris_watcher::LutrisWatcher;
 use ira_platforms::ps4::ShadPS4Watcher;
 use crate::ui::{build_ui, handle_app_message, SharedState};
 use ira_watcher::AchievementWatcher;
@@ -77,14 +76,6 @@ pub fn activate(app: &adw::Application) -> SharedState {
         Arc::new(Mutex::new(HashMap::new()))
     });
 
-    let lutris_watcher = match LutrisWatcher::new(sender.clone()) {
-        Ok(w) => Some(w),
-        Err(e) => {
-            eprintln!("Lutris DB watching unavailable: {}", e);
-            None
-        }
-    };
-
     let shadps4_watcher = match ShadPS4Watcher::new(sender.clone()) {
         Ok(w) => Some(w),
         Err(e) => {
@@ -95,7 +86,6 @@ pub fn activate(app: &adw::Application) -> SharedState {
 
     let shadps4_enabled = cfg.shadps4_enabled;
     let steam_enabled = cfg.steam_enabled;
-    let lutris_enabled = cfg.lutris_enabled;
     let ra_config = cfg.clone();
     let save_dir = cfg.save_dir.clone();
     let sort_mode = cfg.sort_mode;
@@ -114,7 +104,6 @@ pub fn activate(app: &adw::Application) -> SharedState {
         },
     );
 
-    state.borrow_mut().lutris_watcher = lutris_watcher;
     state.borrow_mut().shadps4_watcher = shadps4_watcher;
 
     {
@@ -144,7 +133,6 @@ pub fn activate(app: &adw::Application) -> SharedState {
         let save_dir = save_dir.clone();
         std::thread::spawn(move || {
             let opts = crate::game_list::GameListOptions {
-                lutris_enabled,
                 shadps4_enabled,
                 steam_enabled,
                 sort_mode,

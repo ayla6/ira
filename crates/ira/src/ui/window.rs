@@ -3,7 +3,6 @@ use ira_db::DbConn;
 use ira_api::SteamClient;
 use crate::strings as S;
 use ira_watcher::AchievementWatcher;
-use crate::AppMessage;
 use crate::AppSender;
 use ira_models::{GroupSelection, SortMode};
 use gtk4::prelude::*;
@@ -61,7 +60,6 @@ pub fn build_ui(
         cfg: cfg.clone(),
         steam: ctx.steam.clone(),
         watcher: ctx.watcher.clone(),
-        lutris_watcher: None,
         shadps4_watcher: None,
         db: ctx.db,
         sender: ctx.sender,
@@ -491,17 +489,5 @@ fn connect_window_signals(
         }
     });
 
-    let state_clone = state.clone();
-    window.connect_notify_local(Some("is-active"), move |_, _| {
-        let is_active = state_clone.borrow().window.is_active();
-        if !is_active {
-            return;
-        }
-        let sender = state_clone.borrow().sender.clone();
-        std::thread::spawn(move || {
-            if let Ok(data) = ira_platforms::lutris::load_lutris_playtime() {
-                let _ = sender.send(AppMessage::LutrisDataChanged(data));
-            }
-        });
-    });
+
 }

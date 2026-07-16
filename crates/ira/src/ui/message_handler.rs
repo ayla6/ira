@@ -35,15 +35,7 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         AppMessage::GameStopped(db_id) => {
             state.borrow().running_games.lock().unwrap().remove(&db_id);
             set_sidebar_playing(state, db_id, false);
-            let is_steam = state.borrow().games.iter()
-                .find(|g| g.db_id == db_id)
-                .map(|g| g.kind == ira_models::GameKind::Steam)
-                .unwrap_or(false);
-            if is_steam {
-                refresh_steam_playtimes_for(state, &[db_id]);
-            } else {
-                refresh_playtime_for(state, &[db_id]);
-            }
+            refresh_steam_playtimes_for(state, &[db_id]);
             let selected_id = state.borrow().selected_id.clone();
             let game = state.borrow().games.iter()
                 .find(|g| g.db_id == db_id)
@@ -66,15 +58,21 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 }
             }
         }
-        AppMessage::LutrisDataChanged(data) => {
-            handle_lutris_data_changed(state, data);
-        }
         AppMessage::SessionRecorded { game_id, duration_seconds, .. } => {
-            let mut s = state.borrow_mut();
-            if let Some(g) = s.games.iter_mut().find(|g| g.db_id == game_id) {
-                g.playtime += (duration_seconds as f64) / 3600.0;
+            let hours = (duration_seconds as f64) / 3600.0;
+            let (db, new_playtime) = {
+                let mut s = state.borrow_mut();
+                let db = s.db.clone();
+                if let Some(g) = s.games.iter_mut().find(|g| g.db_id == game_id) {
+                    g.playtime += hours;
+                    (db, g.playtime)
+                } else {
+                    (db, 0.0)
+                }
+            };
+            if new_playtime > 0.0 {
+                let _ = ira_db::update_field(&db, game_id, "playtime", &new_playtime);
             }
-            drop(s);
         }
         AppMessage::ShadPS4PlaytimeChanged => {
             let play_times = ira_platforms::ps4::read_play_times();
@@ -134,31 +132,6 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
     }
 }
 
-fn refresh_playtime_for(state: &SharedState, db_ids: &[i64]) {
-    let lutris_ids: Vec<i64> = {
-        let s = state.borrow();
-        db_ids.iter()
-            .filter_map(|&db_id| s.games.iter().find(|g| g.db_id == db_id).map(|g| g.lutris_id))
-            .filter(|&id| id != 0)
-            .collect()
-    };
-    let Ok(all) = ira_platforms::lutris::load_lutris_playtime() else { return };
-    let id_set: HashSet<i64> = lutris_ids.iter().copied().collect();
-    let lutris_map: HashMap<i64, (f64, i64)> = all
-        .into_iter()
-        .filter(|(id, _, _)| id_set.contains(id))
-        .map(|(id, pt, lp)| (id, (pt, lp)))
-        .collect();
-    let db_map: HashMap<i64, (f64, i64)> = {
-        let s = state.borrow();
-        s.games.iter()
-            .filter(|g| id_set.contains(&g.lutris_id))
-            .filter_map(|g| lutris_map.get(&g.lutris_id).map(|&v| (g.db_id, v)))
-            .collect()
-    };
-    apply_playtime_updates_db(state, &db_map);
-}
-
 fn refresh_steam_playtimes_for(state: &SharedState, db_ids: &[i64]) {
     let id_set: HashSet<i64> = db_ids.iter().copied().collect();
     let app_ids: Vec<(i64, String)> = {
@@ -215,19 +188,6 @@ fn apply_playtime_updates_db(state: &SharedState, updates: &HashMap<i64, (f64, i
             display_game(&game, state);
         }
     }
-}
-
-fn handle_lutris_data_changed(state: &SharedState, data: Vec<(i64, f64, i64)>) {
-    let lutris_map: HashMap<i64, (f64, i64)> =
-        data.into_iter().map(|(id, pt, lp)| (id, (pt, lp))).collect();
-    let db_map: HashMap<i64, (f64, i64)> = {
-        let s = state.borrow();
-        s.games.iter()
-            .filter(|g| g.lutris_id != 0)
-            .filter_map(|g| lutris_map.get(&g.lutris_id).map(|&v| (g.db_id, v)))
-            .collect()
-    };
-    apply_playtime_updates_db(state, &db_map);
 }
 
 fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
@@ -373,7 +333,6 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
         if let Some(i) = found {
             let mut g = game;
             g.hidden = s.games[i].hidden;
-            g.lutris_name = s.games[i].lutris_name.clone();
             g.manual_unmatch = s.games[i].manual_unmatch;
             s.games[i] = g;
         } else {

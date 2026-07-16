@@ -4,6 +4,7 @@ use std::path::PathBuf;
 /// A game as known to Lutris (read from `~/.local/share/lutris/pga.db`).
 /// Lutris is the source of truth for the game list; our DB only stores the
 /// matching to an achievement source (Steam/GOG) plus user preferences.
+#[derive(Clone)]
 pub struct LutrisGame {
     /// Lutris internal numeric id — the stable link we store in our DB.
     pub id: i64,

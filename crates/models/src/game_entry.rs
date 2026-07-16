@@ -10,16 +10,12 @@ pub struct GameEntry {
     pub platform_id: String,
     pub title: String,
     pub hidden: bool,
-    /// Link to the Lutris game (its internal numeric id). None = not linked.
-    pub lutris_db_id: Option<i64>,
     /// SteamGridDB id for games with no achievement source but need images.
     pub sgdb_id: Option<String>,
     /// Per-game logo overlay position (e.g. "bottom-left").
     pub logo_position: String,
     /// Per-game logo height constraint in pixels.
     pub logo_size: i32,
-    /// Set when user removes a game — prevents re-adding from Lutris.
-    pub ignored: i64,
     /// Set when user manually unmatches — prevents auto-rematching.
     pub manual_unmatch: bool,
     /// Sort title (empty = use title for sorting).
@@ -44,6 +40,8 @@ pub struct GameEntry {
     pub emulator_override: String,
     /// Path to the ROM file (for retro games).
     pub rom_path: String,
+    /// Playtime in hours.
+    pub playtime: f64,
 }
 
 impl GameEntry {
@@ -59,11 +57,9 @@ impl GameEntry {
             platform_id: platform_id.to_string(),
             title: String::new(),
             hidden: false,
-            lutris_db_id: None,
             sgdb_id: None,
             logo_position: String::new(),
             logo_size: 0,
-            ignored: 0,
             manual_unmatch: false,
             sort_title: String::new(),
             shadps4_version: String::new(),
@@ -76,6 +72,7 @@ impl GameEntry {
             ra_core: String::new(),
             emulator_override: String::new(),
             rom_path: String::new(),
+            playtime: 0.0,
         }
     }
 
@@ -89,11 +86,9 @@ impl GameEntry {
             platform_id: g.platform_id.clone(),
             title: g.name.clone(),
             hidden: g.hidden,
-            lutris_db_id: if g.lutris_id > 0 { Some(g.lutris_id) } else { None },
             sgdb_id: if g.sgdb_id.is_empty() { None } else { Some(g.sgdb_id.clone()) },
             logo_position: g.logo_position.clone(),
             logo_size: g.logo_size,
-            ignored: 0,
             manual_unmatch: g.manual_unmatch,
             sort_title: g.sort_title.clone(),
             shadps4_version: g.shadps4_version.clone(),
@@ -106,6 +101,7 @@ impl GameEntry {
             ra_core: g.ra_core.clone(),
             emulator_override: g.emulator_override.clone(),
             rom_path: g.rom_path.clone(),
+            playtime: g.playtime,
         }
     }
 }

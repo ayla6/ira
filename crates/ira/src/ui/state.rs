@@ -25,7 +25,6 @@ pub struct AppState {
     pub cfg: Config,
     pub steam: Arc<SteamClient>,
     pub watcher: Option<AchievementWatcher>,
-    pub lutris_watcher: Option<ira_platforms::lutris_watcher::LutrisWatcher>,
     pub shadps4_watcher: Option<ira_platforms::ps4::ShadPS4Watcher>,
     pub db: DbConn,
     pub sender: AppSender,

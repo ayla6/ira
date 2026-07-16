@@ -90,16 +90,3 @@ pub fn find_by_rom_path(conn: &DbConn, rom_path: &str) -> Result<Option<GameEntr
     }
 }
 
-pub fn find_by_lutris_id(conn: &DbConn, lutris_db_id: i64) -> Result<Option<GameEntry>, String> {
-    let c = lock_db(conn)?;
-    let mut stmt = c.prepare(&format!("SELECT {} FROM games WHERE lutris_db_id = ?1", crate::GAME_COLUMNS))
-        .map_err(|e| e.to_string())?;
-    let mut entries = stmt.query_map(params![lutris_db_id], |row| {
-        crate::game_entry_from_row(row)
-    }).map_err(|e| e.to_string())?;
-    if let Some(entry) = entries.next() {
-        Ok(Some(entry.map_err(|e| e.to_string())?))
-    } else {
-        Ok(None)
-    }
-}

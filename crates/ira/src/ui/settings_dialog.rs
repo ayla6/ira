@@ -50,9 +50,9 @@ pub fn show_settings_dialog(
 
     sidebar.append(&sidebar_separator());
 
-    let (lutris_page, lutris_enable_row) = build_lutris_settings_page(&cfg, state, &win);
-    sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Lutris"));
-    stack.add_named(&lutris_page, Some("lutris"));
+    let lutris_page = build_lutris_settings_page(state, &win);
+    sidebar.append(&settings_sidebar_row("system-software-install-symbolic", "Migration"));
+    stack.add_named(&lutris_page, Some("migration"));
 
     let (steam_page, steam_enable_row) = build_steam_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Steam"));
@@ -107,7 +107,7 @@ pub fn show_settings_dialog(
                             let page_id = match label.text().as_str() {
                                 "General" => "general",
                                 "API Keys" => "api",
-                                "Lutris" => "lutris",
+                                "Migration" => "migration",
                                 "Steam" => "steam",
                                 "RetroAchievements" => "ra",
                                 "PS1" => "ps1",
@@ -165,7 +165,6 @@ pub fn show_settings_dialog(
             s.cfg.shadps4_executable = row.text().to_string();
         }
         s.cfg.steam_enabled = steam_enable_row.is_active();
-        s.cfg.lutris_enabled = lutris_enable_row.is_active();
         s.cfg.ra_enabled = ra_enable_row.is_active();
         s.cfg.ra_username = ra_username_row.text().to_string();
         s.cfg.ra_password = ra_password_row.text().to_string();

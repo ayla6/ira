@@ -1,8 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use adw::prelude::*;
-use ira_models::{AppDetails, Game, GameLaunchConfig, GameVariant, WineConfig, WineProfile};
-use crate::AppMessage;
+use ira_models::{AppDetails, GameLaunchConfig, GameVariant, WineConfig, WineProfile};
 use super::helpers;
 use super::settings_dialog;
 use super::state::SharedState;
@@ -68,7 +67,6 @@ pub fn convert_lutris_to_managed(
         }
     };
     ira_db::save_game_config(db, db_id, &launch, &wine, profile_id).map_err(|e| e.to_string())?;
-    ira_db::detach_from_lutris(db, db_id).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -294,7 +292,7 @@ pub(super) fn build_variants_page(
     state: &SharedState,
     db_id: i64,
     game_kind: ira_models::GameKind,
-    has_config: bool,
+    _has_config: bool,
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
 ) -> Rc<RefCell<Vec<VarW>>> {
@@ -395,70 +393,13 @@ pub(super) fn build_variants_page(
     variant_scroll.set_child(Some(&variant_page));
     variant_scroll.set_vexpand(true);
     variant_scroll.set_hexpand(true);
-    if game_kind != ira_models::GameKind::Steam && game_kind != ira_models::GameKind::Ps4 && game_kind != ira_models::GameKind::Retro && (game_kind != ira_models::GameKind::Lutris || has_config || !variants.is_empty()) {
+    if game_kind != ira_models::GameKind::Steam && game_kind != ira_models::GameKind::Ps4 && game_kind != ira_models::GameKind::Retro {
         sidebar.append(&settings_dialog::sidebar_separator());
         sidebar.append(&settings_dialog::settings_sidebar_row("application-x-executable-symbolic", "Variants"));
         stack.add_named(&variant_scroll, Some("variants"));
     }
 
     var_widgets
-}
-
-pub(super) fn build_lutris_conversion(
-    state: &SharedState,
-    db_id: i64,
-    game: &Game,
-    win: &adw::Window,
-    general_page: &gtk4::Box,
-    has_config: bool,
-) {
-    let is_lutris_unmanaged = !game.lutris_name.is_empty() && !has_config;
-    if !is_lutris_unmanaged {
-        return;
-    }
-
-    let convert_group = adw::PreferencesGroup::new();
-    let convert_btn = gtk4::Button::with_label("Convert to managed game");
-    convert_btn.add_css_class("suggested-action");
-    convert_group.add(&convert_btn);
-    general_page.append(&convert_group);
-
-    let state_c = state.clone();
-    let db_id_c = db_id;
-    let lutris_id_c = game.lutris_id;
-    let game_name_c = game.name.clone();
-    let win_c = win.clone();
-    convert_btn.connect_clicked(move |_| {
-        let alert = adw::AlertDialog::new(
-            Some("Convert to managed game"),
-            Some("This will read the game's Lutris configuration and create a managed game config."),
-        );
-        alert.add_response("cancel", "Cancel");
-        alert.add_response("convert", "Convert");
-        alert.set_response_appearance("convert", adw::ResponseAppearance::Suggested);
-        alert.set_default_response(Some("cancel"));
-        alert.set_close_response("cancel");
-
-        let sc = state_c.clone();
-        let db_id = db_id_c;
-        let lutris_id = lutris_id_c;
-        let w_close = win_c.clone();
-        let game_name = game_name_c.clone();
-        alert.connect_response(None, move |_, response| {
-            if response == "convert" {
-                let db = sc.borrow().db.clone();
-                let sender = sc.borrow().sender.clone();
-                let gn = game_name.clone();
-                w_close.close();
-                std::thread::spawn(move || {
-                    if let Err(e) = convert_lutris_to_managed(&db, db_id, lutris_id, &gn) {
-                        let _ = sender.send(AppMessage::AddGameError(e));
-                    }
-                });
-            }
-        });
-        alert.present(Some(&win_c));
-    });
 }
 
 pub(super) fn build_profile_dropdown(

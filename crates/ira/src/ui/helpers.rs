@@ -118,11 +118,9 @@ pub fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
     }
 
     updated.hidden = existing.hidden;
-    updated.lutris_id = existing.lutris_id;
     updated.slug = existing.slug.clone();
     updated.playtime = existing.playtime;
     updated.last_played = existing.last_played;
-    updated.lutris_name = existing.lutris_name.clone();
     updated.manual_unmatch = existing.manual_unmatch;
     updated.sort_title = existing.sort_title.clone();
     if updated.icon_path.is_empty() {

@@ -47,7 +47,7 @@ pub fn update_sort_title(conn: &DbConn, id: i64, sort_title: &str) -> Result<(),
 
 pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
     let c = crate::lock_db(conn)?;
-    let mut stmt = c.prepare(&format!("SELECT {} FROM games WHERE ignored = 0 ORDER BY CASE WHEN sort_title != '' THEN sort_title ELSE title END", crate::GAME_COLUMNS))
+    let mut stmt = c.prepare(&format!("SELECT {} FROM games ORDER BY CASE WHEN sort_title != '' THEN sort_title ELSE title END", crate::GAME_COLUMNS))
         .map_err(|e| e.to_string())?;
     let entries = stmt.query_map([], |row| {
         crate::game_entry_from_row(row)
@@ -62,6 +62,6 @@ pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
 
 pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute("UPDATE games SET ignored = 1 WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    c.execute("DELETE FROM games WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
     Ok(())
 }

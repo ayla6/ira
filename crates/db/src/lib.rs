@@ -4,7 +4,6 @@ use rusqlite::Connection;
 
 mod crud;
 mod lookup;
-mod lutris_ops;
 mod settings;
 mod game_config;
 mod sessions;
@@ -15,7 +14,6 @@ mod metadata;
 mod migration;
 pub use crud::*;
 pub use lookup::*;
-pub use lutris_ops::*;
 pub use settings::*;
 pub use game_config::*;
 pub use sessions::*;
@@ -24,7 +22,7 @@ pub use variants::*;
 pub use groups::*;
 pub use metadata::*;
 
-pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, game_id, platform_id, title, hidden, lutris_db_id, sgdb_id, logo_position, logo_size, ignored, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path";
+pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, game_id, platform_id, title, hidden, sgdb_id, logo_position, logo_size, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path, playtime";
 
 pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<ira_models::GameEntry> {
     Ok(ira_models::GameEntry {
@@ -36,23 +34,22 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<ira_m
         platform_id: row.get(5)?,
         title: row.get(6)?,
         hidden: row.get(7)?,
-        lutris_db_id: row.get(8)?,
-        sgdb_id: row.get(9)?,
-        logo_position: row.get(10)?,
-        logo_size: row.get(11)?,
-        ignored: row.get(12)?,
-        manual_unmatch: row.get(13)?,
-        sort_title: row.get(14)?,
-        shadps4_version: row.get(15)?,
-        last_played: row.get(16)?,
-        release_date: row.get(17)?,
-        release_timestamp: row.get(18)?,
-        metacritic_score: row.get(19)?,
-        steam_review_score: row.get(20)?,
-        steam_review_count: row.get(21)?,
-        ra_core: row.get(22)?,
-        emulator_override: row.get(23)?,
-        rom_path: row.get(24)?,
+        sgdb_id: row.get(8)?,
+        logo_position: row.get(9)?,
+        logo_size: row.get(10)?,
+        manual_unmatch: row.get(11)?,
+        sort_title: row.get(12)?,
+        shadps4_version: row.get(13)?,
+        last_played: row.get(14)?,
+        release_date: row.get(15)?,
+        release_timestamp: row.get(16)?,
+        metacritic_score: row.get(17)?,
+        steam_review_score: row.get(18)?,
+        steam_review_count: row.get(19)?,
+        ra_core: row.get(20)?,
+        emulator_override: row.get(21)?,
+        rom_path: row.get(22)?,
+        playtime: row.get(23)?,
     })
 }
 
@@ -71,7 +68,7 @@ pub(crate) fn lock_db(conn: &DbConn) -> Result<r2d2::PooledConnection<SqliteConn
     conn.get().map_err(|e| e.to_string())
 }
 
-pub(crate) fn update_field(conn: &DbConn, id: i64, column: &str, value: &dyn rusqlite::types::ToSql) -> Result<(), String> {
+pub fn update_field(conn: &DbConn, id: i64, column: &str, value: &dyn rusqlite::types::ToSql) -> Result<(), String> {
     let c = lock_db(conn)?;
     let sql = format!("UPDATE games SET {} = ?1 WHERE id = ?2", column);
     c.execute(&sql, rusqlite::params![value, id]).map_err(|e| e.to_string())?;
@@ -101,11 +98,9 @@ pub fn init_db(db_path: &str) -> DbConn {
                 platform_id TEXT NOT NULL,
                 title TEXT NOT NULL DEFAULT '',
                 hidden INTEGER NOT NULL DEFAULT 0,
-                lutris_db_id INTEGER,
                 sgdb_id TEXT,
                 logo_position TEXT NOT NULL DEFAULT 'bottom-left',
                 logo_size INTEGER NOT NULL DEFAULT 50,
-                ignored INTEGER NOT NULL DEFAULT 0,
                 manual_unmatch INTEGER NOT NULL DEFAULT 0,
                 sort_title TEXT NOT NULL DEFAULT '',
                 shadps4_version TEXT NOT NULL DEFAULT '',
@@ -113,11 +108,6 @@ pub fn init_db(db_path: &str) -> DbConn {
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps4_serial ON games(kind, platform_id) WHERE kind = 'ps4';
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_games_lutris_db_id ON games(lutris_db_id) WHERE lutris_db_id IS NOT NULL;
-            CREATE TABLE IF NOT EXISTS lutris_meta (
-                lutris_id INTEGER PRIMARY KEY,
-                hidden INTEGER NOT NULL DEFAULT 0
-            );
             CREATE TABLE IF NOT EXISTS game_configs (
                 game_id INTEGER NOT NULL UNIQUE,
                 launch_config TEXT NOT NULL DEFAULT '',

@@ -198,24 +198,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
                 },
             )?;
         } else {
-            let uri = format!("lutris:rungameid/{}", game_id);
-            let cmd = vec!["lutris".to_string(), uri.clone()];
-            let log_path = ira_launcher::wrapper::game_log_path(&save_dir, game_id);
-            match ira_launcher::wrapper::spawn_game(&cmd, &[], None, Some(&log_path)) {
-                Ok(child) => {
-                    let pid = child.id() as i32;
-                    running_games.lock().unwrap().insert(game_id, pid);
-                    let sender_c = sender.clone();
-                    let db_c = db.clone();
-                    let rg = running_games.clone();
-                    std::thread::spawn(move || {
-                        ira_launcher::wrapper::monitor_process(
-                            child, pid, &sender_c, game_id, started_at, db_c, rg,
-                        );
-                    });
-                }
-                Err(e) => return Err(format!("Failed to launch {}: {}", uri, e)),
-            }
+            return Err(format!("No launch config saved for '{}'. Configure the game's launch settings first.", game_name));
         }
     }
 

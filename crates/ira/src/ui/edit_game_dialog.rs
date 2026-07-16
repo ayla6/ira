@@ -17,7 +17,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         (game, config, app_default_wine)
     };
     let Some(game) = game else { return };
-    let show_wine = game.kind == ira_models::GameKind::Wine;
+    let _show_wine = game.kind == ira_models::GameKind::Wine;
     let has_config = config.is_some();
     let (saved_launch, mut saved_wine, saved_profile_id) = config.clone().unwrap_or_default();
 
@@ -34,7 +34,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let layout = super::helpers::dialog_layout(&parent);
     layout.window.set_deletable(false);
     layout.stack.set_hexpand(true);
-    layout.header.set_title_widget(Some(&gtk4::Label::new(Some(&game.name))));
+    layout.header.set_title_widget(Some(&gtk4::Label::new(Some(&format!("{} [{}]", game.name, game.db_id)))));
 
     let win = layout.window;
     let sidebar = layout.sidebar;
@@ -48,14 +48,12 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
 
-    build_lutris_conversion(state, db_id, &game, &win, &general_page, has_config);
-
     // --- Profile dropdown (only when wine config exists and wine is enabled) ---
     let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
     let profile_row = build_profile_dropdown(has_config, saved_wine.enabled, saved_profile_id, &profiles, &general_page);
 
-    // --- Launch Config (not for steam/ps4/retro/wine; lutris only if it has a saved config) ---
-    let show_launch_config = !show_wine && game.kind != ira_models::GameKind::Steam && game.kind != ira_models::GameKind::Ps4 && game.kind != ira_models::GameKind::Retro && (game.kind != ira_models::GameKind::Lutris || has_config);
+    // --- Launch Config (not for steam/ps4/retro) ---
+    let show_launch_config = game.kind != ira_models::GameKind::Steam && game.kind != ira_models::GameKind::Ps4 && game.kind != ira_models::GameKind::Retro;
     let launch_config_widgets = if show_launch_config {
         build_launch_config_page(&saved_launch, &win, &sidebar, &stack, true)
     } else {
@@ -419,9 +417,6 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     g.earned_count = 0;
                     g.total_count = 0;
                     g.manual_unmatch = true;
-                    if !g.lutris_name.is_empty() && g.name == format!("App ID: {}", app_id) {
-                        g.name = g.lutris_name.clone();
-                    }
                 } else {
                     state_clone.borrow().game_names.lock().unwrap().remove(&app_id);
                     g.app_id = new_app_id_val.clone();

@@ -8,9 +8,6 @@ pub enum AppMessage {
     AddGameError(String),
     GameStopped(i64),
     GameStarted(i64),
-    /// Fired by the LutrisWatcher when pga.db changes (debounced).
-    /// Carries (lutris_id, playtime, lastplayed) for every Lutris game.
-    LutrisDataChanged(Vec<(i64, f64, i64)>),
     /// Fired by the ShadPS4Watcher when play_time.txt changes.
     ShadPS4PlaytimeChanged,
     /// Initial game list loaded in the background.

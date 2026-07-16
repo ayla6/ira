@@ -161,17 +161,11 @@ pub fn show_game_context_menu(
     hide_action.connect_activate(move |_, _| {
         let new_hidden = !current_hidden;
         let db_id = gc.db_id;
-        let lutris_id = gc.lutris_id;
         {
             let s = sc.borrow();
             if let Some(g) = s.games.iter().find(|g| g.db_id == db_id) {
                 if let Err(e) = ira_db::set_game_hidden(&s.db, g.db_id, new_hidden) {
                     eprintln!("Failed to set hidden: {}", e);
-                }
-                if lutris_id != 0 {
-                    if let Err(e) = ira_db::set_lutris_hidden(&s.db, lutris_id, new_hidden) {
-                        eprintln!("Failed to set lutris hidden: {}", e);
-                    }
                 }
             }
         }

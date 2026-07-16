@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GameKind {
-    Lutris,
     Wine,
     Linux,
     #[default]
@@ -16,7 +15,6 @@ pub enum GameKind {
 impl GameKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            GameKind::Lutris => "lutris",
             GameKind::Wine => "wine",
             GameKind::Linux => "linux",
             GameKind::Ps4 => "ps4",
@@ -29,7 +27,6 @@ impl GameKind {
 
     pub fn from_string(s: &str) -> Self {
         match s {
-            "lutris" => GameKind::Lutris,
             "wine" => GameKind::Wine,
             "linux" => GameKind::Linux,
             "ps4" => GameKind::Ps4,
@@ -42,7 +39,6 @@ impl GameKind {
 
     pub fn display_name(self) -> &'static str {
         match self {
-            GameKind::Lutris => "Lutris",
             GameKind::Wine => "Windows",
             GameKind::Linux => "Linux",
             GameKind::Ps4 => "PS4",
@@ -134,7 +130,7 @@ mod tests {
 
     #[test]
     fn test_game_kind_roundtrip() {
-        for kind in [GameKind::Lutris, GameKind::Wine, GameKind::Linux, GameKind::Ps4, GameKind::Sgdb, GameKind::Steam, GameKind::Retro, GameKind::Other] {
+        for kind in [GameKind::Wine, GameKind::Linux, GameKind::Ps4, GameKind::Sgdb, GameKind::Steam, GameKind::Retro, GameKind::Other] {
             let s = kind.as_str();
             let back = GameKind::from_string(s);
             assert_eq!(kind, back);
@@ -192,7 +188,6 @@ mod tests {
 
     #[test]
     fn test_kind_display_name_all() {
-        assert_eq!(GameKind::Lutris.display_name(), "Lutris");
         assert_eq!(GameKind::Wine.display_name(), "Windows");
         assert_eq!(GameKind::Linux.display_name(), "Linux");
         assert_eq!(GameKind::Ps4.display_name(), "PS4");

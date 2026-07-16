@@ -138,11 +138,10 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 
     let steam = state.borrow().steam.clone();
 
-    // --- Steam auto-batch thread (Lutris games without app_id) ---
-    let steam_games: Vec<(String, i64, i64, ira_models::GameKind)> = needs_matching.iter()
+    // --- Steam auto-batch thread (games without app_id) ---
+    let steam_games: Vec<(String, i64, ira_models::GameKind)> = needs_matching.iter()
         .filter(|g| g.app_id.is_empty() && !g.manual_unmatch)
-        
-        .map(|g| (g.name.clone(), g.lutris_id, g.db_id, g.kind))
+        .map(|g| (g.name.clone(), g.db_id, g.kind))
         .collect();
     let steam_row_indices: Vec<usize> = needs_matching.iter().enumerate()
         .filter(|(_, g)| g.app_id.is_empty() && !g.manual_unmatch)
@@ -158,7 +157,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
         let title_map = title_map.clone();
         let steam = steam.clone();
         std::thread::spawn(move || {
-            for (i, (game_name, lutris_id, _db_id, _kind)) in steam_games.iter().enumerate() {
+            for (i, (game_name, db_id, _kind)) in steam_games.iter().enumerate() {
                 let norm = normalize_title(game_name);
 
                 let matched: Option<(String, String)> = if norm.is_empty() {
@@ -184,7 +183,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
                     }
                 };
 
-                let _ = steam_tx.send((i, final_match, game_name.clone(), *lutris_id));
+                let _ = steam_tx.send((i, final_match, game_name.clone(), *db_id));
             }
         });
     }
@@ -195,12 +194,12 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     let parent_dialog = dialog.clone();
     let steam_row_indices = steam_row_indices.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        if let Ok((idx, matched, game_name, lutris_id)) = steam_rx.borrow_mut().try_recv() {
+        if let Ok((idx, matched, game_name, db_id)) = steam_rx.borrow_mut().try_recv() {
             if let Some(&row_idx) = steam_row_indices.get(idx) {
                 if row_idx < row_boxes.len() {
                     handle_steam_search_result(
                         &state_rx, &row_boxes[row_idx], &steam_rx_steam,
-                        &game_name, lutris_id, matched, &parent_dialog,
+                        &game_name, db_id, matched, &parent_dialog,
                     );
                 }
             }

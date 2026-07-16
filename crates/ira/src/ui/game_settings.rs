@@ -215,7 +215,7 @@ pub(super) fn build_game_general_page(
             search_btn.add_css_class("flat");
             let sc = state.clone();
             let game_name = game.name.clone();
-            let lutris_id = game.lutris_id;
+            let db_id = game.db_id;
             let win_c = win.clone();
             let row_c = row.clone();
             let matched_name = game.name.clone();
@@ -224,7 +224,7 @@ pub(super) fn build_game_general_page(
                     let sc = sc.clone();
                     let name = matched_name.clone();
                     Rc::new(move |sid: &str| {
-                        match_game_to_steam(&sc, lutris_id, sid.to_string(), name.clone());
+                        match_game_to_steam(&sc, db_id, sid.to_string(), name.clone());
                     })
                 };
                 super::steam_search::show_steam_id_search_popup(&sc, &game_name, &win_c, &row_c, "Match", on_select);

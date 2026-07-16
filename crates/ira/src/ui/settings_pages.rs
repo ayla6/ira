@@ -66,16 +66,8 @@ pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::Swit
     (page, notif_row, bg_row, hidden_row, grid_spin)
 }
 
-pub(super) fn build_lutris_settings_page(cfg: &Config, state: &super::state::SharedState, settings_win: &adw::Window) -> (gtk4::Box, adw::SwitchRow) {
+pub(super) fn build_lutris_settings_page(state: &super::state::SharedState, settings_win: &adw::Window) -> gtk4::Box {
     let page = settings_page_container();
-
-    let enable_group = adw::PreferencesGroup::new();
-    let enable_row = adw::SwitchRow::new();
-    enable_row.set_title("Enable Lutris integration");
-    enable_row.set_subtitle("Load games from the Lutris database");
-    enable_row.set_active(cfg.lutris_enabled);
-    enable_group.add(&enable_row);
-    page.append(&enable_group);
 
     let info_group = adw::PreferencesGroup::new();
     info_group.set_title("Lutris installation");
@@ -95,9 +87,9 @@ pub(super) fn build_lutris_settings_page(cfg: &Config, state: &super::state::Sha
     let migrate_group = adw::PreferencesGroup::new();
     migrate_group.set_title("Migration");
     let migrate_row = adw::ActionRow::new();
-    migrate_row.set_title("Convert Lutris games to managed");
-    migrate_row.set_subtitle("Reads each Lutris game's config and creates a managed game config with wine settings");
-    let migrate_btn = gtk4::Button::with_label("Migrate All");
+    migrate_row.set_title("Import Lutris games");
+    migrate_row.set_subtitle("Reads each Lutris game's config and creates a game entry with wine settings");
+    let migrate_btn = gtk4::Button::with_label("Import All");
     migrate_btn.add_css_class("suggested-action");
     migrate_btn.set_valign(gtk4::Align::Center);
     migrate_row.add_suffix(&migrate_btn);
@@ -107,59 +99,62 @@ pub(super) fn build_lutris_settings_page(cfg: &Config, state: &super::state::Sha
     let sc = state.clone();
     let settings_win = settings_win.clone();
     migrate_btn.connect_clicked(move |_| {
-            let db = sc.borrow().db.clone();
-            let sender = sc.borrow().sender.clone();
-            let games = sc.borrow().games.clone();
-
-            let unmanaged: Vec<(i64, i64, String)> = games.iter()
-                .filter(|g| !g.lutris_name.is_empty() && g.lutris_id != 0)
-                .filter(|g| ira_db::get_game_config(&db, g.db_id).ok().flatten().is_none())
-                .map(|g| (g.db_id, g.lutris_id, g.name.clone()))
-                .collect();
-
-            if unmanaged.is_empty() {
+        let lutris_games = match ira_platforms::lutris::load_lutris_games() {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("Failed to load Lutris games: {}", e);
                 return;
             }
+        };
 
-            let alert = adw::AlertDialog::new(
-                Some("Migrate Lutris games"),
-                Some(&format!("Convert {} unmanaged Lutris game(s) to managed games?", unmanaged.len())),
-            );
-            alert.add_response("cancel", "Cancel");
-            alert.add_response("migrate", "Migrate");
-            alert.set_response_appearance("migrate", adw::ResponseAppearance::Suggested);
-            alert.set_default_response(Some("cancel"));
-            alert.set_close_response("cancel");
+        if lutris_games.is_empty() {
+            return;
+        }
 
-            let db = db.clone();
-            let sender = sender.clone();
-            let unmanaged = std::rc::Rc::new(unmanaged);
-            alert.connect_response(None, move |_, response| {
-                if response == "migrate" {
-                    let db = db.clone();
-                    let sender = sender.clone();
-                    let unmanaged = (*unmanaged).clone();
-                    std::thread::spawn(move || {
-                        let mut ok = 0;
-                        let mut errors = 0;
-                        for (db_id, lutris_id, name) in &unmanaged {
-                            match super::edit_game_pages::convert_lutris_to_managed(&db, *db_id, *lutris_id, name) {
-                                Ok(()) => ok += 1,
-                                Err(e) => {
-                                    errors += 1;
-                                    eprintln!("Failed to migrate '{}': {}", name, e);
+        let alert = adw::AlertDialog::new(
+            Some("Import Lutris games"),
+            Some(&format!("Import {} Lutris game(s) as managed Wine games?", lutris_games.len())),
+        );
+        alert.add_response("cancel", "Cancel");
+        alert.add_response("migrate", "Migrate");
+        alert.set_response_appearance("migrate", adw::ResponseAppearance::Suggested);
+        alert.set_default_response(Some("cancel"));
+        alert.set_close_response("cancel");
+
+        let db = sc.borrow().db.clone();
+        let lutris_games = std::rc::Rc::new(lutris_games);
+        alert.connect_response(None, move |_, response| {
+            if response == "migrate" {
+                let db = db.clone();
+                let lutris_games = (*lutris_games).clone();
+                std::thread::spawn(move || {
+                    let mut ok = 0;
+                    let mut errors = 0;
+                    for lg in &lutris_games {
+                        match ira_db::add_game(&db, ira_models::GameKind::Wine, ira_models::TrophySource::Empty, "", "", "", &lg.name) {
+                            Ok(db_id) => {
+                                match super::edit_game_pages::convert_lutris_to_managed(&db, db_id, lg.id, &lg.name) {
+                                    Ok(()) => ok += 1,
+                                    Err(e) => {
+                                        errors += 1;
+                                        eprintln!("Failed to import '{}': {}", lg.name, e);
+                                    }
                                 }
                             }
+                            Err(e) => {
+                                errors += 1;
+                                eprintln!("Failed to add '{}': {}", lg.name, e);
+                            }
                         }
-                        let _ = sender.send(crate::AppMessage::LutrisDataChanged(vec![]));
-                        eprintln!("Migrated {} game(s), {} failed", ok, errors);
-                    });
-                }
-            });
-            alert.present(Some(&settings_win));
+                    }
+                    eprintln!("Imported {} game(s), {} failed", ok, errors);
+                });
+            }
         });
+        alert.present(Some(&settings_win));
+    });
 
-    (page, enable_row)
+    page
 }
 
 pub(super) fn build_api_keys_page(cfg: &Config) -> (gtk4::Box, adw::EntryRow, adw::EntryRow) {

@@ -98,7 +98,9 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
     let ra_any_console = cfg.any_console_enabled();
 
     let mut games = if options.lutris_enabled {
-        build_lutris_games(db, save_dir)
+        let mut g = build_lutris_games(db, save_dir);
+        g.extend(load_non_lutris_games(db, save_dir));
+        g
     } else {
         load_non_lutris_games(db, save_dir)
     };
@@ -161,7 +163,7 @@ fn build_lutris_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
             None
         };
         if let Some(entry) = entry {
-            if entry.lutris_db_id.is_none() {
+            if entry.lutris_db_id.is_none() && !entry.manual_unmatch {
                 let _ = db::set_lutris_db_id(db, entry.id, lg.id);
             }
         }

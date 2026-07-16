@@ -58,6 +58,15 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<ira_m
 
 pub type DbConn = Pool<SqliteConnectionManager>;
 
+/// Forces all WAL data to be written to the main database file and truncates
+/// the WAL. Call this on app shutdown to ensure .wal/.shm files are cleaned up.
+pub fn checkpoint(conn: &DbConn) -> Result<(), String> {
+    let c = lock_db(conn)?;
+    c.pragma_update(None, "wal_checkpoint", "TRUNCATE")
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub(crate) fn lock_db(conn: &DbConn) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, String> {
     conn.get().map_err(|e| e.to_string())
 }
@@ -73,7 +82,6 @@ pub fn init_db(db_path: &str) -> DbConn {
     if let Some(parent) = std::path::Path::new(db_path).parent() {
         std::fs::create_dir_all(parent).expect("failed to create database directory");
     }
-
     let manager = SqliteConnectionManager::file(db_path);
     let pool = Pool::builder()
         .max_size(16)

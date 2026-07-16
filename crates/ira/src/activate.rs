@@ -44,7 +44,7 @@ unsafe extern "C" fn source_destroy(data: glib::ffi::gpointer) {
 pub fn activate(app: &adw::Application) -> SharedState {
     let cfg = config::load_config();
 
-    let db = db::init_db(&format!("{}/gse.db", cfg.save_dir));
+    let db = db::init_db(&format!("{}/ira.db", cfg.save_dir));
 
     ira_platforms::api_emulators::ensure_skeleton(&cfg.save_dir);
 

@@ -27,4 +27,11 @@ fn main() {
     });
 
     app.run();
+
+    let db = state_holder.borrow().as_ref().map(|s| s.borrow().db.clone());
+    if let Some(db) = db {
+        if let Err(e) = ira_db::checkpoint(&db) {
+            eprintln!("Failed to checkpoint database on shutdown: {}", e);
+        }
+    }
 }

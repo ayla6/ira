@@ -17,7 +17,6 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         (game, config, app_default_wine)
     };
     let Some(game) = game else { return };
-    let _show_wine = game.kind == ira_models::GameKind::Wine;
     let has_config = config.is_some();
     let (saved_launch, mut saved_wine, saved_profile_id) = config.clone().unwrap_or_default();
 
@@ -60,8 +59,8 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         None
     };
 
-    // --- Wine Config (for any game with wine enabled) ---
-    let show_wine_tabs = saved_wine.enabled;
+    // --- Wine Config (only for wine kind games) ---
+    let show_wine_tabs = game.kind == ira_models::GameKind::Wine && saved_wine.enabled;
     if show_wine_tabs {
         sidebar.append(&super::settings_dialog::sidebar_separator());
     }

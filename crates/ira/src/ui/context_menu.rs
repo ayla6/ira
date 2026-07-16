@@ -108,6 +108,13 @@ pub fn show_game_context_menu(
 
     menu.append(Some(if current_hidden { S::UNHIDE_GAME } else { S::HIDE_GAME }), Some("game.hide"));
 
+    let is_deletable = matches!(game.kind, ira_models::GameKind::Wine | ira_models::GameKind::Linux);
+    if is_deletable {
+        let remove_section = gio::Menu::new();
+        remove_section.append(Some(S::REMOVE_GAME), Some("game.delete_game"));
+        menu.append_section(None, &remove_section);
+    }
+
     let popover = gtk4::PopoverMenu::from_model(Some(&menu));
     popover.set_halign(gtk4::Align::Start);
     popover.set_has_arrow(false);
@@ -188,6 +195,56 @@ pub fn show_game_context_menu(
         }
     });
     actions.add_action(&hide_action);
+
+    if is_deletable {
+        let delete_game_action = gio::SimpleAction::new("delete_game", None);
+        let sc = state_clone.clone();
+        let gc = game_clone.clone();
+        delete_game_action.connect_activate(move |_, _| {
+            let window = sc.borrow().window.clone();
+            let dialog = adw::AlertDialog::new(
+                Some(S::REMOVE_GAME_QUESTION),
+                Some(&format!("Remove \"{}\"?", gc.name)),
+            );
+            dialog.add_response("cancel", S::CANCEL);
+            dialog.add_response("delete", "Remove");
+            dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+            dialog.set_default_response(Some("cancel"));
+            dialog.set_close_response("cancel");
+
+            let sc = sc.clone();
+            let gc = gc.clone();
+            dialog.connect_response(None, move |_, resp| {
+                if resp != "delete" {
+                    return;
+                }
+                let db = sc.borrow().db.clone();
+                let db_id = gc.db_id;
+                if let Err(e) = ira_db::delete_game_config(&db, db_id) {
+                    eprintln!("Failed to delete game config: {}", e);
+                }
+                if let Err(e) = ira_db::remove_game(&db, db_id) {
+                    eprintln!("Failed to remove game: {}", e);
+                    return;
+                }
+                let mut s = sc.borrow_mut();
+                s.games.retain(|g| g.db_id != db_id);
+                let was_selected = s.selected_id == db_id.to_string();
+                if was_selected {
+                    s.selected_id = String::new();
+                    s.selected_group = ira_models::GroupSelection::AllGames;
+                    drop(s);
+                    super::sidebar::rebuild_sidebar(&sc);
+                    super::message_handler::clear_content(&sc);
+                } else {
+                    drop(s);
+                    super::sidebar::rebuild_sidebar(&sc);
+                }
+            });
+            dialog.present(Some(&window));
+        });
+        actions.add_action(&delete_game_action);
+    }
 
     if game_file.is_some() || game_folder.is_some() {
         let open_game_folder = gio::SimpleAction::new("open_game_folder", None);

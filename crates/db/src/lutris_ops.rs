@@ -57,6 +57,17 @@ pub fn unmatch_game(conn: &DbConn, lutris_db_id: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// Detaches a game from Lutris by clearing lutris_db_id and changing kind to "wine".
+/// The game becomes a fully managed game, visible even when Lutris integration is disabled.
+pub fn detach_from_lutris(conn: &DbConn, id: i64) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute(
+        "UPDATE games SET lutris_db_id = NULL, kind = 'wine' WHERE id = ?1",
+        params![id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn upsert_matching(conn: &DbConn, lutris_db_id: i64, steam_id: &str, kind: &str, trophy_source: &str, platform_id: &str) -> Result<i64, String> {
     let c = crate::lock_db(conn)?;
     let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;

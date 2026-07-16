@@ -67,7 +67,9 @@ pub fn convert_lutris_to_managed(
             ira_db::add_profile(db, &new_profile).ok()
         }
     };
-    ira_db::save_game_config(db, db_id, &launch, &wine, profile_id).map_err(|e| e.to_string())
+    ira_db::save_game_config(db, db_id, &launch, &wine, profile_id).map_err(|e| e.to_string())?;
+    ira_db::detach_from_lutris(db, db_id).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 pub(super) fn build_dlc_page(

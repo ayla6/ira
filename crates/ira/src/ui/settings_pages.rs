@@ -66,7 +66,7 @@ pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::Swit
     (page, notif_row, bg_row, hidden_row, grid_spin)
 }
 
-pub(super) fn build_lutris_settings_page(cfg: &Config, state: &super::state::SharedState) -> (gtk4::Box, adw::SwitchRow) {
+pub(super) fn build_lutris_settings_page(cfg: &Config, state: &super::state::SharedState, settings_win: &adw::Window) -> (gtk4::Box, adw::SwitchRow) {
     let page = settings_page_container();
 
     let enable_group = adw::PreferencesGroup::new();
@@ -104,12 +104,12 @@ pub(super) fn build_lutris_settings_page(cfg: &Config, state: &super::state::Sha
     migrate_group.add(&migrate_row);
     page.append(&migrate_group);
 
-        let sc = state.clone();
-        migrate_btn.connect_clicked(move |_| {
+    let sc = state.clone();
+    let settings_win = settings_win.clone();
+    migrate_btn.connect_clicked(move |_| {
             let db = sc.borrow().db.clone();
             let sender = sc.borrow().sender.clone();
             let games = sc.borrow().games.clone();
-            let win = sc.borrow().window.clone();
 
             let unmanaged: Vec<(i64, i64, String)> = games.iter()
                 .filter(|g| !g.lutris_name.is_empty() && g.lutris_id != 0)
@@ -156,7 +156,7 @@ pub(super) fn build_lutris_settings_page(cfg: &Config, state: &super::state::Sha
                     });
                 }
             });
-            alert.present(Some(&win));
+            alert.present(Some(&settings_win));
         });
 
     (page, enable_row)

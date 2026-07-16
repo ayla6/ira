@@ -16,6 +16,11 @@ thread_local! {
 }
 
 fn queue_icon_load(icon: gtk4::Image, path: String) {
+    // If texture is already cached, set it immediately to avoid flash
+    if let Some(t) = ira_images::cached_texture(&path) {
+        icon.set_paintable(Some(&t));
+        return;
+    }
     ICON_QUEUE.with(|q| q.borrow_mut().push_back((icon, path)));
     ICON_PROCESSOR_RUNNING.with(|r| {
         if !r.get() {

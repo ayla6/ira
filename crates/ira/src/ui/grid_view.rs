@@ -31,6 +31,16 @@ thread_local! {
 }
 
 fn queue_cover_load(pic: gtk4::Picture, path: String, w: i32, h: i32, db_id: i64, vbox: gtk4::Box) {
+    // If texture is already cached, set it immediately to avoid flash
+    if ira_images::cached_texture(&path).is_some() {
+        let stale = unsafe { vbox.data::<AtomicI64>("game-db-id") }
+            .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed) != db_id)
+            .unwrap_or(false);
+        if !stale {
+            ira_images::set_picture_natural(&pic, &path, w, h);
+        }
+        return;
+    }
     COVER_QUEUE.with(|q| q.borrow_mut().push_back(PendingCover { pic, path, w, h, db_id, vbox }));
     COVER_PROCESSOR_RUNNING.with(|r| {
         if !r.get() {

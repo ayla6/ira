@@ -10,6 +10,15 @@ thread_local! {
     static TEXTURE_CACHE: RefCell<TextureCache> = RefCell::new(TextureCache::new());
 }
 
+/// Returns a cached texture without any file I/O.
+/// Use this to check if a texture is already loaded before queuing async.
+pub fn cached_texture(path: &str) -> Option<Texture> {
+    if path.is_empty() {
+        return None;
+    }
+    TEXTURE_CACHE.with(|cell| cell.borrow_mut().get(path))
+}
+
 pub fn texture_for(path: &str) -> Option<Texture> {
     if path.is_empty() {
         return None;

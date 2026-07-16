@@ -333,9 +333,7 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
         let needs_rebuild = s.selected_id == updated.db_id.to_string() && !s.content_unloaded;
         let visual_changed = updated.grid_path != old_grid_path
             || updated.header_path != old_header_path;
-        let needs_grid_update = visual_changed
-            && s.selected_id.is_empty()
-            && !s.content_unloaded;
+        let needs_grid_update = visual_changed && !s.content_unloaded;
         let game_for_grid = if needs_grid_update { Some(updated.clone()) } else { None };
         let game = if needs_rebuild { Some(updated.clone()) } else { None };
         s.games[i] = updated;

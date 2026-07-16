@@ -8,6 +8,7 @@ use super::sgdb_match_dialog::show_sgdb_search_dialog;
 use super::sgdb_picker::{show_sgdb_picker, ShowSgdbPickerParams};
 use super::message_handler::apply_game_update;
 use super::state::SharedState;
+use super::game_item::GameItem;
 
 type SectionEntry = (&'static str, &'static str, &'static str, i32, i32, &'static [&'static str]);
 
@@ -162,11 +163,30 @@ fn make_refresh_closure(
                 ph.add_css_class("dim-label");
                 preview_wrapper.append(&ph);
             }
+            // Invalidate texture cache for the destination path so replaced
+            // images (same path, new content) are reloaded from disk.
+            if std::path::Path::new(&dest_path).exists() {
+                ira_images::invalidate_texture(&dest_path);
+            }
             let s = state_clone.borrow();
-            if let Ok(Some(entry)) = ira_db::find_by_lutris_id(&s.db, game_clone.lutris_id) {
+            if let Ok(Some(entry)) = ira_db::find_by_db_id(&s.db, game_clone.db_id) {
                 drop(s);
                 if let Ok(updated) = crate::game_loader::load_game(&entry, &save_dir) {
                     apply_game_update(&state_clone, updated);
+                    // Also splice the grid store so covers refresh immediately,
+                    // since apply_game_update skips grid updates when a game is selected.
+                    let store = state_clone.borrow().grid_store.clone();
+                    for i in 0..store.n_items() {
+                        if let Some(item) = store.item(i).and_then(|o| o.downcast::<GameItem>().ok()) {
+                            if item.game().is_some_and(|gi| gi.db_id == game_clone.db_id) {
+                                let s = state_clone.borrow();
+                                if let Some(g) = s.games.iter().find(|g| g.db_id == game_clone.db_id) {
+                                    store.splice(i, 1, &[GameItem::new(g)]);
+                                }
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         }

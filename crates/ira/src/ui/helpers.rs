@@ -125,19 +125,19 @@ pub fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
     updated.lutris_name = existing.lutris_name.clone();
     updated.manual_unmatch = existing.manual_unmatch;
     updated.sort_title = existing.sort_title.clone();
-    if !existing.icon_path.is_empty() {
+    if updated.icon_path.is_empty() {
         updated.icon_path = existing.icon_path.clone();
     }
-    if !existing.hero_image_path.is_empty() {
+    if updated.hero_image_path.is_empty() {
         updated.hero_image_path = existing.hero_image_path.clone();
     }
-    if !existing.grid_path.is_empty() {
+    if updated.grid_path.is_empty() {
         updated.grid_path = existing.grid_path.clone();
     }
-    if !existing.header_path.is_empty() {
+    if updated.header_path.is_empty() {
         updated.header_path = existing.header_path.clone();
     }
-    if !existing.logo_path.is_empty() {
+    if updated.logo_path.is_empty() {
         updated.logo_path = existing.logo_path.clone();
     }
     if updated.logo_position.is_empty() {

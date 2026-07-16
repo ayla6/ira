@@ -308,12 +308,16 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         // Pending image copies
         {
             let pc = pending_copies_c.borrow();
+            let cloud_dir = if !game.sgdb_id.is_empty() {
+                ira_parser::sgdb_data_dir(&save_dir_c, &game.sgdb_id)
+            } else if game.kind == ira_models::GameKind::Ps4 {
+                ira_parser::ps4_data_dir(&save_dir_c, &app_id)
+            } else {
+                ira_parser::data_dir(&save_dir_c, &app_id)
+            };
+            let _ = std::fs::create_dir_all(&cloud_dir);
             for (asset, src_path) in pc.iter() {
-                let cloud_dir = if !app_id.is_empty() {
-                    ira_parser::data_dir(&save_dir_c, &app_id)
-                } else {
-                    continue;
-                };
+                if asset == "__unmatch__" { continue; }
                 let file_name = match asset.as_str() {
                     "icon" => "icon.png",
                     "hero" => "library_hero.jpg",
@@ -332,6 +336,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 } else if let Err(e) = std::fs::copy(src_path, &dest) {
                     eprintln!("Failed to copy {}: {}", asset, e);
                 }
+                ira_images::invalidate_texture(&dest.to_string_lossy());
             }
         }
 
@@ -430,6 +435,21 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         }
 
         super::sidebar::rebuild_sidebar(&state_clone);
+
+        // Update grid store so covers reflect new images immediately.
+        {
+            let store = state_clone.borrow().grid_store.clone();
+            let games = state_clone.borrow().games.clone();
+            for i in 0..store.n_items() {
+                if let Some(item) = store.item(i).and_then(|o| o.downcast::<super::game_item::GameItem>().ok()) {
+                    if let Some(gi) = item.game() {
+                        if let Some(g) = games.iter().find(|g| g.db_id == gi.db_id) {
+                            store.splice(i, 1, &[super::game_item::GameItem::new(g)]);
+                        }
+                    }
+                }
+            }
+        }
 
         let selected = state_clone.borrow().selected_id.clone();
         let game_after_save = if selected == db_id_s.to_string() {

@@ -52,6 +52,15 @@ impl TextureCache {
         self.order.push_back(path.to_string());
     }
 
+    pub(super) fn remove(&mut self, path: &str) {
+        if let Some(texture) = self.map.remove(path) {
+            self.total_bytes -= Self::texture_bytes(&texture);
+        }
+        if let Some(pos) = self.order.iter().position(|k| k == path) {
+            self.order.remove(pos);
+        }
+    }
+
     pub(super) fn clear(&mut self) {
         self.map.clear();
         self.order.clear();

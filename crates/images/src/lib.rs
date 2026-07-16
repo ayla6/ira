@@ -68,3 +68,9 @@ pub fn clear_texture_cache() {
         cell.borrow_mut().clear();
     });
 }
+
+pub fn invalidate_texture(path: &str) {
+    TEXTURE_CACHE.with(|cell| {
+        cell.borrow_mut().remove(path);
+    });
+}

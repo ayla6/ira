@@ -126,6 +126,17 @@ fn find_best_image_path(game: &Game, field: &str, file: &str, id: &str, save_dir
     String::new()
 }
 
+fn image_path_for_asset<'a>(game: &'a Game, asset: &'a str) -> &'a str {
+    match asset {
+        "icon" => &game.icon_path,
+        "hero" => &game.hero_image_path,
+        "grid" => &game.grid_path,
+        "header" => &game.header_path,
+        "logo" => &game.logo_path,
+        _ => "",
+    }
+}
+
 fn make_refresh_closure(
     preview_wrapper: &gtk4::Box,
     dest_path: &str,
@@ -163,18 +174,24 @@ fn make_refresh_closure(
                 ph.add_css_class("dim-label");
                 preview_wrapper.append(&ph);
             }
-            // Invalidate texture cache for the destination path so replaced
-            // images (same path, new content) are reloaded from disk.
-            if std::path::Path::new(&dest_path).exists() {
-                ira_images::invalidate_texture(&dest_path);
-            }
             let s = state_clone.borrow();
+            let old_path = s.games.iter()
+                .find(|g| g.db_id == game_clone.db_id)
+                .map(|g| image_path_for_asset(g, &asset_c).to_string())
+                .unwrap_or_default();
             if let Ok(Some(entry)) = ira_db::find_by_db_id(&s.db, game_clone.db_id) {
                 drop(s);
                 if let Ok(updated) = crate::game_loader::load_game(&entry, &save_dir) {
+                    let new_path = image_path_for_asset(&updated, &asset_c).to_string();
+                    // Only invalidate when the path is unchanged (file content replaced).
+                    // If the path changed, there's no stale cache entry for the new path.
+                    if !new_path.is_empty() && new_path == old_path {
+                        ira_images::invalidate_texture(&new_path);
+                    }
                     apply_game_update(&state_clone, updated);
-                    // Also splice the grid store so covers refresh immediately,
-                    // since apply_game_update skips grid updates when a game is selected.
+                    // Splice the grid store to trigger a re-bind, which reloads
+                    // the cover texture. apply_game_update already does this when
+                    // the path changed, but not when only the file content changed.
                     let store = state_clone.borrow().grid_store.clone();
                     for i in 0..store.n_items() {
                         if let Some(item) = store.item(i).and_then(|o| o.downcast::<GameItem>().ok()) {

@@ -434,6 +434,21 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             state_clone.borrow().game_names.lock().unwrap().remove(&app_id);
         }
 
+        // Reload image paths from disk after copying pending files.
+        if !pending_copies_c.borrow().is_empty() {
+            if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, db_id_s) {
+                if let Ok(reloaded) = crate::game_loader::load_game(&entry, &save_dir_c) {
+                    if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id_s) {
+                        g.icon_path = reloaded.icon_path;
+                        g.hero_image_path = reloaded.hero_image_path;
+                        g.grid_path = reloaded.grid_path;
+                        g.header_path = reloaded.header_path;
+                        g.logo_path = reloaded.logo_path;
+                    }
+                }
+            }
+        }
+
         super::sidebar::rebuild_sidebar(&state_clone);
 
         // Update grid store so covers reflect new images immediately.

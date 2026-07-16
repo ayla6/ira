@@ -51,6 +51,7 @@ If the code is actively being implemented (WIP, will be wired up in the next
 commit), bear with the warning until it's connected — do not suppress it.
 Serde fields that exist only for deserialization should be prefixed with `_`
 (e.g. `_success`) instead of using `#[allow(dead_code)]`.
+There's No need to constantly check for it, just don't add new ones.
 
 ## Architecture: Cargo workspace
 

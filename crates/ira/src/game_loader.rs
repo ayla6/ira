@@ -132,6 +132,13 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         ira_platforms::steam::SteamAchievementData { achievements: Vec::new(), n_total: 0, n_achieved: 0 }
     };
 
+    if entry.trophy_source == ira_models::TrophySource::Ra {
+        game.achievements = ira_platforms::retroachievements::load_ra_achievements_from_cache(save_dir, app_id);
+        game.total_count = game.achievements.len();
+        game.earned_count = game.achievements.iter().filter(|a| a.earned).count();
+        return Ok(game);
+    }
+
     let meta_path = ach_dir.join("achievements.json");
     let has_meta = meta_path.is_file();
 

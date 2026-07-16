@@ -493,3 +493,62 @@ pub fn enrich_ra_game(game: &mut Game, save_dir: &str, username: &str, token: &s
         game.icon_path = icon_path;
     }
 }
+
+pub fn load_ra_achievements_from_cache(save_dir: &str, game_id: &str) -> Vec<MergedAchievement> {
+    let game_data_path = paths::game_data_path(save_dir, game_id);
+    let game_data: RaGameData = match std::fs::read(&game_data_path) {
+        Ok(data) => match serde_json::from_slice::<GameDataResponse>(&data) {
+            Ok(resp) => resp.patch_data,
+            Err(_) => return Vec::new(),
+        },
+        Err(_) => return Vec::new(),
+    };
+
+    let unlocks: Vec<u32> = match std::fs::read(paths::unlocks_path(save_dir, game_id)) {
+        Ok(data) => serde_json::from_slice::<UnlocksResponse>(&data)
+            .map(|r| r.user_unlocks)
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+
+    let badges_dir = paths::badges_dir(save_dir);
+    let mut achievements = Vec::new();
+    for def in &game_data.achievements {
+        let earned = unlocks.contains(&def.id);
+        let (icon, icon_gray) = if def.badge_name.is_empty() {
+            (String::new(), String::new())
+        } else {
+            let earned_badge = badges_dir.join(format!("{}.png", def.badge_name));
+            let locked_badge = badges_dir.join(format!("{}_lock.png", def.badge_name));
+            let earned_path = if earned && earned_badge.is_file() {
+                earned_badge.to_string_lossy().into_owned()
+            } else {
+                String::new()
+            };
+            let locked_path = if locked_badge.is_file() {
+                locked_badge.to_string_lossy().into_owned()
+            } else {
+                String::new()
+            };
+            if earned {
+                (earned_path, locked_path)
+            } else {
+                (locked_path.clone(), locked_path)
+            }
+        };
+
+        achievements.push(MergedAchievement {
+            name: format!("{}", def.id),
+            display_name: def.title.clone(),
+            description: def.description.clone(),
+            hidden: false,
+            earned,
+            earned_time: 0,
+            icon_path: icon,
+            icon_gray_path: icon_gray,
+            global_percent: def.rarity,
+            trophy_type: '\0',
+        });
+    }
+    achievements
+}

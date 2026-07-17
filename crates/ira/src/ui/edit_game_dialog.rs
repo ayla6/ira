@@ -321,6 +321,15 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             let _ = std::fs::create_dir_all(&cloud_dir);
             for (asset, src_path) in pc.iter() {
                 if asset == "__unmatch__" { continue; }
+                let base_name = match asset.as_str() {
+                    "icon" => "icon",
+                    "hero" => "library_hero",
+                    "grid" => "library_600x900",
+                    "header" => "header",
+                    "logo" => "logo",
+                    _ => continue,
+                };
+                ira_parser::remove_image_variants(&cloud_dir, base_name);
                 let file_name = match asset.as_str() {
                     "icon" => "icon.png",
                     "hero" => "library_hero.jpg",

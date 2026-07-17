@@ -1,5 +1,7 @@
 use gtk4::prelude::*;
 use adw::prelude::{AlertDialogExt, AdwDialogExt};
+use ira_models::GameKind;
+use ira_parser::{data_dir, ps4_data_dir, sgdb_data_dir};
 use crate::Game;
 use crate::AppMessage;
 use crate::strings as S;
@@ -72,9 +74,7 @@ pub fn show_game_context_menu(
     if wine_prefix.is_some() {
         folders_menu.append(Some("Wine prefix"), Some("game.open_wine_prefix"));
     }
-    if game.trophy_source.has_steam_enrichment() || !game.sgdb_id.is_empty() {
-        folders_menu.append(Some("Image data"), Some("game.open_images"));
-    }
+    folders_menu.append(Some("Image data"), Some("game.open_images"));
     if game.trophy_source == ira_models::TrophySource::Gse {
         folders_menu.append(Some("Achievement status"), Some("game.open_steam_status"));
     } else if game.trophy_source == ira_models::TrophySource::Nge {
@@ -269,17 +269,22 @@ pub fn show_game_context_menu(
         actions.add_action(&open_wine_prefix);
     }
 
-    if game_clone.trophy_source.has_steam_enrichment() || !game_clone.sgdb_id.is_empty() {
-        let open_images = gio::SimpleAction::new("open_images", None);
-        let gc = game_clone.clone();
-        let save_dir = state_clone.borrow().save_dir.clone();
-        open_images.connect_activate(move |_, _| {
-            let subdir = if !gc.sgdb_id.is_empty() { "steamgriddb" } else { "steam" };
-            let path = format!("{}/data/{}/{}", save_dir, subdir, gc.app_id);
-            open_folder(&path);
-        });
-        actions.add_action(&open_images);
-    }
+    let open_images = gio::SimpleAction::new("open_images", None);
+    let gc = game_clone.clone();
+    let save_dir = state_clone.borrow().save_dir.clone();
+    open_images.connect_activate(move |_, _| {
+        let path = if gc.kind == GameKind::Ps4 {
+            ps4_data_dir(&save_dir, &gc.app_id)
+        } else if gc.trophy_source.has_steam_enrichment() {
+            data_dir(&save_dir, &gc.app_id)
+        } else if !gc.sgdb_id.is_empty() {
+            sgdb_data_dir(&save_dir, &gc.sgdb_id)
+        } else {
+            data_dir(&save_dir, &gc.app_id)
+        };
+        open_folder(&path.to_string_lossy());
+    });
+    actions.add_action(&open_images);
 
     if game_clone.trophy_source == ira_models::TrophySource::Gse {
         let open_status = gio::SimpleAction::new("open_steam_status", None);

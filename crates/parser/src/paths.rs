@@ -28,6 +28,16 @@ pub fn find_image_file(dir: &Path, base_name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Remove all image files with the given base_name (e.g. "icon", "library_hero")
+/// in the directory, across all known image extensions. Call before saving a new
+/// image to avoid stale files with different extensions.
+pub fn remove_image_variants(dir: &Path, base_name: &str) {
+    for ext in &["png", "jpg", "jpeg", "webp", "ico"] {
+        let p = dir.join(format!("{}.{}", base_name, ext));
+        let _ = std::fs::remove_file(&p);
+    }
+}
+
 pub fn url_extension(url: &str) -> &str {
     let path = Path::new(url);
     path.extension().and_then(|e| e.to_str()).unwrap_or("png")

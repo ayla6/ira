@@ -268,8 +268,8 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
                         else { std::path::Path::new(&a.url).extension().and_then(|e| e.to_str()).unwrap_or("png") };
                         format!("icon.{}", ext)
                     }
-                    "hero" => "library_hero.jpg".to_string(),
-                    "grid" => "library_600x900.jpg".to_string(),
+                    "hero" => "hero.jpg".to_string(),
+                    "grid" => "vertical.jpg".to_string(),
                     "header" => "header.jpg".to_string(),
                     "logo" => "logo.png".to_string(),
                     _ => continue,
@@ -283,7 +283,15 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
                 let pending_dl = pending_copies.clone();
                 let on_download: Rc<dyn Fn()> = Rc::new(move || {
                     if let Some(ref pc) = pending_dl {
-                        let tmp = std::env::temp_dir().join(format!("sgdb_{}", asset_dl));
+                        let tmp = {
+                            let url_path = std::path::Path::new(&dl_url);
+                            let e = url_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                            if e.is_empty() {
+                                std::env::temp_dir().join(format!("sgdb_{}", asset_dl))
+                            } else {
+                                std::env::temp_dir().join(format!("sgdb_{}.{}", asset_dl, e))
+                            }
+                        };
                         if steam_dl.download_file(&dl_url, &tmp).is_ok() {
                             pc.borrow_mut().insert(asset_dl.clone(), tmp.to_string_lossy().into_owned());
                             on_done_dl();

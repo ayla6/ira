@@ -81,8 +81,8 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         }
     }
 
-    let image_dir = if kind == ira_models::GameKind::Ps4 {
-        ira_parser::ps4_data_dir(save_dir, app_id)
+    let image_dir = if kind == ira_models::GameKind::Retro {
+        ira_parser::retro_data_dir(save_dir, entry.id)
     } else if entry.trophy_source.has_steam_enrichment() {
         ira_parser::data_dir(save_dir, app_id)
     } else if entry.sgdb_id.as_deref().filter(|s| !s.is_empty()).is_some() {
@@ -91,9 +91,8 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         ira_parser::data_dir(save_dir, app_id)
     };
 
-    let icon_png = image_dir.join("icon.png");
-    if icon_png.is_file() {
-        game.icon_path = icon_png.to_string_lossy().into_owned();
+    if let Some(icon_path) = ira_parser::find_image_file(&image_dir, "icon") {
+        game.icon_path = icon_path.to_string_lossy().into_owned();
     } else {
         let ra_icon = ira_parser::ra_icon_path(save_dir, app_id);
         if ra_icon.is_file() {
@@ -101,14 +100,12 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         }
         let icon_ico = image_dir.join("icon.ico");
         if icon_ico.is_file() {
-            match ira_parser::convert_ico_to_png(&icon_ico) {
-                Ok(png) => game.icon_path = png.to_string_lossy().into_owned(),
-                Err(_) => {
-                    let renamed = image_dir.join("icon.png");
-                    if std::fs::rename(&icon_ico, &renamed).is_ok() {
-                        game.icon_path = renamed.to_string_lossy().into_owned();
-                    }
-                }
+            let webp = icon_ico.with_extension("webp");
+            ira_parser::convert_to_lossless_webp(&icon_ico);
+            if webp.is_file() {
+                game.icon_path = webp.to_string_lossy().into_owned();
+            } else {
+                game.icon_path = icon_ico.to_string_lossy().into_owned();
             }
         } else {
             for ext in ["jpg", "webp"] {

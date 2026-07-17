@@ -64,11 +64,7 @@ impl SteamClient {
     }
 
     pub(super) fn find_cached_hero(&self, app_id: &str) -> Option<PathBuf> {
-        let path = self.game_dir(app_id).join("library_hero.jpg");
-        if path.exists() {
-            Some(path)
-        } else {
-            None
-        }
+        ira_parser::find_image_file(&self.game_dir(app_id), "hero")
     }
+
 }

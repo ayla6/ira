@@ -1,7 +1,7 @@
 use gtk4::prelude::*;
 use adw::prelude::{AlertDialogExt, AdwDialogExt};
 use ira_models::GameKind;
-use ira_parser::{data_dir, ps4_data_dir, sgdb_data_dir};
+use ira_parser::{data_dir, ps4_data_dir, sgdb_data_dir, retro_data_dir};
 use crate::Game;
 use crate::AppMessage;
 use crate::strings as S;
@@ -273,7 +273,9 @@ pub fn show_game_context_menu(
     let gc = game_clone.clone();
     let save_dir = state_clone.borrow().save_dir.clone();
     open_images.connect_activate(move |_, _| {
-        let path = if gc.kind == GameKind::Ps4 {
+        let path = if gc.kind == GameKind::Retro {
+            retro_data_dir(&save_dir, gc.db_id)
+        } else if gc.kind == GameKind::Ps4 {
             ps4_data_dir(&save_dir, &gc.app_id)
         } else if gc.trophy_source.has_steam_enrichment() {
             data_dir(&save_dir, &gc.app_id)

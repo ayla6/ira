@@ -206,8 +206,9 @@ pub(super) fn build_game_general_page(
             }
             ra_group.add(&status_row);
 
-            let unmatch_btn = gtk4::Button::with_label("Unmatch from RetroAchievements");
+            let unmatch_btn = gtk4::Button::with_label("Unmatch");
             unmatch_btn.add_css_class("destructive-action");
+            unmatch_btn.set_valign(gtk4::Align::Center);
             if is_pending_unmatch {
                 unmatch_btn.set_sensitive(false);
             }
@@ -224,8 +225,9 @@ pub(super) fn build_game_general_page(
             ra_group.add(&unmatch_row);
         } else if game.trophy_source == ira_models::TrophySource::Empty {
             has_ra_content = true;
-            let match_btn = gtk4::Button::with_label("Match to RetroAchievements\u{2026}");
+            let match_btn = gtk4::Button::with_label("Match\u{2026}");
             match_btn.add_css_class("suggested-action");
+            match_btn.set_valign(gtk4::Align::Center);
             let sc = state.clone();
             let db_id = game.db_id;
             let gn = game.name.clone();

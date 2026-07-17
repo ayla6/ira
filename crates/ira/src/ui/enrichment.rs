@@ -163,7 +163,7 @@ pub fn enrich_game_async(params: EnrichGameParams) {
 /// 1. Look up clienticon hash from appinfo.vdf
 /// 2. Try local steam/games/<hash>.ico
 /// 3. Fall back to Steam CDN download
-/// 4. Convert ICO to PNG and save to the game's data directory
+/// 4. Convert ICO to WebP and save to the game's data directory
 fn fetch_steam_game_icon(
     app_id: &str,
     save_dir: &str,
@@ -173,10 +173,10 @@ fn fetch_steam_game_icon(
     let clienticon = ira_platforms::steam::get_clienticon(app_id_num)?;
     if clienticon.is_empty() { return None; }
 
-    let dest_png = ira_parser::data_dir(save_dir, app_id).join("icon.png");
-    if dest_png.is_file() { return Some(dest_png.to_string_lossy().into_owned()); }
+    let dest_webp = ira_parser::data_dir(save_dir, app_id).join("icon.webp");
+    if dest_webp.is_file() { return Some(dest_webp.to_string_lossy().into_owned()); }
 
-    let _ = std::fs::create_dir_all(dest_png.parent()?);
+    let _ = std::fs::create_dir_all(dest_webp.parent()?);
 
     let ico_in_games = ira_platforms::steam::steam_install_dir()
         .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
@@ -195,7 +195,7 @@ fn fetch_steam_game_icon(
         Some(b) => b,
         None => {
             let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", app_id, clienticon);
-            let tmp = dest_png.with_extension("tmp_ico");
+            let tmp = dest_webp.with_extension("tmp_ico");
             if steam.download_file(&url, &tmp).is_err() {
                 return None;
             }
@@ -206,19 +206,16 @@ fn fetch_steam_game_icon(
         }
     };
 
-    let tmp_ico = dest_png.with_extension("ico");
+    let tmp_ico = dest_webp.with_extension("ico");
     if std::fs::write(&tmp_ico, &ico_bytes).is_err() { return None; }
 
-    match ira_parser::convert_ico_to_png(&tmp_ico) {
-        Ok(png_path) => {
-            let _ = std::fs::rename(&png_path, &dest_png);
-            let _ = std::fs::remove_file(&tmp_ico);
-            Some(dest_png.to_string_lossy().into_owned())
-        }
-        Err(_) => {
-            let _ = std::fs::remove_file(&tmp_ico);
-            None
-        }
+    ira_parser::convert_to_lossless_webp(&tmp_ico);
+    if dest_webp.is_file() {
+        Some(dest_webp.to_string_lossy().into_owned())
+    } else if tmp_ico.is_file() {
+        Some(tmp_ico.to_string_lossy().into_owned())
+    } else {
+        None
     }
 }
 

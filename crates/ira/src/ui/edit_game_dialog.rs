@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::Read;
 use std::rc::Rc;
 use adw::prelude::*;
 use ira_models::{GameLaunchConfig, WineConfig};
@@ -7,6 +8,18 @@ use super::state::SharedState;
 use super::add_game_dialog::collect_env_vars;
 use super::edit_game_launch::build_launch_config_page;
 use super::edit_game_pages::*;
+
+fn is_ico_bytes(path: &str) -> bool {
+    if path.ends_with(".ico") {
+        return true;
+    }
+    let mut f = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut buf = [0u8; 4];
+    f.read_exact(&mut buf).is_ok() && buf == [0x00, 0x00, 0x01, 0x00]
+}
 
 pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let (game, config, app_default_wine) = {
@@ -311,7 +324,12 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         // Pending image copies
         {
             let pc = pending_copies_c.borrow();
-            let cloud_dir = if !game.sgdb_id.is_empty() {
+            let is_steam = game.trophy_source.has_steam_enrichment();
+            let cloud_dir = if game.kind == ira_models::GameKind::Retro {
+                ira_parser::retro_data_dir(&save_dir_c, db_id_s)
+            } else if is_steam {
+                ira_parser::data_dir(&save_dir_c, &app_id)
+            } else if !game.sgdb_id.is_empty() {
                 ira_parser::sgdb_data_dir(&save_dir_c, &game.sgdb_id)
             } else if game.kind == ira_models::GameKind::Ps4 {
                 ira_parser::ps4_data_dir(&save_dir_c, &app_id)
@@ -324,32 +342,54 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 if asset.starts_with("__ra_unmatch_") { continue; }
                 let base_name = match asset.as_str() {
                     "icon" => "icon",
-                    "hero" => "library_hero",
-                    "grid" => "library_600x900",
+                    "hero" => "hero",
+                    "grid" => "vertical",
                     "header" => "header",
                     "logo" => "logo",
                     _ => continue,
                 };
                 ira_parser::remove_image_variants(&cloud_dir, base_name);
-                let file_name = match asset.as_str() {
-                    "icon" => "icon.png",
-                    "hero" => "library_hero.jpg",
-                    "grid" => "library_600x900.jpg",
-                    "header" => "header.jpg",
-                    "logo" => "logo.png",
+                let is_ico = is_ico_bytes(src_path);
+                if is_ico {
+                    let ico_path = cloud_dir.join(format!("{}.ico", base_name));
+                    if std::fs::copy(src_path, &ico_path).is_ok() {
+                        let webp = ico_path.with_extension("webp");
+                        ira_parser::convert_to_lossless_webp(&ico_path);
+                        if webp.is_file() {
+                            ira_images::invalidate_texture(&webp.to_string_lossy());
+                        } else {
+                            ira_images::invalidate_texture(&ico_path.to_string_lossy());
+                        }
+                    }
+                } else {
+                    let ext = std::path::Path::new(src_path).extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("png");
+                    let dest = cloud_dir.join(format!("{}.{}", base_name, ext));
+                    if let Err(e) = std::fs::copy(src_path, &dest) {
+                        eprintln!("Failed to copy {}: {}", asset, e);
+                    }
+                    ira_images::invalidate_texture(&dest.to_string_lossy());
+                }
+            }
+            // Ensure small versions for any newly copied images
+            for (asset, _) in pc.iter() {
+                if asset == "__unmatch__" || asset.starts_with("__ra_unmatch_") { continue; }
+                let (base_name, max_w, max_h) = match asset.as_str() {
+                    "icon" => ("icon", 32u32, 32u32),
+                    "hero" => ("hero", 1920, 620),
+                    "grid" => ("vertical", 300, 450),
+                    "header" => ("header", 460, 215),
+                    "logo" => ("logo", 620, 620),
                     _ => continue,
                 };
-                let dest = cloud_dir.join(file_name);
-                let is_ico = src_path.ends_with(".ico");
-                if is_ico {
-                    let ico_dest = dest.with_extension("ico");
-                    if std::fs::copy(src_path, &ico_dest).is_ok() {
-                        let _ = ira_parser::convert_ico_to_png(&ico_dest);
-                    }
-                } else if let Err(e) = std::fs::copy(src_path, &dest) {
-                    eprintln!("Failed to copy {}: {}", asset, e);
-                }
-                ira_images::invalidate_texture(&dest.to_string_lossy());
+                // Remove stale _small variants so they're regenerated from the new source
+                let small_base = format!("{}_small", base_name);
+                ira_parser::remove_image_variants(&cloud_dir, &small_base);
+                ira_parser::ensure_small_image(&cloud_dir, base_name, max_w, max_h);
+                ira_images::invalidate_texture(
+                    &cloud_dir.join(format!("{}.webp", small_base)).to_string_lossy(),
+                );
             }
         }
 

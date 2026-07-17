@@ -256,11 +256,11 @@ impl RaClient {
         Ok(resp.user_unlocks)
     }
 
-    pub fn download_badge(&self, save_dir: &str, badge_name: &str, locked: bool) -> String {
+    pub fn download_badge(&self, save_dir: &str, game_id: &str, badge_name: &str, locked: bool) -> String {
         let dest = if locked {
-            paths::badge_locked_path(save_dir, badge_name)
+            paths::badge_locked_path(save_dir, game_id, badge_name)
         } else {
-            paths::badge_path(save_dir, badge_name)
+            paths::badge_path(save_dir, game_id, badge_name)
         };
         if dest.is_file() {
             return dest.to_string_lossy().into_owned();
@@ -268,11 +268,14 @@ impl RaClient {
         let _ = std::fs::create_dir_all(dest.parent().unwrap_or(Path::new(".")));
         let suffix = if locked { "_lock" } else { "" };
         let url = format!("{}/{}{}.png", RA_BADGE_URL, badge_name, suffix);
+        let tmp = dest.with_extension("png");
         match self.http.get(&url).send() {
             Ok(resp) if resp.status().is_success() => {
                 match resp.bytes() {
                     Ok(bytes) => {
-                        if std::fs::write(&dest, &bytes).is_ok() {
+                        if std::fs::write(&tmp, &bytes).is_ok() {
+                            // RA servers return PNG — convert to lossless WebP
+                            ira_parser::convert_to_lossless_webp(&tmp);
                             return dest.to_string_lossy().into_owned();
                         }
                     }
@@ -296,11 +299,13 @@ impl RaClient {
         } else {
             format!("https://retroachievements.org{}", image_icon)
         };
+        let tmp = dest.with_extension("png");
         match self.http.get(&url).send() {
             Ok(resp) if resp.status().is_success() => {
                 match resp.bytes() {
                     Ok(bytes) => {
-                        if std::fs::write(&dest, &bytes).is_ok() {
+                        if std::fs::write(&tmp, &bytes).is_ok() {
+                            ira_parser::convert_to_lossless_webp(&tmp);
                             return dest.to_string_lossy().into_owned();
                         }
                     }
@@ -405,6 +410,7 @@ pub fn build_ra_achievements(
     unlocks: &[u32],
     client: &RaClient,
     save_dir: &str,
+    game_id: &str,
 ) -> (Vec<MergedAchievement>, String, String) {
     let mut achievements = Vec::new();
     let mut icon_path = String::new();
@@ -415,23 +421,23 @@ pub fn build_ra_achievements(
         let badge = if def.badge_name.is_empty() {
             String::new()
         } else if earned {
-            client.download_badge(save_dir, &def.badge_name, false)
+            client.download_badge(save_dir, game_id, &def.badge_name, false)
         } else {
-            client.download_badge(save_dir, &def.badge_name, true)
+            client.download_badge(save_dir, game_id, &def.badge_name, true)
         };
 
         let (icon, icon_gray) = if earned {
             let locked_badge = if def.badge_name.is_empty() {
                 String::new()
             } else {
-                client.download_badge(save_dir, &def.badge_name, true)
+                client.download_badge(save_dir, game_id, &def.badge_name, true)
             };
             (badge.clone(), locked_badge)
         } else {
             let unlocked_badge = if def.badge_name.is_empty() {
                 String::new()
             } else {
-                client.download_badge(save_dir, &def.badge_name, false)
+                client.download_badge(save_dir, game_id, &def.badge_name, false)
             };
             (unlocked_badge, badge.clone())
         };
@@ -477,7 +483,7 @@ pub fn enrich_ra_game(game: &mut Game, save_dir: &str, username: &str, token: &s
 
     let unlocks = client.fetch_user_unlocks(save_dir, &game.app_id).unwrap_or_default();
 
-    let (achievements, icon_path, _icon_gray) = build_ra_achievements(&game_data, &unlocks, &client, save_dir);
+    let (achievements, icon_path, _icon_gray) = build_ra_achievements(&game_data, &unlocks, &client, save_dir, &game.app_id);
 
     game.total_count = achievements.len();
     game.earned_count = achievements.iter().filter(|a| a.earned).count();
@@ -511,15 +517,15 @@ pub fn load_ra_achievements_from_cache(save_dir: &str, game_id: &str) -> Vec<Mer
         Err(_) => Vec::new(),
     };
 
-    let badges_dir = paths::badges_dir(save_dir);
+    let ach_dir = paths::achievements_dir(save_dir, game_id);
     let mut achievements = Vec::new();
     for def in &game_data.achievements {
         let earned = unlocks.contains(&def.id);
         let (icon, icon_gray) = if def.badge_name.is_empty() {
             (String::new(), String::new())
         } else {
-            let earned_badge = badges_dir.join(format!("{}.png", def.badge_name));
-            let locked_badge = badges_dir.join(format!("{}_lock.png", def.badge_name));
+            let earned_badge = ach_dir.join(format!("{}.webp", def.badge_name));
+            let locked_badge = ach_dir.join(format!("{}_lock.webp", def.badge_name));
             let earned_path = if earned && earned_badge.is_file() {
                 earned_badge.to_string_lossy().into_owned()
             } else {

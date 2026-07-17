@@ -17,21 +17,35 @@ pub fn read_app_name(save_dir: &str, app_id: &str) -> Option<String> {
 }
 
 pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
-    if game.icon_path.is_empty() {
-        if let Some(p) = super::paths::find_image_file(image_dir, "icon") {
-            game.icon_path = p.to_string_lossy().into_owned();
-        }
+    super::paths::ensure_small_image(image_dir, "icon", 32, 32);
+    super::paths::ensure_small_image(image_dir, "hero", 1920, 620);
+    super::paths::ensure_small_image(image_dir, "vertical", 300, 450);
+    super::paths::ensure_small_image(image_dir, "header", 460, 215);
+    super::paths::ensure_small_image(image_dir, "logo", 620, 620);
+
+    if let Some(p) = super::paths::find_image_file(image_dir, "icon_small")
+        .or_else(|| super::paths::find_image_file(image_dir, "icon"))
+    {
+        game.icon_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = super::paths::find_image_file(image_dir, "library_600x900") {
+    if let Some(p) = super::paths::find_image_file(image_dir, "vertical_small")
+        .or_else(|| super::paths::find_image_file(image_dir, "vertical"))
+    {
         game.grid_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = super::paths::find_image_file(image_dir, "header") {
+    if let Some(p) = super::paths::find_image_file(image_dir, "header_small")
+        .or_else(|| super::paths::find_image_file(image_dir, "header"))
+    {
         game.header_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = super::paths::find_image_file(image_dir, "library_hero") {
+    if let Some(p) = super::paths::find_image_file(image_dir, "hero_small")
+        .or_else(|| super::paths::find_image_file(image_dir, "hero"))
+    {
         game.hero_image_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = super::paths::find_image_file(image_dir, "logo") {
+    if let Some(p) = super::paths::find_image_file(image_dir, "logo_small")
+        .or_else(|| super::paths::find_image_file(image_dir, "logo"))
+    {
         game.logo_path = p.to_string_lossy().into_owned();
     }
 }

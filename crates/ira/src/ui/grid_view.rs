@@ -397,8 +397,8 @@ fn build_recent_row(
             (w, cover_height, false)
         };
         game_widths.push(w);
-        let path = if use_header { &game.header_path } else { &game.grid_path };
-        let item = build_cover(state, game, path, w, h);
+        let path = if use_header { ira_parser::full_image_path(&game.header_path) } else { game.grid_path.clone() };
+        let item = build_cover(state, game, &path, w, h);
         hbox.append(&item);
     }
 

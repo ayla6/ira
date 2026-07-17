@@ -31,11 +31,11 @@ pub fn build_image_manager_content_with_drafts(
     let is_steam = game.trophy_source.has_steam_enrichment();
 
     let sections: [SectionEntry; 5] = [
-        ("Icon", "icon.png", "icon", 48, 48, &[]),
-        ("Hero", "library_hero.jpg", "hero", 96, 48, &[]),
-        ("Capsule", "library_600x900.jpg", "grid", 32, 48, &["600x900"]),
-        ("Header", "header.jpg", "header", 96, 48, &["460x215", "920x430"]),
-        ("Logo", "logo.png", "logo", 96, 48, &[]),
+        ("Icon", "icon", "icon", 48, 48, &[]),
+        ("Hero", "hero", "hero", 96, 48, &[]),
+        ("Capsule", "vertical", "grid", 32, 48, &["600x900"]),
+        ("Header", "header", "header", 96, 48, &["460x215", "920x430"]),
+        ("Logo", "logo", "logo", 96, 48, &[]),
     ];
 
     for &(label, file, asset, thumb_w, thumb_h, dimensions) in &sections {
@@ -94,7 +94,7 @@ pub fn build_image_manager_content_with_drafts(
     content
 }
 
-fn find_best_image_path(game: &Game, field: &str, file: &str, id: &str, save_dir: &str) -> String {
+fn find_best_image_path(game: &Game, field: &str, _base: &str, id: &str, save_dir: &str) -> String {
     let field_path = match field {
         "icon" if !game.icon_path.is_empty() => game.icon_path.clone(),
         "hero" if !game.hero_image_path.is_empty() => game.hero_image_path.clone(),
@@ -106,19 +106,24 @@ fn find_best_image_path(game: &Game, field: &str, file: &str, id: &str, save_dir
     if !field_path.is_empty() && std::path::Path::new(&field_path).is_file() {
         return field_path;
     }
-    if !game.sgdb_id.is_empty() {
-        let sgdb = format!("{}/{}", ira_parser::sgdb_data_dir(save_dir, &game.sgdb_id).to_string_lossy(), file);
-        if std::path::Path::new(&sgdb).is_file() {
-            return sgdb;
+    if game.kind == ira_models::GameKind::Retro {
+        if let Some(f) = ira_parser::find_image_file(&ira_parser::retro_data_dir(save_dir, game.db_id), field) {
+            return f.to_string_lossy().into_owned();
         }
     }
-    let native = if game.kind == ira_models::GameKind::Ps4 {
-        format!("{}/{}", ira_parser::ps4_data_dir(save_dir, id).to_string_lossy(), file)
+    let is_steam = game.trophy_source.has_steam_enrichment();
+    if !is_steam && !game.sgdb_id.is_empty() {
+        if let Some(f) = ira_parser::find_image_file(&ira_parser::sgdb_data_dir(save_dir, &game.sgdb_id), field) {
+            return f.to_string_lossy().into_owned();
+        }
+    }
+    let native_dir = if game.kind == ira_models::GameKind::Ps4 {
+        ira_parser::ps4_data_dir(save_dir, id)
     } else {
-        format!("{}/{}", ira_parser::data_dir(save_dir, id).to_string_lossy(), file)
+        ira_parser::data_dir(save_dir, id)
     };
-    if std::path::Path::new(&native).is_file() {
-        return native;
+    if let Some(f) = ira_parser::find_image_file(&native_dir, field) {
+        return f.to_string_lossy().into_owned();
     }
     if field == "icon" && game.kind == ira_models::GameKind::Ps4 && !game.icon_path.is_empty() && std::path::Path::new(&game.icon_path).is_file() {
         return game.icon_path.clone();
@@ -137,43 +142,46 @@ fn image_path_for_asset<'a>(game: &'a Game, asset: &'a str) -> &'a str {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_refresh_closure(
     preview_wrapper: &gtk4::Box,
-    dest_path: &str,
+    cloud_dir: &std::path::Path,
+    base_name: &str,
     state: &SharedState,
     game: &Game,
     pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
     asset_type: &str,
+    thumb_size: (i32, i32),
 ) -> Rc<dyn Fn()> {
     let save_dir = state.borrow().save_dir.clone();
-    Rc::new({
-        let preview_wrapper = preview_wrapper.clone();
-        let dest_path = dest_path.to_string();
-        let state_clone = state.clone();
-        let game_clone = game.clone();
-        let pending_copies = pending_copies.clone();
-        let asset_c = asset_type.to_string();
-        move || {
-            clear_children(&preview_wrapper);
-            let preview_src = pending_copies.as_ref()
-                .and_then(|pc| pc.borrow().get(&asset_c).cloned())
-                .filter(|p| std::path::Path::new(p).is_file())
-                .or_else(|| {
-                    if std::path::Path::new(&dest_path).exists() {
-                        Some(dest_path.clone())
-                    } else {
-                        None
-                    }
-                });
-            if let Some(path) = preview_src {
-                let p = gtk4::Picture::for_filename(&path);
-                p.set_content_fit(gtk4::ContentFit::ScaleDown);
-                preview_wrapper.append(&p);
-            } else {
-                let ph = gtk4::Label::new(Some("—"));
-                ph.add_css_class("dim-label");
-                preview_wrapper.append(&ph);
-            }
+        let (tw, th) = thumb_size;
+        Rc::new({
+            let preview_wrapper = preview_wrapper.clone();
+            let cloud_dir = cloud_dir.to_path_buf();
+            let base_name = base_name.to_string();
+            let state_clone = state.clone();
+            let game_clone = game.clone();
+            let pending_copies = pending_copies.clone();
+            let asset_c = asset_type.to_string();
+            move || {
+                clear_children(&preview_wrapper);
+                let preview_src = pending_copies.as_ref()
+                    .and_then(|pc| pc.borrow().get(&asset_c).cloned())
+                    .filter(|p| std::path::Path::new(p).is_file())
+                    .or_else(|| {
+                        ira_parser::find_image_file(&cloud_dir, &base_name)
+                            .map(|p| p.to_string_lossy().into_owned())
+                    });
+                if let Some(path) = preview_src {
+                    let p = gtk4::Picture::new();
+                    p.set_content_fit(gtk4::ContentFit::ScaleDown);
+                    ira_images::set_picture_natural(&p, &path, tw, th);
+                    preview_wrapper.append(&p);
+                } else {
+                    let ph = gtk4::Label::new(Some("—"));
+                    ph.add_css_class("dim-label");
+                    preview_wrapper.append(&ph);
+                }
             let s = state_clone.borrow();
             let old_path = s.games.iter()
                 .find(|g| g.db_id == game_clone.db_id)
@@ -229,15 +237,17 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     let id = game.app_id.clone();
     let save_dir = state.borrow().save_dir.clone();
 
-    let cloud_dir = if !game.sgdb_id.is_empty() {
+    let cloud_dir = if game.kind == ira_models::GameKind::Retro {
+        ira_parser::retro_data_dir(&save_dir, game.db_id)
+    } else if is_steam {
+        ira_parser::data_dir(&save_dir, &id)
+    } else if !game.sgdb_id.is_empty() {
         ira_parser::sgdb_data_dir(&save_dir, &game.sgdb_id)
     } else if game.kind == ira_models::GameKind::Ps4 {
         ira_parser::ps4_data_dir(&save_dir, &id)
     } else {
         ira_parser::data_dir(&save_dir, &id)
     };
-    let cloud_base = cloud_dir.to_string_lossy().into_owned();
-
     let section = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
     let lbl = gtk4::Label::new(Some(label));
     lbl.set_halign(gtk4::Align::Start);
@@ -262,13 +272,14 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         }
     };
 
-    let preview = gtk4::Picture::for_filename(&img_path);
+    let preview = gtk4::Picture::new();
     preview.set_content_fit(gtk4::ContentFit::ScaleDown);
     preview.set_size_request(thumb_w, thumb_h);
     let preview_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     preview_wrapper.set_size_request(thumb_w, 48);
     preview_wrapper.set_valign(gtk4::Align::Center);
     if !img_path.is_empty() && std::path::Path::new(&img_path).is_file() {
+        ira_images::set_picture_natural(&preview, &img_path, thumb_w, thumb_h);
         preview_wrapper.append(&preview);
     } else {
         let ph = gtk4::Label::new(Some("—"));
@@ -281,9 +292,8 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     btns.set_hexpand(true);
     btns.set_halign(gtk4::Align::End);
 
-    let dest_path = format!("{}/{}", cloud_base, file_base);
     let refresh_images = make_refresh_closure(
-        &preview_wrapper, &dest_path, state, game, pending_copies.clone(), asset_type,
+        &preview_wrapper, &cloud_dir, file_base, state, game, pending_copies.clone(), asset_type, (thumb_w, thumb_h),
     );
 
     let browse_btn = make_browse_button(
@@ -327,31 +337,24 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         btn.connect_clicked(move |_| {
             if let Ok(app_id_num) = id_c.parse::<u32>() {
                 if let Some(clienticon) = ira_platforms::steam::get_clienticon(app_id_num) {
-                    let dest = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.png");
-                    let _ = std::fs::create_dir_all(dest.parent().unwrap());
+                    let ico_file = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.ico");
+                    let _ = std::fs::create_dir_all(ico_file.parent().unwrap());
+                    let webp_file = ico_file.with_extension("webp");
                     let ico_path = ira_platforms::steam::steam_install_dir()
                         .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
-                    let got = if let Some(ref p) = ico_path {
-                        if p.is_file() {
-                            if let Ok(ico_data) = std::fs::read(p) {
-                                let tmp = dest.with_extension("ico");
-                                if std::fs::write(&tmp, &ico_data).is_ok() {
-                                    let r = ira_parser::convert_ico_to_png(&tmp).ok()
-                                        .map(|png| { let _ = std::fs::rename(&png, &dest); std::fs::remove_file(&tmp).ok();  });
-                                    let _ = std::fs::remove_file(&tmp);
-                                    r.is_some()
-                                } else { false }
-                            } else { false }
-                        } else { false }
-                    } else { false };
-                    if !got {
-                        let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
-                        let tmp = dest.with_extension("ico");
-                        if steam.download_file(&url, &tmp).is_ok() {
-                            if let Ok(png) = ira_parser::convert_ico_to_png(&tmp) {
-                                let _ = std::fs::rename(&png, &dest);
+                    let have_local = ico_path.as_ref().is_some_and(|p| p.is_file());
+                    if have_local {
+                        if let Ok(ico_data) = std::fs::read(ico_path.as_ref().unwrap()) {
+                            if std::fs::write(&ico_file, &ico_data).is_ok() {
+                                ira_parser::convert_to_lossless_webp(&ico_file);
                             }
-                            let _ = std::fs::remove_file(&tmp);
+                        }
+                    }
+                    if !have_local || (!ico_file.is_file() && !webp_file.is_file()) {
+                        let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
+                        let _ = std::fs::remove_file(&ico_file);
+                        if steam.download_file(&url, &ico_file).is_ok() {
+                            ira_parser::convert_to_lossless_webp(&ico_file);
                         }
                     }
                 }

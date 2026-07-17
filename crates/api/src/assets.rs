@@ -6,9 +6,13 @@ use ira_models::DlcInfo;
 impl SteamClient {
     pub fn ensure_sgdb_assets(&self, sgdb_id: &str) -> (String, String, String, String, String) {
         let dir = self.sgdb_dir(sgdb_id);
-        let _ = std::fs::create_dir_all(&dir);
+        self.ensure_sgdb_assets_in_dir(&dir, sgdb_id)
+    }
 
-        let icon_path = if let Some(existing) = ira_parser::find_image_file(&dir, "icon") {
+    pub fn ensure_sgdb_assets_in_dir(&self, dir: &Path, sgdb_id: &str) -> (String, String, String, String, String) {
+        let _ = std::fs::create_dir_all(dir);
+
+        let icon_path = if let Some(existing) = ira_parser::find_image_file(dir, "icon") {
             existing.to_string_lossy().into_owned()
         } else {
             let sgdb_key = self.sgdb_api_key();
@@ -32,12 +36,14 @@ impl SteamClient {
                                 }
                                 if let Some(chosen) = best.map(|(item, _)| item) {
                                     if let Some(url) = chosen.get("url").and_then(|u| u.as_str()) {
-                                        ira_parser::remove_image_variants(&dir, "icon");
+                                        ira_parser::remove_image_variants(dir, "icon");
                                         let ext = ira_parser::url_extension(url);
                                         let dest = dir.join(format!("icon.{}", ext));
                                         if self.download_file(url, &dest).is_ok() {
-                                            let converted = ira_parser::convert_ico_to_png(&dest).unwrap_or_else(|_| dest.clone());
-                                            converted.to_string_lossy().into_owned()
+                                            ira_parser::convert_to_lossless_webp(&dest);
+                                            let webp = dir.join("icon.webp");
+                                            if webp.is_file() { webp.to_string_lossy().into_owned() }
+                                            else { dest.to_string_lossy().into_owned() }
                                         } else { String::new() }
                                     } else { String::new() }
                                 } else { String::new() }
@@ -49,33 +55,39 @@ impl SteamClient {
             }
         };
 
-        let hero_path = if let Some(existing) = ira_parser::find_image_file(&dir, "library_hero") {
+        let hero_path = if let Some(existing) = ira_parser::find_image_file(dir, "hero") {
             existing.to_string_lossy().into_owned()
         } else if let Some(url) = self.fetch_sgdb_asset_url(sgdb_id, "heroes") {
-            ira_parser::remove_image_variants(&dir, "library_hero");
+            ira_parser::remove_image_variants(dir, "hero");
             let ext = ira_parser::url_extension(&url);
-            self.fetch_image(&url, &dir.join(format!("library_hero.{}", ext)))
+            self.fetch_image(&url, &dir.join(format!("hero.{}", ext)))
         } else { String::new() };
 
-        let grid_path = if let Some(existing) = ira_parser::find_image_file(&dir, "library_600x900") {
+        let grid_path = if let Some(existing) = ira_parser::find_image_file(dir, "vertical") {
             existing.to_string_lossy().into_owned()
         } else {
             self.force_download_sgdb(sgdb_id, "grid", false)
         };
 
-        let logo_path = if let Some(existing) = ira_parser::find_image_file(&dir, "logo") {
+        let logo_path = if let Some(existing) = ira_parser::find_image_file(dir, "logo") {
             existing.to_string_lossy().into_owned()
         } else if let Some(url) = self.fetch_sgdb_asset_url(sgdb_id, "logos") {
-            ira_parser::remove_image_variants(&dir, "logo");
+            ira_parser::remove_image_variants(dir, "logo");
             let ext = ira_parser::url_extension(&url);
             self.fetch_image(&url, &dir.join(format!("logo.{}", ext)))
         } else { String::new() };
 
-        let header_path = if let Some(existing) = ira_parser::find_image_file(&dir, "header") {
+        let header_path = if let Some(existing) = ira_parser::find_image_file(dir, "header") {
             existing.to_string_lossy().into_owned()
         } else {
             self.force_download_sgdb(sgdb_id, "header", false)
         };
+
+        if !icon_path.is_empty() { ira_parser::ensure_small_image(dir, "icon", 32, 32); }
+        if !hero_path.is_empty() { ira_parser::ensure_small_image(dir, "hero", 1920, 620); }
+        if !grid_path.is_empty() { ira_parser::ensure_small_image(dir, "vertical", 300, 450); }
+        if !header_path.is_empty() { ira_parser::ensure_small_image(dir, "header", 460, 215); }
+        if !logo_path.is_empty() { ira_parser::ensure_small_image(dir, "logo", 620, 620); }
 
         (icon_path, hero_path, grid_path, logo_path, header_path)
     }
@@ -100,8 +112,10 @@ impl SteamClient {
                     let ext = Path::new(&url).extension().and_then(|e| e.to_str()).unwrap_or("png");
                     let dest = dir.join(format!("icon.{}", ext));
                     if self.download_file(&url, &dest).is_ok() {
-                        let converted = ira_parser::convert_ico_to_png(&dest).unwrap_or_else(|_| dest.clone());
-                        found = converted.to_string_lossy().into_owned();
+                        ira_parser::convert_to_lossless_webp(&dest);
+                        let webp = dir.join("icon.webp");
+                        found = if webp.is_file() { webp.to_string_lossy().into_owned() }
+                            else { dest.to_string_lossy().into_owned() };
                     }
                 }
             }
@@ -114,9 +128,12 @@ impl SteamClient {
             self.fetch_image_fallback(
                 &format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_hero_2x.jpg", app_id),
                 &format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_hero.jpg", app_id),
-                &dir.join("library_hero.jpg"),
+                &dir.join("hero.jpg"),
             )
         };
+
+        if !icon_path.is_empty() { ira_parser::ensure_small_image(&dir, "icon", 32, 32); }
+        if !hero_path.is_empty() { ira_parser::ensure_small_image(&dir, "hero", 1920, 620); }
 
         (icon_path, hero_path)
     }
@@ -127,15 +144,27 @@ impl SteamClient {
             format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/{}", app_id, suffix)
         };
 
-        let grid_path = self.fetch_image_fallback(
-            &cdn("library_600x900_2x.jpg"),
-            &cdn("library_600x900.jpg"),
-            &dir.join("library_600x900.jpg"),
-        );
+        let grid_path = if let Some(existing) = ira_parser::find_image_file(&dir, "vertical") {
+            existing.to_string_lossy().into_owned()
+        } else {
+            self.fetch_image_fallback(&cdn("library_600x900_2x.jpg"), &cdn("library_600x900.jpg"), &dir.join("vertical.jpg"))
+        };
 
-        let header_path = self.fetch_image_fallback(&cdn("header.jpg"), "", &dir.join("header.jpg"));
+        let header_path = if let Some(existing) = ira_parser::find_image_file(&dir, "header") {
+            existing.to_string_lossy().into_owned()
+        } else {
+            self.fetch_image_fallback(&cdn("header.jpg"), "", &dir.join("header.jpg"))
+        };
 
-        let logo_path = self.fetch_image_fallback(&cdn("logo.png"), "", &dir.join("logo.png"));
+        let logo_path = if let Some(existing) = ira_parser::find_image_file(&dir, "logo") {
+            existing.to_string_lossy().into_owned()
+        } else {
+            self.fetch_image_fallback(&cdn("logo.png"), "", &dir.join("logo.png"))
+        };
+
+        if !grid_path.is_empty() { ira_parser::ensure_small_image(&dir, "vertical", 300, 450); }
+        if !header_path.is_empty() { ira_parser::ensure_small_image(&dir, "header", 460, 215); }
+        if !logo_path.is_empty() { ira_parser::ensure_small_image(&dir, "logo", 620, 620); }
 
         (grid_path, header_path, logo_path)
     }
@@ -168,26 +197,34 @@ impl SteamClient {
         let cdn = |suffix: &str| format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/{}", app_id, suffix);
         match asset {
             "hero" => {
-                ira_parser::remove_image_variants(&dir, "library_hero");
-                let dest = dir.join("library_hero.jpg");
+                ira_parser::remove_image_variants(&dir, "hero");
+                let dest = dir.join("hero.jpg");
                 let r = self.fetch_image(&cdn("library_hero_2x.jpg"), &dest);
-                if r.is_empty() { self.fetch_image(&cdn("library_hero.jpg"), &dest) } else { r }
+                let r = if r.is_empty() { self.fetch_image(&cdn("library_hero.jpg"), &dest) } else { r };
+                if !r.is_empty() { ira_parser::ensure_small_image(&dir, "hero", 1920, 620); }
+                r
             }
             "grid" => {
-                ira_parser::remove_image_variants(&dir, "library_600x900");
-                let dest = dir.join("library_600x900.jpg");
+                ira_parser::remove_image_variants(&dir, "vertical");
+                let dest = dir.join("vertical.jpg");
                 let r = self.fetch_image(&cdn("library_600x900_2x.jpg"), &dest);
-                if r.is_empty() { self.fetch_image(&cdn("library_600x900.jpg"), &dest) } else { r }
+                let r = if r.is_empty() { self.fetch_image(&cdn("library_600x900.jpg"), &dest) } else { r };
+                if !r.is_empty() { ira_parser::ensure_small_image(&dir, "vertical", 300, 450); }
+                r
             }
             "header" => {
                 ira_parser::remove_image_variants(&dir, "header");
                 let dest = dir.join("header.jpg");
-                self.fetch_image(&cdn("header.jpg"), &dest)
+                let r = self.fetch_image(&cdn("header.jpg"), &dest);
+                if !r.is_empty() { ira_parser::ensure_small_image(&dir, "header", 460, 215); }
+                r
             }
             "logo" => {
                 ira_parser::remove_image_variants(&dir, "logo");
                 let dest = dir.join("logo.png");
-                self.fetch_image(&cdn("logo.png"), &dest)
+                let r = self.fetch_image(&cdn("logo.png"), &dest);
+                if !r.is_empty() { ira_parser::ensure_small_image(&dir, "logo", 620, 620); }
+                r
             }
             _ => String::new(),
         }
@@ -209,37 +246,38 @@ impl SteamClient {
             Some(u) => u,
             None => return String::new(),
         };
-        match asset {
-            "icon" => {
-                ira_parser::remove_image_variants(&dir, "icon");
-                let ext = Path::new(&url).extension().and_then(|e| e.to_str()).unwrap_or("png");
-                let dest = dir.join(format!("icon.{}", ext));
-                if self.download_file(&url, &dest).is_ok() {
-                    let converted = ira_parser::convert_ico_to_png(&dest).unwrap_or_else(|_| dest.clone());
-                    converted.to_string_lossy().into_owned()
-                } else { String::new() }
-            }
-            "hero" => {
-                ira_parser::remove_image_variants(&dir, "library_hero");
-                let dest = dir.join("library_hero.jpg");
-                self.fetch_image(&url, &dest)
-            }
-            "grid" => {
-                ira_parser::remove_image_variants(&dir, "library_600x900");
-                let dest = dir.join("library_600x900.jpg");
-                self.fetch_image(&url, &dest)
-            }
-            "header" => {
-                ira_parser::remove_image_variants(&dir, "header");
-                let dest = dir.join("header.jpg");
-                self.fetch_image(&url, &dest)
-            }
-            "logo" => {
-                ira_parser::remove_image_variants(&dir, "logo");
-                let dest = dir.join("logo.png");
-                self.fetch_image(&url, &dest)
-            }
-            _ => String::new(),
+        let ext = Path::new(&url).extension().and_then(|e| e.to_str()).unwrap_or("png");
+        let is_png = ext.eq_ignore_ascii_case("png");
+
+        let base_name = match asset {
+            "grid" => "vertical",
+            _ => asset,
+        };
+        ira_parser::remove_image_variants(&dir, base_name);
+
+        let r = if is_png || asset == "icon" {
+            let tmp = dir.join(format!("{}.tmp", base_name));
+            if self.download_file(&url, &tmp).is_ok() {
+                ira_parser::convert_to_lossless_webp(&tmp);
+                let webp = dir.join(format!("{}.webp", base_name));
+                if webp.is_file() { webp.to_string_lossy().into_owned() } else { String::new() }
+            } else { String::new() }
+        } else {
+            let dest = dir.join(format!("{}.{}", base_name, ext));
+            self.fetch_image(&url, &dest)
+        };
+
+        if !r.is_empty() {
+            let (small_name, sw, sh) = match asset {
+                "icon" => ("icon", 32u32, 32u32),
+                "hero" => ("hero", 1920, 620),
+                "grid" => ("vertical", 300, 450),
+                "header" => ("header", 460, 215),
+                "logo" => ("logo", 620, 620),
+                _ => return r,
+            };
+            ira_parser::ensure_small_image(&dir, small_name, sw, sh);
         }
+        r
     }
 }

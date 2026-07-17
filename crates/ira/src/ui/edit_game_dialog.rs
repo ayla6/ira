@@ -368,8 +368,15 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     let dest = cloud_dir.join(format!("{}.{}", base_name, ext));
                     if let Err(e) = std::fs::copy(src_path, &dest) {
                         eprintln!("Failed to copy {}: {}", asset, e);
+                    } else {
+                        ira_parser::convert_to_lossless_webp(&dest);
                     }
-                    ira_images::invalidate_texture(&dest.to_string_lossy());
+                    let webp = cloud_dir.join(format!("{}.webp", base_name));
+                    if webp.is_file() {
+                        ira_images::invalidate_texture(&webp.to_string_lossy());
+                    } else {
+                        ira_images::invalidate_texture(&dest.to_string_lossy());
+                    }
                 }
             }
             // Ensure small versions for any newly copied images

@@ -108,6 +108,7 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             handle_games_loaded(state, games);
         }
         AppMessage::SgdbAssetsDownloaded { db_id, sgdb_id, icon, hero, grid, logo, header } => {
+            let _span = tracing::info_span!("SgdbAssetsDownloaded", db_id).entered();
             if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                 g.sgdb_id = sgdb_id;
                 if !icon.is_empty() { g.icon_path = icon; }
@@ -364,6 +365,7 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
 }
 
 pub fn switch_to_game(state: &SharedState, db_id: i64) {
+    let _span = tracing::info_span!("switch_to_game", db_id).entered();
     state.borrow_mut().selected_id = db_id.to_string();
 
     if let Some(index) = find_game_index(state, db_id) {

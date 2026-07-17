@@ -12,6 +12,7 @@ use super::image_budget::ImageLoadBudget;
 use super::achievement_rows::{create_achievement_row, build_global_tab};
 
 pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::Widget {
+    let _span = tracing::info_span!("build_achievements_view", db_id = game.db_id).entered();
     let is_ps4 = game.kind == ira_models::GameKind::Ps4;
 
     let view_stack = adw::ViewStack::new();

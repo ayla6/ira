@@ -33,11 +33,11 @@ pub fn find_image_file(dir: &Path, base_name: &str) -> Option<PathBuf> {
 }
 
 pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
-    if dir.join(format!("{}_small.webp", base_name)).is_file() {
+    if find_image_file(dir, &format!("{}_small", base_name)).is_some() {
         return;
     }
     let small_name = format!("{}_small", base_name);
-    for ext in &["png", "jpg", "jpeg", "ico"] {
+    for ext in &["png", "jpeg", "ico"] {
         let _ = std::fs::remove_file(dir.join(format!("{}.{}", small_name, ext)));
     }
     let Some(source) = find_image_file(dir, base_name) else { return };
@@ -52,25 +52,21 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     };
     let (w, h) = (img.width(), img.height());
 
-    let is_lossless = matches!(base_name, "icon")
-        || (base_name != "vertical" && base_name != "hero" && base_name != "header"
-            && source.extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| e.eq_ignore_ascii_case("png")));
-
     let dest = dir.join(format!("{}.webp", small_name));
 
     if w <= max_w && h <= max_h {
         let data = img.to_rgba8();
         let (fw, fh) = data.dimensions();
-        let encoded = if is_lossless {
-            webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless()
-        } else {
-            webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode(85.0)
-        };
+        let encoded = webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless();
         let _ = std::fs::write(&dest, &*encoded);
         return;
     }
+
+    let is_lossless = matches!(base_name, "icon")
+        || (base_name != "vertical" && base_name != "hero" && base_name != "header"
+            && source.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("png")));
 
     let ratio = (max_w as f64 / w as f64).min(max_h as f64 / h as f64);
     let new_w = (w as f64 * ratio).ceil() as u32;

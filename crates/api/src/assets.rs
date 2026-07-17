@@ -60,7 +60,13 @@ impl SteamDataClient {
         } else if let Some(url) = self.fetch_sgdb_asset_url(sgdb_id, "heroes") {
             ira_parser::remove_image_variants(dir, "hero");
             let ext = ira_parser::url_extension(&url);
-            self.fetch_image(&url, &dir.join(format!("hero.{}", ext)))
+            let dest = dir.join(format!("hero.{}", ext));
+            let r = self.fetch_image(&url, &dest);
+            if !r.is_empty() {
+                ira_parser::convert_to_lossless_webp(&dest);
+            }
+            let webp = dir.join("hero.webp");
+            if webp.is_file() { webp.to_string_lossy().into_owned() } else { r }
         } else { String::new() };
 
         let grid_path = if let Some(existing) = ira_parser::find_image_file(dir, "vertical") {
@@ -74,7 +80,13 @@ impl SteamDataClient {
         } else if let Some(url) = self.fetch_sgdb_asset_url(sgdb_id, "logos") {
             ira_parser::remove_image_variants(dir, "logo");
             let ext = ira_parser::url_extension(&url);
-            self.fetch_image(&url, &dir.join(format!("logo.{}", ext)))
+            let dest = dir.join(format!("logo.{}", ext));
+            let r = self.fetch_image(&url, &dest);
+            if !r.is_empty() {
+                ira_parser::convert_to_lossless_webp(&dest);
+            }
+            let webp = dir.join("logo.webp");
+            if webp.is_file() { webp.to_string_lossy().into_owned() } else { r }
         } else { String::new() };
 
         let header_path = if let Some(existing) = ira_parser::find_image_file(dir, "header") {
@@ -125,11 +137,17 @@ impl SteamDataClient {
         let hero_path = if let Some(cached) = self.find_cached_hero(app_id) {
             cached.to_string_lossy().into_owned()
         } else {
-            self.fetch_image_fallback(
+            let dest = dir.join("hero.jpg");
+            let r = self.fetch_image_fallback(
                 &format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_hero_2x.jpg", app_id),
                 &format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_hero.jpg", app_id),
-                &dir.join("hero.jpg"),
-            )
+                &dest,
+            );
+            if !r.is_empty() {
+                ira_parser::convert_to_lossless_webp(&dest);
+            }
+            let webp = dir.join("hero.webp");
+            if webp.is_file() { webp.to_string_lossy().into_owned() } else { r }
         };
 
         if !icon_path.is_empty() { ira_parser::ensure_small_image(&dir, "icon", 32, 32); }
@@ -147,19 +165,37 @@ impl SteamDataClient {
         let grid_path = if let Some(existing) = ira_parser::find_image_file(&dir, "vertical") {
             existing.to_string_lossy().into_owned()
         } else {
-            self.fetch_image_fallback(&cdn("library_600x900_2x.jpg"), &cdn("library_600x900.jpg"), &dir.join("vertical.jpg"))
+            let dest = dir.join("vertical.jpg");
+            let r = self.fetch_image_fallback(&cdn("library_600x900_2x.jpg"), &cdn("library_600x900.jpg"), &dest);
+            if !r.is_empty() {
+                ira_parser::convert_to_lossless_webp(&dest);
+            }
+            let webp = dir.join("vertical.webp");
+            if webp.is_file() { webp.to_string_lossy().into_owned() } else { r }
         };
 
         let header_path = if let Some(existing) = ira_parser::find_image_file(&dir, "header") {
             existing.to_string_lossy().into_owned()
         } else {
-            self.fetch_image_fallback(&cdn("header.jpg"), "", &dir.join("header.jpg"))
+            let dest = dir.join("header.jpg");
+            let r = self.fetch_image_fallback(&cdn("header.jpg"), "", &dest);
+            if !r.is_empty() {
+                ira_parser::convert_to_lossless_webp(&dest);
+            }
+            let webp = dir.join("header.webp");
+            if webp.is_file() { webp.to_string_lossy().into_owned() } else { r }
         };
 
         let logo_path = if let Some(existing) = ira_parser::find_image_file(&dir, "logo") {
             existing.to_string_lossy().into_owned()
         } else {
-            self.fetch_image_fallback(&cdn("logo.png"), "", &dir.join("logo.png"))
+            let dest = dir.join("logo.png");
+            let r = self.fetch_image_fallback(&cdn("logo.png"), "", &dest);
+            if !r.is_empty() {
+                ira_parser::convert_to_lossless_webp(&dest);
+            }
+            let webp = dir.join("logo.webp");
+            if webp.is_file() { webp.to_string_lossy().into_owned() } else { r }
         };
 
         if !grid_path.is_empty() { ira_parser::ensure_small_image(&dir, "vertical", 300, 450); }
@@ -201,30 +237,50 @@ impl SteamDataClient {
                 let dest = dir.join("hero.jpg");
                 let r = self.fetch_image(&cdn("library_hero_2x.jpg"), &dest);
                 let r = if r.is_empty() { self.fetch_image(&cdn("library_hero.jpg"), &dest) } else { r };
-                if !r.is_empty() { ira_parser::ensure_small_image(&dir, "hero", 1920, 620); }
-                r
+                if !r.is_empty() {
+                    ira_parser::convert_to_lossless_webp(&dest);
+                    let webp = dir.join("hero.webp");
+                    let r = if webp.is_file() { webp.to_string_lossy().into_owned() } else { r };
+                    ira_parser::ensure_small_image(&dir, "hero", 1920, 620);
+                    r
+                } else { r }
             }
             "grid" => {
                 ira_parser::remove_image_variants(&dir, "vertical");
                 let dest = dir.join("vertical.jpg");
                 let r = self.fetch_image(&cdn("library_600x900_2x.jpg"), &dest);
                 let r = if r.is_empty() { self.fetch_image(&cdn("library_600x900.jpg"), &dest) } else { r };
-                if !r.is_empty() { ira_parser::ensure_small_image(&dir, "vertical", 300, 450); }
-                r
+                if !r.is_empty() {
+                    ira_parser::convert_to_lossless_webp(&dest);
+                    let webp = dir.join("vertical.webp");
+                    let r = if webp.is_file() { webp.to_string_lossy().into_owned() } else { r };
+                    ira_parser::ensure_small_image(&dir, "vertical", 300, 450);
+                    r
+                } else { r }
             }
             "header" => {
                 ira_parser::remove_image_variants(&dir, "header");
                 let dest = dir.join("header.jpg");
                 let r = self.fetch_image(&cdn("header.jpg"), &dest);
-                if !r.is_empty() { ira_parser::ensure_small_image(&dir, "header", 460, 215); }
-                r
+                if !r.is_empty() {
+                    ira_parser::convert_to_lossless_webp(&dest);
+                    let webp = dir.join("header.webp");
+                    let r = if webp.is_file() { webp.to_string_lossy().into_owned() } else { r };
+                    ira_parser::ensure_small_image(&dir, "header", 460, 215);
+                    r
+                } else { r }
             }
             "logo" => {
                 ira_parser::remove_image_variants(&dir, "logo");
                 let dest = dir.join("logo.png");
                 let r = self.fetch_image(&cdn("logo.png"), &dest);
-                if !r.is_empty() { ira_parser::ensure_small_image(&dir, "logo", 620, 620); }
-                r
+                if !r.is_empty() {
+                    ira_parser::convert_to_lossless_webp(&dest);
+                    let webp = dir.join("logo.webp");
+                    let r = if webp.is_file() { webp.to_string_lossy().into_owned() } else { r };
+                    ira_parser::ensure_small_image(&dir, "logo", 620, 620);
+                    r
+                } else { r }
             }
             _ => String::new(),
         }
@@ -264,7 +320,12 @@ impl SteamDataClient {
             } else { String::new() }
         } else {
             let dest = dir.join(format!("{}.{}", base_name, ext));
-            self.fetch_image(&url, &dest)
+            let r = self.fetch_image(&url, &dest);
+            if !r.is_empty() {
+                ira_parser::convert_to_lossless_webp(&dest);
+            }
+            let webp = dir.join(format!("{}.webp", base_name));
+            if webp.is_file() { webp.to_string_lossy().into_owned() } else { r }
         };
 
         if !r.is_empty() {

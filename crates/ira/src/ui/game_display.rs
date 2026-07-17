@@ -6,6 +6,7 @@ use super::helpers::clear_children;
 use super::game_header::build_game_header;
 use super::achievement_view::build_achievements_view;
 pub fn display_game(game: &Game, state: &SharedState) {
+    let _span = tracing::info_span!("display_game", db_id = game.db_id).entered();
     let content_box = state.borrow().content_box.clone();
     let content_scroll = state.borrow().content_scroll.clone();
     let grid_header = state.borrow().grid_header.clone();

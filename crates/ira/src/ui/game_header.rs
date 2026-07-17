@@ -6,6 +6,7 @@ use super::play_button::play_button;
 use super::game_display::{format_last_played, format_playtime, logo_scaled_dims, logo_position_align};
 
 pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_width: i32) -> gtk4::Widget {
+    let _span = tracing::info_span!("build_game_header", db_id = game.db_id).entered();
     let title_row = {
         let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 14);
         let title_label = gtk4::Label::new(Some(&game.name));

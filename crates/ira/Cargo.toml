@@ -24,6 +24,7 @@ ira-config = { path = "../config" }
 ira-watcher = { path = "../watcher" }
 ira-launcher = { path = "../launcher" }
 ira-images = { path = "../images" }
+opticaldiscs = "0.10"
 [dev-dependencies]
 tempfile = "3"
 
@@ -34,6 +35,10 @@ path = "src/main.rs"
 [[bin]]
 name = "ira-test"
 path = "src/bin/test_main.rs"
+
+[[bin]]
+name = "ira-disc-info"
+path = "src/bin/disc_info.rs"
 
 [lints]
 workspace = true

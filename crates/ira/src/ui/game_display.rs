@@ -10,12 +10,17 @@ pub fn display_game(game: &Game, state: &SharedState) {
     let content_scroll = state.borrow().content_scroll.clone();
     let grid_header = state.borrow().grid_header.clone();
 
+    let is_same_game = state.borrow().displayed_db_id == game.db_id;
+    state.borrow_mut().displayed_db_id = game.db_id;
+
     state.borrow_mut().view_generation += 1;
     let gen = state.borrow().view_generation;
 
     clear_children(&grid_header);
     content_scroll.set_child(Some(&content_box));
-    content_scroll.vadjustment().set_value(0.0);
+    if !is_same_game {
+        content_scroll.vadjustment().set_value(0.0);
+    }
 
     clear_children(&content_box);
 

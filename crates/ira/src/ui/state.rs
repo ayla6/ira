@@ -22,6 +22,7 @@ pub struct AppState {
     pub content_box: gtk4::Box,
     pub grid_header: gtk4::Box,
     pub selected_id: String,
+    pub displayed_db_id: i64,
     pub cfg: Config,
     pub steam: Arc<SteamClient>,
     pub watcher: Option<AchievementWatcher>,

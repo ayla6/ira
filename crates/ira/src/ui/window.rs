@@ -57,6 +57,7 @@ pub fn build_ui(
         content_box: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
         grid_header: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
         selected_id: String::new(),
+        displayed_db_id: 0,
         cfg: cfg.clone(),
         steam: ctx.steam.clone(),
         watcher: ctx.watcher.clone(),

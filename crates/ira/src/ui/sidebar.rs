@@ -132,7 +132,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
     };
 
     state.borrow_mut().restoring = true;
-    store.remove_all();
+    let old_n = store.n_items();
 
     let mut items: Vec<SidebarItem> = Vec::new();
     items.push(SidebarItem::new_all_games());
@@ -214,12 +214,13 @@ pub fn rebuild_sidebar(state: &SharedState) {
         }
     }
 
-    store.splice(0, 0, &items);
+    store.splice(0, old_n, &items);
 
     let adj = sidebar_scroll.vadjustment();
-    let upper = adj.upper();
-    let max = (upper - adj.page_size()).max(0.0);
-    adj.set_value(saved_scroll.min(max));
+    glib::idle_add_local_once(move || {
+        let max = (adj.upper() - adj.page_size()).max(0.0);
+        adj.set_value(saved_scroll.min(max));
+    });
 
     restore_selection(state);
     state.borrow_mut().restoring = false;
@@ -234,8 +235,8 @@ fn restore_selection(state: &SharedState) {
         if let Ok(db_id) = selected_id.parse::<i64>() {
             if let Some(index) = find_game_index(state, db_id) {
                 select_row_silently(state, Some(index));
+                return;
             }
-            return;
         }
     }
 

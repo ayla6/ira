@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use ira_config::Config;
@@ -215,6 +215,8 @@ pub fn build_ra_games(
         let roms = scan_roms(&console.folder, console.def.extensions);
         let groups = group_multi_disc_roms(roms);
 
+        let mut matched_db_ids: HashSet<i64> = HashSet::new();
+
         for group in &groups {
             let (rom_name, rom_path, _disc_num) = &group.roms[0];
             let rom_path_str = rom_path.to_string_lossy().into_owned();
@@ -321,7 +323,27 @@ pub fn build_ra_games(
                 }
             }
 
+            matched_db_ids.insert(game.db_id);
             games.push(game);
+        }
+
+        let all_entries = ira_db::find_all_retro_by_platform(db, console.def.id).unwrap_or_default();
+        for mut entry in all_entries {
+            if matched_db_ids.contains(&entry.id) {
+                continue;
+            }
+            if !entry.rom_path.is_empty() && !Path::new(&entry.rom_path).is_file() {
+                let _ = ira_db::set_rom_path(db, entry.id, "");
+                entry.rom_path.clear();
+                let _ = ira_db::delete_discs(db, entry.id);
+            }
+            if let Ok(mut g) = load_game(&entry, save_dir) {
+                if !g.rom_path.is_empty() && !Path::new(&g.rom_path).is_file() {
+                    g.game_path.clear();
+                    g.rom_path.clear();
+                }
+                games.push(g);
+            }
         }
     }
 

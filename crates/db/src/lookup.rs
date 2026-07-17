@@ -90,3 +90,18 @@ pub fn find_by_rom_path(conn: &DbConn, rom_path: &str) -> Result<Option<GameEntr
     }
 }
 
+pub fn find_all_retro_by_platform(conn: &DbConn, platform_id: &str) -> Result<Vec<GameEntry>, String> {
+    let c = lock_db(conn)?;
+    let mut stmt = c.prepare(&format!(
+        "SELECT {} FROM games WHERE kind = 'retro' AND platform_id = ?1", crate::GAME_COLUMNS
+    )).map_err(|e| e.to_string())?;
+    let entries = stmt.query_map(params![platform_id], |row| {
+        crate::game_entry_from_row(row)
+    }).map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for entry in entries {
+        result.push(entry.map_err(|e| e.to_string())?);
+    }
+    Ok(result)
+}
+

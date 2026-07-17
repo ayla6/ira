@@ -61,7 +61,16 @@ pub fn display_game(game: &Game, state: &SharedState) {
     let has_achievements = !game.achievements.is_empty();
 
     if has_achievements {
-        game_vbox.append(&build_achievements_view(game, state, gen));
+        let gv = game_vbox.clone();
+        let state = state.clone();
+        let game = game.clone();
+        glib::idle_add_local(move || {
+            if state.borrow().view_generation != gen {
+                return glib::ControlFlow::Break;
+            }
+            gv.append(&build_achievements_view(&game, &state, gen));
+            glib::ControlFlow::Break
+        });
     }
 
     let clamp = adw::Clamp::new();

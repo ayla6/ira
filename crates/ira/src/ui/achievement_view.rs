@@ -75,65 +75,39 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
         });
     };
 
-    let mut budget = ImageLoadBudget::new(18);
-    const FIRST_BATCH: usize = 30;
     const BATCH_SIZE: usize = 20;
 
     if !earned.is_empty() {
         let earned_group = adw::PreferencesGroup::new();
         earned_group.set_title(&format!("Earned  ·  {}", earned.len()));
-
-        let first_n = FIRST_BATCH.min(earned.len());
-        for ach in &earned[..first_n] {
-            earned_group.add(&create_achievement_row(ach, None, &mut budget));
-        }
         progress_vbox.append(&earned_group);
 
-        if earned.len() > first_n {
-            let remaining: Vec<MergedAchievement> =
-                earned[first_n..].iter().map(|a| (*a).clone()).collect();
-            let group = earned_group.clone();
-            let state_gen = state.clone();
-            let mut i = 0;
-            glib::idle_add_local(move || {
-                if state_gen.borrow().view_generation != gen {
-                    return glib::ControlFlow::Break;
-                }
-                let end = (i + BATCH_SIZE).min(remaining.len());
-                let mut batch_budget = ImageLoadBudget::new(0);
-                for ach in &remaining[i..end] {
-                    group.add(&create_achievement_row(ach, None, &mut batch_budget));
-                }
-                batch_budget.flush(&state_gen, gen);
-                i = end;
-                if i >= remaining.len() {
-                    glib::ControlFlow::Break
-                } else {
-                    glib::ControlFlow::Continue
-                }
-            });
-        }
+        let remaining: Vec<MergedAchievement> = earned.iter().map(|a| (*a).clone()).collect();
+        let group = earned_group.clone();
+        let state_gen = state.clone();
+        let mut i = 0;
+        glib::idle_add_local(move || {
+            if state_gen.borrow().view_generation != gen {
+                return glib::ControlFlow::Break;
+            }
+            let end = (i + BATCH_SIZE).min(remaining.len());
+            let mut batch_budget = ImageLoadBudget::new(0);
+            for ach in &remaining[i..end] {
+                group.add(&create_achievement_row(ach, None, &mut batch_budget));
+            }
+            batch_budget.flush(&state_gen, gen);
+            i = end;
+            if i >= remaining.len() {
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
     }
     if !locked.is_empty() || !hidden.is_empty() {
         let locked_group = adw::PreferencesGroup::new();
         locked_group.set_title(&format!("Locked  ·  {}", locked.len() + hidden.len()));
-
-        let first_n = FIRST_BATCH.min(locked.len());
-        for ach in &locked[..first_n] {
-            let ach_clone = (*ach).clone();
-            let reload_clone = reload.clone();
-            let trophy_source_clone = game.trophy_source;
-            let app_id_clone = game.app_id.clone();
-            let platform_id_clone = game.platform_id.clone();
-            let state_clone = state.clone();
-            locked_group.add(&create_achievement_row(
-                ach,
-                Some(Box::new(move || {
-                    super::matching::confirm_mark_unlocked(&state_clone, trophy_source_clone, &app_id_clone, &platform_id_clone, &ach_clone, reload_clone.clone());
-                })),
-                &mut budget,
-            ));
-        }
+        progress_vbox.append(&locked_group);
 
         let hidden_expander: Option<adw::ExpanderRow> = if !hidden.is_empty() {
             let expander = adw::ExpanderRow::new();
@@ -178,56 +152,50 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
         } else {
             None
         };
-        progress_vbox.append(&locked_group);
 
-        if locked.len() > first_n {
-            let remaining: Vec<MergedAchievement> =
-                locked[first_n..].iter().map(|a| (*a).clone()).collect();
-            let group = locked_group.clone();
-            let reload = reload.clone();
-            let trophy_source = game.trophy_source;
-            let app_id = game.app_id.clone();
-            let platform_id = game.platform_id.clone();
-            let state = state.clone();
-            let mut expander = hidden_expander.clone();
-            let mut i = 0;
-            glib::idle_add_local(move || {
-                if state.borrow().view_generation != gen {
-                    return glib::ControlFlow::Break;
+        let remaining: Vec<MergedAchievement> =
+            locked.iter().map(|a| (*a).clone()).collect();
+        let group = locked_group.clone();
+        let reload = reload.clone();
+        let trophy_source = game.trophy_source;
+        let app_id = game.app_id.clone();
+        let platform_id = game.platform_id.clone();
+        let state = state.clone();
+        let mut expander = hidden_expander.clone();
+        let mut i = 0;
+        glib::idle_add_local(move || {
+            if state.borrow().view_generation != gen {
+                return glib::ControlFlow::Break;
+            }
+            let end = (i + BATCH_SIZE).min(remaining.len());
+            let mut batch_budget = ImageLoadBudget::new(0);
+            for ach in &remaining[i..end] {
+                let ach_clone = ach.clone();
+                let reload_clone = reload.clone();
+                let trophy_source_clone = trophy_source;
+                let app_id_clone = app_id.clone();
+                let platform_id_clone = platform_id.clone();
+                let state_clone = state.clone();
+                group.add(&create_achievement_row(
+                    ach,
+                    Some(Box::new(move || {
+                        super::matching::confirm_mark_unlocked(&state_clone, trophy_source_clone, &app_id_clone, &platform_id_clone, &ach_clone, reload_clone.clone());
+                    })),
+                    &mut batch_budget,
+                ));
+            }
+            batch_budget.flush(&state, gen);
+            i = end;
+            if i >= remaining.len() {
+                if let Some(exp) = expander.take() {
+                    group.add(&exp);
                 }
-                let end = (i + BATCH_SIZE).min(remaining.len());
-                let mut batch_budget = ImageLoadBudget::new(0);
-                for ach in &remaining[i..end] {
-                    let ach_clone = ach.clone();
-                    let reload_clone = reload.clone();
-                    let trophy_source_clone = trophy_source;
-                    let app_id_clone = app_id.clone();
-                    let platform_id_clone = platform_id.clone();
-                    let state_clone = state.clone();
-                    group.add(&create_achievement_row(
-                        ach,
-                        Some(Box::new(move || {
-                            super::matching::confirm_mark_unlocked(&state_clone, trophy_source_clone, &app_id_clone, &platform_id_clone, &ach_clone, reload_clone.clone());
-                        })),
-                        &mut batch_budget,
-                    ));
-                }
-                batch_budget.flush(&state, gen);
-                i = end;
-                if i >= remaining.len() {
-                    if let Some(exp) = expander.take() {
-                        group.add(&exp);
-                    }
-                    glib::ControlFlow::Break
-                } else {
-                    glib::ControlFlow::Continue
-                }
-            });
-        } else if let Some(exp) = hidden_expander {
-            locked_group.add(&exp);
-        }
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
     }
-    budget.flush(state, gen);
 
     let progress_page = view_stack.add_titled(&progress_vbox, Some("progress"), S::MY_PROGRESS);
     progress_page.set_icon_name(Some("user-home-symbolic"));

@@ -1,44 +1,6 @@
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub const GALAXY_ID: &str = "100000000000000000";
-
-/// Caches a directory listing so multiple image lookups avoid repeated `is_file()` stat calls.
-/// One `read_dir` replaces ~60+ individual stat calls per game on cold boots.
-pub struct DirCache {
-    dir: PathBuf,
-    files: HashSet<String>,
-}
-
-impl DirCache {
-    pub fn new(dir: &Path) -> Self {
-        let mut files = HashSet::new();
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    files.insert(name.to_string());
-                }
-            }
-        }
-        DirCache { dir: dir.to_path_buf(), files }
-    }
-
-    pub fn dir(&self) -> &Path { &self.dir }
-
-    pub fn has(&self, filename: &str) -> bool {
-        self.files.contains(filename)
-    }
-
-    pub fn find_image(&self, base_name: &str) -> Option<PathBuf> {
-        for ext in &["png", "jpg", "jpeg", "webp", "ico"] {
-            let filename = format!("{}.{}", base_name, ext);
-            if self.files.contains(&filename) {
-                return Some(self.dir.join(filename));
-            }
-        }
-        None
-    }
-}
 
 pub fn data_dir(save_dir: &str, app_id: &str) -> PathBuf {
     Path::new(save_dir).join("data").join("steam").join(app_id)
@@ -61,7 +23,7 @@ pub fn ra_icon_path(save_dir: &str, game_id: &str) -> PathBuf {
 }
 
 pub fn find_image_file(dir: &Path, base_name: &str) -> Option<PathBuf> {
-    for ext in &["png", "jpg", "jpeg", "webp", "ico"] {
+    for ext in &["webp", "jpg"] {
         let p = dir.join(format!("{}.{}", base_name, ext));
         if p.is_file() {
             return Some(p);
@@ -88,33 +50,6 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
         Ok(i) => i,
         Err(_) => return,
     };
-    resize_and_save(dir, base_name, &small_name, &source, img, max_w, max_h);
-}
-
-/// Cached variant: uses a DirCache to avoid stat calls when the small version already exists.
-pub fn ensure_small_image_cached(cache: &DirCache, base_name: &str, max_w: u32, max_h: u32) {
-    if cache.has(&format!("{}_small.webp", base_name)) {
-        return;
-    }
-    let dir = cache.dir();
-    let small_name = format!("{}_small", base_name);
-    for ext in &["png", "jpg", "jpeg", "ico"] {
-        let _ = std::fs::remove_file(dir.join(format!("{}.{}", small_name, ext)));
-    }
-    let Some(source) = cache.find_image(base_name) else { return };
-
-    let img = match image::ImageReader::open(&source)
-        .map_err(|_| ())
-        .and_then(|r| r.with_guessed_format().map_err(|_| ()))
-        .and_then(|r| r.decode().map_err(|_| ()))
-    {
-        Ok(i) => i,
-        Err(_) => return,
-    };
-    resize_and_save(dir, base_name, &small_name, &source, img, max_w, max_h);
-}
-
-fn resize_and_save(dir: &Path, base_name: &str, small_name: &str, source: &Path, img: image::DynamicImage, max_w: u32, max_h: u32) {
     let (w, h) = (img.width(), img.height());
 
     let is_lossless = matches!(base_name, "icon")
@@ -221,7 +156,6 @@ pub fn unlock_status_path(save_dir: &str, trophy_source: ira_models::TrophySourc
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
 
     #[test]
     fn test_url_extension_png() {
@@ -243,21 +177,5 @@ mod tests {
         let url = "https://example.com/path/icon.png?w=200&h=200";
         let ext = url_extension(url);
         assert!(ext.contains("png"));
-    }
-
-    #[test]
-    fn test_find_image_file_exists() {
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("test_icon.png");
-        fs::write(&file_path, "fake png content").unwrap();
-        let result = find_image_file(dir.path(), "test_icon");
-        assert_eq!(result, Some(file_path));
-    }
-
-    #[test]
-    fn test_find_image_file_not_found() {
-        let dir = tempfile::tempdir().unwrap();
-        let result = find_image_file(dir.path(), "nonexistent");
-        assert_eq!(result, None);
     }
 }

@@ -97,34 +97,16 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         ira_parser::data_dir(save_dir, app_id)
     };
 
-    {
-        let _s = tracing::info_span!("find_images").entered();
-        let cache = ira_parser::DirCache::new(&image_dir);
-
-        if let Some(icon_path) = cache.find_image("icon") {
-            game.icon_path = icon_path.to_string_lossy().into_owned();
-        } else {
-            let ra_icon = ira_parser::ra_icon_path(save_dir, app_id);
-            if ra_icon.is_file() {
-                game.icon_path = ra_icon.to_string_lossy().into_owned();
-            } else if cache.has("icon.ico") {
-                let icon_ico = image_dir.join("icon.ico");
-                let webp = icon_ico.with_extension("webp");
-                ira_parser::convert_to_lossless_webp(&icon_ico);
-                if cache.has("icon.webp") || webp.is_file() {
-                    game.icon_path = webp.to_string_lossy().into_owned();
-                } else {
-                    game.icon_path = icon_ico.to_string_lossy().into_owned();
-                }
-            } else if cache.has("icon.jpg") {
-                game.icon_path = image_dir.join("icon.jpg").to_string_lossy().into_owned();
-            } else if cache.has("icon.webp") {
-                game.icon_path = image_dir.join("icon.webp").to_string_lossy().into_owned();
-            }
+    if let Some(icon_path) = ira_parser::find_image_file(&image_dir, "icon") {
+        game.icon_path = icon_path.to_string_lossy().into_owned();
+    } else if entry.trophy_source == ira_models::TrophySource::Ra {
+        let ra_icon = ira_parser::ra_icon_path(save_dir, app_id);
+        if ra_icon.is_file() {
+            game.icon_path = ra_icon.to_string_lossy().into_owned();
         }
-
-        ira_parser::populate_image_paths_cached(&cache, &mut game);
     }
+
+    ira_parser::populate_image_paths(&image_dir, &mut game);
 
     let is_steam_native = entry.trophy_source == ira_models::TrophySource::SteamNative;
     let steam_native_data = if is_steam_native {

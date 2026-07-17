@@ -43,11 +43,7 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
         let save_dir_native = save_dir.clone();
         let native_handle = s.spawn(move || {
             let _s = tracing::info_span!("load_games_from_db").entered();
-            let mut games = game_loader::load_games(&db_native, &save_dir_native);
-            games.retain(|g| g.kind != ira_models::GameKind::Steam
-                && g.kind != ira_models::GameKind::Ps4
-                && g.kind != ira_models::GameKind::Retro);
-            games
+            game_loader::load_games(&db_native, &save_dir_native)
         });
 
         let ps4_handle = if options.shadps4_enabled {

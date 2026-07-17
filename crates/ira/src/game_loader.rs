@@ -20,6 +20,9 @@ pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
 
     let mut games = Vec::new();
     for entry in entries {
+        if entry.kind != ira_models::GameKind::Linux && entry.kind != ira_models::GameKind::Wine {
+            continue;
+        }
         let app_id = if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id };
         let _s = tracing::info_span!("load_game", app_id).entered();
         match load_game(&entry, save_dir) {

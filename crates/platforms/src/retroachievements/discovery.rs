@@ -26,17 +26,34 @@ fn active_consoles(cfg: &Config) -> Vec<ActiveConsole> {
 }
 
 fn normalize_name(s: &str) -> String {
-    let cleaned: String = s
-        .chars()
-        .map(|c| if c == '_' || c == '.' { ' ' } else { c })
-        .collect();
-    let no_tags = remove_version_tags(&cleaned);
-    let lower = no_tags.to_lowercase();
-    let alnum: String = lower
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
-        .collect();
-    alnum.split_whitespace().collect::<Vec<_>>().join(" ")
+    let mut result = String::with_capacity(s.len());
+    let mut in_brackets = 0i32;
+    let mut prev_space = true;
+
+    for c in s.chars() {
+        match c {
+            '(' | '[' => in_brackets += 1,
+            ')' | ']' => { if in_brackets > 0 { in_brackets -= 1; } }
+            _ if in_brackets > 0 => {}
+            _ => {
+                let c = if c == '_' || c == '.' { ' ' } else { c };
+                for lc in c.to_lowercase() {
+                    if lc.is_alphanumeric() {
+                        result.push(lc);
+                        prev_space = false;
+                    } else if !prev_space {
+                        result.push(' ');
+                        prev_space = true;
+                    }
+                }
+            }
+        }
+    }
+
+    while result.ends_with(' ') {
+        result.pop();
+    }
+    result
 }
 
 fn remove_version_tags(s: &str) -> String {

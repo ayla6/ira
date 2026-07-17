@@ -352,14 +352,6 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             }
         }
 
-        if pending_copies_c.borrow().contains_key("__unmatch__") {
-            let _ = ira_db::set_sgdb_id(&db, db_id_s, "");
-            if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id_s) {
-                g.sgdb_id.clear();
-            }
-            pending_copies_c.borrow_mut().remove("__unmatch__");
-        }
-
         if let Some((ref selected_pos, ref size_adj)) = logo_controls_c {
             let pos = selected_pos.borrow().clone();
             let size = size_adj.value() as i32;

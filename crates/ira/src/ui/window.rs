@@ -37,6 +37,7 @@ pub fn build_ui(
     cfg: Config,
     ctx: AppContext,
 ) -> SharedState {
+    let _span = tracing::info_span!("build_ui").entered();
     let save_dir = cfg.save_dir.clone();
     let groups = ira_db::get_all_groups(&ctx.db).unwrap_or_else(|e| {
         eprintln!("Failed to load groups: {}", e);
@@ -81,7 +82,10 @@ pub fn build_ui(
         collapsed_collections: HashSet::new(),
     }));
 
-    build_window(&state, app);
+    {
+        let _s = tracing::info_span!("build_window").entered();
+        build_window(&state, app);
+    }
 
     let win = state.borrow().window.clone();
     win.present();

@@ -15,6 +15,7 @@ gdk4 = "0.11"
 pango = "0.22"
 libc = "0.2"
 image = { version = "0.25", features = ["png", "ico", "jpeg", "webp"] }
+tracing = "0.1"
 ira-models = { path = "../models" }
 ira-db = { path = "../db" }
 ira-parser = { path = "../parser" }
@@ -25,6 +26,8 @@ ira-watcher = { path = "../watcher" }
 ira-launcher = { path = "../launcher" }
 ira-images = { path = "../images" }
 opticaldiscs = "0.10"
+tracing-subscriber = { version = "0.3", optional = true }
+tracing-chrome = { version = "0.7", optional = true }
 [dev-dependencies]
 tempfile = "3"
 
@@ -44,3 +47,4 @@ path = "src/bin/disc_info.rs"
 workspace = true
 
 [features]
+trace = ["dep:tracing-subscriber", "dep:tracing-chrome"]

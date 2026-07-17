@@ -188,6 +188,7 @@ pub fn build_ra_games(
 ) -> Vec<Game> {
     let has_credentials = !cfg.ra_username.is_empty() && !cfg.ra_token.is_empty();
     let client = if cfg.ra_enabled && has_credentials {
+        let _s = tracing::info_span!("ra_client_init").entered();
         RaClient::from_config(cfg)
     } else {
         None
@@ -197,33 +198,50 @@ pub fn build_ra_games(
     let mut games = Vec::new();
 
     for console in &consoles {
-        let ra_games_raw = match &client {
-            Some(c) => match c.fetch_console_games(save_dir, console.def.ra_console_id) {
-                Ok(g) => g,
-                Err(e) => {
-                    eprintln!("RA: failed to fetch game list for {}: {}", console.def.id, e);
-                    continue;
-                }
-            },
-            None => Vec::new(),
+        let _console_span = tracing::info_span!("ra_console", console = console.def.id).entered();
+
+        let ra_games_raw = {
+            let _s = tracing::info_span!("fetch_console_games").entered();
+            match &client {
+                Some(c) => match c.fetch_console_games(save_dir, console.def.ra_console_id) {
+                    Ok(g) => g,
+                    Err(e) => {
+                        eprintln!("RA: failed to fetch game list for {}: {}", console.def.id, e);
+                        continue;
+                    }
+                },
+                None => Vec::new(),
+            }
         };
         let ra_games: Vec<RaGameEntry> = ra_games_raw
             .into_iter()
             .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset"))
             .collect();
 
-        let ra_title_map: HashMap<String, u32> = ra_games.iter()
-            .map(|g| (normalize_name(&g.title), g.id))
-            .collect();
+        let ra_title_map: HashMap<String, u32> = {
+            let _s = tracing::info_span!("normalize_ra_titles").entered();
+            ra_games.iter()
+                .map(|g| (normalize_name(&g.title), g.id))
+                .collect()
+        };
 
-        let roms = scan_roms(&console.folder, console.def.extensions);
+        let roms = {
+            let _s = tracing::info_span!("scan_roms").entered();
+            scan_roms(&console.folder, console.def.extensions)
+        };
 
-        let existing_entries = ira_db::find_all_retro_by_platform(db, console.def.id).unwrap_or_default();
+        let existing_entries = {
+            let _s = tracing::info_span!("db_find_retro").entered();
+            ira_db::find_all_retro_by_platform(db, console.def.id).unwrap_or_default()
+        };
         let existing_by_path: HashMap<String, ira_models::GameEntry> = existing_entries.iter()
             .filter(|e| !e.rom_path.is_empty())
             .map(|e| (e.rom_path.clone(), e.clone()))
             .collect();
-        let disc_paths = ira_db::get_disc_paths_for_platform(db, console.def.id).unwrap_or_default();
+        let disc_paths = {
+            let _s = tracing::info_span!("db_disc_paths").entered();
+            ira_db::get_disc_paths_for_platform(db, console.def.id).unwrap_or_default()
+        };
 
         let known_paths: HashSet<&str> = existing_by_path.keys()
             .map(|s| s.as_str())
@@ -240,22 +258,27 @@ pub fn build_ra_games(
             }
         }
 
-        for (rom_path_str, entry) in &existing_by_path {
-            let mut g = load_game(entry, save_dir).unwrap_or_else(|_| Game {
-                app_id: entry.steam_id.clone(),
-                kind: GameKind::Retro,
-                trophy_source: entry.trophy_source,
-                platform_id: entry.platform_id.clone(),
-                db_id: entry.id,
-                name: if entry.title.is_empty() { rom_path_str.clone() } else { entry.title.clone() },
-                ..Default::default()
-            });
-            g.game_path = rom_path_str.clone();
-            g.rom_path = rom_path_str.clone();
-            games.push(g);
+        {
+            let _s = tracing::info_span!("load_known_games", count = existing_by_path.len()).entered();
+            for (rom_path_str, entry) in &existing_by_path {
+                let _gs = tracing::info_span!("load_game", app_id = &entry.steam_id).entered();
+                let mut g = load_game(entry, save_dir).unwrap_or_else(|_| Game {
+                    app_id: entry.steam_id.clone(),
+                    kind: GameKind::Retro,
+                    trophy_source: entry.trophy_source,
+                    platform_id: entry.platform_id.clone(),
+                    db_id: entry.id,
+                    name: if entry.title.is_empty() { rom_path_str.clone() } else { entry.title.clone() },
+                    ..Default::default()
+                });
+                g.game_path = rom_path_str.clone();
+                g.rom_path = rom_path_str.clone();
+                games.push(g);
+            }
         }
 
         if !new_roms.is_empty() {
+            let _s = tracing::info_span!("process_new_roms", count = new_roms.len()).entered();
             let groups = group_multi_disc_roms(new_roms);
             for group in &groups {
                 let (rom_name, rom_path, _disc_num) = &group.roms[0];
@@ -349,10 +372,13 @@ pub fn build_ra_games(
             }
         }
 
-        for entry in &existing_entries {
-            if !entry.rom_path.is_empty() && !seen_paths.contains(&entry.rom_path) {
-                let _ = ira_db::set_rom_path(db, entry.id, "");
-                let _ = ira_db::delete_discs(db, entry.id);
+        {
+            let _s = tracing::info_span!("stale_check").entered();
+            for entry in &existing_entries {
+                if !entry.rom_path.is_empty() && !seen_paths.contains(&entry.rom_path) {
+                    let _ = ira_db::set_rom_path(db, entry.id, "");
+                    let _ = ira_db::delete_discs(db, entry.id);
+                }
             }
         }
     }

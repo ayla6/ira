@@ -14,6 +14,8 @@ pub struct GameListOptions {
 }
 
 pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &GameListOptions) -> Vec<Game> {
+    let _span = tracing::info_span!("build_game_list").entered();
+
     let ra_any_console = cfg.any_console_enabled();
     let db = db.clone();
     let save_dir = save_dir.to_string();
@@ -25,6 +27,7 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
         let steam_discovery = if options.steam_enabled {
             let db = db.clone();
             Some(s.spawn(move || {
+                let _s = tracing::info_span!("steam_discover").entered();
                 let steam_games = steam::discover_games();
                 if !steam_games.is_empty() {
                     cleanup_steam_entries(&db, &steam_games);
@@ -39,6 +42,7 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
         let db_native = db.clone();
         let save_dir_native = save_dir.clone();
         let native_handle = s.spawn(move || {
+            let _s = tracing::info_span!("load_games_from_db").entered();
             let mut games = game_loader::load_games(&db_native, &save_dir_native);
             games.retain(|g| g.kind != ira_models::GameKind::Steam
                 && g.kind != ira_models::GameKind::Ps4
@@ -49,7 +53,10 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
         let ps4_handle = if options.shadps4_enabled {
             let db_ps4 = db.clone();
             let save_dir_ps4 = save_dir.clone();
-            Some(s.spawn(move || build_shadps4_games(&db_ps4, &save_dir_ps4)))
+            Some(s.spawn(move || {
+                let _s = tracing::info_span!("build_shadps4_games").entered();
+                build_shadps4_games(&db_ps4, &save_dir_ps4)
+            }))
         } else {
             None
         };
@@ -58,14 +65,20 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
             let db_ra = db.clone();
             let save_dir_ra = save_dir.clone();
             let cfg_ra = cfg.clone();
-            Some(s.spawn(move || retroachievements::build_ra_games(&db_ra, &save_dir_ra, &cfg_ra, game_loader::load_game)))
+            Some(s.spawn(move || {
+                let _s = tracing::info_span!("build_ra_games").entered();
+                retroachievements::build_ra_games(&db_ra, &save_dir_ra, &cfg_ra, game_loader::load_game)
+            }))
         } else {
             None
         };
 
         let steam_games = if let Some(h) = steam_discovery {
             match h.join() {
-                Ok((games, playtimes)) => build_steam_games(&db, &save_dir, &games, &playtimes),
+                Ok((games, playtimes)) => {
+                    let _s = tracing::info_span!("build_steam_games").entered();
+                    build_steam_games(&db, &save_dir, &games, &playtimes)
+                }
                 Err(_) => {
                     eprintln!("Steam discovery thread panicked");
                     Vec::new()

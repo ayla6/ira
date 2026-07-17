@@ -41,17 +41,31 @@ unsafe extern "C" fn source_destroy(data: glib::ffi::gpointer) {
 }
 
 pub fn activate(app: &adw::Application) -> SharedState {
-    let cfg = config::load_config();
+    let _span = tracing::info_span!("activate").entered();
 
-    let db = db::init_db(&format!("{}/ira.db", cfg.save_dir));
+    let cfg = {
+        let _s = tracing::info_span!("load_config").entered();
+        config::load_config()
+    };
 
-    ira_platforms::api_emulators::ensure_skeleton(&cfg.save_dir);
+    let db = {
+        let _s = tracing::info_span!("init_db").entered();
+        db::init_db(&format!("{}/ira.db", cfg.save_dir))
+    };
 
-    let steam = Arc::new(SteamClient::new(
-        cfg.steam_api_key.clone(),
-        cfg.steam_griddb_api_key.clone(),
-        &format!("{}/data", cfg.save_dir),
-    ));
+    {
+        let _s = tracing::info_span!("ensure_skeleton").entered();
+        ira_platforms::api_emulators::ensure_skeleton(&cfg.save_dir);
+    }
+
+    let steam = {
+        let _s = tracing::info_span!("steam_client_new").entered();
+        Arc::new(SteamClient::new(
+            cfg.steam_api_key.clone(),
+            cfg.steam_griddb_api_key.clone(),
+            &format!("{}/data", cfg.save_dir),
+        ))
+    };
 
     let mut pipe_fds = [0i32; 2];
     unsafe {
@@ -64,11 +78,14 @@ pub fn activate(app: &adw::Application) -> SharedState {
     let sender = AppSender::new(tx, write_fd);
 
     let cfg_for_watcher = Arc::new(cfg.clone());
-    let watcher = match AchievementWatcher::new(cfg_for_watcher, sender.clone(), cfg.save_dir.clone(), Arc::new(crate::game_loader::load_game)) {
-        Ok(w) => Some(w),
-        Err(e) => {
-            eprintln!("Live achievement watching unavailable: {}", e);
-            None
+    let watcher = {
+        let _s = tracing::info_span!("watcher_new").entered();
+        match AchievementWatcher::new(cfg_for_watcher, sender.clone(), cfg.save_dir.clone(), Arc::new(crate::game_loader::load_game)) {
+            Ok(w) => Some(w),
+            Err(e) => {
+                eprintln!("Live achievement watching unavailable: {}", e);
+                None
+            }
         }
     };
 
@@ -76,11 +93,14 @@ pub fn activate(app: &adw::Application) -> SharedState {
         Arc::new(Mutex::new(HashMap::new()))
     });
 
-    let shadps4_watcher = match ShadPS4Watcher::new(sender.clone()) {
-        Ok(w) => Some(w),
-        Err(e) => {
-            eprintln!("shadPS4 playtime watching unavailable: {}", e);
-            None
+    let shadps4_watcher = {
+        let _s = tracing::info_span!("shadps4_watcher_new").entered();
+        match ShadPS4Watcher::new(sender.clone()) {
+            Ok(w) => Some(w),
+            Err(e) => {
+                eprintln!("shadPS4 playtime watching unavailable: {}", e);
+                None
+            }
         }
     };
 
@@ -91,18 +111,21 @@ pub fn activate(app: &adw::Application) -> SharedState {
     let sort_mode = cfg.sort_mode;
     let sort_descending = cfg.sort_descending;
 
-    let state = build_ui(
-        app,
-        Vec::new(),
-        cfg,
-        crate::ui::AppContext {
-            steam: steam.clone(),
-            watcher: watcher.clone(),
-            db: db.clone(),
-            sender: sender.clone(),
-            game_names,
-        },
-    );
+    let state = {
+        let _s = tracing::info_span!("build_ui").entered();
+        build_ui(
+            app,
+            Vec::new(),
+            cfg,
+            crate::ui::AppContext {
+                steam: steam.clone(),
+                watcher: watcher.clone(),
+                db: db.clone(),
+                sender: sender.clone(),
+                game_names,
+            },
+        )
+    };
 
     state.borrow_mut().shadps4_watcher = shadps4_watcher;
 
@@ -132,6 +155,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
         let sender = sender.clone();
         let save_dir = save_dir.clone();
         std::thread::spawn(move || {
+            let _span = tracing::info_span!("build_game_list_thread").entered();
             let opts = crate::game_list::GameListOptions {
                 shadps4_enabled,
                 steam_enabled,

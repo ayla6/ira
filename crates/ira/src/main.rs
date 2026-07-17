@@ -1,10 +1,32 @@
 use ira::activate::activate;
 use ira::ui::{restore_content, SharedState};
 use gtk4::prelude::*;
+#[cfg(feature = "trace")]
+use tracing_subscriber::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+#[cfg(feature = "trace")]
+fn init_tracing() -> Option<tracing_chrome::FlushGuard> {
+    if std::env::var("IRA_TRACE").is_err() {
+        return None;
+    }
+    let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
+        .file("ira-trace.json")
+        .include_args(true)
+        .build();
+    tracing_subscriber::registry().with(chrome_layer).init();
+    Some(guard)
+}
+
+#[cfg(not(feature = "trace"))]
+fn init_tracing() -> Option<()> {
+    None
+}
+
 fn main() {
+    let _flush_guard = init_tracing();
+
     let app = adw::Application::new(
         Some("com.github.ira"),
         gio::ApplicationFlags::empty(),

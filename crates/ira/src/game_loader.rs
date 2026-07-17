@@ -9,6 +9,7 @@ pub fn read_app_details(save_dir: &str, app_id: &str) -> Option<AppDetails> {
 }
 
 pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
+    let _span = tracing::info_span!("load_games").entered();
     let entries = match ira_db::load_all_games(conn) {
         Ok(e) => e,
         Err(e) => {
@@ -19,6 +20,8 @@ pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
 
     let mut games = Vec::new();
     for entry in entries {
+        let app_id = if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id };
+        let _s = tracing::info_span!("load_game", app_id).entered();
         match load_game(&entry, save_dir) {
             Ok(game) => games.push(game),
             Err(e) => eprintln!("Skipping game {} ({}): {}", if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id }, entry.kind, e),
@@ -91,34 +94,37 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         ira_parser::data_dir(save_dir, app_id)
     };
 
-    if let Some(icon_path) = ira_parser::find_image_file(&image_dir, "icon") {
-        game.icon_path = icon_path.to_string_lossy().into_owned();
-    } else {
-        let ra_icon = ira_parser::ra_icon_path(save_dir, app_id);
-        if ra_icon.is_file() {
-            game.icon_path = ra_icon.to_string_lossy().into_owned();
-        }
-        let icon_ico = image_dir.join("icon.ico");
-        if icon_ico.is_file() {
-            let webp = icon_ico.with_extension("webp");
-            ira_parser::convert_to_lossless_webp(&icon_ico);
-            if webp.is_file() {
-                game.icon_path = webp.to_string_lossy().into_owned();
-            } else {
-                game.icon_path = icon_ico.to_string_lossy().into_owned();
-            }
+    {
+        let _s = tracing::info_span!("find_images").entered();
+        if let Some(icon_path) = ira_parser::find_image_file(&image_dir, "icon") {
+            game.icon_path = icon_path.to_string_lossy().into_owned();
         } else {
-            for ext in ["jpg", "webp"] {
-                let p = image_dir.join(format!("icon.{}", ext));
-                if p.is_file() {
-                    game.icon_path = p.to_string_lossy().into_owned();
-                    break;
+            let ra_icon = ira_parser::ra_icon_path(save_dir, app_id);
+            if ra_icon.is_file() {
+                game.icon_path = ra_icon.to_string_lossy().into_owned();
+            }
+            let icon_ico = image_dir.join("icon.ico");
+            if icon_ico.is_file() {
+                let webp = icon_ico.with_extension("webp");
+                ira_parser::convert_to_lossless_webp(&icon_ico);
+                if webp.is_file() {
+                    game.icon_path = webp.to_string_lossy().into_owned();
+                } else {
+                    game.icon_path = icon_ico.to_string_lossy().into_owned();
+                }
+            } else {
+                for ext in ["jpg", "webp"] {
+                    let p = image_dir.join(format!("icon.{}", ext));
+                    if p.is_file() {
+                        game.icon_path = p.to_string_lossy().into_owned();
+                        break;
+                    }
                 }
             }
         }
-    }
 
-    ira_parser::populate_image_paths(&image_dir, &mut game);
+        ira_parser::populate_image_paths(&image_dir, &mut game);
+    }
 
     let is_steam_native = entry.trophy_source == ira_models::TrophySource::SteamNative;
     let steam_native_data = if is_steam_native {
@@ -128,6 +134,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     };
 
     if entry.trophy_source == ira_models::TrophySource::Ra {
+        let _s = tracing::info_span!("load_ra_achievements_from_cache").entered();
         game.achievements = ira_platforms::retroachievements::load_ra_achievements_from_cache(save_dir, app_id);
         game.total_count = game.achievements.len();
         game.earned_count = game.achievements.iter().filter(|a| a.earned).count();

@@ -34,7 +34,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
         id: "psp",
         display_name: "PSP",
         ra_console_id: 41,
-        extensions: &["iso", "cso", "pbp", "prx"],
+        extensions: &["iso", "cso", "chd", "pbp", "prx"],
         binary_names: &["ppsspp", "PPSSPPSDL"],
         flatpak_id: "org.ppsspp.PPSSPP",
         emu_display_name: "PPSSPP",

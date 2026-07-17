@@ -202,7 +202,7 @@ pub fn build_ra_games(
                 Ok(g) => g,
                 Err(e) => {
                     eprintln!("RA: failed to fetch game list for {}: {}", console.def.id, e);
-                    Vec::new()
+                    continue;
                 }
             },
             None => Vec::new(),

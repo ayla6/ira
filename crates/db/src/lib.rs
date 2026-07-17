@@ -12,6 +12,7 @@ mod variants;
 mod groups;
 mod metadata;
 mod migration;
+mod discs;
 pub use crud::*;
 pub use lookup::*;
 pub use settings::*;
@@ -21,6 +22,7 @@ pub use profiles::*;
 pub use variants::*;
 pub use groups::*;
 pub use metadata::*;
+pub use discs::*;
 
 pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, game_id, platform_id, title, hidden, sgdb_id, logo_position, logo_size, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path, playtime";
 
@@ -161,6 +163,8 @@ pub fn init_db(db_path: &str) -> DbConn {
             );"
         );
     }
+    create_discs_table(&pool);
+    create_default_disc_table(&pool);
     pool
 }
 

@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ira_config::Config;
-use ira_models::{Game, GameKind, TrophySource};
+use ira_models::{Game, GameDisc, GameKind, TrophySource};
 use crate::consoles::{CONSOLES, ConsoleDef};
 use crate::retroachievements::api::{RaClient, RaGameEntry};
 
@@ -54,6 +55,85 @@ fn remove_version_tags(s: &str) -> String {
         }
     }
     result.trim().to_string()
+}
+
+/// Detects disc patterns in a ROM filename and returns (base_name, disc_number) if found.
+/// Handles patterns like: (Disc 1), (Disc 2), (Disk 1), (CD 1), [CD1], [Disc 1]
+fn strip_disc_pattern(name: &str) -> Option<(String, i32)> {
+    let lower = name.to_lowercase();
+    let keywords = ["disc ", "disk ", "cd "];
+
+    for kw in keywords {
+        if let Some(kw_start) = lower.find(kw) {
+            let bracket_start = name[..kw_start].rfind(['(', '['])?;
+            let after_kw = kw_start + kw.len();
+            let closing = name[after_kw..].find([')', ']'])?;
+            let num_str = name[after_kw..after_kw + closing].trim();
+            if let Ok(n) = num_str.parse::<i32>() {
+                let base = format!("{} {}", name[..bracket_start].trim(), name[after_kw + closing + 1..].trim());
+                let base = base.trim().to_string();
+                return Some((base, n));
+            }
+        }
+    }
+
+    None
+}
+
+struct DiscGroup {
+    roms: Vec<(String, PathBuf, Option<i32>)>,
+}
+
+/// Groups ROMs into multi-disc sets. Uses filename pattern first, then serial fallback.
+fn group_multi_disc_roms(roms: Vec<(String, PathBuf)>) -> Vec<DiscGroup> {
+    let mut by_pattern: HashMap<String, Vec<(String, PathBuf, Option<i32>)>> = HashMap::new();
+    let mut ungrouped: Vec<(String, PathBuf, Option<i32>)> = Vec::new();
+
+    for (name, path) in roms {
+        match strip_disc_pattern(&name) {
+            Some((base, disc_num)) => {
+                by_pattern.entry(base).or_default().push((name, path, Some(disc_num)));
+            }
+            None => {
+                ungrouped.push((name, path, None));
+            }
+        }
+    }
+
+    let mut groups: Vec<DiscGroup> = Vec::new();
+
+    for (_, mut rom_list) in by_pattern {
+        if rom_list.len() >= 2 {
+            rom_list.sort_by_key(|(_, _, disc)| disc.unwrap_or(0));
+            groups.push(DiscGroup { roms: rom_list });
+        } else {
+            groups.push(DiscGroup { roms: rom_list });
+        }
+    }
+
+    let mut by_serial: HashMap<String, Vec<(String, PathBuf, Option<i32>)>> = HashMap::new();
+    for (name, path, _) in ungrouped {
+        let serial = crate::rom_serial::read_serial(&path);
+        if let Some(ref s) = serial {
+            by_serial.entry(s.clone()).or_default().push((name, path, None));
+        } else {
+            groups.push(DiscGroup { roms: vec![(name, path, None)] });
+        }
+    }
+
+    for (_, mut rom_list) in by_serial {
+        if rom_list.len() >= 2 {
+            rom_list.sort_by_key(|(name, _, _)| name.clone());
+            for (i, entry) in rom_list.iter_mut().enumerate() {
+                entry.2 = Some((i + 1) as i32);
+            }
+            groups.push(DiscGroup { roms: rom_list });
+        } else {
+            groups.push(DiscGroup { roms: rom_list });
+        }
+    }
+
+    groups
 }
 
 fn scan_roms(folder: &str, extensions: &[&str]) -> Vec<(String, PathBuf)> {
@@ -133,8 +213,10 @@ pub fn build_ra_games(
             .collect();
 
         let roms = scan_roms(&console.folder, console.def.extensions);
+        let groups = group_multi_disc_roms(roms);
 
-        for (rom_name, rom_path) in &roms {
+        for group in &groups {
+            let (rom_name, rom_path, _disc_num) = &group.roms[0];
             let rom_path_str = rom_path.to_string_lossy().into_owned();
 
             let existing = ira_db::find_by_rom_path(db, &rom_path_str)
@@ -222,6 +304,27 @@ pub fn build_ra_games(
                     }
                 }
             };
+
+            if group.roms.len() > 1 {
+                let _ = ira_db::delete_discs(db, game.db_id);
+                for (i, (_, disc_path, disc_num)) in group.roms.iter().enumerate() {
+                    let disc_num = disc_num.unwrap_or((i + 1) as i32);
+                    let disc_path_str = disc_path.to_string_lossy().into_owned();
+                    let label = if group.roms.len() > 1 {
+                        format!("Disc {}", disc_num)
+                    } else {
+                        String::new()
+                    };
+                    let _ = ira_db::add_disc(db, &GameDisc {
+                        id: 0,
+                        game_id: game.db_id,
+                        disc_number: disc_num,
+                        rom_path: disc_path_str,
+                        label,
+                    });
+                }
+            }
+
             games.push(game);
         }
     }
@@ -290,5 +393,63 @@ mod tests {
             points: 0,
         }];
         assert_eq!(match_rom_to_game("Completely Different Game", &games), None);
+    }
+
+    #[test]
+    fn test_strip_disc_pattern_paren() {
+        assert_eq!(strip_disc_pattern("Final Fantasy VII (Disc 1)"), Some(("Final Fantasy VII".to_string(), 1)));
+        assert_eq!(strip_disc_pattern("Final Fantasy VII (Disc 2)"), Some(("Final Fantasy VII".to_string(), 2)));
+    }
+
+    #[test]
+    fn test_strip_disc_pattern_bracket() {
+        assert_eq!(strip_disc_pattern("Metal Gear Solid [Disc 1]"), Some(("Metal Gear Solid".to_string(), 1)));
+        assert_eq!(strip_disc_pattern("Game [CD 2]"), Some(("Game".to_string(), 2)));
+    }
+
+    #[test]
+    fn test_strip_disc_pattern_disk_variant() {
+        assert_eq!(strip_disc_pattern("Game (Disk 1)"), Some(("Game".to_string(), 1)));
+        assert_eq!(strip_disc_pattern("Game (Disk 3)"), Some(("Game".to_string(), 3)));
+    }
+
+    #[test]
+    fn test_strip_disc_pattern_no_match() {
+        assert_eq!(strip_disc_pattern("Final Fantasy VII"), None);
+        assert_eq!(strip_disc_pattern("Game (USA)"), None);
+        assert_eq!(strip_disc_pattern("Game [!]"), None);
+    }
+
+    #[test]
+    fn test_strip_disc_pattern_preserves_base() {
+        let (base, disc) = strip_disc_pattern("Resident Evil 2 (Disc 1) (USA)").unwrap();
+        assert_eq!(disc, 1);
+        assert!(base.contains("Resident Evil 2"));
+    }
+
+    #[test]
+    fn test_group_multi_disc_by_pattern() {
+        let roms = vec![
+            ("Final Fantasy VII (Disc 1)".to_string(), PathBuf::from("/games/ff7_d1.bin")),
+            ("Final Fantasy VII (Disc 2)".to_string(), PathBuf::from("/games/ff7_d2.bin")),
+            ("Final Fantasy VII (Disc 3)".to_string(), PathBuf::from("/games/ff7_d3.bin")),
+            ("Chrono Trigger".to_string(), PathBuf::from("/games/ct.bin")),
+        ];
+        let groups = group_multi_disc_roms(roms);
+        assert_eq!(groups.len(), 2);
+        let ff7 = groups.iter().find(|g| g.roms.len() == 3).unwrap();
+        assert_eq!(ff7.roms[0].2, Some(1));
+        assert_eq!(ff7.roms[1].2, Some(2));
+        assert_eq!(ff7.roms[2].2, Some(3));
+    }
+
+    #[test]
+    fn test_group_single_rom() {
+        let roms = vec![
+            ("Game".to_string(), PathBuf::from("/games/game.bin")),
+        ];
+        let groups = group_multi_disc_roms(roms);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].roms.len(), 1);
     }
 }

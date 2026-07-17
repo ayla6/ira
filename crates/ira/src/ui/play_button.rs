@@ -82,7 +82,15 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         let fullscreen_flag = ira_models::find_console(&platform_id)
             .map(|d| d.fullscreen_flag)
             .unwrap_or("--fullscreen");
-        let cmd = ira_platforms::emulator_detect::build_launch_command(exe, &game_path, core, cc.fullscreen, fullscreen_flag);
+        let rom_path = {
+            let discs = ira_db::get_discs(&db, db_id).unwrap_or_default();
+            let default_disc_id = ira_db::get_default_disc(&db, db_id);
+            discs.iter()
+                .find(|d| Some(d.id) == default_disc_id)
+                .map(|d| d.rom_path.clone())
+                .unwrap_or(game_path)
+        };
+        let cmd = ira_platforms::emulator_detect::build_launch_command(exe, &rom_path, core, cc.fullscreen, fullscreen_flag);
         let log_path = ira_launcher::wrapper::game_log_path(&save_dir, game_id);
         match ira_launcher::wrapper::spawn_game(&cmd, &[], None, Some(&log_path)) {
             Ok(child) => {
@@ -216,11 +224,13 @@ pub fn play_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
     let st = state.clone();
 
     let variants = ira_db::get_variants(&state.borrow().db, db_id).unwrap_or_default();
+    let discs = ira_db::get_discs(&state.borrow().db, db_id).unwrap_or_default();
     let has_variants = !variants.is_empty();
+    let has_discs = !discs.is_empty();
 
     let is_running = running_games.lock().unwrap().contains_key(&db_id);
 
-    if !has_variants {
+    if !has_variants && !has_discs {
         let btn = gtk4::Button::new();
         btn.set_valign(gtk4::Align::Center);
         btn.set_height_request(48);
@@ -274,6 +284,101 @@ pub fn play_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
         });
 
         return btn.upcast();
+    }
+
+    if has_discs {
+        let split = adw::SplitButton::new();
+
+        let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+        hbox.set_valign(gtk4::Align::Center);
+        hbox.set_halign(gtk4::Align::Center);
+        hbox.set_margin_start(16);
+        hbox.set_margin_end(16);
+
+        let icon = gtk4::Image::from_icon_name("media-playback-start-symbolic");
+        icon.set_pixel_size(20);
+        hbox.append(&icon);
+
+        let label = gtk4::Label::new(Some("Play"));
+        label.add_css_class("play-btn-label");
+        label.set_width_chars(5);
+        hbox.append(&label);
+
+        split.set_child(Some(&hbox));
+        split.set_height_request(48);
+        split.set_valign(gtk4::Align::Center);
+        split.set_dropdown_tooltip("Select disc");
+
+        if is_running {
+            icon.set_icon_name(Some("window-close-symbolic"));
+            label.set_text("Stop");
+        } else {
+            split.add_css_class("suggested-action");
+        }
+
+        let default_did = ira_db::get_default_disc(&state.borrow().db, db_id);
+        let default_target = match default_did {
+            Some(did) => format!("{}", did),
+            None => "0".to_string(),
+        };
+
+        let actions = gio::SimpleActionGroup::new();
+        let action = gio::SimpleAction::new_stateful(
+            "disc",
+            Some(glib::VariantTy::STRING),
+            &glib::Variant::from(&default_target),
+        );
+
+        let st_c = st.clone();
+        action.connect_activate(move |action, param| {
+            if let Some(param) = param {
+                let target_str = param.get::<String>().unwrap_or_default();
+                let did = target_str.parse::<i64>().ok();
+                ira_db::set_default_disc(&st_c.borrow().db, db_id, did);
+                action.change_state(param);
+            }
+        });
+        actions.add_action(&action);
+
+        let menu = gio::Menu::new();
+        for disc in &discs {
+            let name = if disc.label.is_empty() {
+                format!("Disc {}", disc.disc_number)
+            } else {
+                disc.label.clone()
+            };
+            menu.append(Some(&name), Some(&format!("play.disc::{}", disc.id)));
+        }
+
+        split.insert_action_group("play", Some(&actions));
+        split.set_menu_model(Some(&menu));
+
+        let icon_click = icon.clone();
+        let label_click = label.clone();
+        let st_launch = st.clone();
+        split.connect_clicked(move |btn| {
+            let is_running = st_launch.borrow().running_games.lock().unwrap().contains_key(&db_id);
+            if is_running {
+                stop_game(&st_launch, db_id);
+                icon_click.set_icon_name(Some("media-playback-start-symbolic"));
+                label_click.set_text("Play");
+                btn.add_css_class("suggested-action");
+            } else {
+                match launch_game(&st_launch, db_id, None) {
+                    Ok(()) => {
+                        icon_click.set_icon_name(Some("window-close-symbolic"));
+                        label_click.set_text("Stop");
+                        btn.remove_css_class("suggested-action");
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to launch game: {}", e);
+                        let _ = sender.send(AppMessage::AddGameError(e));
+                    }
+                }
+            }
+        });
+
+        return split.upcast();
     }
 
     let split = adw::SplitButton::new();

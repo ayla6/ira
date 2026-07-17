@@ -1,12 +1,14 @@
 use gtk4::prelude::*;
 use adw::prelude::*;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use crate::strings as S;
 use crate::Game;
 use super::matching::match_game_to_steam;
 use super::settings_dialog::build_shadps4_version_dropdown;
 use super::state::SharedState;
+use super::ra_match_dialog::show_ra_search_dialog;
 
 type GameGeneralPageResult = (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>, Option<adw::EntryRow>, Option<adw::ComboRow>, Rc<RefCell<Option<String>>>, Rc<RefCell<Option<String>>>);
 
@@ -15,6 +17,7 @@ pub(super) fn build_game_general_page(
     game: &Game,
     win: &adw::Window,
     languages: &[String],
+    pending_copies: &Rc<RefCell<HashMap<String, String>>>,
 ) -> GameGeneralPageResult {
     let general_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
@@ -186,6 +189,57 @@ pub(super) fn build_game_general_page(
             });
 
             general_page.append(&emu_group);
+        }
+
+        let ra_group = adw::PreferencesGroup::new();
+        ra_group.set_title("RetroAchievements");
+        let mut has_ra_content = false;
+        if game.trophy_source == ira_models::TrophySource::Ra && !game.app_id.is_empty() {
+            has_ra_content = true;
+            let status_row = adw::ActionRow::new();
+            status_row.set_title("Linked to RetroAchievements");
+            status_row.set_subtitle(&format!("Game ID: {}", game.app_id));
+            let pending_key = format!("__ra_unmatch_{}", game.db_id);
+            let is_pending_unmatch = pending_copies.borrow().contains_key(&pending_key);
+            if is_pending_unmatch {
+                status_row.set_subtitle("Will be unmatched on Save\u{2026}");
+            }
+            ra_group.add(&status_row);
+
+            let unmatch_btn = gtk4::Button::with_label("Unmatch from RetroAchievements");
+            unmatch_btn.add_css_class("destructive-action");
+            if is_pending_unmatch {
+                unmatch_btn.set_sensitive(false);
+            }
+            let pc = pending_copies.clone();
+            let pkey = pending_key.clone();
+            let unmatch_btn_c = unmatch_btn.clone();
+            unmatch_btn.connect_clicked(move |_| {
+                pc.borrow_mut().insert(pkey.clone(), String::new());
+                unmatch_btn_c.set_sensitive(false);
+                status_row.set_subtitle("Will be unmatched on Save\u{2026}");
+            });
+            let unmatch_row = adw::ActionRow::new();
+            unmatch_row.add_suffix(&unmatch_btn);
+            ra_group.add(&unmatch_row);
+        } else if game.trophy_source == ira_models::TrophySource::Empty {
+            has_ra_content = true;
+            let match_btn = gtk4::Button::with_label("Match to RetroAchievements\u{2026}");
+            match_btn.add_css_class("suggested-action");
+            let sc = state.clone();
+            let db_id = game.db_id;
+            let gn = game.name.clone();
+            let pid = game.platform_id.clone();
+            let pw = win.clone();
+            match_btn.connect_clicked(move |_| {
+                show_ra_search_dialog(&sc, db_id, &gn, &pid, &pw, None);
+            });
+            let match_row = adw::ActionRow::new();
+            match_row.add_suffix(&match_btn);
+            ra_group.add(&match_row);
+        }
+        if has_ra_content {
+            general_page.append(&ra_group);
         }
     }
 

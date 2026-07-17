@@ -42,8 +42,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
     // --- General page ---
     let languages = app_details.as_ref().map(|d| d.languages.clone()).unwrap_or_default();
+    let pending_copies: Rc<RefCell<HashMap<String, String>>> = Default::default();
     let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator) =
-        super::game_settings::build_game_general_page(state, &game, &win, &languages);
+        super::game_settings::build_game_general_page(state, &game, &win, &languages, &pending_copies);
     sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
 
@@ -81,7 +82,6 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     }
 
     // --- Images page ---
-    let pending_copies: Rc<RefCell<HashMap<String, String>>> = Default::default();
     if !game.app_id.is_empty() {
         let images_page = super::image_manager::build_image_manager_content_with_drafts(
             state, &game, &win, Some(pending_copies.clone()),
@@ -321,6 +321,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             let _ = std::fs::create_dir_all(&cloud_dir);
             for (asset, src_path) in pc.iter() {
                 if asset == "__unmatch__" { continue; }
+                if asset.starts_with("__ra_unmatch_") { continue; }
                 let base_name = match asset.as_str() {
                     "icon" => "icon",
                     "hero" => "library_hero",
@@ -350,6 +351,34 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 }
                 ira_images::invalidate_texture(&dest.to_string_lossy());
             }
+        }
+
+        // SGDB unmatch
+        if pending_copies_c.borrow().contains_key("__unmatch__") {
+            let _ = ira_db::set_sgdb_id(&db, db_id_s, "");
+            if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id_s) {
+                g.sgdb_id.clear();
+            }
+            pending_copies_c.borrow_mut().remove("__unmatch__");
+        }
+
+        // RA unmatch
+        let ra_unmatch_key = format!("__ra_unmatch_{}", db_id_s);
+        if pending_copies_c.borrow().contains_key(&ra_unmatch_key) {
+            let _ = ira_db::update_game_ids(&db, db_id_s, "", "", ira_models::TrophySource::Empty, "");
+            {
+                let mut s = state_clone.borrow_mut();
+                if let Some(g) = s.games.iter_mut().find(|g| g.db_id == db_id_s) {
+                    g.app_id.clear();
+                    g.trophy_source = ira_models::TrophySource::Empty;
+                    g.platform_id.clear();
+                    g.achievements.clear();
+                    g.earned_count = 0;
+                    g.total_count = 0;
+                    g.manual_unmatch = true;
+                }
+            }
+            pending_copies_c.borrow_mut().remove(&ra_unmatch_key);
         }
 
         if let Some((ref selected_pos, ref size_adj)) = logo_controls_c {

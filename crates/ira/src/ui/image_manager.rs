@@ -1,7 +1,4 @@
 use gtk4::prelude::*;
-use adw::prelude::{AlertDialogExt, AdwDialogExt};
-use ira_db::{find_by_db_id, set_sgdb_id, update_game_ids};
-use ira_models::{GameKind, TrophySource};
 use crate::Game;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -12,7 +9,6 @@ use super::sgdb_picker::{show_sgdb_picker, ShowSgdbPickerParams};
 use super::message_handler::apply_game_update;
 use super::state::SharedState;
 use super::game_item::GameItem;
-use super::game_display::display_game;
 
 type SectionEntry = (&'static str, &'static str, &'static str, i32, i32, &'static [&'static str]);
 
@@ -76,119 +72,20 @@ pub fn build_image_manager_content_with_drafts(
             btn_box.append(&label);
             let unmatch_btn = gtk4::Button::with_label("Unmatch SGDB");
             unmatch_btn.add_css_class("destructive-action");
+            let pending_pc = pending_copies.clone();
             let sc = state.clone();
             let did = game.db_id;
             unmatch_btn.connect_clicked(move |_| {
-                let _ = set_sgdb_id(&sc.borrow().db, did, "");
-                {
-                    let mut s = sc.borrow_mut();
-                    if let Some(g) = s.games.iter_mut().find(|g| g.db_id == did) {
-                        g.sgdb_id.clear();
-                        g.icon_path.clear();
-                        g.hero_image_path.clear();
-                        g.grid_path.clear();
-                        g.header_path.clear();
-                        g.logo_path.clear();
-                    }
-                }
-                let (db, save_dir) = {
-                    let s = sc.borrow();
-                    (s.db.clone(), s.save_dir.clone())
-                };
-                if let Ok(Some(entry)) = find_by_db_id(&db, did) {
-                    if let Ok(game) = crate::game_loader::load_game(&entry, &save_dir) {
-                        let mut s = sc.borrow_mut();
-                        if let Some(g) = s.games.iter_mut().find(|g| g.db_id == did) {
-                            g.icon_path = game.icon_path;
-                            g.hero_image_path = game.hero_image_path;
-                            g.grid_path = game.grid_path;
-                            g.header_path = game.header_path;
-                            g.logo_path = game.logo_path;
-                        }
-                    }
-                }
-                refresh_settings_images_page(&sc, did, |s, game, win| {
-                    build_image_manager_content(s, game, win).upcast()
-                });
-                let selected_id = sc.borrow().selected_id.clone();
-                if selected_id == did.to_string() {
-                    let game = sc.borrow().games.iter().find(|g| g.db_id == did).cloned();
-                    if let Some(game) = game {
-                        display_game(&game, &sc);
-                    }
+                if let Some(ref pc) = pending_pc {
+                    pc.borrow_mut().insert("__unmatch__".to_string(), String::new());
+                    refresh_settings_images_page(&sc, did, |s, game, win| {
+                        let mut g2 = game.clone();
+                        g2.sgdb_id.clear();
+                        build_image_manager_content_with_drafts(s, &g2, win, Some(pc.clone())).upcast()
+                    });
                 }
             });
             btn_box.append(&unmatch_btn);
-        }
-
-        if game.kind == GameKind::Retro && game.trophy_source == TrophySource::Ra && !game.app_id.is_empty() {
-            let ra_unmatch_btn = gtk4::Button::with_label("Unmatch from RetroAchievements");
-            ra_unmatch_btn.add_css_class("destructive-action");
-            let sc = state.clone();
-            let did = game.db_id;
-            let (db, save_dir) = {
-                let s = state.borrow();
-                (s.db.clone(), s.save_dir.clone())
-            };
-            let game_name = game.name.clone();
-            ra_unmatch_btn.connect_clicked(move |_| {
-                let dialog = adw::AlertDialog::new(
-                    Some("Unmatch from RetroAchievements?"),
-                    Some(&format!("This will remove the RetroAchievements link for \"{}\". Achievements will be cleared. You can rematch later.", game_name)),
-                );
-                dialog.add_response("cancel", "Cancel");
-                dialog.add_response("unmatch", "Unmatch");
-                dialog.set_response_appearance("unmatch", adw::ResponseAppearance::Destructive);
-                dialog.set_default_response(Some("cancel"));
-                dialog.set_close_response("cancel");
-                let sc2 = sc.clone();
-                let db2 = db.clone();
-                let save_dir2 = save_dir.clone();
-                let did2 = did;
-                dialog.connect_response(None, move |_, resp| {
-                    if resp != "unmatch" {
-                        return;
-                    }
-                    let _ = update_game_ids(&db2, did2, "", "", TrophySource::Empty, "");
-                    {
-                        let mut s = sc2.borrow_mut();
-                        if let Some(g) = s.games.iter_mut().find(|g| g.db_id == did2) {
-                            g.app_id.clear();
-                            g.trophy_source = TrophySource::Empty;
-                            g.platform_id.clear();
-                            g.achievements.clear();
-                            g.earned_count = 0;
-                            g.total_count = 0;
-                            g.manual_unmatch = true;
-                        }
-                    }
-                    if let Ok(Some(entry)) = find_by_db_id(&db2, did2) {
-                        if let Ok(game) = crate::game_loader::load_game(&entry, &save_dir2) {
-                            let mut s = sc2.borrow_mut();
-                            if let Some(g) = s.games.iter_mut().find(|g| g.db_id == did2) {
-                                g.icon_path = game.icon_path;
-                                g.hero_image_path = game.hero_image_path;
-                                g.grid_path = game.grid_path;
-                                g.header_path = game.header_path;
-                                g.logo_path = game.logo_path;
-                            }
-                        }
-                    }
-                    refresh_settings_images_page(&sc2, did2, |s, game, win| {
-                        build_image_manager_content(s, game, win).upcast()
-                    });
-                    let selected_id = sc2.borrow().selected_id.clone();
-                    if selected_id == did2.to_string() {
-                        let game = sc2.borrow().games.iter().find(|g| g.db_id == did2).cloned();
-                        if let Some(game) = game {
-                            display_game(&game, &sc2);
-                        }
-                    }
-                });
-                let window = sc.borrow().window.clone();
-                dialog.present(Some(&window));
-            });
-            btn_box.append(&ra_unmatch_btn);
         }
 
         content.append(&btn_box);

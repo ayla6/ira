@@ -71,7 +71,7 @@ fn strip_disc_pattern(name: &str) -> Option<(String, i32)> {
             let num_str = name[after_kw..after_kw + closing].trim();
             if let Ok(n) = num_str.parse::<i32>() {
                 let base = format!("{} {}", name[..bracket_start].trim(), name[after_kw + closing + 1..].trim());
-                let base = base.trim().to_string();
+                let base = remove_version_tags(base.trim()).to_string();
                 return Some((base, n));
             }
         }

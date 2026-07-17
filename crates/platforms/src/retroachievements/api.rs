@@ -319,6 +319,15 @@ impl RaClient {
     }
 }
 
+/// Read cached console games list without creating an RaClient (no network).
+/// Returns None if the cache file doesn't exist or is unreadable.
+pub fn read_console_games_cache(save_dir: &str, console_id: u32) -> Option<Vec<RaGameEntry>> {
+    let cache = paths::console_games_path(save_dir, console_id);
+    let data = std::fs::read(&cache).ok()?;
+    let resp: ConsoleGamesResponse = serde_json::from_slice(&data).ok()?;
+    Some(resp.response)
+}
+
 #[derive(Debug, Deserialize)]
 struct LoginResponse {
     #[serde(default)]

@@ -111,6 +111,23 @@ pub fn activate(app: &adw::Application) -> SharedState {
     let sort_mode = cfg.sort_mode;
     let sort_descending = cfg.sort_descending;
 
+    {
+        let db = db.clone();
+        let sender = sender.clone();
+        let save_dir = save_dir.clone();
+        std::thread::spawn(move || {
+            let _span = tracing::info_span!("build_game_list_thread").entered();
+            let opts = crate::game_list::GameListOptions {
+                shadps4_enabled,
+                steam_enabled,
+                sort_mode,
+                sort_descending,
+            };
+            let games = build_game_list(&db, &save_dir, &ra_config, &opts);
+            let _ = sender.send(AppMessage::GamesLoaded(games));
+        });
+    }
+
     let state = {
         let _s = tracing::info_span!("build_ui").entered();
         build_ui(
@@ -148,23 +165,6 @@ pub fn activate(app: &adw::Application) -> SharedState {
             glib::ffi::g_source_attach(source as *mut glib::ffi::GSource, std::ptr::null_mut());
             glib::ffi::g_source_unref(source as *mut glib::ffi::GSource);
         }
-    }
-
-    {
-        let db = db.clone();
-        let sender = sender.clone();
-        let save_dir = save_dir.clone();
-        std::thread::spawn(move || {
-            let _span = tracing::info_span!("build_game_list_thread").entered();
-            let opts = crate::game_list::GameListOptions {
-                shadps4_enabled,
-                steam_enabled,
-                sort_mode,
-                sort_descending,
-            };
-            let games = build_game_list(&db, &save_dir, &ra_config, &opts);
-            let _ = sender.send(AppMessage::GamesLoaded(games));
-        });
     }
 
     if std::env::var("AV_BENCH").is_ok() {

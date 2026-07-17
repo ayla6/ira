@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use ira_config::Config;
 use ira_models::{Game, GameDisc, GameKind, TrophySource};
 use crate::consoles::{CONSOLES, ConsoleDef};
-use crate::retroachievements::api::{RaClient, RaGameEntry};
+use crate::retroachievements::api::RaGameEntry;
 
 struct ActiveConsole {
     def: &'static ConsoleDef,
@@ -186,14 +186,6 @@ pub fn build_ra_games(
     cfg: &Config,
     load_game: impl Fn(&ira_models::GameEntry, &str) -> Result<ira_models::Game, String>,
 ) -> Vec<Game> {
-    let has_credentials = !cfg.ra_username.is_empty() && !cfg.ra_token.is_empty();
-    let client = if cfg.ra_enabled && has_credentials {
-        let _s = tracing::info_span!("ra_client_init").entered();
-        RaClient::from_config(cfg)
-    } else {
-        None
-    };
-
     let consoles = active_consoles(cfg);
     let mut games = Vec::new();
 
@@ -201,16 +193,13 @@ pub fn build_ra_games(
         let _console_span = tracing::info_span!("ra_console", console = console.def.id).entered();
 
         let ra_games_raw = {
-            let _s = tracing::info_span!("fetch_console_games").entered();
-            match &client {
-                Some(c) => match c.fetch_console_games(save_dir, console.def.ra_console_id) {
-                    Ok(g) => g,
-                    Err(e) => {
-                        eprintln!("RA: failed to fetch game list for {}: {}", console.def.id, e);
-                        continue;
-                    }
-                },
-                None => Vec::new(),
+            let _s = tracing::info_span!("read_console_games_cache").entered();
+            match crate::retroachievements::read_console_games_cache(save_dir, console.def.ra_console_id) {
+                Some(g) => g,
+                None => {
+                    eprintln!("RA: no cached game list for {}, new ROMs won't be matched", console.def.id);
+                    Vec::new()
+                }
             }
         };
         let ra_games: Vec<RaGameEntry> = ra_games_raw
@@ -284,7 +273,7 @@ pub fn build_ra_games(
                 let (rom_name, rom_path, _disc_num) = &group.roms[0];
                 let rom_path_str = rom_path.to_string_lossy().into_owned();
 
-                let matched_id = if client.is_some() {
+                let matched_id = if !ra_title_map.is_empty() {
                     let rom_norm = normalize_name(rom_name);
                     if rom_norm.is_empty() { None } else { ra_title_map.get(&rom_norm).copied() }
                 } else {

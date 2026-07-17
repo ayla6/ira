@@ -2,6 +2,26 @@ use crate::DbConn;
 use ira_models::GameDisc;
 use rusqlite::params;
 
+/// Returns all disc rom_paths for retro games on the given platform.
+/// Used to check whether a scanned ROM is already known (in the DB)
+/// without spawning `ira-disc-info` subprocesses.
+pub fn get_disc_paths_for_platform(conn: &DbConn, platform_id: &str) -> Result<std::collections::HashSet<String>, String> {
+    let c = crate::lock_db(conn)?;
+    let mut stmt = c.prepare(
+        "SELECT gd.rom_path FROM game_discs gd
+         JOIN games g ON gd.game_id = g.id
+         WHERE g.kind = 'retro' AND g.platform_id = ?1"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params![platform_id], |row| {
+        row.get::<_, String>(0)
+    }).map_err(|e| e.to_string())?;
+    let mut result = std::collections::HashSet::new();
+    for row in rows {
+        result.insert(row.map_err(|e| e.to_string())?);
+    }
+    Ok(result)
+}
+
 pub fn create_discs_table(conn: &DbConn) {
     let c = crate::lock_db(conn).expect("db lock");
     c.execute_batch(

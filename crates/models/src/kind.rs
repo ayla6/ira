@@ -7,7 +7,6 @@ pub enum GameKind {
     #[default]
     Other,
     Ps4,
-    Sgdb,
     Steam,
     Retro,
 }
@@ -18,7 +17,6 @@ impl GameKind {
             GameKind::Wine => "wine",
             GameKind::Linux => "linux",
             GameKind::Ps4 => "ps4",
-            GameKind::Sgdb => "sgdb",
             GameKind::Steam => "steam",
             GameKind::Retro => "retro",
             GameKind::Other => "other",
@@ -30,7 +28,6 @@ impl GameKind {
             "wine" => GameKind::Wine,
             "linux" => GameKind::Linux,
             "ps4" => GameKind::Ps4,
-            "sgdb" => GameKind::Sgdb,
             "steam" => GameKind::Steam,
             "retro" => GameKind::Retro,
             _ => GameKind::Other,
@@ -42,7 +39,6 @@ impl GameKind {
             GameKind::Wine => "Windows",
             GameKind::Linux => "Linux",
             GameKind::Ps4 => "PS4",
-            GameKind::Sgdb => "SteamGridDB",
             GameKind::Steam => "Steam",
             GameKind::Retro => "Retro",
             GameKind::Other => "Other",
@@ -130,7 +126,7 @@ mod tests {
 
     #[test]
     fn test_game_kind_roundtrip() {
-        for kind in [GameKind::Wine, GameKind::Linux, GameKind::Ps4, GameKind::Sgdb, GameKind::Steam, GameKind::Retro, GameKind::Other] {
+        for kind in [GameKind::Wine, GameKind::Linux, GameKind::Ps4, GameKind::Steam, GameKind::Retro, GameKind::Other] {
             let s = kind.as_str();
             let back = GameKind::from_string(s);
             assert_eq!(kind, back);
@@ -191,7 +187,6 @@ mod tests {
         assert_eq!(GameKind::Wine.display_name(), "Windows");
         assert_eq!(GameKind::Linux.display_name(), "Linux");
         assert_eq!(GameKind::Ps4.display_name(), "PS4");
-        assert_eq!(GameKind::Sgdb.display_name(), "SteamGridDB");
         assert_eq!(GameKind::Steam.display_name(), "Steam");
         assert_eq!(GameKind::Retro.display_name(), "Retro");
         assert_eq!(GameKind::Other.display_name(), "Other");

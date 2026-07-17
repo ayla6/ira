@@ -202,7 +202,7 @@ pub fn build_ra_games(
                 Ok(g) => g,
                 Err(e) => {
                     eprintln!("RA: failed to fetch game list for {}: {}", console.def.id, e);
-                    continue;
+                    Vec::new()
                 }
             },
             None => Vec::new(),
@@ -328,21 +328,13 @@ pub fn build_ra_games(
         }
 
         let all_entries = ira_db::find_all_retro_by_platform(db, console.def.id).unwrap_or_default();
-        for mut entry in all_entries {
+        for entry in &all_entries {
             if matched_db_ids.contains(&entry.id) {
                 continue;
             }
             if !entry.rom_path.is_empty() && !Path::new(&entry.rom_path).is_file() {
                 let _ = ira_db::set_rom_path(db, entry.id, "");
-                entry.rom_path.clear();
                 let _ = ira_db::delete_discs(db, entry.id);
-            }
-            if let Ok(mut g) = load_game(&entry, save_dir) {
-                if !g.rom_path.is_empty() && !Path::new(&g.rom_path).is_file() {
-                    g.game_path.clear();
-                    g.rom_path.clear();
-                }
-                games.push(g);
             }
         }
     }

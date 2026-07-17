@@ -305,16 +305,12 @@ pub fn build_ra_games(
                 }
             };
 
+            let _ = ira_db::delete_discs(db, game.db_id);
             if group.roms.len() > 1 {
-                let _ = ira_db::delete_discs(db, game.db_id);
                 for (i, (_, disc_path, disc_num)) in group.roms.iter().enumerate() {
                     let disc_num = disc_num.unwrap_or((i + 1) as i32);
                     let disc_path_str = disc_path.to_string_lossy().into_owned();
-                    let label = if group.roms.len() > 1 {
-                        format!("Disc {}", disc_num)
-                    } else {
-                        String::new()
-                    };
+                    let label = format!("Disc {}", disc_num);
                     let _ = ira_db::add_disc(db, &GameDisc {
                         id: 0,
                         game_id: game.db_id,

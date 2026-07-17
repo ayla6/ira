@@ -14,52 +14,96 @@ pub struct GameListOptions {
 }
 
 pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &GameListOptions) -> Vec<Game> {
-    let steam_games = if options.steam_enabled { steam::discover_games() } else { Vec::new() };
-    if options.steam_enabled && !steam_games.is_empty() {
-        cleanup_steam_entries(db, &steam_games);
-    }
-
-    let steam_playtimes = if options.steam_enabled { steam::read_all_playtimes() } else { std::collections::HashMap::new() };
-
     let ra_any_console = cfg.any_console_enabled();
+    let db = db.clone();
+    let save_dir = save_dir.to_string();
+    let cfg = cfg.clone();
+    let sort_mode = options.sort_mode;
+    let sort_descending = options.sort_descending;
 
-    let mut games = game_loader::load_games(db, save_dir);
+    std::thread::scope(|s| {
+        let steam_discovery = if options.steam_enabled {
+            let db = db.clone();
+            Some(s.spawn(move || {
+                let steam_games = steam::discover_games();
+                if !steam_games.is_empty() {
+                    cleanup_steam_entries(&db, &steam_games);
+                }
+                let steam_playtimes = steam::read_all_playtimes();
+                (steam_games, steam_playtimes)
+            }))
+        } else {
+            None
+        };
 
-    games.retain(|g| {
-        if !options.steam_enabled && g.kind == ira_models::GameKind::Steam { return false; }
-        if !options.shadps4_enabled && g.kind == ira_models::GameKind::Ps4 { return false; }
-        if !ra_any_console && g.kind == ira_models::GameKind::Retro { return false; }
-        true
-    });
-    if options.shadps4_enabled {
-        games.retain(|g| g.kind != ira_models::GameKind::Ps4);
-    }
-    if options.steam_enabled {
-        games.retain(|g| g.kind != ira_models::GameKind::Steam);
-    }
-    if ra_any_console {
-        games.retain(|g| g.kind != ira_models::GameKind::Retro);
-    }
-    games.sort_by(|a, b| {
-        let ord = options.sort_mode.compare(a, b);
-        if options.sort_descending { ord.reverse() } else { ord }
-    });
+        let db_native = db.clone();
+        let save_dir_native = save_dir.clone();
+        let native_handle = s.spawn(move || {
+            let mut games = game_loader::load_games(&db_native, &save_dir_native);
+            games.retain(|g| g.kind != ira_models::GameKind::Steam
+                && g.kind != ira_models::GameKind::Ps4
+                && g.kind != ira_models::GameKind::Retro);
+            games
+        });
 
-    if options.shadps4_enabled {
-        games.extend(build_shadps4_games(db, save_dir));
-    }
-    if options.steam_enabled {
-        games.extend(build_steam_games(db, save_dir, &steam_games, &steam_playtimes));
-    }
-    if ra_any_console {
-        games.extend(retroachievements::build_ra_games(db, save_dir, cfg, game_loader::load_game));
-    }
-    games.sort_by(|a, b| {
-        let ord = options.sort_mode.compare(a, b);
-        if options.sort_descending { ord.reverse() } else { ord }
-    });
+        let ps4_handle = if options.shadps4_enabled {
+            let db_ps4 = db.clone();
+            let save_dir_ps4 = save_dir.clone();
+            Some(s.spawn(move || build_shadps4_games(&db_ps4, &save_dir_ps4)))
+        } else {
+            None
+        };
 
-    games
+        let ra_handle = if ra_any_console {
+            let db_ra = db.clone();
+            let save_dir_ra = save_dir.clone();
+            let cfg_ra = cfg.clone();
+            Some(s.spawn(move || retroachievements::build_ra_games(&db_ra, &save_dir_ra, &cfg_ra, game_loader::load_game)))
+        } else {
+            None
+        };
+
+        let steam_games = if let Some(h) = steam_discovery {
+            match h.join() {
+                Ok((games, playtimes)) => build_steam_games(&db, &save_dir, &games, &playtimes),
+                Err(_) => {
+                    eprintln!("Steam discovery thread panicked");
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
+        let mut games = match native_handle.join() {
+            Ok(g) => g,
+            Err(_) => {
+                eprintln!("Native games thread panicked");
+                Vec::new()
+            }
+        };
+
+        if let Some(h) = ps4_handle {
+            match h.join() {
+                Ok(g) => games.extend(g),
+                Err(_) => eprintln!("PS4 games thread panicked"),
+            }
+        }
+        games.extend(steam_games);
+        if let Some(h) = ra_handle {
+            match h.join() {
+                Ok(g) => games.extend(g),
+                Err(_) => eprintln!("RA games thread panicked"),
+            }
+        }
+
+        games.sort_by(|a, b| {
+            let ord = sort_mode.compare(a, b);
+            if sort_descending { ord.reverse() } else { ord }
+        });
+
+        games
+    })
 }
 
 fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {

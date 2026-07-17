@@ -10,16 +10,16 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-pub struct SteamClient {
+pub struct SteamDataClient {
     api_key: Mutex<String>,
     sgdb_api_key: Mutex<String>,
     cache_dir: PathBuf,
     http: reqwest::blocking::Client,
 }
 
-impl SteamClient {
+impl SteamDataClient {
     pub fn new(api_key: String, sgdb_key: String, data_dir: &str) -> Self {
-        SteamClient {
+        SteamDataClient {
             api_key: Mutex::new(api_key),
             sgdb_api_key: Mutex::new(sgdb_key),
             cache_dir: PathBuf::from(data_dir),

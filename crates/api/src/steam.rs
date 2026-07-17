@@ -1,13 +1,13 @@
 use std::path::Path;
 
-use crate::SteamClient;
+use crate::SteamDataClient;
 use crate::types::{
     AppDetails, AppDetailsResponse, GlobalAchievementsResponse, SteamGameDetails, SteamReviewSummary,
     SteamReviewsResponse,
 };
 use crate::util::{pick_lang, urlencode, NEMIRTINGAS_BASE_URL};
 
-impl SteamClient {
+impl SteamDataClient {
     pub fn fetch_game_details(&self, app_id: &str) -> Option<SteamGameDetails> {
         let cache_path = self.game_dir(app_id).join("appdetails.json");
         if let Ok(data) = std::fs::read(&cache_path) {

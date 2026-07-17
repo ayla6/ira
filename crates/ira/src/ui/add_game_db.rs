@@ -10,7 +10,7 @@ pub(super) struct AddGameToDbParams<'a> {
     pub(super) launch_config: &'a GameLaunchConfig,
     pub(super) wine_config: &'a WineConfig,
     pub(super) profile_id: Option<i64>,
-    pub(super) steam: &'a ira_api::SteamClient,
+    pub(super) steam: &'a ira_api::SteamDataClient,
     pub(super) save_dir: &'a str,
 }
 

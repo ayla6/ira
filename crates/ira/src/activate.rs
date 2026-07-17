@@ -1,4 +1,4 @@
-use ira_api::SteamClient;
+use ira_api::SteamDataClient;
 use crate::bench::run_bench;
 use ira_config as config;
 use ira_db as db;
@@ -58,15 +58,6 @@ pub fn activate(app: &adw::Application) -> SharedState {
         ira_platforms::api_emulators::ensure_skeleton(&cfg.save_dir);
     }
 
-    let steam = {
-        let _s = tracing::info_span!("steam_client_new").entered();
-        Arc::new(SteamClient::new(
-            cfg.steam_api_key.clone(),
-            cfg.steam_griddb_api_key.clone(),
-            &format!("{}/data", cfg.save_dir),
-        ))
-    };
-
     let mut pipe_fds = [0i32; 2];
     unsafe {
         libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC);
@@ -77,36 +68,8 @@ pub fn activate(app: &adw::Application) -> SharedState {
     let (tx, rx) = mpsc::channel::<AppMessage>();
     let sender = AppSender::new(tx, write_fd);
 
-    let cfg_for_watcher = Arc::new(cfg.clone());
-    let watcher = {
-        let _s = tracing::info_span!("watcher_new").entered();
-        match AchievementWatcher::new(cfg_for_watcher, sender.clone(), cfg.save_dir.clone(), Arc::new(crate::game_loader::load_game)) {
-            Ok(w) => Some(w),
-            Err(e) => {
-                eprintln!("Live achievement watching unavailable: {}", e);
-                None
-            }
-        }
-    };
-
-    let game_names = watcher.as_ref().map(|w| w.game_names()).unwrap_or_else(|| {
-        Arc::new(Mutex::new(HashMap::new()))
-    });
-
-    let shadps4_watcher = {
-        let _s = tracing::info_span!("shadps4_watcher_new").entered();
-        match ShadPS4Watcher::new(sender.clone()) {
-            Ok(w) => Some(w),
-            Err(e) => {
-                eprintln!("shadPS4 playtime watching unavailable: {}", e);
-                None
-            }
-        }
-    };
-
     let shadps4_enabled = cfg.shadps4_enabled;
     let steam_enabled = cfg.steam_enabled;
-    let ra_config = cfg.clone();
     let save_dir = cfg.save_dir.clone();
     let sort_mode = cfg.sort_mode;
     let sort_descending = cfg.sort_descending;
@@ -115,6 +78,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
         let db = db.clone();
         let sender = sender.clone();
         let save_dir = save_dir.clone();
+        let ra_config = cfg.clone();
         std::thread::spawn(move || {
             let _span = tracing::info_span!("build_game_list_thread").entered();
             let opts = crate::game_list::GameListOptions {
@@ -128,6 +92,10 @@ pub fn activate(app: &adw::Application) -> SharedState {
         });
     }
 
+    let steam_api_key = cfg.steam_api_key.clone();
+    let steam_griddb_api_key = cfg.steam_griddb_api_key.clone();
+    let cfg_for_watcher = Arc::new(cfg.clone());
+
     let state = {
         let _s = tracing::info_span!("build_ui").entered();
         build_ui(
@@ -135,16 +103,47 @@ pub fn activate(app: &adw::Application) -> SharedState {
             Vec::new(),
             cfg,
             crate::ui::AppContext {
-                steam: steam.clone(),
-                watcher: watcher.clone(),
+                steam: Arc::new(SteamDataClient::new(String::new(), String::new(), &format!("{}/data", save_dir))),
+                watcher: None,
                 db: db.clone(),
                 sender: sender.clone(),
-                game_names,
+                game_names: Arc::new(Mutex::new(HashMap::new())),
             },
         )
     };
 
-    state.borrow_mut().shadps4_watcher = shadps4_watcher;
+    {
+        let _s = tracing::info_span!("post_ui_setup").entered();
+
+        let steam = Arc::new(SteamDataClient::new(
+            steam_api_key,
+            steam_griddb_api_key,
+            &format!("{}/data", save_dir),
+        ));
+        state.borrow_mut().steam = steam;
+
+        let watcher = match AchievementWatcher::new(cfg_for_watcher, sender.clone(), save_dir.clone(), Arc::new(crate::game_loader::load_game)) {
+            Ok(w) => {
+                let game_names = w.game_names();
+                state.borrow_mut().game_names = game_names;
+                Some(w)
+            }
+            Err(e) => {
+                eprintln!("Live achievement watching unavailable: {}", e);
+                None
+            }
+        };
+        state.borrow_mut().watcher = watcher;
+
+        let shadps4_watcher = match ShadPS4Watcher::new(sender.clone()) {
+            Ok(w) => Some(w),
+            Err(e) => {
+                eprintln!("shadPS4 playtime watching unavailable: {}", e);
+                None
+            }
+        };
+        state.borrow_mut().shadps4_watcher = shadps4_watcher;
+    }
 
     {
         let data = Box::new(MainLoopData {

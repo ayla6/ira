@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use crate::SteamClient;
+use crate::SteamDataClient;
 use crate::util::MIN_IMAGE_BYTES;
 
-impl SteamClient {
+impl SteamDataClient {
     pub(super) fn game_dir(&self, app_id: &str) -> PathBuf {
         self.cache_dir.join("steam").join(app_id)
     }

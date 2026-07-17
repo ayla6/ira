@@ -1,6 +1,6 @@
 use gtk4::prelude::*;
 use adw::prelude::*;
-use ira_api::SteamClient;
+use ira_api::SteamDataClient;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -19,7 +19,7 @@ pub enum SearchSource {
 
 pub(super) struct SearchResultsDialogParams<'a> {
     state: &'a SharedState,
-    steam: Arc<SteamClient>,
+    steam: Arc<SteamDataClient>,
     source_name: &'a str,
     game_name: &'a str,
     db_id: i64,
@@ -31,7 +31,7 @@ pub(super) struct SearchResultsDialogParams<'a> {
 pub(super) fn handle_steam_search_result(
     state: &SharedState,
     action_box: &gtk4::Box,
-    steam: &Arc<SteamClient>,
+    steam: &Arc<SteamDataClient>,
     game_name: &str,
     db_id: i64,
     matched: Option<(String, String)>,

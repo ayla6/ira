@@ -1,6 +1,6 @@
 use ira_config::Config;
 use ira_db::DbConn;
-use ira_api::SteamClient;
+use ira_api::SteamDataClient;
 use crate::strings as S;
 use ira_watcher::AchievementWatcher;
 use crate::AppSender;
@@ -24,7 +24,7 @@ use super::add_game_dialog::show_add_game_dialog;
 use super::background::show_close_choice_dialog;
 
 pub struct AppContext {
-    pub steam: Arc<SteamClient>,
+    pub steam: Arc<SteamDataClient>,
     pub watcher: Option<AchievementWatcher>,
     pub db: DbConn,
     pub sender: AppSender,

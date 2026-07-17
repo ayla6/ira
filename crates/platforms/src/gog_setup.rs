@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use ira_db::DbConn;
-use ira_api::SteamClient;
+use ira_api::SteamDataClient;
 use ira_parser::GALAXY_ID;
 use crate::gog::generate_galaxy_emu_config;
 
@@ -10,7 +10,7 @@ pub fn add_gog_game_from_folder(
     product_id: &str,
     game_name: &str,
     steam_app_id: &str,
-    steam: &SteamClient,
+    steam: &SteamDataClient,
     db: &DbConn,
     save_dir: &str,
 ) -> Result<String, String> {

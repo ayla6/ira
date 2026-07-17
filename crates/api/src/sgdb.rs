@@ -1,8 +1,8 @@
-use crate::SteamClient;
+use crate::SteamDataClient;
 use crate::types::SgdbAsset;
 use crate::util::urlencode;
 
-impl SteamClient {
+impl SteamDataClient {
     fn sgdb_get_json(&self, url: &str) -> Option<serde_json::Value> {
         let sgdb_key = self.sgdb_api_key();
         if sgdb_key.is_empty() { return None; }

@@ -1,8 +1,8 @@
-use crate::SteamClient;
+use crate::SteamDataClient;
 use crate::types::{NemirtingasAchievement, SteamSchemaAchievement, SteamSchemaResponse};
 use crate::util::NEMIRTINGAS_BASE_URL;
 
-impl SteamClient {
+impl SteamDataClient {
     pub(super) fn fetch_nemirtingas_achievements(&self, app_id: &str) -> Option<Vec<NemirtingasAchievement>> {
         let url = format!("{}/{}/achievements_db.json", NEMIRTINGAS_BASE_URL, app_id);
         let resp = self.http.get(&url).send().ok()?;

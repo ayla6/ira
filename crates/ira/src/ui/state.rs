@@ -1,7 +1,7 @@
 use ira_config::Config;
 use super::game_selection_model::GameSelectionModel;
 use ira_db::DbConn;
-use ira_api::SteamClient;
+use ira_api::SteamDataClient;
 use ira_watcher::AchievementWatcher;
 use crate::AppSender;
 use crate::Game;
@@ -24,7 +24,7 @@ pub struct AppState {
     pub selected_id: String,
     pub displayed_db_id: i64,
     pub cfg: Config,
-    pub steam: Arc<SteamClient>,
+    pub steam: Arc<SteamDataClient>,
     pub watcher: Option<AchievementWatcher>,
     pub shadps4_watcher: Option<ira_platforms::ps4::ShadPS4Watcher>,
     pub db: DbConn,

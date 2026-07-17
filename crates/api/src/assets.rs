@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use crate::SteamClient;
+use crate::SteamDataClient;
 use ira_models::DlcInfo;
 
-impl SteamClient {
+impl SteamDataClient {
     pub fn ensure_sgdb_assets(&self, sgdb_id: &str) -> (String, String, String, String, String) {
         let dir = self.sgdb_dir(sgdb_id);
         self.ensure_sgdb_assets_in_dir(&dir, sgdb_id)

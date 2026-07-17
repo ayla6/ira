@@ -1,4 +1,4 @@
-use ira_api::SteamClient;
+use ira_api::SteamDataClient;
 use ira_db::DbConn;
 use ira_watcher::AchievementWatcher;
 use crate::AppMessage;
@@ -17,7 +17,7 @@ pub struct EnrichGameParams {
     pub platform_id: String,
     pub db_id: i64,
     pub title: String,
-    pub steam: Arc<SteamClient>,
+    pub steam: Arc<SteamDataClient>,
     pub watcher: Option<AchievementWatcher>,
     pub sender: AppSender,
     pub save_dir: String,
@@ -167,7 +167,7 @@ pub fn enrich_game_async(params: EnrichGameParams) {
 fn fetch_steam_game_icon(
     app_id: &str,
     save_dir: &str,
-    steam: &std::sync::Arc<ira_api::SteamClient>,
+    steam: &std::sync::Arc<ira_api::SteamDataClient>,
 ) -> Option<String> {
     let app_id_num: u32 = app_id.parse().ok()?;
     let clienticon = ira_platforms::steam::get_clienticon(app_id_num)?;

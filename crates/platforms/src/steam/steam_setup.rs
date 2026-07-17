@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use ira_db::DbConn;
-use ira_api::SteamClient;
+use ira_api::SteamDataClient;
 
 /// Detect a Steam/Goldberg game by looking for steam_appid.txt.
 pub fn detect_app_id(folder: &str) -> Option<String> {
@@ -24,7 +24,7 @@ pub fn add_game_from_folder(
     folder: &str,
     app_id: &str,
     kind: ira_models::GameKind,
-    steam: &SteamClient,
+    steam: &SteamDataClient,
     db: &DbConn,
     save_dir: &str,
 ) -> Result<String, String> {

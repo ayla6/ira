@@ -1,6 +1,6 @@
 use gtk4::prelude::*;
 use adw::prelude::*;
-use ira_api::SteamClient;
+use ira_api::SteamDataClient;
 use ira_config::Config;
 use crate::strings as S;
 use std::sync::Arc;
@@ -27,7 +27,7 @@ pub(super) use super::settings_console::build_shadps4_version_dropdown;
 pub fn show_settings_dialog(
     parent: &adw::ApplicationWindow,
     cfg: Config,
-    steam: Arc<SteamClient>,
+    steam: Arc<SteamDataClient>,
     state: &SharedState,
 ) {
     let layout = dialog_layout(parent);

@@ -1,6 +1,6 @@
 use gtk4::prelude::*;
 use adw::prelude::*;
-use ira_api::SteamClient;
+use ira_api::SteamDataClient;
 use ira_api::types::SgdbAsset;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use super::helpers::clear_children;
 fn build_sgdb_asset_card(
     a: &SgdbAsset,
     asset_type: &str,
-    steam: &Arc<SteamClient>,
+    steam: &Arc<SteamDataClient>,
     on_download: Rc<dyn Fn()>,
     save_dir: &str,
 ) -> (gtk4::Widget, gtk4::Widget) {
@@ -130,7 +130,7 @@ fn build_sgdb_asset_card(
 }
 
 pub(crate) struct ShowSgdbPickerParams<'a> {
-    pub steam: &'a Arc<SteamClient>,
+    pub steam: &'a Arc<SteamDataClient>,
     pub id: &'a str,
     pub asset: &'a str,
     pub is_steam_id: bool,

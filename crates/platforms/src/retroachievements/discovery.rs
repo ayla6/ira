@@ -235,28 +235,6 @@ fn build_ra_games_for_console(
 ) -> Vec<Game> {
     let mut games = Vec::new();
 
-    let ra_games_raw = {
-        let _s = tracing::info_span!("read_console_games_cache").entered();
-        match crate::retroachievements::read_console_games_cache(save_dir, console.def.ra_console_id) {
-            Some(g) => g,
-            None => {
-                eprintln!("RA: no cached game list for {}, new ROMs won't be matched", console.def.id);
-                Vec::new()
-            }
-        }
-    };
-    let ra_games: Vec<RaGameEntry> = ra_games_raw
-        .into_iter()
-        .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset"))
-        .collect();
-
-    let ra_title_map: HashMap<String, u32> = {
-        let _s = tracing::info_span!("normalize_ra_titles").entered();
-        ra_games.iter()
-            .map(|g| (normalize_name(&g.title), g.id))
-            .collect()
-    };
-
     let roms = {
         let _s = tracing::info_span!("scan_roms").entered();
         scan_roms(&console.folder, console.def.extensions)
@@ -311,6 +289,24 @@ fn build_ra_games_for_console(
 
     if !new_roms.is_empty() {
         let _s = tracing::info_span!("process_new_roms", count = new_roms.len()).entered();
+
+        let ra_games: Vec<RaGameEntry> = {
+            let _cs = tracing::info_span!("read_console_games_cache").entered();
+            match crate::retroachievements::read_console_games_cache(save_dir, console.def.ra_console_id) {
+                Some(g) => g.into_iter().filter(|g| !g.title.contains('~') && !g.title.contains("[Subset")).collect(),
+                None => {
+                    eprintln!("RA: no cached game list for {}, new ROMs won't be matched", console.def.id);
+                    Vec::new()
+                }
+            }
+        };
+        let ra_title_map: HashMap<String, u32> = {
+            let _ns = tracing::info_span!("normalize_ra_titles").entered();
+            ra_games.iter()
+                .map(|g| (normalize_name(&g.title), g.id))
+                .collect()
+        };
+
         let groups = group_multi_disc_roms(new_roms);
         for group in &groups {
             let (rom_name, rom_path, _disc_num) = &group.roms[0];

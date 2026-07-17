@@ -519,29 +519,33 @@ pub fn load_ra_achievements_from_cache(save_dir: &str, game_id: &str) -> Vec<Mer
         Err(_) => return Vec::new(),
     };
 
-    let unlocks: Vec<u32> = match std::fs::read(paths::unlocks_path(save_dir, game_id)) {
+    let unlocks: std::collections::HashSet<u32> = match std::fs::read(paths::unlocks_path(save_dir, game_id)) {
         Ok(data) => serde_json::from_slice::<UnlocksResponse>(&data)
-            .map(|r| r.user_unlocks)
+            .map(|r| r.user_unlocks.into_iter().collect())
             .unwrap_or_default(),
-        Err(_) => Vec::new(),
+        Err(_) => std::collections::HashSet::new(),
     };
 
     let ach_dir = paths::achievements_dir(save_dir, game_id);
+    let badge_files: std::collections::HashSet<String> = std::fs::read_dir(&ach_dir)
+        .map(|d| d.filter_map(|e| e.ok()).filter_map(|e| e.file_name().to_str().map(String::from)).collect())
+        .unwrap_or_default();
+
     let mut achievements = Vec::new();
     for def in &game_data.achievements {
         let earned = unlocks.contains(&def.id);
         let (icon, icon_gray) = if def.badge_name.is_empty() {
             (String::new(), String::new())
         } else {
-            let earned_badge = ach_dir.join(format!("{}.webp", def.badge_name));
-            let locked_badge = ach_dir.join(format!("{}_lock.webp", def.badge_name));
-            let earned_path = if earned && earned_badge.is_file() {
-                earned_badge.to_string_lossy().into_owned()
+            let earned_name = format!("{}.webp", def.badge_name);
+            let locked_name = format!("{}_lock.webp", def.badge_name);
+            let earned_path = if earned && badge_files.contains(&earned_name) {
+                ach_dir.join(&earned_name).to_string_lossy().into_owned()
             } else {
                 String::new()
             };
-            let locked_path = if locked_badge.is_file() {
-                locked_badge.to_string_lossy().into_owned()
+            let locked_path = if badge_files.contains(&locked_name) {
+                ach_dir.join(&locked_name).to_string_lossy().into_owned()
             } else {
                 String::new()
             };

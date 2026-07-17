@@ -1,6 +1,7 @@
 use ira_models::{AchievementStatus, Game};
 use std::collections::HashMap;
 use serde::Deserialize;
+use super::paths::DirCache;
 
 #[derive(Deserialize)]
 struct AppDetailsName {
@@ -46,6 +47,31 @@ pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
     if let Some(p) = super::paths::find_image_file(image_dir, "logo_small")
         .or_else(|| super::paths::find_image_file(image_dir, "logo"))
     {
+        game.logo_path = p.to_string_lossy().into_owned();
+    }
+}
+
+/// Cached variant: uses a DirCache to avoid ~60 stat calls per game.
+pub fn populate_image_paths_cached(cache: &DirCache, game: &mut Game) {
+    super::paths::ensure_small_image_cached(cache, "icon", 32, 32);
+    super::paths::ensure_small_image_cached(cache, "hero", 1920, 620);
+    super::paths::ensure_small_image_cached(cache, "vertical", 300, 450);
+    super::paths::ensure_small_image_cached(cache, "header", 460, 215);
+    super::paths::ensure_small_image_cached(cache, "logo", 620, 620);
+
+    if let Some(p) = cache.find_image("icon_small").or_else(|| cache.find_image("icon")) {
+        game.icon_path = p.to_string_lossy().into_owned();
+    }
+    if let Some(p) = cache.find_image("vertical_small").or_else(|| cache.find_image("vertical")) {
+        game.grid_path = p.to_string_lossy().into_owned();
+    }
+    if let Some(p) = cache.find_image("header_small").or_else(|| cache.find_image("header")) {
+        game.header_path = p.to_string_lossy().into_owned();
+    }
+    if let Some(p) = cache.find_image("hero_small").or_else(|| cache.find_image("hero")) {
+        game.hero_image_path = p.to_string_lossy().into_owned();
+    }
+    if let Some(p) = cache.find_image("logo_small").or_else(|| cache.find_image("logo")) {
         game.logo_path = p.to_string_lossy().into_owned();
     }
 }

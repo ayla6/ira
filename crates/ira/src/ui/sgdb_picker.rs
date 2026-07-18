@@ -13,7 +13,7 @@ fn build_sgdb_asset_card(
     _asset_type: &str,
     steam: &Arc<SteamDataClient>,
     on_download: Rc<dyn Fn()>,
-    save_dir: &str,
+    save_dir: String,
     thumb_size: i32,
 ) -> (gtk4::Widget, gtk4::Widget) {
 
@@ -75,44 +75,57 @@ fn build_sgdb_asset_card(
     row.append(&ldl);
 
     let cb_g = on_download.clone();
-    gdl.connect_clicked(move |_| cb_g());
-    ldl.connect_clicked(move |_| on_download());
+    let gdl_c = gdl.clone();
+    gdl.connect_clicked(move |_| {
+        gdl_c.set_label("Downloading…");
+        gdl_c.set_sensitive(false);
+        cb_g();
+    });
+    let ldl_c = ldl.clone();
+    ldl.connect_clicked(move |_| {
+        ldl_c.set_label("Downloading…");
+        ldl_c.set_sensitive(false);
+        on_download();
+    });
 
     let url_clone = a.url.clone();
     let steam_thumb = steam.clone();
     let thumb_dir = format!("{}/data/.thumbnails", save_dir);
     let _ = std::fs::create_dir_all(&thumb_dir);
-    let thumb_name = format!("{}/{}", thumb_dir, url_clone.rsplit('/').next().unwrap_or("thumb"));
+    let full_cache_name = format!("{}/{}", thumb_dir, url_clone.rsplit('/').next().unwrap_or("thumb"));
+    let thumb_display_name = format!("{}_thumb", full_cache_name);
     let tsize = thumb_size;
     let (tx_thumb, rx_thumb) = std::sync::mpsc::channel::<Option<String>>();
     let rx_thumb = std::cell::RefCell::new(rx_thumb);
     std::thread::spawn(move || {
         let _s = tracing::info_span!("thumbnail_download", url = %url_clone).entered();
-        let final_path = if std::path::Path::new(&thumb_name).exists() {
-            Some(thumb_name.clone())
-        } else if steam_thumb.download_file(&url_clone, std::path::Path::new(&thumb_name)).is_ok() {
-            let mut path = thumb_name.clone();
-            if std::path::Path::new(&thumb_name).extension().and_then(|e| e.to_str()) == Some("ico") {
-                if let Ok(img) = image::open(&thumb_name) {
-                    let png_path = std::path::Path::new(&thumb_name).with_extension("png");
+        let display_path = if std::path::Path::new(&thumb_display_name).exists() {
+            thumb_display_name.clone()
+        } else if steam_thumb.download_file(&url_clone, std::path::Path::new(&full_cache_name)).is_ok() {
+            let mut src_path = full_cache_name.clone();
+            if std::path::Path::new(&full_cache_name).extension().and_then(|e| e.to_str()) == Some("ico") {
+                if let Ok(img) = image::open(&full_cache_name) {
+                    let png_path = std::path::Path::new(&full_cache_name).with_extension("png");
                     if img.save(&png_path).is_ok() {
-                        let _ = std::fs::remove_file(&thumb_name);
-                        path = png_path.to_string_lossy().into_owned();
+                        let _ = std::fs::remove_file(&full_cache_name);
+                        src_path = png_path.to_string_lossy().into_owned();
                     }
                 }
             }
-            if let Ok(img) = image::open(&path) {
+            if let Ok(img) = image::open(&src_path) {
                 let (w, h) = (img.width(), img.height());
                 if w > tsize as u32 || h > tsize as u32 {
                     let resized = img.resize(tsize as u32, tsize as u32, image::imageops::FilterType::Lanczos3);
-                    let _ = resized.save(&path);
+                    let _ = resized.save(&thumb_display_name);
+                } else {
+                    let _ = std::fs::copy(&src_path, &thumb_display_name);
                 }
             }
-            Some(path)
+            thumb_display_name.clone()
         } else {
-            None
+            String::new()
         };
-        let _ = tx_thumb.send(final_path);
+        let _ = tx_thumb.send(if display_path.is_empty() { None } else { Some(display_path) });
     });
     let tp_g = grid_pic.clone();
     let tp_l = list_pic.clone();
@@ -184,9 +197,38 @@ fn rebuild_assets_view(
         let on_done_dl = on_done.clone();
         let asset_dl = asset_clone.to_string();
         let pending_dl = pending_copies.clone();
+        let save_dir_dl = save_dir_clone.to_string();
         let on_download: Rc<dyn Fn()> = Rc::new(move || {
             let _s = tracing::info_span!("on_download", asset = %asset_dl, url = %dl_url).entered();
             if let Some(ref pc) = pending_dl {
+                let thumb_dir = format!("{}/data/.thumbnails", save_dir_dl);
+                let cache_name = format!("{}/{}", thumb_dir, dl_url.rsplit('/').next().unwrap_or("thumb"));
+                let cache_path = std::path::Path::new(&cache_name);
+                let png_cache = cache_path.with_extension("png");
+                let cached = if cache_path.is_file() {
+                    Some(cache_path.to_path_buf())
+                } else if png_cache.is_file() {
+                    Some(png_cache)
+                } else {
+                    None
+                };
+
+                if let Some(cached_path) = cached {
+                    let ext = cached_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                    let final_path = if ext == "png" || ext == "ico" {
+                        ira_parser::convert_to_lossless_webp(&cached_path);
+                        let webp = cached_path.with_extension("webp");
+                        if webp.is_file() { webp.to_string_lossy().into_owned() }
+                        else { cached_path.to_string_lossy().into_owned() }
+                    } else {
+                        cached_path.to_string_lossy().into_owned()
+                    };
+                    pc.borrow_mut().insert(asset_dl.clone(), final_path);
+                    on_done_dl();
+                    picker_dl.close();
+                    return;
+                }
+
                 let tmp = {
                     let url_path = std::path::Path::new(&dl_url);
                     let e = url_path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -196,17 +238,49 @@ fn rebuild_assets_view(
                         std::env::temp_dir().join(format!("sgdb_{}.{}", asset_dl, e))
                     }
                 };
-                if steam_dl.download_file(&dl_url, &tmp).is_ok() {
-                    pc.borrow_mut().insert(asset_dl.clone(), tmp.to_string_lossy().into_owned());
-                    on_done_dl();
-                    picker_dl.close();
-                } else {
-                    eprintln!("Download failed for {}", dl_url);
-                }
+                let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+                let rx = std::cell::RefCell::new(rx);
+                let url = dl_url.clone();
+                let steam = steam_dl.clone();
+                let tmp_c = tmp.clone();
+                std::thread::spawn(move || {
+                    let _s = tracing::info_span!("download_and_convert", url = %url).entered();
+                    let result = if steam.download_file(&url, &tmp_c).is_ok() {
+                        let ext = tmp_c.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                        if ext == "png" || ext == "ico" {
+                            ira_parser::convert_to_lossless_webp(&tmp_c);
+                            let webp = tmp_c.with_extension("webp");
+                            if webp.is_file() { webp.to_string_lossy().into_owned() }
+                            else { tmp_c.to_string_lossy().into_owned() }
+                        } else {
+                            tmp_c.to_string_lossy().into_owned()
+                        }
+                    } else {
+                        eprintln!("Download failed for {}", url);
+                        String::new()
+                    };
+                    let _ = tx.send(if result.is_empty() { None } else { Some(result) });
+                });
+                let pc_c = pc.clone();
+                let on_done_c = on_done_dl.clone();
+                let picker_c = picker_dl.clone();
+                let asset_c = asset_dl.clone();
+                glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+                    if let Ok(result) = rx.borrow_mut().try_recv() {
+                        if let Some(path) = result {
+                            pc_c.borrow_mut().insert(asset_c.clone(), path);
+                            on_done_c();
+                            picker_c.close();
+                        }
+                        glib::ControlFlow::Break
+                    } else {
+                        glib::ControlFlow::Continue
+                    }
+                });
             }
         });
 
-        let (grid_card, list_row) = build_sgdb_asset_card(a, asset_clone, steam_clone, on_download, save_dir_clone, thumb_size);
+        let (grid_card, list_row) = build_sgdb_asset_card(a, asset_clone, steam_clone, on_download, save_dir_clone.to_string(), thumb_size);
         flow.append(&grid_card);
         list_view.append(&list_row);
     }

@@ -25,6 +25,7 @@ impl SteamDataClient {
             cache_dir: PathBuf::from(data_dir),
             http: reqwest::blocking::Client::builder()
                 .timeout(Duration::from_secs(20))
+                .user_agent("Ira/0.1 (https://github.com/ayla6/ira)")
                 .build()
                 .expect("failed to build HTTP client"),
         }

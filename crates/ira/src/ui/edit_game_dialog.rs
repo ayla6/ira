@@ -341,7 +341,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 ira_parser::data_dir(&save_dir_c, &app_id)
             };
             let _ = std::fs::create_dir_all(&cloud_dir);
-            let mut pending_images: Vec<(String, u32, u32)> = Vec::new();
+            let mut pending_images: Vec<(String, std::path::PathBuf, u32, u32)> = Vec::new();
             for (asset, src_path) in pc.iter() {
                 if asset == "__unmatch__" { continue; }
                 if asset.starts_with("__ra_unmatch_") { continue; }
@@ -363,11 +363,10 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 };
                 ira_parser::remove_image_variants(&cloud_dir, base_name);
                 let is_ico = is_ico_bytes(src_path);
-                if is_ico {
+                let dest = if is_ico {
                     let ico_path = cloud_dir.join(format!("{}.ico", base_name));
-                    if std::fs::copy(src_path, &ico_path).is_ok() {
-                        pending_images.push((base_name.to_string(), max_w, max_h));
-                    }
+                    std::fs::copy(src_path, &ico_path).ok();
+                    ico_path
                 } else {
                     let ext = std::path::Path::new(src_path).extension()
                         .and_then(|e| e.to_str())
@@ -375,9 +374,11 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     let dest = cloud_dir.join(format!("{}.{}", base_name, ext));
                     if let Err(e) = std::fs::copy(src_path, &dest) {
                         eprintln!("Failed to copy {}: {}", asset, e);
-                    } else {
-                        pending_images.push((base_name.to_string(), max_w, max_h));
                     }
+                    dest
+                };
+                if dest.is_file() {
+                    pending_images.push((base_name.to_string(), dest, max_w, max_h));
                 }
             }
             // Convert and generate small images in background
@@ -386,15 +387,16 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 let db_id_bg = db_id_s;
                 std::thread::spawn(move || {
                     let _s = tracing::info_span!("pending_image_conversion", db_id = db_id_bg, count = pending_images.len()).entered();
-                    for (base_name, max_w, max_h) in &pending_images {
-                        if let Some(src) = ira_parser::find_image_file(&cloud_dir_bg, base_name) {
-                            ira_parser::convert_to_lossless_webp(&src);
+                    for (base_name, dest, max_w, max_h) in &pending_images {
+                        let ext = dest.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                        if ext != "webp" && ext != "jpg" {
+                            ira_parser::convert_to_lossless_webp(dest);
                         }
                         let small_base = format!("{}_small", base_name);
                         ira_parser::remove_image_variants(&cloud_dir_bg, &small_base);
                         ira_parser::ensure_small_image(&cloud_dir_bg, base_name, *max_w, *max_h);
                     }
-                    let base_names: Vec<String> = pending_images.into_iter().map(|(b, _, _)| b).collect();
+                    let base_names: Vec<String> = pending_images.into_iter().map(|(b, _, _, _)| b).collect();
                     glib::idle_add_once(move || {
                         for base_name in &base_names {
                             let webp = cloud_dir_bg.join(format!("{}.webp", base_name));

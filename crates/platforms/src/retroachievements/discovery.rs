@@ -206,10 +206,16 @@ pub fn build_ra_games(
     let consoles = active_consoles(cfg);
     let load_game = &load_game;
 
-    let ra_client = RaClient::from_config(cfg).unwrap_or_else(|| RaClient::new("", "", ""));
-    for console in &consoles {
-        if let Err(e) = ra_client.fetch_console_games(save_dir, console.def.ra_console_id) {
-            eprintln!("RA: failed to fetch console games for {}: {}", console.def.id, e);
+    let needs_fetch = consoles.iter().any(|c| {
+        !crate::retroachievements::paths::console_games_path(save_dir, c.def.ra_console_id).is_file()
+    });
+    if needs_fetch {
+        if let Some(ra_client) = RaClient::from_config(cfg) {
+            for console in &consoles {
+                if let Err(e) = ra_client.fetch_console_games(save_dir, console.def.ra_console_id) {
+                    eprintln!("RA: failed to fetch console games for {}: {}", console.def.id, e);
+                }
+            }
         }
     }
 

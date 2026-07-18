@@ -15,6 +15,7 @@ fn build_sgdb_asset_card(
     on_download: Rc<dyn Fn()>,
     save_dir: String,
     thumb_size: i32,
+    all_buttons: Rc<RefCell<Vec<gtk4::Button>>>,
 ) -> (gtk4::Widget, gtk4::Widget) {
 
     let mut info = String::new();
@@ -74,17 +75,24 @@ fn build_sgdb_asset_card(
     ldl.add_css_class("suggested-action");
     row.append(&ldl);
 
+    all_buttons.borrow_mut().push(gdl.clone());
+    all_buttons.borrow_mut().push(ldl.clone());
+
     let cb_g = on_download.clone();
-    let gdl_c = gdl.clone();
+    let buttons_g = all_buttons.clone();
     gdl.connect_clicked(move |_| {
-        gdl_c.set_label("Downloading…");
-        gdl_c.set_sensitive(false);
+        for b in buttons_g.borrow().iter() {
+            b.set_sensitive(false);
+            b.set_label("Downloading…");
+        }
         cb_g();
     });
-    let ldl_c = ldl.clone();
+    let buttons_l = all_buttons.clone();
     ldl.connect_clicked(move |_| {
-        ldl_c.set_label("Downloading…");
-        ldl_c.set_sensitive(false);
+        for b in buttons_l.borrow().iter() {
+            b.set_sensitive(false);
+            b.set_label("Downloading…");
+        }
         on_download();
     });
 
@@ -171,6 +179,8 @@ fn rebuild_assets_view(
     }
 
     flow.set_max_children_per_line((900 / (thumb_size + 20)).clamp(1, 8) as u32);
+
+    let all_buttons: Rc<RefCell<Vec<gtk4::Button>>> = Rc::new(RefCell::new(Vec::new()));
 
     for a in assets {
         let data_subdir = if is_steam_id { "steam".to_string() } else { "steamgriddb".to_string() };
@@ -280,7 +290,7 @@ fn rebuild_assets_view(
             }
         });
 
-        let (grid_card, list_row) = build_sgdb_asset_card(a, asset_clone, steam_clone, on_download, save_dir_clone.to_string(), thumb_size);
+        let (grid_card, list_row) = build_sgdb_asset_card(a, asset_clone, steam_clone, on_download, save_dir_clone.to_string(), thumb_size, all_buttons.clone());
         flow.append(&grid_card);
         list_view.append(&list_row);
     }

@@ -2,8 +2,10 @@ use gtk4::prelude::*;
 use adw::prelude::*;
 use crate::Game;
 use std::cell::Cell;
+use std::rc::Rc;
 
 use super::state::SharedState;
+use super::helpers::clear_children;
 use super::steam_search_dialog::handle_steam_search_result;
 use super::sgdb_match_dialog::handle_unified_sgdb_result;
 use super::ra_match_dialog::show_ra_search_dialog;
@@ -104,8 +106,15 @@ pub fn show_mass_match_dialog(state: &SharedState) {
             let pid2 = pid.clone();
             let dlg2 = dlg.clone();
             let did2 = did;
+            let inner_c = inner.clone();
             ra_btn.connect_clicked(move |_| {
-                show_ra_search_dialog(&sc2, did2, &gn2, &pid2, &dlg2, None);
+                let inner_update = inner_c.clone();
+                show_ra_search_dialog(&sc2, did2, &gn2, &pid2, &dlg2, Some(Rc::new(move || {
+                    clear_children(&inner_update);
+                    let label = gtk4::Label::new(Some("RA: matched"));
+                    label.add_css_class("success-label");
+                    inner_update.append(&label);
+                })));
             });
             inner.append(&ra_btn);
             ac

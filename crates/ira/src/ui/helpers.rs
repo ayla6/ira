@@ -32,7 +32,12 @@ pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
     sidebar.add_css_class("navigation-sidebar");
     sidebar.set_margin_top(6);
     sidebar.set_margin_bottom(6);
-    sidebar_area.append(&sidebar);
+
+    let sidebar_scroll = gtk4::ScrolledWindow::new();
+    sidebar_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    sidebar_scroll.set_vexpand(true);
+    sidebar_scroll.set_child(Some(&sidebar));
+    sidebar_area.append(&sidebar_scroll);
 
     let sep = gtk4::Separator::new(gtk4::Orientation::Vertical);
     outer.append(&sidebar_area);

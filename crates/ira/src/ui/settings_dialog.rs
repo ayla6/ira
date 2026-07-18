@@ -104,24 +104,26 @@ pub fn show_settings_dialog(
                 if let Some(hbox) = child.downcast_ref::<gtk4::Box>() {
                     if let Some(sibling) = hbox.last_child() {
                         if let Some(label) = sibling.downcast_ref::<gtk4::Label>() {
-                            let page_id = match label.text().as_str() {
-                                "General" => "general",
-                                "API Keys" => "api",
-                                "Migration" => "migration",
-                                "Steam" => "steam",
-                                "RetroAchievements" => "ra",
-                                "PS1" => "ps1",
-                                "PS2" => "ps2",
-                                "PS4" => "ps4",
-                                "PSP" => "psp",
-                                "Performance" => "Performance",
-                                "Graphics" => "Graphics",
-                                "Wine Advanced" => "Wine Advanced",
-                                "Wine Profiles" => "profiles",
-                                "API Emulators" => "api_emulators",
-                                _ => "general",
+                            let text = label.text().to_string();
+                            let page_id = match text.as_str() {
+                                "API Keys" => "api".to_string(),
+                                "RetroAchievements" => "ra".to_string(),
+                                "Wine Profiles" => "profiles".to_string(),
+                                "API Emulators" => "api_emulators".to_string(),
+                                _ => {
+                                    if stack_clone.child_by_name(&text).is_some() {
+                                        text
+                                    } else {
+                                        let lower = text.to_lowercase();
+                                        if stack_clone.child_by_name(&lower).is_some() {
+                                            lower
+                                        } else {
+                                            "general".to_string()
+                                        }
+                                    }
+                                }
                             };
-                            stack_clone.set_visible_child_name(page_id);
+                            stack_clone.set_visible_child_name(&page_id);
                         }
                     }
                 }

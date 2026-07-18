@@ -184,9 +184,13 @@ pub(super) fn build_console_settings_page(
 
     let exe_row = adw::EntryRow::new();
     exe_row.set_title("Emulator executable");
-    exe_row.set_text(&cc.executable);
 
-    let mut core_dropdown: Option<gtk4::DropDown> = None;
+    let initial_exe = if cc.executable.is_empty() {
+        detected_emulators.first().map(|e| e.launch_command.clone()).unwrap_or_default()
+    } else {
+        cc.executable.clone()
+    };
+    exe_row.set_text(&initial_exe);
 
     if !detected_emulators.is_empty() {
         let emu_names: Vec<String> = detected_emulators.iter()
@@ -196,9 +200,10 @@ pub(super) fn build_console_settings_page(
         let emu_dropdown = gtk4::DropDown::new(Some(emu_model), None::<&gtk4::PropertyExpression>);
 
         let mut selected_idx: u32 = 0;
-        if !cc.executable.is_empty() {
+        let current_exe = exe_row.text().to_string();
+        if !current_exe.is_empty() {
             for (i, e) in detected_emulators.iter().enumerate() {
-                if e.launch_command == cc.executable {
+                if e.launch_command == current_exe {
                     selected_idx = i as u32;
                     break;
                 }
@@ -226,15 +231,14 @@ pub(super) fn build_console_settings_page(
     auto_btn.add_css_class("flat");
     auto_btn.set_valign(gtk4::Align::Center);
     {
-        let exe_row = exe_row.clone();
+        let exe_row_c = exe_row.clone();
         let emus_clone = detected_emulators.clone();
         auto_btn.connect_clicked(move |_| {
             if let Some(e) = emus_clone.first() {
-                exe_row.set_text(&e.launch_command);
+                exe_row_c.set_text(&e.launch_command);
             }
         });
     }
-    exe_row.add_suffix(&auto_btn);
 
     let exe_browse = make_browse_button(
         Some(win),
@@ -246,39 +250,55 @@ pub(super) fn build_console_settings_page(
             move |path| row.set_text(&path.to_string_lossy())
         },
     );
+    exe_row.add_suffix(&auto_btn);
     exe_row.add_suffix(&exe_browse);
     emu_group.add(&exe_row);
 
-    let is_ra = ira_platforms::emulator_detect::is_retroarch(&cc.executable);
-    if is_ra {
-        let cores = ira_platforms::emulator_detect::detect_ra_cores();
-        if !cores.is_empty() {
-            let mut core_names: Vec<String> = vec!["None (auto-detect)".to_string()];
-            core_names.extend(cores.iter().map(|c| c.display_name.clone()));
-            let core_model = string_list_from(&core_names);
-            let dropdown = gtk4::DropDown::new(Some(core_model), None::<&gtk4::PropertyExpression>);
+    let cores = ira_platforms::emulator_detect::detect_ra_cores();
+    let mut core_dropdown: Option<gtk4::DropDown> = None;
+    let mut core_row_opt: Option<adw::ActionRow> = None;
 
-            let mut selected_idx: u32 = 0;
-            if !cc.ra_core.is_empty() {
-                for (i, c) in cores.iter().enumerate() {
-                    if c.path == cc.ra_core {
-                        selected_idx = (i + 1) as u32;
-                        break;
-                    }
+    if !cores.is_empty() {
+        let mut core_names: Vec<String> = vec!["None (auto-detect)".to_string()];
+        core_names.extend(cores.iter().map(|c| c.display_name.clone()));
+        let core_model = string_list_from(&core_names);
+        let dropdown = gtk4::DropDown::new(Some(core_model), None::<&gtk4::PropertyExpression>);
+
+        let mut selected_idx: u32 = 0;
+        if !cc.ra_core.is_empty() {
+            for (i, c) in cores.iter().enumerate() {
+                if c.path == cc.ra_core {
+                    selected_idx = (i + 1) as u32;
+                    break;
                 }
             }
-            dropdown.set_selected(selected_idx);
-
-            let core_row = adw::ActionRow::new();
-            core_row.set_title("RetroArch core");
-            core_row.set_subtitle("Select a core for this console");
-            dropdown.set_valign(gtk4::Align::Center);
-            core_row.add_suffix(&dropdown);
-            emu_group.add(&core_row);
-
-            core_dropdown = Some(dropdown);
         }
+        dropdown.set_selected(selected_idx);
+
+        let core_row = adw::ActionRow::new();
+        core_row.set_title("RetroArch core");
+        core_row.set_subtitle("Select a core for this console");
+        dropdown.set_valign(gtk4::Align::Center);
+        core_row.add_suffix(&dropdown);
+        core_row.set_visible(ira_platforms::emulator_detect::is_retroarch(exe_row.text().as_ref()));
+        emu_group.add(&core_row);
+
+        core_row_opt = Some(core_row);
+        core_dropdown = Some(dropdown);
     }
+
+    auto_btn.set_visible(!detected_emulators.iter().any(|e| e.launch_command == exe_row.text().as_str()));
+
+    let core_row_c = core_row_opt;
+    let auto_btn_c = auto_btn.clone();
+    let emus_for_changed = detected_emulators.clone();
+    exe_row.connect_changed(move |entry| {
+        let text = entry.text().to_string();
+        if let Some(ref cr) = core_row_c {
+            cr.set_visible(ira_platforms::emulator_detect::is_retroarch(&text));
+        }
+        auto_btn_c.set_visible(!emus_for_changed.iter().any(|e| e.launch_command == text));
+    });
 
     let fullscreen_row = adw::SwitchRow::new();
     fullscreen_row.set_title("Start games in fullscreen");

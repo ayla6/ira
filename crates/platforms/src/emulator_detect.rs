@@ -142,7 +142,7 @@ pub fn build_launch_command(
     } else {
         vec![exe.to_string()]
     };
-    if fullscreen {
+    if fullscreen && !fullscreen_flag.is_empty() {
         cmd.push(fullscreen_flag.to_string());
     }
     cmd.push(rom_path.to_string());

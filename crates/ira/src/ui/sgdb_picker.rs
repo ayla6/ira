@@ -101,7 +101,10 @@ fn build_sgdb_asset_card(
     let thumb_dir = format!("{}/data/.thumbnails", save_dir);
     let _ = std::fs::create_dir_all(&thumb_dir);
     let full_cache_name = format!("{}/{}", thumb_dir, url_clone.rsplit('/').next().unwrap_or("thumb"));
-    let thumb_display_name = format!("{}_thumb", full_cache_name);
+    let cache_path = std::path::Path::new(&full_cache_name);
+    let stem = cache_path.file_stem().and_then(|s| s.to_str()).unwrap_or("thumb");
+    let ext = cache_path.extension().and_then(|e| e.to_str()).unwrap_or("png");
+    let thumb_display_name = format!("{}/{}_thumb.{}", thumb_dir, stem, ext);
     let tsize = thumb_size;
     let (tx_thumb, rx_thumb) = std::sync::mpsc::channel::<Option<String>>();
     let rx_thumb = std::cell::RefCell::new(rx_thumb);

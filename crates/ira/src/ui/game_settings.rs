@@ -42,9 +42,7 @@ fn build_ra_section(state: &SharedState, game: &Game, win: &adw::Window, pending
             unmatch_btn_c.set_sensitive(false);
             status_row_c.set_subtitle("Will be unmatched on Save\u{2026}");
         });
-        let unmatch_row = adw::ActionRow::new();
-        unmatch_row.add_suffix(&unmatch_btn);
-        ra_group.add(&unmatch_row);
+        status_row.add_suffix(&unmatch_btn);
     } else if game.trophy_source == ira_models::TrophySource::Empty {
         let match_btn = gtk4::Button::with_label("Match\u{2026}");
         match_btn.add_css_class("suggested-action");

@@ -392,7 +392,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                         ira_parser::ensure_small_image(&cloud_dir_bg, base_name, *max_w, *max_h);
                     }
                     let base_names: Vec<String> = pending_images.into_iter().map(|(b, _, _)| b).collect();
-                    glib::idle_add_local_once(move || {
+                    glib::idle_add_once(move || {
                         for base_name in &base_names {
                             let webp = cloud_dir_bg.join(format!("{}.webp", base_name));
                             if webp.is_file() {

@@ -12,7 +12,7 @@ use super::game_item::GameItem;
 use super::game_display::display_game;
 use super::helpers::{merge_game_enrichment, clear_children};
 use super::enrichment::enrich_game_async;
-use super::image_manager::build_image_manager_content;
+use super::image_manager::build_image_manager_content_with_drafts;
 pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
     match msg {
         AppMessage::EnrichedGame(game) | AppMessage::WatcherGameUpdated(game) => {
@@ -109,6 +109,10 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         }
         AppMessage::SgdbAssetsDownloaded { db_id, sgdb_id, icon, hero, grid, logo, header } => {
             let _span = tracing::info_span!("SgdbAssetsDownloaded", db_id).entered();
+            {
+                let db = state.borrow().db.clone();
+                let _ = ira_db::set_sgdb_id(&db, db_id, &sgdb_id);
+            }
             if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                 g.sgdb_id = sgdb_id;
                 if !icon.is_empty() { g.icon_path = icon; }
@@ -117,8 +121,8 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 if !logo.is_empty() { g.logo_path = logo; }
                 if !header.is_empty() { g.header_path = header; }
             }
-            super::helpers::refresh_settings_images_page(state, db_id, |s, game, win| {
-                build_image_manager_content(s, game, win).upcast()
+            super::helpers::refresh_settings_images_page(state, db_id, |s, game, win, pc| {
+                build_image_manager_content_with_drafts(s, game, win, pc).upcast()
             });
             let selected_id = state.borrow().selected_id.clone();
             if selected_id == db_id.to_string() {

@@ -78,10 +78,10 @@ pub fn build_image_manager_content_with_drafts(
             unmatch_btn.connect_clicked(move |_| {
                 if let Some(ref pc) = pending_pc {
                     pc.borrow_mut().insert("__unmatch__".to_string(), String::new());
-                    refresh_settings_images_page(&sc, did, |s, game, win| {
+                    refresh_settings_images_page(&sc, did, |s, game, win, pc| {
                         let mut g2 = game.clone();
                         g2.sgdb_id.clear();
-                        build_image_manager_content_with_drafts(s, &g2, win, Some(pc.clone())).upcast()
+                        build_image_manager_content_with_drafts(s, &g2, win, pc).upcast()
                     });
                 }
             });

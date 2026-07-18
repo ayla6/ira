@@ -590,7 +590,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
     {
         let mut s = state.borrow_mut();
-        s.settings_data = Some((win.clone(), stack.clone(), db_id));
+        s.settings_data = Some((win.clone(), stack.clone(), db_id, pending_copies.clone()));
     }
     let state_close = state.clone();
     win.connect_close_request(move |_| {

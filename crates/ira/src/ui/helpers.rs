@@ -2,7 +2,9 @@ use adw::prelude::{AdwDialogExt, AdwWindowExt, AlertDialogExt};
 use gtk4::prelude::*;
 use crate::Game;
 use crate::strings as S;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use super::state::SharedState;
 
@@ -268,15 +270,15 @@ pub fn esc(s: &str) -> String {
 pub fn refresh_settings_images_page(
     state: &SharedState,
     db_id: i64,
-    build_page: impl Fn(&SharedState, &Game, &adw::Window) -> gtk4::Widget,
+    build_page: impl Fn(&SharedState, &Game, &adw::Window, Option<Rc<RefCell<HashMap<String, String>>>>) -> gtk4::Widget,
 ) {
-    if let Some((ref sw, ref ss, sdb_id)) = state.borrow().settings_data.clone() {
+    if let Some((ref sw, ref ss, sdb_id, ref pc)) = state.borrow().settings_data.clone() {
         if sdb_id == db_id && sw.is_visible() {
             if let Some(old) = ss.child_by_name("images") {
                 ss.remove(&old);
             }
             if let Some(game) = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned() {
-                let new_page = build_page(state, &game, sw);
+                let new_page = build_page(state, &game, sw, Some(pc.clone()));
                 ss.add_named(&new_page, Some("images"));
             }
         }

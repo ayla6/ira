@@ -2,7 +2,7 @@ use gtk4::prelude::*;
 use adw::prelude::*;
 use ira_api::SteamDataClient;
 use ira_api::types::SgdbAsset;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -14,8 +14,8 @@ fn build_sgdb_asset_card(
     steam: &Arc<SteamDataClient>,
     on_download: Rc<dyn Fn()>,
     save_dir: &str,
+    thumb_size: i32,
 ) -> (gtk4::Widget, gtk4::Widget) {
-    let thumb_size = 300;
 
     let mut info = String::new();
     if a.width > 0 && a.height > 0 {
@@ -60,7 +60,8 @@ fn build_sgdb_asset_card(
 
     let list_pic = gtk4::Picture::new();
     list_pic.set_content_fit(gtk4::ContentFit::ScaleDown);
-    list_pic.set_size_request(96, 96);
+    let list_thumb = (thumb_size / 3).max(48);
+    list_pic.set_size_request(list_thumb, list_thumb);
     row.append(&list_pic);
 
     let rlbl = gtk4::Label::new(Some(&info));
@@ -129,6 +130,86 @@ fn build_sgdb_asset_card(
     (card.upcast::<gtk4::Widget>(), row.upcast::<gtk4::Widget>())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn rebuild_assets_view(
+    flow: &gtk4::FlowBox,
+    list_view: &gtk4::ListBox,
+    assets: &[SgdbAsset],
+    thumb_size: i32,
+    id_clone: &str,
+    save_dir_clone: &str,
+    steam_clone: &Arc<SteamDataClient>,
+    asset_clone: &str,
+    is_steam_id: bool,
+    picker_clone: &adw::Window,
+    on_done: &Rc<dyn Fn()>,
+    pending_copies: &Option<Rc<RefCell<HashMap<String, String>>>>,
+) {
+    clear_children(flow);
+    clear_children(list_view);
+
+    if assets.is_empty() {
+        let none = gtk4::Label::new(Some("No images found on SteamGridDB"));
+        none.add_css_class("dim-label");
+        flow.append(&none);
+        list_view.append(&gtk4::Label::new(Some("No images found on SteamGridDB")));
+        return;
+    }
+
+    flow.set_max_children_per_line((900 / (thumb_size + 20)).clamp(1, 8) as u32);
+
+    for a in assets {
+        let data_subdir = if is_steam_id { "steam".to_string() } else { "steamgriddb".to_string() };
+        let dest_dir = format!("{}/data/{}/{}", save_dir_clone, data_subdir, id_clone);
+        let file_name = match asset_clone {
+            "icon" => {
+                let ext = if a.mime.contains("icon") || a.mime.contains("x-icon") { "ico" }
+                else if a.mime.contains("png") { "png" }
+                else if a.mime.contains("jpeg") || a.mime.contains("jpg") { "jpg" }
+                else if a.mime.contains("webp") { "webp" }
+                else { std::path::Path::new(&a.url).extension().and_then(|e| e.to_str()).unwrap_or("png") };
+                format!("icon.{}", ext)
+            }
+            "hero" => "hero.jpg".to_string(),
+            "grid" => "vertical.jpg".to_string(),
+            "header" => "header.jpg".to_string(),
+            "logo" => "logo.png".to_string(),
+            _ => continue,
+        };
+        let _dest = format!("{}/{}", dest_dir, file_name);
+        let dl_url = a.url.clone();
+        let steam_dl = steam_clone.clone();
+        let picker_dl = picker_clone.clone();
+        let on_done_dl = on_done.clone();
+        let asset_dl = asset_clone.to_string();
+        let pending_dl = pending_copies.clone();
+        let on_download: Rc<dyn Fn()> = Rc::new(move || {
+            if let Some(ref pc) = pending_dl {
+                let tmp = {
+                    let url_path = std::path::Path::new(&dl_url);
+                    let e = url_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    if e.is_empty() {
+                        std::env::temp_dir().join(format!("sgdb_{}", asset_dl))
+                    } else {
+                        std::env::temp_dir().join(format!("sgdb_{}.{}", asset_dl, e))
+                    }
+                };
+                if steam_dl.download_file(&dl_url, &tmp).is_ok() {
+                    pc.borrow_mut().insert(asset_dl.clone(), tmp.to_string_lossy().into_owned());
+                    on_done_dl();
+                    picker_dl.close();
+                } else {
+                    eprintln!("Download failed for {}", dl_url);
+                }
+            }
+        });
+
+        let (grid_card, list_row) = build_sgdb_asset_card(a, asset_clone, steam_clone, on_download, save_dir_clone, thumb_size);
+        flow.append(&grid_card);
+        list_view.append(&list_row);
+    }
+}
+
 pub(crate) struct ShowSgdbPickerParams<'a> {
     pub steam: &'a Arc<SteamDataClient>,
     pub id: &'a str,
@@ -158,6 +239,15 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     toggle_btn.set_icon_name("view-list-symbolic");
     toggle_btn.set_tooltip_text(Some("Switch to list view"));
     toggle_btn.add_css_class("flat");
+
+    let zoom_adj = gtk4::Adjustment::new(300.0, 100.0, 500.0, 50.0, 100.0, 0.0);
+    let zoom_scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, Some(&zoom_adj));
+    zoom_scale.set_tooltip_text(Some("Zoom"));
+    zoom_scale.set_width_request(120);
+    zoom_scale.set_draw_value(false);
+    zoom_scale.add_css_class("flat");
+
+    header_bar.pack_end(&zoom_scale);
     header_bar.pack_end(&toggle_btn);
 
     outer.append(&header_bar);
@@ -226,9 +316,46 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let steam_clone = steam.clone();
     let id_clone = id.to_string();
     let asset_clone = asset.to_string();
+    let save_dir_clone = save_dir_owned.clone();
     let picker_clone = picker.clone();
     let on_done = on_done.clone();
-    let save_dir_clone = save_dir_owned.clone();
+    let pending_copies = pending_copies.clone();
+
+    let assets_store: Rc<RefCell<Vec<SgdbAsset>>> = Rc::new(RefCell::new(Vec::new()));
+    let zoom_level = Rc::new(Cell::new(300));
+
+    let rebuild: Rc<dyn Fn()> = {
+        let assets_store = assets_store.clone();
+        let zoom_level = zoom_level.clone();
+        let flow = flow.clone();
+        let list_view = list_view.clone();
+        let steam_clone = steam_clone.clone();
+        let id_clone = id_clone.clone();
+        let asset_clone = asset_clone.clone();
+        let save_dir_clone = save_dir_clone.clone();
+        let picker_clone = picker_clone.clone();
+        let on_done = on_done.clone();
+        let pending_copies = pending_copies.clone();
+
+        Rc::new(move || {
+            let assets = assets_store.borrow();
+            let thumb_size = zoom_level.get();
+            rebuild_assets_view(
+                &flow,
+                &list_view,
+                &assets,
+                thumb_size,
+                &id_clone,
+                &save_dir_clone,
+                &steam_clone,
+                &asset_clone,
+                is_steam_id,
+                &picker_clone,
+                &on_done,
+                &pending_copies,
+            );
+        })
+    };
 
     let stack_toggle = stack.clone();
     toggle_btn.connect_toggled(move |btn| {
@@ -243,72 +370,21 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         }
     });
 
+    let assets_store_t = assets_store.clone();
+    let rebuild_t = rebuild.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
         if let Ok(assets) = rx.borrow_mut().try_recv() {
-            clear_children(&flow);
-            clear_children(&list_view);
-
-            if assets.is_empty() {
-                let none = gtk4::Label::new(Some("No images found on SteamGridDB"));
-                none.add_css_class("dim-label");
-                flow.append(&none);
-                list_view.append(&gtk4::Label::new(Some("No images found on SteamGridDB")));
-                return glib::ControlFlow::Break;
-            }
-
-            for a in assets {
-                let data_subdir = if is_steam_id { "steam".to_string() } else { "steamgriddb".to_string() };
-                let dest_dir = format!("{}/data/{}/{}", save_dir_clone, data_subdir, id_clone);
-                let file_name = match asset_clone.as_str() {
-                    "icon" => {
-                        let ext = if a.mime.contains("icon") || a.mime.contains("x-icon") { "ico" }
-                        else if a.mime.contains("png") { "png" }
-                        else if a.mime.contains("jpeg") || a.mime.contains("jpg") { "jpg" }
-                        else if a.mime.contains("webp") { "webp" }
-                        else { std::path::Path::new(&a.url).extension().and_then(|e| e.to_str()).unwrap_or("png") };
-                        format!("icon.{}", ext)
-                    }
-                    "hero" => "hero.jpg".to_string(),
-                    "grid" => "vertical.jpg".to_string(),
-                    "header" => "header.jpg".to_string(),
-                    "logo" => "logo.png".to_string(),
-                    _ => continue,
-                };
-                let _dest = format!("{}/{}", dest_dir, file_name);
-                let dl_url = a.url.clone();
-                let steam_dl = steam_clone.clone();
-                let picker_dl = picker_clone.clone();
-                let on_done_dl = on_done.clone();
-                let asset_dl = asset_clone.clone();
-                let pending_dl = pending_copies.clone();
-                let on_download: Rc<dyn Fn()> = Rc::new(move || {
-                    if let Some(ref pc) = pending_dl {
-                        let tmp = {
-                            let url_path = std::path::Path::new(&dl_url);
-                            let e = url_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                            if e.is_empty() {
-                                std::env::temp_dir().join(format!("sgdb_{}", asset_dl))
-                            } else {
-                                std::env::temp_dir().join(format!("sgdb_{}.{}", asset_dl, e))
-                            }
-                        };
-                        if steam_dl.download_file(&dl_url, &tmp).is_ok() {
-                            pc.borrow_mut().insert(asset_dl.clone(), tmp.to_string_lossy().into_owned());
-                            on_done_dl();
-                            picker_dl.close();
-                        } else {
-                            eprintln!("Download failed for {}", dl_url);
-                        }
-                    }
-                });
-
-                let (grid_card, list_row) = build_sgdb_asset_card(&a, &asset_clone, &steam_clone, on_download, &save_dir_clone);
-                flow.append(&grid_card);
-                list_view.append(&list_row);
-            }
+            *assets_store_t.borrow_mut() = assets;
+            rebuild_t();
             glib::ControlFlow::Break
         } else {
             glib::ControlFlow::Continue
         }
+    });
+
+    let rebuild_z = rebuild.clone();
+    zoom_scale.connect_value_changed(move |s| {
+        zoom_level.set(s.value() as i32);
+        rebuild_z();
     });
 }

@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use super::state::SharedState;
-use super::image_manager::build_image_manager_content;
+use super::image_manager::build_image_manager_content_with_drafts;
 use super::helpers::clear_children;
 use super::helpers::refresh_settings_images_page;
 use super::game_display::display_game;
@@ -99,8 +99,8 @@ pub(super) fn handle_unified_sgdb_result(
                     display_game(&game, &sc);
                 }
             }
-            refresh_settings_images_page(&sc, db_id, |s, game, win| {
-                build_image_manager_content(s, game, win).upcast()
+            refresh_settings_images_page(&sc, db_id, |s, game, win, pc| {
+                build_image_manager_content_with_drafts(s, game, win, pc).upcast()
             });
             let is_grid_showing = sc.borrow().selected_id.is_empty() && !sc.borrow().content_unloaded;
             if is_grid_showing {
@@ -249,8 +249,8 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
                             if let Some(g) = state_c3.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                                 g.sgdb_id = sgdb_id_c.clone();
                             }
-                            refresh_settings_images_page(&state_c3, db_id, |s, game, win| {
-                                build_image_manager_content(s, game, win).upcast()
+                            refresh_settings_images_page(&state_c3, db_id, |s, game, win, pc| {
+                                build_image_manager_content_with_drafts(s, game, win, pc).upcast()
                             });
                             let steam = state_c3.borrow().steam.clone();
                             let sgdb_id_d = sgdb_id_c.clone();

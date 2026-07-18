@@ -11,6 +11,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+pub type SettingsData = (adw::Window, gtk4::Stack, i64, Rc<RefCell<HashMap<String, String>>>);
+
 pub struct AppState {
     pub window: adw::ApplicationWindow,
     pub games: Vec<Game>,
@@ -36,7 +38,7 @@ pub struct AppState {
     pub grid_store: gio::ListStore,
     pub sidebar_rebuild_pending: bool,
     pub view_generation: u32,
-    pub settings_data: Option<(adw::Window, gtk4::Stack, i64)>,
+    pub settings_data: Option<SettingsData>,
     pub save_dir: String,
     pub search_query: String,
     pub selected_group: GroupSelection,

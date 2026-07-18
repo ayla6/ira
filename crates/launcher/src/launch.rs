@@ -9,6 +9,7 @@ pub struct LaunchContext {
     pub game_name: String,
     pub sender: AppSender,
     pub game_id: i64,
+    pub app_id: String,
     pub db: DbConn,
     pub save_dir: String,
     pub running_games: Arc<Mutex<HashMap<i64, i32>>>,
@@ -46,7 +47,7 @@ pub fn launch_game(
         } else {
             super::wine_launch::build_wine_command(&wine_exe, &launch.exe, &args, wine)
         };
-        let env = super::env_builder::build_env(launch, Some(wine), &wine_exe, &ctx.save_dir, ctx.game_id, &mut cmd);
+        let env = super::env_builder::build_env(launch, Some(wine), &wine_exe, &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
 
         let pfx = super::wine_launch::wine_prefix(wine);
         let prefix_ready = std::path::Path::new(&pfx).join("system.reg").is_file();
@@ -93,7 +94,7 @@ pub fn launch_game(
             shlex::split(&launch.args).ok_or_else(|| "Failed to parse arguments".to_string())?
         };
         let mut cmd = super::native_launch::build_native_command(&launch.exe, &args);
-        let env = super::env_builder::build_env(launch, None, "", &ctx.save_dir, ctx.game_id, &mut cmd);
+        let env = super::env_builder::build_env(launch, None, "", &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
         (cmd, env)
     };
 

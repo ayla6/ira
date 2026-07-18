@@ -200,6 +200,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
                     game_name: game_name.clone(),
                     sender,
                     game_id,
+                    app_id: app_id.clone(),
                     db: db.clone(),
                     save_dir: save_dir.clone(),
                     running_games: running_games.clone(),

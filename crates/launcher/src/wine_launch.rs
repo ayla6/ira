@@ -79,7 +79,7 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
         env.push(("WINEDLLOVERRIDES".to_string(), overrides_str));
     }
 
-    if let Some(proton_path) = get_proton_path(&wine.version) {
+    if let Some(proton_path) = get_proton_path(&wine.version, wine_exe) {
         env.push(("PROTONPATH".to_string(), proton_path));
     }
 

@@ -42,6 +42,7 @@ pub struct WineConfigWidgets {
     pub wine_env_vars_box: gtk4::ListBox,
     pub dll_overrides_box: gtk4::ListBox,
     pub overridden: OverrideList,
+    pub umu_enabled: bool,
 }
 
 pub struct WinePage {
@@ -257,6 +258,7 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
         dpi_enabled, dpi, gamemode, mangohud, gamescope, gamescope_flags,
         dxvk_frame_rate, proton_wow64, proton_ntsync, wine_env_vars_box, dll_overrides_box,
         overridden,
+        umu_enabled: wine.umu_enabled,
     };
 
     (pages, widgets)
@@ -310,7 +312,7 @@ impl WineConfigWidgets {
             proton_wow64: self.proton_wow64.is_active(),
             proton_ntsync: self.proton_ntsync.is_active(),
             wine_env_vars: collect_env_vars(&self.wine_env_vars_box),
-            umu_enabled: false,
+            umu_enabled: self.umu_enabled,
             overridden_fields: self.overridden.borrow().clone(),
         }
     }

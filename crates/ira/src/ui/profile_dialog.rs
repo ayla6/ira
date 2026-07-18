@@ -205,7 +205,7 @@ fn show_profile_dialog(
     let umu_row = adw::SwitchRow::new();
     umu_row.set_title("UMU Launcher");
     umu_row.set_subtitle("Launch via umu-run (required for Proton versions)");
-    if let Some(p) = existing.as_ref() { umu_row.set_active(p.umu_enabled); }
+    umu_row.set_active(existing.as_ref().is_none_or(|p| p.umu_enabled));
     group.add(&umu_row);
 
     content.append(&group);

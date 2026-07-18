@@ -30,15 +30,18 @@ fn find_proton_wine(dir: &std::path::Path) -> Option<String> {
     None
 }
 
-pub(crate) fn get_proton_path(version: &str) -> Option<String> {
+pub(crate) fn get_proton_path(version: &str, wine_exe: &str) -> Option<String> {
     let v = version.to_lowercase();
-    if v == "ge-proton" {
-        Some("GE-Proton".to_string())
-    } else if v.contains("proton") {
-        Some(version.to_string())
-    } else {
-        None
+    if v == "ge-proton" || wine_exe.ends_with("umu-run") || wine_exe.contains("/umu") {
+        return Some("GE-Proton".to_string());
     }
+    if !v.contains("proton") {
+        return None;
+    }
+    let path = std::path::Path::new(wine_exe);
+    let bin_dir = path.parent()?;
+    let proton_root = bin_dir.parent()?.parent()?;
+    Some(proton_root.to_string_lossy().into_owned())
 }
 
 pub fn find_wine_binary(version: &str, custom_path: &str) -> Result<String, String> {

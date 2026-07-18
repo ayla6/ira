@@ -236,6 +236,9 @@ impl SteamDataClient {
 
         let settings_dir = self.game_dir(app_id).join("achievements");
         let img_dir = settings_dir.join("achievement_images");
+        if img_dir.exists() && !img_dir.is_dir() {
+            let _ = std::fs::remove_file(&img_dir);
+        }
         std::fs::create_dir_all(&img_dir).map_err(|e| format!("could not create achievements dir: {}", e))?;
 
         let mut jobs: Vec<IconJob> = Vec::new();

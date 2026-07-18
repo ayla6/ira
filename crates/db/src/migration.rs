@@ -38,6 +38,9 @@ pub fn run_schema_migrations(conn: &Connection) {
     // Drop obsolete unique indexes that prevented multiple retro games per console
     let _ = conn.execute("DROP INDEX IF EXISTS idx_games_trophy_platform", []);
     let _ = conn.execute("DROP INDEX IF EXISTS idx_games_kind_platform", []);
+    // Replace global game_id index with compound (game_id, platform_id) to prevent cross-platform collisions
+    let _ = conn.execute("DROP INDEX IF EXISTS idx_games_game_id", []);
+    let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_games_game_id_platform ON games(game_id, platform_id) WHERE game_id != ''", []);
 }
 
 #[cfg(test)]

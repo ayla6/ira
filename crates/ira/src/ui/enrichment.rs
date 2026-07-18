@@ -256,7 +256,7 @@ fn enrich_ra(params: EnrichRaParams) {
         return;
     }
 
-    let entry = ira_db::find_by_game_id(db, app_id, platform_id)
+    let entry = ira_db::find_by_db_id(db, db_id)
         .ok()
         .flatten()
         .unwrap_or_else(|| GameEntry::for_reload(db_id, ira_models::GameKind::Retro, ira_models::TrophySource::from_string(trophy_source), "", app_id, platform_id));

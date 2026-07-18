@@ -91,7 +91,7 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
                 last_played: entry.last_played,
                 logo_position: entry.logo_position.clone(),
                 logo_size: entry.logo_size,
-                manual_unmatch: false,
+                manual_unmatch: entry.manual_unmatch,
                 sort_title: entry.sort_title.clone(),
                 game_path: String::new(),
                 sgdb_id,

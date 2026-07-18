@@ -110,7 +110,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
             inner.append(&ra_btn);
             ac
         } else {
-            let searching_text = if game.app_id.is_empty() && !g_manual_unmatch(game) {
+            let searching_text = if game.app_id.is_empty() && !game.manual_unmatch {
                 "Searching Steam..."
             } else {
                 "Searching SGDB..."
@@ -254,10 +254,6 @@ pub fn show_mass_match_dialog(state: &SharedState) {
         }
         glib::ControlFlow::Continue
     });
-}
-
-fn g_manual_unmatch(g: &Game) -> bool {
-    g.manual_unmatch
 }
 
 fn create_match_row(list: &gtk4::ListBox, name: &str, searching_text: &str) -> gtk4::Box {

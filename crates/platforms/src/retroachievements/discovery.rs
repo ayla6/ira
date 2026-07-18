@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use ira_config::Config;
 use ira_models::{Game, GameDisc, GameKind, TrophySource};
 use crate::consoles::{CONSOLES, ConsoleDef};
-use crate::retroachievements::api::RaGameEntry;
+use crate::retroachievements::api::{RaClient, RaGameEntry};
 
 struct ActiveConsole {
     def: &'static ConsoleDef,
@@ -205,6 +205,13 @@ pub fn build_ra_games(
 ) -> Vec<Game> {
     let consoles = active_consoles(cfg);
     let load_game = &load_game;
+
+    let ra_client = RaClient::from_config(cfg).unwrap_or_else(|| RaClient::new("", "", ""));
+    for console in &consoles {
+        if let Err(e) = ra_client.fetch_console_games(save_dir, console.def.ra_console_id) {
+            eprintln!("RA: failed to fetch console games for {}: {}", console.def.id, e);
+        }
+    }
 
     std::thread::scope(|s| {
         let mut handles = Vec::new();

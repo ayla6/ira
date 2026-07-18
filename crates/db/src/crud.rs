@@ -15,7 +15,7 @@ pub fn add_game(conn: &DbConn, kind: GameKind, trophy_source: TrophySource, stea
     } else {
         c.execute(
             "INSERT INTO games (kind, trophy_source, steam_id, game_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(game_id) WHERE game_id != '' DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
+             ON CONFLICT(game_id, platform_id) WHERE game_id != '' DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
             params![kind, trophy_source, steam_id, game_id, platform_id, title],
         ).map_err(|e| e.to_string())?;
     }
@@ -41,6 +41,13 @@ pub fn update_game_ids(conn: &DbConn, id: i64, steam_id: &str, game_id: &str, tr
 pub fn update_sort_title(conn: &DbConn, id: i64, sort_title: &str) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.execute("UPDATE games SET sort_title = ?1 WHERE id = ?2", params![sort_title, id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn set_manual_unmatch(conn: &DbConn, id: i64, value: bool) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute("UPDATE games SET manual_unmatch = ?1 WHERE id = ?2", params![value, id])
         .map_err(|e| e.to_string())?;
     Ok(())
 }

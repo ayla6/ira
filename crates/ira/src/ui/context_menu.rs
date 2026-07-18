@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use gtk4::prelude::*;
 use adw::prelude::{AlertDialogExt, AdwDialogExt};
 use ira_models::GameKind;
@@ -16,7 +18,7 @@ pub fn show_game_context_menu(
     parent: &impl glib::prelude::IsA<gtk4::Widget>,
     at_x: f64,
     at_y: f64,
-    sidebar_row: Option<&gtk4::ListBoxRow>,
+    _sidebar_row: Option<&gtk4::ListBoxRow>,
 ) {
     let current_hidden = state
         .borrow()
@@ -164,7 +166,6 @@ pub fn show_game_context_menu(
     let hide_action = gio::SimpleAction::new("hide", None);
     let sc = state_clone.clone();
     let gc = game_clone.clone();
-    let row = sidebar_row.cloned();
     hide_action.connect_activate(move |_, _| {
         let new_hidden = !current_hidden;
         let db_id = gc.db_id;
@@ -179,20 +180,7 @@ pub fn show_game_context_menu(
         if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
             g.hidden = new_hidden;
         }
-        if let Some(ref row_clone) = row {
-            let scroll = sc.borrow().sidebar_scroll.clone();
-            let saved_scroll = scroll.vadjustment().value();
-            if new_hidden {
-                row_clone.add_css_class("hidden-game");
-            } else {
-                row_clone.remove_css_class("hidden-game");
-            }
-            let show_hidden = sc.borrow().cfg.show_hidden_games;
-            row_clone.set_visible(!new_hidden || show_hidden);
-            let adj = scroll.vadjustment();
-            let max = (adj.upper() - adj.page_size()).max(0.0);
-            adj.set_value(saved_scroll.min(max));
-        }
+        super::sidebar::rebuild_sidebar(&sc);
     });
     actions.add_action(&hide_action);
 
@@ -378,6 +366,176 @@ pub fn show_game_context_menu(
         dialog.present(Some(&window));
     });
     actions.add_action(&new_collection);
+
+    parent.insert_action_group("game", Some(&actions));
+
+    popover.set_parent(parent);
+    popover.set_pointing_to(Some(&gdk4::Rectangle::new(at_x as i32, at_y as i32, 1, 1)));
+    popover.popup();
+}
+
+pub fn show_multi_game_context_menu(
+    state: &SharedState,
+    db_ids: &HashSet<i64>,
+    parent: &impl glib::prelude::IsA<gtk4::Widget>,
+    at_x: f64,
+    at_y: f64,
+) {
+    let menu = gio::Menu::new();
+    let collections_menu = gio::Menu::new();
+
+    let groups = state.borrow().groups.clone();
+    let db = state.borrow().db.clone();
+
+    let game_group_map: std::collections::HashMap<i64, Vec<i64>> = db_ids
+        .iter()
+        .map(|&db_id| {
+            let group_ids = ira_db::get_groups_for_game(&db, db_id)
+                .unwrap_or_default()
+                .iter()
+                .map(|g| g.id)
+                .collect();
+            (db_id, group_ids)
+        })
+        .collect();
+
+    for g in &groups {
+        let all_in = db_ids
+            .iter()
+            .all(|&db_id| game_group_map.get(&db_id).is_some_and(|ids| ids.contains(&g.id)));
+        let label = if all_in {
+            format!("✓ {}", g.name)
+        } else {
+            g.name.clone()
+        };
+        let item = gio::MenuItem::new(Some(&label), None);
+        item.set_action_and_target_value(Some("game.toggle_group"), Some(&g.id.to_variant()));
+        collections_menu.append_item(&item);
+    }
+
+    if !groups.is_empty() {
+        collections_menu.append_section(None, &gio::Menu::new());
+    }
+    collections_menu.append(Some("Add to new collection…"), Some("game.new_collection"));
+    menu.append_submenu(Some("Collections"), &collections_menu);
+
+    let all_hidden = db_ids.iter().all(|&db_id| {
+        state.borrow().games.iter()
+            .find(|g| g.db_id == db_id)
+            .is_some_and(|g| g.hidden)
+    });
+    let hide_label = if all_hidden { S::UNHIDE_GAME } else { S::HIDE_GAME };
+    let hide_section = gio::Menu::new();
+    hide_section.append(Some(hide_label), Some("game.toggle_hide"));
+    menu.append_section(None, &hide_section);
+
+    let popover = gtk4::PopoverMenu::from_model(Some(&menu));
+    popover.set_halign(gtk4::Align::Start);
+    popover.set_has_arrow(false);
+
+    let sc_orig = state.clone();
+    let ids: Vec<i64> = db_ids.iter().copied().collect();
+    let actions = gio::SimpleActionGroup::new();
+
+    let toggle_group = gio::SimpleAction::new("toggle_group", Some(&i64::static_variant_type()));
+    let sc = sc_orig.clone();
+    let ids_clone = ids.clone();
+    toggle_group.connect_activate(move |_, param| {
+        let group_id = param.and_then(|p| p.get::<i64>()).unwrap_or(0);
+        let db = sc.borrow().db.clone();
+
+        let all_in = ids_clone.iter().all(|&db_id| {
+            let game_groups = ira_db::get_groups_for_game(&db, db_id).unwrap_or_default();
+            game_groups.iter().any(|g| g.id == group_id)
+        });
+
+        for &db_id in &ids_clone {
+            if all_in {
+                if let Err(e) = ira_db::remove_game_from_group(&db, db_id, group_id) {
+                    eprintln!("Failed to remove game from group: {}", e);
+                }
+            } else if let Err(e) = ira_db::add_game_to_group(&db, db_id, group_id) {
+                eprintln!("Failed to add game to group: {}", e);
+            }
+        }
+        super::sidebar::rebuild_sidebar(&sc);
+    });
+    actions.add_action(&toggle_group);
+
+    let new_collection = gio::SimpleAction::new("new_collection", None);
+    let sc = sc_orig.clone();
+    let ids_clone2 = ids.clone();
+    new_collection.connect_activate(move |_, _| {
+        let window = sc.borrow().window.clone();
+        let dialog = adw::AlertDialog::new(Some("New Collection"), Some("Enter a name for the collection:"));
+        let entry = gtk4::Entry::new();
+        entry.set_placeholder_text(Some("Collection name"));
+        entry.set_margin_start(12);
+        entry.set_margin_end(12);
+        entry.set_margin_top(8);
+        entry.set_margin_bottom(8);
+        dialog.set_extra_child(Some(&entry));
+        dialog.add_response("cancel", S::CANCEL);
+        dialog.add_response("create", "Create");
+        dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("create"));
+        dialog.set_close_response("cancel");
+
+        let entry_clone = entry.clone();
+        let sc = sc.clone();
+        let ids_clone3 = ids_clone2.clone();
+        dialog.connect_response(None, move |_, resp| {
+            if resp != "create" {
+                return;
+            }
+            let name = entry_clone.text().trim().to_string();
+            if name.is_empty() {
+                return;
+            }
+            let db = sc.borrow().db.clone();
+            match ira_db::create_group(&db, &name) {
+                Ok(group_id) => {
+                    for &db_id in &ids_clone3 {
+                        if let Err(e) = ira_db::add_game_to_group(&db, db_id, group_id) {
+                            eprintln!("Failed to add game to new group: {}", e);
+                        }
+                    }
+                    let groups = ira_db::get_all_groups(&db).unwrap_or_default();
+                    sc.borrow_mut().groups = groups;
+                    super::sidebar::rebuild_sidebar(&sc);
+                }
+                Err(e) => {
+                    eprintln!("Failed to create group: {}", e);
+                }
+            }
+        });
+        dialog.present(Some(&window));
+    });
+    actions.add_action(&new_collection);
+
+    let toggle_hide = gio::SimpleAction::new("toggle_hide", None);
+    let sc = sc_orig.clone();
+    let ids_clone4 = ids.clone();
+    let all_hidden_clone = all_hidden;
+    toggle_hide.connect_activate(move |_, _| {
+        let new_hidden = !all_hidden_clone;
+        let db = sc.borrow().db.clone();
+        for &db_id in &ids_clone4 {
+            if let Err(e) = ira_db::set_game_hidden(&db, db_id, new_hidden) {
+                eprintln!("Failed to set hidden: {}", e);
+            }
+        }
+        {
+            let mut s = sc.borrow_mut();
+            for g in s.games.iter_mut() {
+                if ids_clone4.contains(&g.db_id) {
+                    g.hidden = new_hidden;
+                }
+            }
+        }
+        super::sidebar::rebuild_sidebar(&sc);
+    });
+    actions.add_action(&toggle_hide);
 
     parent.insert_action_group("game", Some(&actions));
 

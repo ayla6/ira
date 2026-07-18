@@ -358,6 +358,7 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
                 let selected = state_clone.borrow().selected_id.clone();
                 if selected.is_empty() {
                     select_row_silently(&state_clone, Some(0));
+                    show_grid_view(&state_clone);
                 }
             });
         }
@@ -404,6 +405,25 @@ pub fn switch_to_game(state: &SharedState, db_id: i64) {
                 ra_username,
                 ra_token,
                 ra_password,
+            });
+        } else if game.kind == ira_models::GameKind::Retro
+            && game.trophy_source == ira_models::TrophySource::Ra
+            && !game.app_id.is_empty()
+            && game.achievements.iter().any(|a| a.icon_path.is_empty())
+        {
+            let app_id = game.app_id.clone();
+            let db_id = game.db_id;
+            let save_dir = state.borrow().save_dir.clone();
+            let db = state.borrow().db.clone();
+            let sender = state.borrow().sender.clone();
+            std::thread::spawn(move || {
+                if ira_platforms::retroachievements::redownload_missing_ra_badges(&save_dir, &app_id) {
+                    if let Some(entry) = ira_db::find_by_db_id(&db, db_id).ok().flatten() {
+                        if let Ok(updated) = crate::game_loader::load_game(&entry, &save_dir) {
+                            let _ = sender.send(crate::AppMessage::EnrichedGame(updated));
+                        }
+                    }
+                }
             });
         }
     }

@@ -3,7 +3,7 @@ use crate::Game;
 use ira_models::GroupSelection;
 use crate::strings as S;
 use super::state::SharedState;
-use super::context_menu::show_game_context_menu;
+use super::context_menu::{show_game_context_menu, show_multi_game_context_menu};
 use super::helpers::clear_children;
 use super::sidebar_item::{SidebarItem, SidebarItemKind};
 use std::collections::{HashMap, HashSet};
@@ -94,6 +94,8 @@ pub fn update_sidebar_game(state: &SharedState, db_id: i64, name: &str, icon_pat
 
 pub fn set_sidebar_playing(state: &SharedState, db_id: i64, playing: bool) {
     let store = state.borrow().sidebar_store.clone();
+    let sidebar_scroll = state.borrow().sidebar_scroll.clone();
+    let saved_scroll = sidebar_scroll.vadjustment().value();
     for i in 0..store.n_items() {
         if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()) {
             if item.kind() == SidebarItemKind::Game && item.db_id() == db_id {
@@ -101,10 +103,14 @@ pub fn set_sidebar_playing(state: &SharedState, db_id: i64, playing: bool) {
                     db_id, &item.name(), &item.icon_path(), item.hidden(), playing,
                 );
                 store.splice(i, 1, &[new_item]);
-                break;
             }
         }
     }
+    let adj = sidebar_scroll.vadjustment();
+    glib::idle_add_local_once(move || {
+        let max = (adj.upper() - adj.page_size()).max(0.0);
+        adj.set_value(saved_scroll.min(max));
+    });
 }
 
 pub fn rebuild_sidebar(state: &SharedState) {
@@ -227,9 +233,27 @@ pub fn rebuild_sidebar(state: &SharedState) {
 }
 
 fn restore_selection(state: &SharedState) {
+    let multi_selected_ids = state.borrow().multi_selected_ids.clone();
+    let store = state.borrow().sidebar_store.clone();
+
+    if !multi_selected_ids.is_empty() {
+        let selection = state.borrow().sidebar_selection.clone();
+        let bitset = gtk4::Bitset::new_empty();
+        for i in 0..store.n_items() {
+            if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()) {
+                if item.kind() == SidebarItemKind::Game
+                    && multi_selected_ids.contains(&item.db_id())
+                {
+                    bitset.add(i);
+                }
+            }
+        }
+        selection.set_selection(&bitset, &bitset);
+        return;
+    }
+
     let selected_id = state.borrow().selected_id.clone();
     let selected_group = state.borrow().selected_group.clone();
-    let store = state.borrow().sidebar_store.clone();
 
     if !selected_id.is_empty() {
         if let Ok(db_id) = selected_id.parse::<i64>() {
@@ -270,10 +294,6 @@ pub fn build_factory(state: &SharedState) -> gtk4::SignalListItemFactory {
         list_item.set_selectable(true);
 
         let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-        row.set_margin_top(4);
-        row.set_margin_bottom(4);
-        row.set_margin_start(24);
-        row.set_margin_end(10);
 
         list_item.set_child(Some(&row));
     });
@@ -288,9 +308,14 @@ pub fn build_factory(state: &SharedState) -> gtk4::SignalListItemFactory {
 
         clear_children(&row);
 
+        row.remove_css_class("playing-game");
+        row.remove_css_class("hidden-game");
+        row.remove_css_class("sidebar-row-pad-game");
+        row.remove_css_class("sidebar-row-pad-header");
+
         match item.kind() {
             SidebarItemKind::AllGames => {
-                row.set_margin_start(24);
+                row.add_css_class("sidebar-row-pad-game");
                 let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
                 icon.set_pixel_size(16);
                 row.append(&icon);
@@ -310,7 +335,7 @@ pub fn build_factory(state: &SharedState) -> gtk4::SignalListItemFactory {
                 row.append(&add_btn);
             }
             SidebarItemKind::CollectionHeader | SidebarItemKind::UncategorizedHeader => {
-                row.set_margin_start(4);
+                row.add_css_class("sidebar-row-pad-header");
                 let group_id = item.group_id();
                 let collapsed = item.collapsed();
 
@@ -392,10 +417,7 @@ pub fn build_factory(state: &SharedState) -> gtk4::SignalListItemFactory {
                 }
             }
             SidebarItemKind::Game => {
-                row.remove_css_class("hidden-game");
-                row.remove_css_class("playing-game");
-
-                row.set_margin_start(24);
+                row.add_css_class("sidebar-row-pad-game");
                 let icon = gtk4::Image::from_icon_name("application-x-executable");
                 icon.set_pixel_size(24);
                 if !item.icon_path().is_empty() {
@@ -425,11 +447,25 @@ pub fn build_factory(state: &SharedState) -> gtk4::SignalListItemFactory {
                 right_click.set_button(3);
                 right_click.connect_pressed(move |_, _, x, y| {
                     if let Some(r) = row_weak.upgrade() {
-                        let game = sc.borrow().games.iter()
-                            .find(|g| g.db_id == db_id)
-                            .cloned();
-                        if let Some(game) = game {
-                            show_game_context_menu(&sc, &game, &r, x, y, None::<&gtk4::ListBoxRow>);
+                        let selected_ids = {
+                            let s = sc.borrow();
+                            s.sidebar_selection.selected_db_ids()
+                        };
+                        if selected_ids.len() > 1 && selected_ids.contains(&db_id) {
+                            show_multi_game_context_menu(&sc, &selected_ids, &r, x, y);
+                        } else {
+                            if !selected_ids.contains(&db_id) || selected_ids.len() != 1 {
+                                if let Some(pos) = find_game_index(&sc, db_id) {
+                                    let selection = sc.borrow().sidebar_selection.clone();
+                                    selection.select_item(pos, true);
+                                }
+                            }
+                            let game = sc.borrow().games.iter()
+                                .find(|g| g.db_id == db_id)
+                                .cloned();
+                            if let Some(game) = game {
+                                show_game_context_menu(&sc, &game, &r, x, y, None::<&gtk4::ListBoxRow>);
+                            }
                         }
                     }
                 });

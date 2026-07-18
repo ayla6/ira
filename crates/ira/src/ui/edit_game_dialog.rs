@@ -204,6 +204,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let game_exe = saved_launch.exe.clone();
     let language_row_c = language_row.clone();
     let languages_c = languages.clone();
+    let saved_platform_id = game.platform_id.clone();
 
     save_btn.connect_clicked(move |_| {
         let title = title_entry.text().to_string();
@@ -226,7 +227,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 app_id_changed = true;
                 new_app_id_val = new_id.clone();
                 let ts = if new_id.is_empty() { ira_models::TrophySource::Empty } else { trophy_source };
-                let pid = if new_id.is_empty() { "" } else { &new_id };
+                let pid = if game_kind == ira_models::GameKind::Ps4 || game_kind == ira_models::GameKind::Retro {
+                    &saved_platform_id
+                } else if new_id.is_empty() { "" } else { &new_id };
                 let (steam_id, game_id): (&str, &str) = if game_kind == ira_models::GameKind::Ps4 || game_kind == ira_models::GameKind::Retro { ("", &new_id) } else { (&new_id, "") };
                 if let Err(e) = ira_db::update_game_ids(&db, db_id_s, steam_id, game_id, ts, pid) {
                     eprintln!("Failed to update app ID: {}", e);
@@ -412,13 +415,13 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         // RA unmatch
         let ra_unmatch_key = format!("__ra_unmatch_{}", db_id_s);
         if pending_copies_c.borrow().contains_key(&ra_unmatch_key) {
-            let _ = ira_db::update_game_ids(&db, db_id_s, "", "", ira_models::TrophySource::Empty, "");
+            let _ = ira_db::update_game_ids(&db, db_id_s, "", "", ira_models::TrophySource::Empty, &saved_platform_id);
+            let _ = ira_db::set_manual_unmatch(&db, db_id_s, true);
             {
                 let mut s = state_clone.borrow_mut();
                 if let Some(g) = s.games.iter_mut().find(|g| g.db_id == db_id_s) {
                     g.app_id.clear();
                     g.trophy_source = ira_models::TrophySource::Empty;
-                    g.platform_id.clear();
                     g.achievements.clear();
                     g.earned_count = 0;
                     g.total_count = 0;

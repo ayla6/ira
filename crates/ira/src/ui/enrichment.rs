@@ -64,6 +64,17 @@ pub fn enrich_game_async(params: EnrichGameParams) {
         };
 
         if trophy_source.has_steam_enrichment() {
+            let has_missing_icons = game.achievements.iter().any(|a| a.icon_path.is_empty());
+            if has_missing_icons {
+                if let Err(e) = steam.generate_steam_settings(&app_id) {
+                    eprintln!("Could not re-download achievement icons for {}: {}", app_id, e);
+                } else if let Ok(reloaded) = load_game(&entry, &save_dir) {
+                    game.achievements = reloaded.achievements;
+                }
+            }
+        }
+
+        if trophy_source.has_steam_enrichment() {
             if game.name.starts_with("App ID:") {
                 if let Some(mut details) = steam.fetch_app_details(&app_id) {
                     if !details.name.is_empty() {
@@ -245,7 +256,7 @@ fn enrich_ra(params: EnrichRaParams) {
         return;
     }
 
-    let entry = ira_db::find_by_game_id(db, app_id)
+    let entry = ira_db::find_by_game_id(db, app_id, platform_id)
         .ok()
         .flatten()
         .unwrap_or_else(|| GameEntry::for_reload(db_id, ira_models::GameKind::Retro, ira_models::TrophySource::from_string(trophy_source), "", app_id, platform_id));

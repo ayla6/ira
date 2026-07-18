@@ -571,3 +571,28 @@ pub fn load_ra_achievements_from_cache(save_dir: &str, game_id: &str) -> Vec<Mer
     }
     achievements
 }
+
+pub fn redownload_missing_ra_badges(save_dir: &str, game_id: &str) -> bool {
+    let game_data_path = paths::game_data_path(save_dir, game_id);
+    let game_data: RaGameData = match std::fs::read(&game_data_path) {
+        Ok(data) => match serde_json::from_slice::<GameDataResponse>(&data) {
+            Ok(resp) => resp.patch_data,
+            Err(_) => return false,
+        },
+        Err(_) => return false,
+    };
+
+    let client = RaClient::new("", "", "");
+    let mut downloaded_any = false;
+    for def in &game_data.achievements {
+        if def.badge_name.is_empty() {
+            continue;
+        }
+        let unlocked = client.download_badge(save_dir, game_id, &def.badge_name, false);
+        let locked = client.download_badge(save_dir, game_id, &def.badge_name, true);
+        if !unlocked.is_empty() || !locked.is_empty() {
+            downloaded_any = true;
+        }
+    }
+    downloaded_any
+}

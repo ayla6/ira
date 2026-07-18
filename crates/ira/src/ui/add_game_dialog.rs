@@ -134,7 +134,6 @@ pub fn show_add_game_dialog(state: &SharedState) {
     let state_c = state.clone();
     add_btn.connect_clicked(move |_| {
         name_entry.remove_css_class("error");
-        exe_entry.remove_css_class("error");
 
         let name = name_entry.text().to_string();
         if name.is_empty() {
@@ -142,14 +141,6 @@ pub fn show_add_game_dialog(state: &SharedState) {
             return;
         }
         let exe_path = exe_entry.text().to_string();
-        if exe_path.is_empty() {
-            exe_entry.add_css_class("error");
-            return;
-        }
-        if !std::path::Path::new(&exe_path).is_file() {
-            exe_entry.add_css_class("error");
-            return;
-        }
         let is_wine = kind_row.selected() == 1;
         let args = args_entry.text().to_string();
         let wd = wd_entry.text().to_string();
@@ -201,6 +192,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
                     if let Some(entry) = entry {
                         if let Ok(mut game) = crate::game_loader::load_game(&entry, &save_dir_c) {
                             game.name = name_c.clone();
+                            game.game_path = launch_config.exe.clone();
                             let _ = ira_db::update_game_title(&db_c, game.db_id, &name_c);
                             if let Some(ref w) = watcher_c {
                                 w.watch(&entry, &game.achievements);

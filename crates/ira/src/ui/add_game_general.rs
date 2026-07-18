@@ -80,10 +80,11 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
         let sc = state.clone();
         let win_c = win.clone();
         let row_c = steam_id_entry.clone();
-        let name_c = String::new();
+        let name_entry_c = name_entry.clone();
         steam_search_btn.connect_clicked(move |_| {
+            let search_text = name_entry_c.text().to_string();
             let on_select = Rc::new(|_: &str| {});
-            super::steam_search::show_steam_id_search_popup(&sc, &name_c, &win_c, &row_c, "Select", on_select);
+            super::steam_search::show_steam_id_search_popup(&sc, &search_text, &win_c, &row_c, "Select", on_select);
         });
     }
     steam_id_entry.add_suffix(&steam_search_btn);

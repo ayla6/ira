@@ -80,6 +80,7 @@ pub fn build_ui(
         search_entry: gtk4::SearchEntry::new(),
         sort_label: gtk4::Label::new(Some(SortMode::Alphabetical.display_label())),
         collapsed_collections: HashSet::new(),
+        multi_selected_ids: HashSet::new(),
     }));
 
     {
@@ -397,6 +398,14 @@ fn connect_window_signals(
         if position == gtk4::INVALID_LIST_POSITION {
             return;
         }
+
+        if !model.select_single() {
+            let selected_ids = model.selected_db_ids();
+            drop(s);
+            state_clone.borrow_mut().multi_selected_ids = selected_ids;
+            return;
+        }
+
         let store = s.sidebar_store.clone();
         let Some(item) = store.item(position).and_then(|o| o.downcast::<super::sidebar_item::SidebarItem>().ok()) else {
             return;
@@ -410,19 +419,24 @@ fn connect_window_signals(
             super::sidebar_item::SidebarItemKind::AllGames => {
                 state_clone.borrow_mut().selected_id.clear();
                 state_clone.borrow_mut().selected_group = GroupSelection::AllGames;
+                state_clone.borrow_mut().multi_selected_ids.clear();
                 show_grid_view(&state_clone);
             }
             super::sidebar_item::SidebarItemKind::CollectionHeader => {
                 state_clone.borrow_mut().selected_id.clear();
                 state_clone.borrow_mut().selected_group = GroupSelection::Collection(group_id);
+                state_clone.borrow_mut().multi_selected_ids.clear();
                 show_grid_view(&state_clone);
             }
             super::sidebar_item::SidebarItemKind::UncategorizedHeader => {
                 state_clone.borrow_mut().selected_id.clear();
                 state_clone.borrow_mut().selected_group = GroupSelection::Uncategorized;
+                state_clone.borrow_mut().multi_selected_ids.clear();
                 show_grid_view(&state_clone);
             }
             super::sidebar_item::SidebarItemKind::Game => {
+                state_clone.borrow_mut().selected_id = db_id.to_string();
+                state_clone.borrow_mut().multi_selected_ids = HashSet::from([db_id]);
                 switch_to_game(&state_clone, db_id);
             }
         }

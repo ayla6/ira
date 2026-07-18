@@ -44,6 +44,7 @@ pub struct AppState {
     pub search_entry: gtk4::SearchEntry,
     pub sort_label: gtk4::Label,
     pub collapsed_collections: HashSet<i64>,
+    pub multi_selected_ids: HashSet<i64>,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;

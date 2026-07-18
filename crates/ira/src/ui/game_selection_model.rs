@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 
 use glib::subclass::prelude::*;
 use gtk4::prelude::*;
@@ -13,6 +14,7 @@ mod imp {
         pub model: RefCell<Option<gio::ListStore>>,
         pub selected: RefCell<gtk4::Bitset>,
         pub clicked_position: Cell<u32>,
+        pub select_single: Cell<bool>,
     }
 
     impl Default for GameSelectionModel {
@@ -21,6 +23,7 @@ mod imp {
                 model: RefCell::new(None),
                 selected: RefCell::new(gtk4::Bitset::new_empty()),
                 clicked_position: Cell::new(gtk4::INVALID_LIST_POSITION),
+                select_single: Cell::new(true),
             }
         }
     }
@@ -66,8 +69,9 @@ mod imp {
             self.selected.borrow().copy()
         }
 
-        fn select_item(&self, position: u32, _unselect_rest: bool) -> bool {
+        fn select_item(&self, position: u32, unselect_rest: bool) -> bool {
             self.clicked_position.set(position);
+            self.select_single.set(unselect_rest);
 
             let model = self.model.borrow();
             let Some(store) = model.as_ref() else {
@@ -99,17 +103,185 @@ mod imp {
             }
 
             let old = self.selected.borrow().copy();
-            let selected = self.selected.borrow_mut();
-            if selected.equals(&new_selection) {
-                return true;
+            {
+                let selected = self.selected.borrow_mut();
+                if unselect_rest {
+                    if selected.equals(&new_selection) {
+                        return true;
+                    }
+                    selected.remove_all();
+                    selected.union(&new_selection);
+                } else {
+                    selected.union(&new_selection);
+                }
             }
-            selected.remove_all();
-            selected.union(&new_selection);
-            drop(selected);
             drop(model);
 
             let changes = old.copy();
             changes.union(&new_selection);
+            let min = changes.minimum();
+            let max = changes.maximum();
+            self.obj().selection_changed(min, max - min + 1);
+
+            true
+        }
+
+        fn unselect_item(&self, position: u32) -> bool {
+            self.clicked_position.set(position);
+            self.select_single.set(false);
+
+            let model = self.model.borrow();
+            let Some(store) = model.as_ref() else {
+                return false;
+            };
+            let Some(item) = store
+                .item(position)
+                .and_then(|o| o.downcast::<SidebarItem>().ok())
+            else {
+                return false;
+            };
+
+            let to_remove = gtk4::Bitset::new_empty();
+
+            if item.kind() == SidebarItemKind::Game {
+                let db_id = item.db_id();
+                for i in 0..store.n_items() {
+                    if let Some(it) = store
+                        .item(i)
+                        .and_then(|o| o.downcast::<SidebarItem>().ok())
+                    {
+                        if it.kind() == SidebarItemKind::Game && it.db_id() == db_id {
+                            to_remove.add(i);
+                        }
+                    }
+                }
+            } else {
+                to_remove.add(position);
+            }
+
+            let old = self.selected.borrow().copy();
+            {
+                let selected = self.selected.borrow_mut();
+                selected.subtract(&to_remove);
+            }
+            drop(model);
+
+            let changes = old.copy();
+            changes.union(&to_remove);
+            let min = changes.minimum();
+            let max = changes.maximum();
+            self.obj().selection_changed(min, max - min + 1);
+
+            true
+        }
+
+        fn select_range(&self, position: u32, n_items: u32, unselect_rest: bool) -> bool {
+            self.clicked_position.set(position);
+            self.select_single.set(false);
+
+            let model = self.model.borrow();
+            let Some(store) = model.as_ref() else {
+                return false;
+            };
+
+            let end = (position.saturating_add(n_items)).min(store.n_items());
+            let new_selection = gtk4::Bitset::new_empty();
+
+            let mut db_ids: HashSet<i64> = HashSet::new();
+            for i in position..end {
+                if let Some(item) = store
+                    .item(i)
+                    .and_then(|o| o.downcast::<SidebarItem>().ok())
+                {
+                    if item.kind() == SidebarItemKind::Game {
+                        db_ids.insert(item.db_id());
+                    } else {
+                        new_selection.add(i);
+                    }
+                }
+            }
+
+            for j in 0..store.n_items() {
+                if let Some(it) = store
+                    .item(j)
+                    .and_then(|o| o.downcast::<SidebarItem>().ok())
+                {
+                    if it.kind() == SidebarItemKind::Game && db_ids.contains(&it.db_id()) {
+                        new_selection.add(j);
+                    }
+                }
+            }
+
+            let old = self.selected.borrow().copy();
+            {
+                let selected = self.selected.borrow_mut();
+                if unselect_rest {
+                    if selected.equals(&new_selection) {
+                        return true;
+                    }
+                    selected.remove_all();
+                    selected.union(&new_selection);
+                } else {
+                    selected.union(&new_selection);
+                }
+            }
+            drop(model);
+
+            let changes = old.copy();
+            changes.union(&new_selection);
+            let min = changes.minimum();
+            let max = changes.maximum();
+            self.obj().selection_changed(min, max - min + 1);
+
+            true
+        }
+
+        fn unselect_range(&self, position: u32, n_items: u32) -> bool {
+            self.clicked_position.set(position);
+            self.select_single.set(false);
+
+            let model = self.model.borrow();
+            let Some(store) = model.as_ref() else {
+                return false;
+            };
+
+            let end = (position.saturating_add(n_items)).min(store.n_items());
+            let to_remove = gtk4::Bitset::new_empty();
+
+            let mut db_ids: HashSet<i64> = HashSet::new();
+            for i in position..end {
+                if let Some(item) = store
+                    .item(i)
+                    .and_then(|o| o.downcast::<SidebarItem>().ok())
+                {
+                    if item.kind() == SidebarItemKind::Game {
+                        db_ids.insert(item.db_id());
+                    } else {
+                        to_remove.add(i);
+                    }
+                }
+            }
+
+            for j in 0..store.n_items() {
+                if let Some(it) = store
+                    .item(j)
+                    .and_then(|o| o.downcast::<SidebarItem>().ok())
+                {
+                    if it.kind() == SidebarItemKind::Game && db_ids.contains(&it.db_id()) {
+                        to_remove.add(j);
+                    }
+                }
+            }
+
+            let old = self.selected.borrow().copy();
+            {
+                let selected = self.selected.borrow_mut();
+                selected.subtract(&to_remove);
+            }
+            drop(model);
+
+            let changes = old.copy();
+            changes.union(&to_remove);
             let min = changes.minimum();
             let max = changes.maximum();
             self.obj().selection_changed(min, max - min + 1);
@@ -168,6 +340,31 @@ impl GameSelectionModel {
 
     pub fn clicked_position(&self) -> u32 {
         self.imp().clicked_position.get()
+    }
+
+    pub fn select_single(&self) -> bool {
+        self.imp().select_single.get()
+    }
+
+    pub fn selected_db_ids(&self) -> HashSet<i64> {
+        let model = self.imp().model.borrow();
+        let selected = self.imp().selected.borrow();
+        let mut ids = HashSet::new();
+        if let Some(store) = model.as_ref() {
+            for i in 0..store.n_items() {
+                if selected.contains(i) {
+                    if let Some(item) = store
+                        .item(i)
+                        .and_then(|o| o.downcast::<SidebarItem>().ok())
+                    {
+                        if item.kind() == SidebarItemKind::Game {
+                            ids.insert(item.db_id());
+                        }
+                    }
+                }
+            }
+        }
+        ids
     }
 
     pub fn set_model(&self, model: &gio::ListStore) {

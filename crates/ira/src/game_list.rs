@@ -120,7 +120,7 @@ fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
     let mut games = Vec::new();
 
     for shad in &shad_games {
-        let entry = db::find_by_game_id(db, &shad.npwr_id).ok().flatten()
+        let entry = db::find_by_game_id(db, &shad.npwr_id, &shad.serial).ok().flatten()
             .or_else(|| db::find_by_kind_platform(db, ira_models::GameKind::Ps4, &shad.serial).ok().flatten());
         let (db_id, title, hidden, logo_position, logo_size, sort_title, sgdb_id, shadps4_version, last_played) = match entry {
             Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title, e.sgdb_id.clone().unwrap_or_default(), e.shadps4_version.clone(), e.last_played),

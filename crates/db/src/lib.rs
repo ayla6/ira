@@ -148,9 +148,13 @@ pub fn init_db(db_path: &str) -> DbConn {
         migration::run_schema_migrations(&conn);
 
         conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_games_game_id ON games(game_id) WHERE game_id != ''",
+            "DROP INDEX IF EXISTS idx_games_game_id",
             [],
-        ).expect("failed to create game_id index");
+        ).expect("failed to drop old game_id index");
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_games_game_id_platform ON games(game_id, platform_id) WHERE game_id != ''",
+            [],
+        ).expect("failed to create game_id+platform_id index");
     }
 
     create_variants_table(&pool);

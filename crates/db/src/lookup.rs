@@ -16,11 +16,11 @@ pub fn find_by_steam_id(conn: &DbConn, steam_id: &str) -> Result<Option<GameEntr
     }
 }
 
-pub fn find_by_game_id(conn: &DbConn, game_id: &str) -> Result<Option<GameEntry>, String> {
+pub fn find_by_game_id(conn: &DbConn, game_id: &str, platform_id: &str) -> Result<Option<GameEntry>, String> {
     let c = lock_db(conn)?;
-    let mut stmt = c.prepare(&format!("SELECT {} FROM games WHERE game_id = ?1", crate::GAME_COLUMNS))
+    let mut stmt = c.prepare(&format!("SELECT {} FROM games WHERE game_id = ?1 AND platform_id = ?2", crate::GAME_COLUMNS))
         .map_err(|e| e.to_string())?;
-    let mut entries = stmt.query_map(params![game_id], |row| {
+    let mut entries = stmt.query_map(params![game_id, platform_id], |row| {
         crate::game_entry_from_row(row)
     }).map_err(|e| e.to_string())?;
     if let Some(entry) = entries.next() {

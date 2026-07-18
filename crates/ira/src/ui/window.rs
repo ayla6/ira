@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use super::state::{AppState, SharedState};
 use super::css::APP_CSS;
-use super::sidebar::{rebuild_sidebar, select_row_silently};
+use super::sidebar::{rebuild_sidebar, rebuild_sidebar_and_show_grid, select_row_silently};
 use super::grid_view::show_grid_view;
 use super::message_handler::switch_to_game;
 use super::settings_dialog::show_settings_dialog;
@@ -285,10 +285,7 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
         let active = sw.is_active();
         state_clone.borrow_mut().cfg.show_hidden_games = active;
         let _ = state_clone.borrow().cfg.save();
-        rebuild_sidebar(&state_clone);
-        if state_clone.borrow().selected_id.is_empty() && !state_clone.borrow().content_unloaded {
-            show_grid_view(&state_clone);
-        }
+        rebuild_sidebar_and_show_grid(&state_clone);
     });
 
     let state_clone = state.clone();
@@ -358,12 +355,7 @@ fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, 
                 state_clone.borrow_mut().cfg.sort_mode = mode_c;
                 let _ = state_clone.borrow().cfg.save();
                 state_clone.borrow().sort_label.set_text(mode_c.display_label());
-                rebuild_sidebar(&state_clone);
-                if state_clone.borrow().selected_id.is_empty()
-                    && !state_clone.borrow().content_unloaded
-                {
-                    show_grid_view(&state_clone);
-                }
+                rebuild_sidebar_and_show_grid(&state_clone);
             }
         });
     }
@@ -473,12 +465,7 @@ fn connect_window_signals(
         let s = state_clone.clone();
         glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
             if gen_cell.get() == gen {
-                rebuild_sidebar(&s);
-                if s.borrow().selected_id.is_empty()
-                    && !s.borrow().content_unloaded
-                {
-                    show_grid_view(&s);
-                }
+                rebuild_sidebar_and_show_grid(&s);
             }
         });
     });

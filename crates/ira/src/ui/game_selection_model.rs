@@ -28,6 +28,31 @@ mod imp {
         }
     }
 
+    impl GameSelectionModel {
+        fn emit_selection_changed(&self, old: &gtk4::Bitset, target: &gtk4::Bitset) {
+            let changes = old.copy();
+            changes.union(target);
+            let min = changes.minimum();
+            let max = changes.maximum();
+            self.obj().selection_changed(min, max - min + 1);
+        }
+    }
+
+    fn positions_for_db_ids(store: &gio::ListStore, db_ids: &HashSet<i64>) -> gtk4::Bitset {
+        let bitset = gtk4::Bitset::new_empty();
+        for i in 0..store.n_items() {
+            if let Some(item) = store
+                .item(i)
+                .and_then(|o| o.downcast::<SidebarItem>().ok())
+            {
+                if item.kind() == SidebarItemKind::Game && db_ids.contains(&item.db_id()) {
+                    bitset.add(i);
+                }
+            }
+        }
+        bitset
+    }
+
     #[glib::object_subclass]
     impl ObjectSubclass for GameSelectionModel {
         const NAME: &'static str = "IraGameSelectionModel";
@@ -84,23 +109,15 @@ mod imp {
                 return false;
             };
 
-            let new_selection = gtk4::Bitset::new_empty();
-
-            if item.kind() == SidebarItemKind::Game {
-                let db_id = item.db_id();
-                for i in 0..store.n_items() {
-                    if let Some(it) = store
-                        .item(i)
-                        .and_then(|o| o.downcast::<SidebarItem>().ok())
-                    {
-                        if it.kind() == SidebarItemKind::Game && it.db_id() == db_id {
-                            new_selection.add(i);
-                        }
-                    }
-                }
+            let new_selection = if item.kind() == SidebarItemKind::Game {
+                let mut db_ids = HashSet::new();
+                db_ids.insert(item.db_id());
+                positions_for_db_ids(store, &db_ids)
             } else {
-                new_selection.add(position);
-            }
+                let bs = gtk4::Bitset::new_empty();
+                bs.add(position);
+                bs
+            };
 
             let old = self.selected.borrow().copy();
             {
@@ -117,11 +134,7 @@ mod imp {
             }
             drop(model);
 
-            let changes = old.copy();
-            changes.union(&new_selection);
-            let min = changes.minimum();
-            let max = changes.maximum();
-            self.obj().selection_changed(min, max - min + 1);
+            self.emit_selection_changed(&old, &new_selection);
 
             true
         }
@@ -141,23 +154,15 @@ mod imp {
                 return false;
             };
 
-            let to_remove = gtk4::Bitset::new_empty();
-
-            if item.kind() == SidebarItemKind::Game {
-                let db_id = item.db_id();
-                for i in 0..store.n_items() {
-                    if let Some(it) = store
-                        .item(i)
-                        .and_then(|o| o.downcast::<SidebarItem>().ok())
-                    {
-                        if it.kind() == SidebarItemKind::Game && it.db_id() == db_id {
-                            to_remove.add(i);
-                        }
-                    }
-                }
+            let to_remove = if item.kind() == SidebarItemKind::Game {
+                let mut db_ids = HashSet::new();
+                db_ids.insert(item.db_id());
+                positions_for_db_ids(store, &db_ids)
             } else {
-                to_remove.add(position);
-            }
+                let bs = gtk4::Bitset::new_empty();
+                bs.add(position);
+                bs
+            };
 
             let old = self.selected.borrow().copy();
             {
@@ -166,11 +171,7 @@ mod imp {
             }
             drop(model);
 
-            let changes = old.copy();
-            changes.union(&to_remove);
-            let min = changes.minimum();
-            let max = changes.maximum();
-            self.obj().selection_changed(min, max - min + 1);
+            self.emit_selection_changed(&old, &to_remove);
 
             true
         }
@@ -201,16 +202,7 @@ mod imp {
                 }
             }
 
-            for j in 0..store.n_items() {
-                if let Some(it) = store
-                    .item(j)
-                    .and_then(|o| o.downcast::<SidebarItem>().ok())
-                {
-                    if it.kind() == SidebarItemKind::Game && db_ids.contains(&it.db_id()) {
-                        new_selection.add(j);
-                    }
-                }
-            }
+            new_selection.union(&positions_for_db_ids(store, &db_ids));
 
             let old = self.selected.borrow().copy();
             {
@@ -227,11 +219,7 @@ mod imp {
             }
             drop(model);
 
-            let changes = old.copy();
-            changes.union(&new_selection);
-            let min = changes.minimum();
-            let max = changes.maximum();
-            self.obj().selection_changed(min, max - min + 1);
+            self.emit_selection_changed(&old, &new_selection);
 
             true
         }
@@ -262,16 +250,7 @@ mod imp {
                 }
             }
 
-            for j in 0..store.n_items() {
-                if let Some(it) = store
-                    .item(j)
-                    .and_then(|o| o.downcast::<SidebarItem>().ok())
-                {
-                    if it.kind() == SidebarItemKind::Game && db_ids.contains(&it.db_id()) {
-                        to_remove.add(j);
-                    }
-                }
-            }
+            to_remove.union(&positions_for_db_ids(store, &db_ids));
 
             let old = self.selected.borrow().copy();
             {
@@ -280,11 +259,7 @@ mod imp {
             }
             drop(model);
 
-            let changes = old.copy();
-            changes.union(&to_remove);
-            let min = changes.minimum();
-            let max = changes.maximum();
-            self.obj().selection_changed(min, max - min + 1);
+            self.emit_selection_changed(&old, &to_remove);
 
             true
         }

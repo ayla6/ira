@@ -4,6 +4,7 @@ use ira_models::GroupSelection;
 use crate::strings as S;
 use super::state::SharedState;
 use super::context_menu::{show_game_context_menu, show_multi_game_context_menu};
+use super::grid_view::show_grid_view;
 use super::helpers::clear_children;
 use super::sidebar_item::{SidebarItem, SidebarItemKind};
 use std::collections::{HashMap, HashSet};
@@ -283,6 +284,13 @@ fn restore_selection(state: &SharedState) {
     }
 
     select_row_silently(state, Some(0));
+}
+
+pub fn rebuild_sidebar_and_show_grid(state: &SharedState) {
+    rebuild_sidebar(state);
+    if state.borrow().selected_id.is_empty() && !state.borrow().content_unloaded {
+        show_grid_view(state);
+    }
 }
 
 pub fn build_factory(state: &SharedState) -> gtk4::SignalListItemFactory {

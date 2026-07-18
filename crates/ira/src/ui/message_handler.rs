@@ -6,7 +6,7 @@ use crate::Game;
 use crate::strings as S;
 use std::collections::{HashMap, HashSet};
 use super::state::SharedState;
-use super::sidebar::{select_row_silently, rebuild_sidebar, find_game_index, update_sidebar_game, set_sidebar_playing};
+use super::sidebar::{select_row_silently, rebuild_sidebar, rebuild_sidebar_and_show_grid, find_game_index, update_sidebar_game, set_sidebar_playing};
 use super::grid_view::show_grid_view;
 use super::game_item::GameItem;
 use super::game_display::display_game;
@@ -354,12 +354,7 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
             let state_clone = state.clone();
             glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
                 state_clone.borrow_mut().sidebar_rebuild_pending = false;
-                rebuild_sidebar(&state_clone);
-                let selected = state_clone.borrow().selected_id.clone();
-                if selected.is_empty() {
-                    select_row_silently(&state_clone, Some(0));
-                    show_grid_view(&state_clone);
-                }
+                rebuild_sidebar_and_show_grid(&state_clone);
             });
         }
     }

@@ -12,6 +12,88 @@ use super::helpers::open_folder;
 use super::helpers::open_file_location;
 use super::edit_game_dialog::show_edit_game_dialog;
 
+fn show_collection_name_dialog(
+    window: adw::ApplicationWindow,
+    state: SharedState,
+    add_games: impl Fn(&ira_db::DbConn, i64) + 'static,
+) {
+    let dialog = adw::AlertDialog::new(Some("New Collection"), Some("Enter a name for the collection:"));
+    let entry = gtk4::Entry::new();
+    entry.set_placeholder_text(Some("Collection name"));
+    entry.set_margin_start(12);
+    entry.set_margin_end(12);
+    entry.set_margin_top(8);
+    entry.set_margin_bottom(8);
+    dialog.set_extra_child(Some(&entry));
+    dialog.add_response("cancel", S::CANCEL);
+    dialog.add_response("create", "Create");
+    dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("create"));
+    dialog.set_close_response("cancel");
+
+    let entry_clone = entry.clone();
+    dialog.connect_response(None, move |_, resp| {
+        if resp != "create" {
+            return;
+        }
+        let name = entry_clone.text().trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        let db = state.borrow().db.clone();
+        match ira_db::create_group(&db, &name) {
+            Ok(group_id) => {
+                add_games(&db, group_id);
+                let groups = ira_db::get_all_groups(&db).unwrap_or_default();
+                state.borrow_mut().groups = groups;
+                super::sidebar::rebuild_sidebar(&state);
+            }
+            Err(e) => {
+                eprintln!("Failed to create group: {}", e);
+            }
+        }
+    });
+    dialog.present(Some(&window));
+}
+
+fn setup_and_show_popover(
+    menu: &gio::Menu,
+    actions: &gio::SimpleActionGroup,
+    parent: &impl glib::prelude::IsA<gtk4::Widget>,
+    at_x: f64,
+    at_y: f64,
+) {
+    let popover = gtk4::PopoverMenu::from_model(Some(menu));
+    popover.set_halign(gtk4::Align::Start);
+    popover.set_has_arrow(false);
+    parent.insert_action_group("game", Some(actions));
+    popover.set_parent(parent);
+    popover.set_pointing_to(Some(&gdk4::Rectangle::new(at_x as i32, at_y as i32, 1, 1)));
+    popover.popup();
+}
+
+fn build_collections_submenu(
+    groups: &[ira_models::Group],
+    is_checked: impl Fn(&ira_models::Group) -> bool,
+) -> gio::Menu {
+    let collections_menu = gio::Menu::new();
+    for g in groups {
+        let label = if is_checked(g) {
+            format!("✓ {}", g.name)
+        } else {
+            g.name.clone()
+        };
+        let item = gio::MenuItem::new(Some(&label), None);
+        item.set_action_and_target_value(Some("game.toggle_group"), Some(&g.id.to_variant()));
+        collections_menu.append_item(&item);
+    }
+    if !groups.is_empty() {
+        collections_menu.append_section(None, &gio::Menu::new());
+    }
+    collections_menu.append(Some("Add to new collection…"), Some("game.new_collection"));
+    collections_menu
+}
+
 pub fn show_game_context_menu(
     state: &SharedState,
     game: &Game,
@@ -86,26 +168,14 @@ pub fn show_game_context_menu(
         menu.append_submenu(Some("Open folder"), &folders_menu);
     }
 
-    let collections_menu = gio::Menu::new();
     let groups = state.borrow().groups.clone();
     let game_groups = {
         let db = state.borrow().db.clone();
         ira_db::get_groups_for_game(&db, game.db_id).unwrap_or_default()
     };
-    for g in &groups {
-        let label = if game_groups.iter().any(|gg| gg.id == g.id) {
-            format!("✓ {}", g.name)
-        } else {
-            g.name.clone()
-        };
-        let item = gio::MenuItem::new(Some(&label), None);
-        item.set_action_and_target_value(Some("game.toggle_group"), Some(&g.id.to_variant()));
-        collections_menu.append_item(&item);
-    }
-    if !groups.is_empty() {
-        collections_menu.append_section(None, &gio::Menu::new());
-    }
-    collections_menu.append(Some("Add to new collection…"), Some("game.new_collection"));
+    let collections_menu = build_collections_submenu(&groups, |g| {
+        game_groups.iter().any(|gg| gg.id == g.id)
+    });
     menu.append_submenu(Some("Collections"), &collections_menu);
 
     menu.append(Some(if current_hidden { S::UNHIDE_GAME } else { S::HIDE_GAME }), Some("game.hide"));
@@ -116,10 +186,6 @@ pub fn show_game_context_menu(
         remove_section.append(Some(S::REMOVE_GAME), Some("game.delete_game"));
         menu.append_section(None, &remove_section);
     }
-
-    let popover = gtk4::PopoverMenu::from_model(Some(&menu));
-    popover.set_halign(gtk4::Align::Start);
-    popover.set_has_arrow(false);
 
     let state_clone = state.clone();
     let game_clone = game.clone();
@@ -323,55 +389,16 @@ pub fn show_game_context_menu(
     let gc = game_clone.clone();
     new_collection.connect_activate(move |_, _| {
         let window = sc.borrow().window.clone();
-        let dialog = adw::AlertDialog::new(Some("New Collection"), Some("Enter a name for the collection:"));
-        let entry = gtk4::Entry::new();
-        entry.set_placeholder_text(Some("Collection name"));
-        entry.set_margin_start(12);
-        entry.set_margin_end(12);
-        entry.set_margin_top(8);
-        entry.set_margin_bottom(8);
-        dialog.set_extra_child(Some(&entry));
-        dialog.add_response("cancel", S::CANCEL);
-        dialog.add_response("create", "Create");
-        dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
-        dialog.set_default_response(Some("create"));
-        dialog.set_close_response("cancel");
-
-        let entry_clone = entry.clone();
-        let sc = sc.clone();
-        let gc = gc.clone();
-        dialog.connect_response(None, move |_, resp| {
-            if resp != "create" {
-                return;
-            }
-            let name = entry_clone.text().trim().to_string();
-            if name.is_empty() {
-                return;
-            }
-            let db = sc.borrow().db.clone();
-            match ira_db::create_group(&db, &name) {
-                Ok(group_id) => {
-                    if let Err(e) = ira_db::add_game_to_group(&db, gc.db_id, group_id) {
-                        eprintln!("Failed to add game to new group: {}", e);
-                    }
-                    let groups = ira_db::get_all_groups(&db).unwrap_or_default();
-                    sc.borrow_mut().groups = groups;
-                    super::sidebar::rebuild_sidebar(&sc);
-                }
-                Err(e) => {
-                    eprintln!("Failed to create group: {}", e);
-                }
+        let sc2 = sc.clone();
+        show_collection_name_dialog(window, sc2, move |db, group_id| {
+            if let Err(e) = ira_db::add_game_to_group(db, gc.db_id, group_id) {
+                eprintln!("Failed to add game to new group: {}", e);
             }
         });
-        dialog.present(Some(&window));
     });
     actions.add_action(&new_collection);
 
-    parent.insert_action_group("game", Some(&actions));
-
-    popover.set_parent(parent);
-    popover.set_pointing_to(Some(&gdk4::Rectangle::new(at_x as i32, at_y as i32, 1, 1)));
-    popover.popup();
+    setup_and_show_popover(&menu, &actions, parent, at_x, at_y);
 }
 
 pub fn show_multi_game_context_menu(
@@ -382,7 +409,6 @@ pub fn show_multi_game_context_menu(
     at_y: f64,
 ) {
     let menu = gio::Menu::new();
-    let collections_menu = gio::Menu::new();
 
     let groups = state.borrow().groups.clone();
     let db = state.borrow().db.clone();
@@ -399,24 +425,11 @@ pub fn show_multi_game_context_menu(
         })
         .collect();
 
-    for g in &groups {
-        let all_in = db_ids
-            .iter()
-            .all(|&db_id| game_group_map.get(&db_id).is_some_and(|ids| ids.contains(&g.id)));
-        let label = if all_in {
-            format!("✓ {}", g.name)
-        } else {
-            g.name.clone()
-        };
-        let item = gio::MenuItem::new(Some(&label), None);
-        item.set_action_and_target_value(Some("game.toggle_group"), Some(&g.id.to_variant()));
-        collections_menu.append_item(&item);
-    }
-
-    if !groups.is_empty() {
-        collections_menu.append_section(None, &gio::Menu::new());
-    }
-    collections_menu.append(Some("Add to new collection…"), Some("game.new_collection"));
+    let collections_menu = build_collections_submenu(&groups, |g| {
+        db_ids.iter().all(|&db_id| {
+            game_group_map.get(&db_id).is_some_and(|ids| ids.contains(&g.id))
+        })
+    });
     menu.append_submenu(Some("Collections"), &collections_menu);
 
     let all_hidden = db_ids.iter().all(|&db_id| {
@@ -428,10 +441,6 @@ pub fn show_multi_game_context_menu(
     let hide_section = gio::Menu::new();
     hide_section.append(Some(hide_label), Some("game.toggle_hide"));
     menu.append_section(None, &hide_section);
-
-    let popover = gtk4::PopoverMenu::from_model(Some(&menu));
-    popover.set_halign(gtk4::Align::Start);
-    popover.set_has_arrow(false);
 
     let sc_orig = state.clone();
     let ids: Vec<i64> = db_ids.iter().copied().collect();
@@ -467,49 +476,15 @@ pub fn show_multi_game_context_menu(
     let ids_clone2 = ids.clone();
     new_collection.connect_activate(move |_, _| {
         let window = sc.borrow().window.clone();
-        let dialog = adw::AlertDialog::new(Some("New Collection"), Some("Enter a name for the collection:"));
-        let entry = gtk4::Entry::new();
-        entry.set_placeholder_text(Some("Collection name"));
-        entry.set_margin_start(12);
-        entry.set_margin_end(12);
-        entry.set_margin_top(8);
-        entry.set_margin_bottom(8);
-        dialog.set_extra_child(Some(&entry));
-        dialog.add_response("cancel", S::CANCEL);
-        dialog.add_response("create", "Create");
-        dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
-        dialog.set_default_response(Some("create"));
-        dialog.set_close_response("cancel");
-
-        let entry_clone = entry.clone();
-        let sc = sc.clone();
-        let ids_clone3 = ids_clone2.clone();
-        dialog.connect_response(None, move |_, resp| {
-            if resp != "create" {
-                return;
-            }
-            let name = entry_clone.text().trim().to_string();
-            if name.is_empty() {
-                return;
-            }
-            let db = sc.borrow().db.clone();
-            match ira_db::create_group(&db, &name) {
-                Ok(group_id) => {
-                    for &db_id in &ids_clone3 {
-                        if let Err(e) = ira_db::add_game_to_group(&db, db_id, group_id) {
-                            eprintln!("Failed to add game to new group: {}", e);
-                        }
-                    }
-                    let groups = ira_db::get_all_groups(&db).unwrap_or_default();
-                    sc.borrow_mut().groups = groups;
-                    super::sidebar::rebuild_sidebar(&sc);
-                }
-                Err(e) => {
-                    eprintln!("Failed to create group: {}", e);
+        let sc2 = sc.clone();
+        let ids3 = ids_clone2.clone();
+        show_collection_name_dialog(window, sc2, move |db, group_id| {
+            for &db_id in &ids3 {
+                if let Err(e) = ira_db::add_game_to_group(db, db_id, group_id) {
+                    eprintln!("Failed to add game to new group: {}", e);
                 }
             }
         });
-        dialog.present(Some(&window));
     });
     actions.add_action(&new_collection);
 
@@ -537,9 +512,5 @@ pub fn show_multi_game_context_menu(
     });
     actions.add_action(&toggle_hide);
 
-    parent.insert_action_group("game", Some(&actions));
-
-    popover.set_parent(parent);
-    popover.set_pointing_to(Some(&gdk4::Rectangle::new(at_x as i32, at_y as i32, 1, 1)));
-    popover.popup();
+    setup_and_show_popover(&menu, &actions, parent, at_x, at_y);
 }

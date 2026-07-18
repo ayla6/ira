@@ -328,6 +328,18 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         {
             let pc = pending_copies_c.borrow();
             let _s = tracing::info_span!("pending_image_copies", db_id = db_id_s, count = pc.len()).entered();
+
+            // Invalidate old textures before replacing files so grid items reload
+            if !pc.is_empty() {
+                if let Some(g) = state_clone.borrow().games.iter().find(|g| g.db_id == db_id_s).cloned() {
+                    for path in [&g.icon_path, &g.hero_image_path, &g.grid_path, &g.header_path, &g.logo_path] {
+                        if !path.is_empty() {
+                            ira_images::invalidate_texture(path);
+                        }
+                    }
+                }
+            }
+
             let is_steam = game.trophy_source.has_steam_enrichment();
             let cloud_dir = if game.kind == ira_models::GameKind::Retro {
                 ira_parser::retro_data_dir(&save_dir_c, db_id_s)

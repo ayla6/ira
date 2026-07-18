@@ -166,9 +166,10 @@ fn make_refresh_closure(
             let asset_c = asset_type.to_string();
             move || {
                 clear_children(&preview_wrapper);
-                let preview_src = pending_copies.as_ref()
+                let from_pending = pending_copies.as_ref()
                     .and_then(|pc| pc.borrow().get(&asset_c).cloned())
-                    .filter(|p| std::path::Path::new(p).is_file())
+                    .filter(|p| std::path::Path::new(p).is_file());
+                let preview_src = from_pending.clone()
                     .or_else(|| {
                         ira_parser::find_image_file(&cloud_dir, &base_name)
                             .map(|p| p.to_string_lossy().into_owned())
@@ -183,24 +184,22 @@ fn make_refresh_closure(
                     ph.add_css_class("dim-label");
                     preview_wrapper.append(&ph);
                 }
+                // Only invalidate textures and update grid when the image was
+                // written directly to disk (e.g. Steam button). When it's from
+                // pending_copies (temp file), the cloud dir hasn't changed yet —
+                // invalidation happens at save time instead.
+                if from_pending.is_some() {
+                    return;
+                }
             let s = state_clone.borrow();
-            let old_path = s.games.iter()
-                .find(|g| g.db_id == game_clone.db_id)
-                .map(|g| image_path_for_asset(g, &asset_c).to_string())
-                .unwrap_or_default();
             if let Ok(Some(entry)) = ira_db::find_by_db_id(&s.db, game_clone.db_id) {
                 drop(s);
                 if let Ok(updated) = crate::game_loader::load_game(&entry, &save_dir) {
                     let new_path = image_path_for_asset(&updated, &asset_c).to_string();
-                    // Only invalidate when the path is unchanged (file content replaced).
-                    // If the path changed, there's no stale cache entry for the new path.
-                    if !new_path.is_empty() && new_path == old_path {
+                    if !new_path.is_empty() {
                         ira_images::invalidate_texture(&new_path);
                     }
                     apply_game_update(&state_clone, updated);
-                    // Splice the grid store to trigger a re-bind, which reloads
-                    // the cover texture. apply_game_update already does this when
-                    // the path changed, but not when only the file content changed.
                     let store = state_clone.borrow().grid_store.clone();
                     for i in 0..store.n_items() {
                         if let Some(item) = store.item(i).and_then(|o| o.downcast::<GameItem>().ok()) {

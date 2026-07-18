@@ -10,7 +10,81 @@ use super::settings_dialog::build_shadps4_version_dropdown;
 use super::state::SharedState;
 use super::ra_match_dialog::show_ra_search_dialog;
 
-type GameGeneralPageResult = (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>, Option<adw::EntryRow>, Option<adw::ComboRow>, Rc<RefCell<Option<String>>>, Rc<RefCell<Option<String>>>);
+type GameGeneralPageResult = (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>, Option<adw::EntryRow>, Option<adw::ComboRow>, Rc<RefCell<Option<String>>>, Rc<RefCell<Option<String>>>, Option<gtk4::Box>);
+
+fn build_ra_section(state: &SharedState, game: &Game, win: &adw::Window, pending_copies: &Rc<RefCell<HashMap<String, String>>>) -> adw::PreferencesGroup {
+    let ra_group = adw::PreferencesGroup::new();
+    ra_group.set_title("RetroAchievements");
+
+    if game.trophy_source == ira_models::TrophySource::Ra && !game.app_id.is_empty() {
+        let status_row = adw::ActionRow::new();
+        status_row.set_title("Linked to RetroAchievements");
+        status_row.set_subtitle(&format!("Game ID: {}", game.app_id));
+        let pending_key = format!("__ra_unmatch_{}", game.db_id);
+        let is_pending_unmatch = pending_copies.borrow().contains_key(&pending_key);
+        if is_pending_unmatch {
+            status_row.set_subtitle("Will be unmatched on Save\u{2026}");
+        }
+        ra_group.add(&status_row);
+
+        let unmatch_btn = gtk4::Button::with_label("Unmatch");
+        unmatch_btn.add_css_class("destructive-action");
+        unmatch_btn.set_valign(gtk4::Align::Center);
+        if is_pending_unmatch {
+            unmatch_btn.set_sensitive(false);
+        }
+        let pc = pending_copies.clone();
+        let pkey = pending_key.clone();
+        let unmatch_btn_c = unmatch_btn.clone();
+        let status_row_c = status_row.clone();
+        unmatch_btn.connect_clicked(move |_| {
+            pc.borrow_mut().insert(pkey.clone(), String::new());
+            unmatch_btn_c.set_sensitive(false);
+            status_row_c.set_subtitle("Will be unmatched on Save\u{2026}");
+        });
+        let unmatch_row = adw::ActionRow::new();
+        unmatch_row.add_suffix(&unmatch_btn);
+        ra_group.add(&unmatch_row);
+    } else if game.trophy_source == ira_models::TrophySource::Empty {
+        let match_btn = gtk4::Button::with_label("Match\u{2026}");
+        match_btn.add_css_class("suggested-action");
+        match_btn.set_valign(gtk4::Align::Center);
+        let sc = state.clone();
+        let db_id = game.db_id;
+        let gn = game.name.clone();
+        let pid = game.platform_id.clone();
+        let pw = win.clone();
+        match_btn.connect_clicked(move |_| {
+            show_ra_search_dialog(&sc, db_id, &gn, &pid, &pw, None);
+        });
+        let match_row = adw::ActionRow::new();
+        match_row.add_suffix(&match_btn);
+        ra_group.add(&match_row);
+    }
+
+    ra_group
+}
+
+pub(super) fn refresh_ra_section(state: &SharedState, db_id: i64) {
+    let sd = match state.borrow().settings_data.clone() {
+        Some(d) => d,
+        None => return,
+    };
+    if sd.db_id != db_id || !sd.window.is_visible() {
+        return;
+    }
+    let ra_container = match &sd.ra_container {
+        Some(c) => c.clone(),
+        None => return,
+    };
+    let game = match state.borrow().games.iter().find(|g| g.db_id == db_id).cloned() {
+        Some(g) => g,
+        None => return,
+    };
+    super::helpers::clear_children(&ra_container);
+    let ra_group = build_ra_section(state, &game, &sd.window, &sd.pending_copies);
+    ra_container.append(&ra_group);
+}
 
 pub(super) fn build_game_general_page(
     state: &SharedState,
@@ -82,6 +156,7 @@ pub(super) fn build_game_general_page(
 
     let pending_ra_core: Rc<RefCell<Option<String>>> = Default::default();
     let pending_emulator: Rc<RefCell<Option<String>>> = Default::default();
+    let mut ra_container: Option<gtk4::Box> = None;
     if game.kind == ira_models::GameKind::Retro {
         let emulators = ira_platforms::emulator_detect::detect_emulators(&game.platform_id);
         let cores = ira_platforms::emulator_detect::detect_ra_cores();
@@ -191,58 +266,11 @@ pub(super) fn build_game_general_page(
             general_page.append(&emu_group);
         }
 
-        let ra_group = adw::PreferencesGroup::new();
-        ra_group.set_title("RetroAchievements");
-        let mut has_ra_content = false;
-        if game.trophy_source == ira_models::TrophySource::Ra && !game.app_id.is_empty() {
-            has_ra_content = true;
-            let status_row = adw::ActionRow::new();
-            status_row.set_title("Linked to RetroAchievements");
-            status_row.set_subtitle(&format!("Game ID: {}", game.app_id));
-            let pending_key = format!("__ra_unmatch_{}", game.db_id);
-            let is_pending_unmatch = pending_copies.borrow().contains_key(&pending_key);
-            if is_pending_unmatch {
-                status_row.set_subtitle("Will be unmatched on Save\u{2026}");
-            }
-            ra_group.add(&status_row);
-
-            let unmatch_btn = gtk4::Button::with_label("Unmatch");
-            unmatch_btn.add_css_class("destructive-action");
-            unmatch_btn.set_valign(gtk4::Align::Center);
-            if is_pending_unmatch {
-                unmatch_btn.set_sensitive(false);
-            }
-            let pc = pending_copies.clone();
-            let pkey = pending_key.clone();
-            let unmatch_btn_c = unmatch_btn.clone();
-            unmatch_btn.connect_clicked(move |_| {
-                pc.borrow_mut().insert(pkey.clone(), String::new());
-                unmatch_btn_c.set_sensitive(false);
-                status_row.set_subtitle("Will be unmatched on Save\u{2026}");
-            });
-            let unmatch_row = adw::ActionRow::new();
-            unmatch_row.add_suffix(&unmatch_btn);
-            ra_group.add(&unmatch_row);
-        } else if game.trophy_source == ira_models::TrophySource::Empty {
-            has_ra_content = true;
-            let match_btn = gtk4::Button::with_label("Match\u{2026}");
-            match_btn.add_css_class("suggested-action");
-            match_btn.set_valign(gtk4::Align::Center);
-            let sc = state.clone();
-            let db_id = game.db_id;
-            let gn = game.name.clone();
-            let pid = game.platform_id.clone();
-            let pw = win.clone();
-            match_btn.connect_clicked(move |_| {
-                show_ra_search_dialog(&sc, db_id, &gn, &pid, &pw, None);
-            });
-            let match_row = adw::ActionRow::new();
-            match_row.add_suffix(&match_btn);
-            ra_group.add(&match_row);
-        }
-        if has_ra_content {
-            general_page.append(&ra_group);
-        }
+        let ra_group = build_ra_section(state, game, win, pending_copies);
+        let container = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        container.append(&ra_group);
+        general_page.append(&container);
+        ra_container = Some(container);
     }
 
     let mut app_id_entry: Option<adw::EntryRow> = None;
@@ -329,5 +357,5 @@ pub(super) fn build_game_general_page(
         None
     };
 
-    (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator)
+    (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator, ra_container)
 }

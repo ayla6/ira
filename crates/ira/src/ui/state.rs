@@ -11,7 +11,14 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-pub type SettingsData = (adw::Window, gtk4::Stack, i64, Rc<RefCell<HashMap<String, String>>>);
+#[derive(Clone)]
+pub struct SettingsData {
+    pub window: adw::Window,
+    pub stack: gtk4::Stack,
+    pub db_id: i64,
+    pub pending_copies: Rc<RefCell<HashMap<String, String>>>,
+    pub ra_container: Option<gtk4::Box>,
+}
 
 pub struct AppState {
     pub window: adw::ApplicationWindow,

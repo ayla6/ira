@@ -56,7 +56,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     // --- General page ---
     let languages = app_details.as_ref().map(|d| d.languages.clone()).unwrap_or_default();
     let pending_copies: Rc<RefCell<HashMap<String, String>>> = Default::default();
-    let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator) =
+    let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator, ra_container) =
         super::game_settings::build_game_general_page(state, &game, &win, &languages, &pending_copies);
     sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
@@ -607,7 +607,13 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
     {
         let mut s = state.borrow_mut();
-        s.settings_data = Some((win.clone(), stack.clone(), db_id, pending_copies.clone()));
+        s.settings_data = Some(super::state::SettingsData {
+            window: win.clone(),
+            stack: stack.clone(),
+            db_id,
+            pending_copies: pending_copies.clone(),
+            ra_container,
+        });
     }
     let state_close = state.clone();
     win.connect_close_request(move |_| {

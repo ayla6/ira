@@ -272,15 +272,17 @@ pub fn refresh_settings_images_page(
     db_id: i64,
     build_page: impl Fn(&SharedState, &Game, &adw::Window, Option<Rc<RefCell<HashMap<String, String>>>>) -> gtk4::Widget,
 ) {
-    if let Some((ref sw, ref ss, sdb_id, ref pc)) = state.borrow().settings_data.clone() {
-        if sdb_id == db_id && sw.is_visible() {
-            if let Some(old) = ss.child_by_name("images") {
-                ss.remove(&old);
-            }
-            if let Some(game) = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned() {
-                let new_page = build_page(state, &game, sw, Some(pc.clone()));
-                ss.add_named(&new_page, Some("images"));
-            }
+    let sd = match state.borrow().settings_data.clone() {
+        Some(d) => d,
+        None => return,
+    };
+    if sd.db_id == db_id && sd.window.is_visible() {
+        if let Some(old) = sd.stack.child_by_name("images") {
+            sd.stack.remove(&old);
+        }
+        if let Some(game) = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned() {
+            let new_page = build_page(state, &game, &sd.window, Some(sd.pending_copies.clone()));
+            sd.stack.add_named(&new_page, Some("images"));
         }
     }
 }

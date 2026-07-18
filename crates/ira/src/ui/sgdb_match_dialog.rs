@@ -236,7 +236,7 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
                 } else {
                     for (sgdb_id, name) in &results {
                         let row = adw::ActionRow::new();
-                        row.set_title(name);
+                        row.set_title(&super::helpers::esc(name));
                         row.set_subtitle(&format!("SGDB ID: {}", sgdb_id));
                         let match_btn = gtk4::Button::with_label("Match");
                         match_btn.add_css_class("suggested-action");

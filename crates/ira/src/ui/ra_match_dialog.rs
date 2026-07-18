@@ -70,7 +70,7 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
         } else {
             for game in &results {
                 let row = adw::ActionRow::new();
-                row.set_title(&game.title);
+                row.set_title(&super::helpers::esc(&game.title));
                 row.set_subtitle(&format!("RA ID: {} · {} achievements", game.id, game.num_achievements));
                 let match_btn = gtk4::Button::with_label("Match");
                 match_btn.add_css_class("suggested-action");
@@ -113,16 +113,10 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                     dc.close();
                     let sc_refresh = sc.clone();
                     glib::idle_add_local_once(move || {
-                        let sd = sc_refresh.borrow().settings_data.clone();
-                        if let Some((ref sw, _, sdb_id, _)) = sd {
-                            if sdb_id == db_id && sw.is_visible() {
-                                sw.close();
-                                let sc_reopen = sc_refresh.clone();
-                                glib::idle_add_local_once(move || {
-                                    super::edit_game_dialog::show_edit_game_dialog(&sc_reopen, db_id);
-                                });
-                            }
-                        }
+                        super::game_settings::refresh_ra_section(&sc_refresh, db_id);
+                        super::helpers::refresh_settings_images_page(&sc_refresh, db_id, |s, game, win, pc| {
+                            super::image_manager::build_image_manager_content_with_drafts(s, game, win, pc).upcast()
+                        });
                     });
                 });
                 row.add_suffix(&match_btn);

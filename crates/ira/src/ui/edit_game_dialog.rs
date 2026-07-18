@@ -324,7 +324,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             }
         }
 
-        // Pending image copies
+        // Pending image copies — copy files on main thread (fast), convert in background
         {
             let pc = pending_copies_c.borrow();
             let is_steam = game.trophy_source.has_steam_enrichment();
@@ -340,6 +340,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 ira_parser::data_dir(&save_dir_c, &app_id)
             };
             let _ = std::fs::create_dir_all(&cloud_dir);
+            let mut pending_images: Vec<(String, u32, u32)> = Vec::new();
             for (asset, src_path) in pc.iter() {
                 if asset == "__unmatch__" { continue; }
                 if asset.starts_with("__ra_unmatch_") { continue; }
@@ -351,18 +352,20 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     "logo" => "logo",
                     _ => continue,
                 };
+                let (max_w, max_h) = match asset.as_str() {
+                    "icon" => (32u32, 32u32),
+                    "hero" => (1920, 620),
+                    "grid" => (300, 450),
+                    "header" => (460, 215),
+                    "logo" => (620, 620),
+                    _ => continue,
+                };
                 ira_parser::remove_image_variants(&cloud_dir, base_name);
                 let is_ico = is_ico_bytes(src_path);
                 if is_ico {
                     let ico_path = cloud_dir.join(format!("{}.ico", base_name));
                     if std::fs::copy(src_path, &ico_path).is_ok() {
-                        let webp = ico_path.with_extension("webp");
-                        ira_parser::convert_to_lossless_webp(&ico_path);
-                        if webp.is_file() {
-                            ira_images::invalidate_texture(&webp.to_string_lossy());
-                        } else {
-                            ira_images::invalidate_texture(&ico_path.to_string_lossy());
-                        }
+                        pending_images.push((base_name.to_string(), max_w, max_h));
                     }
                 } else {
                     let ext = std::path::Path::new(src_path).extension()
@@ -372,34 +375,36 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     if let Err(e) = std::fs::copy(src_path, &dest) {
                         eprintln!("Failed to copy {}: {}", asset, e);
                     } else {
-                        ira_parser::convert_to_lossless_webp(&dest);
-                    }
-                    let webp = cloud_dir.join(format!("{}.webp", base_name));
-                    if webp.is_file() {
-                        ira_images::invalidate_texture(&webp.to_string_lossy());
-                    } else {
-                        ira_images::invalidate_texture(&dest.to_string_lossy());
+                        pending_images.push((base_name.to_string(), max_w, max_h));
                     }
                 }
             }
-            // Ensure small versions for any newly copied images
-            for (asset, _) in pc.iter() {
-                if asset == "__unmatch__" || asset.starts_with("__ra_unmatch_") { continue; }
-                let (base_name, max_w, max_h) = match asset.as_str() {
-                    "icon" => ("icon", 32u32, 32u32),
-                    "hero" => ("hero", 1920, 620),
-                    "grid" => ("vertical", 300, 450),
-                    "header" => ("header", 460, 215),
-                    "logo" => ("logo", 620, 620),
-                    _ => continue,
-                };
-                // Remove stale _small variants so they're regenerated from the new source
-                let small_base = format!("{}_small", base_name);
-                ira_parser::remove_image_variants(&cloud_dir, &small_base);
-                ira_parser::ensure_small_image(&cloud_dir, base_name, max_w, max_h);
-                ira_images::invalidate_texture(
-                    &cloud_dir.join(format!("{}.webp", small_base)).to_string_lossy(),
-                );
+            // Convert and generate small images in background
+            if !pending_images.is_empty() {
+                let cloud_dir_bg = cloud_dir.clone();
+                std::thread::spawn(move || {
+                    for (base_name, max_w, max_h) in &pending_images {
+                        if let Some(src) = ira_parser::find_image_file(&cloud_dir_bg, base_name) {
+                            ira_parser::convert_to_lossless_webp(&src);
+                        }
+                        let small_base = format!("{}_small", base_name);
+                        ira_parser::remove_image_variants(&cloud_dir_bg, &small_base);
+                        ira_parser::ensure_small_image(&cloud_dir_bg, base_name, *max_w, *max_h);
+                    }
+                    let base_names: Vec<String> = pending_images.into_iter().map(|(b, _, _)| b).collect();
+                    glib::idle_add_local_once(move || {
+                        for base_name in &base_names {
+                            let webp = cloud_dir_bg.join(format!("{}.webp", base_name));
+                            if webp.is_file() {
+                                ira_images::invalidate_texture(&webp.to_string_lossy());
+                            }
+                            let small = cloud_dir_bg.join(format!("{}_small.webp", base_name));
+                            if small.is_file() {
+                                ira_images::invalidate_texture(&small.to_string_lossy());
+                            }
+                        }
+                    });
+                });
             }
         }
 
@@ -582,6 +587,17 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     btn_row.append(&cancel_btn);
     btn_row.append(&save_btn);
     content_area.append(&btn_row);
+
+    {
+        let mut s = state.borrow_mut();
+        s.settings_data = Some((win.clone(), stack.clone(), db_id));
+    }
+    let state_close = state.clone();
+    win.connect_close_request(move |_| {
+        state_close.borrow_mut().settings_data = None;
+        glib::Propagation::Proceed
+    });
+
     win.present();
 }
 

@@ -111,6 +111,19 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                     }
                     if let Some(ref cb) = on_match_c { cb(); }
                     dc.close();
+                    let sc_refresh = sc.clone();
+                    glib::idle_add_local_once(move || {
+                        let sd = sc_refresh.borrow().settings_data.clone();
+                        if let Some((ref sw, _, sdb_id)) = sd {
+                            if sdb_id == db_id && sw.is_visible() {
+                                sw.close();
+                                let sc_reopen = sc_refresh.clone();
+                                glib::idle_add_local_once(move || {
+                                    super::edit_game_dialog::show_edit_game_dialog(&sc_reopen, db_id);
+                                });
+                            }
+                        }
+                    });
                 });
                 row.add_suffix(&match_btn);
                 list_c.append(&row);

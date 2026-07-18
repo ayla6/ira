@@ -10,12 +10,12 @@ use super::helpers::clear_children;
 
 fn build_sgdb_asset_card(
     a: &SgdbAsset,
-    asset_type: &str,
+    _asset_type: &str,
     steam: &Arc<SteamDataClient>,
     on_download: Rc<dyn Fn()>,
     save_dir: &str,
 ) -> (gtk4::Widget, gtk4::Widget) {
-    let thumb_size = if asset_type == "header" { 138 } else { 90 };
+    let thumb_size = 300;
 
     let mut info = String::new();
     if a.width > 0 && a.height > 0 {
@@ -30,11 +30,11 @@ fn build_sgdb_asset_card(
         else { info = format!("by {}", a.author); }
     }
 
-    let card = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+    let card = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
     card.set_halign(gtk4::Align::Center);
     card.set_valign(gtk4::Align::Start);
-    card.set_margin_top(4);
-    card.set_margin_bottom(4);
+    card.set_margin_top(8);
+    card.set_margin_bottom(8);
 
     let grid_pic = gtk4::Picture::new();
     grid_pic.set_content_fit(gtk4::ContentFit::ScaleDown);
@@ -51,7 +51,7 @@ fn build_sgdb_asset_card(
 
     let gdl = gtk4::Button::with_label("Download");
     gdl.add_css_class("suggested-action");
-    gdl.set_halign(gtk4::Align::Center);
+    gdl.set_hexpand(true);
     card.append(&gdl);
 
     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
@@ -60,7 +60,7 @@ fn build_sgdb_asset_card(
 
     let list_pic = gtk4::Picture::new();
     list_pic.set_content_fit(gtk4::ContentFit::ScaleDown);
-    list_pic.set_size_request(48, 48);
+    list_pic.set_size_request(96, 96);
     row.append(&list_pic);
 
     let rlbl = gtk4::Label::new(Some(&info));
@@ -144,8 +144,8 @@ pub(crate) struct ShowSgdbPickerParams<'a> {
 pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let ShowSgdbPickerParams { steam, id, asset, is_steam_id, dimensions, parent, on_done, pending_copies, save_dir } = params;
     let picker = adw::Window::new();
-    picker.set_default_width(600);
-    picker.set_default_height(500);
+    picker.set_default_width(900);
+    picker.set_default_height(700);
     picker.set_transient_for(Some(parent));
     picker.set_modal(true);
     let save_dir_owned = save_dir.to_string();
@@ -171,7 +171,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     flow.set_selection_mode(gtk4::SelectionMode::None);
     flow.set_homogeneous(true);
     flow.set_min_children_per_line(1);
-    flow.set_max_children_per_line(8);
+    flow.set_max_children_per_line(3);
     flow.set_row_spacing(8);
     flow.set_column_spacing(8);
     flow.set_margin_start(12);

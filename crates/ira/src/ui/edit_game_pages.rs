@@ -408,6 +408,8 @@ pub(super) fn build_profile_dropdown(
     saved_profile_id: Option<i64>,
     profiles: &[WineProfile],
     general_page: &gtk4::Box,
+    state: &SharedState,
+    win: &adw::Window,
 ) -> Option<adw::ComboRow> {
     let profile_row: Option<adw::ComboRow> = if has_config && saved_wine_enabled {
         let profile_labels: Vec<String> = std::iter::once("Custom (per-game)".to_string())
@@ -426,6 +428,45 @@ pub(super) fn build_profile_dropdown(
                 }
             }
         }
+
+        let edit_btn = gtk4::Button::new();
+        edit_btn.set_icon_name("document-edit-symbolic");
+        edit_btn.set_tooltip_text(Some("Edit profile"));
+        edit_btn.set_valign(gtk4::Align::Center);
+        edit_btn.add_css_class("flat");
+        if pr.selected() == 0 {
+            edit_btn.set_sensitive(false);
+        }
+        let profiles_c: Vec<WineProfile> = profiles.to_vec();
+        let pr_c = pr.clone();
+        let state_c = state.clone();
+        let win_c = win.clone();
+        edit_btn.connect_clicked(move |_| {
+            let idx = pr_c.selected() as usize;
+            if idx == 0 { return; }
+            if let Some(p) = profiles_c.get(idx - 1) {
+                let parent = state_c.borrow().window.clone();
+                let db = state_c.borrow().db.clone();
+                super::profile_dialog::show_profile_dialog(&parent, &db, Some(p.clone()), &state_c, &win_c, None);
+            }
+        });
+
+        let new_btn = gtk4::Button::new();
+        new_btn.set_icon_name("list-add-symbolic");
+        new_btn.set_tooltip_text(Some("Create new profile"));
+        new_btn.set_valign(gtk4::Align::Center);
+        new_btn.add_css_class("flat");
+        let state_n = state.clone();
+        let win_n = win.clone();
+        new_btn.connect_clicked(move |_| {
+            let parent = state_n.borrow().window.clone();
+            let db = state_n.borrow().db.clone();
+            super::profile_dialog::show_profile_dialog(&parent, &db, None, &state_n, &win_n, None);
+        });
+
+        pr.add_suffix(&edit_btn);
+        pr.add_suffix(&new_btn);
+
         let profile_group = adw::PreferencesGroup::new();
         profile_group.add(&pr);
         general_page.prepend(&profile_group);

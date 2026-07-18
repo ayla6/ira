@@ -63,9 +63,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
     // --- Profile dropdown (only when wine config exists and wine is enabled) ---
     let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
-    let profile_row = build_profile_dropdown(has_config, saved_wine.enabled, saved_profile_id, &profiles, &general_page);
+    let profile_row = build_profile_dropdown(has_config, saved_wine.enabled, saved_profile_id, &profiles, &general_page, state, &win);
 
-    // --- Launch Config (not for steam/ps4/retro) ---
+    // --- Launch Config + Wine Config (not for steam/ps4/retro) ---
     let show_launch_config = game.kind != ira_models::GameKind::Steam && game.kind != ira_models::GameKind::Ps4 && game.kind != ira_models::GameKind::Retro;
     let launch_config_widgets = if show_launch_config {
         build_launch_config_page(&saved_launch, &win, &sidebar, &stack, true)
@@ -73,12 +73,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         None
     };
 
-    // --- Wine Config (only for wine kind games) ---
     let show_wine_tabs = game.kind == ira_models::GameKind::Wine && saved_wine.enabled;
-    if show_wine_tabs {
-        sidebar.append(&super::settings_dialog::sidebar_separator());
-    }
-
     let wine_widgets_opt = if show_wine_tabs {
         let (wine_pages, ww) = crate::ui::wine_config_widget::build_wine_config_pages(&saved_wine, Some(&app_default_wine));
         for wp in &wine_pages {
@@ -90,7 +85,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         None
     };
 
-    if show_wine_tabs {
+    if show_launch_config || show_wine_tabs {
         sidebar.append(&super::settings_dialog::sidebar_separator());
     }
 

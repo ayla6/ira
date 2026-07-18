@@ -35,7 +35,7 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> g
     let sw_add = settings_win_clone.clone();
     let list_rc_add = list_rc.clone();
     add_btn.connect_clicked(move |_| {
-        show_profile_dialog(&win_add, &db_add, None, &sc_add, &sw_add, list_rc_add.clone());
+        show_profile_dialog(&win_add, &db_add, None, &sc_add, &sw_add, Some(list_rc_add.clone()));
     });
     group.add(&add_btn);
 
@@ -75,7 +75,7 @@ fn repopulate_profiles(
         let sw_edit = settings_win.clone();
         let list_rc_edit = list_rc.clone();
         edit_btn.connect_clicked(move |_| {
-            show_profile_dialog(&win_edit, &db_edit, Some(p_edit.clone()), &sc_edit, &sw_edit, list_rc_edit.clone());
+            show_profile_dialog(&win_edit, &db_edit, Some(p_edit.clone()), &sc_edit, &sw_edit, Some(list_rc_edit.clone()));
         });
         row.add_suffix(&edit_btn);
 
@@ -116,13 +116,13 @@ fn repopulate_profiles(
     }
 }
 
-fn show_profile_dialog(
+pub fn show_profile_dialog(
     parent: &adw::ApplicationWindow,
     db: &ira_db::DbConn,
     existing: Option<ira_models::WineProfile>,
     state: &SharedState,
     settings_win: &adw::Window,
-    list_rc: ListRef,
+    list_rc: Option<ListRef>,
 ) {
     let win = adw::Window::new();
     win.set_default_width(450);
@@ -281,6 +281,8 @@ fn show_profile_dialog(
             }
         }
         win_c2.close();
-        repopulate_profiles(&list_rc_c, &db_c, &parent_c, &sc_c, &sw_c);
+        if let Some(ref lr) = list_rc_c {
+            repopulate_profiles(lr, &db_c, &parent_c, &sc_c, &sw_c);
+        }
     });
 }

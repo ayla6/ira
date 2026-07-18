@@ -50,10 +50,6 @@ pub fn show_settings_dialog(
 
     sidebar.append(&sidebar_separator());
 
-    let lutris_page = build_lutris_settings_page(state, &win);
-    sidebar.append(&settings_sidebar_row("system-software-install-symbolic", "Migration"));
-    stack.add_named(&lutris_page, Some("migration"));
-
     let (steam_page, steam_enable_row) = build_steam_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Steam"));
     stack.add_named(&steam_page, Some("steam"));
@@ -96,6 +92,10 @@ pub fn show_settings_dialog(
     let (emu_page, emu_version_row, emu_version_model) = build_api_emulators_page(&cfg);
     sidebar.append(&settings_sidebar_row("applications-engineering-symbolic", "API Emulators"));
     stack.add_named(&emu_page, Some("api_emulators"));
+
+    let lutris_page = build_lutris_settings_page(state, &win);
+    sidebar.append(&settings_sidebar_row("system-software-install-symbolic", "Migration"));
+    stack.add_named(&lutris_page, Some("migration"));
 
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {

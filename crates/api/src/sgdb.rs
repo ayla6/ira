@@ -4,6 +4,7 @@ use crate::util::urlencode;
 
 impl SteamDataClient {
     fn sgdb_get_json(&self, url: &str) -> Option<serde_json::Value> {
+        let _s = tracing::info_span!("sgdb_get_json", url).entered();
         let sgdb_key = self.sgdb_api_key();
         if sgdb_key.is_empty() { return None; }
         let resp = self.http
@@ -73,6 +74,7 @@ impl SteamDataClient {
     }
 
     pub fn list_sgdb_assets(&self, id: &str, asset: &str, is_steam_id: bool, dimensions: &[&str]) -> Vec<SgdbAsset> {
+        let _s = tracing::info_span!("list_sgdb_assets", id, asset).entered();
         let endpoint = match sgdb_endpoint(asset, is_steam_id, id) {
             Some(e) => e,
             None => return Vec::new(),

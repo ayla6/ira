@@ -229,6 +229,7 @@ impl SteamDataClient {
     }
 
     pub fn generate_steam_settings(&self, app_id: &str) -> Result<(), String> {
+        let _s = tracing::info_span!("generate_steam_settings", app_id).entered();
         struct IconJob {
             url: String,
             dest: std::path::PathBuf,

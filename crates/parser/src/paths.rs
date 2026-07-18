@@ -33,6 +33,7 @@ pub fn find_image_file(dir: &Path, base_name: &str) -> Option<PathBuf> {
 }
 
 pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
+    let _s = tracing::info_span!("ensure_small_image", base_name, max_w, max_h).entered();
     if find_image_file(dir, &format!("{}_small", base_name)).is_some() {
         return;
     }
@@ -90,6 +91,7 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
 /// in the directory, across all known image extensions. Call before saving a new
 /// image to avoid stale files with different extensions.
 pub fn remove_image_variants(dir: &Path, base_name: &str) {
+    let _s = tracing::info_span!("remove_image_variants", base_name).entered();
     for ext in &["png", "jpg", "jpeg", "webp", "ico"] {
         let p = dir.join(format!("{}.{}", base_name, ext));
         let _ = std::fs::remove_file(&p);
@@ -112,6 +114,7 @@ pub fn full_image_path(path: &str) -> String {
 /// Open an image file (PNG, JPEG, ICO, etc.) and re-save as lossless WebP,
 /// removing the original. Does nothing if the file can't be decoded.
 pub fn convert_to_lossless_webp(path: &Path) {
+    let _s = tracing::info_span!("convert_to_lossless_webp", path = %path.display()).entered();
     let base = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let parent = path.parent().unwrap_or(Path::new("."));
     let webp = parent.join(format!("{}.webp", base));

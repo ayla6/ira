@@ -17,6 +17,8 @@ pub fn read_app_name(save_dir: &str, app_id: &str) -> Option<String> {
 }
 
 pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
+    let db_id = game.db_id;
+    let _s = tracing::info_span!("populate_image_paths", db_id).entered();
     super::paths::ensure_small_image(image_dir, "icon", 32, 32);
     super::paths::ensure_small_image(image_dir, "hero", 1920, 620);
     super::paths::ensure_small_image(image_dir, "vertical", 300, 450);

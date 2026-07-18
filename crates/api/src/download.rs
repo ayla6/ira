@@ -13,6 +13,7 @@ impl SteamDataClient {
     }
 
     pub(super) fn fetch_image(&self, url: &str, dest: &Path) -> String {
+        let _s = tracing::info_span!("fetch_image", url).entered();
         if self.download_file(url, dest).is_ok() {
             if let Ok(meta) = std::fs::metadata(dest) {
                 if meta.len() >= MIN_IMAGE_BYTES {
@@ -25,6 +26,7 @@ impl SteamDataClient {
     }
 
     pub(super) fn fetch_image_fallback(&self, primary: &str, fallback: &str, dest: &Path) -> String {
+        let _s = tracing::info_span!("fetch_image_fallback", url = primary).entered();
         if dest.exists() {
             return dest.to_string_lossy().into_owned();
         }
@@ -37,6 +39,7 @@ impl SteamDataClient {
     }
 
     pub fn download_file(&self, url: &str, dest: &Path) -> Result<(), String> {
+        let _s = tracing::info_span!("download_file", url, dest = %dest.display()).entered();
         std::fs::create_dir_all(dest.parent().unwrap_or(Path::new(".")))
             .map_err(|e| e.to_string())?;
         let resp = self

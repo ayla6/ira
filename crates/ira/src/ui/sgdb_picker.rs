@@ -87,6 +87,7 @@ fn build_sgdb_asset_card(
     let (tx_thumb, rx_thumb) = std::sync::mpsc::channel::<Option<String>>();
     let rx_thumb = std::cell::RefCell::new(rx_thumb);
     std::thread::spawn(move || {
+        let _s = tracing::info_span!("thumbnail_download", url = %url_clone).entered();
         let final_path = if std::path::Path::new(&thumb_name).exists() {
             Some(thumb_name.clone())
         } else if steam_thumb.download_file(&url_clone, std::path::Path::new(&thumb_name)).is_ok() {
@@ -184,6 +185,7 @@ fn rebuild_assets_view(
         let asset_dl = asset_clone.to_string();
         let pending_dl = pending_copies.clone();
         let on_download: Rc<dyn Fn()> = Rc::new(move || {
+            let _s = tracing::info_span!("on_download", asset = %asset_dl, url = %dl_url).entered();
             if let Some(ref pc) = pending_dl {
                 let tmp = {
                     let url_path = std::path::Path::new(&dl_url);

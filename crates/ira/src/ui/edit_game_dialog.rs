@@ -327,6 +327,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         // Pending image copies — copy files on main thread (fast), convert in background
         {
             let pc = pending_copies_c.borrow();
+            let _s = tracing::info_span!("pending_image_copies", db_id = db_id_s, count = pc.len()).entered();
             let is_steam = game.trophy_source.has_steam_enrichment();
             let cloud_dir = if game.kind == ira_models::GameKind::Retro {
                 ira_parser::retro_data_dir(&save_dir_c, db_id_s)
@@ -382,7 +383,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             // Convert and generate small images in background
             if !pending_images.is_empty() {
                 let cloud_dir_bg = cloud_dir.clone();
+                let db_id_bg = db_id_s;
                 std::thread::spawn(move || {
+                    let _s = tracing::info_span!("pending_image_conversion", db_id = db_id_bg, count = pending_images.len()).entered();
                     for (base_name, max_w, max_h) in &pending_images {
                         if let Some(src) = ira_parser::find_image_file(&cloud_dir_bg, base_name) {
                             ira_parser::convert_to_lossless_webp(&src);

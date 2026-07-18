@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 pub fn convert_ico_to_png(ico_path: &Path) -> Result<PathBuf, String> {
+    let _s = tracing::info_span!("convert_ico_to_png", path = %ico_path.display()).entered();
     let png_path = ico_path.with_extension("png");
     if png_path.exists() {
         let _ = std::fs::remove_file(ico_path);

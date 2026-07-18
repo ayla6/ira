@@ -153,6 +153,7 @@ fn make_refresh_closure(
     asset_type: &str,
     thumb_size: (i32, i32),
 ) -> Rc<dyn Fn()> {
+    let _s = tracing::info_span!("make_refresh_closure", asset = %asset_type, db_id = game.db_id).entered();
     let save_dir = state.borrow().save_dir.clone();
         let (tw, th) = thumb_size;
         Rc::new({
@@ -322,6 +323,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         let asset_c = asset_type.to_string();
         let refresh = refresh_images.clone();
         btn.connect_clicked(move |_| {
+            let _s = tracing::info_span!("steam_button", app_id = %id_c, asset = %asset_c).entered();
             let _ = steam.force_download_steam(&id_c, &asset_c);
             refresh();
         });
@@ -335,6 +337,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         let save_dir_c = save_dir.clone();
         let refresh = refresh_images.clone();
         btn.connect_clicked(move |_| {
+            let _s = tracing::info_span!("steam_button_icon", app_id = %id_c).entered();
             if let Ok(app_id_num) = id_c.parse::<u32>() {
                 if let Some(clienticon) = ira_platforms::steam::get_clienticon(app_id_num) {
                     let ico_file = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.ico");

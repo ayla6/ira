@@ -10,6 +10,7 @@ impl SteamDataClient {
     }
 
     pub fn ensure_sgdb_assets_in_dir(&self, dir: &Path, sgdb_id: &str) -> (String, String, String, String, String) {
+        let _s = tracing::info_span!("ensure_sgdb_assets_in_dir", sgdb_id).entered();
         let _ = std::fs::create_dir_all(dir);
 
         let icon_path = if let Some(existing) = ira_parser::find_image_file(dir, "icon") {
@@ -109,6 +110,7 @@ impl SteamDataClient {
         app_id: &str,
         has_local_icon: bool,
     ) -> (String, String) {
+        let _s = tracing::info_span!("ensure_assets", app_id).entered();
         let dir = self.game_dir(app_id);
 
         let icon_path = if has_local_icon {
@@ -157,6 +159,7 @@ impl SteamDataClient {
     }
 
     pub fn ensure_grids(&self, app_id: &str) -> (String, String, String) {
+        let _s = tracing::info_span!("ensure_grids", app_id).entered();
         let dir = self.game_dir(app_id);
         let cdn = |suffix: &str| {
             format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/{}", app_id, suffix)
@@ -206,6 +209,7 @@ impl SteamDataClient {
     }
 
     pub fn ensure_dlc_images(&self, app_id: &str, dlcs: &mut std::collections::HashMap<String, DlcInfo>) {
+        let _s = tracing::info_span!("ensure_dlc_images", app_id).entered();
         let base_dir = self.game_dir(app_id);
         let dlc_dir = base_dir.join("dlc");
         let _ = std::fs::create_dir_all(&dlc_dir);
@@ -229,6 +233,7 @@ impl SteamDataClient {
     }
 
     pub fn force_download_steam(&self, app_id: &str, asset: &str) -> String {
+        let _s = tracing::info_span!("force_download_steam", app_id, asset).entered();
         let dir = self.game_dir(app_id);
         let cdn = |suffix: &str| format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/{}", app_id, suffix);
         match asset {
@@ -287,6 +292,7 @@ impl SteamDataClient {
     }
 
     pub fn force_download_sgdb(&self, id: &str, asset: &str, is_steam_id: bool) -> String {
+        let _s = tracing::info_span!("force_download_sgdb", sgdb_id = id, asset).entered();
         let dir = if is_steam_id { self.game_dir(id) } else { self.sgdb_dir(id) };
         let _ = std::fs::create_dir_all(&dir);
     let endpoint = match crate::sgdb::sgdb_endpoint(asset, is_steam_id, id) {

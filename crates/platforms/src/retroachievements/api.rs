@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use serde::Deserialize;
+use tracing::info_span;
 
 use ira_config::Config;
 use ira_models::{Game, MergedAchievement};
@@ -257,6 +258,7 @@ impl RaClient {
     }
 
     pub fn download_badge(&self, save_dir: &str, game_id: &str, badge_name: &str, locked: bool) -> String {
+        let _s = info_span!("download_badge", badge_name).entered();
         let dest = if locked {
             paths::badge_locked_path(save_dir, game_id, badge_name)
         } else {
@@ -289,6 +291,7 @@ impl RaClient {
     }
 
     pub fn download_game_icon(&self, save_dir: &str, game_id: &str, image_icon: &str) -> String {
+        let _s = info_span!("download_game_icon", game_id).entered();
         let dest = paths::game_icon_path(save_dir, game_id);
         if dest.is_file() {
             return dest.to_string_lossy().into_owned();
@@ -421,6 +424,7 @@ pub fn build_ra_achievements(
     save_dir: &str,
     game_id: &str,
 ) -> (Vec<MergedAchievement>, String, String) {
+    let _s = info_span!("build_ra_achievements", game_id, count = game_data.achievements.len()).entered();
     let mut achievements = Vec::new();
     let mut icon_path = String::new();
     let mut icon_gray_path = String::new();
@@ -476,6 +480,7 @@ pub fn build_ra_achievements(
 }
 
 pub fn enrich_ra_game(game: &mut Game, save_dir: &str, username: &str, token: &str, password: &str) {
+    let _s = info_span!("enrich_ra_game", game_id = &game.app_id[..]).entered();
     if RaClient::auth_is_broken() {
         return;
     }
@@ -573,6 +578,7 @@ pub fn load_ra_achievements_from_cache(save_dir: &str, game_id: &str) -> Vec<Mer
 }
 
 pub fn redownload_missing_ra_badges(save_dir: &str, game_id: &str) -> bool {
+    let _s = info_span!("redownload_missing_ra_badges", game_id).entered();
     let game_data_path = paths::game_data_path(save_dir, game_id);
     let game_data: RaGameData = match std::fs::read(&game_data_path) {
         Ok(data) => match serde_json::from_slice::<GameDataResponse>(&data) {

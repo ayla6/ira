@@ -30,6 +30,7 @@ pub struct EnrichGameParams {
 pub fn enrich_game_async(params: EnrichGameParams) {
     let EnrichGameParams { app_id, trophy_source, platform_id, db_id, title, steam, watcher, sender, save_dir, db, ra_username, ra_token, ra_password } = params;
     std::thread::spawn(move || {
+        let _s = tracing::info_span!("enrich_game_async", app_id = %app_id, db_id = db_id).entered();
         if trophy_source == ira_models::TrophySource::Ra {
             let _guard = RA_ENRICH_LOCK.lock().unwrap();
             enrich_ra(EnrichRaParams {
@@ -66,6 +67,7 @@ pub fn enrich_game_async(params: EnrichGameParams) {
         if trophy_source.has_steam_enrichment() {
             let has_missing_icons = game.achievements.iter().any(|a| a.icon_path.is_empty());
             if has_missing_icons {
+                let _s = tracing::info_span!("enrich_redownload_icons", app_id = %app_id).entered();
                 if let Err(e) = steam.generate_steam_settings(&app_id) {
                     eprintln!("Could not re-download achievement icons for {}: {}", app_id, e);
                 } else if let Ok(reloaded) = load_game(&entry, &save_dir) {
@@ -180,6 +182,7 @@ fn fetch_steam_game_icon(
     save_dir: &str,
     steam: &std::sync::Arc<ira_api::SteamDataClient>,
 ) -> Option<String> {
+    let _s = tracing::info_span!("fetch_steam_game_icon", app_id = %app_id).entered();
     let app_id_num: u32 = app_id.parse().ok()?;
     let clienticon = ira_platforms::steam::get_clienticon(app_id_num)?;
     if clienticon.is_empty() { return None; }
@@ -246,6 +249,7 @@ struct EnrichRaParams<'a> {
 
 fn enrich_ra(params: EnrichRaParams) {
     let EnrichRaParams { app_id, trophy_source, platform_id, db_id, title, save_dir, sender, ra_username, ra_token, ra_password, db } = params;
+    let _s = tracing::info_span!("enrich_ra", app_id = %app_id, db_id = db_id).entered();
     if ira_platforms::retroachievements::RaClient::auth_is_broken() {
         return;
     }

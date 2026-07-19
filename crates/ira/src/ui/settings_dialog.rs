@@ -48,8 +48,23 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("dialog-password-symbolic", "API Keys"));
     stack.add_named(&api_page, Some("api"));
 
+    let (wine_pages, wine_widgets) = build_wine_config_pages(&cfg.default_wine_config, None);
     sidebar.append(&sidebar_separator());
+    for wp in &wine_pages {
+        sidebar.append(&settings_sidebar_row(wp.icon, wp.label));
+        stack.add_named(&wp.page, Some(wp.label));
+    }
 
+    let (profiles_page, prefix_base_row) = build_profiles_page(state, &win);
+    sidebar.append(&settings_sidebar_row("system-users-symbolic", "Wine Profiles"));
+    stack.add_named(&profiles_page, Some("profiles"));
+
+    sidebar.append(&sidebar_separator());
+    let (emu_page, emu_version_row, emu_version_model) = build_api_emulators_page(&cfg);
+    sidebar.append(&settings_sidebar_row("applications-engineering-symbolic", "API Emulators"));
+    stack.add_named(&emu_page, Some("api_emulators"));
+
+    sidebar.append(&sidebar_separator());
     let (steam_page, steam_enable_row) = build_steam_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Steam"));
     stack.add_named(&steam_page, Some("steam"));
@@ -77,24 +92,8 @@ pub fn show_settings_dialog(
         }
     }
 
-    let (wine_pages, wine_widgets) = build_wine_config_pages(&cfg.default_wine_config, None);
-    sidebar.append(&sidebar_separator());
-    for wp in &wine_pages {
-        sidebar.append(&settings_sidebar_row(wp.icon, wp.label));
-        stack.add_named(&wp.page, Some(wp.label));
-    }
-
-    let profiles_page = build_profiles_page(state, &win);
-    sidebar.append(&settings_sidebar_row("system-users-symbolic", "Wine Profiles"));
-    stack.add_named(&profiles_page, Some("profiles"));
-
-    sidebar.append(&sidebar_separator());
-    let (emu_page, emu_version_row, emu_version_model) = build_api_emulators_page(&cfg);
-    sidebar.append(&settings_sidebar_row("applications-engineering-symbolic", "API Emulators"));
-    stack.add_named(&emu_page, Some("api_emulators"));
-
     let lutris_page = build_lutris_settings_page(state, &win);
-    sidebar.append(&settings_sidebar_row("system-software-install-symbolic", "Migration"));
+    sidebar.append(&settings_sidebar_row("system-software-install-symbolic", "Lutris Migration"));
     stack.add_named(&lutris_page, Some("migration"));
 
     let stack_clone = stack.clone();
@@ -189,6 +188,7 @@ pub fn show_settings_dialog(
             }
         }
         s.cfg.default_wine_config = wine_widgets.to_wine_config();
+        s.cfg.prefix_base_dir = prefix_base_row.text().to_string();
 
         let idx = emu_version_row.selected();
         let ver = emu_version_model.string(idx).map(|s| s.to_string()).unwrap_or_default();

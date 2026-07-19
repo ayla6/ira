@@ -6,8 +6,28 @@ use std::cell::RefCell;
 
 type ListRef = Rc<RefCell<gtk4::ListBox>>;
 
-pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> gtk4::ScrolledWindow {
+pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> (gtk4::ScrolledWindow, adw::EntryRow) {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+
+    let settings_group = adw::PreferencesGroup::new();
+    settings_group.set_title("Prefix Settings");
+
+    let prefix_base_row = adw::EntryRow::new();
+    prefix_base_row.set_title("Prefix base directory (new prefixes created as {base}/{game-slug})");
+    prefix_base_row.set_text(&state.borrow().cfg.prefix_base_dir);
+    let prefix_browse = super::helpers::make_browse_button(
+        Some(settings_win),
+        "Select prefix base directory",
+        true,
+        None,
+        {
+            let entry = prefix_base_row.clone();
+            move |path| entry.set_text(&path.to_string_lossy())
+        },
+    );
+    prefix_base_row.add_suffix(&prefix_browse);
+    settings_group.add(&prefix_base_row);
+    page.append(&settings_group);
 
     let group = adw::PreferencesGroup::new();
     group.set_title("Wine Profiles");
@@ -35,7 +55,7 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> g
     let sw_add = settings_win_clone.clone();
     let list_rc_add = list_rc.clone();
     add_btn.connect_clicked(move |_| {
-        show_profile_dialog(&win_add, &db_add, None, &sc_add, &sw_add, Some(list_rc_add.clone()));
+        show_profile_dialog(&win_add, &db_add, None, &sc_add, &sw_add, Some(list_rc_add.clone()), None);
     });
     group.add(&add_btn);
 
@@ -45,7 +65,7 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> g
     sw.set_hexpand(true);
     sw.set_vexpand(true);
     sw.set_child(Some(&page));
-    sw
+    (sw, prefix_base_row)
 }
 
 fn repopulate_profiles(
@@ -75,7 +95,7 @@ fn repopulate_profiles(
         let sw_edit = settings_win.clone();
         let list_rc_edit = list_rc.clone();
         edit_btn.connect_clicked(move |_| {
-            show_profile_dialog(&win_edit, &db_edit, Some(p_edit.clone()), &sc_edit, &sw_edit, Some(list_rc_edit.clone()));
+            show_profile_dialog(&win_edit, &db_edit, Some(p_edit.clone()), &sc_edit, &sw_edit, Some(list_rc_edit.clone()), None);
         });
         row.add_suffix(&edit_btn);
 
@@ -123,6 +143,7 @@ pub fn show_profile_dialog(
     state: &SharedState,
     settings_win: &adw::Window,
     list_rc: Option<ListRef>,
+    game_slug: Option<&str>,
 ) {
     let win = adw::Window::new();
     win.set_default_width(450);
@@ -173,7 +194,15 @@ pub fn show_profile_dialog(
 
     let prefix_entry = adw::EntryRow::new();
     prefix_entry.set_title("Wine prefix path (empty = default ~/.wine)");
-    if let Some(p) = existing.as_ref() { prefix_entry.set_text(&p.prefix); }
+    if let Some(p) = existing.as_ref() {
+        prefix_entry.set_text(&p.prefix);
+    } else if let Some(slug) = game_slug {
+        if !slug.is_empty() {
+            let base = state.borrow().cfg.prefix_base_dir.clone();
+            let generated = ira_launcher::wine_launch::generate_prefix_path(&base, slug);
+            prefix_entry.set_text(&generated);
+        }
+    }
 
     let prefix_browse = super::helpers::make_browse_button(
         Some(&win),

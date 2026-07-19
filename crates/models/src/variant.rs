@@ -11,5 +11,7 @@ pub struct GameVariant {
     pub args: String,
     #[serde(default)]
     pub env_vars: Vec<(String, String)>,
+    #[serde(default)]
+    pub sort_order: i32,
 }
 

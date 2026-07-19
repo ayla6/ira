@@ -122,4 +122,19 @@ gridview.game-grid child:focus-within {
 .dim-label {
     opacity: 0.55;
 }
+
+.variant-card {
+    padding: 12px;
+    border-radius: 10px;
+    background-color: alpha(@theme_fg_color, 0.05);
+}
+.variant-card.dragging {
+    opacity: 0.5;
+}
+.variant-drag-handle {
+    opacity: 0.5;
+}
+.variant-drag-handle:active {
+    opacity: 0.8;
+}
 ";

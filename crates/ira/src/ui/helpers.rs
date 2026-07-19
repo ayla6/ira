@@ -304,6 +304,41 @@ pub fn format_duration(seconds: i64) -> String {
     }
 }
 
+/// Spawn a terminal running bash, with the given env vars set.
+/// Tries common terminal emulators in order since `-e` isn't universal.
+pub fn spawn_terminal(env: &[(String, String)]) {
+    let terminals: &[(&str, &[&str])] = &[
+        ("gnome-terminal", &["--", "bash"]),
+        ("konsole", &["-e", "bash"]),
+        ("xfce4-terminal", &["-e", "bash"]),
+        ("mate-terminal", &["--", "bash"]),
+        ("alacritty", &["-e", "bash"]),
+        ("kitty", &["-e", "bash"]),
+        ("foot", &["-e", "bash"]),
+        ("wezterm", &["start", "--", "bash"]),
+        ("tilix", &["-e", "bash"]),
+        ("qterminal", &["-e", "bash"]),
+        ("lxterminal", &["-e", "bash"]),
+        ("terminator", &["-e", "bash"]),
+        ("xterm", &["-e", "bash"]),
+    ];
+
+    if let Ok(term) = std::env::var("TERMINAL") {
+        let mut cmd = std::process::Command::new(&term);
+        cmd.arg("-e").arg("bash");
+        for (k, v) in env { cmd.env(k, v); }
+        if cmd.spawn().is_ok() { return; }
+    }
+
+    for (term, args) in terminals {
+        let mut cmd = std::process::Command::new(term);
+        cmd.args(*args);
+        for (k, v) in env { cmd.env(k, v); }
+        if cmd.spawn().is_ok() { return; }
+    }
+    eprintln!("No terminal emulator found. Set $TERMINAL or install gnome-terminal/konsole/xterm.");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

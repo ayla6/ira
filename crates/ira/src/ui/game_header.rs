@@ -98,9 +98,14 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
         let winetricks = gio::SimpleAction::new("winetricks", None);
         winetricks.connect_activate(move |_, _| {
             let (wine_exe, prefix, env) = get_wine_cmd_env(&st_winetricks, db_id);
-            if wine_exe.is_some() {
+            if let Some(exe) = wine_exe {
                 let mut cmd = std::process::Command::new("winetricks");
+                cmd.arg("--gui");
                 cmd.env("WINEPREFIX", &prefix);
+                if let Some(dir) = std::path::Path::new(&exe).parent() {
+                    let path = std::env::var("PATH").unwrap_or_default();
+                    cmd.env("PATH", format!("{}:{}", dir.display(), path));
+                }
                 for (k, v) in &env { cmd.env(k, v); }
                 let _ = cmd.spawn();
             }
@@ -176,18 +181,15 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
         let bash = gio::SimpleAction::new("bash", None);
         bash.connect_activate(move |_, _| {
             let (wine_exe, prefix, env) = get_wine_cmd_env(&st_bash, db_id);
-            let term = std::env::var("TERMINAL").unwrap_or_else(|_| "x-terminal-emulator".to_string());
-            let mut cmd = std::process::Command::new(&term);
-            cmd.arg("-e").arg("bash");
-            cmd.env("WINEPREFIX", &prefix);
-            if let Some(ref exe) = wine_exe {
-                let wine_dir = std::path::Path::new(exe).parent();
-                if let Some(dir) = wine_dir {
-                    cmd.env("PATH", format!("{}:{}", dir.display(), std::env::var("PATH").unwrap_or_default()));
+            let mut full_env = env;
+            full_env.push(("WINEPREFIX".to_string(), prefix));
+            if let Some(exe) = wine_exe {
+                if let Some(dir) = std::path::Path::new(&exe).parent() {
+                    let path = std::env::var("PATH").unwrap_or_default();
+                    full_env.push(("PATH".to_string(), format!("{}:{}", dir.display(), path)));
                 }
             }
-            for (k, v) in &env { cmd.env(k, v); }
-            let _ = cmd.spawn();
+            super::helpers::spawn_terminal(&full_env);
         });
         actions.add_action(&bash);
 
@@ -402,7 +404,7 @@ fn get_wine_cmd_env(state: &SharedState, db_id: i64) -> (Option<String>, String,
     }
     wine = wine.merge_with_default(&app_default);
     let prefix = ira_launcher::wine_launch::wine_prefix(&wine);
-    let env = ira_launcher::wine_launch::build_wine_env(&wine, "");
     let exe = ira_launcher::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path).ok();
+    let env = ira_launcher::wine_launch::build_wine_env(&wine, exe.as_deref().unwrap_or(""));
     (exe, prefix, env)
 }

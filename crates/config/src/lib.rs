@@ -39,6 +39,8 @@ pub struct Config {
     pub save_dir: String,
     #[serde(default)]
     pub default_wine_config: WineConfig,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub prefix_base_dir: String,
     #[serde(default)]
     pub default_native_env_vars: Vec<(String, String)>,
     #[serde(default)]
@@ -78,6 +80,7 @@ impl Default for Config {
 
             save_dir: default_save_dir(),
             default_wine_config: WineConfig::default(),
+            prefix_base_dir: String::new(),
             default_native_env_vars: Vec::new(),
             default_api_emu_version: String::new(),
             sort_mode: ira_models::SortMode::default(),
@@ -218,6 +221,7 @@ impl Config {
             steam_enabled: self.steam_enabled,
             save_dir: self.save_dir.clone(),
             default_wine_config: self.default_wine_config.clone(),
+            prefix_base_dir: self.prefix_base_dir.clone(),
             default_native_env_vars: self.default_native_env_vars.clone(),
             default_api_emu_version: self.default_api_emu_version.clone(),
             sort_mode: self.sort_mode,

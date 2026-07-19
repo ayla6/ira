@@ -41,6 +41,7 @@ mod add_game_db;
 mod edit_game_dialog;
 mod edit_game_launch;
 mod edit_game_pages;
+mod edit_game_advanced;
 mod play_history;
 mod wine_config_helpers;
 mod wine_config_env_dll;

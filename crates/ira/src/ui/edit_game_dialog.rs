@@ -8,6 +8,7 @@ use super::state::SharedState;
 use super::add_game_dialog::collect_env_vars;
 use super::edit_game_launch::build_launch_config_page;
 use super::edit_game_pages::*;
+use super::wine_config_env_dll::collect_dll_overrides;
 
 fn is_ico_bytes(path: &str) -> bool {
     if path.ends_with(".ico") {
@@ -61,14 +62,22 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
 
-    // --- Profile dropdown (only when wine config exists and wine is enabled) ---
-    let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
-    let profile_row = build_profile_dropdown(has_config, saved_wine.enabled, saved_profile_id, &profiles, &general_page, state, &win);
-
     // --- Launch Config + Wine Config (not for steam/ps4/retro) ---
     let show_launch_config = game.kind != ira_models::GameKind::Steam && game.kind != ira_models::GameKind::Ps4 && game.kind != ira_models::GameKind::Retro;
+    let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
     let launch_config_widgets = if show_launch_config {
-        build_launch_config_page(&saved_launch, &win, &sidebar, &stack, true)
+        build_launch_config_page(super::edit_game_launch::LaunchConfigParams {
+            launch: &saved_launch,
+            win: &win,
+            sidebar: &sidebar,
+            stack: &stack,
+            has_config,
+            saved_wine_enabled: saved_wine.enabled,
+            saved_profile_id,
+            profiles: &profiles,
+            state,
+            game_slug: &game.slug,
+        })
     } else {
         None
     };
@@ -77,10 +86,34 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let wine_widgets_opt = if show_wine_tabs {
         let (wine_pages, ww) = crate::ui::wine_config_widget::build_wine_config_pages(&saved_wine, Some(&app_default_wine));
         for wp in &wine_pages {
+            if wp.label == "Wine Advanced" { continue; }
             sidebar.append(&super::settings_dialog::settings_sidebar_row(wp.icon, wp.label));
             stack.add_named(&wp.page, Some(wp.label));
         }
         Some(ww)
+    } else {
+        None
+    };
+
+    // --- Combined Advanced page (env vars + LD for all, anti-cheat/debug/DLL for wine) ---
+    let show_advanced = show_launch_config;
+    let advanced_widgets = if show_advanced {
+        let ww_ref = wine_widgets_opt.as_ref();
+        let wine_env_data: Option<Vec<(String, String)>> = ww_ref.map(|ww| {
+            super::wine_config_env_dll::collect_env_vars(&ww.wine_env_vars_box)
+        });
+        let dll_data: Option<Vec<(String, String)>> = ww_ref.map(|ww| {
+            collect_dll_overrides(&ww.dll_overrides_box)
+        });
+        let aw = super::edit_game_advanced::build_advanced_page(
+            &saved_launch,
+            wine_env_data.as_deref(),
+            dll_data.as_deref(),
+            ww_ref,
+            &sidebar,
+            &stack,
+        );
+        Some(aw)
     } else {
         None
     };
@@ -200,6 +233,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let language_row_c = language_row.clone();
     let languages_c = languages.clone();
     let saved_platform_id = game.platform_id.clone();
+    let advanced_widgets_c = advanced_widgets.clone();
 
     save_btn.connect_clicked(move |_| {
         let title = title_entry.text().to_string();
@@ -245,15 +279,39 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
         // Save launch config + wine config
         if let Some(ref lc) = launch_config_widgets {
+            let env_vars = if let Some(ref aw) = advanced_widgets_c {
+                collect_env_vars(&aw.env_vars_box)
+            } else {
+                Vec::new()
+            };
+            let ld_preload = if let Some(ref aw) = advanced_widgets_c {
+                aw.ld_preload_entry.text().to_string()
+            } else {
+                String::new()
+            };
+            let ld_library_path = if let Some(ref aw) = advanced_widgets_c {
+                aw.ld_library_path_entry.text().to_string()
+            } else {
+                String::new()
+            };
             let launch = GameLaunchConfig {
                 exe: lc.exe_entry.text().to_string(),
                 args: lc.args_entry.text().to_string(),
                 working_dir: lc.wd_entry.text().to_string(),
-                env_vars: collect_env_vars(&lc.env_vars_box),
-                ld_preload: lc.ld_preload_entry.text().to_string(),
-                ld_library_path: lc.ld_path_entry.text().to_string(),
+                env_vars: if show_wine_tabs { Vec::new() } else { env_vars.clone() },
+                ld_preload,
+                ld_library_path,
             };
             let mut wine = wine_widgets_opt.as_ref().map_or(WineConfig::default(), |ww| ww.to_wine_config());
+
+            if show_wine_tabs {
+                wine.wine_env_vars = env_vars;
+                if let Some(ref aw) = advanced_widgets_c {
+                    if let Some(ref dob) = aw.dll_overrides_box {
+                        wine.dll_overrides = collect_dll_overrides(dob);
+                    }
+                }
+            }
 
             if wine.dll_overrides != app_default_wine_c.dll_overrides {
                 if !wine.overridden_fields.contains(&"dll_overrides".to_string()) {
@@ -269,11 +327,15 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             } else {
                 wine.overridden_fields.retain(|f| f != "wine_env_vars");
             }
-            let new_profile_id = if let Some(ref profile_row) = profile_row {
-                if profile_row.selected() > 0 {
-                    profiles.get((profile_row.selected() - 1) as usize).map(|p| p.id)
+            let new_profile_id = if let Some(ref lc) = launch_config_widgets {
+                if let Some(ref profile_row) = lc.profile_row {
+                    if profile_row.selected() > 0 {
+                        profiles.get((profile_row.selected() - 1) as usize).map(|p| p.id)
+                    } else {
+                        None
+                    }
                 } else {
-                    None
+                    saved_profile_id
                 }
             } else {
                 saved_profile_id
@@ -588,6 +650,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     working_dir: vw._wd.text().to_string(),
                     args: vw._args.text().to_string(),
                     env_vars: Vec::new(),
+                    sort_order: 0,
                 };
                 let _ = ira_db::add_variant(&db, &variant);
             }

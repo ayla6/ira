@@ -130,6 +130,43 @@ pub fn wine_prefix(wine: &WineConfig) -> String {
     }
 }
 
+/// Generate a unique prefix path from a game slug.
+///
+/// If `base_dir` is empty, falls back to `~/.local/share/ira/prefixes`.
+/// The slug is sanitized: only alphanumeric + dashes kept, lowercased.
+/// If `{base}/{slug}` already exists, tries `{slug}1`, `{slug}2`, etc.
+pub fn generate_prefix_path(base_dir: &str, slug: &str) -> String {
+    let base = if base_dir.is_empty() {
+        let xdg = std::env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty());
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        match xdg {
+            Some(x) => format!("{}/ira/prefixes", x),
+            None => format!("{}/.local/share/ira/prefixes", home),
+        }
+    } else {
+        base_dir.to_string()
+    };
+
+    let clean: String = slug
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+        .collect();
+    let clean: String = clean.split('-').filter(|s| !s.is_empty()).collect::<Vec<_>>().join("-");
+    let candidate = format!("{}/{}", base, clean);
+    if !std::path::Path::new(&candidate).exists() {
+        return candidate;
+    }
+    let mut i = 1;
+    loop {
+        let c = format!("{}/{}{}", base, clean, i);
+        if !std::path::Path::new(&c).exists() {
+            return c;
+        }
+        i += 1;
+    }
+}
+
 pub fn build_wine_reg_commands(wine: &WineConfig, wine_exe: &str) -> Vec<Vec<String>> {
     let mut commands: Vec<Vec<String>> = Vec::new();
 
@@ -287,4 +324,39 @@ pub fn is_fsync_supported() -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_prefix_path_basic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_str().unwrap();
+        let p = generate_prefix_path(base, "Halo: Combat Evolved");
+        assert_eq!(p, format!("{}/halo-combat-evolved", base));
+        assert!(!std::path::Path::new(&p).exists());
+    }
+
+    #[test]
+    fn test_generate_prefix_path_collision() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_str().unwrap();
+        let first = generate_prefix_path(base, "Halo");
+        std::fs::create_dir_all(&first).unwrap();
+        let second = generate_prefix_path(base, "Halo");
+        assert_eq!(second, format!("{}/halo1", base));
+        std::fs::create_dir_all(&second).unwrap();
+        let third = generate_prefix_path(base, "Halo");
+        assert_eq!(third, format!("{}/halo2", base));
+    }
+
+    #[test]
+    fn test_generate_prefix_path_sanitizes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_str().unwrap();
+        let p = generate_prefix_path(base, "Game!!! @#$%");
+        assert_eq!(p, format!("{}/game", base));
+    }
 }

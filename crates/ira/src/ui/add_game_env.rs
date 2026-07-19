@@ -9,15 +9,17 @@ pub(super) fn build_env_page() -> (gtk4::Box, gtk4::ListBox, adw::EntryRow, adw:
 
     let env_vars_box = gtk4::ListBox::new();
     env_vars_box.add_css_class("boxed-list");
-    env_group.add(&env_vars_box);
 
-    let add_env_btn = gtk4::Button::with_label("Add variable");
+    let add_env_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    add_env_btn.set_tooltip_text(Some("Add variable"));
+    add_env_btn.set_valign(gtk4::Align::Center);
     add_env_btn.add_css_class("flat");
     let env_box_clone = env_vars_box.clone();
     add_env_btn.connect_clicked(move |_| {
         env_box_clone.append(&super::add_game_dialog::build_env_var_row("", ""));
     });
-    env_group.add(&add_env_btn);
+    env_group.set_header_suffix(Some(&add_env_btn));
+    env_group.add(&env_vars_box);
     page.append(&env_group);
 
     let expander = adw::ExpanderRow::new();

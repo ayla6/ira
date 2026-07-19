@@ -44,11 +44,10 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> (
 
     repopulate_profiles(&list_rc, &db, &window, &state_clone, &settings_win_clone);
 
-    group.add(&list);
-
-    let add_btn = gtk4::Button::with_label("Create Profile");
+    let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    add_btn.set_tooltip_text(Some("Create profile"));
+    add_btn.set_valign(gtk4::Align::Center);
     add_btn.add_css_class("flat");
-    add_btn.set_margin_top(12);
     let win_add = window.clone();
     let db_add = db.clone();
     let sc_add = state_clone.clone();
@@ -57,7 +56,9 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> (
     add_btn.connect_clicked(move |_| {
         show_profile_dialog(&win_add, &db_add, None, &sc_add, &sw_add, Some(list_rc_add.clone()), None);
     });
-    group.add(&add_btn);
+    group.set_header_suffix(Some(&add_btn));
+
+    group.add(&list);
 
     page.append(&group);
 

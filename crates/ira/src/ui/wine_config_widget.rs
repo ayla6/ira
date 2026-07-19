@@ -24,7 +24,9 @@ pub struct WineConfigWidgets {
     pub eac: adw::SwitchRow,
     pub show_debug: adw::ComboRow,
     pub audio: adw::ComboRow,
-    pub graphics: adw::ComboRow,
+    pub wayland: adw::SwitchRow,
+    pub gpu_row: Option<adw::ComboRow>,
+    pub gpu_options: Vec<String>,
     pub desktop_integration: adw::SwitchRow,
     pub show_crash_dialogs: adw::SwitchRow,
     pub mouse_warp_override: adw::ComboRow,
@@ -118,12 +120,33 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
     let dxvk_nvapi = build_switch_row("DXVK-NVAPI / DLSS", "NVIDIA DLSS support via DXVK", wine.dxvk_nvapi);
     if let Some(dd) = dft { track_switch(&dxvk_nvapi, "dxvk_nvapi", dd.dxvk_nvapi, &overridden); }
     gfx_group.add(&dxvk_nvapi);
-    let (graphics, _gfx_model) = build_combo_row("Graphics backend", &[("Auto", "auto"), ("Wayland", "wayland"), ("X11", "x11")]);
-    {
-        let idx = match wine.graphics.as_str() { "wayland" => 1, "x11" => 2, _ => 0 };
-        graphics.set_selected(idx);
-    }
-    gfx_group.add(&graphics);
+
+    let gpus = ira_launcher::gpu::detect_gpus();
+    let gpu_options: Vec<String> = gpus.iter().map(|g| g.card.clone()).collect();
+    let gpu_row = if gpus.len() > 1 {
+        let mut gpu_labels: Vec<String> = vec!["Auto".to_string()];
+        gpu_labels.extend(gpus.iter().map(|g| format!("{} — {}", g.short_name(), g.card)));
+        let gpu_model = gtk4::StringList::new(&gpu_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        let gr = adw::ComboRow::new();
+        gr.set_title("GPU");
+        gr.set_subtitle("Graphics card to use for rendering");
+        gr.set_model(Some(&gpu_model));
+        if !wine.gpu.is_empty() {
+            for (i, card) in gpu_options.iter().enumerate() {
+                if card == &wine.gpu {
+                    gr.set_selected((i + 1) as u32);
+                    break;
+                }
+            }
+        }
+        gfx_group.add(&gr);
+        Some(gr)
+    } else {
+        None
+    };
+
+    let wayland = build_switch_row("Enable Wayland", "Use Wayland for display instead of X11", wine.graphics == "wayland");
+    gfx_group.add(&wayland);
     let (mouse_warp_override, _warp_model) = build_combo_row("Mouse warp override", &[("Enable", "enable"), ("Disable", "disable"), ("Force", "force")]);
     {
         let idx = match wine.mouse_warp_override.as_str() { "disable" => 1, "force" => 2, _ => 0 };
@@ -185,11 +208,6 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
     adv_page.append(&dbg_group);
 
     let env_group = make_section("Environment Variables");
-    let env_label = gtk4::Label::new(Some("Custom environment variables passed to Wine"));
-    env_label.set_xalign(0.0);
-    env_label.add_css_class("dim-label");
-    env_label.set_margin_bottom(8);
-    env_group.add(&env_label);
 
     let wine_env_vars_box = gtk4::ListBox::new();
     wine_env_vars_box.add_css_class("boxed-list");
@@ -197,24 +215,21 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
         let row = build_env_var_row(name, value);
         wine_env_vars_box.append(&row);
     }
-    env_group.add(&wine_env_vars_box);
 
-    let add_env_btn = gtk4::Button::with_label("Add variable");
+    let add_env_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    add_env_btn.set_tooltip_text(Some("Add variable"));
+    add_env_btn.set_valign(gtk4::Align::Center);
     add_env_btn.add_css_class("flat");
     let env_box_clone = wine_env_vars_box.clone();
     add_env_btn.connect_clicked(move |_| {
         let row = build_env_var_row("", "");
         env_box_clone.append(&row);
     });
-    env_group.add(&add_env_btn);
+    env_group.set_header_suffix(Some(&add_env_btn));
+    env_group.add(&wine_env_vars_box);
     adv_page.append(&env_group);
 
     let dll_group = make_section("DLL Overrides");
-    let dll_label = gtk4::Label::new(Some("Configure DLL load order for native/builtin Wine DLLs"));
-    dll_label.set_xalign(0.0);
-    dll_label.add_css_class("dim-label");
-    dll_label.set_margin_bottom(8);
-    dll_group.add(&dll_label);
 
     let dll_overrides_box = gtk4::ListBox::new();
     dll_overrides_box.add_css_class("boxed-list");
@@ -222,16 +237,18 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
         let row = build_dll_override_row(name, value);
         dll_overrides_box.append(&row);
     }
-    dll_group.add(&dll_overrides_box);
 
-    let add_dll_btn = gtk4::Button::with_label("Add override");
+    let add_dll_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    add_dll_btn.set_tooltip_text(Some("Add override"));
+    add_dll_btn.set_valign(gtk4::Align::Center);
     add_dll_btn.add_css_class("flat");
     let box_clone = dll_overrides_box.clone();
     add_dll_btn.connect_clicked(move |_| {
         let row = build_dll_override_row("", "native,builtin");
         box_clone.append(&row);
     });
-    dll_group.add(&add_dll_btn);
+    dll_group.set_header_suffix(Some(&add_dll_btn));
+    dll_group.add(&dll_overrides_box);
     adv_page.append(&dll_group);
     pages.push(WinePage { icon: "preferences-other-symbolic", label: "Wine Advanced", page: page_with_content(adv_page) });
 
@@ -253,7 +270,7 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
         version: wine.version.clone(), custom_wine_path: wine.custom_wine_path.clone(),
         arch: wine.arch.clone(), prefix: wine.prefix.clone(),
         esync, fsync, dxvk, vkd3d, d3d_extras,
-        dxvk_nvapi, fsr, battleye, eac, show_debug, audio, graphics, desktop_integration,
+        dxvk_nvapi, fsr, battleye, eac, show_debug, audio, wayland, gpu_row, gpu_options, desktop_integration,
         show_crash_dialogs, mouse_warp_override, virtual_desktop, virtual_desktop_res,
         dpi_enabled, dpi, gamemode, mangohud, gamescope, gamescope_flags,
         dxvk_frame_rate, proton_wow64, proton_ntsync, wine_env_vars_box, dll_overrides_box,
@@ -272,11 +289,17 @@ impl WineConfigWidgets {
         let audio_idx = self.audio.selected() as usize;
         let audio_value = match audio_idx { 1 => "alsa", 2 => "pulse", 3 => "oss", _ => "auto" };
 
-        let gfx_idx = self.graphics.selected() as usize;
-        let gfx_value = match gfx_idx { 1 => "wayland", 2 => "x11", _ => "auto" };
+        let gfx_value = if self.wayland.is_active() { "wayland" } else { "auto" };
 
         let warp_idx = self.mouse_warp_override.selected() as usize;
         let warp_value = match warp_idx { 1 => "disable", 2 => "force", _ => "enable" };
+
+        let gpu_value = if let Some(ref gr) = self.gpu_row {
+            let idx = gr.selected() as usize;
+            if idx == 0 { String::new() } else {
+                self.gpu_options.get(idx - 1).cloned().unwrap_or_default()
+            }
+        } else { String::new() };
 
         WineConfig {
             enabled: true,
@@ -314,6 +337,7 @@ impl WineConfigWidgets {
             wine_env_vars: collect_env_vars(&self.wine_env_vars_box),
             umu_enabled: self.umu_enabled,
             overridden_fields: self.overridden.borrow().clone(),
+            gpu: gpu_value,
         }
     }
 }

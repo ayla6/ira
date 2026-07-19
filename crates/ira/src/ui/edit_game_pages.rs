@@ -298,6 +298,22 @@ pub(super) fn build_variants_page(
 ) -> Rc<RefCell<Vec<VarW>>> {
     let variants: Vec<GameVariant> = ira_db::get_variants(&state.borrow().db, db_id).unwrap_or_default();
     let variant_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+
+    let header = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    header.set_margin_start(12);
+    header.set_margin_end(12);
+    let title = gtk4::Label::new(Some("Variants"));
+    title.set_halign(gtk4::Align::Start);
+    title.set_hexpand(true);
+    title.add_css_class("heading");
+    let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    add_btn.set_tooltip_text(Some("Add variant"));
+    add_btn.set_valign(gtk4::Align::Center);
+    add_btn.add_css_class("flat");
+    header.append(&title);
+    header.append(&add_btn);
+    variant_page.append(&header);
+
     let variant_container = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
     variant_container.set_margin_start(12);
     variant_container.set_margin_end(12);
@@ -379,15 +395,11 @@ pub(super) fn build_variants_page(
         add_variant_fn(v.clone());
     }
 
-    let add_btn = gtk4::Button::with_label("Add variant");
-    add_btn.add_css_class("suggested-action");
-    add_btn.set_margin_top(8);
     {
         let add_variant_fn = add_variant_fn;
         let new_v = GameVariant { game_id: db_id, ..Default::default() };
         add_btn.connect_clicked(move |_| add_variant_fn(new_v.clone()));
     }
-    variant_page.append(&add_btn);
 
     let variant_scroll = gtk4::ScrolledWindow::new();
     variant_scroll.set_child(Some(&variant_page));
@@ -454,7 +466,7 @@ pub(super) fn build_profile_dropdown(params: ProfileDropdownParams) -> Option<ad
             }
         });
 
-        pr.add_suffix(&edit_btn);
+        pr.add_prefix(&edit_btn);
 
         let profile_group = adw::PreferencesGroup::new();
         profile_group.add(&pr);

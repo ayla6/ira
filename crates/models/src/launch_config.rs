@@ -55,6 +55,8 @@ pub struct WineConfig {
     pub umu_enabled: bool,
     #[serde(default)]
     pub overridden_fields: Vec<String>,
+    #[serde(default)]
+    pub gpu: String,
 }
 
 fn default_true() -> bool { true }
@@ -97,6 +99,7 @@ impl Default for WineConfig {
             wine_env_vars: Vec::new(),
             umu_enabled: true,
             overridden_fields: Vec::new(),
+            gpu: String::new(),
         }
     }
 }
@@ -141,6 +144,7 @@ impl WineConfig {
             wine_env_vars: if has("wine_env_vars") { self.wine_env_vars.clone() } else { default.wine_env_vars.clone() },
             umu_enabled: self.umu_enabled,
             overridden_fields: self.overridden_fields.clone(),
+            gpu: self.gpu.clone(),
         }
     }
 }

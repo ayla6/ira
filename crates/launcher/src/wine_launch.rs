@@ -98,6 +98,11 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
         env.push((k.clone(), v.clone()));
     }
 
+    for (k, v) in crate::gpu::build_gpu_env(&wine.gpu) {
+        env.retain(|(ek, _)| ek != &k);
+        env.push((k, v));
+    }
+
     env
 }
 

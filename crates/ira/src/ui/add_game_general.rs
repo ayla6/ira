@@ -56,7 +56,7 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
     wd_entry.add_suffix(&wd_browse);
     info_group.add(&wd_entry);
 
-    let profile_labels: Vec<String> = std::iter::once("Custom (per-game)".to_string())
+    let profile_labels: Vec<String> = std::iter::once("New prefix".to_string())
         .chain(profiles.iter().map(|p| p.name.clone()))
         .collect();
     let profile_model = super::helpers::string_list_from(&profile_labels);
@@ -64,6 +64,28 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
     profile_row.set_title("Wine Profile");
     profile_row.set_subtitle("Links wine version + prefix together");
     profile_row.set_model(Some(&profile_model));
+
+    let edit_btn = gtk4::Button::new();
+    edit_btn.set_icon_name("document-edit-symbolic");
+    edit_btn.set_tooltip_text(Some("Edit profile"));
+    edit_btn.set_valign(gtk4::Align::Center);
+    edit_btn.add_css_class("flat");
+    let profiles_c: Vec<ira_models::WineProfile> = profiles.to_vec();
+    let pr_c = profile_row.clone();
+    let state_c = state.clone();
+    let win_c = win.clone();
+    edit_btn.connect_clicked(move |_| {
+        let idx = pr_c.selected() as usize;
+        let parent = state_c.borrow().window.clone();
+        let db = state_c.borrow().db.clone();
+        if idx == 0 {
+            super::profile_dialog::show_profile_dialog(&parent, &db, None, &state_c, &win_c, None, None);
+        } else if let Some(p) = profiles_c.get(idx - 1) {
+            super::profile_dialog::show_profile_dialog(&parent, &db, Some(p.clone()), &state_c, &win_c, None, None);
+        }
+    });
+    profile_row.add_suffix(&edit_btn);
+
     info_group.add(&profile_row);
 
     page.append(&info_group);

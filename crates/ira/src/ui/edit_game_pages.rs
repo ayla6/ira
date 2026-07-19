@@ -466,7 +466,7 @@ pub(super) fn build_profile_dropdown(params: ProfileDropdownParams) -> Option<ad
             }
         });
 
-        pr.add_prefix(&edit_btn);
+        pr.add_suffix(&edit_btn);
 
         let profile_group = adw::PreferencesGroup::new();
         profile_group.add(&pr);

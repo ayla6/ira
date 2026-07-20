@@ -241,17 +241,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     let id = game.app_id.clone();
     let save_dir = state.borrow().save_dir.clone();
 
-    let cloud_dir = if game.kind == ira_models::GameKind::Retro {
-        ira_parser::retro_data_dir(&save_dir, game.db_id)
-    } else if is_steam {
-        ira_parser::data_dir(&save_dir, &id)
-    } else if !game.sgdb_id.is_empty() {
-        ira_parser::sgdb_data_dir(&save_dir, &game.sgdb_id)
-    } else if game.kind == ira_models::GameKind::Ps4 {
-        ira_parser::ps4_data_dir(&save_dir, &id)
-    } else {
-        ira_parser::data_dir(&save_dir, &id)
-    };
+    let cloud_dir = ira_parser::game_data_dir(&save_dir, game);
     let section = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
     let lbl = gtk4::Label::new(Some(label));
     lbl.set_halign(gtk4::Align::Start);

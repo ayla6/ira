@@ -82,15 +82,7 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
         }
     }
 
-    let image_dir = if kind == ira_models::GameKind::Retro {
-        ira_parser::retro_data_dir(save_dir, entry.id)
-    } else if entry.trophy_source.has_steam_enrichment() {
-        ira_parser::data_dir(save_dir, app_id)
-    } else if entry.sgdb_id.as_deref().filter(|s| !s.is_empty()).is_some() {
-        ira_parser::sgdb_data_dir(save_dir, entry.sgdb_id.as_deref().unwrap())
-    } else {
-        ira_parser::data_dir(save_dir, app_id)
-    };
+    let image_dir = ira_parser::entry_data_dir(save_dir, entry);
 
     if let Some(icon_path) = ira_parser::find_image_file(&image_dir, "icon") {
         game.icon_path = icon_path.to_string_lossy().into_owned();

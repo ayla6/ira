@@ -345,26 +345,19 @@ pub(super) fn build_variants_page(
     variant_page.append(&variant_container);
 
     let var_widgets: Rc<RefCell<Vec<VarW>>> = Rc::new(RefCell::new(Vec::new()));
-    let drag_source_group: Rc<RefCell<Option<adw::PreferencesGroup>>> = Rc::new(RefCell::new(None));
 
     let add_variant_fn = {
         let var_widgets = var_widgets.clone();
         let container = variant_container.clone();
-        let drag_source_group = drag_source_group.clone();
         move |v: GameVariant| {
             let group = adw::PreferencesGroup::new();
 
-            let suffix_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
-            suffix_box.set_valign(gtk4::Align::Center);
-
-            let drag_handle = gtk4::Image::from_icon_name("view-app-grid-symbolic");
-            drag_handle.set_tooltip_text(Some("Drag to reorder"));
-            drag_handle.add_css_class("dim-label");
-            suffix_box.append(&drag_handle);
+            let name_entry = adw::EntryRow::new();
+            name_entry.set_title("Variant name");
+            name_entry.set_text(&v.name);
 
             let up_btn = gtk4::Button::from_icon_name("go-up-symbolic");
             up_btn.set_tooltip_text(Some("Move up"));
-            up_btn.add_css_class("flat");
             up_btn.set_valign(gtk4::Align::Center);
             let group_up = group.clone();
             let vw_up = var_widgets.clone();
@@ -372,11 +365,10 @@ pub(super) fn build_variants_page(
             up_btn.connect_clicked(move |_| {
                 move_variant_card(&group_up, -1, &vw_up, &container_up);
             });
-            suffix_box.append(&up_btn);
+            name_entry.add_suffix(&up_btn);
 
             let down_btn = gtk4::Button::from_icon_name("go-down-symbolic");
             down_btn.set_tooltip_text(Some("Move down"));
-            down_btn.add_css_class("flat");
             down_btn.set_valign(gtk4::Align::Center);
             let group_down = group.clone();
             let vw_down = var_widgets.clone();
@@ -384,23 +376,19 @@ pub(super) fn build_variants_page(
             down_btn.connect_clicked(move |_| {
                 move_variant_card(&group_down, 1, &vw_down, &container_down);
             });
-            suffix_box.append(&down_btn);
+            name_entry.add_suffix(&down_btn);
 
             let del_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
-            del_btn.add_css_class("flat");
-            del_btn.add_css_class("error");
+            del_btn.set_tooltip_text(Some("Delete variant"));
             del_btn.set_valign(gtk4::Align::Center);
+            del_btn.add_css_class("error");
             let container_c = container.clone();
             let group_c = group.clone();
             del_btn.connect_clicked(move |_| {
                 container_c.remove(&group_c);
             });
-            suffix_box.append(&del_btn);
-            group.set_header_suffix(Some(&suffix_box));
+            name_entry.add_suffix(&del_btn);
 
-            let name_entry = adw::EntryRow::new();
-            name_entry.set_title("Variant name");
-            name_entry.set_text(&v.name);
             group.add(&name_entry);
 
             let exe_entry = adw::EntryRow::new();
@@ -439,46 +427,6 @@ pub(super) fn build_variants_page(
             );
             wd_entry.add_suffix(&wd_browse);
             group.add(&wd_entry);
-
-            let drag = gtk4::DragSource::new();
-            drag.set_content(Some(&gtk4::gdk::ContentProvider::for_value(&"variant".to_value())));
-            let group_for_drag = group.clone();
-            let dsg_clone = drag_source_group.clone();
-            drag.connect_drag_begin(move |_, _| {
-                *dsg_clone.borrow_mut() = Some(group_for_drag.clone());
-            });
-            drag_handle.add_controller(drag);
-
-            let drop = gtk4::DropTarget::new(gtk4::glib::Type::STRING, gtk4::gdk::DragAction::MOVE);
-            let group_for_drop = group.clone();
-            let container_drop = container.clone();
-            let vw_drop = var_widgets.clone();
-            let dsg_drop = drag_source_group.clone();
-            drop.connect_drop(move |_, _, _, _| {
-                let src = dsg_drop.borrow_mut().take();
-                if let Some(src_group) = src {
-                    let (src_idx, tgt_idx) = {
-                        let w = vw_drop.borrow();
-                        (w.iter().position(|v| v.group == src_group),
-                         w.iter().position(|v| v.group == group_for_drop))
-                    };
-                    if let (Some(si), Some(ti)) = (src_idx, tgt_idx) {
-                        if si == ti { return true; }
-                        let sibling = {
-                            let mut w = vw_drop.borrow_mut();
-                            let item = w.remove(si);
-                            w.insert(ti, item);
-                            if ti == 0 { None } else { Some(w[ti - 1].group.clone()) }
-                        };
-                        match &sibling {
-                            None => container_drop.reorder_child_after(&src_group, None::<&gtk4::Widget>),
-                            Some(sib) => container_drop.reorder_child_after(&src_group, Some(sib)),
-                        }
-                    }
-                }
-                true
-            });
-            group.add_controller(drop);
 
             container.append(&group);
 

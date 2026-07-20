@@ -71,7 +71,9 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 }
             };
             if new_playtime > 0.0 {
-                let _ = ira_db::update_field(&db, game_id, "playtime", &new_playtime);
+                if let Err(e) = ira_db::update_field(&db, game_id, "playtime", &new_playtime) {
+                    eprintln!("Failed to update playtime: {}", e);
+                }
             }
         }
         AppMessage::ShadPS4PlaytimeChanged => {
@@ -111,7 +113,9 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             let _span = tracing::info_span!("SgdbAssetsDownloaded", db_id).entered();
             {
                 let db = state.borrow().db.clone();
-                let _ = ira_db::set_sgdb_id(&db, db_id, &sgdb_id);
+                if let Err(e) = ira_db::set_sgdb_id(&db, db_id, &sgdb_id) {
+                    eprintln!("Failed to set SGDB ID: {}", e);
+                }
             }
             if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                 g.sgdb_id = sgdb_id;
@@ -292,7 +296,9 @@ fn start_background_enrichment(state: &SharedState) {
                                 continue;
                             }
                             if let Ok(updated) = crate::game_loader::load_game(&entry, save_dir) {
-                                let _ = ira_db::update_achievement_counts(db, updated.db_id, updated.earned_count as i64, updated.total_count as i64, current_mtime);
+                                if let Err(e) = ira_db::update_achievement_counts(db, updated.db_id, updated.earned_count as i64, updated.total_count as i64, current_mtime) {
+                                    eprintln!("Failed to update achievement counts: {}", e);
+                                }
                                 let _ = sender.send(crate::AppMessage::EnrichedGame(updated));
                             }
                         }
@@ -332,7 +338,9 @@ pub(crate) fn apply_game_update(state: &SharedState, updated: Game) {
             } else {
                 0
             };
-            let _ = ira_db::update_achievement_counts(&db, updated.db_id, updated.earned_count as i64, updated.total_count as i64, mtime);
+            if let Err(e) = ira_db::update_achievement_counts(&db, updated.db_id, updated.earned_count as i64, updated.total_count as i64, mtime) {
+                eprintln!("Failed to update achievement counts: {}", e);
+            }
         }
 
         if was_placeholder && !updated.name.is_empty() && !updated.name.starts_with("App ID:") {

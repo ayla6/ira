@@ -267,14 +267,20 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         }
 
         if let Some(ver) = pending_version.borrow().as_ref() {
-            let _ = ira_db::set_shadps4_version(&db, db_id_s, ver);
+            if let Err(e) = ira_db::set_shadps4_version(&db, db_id_s, ver) {
+                eprintln!("Failed to set shadps4 version: {}", e);
+            }
         }
 
         if let Some(core) = pending_ra_core.borrow().as_ref() {
-            let _ = ira_db::set_ra_core(&db, db_id_s, core);
+            if let Err(e) = ira_db::set_ra_core(&db, db_id_s, core) {
+                eprintln!("Failed to set RA core: {}", e);
+            }
         }
         if let Some(emu) = pending_emulator.borrow().as_ref() {
-            let _ = ira_db::set_emulator_override(&db, db_id_s, emu);
+            if let Err(e) = ira_db::set_emulator_override(&db, db_id_s, emu) {
+                eprintln!("Failed to set emulator override: {}", e);
+            }
         }
 
         // Save launch config + wine config
@@ -340,7 +346,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             } else {
                 saved_profile_id
             };
-            let _ = ira_db::save_game_config(&db, db_id_s, &launch, &wine, new_profile_id);
+            if let Err(e) = ira_db::save_game_config(&db, db_id_s, &launch, &wine, new_profile_id) {
+                eprintln!("Failed to save game config: {}", e);
+            }
 
             if wine.enabled {
                 let reg_changed = wine.mouse_warp_override != old_wine.mouse_warp_override
@@ -484,7 +492,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
         // SGDB unmatch
         if pending_copies_c.borrow().contains_key("__unmatch__") {
-            let _ = ira_db::set_sgdb_id(&db, db_id_s, "");
+            if let Err(e) = ira_db::set_sgdb_id(&db, db_id_s, "") {
+                eprintln!("Failed to clear SGDB ID: {}", e);
+            }
             if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id_s) {
                 g.sgdb_id.clear();
             }
@@ -494,8 +504,12 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         // RA unmatch
         let ra_unmatch_key = format!("__ra_unmatch_{}", db_id_s);
         if pending_copies_c.borrow().contains_key(&ra_unmatch_key) {
-            let _ = ira_db::update_game_ids(&db, db_id_s, "", "", ira_models::TrophySource::Empty, &saved_platform_id);
-            let _ = ira_db::set_manual_unmatch(&db, db_id_s, true);
+            if let Err(e) = ira_db::update_game_ids(&db, db_id_s, "", "", ira_models::TrophySource::Empty, &saved_platform_id) {
+                eprintln!("Failed to unmatch RA game: {}", e);
+            }
+            if let Err(e) = ira_db::set_manual_unmatch(&db, db_id_s, true) {
+                eprintln!("Failed to set manual unmatch: {}", e);
+            }
             {
                 let mut s = state_clone.borrow_mut();
                 if let Some(g) = s.games.iter_mut().find(|g| g.db_id == db_id_s) {

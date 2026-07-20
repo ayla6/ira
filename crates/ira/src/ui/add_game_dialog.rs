@@ -193,7 +193,9 @@ pub fn show_add_game_dialog(state: &SharedState) {
                         if let Ok(mut game) = crate::game_loader::load_game(&entry, &save_dir_c) {
                             game.name = name_c.clone();
                             game.game_path = launch_config.exe.clone();
-                            let _ = ira_db::update_game_title(&db_c, game.db_id, &name_c);
+                            if let Err(e) = ira_db::update_game_title(&db_c, game.db_id, &name_c) {
+                                eprintln!("Failed to update game title: {}", e);
+                            }
                             if let Some(ref w) = watcher_c {
                                 w.watch(&entry, &game.achievements);
                             }

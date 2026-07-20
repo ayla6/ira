@@ -32,7 +32,9 @@ pub(super) fn handle_unified_sgdb_result(
     clear_children(action_box);
 
     if let Some((sgdb_id, matched_name)) = matched {
-        let _ = ira_db::set_sgdb_id(&state.borrow().db, db_id, &sgdb_id);
+        if let Err(e) = ira_db::set_sgdb_id(&state.borrow().db, db_id, &sgdb_id) {
+            eprintln!("Failed to set SGDB ID: {}", e);
+        }
         if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
             g.sgdb_id = sgdb_id.clone();
         }
@@ -65,7 +67,9 @@ pub(super) fn handle_unified_sgdb_result(
         let parent_c = parent_dialog.clone();
         let game_name_c = game_name.to_string();
         undo_btn.connect_clicked(move |_| {
-            let _ = ira_db::set_sgdb_id(&sc.borrow().db, db_id, "");
+            if let Err(e) = ira_db::set_sgdb_id(&sc.borrow().db, db_id, "") {
+                eprintln!("Failed to clear SGDB ID: {}", e);
+            }
             {
                 let mut s = sc.borrow_mut();
                 if let Some(g) = s.games.iter_mut().find(|g| g.db_id == db_id) {
@@ -246,7 +250,9 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
                         let dialog_c3 = dialog_c2.clone();
                         let on_match_cb = on_match_clone.clone();
                         match_btn.connect_clicked(move |_| {
-                            let _ = ira_db::set_sgdb_id(&state_c3.borrow().db, db_id, &sgdb_id_c);
+                            if let Err(e) = ira_db::set_sgdb_id(&state_c3.borrow().db, db_id, &sgdb_id_c) {
+                                eprintln!("Failed to set SGDB ID: {}", e);
+                            }
                             if let Some(g) = state_c3.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                                 g.sgdb_id = sgdb_id_c.clone();
                             }

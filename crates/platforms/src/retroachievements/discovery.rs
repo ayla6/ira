@@ -322,7 +322,9 @@ fn build_ra_games_for_console(
                             .find(|g| g.id == ra_id)
                             .map(|g| g.title.clone())
                             .unwrap_or_else(|| rom_name.clone());
-                        let _ = ira_db::update_game_ids(db, entry.id, "", &new_game_id, ira_models::TrophySource::Ra, console.def.id);
+                        if let Err(e) = ira_db::update_game_ids(db, entry.id, "", &new_game_id, ira_models::TrophySource::Ra, console.def.id) {
+                            eprintln!("Failed to update game IDs for RA match: {}", e);
+                        }
                         entry.game_id = new_game_id;
                         entry.trophy_source = ira_models::TrophySource::Ra;
                         if entry.title.is_empty() {
@@ -384,7 +386,9 @@ fn build_ra_games_for_console(
             let game = match existing_by_id {
                 Some(e) => {
                     if e.rom_path.is_empty() {
-                        let _ = ira_db::set_rom_path(db, e.id, &rom_path_str);
+                        if let Err(e) = ira_db::set_rom_path(db, e.id, &rom_path_str) {
+                            eprintln!("Failed to set ROM path: {}", e);
+                        }
                     }
                     let mut g = load_game(&e, save_dir)
                         .unwrap_or_else(|_| Game {
@@ -403,7 +407,9 @@ fn build_ra_games_for_console(
                 None => {
                     match ira_db::add_game(db, GameKind::Retro, trophy_source, "", &app_id, console.def.id, &title) {
                         Ok(id) => {
-                            let _ = ira_db::set_rom_path(db, id, &rom_path_str);
+                            if let Err(e) = ira_db::set_rom_path(db, id, &rom_path_str) {
+                                eprintln!("Failed to set ROM path: {}", e);
+                            }
                             Game {
                                 app_id: app_id.clone(),
                                 kind: GameKind::Retro,
@@ -424,19 +430,23 @@ fn build_ra_games_for_console(
                 }
             };
 
-            let _ = ira_db::delete_discs(db, game.db_id);
+            if let Err(e) = ira_db::delete_discs(db, game.db_id) {
+                eprintln!("Failed to delete discs: {}", e);
+            }
             if group.roms.len() > 1 {
                 for (i, (_, disc_path, disc_num)) in group.roms.iter().enumerate() {
                     let disc_num = disc_num.unwrap_or((i + 1) as i32);
                     let disc_path_str = disc_path.to_string_lossy().into_owned();
                     let label = format!("Disc {}", disc_num);
-                    let _ = ira_db::add_disc(db, &GameDisc {
+                    if let Err(e) = ira_db::add_disc(db, &GameDisc {
                         id: 0,
                         game_id: game.db_id,
                         disc_number: disc_num,
                         rom_path: disc_path_str,
                         label,
-                    });
+                    }) {
+                        eprintln!("Failed to add disc: {}", e);
+                    }
                 }
             }
 
@@ -448,8 +458,12 @@ fn build_ra_games_for_console(
         let _s = tracing::info_span!("stale_check").entered();
         for entry in &existing_entries {
             if !entry.rom_path.is_empty() && !seen_paths.contains(&entry.rom_path) {
-                let _ = ira_db::set_rom_path(db, entry.id, "");
-                let _ = ira_db::delete_discs(db, entry.id);
+                if let Err(e) = ira_db::set_rom_path(db, entry.id, "") {
+                    eprintln!("Failed to clear ROM path: {}", e);
+                }
+                if let Err(e) = ira_db::delete_discs(db, entry.id) {
+                    eprintln!("Failed to delete discs: {}", e);
+                }
             }
         }
     }

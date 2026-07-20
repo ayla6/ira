@@ -169,7 +169,7 @@ pub fn enrich_game_async(params: EnrichGameParams) {
                 }
             }
 
-            let _ = ira_db::store_game_metadata(
+            if let Err(e) = ira_db::store_game_metadata(
                 &db,
                 game.db_id,
                 &game.release_date,
@@ -177,7 +177,9 @@ pub fn enrich_game_async(params: EnrichGameParams) {
                 game.metacritic_score,
                 game.steam_review_score,
                 game.steam_review_count,
-            );
+            ) {
+                eprintln!("Failed to store game metadata: {}", e);
+            }
 
             if let Some(ref watcher) = watcher {
                 watcher.watch(&entry, &game.achievements);

@@ -83,8 +83,12 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                 let pid = platform_id.clone();
                 match_btn.connect_clicked(move |_| {
                     let app_id = ra_id.to_string();
-                    let _ = ira_db::update_game_ids(&sc.borrow().db, db_id, "", &app_id, ira_models::TrophySource::Ra, &pid);
-                    let _ = ira_db::set_manual_unmatch(&sc.borrow().db, db_id, false);
+                    if let Err(e) = ira_db::update_game_ids(&sc.borrow().db, db_id, "", &app_id, ira_models::TrophySource::Ra, &pid) {
+                        eprintln!("Failed to update game IDs for RA match: {}", e);
+                    }
+                    if let Err(e) = ira_db::set_manual_unmatch(&sc.borrow().db, db_id, false) {
+                        eprintln!("Failed to clear manual unmatch: {}", e);
+                    }
                     if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                         g.app_id = app_id.clone();
                         g.trophy_source = ira_models::TrophySource::Ra;

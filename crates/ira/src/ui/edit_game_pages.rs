@@ -281,11 +281,12 @@ pub(super) fn build_api_emulator_page(
 }
 
 pub(super) struct VarW {
-    pub(super) _name: adw::EntryRow,
-    pub(super) _exe: adw::EntryRow,
-    pub(super) _wd: adw::EntryRow,
-    pub(super) _args: adw::EntryRow,
-    pub(super) _group: adw::PreferencesGroup,
+    pub(super) id: Option<i64>,
+    pub(super) name: adw::EntryRow,
+    pub(super) exe: adw::EntryRow,
+    pub(super) wd: adw::EntryRow,
+    pub(super) args: adw::EntryRow,
+    pub(super) group: adw::PreferencesGroup,
 }
 
 pub(super) fn build_variants_page(
@@ -320,12 +321,23 @@ pub(super) fn build_variants_page(
     variant_page.append(&variant_container);
 
     let var_widgets: Rc<RefCell<Vec<VarW>>> = Rc::new(RefCell::new(Vec::new()));
+    let drag_source_group: Rc<RefCell<Option<adw::PreferencesGroup>>> = Rc::new(RefCell::new(None));
 
     let add_variant_fn = {
         let var_widgets = var_widgets.clone();
         let container = variant_container.clone();
+        let drag_source_group = drag_source_group.clone();
         move |v: GameVariant| {
             let group = adw::PreferencesGroup::new();
+
+            let suffix_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+            suffix_box.set_valign(gtk4::Align::Center);
+
+            let drag_handle = gtk4::Image::from_icon_name("view-app-grid-symbolic");
+            drag_handle.set_tooltip_text(Some("Drag to reorder"));
+            drag_handle.add_css_class("dim-label");
+            suffix_box.append(&drag_handle);
+
             let del_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
             del_btn.add_css_class("flat");
             del_btn.add_css_class("error");
@@ -335,7 +347,8 @@ pub(super) fn build_variants_page(
             del_btn.connect_clicked(move |_| {
                 container_c.remove(&group_c);
             });
-            group.set_header_suffix(Some(&del_btn));
+            suffix_box.append(&del_btn);
+            group.set_header_suffix(Some(&suffix_box));
 
             let name_entry = adw::EntryRow::new();
             name_entry.set_title("Variant name");
@@ -379,14 +392,55 @@ pub(super) fn build_variants_page(
             wd_entry.add_suffix(&wd_browse);
             group.add(&wd_entry);
 
+            let drag = gtk4::DragSource::new();
+            drag.set_content(Some(&gtk4::gdk::ContentProvider::for_value(&"variant".to_value())));
+            let group_for_drag = group.clone();
+            let dsg_clone = drag_source_group.clone();
+            drag.connect_drag_begin(move |_, _| {
+                *dsg_clone.borrow_mut() = Some(group_for_drag.clone());
+            });
+            drag_handle.add_controller(drag);
+
+            let drop = gtk4::DropTarget::new(gtk4::glib::Type::STRING, gtk4::gdk::DragAction::MOVE);
+            let group_for_drop = group.clone();
+            let container_drop = container.clone();
+            let vw_drop = var_widgets.clone();
+            let dsg_drop = drag_source_group.clone();
+            drop.connect_drop(move |_, _, _, _| {
+                let src = dsg_drop.borrow_mut().take();
+                if let Some(src_group) = src {
+                    let (src_idx, tgt_idx) = {
+                        let w = vw_drop.borrow();
+                        (w.iter().position(|v| v.group == src_group),
+                         w.iter().position(|v| v.group == group_for_drop))
+                    };
+                    if let (Some(si), Some(ti)) = (src_idx, tgt_idx) {
+                        if si == ti { return true; }
+                        let sibling = {
+                            let mut w = vw_drop.borrow_mut();
+                            let item = w.remove(si);
+                            w.insert(ti, item);
+                            if ti == 0 { None } else { Some(w[ti - 1].group.clone()) }
+                        };
+                        match &sibling {
+                            None => container_drop.reorder_child_after(&src_group, None::<&gtk4::Widget>),
+                            Some(sib) => container_drop.reorder_child_after(&src_group, Some(sib)),
+                        }
+                    }
+                }
+                true
+            });
+            group.add_controller(drop);
+
             container.append(&group);
 
             var_widgets.borrow_mut().push(VarW {
-                _name: name_entry,
-                _exe: exe_entry,
-                _wd: wd_entry,
-                _args: args_entry,
-                _group: group,
+                id: if v.id > 0 { Some(v.id) } else { None },
+                name: name_entry,
+                exe: exe_entry,
+                wd: wd_entry,
+                args: args_entry,
+                group,
             });
         }
     };

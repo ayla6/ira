@@ -635,24 +635,54 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             crate::ui::game_display::display_game(&g, &state_clone);
         }
 
-        // Save variants
+        // Save variants: update existing, add new, delete removed, reorder
         {
-            let _ = ira_db::delete_all_variants(&db, db_id_s);
-            for vw in var_widgets_save.borrow().iter() {
-                if vw._group.parent().is_none() { continue; }
-                let name = vw._name.text().to_string();
+            let widgets = var_widgets_save.borrow();
+
+            for vw in widgets.iter() {
+                if vw.group.parent().is_none() {
+                    if let Some(id) = vw.id {
+                        if let Err(e) = ira_db::delete_variant(&db, id) {
+                            eprintln!("Failed to delete variant {}: {}", id, e);
+                        }
+                    }
+                }
+            }
+
+            let mut ordered_ids: Vec<i64> = Vec::new();
+            for vw in widgets.iter() {
+                if vw.group.parent().is_none() { continue; }
+                let name = vw.name.text().to_string();
                 if name.is_empty() { continue; }
+
                 let variant = ira_models::GameVariant {
-                    id: 0,
+                    id: vw.id.unwrap_or(0),
                     game_id: db_id_s,
                     name,
-                    exe: vw._exe.text().to_string(),
-                    working_dir: vw._wd.text().to_string(),
-                    args: vw._args.text().to_string(),
+                    exe: vw.exe.text().to_string(),
+                    working_dir: vw.wd.text().to_string(),
+                    args: vw.args.text().to_string(),
                     env_vars: Vec::new(),
                     sort_order: 0,
                 };
-                let _ = ira_db::add_variant(&db, &variant);
+
+                if let Some(id) = vw.id {
+                    if let Err(e) = ira_db::update_variant(&db, &variant) {
+                        eprintln!("Failed to update variant {}: {}", id, e);
+                    }
+                    ordered_ids.push(id);
+                } else {
+                    match ira_db::add_variant(&db, &variant) {
+                        Ok(new_id) => ordered_ids.push(new_id),
+                        Err(e) => eprintln!("Failed to add variant: {}", e),
+                    }
+                }
+            }
+
+            if ordered_ids.len() > 1 {
+                if let Err(e) = ira_db::reorder_variants(&db, &ordered_ids) {
+                    eprintln!("Failed to reorder variants: {}", e);
+                }
             }
         }
 

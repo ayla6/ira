@@ -24,7 +24,7 @@ pub use groups::*;
 pub use metadata::*;
 pub use discs::*;
 
-pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, game_id, platform_id, title, hidden, sgdb_id, logo_position, logo_size, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path, playtime";
+pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, game_id, platform_id, title, hidden, sgdb_id, logo_position, logo_size, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path, playtime, cached_earned_count, cached_total_count, cached_achievement_mtime";
 
 pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<ira_models::GameEntry> {
     Ok(ira_models::GameEntry {
@@ -52,6 +52,9 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<ira_m
         emulator_override: row.get(21)?,
         rom_path: row.get(22)?,
         playtime: row.get(23)?,
+        cached_earned_count: row.get(24)?,
+        cached_total_count: row.get(25)?,
+        cached_achievement_mtime: row.get(26)?,
     })
 }
 

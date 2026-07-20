@@ -17,18 +17,23 @@ thread_local! {
 }
 
 fn queue_icon_load(icon: gtk4::Image, path: String) {
+    let _s = tracing::info_span!("queue_icon_load", path = %path).entered();
     // If texture is already cached, set it immediately to avoid flash
     if let Some(t) = ira_images::cached_texture(&path) {
         icon.set_paintable(Some(&t));
         return;
     }
     ICON_QUEUE.with(|q| q.borrow_mut().push_back((icon, path)));
+    let queue_depth = ICON_QUEUE.with(|q| q.borrow().len());
+    tracing::info!(queue_depth, "icon_queued");
     ICON_PROCESSOR_RUNNING.with(|r| {
         if !r.get() {
             r.set(true);
             glib::source::idle_add_local_full(glib::Priority::LOW, move || {
                 let req = ICON_QUEUE.with(|q| q.borrow_mut().pop_front());
                 if let Some((icon, path)) = req {
+                    let remaining = ICON_QUEUE.with(|q| q.borrow().len());
+                    let _s = tracing::info_span!("icon_idle_tick", path = %path, remaining).entered();
                     ira_images::set_image(&icon, &path);
                 }
                 let empty = ICON_QUEUE.with(|q| q.borrow().is_empty());

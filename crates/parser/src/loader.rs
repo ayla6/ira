@@ -19,35 +19,47 @@ pub fn read_app_name(save_dir: &str, app_id: &str) -> Option<String> {
 pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
     let db_id = game.db_id;
     let _s = tracing::info_span!("populate_image_paths", db_id).entered();
-    super::paths::ensure_small_image(image_dir, "icon", 32, 32);
-    super::paths::ensure_small_image(image_dir, "hero", 1920, 620);
-    super::paths::ensure_small_image(image_dir, "vertical", 300, 450);
-    super::paths::ensure_small_image(image_dir, "header", 460, 215);
-    super::paths::ensure_small_image(image_dir, "logo", 620, 620);
 
-    if let Some(p) = super::paths::find_image_file(image_dir, "icon_small")
-        .or_else(|| super::paths::find_image_file(image_dir, "icon"))
-    {
+    let mut files: std::collections::HashSet<String> = std::fs::read_dir(image_dir)
+        .map(|d| d.filter_map(|e| e.ok())
+            .filter_map(|e| e.file_name().to_str().map(String::from))
+            .collect())
+        .unwrap_or_default();
+
+    for &(base, max_w, max_h) in &[("icon", 32u32, 32u32), ("hero", 1920, 620), ("vertical", 300, 450), ("header", 460, 215), ("logo", 620, 620)] {
+        let small_webp = format!("{}_small.webp", base);
+        let small_jpg = format!("{}_small.jpg", base);
+        if !files.contains(&small_webp) && !files.contains(&small_jpg) {
+            super::paths::ensure_small_image(image_dir, base, max_w, max_h);
+            if image_dir.join(&small_webp).is_file() {
+                files.insert(small_webp);
+            }
+        }
+    }
+
+    let find = |base: &str| -> Option<std::path::PathBuf> {
+        for ext in &["webp", "jpg"] {
+            let name = format!("{}.{}", base, ext);
+            if files.contains(&name) {
+                return Some(image_dir.join(name));
+            }
+        }
+        None
+    };
+
+    if let Some(p) = find("icon_small").or_else(|| find("icon")) {
         game.icon_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = super::paths::find_image_file(image_dir, "vertical_small")
-        .or_else(|| super::paths::find_image_file(image_dir, "vertical"))
-    {
+    if let Some(p) = find("vertical_small").or_else(|| find("vertical")) {
         game.grid_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = super::paths::find_image_file(image_dir, "header_small")
-        .or_else(|| super::paths::find_image_file(image_dir, "header"))
-    {
+    if let Some(p) = find("header_small").or_else(|| find("header")) {
         game.header_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = super::paths::find_image_file(image_dir, "hero_small")
-        .or_else(|| super::paths::find_image_file(image_dir, "hero"))
-    {
+    if let Some(p) = find("hero_small").or_else(|| find("hero")) {
         game.hero_image_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = super::paths::find_image_file(image_dir, "logo_small")
-        .or_else(|| super::paths::find_image_file(image_dir, "logo"))
-    {
+    if let Some(p) = find("logo_small").or_else(|| find("logo")) {
         game.logo_path = p.to_string_lossy().into_owned();
     }
 }

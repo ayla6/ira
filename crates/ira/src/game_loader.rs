@@ -23,9 +23,7 @@ pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
         if entry.kind != ira_models::GameKind::Linux && entry.kind != ira_models::GameKind::Wine {
             continue;
         }
-        let app_id = if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id };
-        let _s = tracing::info_span!("load_game", app_id).entered();
-        match load_game(&entry, save_dir) {
+        match load_game_fast(&entry, save_dir) {
             Ok(game) => games.push(game),
             Err(e) => eprintln!("Skipping game {} ({}): {}", if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id }, entry.kind, e),
         }
@@ -34,16 +32,15 @@ pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
     games
 }
 
-pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
+fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
     let app_id = if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id };
     let kind = entry.kind;
-    let platform_id = &entry.platform_id;
 
     let mut game = Game {
         app_id: app_id.to_string(),
         kind,
         trophy_source: entry.trophy_source,
-        platform_id: platform_id.to_string(),
+        platform_id: entry.platform_id.to_string(),
         db_id: entry.id,
         name: if entry.title.is_empty() {
             format!("App ID: {}", app_id)
@@ -79,8 +76,6 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         rom_path: entry.rom_path.clone(),
     };
 
-    let ach_dir = ira_parser::achievements_dir(save_dir, app_id);
-
     if entry.title.is_empty() {
         if let Some(name) = ira_parser::read_app_name(save_dir, app_id) {
             game.name = name;
@@ -107,6 +102,43 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     }
 
     ira_parser::populate_image_paths(&image_dir, &mut game);
+
+    game
+}
+
+pub fn load_game_fast(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
+    let app_id = if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id };
+    let _s = tracing::info_span!("load_game_fast", app_id).entered();
+    let mut game = build_game_base(entry, save_dir);
+    game.earned_count = entry.cached_earned_count as usize;
+    game.total_count = entry.cached_total_count as usize;
+    Ok(game)
+}
+
+/// Returns the max mtime of RA achievement files (game.json + unlocks.json).
+/// Returns 0 if neither file exists. Used to skip background reloading
+/// when achievement files haven't changed since the last cache write.
+pub fn ra_achievement_mtime(save_dir: &str, game_id: &str) -> i64 {
+    let ra_dir = std::path::Path::new(save_dir).join("data").join("ra").join(game_id);
+    let mtime = |p: std::path::PathBuf| {
+        p.metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    };
+    mtime(ra_dir.join("game.json")).max(mtime(ra_dir.join("unlocks.json")))
+}
+
+pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
+    let app_id = if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id };
+    let platform_id = &entry.platform_id;
+    let _s = tracing::info_span!("load_game", app_id).entered();
+
+    let mut game = build_game_base(entry, save_dir);
+
+    let ach_dir = ira_parser::achievements_dir(save_dir, app_id);
 
     let is_steam_native = entry.trophy_source == ira_models::TrophySource::SteamNative;
     let steam_native_data = if is_steam_native {

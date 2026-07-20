@@ -1,6 +1,7 @@
 use gdk4::Texture;
 use gtk4::prelude::TextureExt;
 use std::collections::{HashMap, VecDeque};
+use tracing::info_span;
 
 pub(super) struct TextureCache {
     map: HashMap<String, Texture>,
@@ -26,6 +27,8 @@ impl TextureCache {
     }
 
     pub(super) fn get(&mut self, path: &str) -> Option<Texture> {
+        let hit = self.map.contains_key(path);
+        let _s = info_span!("cache_get", path, hit, entries = self.map.len(), total_bytes = self.total_bytes).entered();
         if let Some(t) = self.map.get(path) {
             if let Some(pos) = self.order.iter().position(|k| k == path) {
                 self.order.remove(pos);
@@ -38,6 +41,7 @@ impl TextureCache {
 
     pub(super) fn insert(&mut self, path: &str, texture: Texture) {
         let bytes = Self::texture_bytes(&texture);
+        let _s = info_span!("cache_insert", path, bytes, entries_before = self.map.len(), total_bytes_before = self.total_bytes).entered();
         while (self.total_bytes + bytes > self.max_bytes || self.map.len() >= self.max_entries)
             && !self.order.is_empty()
         {
@@ -53,6 +57,8 @@ impl TextureCache {
     }
 
     pub(super) fn remove(&mut self, path: &str) {
+        let hit = self.map.contains_key(path);
+        let _s = info_span!("cache_remove", path, hit, entries_before = self.map.len(), total_bytes_before = self.total_bytes).entered();
         if let Some(texture) = self.map.remove(path) {
             self.total_bytes -= Self::texture_bytes(&texture);
         }
@@ -62,6 +68,7 @@ impl TextureCache {
     }
 
     pub(super) fn clear(&mut self) {
+        let _s = info_span!("cache_clear", entries_before = self.map.len(), total_bytes_before = self.total_bytes).entered();
         self.map.clear();
         self.order.clear();
         self.total_bytes = 0;

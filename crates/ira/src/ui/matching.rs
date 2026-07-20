@@ -46,6 +46,7 @@ pub fn match_game_to_steam(state: &SharedState, db_id: i64, steam_app_id: String
                             ra_username,
                             ra_token,
                             ra_password,
+                            game: None,
                         });
                     }
                     Err(e) => eprintln!("match_game_to_steam: load_game failed: {}", e),

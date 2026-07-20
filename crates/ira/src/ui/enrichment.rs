@@ -3,6 +3,7 @@ use ira_db::DbConn;
 use ira_watcher::AchievementWatcher;
 use crate::AppMessage;
 use crate::AppSender;
+use crate::Game;
 use crate::GameEntry;
 
 use crate::game_loader::load_game;
@@ -25,10 +26,13 @@ pub struct EnrichGameParams {
     pub ra_username: String,
     pub ra_token: String,
     pub ra_password: String,
+    /// If provided, use this game instead of calling load_game (skips achievement loading).
+    /// Pass Some for background enrichment, None for on-demand loading.
+    pub game: Option<Game>,
 }
 
 pub fn enrich_game_async(params: EnrichGameParams) {
-    let EnrichGameParams { app_id, trophy_source, platform_id, db_id, title, steam, watcher, sender, save_dir, db, ra_username, ra_token, ra_password } = params;
+    let EnrichGameParams { app_id, trophy_source, platform_id, db_id, title, steam, watcher, sender, save_dir, db, ra_username, ra_token, ra_password, game } = params;
     std::thread::spawn(move || {
         let _s = tracing::info_span!("enrich_game_async", app_id = %app_id, db_id = db_id).entered();
         if trophy_source == ira_models::TrophySource::Ra {
@@ -55,16 +59,28 @@ pub fn enrich_game_async(params: EnrichGameParams) {
             if !meta_path.exists() {
                 if let Err(e) = steam.generate_steam_settings(&app_id) {
                     eprintln!("Could not generate achievements for {}: {}", app_id, e);
+                    if let Some(parent) = meta_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let _ = std::fs::write(&meta_path, "[]");
                 }
             }
         }
 
-        let Ok(mut game) = load_game(&entry, &save_dir) else {
-            eprintln!("Failed reloading {}", app_id);
-            return;
+        let game_provided = game.is_some();
+        let mut game = if let Some(g) = game {
+            g
+        } else {
+            match load_game(&entry, &save_dir) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("Failed reloading {}: {}", app_id, e);
+                    return;
+                }
+            }
         };
 
-        if trophy_source.has_steam_enrichment() {
+        if !game_provided && trophy_source.has_steam_enrichment() {
             let has_missing_icons = game.achievements.iter().any(|a| a.icon_path.is_empty());
             if has_missing_icons {
                 let _s = tracing::info_span!("enrich_redownload_icons", app_id = %app_id).entered();
@@ -77,21 +93,13 @@ pub fn enrich_game_async(params: EnrichGameParams) {
         }
 
         if trophy_source.has_steam_enrichment() {
-            if game.name.starts_with("App ID:") {
+            let appdetails_path = ira_parser::data_dir(&save_dir, &app_id).join("appdetails.json");
+            let needs_app_details = game.name.starts_with("App ID:") || !appdetails_path.exists();
+            if needs_app_details {
                 if let Some(mut details) = steam.fetch_app_details(&app_id) {
-                    if !details.name.is_empty() {
+                    if !details.name.is_empty() && game.name.starts_with("App ID:") {
                         game.name = details.name.clone();
                     }
-                    if !details.dlcs.is_empty() {
-                        steam.ensure_dlc_images(&app_id, &mut details.dlcs);
-                        let path = ira_parser::data_dir(&save_dir, &app_id).join("appdetails.json");
-                        if let Ok(b) = serde_json::to_vec(&details) {
-                            let _ = std::fs::write(&path, b);
-                        }
-                    }
-                }
-            } else {
-                if let Some(mut details) = steam.fetch_app_details(&app_id) {
                     if !details.dlcs.is_empty() {
                         steam.ensure_dlc_images(&app_id, &mut details.dlcs);
                         let path = ira_parser::data_dir(&save_dir, &app_id).join("appdetails.json");
@@ -128,29 +136,37 @@ pub fn enrich_game_async(params: EnrichGameParams) {
                 game.logo_path = logo_path;
             }
 
-            if let Some(pcts) = steam.fetch_global_achievements(&app_id) {
-                for a in &mut game.achievements {
-                    if let Some(&pct) = pcts.get(&a.name) {
-                        a.global_percent = pct;
+            if !game.achievements.is_empty() && game.achievements.iter().any(|a| a.global_percent == 0.0) {
+                if let Some(pcts) = steam.fetch_global_achievements(&app_id) {
+                    for a in &mut game.achievements {
+                        if let Some(&pct) = pcts.get(&a.name) {
+                            a.global_percent = pct;
+                        }
                     }
                 }
             }
 
-            if let Some(details) = steam.fetch_steam_store_data(&app_id) {
-                if let Some(rd) = details.release_date {
-                    if !rd.coming_soon {
-                        game.release_date = rd.date.clone();
-                        game.release_timestamp = ira_parser::parse_steam_release_date(&rd.date);
+            if game.release_date.is_empty() || game.metacritic_score < 0 {
+                if let Some(details) = steam.fetch_steam_store_data(&app_id) {
+                    if let Some(rd) = details.release_date {
+                        if !rd.coming_soon && game.release_date.is_empty() {
+                            game.release_date = rd.date.clone();
+                            game.release_timestamp = ira_parser::parse_steam_release_date(&rd.date);
+                        }
                     }
-                }
-                if let Some(mc) = details.metacritic {
-                    game.metacritic_score = mc.score as i64;
+                    if let Some(mc) = details.metacritic {
+                        if game.metacritic_score < 0 {
+                            game.metacritic_score = mc.score as i64;
+                        }
+                    }
                 }
             }
 
-            if let Some(review) = steam.fetch_steam_reviews(&app_id) {
-                game.steam_review_score = review.review_score as i64;
-                game.steam_review_count = review.total_reviews as i64;
+            if game.steam_review_score < 0 {
+                if let Some(review) = steam.fetch_steam_reviews(&app_id) {
+                    game.steam_review_score = review.review_score as i64;
+                    game.steam_review_count = review.total_reviews as i64;
+                }
             }
 
             let _ = ira_db::store_game_metadata(

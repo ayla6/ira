@@ -45,6 +45,15 @@ pub fn update_sort_title(conn: &DbConn, id: i64, sort_title: &str) -> Result<(),
     Ok(())
 }
 
+pub fn update_achievement_counts(conn: &DbConn, id: i64, earned: i64, total: i64, mtime: i64) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute(
+        "UPDATE games SET cached_earned_count = ?1, cached_total_count = ?2, cached_achievement_mtime = ?3 WHERE id = ?4",
+        params![earned, total, mtime, id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn set_manual_unmatch(conn: &DbConn, id: i64, value: bool) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.execute("UPDATE games SET manual_unmatch = ?1 WHERE id = ?2", params![value, id])

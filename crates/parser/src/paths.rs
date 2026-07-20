@@ -43,13 +43,16 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     }
     let Some(source) = find_image_file(dir, base_name) else { return };
 
-    let img = match image::ImageReader::open(&source)
-        .map_err(|_| ())
-        .and_then(|r| r.with_guessed_format().map_err(|_| ()))
-        .and_then(|r| r.decode().map_err(|_| ()))
-    {
-        Ok(i) => i,
-        Err(_) => return,
+    let img = {
+        let _s = tracing::info_span!("ensure_small_decode", base_name).entered();
+        match image::ImageReader::open(&source)
+            .map_err(|_| ())
+            .and_then(|r| r.with_guessed_format().map_err(|_| ()))
+            .and_then(|r| r.decode().map_err(|_| ()))
+        {
+            Ok(i) => i,
+            Err(_) => return,
+        }
     };
     let (w, h) = (img.width(), img.height());
 
@@ -58,7 +61,10 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     if w <= max_w && h <= max_h {
         let data = img.to_rgba8();
         let (fw, fh) = data.dimensions();
-        let encoded = webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless();
+        let encoded = {
+            let _s = tracing::info_span!("ensure_small_encode", base_name, w, h, mode = "lossless_no_resize").entered();
+            webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless()
+        };
         let _ = std::fs::write(&dest, &*encoded);
         return;
     }
@@ -74,15 +80,21 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     let new_h = (h as f64 * ratio).ceil() as u32;
     let new_w = new_w.max(1);
     let new_h = new_h.max(1);
-    let resized = img.resize(new_w, new_h, image::imageops::FilterType::Lanczos3);
+    let resized = {
+        let _s = tracing::info_span!("ensure_small_resize", base_name, src_w = w, src_h = h, dst_w = new_w, dst_h = new_h, filter = "Lanczos3").entered();
+        img.resize(new_w, new_h, image::imageops::FilterType::Lanczos3)
+    };
 
     let data = resized.to_rgba8();
     let (fw, fh) = data.dimensions();
 
-    let encoded = if is_lossless {
-        webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless()
-    } else {
-        webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode(85.0)
+    let encoded = {
+        let _s = tracing::info_span!("ensure_small_encode", base_name, w = fw, h = fh, mode = if is_lossless { "lossless" } else { "lossy" }).entered();
+        if is_lossless {
+            webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless()
+        } else {
+            webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode(85.0)
+        }
     };
     let _ = std::fs::write(&dest, &*encoded);
 }

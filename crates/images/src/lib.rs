@@ -6,7 +6,7 @@ pub use scaled::ScaledPaintable;
 use cache::TextureCache;
 use gdk4::Texture;
 use std::cell::RefCell;
-use tracing::debug_span;
+use tracing::info_span;
 thread_local! {
     static TEXTURE_CACHE: RefCell<TextureCache> = RefCell::new(TextureCache::new());
 }
@@ -14,6 +14,7 @@ thread_local! {
 /// Returns a cached texture without any file I/O.
 /// Use this to check if a texture is already loaded before queuing async.
 pub fn cached_texture(path: &str) -> Option<Texture> {
+    let _s = info_span!("cached_texture", path).entered();
     if path.is_empty() {
         return None;
     }
@@ -21,7 +22,7 @@ pub fn cached_texture(path: &str) -> Option<Texture> {
 }
 
 pub fn texture_for(path: &str) -> Option<Texture> {
-    let _s = debug_span!("texture_for", path).entered();
+    let _s = info_span!("texture_for", path).entered();
     if path.is_empty() {
         return None;
     }
@@ -30,7 +31,11 @@ pub fn texture_for(path: &str) -> Option<Texture> {
         if let Some(t) = cache.get(path) {
             return Some(t);
         }
-        match Texture::from_filename(path) {
+        let decoded = {
+            let _s = info_span!("Texture::from_filename", path).entered();
+            Texture::from_filename(path)
+        };
+        match decoded {
             Ok(t) => {
                 let cloned = t.clone();
                 cache.insert(path, t);
@@ -42,13 +47,14 @@ pub fn texture_for(path: &str) -> Option<Texture> {
 }
 
 pub fn set_image(img: &gtk4::Image, path: &str) {
+    let _s = info_span!("set_image", path).entered();
     if let Some(t) = texture_for(path) {
         img.set_paintable(Some(&t));
     }
 }
 
 pub fn set_picture_natural(pic: &gtk4::Picture, path: &str, w: i32, h: i32) {
-    let _s = debug_span!("set_picture_natural", path).entered();
+    let _s = info_span!("set_picture_natural", path, w, h).entered();
     if w <= 0 || h <= 0 || path.is_empty() {
         return;
     }
@@ -59,6 +65,7 @@ pub fn set_picture_natural(pic: &gtk4::Picture, path: &str, w: i32, h: i32) {
 }
 
 pub fn new_image_from_file(path: &str) -> gtk4::Image {
+    let _s = info_span!("new_image_from_file", path).entered();
     if let Some(t) = texture_for(path) {
         gtk4::Image::from_paintable(Some(&t))
     } else {
@@ -67,13 +74,14 @@ pub fn new_image_from_file(path: &str) -> gtk4::Image {
 }
 
 pub fn clear_texture_cache() {
+    let _s = info_span!("clear_texture_cache").entered();
     TEXTURE_CACHE.with(|cell| {
         cell.borrow_mut().clear();
     });
 }
 
 pub fn invalidate_texture(path: &str) {
-    let _s = debug_span!("invalidate_texture", path).entered();
+    let _s = info_span!("invalidate_texture", path).entered();
     TEXTURE_CACHE.with(|cell| {
         cell.borrow_mut().remove(path);
     });

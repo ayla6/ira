@@ -42,6 +42,12 @@ pub struct GameEntry {
     pub rom_path: String,
     /// Playtime in hours.
     pub playtime: f64,
+    /// Cached achievement count (earned) from last full load.
+    pub cached_earned_count: i64,
+    /// Cached achievement count (total) from last full load.
+    pub cached_total_count: i64,
+    /// Mtime of achievement files at last cache write (0 = never cached).
+    pub cached_achievement_mtime: i64,
 }
 
 impl GameEntry {
@@ -73,6 +79,9 @@ impl GameEntry {
             emulator_override: String::new(),
             rom_path: String::new(),
             playtime: 0.0,
+            cached_earned_count: 0,
+            cached_total_count: 0,
+            cached_achievement_mtime: 0,
         }
     }
 
@@ -102,6 +111,9 @@ impl GameEntry {
             emulator_override: g.emulator_override.clone(),
             rom_path: g.rom_path.clone(),
             playtime: g.playtime,
+            cached_earned_count: g.earned_count as i64,
+            cached_total_count: g.total_count as i64,
+            cached_achievement_mtime: 0,
         }
     }
 }

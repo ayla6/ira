@@ -212,17 +212,15 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
     select_row_silently(state, Some(0));
     show_grid_view(state);
 
-    let (steam, watcher, sender) = {
+    start_background_enrichment(state);
+}
+
+fn start_background_enrichment(state: &SharedState) {
+    let (steam, watcher, sender, db, save_dir, ra_username, ra_token, ra_password) = {
         let s = state.borrow();
-        (s.steam.clone(), s.watcher.clone(), s.sender.clone())
+        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
     };
 
-    let (ra_username, ra_token, ra_password) = {
-        let s = state.borrow();
-        (s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
-    };
-
-    let db = state.borrow().db.clone();
     let s = state.borrow();
     for g in &s.games {
         if g.app_id.is_empty() {
@@ -236,11 +234,7 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
             }
         }
 
-        if g.kind == ira_models::GameKind::Ps4 {
-            continue;
-        }
-
-        if g.kind == ira_models::GameKind::Retro {
+        if g.kind == ira_models::GameKind::Ps4 || g.kind == ira_models::GameKind::Retro {
             continue;
         }
 
@@ -258,6 +252,56 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
             ra_username: ra_username.clone(),
             ra_token: ra_token.clone(),
             ra_password: ra_password.clone(),
+            game: Some(g.clone()),
+        });
+    }
+
+    let ra_games: Vec<(i64, String, String)> = {
+        let s = state.borrow();
+        s.games.iter()
+            .filter(|g| g.kind == ira_models::GameKind::Retro
+                && g.trophy_source == ira_models::TrophySource::Ra
+                && !g.app_id.is_empty())
+            .map(|g| (g.db_id, g.app_id.clone(), g.platform_id.clone()))
+            .collect()
+    };
+    if !ra_games.is_empty() {
+        let db = db.clone();
+        let sender = sender.clone();
+        let save_dir = save_dir.clone();
+        std::thread::spawn(move || {
+            let _s = tracing::info_span!("background_load_ra", count = ra_games.len()).entered();
+            let n_threads = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+                .min(ra_games.len())
+                .max(1);
+            let chunk_size = ra_games.len().div_ceil(n_threads).max(1);
+            std::thread::scope(|s| {
+                let handles: Vec<_> = ra_games.chunks(chunk_size).map(|chunk| {
+                    let db = &db;
+                    let save_dir = &save_dir;
+                    let sender = &sender;
+                    s.spawn(move || {
+                        for (db_id, app_id, _platform_id) in chunk {
+                            let Some(entry) = ira_db::find_by_db_id(db, *db_id).ok().flatten() else {
+                                continue;
+                            };
+                            let current_mtime = crate::game_loader::ra_achievement_mtime(save_dir, app_id);
+                            if current_mtime > 0 && current_mtime == entry.cached_achievement_mtime {
+                                continue;
+                            }
+                            if let Ok(updated) = crate::game_loader::load_game(&entry, save_dir) {
+                                let _ = ira_db::update_achievement_counts(db, updated.db_id, updated.earned_count as i64, updated.total_count as i64, current_mtime);
+                                let _ = sender.send(crate::AppMessage::EnrichedGame(updated));
+                            }
+                        }
+                    })
+                }).collect();
+                for h in handles {
+                    let _ = h.join();
+                }
+            });
         });
     }
 }
@@ -276,8 +320,20 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
 
         let old_grid_path = s.games[i].grid_path.clone();
         let old_header_path = s.games[i].header_path.clone();
+        let old_earned = s.games[i].earned_count;
+        let old_total = s.games[i].total_count;
 
         merge_game_enrichment(&s.games[i], &mut updated);
+
+        if updated.earned_count != old_earned || updated.total_count != old_total {
+            let db = s.db.clone();
+            let mtime = if updated.trophy_source == ira_models::TrophySource::Ra {
+                crate::game_loader::ra_achievement_mtime(&s.save_dir, &updated.app_id)
+            } else {
+                0
+            };
+            let _ = ira_db::update_achievement_counts(&db, updated.db_id, updated.earned_count as i64, updated.total_count as i64, mtime);
+        }
 
         if was_placeholder && !updated.name.is_empty() && !updated.name.starts_with("App ID:") {
             let db = s.db.clone();
@@ -296,8 +352,11 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
         let sidebar_update = (updated.db_id, updated.name.clone(), icon_path);
 
         let needs_rebuild = s.selected_id == updated.db_id.to_string() && !s.content_unloaded;
+        let counts_changed = updated.earned_count != old_earned
+            || updated.total_count != old_total;
         let visual_changed = updated.grid_path != old_grid_path
-            || updated.header_path != old_header_path;
+            || updated.header_path != old_header_path
+            || counts_changed;
         let needs_grid_update = visual_changed && !s.content_unloaded;
         let game_for_grid = if needs_grid_update { Some(updated.clone()) } else { None };
         let game = if needs_rebuild { Some(updated.clone()) } else { None };
@@ -376,7 +435,7 @@ pub fn switch_to_game(state: &SharedState, db_id: i64) {
     if let Some(game) = game {
         display_game(&game, state);
 
-        if game.kind == ira_models::GameKind::Retro && game.trophy_source != ira_models::TrophySource::Empty && game.total_count == 0 && !game.app_id.is_empty() {
+        if game.achievements.is_empty() && !game.app_id.is_empty() && game.trophy_source != ira_models::TrophySource::Empty {
             let (ra_username, ra_token, ra_password, steam, watcher, sender, save_dir, db) = {
                 let s = state.borrow();
                 (
@@ -404,6 +463,7 @@ pub fn switch_to_game(state: &SharedState, db_id: i64) {
                 ra_username,
                 ra_token,
                 ra_password,
+                game: None,
             });
         } else if game.kind == ira_models::GameKind::Retro
             && game.trophy_source == ira_models::TrophySource::Ra

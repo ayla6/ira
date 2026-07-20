@@ -31,6 +31,7 @@ thread_local! {
 }
 
 fn queue_cover_load(pic: gtk4::Picture, path: String, w: i32, h: i32, db_id: i64, vbox: gtk4::Box) {
+    let _s = tracing::info_span!("queue_cover_load", path = %path, w, h, db_id).entered();
     // If texture is already cached, set it immediately to avoid flash
     if ira_images::cached_texture(&path).is_some() {
         let stale = unsafe { vbox.data::<AtomicI64>("game-db-id") }
@@ -42,12 +43,16 @@ fn queue_cover_load(pic: gtk4::Picture, path: String, w: i32, h: i32, db_id: i64
         return;
     }
     COVER_QUEUE.with(|q| q.borrow_mut().push_back(PendingCover { pic, path, w, h, db_id, vbox }));
+    let queue_depth = COVER_QUEUE.with(|q| q.borrow().len());
+    tracing::info!(queue_depth, "cover_queued");
     COVER_PROCESSOR_RUNNING.with(|r| {
         if !r.get() {
             r.set(true);
             glib::source::idle_add_local_full(glib::Priority::LOW, move || {
                 let req = COVER_QUEUE.with(|q| q.borrow_mut().pop_front());
                 if let Some(req) = req {
+                    let remaining = COVER_QUEUE.with(|q| q.borrow().len());
+                    let _s = tracing::info_span!("cover_idle_tick", path = %req.path, remaining).entered();
                     let stale = unsafe { req.vbox.data::<AtomicI64>("game-db-id") }
                         .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed) != req.db_id)
                         .unwrap_or(false);

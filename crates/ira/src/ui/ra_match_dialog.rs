@@ -107,6 +107,7 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                             title: g.name.clone(),
                             steam, watcher, sender, save_dir, db,
                             ra_username, ra_token, ra_password,
+                            game: None,
                         });
                     }
                     if let Some(ref cb) = on_match_c { cb(); }

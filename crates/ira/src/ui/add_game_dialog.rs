@@ -213,6 +213,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
                                 ra_username: ra_username_c,
                                 ra_token: ra_token_c,
                                 ra_password: ra_password_c,
+                                game: None,
                             });
                         }
                     }

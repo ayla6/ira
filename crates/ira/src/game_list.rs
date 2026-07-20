@@ -63,7 +63,7 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
             let cfg_ra = cfg.clone();
             Some(s.spawn(move || {
                 let _s = tracing::info_span!("build_ra_games").entered();
-                retroachievements::build_ra_games(&db_ra, &save_dir_ra, &cfg_ra, game_loader::load_game)
+                retroachievements::build_ra_games(&db_ra, &save_dir_ra, &cfg_ra, game_loader::load_game_fast)
             }))
         } else {
             None
@@ -188,7 +188,7 @@ fn build_steam_games(db: &db::DbConn, save_dir: &str, steam_games: &[steam::Stea
 
         let db_entry = db::find_by_steam_id(db, &sg.app_id).ok().flatten();
         if let Some(e) = db_entry {
-            match game_loader::load_game(&e, save_dir) {
+            match game_loader::load_game_fast(&e, save_dir) {
                 Ok(mut game) => {
                     if (game.name.is_empty() || game.name.starts_with("App ID:"))
                         && !sg.name.is_empty() {

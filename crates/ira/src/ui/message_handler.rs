@@ -306,7 +306,7 @@ fn start_background_enrichment(state: &SharedState) {
     }
 }
 
-pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
+pub(crate) fn apply_game_update(state: &SharedState, updated: Game) {
     let app_id = updated.app_id.clone();
 
     let (game_for_display, game_for_grid, sidebar_update) = {
@@ -323,7 +323,7 @@ pub(crate) fn apply_game_update(state: &SharedState, mut updated: Game) {
         let old_earned = s.games[i].earned_count;
         let old_total = s.games[i].total_count;
 
-        merge_game_enrichment(&s.games[i], &mut updated);
+        let updated = merge_game_enrichment(&s.games[i], &updated);
 
         if updated.earned_count != old_earned || updated.total_count != old_total {
             let db = s.db.clone();

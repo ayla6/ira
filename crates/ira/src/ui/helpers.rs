@@ -116,65 +116,24 @@ pub fn make_browse_button(
     browse
 }
 
-pub fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
-    updated.kind = existing.kind;
-    updated.game_path = existing.game_path.clone();
+/// Merge enrichment results into the existing in-memory game.
+///
+/// Starts from `existing` (which has the user's current edits) and applies only
+/// the fields enrichment is responsible for (achievements, images, metadata).
+/// All other fields are preserved from `existing` by default, so stale
+/// enrichment data (read from DB before a save) can never revert user edits.
+pub fn merge_game_enrichment(existing: &Game, enriched: &Game) -> Game {
+    let mut result = existing.clone();
 
-    if !existing.name.is_empty() && !existing.name.starts_with("App ID:") {
-        updated.name = existing.name.clone();
-    }
-
-    updated.hidden = existing.hidden;
-    updated.slug = existing.slug.clone();
-    updated.playtime = existing.playtime;
-    updated.last_played = existing.last_played;
-    updated.manual_unmatch = existing.manual_unmatch;
-    updated.sort_title = existing.sort_title.clone();
-    if updated.icon_path.is_empty() {
-        updated.icon_path = existing.icon_path.clone();
-    }
-    if updated.hero_image_path.is_empty() {
-        updated.hero_image_path = existing.hero_image_path.clone();
-    }
-    if updated.grid_path.is_empty() {
-        updated.grid_path = existing.grid_path.clone();
-    }
-    if updated.header_path.is_empty() {
-        updated.header_path = existing.header_path.clone();
-    }
-    if updated.logo_path.is_empty() {
-        updated.logo_path = existing.logo_path.clone();
-    }
-    if updated.logo_position.is_empty() {
-        updated.logo_position = existing.logo_position.clone();
-    }
-    if updated.logo_size == 0 {
-        updated.logo_size = existing.logo_size;
-    }
-
-    if updated.release_date.is_empty() {
-        updated.release_date = existing.release_date.clone();
-    }
-    if updated.release_timestamp == 0 {
-        updated.release_timestamp = existing.release_timestamp;
-    }
-    if updated.metacritic_score < 0 {
-        updated.metacritic_score = existing.metacritic_score;
-    }
-    if updated.steam_review_score < 0 {
-        updated.steam_review_score = existing.steam_review_score;
-    }
-    if updated.steam_review_count == 0 {
-        updated.steam_review_count = existing.steam_review_count;
-    }
-
+    // Achievements — enrichment loads these from disk.
+    result.achievements = enriched.achievements.clone();
     if !existing.achievements.is_empty() {
         let existing_pcts: HashMap<String, f64> = existing
             .achievements
             .iter()
             .map(|a| (a.name.clone(), a.global_percent))
             .collect();
-        for a in &mut updated.achievements {
+        for a in &mut result.achievements {
             if a.global_percent == 0.0 {
                 if let Some(&pct) = existing_pcts.get(&a.name) {
                     a.global_percent = pct;
@@ -182,6 +141,49 @@ pub fn merge_game_enrichment(existing: &Game, updated: &mut Game) {
             }
         }
     }
+    result.earned_count = enriched.earned_count;
+    result.total_count = enriched.total_count;
+
+    // Images — apply only if enrichment found something.
+    if !enriched.icon_path.is_empty() {
+        result.icon_path = enriched.icon_path.clone();
+    }
+    if !enriched.hero_image_path.is_empty() {
+        result.hero_image_path = enriched.hero_image_path.clone();
+    }
+    if !enriched.grid_path.is_empty() {
+        result.grid_path = enriched.grid_path.clone();
+    }
+    if !enriched.header_path.is_empty() {
+        result.header_path = enriched.header_path.clone();
+    }
+    if !enriched.logo_path.is_empty() {
+        result.logo_path = enriched.logo_path.clone();
+    }
+
+    // Name — apply only if existing is a placeholder.
+    if existing.name.is_empty() || existing.name.starts_with("App ID:") {
+        result.name = enriched.name.clone();
+    }
+
+    // Metadata — apply only if enrichment fetched something.
+    if !enriched.release_date.is_empty() {
+        result.release_date = enriched.release_date.clone();
+    }
+    if enriched.release_timestamp != 0 {
+        result.release_timestamp = enriched.release_timestamp;
+    }
+    if enriched.metacritic_score >= 0 {
+        result.metacritic_score = enriched.metacritic_score;
+    }
+    if enriched.steam_review_score >= 0 {
+        result.steam_review_score = enriched.steam_review_score;
+    }
+    if enriched.steam_review_count != 0 {
+        result.steam_review_count = enriched.steam_review_count;
+    }
+
+    result
 }
 
 pub fn open_folder(path: &str) {
@@ -381,5 +383,111 @@ mod tests {
     fn test_format_duration_rounds_near_hour() {
         assert_eq!(format_duration(3570), "1h");
         assert_eq!(format_duration(3630), "1h01min");
+    }
+
+    #[test]
+    fn test_merge_game_enrichment_preserves_user_edits() {
+        let existing = Game {
+            shadps4_version: "/new/shadps4".to_string(),
+            ra_core: "snes9x".to_string(),
+            emulator_override: "/new/emu".to_string(),
+            platform_id: "NEWPID".to_string(),
+            trophy_source: ira_models::TrophySource::Ra,
+            sgdb_id: "12345".to_string(),
+            rom_path: "/new/rom.sfc".to_string(),
+            sort_title: "My Sort".to_string(),
+            logo_position: "center".to_string(),
+            logo_size: 75,
+            ..Default::default()
+        };
+
+        let enriched = Game {
+            platform_id: "OLDPID".to_string(),
+            trophy_source: ira_models::TrophySource::SteamNative,
+            logo_position: "bottom-left".to_string(),
+            logo_size: 50,
+            ..Default::default()
+        };
+
+        let result = merge_game_enrichment(&existing, &enriched);
+
+        assert_eq!(result.shadps4_version, "/new/shadps4");
+        assert_eq!(result.ra_core, "snes9x");
+        assert_eq!(result.emulator_override, "/new/emu");
+        assert_eq!(result.platform_id, "NEWPID");
+        assert_eq!(result.trophy_source, ira_models::TrophySource::Ra);
+        assert_eq!(result.sgdb_id, "12345");
+        assert_eq!(result.rom_path, "/new/rom.sfc");
+        assert_eq!(result.sort_title, "My Sort");
+        assert_eq!(result.logo_position, "center");
+        assert_eq!(result.logo_size, 75);
+    }
+
+    #[test]
+    fn test_merge_game_enrichment_preserves_name_and_sort_title() {
+        let existing = Game {
+            name: "My Game".to_string(),
+            sort_title: "Sort Key".to_string(),
+            ..Default::default()
+        };
+
+        let enriched = Game {
+            name: "App ID: 123".to_string(),
+            ..Default::default()
+        };
+
+        let result = merge_game_enrichment(&existing, &enriched);
+
+        assert_eq!(result.name, "My Game");
+        assert_eq!(result.sort_title, "Sort Key");
+    }
+
+    #[test]
+    fn test_merge_game_enrichment_applies_enrichment_achievements() {
+        let existing = Game::default();
+
+        let enriched = Game {
+            earned_count: 5,
+            total_count: 10,
+            ..Default::default()
+        };
+
+        let result = merge_game_enrichment(&existing, &enriched);
+
+        assert_eq!(result.earned_count, 5);
+        assert_eq!(result.total_count, 10);
+    }
+
+    #[test]
+    fn test_merge_game_enrichment_applies_enrichment_images() {
+        let existing = Game::default();
+
+        let enriched = Game {
+            icon_path: "/new/icon.webp".to_string(),
+            hero_image_path: "/new/hero.webp".to_string(),
+            ..Default::default()
+        };
+
+        let result = merge_game_enrichment(&existing, &enriched);
+
+        assert_eq!(result.icon_path, "/new/icon.webp");
+        assert_eq!(result.hero_image_path, "/new/hero.webp");
+    }
+
+    #[test]
+    fn test_merge_game_enrichment_applies_name_for_placeholder() {
+        let existing = Game {
+            name: "App ID: 123".to_string(),
+            ..Default::default()
+        };
+
+        let enriched = Game {
+            name: "Real Game Name".to_string(),
+            ..Default::default()
+        };
+
+        let result = merge_game_enrichment(&existing, &enriched);
+
+        assert_eq!(result.name, "Real Game Name");
     }
 }

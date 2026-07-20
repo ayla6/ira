@@ -155,20 +155,23 @@ fn build_sgdb_asset_card(
     (card.upcast::<gtk4::Widget>(), row.upcast::<gtk4::Widget>())
 }
 
-#[allow(clippy::too_many_arguments)]
+struct SgdbPickerCtx {
+    id: String,
+    save_dir: String,
+    steam: Arc<SteamDataClient>,
+    asset: String,
+    is_steam_id: bool,
+    picker: adw::Window,
+    on_done: Rc<dyn Fn()>,
+    pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
+}
+
 fn rebuild_assets_view(
     flow: &gtk4::FlowBox,
     list_view: &gtk4::ListBox,
     assets: &[SgdbAsset],
     thumb_size: i32,
-    id_clone: &str,
-    save_dir_clone: &str,
-    steam_clone: &Arc<SteamDataClient>,
-    asset_clone: &str,
-    is_steam_id: bool,
-    picker_clone: &adw::Window,
-    on_done: &Rc<dyn Fn()>,
-    pending_copies: &Option<Rc<RefCell<HashMap<String, String>>>>,
+    ctx: &SgdbPickerCtx,
 ) {
     clear_children(flow);
     clear_children(list_view);
@@ -186,9 +189,9 @@ fn rebuild_assets_view(
     let all_buttons: Rc<RefCell<Vec<gtk4::Button>>> = Rc::new(RefCell::new(Vec::new()));
 
     for a in assets {
-        let data_subdir = if is_steam_id { "steam".to_string() } else { "steamgriddb".to_string() };
-        let dest_dir = format!("{}/data/{}/{}", save_dir_clone, data_subdir, id_clone);
-        let file_name = match asset_clone {
+        let data_subdir = if ctx.is_steam_id { "steam".to_string() } else { "steamgriddb".to_string() };
+        let dest_dir = format!("{}/data/{}/{}", ctx.save_dir, data_subdir, ctx.id);
+        let file_name = match ctx.asset.as_str() {
             "icon" => {
                 let ext = if a.mime.contains("icon") || a.mime.contains("x-icon") { "ico" }
                 else if a.mime.contains("png") { "png" }
@@ -205,12 +208,12 @@ fn rebuild_assets_view(
         };
         let _dest = format!("{}/{}", dest_dir, file_name);
         let dl_url = a.url.clone();
-        let steam_dl = steam_clone.clone();
-        let picker_dl = picker_clone.clone();
-        let on_done_dl = on_done.clone();
-        let asset_dl = asset_clone.to_string();
-        let pending_dl = pending_copies.clone();
-        let save_dir_dl = save_dir_clone.to_string();
+        let steam_dl = ctx.steam.clone();
+        let picker_dl = ctx.picker.clone();
+        let on_done_dl = ctx.on_done.clone();
+        let asset_dl = ctx.asset.clone();
+        let pending_dl = ctx.pending_copies.clone();
+        let save_dir_dl = ctx.save_dir.clone();
         let on_download: Rc<dyn Fn()> = Rc::new(move || {
             let _s = tracing::info_span!("on_download", asset = %asset_dl, url = %dl_url).entered();
             if let Some(ref pc) = pending_dl {
@@ -293,7 +296,7 @@ fn rebuild_assets_view(
             }
         });
 
-        let (grid_card, list_row) = build_sgdb_asset_card(a, asset_clone, steam_clone, on_download, save_dir_clone.to_string(), thumb_size, all_buttons.clone());
+        let (grid_card, list_row) = build_sgdb_asset_card(a, &ctx.asset, &ctx.steam, on_download, ctx.save_dir.clone(), thumb_size, all_buttons.clone());
         flow.append(&grid_card);
         list_view.append(&list_row);
     }
@@ -418,13 +421,16 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         let zoom_level = zoom_level.clone();
         let flow = flow.clone();
         let list_view = list_view.clone();
-        let steam_clone = steam_clone.clone();
-        let id_clone = id_clone.clone();
-        let asset_clone = asset_clone.clone();
-        let save_dir_clone = save_dir_clone.clone();
-        let picker_clone = picker_clone.clone();
-        let on_done = on_done.clone();
-        let pending_copies = pending_copies.clone();
+        let picker_ctx = SgdbPickerCtx {
+            id: id_clone,
+            save_dir: save_dir_clone,
+            steam: steam_clone,
+            asset: asset_clone,
+            is_steam_id,
+            picker: picker_clone,
+            on_done,
+            pending_copies,
+        };
 
         Rc::new(move || {
             let assets = assets_store.borrow();
@@ -434,14 +440,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
                 &list_view,
                 &assets,
                 thumb_size,
-                &id_clone,
-                &save_dir_clone,
-                &steam_clone,
-                &asset_clone,
-                is_steam_id,
-                &picker_clone,
-                &on_done,
-                &pending_copies,
+                &picker_ctx,
             );
         })
     };

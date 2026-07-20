@@ -142,24 +142,28 @@ fn image_path_for_asset<'a>(game: &'a Game, asset: &'a str) -> &'a str {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+struct AssetRefreshCtx<'a> {
+    cloud_dir: &'a std::path::Path,
+    base_name: &'a str,
+    asset_type: &'a str,
+    thumb_size: (i32, i32),
+}
+
 fn make_refresh_closure(
     preview_wrapper: &gtk4::Box,
-    cloud_dir: &std::path::Path,
-    base_name: &str,
+    ctx: AssetRefreshCtx,
     state: &SharedState,
     game: &Game,
     pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
-    asset_type: &str,
-    thumb_size: (i32, i32),
 ) -> Rc<dyn Fn()> {
+    let asset_type = ctx.asset_type;
     let _s = tracing::info_span!("make_refresh_closure", asset = %asset_type, db_id = game.db_id).entered();
     let save_dir = state.borrow().save_dir.clone();
-        let (tw, th) = thumb_size;
+        let (tw, th) = ctx.thumb_size;
         Rc::new({
             let preview_wrapper = preview_wrapper.clone();
-            let cloud_dir = cloud_dir.to_path_buf();
-            let base_name = base_name.to_string();
+            let cloud_dir = ctx.cloud_dir.to_path_buf();
+            let base_name = ctx.base_name.to_string();
             let state_clone = state.clone();
             let game_clone = game.clone();
             let pending_copies = pending_copies.clone();
@@ -293,7 +297,9 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     btns.set_halign(gtk4::Align::End);
 
     let refresh_images = make_refresh_closure(
-        &preview_wrapper, &cloud_dir, file_base, state, game, pending_copies.clone(), asset_type, (thumb_w, thumb_h),
+        &preview_wrapper,
+        AssetRefreshCtx { cloud_dir: &cloud_dir, base_name: file_base, asset_type, thumb_size: (thumb_w, thumb_h) },
+        state, game, pending_copies.clone(),
     );
 
     let browse_btn = make_browse_button(

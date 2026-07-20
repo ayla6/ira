@@ -289,6 +289,30 @@ pub(super) struct VarW {
     pub(super) group: adw::PreferencesGroup,
 }
 
+fn move_variant_card(
+    group: &adw::PreferencesGroup,
+    delta: isize,
+    var_widgets: &Rc<RefCell<Vec<VarW>>>,
+    container: &gtk4::Box,
+) {
+    let widgets = var_widgets.borrow();
+    let idx = widgets.iter().position(|w| w.group == *group);
+    if let Some(i) = idx {
+        let new_i = i as isize + delta;
+        if new_i < 0 || new_i >= widgets.len() as isize { return; }
+        let new_i = new_i as usize;
+        drop(widgets);
+        let mut widgets = var_widgets.borrow_mut();
+        widgets.swap(i, new_i);
+        let sibling = if new_i == 0 { None } else { Some(widgets[new_i - 1].group.clone()) };
+        drop(widgets);
+        match &sibling {
+            None => container.reorder_child_after(group, None::<&gtk4::Widget>),
+            Some(sib) => container.reorder_child_after(group, Some(sib)),
+        }
+    }
+}
+
 pub(super) fn build_variants_page(
     state: &SharedState,
     db_id: i64,
@@ -337,6 +361,30 @@ pub(super) fn build_variants_page(
             drag_handle.set_tooltip_text(Some("Drag to reorder"));
             drag_handle.add_css_class("dim-label");
             suffix_box.append(&drag_handle);
+
+            let up_btn = gtk4::Button::from_icon_name("go-up-symbolic");
+            up_btn.set_tooltip_text(Some("Move up"));
+            up_btn.add_css_class("flat");
+            up_btn.set_valign(gtk4::Align::Center);
+            let group_up = group.clone();
+            let vw_up = var_widgets.clone();
+            let container_up = container.clone();
+            up_btn.connect_clicked(move |_| {
+                move_variant_card(&group_up, -1, &vw_up, &container_up);
+            });
+            suffix_box.append(&up_btn);
+
+            let down_btn = gtk4::Button::from_icon_name("go-down-symbolic");
+            down_btn.set_tooltip_text(Some("Move down"));
+            down_btn.add_css_class("flat");
+            down_btn.set_valign(gtk4::Align::Center);
+            let group_down = group.clone();
+            let vw_down = var_widgets.clone();
+            let container_down = container.clone();
+            down_btn.connect_clicked(move |_| {
+                move_variant_card(&group_down, 1, &vw_down, &container_down);
+            });
+            suffix_box.append(&down_btn);
 
             let del_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
             del_btn.add_css_class("flat");

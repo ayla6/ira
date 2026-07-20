@@ -158,9 +158,13 @@ pub fn full_image_path(path: &str) -> String {
 }
 
 /// Open an image file (PNG, JPEG, ICO, etc.) and re-save as lossless WebP,
-/// removing the original. Does nothing if the file can't be decoded.
+/// removing the original. Does nothing if the file can't be decoded or is
+/// already WebP (re-encoding would self-delete: output path == input path).
 pub fn convert_to_lossless_webp(path: &Path) {
     let _s = tracing::info_span!("convert_to_lossless_webp", path = %path.display()).entered();
+    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("webp")) {
+        return;
+    }
     let base = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let parent = path.parent().unwrap_or(Path::new("."));
     let webp = parent.join(format!("{}.webp", base));
@@ -222,5 +226,28 @@ mod tests {
         let url = "https://example.com/path/icon.png?w=200&h=200";
         let ext = url_extension(url);
         assert!(ext.contains("png"));
+    }
+
+    #[test]
+    fn test_convert_to_lossless_webp_skips_webp() {
+        let tmp = tempfile::tempdir().unwrap();
+        let webp_path = tmp.path().join("vertical.webp");
+        let img = image::RgbaImage::new(2, 2);
+        let encoded = webp::Encoder::from_rgba(img.as_raw(), 2, 2).encode_lossless();
+        std::fs::write(&webp_path, &*encoded).unwrap();
+        convert_to_lossless_webp(&webp_path);
+        assert!(webp_path.is_file(), "webp file should not be deleted when input is already webp");
+    }
+
+    #[test]
+    fn test_convert_to_lossless_webp_converts_png() {
+        let tmp = tempfile::tempdir().unwrap();
+        let png_path = tmp.path().join("icon.png");
+        let img = image::RgbaImage::new(2, 2);
+        img.save(&png_path).unwrap();
+        convert_to_lossless_webp(&png_path);
+        assert!(!png_path.is_file(), "png file should be removed after conversion");
+        let webp_path = tmp.path().join("icon.webp");
+        assert!(webp_path.is_file(), "webp file should exist after conversion");
     }
 }

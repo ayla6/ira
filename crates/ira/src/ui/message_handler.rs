@@ -150,6 +150,19 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             }
         }
         AppMessage::VariantSelected(db_id, variant_id) => {
+            // For show_as_entry variants, navigate to the variant's grid entry
+            if let Some(vid) = variant_id {
+                let is_show_as_entry = ira_db::get_variants(&state.borrow().db, db_id)
+                    .unwrap_or_default()
+                    .iter()
+                    .find(|v| v.id == vid)
+                    .is_some_and(|v| v.show_as_entry);
+                if is_show_as_entry {
+                    switch_to_game(state, db_id, Some(vid));
+                    return;
+                }
+            }
+
             let (db, save_dir, sender) = {
                 let s = state.borrow();
                 (s.db.clone(), s.save_dir.clone(), s.sender.clone())

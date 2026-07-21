@@ -258,7 +258,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     Ok(game)
 }
 
-/// Apply a specific variant's hero + logo to the base game.
+/// Apply a specific variant's images to the base game.
 /// Only applies if the variant has `custom_images=true` and `show_as_entry=false`.
 /// Called when the user selects a variant on the base game's play button.
 pub fn apply_variant_images_for(db: &DbConn, save_dir: &str, entry: &GameEntry, game: &mut Game, variant_id: i64) {
@@ -272,12 +272,11 @@ pub fn apply_variant_images_for(db: &DbConn, save_dir: &str, entry: &GameEntry, 
 
     let mut var_game = Game::default();
     ira_parser::populate_image_paths(&var_dir, &mut var_game);
-    if !var_game.hero_image_path.is_empty() {
-        game.hero_image_path = var_game.hero_image_path;
-    }
-    if !var_game.logo_path.is_empty() {
-        game.logo_path = var_game.logo_path;
-    }
+    if !var_game.icon_path.is_empty() { game.icon_path = var_game.icon_path; }
+    if !var_game.hero_image_path.is_empty() { game.hero_image_path = var_game.hero_image_path; }
+    if !var_game.grid_path.is_empty() { game.grid_path = var_game.grid_path; }
+    if !var_game.header_path.is_empty() { game.header_path = var_game.header_path; }
+    if !var_game.logo_path.is_empty() { game.logo_path = var_game.logo_path; }
 }
 
 /// For each variant with `show_as_entry=true`, create a pseudo-Game entry

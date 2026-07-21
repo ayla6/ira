@@ -25,6 +25,16 @@ pub fn launch_game(
         .unwrap_or_default()
         .as_secs() as i64;
 
+    let game_dir = if launch.working_dir.is_empty() {
+        std::path::Path::new(&launch.exe).parent().map(|p| p.to_string_lossy().to_string())
+    } else {
+        Some(launch.working_dir.clone())
+    };
+
+    if !launch.pre_launch.is_empty() {
+        run_pre_launch(&launch.pre_launch, game_dir.as_deref(), &ctx.save_dir, ctx.game_id)?;
+    }
+
     let (command, env) = if wine.is_some_and(|w| w.enabled) {
         let wine = wine.unwrap();
         let wine_exe = super::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path)?;
@@ -98,12 +108,6 @@ pub fn launch_game(
         (cmd, env)
     };
 
-    let game_dir = if launch.working_dir.is_empty() {
-        std::path::Path::new(&launch.exe).parent().map(|p| p.to_string_lossy().to_string())
-    } else {
-        Some(launch.working_dir.clone())
-    };
-
     let log_path = super::wrapper::game_log_path(&ctx.save_dir, ctx.game_id);
     let child = super::wrapper::spawn_game(&command, &env, game_dir.as_deref(), Some(&log_path))?;
     let child_pid = child.id() as i32;
@@ -119,4 +123,33 @@ pub fn launch_game(
     });
 
     Ok(child_pid)
+}
+
+/// Run a pre-launch command synchronously via `sh -c`.
+/// Uses the game's working directory. Aborts launch on non-zero exit.
+fn run_pre_launch(cmd: &str, cwd: Option<&str>, save_dir: &str, game_id: i64) -> Result<(), String> {
+    let log_path = super::wrapper::game_log_path(save_dir, game_id);
+    let mut child = std::process::Command::new("sh");
+    child.arg("-c").arg(cmd);
+    if let Some(dir) = cwd {
+        child.current_dir(dir);
+    }
+    if let Some(parent) = std::path::Path::new(&log_path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::File::create(&log_path) {
+        Ok(f) => {
+            let stderr = f.try_clone().unwrap_or_else(|_| {
+                std::fs::File::create("/dev/null").unwrap()
+            });
+            child.stdout(std::process::Stdio::from(f));
+            child.stderr(std::process::Stdio::from(stderr));
+        }
+        Err(e) => eprintln!("Could not open log file {}: {}", log_path, e),
+    }
+    match child.status() {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(format!("Pre-launch command failed (exit code {:?})", s.code())),
+        Err(e) => Err(format!("Failed to run pre-launch command: {}", e)),
+    }
 }

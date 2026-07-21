@@ -198,9 +198,9 @@ pub fn show_game_context_menu(
         if is_running {
             super::play_button::stop_game(&sc, db_id);
         } else {
-            match super::play_button::launch_game(&sc, db_id, None) {
+            match super::play_button::launch_game(&sc, db_id, gc.variant_id) {
                 Ok(()) => {
-                    let _ = sc.borrow().sender.send(AppMessage::GameStarted(db_id));
+                    let _ = sc.borrow().sender.send(AppMessage::GameStarted(db_id, gc.variant_id));
                 }
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);
@@ -281,7 +281,7 @@ pub fn show_game_context_menu(
                 }
                 let mut s = sc.borrow_mut();
                 s.games.retain(|g| g.db_id != db_id);
-                let was_selected = s.selected_id == db_id.to_string();
+                let was_selected = ira_models::parse_db_id(&s.selected_id) == db_id;
                 if was_selected {
                     s.selected_id = String::new();
                     s.selected_group = ira_models::GroupSelection::AllGames;

@@ -22,7 +22,18 @@ struct PendingCover {
     w: i32,
     h: i32,
     db_id: i64,
+    variant_id: i64,
     vbox: gtk4::Box,
+}
+
+fn is_stale(vbox: &gtk4::Box, db_id: i64, variant_id: i64) -> bool {
+    let db_mismatch = unsafe { vbox.data::<AtomicI64>("game-db-id") }
+        .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed) != db_id)
+        .unwrap_or(false);
+    let var_mismatch = unsafe { vbox.data::<AtomicI64>("game-variant-id") }
+        .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed) != variant_id)
+        .unwrap_or(false);
+    db_mismatch || var_mismatch
 }
 
 thread_local! {
@@ -30,19 +41,15 @@ thread_local! {
     static COVER_PROCESSOR_RUNNING: Cell<bool> = const { Cell::new(false) };
 }
 
-fn queue_cover_load(pic: gtk4::Picture, path: String, w: i32, h: i32, db_id: i64, vbox: gtk4::Box) {
-    let _s = tracing::info_span!("queue_cover_load", path = %path, w, h, db_id).entered();
-    // If texture is already cached, set it immediately to avoid flash
+fn queue_cover_load(pic: gtk4::Picture, path: String, w: i32, h: i32, db_id: i64, variant_id: i64, vbox: gtk4::Box) {
+    let _s = tracing::info_span!("queue_cover_load", path = %path, w, h, db_id, variant_id).entered();
     if ira_images::cached_texture(&path).is_some() {
-        let stale = unsafe { vbox.data::<AtomicI64>("game-db-id") }
-            .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed) != db_id)
-            .unwrap_or(false);
-        if !stale {
+        if !is_stale(&vbox, db_id, variant_id) {
             ira_images::set_picture_natural(&pic, &path, w, h);
         }
         return;
     }
-    COVER_QUEUE.with(|q| q.borrow_mut().push_back(PendingCover { pic, path, w, h, db_id, vbox }));
+    COVER_QUEUE.with(|q| q.borrow_mut().push_back(PendingCover { pic, path, w, h, db_id, variant_id, vbox }));
     let queue_depth = COVER_QUEUE.with(|q| q.borrow().len());
     tracing::info!(queue_depth, "cover_queued");
     COVER_PROCESSOR_RUNNING.with(|r| {
@@ -53,10 +60,7 @@ fn queue_cover_load(pic: gtk4::Picture, path: String, w: i32, h: i32, db_id: i64
                 if let Some(req) = req {
                     let remaining = COVER_QUEUE.with(|q| q.borrow().len());
                     let _s = tracing::info_span!("cover_idle_tick", path = %req.path, remaining).entered();
-                    let stale = unsafe { req.vbox.data::<AtomicI64>("game-db-id") }
-                        .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed) != req.db_id)
-                        .unwrap_or(false);
-                    if !stale {
+                    if !is_stale(&req.vbox, req.db_id, req.variant_id) {
                         ira_images::set_picture_natural(&req.pic, &req.path, req.w, req.h);
                     }
                 }
@@ -217,6 +221,7 @@ pub fn show_grid_view(state: &SharedState) {
         vbox.append(&overlay);
 
         unsafe { vbox.set_data::<AtomicI64>("game-db-id", AtomicI64::new(0)) };
+        unsafe { vbox.set_data::<AtomicI64>("game-variant-id", AtomicI64::new(0)) };
         unsafe { vbox.set_data::<gtk4::Label>("name-label", name_label.clone()) };
 
         let sc = state_for_setup.clone();
@@ -226,8 +231,13 @@ pub fn show_grid_view(state: &SharedState) {
             if let Some(ptr) = unsafe { widget.data::<AtomicI64>("game-db-id") } {
                 let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
                 if db_id != 0 {
-                    switch_to_game(&sc, db_id);
-                    scroll_to_row(&sc, db_id);
+                    let variant_id = unsafe { widget.data::<AtomicI64>("game-variant-id") }
+                        .and_then(|ptr| {
+                            let v = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
+                            if v > 0 { Some(v) } else { None }
+                        });
+                    switch_to_game(&sc, db_id, variant_id);
+                    scroll_to_row(&sc, db_id, variant_id);
                 }
             }
         });
@@ -241,11 +251,16 @@ pub fn show_grid_view(state: &SharedState) {
             if let Some(ptr) = unsafe { widget.data::<AtomicI64>("game-db-id") } {
                 let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
                 if db_id != 0 {
+                    let variant_id = unsafe { widget.data::<AtomicI64>("game-variant-id") }
+                        .and_then(|ptr| {
+                            let v = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
+                            if v > 0 { Some(v) } else { None }
+                        });
                     let game = sc2
                         .borrow()
                         .games
                         .iter()
-                        .find(|g| g.db_id == db_id)
+                        .find(|g| g.db_id == db_id && g.variant_id == variant_id)
                         .cloned();
                     if let Some(game) = game {
                         show_game_context_menu(&sc2, &game, &widget, x, y, None::<&gtk4::ListBoxRow>);
@@ -280,8 +295,11 @@ pub fn show_grid_view(state: &SharedState) {
             if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-db-id") } {
                 unsafe { ptr.as_ref() }.store(game.db_id, Ordering::Relaxed);
             }
+            if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-variant-id") } {
+                unsafe { ptr.as_ref() }.store(game.variant_id.unwrap_or(0), Ordering::Relaxed);
+            }
             if !game.grid_path.is_empty() {
-                queue_cover_load(pic.clone(), game.grid_path.clone(), cover_width, cover_height, game.db_id, vbox.clone());
+                queue_cover_load(pic.clone(), game.grid_path.clone(), cover_width, cover_height, game.db_id, game.variant_id.unwrap_or(0), vbox.clone());
                 if let Some(ref label) = name_label {
                     label.set_visible(false);
                 }
@@ -316,6 +334,9 @@ pub fn show_grid_view(state: &SharedState) {
         let pic = pic_widget.downcast_ref::<gtk4::Picture>().unwrap();
 
         if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-db-id") } {
+            unsafe { ptr.as_ref() }.store(0, Ordering::Relaxed);
+        }
+        if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-variant-id") } {
             unsafe { ptr.as_ref() }.store(0, Ordering::Relaxed);
         }
         let placeholder = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
@@ -495,17 +516,18 @@ fn build_cover(
     pic.set_size_request(w, h);
     pic.add_css_class("game-cover-pic");
     if !image_path.is_empty() {
-        queue_cover_load(pic.clone(), image_path.to_string(), w, h, game.db_id, gtk4::Box::new(gtk4::Orientation::Vertical, 0));
+        queue_cover_load(pic.clone(), image_path.to_string(), w, h, game.db_id, game.variant_id.unwrap_or(0), gtk4::Box::new(gtk4::Orientation::Vertical, 0));
     }
 
     vbox.append(&pic);
 
     let state_clone = state.clone();
     let db_id = game.db_id;
+    let variant_id = game.variant_id;
     let click = gtk4::GestureClick::new();
     click.connect_pressed(move |_, _, _, _| {
-        switch_to_game(&state_clone, db_id);
-        scroll_to_row(&state_clone, db_id);
+        switch_to_game(&state_clone, db_id, variant_id);
+        scroll_to_row(&state_clone, db_id, variant_id);
     });
     vbox.add_controller(click);
 

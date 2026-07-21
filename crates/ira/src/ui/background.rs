@@ -92,12 +92,13 @@ pub fn restore_content(state: &SharedState) {
         return;
     }
 
-    let db_id: i64 = selected_id.parse().unwrap_or(0);
-    let game = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
+    let db_id = ira_models::parse_db_id(&selected_id);
+    let variant_id = selected_id.split("-v").nth(1).and_then(|s| s.parse::<i64>().ok());
+    let game = state.borrow().games.iter().find(|g| g.db_id == db_id && g.variant_id == variant_id).cloned();
     if let Some(game) = game {
         display_game(&game, state);
 
-        let index = find_game_index(state, db_id);
+        let index = find_game_index(state, db_id, variant_id);
         select_row_silently(state, index);
     } else {
         state.borrow_mut().selected_id.clear();

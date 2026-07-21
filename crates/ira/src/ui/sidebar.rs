@@ -59,20 +59,20 @@ pub fn select_row_silently(state: &SharedState, index: Option<u32>) {
     state.borrow_mut().restoring = false;
 }
 
-pub fn scroll_to_row(state: &SharedState, db_id: i64) {
+pub fn scroll_to_row(state: &SharedState, db_id: i64, variant_id: Option<i64>) {
     let view = state.borrow().sidebar_view.clone();
-    if let Some(index) = find_game_index(state, db_id) {
+    if let Some(index) = find_game_index(state, db_id, variant_id) {
         glib::idle_add_local_once(move || {
             view.scroll_to(index, gtk4::ListScrollFlags::NONE, None);
         });
     }
 }
 
-pub fn find_game_index(state: &SharedState, db_id: i64) -> Option<u32> {
+pub fn find_game_index(state: &SharedState, db_id: i64, variant_id: Option<i64>) -> Option<u32> {
     let store = state.borrow().sidebar_store.clone();
     for i in 0..store.n_items() {
         if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()) {
-            if item.kind() == SidebarItemKind::Game && item.db_id() == db_id {
+            if item.kind() == SidebarItemKind::Game && item.db_id() == db_id && item.variant_id() == variant_id {
                 return Some(i);
             }
         }
@@ -84,7 +84,7 @@ pub fn update_sidebar_game(state: &SharedState, db_id: i64, name: &str, icon_pat
     let store = state.borrow().sidebar_store.clone();
     for i in 0..store.n_items() {
         if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()) {
-            if item.kind() == SidebarItemKind::Game && item.db_id() == db_id {
+            if item.kind() == SidebarItemKind::Game && item.db_id() == db_id && item.variant_id().is_none() {
                 if item.name() == name && item.icon_path() == icon_path {
                     return;
                 }
@@ -105,8 +105,8 @@ pub fn set_sidebar_playing(state: &SharedState, db_id: i64, playing: bool) {
     for i in 0..store.n_items() {
         if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()) {
             if item.kind() == SidebarItemKind::Game && item.db_id() == db_id {
-                let new_item = SidebarItem::new_game(
-                    db_id, &item.name(), &item.icon_path(), item.hidden(), playing,
+                let new_item = SidebarItem::new_game_variant(
+                    db_id, item.variant_id(), &item.name(), &item.icon_path(), item.hidden(), playing,
                 );
                 store.splice(i, 1, &[new_item]);
             }
@@ -177,8 +177,8 @@ pub fn rebuild_sidebar(state: &SharedState) {
             if !is_collapsed {
                 for game in &collection_games {
                     let is_running = running_games.lock().unwrap().contains_key(&game.db_id);
-                    items.push(SidebarItem::new_game(
-                        game.db_id, &game.name, &game.icon_path, game.hidden, is_running,
+                    items.push(SidebarItem::new_game_variant(
+                        game.db_id, game.variant_id, &game.name, &game.icon_path, game.hidden, is_running,
                     ));
                 }
             }
@@ -198,8 +198,8 @@ pub fn rebuild_sidebar(state: &SharedState) {
             if !is_collapsed {
                 for game in &uncategorized {
                     let is_running = running_games.lock().unwrap().contains_key(&game.db_id);
-                    items.push(SidebarItem::new_game(
-                        game.db_id, &game.name, &game.icon_path, game.hidden, is_running,
+                    items.push(SidebarItem::new_game_variant(
+                        game.db_id, game.variant_id, &game.name, &game.icon_path, game.hidden, is_running,
                     ));
                 }
             }
@@ -220,8 +220,8 @@ pub fn rebuild_sidebar(state: &SharedState) {
 
         for game in &filtered {
             let is_running = running_games.lock().unwrap().contains_key(&game.db_id);
-            items.push(SidebarItem::new_game(
-                game.db_id, &game.name, &game.icon_path, game.hidden, is_running,
+            items.push(SidebarItem::new_game_variant(
+                game.db_id, game.variant_id, &game.name, &game.icon_path, game.hidden, is_running,
             ));
         }
     }
@@ -247,10 +247,14 @@ fn restore_selection(state: &SharedState) {
         let bitset = gtk4::Bitset::new_empty();
         for i in 0..store.n_items() {
             if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()) {
-                if item.kind() == SidebarItemKind::Game
-                    && multi_selected_ids.contains(&item.db_id())
-                {
-                    bitset.add(i);
+                if item.kind() == SidebarItemKind::Game {
+                    let grid_id = match item.variant_id() {
+                        Some(vid) => format!("{}-v{}", item.db_id(), vid),
+                        None => item.db_id().to_string(),
+                    };
+                    if multi_selected_ids.contains(&grid_id) {
+                        bitset.add(i);
+                    }
                 }
             }
         }
@@ -262,8 +266,10 @@ fn restore_selection(state: &SharedState) {
     let selected_group = state.borrow().selected_group.clone();
 
     if !selected_id.is_empty() {
-        if let Ok(db_id) = selected_id.parse::<i64>() {
-            if let Some(index) = find_game_index(state, db_id) {
+        let db_id = ira_models::parse_db_id(&selected_id);
+        if db_id > 0 {
+            let variant_id = selected_id.split("-v").nth(1).and_then(|s| s.parse::<i64>().ok());
+            if let Some(index) = find_game_index(state, db_id, variant_id) {
                 select_row_silently(state, Some(index));
                 return;
             }
@@ -464,17 +470,24 @@ pub fn build_factory(state: &SharedState) -> gtk4::SignalListItemFactory {
                             let s = sc.borrow();
                             s.sidebar_selection.selected_db_ids()
                         };
-                        if selected_ids.len() > 1 && selected_ids.contains(&db_id) {
-                            show_multi_game_context_menu(&sc, &selected_ids, &r, x, y);
+                        let item_grid_id = match item.variant_id() {
+                            Some(vid) => format!("{}-v{}", db_id, vid),
+                            None => db_id.to_string(),
+                        };
+                        if selected_ids.len() > 1 && selected_ids.contains(&item_grid_id) {
+                            let db_ids: HashSet<i64> = selected_ids.iter()
+                                .map(|s| ira_models::parse_db_id(s))
+                                .collect();
+                            show_multi_game_context_menu(&sc, &db_ids, &r, x, y);
                         } else {
-                            if !selected_ids.contains(&db_id) || selected_ids.len() != 1 {
-                                if let Some(pos) = find_game_index(&sc, db_id) {
+                            if !selected_ids.contains(&item_grid_id) || selected_ids.len() != 1 {
+                                if let Some(pos) = find_game_index(&sc, db_id, item.variant_id()) {
                                     let selection = sc.borrow().sidebar_selection.clone();
                                     selection.select_item(pos, true);
                                 }
                             }
                             let game = sc.borrow().games.iter()
-                                .find(|g| g.db_id == db_id)
+                                .find(|g| g.db_id == db_id && g.variant_id == item.variant_id())
                                 .cloned();
                             if let Some(game) = game {
                                 show_game_context_menu(&sc, &game, &r, x, y, None::<&gtk4::ListBoxRow>);

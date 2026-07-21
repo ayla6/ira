@@ -118,7 +118,7 @@ pub fn monitor_process(
     }
 
     running_games.lock().unwrap().remove(&game_id);
-    let _ = sender.send(AppMessage::GameStopped(game_id));
+    let _ = sender.send(AppMessage::GameStopped(game_id, None));
 }
 
 fn reap_zombies(pgid: i32) {

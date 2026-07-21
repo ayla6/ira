@@ -24,7 +24,11 @@ pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
             continue;
         }
         match load_game_fast(&entry, save_dir) {
-            Ok(game) => games.push(game),
+            Ok(game) => {
+                let variant_entries = build_variant_entries(conn, save_dir, &game);
+                games.push(game);
+                games.extend(variant_entries);
+            }
             Err(e) => eprintln!("Skipping game {} ({}): {}", if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id }, entry.kind, e),
         }
     }
@@ -66,6 +70,7 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
         game_path: String::new(),
         sgdb_id: entry.sgdb_id.clone().unwrap_or_default(),
         shadps4_version: entry.shadps4_version.clone(),
+        variant_id: None,
         release_date: entry.release_date.clone(),
         release_timestamp: entry.release_timestamp,
         metacritic_score: entry.metacritic_score,
@@ -251,4 +256,56 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     }
 
     Ok(game)
+}
+
+/// Apply a specific variant's hero + logo to the base game.
+/// Only applies if the variant has `custom_images=true` and `show_as_entry=false`.
+/// Called when the user selects a variant on the base game's play button.
+pub fn apply_variant_images_for(db: &DbConn, save_dir: &str, entry: &GameEntry, game: &mut Game, variant_id: i64) {
+    let Ok(variants) = ira_db::get_variants(db, entry.id) else { return };
+    let Some(var) = variants.iter().find(|v| v.id == variant_id) else { return };
+    if !var.custom_images || var.show_as_entry { return }
+
+    let image_dir = ira_parser::entry_data_dir(save_dir, entry);
+    let var_dir = image_dir.join(format!("variant-{}", variant_id));
+    if !var_dir.is_dir() { return }
+
+    let mut var_game = Game::default();
+    ira_parser::populate_image_paths(&var_dir, &mut var_game);
+    if !var_game.hero_image_path.is_empty() {
+        game.hero_image_path = var_game.hero_image_path;
+    }
+    if !var_game.logo_path.is_empty() {
+        game.logo_path = var_game.logo_path;
+    }
+}
+
+/// For each variant with `show_as_entry=true`, create a pseudo-Game entry
+/// that appears in the grid as a separate game. The pseudo-game shares
+/// achievements, playtime, etc. with the base game but has its own images.
+pub fn build_variant_entries(db: &DbConn, save_dir: &str, game: &Game) -> Vec<Game> {
+    let Ok(variants) = ira_db::get_variants(db, game.db_id) else { return Vec::new() };
+    let image_dir = ira_parser::game_data_dir(save_dir, game);
+
+    variants.iter()
+        .filter(|v| v.show_as_entry)
+        .map(|v| {
+            let mut entry = game.clone();
+            entry.variant_id = Some(v.id);
+            entry.name = format!("{} - {}", game.name, v.name);
+
+            let var_dir = image_dir.join(format!("variant-{}", v.id));
+            if var_dir.is_dir() {
+                let mut var_game = Game::default();
+                ira_parser::populate_image_paths(&var_dir, &mut var_game);
+                if !var_game.icon_path.is_empty() { entry.icon_path = var_game.icon_path; }
+                if !var_game.hero_image_path.is_empty() { entry.hero_image_path = var_game.hero_image_path; }
+                if !var_game.grid_path.is_empty() { entry.grid_path = var_game.grid_path; }
+                if !var_game.header_path.is_empty() { entry.header_path = var_game.header_path; }
+                if !var_game.logo_path.is_empty() { entry.logo_path = var_game.logo_path; }
+            }
+
+            entry
+        })
+        .collect()
 }

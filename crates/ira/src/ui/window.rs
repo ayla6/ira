@@ -427,9 +427,8 @@ fn connect_window_signals(
                 show_grid_view(&state_clone);
             }
             super::sidebar_item::SidebarItemKind::Game => {
-                state_clone.borrow_mut().selected_id = db_id.to_string();
-                state_clone.borrow_mut().multi_selected_ids = HashSet::from([db_id]);
-                switch_to_game(&state_clone, db_id);
+                state_clone.borrow_mut().multi_selected_ids = HashSet::new();
+                switch_to_game(&state_clone, db_id, item.variant_id());
             }
         }
     });
@@ -442,13 +441,14 @@ fn connect_window_signals(
         };
         if item.kind() == super::sidebar_item::SidebarItemKind::Game {
             let db_id = item.db_id();
+            let item_variant_id = item.variant_id();
             let s = state_clone.borrow();
             if s.games.iter().any(|g| g.db_id == db_id) {
-                let vid = ira_db::get_default_variant(&s.db, db_id);
+                let vid = item_variant_id.or_else(|| ira_db::get_default_variant(&s.db, db_id));
                 drop(s);
                 if !state_clone.borrow().running_games.lock().unwrap().contains_key(&db_id) {
                     let _ = super::play_button::launch_game(&state_clone, db_id, vid);
-                    let _ = state_clone.borrow().sender.send(crate::AppMessage::GameStarted(db_id));
+                    let _ = state_clone.borrow().sender.send(crate::AppMessage::GameStarted(db_id, item_variant_id));
                 }
             }
         }

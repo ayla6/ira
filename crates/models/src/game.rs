@@ -53,6 +53,9 @@ pub struct Game {
     pub emulator_override: String,
     /// Path to the ROM file (for retro games).
     pub rom_path: String,
+    /// If Some(variant_id), this is a pseudo-game entry for a variant
+    /// shown as a separate grid entry. None for real games.
+    pub variant_id: Option<i64>,
 }
 
 impl Default for Game {
@@ -91,6 +94,7 @@ impl Default for Game {
             ra_core: String::new(),
             emulator_override: String::new(),
             rom_path: String::new(),
+            variant_id: None,
         }
     }
 }
@@ -107,6 +111,25 @@ impl Game {
             self.earned_count as f64 / self.total_count as f64 * 100.0
         }
     }
+
+    /// Unique identifier for grid/sidebar selection.
+    /// Real games use db_id; variant pseudo-entries use "{db_id}-v{variant_id}".
+    pub fn grid_id(&self) -> String {
+        match self.variant_id {
+            Some(vid) => format!("{}-v{}", self.db_id, vid),
+            None => self.db_id.to_string(),
+        }
+    }
+
+    /// Whether this is a variant pseudo-game entry (not a real game).
+    pub fn is_variant_entry(&self) -> bool {
+        self.variant_id.is_some()
+    }
+}
+
+/// Extract the db_id from a grid_id string ("123" or "123-v456").
+pub fn parse_db_id(grid_id: &str) -> i64 {
+    grid_id.split("-v").next().and_then(|s| s.parse().ok()).unwrap_or(0)
 }
 
 #[cfg(test)]

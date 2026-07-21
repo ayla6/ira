@@ -164,6 +164,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
             env_vars: collect_env_vars(&env_vars_box),
             ld_preload: ld_preload_entry.text().to_string(),
             ld_library_path: ld_library_entry.text().to_string(),
+            pre_launch: String::new(),
         };
         let wine_config = if is_wine { wine_widgets.to_wine_config() } else { WineConfig::default() };
 

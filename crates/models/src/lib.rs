@@ -16,6 +16,7 @@ mod consoles;
 mod app_details;
 
 pub use game::Game;
+pub use game::parse_db_id;
 pub use consoles::{ConsoleDef, CONSOLES, find_console};
 pub use app_details::{AppDetails, DlcInfo};
 pub use game_entry::GameEntry;

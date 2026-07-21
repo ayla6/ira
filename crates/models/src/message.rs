@@ -6,8 +6,8 @@ pub enum AppMessage {
     NewGame(Game),
     WatcherGameUpdated(Game),
     AddGameError(String),
-    GameStopped(i64),
-    GameStarted(i64),
+    GameStopped(i64, Option<i64>),
+    GameStarted(i64, Option<i64>),
     /// Fired by the ShadPS4Watcher when play_time.txt changes.
     ShadPS4PlaytimeChanged,
     /// Initial game list loaded in the background.
@@ -28,6 +28,12 @@ pub enum AppMessage {
         logo: String,
         header: String,
     },
+    /// User selected a different variant on the base game's play button.
+    /// Reloads the game page with the variant's hero + logo.
+    VariantSelected(i64, Option<i64>),
+    /// Variants were added/removed/edited in the edit dialog.
+    /// Rebuilds variant pseudo-game entries for this game.
+    VariantsChanged(i64),
 }
 
 pub struct AppSender {

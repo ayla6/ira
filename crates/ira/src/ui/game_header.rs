@@ -20,7 +20,7 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
         let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
         row.set_valign(gtk4::Align::Center);
         row.set_hexpand(true);
-        row.append(&play_button(state, game.db_id));
+        row.append(&play_button(state, game.db_id, game.variant_id));
         row.append(&stat_label("Last played", &format_last_played(game.last_played)));
         row.append(&stat_label("Play time", &format_playtime(game.playtime)));
         if game.total_count > 0 {

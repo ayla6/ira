@@ -82,6 +82,7 @@ pub fn load_shadps4_game(
         ra_core: String::new(),
         emulator_override: String::new(),
         rom_path: String::new(),
+        variant_id: None,
     };
 
     // PS4 default icon: always copy from the game's sce_sys/icon0.png to data/ps4/{NPWR}/icon.png

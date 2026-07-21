@@ -164,7 +164,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     );
 
     // --- Variants page ---
-    let var_widgets = build_variants_page(state, db_id, game.kind, has_config, &sidebar, &stack);
+    let var_widgets = build_variants_page(state, db_id, game.kind, has_config, &sidebar, &stack, &win);
 
     // --- Sidebar navigation ---
     let stack_clone = stack.clone();
@@ -307,6 +307,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 env_vars: if show_wine_tabs { Vec::new() } else { env_vars.clone() },
                 ld_preload,
                 ld_library_path,
+                pre_launch: lc.pre_launch_entry.text().to_string(),
             };
             let mut wine = wine_widgets_opt.as_ref().map_or(WineConfig::default(), |ww| ww.to_wine_config());
 
@@ -428,6 +429,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     _ => continue,
                 };
                 ira_parser::remove_image_variants(&cloud_dir, base_name);
+                ira_parser::remove_image_variants(&cloud_dir, &format!("{}_small", base_name));
                 let is_ico = is_ico_bytes(src_path);
                 let dest = if is_ico {
                     let ico_path = cloud_dir.join(format!("{}.ico", base_name));
@@ -667,6 +669,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     args: vw.args.text().to_string(),
                     env_vars: Vec::new(),
                     sort_order: 0,
+                    pre_launch: vw.pre_launch.text().to_string(),
+                    custom_images: vw.custom_images.is_active(),
+                    show_as_entry: vw.show_as_entry.is_active(),
                 };
 
                 if let Some(id) = vw.id {
@@ -689,6 +694,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             }
         }
 
+        let _ = state_clone.borrow().sender.send(crate::AppMessage::VariantsChanged(db_id_s));
         win_s.close();
     });
 

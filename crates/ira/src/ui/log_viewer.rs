@@ -41,7 +41,7 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
 
     let initial_content = std::fs::read_to_string(&log_path)
         .unwrap_or_else(|_| format!("No log file found at:\n{}\n\nThe log will be created when the game is launched.", log_path));
-    buffer.set_text(&initial_content);
+    buffer.set_text(&initial_content.replace('\0', "\u{FFFD}"));
 
     let mark = buffer.create_mark(None, &buffer.end_iter(), false);
 
@@ -65,7 +65,7 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
             if let Ok(content) = std::fs::read_to_string(&log_path_clone) {
                 let current = buf_clone.text(&buf_clone.start_iter(), &buf_clone.end_iter(), false);
                 if current != content {
-                    buf_clone.set_text(&content);
+                    buf_clone.set_text(&content.replace('\0', "\u{FFFD}"));
                     buf_clone.move_mark(&mark_clone, &buf_clone.end_iter());
                     tv_clone.scroll_to_mark(&mark_clone, 0.0, false, 0.0, 0.0);
                 }

@@ -9,6 +9,8 @@ pub struct GameLaunchConfig {
     pub env_vars: Vec<(String, String)>,
     pub ld_preload: String,
     pub ld_library_path: String,
+    #[serde(default)]
+    pub pre_launch: String,
 }
 
 

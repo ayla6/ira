@@ -39,6 +39,9 @@ pub fn run_schema_migrations(conn: &Connection) {
     ensure_column(conn, "games", "cached_achievement_mtime", "INTEGER NOT NULL DEFAULT 0");
     ensure_column(conn, "wine_profiles", "umu_enabled", "INTEGER NOT NULL DEFAULT 1");
     ensure_column(conn, "game_variants", "sort_order", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(conn, "game_variants", "pre_launch", "TEXT NOT NULL DEFAULT ''");
+    ensure_column(conn, "game_variants", "custom_images", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(conn, "game_variants", "show_as_entry", "INTEGER NOT NULL DEFAULT 0");
     // Drop obsolete unique indexes that prevented multiple retro games per console
     let _ = conn.execute("DROP INDEX IF EXISTS idx_games_trophy_platform", []);
     let _ = conn.execute("DROP INDEX IF EXISTS idx_games_kind_platform", []);

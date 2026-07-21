@@ -32,26 +32,26 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             dialog.set_close_response("ok");
             dialog.present(Some(&window));
         }
-        AppMessage::GameStopped(db_id) => {
+        AppMessage::GameStopped(db_id, _variant_id) => {
             state.borrow().running_games.lock().unwrap().remove(&db_id);
             set_sidebar_playing(state, db_id, false);
             refresh_steam_playtimes_for(state, &[db_id]);
             let selected_id = state.borrow().selected_id.clone();
-            let game = state.borrow().games.iter()
-                .find(|g| g.db_id == db_id)
-                .cloned();
-            if selected_id == db_id.to_string() {
+            if ira_models::parse_db_id(&selected_id) == db_id {
+                let game = state.borrow().games.iter()
+                    .find(|g| g.grid_id() == selected_id)
+                    .cloned();
                 if let Some(game) = game {
                     display_game(&game, state);
                 }
             }
         }
-        AppMessage::GameStarted(db_id) => {
+        AppMessage::GameStarted(db_id, _variant_id) => {
             set_sidebar_playing(state, db_id, true);
             let selected_id = state.borrow().selected_id.clone();
-            if selected_id == db_id.to_string() {
+            if ira_models::parse_db_id(&selected_id) == db_id {
                 let game = state.borrow().games.iter()
-                    .find(|g| g.db_id == db_id)
+                    .find(|g| g.grid_id() == selected_id)
                     .cloned();
                 if let Some(game) = game {
                     display_game(&game, state);
@@ -95,9 +95,9 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 rebuild_sidebar(state);
                 let selected_id = state.borrow().selected_id.clone();
                 if let Some(id) = updated_ids.first() {
-                    if selected_id == id.to_string() {
+                    if ira_models::parse_db_id(&selected_id) == *id {
                         let game = state.borrow().games.iter()
-                            .find(|g| g.db_id == *id)
+                            .find(|g| g.grid_id() == selected_id)
                             .cloned();
                         if let Some(game) = game {
                             display_game(&game, state);
@@ -129,14 +129,49 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 build_image_manager_content_with_drafts(s, game, win, pc).upcast()
             });
             let selected_id = state.borrow().selected_id.clone();
-            if selected_id == db_id.to_string() {
+            if ira_models::parse_db_id(&selected_id) == db_id {
                 let game = state.borrow().games.iter()
-                    .find(|g| g.db_id == db_id)
+                    .find(|g| g.grid_id() == selected_id)
                     .cloned();
                 if let Some(game) = game {
                     display_game(&game, state);
                 }
             }
+        }
+        AppMessage::VariantSelected(db_id, variant_id) => {
+            let (db, save_dir, sender) = {
+                let s = state.borrow();
+                (s.db.clone(), s.save_dir.clone(), s.sender.clone())
+            };
+            std::thread::spawn(move || {
+                let Some(entry) = ira_db::find_by_db_id(&db, db_id).ok().flatten() else { return };
+                let Ok(mut game) = crate::game_loader::load_game(&entry, &save_dir) else { return };
+                if let Some(vid) = variant_id {
+                    crate::game_loader::apply_variant_images_for(&db, &save_dir, &entry, &mut game, vid);
+                }
+                let _ = sender.send(crate::AppMessage::EnrichedGame(game));
+            });
+        }
+        AppMessage::VariantsChanged(db_id) => {
+            let (db, save_dir) = {
+                let s = state.borrow();
+                (s.db.clone(), s.save_dir.clone())
+            };
+            {
+                let mut s = state.borrow_mut();
+                s.games.retain(|g| g.db_id != db_id || g.variant_id.is_none());
+            }
+            if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, db_id) {
+                if let Ok(game) = crate::game_loader::load_game_fast(&entry, &save_dir) {
+                    let variant_entries = crate::game_loader::build_variant_entries(&db, &save_dir, &game);
+                    let mut s = state.borrow_mut();
+                    if let Some(idx) = s.games.iter().position(|g| g.db_id == db_id && g.variant_id.is_none()) {
+                        s.games[idx] = game;
+                    }
+                    s.games.extend(variant_entries);
+                }
+            }
+            super::sidebar::rebuild_sidebar(state);
         }
     }
 }
@@ -169,7 +204,7 @@ fn apply_playtime_updates_db(state: &SharedState, updates: &HashMap<i64, (f64, i
 
     {
         let mut s = state.borrow_mut();
-        selected_db_id = s.selected_id.parse().unwrap_or(0);
+        selected_db_id = ira_models::parse_db_id(&s.selected_id);
 
         for g in &mut s.games {
             if let Some(&(playtime, lastplayed)) = updates.get(&g.db_id) {
@@ -227,7 +262,7 @@ fn start_background_enrichment(state: &SharedState) {
 
     let s = state.borrow();
     for g in &s.games {
-        if g.app_id.is_empty() {
+        if g.app_id.is_empty() || g.variant_id.is_some() {
             continue;
         }
         if g.trophy_source.has_steam_enrichment() {
@@ -313,11 +348,11 @@ fn start_background_enrichment(state: &SharedState) {
 }
 
 pub(crate) fn apply_game_update(state: &SharedState, updated: Game) {
-    let app_id = updated.app_id.clone();
+    let db_id = updated.db_id;
 
-    let (game_for_display, game_for_grid, sidebar_update) = {
+    let (game_for_display, game_for_grid, sidebar_update, variant_grid_updates) = {
         let mut s = state.borrow_mut();
-        let Some(i) = s.games.iter().position(|g| g.app_id == app_id) else {
+        let Some(i) = s.games.iter().position(|g| g.db_id == db_id && g.variant_id.is_none()) else {
             return;
         };
 
@@ -350,7 +385,7 @@ pub(crate) fn apply_game_update(state: &SharedState, updated: Game) {
             }
         }
 
-        s.game_names.lock().unwrap().insert(app_id.clone(), updated.name.clone());
+        s.game_names.lock().unwrap().insert(updated.app_id.clone(), updated.name.clone());
 
         let icon_path = if updated.icon_path.is_empty() {
             String::new()
@@ -359,7 +394,7 @@ pub(crate) fn apply_game_update(state: &SharedState, updated: Game) {
         };
         let sidebar_update = (updated.db_id, updated.name.clone(), icon_path);
 
-        let needs_rebuild = s.selected_id == updated.db_id.to_string() && !s.content_unloaded;
+        let needs_rebuild = s.selected_id == updated.grid_id() && !s.content_unloaded;
         let counts_changed = updated.earned_count != old_earned
             || updated.total_count != old_total;
         let visual_changed = updated.grid_path != old_grid_path
@@ -368,8 +403,43 @@ pub(crate) fn apply_game_update(state: &SharedState, updated: Game) {
         let needs_grid_update = visual_changed && !s.content_unloaded;
         let game_for_grid = if needs_grid_update { Some(updated.clone()) } else { None };
         let game = if needs_rebuild { Some(updated.clone()) } else { None };
+
+        // Sync variant entries: copy achievements, counts, playtime from base game
+        let sync_db_id = updated.db_id;
+        let sync_achievements = updated.achievements.clone();
+        let sync_earned = updated.earned_count;
+        let sync_total = updated.total_count;
+        let sync_playtime = updated.playtime;
+        let sync_last_played = updated.last_played;
+        let mut variant_grid_updates: Vec<Game> = Vec::new();
+        {
+            for g in &mut s.games {
+                if g.db_id == sync_db_id && g.variant_id.is_some() {
+                    let g_counts_changed = g.earned_count != sync_earned || g.total_count != sync_total;
+                    g.achievements = sync_achievements.clone();
+                    g.earned_count = sync_earned;
+                    g.total_count = sync_total;
+                    g.playtime = sync_playtime;
+                    g.last_played = sync_last_played;
+                    if g_counts_changed {
+                        variant_grid_updates.push(g.clone());
+                    }
+                }
+            }
+        }
+
         s.games[i] = updated;
-        (game, game_for_grid, sidebar_update)
+
+        // If the selected game is a variant of this base game, refresh its display
+        // (variant entries were just synced with achievements from the base game)
+        let game = game.or_else(|| {
+            if s.content_unloaded { return None; }
+            s.games.iter()
+                .find(|g| g.grid_id() == s.selected_id && g.db_id == sync_db_id && g.variant_id.is_some())
+                .cloned()
+        });
+
+        (game, game_for_grid, sidebar_update, variant_grid_updates)
     };
 
     let (db_id, name, icon_path) = sidebar_update;
@@ -382,8 +452,19 @@ pub(crate) fn apply_game_update(state: &SharedState, updated: Game) {
         let store = state.borrow().grid_store.clone();
         for i in 0..store.n_items() {
             if let Some(item) = store.item(i).and_then(|o| o.downcast::<GameItem>().ok()) {
-                if item.game().is_some_and(|gi| gi.db_id == g.db_id) {
+                if item.game().is_some_and(|gi| gi.db_id == g.db_id && gi.variant_id.is_none()) {
                     store.splice(i, 1, &[GameItem::new(&g)]);
+                    break;
+                }
+            }
+        }
+    }
+    for vg in variant_grid_updates {
+        let store = state.borrow().grid_store.clone();
+        for i in 0..store.n_items() {
+            if let Some(item) = store.item(i).and_then(|o| o.downcast::<GameItem>().ok()) {
+                if item.game().is_some_and(|gi| gi.grid_id() == vg.grid_id()) {
+                    store.splice(i, 1, &[GameItem::new(&vg)]);
                     break;
                 }
             }
@@ -431,15 +512,20 @@ fn insert_or_update_game(state: &SharedState, game: Game) {
     }
 }
 
-pub fn switch_to_game(state: &SharedState, db_id: i64) {
-    let _span = tracing::info_span!("switch_to_game", db_id).entered();
-    state.borrow_mut().selected_id = db_id.to_string();
+pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) {
+    let _span = tracing::info_span!("switch_to_game", db_id, variant_id = ?variant_id).entered();
+    state.borrow_mut().selected_id = match variant_id {
+        Some(vid) => format!("{}-v{}", db_id, vid),
+        None => db_id.to_string(),
+    };
 
-    if let Some(index) = find_game_index(state, db_id) {
+    if let Some(index) = find_game_index(state, db_id, variant_id) {
         select_row_silently(state, Some(index));
     }
 
-    let game = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
+    let game = state.borrow().games.iter()
+        .find(|g| g.db_id == db_id && g.variant_id == variant_id)
+        .cloned();
     if let Some(game) = game {
         display_game(&game, state);
 

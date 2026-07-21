@@ -5,6 +5,7 @@ pub use scaled::ScaledPaintable;
 
 use cache::TextureCache;
 use gdk4::Texture;
+use gtk4::prelude::*;
 use std::cell::RefCell;
 use tracing::info_span;
 thread_local! {
@@ -61,6 +62,25 @@ pub fn set_picture_natural(pic: &gtk4::Picture, path: &str, w: i32, h: i32) {
     if let Some(t) = texture_for(path) {
         let paintable = ScaledPaintable::new(&t, w, h);
         pic.set_paintable(Some(&paintable));
+    }
+}
+
+/// Load a texture and set it on a Picture preserving aspect ratio.
+/// The Picture is configured with ContentFit::Contain so the image
+/// scales to fit within the allocation without distortion.
+pub fn set_picture_contain(pic: &gtk4::Picture, path: &str, max_h: i32) {
+    let _s = info_span!("set_picture_contain", path, max_h).entered();
+    if path.is_empty() {
+        return;
+    }
+    if let Some(t) = texture_for(path) {
+        pic.set_paintable(Some(&t));
+    }
+    pic.set_content_fit(gtk4::ContentFit::Contain);
+    pic.set_halign(gtk4::Align::Start);
+    pic.set_valign(gtk4::Align::Center);
+    if max_h > 0 {
+        pic.set_height_request(max_h);
     }
 }
 

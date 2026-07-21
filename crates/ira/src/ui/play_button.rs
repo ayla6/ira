@@ -1,5 +1,7 @@
 use crate::AppMessage;
 use gtk4::prelude::*;
+use std::cell::Cell;
+use std::rc::Rc;
 use super::state::SharedState;
 
 pub fn stop_game(state: &SharedState, game_id: i64) {
@@ -178,6 +180,9 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
                     if !var.env_vars.is_empty() {
                         launch.env_vars = var.env_vars.clone();
                     }
+                    if !var.pre_launch.is_empty() {
+                        launch.pre_launch = var.pre_launch.clone();
+                    }
                 }
             }
         }
@@ -221,7 +226,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
     Ok(())
 }
 
-pub fn play_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
+pub fn play_button(state: &SharedState, db_id: i64, variant_id: Option<i64>) -> gtk4::Widget {
     let running_games = state.borrow().running_games.clone();
     let sender = state.borrow().sender.clone();
     let st = state.clone();
@@ -413,11 +418,13 @@ pub fn play_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
         split.add_css_class("suggested-action");
     }
 
-    let default_vid = ira_db::get_default_variant(&state.borrow().db, db_id);
+    let default_vid = variant_id.or_else(|| ira_db::get_default_variant(&state.borrow().db, db_id));
     let default_target = match default_vid {
         Some(vid) => format!("{}", vid),
         None => "none".to_string(),
     };
+
+    let current_variant: Rc<Cell<Option<i64>>> = Rc::new(Cell::new(default_vid));
 
     let actions = gio::SimpleActionGroup::new();
     let action = gio::SimpleAction::new_stateful(
@@ -426,10 +433,11 @@ pub fn play_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
         &glib::Variant::from(&default_target),
     );
 
-    // Only save to DB and explicitly trigger change_state — the default
-    // handler calls change_state after activate, but calling it here too
-    // ensures the state updates immediately so the menu re-renders.
+    // For variant entries, don't persist the selection to DB — just track locally.
+    // For base games, persist as before and notify so the game page reloads
+    // with the variant's hero + logo (if the variant has custom_images).
     let st_c = st.clone();
+    let current_variant_c = current_variant.clone();
     action.connect_activate(move |action, param| {
         if let Some(param) = param {
             let target_str = param.get::<String>().unwrap_or_default();
@@ -438,7 +446,11 @@ pub fn play_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
             } else {
                 target_str.parse::<i64>().ok()
             };
-            ira_db::set_default_variant(&st_c.borrow().db, db_id, vid);
+            if variant_id.is_none() {
+                ira_db::set_default_variant(&st_c.borrow().db, db_id, vid);
+                let _ = st_c.borrow().sender.send(crate::AppMessage::VariantSelected(db_id, vid));
+            }
+            current_variant_c.set(vid);
             action.change_state(param);
         }
     });
@@ -456,6 +468,7 @@ pub fn play_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
     let icon_click = icon.clone();
     let label_click = label.clone();
     let st_launch = st.clone();
+    let current_variant_launch = current_variant.clone();
     split.connect_clicked(move |btn| {
         let is_running = st_launch.borrow().running_games.lock().unwrap().contains_key(&db_id);
         if is_running {
@@ -464,7 +477,7 @@ pub fn play_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
             label_click.set_text("Play");
             btn.add_css_class("suggested-action");
         } else {
-            let vid = ira_db::get_default_variant(&st_launch.borrow().db, db_id);
+            let vid = current_variant_launch.get();
             match launch_game(&st_launch, db_id, vid) {
                 Ok(()) => {
                     icon_click.set_icon_name(Some("window-close-symbolic"));

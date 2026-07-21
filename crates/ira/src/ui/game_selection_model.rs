@@ -38,21 +38,6 @@ mod imp {
         }
     }
 
-    fn positions_for_db_ids(store: &gio::ListStore, db_ids: &HashSet<i64>) -> gtk4::Bitset {
-        let bitset = gtk4::Bitset::new_empty();
-        for i in 0..store.n_items() {
-            if let Some(item) = store
-                .item(i)
-                .and_then(|o| o.downcast::<SidebarItem>().ok())
-            {
-                if item.kind() == SidebarItemKind::Game && db_ids.contains(&item.db_id()) {
-                    bitset.add(i);
-                }
-            }
-        }
-        bitset
-    }
-
     #[glib::object_subclass]
     impl ObjectSubclass for GameSelectionModel {
         const NAME: &'static str = "IraGameSelectionModel";
@@ -98,26 +83,8 @@ mod imp {
             self.clicked_position.set(position);
             self.select_single.set(unselect_rest);
 
-            let model = self.model.borrow();
-            let Some(store) = model.as_ref() else {
-                return false;
-            };
-            let Some(item) = store
-                .item(position)
-                .and_then(|o| o.downcast::<SidebarItem>().ok())
-            else {
-                return false;
-            };
-
-            let new_selection = if item.kind() == SidebarItemKind::Game {
-                let mut db_ids = HashSet::new();
-                db_ids.insert(item.db_id());
-                positions_for_db_ids(store, &db_ids)
-            } else {
-                let bs = gtk4::Bitset::new_empty();
-                bs.add(position);
-                bs
-            };
+            let new_selection = gtk4::Bitset::new_empty();
+            new_selection.add(position);
 
             let old = self.selected.borrow().copy();
             {
@@ -132,7 +99,6 @@ mod imp {
                     selected.union(&new_selection);
                 }
             }
-            drop(model);
 
             self.emit_selection_changed(&old, &new_selection);
 
@@ -143,33 +109,14 @@ mod imp {
             self.clicked_position.set(position);
             self.select_single.set(false);
 
-            let model = self.model.borrow();
-            let Some(store) = model.as_ref() else {
-                return false;
-            };
-            let Some(item) = store
-                .item(position)
-                .and_then(|o| o.downcast::<SidebarItem>().ok())
-            else {
-                return false;
-            };
-
-            let to_remove = if item.kind() == SidebarItemKind::Game {
-                let mut db_ids = HashSet::new();
-                db_ids.insert(item.db_id());
-                positions_for_db_ids(store, &db_ids)
-            } else {
-                let bs = gtk4::Bitset::new_empty();
-                bs.add(position);
-                bs
-            };
+            let to_remove = gtk4::Bitset::new_empty();
+            to_remove.add(position);
 
             let old = self.selected.borrow().copy();
             {
                 let selected = self.selected.borrow_mut();
                 selected.subtract(&to_remove);
             }
-            drop(model);
 
             self.emit_selection_changed(&old, &to_remove);
 
@@ -187,22 +134,9 @@ mod imp {
 
             let end = (position.saturating_add(n_items)).min(store.n_items());
             let new_selection = gtk4::Bitset::new_empty();
-
-            let mut db_ids: HashSet<i64> = HashSet::new();
             for i in position..end {
-                if let Some(item) = store
-                    .item(i)
-                    .and_then(|o| o.downcast::<SidebarItem>().ok())
-                {
-                    if item.kind() == SidebarItemKind::Game {
-                        db_ids.insert(item.db_id());
-                    } else {
-                        new_selection.add(i);
-                    }
-                }
+                new_selection.add(i);
             }
-
-            new_selection.union(&positions_for_db_ids(store, &db_ids));
 
             let old = self.selected.borrow().copy();
             {
@@ -228,36 +162,17 @@ mod imp {
             self.clicked_position.set(position);
             self.select_single.set(false);
 
-            let model = self.model.borrow();
-            let Some(store) = model.as_ref() else {
-                return false;
-            };
-
-            let end = (position.saturating_add(n_items)).min(store.n_items());
             let to_remove = gtk4::Bitset::new_empty();
-
-            let mut db_ids: HashSet<i64> = HashSet::new();
+            let end = position.saturating_add(n_items);
             for i in position..end {
-                if let Some(item) = store
-                    .item(i)
-                    .and_then(|o| o.downcast::<SidebarItem>().ok())
-                {
-                    if item.kind() == SidebarItemKind::Game {
-                        db_ids.insert(item.db_id());
-                    } else {
-                        to_remove.add(i);
-                    }
-                }
+                to_remove.add(i);
             }
-
-            to_remove.union(&positions_for_db_ids(store, &db_ids));
 
             let old = self.selected.borrow().copy();
             {
                 let selected = self.selected.borrow_mut();
                 selected.subtract(&to_remove);
             }
-            drop(model);
 
             self.emit_selection_changed(&old, &to_remove);
 
@@ -321,7 +236,7 @@ impl GameSelectionModel {
         self.imp().select_single.get()
     }
 
-    pub fn selected_db_ids(&self) -> HashSet<i64> {
+    pub fn selected_db_ids(&self) -> HashSet<String> {
         let model = self.imp().model.borrow();
         let selected = self.imp().selected.borrow();
         let mut ids = HashSet::new();
@@ -333,7 +248,10 @@ impl GameSelectionModel {
                         .and_then(|o| o.downcast::<SidebarItem>().ok())
                     {
                         if item.kind() == SidebarItemKind::Game {
-                            ids.insert(item.db_id());
+                            ids.insert(match item.variant_id() {
+                                Some(vid) => format!("{}-v{}", item.db_id(), vid),
+                                None => item.db_id().to_string(),
+                            });
                         }
                     }
                 }

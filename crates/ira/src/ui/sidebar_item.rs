@@ -16,6 +16,7 @@ mod imp {
     pub struct SidebarItem {
         pub kind: RefCell<SidebarItemKind>,
         pub db_id: Cell<i64>,
+        pub variant_id: Cell<Option<i64>>,
         pub name: RefCell<String>,
         pub icon_path: RefCell<String>,
         pub group_id: Cell<i64>,
@@ -30,6 +31,7 @@ mod imp {
             Self {
                 kind: RefCell::new(SidebarItemKind::default()),
                 db_id: Cell::new(0),
+                variant_id: Cell::new(None),
                 name: RefCell::new(String::new()),
                 icon_path: RefCell::new(String::new()),
                 group_id: Cell::new(0),
@@ -74,10 +76,15 @@ impl SidebarItem {
     }
 
     pub fn new_game(db_id: i64, name: &str, icon_path: &str, hidden: bool, playing: bool) -> Self {
+        Self::new_game_variant(db_id, None, name, icon_path, hidden, playing)
+    }
+
+    pub fn new_game_variant(db_id: i64, variant_id: Option<i64>, name: &str, icon_path: &str, hidden: bool, playing: bool) -> Self {
         let obj: Self = glib::Object::new();
         let imp = obj.imp();
         *imp.kind.borrow_mut() = SidebarItemKind::Game;
         imp.db_id.set(db_id);
+        imp.variant_id.set(variant_id);
         *imp.name.borrow_mut() = name.to_string();
         *imp.icon_path.borrow_mut() = icon_path.to_string();
         imp.hidden.set(hidden);
@@ -101,6 +108,10 @@ impl SidebarItem {
 
     pub fn db_id(&self) -> i64 {
         self.imp().db_id.get()
+    }
+
+    pub fn variant_id(&self) -> Option<i64> {
+        self.imp().variant_id.get()
     }
 
     pub fn name(&self) -> String {

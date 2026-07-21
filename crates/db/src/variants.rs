@@ -13,7 +13,10 @@ pub fn create_variants_table(conn: &DbConn) {
             working_dir TEXT NOT NULL DEFAULT '',
             args TEXT NOT NULL DEFAULT '',
             env_vars TEXT NOT NULL DEFAULT '[]',
-            sort_order INTEGER NOT NULL DEFAULT 0
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            pre_launch TEXT NOT NULL DEFAULT '',
+            custom_images INTEGER NOT NULL DEFAULT 0,
+            show_as_entry INTEGER NOT NULL DEFAULT 0
         );"
     ).expect("create game_variants table");
 }
@@ -21,7 +24,7 @@ pub fn create_variants_table(conn: &DbConn) {
 pub fn get_variants(conn: &DbConn, game_id: i64) -> Result<Vec<GameVariant>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c.prepare(
-        "SELECT id, game_id, name, exe, working_dir, args, env_vars, sort_order FROM game_variants WHERE game_id = ?1 ORDER BY sort_order, id"
+        "SELECT id, game_id, name, exe, working_dir, args, env_vars, sort_order, pre_launch, custom_images, show_as_entry FROM game_variants WHERE game_id = ?1 ORDER BY sort_order, id"
     ).map_err(|e| e.to_string())?;
     let rows = stmt.query_map(params![game_id], |row| {
         let env_str: String = row.get(6)?;
@@ -35,6 +38,9 @@ pub fn get_variants(conn: &DbConn, game_id: i64) -> Result<Vec<GameVariant>, Str
             args: row.get(5)?,
             env_vars,
             sort_order: row.get(7)?,
+            pre_launch: row.get(8)?,
+            custom_images: row.get::<_, i64>(9)? != 0,
+            show_as_entry: row.get::<_, i64>(10)? != 0,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -54,8 +60,8 @@ pub fn add_variant(conn: &DbConn, variant: &GameVariant) -> Result<i64, String> 
         |row| row.get(0),
     ).unwrap_or(0);
     c.execute(
-        "INSERT INTO game_variants (game_id, name, exe, working_dir, args, env_vars, sort_order) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![variant.game_id, variant.name, variant.exe, variant.working_dir, variant.args, env_str, sort_order],
+        "INSERT INTO game_variants (game_id, name, exe, working_dir, args, env_vars, sort_order, pre_launch, custom_images, show_as_entry) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![variant.game_id, variant.name, variant.exe, variant.working_dir, variant.args, env_str, sort_order, variant.pre_launch, variant.custom_images as i64, variant.show_as_entry as i64],
     ).map_err(|e| e.to_string())?;
     Ok(c.last_insert_rowid())
 }
@@ -64,8 +70,8 @@ pub fn update_variant(conn: &DbConn, variant: &GameVariant) -> Result<(), String
     let env_str = serde_json::to_string(&variant.env_vars).map_err(|e| e.to_string())?;
     let c = crate::lock_db(conn)?;
     c.execute(
-        "UPDATE game_variants SET name=?1, exe=?2, working_dir=?3, args=?4, env_vars=?5 WHERE id=?6",
-        params![variant.name, variant.exe, variant.working_dir, variant.args, env_str, variant.id],
+        "UPDATE game_variants SET name=?1, exe=?2, working_dir=?3, args=?4, env_vars=?5, pre_launch=?6, custom_images=?7, show_as_entry=?8 WHERE id=?9",
+        params![variant.name, variant.exe, variant.working_dir, variant.args, env_str, variant.pre_launch, variant.custom_images as i64, variant.show_as_entry as i64, variant.id],
     ).map_err(|e| e.to_string())?;
     Ok(())
 }

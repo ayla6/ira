@@ -98,8 +98,8 @@ pub(super) fn handle_unified_sgdb_result(
                 }
             }
             let selected_id = sc.borrow().selected_id.clone();
-            if selected_id == db_id.to_string() {
-                let game = sc.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
+            if ira_models::parse_db_id(&selected_id) == db_id {
+                let game = sc.borrow().games.iter().find(|g| g.grid_id() == selected_id).cloned();
                 if let Some(game) = game {
                     display_game(&game, &sc);
                 }

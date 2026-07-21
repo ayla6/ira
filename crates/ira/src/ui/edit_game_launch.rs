@@ -8,6 +8,7 @@ pub(super) struct LaunchConfigWidgets {
     pub(super) exe_entry: adw::EntryRow,
     pub(super) args_entry: adw::EntryRow,
     pub(super) wd_entry: adw::EntryRow,
+    pub(super) pre_launch_entry: adw::EntryRow,
     pub(super) profile_row: Option<adw::ComboRow>,
 }
 
@@ -82,6 +83,12 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
     wd_entry.add_suffix(&wd_browse);
     lc_group.add(&wd_entry);
 
+    let pre_launch_entry = adw::EntryRow::new();
+    pre_launch_entry.set_title("Run before game");
+    pre_launch_entry.set_text(&params.launch.pre_launch);
+    pre_launch_entry.set_tooltip_text(Some("Shell command to run before launching the game. If it fails, the game will not launch."));
+    lc_group.add(&pre_launch_entry);
+
     page.append(&lc_group);
     params.sidebar.append(&settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Launch Config"));
     params.stack.add_named(&page, Some("launch"));
@@ -90,6 +97,7 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
         exe_entry,
         args_entry,
         wd_entry,
+        pre_launch_entry,
         profile_row,
     })
 }

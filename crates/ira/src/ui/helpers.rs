@@ -145,20 +145,24 @@ pub fn merge_game_enrichment(existing: &Game, enriched: &Game) -> Game {
     result.total_count = enriched.total_count;
 
     // Images — apply only if enrichment found something.
-    if !enriched.icon_path.is_empty() {
-        result.icon_path = enriched.icon_path.clone();
-    }
-    if !enriched.hero_image_path.is_empty() {
-        result.hero_image_path = enriched.hero_image_path.clone();
-    }
-    if !enriched.grid_path.is_empty() {
-        result.grid_path = enriched.grid_path.clone();
-    }
-    if !enriched.header_path.is_empty() {
-        result.header_path = enriched.header_path.clone();
-    }
-    if !enriched.logo_path.is_empty() {
-        result.logo_path = enriched.logo_path.clone();
+    // Skip image paths from variant pseudo-games — their images are variant-specific
+    // and must not overwrite the base game's images.
+    if enriched.variant_id.is_none() {
+        if !enriched.icon_path.is_empty() {
+            result.icon_path = enriched.icon_path.clone();
+        }
+        if !enriched.hero_image_path.is_empty() {
+            result.hero_image_path = enriched.hero_image_path.clone();
+        }
+        if !enriched.grid_path.is_empty() {
+            result.grid_path = enriched.grid_path.clone();
+        }
+        if !enriched.header_path.is_empty() {
+            result.header_path = enriched.header_path.clone();
+        }
+        if !enriched.logo_path.is_empty() {
+            result.logo_path = enriched.logo_path.clone();
+        }
     }
 
     // Name — apply only if existing is a placeholder.

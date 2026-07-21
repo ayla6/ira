@@ -43,7 +43,7 @@ pub fn run_bench(state: SharedState) {
             }
             1 => {
                 let id = if switch_i % 2 == 0 { app_a } else { app_b };
-                switch_to_game(&state, id);
+                switch_to_game(&state, id, None);
                 log(&format!("after switch {:2} ({})", switch_i + 1, id));
                 switch_i += 1;
                 if switch_i >= 10 {

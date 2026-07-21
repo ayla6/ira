@@ -286,6 +286,9 @@ pub(super) struct VarW {
     pub(super) exe: adw::EntryRow,
     pub(super) wd: adw::EntryRow,
     pub(super) args: adw::EntryRow,
+    pub(super) pre_launch: adw::EntryRow,
+    pub(super) custom_images: adw::SwitchRow,
+    pub(super) show_as_entry: adw::SwitchRow,
     pub(super) group: adw::PreferencesGroup,
 }
 
@@ -320,6 +323,7 @@ pub(super) fn build_variants_page(
     _has_config: bool,
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
+    win: &adw::Window,
 ) -> Rc<RefCell<Vec<VarW>>> {
     let variants: Vec<GameVariant> = ira_db::get_variants(&state.borrow().db, db_id).unwrap_or_default();
     let variant_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -349,6 +353,9 @@ pub(super) fn build_variants_page(
     let add_variant_fn = {
         let var_widgets = var_widgets.clone();
         let container = variant_container.clone();
+        let state_for_fn = state.clone();
+        let db_id_for_fn = db_id;
+        let win_for_fn = win.clone();
         move |v: GameVariant| {
             let group = adw::PreferencesGroup::new();
 
@@ -428,6 +435,82 @@ pub(super) fn build_variants_page(
             wd_entry.add_suffix(&wd_browse);
             group.add(&wd_entry);
 
+            let pre_launch_entry = adw::EntryRow::new();
+            pre_launch_entry.set_title("Run before game");
+            pre_launch_entry.set_text(&v.pre_launch);
+            pre_launch_entry.set_tooltip_text(Some("Shell command to run before launching. If it fails, the game will not launch."));
+            group.add(&pre_launch_entry);
+
+            let custom_images_row = adw::SwitchRow::new();
+            custom_images_row.set_title("Custom images");
+            custom_images_row.set_subtitle("Use custom hero and logo for this variant");
+            custom_images_row.set_active(v.custom_images || v.show_as_entry);
+            group.add(&custom_images_row);
+
+            let show_as_entry_row = adw::SwitchRow::new();
+            show_as_entry_row.set_title("Show as separate entry");
+            show_as_entry_row.set_subtitle("Appears in the grid as its own game entry");
+            show_as_entry_row.set_active(v.show_as_entry);
+            group.add(&show_as_entry_row);
+
+            {
+                let custom_images_c = custom_images_row.clone();
+                show_as_entry_row.connect_notify_local(Some("active"), move |row, _| {
+                    if row.is_active() {
+                        custom_images_c.set_active(true);
+                        custom_images_c.set_sensitive(false);
+                    } else {
+                        custom_images_c.set_sensitive(true);
+                    }
+                });
+            }
+
+            if v.show_as_entry {
+                custom_images_row.set_sensitive(false);
+            }
+
+            let images_expander = adw::ExpanderRow::new();
+            images_expander.set_title("Manage images");
+            images_expander.set_enable_expansion(custom_images_row.is_active() && v.id > 0);
+            if v.id == 0 {
+                images_expander.set_subtitle("Save the variant first");
+            }
+            group.add(&images_expander);
+            {
+                let images_expander_c = images_expander.clone();
+                custom_images_row.connect_notify_local(Some("active"), move |row, _| {
+                    images_expander_c.set_enable_expansion(row.is_active());
+                });
+            }
+            if v.id > 0 {
+                let state_c = state_for_fn.clone();
+                let db_id_c = db_id_for_fn;
+                let variant_id = v.id;
+                let parent_win = win_for_fn.clone();
+                let save_dir = state_for_fn.borrow().save_dir.clone();
+                let db = state_for_fn.borrow().db.clone();
+                if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, db_id_c) {
+                    let image_dir = ira_parser::entry_data_dir(&save_dir, &entry);
+                    let var_dir = image_dir.join(format!("variant-{}", variant_id));
+                    let _ = std::fs::create_dir_all(&var_dir);
+                    for &(label, file_base, asset_type, thumb_h) in &[
+                        ("Icon", "icon", "icon", 48i32),
+                        ("Hero", "hero", "hero", 64),
+                        ("Capsule", "vertical", "grid", 64),
+                        ("Header", "header", "header", 48),
+                        ("Logo", "logo", "logo", 64),
+                    ] {
+                        let row = super::image_manager::build_image_section_for_dir(
+                            super::image_manager::VariantImageSectionParams {
+                                target_dir: &var_dir, label, file_base, asset_type, max_h: thumb_h,
+                                state: &state_c, entry: &entry, parent_win: &parent_win,
+                            },
+                        );
+                        images_expander.add_row(&row);
+                    }
+                }
+            }
+
             container.append(&group);
 
             var_widgets.borrow_mut().push(VarW {
@@ -436,6 +519,9 @@ pub(super) fn build_variants_page(
                 exe: exe_entry,
                 wd: wd_entry,
                 args: args_entry,
+                pre_launch: pre_launch_entry,
+                custom_images: custom_images_row,
+                show_as_entry: show_as_entry_row,
                 group,
             });
         }

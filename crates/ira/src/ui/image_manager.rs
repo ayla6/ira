@@ -1,4 +1,5 @@
 use gtk4::prelude::*;
+use adw::prelude::*;
 use crate::Game;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -32,10 +33,10 @@ pub fn build_image_manager_content_with_drafts(
 
     let sections: [SectionEntry; 5] = [
         ("Icon", "icon", "icon", 48, 48, &[]),
-        ("Hero", "hero", "hero", 96, 48, &[]),
-        ("Capsule", "vertical", "grid", 32, 48, &["600x900"]),
+        ("Hero", "hero", "hero", 96, 64, &[]),
+        ("Capsule", "vertical", "grid", 48, 64, &["600x900"]),
         ("Header", "header", "header", 96, 48, &["460x215", "920x430"]),
-        ("Logo", "logo", "logo", 96, 48, &[]),
+        ("Logo", "logo", "logo", 64, 64, &[]),
     ];
 
     for &(label, file, asset, thumb_w, thumb_h, dimensions) in &sections {
@@ -180,18 +181,14 @@ fn make_refresh_closure(
                     });
                 if let Some(path) = preview_src {
                     let p = gtk4::Picture::new();
-                    p.set_content_fit(gtk4::ContentFit::ScaleDown);
-                    ira_images::set_picture_natural(&p, &path, tw, th);
+                    ira_images::set_picture_contain(&p, &path, th.max(tw));
                     preview_wrapper.append(&p);
                 } else {
                     let ph = gtk4::Label::new(Some("—"));
                     ph.add_css_class("dim-label");
+                    ph.set_height_request(th.max(tw));
                     preview_wrapper.append(&ph);
                 }
-                // Only invalidate textures and update grid when the image was
-                // written directly to disk (e.g. Steam button). When it's from
-                // pending_copies (temp file), the cloud dir hasn't changed yet —
-                // invalidation happens at save time instead.
                 if from_pending.is_some() {
                     return;
                 }
@@ -267,17 +264,16 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     };
 
     let preview = gtk4::Picture::new();
-    preview.set_content_fit(gtk4::ContentFit::ScaleDown);
-    preview.set_size_request(thumb_w, thumb_h);
+    let max_h = thumb_h.max(thumb_w);
     let preview_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    preview_wrapper.set_size_request(thumb_w, 48);
     preview_wrapper.set_valign(gtk4::Align::Center);
     if !img_path.is_empty() && std::path::Path::new(&img_path).is_file() {
-        ira_images::set_picture_natural(&preview, &img_path, thumb_w, thumb_h);
+        ira_images::set_picture_contain(&preview, &img_path, max_h);
         preview_wrapper.append(&preview);
     } else {
         let ph = gtk4::Label::new(Some("—"));
         ph.add_css_class("dim-label");
+        ph.set_height_request(max_h);
         preview_wrapper.append(&ph);
     }
     row.append(&preview_wrapper);
@@ -429,4 +425,135 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     section
 }
 
+/// Build a compact image section for a variant directory.
+/// Images are saved directly to `target_dir` (no pending_copies).
+/// Used inside variant cards' expandable "Manage images" section.
+pub struct VariantImageSectionParams<'a> {
+    pub target_dir: &'a std::path::Path,
+    pub label: &'a str,
+    pub file_base: &'a str,
+    pub asset_type: &'a str,
+    pub max_h: i32,
+    pub state: &'a SharedState,
+    pub entry: &'a ira_models::GameEntry,
+    pub parent_win: &'a adw::Window,
+}
 
+pub fn build_image_section_for_dir(params: VariantImageSectionParams) -> adw::ActionRow {
+    let VariantImageSectionParams { target_dir, label, file_base, asset_type, max_h, state, entry, parent_win } = params;
+    let row = adw::ActionRow::new();
+    row.set_title(label);
+
+    let preview_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    preview_wrapper.set_valign(gtk4::Align::Center);
+
+    let refresh_preview = {
+        let target_dir = target_dir.to_path_buf();
+        let preview_wrapper = preview_wrapper.clone();
+        let file_base = file_base.to_string();
+        Rc::new(move || {
+            clear_children(&preview_wrapper);
+            if let Some(p) = ira_parser::find_image_file(&target_dir, &file_base) {
+                let pic = gtk4::Picture::new();
+                ira_images::set_picture_contain(&pic, &p.to_string_lossy(), max_h);
+                preview_wrapper.append(&pic);
+            } else {
+                let ph = gtk4::Label::new(Some("—"));
+                ph.add_css_class("dim-label");
+                ph.set_height_request(max_h);
+                preview_wrapper.append(&ph);
+            }
+        })
+    };
+    refresh_preview();
+    row.add_prefix(&preview_wrapper);
+
+    let btns = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+
+    let browse_btn = make_browse_button(
+        Some(parent_win),
+        "Select image",
+        false,
+        Some(("Images", &["image/png", "image/jpeg", "image/webp", "image/x-icon"])),
+        {
+            let target_dir = target_dir.to_path_buf();
+            let file_base = file_base.to_string();
+            let refresh = refresh_preview.clone();
+            move |path| {
+                ira_parser::remove_image_variants(&target_dir, &file_base);
+                ira_parser::remove_image_variants(&target_dir, &format!("{}_small", file_base));
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png");
+                let dest = target_dir.join(format!("{}.{}", file_base, ext));
+                let _ = std::fs::copy(path, &dest);
+                ira_parser::convert_to_lossless_webp(&dest);
+                let (sw, sh) = match file_base.as_str() {
+                    "icon" => (32u32, 32u32),
+                    "hero" => (1920, 620),
+                    "vertical" => (300, 450),
+                    "header" => (460, 215),
+                    "logo" => (620, 620),
+                    _ => (128, 128),
+                };
+                ira_parser::ensure_small_image(&target_dir, &file_base, sw, sh);
+                refresh();
+            }
+        },
+    );
+    btns.append(&browse_btn);
+
+    let sgdb_id = entry.sgdb_id.clone().unwrap_or_default();
+    let is_steam = entry.trophy_source.has_steam_enrichment();
+    let sgdb_id_for_picker = if !sgdb_id.is_empty() {
+        sgdb_id.clone()
+    } else if !entry.steam_id.is_empty() {
+        entry.steam_id.clone()
+    } else {
+        entry.game_id.clone()
+    };
+    if !sgdb_id_for_picker.is_empty() {
+        let btn = gtk4::Button::with_label("SGDB");
+        btn.add_css_class("flat");
+        let steam = state.borrow().steam.clone();
+        let asset_c = asset_type.to_string();
+        let parent = parent_win.clone();
+        let refresh = refresh_preview.clone();
+        let sgdb_id_c = sgdb_id_for_picker.clone();
+        let save_dir = state.borrow().save_dir.clone();
+        let sgdb_id_empty = sgdb_id.is_empty();
+        btn.connect_clicked(move |_| {
+            let on_done: Rc<dyn Fn()> = {
+                let refresh = refresh.clone();
+                Rc::new(move || {
+                    refresh();
+                })
+            };
+            show_sgdb_picker(ShowSgdbPickerParams {
+                steam: &steam, id: &sgdb_id_c, asset: &asset_c,
+                is_steam_id: is_steam && sgdb_id_empty,
+                dimensions: &[],
+                parent: &parent, on_done,
+                pending_copies: None,
+                save_dir: &save_dir,
+            });
+        });
+        btns.append(&btn);
+    }
+
+    let reset_btn = gtk4::Button::with_label("Reset");
+    reset_btn.add_css_class("flat");
+    {
+        let target_dir = target_dir.to_path_buf();
+        let file_base = file_base.to_string();
+        let refresh = refresh_preview.clone();
+        reset_btn.connect_clicked(move |_| {
+            ira_parser::remove_image_variants(&target_dir, &file_base);
+            let small = format!("{}_small", file_base);
+            ira_parser::remove_image_variants(&target_dir, &small);
+            refresh();
+        });
+    }
+    btns.append(&reset_btn);
+
+    row.add_suffix(&btns);
+    row
+}

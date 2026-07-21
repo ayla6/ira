@@ -391,8 +391,27 @@ pub(super) fn build_variants_page(
             del_btn.add_css_class("error");
             let container_c = container.clone();
             let group_c = group.clone();
+            let name_entry_c = name_entry.clone();
+            let main_win = state_for_fn.borrow().window.clone();
             del_btn.connect_clicked(move |_| {
-                container_c.remove(&group_c);
+                let variant_name = name_entry_c.text().to_string();
+                let dialog = adw::AlertDialog::new(
+                    Some("Delete variant?"),
+                    Some(&format!("\"{}\" will be removed. Save to apply changes.", variant_name)),
+                );
+                dialog.add_response("cancel", "Cancel");
+                dialog.add_response("delete", "Delete");
+                dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+                dialog.set_default_response(Some("cancel"));
+                dialog.set_close_response("cancel");
+                let container_cc = container_c.clone();
+                let group_cc = group_c.clone();
+                dialog.connect_response(None, move |_, response| {
+                    if response == "delete" {
+                        container_cc.remove(&group_cc);
+                    }
+                });
+                dialog.present(Some(&main_win));
             });
             name_entry.add_suffix(&del_btn);
 

@@ -104,7 +104,7 @@ pub fn set_sidebar_playing(state: &SharedState, db_id: i64, playing: bool) {
     let saved_scroll = sidebar_scroll.vadjustment().value();
     for i in 0..store.n_items() {
         if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()) {
-            if item.kind() == SidebarItemKind::Game && item.db_id() == db_id {
+            if item.kind() == SidebarItemKind::Game && item.db_id() == db_id && item.playing() != playing {
                 let new_item = SidebarItem::new_game_variant(
                     db_id, item.variant_id(), &item.name(), &item.icon_path(), item.hidden(), playing,
                 );

@@ -67,6 +67,11 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         .unwrap_or_default()
         .as_secs() as i64;
 
+    let variant_info = variant_id
+        .and_then(|vid| ira_db::get_variants(&db, db_id).ok()?.into_iter().find(|v| v.id == vid))
+        .map(|v| (v.show_as_entry, v.count_playtime));
+    let (variant_show_as_entry, variant_count_playtime) = variant_info.unwrap_or((false, true));
+
     if kind == ira_models::GameKind::Retro {
         let cc = cfg_clone.console(&platform_id);
         let exe = if !per_game_emu.is_empty() {
@@ -102,6 +107,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
                     sender: sender.clone(),
                     game_id,
                     variant_id: None,
+                    count_playtime: true,
                     started_at,
                     db: db.clone(),
                     running_games: running_games.clone(),
@@ -130,6 +136,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
                     sender: sender.clone(),
                     game_id,
                     variant_id: None,
+                    count_playtime: true,
                     started_at,
                     db: db.clone(),
                     running_games: running_games.clone(),
@@ -212,6 +219,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
                     sender,
                     game_id,
                     variant_id,
+                    count_playtime: variant_count_playtime,
                     app_id: app_id.clone(),
                     db: db.clone(),
                     save_dir: save_dir.clone(),
@@ -223,11 +231,9 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         }
     }
 
-    let variant_show_as_entry = variant_id
-        .and_then(|vid| ira_db::get_variants(&db, db_id).ok()?.into_iter().find(|v| v.id == vid))
-        .is_some_and(|v| v.show_as_entry);
-
-    if variant_show_as_entry {
+    if !variant_count_playtime {
+        // Variant doesn't count playtime (e.g. modding tool) — skip last_played
+    } else if variant_show_as_entry {
         if let Some(vid) = variant_id {
             if let Err(e) = ira_db::set_variant_last_played(&db, vid, started_at) {
                 eprintln!("Failed to update variant last played: {}", e);

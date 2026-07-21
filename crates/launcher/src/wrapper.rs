@@ -79,6 +79,7 @@ pub struct MonitorContext {
     pub sender: AppSender,
     pub game_id: i64,
     pub variant_id: Option<i64>,
+    pub count_playtime: bool,
     pub started_at: i64,
     pub db: DbConn,
     pub running_games: Arc<Mutex<HashMap<i64, i32>>>,
@@ -110,7 +111,7 @@ pub fn monitor_process(
 
     if duration < 5 {
         eprintln!("Game {} exited after {}s — possible crash, not recording session", ctx.game_id, duration);
-    } else {
+    } else if ctx.count_playtime {
         if let Err(e) = record_session(&ctx.db, ctx.game_id, ctx.variant_id, ctx.started_at, ended_at) {
             eprintln!("Failed to record play session: {}", e);
         }

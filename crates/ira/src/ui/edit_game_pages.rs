@@ -289,6 +289,7 @@ pub(super) struct VarW {
     pub(super) pre_launch: adw::EntryRow,
     pub(super) custom_images: adw::SwitchRow,
     pub(super) show_as_entry: adw::SwitchRow,
+    pub(super) count_playtime: adw::SwitchRow,
     pub(super) group: adw::PreferencesGroup,
 }
 
@@ -488,6 +489,12 @@ pub(super) fn build_variants_page(
                 custom_images_row.set_sensitive(false);
             }
 
+            let count_playtime_row = adw::SwitchRow::new();
+            count_playtime_row.set_title("Count playtime");
+            count_playtime_row.set_subtitle("Track playtime for this variant (disable for modding tools)");
+            count_playtime_row.set_active(v.count_playtime);
+            group.add(&count_playtime_row);
+
             let images_expander = adw::ExpanderRow::new();
             images_expander.set_title("Manage images");
             images_expander.set_enable_expansion(custom_images_row.is_active() && v.id > 0);
@@ -541,6 +548,7 @@ pub(super) fn build_variants_page(
                 pre_launch: pre_launch_entry,
                 custom_images: custom_images_row,
                 show_as_entry: show_as_entry_row,
+                count_playtime: count_playtime_row,
                 group,
             });
         }

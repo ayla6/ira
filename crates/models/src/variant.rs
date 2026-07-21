@@ -23,5 +23,9 @@ pub struct GameVariant {
     pub playtime: f64,
     #[serde(default)]
     pub last_played: i64,
+    #[serde(default = "default_true")]
+    pub count_playtime: bool,
 }
+
+fn default_true() -> bool { true }
 

@@ -256,6 +256,11 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
                             if let Some(g) = state_c3.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                                 g.sgdb_id = sgdb_id_c.clone();
                             }
+                            if let Some(ref sd) = state_c3.borrow().settings_data {
+                                if sd.db_id == db_id {
+                                    sd.pending_copies.borrow_mut().remove("__unmatch__");
+                                }
+                            }
                             refresh_settings_images_page(&state_c3, db_id, |s, game, win, pc| {
                                 build_image_manager_content_with_drafts(s, game, win, pc).upcast()
                             });

@@ -96,6 +96,12 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                         g.total_count = 0;
                         g.achievements.clear();
                     }
+                    if let Some(ref sd) = sc.borrow().settings_data {
+                        if sd.db_id == db_id {
+                            let key = format!("__ra_unmatch_{}", db_id);
+                            sd.pending_copies.borrow_mut().remove(&key);
+                        }
+                    }
                     let (ra_username, ra_token, ra_password, steam, watcher, sender, save_dir, db) = {
                         let s = sc.borrow();
                         (s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone(),

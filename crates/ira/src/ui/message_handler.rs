@@ -159,6 +159,7 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                     .is_some_and(|v| v.show_as_entry);
                 if is_show_as_entry {
                     switch_to_game(state, db_id, Some(vid));
+                    super::sidebar::scroll_to_row(state, db_id, Some(vid));
                     return;
                 }
             }

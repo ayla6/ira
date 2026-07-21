@@ -473,9 +473,7 @@ pub fn play_button(state: &SharedState, db_id: i64, variant_id: Option<i64>) -> 
             } else {
                 target_str.parse::<i64>().ok()
             };
-            if variant_id.is_none() {
-                ira_db::set_default_variant(&st_c.borrow().db, db_id, vid);
-            }
+            ira_db::set_default_variant(&st_c.borrow().db, db_id, vid);
             let _ = st_c.borrow().sender.send(crate::AppMessage::VariantSelected(db_id, vid));
             current_variant_c.set(vid);
             action.change_state(param);

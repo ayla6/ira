@@ -38,7 +38,7 @@ pub fn stop_game(state: &SharedState, game_id: i64) {
 }
 
 pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -> Result<(), String> {
-    let (running_games, sender, game_info, global_shadps4_exe, db, save_dir, app_default_wine, default_native_env_vars, cfg_clone) = {
+    let (running_games, sender, game_info, global_shadps4_exe, global_rpcs3_exe, db, save_dir, app_default_wine, default_native_env_vars, cfg_clone) = {
         let s = state.borrow();
         (
             s.running_games.clone(),
@@ -48,6 +48,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
                 .map(|g| (g.kind, g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone(), g.platform_id.clone(), g.ra_core.clone(), g.emulator_override.clone()))
                 .unwrap_or_default(),
             s.cfg.shadps4_executable.clone(),
+            s.cfg.rpcs3_executable.clone(),
             s.db.clone(),
             s.save_dir.clone(),
             s.cfg.default_wine_config.clone(),
@@ -146,6 +147,35 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
                 });
             }
             Err(e) => return Err(format!("Failed to launch shadPS4: {}", e)),
+        }
+    } else if kind == ira_models::GameKind::Ps3 {
+        let exe = if !per_game_emu.is_empty() {
+            per_game_emu.as_str()
+        } else if !global_rpcs3_exe.is_empty() {
+            &global_rpcs3_exe
+        } else {
+            "rpcs3"
+        };
+        let cmd = vec![exe.to_string(), "--no-gui".to_string(), game_path.to_string()];
+        let log_path = ira_launcher::wrapper::game_log_path(&save_dir, game_id);
+        match ira_launcher::wrapper::spawn_game(&cmd, &[], None, Some(&log_path)) {
+            Ok(child) => {
+                let pid = child.id() as i32;
+                running_games.lock().unwrap().insert(game_id, pid);
+                let mc = ira_launcher::wrapper::MonitorContext {
+                    sender: sender.clone(),
+                    game_id,
+                    variant_id: None,
+                    count_playtime: true,
+                    started_at,
+                    db: db.clone(),
+                    running_games: running_games.clone(),
+                };
+                std::thread::spawn(move || {
+                    ira_launcher::wrapper::monitor_process(child, pid, mc);
+                });
+            }
+            Err(e) => return Err(format!("Failed to launch RPCS3: {}", e)),
         }
     } else if kind == ira_models::GameKind::Steam {
         let cmd = vec!["steam".to_string(), "-applaunch".to_string(), app_id.clone()];

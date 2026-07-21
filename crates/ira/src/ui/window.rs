@@ -63,6 +63,7 @@ pub fn build_ui(
         steam: ctx.steam.clone(),
         watcher: ctx.watcher.clone(),
         shadps4_watcher: None,
+        rpcs3_watcher: None,
         db: ctx.db,
         sender: ctx.sender,
         game_names: ctx.game_names,

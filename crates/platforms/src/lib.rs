@@ -9,6 +9,7 @@ pub mod api_emulators_shared;
 pub mod api_emulators_steam;
 pub mod consoles;
 pub mod ps4;
+pub mod ps3;
 pub mod retroachievements;
 pub mod emulator_detect;
 pub mod rom_serial;

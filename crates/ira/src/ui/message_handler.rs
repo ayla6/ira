@@ -117,6 +117,50 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 }
             }
         }
+        AppMessage::Rpcs3PlaytimeChanged => {
+            let persistent = ira_platforms::ps3::parse_persistent_settings(
+                &ira_platforms::ps3::persistent_settings_path(),
+            );
+            let mut updated_ids = Vec::new();
+            for g in state.borrow_mut().games.iter_mut() {
+                if g.kind == ira_models::GameKind::Ps3 {
+                    let serial = &g.platform_id;
+                    let new_playtime = persistent.playtime_ms.get(serial)
+                        .map(|ms| ira_platforms::ps3::ms_to_hours(*ms));
+                    let new_last_played = persistent.last_played.get(serial).copied();
+                    let changed = match new_playtime {
+                        Some(pt) if (g.playtime - pt).abs() > 0.001 => {
+                            g.playtime = pt;
+                            true
+                        }
+                        _ => false,
+                    } || match new_last_played {
+                        Some(lp) if lp != g.last_played => {
+                            g.last_played = lp;
+                            true
+                        }
+                        _ => false,
+                    };
+                    if changed {
+                        updated_ids.push(g.db_id);
+                    }
+                }
+            }
+            if !updated_ids.is_empty() {
+                rebuild_sidebar(state);
+                let selected_id = state.borrow().selected_id.clone();
+                if let Some(id) = updated_ids.first() {
+                    if ira_models::parse_db_id(&selected_id) == *id {
+                        let game = state.borrow().games.iter()
+                            .find(|g| g.grid_id() == selected_id)
+                            .cloned();
+                        if let Some(game) = game {
+                            display_game(&game, state);
+                        }
+                    }
+                }
+            }
+        }
         AppMessage::GamesLoaded(games) => {
             handle_games_loaded(state, games);
         }
@@ -332,7 +376,7 @@ fn start_background_enrichment(state: &SharedState) {
             }
         }
 
-        if g.kind == ira_models::GameKind::Ps4 || g.kind == ira_models::GameKind::Retro {
+        if g.kind == ira_models::GameKind::Ps4 || g.kind == ira_models::GameKind::Ps3 || g.kind == ira_models::GameKind::Retro {
             continue;
         }
 

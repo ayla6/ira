@@ -63,7 +63,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     stack.add_named(&general_page, Some("general"));
 
     // --- Launch Config + Wine Config (not for steam/ps4/retro) ---
-    let show_launch_config = game.kind != ira_models::GameKind::Steam && game.kind != ira_models::GameKind::Ps4 && game.kind != ira_models::GameKind::Retro;
+    let show_launch_config = game.kind != ira_models::GameKind::Steam && game.kind != ira_models::GameKind::Ps4 && game.kind != ira_models::GameKind::Ps3 && game.kind != ira_models::GameKind::Retro;
     let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
     let launch_config_widgets = if show_launch_config {
         build_launch_config_page(super::edit_game_launch::LaunchConfigParams {
@@ -256,10 +256,10 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                 app_id_changed = true;
                 new_app_id_val = new_id.clone();
                 let ts = if new_id.is_empty() { ira_models::TrophySource::Empty } else { trophy_source };
-                let pid = if game_kind == ira_models::GameKind::Ps4 || game_kind == ira_models::GameKind::Retro {
+                let pid = if game_kind == ira_models::GameKind::Ps4 || game_kind == ira_models::GameKind::Ps3 || game_kind == ira_models::GameKind::Retro {
                     &saved_platform_id
                 } else if new_id.is_empty() { "" } else { &new_id };
-                let (steam_id, game_id): (&str, &str) = if game_kind == ira_models::GameKind::Ps4 || game_kind == ira_models::GameKind::Retro { ("", &new_id) } else { (&new_id, "") };
+                let (steam_id, game_id): (&str, &str) = if game_kind == ira_models::GameKind::Ps4 || game_kind == ira_models::GameKind::Ps3 || game_kind == ira_models::GameKind::Retro { ("", &new_id) } else { (&new_id, "") };
                 if let Err(e) = ira_db::update_game_ids(&db, db_id_s, steam_id, game_id, ts, pid) {
                     eprintln!("Failed to update app ID: {}", e);
                 }

@@ -52,7 +52,7 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
     let has_hero = !game.hero_image_path.is_empty();
 
     // Wine tools button (only shown if wine is enabled — skip DB lookup for native platforms)
-    let wine_enabled = if game.kind == ira_models::GameKind::Steam || game.kind == ira_models::GameKind::Ps4 {
+    let wine_enabled = if game.kind == ira_models::GameKind::Steam || game.kind == ira_models::GameKind::Ps4 || game.kind == ira_models::GameKind::Ps3 {
         false
     } else {
         let s = state.borrow();

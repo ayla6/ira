@@ -13,7 +13,7 @@ use super::achievement_rows::{create_achievement_row, build_global_tab};
 
 pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::Widget {
     let _span = tracing::info_span!("build_achievements_view", db_id = game.db_id).entered();
-    let is_ps4 = game.kind == ira_models::GameKind::Ps4;
+    let is_ps4 = game.kind.is_trophy_console();
 
     let view_stack = adw::ViewStack::new();
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -59,7 +59,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
     let trophy_source_for_reload = game.trophy_source;
     let platform_id_for_reload = game.platform_id.clone();
     let db_id_for_reload = game.db_id;
-    let is_retro_or_ps4 = kind_for_reload == ira_models::GameKind::Ps4 || kind_for_reload == ira_models::GameKind::Retro;
+    let is_retro_or_ps4 = kind_for_reload == ira_models::GameKind::Ps4 || kind_for_reload == ira_models::GameKind::Ps3 || kind_for_reload == ira_models::GameKind::Retro;
     let can_mark_unlocked = matches!(kind_for_reload, ira_models::GameKind::Wine | ira_models::GameKind::Linux);
 
     let sender = state.borrow().sender.clone();

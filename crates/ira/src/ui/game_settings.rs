@@ -8,6 +8,7 @@ use crate::Game;
 use super::matching::match_game_to_steam;
 use super::settings_dialog::build_shadps4_version_dropdown;
 use super::state::SharedState;
+use super::helpers::clear_children;
 use super::ra_match_dialog::show_ra_search_dialog;
 
 type GameGeneralPageResult = (gtk4::Box, adw::EntryRow, adw::EntryRow, Rc<RefCell<Option<String>>>, Option<adw::EntryRow>, Option<adw::ComboRow>, Rc<RefCell<Option<String>>>, Rc<RefCell<Option<String>>>, Option<gtk4::Box>);
@@ -35,12 +36,25 @@ fn build_ra_section(state: &SharedState, game: &Game, win: &adw::Window, pending
         }
         let pc = pending_copies.clone();
         let pkey = pending_key.clone();
-        let unmatch_btn_c = unmatch_btn.clone();
-        let status_row_c = status_row.clone();
+        let sc = state.clone();
+        let game_clone = game.clone();
         unmatch_btn.connect_clicked(move |_| {
             pc.borrow_mut().insert(pkey.clone(), String::new());
-            unmatch_btn_c.set_sensitive(false);
-            status_row_c.set_subtitle("Will be unmatched on Save\u{2026}");
+            let sd = match sc.borrow().settings_data.clone() {
+                Some(d) => d,
+                None => return,
+            };
+            if sd.db_id != game_clone.db_id || !sd.window.is_visible() {
+                return;
+            }
+            if let Some(ref ra_container) = sd.ra_container {
+                clear_children(ra_container);
+                let mut g2 = game_clone.clone();
+                g2.trophy_source = ira_models::TrophySource::Empty;
+                g2.app_id.clear();
+                let ra_group = build_ra_section(&sc, &g2, &sd.window, &sd.pending_copies);
+                ra_container.append(&ra_group);
+            }
         });
         status_row.add_suffix(&unmatch_btn);
     } else if game.trophy_source == ira_models::TrophySource::Empty {
@@ -273,10 +287,10 @@ pub(super) fn build_game_general_page(
 
     let mut app_id_entry: Option<adw::EntryRow> = None;
 
-    if game.trophy_source == ira_models::TrophySource::Gse || game.trophy_source == ira_models::TrophySource::Nge || game.kind == ira_models::GameKind::Ps4 {
+    if game.trophy_source == ira_models::TrophySource::Gse || game.trophy_source == ira_models::TrophySource::Nge || game.kind.is_trophy_console() {
         let ids_group = adw::PreferencesGroup::new();
         ids_group.set_title("Service IDs");
-    if game.kind == ira_models::GameKind::Ps4 {
+    if game.kind.is_trophy_console() {
             let row = adw::ActionRow::new();
             row.set_title("NPWR Code");
             row.set_subtitle(&game.app_id);

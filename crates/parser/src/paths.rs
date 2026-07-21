@@ -10,6 +10,10 @@ pub fn ps4_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
     Path::new(save_dir).join("data").join("ps4").join(app_id)
 }
 
+pub fn ps3_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
+    Path::new(save_dir).join("data").join("ps3").join(app_id)
+}
+
 pub fn sgdb_data_dir(save_dir: &str, sgdb_id: &str) -> PathBuf {
     Path::new(save_dir).join("data").join("steamgriddb").join(sgdb_id)
 }
@@ -30,6 +34,8 @@ pub fn game_data_dir(save_dir: &str, game: &ira_models::Game) -> PathBuf {
         sgdb_data_dir(save_dir, &game.sgdb_id)
     } else if game.kind == ira_models::GameKind::Ps4 {
         ps4_data_dir(save_dir, &game.app_id)
+    } else if game.kind == ira_models::GameKind::Ps3 {
+        ps3_data_dir(save_dir, &game.app_id)
     } else {
         data_dir(save_dir, &game.app_id)
     }
@@ -47,6 +53,8 @@ pub fn entry_data_dir(save_dir: &str, entry: &ira_models::GameEntry) -> PathBuf 
         sgdb_data_dir(save_dir, sgdb_id)
     } else if entry.kind == ira_models::GameKind::Ps4 {
         ps4_data_dir(save_dir, app_id)
+    } else if entry.kind == ira_models::GameKind::Ps3 {
+        ps3_data_dir(save_dir, app_id)
     } else {
         data_dir(save_dir, app_id)
     }
@@ -138,7 +146,7 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
 /// image to avoid stale files with different extensions.
 pub fn remove_image_variants(dir: &Path, base_name: &str) {
     let _s = tracing::info_span!("remove_image_variants", base_name).entered();
-    for ext in &["png", "jpg", "jpeg", "webp", "ico"] {
+    for ext in &["png", "jpg", "jpeg", "webp", "ico", "tmp"] {
         let p = dir.join(format!("{}.{}", base_name, ext));
         let _ = std::fs::remove_file(&p);
     }
@@ -247,7 +255,7 @@ mod tests {
         img.save(&png_path).unwrap();
         convert_to_lossless_webp(&png_path);
         assert!(!png_path.is_file(), "png file should be removed after conversion");
-        let webp_path = tmp.path().join("icon.webp");
-        assert!(webp_path.is_file(), "webp file should exist after conversion");
+        let webp_out = tmp.path().join("icon.webp");
+        assert!(webp_out.is_file(), "webp file should exist after conversion");
     }
 }

@@ -3,11 +3,13 @@ use ira_config::Config;
 use ira_models::{Game, SortMode};
 use crate::game_loader;
 use ira_platforms::ps4::{discover_games, load_shadps4_game, ShadPS4GameMeta};
+use ira_platforms::ps3::{discover_games as discover_rpcs3_games, load_rpcs3_game, Rpcs3GameMeta};
 use ira_platforms::retroachievements;
 use ira_platforms::steam;
 
 pub struct GameListOptions {
     pub shadps4_enabled: bool,
+    pub rpcs3_enabled: bool,
     pub steam_enabled: bool,
     pub sort_mode: SortMode,
     pub sort_descending: bool,
@@ -57,6 +59,17 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
             None
         };
 
+        let ps3_handle = if options.rpcs3_enabled {
+            let db_ps3 = db.clone();
+            let save_dir_ps3 = save_dir.clone();
+            Some(s.spawn(move || {
+                let _s = tracing::info_span!("build_rpcs3_games").entered();
+                build_rpcs3_games(&db_ps3, &save_dir_ps3)
+            }))
+        } else {
+            None
+        };
+
         let ra_handle = if ra_any_console {
             let db_ra = db.clone();
             let save_dir_ra = save_dir.clone();
@@ -96,6 +109,12 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
             match h.join() {
                 Ok(g) => games.extend(g),
                 Err(_) => eprintln!("PS4 games thread panicked"),
+            }
+        }
+        if let Some(h) = ps3_handle {
+            match h.join() {
+                Ok(g) => games.extend(g),
+                Err(_) => eprintln!("PS3 games thread panicked"),
             }
         }
         games.extend(steam_games);
@@ -146,6 +165,46 @@ fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
                 sort_title,
                 sgdb_id,
                 shadps4_version,
+                last_played,
+            },
+            save_dir,
+        );
+        games.push(game);
+    }
+
+    games
+}
+
+fn build_rpcs3_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
+    let ps3_games = discover_rpcs3_games();
+    let mut games = Vec::new();
+
+    for ps3_game in &ps3_games {
+        let entry = db::find_by_game_id(db, &ps3_game.npwr_id, &ps3_game.serial).ok().flatten()
+            .or_else(|| db::find_by_kind_platform(db, ira_models::GameKind::Ps3, &ps3_game.serial).ok().flatten());
+        let (db_id, title, hidden, logo_position, logo_size, sort_title, sgdb_id, last_played) = match entry {
+            Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title, e.sgdb_id.clone().unwrap_or_default(), e.last_played),
+            None => {
+                match db::add_game(db, ira_models::GameKind::Ps3, ira_models::TrophySource::Empty, "", &ps3_game.npwr_id, &ps3_game.serial, &ps3_game.title) {
+                    Ok(id) => (id, ps3_game.title.clone(), false, "bottom-left".to_string(), 50, String::new(), String::new(), 0),
+                    Err(e) => {
+                        eprintln!("RPCS3: failed to add {} to DB: {}", ps3_game.serial, e);
+                        continue;
+                    }
+                }
+            }
+        };
+
+        let game = load_rpcs3_game(
+            ps3_game,
+            db_id,
+            &Rpcs3GameMeta {
+                title,
+                hidden,
+                logo_position,
+                logo_size,
+                sort_title,
+                sgdb_id,
                 last_played,
             },
             save_dir,

@@ -55,17 +55,19 @@ pub(super) fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (g
 
     let ps4_exe_row = adw::EntryRow::new();
     ps4_exe_row.set_title("shadPS4 executable path");
-    ps4_exe_row.set_text(&cfg.shadps4_executable);
 
     let shadps4_versions = ira_platforms::ps4::read_shadps4_versions();
     let detected_path = ira_platforms::ps4::detect_shadps4_version_path();
 
+    let initial_exe = if cfg.shadps4_executable.is_empty() {
+        detected_path.clone().unwrap_or_default()
+    } else {
+        cfg.shadps4_executable.clone()
+    };
+    ps4_exe_row.set_text(&initial_exe);
+
     if !shadps4_versions.is_empty() {
-        let current_exe = if cfg.shadps4_executable.is_empty() {
-            detected_path.clone().unwrap_or_default()
-        } else {
-            cfg.shadps4_executable.clone()
-        };
+        let current_exe = ps4_exe_row.text().to_string();
         let version_dropdown = build_shadps4_version_dropdown(&current_exe, false);
 
         let ps4_exe_row_c = ps4_exe_row.clone();
@@ -131,6 +133,71 @@ pub(super) fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (g
     page.append(&ps4_dirs_group);
 
     (page, ps4_enable_row, ps4_exe_row)
+}
+
+pub(super) fn build_rpcs3_settings_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
+    let page = settings_page_container();
+
+    let enable_group = adw::PreferencesGroup::new();
+    let enable_row = adw::SwitchRow::new();
+    enable_row.set_title("Enable PS3 integration");
+    enable_row.set_subtitle("Scan RPCS3's dev_hdd0 for installed PS3 games");
+    enable_row.set_active(cfg.rpcs3_enabled);
+    enable_group.add(&enable_row);
+    page.append(&enable_group);
+
+    let emu_group = adw::PreferencesGroup::new();
+    emu_group.set_title("Emulator");
+
+    let detected = ira_platforms::emulator_detect::detect_native(&["rpcs3", "rpcs3-emu"], "RPCS3");
+
+    let exe_row = adw::EntryRow::new();
+    exe_row.set_title("RPCS3 executable path");
+
+    let initial_exe = if cfg.rpcs3_executable.is_empty() {
+        detected.as_ref().map(|e| e.launch_command.clone()).unwrap_or_default()
+    } else {
+        cfg.rpcs3_executable.clone()
+    };
+    exe_row.set_text(&initial_exe);
+
+    if let Some(emu) = &detected {
+        let auto_btn = gtk4::Button::with_label("Auto-detect");
+        auto_btn.add_css_class("flat");
+        auto_btn.set_valign(gtk4::Align::Center);
+        let exe_row_c = exe_row.clone();
+        let path = emu.launch_command.clone();
+        auto_btn.connect_clicked(move |_| {
+            exe_row_c.set_text(&path);
+        });
+        exe_row.add_suffix(&auto_btn);
+    }
+
+    let exe_browse = make_browse_button(
+        Some(win),
+        "Select RPCS3 executable",
+        false,
+        Some(("Executable", &["application/x-executable"])),
+        {
+            let row = exe_row.clone();
+            move |path| row.set_text(&path.to_string_lossy())
+        },
+    );
+    exe_row.add_suffix(&exe_browse);
+    emu_group.add(&exe_row);
+    page.append(&emu_group);
+
+    let dirs_group = adw::PreferencesGroup::new();
+    dirs_group.set_title("Install directories");
+    dirs_group.set_description(Some("Managed by RPCS3 (dev_hdd0/game)"));
+    let games_dir = ira_platforms::ps3::games_dir();
+    let dir_row = adw::ActionRow::new();
+    dir_row.set_title(&games_dir.display().to_string());
+    dir_row.set_sensitive(false);
+    dirs_group.add(&dir_row);
+    page.append(&dirs_group);
+
+    (page, enable_row, exe_row)
 }
 
 pub(super) struct ConsolePageWidgets {

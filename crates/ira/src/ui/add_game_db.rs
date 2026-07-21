@@ -16,7 +16,7 @@ pub(super) struct AddGameToDbParams<'a> {
 
 pub(super) fn add_game_to_db(params: AddGameToDbParams) -> Result<i64, String> {
     let AddGameToDbParams { db, name, kind, trophy_source, app_id, platform_id, launch_config, wine_config, profile_id, steam, save_dir } = params;
-    let (steam_id, game_id) = if kind == ira_models::GameKind::Ps4 || kind == ira_models::GameKind::Retro { ("", app_id) } else { (app_id, "") };
+    let (steam_id, game_id) = if kind == ira_models::GameKind::Ps4 || kind == ira_models::GameKind::Ps3 || kind == ira_models::GameKind::Retro { ("", app_id) } else { (app_id, "") };
     let game_id = ira_db::add_game(db, kind, trophy_source, steam_id, game_id, platform_id, name)?;
     ira_db::save_game_config(db, game_id, launch_config, wine_config, profile_id)?;
     if !app_id.is_empty() && app_id.parse::<i64>().is_ok() {

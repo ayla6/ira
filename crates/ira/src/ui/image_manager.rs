@@ -120,13 +120,15 @@ fn find_best_image_path(game: &Game, field: &str, _base: &str, id: &str, save_di
     }
     let native_dir = if game.kind == ira_models::GameKind::Ps4 {
         ira_parser::ps4_data_dir(save_dir, id)
+    } else if game.kind == ira_models::GameKind::Ps3 {
+        ira_parser::ps3_data_dir(save_dir, id)
     } else {
         ira_parser::data_dir(save_dir, id)
     };
     if let Some(f) = ira_parser::find_image_file(&native_dir, field) {
         return f.to_string_lossy().into_owned();
     }
-    if field == "icon" && game.kind == ira_models::GameKind::Ps4 && !game.icon_path.is_empty() && std::path::Path::new(&game.icon_path).is_file() {
+    if field == "icon" && game.kind.is_trophy_console() && !game.icon_path.is_empty() && std::path::Path::new(&game.icon_path).is_file() {
         return game.icon_path.clone();
     }
     String::new()
@@ -385,7 +387,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     btns.append(&btn);
     }
 
-    if asset_type == "icon" && game.kind == ira_models::GameKind::Ps4 {
+    if asset_type == "icon" && game.kind.is_trophy_console() {
         let reset_btn = gtk4::Button::with_label("Reset");
         let gc = game.clone();
         let refresh = refresh_images.clone();

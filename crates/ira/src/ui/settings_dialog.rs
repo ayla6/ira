@@ -13,7 +13,7 @@ use super::settings_pages::{
     build_steam_settings_page, build_ra_settings_page, build_api_emulators_page,
 };
 use super::settings_console::{
-    build_shadps4_settings_page, build_console_settings_page, ConsolePageWidgets,
+    build_shadps4_settings_page, build_rpcs3_settings_page, build_console_settings_page, ConsolePageWidgets,
 };
 
 pub(super) fn settings_page_container() -> gtk4::Box {
@@ -76,6 +76,8 @@ pub fn show_settings_dialog(
     let mut console_widgets: Vec<(&'static str, ConsolePageWidgets)> = Vec::new();
     let mut ps4_enable_row: Option<adw::SwitchRow> = None;
     let mut ps4_exe_row: Option<adw::EntryRow> = None;
+    let mut ps3_enable_row: Option<adw::SwitchRow> = None;
+    let mut ps3_exe_row: Option<adw::EntryRow> = None;
     for def in ira_models::CONSOLES {
         let cc = cfg.console(def.id);
         let (page, widgets) = build_console_settings_page(&win, def, cc);
@@ -84,6 +86,12 @@ pub fn show_settings_dialog(
         console_widgets.push((def.id, widgets));
 
         if def.id == "ps2" {
+            let (ps3_page, ps3_en, ps3_exe) = build_rpcs3_settings_page(&cfg, &win);
+            sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS3"));
+            stack.add_named(&ps3_page, Some("ps3"));
+            ps3_enable_row = Some(ps3_en);
+            ps3_exe_row = Some(ps3_exe);
+
             let (ps4_page, ps4_en, ps4_exe) = build_shadps4_settings_page(&cfg, &win);
             sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS4"));
             stack.add_named(&ps4_page, Some("ps4"));
@@ -164,6 +172,12 @@ pub fn show_settings_dialog(
         }
         if let Some(row) = &ps4_exe_row {
             s.cfg.shadps4_executable = row.text().to_string();
+        }
+        if let Some(row) = &ps3_enable_row {
+            s.cfg.rpcs3_enabled = row.is_active();
+        }
+        if let Some(row) = &ps3_exe_row {
+            s.cfg.rpcs3_executable = row.text().to_string();
         }
         s.cfg.steam_enabled = steam_enable_row.is_active();
         s.cfg.ra_enabled = ra_enable_row.is_active();

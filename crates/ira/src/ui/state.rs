@@ -36,6 +36,7 @@ pub struct AppState {
     pub steam: Arc<SteamDataClient>,
     pub watcher: Option<AchievementWatcher>,
     pub shadps4_watcher: Option<ira_platforms::ps4::ShadPS4Watcher>,
+    pub rpcs3_watcher: Option<ira_platforms::ps3::Rpcs3Watcher>,
     pub db: DbConn,
     pub sender: AppSender,
     pub game_names: Arc<Mutex<HashMap<String, String>>>,

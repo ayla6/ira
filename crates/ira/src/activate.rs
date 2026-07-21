@@ -5,6 +5,7 @@ use ira_db as db;
 use crate::game_list::build_game_list;
 use ira_models::{AppMessage, AppSender};
 use ira_platforms::ps4::ShadPS4Watcher;
+use ira_platforms::ps3::Rpcs3Watcher;
 use crate::ui::{build_ui, handle_app_message, SharedState};
 use ira_watcher::AchievementWatcher;
 use gtk4::glib;
@@ -69,6 +70,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
     let sender = AppSender::new(tx, write_fd);
 
     let shadps4_enabled = cfg.shadps4_enabled;
+    let rpcs3_enabled = cfg.rpcs3_enabled;
     let steam_enabled = cfg.steam_enabled;
     let save_dir = cfg.save_dir.clone();
     let sort_mode = cfg.sort_mode;
@@ -83,6 +85,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
             let _span = tracing::info_span!("build_game_list_thread").entered();
             let opts = crate::game_list::GameListOptions {
                 shadps4_enabled,
+                rpcs3_enabled,
                 steam_enabled,
                 sort_mode,
                 sort_descending,
@@ -143,6 +146,15 @@ pub fn activate(app: &adw::Application) -> SharedState {
             }
         };
         state.borrow_mut().shadps4_watcher = shadps4_watcher;
+
+        let rpcs3_watcher = match Rpcs3Watcher::new(sender.clone()) {
+            Ok(w) => Some(w),
+            Err(e) => {
+                eprintln!("RPCS3 playtime watching unavailable: {}", e);
+                None
+            }
+        };
+        state.borrow_mut().rpcs3_watcher = rpcs3_watcher;
     }
 
     {

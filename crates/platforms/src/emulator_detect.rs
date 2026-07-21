@@ -38,7 +38,7 @@ fn detect_flatpak(flatpak_id: &str, display_name: &str) -> Option<DetectedEmulat
     }
 }
 
-fn detect_native(names: &[&str], display_name: &str) -> Option<DetectedEmulator> {
+pub fn detect_native(names: &[&str], display_name: &str) -> Option<DetectedEmulator> {
     for name in names {
         if let Some(path) = which(name) {
             return Some(DetectedEmulator {

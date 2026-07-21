@@ -10,6 +10,8 @@ pub enum AppMessage {
     GameStarted(i64, Option<i64>),
     /// Fired by the ShadPS4Watcher when play_time.txt changes.
     ShadPS4PlaytimeChanged,
+    /// Fired by the Rpcs3Watcher when persistent_settings.dat changes.
+    Rpcs3PlaytimeChanged,
     /// Initial game list loaded in the background.
     GamesLoaded(Vec<Game>),
     /// SGDB assets downloaded for a game.

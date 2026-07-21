@@ -13,7 +13,6 @@ fn build_sgdb_asset_card(
     _asset_type: &str,
     steam: &Arc<SteamDataClient>,
     on_download: Rc<dyn Fn()>,
-    save_dir: String,
     thumb_size: i32,
     all_buttons: Rc<RefCell<Vec<gtk4::Button>>>,
 ) -> (gtk4::Widget, gtk4::Widget) {
@@ -96,55 +95,25 @@ fn build_sgdb_asset_card(
         on_download();
     });
 
-    let url_clone = a.url.clone();
+    let thumb_url = if a.thumb.is_empty() { a.url.clone() } else { a.thumb.clone() };
     let steam_thumb = steam.clone();
-    let thumb_dir = format!("{}/data/.thumbnails", save_dir);
-    let _ = std::fs::create_dir_all(&thumb_dir);
-    let full_cache_name = format!("{}/{}", thumb_dir, url_clone.rsplit('/').next().unwrap_or("thumb"));
-    let cache_path = std::path::Path::new(&full_cache_name);
-    let stem = cache_path.file_stem().and_then(|s| s.to_str()).unwrap_or("thumb");
-    let ext = cache_path.extension().and_then(|e| e.to_str()).unwrap_or("png");
-    let thumb_display_name = format!("{}/{}_thumb.{}", thumb_dir, stem, ext);
-    let tsize = thumb_size;
-    let (tx_thumb, rx_thumb) = std::sync::mpsc::channel::<Option<String>>();
+    let (tx_thumb, rx_thumb) = std::sync::mpsc::channel::<Option<Vec<u8>>>();
     let rx_thumb = std::cell::RefCell::new(rx_thumb);
     std::thread::spawn(move || {
-        let _s = tracing::info_span!("thumbnail_download", url = %url_clone).entered();
-        let display_path = if std::path::Path::new(&thumb_display_name).exists() {
-            thumb_display_name.clone()
-        } else if steam_thumb.download_file(&url_clone, std::path::Path::new(&full_cache_name)).is_ok() {
-            let mut src_path = full_cache_name.clone();
-            if std::path::Path::new(&full_cache_name).extension().and_then(|e| e.to_str()) == Some("ico") {
-                if let Ok(img) = image::open(&full_cache_name) {
-                    let png_path = std::path::Path::new(&full_cache_name).with_extension("png");
-                    if img.save(&png_path).is_ok() {
-                        let _ = std::fs::remove_file(&full_cache_name);
-                        src_path = png_path.to_string_lossy().into_owned();
-                    }
-                }
-            }
-            if let Ok(img) = image::open(&src_path) {
-                let (w, h) = (img.width(), img.height());
-                if w > tsize as u32 || h > tsize as u32 {
-                    let resized = img.resize(tsize as u32, tsize as u32, image::imageops::FilterType::Lanczos3);
-                    let _ = resized.save(&thumb_display_name);
-                } else {
-                    let _ = std::fs::copy(&src_path, &thumb_display_name);
-                }
-            }
-            thumb_display_name.clone()
-        } else {
-            String::new()
-        };
-        let _ = tx_thumb.send(if display_path.is_empty() { None } else { Some(display_path) });
+        let _s = tracing::info_span!("thumbnail_download", url = %thumb_url).entered();
+        let bytes = steam_thumb.download_bytes(&thumb_url).ok().filter(|b| !b.is_empty());
+        let _ = tx_thumb.send(bytes);
     });
     let tp_g = grid_pic.clone();
     let tp_l = list_pic.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-        if let Ok(path) = rx_thumb.borrow_mut().try_recv() {
-            if let Some(p) = path {
-                tp_g.set_filename(Some(&p));
-                tp_l.set_filename(Some(&p));
+        if let Ok(bytes) = rx_thumb.borrow_mut().try_recv() {
+            if let Some(bytes) = bytes {
+                let texture = gdk4::Texture::from_bytes(&glib::Bytes::from_owned(bytes));
+                if let Ok(texture) = texture {
+                    tp_g.set_paintable(Some(&texture));
+                    tp_l.set_paintable(Some(&texture));
+                }
             }
             glib::ControlFlow::Break
         } else {
@@ -213,38 +182,9 @@ fn rebuild_assets_view(
         let on_done_dl = ctx.on_done.clone();
         let asset_dl = ctx.asset.clone();
         let pending_dl = ctx.pending_copies.clone();
-        let save_dir_dl = ctx.save_dir.clone();
         let on_download: Rc<dyn Fn()> = Rc::new(move || {
             let _s = tracing::info_span!("on_download", asset = %asset_dl, url = %dl_url).entered();
             if let Some(ref pc) = pending_dl {
-                let thumb_dir = format!("{}/data/.thumbnails", save_dir_dl);
-                let cache_name = format!("{}/{}", thumb_dir, dl_url.rsplit('/').next().unwrap_or("thumb"));
-                let cache_path = std::path::Path::new(&cache_name);
-                let png_cache = cache_path.with_extension("png");
-                let cached = if cache_path.is_file() {
-                    Some(cache_path.to_path_buf())
-                } else if png_cache.is_file() {
-                    Some(png_cache)
-                } else {
-                    None
-                };
-
-                if let Some(cached_path) = cached {
-                    let ext = cached_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                    let final_path = if ext == "png" || ext == "ico" {
-                        ira_parser::convert_to_lossless_webp(&cached_path);
-                        let webp = cached_path.with_extension("webp");
-                        if webp.is_file() { webp.to_string_lossy().into_owned() }
-                        else { cached_path.to_string_lossy().into_owned() }
-                    } else {
-                        cached_path.to_string_lossy().into_owned()
-                    };
-                    pc.borrow_mut().insert(asset_dl.clone(), final_path);
-                    on_done_dl();
-                    picker_dl.close();
-                    return;
-                }
-
                 let tmp = {
                     let url_path = std::path::Path::new(&dl_url);
                     let e = url_path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -296,7 +236,7 @@ fn rebuild_assets_view(
             }
         });
 
-        let (grid_card, list_row) = build_sgdb_asset_card(a, &ctx.asset, &ctx.steam, on_download, ctx.save_dir.clone(), thumb_size, all_buttons.clone());
+        let (grid_card, list_row) = build_sgdb_asset_card(a, &ctx.asset, &ctx.steam, on_download, thumb_size, all_buttons.clone());
         flow.append(&grid_card);
         list_view.append(&list_row);
     }

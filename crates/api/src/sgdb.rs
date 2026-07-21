@@ -95,6 +95,7 @@ impl SteamDataClient {
         };
         data.iter().filter_map(|item| {
             let url = item.get("url")?.as_str()?.to_string();
+            let thumb = item.get("thumb").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let width = item.get("width").and_then(|v| v.as_i64()).unwrap_or(0);
             let height = item.get("height").and_then(|v| v.as_i64()).unwrap_or(0);
             let style = item.get("style").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -104,7 +105,7 @@ impl SteamDataClient {
                 .unwrap_or("")
                 .to_string();
             let mime = item.get("mime").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            Some(SgdbAsset { url, width, height, style, author, mime })
+            Some(SgdbAsset { url, thumb, width, height, style, author, mime })
         }).collect()
     }
 

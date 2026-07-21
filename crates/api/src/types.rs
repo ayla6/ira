@@ -6,6 +6,7 @@ pub use ira_models::{AppDetails, DlcInfo};
 #[derive(Clone)]
 pub struct SgdbAsset {
     pub url: String,
+    pub thumb: String,
     pub width: i64,
     pub height: i64,
     pub style: String,

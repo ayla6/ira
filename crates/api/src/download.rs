@@ -55,6 +55,20 @@ impl SteamDataClient {
         Ok(())
     }
 
+    pub fn download_bytes(&self, url: &str) -> Result<Vec<u8>, String> {
+        let _s = tracing::info_span!("download_bytes", url).entered();
+        let resp = self
+            .http
+            .get(url)
+            .send()
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {}", resp.status()));
+        }
+        let bytes = resp.bytes().map_err(|e| e.to_string())?;
+        Ok(bytes.to_vec())
+    }
+
     pub(super) fn find_cached_icon(&self, app_id: &str) -> Option<PathBuf> {
         let dir = self.game_dir(app_id);
         for ext in [".png", ".ico", ".jpg", ".webp"] {

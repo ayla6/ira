@@ -290,6 +290,8 @@ pub(super) struct VarW {
     pub(super) custom_images: adw::SwitchRow,
     pub(super) show_as_entry: adw::SwitchRow,
     pub(super) count_playtime: adw::SwitchRow,
+    pub(super) logo_position: Rc<RefCell<String>>,
+    pub(super) logo_size: gtk4::Adjustment,
     pub(super) group: adw::PreferencesGroup,
 }
 
@@ -502,6 +504,9 @@ pub(super) fn build_variants_page(
                 images_expander.set_subtitle("Save the variant first");
             }
             group.add(&images_expander);
+
+            let mut logo_position_cell: Option<Rc<RefCell<String>>> = None;
+            let mut logo_size_adj_cell: Option<gtk4::Adjustment> = None;
             {
                 let images_expander_c = images_expander.clone();
                 custom_images_row.connect_notify_local(Some("active"), move |row, _| {
@@ -534,6 +539,20 @@ pub(super) fn build_variants_page(
                         );
                         images_expander.add_row(&row);
                     }
+
+                    // Logo position/size preview (same UI as base game)
+                    let mut var_game = crate::Game::default();
+                    ira_parser::populate_image_paths(&var_dir, &mut var_game);
+                    var_game.logo_position = v.logo_position.clone();
+                    var_game.logo_size = v.logo_size;
+                    if let Some((logo_ui, logo_pos, logo_size_adj)) = super::game_logo::build_game_logo_page(&var_game) {
+                        let logo_row = adw::ActionRow::new();
+                        logo_row.set_activatable(false);
+                        logo_row.set_child(Some(&logo_ui));
+                        images_expander.add_row(&logo_row);
+                        logo_position_cell = Some(logo_pos);
+                        logo_size_adj_cell = Some(logo_size_adj);
+                    }
                 }
             }
 
@@ -549,6 +568,8 @@ pub(super) fn build_variants_page(
                 custom_images: custom_images_row,
                 show_as_entry: show_as_entry_row,
                 count_playtime: count_playtime_row,
+                logo_position: logo_position_cell.unwrap_or_else(|| Rc::new(RefCell::new(v.logo_position.clone()))),
+                logo_size: logo_size_adj_cell.unwrap_or_else(|| gtk4::Adjustment::new(v.logo_size as f64, 5.0, 100.0, 1.0, 5.0, 0.0)),
                 group,
             });
         }

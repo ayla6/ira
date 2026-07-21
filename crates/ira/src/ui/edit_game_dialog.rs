@@ -673,6 +673,8 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     custom_images: vw.custom_images.is_active(),
                     show_as_entry: vw.show_as_entry.is_active(),
                     count_playtime: vw.count_playtime.is_active(),
+                    logo_position: vw.logo_position.borrow().clone(),
+                    logo_size: vw.logo_size.value() as i32,
                     ..Default::default()
                 };
 

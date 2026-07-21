@@ -25,7 +25,13 @@ pub struct GameVariant {
     pub last_played: i64,
     #[serde(default = "default_true")]
     pub count_playtime: bool,
+    #[serde(default = "default_bottom_left")]
+    pub logo_position: String,
+    #[serde(default = "default_50")]
+    pub logo_size: i32,
 }
 
 fn default_true() -> bool { true }
+fn default_bottom_left() -> String { "bottom-left".to_string() }
+fn default_50() -> i32 { 50 }
 

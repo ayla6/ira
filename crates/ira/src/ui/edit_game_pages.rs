@@ -560,16 +560,23 @@ pub(super) fn build_variants_page(
                     }
                     var_game.logo_position = v.logo_position.clone();
                     var_game.logo_size = v.logo_size;
-                    if let Some((logo_ui, logo_pos, logo_size_adj, logo_mod)) = super::game_logo::build_game_logo_page(&var_game) {
+                    if let Some((logo_ui, logo_pos, logo_size_adj, logo_mod)) = super::game_logo::build_game_logo_page(&var_game, true) {
                         let logo_expander = adw::ExpanderRow::new();
                         logo_expander.set_title("Logo position");
                         logo_expander.set_subtitle(if v.logo_position.is_empty() { "Inherited from base game" } else { "" });
                         logo_expander.set_enable_expansion(true);
+                        logo_expander.set_visible(custom_images_row.is_active());
                         let logo_row = adw::ActionRow::new();
                         logo_row.set_activatable(false);
                         logo_row.set_child(Some(&logo_ui));
                         logo_expander.add_row(&logo_row);
                         group.add(&logo_expander);
+                        {
+                            let logo_exp_c = logo_expander.clone();
+                            custom_images_row.connect_notify_local(Some("active"), move |row, _| {
+                                logo_exp_c.set_visible(row.is_active());
+                            });
+                        }
                         logo_position_cell = Some(logo_pos);
                         logo_size_adj_cell = Some(logo_size_adj);
                         logo_modified_cell = Some(logo_mod);

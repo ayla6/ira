@@ -5,7 +5,7 @@ use crate::Game;
 
 pub(super) type LogoControls = (gtk4::Box, Rc<RefCell<String>>, gtk4::Adjustment, Rc<Cell<bool>>);
 
-pub(super) fn build_game_logo_page(game: &Game) -> Option<LogoControls> {
+pub(super) fn build_game_logo_page(game: &Game, show_reset: bool) -> Option<LogoControls> {
     let logo_page = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
 
     let inherited = game.logo_position.is_empty();
@@ -17,17 +17,25 @@ pub(super) fn build_game_logo_page(game: &Game) -> Option<LogoControls> {
     let size_adj = gtk4::Adjustment::new(size_pct as f64, 5.0, 100.0, 1.0, 5.0, 0.0);
 
     let preview_overlay = gtk4::Overlay::new();
-    preview_overlay.set_height_request(220);
     preview_overlay.set_overflow(gtk4::Overflow::Hidden);
 
     let hero_pic = gtk4::Picture::new();
-    if let Some(t) = ira_images::texture_for(&game.hero_image_path) {
-        hero_pic.set_paintable(Some(&t));
+    let hero_texture = ira_images::texture_for(&game.hero_image_path);
+    if let Some(ref t) = hero_texture {
+        hero_pic.set_paintable(Some(t));
     }
     hero_pic.set_content_fit(gtk4::ContentFit::Cover);
     hero_pic.set_halign(gtk4::Align::Fill);
     hero_pic.set_valign(gtk4::Align::Fill);
     preview_overlay.set_child(Some(&hero_pic));
+
+    let overlay_h = hero_texture
+        .map(|t| {
+            let aspect = t.width() as f64 / t.height() as f64;
+            (460.0 / aspect).max(100.0) as i32
+        })
+        .unwrap_or(200);
+    preview_overlay.set_height_request(overlay_h);
 
     let preview_draw = gtk4::DrawingArea::new();
     preview_draw.set_halign(gtk4::Align::Fill);
@@ -125,10 +133,44 @@ pub(super) fn build_game_logo_page(game: &Game) -> Option<LogoControls> {
     preview_frame.set_child(Some(&preview_overlay));
     logo_page.append(&preview_frame);
 
-    let size_label = gtk4::Label::new(Some("Size (% of hero height)"));
-    size_label.set_halign(gtk4::Align::Start);
-    size_label.add_css_class("heading");
-    logo_page.append(&size_label);
+    let header_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    header_row.set_halign(gtk4::Align::Fill);
+    header_row.set_margin_start(12);
+    let pos_label = gtk4::Label::new(Some("Logo position"));
+    pos_label.set_halign(gtk4::Align::Start);
+    pos_label.set_hexpand(true);
+    pos_label.add_css_class("heading");
+    header_row.append(&pos_label);
+
+    if show_reset && !inherited {
+        let reset_btn = gtk4::Button::from_icon_name("edit-undo-symbolic");
+        reset_btn.add_css_class("flat");
+        reset_btn.set_tooltip_text(Some("Reset to base game"));
+        let selected_pos_reset = selected_pos.clone();
+        let size_adj_reset = size_adj.clone();
+        let btns_reset = btns.clone();
+        let preview_reset = preview_draw.clone();
+        let modified_reset = modified.clone();
+        reset_btn.connect_clicked(move |_| {
+            *selected_pos_reset.borrow_mut() = "bottom-left".to_string();
+            size_adj_reset.set_value(50.0);
+            modified_reset.set(false);
+            for b in btns_reset.iter() {
+                b.remove_css_class("selected");
+            }
+            for (i, &pos) in ["top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right"].iter().enumerate() {
+                if pos == "bottom-left" {
+                    btns_reset[i].add_css_class("selected");
+                }
+            }
+            preview_reset.queue_draw();
+        });
+        if inherited {
+            reset_btn.set_sensitive(false);
+        }
+        header_row.append(&reset_btn);
+    }
+    logo_page.append(&header_row);
 
     let size_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     size_row.set_hexpand(true);
@@ -151,32 +193,6 @@ pub(super) fn build_game_logo_page(game: &Game) -> Option<LogoControls> {
     size_row.append(&size_scale);
     size_row.append(&size_spin);
     logo_page.append(&size_row);
-
-    let reset_btn = gtk4::Button::with_label("Reset to base game");
-    reset_btn.add_css_class("flat");
-    let selected_pos_reset = selected_pos.clone();
-    let size_adj_reset = size_adj.clone();
-    let btns_reset = btns.clone();
-    let preview_reset = preview_draw.clone();
-    let modified_reset = modified.clone();
-    reset_btn.connect_clicked(move |_| {
-        *selected_pos_reset.borrow_mut() = "bottom-left".to_string();
-        size_adj_reset.set_value(50.0);
-        modified_reset.set(false);
-        for b in btns_reset.iter() {
-            b.remove_css_class("selected");
-        }
-        for (i, &pos) in logo_positions.iter().enumerate() {
-            if pos == "bottom-left" {
-                btns_reset[i].add_css_class("selected");
-            }
-        }
-        preview_reset.queue_draw();
-    });
-    if inherited {
-        reset_btn.set_sensitive(false);
-    }
-    logo_page.append(&reset_btn);
 
     Some((logo_page, selected_pos, size_adj, modified))
 }

@@ -133,7 +133,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
     // --- Logo page ---
     let logo_controls: Option<(Rc<RefCell<String>>, gtk4::Adjustment)> =
-        if let Some((logo_page, selected_pos, size_adj, _modified)) = super::game_logo::build_game_logo_page(&game) {
+        if let Some((logo_page, selected_pos, size_adj, _modified)) = super::game_logo::build_game_logo_page(&game, false) {
             sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-desktop-wallpaper-symbolic", "Logo"));
             stack.add_named(&logo_page, Some("logo"));
             Some((selected_pos, size_adj))

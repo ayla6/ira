@@ -227,13 +227,9 @@ fn fetch_steam_game_icon(
         Some(b) => b,
         None => {
             let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", app_id, clienticon);
-            let tmp = dest_webp.with_extension("tmp_ico");
-            if steam.download_file(&url, &tmp).is_err() {
-                return None;
-            }
-            match std::fs::read(&tmp) {
-                Ok(b) => { let _ = std::fs::remove_file(&tmp); b }
-                Err(_) => { let _ = std::fs::remove_file(&tmp); return None; }
+            match steam.download_bytes(&url) {
+                Ok(b) => b,
+                Err(_) => return None,
             }
         }
     };

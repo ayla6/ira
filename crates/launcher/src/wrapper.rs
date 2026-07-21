@@ -75,14 +75,19 @@ pub fn game_log_path(save_dir: &str, game_id: i64) -> String {
         .into_owned()
 }
 
+pub struct MonitorContext {
+    pub sender: AppSender,
+    pub game_id: i64,
+    pub variant_id: Option<i64>,
+    pub started_at: i64,
+    pub db: DbConn,
+    pub running_games: Arc<Mutex<HashMap<i64, i32>>>,
+}
+
 pub fn monitor_process(
     mut child: Child,
     child_pid: i32,
-    sender: &AppSender,
-    game_id: i64,
-    started_at: i64,
-    db: DbConn,
-    running_games: Arc<Mutex<HashMap<i64, i32>>>,
+    ctx: MonitorContext,
 ) {
     loop {
         std::thread::sleep(Duration::from_secs(2));
@@ -101,24 +106,25 @@ pub fn monitor_process(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
-    let duration = ended_at - started_at;
+    let duration = ended_at - ctx.started_at;
 
     if duration < 5 {
-        eprintln!("Game {} exited after {}s — possible crash, not recording session", game_id, duration);
+        eprintln!("Game {} exited after {}s — possible crash, not recording session", ctx.game_id, duration);
     } else {
-        if let Err(e) = record_session(&db, game_id, started_at, ended_at) {
+        if let Err(e) = record_session(&ctx.db, ctx.game_id, ctx.variant_id, ctx.started_at, ended_at) {
             eprintln!("Failed to record play session: {}", e);
         }
-        let _ = sender.send(AppMessage::SessionRecorded {
-            game_id,
+        let _ = ctx.sender.send(AppMessage::SessionRecorded {
+            game_id: ctx.game_id,
+            variant_id: ctx.variant_id,
             duration_seconds: duration,
-            started_at,
+            started_at: ctx.started_at,
             ended_at,
         });
     }
 
-    running_games.lock().unwrap().remove(&game_id);
-    let _ = sender.send(AppMessage::GameStopped(game_id, None));
+    ctx.running_games.lock().unwrap().remove(&ctx.game_id);
+    let _ = ctx.sender.send(AppMessage::GameStopped(ctx.game_id, ctx.variant_id));
 }
 
 fn reap_zombies(pgid: i32) {

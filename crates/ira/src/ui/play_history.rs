@@ -12,9 +12,9 @@ fn format_datetime(timestamp: i64) -> String {
     naive
 }
 
-pub fn show_play_history_dialog(state: &SharedState, game_id: i64) -> adw::Dialog {
+pub fn show_play_history_dialog(state: &SharedState, game_id: i64, variant_id: Option<i64>) -> adw::Dialog {
     let game_name = state.borrow().games.iter()
-        .find(|g| g.db_id == game_id)
+        .find(|g| g.db_id == game_id && g.variant_id == variant_id)
         .map(|g| g.name.clone())
         .unwrap_or_default();
 
@@ -33,14 +33,14 @@ pub fn show_play_history_dialog(state: &SharedState, game_id: i64) -> adw::Dialo
     box_.set_margin_top(12);
     box_.set_margin_bottom(12);
 
-    let total = ira_db::get_total_playtime_for_game(&state.borrow().db, game_id)
+    let total = ira_db::get_total_playtime_for_game(&state.borrow().db, game_id, variant_id)
         .unwrap_or(0);
     let total_label = gtk4::Label::new(Some(&format!("{}: {}", S::TOTAL_PLAYTIME, format_duration(total))));
     total_label.add_css_class("heading");
     total_label.set_xalign(0.0);
     box_.append(&total_label);
 
-    let sessions = ira_db::get_sessions_for_game(&state.borrow().db, game_id)
+    let sessions = ira_db::get_sessions_for_game(&state.borrow().db, game_id, variant_id)
         .unwrap_or_default();
 
     if sessions.is_empty() {

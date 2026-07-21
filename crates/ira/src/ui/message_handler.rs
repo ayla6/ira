@@ -58,21 +58,32 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 }
             }
         }
-        AppMessage::SessionRecorded { game_id, duration_seconds, .. } => {
+        AppMessage::SessionRecorded { game_id, variant_id, duration_seconds, .. } => {
             let hours = (duration_seconds as f64) / 3600.0;
-            let (db, new_playtime) = {
+            let (db, new_base_playtime, new_variant_playtime) = {
                 let mut s = state.borrow_mut();
                 let db = s.db.clone();
-                if let Some(g) = s.games.iter_mut().find(|g| g.db_id == game_id) {
-                    g.playtime += hours;
-                    (db, g.playtime)
-                } else {
-                    (db, 0.0)
+                let mut base_pt = 0.0;
+                let mut var_pt: Option<(i64, f64)> = None;
+                for g in &mut s.games {
+                    if g.db_id == game_id && g.variant_id.is_none() {
+                        g.playtime += hours;
+                        base_pt = g.playtime;
+                    } else if g.db_id == game_id && g.variant_id == variant_id && variant_id.is_some() {
+                        g.playtime += hours;
+                        var_pt = Some((variant_id.unwrap(), g.playtime));
+                    }
                 }
+                (db, base_pt, var_pt)
             };
-            if new_playtime > 0.0 {
-                if let Err(e) = ira_db::update_field(&db, game_id, "playtime", &new_playtime) {
+            if new_base_playtime > 0.0 {
+                if let Err(e) = ira_db::update_field(&db, game_id, "playtime", &new_base_playtime) {
                     eprintln!("Failed to update playtime: {}", e);
+                }
+            }
+            if let Some((vid, vpt)) = new_variant_playtime {
+                if let Err(e) = ira_db::update_variant_playtime(&db, vid, vpt) {
+                    eprintln!("Failed to update variant playtime: {}", e);
                 }
             }
         }
@@ -169,6 +180,12 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                         s.games[idx] = game;
                     }
                     s.games.extend(variant_entries);
+                    let sort_mode = s.cfg.sort_mode;
+                    let sort_descending = s.cfg.sort_descending;
+                    s.games.sort_by(|a, b| {
+                        let ord = sort_mode.compare(a, b);
+                        if sort_descending { ord.reverse() } else { ord }
+                    });
                 }
             }
             super::sidebar::rebuild_sidebar(state);
@@ -404,13 +421,12 @@ pub(crate) fn apply_game_update(state: &SharedState, updated: Game) {
         let game_for_grid = if needs_grid_update { Some(updated.clone()) } else { None };
         let game = if needs_rebuild { Some(updated.clone()) } else { None };
 
-        // Sync variant entries: copy achievements, counts, playtime from base game
+        // Sync variant entries: copy achievements and counts from base game.
+        // Playtime and last_played are variant-specific — do not overwrite.
         let sync_db_id = updated.db_id;
         let sync_achievements = updated.achievements.clone();
         let sync_earned = updated.earned_count;
         let sync_total = updated.total_count;
-        let sync_playtime = updated.playtime;
-        let sync_last_played = updated.last_played;
         let mut variant_grid_updates: Vec<Game> = Vec::new();
         {
             for g in &mut s.games {
@@ -419,8 +435,6 @@ pub(crate) fn apply_game_update(state: &SharedState, updated: Game) {
                     g.achievements = sync_achievements.clone();
                     g.earned_count = sync_earned;
                     g.total_count = sync_total;
-                    g.playtime = sync_playtime;
-                    g.last_played = sync_last_played;
                     if g_counts_changed {
                         variant_grid_updates.push(g.clone());
                     }

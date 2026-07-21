@@ -42,6 +42,9 @@ pub fn run_schema_migrations(conn: &Connection) {
     ensure_column(conn, "game_variants", "pre_launch", "TEXT NOT NULL DEFAULT ''");
     ensure_column(conn, "game_variants", "custom_images", "INTEGER NOT NULL DEFAULT 0");
     ensure_column(conn, "game_variants", "show_as_entry", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(conn, "game_variants", "playtime", "REAL NOT NULL DEFAULT 0.0");
+    ensure_column(conn, "game_variants", "last_played", "INTEGER NOT NULL DEFAULT 0");
+    ensure_column(conn, "play_sessions", "variant_id", "INTEGER");
     // Drop obsolete unique indexes that prevented multiple retro games per console
     let _ = conn.execute("DROP INDEX IF EXISTS idx_games_trophy_platform", []);
     let _ = conn.execute("DROP INDEX IF EXISTS idx_games_kind_platform", []);

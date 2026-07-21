@@ -672,6 +672,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     pre_launch: vw.pre_launch.text().to_string(),
                     custom_images: vw.custom_images.is_active(),
                     show_as_entry: vw.show_as_entry.is_active(),
+                    ..Default::default()
                 };
 
                 if let Some(id) = vw.id {

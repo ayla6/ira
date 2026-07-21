@@ -222,8 +222,9 @@ pub fn show_game_context_menu(
     let play_hist_action = gio::SimpleAction::new("play_history", None);
     let sc = state_clone.clone();
     let db_id_for_hist = game_clone.db_id;
+    let variant_id_for_hist = game_clone.variant_id;
     play_hist_action.connect_activate(move |_, _| {
-        super::play_history::show_play_history_dialog(&sc, db_id_for_hist);
+        super::play_history::show_play_history_dialog(&sc, db_id_for_hist, variant_id_for_hist);
     });
     actions.add_action(&play_hist_action);
 

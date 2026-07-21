@@ -15,6 +15,7 @@ pub enum AppMessage {
     /// SGDB assets downloaded for a game.
     SessionRecorded {
         game_id: i64,
+        variant_id: Option<i64>,
         duration_seconds: i64,
         started_at: i64,
         ended_at: i64,

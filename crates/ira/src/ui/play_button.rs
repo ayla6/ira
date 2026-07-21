@@ -98,13 +98,16 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             Ok(child) => {
                 let pid = child.id() as i32;
                 running_games.lock().unwrap().insert(game_id, pid);
-                let sender_c = sender.clone();
-                let db_c = db.clone();
-                let rg = running_games.clone();
+                let mc = ira_launcher::wrapper::MonitorContext {
+                    sender: sender.clone(),
+                    game_id,
+                    variant_id: None,
+                    started_at,
+                    db: db.clone(),
+                    running_games: running_games.clone(),
+                };
                 std::thread::spawn(move || {
-                    ira_launcher::wrapper::monitor_process(
-                        child, pid, &sender_c, game_id, started_at, db_c, rg,
-                    );
+                    ira_launcher::wrapper::monitor_process(child, pid, mc);
                 });
             }
             Err(e) => return Err(format!("Failed to launch {}: {}", game_name, e)),
@@ -123,13 +126,16 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             Ok(child) => {
                 let pid = child.id() as i32;
                 running_games.lock().unwrap().insert(game_id, pid);
-                let sender_c = sender.clone();
-                let db_c = db.clone();
-                let rg = running_games.clone();
+                let mc = ira_launcher::wrapper::MonitorContext {
+                    sender: sender.clone(),
+                    game_id,
+                    variant_id: None,
+                    started_at,
+                    db: db.clone(),
+                    running_games: running_games.clone(),
+                };
                 std::thread::spawn(move || {
-                    ira_launcher::wrapper::monitor_process(
-                        child, pid, &sender_c, game_id, started_at, db_c, rg,
-                    );
+                    ira_launcher::wrapper::monitor_process(child, pid, mc);
                 });
             }
             Err(e) => return Err(format!("Failed to launch shadPS4: {}", e)),
@@ -205,6 +211,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
                     game_name: game_name.clone(),
                     sender,
                     game_id,
+                    variant_id,
                     app_id: app_id.clone(),
                     db: db.clone(),
                     save_dir: save_dir.clone(),
@@ -216,11 +223,26 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         }
     }
 
-    if let Err(e) = ira_db::set_last_played(&db, db_id, started_at) {
-        eprintln!("Failed to update last played: {}", e);
-    }
-    if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == game_id) {
-        g.last_played = started_at;
+    let variant_show_as_entry = variant_id
+        .and_then(|vid| ira_db::get_variants(&db, db_id).ok()?.into_iter().find(|v| v.id == vid))
+        .is_some_and(|v| v.show_as_entry);
+
+    if variant_show_as_entry {
+        if let Some(vid) = variant_id {
+            if let Err(e) = ira_db::set_variant_last_played(&db, vid, started_at) {
+                eprintln!("Failed to update variant last played: {}", e);
+            }
+        }
+        if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == game_id && g.variant_id == variant_id) {
+            g.last_played = started_at;
+        }
+    } else {
+        if let Err(e) = ira_db::set_last_played(&db, db_id, started_at) {
+            eprintln!("Failed to update last played: {}", e);
+        }
+        if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == game_id && g.variant_id.is_none()) {
+            g.last_played = started_at;
+        }
     }
 
     Ok(())

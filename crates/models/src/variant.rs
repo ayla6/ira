@@ -19,5 +19,9 @@ pub struct GameVariant {
     pub custom_images: bool,
     #[serde(default)]
     pub show_as_entry: bool,
+    #[serde(default)]
+    pub playtime: f64,
+    #[serde(default)]
+    pub last_played: i64,
 }
 

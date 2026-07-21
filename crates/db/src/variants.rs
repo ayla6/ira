@@ -16,7 +16,9 @@ pub fn create_variants_table(conn: &DbConn) {
             sort_order INTEGER NOT NULL DEFAULT 0,
             pre_launch TEXT NOT NULL DEFAULT '',
             custom_images INTEGER NOT NULL DEFAULT 0,
-            show_as_entry INTEGER NOT NULL DEFAULT 0
+            show_as_entry INTEGER NOT NULL DEFAULT 0,
+            playtime REAL NOT NULL DEFAULT 0.0,
+            last_played INTEGER NOT NULL DEFAULT 0
         );"
     ).expect("create game_variants table");
 }
@@ -24,7 +26,7 @@ pub fn create_variants_table(conn: &DbConn) {
 pub fn get_variants(conn: &DbConn, game_id: i64) -> Result<Vec<GameVariant>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c.prepare(
-        "SELECT id, game_id, name, exe, working_dir, args, env_vars, sort_order, pre_launch, custom_images, show_as_entry FROM game_variants WHERE game_id = ?1 ORDER BY sort_order, id"
+        "SELECT id, game_id, name, exe, working_dir, args, env_vars, sort_order, pre_launch, custom_images, show_as_entry, playtime, last_played FROM game_variants WHERE game_id = ?1 ORDER BY sort_order, id"
     ).map_err(|e| e.to_string())?;
     let rows = stmt.query_map(params![game_id], |row| {
         let env_str: String = row.get(6)?;
@@ -41,6 +43,8 @@ pub fn get_variants(conn: &DbConn, game_id: i64) -> Result<Vec<GameVariant>, Str
             pre_launch: row.get(8)?,
             custom_images: row.get::<_, i64>(9)? != 0,
             show_as_entry: row.get::<_, i64>(10)? != 0,
+            playtime: row.get(11)?,
+            last_played: row.get(12)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -125,5 +129,23 @@ pub fn delete_all_variants(conn: &DbConn, game_id: i64) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.execute("DELETE FROM game_variants WHERE game_id = ?1", params![game_id])
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn update_variant_playtime(conn: &DbConn, variant_id: i64, playtime: f64) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute(
+        "UPDATE game_variants SET playtime = ?1 WHERE id = ?2",
+        params![playtime, variant_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn set_variant_last_played(conn: &DbConn, variant_id: i64, last_played: i64) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute(
+        "UPDATE game_variants SET last_played = ?1 WHERE id = ?2",
+        params![last_played, variant_id],
+    ).map_err(|e| e.to_string())?;
     Ok(())
 }

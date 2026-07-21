@@ -9,6 +9,7 @@ pub struct LaunchContext {
     pub game_name: String,
     pub sender: AppSender,
     pub game_id: i64,
+    pub variant_id: Option<i64>,
     pub app_id: String,
     pub db: DbConn,
     pub save_dir: String,
@@ -115,11 +116,17 @@ pub fn launch_game(
     ctx.running_games.lock().map_err(|e| e.to_string())?.insert(ctx.game_id, child_pid);
 
     let game_id = ctx.game_id;
-    let sender_c = ctx.sender.clone();
-    let db_c = ctx.db.clone();
-    let rg = ctx.running_games.clone();
+    let variant_id = ctx.variant_id;
+    let mc = super::wrapper::MonitorContext {
+        sender: ctx.sender.clone(),
+        game_id,
+        variant_id,
+        started_at,
+        db: ctx.db.clone(),
+        running_games: ctx.running_games.clone(),
+    };
     std::thread::spawn(move || {
-        super::wrapper::monitor_process(child, child_pid, &sender_c, game_id, started_at, db_c, rg);
+        super::wrapper::monitor_process(child, child_pid, mc);
     });
 
     Ok(child_pid)

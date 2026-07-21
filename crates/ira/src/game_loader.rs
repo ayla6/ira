@@ -293,6 +293,8 @@ pub fn build_variant_entries(db: &DbConn, save_dir: &str, game: &Game) -> Vec<Ga
             let mut entry = game.clone();
             entry.variant_id = Some(v.id);
             entry.name = format!("{} - {}", game.name, v.name);
+            entry.playtime = v.playtime;
+            entry.last_played = v.last_played;
 
             let var_dir = image_dir.join(format!("variant-{}", v.id));
             if var_dir.is_dir() {

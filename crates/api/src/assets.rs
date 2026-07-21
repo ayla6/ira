@@ -317,22 +317,19 @@ impl SteamDataClient {
         };
         ira_parser::remove_image_variants(&dir, base_name);
 
+        let dest = dir.join(format!("{}.{}", base_name, ext));
         let r = if is_png || asset == "icon" {
-            let tmp = dir.join(format!("{}.tmp", base_name));
-            if self.download_file(&url, &tmp).is_ok() {
-                ira_parser::convert_to_lossless_webp(&tmp);
-                let webp = dir.join(format!("{}.webp", base_name));
-                if webp.is_file() { webp.to_string_lossy().into_owned() } else { String::new() }
+            if self.download_file(&url, &dest).is_ok() {
+                dest.to_string_lossy().into_owned()
             } else { String::new() }
         } else {
-            let dest = dir.join(format!("{}.{}", base_name, ext));
-            let r = self.fetch_image(&url, &dest);
-            if !r.is_empty() {
-                ira_parser::convert_to_lossless_webp(&dest);
-            }
+            self.fetch_image(&url, &dest)
+        };
+        let r = if !r.is_empty() {
+            ira_parser::convert_to_lossless_webp(&dest);
             let webp = dir.join(format!("{}.webp", base_name));
             if webp.is_file() { webp.to_string_lossy().into_owned() } else { r }
-        };
+        } else { r };
 
         if !r.is_empty() {
             let (small_name, sw, sh) = match asset {

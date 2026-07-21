@@ -163,6 +163,13 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 }
             }
 
+            // If the selected game is a variant entry and the user selected
+            // "Base game" or a non-show_as_entry variant, navigate to the base game
+            let selected_id = state.borrow().selected_id.clone();
+            if ira_models::parse_db_id(&selected_id) == db_id && selected_id != db_id.to_string() {
+                switch_to_game(state, db_id, None);
+            }
+
             let (db, save_dir, sender) = {
                 let s = state.borrow();
                 (s.db.clone(), s.save_dir.clone(), s.sender.clone())
@@ -268,6 +275,27 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
     {
         let mut s = state.borrow_mut();
         s.games = games;
+
+        // Validate default variants: reset if no longer eligible
+        let db = s.db.clone();
+        let mut db_ids_to_check: Vec<i64> = s.games.iter()
+            .filter(|g| g.variant_id.is_none())
+            .map(|g| g.db_id)
+            .collect();
+        db_ids_to_check.dedup();
+        for db_id in &db_ids_to_check {
+            if let Some(default_vid) = ira_db::get_default_variant(&db, *db_id) {
+                let eligible = ira_db::get_variants(&db, *db_id)
+                    .unwrap_or_default()
+                    .iter()
+                    .find(|v| v.id == default_vid)
+                    .is_some_and(|v| v.count_playtime && !v.show_as_entry);
+                if !eligible {
+                    ira_db::set_default_variant(&db, *db_id, None);
+                }
+            }
+        }
+
         let mut names = s.game_names.lock().unwrap();
         for g in &s.games {
             if !g.app_id.is_empty() {

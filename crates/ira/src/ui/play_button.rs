@@ -446,7 +446,10 @@ pub fn play_button(state: &SharedState, db_id: i64, variant_id: Option<i64>) -> 
         split.add_css_class("suggested-action");
     }
 
-    let default_vid = variant_id.or_else(|| ira_db::get_default_variant(&state.borrow().db, db_id));
+    let default_vid = variant_id.or_else(|| {
+        let vid = ira_db::get_default_variant(&state.borrow().db, db_id)?;
+        variants.iter().find(|v| v.id == vid && v.count_playtime && !v.show_as_entry).map(|v| v.id)
+    });
     let default_target = match default_vid {
         Some(vid) => format!("{}", vid),
         None => "none".to_string(),
@@ -460,6 +463,11 @@ pub fn play_button(state: &SharedState, db_id: i64, variant_id: Option<i64>) -> 
         Some(glib::VariantTy::STRING),
         &glib::Variant::from(&default_target),
     );
+
+    let eligible_default_ids: std::collections::HashSet<i64> = variants.iter()
+        .filter(|v| v.count_playtime && !v.show_as_entry)
+        .map(|v| v.id)
+        .collect();
 
     // For variant entries, don't persist the selection to DB — just track locally.
     // For base games, persist as before and notify so the game page reloads
@@ -475,7 +483,10 @@ pub fn play_button(state: &SharedState, db_id: i64, variant_id: Option<i64>) -> 
                 target_str.parse::<i64>().ok()
             };
             if variant_id.is_none() {
-                ira_db::set_default_variant(&st_c.borrow().db, db_id, vid);
+                let can_be_default = vid.is_none_or(|vid| eligible_default_ids.contains(&vid));
+                if can_be_default {
+                    ira_db::set_default_variant(&st_c.borrow().db, db_id, vid);
+                }
                 let _ = st_c.borrow().sender.send(crate::AppMessage::VariantSelected(db_id, vid));
             }
             current_variant_c.set(vid);

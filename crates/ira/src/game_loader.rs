@@ -278,8 +278,8 @@ pub fn apply_variant_images_for(db: &DbConn, save_dir: &str, entry: &GameEntry, 
     if !var_game.header_path.is_empty() { game.header_path = var_game.header_path; }
     if !var_game.logo_path.is_empty() { game.logo_path = var_game.logo_path; }
 
-    game.logo_position = var.logo_position.clone();
-    game.logo_size = var.logo_size;
+    if !var.logo_position.is_empty() { game.logo_position = var.logo_position.clone(); }
+    if var.logo_size != 0 { game.logo_size = var.logo_size; }
 }
 
 /// For each variant with `show_as_entry=true`, create a pseudo-Game entry
@@ -297,8 +297,8 @@ pub fn build_variant_entries(db: &DbConn, save_dir: &str, game: &Game) -> Vec<Ga
             entry.name = format!("{} - {}", game.name, v.name);
             entry.playtime = v.playtime;
             entry.last_played = v.last_played;
-            entry.logo_position = v.logo_position.clone();
-            entry.logo_size = v.logo_size;
+    if !v.logo_position.is_empty() { entry.logo_position = v.logo_position.clone(); }
+    if v.logo_size != 0 { entry.logo_size = v.logo_size; }
 
             let var_dir = image_dir.join(format!("variant-{}", v.id));
             if var_dir.is_dir() {

@@ -133,7 +133,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
     // --- Logo page ---
     let logo_controls: Option<(Rc<RefCell<String>>, gtk4::Adjustment)> =
-        if let Some((logo_page, selected_pos, size_adj)) = super::game_logo::build_game_logo_page(&game) {
+        if let Some((logo_page, selected_pos, size_adj, _modified)) = super::game_logo::build_game_logo_page(&game) {
             sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-desktop-wallpaper-symbolic", "Logo"));
             stack.add_named(&logo_page, Some("logo"));
             Some((selected_pos, size_adj))
@@ -673,8 +673,8 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
                     custom_images: vw.custom_images.is_active(),
                     show_as_entry: vw.show_as_entry.is_active(),
                     count_playtime: vw.count_playtime.is_active(),
-                    logo_position: vw.logo_position.borrow().clone(),
-                    logo_size: vw.logo_size.value() as i32,
+                    logo_position: if vw.logo_modified.get() { vw.logo_position.borrow().clone() } else { String::new() },
+                    logo_size: if vw.logo_modified.get() { vw.logo_size.value() as i32 } else { 0 },
                     ..Default::default()
                 };
 

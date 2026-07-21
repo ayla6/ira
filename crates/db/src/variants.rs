@@ -20,8 +20,8 @@ pub fn create_variants_table(conn: &DbConn) {
             playtime REAL NOT NULL DEFAULT 0.0,
             last_played INTEGER NOT NULL DEFAULT 0,
             count_playtime INTEGER NOT NULL DEFAULT 1,
-            logo_position TEXT NOT NULL DEFAULT 'bottom-left',
-            logo_size INTEGER NOT NULL DEFAULT 50
+            logo_position TEXT NOT NULL DEFAULT '',
+            logo_size INTEGER NOT NULL DEFAULT 0
         );"
     ).expect("create game_variants table");
 }

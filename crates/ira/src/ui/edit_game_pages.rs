@@ -292,6 +292,7 @@ pub(super) struct VarW {
     pub(super) count_playtime: adw::SwitchRow,
     pub(super) logo_position: Rc<RefCell<String>>,
     pub(super) logo_size: gtk4::Adjustment,
+    pub(super) logo_modified: Rc<std::cell::Cell<bool>>,
     pub(super) group: adw::PreferencesGroup,
 }
 
@@ -507,6 +508,7 @@ pub(super) fn build_variants_page(
 
             let mut logo_position_cell: Option<Rc<RefCell<String>>> = None;
             let mut logo_size_adj_cell: Option<gtk4::Adjustment> = None;
+            let mut logo_modified_cell: Option<Rc<std::cell::Cell<bool>>> = None;
             {
                 let images_expander_c = images_expander.clone();
                 custom_images_row.connect_notify_local(Some("active"), move |row, _| {
@@ -540,18 +542,37 @@ pub(super) fn build_variants_page(
                         images_expander.add_row(&row);
                     }
 
-                    // Logo position/size preview (same UI as base game)
+                    // Logo position/size — outside images expander, always visible for saved variants.
+                    // Falls back to base game's hero/logo for preview.
                     let mut var_game = crate::Game::default();
                     ira_parser::populate_image_paths(&var_dir, &mut var_game);
+                    if var_game.hero_image_path.is_empty() || var_game.logo_path.is_empty() {
+                        if let Some(base) = state_for_fn.borrow().games.iter()
+                            .find(|g| g.db_id == db_id_for_fn && g.variant_id.is_none())
+                        {
+                            if var_game.hero_image_path.is_empty() {
+                                var_game.hero_image_path = base.hero_image_path.clone();
+                            }
+                            if var_game.logo_path.is_empty() {
+                                var_game.logo_path = base.logo_path.clone();
+                            }
+                        }
+                    }
                     var_game.logo_position = v.logo_position.clone();
                     var_game.logo_size = v.logo_size;
-                    if let Some((logo_ui, logo_pos, logo_size_adj)) = super::game_logo::build_game_logo_page(&var_game) {
+                    if let Some((logo_ui, logo_pos, logo_size_adj, logo_mod)) = super::game_logo::build_game_logo_page(&var_game) {
+                        let logo_expander = adw::ExpanderRow::new();
+                        logo_expander.set_title("Logo position");
+                        logo_expander.set_subtitle(if v.logo_position.is_empty() { "Inherited from base game" } else { "" });
+                        logo_expander.set_enable_expansion(true);
                         let logo_row = adw::ActionRow::new();
                         logo_row.set_activatable(false);
                         logo_row.set_child(Some(&logo_ui));
-                        images_expander.add_row(&logo_row);
+                        logo_expander.add_row(&logo_row);
+                        group.add(&logo_expander);
                         logo_position_cell = Some(logo_pos);
                         logo_size_adj_cell = Some(logo_size_adj);
+                        logo_modified_cell = Some(logo_mod);
                     }
                 }
             }
@@ -570,6 +591,7 @@ pub(super) fn build_variants_page(
                 count_playtime: count_playtime_row,
                 logo_position: logo_position_cell.unwrap_or_else(|| Rc::new(RefCell::new(v.logo_position.clone()))),
                 logo_size: logo_size_adj_cell.unwrap_or_else(|| gtk4::Adjustment::new(v.logo_size as f64, 5.0, 100.0, 1.0, 5.0, 0.0)),
+                logo_modified: logo_modified_cell.unwrap_or_else(|| Rc::new(std::cell::Cell::new(false))),
                 group,
             });
         }

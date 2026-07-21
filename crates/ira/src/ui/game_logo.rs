@@ -1,18 +1,19 @@
 use gtk4::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use crate::Game;
 
-pub(super) fn build_game_logo_page(game: &Game) -> Option<(gtk4::Box, Rc<RefCell<String>>, gtk4::Adjustment)> {
-    if game.logo_path.is_empty() {
-        return None;
-    }
+pub(super) type LogoControls = (gtk4::Box, Rc<RefCell<String>>, gtk4::Adjustment, Rc<Cell<bool>>);
 
+pub(super) fn build_game_logo_page(game: &Game) -> Option<LogoControls> {
     let logo_page = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
 
-    let selected_pos: Rc<RefCell<String>> = Rc::new(RefCell::new(game.logo_position.clone()));
+    let inherited = game.logo_position.is_empty();
+    let pos_str = if inherited { "bottom-left".to_string() } else { game.logo_position.clone() };
+    let selected_pos: Rc<RefCell<String>> = Rc::new(RefCell::new(pos_str));
+    let modified: Rc<Cell<bool>> = Rc::new(Cell::new(false));
 
-    let size_pct = game.logo_size.clamp(5, 100);
+    let size_pct = if inherited { 50 } else { game.logo_size }.clamp(5, 100);
     let size_adj = gtk4::Adjustment::new(size_pct as f64, 5.0, 100.0, 1.0, 5.0, 0.0);
 
     let preview_overlay = gtk4::Overlay::new();
@@ -34,40 +35,42 @@ pub(super) fn build_game_logo_page(game: &Game) -> Option<(gtk4::Box, Rc<RefCell
     preview_draw.set_hexpand(true);
     preview_draw.set_vexpand(true);
 
-    if let Ok(ref pixbuf) = gtk4::gdk_pixbuf::Pixbuf::from_file(&game.logo_path) {
-        let pb_w = pixbuf.width() as f64;
-        let pb_h = pixbuf.height() as f64;
-        let pixbuf_clone = pixbuf.clone();
-        let pos_for_draw = selected_pos.clone();
-        let adj_for_draw = size_adj.clone();
+    if !game.logo_path.is_empty() {
+        if let Ok(ref pixbuf) = gtk4::gdk_pixbuf::Pixbuf::from_file(&game.logo_path) {
+            let pb_w = pixbuf.width() as f64;
+            let pb_h = pixbuf.height() as f64;
+            let pixbuf_clone = pixbuf.clone();
+            let pos_for_draw = selected_pos.clone();
+            let adj_for_draw = size_adj.clone();
 
-        preview_draw.set_draw_func(move |_area, cr, area_w, area_h| {
-            let w = area_w as f64;
-            let h = area_h as f64;
-            if w <= 0.0 || h <= 0.0 { return; }
-            let pct = adj_for_draw.value() as i32;
-            let (lw, lh) = super::game_display::logo_scaled_dims(w, h, pb_w, pb_h, pct);
-            let pos = pos_for_draw.borrow().clone();
-            let (halign, valign) = super::game_display::logo_position_align(&pos);
-            let x = match halign {
-                gtk4::Align::Start => 12.0,
-                gtk4::Align::Center => (w - lw) / 2.0,
-                gtk4::Align::End => w - lw - 12.0,
-                _ => 12.0,
-            };
-            let y = match valign {
-                gtk4::Align::Start => 12.0,
-                gtk4::Align::Center => (h - lh) / 2.0,
-                gtk4::Align::End => h - lh - 12.0,
-                _ => h - lh - 12.0,
-            };
-            let _ = cr.save();
-            cr.translate(x, y);
-            cr.scale(lw / pb_w, lh / pb_h);
-            cr.set_source_pixbuf(&pixbuf_clone, 0.0, 0.0);
-            let _ = cr.paint();
-            let _ = cr.restore();
-        });
+            preview_draw.set_draw_func(move |_area, cr, area_w, area_h| {
+                let w = area_w as f64;
+                let h = area_h as f64;
+                if w <= 0.0 || h <= 0.0 { return; }
+                let pct = adj_for_draw.value() as i32;
+                let (lw, lh) = super::game_display::logo_scaled_dims(w, h, pb_w, pb_h, pct);
+                let pos = pos_for_draw.borrow().clone();
+                let (halign, valign) = super::game_display::logo_position_align(&pos);
+                let x = match halign {
+                    gtk4::Align::Start => 12.0,
+                    gtk4::Align::Center => (w - lw) / 2.0,
+                    gtk4::Align::End => w - lw - 12.0,
+                    _ => 12.0,
+                };
+                let y = match valign {
+                    gtk4::Align::Start => 12.0,
+                    gtk4::Align::Center => (h - lh) / 2.0,
+                    gtk4::Align::End => h - lh - 12.0,
+                    _ => h - 12.0,
+                };
+                let _ = cr.save();
+                cr.translate(x, y);
+                cr.scale(lw / pb_w, lh / pb_h);
+                cr.set_source_pixbuf(&pixbuf_clone, 0.0, 0.0);
+                let _ = cr.paint();
+                let _ = cr.restore();
+            });
+        }
     }
 
     preview_overlay.add_overlay(&preview_draw);
@@ -82,11 +85,12 @@ pub(super) fn build_game_logo_page(game: &Game) -> Option<(gtk4::Box, Rc<RefCell
     pos_grid.set_hexpand(true);
     pos_grid.set_vexpand(true);
 
+    let current_pos = selected_pos.borrow().clone();
     let mut all_btns: Vec<gtk4::Button> = Vec::new();
     for (i, &pos) in logo_positions.iter().enumerate() {
         let btn = gtk4::Button::new();
         btn.add_css_class("logo-pos-overlay-btn");
-        if pos == game.logo_position {
+        if pos == current_pos {
             btn.add_css_class("selected");
         }
         btn.set_hexpand(true);
@@ -103,12 +107,14 @@ pub(super) fn build_game_logo_page(game: &Game) -> Option<(gtk4::Box, Rc<RefCell
         let selected_pos_c = selected_pos.clone();
         let pos_owned = pos.to_string();
         let preview_clone = preview_draw.clone();
+        let modified_c = modified.clone();
         btns[i].connect_clicked(move |btn| {
             for b in btns_c.iter() {
                 b.remove_css_class("selected");
             }
             btn.add_css_class("selected");
             *selected_pos_c.borrow_mut() = pos_owned.clone();
+            modified_c.set(true);
             preview_clone.queue_draw();
         });
     }
@@ -136,13 +142,41 @@ pub(super) fn build_game_logo_page(game: &Game) -> Option<(gtk4::Box, Rc<RefCell
     size_spin.set_digits(1);
 
     let preview_draw_for_size = preview_draw.clone();
+    let modified_for_size = modified.clone();
     size_adj.connect_value_changed(move |_| {
         preview_draw_for_size.queue_draw();
+        modified_for_size.set(true);
     });
 
     size_row.append(&size_scale);
     size_row.append(&size_spin);
     logo_page.append(&size_row);
 
-    Some((logo_page, selected_pos, size_adj))
+    let reset_btn = gtk4::Button::with_label("Reset to base game");
+    reset_btn.add_css_class("flat");
+    let selected_pos_reset = selected_pos.clone();
+    let size_adj_reset = size_adj.clone();
+    let btns_reset = btns.clone();
+    let preview_reset = preview_draw.clone();
+    let modified_reset = modified.clone();
+    reset_btn.connect_clicked(move |_| {
+        *selected_pos_reset.borrow_mut() = "bottom-left".to_string();
+        size_adj_reset.set_value(50.0);
+        modified_reset.set(false);
+        for b in btns_reset.iter() {
+            b.remove_css_class("selected");
+        }
+        for (i, &pos) in logo_positions.iter().enumerate() {
+            if pos == "bottom-left" {
+                btns_reset[i].add_css_class("selected");
+            }
+        }
+        preview_reset.queue_draw();
+    });
+    if inherited {
+        reset_btn.set_sensitive(false);
+    }
+    logo_page.append(&reset_btn);
+
+    Some((logo_page, selected_pos, size_adj, modified))
 }

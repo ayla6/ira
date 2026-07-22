@@ -21,11 +21,7 @@ fn find_all_games_by(conn: &DbConn, where_clause: &str, params: &[&dyn rusqlite:
         .map_err(|e| e.to_string())?;
     let entries = stmt.query_map(params, crate::game_entry_from_row)
         .map_err(|e| e.to_string())?;
-    let mut result = Vec::new();
-    for entry in entries {
-        result.push(entry.map_err(|e| e.to_string())?);
-    }
-    Ok(result)
+    entries.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
 pub fn find_by_steam_id(conn: &DbConn, steam_id: &str) -> Result<Option<GameEntry>, String> {

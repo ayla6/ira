@@ -40,11 +40,7 @@ pub fn get_all_groups(conn: &DbConn) -> Result<Vec<Group>, String> {
             })
         })
         .map_err(|e| e.to_string())?;
-    let mut result = Vec::new();
-    for g in groups {
-        result.push(g.map_err(|e| e.to_string())?);
-    }
-    Ok(result)
+    groups.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
 pub fn add_game_to_group(conn: &DbConn, game_id: i64, group_id: i64) -> Result<(), String> {
@@ -85,11 +81,7 @@ pub fn get_groups_for_game(conn: &DbConn, game_id: i64) -> Result<Vec<Group>, St
             })
         })
         .map_err(|e| e.to_string())?;
-    let mut result = Vec::new();
-    for g in groups {
-        result.push(g.map_err(|e| e.to_string())?);
-    }
-    Ok(result)
+    groups.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
 pub fn get_game_ids_in_group(conn: &DbConn, group_id: i64) -> Result<Vec<i64>, String> {
@@ -100,11 +92,7 @@ pub fn get_game_ids_in_group(conn: &DbConn, group_id: i64) -> Result<Vec<i64>, S
     let ids = stmt
         .query_map(params![group_id], |row| row.get(0))
         .map_err(|e| e.to_string())?;
-    let mut result = Vec::new();
-    for id in ids {
-        result.push(id.map_err(|e| e.to_string())?);
-    }
-    Ok(result)
+    ids.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

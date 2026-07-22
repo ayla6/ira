@@ -30,11 +30,7 @@ pub fn get_sessions_for_game(conn: &DbConn, game_id: i64, variant_id: Option<i64
             })
         })
         .map_err(|e| e.to_string())?;
-    let mut result = Vec::new();
-    for row in rows {
-        result.push(row.map_err(|e| e.to_string())?);
-    }
-    Ok(result)
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
 fn day_start_end(date: &chrono::NaiveDate) -> (i64, i64) {
@@ -65,11 +61,7 @@ pub fn get_sessions_range(conn: &DbConn, from: i64, to: i64) -> Result<Vec<PlayS
             })
         })
         .map_err(|e| e.to_string())?;
-    let mut result = Vec::new();
-    for row in rows {
-        result.push(row.map_err(|e| e.to_string())?);
-    }
-    Ok(result)
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
 pub fn get_total_playtime_for_game(conn: &DbConn, game_id: i64, variant_id: Option<i64>) -> Result<i64, String> {
@@ -97,11 +89,7 @@ pub fn get_playtime_by_day(conn: &DbConn, from: i64, to: i64) -> Result<Vec<(chr
             Ok((day, total))
         })
         .map_err(|e| e.to_string())?;
-    let mut result = Vec::new();
-    for row in rows {
-        result.push(row.map_err(|e| e.to_string())?);
-    }
-    Ok(result)
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
 pub fn delete_sessions_for_game(conn: &DbConn, game_id: i64) -> Result<(), String> {

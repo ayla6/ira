@@ -27,11 +27,7 @@ pub fn get_all_profiles(conn: &DbConn) -> Result<Vec<WineProfile>, String> {
             umu_enabled: row.get(6)?,
         })
     }).map_err(|e| e.to_string())?;
-    let mut result = Vec::new();
-    for row in rows {
-        result.push(row.map_err(|e| e.to_string())?);
-    }
-    Ok(result)
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
 pub fn update_profile(conn: &DbConn, profile: &WineProfile) -> Result<(), String> {
@@ -67,7 +63,7 @@ pub fn get_profile(conn: &DbConn, id: i64) -> Result<Option<WineProfile>, String
         })
     }).map_err(|e| e.to_string())?;
     if let Some(row) = rows.next() {
-        Ok(Some(row.map_err(|e| e.to_string())?))
+        row.map_err(|e| e.to_string()).map(Some)
     } else {
         Ok(None)
     }

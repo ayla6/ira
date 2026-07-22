@@ -31,18 +31,10 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
     let progress_vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
     let global_vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
 
-    let mut earned: Vec<&MergedAchievement> = Vec::new();
-    let mut locked: Vec<&MergedAchievement> = Vec::new();
-    let mut hidden: Vec<&MergedAchievement> = Vec::new();
-    for ach in &game.achievements {
-        if ach.earned {
-            earned.push(ach);
-        } else if ach.hidden {
-            hidden.push(ach);
-        } else {
-            locked.push(ach);
-        }
-    }
+    let (mut earned, rest): (Vec<&MergedAchievement>, Vec<&MergedAchievement>) =
+        game.achievements.iter().partition(|a| a.earned);
+    let (hidden, mut locked): (Vec<&MergedAchievement>, Vec<&MergedAchievement>) =
+        rest.into_iter().partition(|a| a.hidden);
 
     earned.sort_by(|a, b| b.earned_time.cmp(&a.earned_time));
     locked.sort_by(|a, b| {

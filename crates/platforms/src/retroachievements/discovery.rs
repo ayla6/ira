@@ -14,17 +14,15 @@ struct ActiveConsole {
 }
 
 fn active_consoles(cfg: &Config) -> Vec<ActiveConsole> {
-    let mut consoles = Vec::new();
-    for def in CONSOLES {
-        let cc = cfg.console(def.id);
-        if cc.enabled && !cc.folder.is_empty() {
-            consoles.push(ActiveConsole {
+    CONSOLES.iter()
+        .filter_map(|def| {
+            let cc = cfg.console(def.id);
+            (cc.enabled && !cc.folder.is_empty()).then_some(ActiveConsole {
                 def,
                 folder: cc.folder.clone(),
-            });
-        }
-    }
-    consoles
+            })
+        })
+        .collect()
 }
 
 pub fn build_ra_games(

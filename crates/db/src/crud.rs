@@ -69,11 +69,7 @@ pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
         crate::game_entry_from_row(row)
     }).map_err(|e| e.to_string())?;
 
-    let mut result = Vec::new();
-    for entry in entries {
-        result.push(entry.map_err(|e| e.to_string())?);
-    }
-    Ok(result)
+    entries.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
 pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {

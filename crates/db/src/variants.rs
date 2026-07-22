@@ -54,11 +54,7 @@ pub fn get_variants(conn: &DbConn, game_id: i64) -> Result<Vec<GameVariant>, Str
         })
     }).map_err(|e| e.to_string())?;
 
-    let mut result = Vec::new();
-    for row in rows {
-        result.push(row.map_err(|e| e.to_string())?);
-    }
-    Ok(result)
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
 pub fn add_variant(conn: &DbConn, variant: &GameVariant) -> Result<i64, String> {

@@ -41,11 +41,8 @@ pub fn find_icon_path(ach_dir: &Path, icon_field: &str) -> String {
         ach_dir.join("achievement_images").join(base),
         ach_dir.join("img").join(base),
     ];
-    for cand in &candidates {
-        if cand.is_file() {
-            let converted = try_convert_ico(cand);
-            return converted.to_string_lossy().into_owned();
-        }
-    }
-    String::new()
+    candidates.iter()
+        .find(|cand| cand.is_file())
+        .map(|cand| try_convert_ico(cand).to_string_lossy().into_owned())
+        .unwrap_or_default()
 }

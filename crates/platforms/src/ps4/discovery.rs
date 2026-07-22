@@ -14,19 +14,14 @@ pub fn read_install_dirs() -> Vec<PathBuf> {
         Err(_) => return Vec::new(),
     };
 
-    let mut dirs = Vec::new();
-    if let Some(install_dirs) = json.get("General").and_then(|g| g.get("install_dirs")).and_then(|d| d.as_array()) {
-        for dir in install_dirs {
-            let enabled = dir.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false);
-            if !enabled {
-                continue;
-            }
-            if let Some(path) = dir.get("path").and_then(|p| p.as_str()) {
-                dirs.push(PathBuf::from(path));
-            }
-        }
-    }
-    dirs
+    json.get("General")
+        .and_then(|g| g.get("install_dirs"))
+        .and_then(|d| d.as_array())
+        .into_iter()
+        .flat_map(|arr| arr.iter())
+        .filter(|dir| dir.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false))
+        .filter_map(|dir| dir.get("path").and_then(|p| p.as_str()).map(PathBuf::from))
+        .collect()
 }
 
 /// A discovered shadPS4 game.

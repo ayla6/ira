@@ -51,22 +51,13 @@ pub fn detect_native(names: &[&str], display_name: &str) -> Option<DetectedEmula
 }
 
 pub fn detect_emulators(console: &str) -> Vec<DetectedEmulator> {
-    let mut result = Vec::new();
-    if let Some(def) = ira_models::find_console(console) {
-        if let Some(e) = detect_native(def.binary_names, def.emu_display_name) {
-            result.push(e);
-        }
-        if let Some(e) = detect_flatpak(def.flatpak_id, def.emu_display_name) {
-            result.push(e);
-        }
-    }
-    if let Some(e) = detect_native(&["retroarch"], "RetroArch") {
-        result.push(e);
-    }
-    if let Some(e) = detect_flatpak("org.libretro.RetroArch", "RetroArch") {
-        result.push(e);
-    }
-    result
+    let def = ira_models::find_console(console);
+    [
+        def.and_then(|d| detect_native(d.binary_names, d.emu_display_name)),
+        def.and_then(|d| detect_flatpak(d.flatpak_id, d.emu_display_name)),
+        detect_native(&["retroarch"], "RetroArch"),
+        detect_flatpak("org.libretro.RetroArch", "RetroArch"),
+    ].into_iter().flatten().collect()
 }
 
 pub fn is_retroarch(launch_command: &str) -> bool {

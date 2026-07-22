@@ -286,17 +286,12 @@ pub(super) fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRo
 
     let gse_versions = ira_platforms::api_emulators::list_gse_versions(&cfg.save_dir);
     let gog_versions = ira_platforms::api_emulators::list_gog_versions(&cfg.save_dir);
-    let mut all_versions: Vec<String> = Vec::new();
-    for v in &gse_versions {
-        if !all_versions.contains(v) {
-            all_versions.push(v.clone());
-        }
-    }
-    for v in &gog_versions {
-        if !all_versions.contains(v) {
-            all_versions.push(v.clone());
-        }
-    }
+    let mut all_versions: Vec<String> = gse_versions.iter()
+        .chain(gog_versions.iter())
+        .cloned()
+        .collect();
+    all_versions.sort();
+    all_versions.dedup();
 
     let version_model = if all_versions.is_empty() {
         let strings = vec!["(no versions installed)"];

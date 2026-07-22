@@ -81,30 +81,19 @@ pub fn discover_games() -> Vec<Rpcs3Game> {
     // PSN games
     let psn_dir = games_dir();
     if let Ok(entries) = std::fs::read_dir(&psn_dir) {
-        for entry in entries.flatten() {
-            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                continue;
-            }
-            if let Some(game) = scan_game_folder(&entry.path()) {
-                games.push(game);
-            }
-        }
+        games.extend(entries.flatten()
+            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .filter_map(|e| scan_game_folder(&e.path())));
     }
 
     // Disc games (folder structure: disc/<name>/PS3_GAME/PARAM.SFO)
     let disc_dir = disc_dir();
     if let Ok(entries) = std::fs::read_dir(&disc_dir) {
-        for entry in entries.flatten() {
-            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                continue;
-            }
-            let ps3_game_dir = entry.path().join("PS3_GAME");
-            if ps3_game_dir.join("PARAM.SFO").is_file() {
-                if let Some(game) = scan_game_folder(&ps3_game_dir) {
-                    games.push(game);
-                }
-            }
-        }
+        games.extend(entries.flatten()
+            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .map(|e| e.path().join("PS3_GAME"))
+            .filter(|p| p.join("PARAM.SFO").is_file())
+            .filter_map(|ref p| scan_game_folder(p)));
     }
 
     games

@@ -30,20 +30,16 @@ pub fn detect_gpus() -> Vec<GpuInfo> {
         Err(_) => return Vec::new(),
     };
 
-    let mut gpus = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let name_str = match name.to_str() {
-            Some(s) => s,
-            None => continue,
-        };
-        if !name_str.starts_with("card") || name_str.contains(':') {
-            continue;
-        }
-        if let Some(gpu) = read_gpu_info(name_str) {
-            gpus.push(gpu);
-        }
-    }
+    let mut gpus: Vec<_> = entries.flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name_str = name.to_str()?;
+            if !name_str.starts_with("card") || name_str.contains(':') {
+                return None;
+            }
+            read_gpu_info(name_str)
+        })
+        .collect();
     gpus.sort_by(|a, b| a.card.cmp(&b.card));
     gpus
 }

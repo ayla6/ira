@@ -25,6 +25,11 @@ pub(super) fn is_stale(vbox: &gtk4::Box, db_id: i64, variant_id: i64) -> bool {
 }
 
 pub(super) fn queue_cover_load(pic: gtk4::Picture, path: String, w: i32, h: i32, db_id: i64, variant_id: i64, vbox: gtk4::Box) {
+    queue_cover_load_priority(pic, path, (w, h), db_id, variant_id, vbox, glib::Priority::LOW);
+}
+
+pub(super) fn queue_cover_load_priority(pic: gtk4::Picture, path: String, dims: (i32, i32), db_id: i64, variant_id: i64, vbox: gtk4::Box, priority: glib::Priority) {
+    let (w, h) = dims;
     let _s = tracing::info_span!("queue_cover_load", path = %path, w, h, db_id, variant_id).entered();
     if ira_images::cached_texture(&path).is_some() {
         if !is_stale(&vbox, db_id, variant_id) {
@@ -34,7 +39,7 @@ pub(super) fn queue_cover_load(pic: gtk4::Picture, path: String, w: i32, h: i32,
     }
     let pic_weak = pic.downgrade();
     let vbox_weak = vbox.downgrade();
-    ira_images::load_texture_async(&path, move |texture| {
+    ira_images::load_texture_async_with_priority(&path, priority, move |texture| {
         if let (Some(pic), Some(vbox)) = (pic_weak.upgrade(), vbox_weak.upgrade()) {
             if !is_stale(&vbox, db_id, variant_id) {
                 if let Some(t) = texture {

@@ -121,6 +121,16 @@ pub fn load_texture_async<F>(path: &str, callback: F)
 where
     F: FnOnce(Option<Texture>) + 'static,
 {
+    load_texture_async_with_priority(path, glib::Priority::LOW, callback);
+}
+
+/// Same as `load_texture_async` but allows specifying the idle priority for
+/// the result-processing callback. Use a higher priority (e.g. `DEFAULT`)
+/// for images that should appear before lower-priority ones.
+pub fn load_texture_async_with_priority<F>(path: &str, priority: glib::Priority, callback: F)
+where
+    F: FnOnce(Option<Texture>) + 'static,
+{
     let _s = info_span!("load_texture_async", path).entered();
     if path.is_empty() {
         callback(None);
@@ -161,7 +171,7 @@ where
         .ok();
 
     let path_for_idle = path_str;
-    glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+    glib::source::idle_add_local_full(priority, move || {
         match rx.borrow_mut().try_recv() {
             Ok(result) => {
                 let callbacks = PENDING_LOADS.with(|cell| cell.borrow_mut().remove(&path_for_idle));

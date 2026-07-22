@@ -2,7 +2,7 @@ use gtk4::prelude::*;
 use crate::Game;
 use std::rc::Rc;
 use super::state::SharedState;
-use super::grid_view::queue_cover_load;
+use super::grid_view::queue_cover_load_priority;
 use super::message_helpers::switch_to_game;
 use super::sidebar::scroll_to_row;
 use super::context_menu::show_game_context_menu;
@@ -143,7 +143,7 @@ pub(super) fn build_cover(
     pic.set_size_request(w, h);
     pic.add_css_class("game-cover-pic");
     if !image_path.is_empty() {
-        queue_cover_load(pic.clone(), image_path.to_string(), w, h, game.db_id, game.variant_id.unwrap_or(0), vbox.clone());
+        queue_cover_load_priority(pic.clone(), image_path.to_string(), (w, h), game.db_id, game.variant_id.unwrap_or(0), vbox.clone(), glib::Priority::DEFAULT);
     }
 
     vbox.append(&pic);

@@ -301,8 +301,7 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
         let logo_pct = game.logo_size.clamp(5, 100);
         let logo_pos = game.logo_position.clone();
 
-        let pixbuf_result = gtk4::gdk_pixbuf::Pixbuf::from_file(&game.logo_path);
-        if let Ok(pixbuf) = pixbuf_result {
+        if let Some(pixbuf) = ira_images::pixbuf_for(&game.logo_path) {
             let pb_w = pixbuf.width() as f64;
             let pb_h = pixbuf.height() as f64;
 

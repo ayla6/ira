@@ -153,10 +153,10 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                 img.set_valign(gtk4::Align::Center);
                 if ach.earned {
                     if !ach.icon_path.is_empty() {
-                        ira_images::set_image(&img, &ach.icon_path);
+                        ira_images::set_image_async(&img, &ach.icon_path);
                     }
                 } else if !ach.icon_gray_path.is_empty() {
-                    ira_images::set_image(&img, &ach.icon_gray_path);
+                    ira_images::set_image_async(&img, &ach.icon_gray_path);
                 }
                 ach_row.add_prefix(&img);
 

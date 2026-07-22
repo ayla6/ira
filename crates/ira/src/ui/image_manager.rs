@@ -183,7 +183,7 @@ fn make_refresh_closure(
                     });
                 if let Some(path) = preview_src {
                     let p = gtk4::Picture::new();
-                    ira_images::set_picture_contain(&p, &path, th.max(tw));
+                    ira_images::set_picture_contain_async(&p, &path, th.max(tw));
                     preview_wrapper.append(&p);
                 } else {
                     let ph = gtk4::Label::new(Some("—"));
@@ -270,7 +270,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     let preview_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     preview_wrapper.set_valign(gtk4::Align::Center);
     if !img_path.is_empty() && std::path::Path::new(&img_path).is_file() {
-        ira_images::set_picture_contain(&preview, &img_path, max_h);
+        ira_images::set_picture_contain_async(&preview, &img_path, max_h);
         preview_wrapper.append(&preview);
     } else {
         let ph = gtk4::Label::new(Some("—"));
@@ -457,7 +457,7 @@ pub fn build_image_section_for_dir(params: VariantImageSectionParams) -> adw::Ac
             clear_children(&preview_wrapper);
             if let Some(p) = ira_parser::find_image_file(&target_dir, &file_base) {
                 let pic = gtk4::Picture::new();
-                ira_images::set_picture_contain(&pic, &p.to_string_lossy(), max_h);
+                ira_images::set_picture_contain_async(&pic, &p.to_string_lossy(), max_h);
                 preview_wrapper.append(&pic);
             } else {
                 let ph = gtk4::Label::new(Some("—"));

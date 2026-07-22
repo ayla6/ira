@@ -44,7 +44,7 @@ pub(super) fn build_game_logo_page(game: &Game, show_reset: bool) -> Option<Logo
     preview_draw.set_vexpand(true);
 
     if !game.logo_path.is_empty() {
-        if let Ok(ref pixbuf) = gtk4::gdk_pixbuf::Pixbuf::from_file(&game.logo_path) {
+        if let Some(ref pixbuf) = ira_images::pixbuf_for(&game.logo_path) {
             let pb_w = pixbuf.width() as f64;
             let pb_h = pixbuf.height() as f64;
             let pixbuf_clone = pixbuf.clone();

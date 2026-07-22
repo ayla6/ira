@@ -8,6 +8,7 @@ gtk4 = { version = "0.11", features = ["v4_14"] }
 gdk4 = "0.11"
 glib = "0.22"
 ira-models = { path = "../models" }
+ira-parser = { path = "../parser" }
 tracing = "0.1"
 
 [lints]

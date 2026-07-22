@@ -3,8 +3,6 @@ use crate::Game;
 use crate::strings as S;
 use ira_models::{GroupSelection, SortMode};
 
-use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use super::state::SharedState;
@@ -16,16 +14,6 @@ use super::context_menu::show_game_context_menu;
 use super::helpers::clear_children;
 use super::filter::filtered_games;
 
-struct PendingCover {
-    pic: gtk4::Picture,
-    path: String,
-    w: i32,
-    h: i32,
-    db_id: i64,
-    variant_id: i64,
-    vbox: gtk4::Box,
-}
-
 fn is_stale(vbox: &gtk4::Box, db_id: i64, variant_id: i64) -> bool {
     let db_mismatch = unsafe { vbox.data::<AtomicI64>("game-db-id") }
         .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed) != db_id)
@@ -36,11 +24,6 @@ fn is_stale(vbox: &gtk4::Box, db_id: i64, variant_id: i64) -> bool {
     db_mismatch || var_mismatch
 }
 
-thread_local! {
-    static COVER_QUEUE: RefCell<VecDeque<PendingCover>> = const { RefCell::new(VecDeque::new()) };
-    static COVER_PROCESSOR_RUNNING: Cell<bool> = const { Cell::new(false) };
-}
-
 fn queue_cover_load(pic: gtk4::Picture, path: String, w: i32, h: i32, db_id: i64, variant_id: i64, vbox: gtk4::Box) {
     let _s = tracing::info_span!("queue_cover_load", path = %path, w, h, db_id, variant_id).entered();
     if ira_images::cached_texture(&path).is_some() {
@@ -49,29 +32,16 @@ fn queue_cover_load(pic: gtk4::Picture, path: String, w: i32, h: i32, db_id: i64
         }
         return;
     }
-    COVER_QUEUE.with(|q| q.borrow_mut().push_back(PendingCover { pic, path, w, h, db_id, variant_id, vbox }));
-    let queue_depth = COVER_QUEUE.with(|q| q.borrow().len());
-    tracing::info!(queue_depth, "cover_queued");
-    COVER_PROCESSOR_RUNNING.with(|r| {
-        if !r.get() {
-            r.set(true);
-            glib::source::idle_add_local_full(glib::Priority::LOW, move || {
-                let req = COVER_QUEUE.with(|q| q.borrow_mut().pop_front());
-                if let Some(req) = req {
-                    let remaining = COVER_QUEUE.with(|q| q.borrow().len());
-                    let _s = tracing::info_span!("cover_idle_tick", path = %req.path, remaining).entered();
-                    if !is_stale(&req.vbox, req.db_id, req.variant_id) {
-                        ira_images::set_picture_natural(&req.pic, &req.path, req.w, req.h);
-                    }
+    let pic_weak = pic.downgrade();
+    let vbox_weak = vbox.downgrade();
+    ira_images::load_texture_async(&path, move |texture| {
+        if let (Some(pic), Some(vbox)) = (pic_weak.upgrade(), vbox_weak.upgrade()) {
+            if !is_stale(&vbox, db_id, variant_id) {
+                if let Some(t) = texture {
+                    let paintable = ira_images::ScaledPaintable::new(&t, w, h);
+                    pic.set_paintable(Some(&paintable));
                 }
-                let empty = COVER_QUEUE.with(|q| q.borrow().is_empty());
-                if empty {
-                    COVER_PROCESSOR_RUNNING.with(|r| r.set(false));
-                    glib::ControlFlow::Break
-                } else {
-                    glib::ControlFlow::Continue
-                }
-            });
+            }
         }
     });
 }
@@ -516,7 +486,7 @@ fn build_cover(
     pic.set_size_request(w, h);
     pic.add_css_class("game-cover-pic");
     if !image_path.is_empty() {
-        queue_cover_load(pic.clone(), image_path.to_string(), w, h, game.db_id, game.variant_id.unwrap_or(0), gtk4::Box::new(gtk4::Orientation::Vertical, 0));
+        queue_cover_load(pic.clone(), image_path.to_string(), w, h, game.db_id, game.variant_id.unwrap_or(0), vbox.clone());
     }
 
     vbox.append(&pic);

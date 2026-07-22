@@ -199,6 +199,21 @@ pub fn url_extension(url: &str) -> &str {
     path.extension().and_then(|e| e.to_str()).unwrap_or("png")
 }
 
+/// Decode an image file to raw RGBA8 pixels suitable for `gdk::MemoryTexture`.
+/// Reads the file and decodes it using the `image` crate. Returns `None` if
+/// the file can't be read or the format is unsupported.
+///
+/// Designed to be called on a background thread — the returned `(Vec<u8>, w, h)`
+/// is `Send` and can be passed back to the main thread to create a `MemoryTexture`.
+pub fn decode_to_rgba(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
+    let _s = tracing::info_span!("decode_to_rgba", path = %path.display()).entered();
+    let data = std::fs::read(path).ok()?;
+    let img = image::load_from_memory(&data).ok()?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    Some((rgba.into_raw(), w, h))
+}
+
 pub fn achievements_dir(save_dir: &str, app_id: &str) -> PathBuf {
     data_dir(save_dir, app_id).join("achievements")
 }

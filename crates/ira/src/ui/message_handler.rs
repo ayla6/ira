@@ -448,6 +448,38 @@ fn start_background_enrichment(state: &SharedState) {
             });
         });
     }
+
+    let sgdb_games: Vec<(i64, String, bool)> = {
+        let s = state.borrow();
+        s.games.iter()
+            .filter(|g| !g.sgdb_id.is_empty()
+                && g.variant_id.is_none()
+                && (g.icon_path.is_empty() || g.hero_image_path.is_empty()
+                    || g.grid_path.is_empty() || g.logo_path.is_empty()
+                    || g.header_path.is_empty()))
+            .map(|g| (g.db_id, g.sgdb_id.clone(), g.kind == ira_models::GameKind::Retro))
+            .collect()
+    };
+    if !sgdb_games.is_empty() {
+        let steam = state.borrow().steam.clone();
+        let sender = state.borrow().sender.clone();
+        let save_dir = state.borrow().save_dir.clone();
+        std::thread::spawn(move || {
+            let _s = tracing::info_span!("background_sgdb_redownload", count = sgdb_games.len()).entered();
+            for (db_id, sgdb_id, is_retro) in sgdb_games {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let (icon, hero, grid, logo, header) = if is_retro {
+                    let dir = ira_parser::retro_data_dir(&save_dir, db_id);
+                    steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id)
+                } else {
+                    steam.ensure_sgdb_assets(&sgdb_id)
+                };
+                let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
+                    db_id, sgdb_id, icon, hero, grid, logo, header,
+                });
+            }
+        });
+    }
 }
 
 pub(crate) fn apply_game_update(state: &SharedState, updated: Game) {

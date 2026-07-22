@@ -73,7 +73,7 @@ impl SteamDataClient {
         let grid_path = if let Some(existing) = ira_parser::find_image_file(dir, "vertical") {
             existing.to_string_lossy().into_owned()
         } else {
-            self.force_download_sgdb(sgdb_id, "grid", false)
+            self.force_download_sgdb(dir, sgdb_id, "grid", false)
         };
 
         let logo_path = if let Some(existing) = ira_parser::find_image_file(dir, "logo") {
@@ -93,7 +93,7 @@ impl SteamDataClient {
         let header_path = if let Some(existing) = ira_parser::find_image_file(dir, "header") {
             existing.to_string_lossy().into_owned()
         } else {
-            self.force_download_sgdb(sgdb_id, "header", false)
+            self.force_download_sgdb(dir, sgdb_id, "header", false)
         };
 
         if !icon_path.is_empty() { ira_parser::ensure_small_image(dir, "icon", 32, 32); }
@@ -291,10 +291,9 @@ impl SteamDataClient {
         }
     }
 
-    pub fn force_download_sgdb(&self, id: &str, asset: &str, is_steam_id: bool) -> String {
+    pub fn force_download_sgdb(&self, dir: &Path, id: &str, asset: &str, is_steam_id: bool) -> String {
         let _s = tracing::info_span!("force_download_sgdb", sgdb_id = id, asset).entered();
-        let dir = if is_steam_id { self.game_dir(id) } else { self.sgdb_dir(id) };
-        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::create_dir_all(dir);
     let endpoint = match crate::sgdb::sgdb_endpoint(asset, is_steam_id, id) {
         Some(e) => e,
         None => return String::new(),
@@ -315,7 +314,7 @@ impl SteamDataClient {
             "grid" => "vertical",
             _ => asset,
         };
-        ira_parser::remove_image_variants(&dir, base_name);
+        ira_parser::remove_image_variants(dir, base_name);
 
         let dest = dir.join(format!("{}.{}", base_name, ext));
         let r = if is_png || asset == "icon" {
@@ -340,7 +339,7 @@ impl SteamDataClient {
                 "logo" => ("logo", 620, 620),
                 _ => return r,
             };
-            ira_parser::ensure_small_image(&dir, small_name, sw, sh);
+            ira_parser::ensure_small_image(dir, small_name, sw, sh);
         }
         r
     }

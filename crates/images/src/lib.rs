@@ -8,10 +8,12 @@ use gdk4::{MemoryFormat, MemoryTexture, Texture};
 use gtk4::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use tracing::info_span;
 
 type PendingCallback = Box<dyn FnOnce(Option<Texture>)>;
 type PendingMap = HashMap<String, Vec<PendingCallback>>;
+type DecodeJob = (String, mpsc::Sender<Option<(Vec<u8>, u32, u32)>>);
 
 thread_local! {
     static TEXTURE_CACHE: RefCell<TextureCache> = RefCell::new(TextureCache::new());
@@ -21,6 +23,29 @@ thread_local! {
 }
 
 const PIXBUF_CACHE_MAX: usize = 15;
+const DECODE_POOL_SIZE: usize = 3;
+
+fn decode_queue() -> &'static mpsc::Sender<DecodeJob> {
+    static QUEUE: OnceLock<mpsc::Sender<DecodeJob>> = OnceLock::new();
+    QUEUE.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<DecodeJob>();
+        let rx = Arc::new(Mutex::new(rx));
+        for i in 0..DECODE_POOL_SIZE {
+            let rx = rx.clone();
+            std::thread::Builder::new()
+                .name(format!("ira-decode-{i}"))
+                .spawn(move || {
+                    while let Ok((path, result_tx)) = rx.lock().unwrap().recv() {
+                        let _s = info_span!("bg_decode", path = %path).entered();
+                        let result = ira_parser::decode_to_rgba(std::path::Path::new(&path));
+                        let _ = result_tx.send(result);
+                    }
+                })
+                .expect("Failed to spawn decode thread");
+        }
+        tx
+    })
+}
 
 // -----------------------------------------------------------------------
 // Synchronous API — cache hits are instant, cache misses block main thread
@@ -157,18 +182,19 @@ where
         return;
     }
 
-    let (tx, rx) = std::sync::mpsc::channel::<Option<(Vec<u8>, u32, u32)>>();
+    let (tx, rx) = mpsc::channel::<Option<(Vec<u8>, u32, u32)>>();
     let rx = RefCell::new(rx);
 
-    let path_for_thread = path_str.clone();
-    std::thread::Builder::new()
-        .name(format!("ira-decode-{}", path_str.get(..16).unwrap_or(&path_str)))
-        .spawn(move || {
-            let _s = info_span!("bg_decode", path = %path_for_thread).entered();
-            let result = ira_parser::decode_to_rgba(std::path::Path::new(&path_for_thread));
-            let _ = tx.send(result);
-        })
-        .ok();
+    let path_for_decode = path_str.clone();
+    if decode_queue().send((path_for_decode, tx)).is_err() {
+        let callbacks = PENDING_LOADS.with(|cell| cell.borrow_mut().remove(&path_str));
+        if let Some(callbacks) = callbacks {
+            for cb in callbacks {
+                cb(None);
+            }
+        }
+        return;
+    }
 
     let path_for_idle = path_str;
     glib::source::idle_add_local_full(priority, move || {

@@ -315,10 +315,34 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         let id_c = id.clone();
         let asset_c = asset_type.to_string();
         let refresh = refresh_images.clone();
+        let btn_clone = btn.clone();
         btn.connect_clicked(move |_| {
-            let _s = tracing::info_span!("steam_button", app_id = %id_c, asset = %asset_c).entered();
-            let _ = steam.force_download_steam(&id_c, &asset_c);
-            refresh();
+            btn_clone.set_sensitive(false);
+            btn_clone.set_label("Downloading…");
+            let steam = steam.clone();
+            let id_c = id_c.clone();
+            let asset_c = asset_c.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let rx = std::cell::RefCell::new(rx);
+            std::thread::spawn(move || {
+                let _s = tracing::info_span!("steam_download", app_id = %id_c, asset = %asset_c).entered();
+                let _ = steam.force_download_steam(&id_c, &asset_c);
+                let _ = tx.send(());
+            });
+            let btn_weak = btn_clone.downgrade();
+            let refresh = refresh.clone();
+            glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+                if rx.borrow_mut().try_recv().is_ok() {
+                    if let Some(btn) = btn_weak.upgrade() {
+                        btn.set_sensitive(true);
+                        btn.set_label("Steam");
+                    }
+                    refresh();
+                    glib::ControlFlow::Break
+                } else {
+                    glib::ControlFlow::Continue
+                }
+            });
         });
         btns.append(&btn);
     }
@@ -329,33 +353,57 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         let id_c = id.clone();
         let save_dir_c = save_dir.clone();
         let refresh = refresh_images.clone();
+        let btn_clone = btn.clone();
         btn.connect_clicked(move |_| {
-            let _s = tracing::info_span!("steam_button_icon", app_id = %id_c).entered();
-            if let Ok(app_id_num) = id_c.parse::<u32>() {
-                if let Some(clienticon) = ira_platforms::steam::get_clienticon(app_id_num) {
-                    let ico_file = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.ico");
-                    let _ = std::fs::create_dir_all(ico_file.parent().unwrap());
-                    let webp_file = ico_file.with_extension("webp");
-                    let ico_path = ira_platforms::steam::steam_install_dir()
-                        .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
-                    let have_local = ico_path.as_ref().is_some_and(|p| p.is_file());
-                    if have_local {
-                        if let Ok(ico_data) = std::fs::read(ico_path.as_ref().unwrap()) {
-                            if std::fs::write(&ico_file, &ico_data).is_ok() {
+            btn_clone.set_sensitive(false);
+            btn_clone.set_label("Downloading…");
+            let steam = steam.clone();
+            let id_c = id_c.clone();
+            let save_dir_c = save_dir_c.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let rx = std::cell::RefCell::new(rx);
+            std::thread::spawn(move || {
+                let _s = tracing::info_span!("steam_icon_download", app_id = %id_c).entered();
+                if let Ok(app_id_num) = id_c.parse::<u32>() {
+                    if let Some(clienticon) = ira_platforms::steam::get_clienticon(app_id_num) {
+                        let ico_file = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.ico");
+                        let _ = std::fs::create_dir_all(ico_file.parent().unwrap());
+                        let webp_file = ico_file.with_extension("webp");
+                        let ico_path = ira_platforms::steam::steam_install_dir()
+                            .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
+                        let have_local = ico_path.as_ref().is_some_and(|p| p.is_file());
+                        if have_local {
+                            if let Ok(ico_data) = std::fs::read(ico_path.as_ref().unwrap()) {
+                                if std::fs::write(&ico_file, &ico_data).is_ok() {
+                                    ira_parser::convert_to_lossless_webp(&ico_file);
+                                }
+                            }
+                        }
+                        if !have_local || (!ico_file.is_file() && !webp_file.is_file()) {
+                            let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
+                            let _ = std::fs::remove_file(&ico_file);
+                            if steam.download_file(&url, &ico_file).is_ok() {
                                 ira_parser::convert_to_lossless_webp(&ico_file);
                             }
                         }
                     }
-                    if !have_local || (!ico_file.is_file() && !webp_file.is_file()) {
-                        let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
-                        let _ = std::fs::remove_file(&ico_file);
-                        if steam.download_file(&url, &ico_file).is_ok() {
-                            ira_parser::convert_to_lossless_webp(&ico_file);
-                        }
-                    }
                 }
-            }
-            refresh();
+                let _ = tx.send(());
+            });
+            let btn_weak = btn_clone.downgrade();
+            let refresh = refresh.clone();
+            glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+                if rx.borrow_mut().try_recv().is_ok() {
+                    if let Some(btn) = btn_weak.upgrade() {
+                        btn.set_sensitive(true);
+                        btn.set_label("Steam");
+                    }
+                    refresh();
+                    glib::ControlFlow::Break
+                } else {
+                    glib::ControlFlow::Continue
+                }
+            });
         });
         btns.append(&btn);
     }

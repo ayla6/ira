@@ -7,7 +7,7 @@ use super::window::build_window;
 use super::sidebar::{select_row_silently, rebuild_sidebar, find_game_index};
 use super::grid_view::show_grid_view;
 use super::game_display::display_game;
-use super::message_handler::clear_content;
+use super::message_helpers::clear_content;
 use super::helpers::clear_children;
 
 pub fn show_close_choice_dialog(state: &SharedState) {

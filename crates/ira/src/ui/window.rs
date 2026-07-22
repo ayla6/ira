@@ -17,7 +17,7 @@ use super::state::{AppState, SharedState};
 use super::css::APP_CSS;
 use super::sidebar::{rebuild_sidebar, rebuild_sidebar_and_show_grid, select_row_silently};
 use super::grid_view::show_grid_view;
-use super::message_handler::switch_to_game;
+use super::message_helpers::switch_to_game;
 use super::settings_dialog::show_settings_dialog;
 use super::mass_match_dialog::show_mass_match_dialog;
 use super::add_game_dialog::show_add_game_dialog;

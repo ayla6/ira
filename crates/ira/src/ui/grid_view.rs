@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use super::state::SharedState;
 use super::game_item::GameItem;
 use super::grid_bin::GridBin;
-use super::message_handler::switch_to_game;
+use super::message_helpers::switch_to_game;
 use super::sidebar::scroll_to_row;
 use super::context_menu::show_game_context_menu;
 use super::helpers::clear_children;

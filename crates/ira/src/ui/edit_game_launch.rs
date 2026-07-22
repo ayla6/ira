@@ -4,6 +4,7 @@ use super::helpers;
 use super::settings_dialog;
 use super::state::SharedState;
 
+#[derive(Clone)]
 pub(super) struct LaunchConfigWidgets {
     pub(super) exe_entry: adw::EntryRow,
     pub(super) args_entry: adw::EntryRow,

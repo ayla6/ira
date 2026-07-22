@@ -3,14 +3,11 @@ use std::collections::HashSet;
 use gtk4::prelude::*;
 use adw::prelude::{AlertDialogExt, AdwDialogExt};
 use crate::Game;
-use crate::AppMessage;
 use crate::strings as S;
 use super::state::SharedState;
-use super::helpers::open_folder;
-use super::helpers::open_file_location;
-use super::edit_game_dialog::show_edit_game_dialog;
+use super::context_menu_actions::*;
 
-fn show_collection_name_dialog(
+pub(super) fn show_collection_name_dialog(
     window: adw::ApplicationWindow,
     state: SharedState,
     add_games: impl Fn(&ira_db::DbConn, i64) + 'static,
@@ -185,207 +182,28 @@ pub fn show_game_context_menu(
         menu.append_section(None, &remove_section);
     }
 
-    let state_clone = state.clone();
-    let game_clone = game.clone();
     let actions = gio::SimpleActionGroup::new();
 
-    let play_action = gio::SimpleAction::new("play", None);
-    let sc = state_clone.clone();
-    let gc = game_clone.clone();
-    play_action.connect_activate(move |_, _| {
-        let db_id = gc.db_id;
-        let is_running = sc.borrow().running_games.lock().unwrap().contains_key(&db_id);
-        if is_running {
-            super::play_button::stop_game(&sc, db_id);
-        } else {
-            match super::play_button::launch_game(&sc, db_id, gc.variant_id) {
-                Ok(()) => {
-                    let _ = sc.borrow().sender.send(AppMessage::GameStarted(db_id, gc.variant_id));
-                }
-                Err(e) => {
-                    eprintln!("Failed to launch game: {}", e);
-                    let _ = sc.borrow().sender.send(AppMessage::AddGameError(e));
-                }
-            }
-        }
-    });
-    actions.add_action(&play_action);
-
-    let edit_action = gio::SimpleAction::new("edit", None);
-    let sc = state_clone.clone();
-    let db_id_for_edit = game_clone.db_id;
-    edit_action.connect_activate(move |_, _| {
-        show_edit_game_dialog(&sc, db_id_for_edit);
-    });
-    actions.add_action(&edit_action);
-
-    let play_hist_action = gio::SimpleAction::new("play_history", None);
-    let sc = state_clone.clone();
-    let db_id_for_hist = game_clone.db_id;
-    let variant_id_for_hist = game_clone.variant_id;
-    play_hist_action.connect_activate(move |_, _| {
-        super::play_history::show_play_history_dialog(&sc, db_id_for_hist, variant_id_for_hist);
-    });
-    actions.add_action(&play_hist_action);
-
-    let hide_action = gio::SimpleAction::new("hide", None);
-    let sc = state_clone.clone();
-    let gc = game_clone.clone();
-    hide_action.connect_activate(move |_, _| {
-        let new_hidden = !current_hidden;
-        let db_id = gc.db_id;
-        {
-            let s = sc.borrow();
-            if let Some(g) = s.games.iter().find(|g| g.db_id == db_id) {
-                if let Err(e) = ira_db::set_game_hidden(&s.db, g.db_id, new_hidden) {
-                    eprintln!("Failed to set hidden: {}", e);
-                }
-            }
-        }
-        if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
-            g.hidden = new_hidden;
-        }
-        super::sidebar::rebuild_sidebar(&sc);
-    });
-    actions.add_action(&hide_action);
-
+    setup_play_action(&actions, state.clone(), game.clone());
+    setup_edit_action(&actions, state.clone(), game.db_id);
+    setup_play_history_action(&actions, state.clone(), game.db_id, game.variant_id);
+    setup_hide_action(&actions, state.clone(), game.db_id, current_hidden);
     if is_deletable {
-        let delete_game_action = gio::SimpleAction::new("delete_game", None);
-        let sc = state_clone.clone();
-        let gc = game_clone.clone();
-        delete_game_action.connect_activate(move |_, _| {
-            let window = sc.borrow().window.clone();
-            let dialog = adw::AlertDialog::new(
-                Some(S::REMOVE_GAME_QUESTION),
-                Some(&format!("Remove \"{}\"?", gc.name)),
-            );
-            dialog.add_response("cancel", S::CANCEL);
-            dialog.add_response("delete", "Remove");
-            dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
-            dialog.set_default_response(Some("cancel"));
-            dialog.set_close_response("cancel");
-
-            let sc = sc.clone();
-            let gc = gc.clone();
-            dialog.connect_response(None, move |_, resp| {
-                if resp != "delete" {
-                    return;
-                }
-                let db = sc.borrow().db.clone();
-                let db_id = gc.db_id;
-                if let Err(e) = ira_db::delete_game_config(&db, db_id) {
-                    eprintln!("Failed to delete game config: {}", e);
-                }
-                if let Err(e) = ira_db::remove_game(&db, db_id) {
-                    eprintln!("Failed to remove game: {}", e);
-                    return;
-                }
-                let mut s = sc.borrow_mut();
-                s.games.retain(|g| g.db_id != db_id);
-                let was_selected = ira_models::parse_db_id(&s.selected_id) == db_id;
-                if was_selected {
-                    s.selected_id = String::new();
-                    s.selected_group = ira_models::GroupSelection::AllGames;
-                    drop(s);
-                    super::sidebar::rebuild_sidebar(&sc);
-                    super::message_handler::clear_content(&sc);
-                } else {
-                    drop(s);
-                    super::sidebar::rebuild_sidebar(&sc);
-                }
-            });
-            dialog.present(Some(&window));
-        });
-        actions.add_action(&delete_game_action);
+        setup_delete_game_action(&actions, state.clone(), game.clone());
     }
-
     if game_file.is_some() || game_folder.is_some() {
-        let open_game_folder = gio::SimpleAction::new("open_game_folder", None);
-        let file_path = game_file.clone();
-        let folder_path = game_folder.clone();
-        open_game_folder.connect_activate(move |_, _| {
-            if let Some(ref file) = file_path {
-                open_file_location(file);
-            } else if let Some(ref folder) = folder_path {
-                open_folder(folder);
-            }
-        });
-        actions.add_action(&open_game_folder);
+        setup_open_game_folder_action(&actions, game_file.clone(), game_folder.clone());
     }
-
-    if let Some(ref pfx) = wine_prefix {
-        let open_wine_prefix = gio::SimpleAction::new("open_wine_prefix", None);
-        let path = pfx.clone();
-        open_wine_prefix.connect_activate(move |_, _| {
-            open_folder(&path);
-        });
-        actions.add_action(&open_wine_prefix);
+    setup_open_wine_prefix_action(&actions, wine_prefix.clone());
+    setup_open_images_action(&actions, state.clone(), game.clone());
+    if game.trophy_source == ira_models::TrophySource::Gse {
+        setup_open_steam_status_action(&actions, state.clone(), game.clone());
     }
-
-    let open_images = gio::SimpleAction::new("open_images", None);
-    let gc = game_clone.clone();
-    let save_dir = state_clone.borrow().save_dir.clone();
-    open_images.connect_activate(move |_, _| {
-        let path = ira_parser::game_data_dir(&save_dir, &gc);
-        open_folder(&path.to_string_lossy());
-    });
-    actions.add_action(&open_images);
-
-    if game_clone.trophy_source == ira_models::TrophySource::Gse {
-        let open_status = gio::SimpleAction::new("open_steam_status", None);
-        let gc = game_clone.clone();
-        let save_dir = state_clone.borrow().save_dir.clone();
-        open_status.connect_activate(move |_, _| {
-            let path = format!("{}/steam/{}", save_dir, gc.app_id);
-            open_folder(&path);
-        });
-        actions.add_action(&open_status);
+    if game.trophy_source == ira_models::TrophySource::Nge {
+        setup_open_gog_status_action(&actions, state.clone(), game.clone());
     }
-
-    if game_clone.trophy_source == ira_models::TrophySource::Nge {
-        let open_gog = gio::SimpleAction::new("open_gog_status", None);
-        let gc = game_clone.clone();
-        let save_dir = state_clone.borrow().save_dir.clone();
-        open_gog.connect_activate(move |_, _| {
-            let path = format!("{}/gog/{}/{}", save_dir, ira_parser::GALAXY_ID, gc.platform_id);
-            open_folder(&path);
-        });
-        actions.add_action(&open_gog);
-    }
-
-    let toggle_group = gio::SimpleAction::new("toggle_group", Some(&i64::static_variant_type()));
-    let sc = state_clone.clone();
-    let gc = game_clone.clone();
-    toggle_group.connect_activate(move |_, param| {
-        let group_id = param.and_then(|p| p.get::<i64>()).unwrap_or(0);
-        let db = sc.borrow().db.clone();
-        let existing = ira_db::get_groups_for_game(&db, gc.db_id).unwrap_or_default();
-        if existing.iter().any(|g| g.id == group_id) {
-            if let Err(e) = ira_db::remove_game_from_group(&db, gc.db_id, group_id) {
-                eprintln!("Failed to remove game from group: {}", e);
-            }
-        } else {
-            if let Err(e) = ira_db::add_game_to_group(&db, gc.db_id, group_id) {
-                eprintln!("Failed to add game to group: {}", e);
-            }
-        }
-        super::sidebar::rebuild_sidebar(&sc);
-    });
-    actions.add_action(&toggle_group);
-
-    let new_collection = gio::SimpleAction::new("new_collection", None);
-    let sc = state_clone.clone();
-    let gc = game_clone.clone();
-    new_collection.connect_activate(move |_, _| {
-        let window = sc.borrow().window.clone();
-        let sc2 = sc.clone();
-        show_collection_name_dialog(window, sc2, move |db, group_id| {
-            if let Err(e) = ira_db::add_game_to_group(db, gc.db_id, group_id) {
-                eprintln!("Failed to add game to new group: {}", e);
-            }
-        });
-    });
-    actions.add_action(&new_collection);
+    setup_toggle_group_action(&actions, state.clone(), game.clone());
+    setup_new_collection_action(&actions, state.clone(), game.clone());
 
     setup_and_show_popover(&menu, &actions, parent, at_x, at_y);
 }
@@ -431,75 +249,12 @@ pub fn show_multi_game_context_menu(
     hide_section.append(Some(hide_label), Some("game.toggle_hide"));
     menu.append_section(None, &hide_section);
 
-    let sc_orig = state.clone();
     let ids: Vec<i64> = db_ids.iter().copied().collect();
     let actions = gio::SimpleActionGroup::new();
 
-    let toggle_group = gio::SimpleAction::new("toggle_group", Some(&i64::static_variant_type()));
-    let sc = sc_orig.clone();
-    let ids_clone = ids.clone();
-    toggle_group.connect_activate(move |_, param| {
-        let group_id = param.and_then(|p| p.get::<i64>()).unwrap_or(0);
-        let db = sc.borrow().db.clone();
-
-        let all_in = ids_clone.iter().all(|&db_id| {
-            let game_groups = ira_db::get_groups_for_game(&db, db_id).unwrap_or_default();
-            game_groups.iter().any(|g| g.id == group_id)
-        });
-
-        for &db_id in &ids_clone {
-            if all_in {
-                if let Err(e) = ira_db::remove_game_from_group(&db, db_id, group_id) {
-                    eprintln!("Failed to remove game from group: {}", e);
-                }
-            } else if let Err(e) = ira_db::add_game_to_group(&db, db_id, group_id) {
-                eprintln!("Failed to add game to group: {}", e);
-            }
-        }
-        super::sidebar::rebuild_sidebar(&sc);
-    });
-    actions.add_action(&toggle_group);
-
-    let new_collection = gio::SimpleAction::new("new_collection", None);
-    let sc = sc_orig.clone();
-    let ids_clone2 = ids.clone();
-    new_collection.connect_activate(move |_, _| {
-        let window = sc.borrow().window.clone();
-        let sc2 = sc.clone();
-        let ids3 = ids_clone2.clone();
-        show_collection_name_dialog(window, sc2, move |db, group_id| {
-            for &db_id in &ids3 {
-                if let Err(e) = ira_db::add_game_to_group(db, db_id, group_id) {
-                    eprintln!("Failed to add game to new group: {}", e);
-                }
-            }
-        });
-    });
-    actions.add_action(&new_collection);
-
-    let toggle_hide = gio::SimpleAction::new("toggle_hide", None);
-    let sc = sc_orig.clone();
-    let ids_clone4 = ids.clone();
-    let all_hidden_clone = all_hidden;
-    toggle_hide.connect_activate(move |_, _| {
-        let new_hidden = !all_hidden_clone;
-        let db = sc.borrow().db.clone();
-        for &db_id in &ids_clone4 {
-            if let Err(e) = ira_db::set_game_hidden(&db, db_id, new_hidden) {
-                eprintln!("Failed to set hidden: {}", e);
-            }
-        }
-        {
-            let mut s = sc.borrow_mut();
-            for g in s.games.iter_mut() {
-                if ids_clone4.contains(&g.db_id) {
-                    g.hidden = new_hidden;
-                }
-            }
-        }
-        super::sidebar::rebuild_sidebar(&sc);
-    });
-    actions.add_action(&toggle_hide);
+    setup_multi_toggle_group_action(&actions, state.clone(), ids.clone());
+    setup_multi_new_collection_action(&actions, state.clone(), ids.clone());
+    setup_multi_toggle_hide_action(&actions, state.clone(), ids.clone(), all_hidden);
 
     setup_and_show_popover(&menu, &actions, parent, at_x, at_y);
 }

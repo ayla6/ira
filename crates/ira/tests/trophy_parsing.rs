@@ -63,3 +63,40 @@ fn test_parse_user_trophies_simple() {
     assert!(!unlocks.get("1").unwrap().0);
     assert!(unlocks.get("2").unwrap().0);
 }
+
+#[test]
+fn test_parse_trop_xml_with_attributes() {
+    let trop_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<trophyconf>\n    <trophy id=\"0\" pid=\"pid001\" ttype=\"P\" hidden=\"no\">\n        <name>Platinum</name>\n        <detail>All trophies</detail>\n    </trophy>\n    <trophy id=\"1\" pid=\"pid002\" ttype=\"G\" hidden=\"no\">\n        <name>Gold</name>\n        <detail>Hard one</detail>\n    </trophy>\n    <trophy id=\"2\" pid=\"pid003\" ttype=\"S\" hidden=\"yes\">\n        <name>Secret Silver</name>\n        <detail>Hidden</detail>\n    </trophy>\n</trophyconf>";
+
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(tmp.path(), trop_xml).unwrap();
+    let defs = ps4::parse_trop_xml(tmp.path());
+
+    assert_eq!(defs.len(), 3);
+    assert_eq!(defs[0].id, "0");
+    assert_eq!(defs[0].ttype, 'P');
+    assert!(!defs[0].hidden);
+    assert_eq!(defs[0].name, "Platinum");
+    assert_eq!(defs[0].detail, "All trophies");
+    assert_eq!(defs[1].id, "1");
+    assert_eq!(defs[1].ttype, 'G');
+    assert!(!defs[1].hidden);
+    assert_eq!(defs[1].name, "Gold");
+    assert_eq!(defs[2].id, "2");
+    assert_eq!(defs[2].ttype, 'S');
+    assert!(defs[2].hidden);
+    assert_eq!(defs[2].name, "Secret Silver");
+
+    let user_xml = "<?xml version=\"1.0\"?>\n<trophies>\n    <trophy id=\"0\" unlockstate=\"true\" timestamp=\"1000000000\"></trophy>\n    <trophy id=\"1\" unlockstate=\"false\" timestamp=\"0\"></trophy>\n    <trophy id=\"2\" unlockstate=\"true\" timestamp=\"1000000001\"></trophy>\n</trophies>";
+
+    let tmp2 = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(tmp2.path(), user_xml).unwrap();
+    let unlocks = ps4::parse_user_trophies(tmp2.path());
+
+    assert_eq!(unlocks.len(), 3);
+    assert!(unlocks.get("0").unwrap().0);
+    assert_eq!(unlocks.get("0").unwrap().1, 1000000000);
+    assert!(!unlocks.get("1").unwrap().0);
+    assert!(unlocks.get("2").unwrap().0);
+    assert_eq!(unlocks.get("2").unwrap().1, 1000000001);
+}

@@ -22,7 +22,18 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
         row.set_hexpand(true);
         row.append(&play_button(state, game.db_id, game.variant_id));
         row.append(&stat_label("Last played", &format_last_played(game.last_played)));
-        row.append(&stat_label("Play time", &format_playtime(game.playtime)));
+        let pt_box = stat_label("Play time", &format_playtime(game.playtime));
+        pt_box.add_css_class("clickable-stat");
+        pt_box.set_tooltip_text(Some("View play history"));
+        let sc = state.clone();
+        let db_id = game.db_id;
+        let variant_id = game.variant_id;
+        let click = gtk4::GestureClick::new();
+        click.connect_pressed(move |_, _, _, _| {
+            super::play_history::show_play_history_dialog(&sc, db_id, variant_id);
+        });
+        pt_box.add_controller(click);
+        row.append(&pt_box);
         if game.total_count > 0 {
             let tbox = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
             tbox.set_valign(gtk4::Align::Center);

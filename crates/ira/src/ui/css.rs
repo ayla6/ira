@@ -137,4 +137,7 @@ gridview.game-grid child:focus-within {
 .variant-drag-handle:active {
     opacity: 0.8;
 }
+
+.clickable-stat { transition: 100ms ease; border-radius: 6px; padding: 6px 10px; margin: -6px -10px; }
+.clickable-stat:hover { background-color: alpha(@theme_fg_color, 0.07); }
 ";

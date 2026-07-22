@@ -35,21 +35,6 @@ pub fn load_rpcs3_game(
     let npwr_id = &game.npwr_id;
     let serial = &game.serial;
 
-    // Trophy definitions from TROPCONF.SFM — same XML schema as PS4's TROP.XML,
-    // so we reuse parse_trop_xml directly.
-    let defs = if npwr_id.is_empty() {
-        Vec::new()
-    } else {
-        parse_trop_xml(&trophy_conf_path(npwr_id))
-    };
-
-    // Unlock state from TROPUSR.DAT (binary).
-    let unlock_states = if npwr_id.is_empty() {
-        Default::default()
-    } else {
-        parse_tropusr(&tropusr_path(npwr_id)).unwrap_or_default()
-    };
-
     // Playtime + last-played from persistent_settings.dat.
     let persistent = parse_persistent_settings(&persistent_settings_path());
     let playtime = persistent
@@ -137,6 +122,24 @@ pub fn load_rpcs3_game(
     ira_parser::populate_image_paths(&image_dir, &mut out);
 
     // Build achievements from TROPCONF.SFM definitions + TROPUSR.DAT unlock state.
+    out.achievements = load_ps3_trophies(npwr_id);
+    out.total_count = out.achievements.len();
+    out.earned_count = out.achievements.iter().filter(|a| a.earned).count();
+
+    out
+}
+
+/// Load PS3 trophy achievements from TROPCONF.SFM (definitions) + TROPUSR.DAT (unlock state).
+/// Returns an empty vector if the NPWR ID is empty or the files are missing.
+pub fn load_ps3_trophies(npwr_id: &str) -> Vec<MergedAchievement> {
+    if npwr_id.is_empty() {
+        return Vec::new();
+    }
+
+    let defs = parse_trop_xml(&trophy_conf_path(npwr_id));
+    let unlock_states = parse_tropusr(&tropusr_path(npwr_id)).unwrap_or_default();
+
+    let mut achievements = Vec::new();
     for def in &defs {
         // TROPCONF.SFM trophy IDs are zero-padded strings ("000", "001", ...).
         // TROPUSR.DAT uses numeric u32 IDs. Parse the string to u32 for lookup.
@@ -153,7 +156,7 @@ pub fn load_rpcs3_game(
             String::new()
         };
 
-        out.achievements.push(MergedAchievement {
+        achievements.push(MergedAchievement {
             name: format!("trophy_{}", def.id),
             display_name: def.name.clone(),
             description: def.detail.clone(),
@@ -165,12 +168,7 @@ pub fn load_rpcs3_game(
             global_percent: 0.0,
             trophy_type: def.ttype,
         });
-
-        out.total_count += 1;
-        if earned {
-            out.earned_count += 1;
-        }
     }
 
-    out
+    achievements
 }

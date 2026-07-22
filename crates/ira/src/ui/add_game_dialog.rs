@@ -8,9 +8,9 @@ use super::add_game_env::build_env_page;
 use super::add_game_db::{add_game_to_db, AddGameToDbParams};
 
 pub fn show_add_game_dialog(state: &SharedState) {
-    let (window, db, sender, steam, watcher, save_dir, ra_username, ra_token, ra_password) = {
+    let (window, db, sender, steam, save_dir, ra_username, ra_token, ra_password) = {
         let s = state.borrow();
-        (s.window.clone(), s.db.clone(), s.sender.clone(), s.steam.clone(), s.watcher.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
+        (s.window.clone(), s.db.clone(), s.sender.clone(), s.steam.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
     };
 
     let layout = super::helpers::dialog_layout(&window);
@@ -175,7 +175,6 @@ pub fn show_add_game_dialog(state: &SharedState) {
         let kind_c = kind;
         let ts_c = trophy_source;
         let steam_c = steam.clone();
-        let watcher_c = watcher.clone();
         let save_dir_c = save_dir.clone();
         let ra_username_c = ra_username.clone();
         let ra_token_c = ra_token.clone();
@@ -197,9 +196,6 @@ pub fn show_add_game_dialog(state: &SharedState) {
                             if let Err(e) = ira_db::update_game_title(&db_c, game.db_id, &name_c) {
                                 eprintln!("Failed to update game title: {}", e);
                             }
-                            if let Some(ref w) = watcher_c {
-                                w.watch(&entry, &game.achievements);
-                            }
                             let _ = sender_c.send(AppMessage::NewGame(game.clone()));
                             let g_name = game.name.clone();
                             crate::ui::enrichment::enrich_game_async(crate::ui::enrichment::EnrichGameParams {
@@ -209,7 +205,6 @@ pub fn show_add_game_dialog(state: &SharedState) {
                                 db_id: game.db_id,
                                 title: g_name,
                                 steam: steam_c,
-                                watcher: watcher_c,
                                 sender: sender_c,
                                 save_dir: save_dir_c,
                                 db: db_c,

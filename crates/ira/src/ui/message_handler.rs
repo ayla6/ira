@@ -36,6 +36,9 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             state.borrow().running_games.lock().unwrap().remove(&db_id);
             set_sidebar_playing(state, db_id, false);
             refresh_steam_playtimes_for(state, &[db_id]);
+            if let Some(ref watcher) = state.borrow().watcher {
+                watcher.unwatch(db_id);
+            }
             let selected_id = state.borrow().selected_id.clone();
             if ira_models::parse_db_id(&selected_id) == db_id {
                 let game = state.borrow().games.iter()
@@ -48,6 +51,19 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         }
         AppMessage::GameStarted(db_id, _variant_id) => {
             set_sidebar_playing(state, db_id, true);
+            let (watcher, game, save_dir) = {
+                let s = state.borrow();
+                let game = s.games.iter()
+                    .find(|g| g.db_id == db_id && g.variant_id.is_none())
+                    .cloned();
+                (s.watcher.clone(), game, s.save_dir.clone())
+            };
+            if let (Some(watcher), Some(game)) = (watcher, game) {
+                if let Some(watch_file) = crate::game_loader::achievement_watch_file(&game, &save_dir) {
+                    let entry = GameEntry::for_reload(game.db_id, game.kind, game.trophy_source, &game.app_id, "", &game.platform_id);
+                    watcher.watch(&entry, &watch_file, &game.achievements);
+                }
+            }
             let selected_id = state.borrow().selected_id.clone();
             if ira_models::parse_db_id(&selected_id) == db_id {
                 let game = state.borrow().games.iter()
@@ -358,22 +374,15 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
 }
 
 fn start_background_enrichment(state: &SharedState) {
-    let (steam, watcher, sender, db, save_dir, ra_username, ra_token, ra_password) = {
+    let (steam, sender, db, save_dir, ra_username, ra_token, ra_password) = {
         let s = state.borrow();
-        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
+        (s.steam.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
     };
 
     let s = state.borrow();
     for g in &s.games {
         if g.app_id.is_empty() || g.variant_id.is_some() {
             continue;
-        }
-        if g.trophy_source.has_steam_enrichment() {
-            if let Some(ref watcher) = watcher {
-                let mut entry = GameEntry::for_reload(g.db_id, g.kind, g.trophy_source, &g.app_id, "", &g.platform_id);
-                entry.sort_title = g.sort_title.clone();
-                watcher.watch(&entry, &g.achievements);
-            }
         }
 
         if g.kind == ira_models::GameKind::Ps4 || g.kind == ira_models::GameKind::Ps3 || g.kind == ira_models::GameKind::Retro {
@@ -387,7 +396,6 @@ fn start_background_enrichment(state: &SharedState) {
             db_id: g.db_id,
             title: g.name.clone(),
             steam: steam.clone(),
-            watcher: watcher.clone(),
             sender: sender.clone(),
             save_dir: state.borrow().save_dir.clone(),
             db: db.clone(),
@@ -662,14 +670,13 @@ pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) 
         display_game(&game, state);
 
         if game.achievements.is_empty() && !game.app_id.is_empty() && game.trophy_source != ira_models::TrophySource::Empty {
-            let (ra_username, ra_token, ra_password, steam, watcher, sender, save_dir, db) = {
+            let (ra_username, ra_token, ra_password, steam, sender, save_dir, db) = {
                 let s = state.borrow();
                 (
                     s.cfg.ra_username.clone(),
                     s.cfg.ra_token.clone(),
                     s.cfg.ra_password.clone(),
                     s.steam.clone(),
-                    s.watcher.clone(),
                     s.sender.clone(),
                     s.save_dir.clone(),
                     s.db.clone(),
@@ -682,7 +689,6 @@ pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) 
                 db_id: game.db_id,
                 title: game.name.clone(),
                 steam,
-                watcher,
                 sender,
                 save_dir,
                 db,

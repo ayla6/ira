@@ -1,6 +1,5 @@
 use ira_api::SteamDataClient;
 use ira_db::DbConn;
-use ira_watcher::AchievementWatcher;
 use crate::AppMessage;
 use crate::AppSender;
 use crate::Game;
@@ -19,7 +18,6 @@ pub struct EnrichGameParams {
     pub db_id: i64,
     pub title: String,
     pub steam: Arc<SteamDataClient>,
-    pub watcher: Option<AchievementWatcher>,
     pub sender: AppSender,
     pub save_dir: String,
     pub db: DbConn,
@@ -32,7 +30,7 @@ pub struct EnrichGameParams {
 }
 
 pub fn enrich_game_async(params: EnrichGameParams) {
-    let EnrichGameParams { app_id, trophy_source, platform_id, db_id, title, steam, watcher, sender, save_dir, db, ra_username, ra_token, ra_password, game } = params;
+    let EnrichGameParams { app_id, trophy_source, platform_id, db_id, title, steam, sender, save_dir, db, ra_username, ra_token, ra_password, game } = params;
     std::thread::spawn(move || {
         let _s = tracing::info_span!("enrich_game_async", app_id = %app_id, db_id = db_id).entered();
         if trophy_source == ira_models::TrophySource::Ra {
@@ -179,10 +177,6 @@ pub fn enrich_game_async(params: EnrichGameParams) {
                 game.steam_review_count,
             ) {
                 eprintln!("Failed to store game metadata: {}", e);
-            }
-
-            if let Some(ref watcher) = watcher {
-                watcher.watch(&entry, &game.achievements);
             }
         }
 

@@ -1,6 +1,5 @@
 use ira_config::Config;
 use ira_models::{AppMessage, AppSender, GameEntry, MergedAchievement};
-use ira_parser::unlock_status_path;
 use ::notify::{Config as NotifyConfig, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -9,9 +8,14 @@ use std::time::{Duration, Instant};
 
 type LoadGameFn = Arc<dyn Fn(&GameEntry, &str) -> Result<ira_models::Game, String> + Send + Sync>;
 
+struct WatchedGame {
+    entry: GameEntry,
+    watch_filename: String,
+}
+
 struct WatcherState {
-    dir_to_game: HashMap<PathBuf, GameEntry>,
-    last_earned: HashMap<String, HashMap<String, bool>>,
+    dir_to_game: HashMap<PathBuf, WatchedGame>,
+    last_earned: HashMap<i64, HashMap<String, bool>>,
     game_names: Arc<Mutex<HashMap<String, String>>>,
     load_game: LoadGameFn,
     save_dir: String,
@@ -53,34 +57,64 @@ impl AchievementWatcher {
         self.state.lock().unwrap().game_names.clone()
     }
 
-    pub fn watch(&self, entry: &GameEntry, achievements: &[MergedAchievement]) {
+    /// Register a game for live achievement watching.
+    /// `watch_file` is the specific file whose modification triggers a reload
+    /// (e.g. achievements.json for GSE, TROPUSR.DAT for PS3).
+    /// The parent directory is created if it doesn't exist (e.g. when GSE
+    /// hasn't generated its folder yet).
+    pub fn watch(&self, entry: &GameEntry, watch_file: &Path, achievements: &[MergedAchievement]) {
         let earned: HashMap<String, bool> =
             achievements.iter().map(|a| (a.name.clone(), a.earned)).collect();
 
-        let watch_dir = unlock_status_path(
-            &self.state.lock().unwrap().save_dir,
-            entry.trophy_source,
-            &entry.steam_id,
-            &entry.platform_id,
-        )
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_default();
+        let watch_dir = watch_file.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        let watch_filename = watch_file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+
+        if !watch_dir.as_os_str().is_empty() && !watch_dir.is_dir() {
+            if let Err(e) = std::fs::create_dir_all(&watch_dir) {
+                eprintln!("Could not create watch directory {:?}: {}", watch_dir, e);
+            }
+        }
 
         let already_watching = {
             let mut st = self.state.lock().unwrap();
-            st.last_earned.insert(entry.steam_id.clone(), earned);
-            st.dir_to_game.values().any(|g| g.steam_id == entry.steam_id)
+            st.last_earned.insert(entry.id, earned);
+            st.dir_to_game.values().any(|wg| wg.entry.id == entry.id)
         };
 
         if !already_watching {
             let mut st = self.state.lock().unwrap();
-            st.dir_to_game.insert(watch_dir.clone(), entry.clone());
+            st.dir_to_game.insert(watch_dir.clone(), WatchedGame {
+                entry: entry.clone(),
+                watch_filename,
+            });
             drop(st);
             let mut w = self.watcher.lock().unwrap();
             if let Err(e) = w.watch(&watch_dir, RecursiveMode::NonRecursive) {
                 eprintln!("Could not watch {:?} for live updates: {}", watch_dir, e);
             }
+        }
+    }
+
+    /// Remove a game from live achievement watching.
+    pub fn unwatch(&self, db_id: i64) {
+        let watch_dir = {
+            let mut st = self.state.lock().unwrap();
+            let dir = st.dir_to_game.iter()
+                .find(|(_, wg)| wg.entry.id == db_id)
+                .map(|(k, _)| k.clone());
+            if let Some(ref dir) = dir {
+                st.dir_to_game.remove(dir);
+                st.last_earned.remove(&db_id);
+            }
+            dir
+        };
+        if let Some(dir) = watch_dir {
+            let mut w = self.watcher.lock().unwrap();
+            let _ = w.unwatch(&dir);
         }
     }
 }
@@ -91,7 +125,7 @@ fn event_loop(
     sender: AppSender,
     cfg: Arc<Config>,
 ) {
-    let mut pending: HashMap<String, PathBuf> = HashMap::new();
+    let mut pending: HashMap<i64, PathBuf> = HashMap::new();
     let mut last_event = Instant::now();
 
     loop {
@@ -105,9 +139,9 @@ fn event_loop(
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 if !pending.is_empty() && last_event.elapsed() >= Duration::from_millis(300) {
-                    let ready: Vec<(String, PathBuf)> = pending.drain().collect();
-                    for (app_id, game_dir) in ready {
-                        process_reload(&app_id, &game_dir, &state, &sender, &cfg);
+                    let ready: Vec<(i64, PathBuf)> = pending.drain().collect();
+                    for (db_id, game_dir) in ready {
+                        process_reload(db_id, &game_dir, &state, &sender, &cfg);
                     }
                 }
             }
@@ -119,29 +153,29 @@ fn event_loop(
 fn handle_notify_event(
     event: &::notify::Event,
     state: &Mutex<WatcherState>,
-    pending: &mut HashMap<String, PathBuf>,
+    pending: &mut HashMap<i64, PathBuf>,
 ) {
     let is_create = matches!(event.kind, EventKind::Create(_));
     let is_modify = matches!(event.kind, EventKind::Modify(_));
 
-    for path in &event.paths {
-        if path.file_name().and_then(|n| n.to_str()) != Some("achievements.json") {
-            continue;
-        }
-        if !is_create && !is_modify {
-            continue;
-        }
+    if !is_create && !is_modify {
+        return;
+    }
 
+    for path in &event.paths {
         let game_dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
         let st = state.lock().unwrap();
-        if let Some(entry) = st.dir_to_game.get(&game_dir) {
-            pending.insert(entry.steam_id.clone(), game_dir.clone());
+        if let Some(wg) = st.dir_to_game.get(&game_dir) {
+            let filename = path.file_name().and_then(|n| n.to_str());
+            if filename == Some(&wg.watch_filename) {
+                pending.insert(wg.entry.id, game_dir.clone());
+            }
         }
     }
 }
 
 fn process_reload(
-    app_id: &str,
+    db_id: i64,
     game_dir: &Path,
     state: &Mutex<WatcherState>,
     sender: &AppSender,
@@ -149,7 +183,7 @@ fn process_reload(
 ) {
     let (entry, save_dir, load_game) = {
         let st = state.lock().unwrap();
-        let entry = st.dir_to_game.get(game_dir).cloned();
+        let entry = st.dir_to_game.get(game_dir).map(|wg| wg.entry.clone());
         let save_dir = st.save_dir.clone();
         let load_game = st.load_game.clone();
         (entry, save_dir, load_game)
@@ -160,7 +194,7 @@ fn process_reload(
     let game = match load_game(&entry, &save_dir) {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("Live-reload of {} failed: {}", app_id, e);
+            eprintln!("Live-reload of {} failed: {}", db_id, e);
             return;
         }
     };
@@ -169,7 +203,7 @@ fn process_reload(
 
     {
         let mut st = state.lock().unwrap();
-        let previous = st.last_earned.get(app_id).cloned().unwrap_or_default();
+        let previous = st.last_earned.get(&db_id).cloned().unwrap_or_default();
         let mut current = HashMap::new();
         for a in &game.achievements {
             current.insert(a.name.clone(), a.earned);
@@ -177,13 +211,13 @@ fn process_reload(
                 newly_earned.push(a.clone());
             }
         }
-        st.last_earned.insert(app_id.to_string(), current);
+        st.last_earned.insert(db_id, current);
     }
 
     let game_name = {
         let st = state.lock().unwrap();
         let names = st.game_names.lock().unwrap();
-        names.get(app_id).cloned().unwrap_or_else(|| game.name.clone())
+        names.get(&game.app_id).cloned().unwrap_or_else(|| game.name.clone())
     };
 
     let _ = sender.send(AppMessage::WatcherGameUpdated(game));

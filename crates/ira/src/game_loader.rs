@@ -1,6 +1,7 @@
 use ira_db::DbConn;
 use ira_models::{AchievementStatus, AppDetails, Game, GameEntry, MergedAchievement};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 pub fn read_app_details(save_dir: &str, app_id: &str) -> Option<AppDetails> {
     let path = ira_parser::data_dir(save_dir, app_id).join("appdetails.json");
@@ -134,6 +135,13 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     let _s = tracing::info_span!("load_game", app_id).entered();
 
     let mut game = build_game_base(entry, save_dir);
+
+    if entry.kind == ira_models::GameKind::Ps3 {
+        game.achievements = ira_platforms::ps3::load_ps3_trophies(app_id);
+        game.total_count = game.achievements.len();
+        game.earned_count = game.achievements.iter().filter(|a| a.earned).count();
+        return Ok(game);
+    }
 
     let ach_dir = ira_parser::achievements_dir(save_dir, app_id);
 
@@ -314,4 +322,24 @@ pub fn build_variant_entries(db: &DbConn, save_dir: &str, game: &Game) -> Vec<Ga
             entry
         })
         .collect()
+}
+
+/// Compute the file to watch for live achievement updates for a given game.
+/// Returns None for game types that don't have a watchable achievement file
+/// (e.g. SteamNative reads from Steam's API, RetroAchievements uses a cache).
+pub fn achievement_watch_file(game: &Game, save_dir: &str) -> Option<PathBuf> {
+    match game.trophy_source {
+        ira_models::TrophySource::Gse | ira_models::TrophySource::Nge => {
+            Some(ira_parser::unlock_status_path(
+                save_dir,
+                game.trophy_source,
+                &game.app_id,
+                &game.platform_id,
+            ))
+        }
+        _ if game.kind == ira_models::GameKind::Ps3 => {
+            Some(ira_platforms::ps3::tropusr_path(&game.app_id))
+        }
+        _ => None,
+    }
 }

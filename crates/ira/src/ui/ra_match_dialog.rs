@@ -102,10 +102,10 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                             sd.pending_copies.borrow_mut().remove(&key);
                         }
                     }
-                    let (ra_username, ra_token, ra_password, steam, watcher, sender, save_dir, db) = {
+                    let (ra_username, ra_token, ra_password, steam, sender, save_dir, db) = {
                         let s = sc.borrow();
                         (s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone(),
-                         s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.save_dir.clone(), s.db.clone())
+                         s.steam.clone(), s.sender.clone(), s.save_dir.clone(), s.db.clone())
                     };
                     let g = sc.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
                     if let Some(g) = g {
@@ -115,7 +115,7 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                             platform_id: g.platform_id.clone(),
                             db_id: g.db_id,
                             title: g.name.clone(),
-                            steam, watcher, sender, save_dir, db,
+                            steam, sender, save_dir, db,
                             ra_username, ra_token, ra_password,
                             game: None,
                         });

@@ -8,9 +8,9 @@ use super::helpers::confirm_dialog;
 use crate::strings as S;
 
 pub fn match_game_to_steam(state: &SharedState, db_id: i64, steam_app_id: String, game_name: String) {
-    let (steam, watcher, sender, db, save_dir, ra_username, ra_token, ra_password) = {
+    let (steam, sender, db, save_dir, ra_username, ra_token, ra_password) = {
         let s = state.borrow();
-        (s.steam.clone(), s.watcher.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
+        (s.steam.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
     };
     std::thread::spawn(move || {
         if let Err(e) = ira_db::update_game_ids(&db, db_id, &steam_app_id, &steam_app_id, ira_models::TrophySource::Gse, &steam_app_id) {
@@ -31,9 +31,6 @@ pub fn match_game_to_steam(state: &SharedState, db_id: i64, steam_app_id: String
                             game.name = game_name.clone();
                         }
                         let name = game.name.clone();
-                        if let Some(ref watcher) = watcher {
-                            watcher.watch(&entry, &game.achievements);
-                        }
                         let _ = sender.send(AppMessage::NewGame(game));
                         enrich_game_async(crate::ui::enrichment::EnrichGameParams {
                             app_id: steam_app_id.clone(),
@@ -42,7 +39,6 @@ pub fn match_game_to_steam(state: &SharedState, db_id: i64, steam_app_id: String
                             db_id: entry.id,
                             title: name,
                             steam,
-                            watcher,
                             sender,
                             save_dir,
                             db,

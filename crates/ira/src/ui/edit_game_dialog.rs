@@ -5,7 +5,8 @@ use adw::prelude::*;
 use ira_models::WineConfig;
 use super::state::SharedState;
 use super::edit_game_launch::build_launch_config_page;
-use super::edit_game_pages::*;
+use super::edit_game_pages::{build_api_emulator_page, build_dlc_page};
+use super::edit_game_variants::build_variants_page;
 use super::edit_game_save::{save_game_settings, SaveGameSettingsParams};
 
 pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {

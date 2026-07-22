@@ -7,7 +7,7 @@ use ira_models::{AssetType, GameLaunchConfig, TrophySource, WineConfig};
 use super::add_game_dialog::collect_env_vars;
 use super::edit_game_advanced::AdvancedWidgets;
 use super::edit_game_launch::LaunchConfigWidgets;
-use super::edit_game_pages::VarW;
+use super::edit_game_variants::VarW;
 use super::state::SharedState;
 use super::wine_config_env_dll::collect_dll_overrides;
 use super::wine_config_widget::WineConfigWidgets;
@@ -442,62 +442,7 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
         super::game_display::display_game(&g, &params.state);
     }
 
-    {
-        let widgets = params.var_widgets.borrow();
-
-        for vw in widgets.iter() {
-            if vw.group.parent().is_none() {
-                if let Some(id) = vw.id {
-                    if let Err(e) = ira_db::delete_variant(&db, id) {
-                        eprintln!("Failed to delete variant {}: {}", id, e);
-                    }
-                }
-            }
-        }
-
-        let mut ordered_ids: Vec<i64> = Vec::new();
-        for vw in widgets.iter() {
-            if vw.group.parent().is_none() { continue; }
-            let name = vw.name.text().to_string();
-            if name.is_empty() { continue; }
-
-            let variant = ira_models::GameVariant {
-                id: vw.id.unwrap_or(0),
-                game_id: params.db_id,
-                name,
-                exe: vw.exe.text().to_string(),
-                working_dir: vw.wd.text().to_string(),
-                args: vw.args.text().to_string(),
-                env_vars: Vec::new(),
-                sort_order: 0,
-                pre_launch: vw.pre_launch.text().to_string(),
-                custom_images: vw.custom_images.is_active(),
-                show_as_entry: vw.show_as_entry.is_active(),
-                count_playtime: vw.count_playtime.is_active(),
-                logo_position: if vw.logo_modified.get() { vw.logo_position.borrow().clone() } else { String::new() },
-                logo_size: if vw.logo_modified.get() { vw.logo_size.value() as i32 } else { 0 },
-                ..Default::default()
-            };
-
-            if let Some(id) = vw.id {
-                if let Err(e) = ira_db::update_variant(&db, &variant) {
-                    eprintln!("Failed to update variant {}: {}", id, e);
-                }
-                ordered_ids.push(id);
-            } else {
-                match ira_db::add_variant(&db, &variant) {
-                    Ok(new_id) => ordered_ids.push(new_id),
-                    Err(e) => eprintln!("Failed to add variant: {}", e),
-                }
-            }
-        }
-
-        if ordered_ids.len() > 1 {
-            if let Err(e) = ira_db::reorder_variants(&db, &ordered_ids) {
-                eprintln!("Failed to reorder variants: {}", e);
-            }
-        }
-    }
+    super::edit_game_variants::save_variants(&db, params.db_id, &params.var_widgets);
 
     let _ = params.state.borrow().sender.send(crate::AppMessage::VariantsChanged(params.db_id));
     params.win.close();

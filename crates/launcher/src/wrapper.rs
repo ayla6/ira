@@ -126,6 +126,15 @@ pub fn monitor_process(
 
     ctx.running_games.lock().unwrap().remove(&ctx.game_id);
     let _ = ctx.sender.send(AppMessage::GameStopped(ctx.game_id, ctx.variant_id));
+
+    // Continue reaping zombies for a few seconds after the game exits.
+    // Wine background processes and stragglers may die after the main
+    // game process, and without a reaper they become visible as defunct
+    // processes in htop/btop.
+    for _ in 0..10 {
+        std::thread::sleep(Duration::from_secs(1));
+        reap_zombies(child_pid);
+    }
 }
 
 fn reap_zombies(pgid: i32) {
@@ -133,6 +142,20 @@ fn reap_zombies(pgid: i32) {
         let ret = unsafe {
             let mut status: i32 = 0;
             libc::waitpid(-pgid, &mut status as *mut i32, libc::WNOHANG)
+        };
+        if ret <= 0 {
+            break;
+        }
+    }
+}
+
+/// Reap ALL children of the calling process, regardless of process group.
+/// Used after stop_game_with_wine finishes killing — by that point
+/// wineserver -k has completed so there are no conflicting waitpid calls.
+fn reap_all() {
+    loop {
+        let ret = unsafe {
+            libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG)
         };
         if ret <= 0 {
             break;
@@ -254,7 +277,11 @@ pub fn stop_game_with_wine(pid: i32, wine_exe: Option<&str>, wine_prefix: Option
         // Step 6: Wait 2s for stragglers to exit.
         std::thread::sleep(Duration::from_secs(2));
 
-        // Step 7: Final fallback — SIGKILL any survivors.
+        // Step 7: Final fallback — SIGKILL the entire process group,
+        // then SIGKILL any remaining stragglers that escaped the group.
+        if pid > 0 {
+            unsafe { libc::kill(-pid, libc::SIGKILL); }
+        }
         for d in &descendants {
             let alive = unsafe { libc::kill(*d, 0) } == 0;
             if alive {
@@ -272,6 +299,11 @@ pub fn stop_game_with_wine(pid: i32, wine_exe: Option<&str>, wine_prefix: Option
             eprintln!("stop: force killing game pid {}", pid);
             unsafe { libc::kill(pid, libc::SIGKILL); }
         }
+
+        // Step 8: Reap all zombies. Safe to use waitpid(-1) here because
+        // wineserver -k has already completed and no other blocking wait
+        // calls are in flight.
+        reap_all();
     });
 }
 

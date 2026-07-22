@@ -486,8 +486,12 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             if let Err(e) = ira_db::set_sgdb_id(&db, db_id_s, "") {
                 eprintln!("Failed to clear SGDB ID: {}", e);
             }
+            if let Err(e) = ira_db::set_manual_unmatch(&db, db_id_s, true) {
+                eprintln!("Failed to set manual unmatch: {}", e);
+            }
             if let Some(g) = state_clone.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id_s) {
                 g.sgdb_id.clear();
+                g.manual_unmatch = true;
             }
             pending_copies_c.borrow_mut().remove("__unmatch__");
         }

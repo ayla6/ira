@@ -17,6 +17,9 @@ pub fn match_game_to_steam(state: &SharedState, db_id: i64, steam_app_id: String
             eprintln!("match_game_to_steam: update_game_ids failed: {}", e);
             return;
         }
+        if let Err(e) = ira_db::set_manual_unmatch(&db, db_id, false) {
+            eprintln!("match_game_to_steam: set_manual_unmatch failed: {}", e);
+        }
         if let Err(e) = steam.generate_steam_settings(&steam_app_id) {
             eprintln!("match_game_to_steam: generate_steam_settings failed: {}", e);
         }
@@ -67,6 +70,9 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
         if let Err(e) = ira_db::set_sgdb_id(&db, db_id, &sgdb_id) {
             eprintln!("match_game_to_sgdb: set_sgdb_id failed: {}", e);
             return;
+        }
+        if let Err(e) = ira_db::set_manual_unmatch(&db, db_id, false) {
+            eprintln!("match_game_to_sgdb: set_manual_unmatch failed: {}", e);
         }
         let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets(&sgdb_id);
 

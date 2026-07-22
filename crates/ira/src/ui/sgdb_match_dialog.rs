@@ -70,10 +70,14 @@ pub(super) fn handle_unified_sgdb_result(
             if let Err(e) = ira_db::set_sgdb_id(&sc.borrow().db, db_id, "") {
                 eprintln!("Failed to clear SGDB ID: {}", e);
             }
+            if let Err(e) = ira_db::set_manual_unmatch(&sc.borrow().db, db_id, true) {
+                eprintln!("Failed to set manual unmatch: {}", e);
+            }
             {
                 let mut s = sc.borrow_mut();
                 if let Some(g) = s.games.iter_mut().find(|g| g.db_id == db_id) {
                     g.sgdb_id.clear();
+                    g.manual_unmatch = true;
                     g.icon_path.clear();
                     g.hero_image_path.clear();
                     g.grid_path.clear();
@@ -253,8 +257,12 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
                             if let Err(e) = ira_db::set_sgdb_id(&state_c3.borrow().db, db_id, &sgdb_id_c) {
                                 eprintln!("Failed to set SGDB ID: {}", e);
                             }
+                            if let Err(e) = ira_db::set_manual_unmatch(&state_c3.borrow().db, db_id, false) {
+                                eprintln!("Failed to clear manual unmatch: {}", e);
+                            }
                             if let Some(g) = state_c3.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                                 g.sgdb_id = sgdb_id_c.clone();
+                                g.manual_unmatch = false;
                             }
                             if let Some(ref sd) = state_c3.borrow().settings_data {
                                 if sd.db_id == db_id {

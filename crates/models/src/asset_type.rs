@@ -68,6 +68,14 @@ impl AssetType {
         }
     }
 
+    pub fn sgdb_dimensions(self) -> &'static [&'static str] {
+        match self {
+            AssetType::Grid => &["600x900"],
+            AssetType::Header => &["460x215", "920x430"],
+            _ => &[],
+        }
+    }
+
     pub fn all() -> &'static [AssetType] {
         &[
             AssetType::Icon,

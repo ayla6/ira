@@ -11,8 +11,6 @@ use super::sgdb_match_dialog::show_sgdb_search_dialog;
 use super::sgdb_picker::{show_sgdb_picker, ShowSgdbPickerParams};
 use super::state::SharedState;
 
-type SectionEntry = (&'static str, &'static str, &'static str, i32, i32, &'static [&'static str]);
-
 pub fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &adw::Window) -> gtk4::Box {
     build_image_manager_content_with_drafts(state, game, parent_win, None)
 }
@@ -31,18 +29,17 @@ pub fn build_image_manager_content_with_drafts(
 
     let is_steam = game.trophy_source.has_steam_enrichment();
 
-    let sections: [SectionEntry; 5] = [
-        (AssetType::Icon.display_name(), AssetType::Icon.file_base(), AssetType::Icon.as_str(), 48, 48, &[]),
-        (AssetType::Hero.display_name(), AssetType::Hero.file_base(), AssetType::Hero.as_str(), 96, 64, &[]),
-        (AssetType::Grid.display_name(), AssetType::Grid.file_base(), AssetType::Grid.as_str(), 48, 64, &["600x900"]),
-        (AssetType::Header.display_name(), AssetType::Header.file_base(), AssetType::Header.as_str(), 96, 48, &["460x215", "920x430"]),
-        (AssetType::Logo.display_name(), AssetType::Logo.file_base(), AssetType::Logo.as_str(), 64, 64, &[]),
-    ];
-
-    for &(label, file, asset, thumb_w, thumb_h, dimensions) in &sections {
+    for &at in AssetType::all() {
+        let (thumb_w, thumb_h) = match at {
+            AssetType::Icon => (48, 48),
+            AssetType::Hero => (96, 64),
+            AssetType::Grid => (48, 64),
+            AssetType::Header => (96, 48),
+            AssetType::Logo => (64, 64),
+        };
         let section = build_image_section(BuildImageSectionParams {
-            label, file_base: file, asset_type: asset,
-            thumb_w, thumb_h, dims: dimensions,
+            label: at.display_name(), file_base: at.file_base(), asset_type: at.as_str(),
+            thumb_w, thumb_h, dims: at.sgdb_dimensions(),
             game, state, parent_win,
             pending_copies: pending_copies.clone(),
         });
@@ -358,6 +355,7 @@ pub struct VariantImageSectionParams<'a> {
     pub label: &'a str,
     pub file_base: &'a str,
     pub asset_type: &'a str,
+    pub dimensions: &'static [&'static str],
     pub max_h: i32,
     pub state: &'a SharedState,
     pub entry: &'a ira_models::GameEntry,
@@ -365,7 +363,7 @@ pub struct VariantImageSectionParams<'a> {
 }
 
 pub fn build_image_section_for_dir(params: VariantImageSectionParams) -> adw::ActionRow {
-    let VariantImageSectionParams { target_dir, label, file_base, asset_type, max_h, state, entry, parent_win } = params;
+    let VariantImageSectionParams { target_dir, label, file_base, asset_type, dimensions, max_h, state, entry, parent_win } = params;
     let row = adw::ActionRow::new();
     row.set_title(label);
 
@@ -451,7 +449,7 @@ pub fn build_image_section_for_dir(params: VariantImageSectionParams) -> adw::Ac
             show_sgdb_picker(ShowSgdbPickerParams {
                 steam: &steam, id: &sgdb_id_c, asset: &asset_c,
                 is_steam_id: is_steam && sgdb_id_empty,
-                dimensions: &[],
+                dimensions,
                 parent: &parent, on_done,
                 pending_copies: None,
                 save_dir: &save_dir,

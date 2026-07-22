@@ -98,7 +98,9 @@ pub fn rebuild_sidebar(state: &SharedState) {
         let s = state.borrow();
         let group_members: HashMap<i64, Vec<i64>> = s.groups.iter()
             .map(|g| {
-                let ids = ira_db::get_game_ids_in_group(&s.db, g.id).unwrap_or_default();
+                let ids: Vec<i64> = s.group_members.get(&g.id)
+                    .map(|set| set.iter().copied().collect())
+                    .unwrap_or_default();
                 (g.id, ids)
             })
             .collect();

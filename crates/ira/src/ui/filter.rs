@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use super::state::SharedState;
 
 pub fn filtered_games(state: &SharedState) -> Vec<Game> {
-    let (sort_mode, sort_descending, search, show_hidden, selected_group, games, db) = {
+    let (sort_mode, sort_descending, search, show_hidden, selected_group, games, group_members) = {
         let s = state.borrow();
         (
             s.cfg.sort_mode,
@@ -13,25 +13,16 @@ pub fn filtered_games(state: &SharedState) -> Vec<Game> {
             s.cfg.show_hidden_games,
             s.selected_group.clone(),
             s.games.clone(),
-            s.db.clone(),
+            s.group_members.clone(),
         )
     };
 
     let collection_game_ids: HashSet<i64> = match &selected_group {
         GroupSelection::Collection(group_id) => {
-            ira_db::get_game_ids_in_group(&db, *group_id).unwrap_or_else(|e| {
-                eprintln!("Failed to load group members: {}", e);
-                Vec::new()
-            }).into_iter().collect()
+            group_members.get(group_id).cloned().unwrap_or_default()
         }
         GroupSelection::Uncategorized => {
-            let groups = ira_db::get_all_groups(&db).unwrap_or_default();
-            let mut ids = HashSet::new();
-            for g in &groups {
-                let group_ids = ira_db::get_game_ids_in_group(&db, g.id).unwrap_or_default();
-                ids.extend(group_ids);
-            }
-            ids
+            group_members.values().flatten().copied().collect()
         }
         _ => HashSet::new(),
     };

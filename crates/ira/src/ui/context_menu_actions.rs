@@ -175,10 +175,14 @@ pub(super) fn setup_toggle_group_action(actions: &gio::SimpleActionGroup, state:
             if let Err(e) = ira_db::remove_game_from_group(&db, game.db_id, group_id) {
                 eprintln!("Failed to remove game from group: {}", e);
             }
+            if let Some(members) = state.borrow_mut().group_members.get_mut(&group_id) {
+                members.remove(&game.db_id);
+            }
         } else {
             if let Err(e) = ira_db::add_game_to_group(&db, game.db_id, group_id) {
                 eprintln!("Failed to add game to group: {}", e);
             }
+            state.borrow_mut().group_members.entry(group_id).or_default().insert(game.db_id);
         }
         super::sidebar::rebuild_sidebar(&state);
     });
@@ -215,8 +219,13 @@ pub(super) fn setup_multi_toggle_group_action(actions: &gio::SimpleActionGroup, 
                 if let Err(e) = ira_db::remove_game_from_group(&db, db_id, group_id) {
                     eprintln!("Failed to remove game from group: {}", e);
                 }
+                if let Some(members) = state.borrow_mut().group_members.get_mut(&group_id) {
+                    members.remove(&db_id);
+                }
             } else if let Err(e) = ira_db::add_game_to_group(&db, db_id, group_id) {
                 eprintln!("Failed to add game to group: {}", e);
+            } else {
+                state.borrow_mut().group_members.entry(group_id).or_default().insert(db_id);
             }
         }
         super::sidebar::rebuild_sidebar(&state);

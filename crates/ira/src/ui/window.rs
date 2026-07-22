@@ -43,6 +43,12 @@ pub fn build_ui(
         eprintln!("Failed to load groups: {}", e);
         Vec::new()
     });
+    let group_members: HashMap<i64, HashSet<i64>> = groups.iter()
+        .map(|g| {
+            let ids = ira_db::get_game_ids_in_group(&ctx.db, g.id).unwrap_or_default();
+            (g.id, ids.into_iter().collect())
+        })
+        .collect();
 
     let sidebar_store = gio::ListStore::new::<super::sidebar_item::SidebarItem>();
     let sidebar_selection = super::game_selection_model::GameSelectionModel::new(Some(&sidebar_store));
@@ -78,6 +84,7 @@ pub fn build_ui(
         search_query: String::new(),
         selected_group: GroupSelection::AllGames,
         groups,
+        group_members,
         search_entry: gtk4::SearchEntry::new(),
         sort_label: gtk4::Label::new(Some(SortMode::Alphabetical.display_label())),
         collapsed_collections: HashSet::new(),

@@ -51,6 +51,7 @@ pub struct AppState {
     pub search_query: String,
     pub selected_group: GroupSelection,
     pub groups: Vec<Group>,
+    pub group_members: HashMap<i64, HashSet<i64>>,
     pub search_entry: gtk4::SearchEntry,
     pub sort_label: gtk4::Label,
     pub collapsed_collections: HashSet<i64>,

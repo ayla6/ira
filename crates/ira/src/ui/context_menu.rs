@@ -40,7 +40,9 @@ pub(super) fn show_collection_name_dialog(
             Ok(group_id) => {
                 add_games(&db, group_id);
                 let groups = ira_db::get_all_groups(&db).unwrap_or_default();
+                let members = ira_db::get_game_ids_in_group(&db, group_id).unwrap_or_default();
                 state.borrow_mut().groups = groups;
+                state.borrow_mut().group_members.insert(group_id, members.into_iter().collect());
                 super::sidebar::rebuild_sidebar(&state);
             }
             Err(e) => {

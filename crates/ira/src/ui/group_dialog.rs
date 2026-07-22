@@ -115,6 +115,7 @@ pub fn show_delete_group_dialog(state: &SharedState, group_id: i64, name: &str) 
             Ok(_) => {
                 let groups = ira_db::get_all_groups(&db).unwrap_or_default();
                 state_clone.borrow_mut().groups = groups;
+                state_clone.borrow_mut().group_members.remove(&group_id);
                 state_clone.borrow_mut().selected_group = ira_models::GroupSelection::AllGames;
                 let selected_id = state_clone.borrow().selected_id.clone();
                 rebuild_sidebar(&state_clone);

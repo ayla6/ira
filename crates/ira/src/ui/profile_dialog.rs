@@ -3,6 +3,7 @@ use adw::prelude::*;
 use super::state::SharedState;
 use std::rc::Rc;
 use std::cell::RefCell;
+use super::css::*;
 
 type ListRef = Rc<RefCell<gtk4::ListBox>>;
 
@@ -33,7 +34,7 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> (
     group.set_title("Wine Profiles");
 
     let list = gtk4::ListBox::new();
-    list.add_css_class("boxed-list");
+    list.add_css_class(CSS_BOXED_LIST);
     list.set_valign(gtk4::Align::Start);
     let list_rc: ListRef = Rc::new(RefCell::new(list.clone()));
 
@@ -47,7 +48,7 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> (
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.set_tooltip_text(Some("Create profile"));
     add_btn.set_valign(gtk4::Align::Center);
-    add_btn.add_css_class("flat");
+    add_btn.add_css_class(CSS_FLAT);
     let win_add = window.clone();
     let db_add = db.clone();
     let sc_add = state_clone.clone();
@@ -77,9 +78,7 @@ fn repopulate_profiles(
     settings_win: &adw::Window,
 ) {
     let list = list_rc.borrow().clone();
-    while let Some(child) = list.first_child() {
-        list.remove(&child);
-    }
+    super::helpers::clear_children(&list);
 
     let profiles = ira_db::get_all_profiles(db).unwrap_or_default();
     for p in &profiles {
@@ -88,7 +87,7 @@ fn repopulate_profiles(
         row.set_subtitle(&format!("{} — {}{}", p.wine_version, if p.prefix.is_empty() { "(default prefix)" } else { &p.prefix }, if p.umu_enabled { " — UMU" } else { "" }));
 
         let edit_btn = gtk4::Button::from_icon_name("document-edit-symbolic");
-        edit_btn.add_css_class("flat");
+        edit_btn.add_css_class(CSS_FLAT);
         let p_edit = p.clone();
         let win_edit = window.clone();
         let db_edit = db.clone();
@@ -101,7 +100,7 @@ fn repopulate_profiles(
         row.add_suffix(&edit_btn);
 
         let del_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
-        del_btn.add_css_class("flat");
+        del_btn.add_css_class(CSS_FLAT);
         let p_id = p.id;
         let db_del = db.clone();
         let sw_del = settings_win.clone();
@@ -248,7 +247,7 @@ pub fn show_profile_dialog(
     cancel_btn.connect_clicked(move |_| win_c.close());
 
     let save_btn = gtk4::Button::with_label("Save");
-    save_btn.add_css_class("suggested-action");
+    save_btn.add_css_class(CSS_SUGGESTED_ACTION);
 
     btn_row.append(&cancel_btn);
     btn_row.append(&save_btn);
@@ -273,7 +272,7 @@ pub fn show_profile_dialog(
     save_btn.connect_clicked(move |_| {
         let name = name_c.text().to_string();
         if name.is_empty() {
-            name_c.add_css_class("error");
+            name_c.add_css_class(CSS_ERROR);
             return;
         }
         let vidx = version_row_c.selected() as usize;

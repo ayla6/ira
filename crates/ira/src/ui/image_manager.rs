@@ -10,6 +10,7 @@ use super::image_manager_helpers::{find_best_image_path, AssetRefreshCtx, make_r
 use super::sgdb_match_dialog::show_sgdb_search_dialog;
 use super::sgdb_picker::{show_sgdb_picker, ShowSgdbPickerParams};
 use super::state::SharedState;
+use super::css::*;
 
 pub fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &adw::Window) -> gtk4::Box {
     build_image_manager_content_with_drafts(state, game, parent_win, None)
@@ -53,7 +54,7 @@ pub fn build_image_manager_content_with_drafts(
 
         if game.sgdb_id.is_empty() && !is_steam {
             let match_btn = gtk4::Button::with_label("Match to SteamGridDB…");
-            match_btn.add_css_class("suggested-action");
+            match_btn.add_css_class(CSS_SUGGESTED_ACTION);
             let sc = state.clone();
             let gn = game.name.clone();
             let did = game.db_id;
@@ -66,10 +67,10 @@ pub fn build_image_manager_content_with_drafts(
 
         if !game.sgdb_id.is_empty() {
             let label = gtk4::Label::new(Some(&format!("Matched (SGDB ID: {})", game.sgdb_id)));
-            label.add_css_class("success-label");
+            label.add_css_class(CSS_SUCCESS_LABEL);
             btn_box.append(&label);
             let unmatch_btn = gtk4::Button::with_label("Unmatch SGDB");
-            unmatch_btn.add_css_class("destructive-action");
+            unmatch_btn.add_css_class(CSS_DESTRUCTIVE_ACTION);
             let pending_pc = pending_copies.clone();
             let sc = state.clone();
             let did = game.db_id;
@@ -105,6 +106,256 @@ struct BuildImageSectionParams<'a> {
     pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
 }
 
+fn resolve_image_path(
+    pending_copies: &Option<Rc<RefCell<HashMap<String, String>>>>,
+    asset_type: &str,
+    game: &Game,
+    file_base: &str,
+    id: &str,
+    save_dir: &str,
+) -> String {
+    let draft_path = pending_copies.as_ref()
+        .and_then(|pc| pc.borrow().get(asset_type).cloned());
+    if let Some(ref src) = draft_path {
+        if std::path::Path::new(src).is_file() {
+            src.clone()
+        } else {
+            find_best_image_path(game, asset_type, file_base, id, save_dir)
+        }
+    } else {
+        find_best_image_path(game, asset_type, file_base, id, save_dir)
+    }
+}
+
+fn build_image_preview(img_path: &str, max_h: i32) -> gtk4::Box {
+    let preview = gtk4::Picture::new();
+    let preview_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    preview_wrapper.set_valign(gtk4::Align::Center);
+    if !img_path.is_empty() && std::path::Path::new(&img_path).is_file() {
+        ira_images::set_picture_contain_async(&preview, img_path, max_h);
+        preview_wrapper.append(&preview);
+    } else {
+        let ph = gtk4::Label::new(Some("—"));
+        ph.add_css_class(CSS_DIM_LABEL);
+        ph.set_height_request(max_h);
+        preview_wrapper.append(&ph);
+    }
+    preview_wrapper
+}
+
+fn build_steam_non_icon_button(
+    is_steam: bool,
+    asset_type: &str,
+    state: &SharedState,
+    id: &str,
+    refresh_images: &Rc<dyn Fn()>,
+) -> Option<gtk4::Button> {
+    if !is_steam || AssetType::from_string(asset_type) == Some(AssetType::Icon) {
+        return None;
+    }
+    let btn = gtk4::Button::with_label("Steam");
+    let steam = state.borrow().steam.clone();
+    let id_c = id.to_string();
+    let asset_c = asset_type.to_string();
+    let refresh = Rc::clone(refresh_images);
+    let btn_clone = btn.clone();
+    btn.connect_clicked(move |_| {
+        btn_clone.set_sensitive(false);
+        btn_clone.set_label("Downloading…");
+        let steam = steam.clone();
+        let id_c = id_c.clone();
+        let asset_c = asset_c.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let rx = std::cell::RefCell::new(rx);
+        let asset_at = AssetType::from_string(&asset_c).unwrap_or(AssetType::Icon);
+        std::thread::spawn(move || {
+            let _s = tracing::info_span!("steam_download", app_id = %id_c, asset = %asset_c).entered();
+            let _ = steam.force_download_steam(&id_c, asset_at);
+            let _ = tx.send(());
+        });
+        let btn_weak = btn_clone.downgrade();
+        let refresh = refresh.clone();
+        glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+            if rx.borrow_mut().try_recv().is_ok() {
+                if let Some(btn) = btn_weak.upgrade() {
+                    btn.set_sensitive(true);
+                    btn.set_label("Steam");
+                }
+                refresh();
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
+    });
+    Some(btn)
+}
+
+fn build_steam_icon_button(
+    is_steam: bool,
+    asset_type: &str,
+    trophy_source: ira_models::TrophySource,
+    state: &SharedState,
+    id: &str,
+    save_dir: &str,
+    refresh_images: &Rc<dyn Fn()>,
+) -> Option<gtk4::Button> {
+    if !is_steam || AssetType::from_string(asset_type) != Some(AssetType::Icon) || trophy_source != ira_models::TrophySource::SteamNative {
+        return None;
+    }
+    let btn = gtk4::Button::with_label("Steam");
+    let steam = state.borrow().steam.clone();
+    let id_c = id.to_string();
+    let save_dir_c = save_dir.to_string();
+    let refresh = Rc::clone(refresh_images);
+    let btn_clone = btn.clone();
+    btn.connect_clicked(move |_| {
+        btn_clone.set_sensitive(false);
+        btn_clone.set_label("Downloading…");
+        let steam = steam.clone();
+        let id_c = id_c.clone();
+        let save_dir_c = save_dir_c.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let rx = std::cell::RefCell::new(rx);
+        std::thread::spawn(move || {
+            let _s = tracing::info_span!("steam_icon_download", app_id = %id_c).entered();
+            if let Ok(app_id_num) = id_c.parse::<u32>() {
+                if let Some(clienticon) = ira_platforms::steam::get_clienticon(app_id_num) {
+                    let ico_file = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.ico");
+                    if let Some(parent) = ico_file.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let webp_file = ico_file.with_extension("webp");
+                    let ico_path = ira_platforms::steam::steam_install_dir()
+                        .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
+                    let have_local = ico_path.as_ref().is_some_and(|p| p.is_file());
+                    if have_local {
+                        if let Some(ref ico_path_val) = ico_path {
+                            if let Ok(ico_data) = std::fs::read(ico_path_val) {
+                                if std::fs::write(&ico_file, &ico_data).is_ok() {
+                                    ira_parser::convert_to_lossless_webp(&ico_file);
+                                }
+                            }
+                        }
+                    }
+                    if !have_local || (!ico_file.is_file() && !webp_file.is_file()) {
+                        let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
+                        let _ = std::fs::remove_file(&ico_file);
+                        if steam.download_file(&url, &ico_file).is_ok() {
+                            ira_parser::convert_to_lossless_webp(&ico_file);
+                        }
+                    }
+                }
+            }
+            let _ = tx.send(());
+        });
+        let btn_weak = btn_clone.downgrade();
+        let refresh = refresh.clone();
+        glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+            if rx.borrow_mut().try_recv().is_ok() {
+                if let Some(btn) = btn_weak.upgrade() {
+                    btn.set_sensitive(true);
+                    btn.set_label("Steam");
+                }
+                refresh();
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
+    });
+    Some(btn)
+}
+
+struct SgdbPickerCtx<'a> {
+    state: &'a SharedState,
+    asset_type: &'a str,
+    parent_win: &'a adw::Window,
+    refresh_images: &'a Rc<dyn Fn()>,
+    dims: &'a [&'static str],
+    pending_copies: &'a Option<Rc<RefCell<HashMap<String, String>>>>,
+    save_dir: &'a str,
+}
+
+fn build_sgdb_picker_button(
+    game: &Game,
+    is_steam: bool,
+    id: &str,
+    ctx: &SgdbPickerCtx,
+) -> Option<gtk4::Button> {
+    let sgdb_id_for_picker = if !game.sgdb_id.is_empty() {
+        game.sgdb_id.clone()
+    } else {
+        id.to_string()
+    };
+    let sgdb_is_steam_id = is_steam && game.sgdb_id.is_empty();
+    let pending_copies_btn = ctx.pending_copies.clone();
+    if sgdb_id_for_picker.is_empty() {
+        return None;
+    }
+    let btn = gtk4::Button::with_label("SGDB…");
+    let steam = ctx.state.borrow().steam.clone();
+    let asset_c = ctx.asset_type.to_string();
+    let parent = ctx.parent_win.clone();
+    let refresh = Rc::clone(ctx.refresh_images);
+    let dims_vec: Vec<&str> = ctx.dims.to_vec();
+    let sgdb_id_c = sgdb_id_for_picker.clone();
+    let save_dir_c = ctx.save_dir.to_string();
+    btn.connect_clicked(move |_| {
+        show_sgdb_picker(ShowSgdbPickerParams {
+            steam: &steam, id: &sgdb_id_c, asset: &asset_c,
+            is_steam_id: sgdb_is_steam_id, dimensions: &dims_vec,
+            parent: &parent, on_done: refresh.clone(),
+            pending_copies: pending_copies_btn.clone(), save_dir: &save_dir_c,
+        });
+    });
+    Some(btn)
+}
+
+fn build_reset_icon_button(
+    asset_type: &str,
+    game: &Game,
+    refresh_images: &Rc<dyn Fn()>,
+    pending_copies: &Option<Rc<RefCell<HashMap<String, String>>>>,
+    save_dir: &str,
+) -> Option<gtk4::Button> {
+    if AssetType::from_string(asset_type) != Some(AssetType::Icon) || !game.kind.is_trophy_console() {
+        return None;
+    }
+    let reset_btn = gtk4::Button::with_label("Reset");
+    let gc = game.clone();
+    let refresh = Rc::clone(refresh_images);
+    let pending_copies_reset = pending_copies.clone();
+    let asset_reset = asset_type.to_string();
+    let save_dir_c2 = save_dir.to_string();
+    reset_btn.connect_clicked(move |_| {
+        let app_id = gc.app_id.clone();
+        let game_path = gc.game_path.clone();
+        let image_dir = std::path::Path::new(&save_dir_c2).join("data").join("ps4").join(&app_id);
+        let icon_png = image_dir.join("icon.png");
+        let default_path = if icon_png.is_file() {
+            Some(icon_png.to_string_lossy().into_owned())
+        } else {
+            let game_icon = std::path::Path::new(&game_path).join("sce_sys").join("icon0.png");
+            if game_icon.is_file() {
+                let _ = std::fs::create_dir_all(&image_dir);
+                let _ = std::fs::copy(&game_icon, &icon_png);
+                Some(icon_png.to_string_lossy().into_owned())
+            } else {
+                None
+            }
+        };
+        if let Some(ref pc) = pending_copies_reset {
+            pc.borrow_mut().remove(&asset_reset);
+            if let Some(path) = default_path {
+                pc.borrow_mut().insert(asset_reset.clone(), path);
+            }
+        }
+        refresh();
+    });
+    Some(reset_btn)
+}
+
 fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     let BuildImageSectionParams { label, file_base, asset_type, thumb_w, thumb_h, dims, game, state, parent_win, pending_copies } = params;
     let is_steam = game.trophy_source.has_steam_enrichment();
@@ -115,40 +366,16 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     let section = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
     let lbl = gtk4::Label::new(Some(label));
     lbl.set_halign(gtk4::Align::Start);
-    lbl.add_css_class("heading");
+    lbl.add_css_class(CSS_HEADING);
     section.append(&lbl);
 
     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     row.set_hexpand(true);
     row.set_valign(gtk4::Align::Center);
 
-    let img_path = {
-        let draft_path = pending_copies.as_ref()
-            .and_then(|pc| pc.borrow().get(asset_type).cloned());
-        if let Some(ref src) = draft_path {
-            if std::path::Path::new(src).is_file() {
-                src.clone()
-            } else {
-                find_best_image_path(game, asset_type, file_base, &id, &save_dir)
-            }
-        } else {
-            find_best_image_path(game, asset_type, file_base, &id, &save_dir)
-        }
-    };
-
-    let preview = gtk4::Picture::new();
+    let img_path = resolve_image_path(&pending_copies, asset_type, game, file_base, &id, &save_dir);
     let max_h = thumb_h.max(thumb_w);
-    let preview_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    preview_wrapper.set_valign(gtk4::Align::Center);
-    if !img_path.is_empty() && std::path::Path::new(&img_path).is_file() {
-        ira_images::set_picture_contain_async(&preview, &img_path, max_h);
-        preview_wrapper.append(&preview);
-    } else {
-        let ph = gtk4::Label::new(Some("—"));
-        ph.add_css_class("dim-label");
-        ph.set_height_request(max_h);
-        preview_wrapper.append(&ph);
-    }
+    let preview_wrapper = build_image_preview(&img_path, max_h);
     row.append(&preview_wrapper);
 
     let btns = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
@@ -168,7 +395,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         Some(("Images", &["image/png", "image/jpeg", "image/webp", "image/x-icon"])),
         {
             let pc = pending_copies.clone();
-            let refresh = refresh_images.clone();
+            let refresh = Rc::clone(&refresh_images);
             let asset_name = asset_type.to_string();
             move |path| {
                 if let Some(ref pc_inner) = pc {
@@ -180,166 +407,21 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     );
     btns.append(&browse_btn);
 
-    if is_steam && AssetType::from_string(asset_type) != Some(AssetType::Icon) {
-        let btn = gtk4::Button::with_label("Steam");
-        let steam = state.borrow().steam.clone();
-        let id_c = id.clone();
-        let asset_c = asset_type.to_string();
-        let refresh = refresh_images.clone();
-        let btn_clone = btn.clone();
-        btn.connect_clicked(move |_| {
-            btn_clone.set_sensitive(false);
-            btn_clone.set_label("Downloading…");
-            let steam = steam.clone();
-            let id_c = id_c.clone();
-            let asset_c = asset_c.clone();
-            let (tx, rx) = std::sync::mpsc::channel();
-            let rx = std::cell::RefCell::new(rx);
-            let asset_at = AssetType::from_string(&asset_c).unwrap_or(AssetType::Icon);
-            std::thread::spawn(move || {
-                let _s = tracing::info_span!("steam_download", app_id = %id_c, asset = %asset_c).entered();
-                let _ = steam.force_download_steam(&id_c, asset_at);
-                let _ = tx.send(());
-            });
-            let btn_weak = btn_clone.downgrade();
-            let refresh = refresh.clone();
-            glib::source::idle_add_local_full(glib::Priority::LOW, move || {
-                if rx.borrow_mut().try_recv().is_ok() {
-                    if let Some(btn) = btn_weak.upgrade() {
-                        btn.set_sensitive(true);
-                        btn.set_label("Steam");
-                    }
-                    refresh();
-                    glib::ControlFlow::Break
-                } else {
-                    glib::ControlFlow::Continue
-                }
-            });
-        });
+    if let Some(btn) = build_steam_non_icon_button(is_steam, asset_type, state, &id, &refresh_images) {
         btns.append(&btn);
     }
 
-    if is_steam && AssetType::from_string(asset_type) == Some(AssetType::Icon) && game.trophy_source == ira_models::TrophySource::SteamNative {
-        let btn = gtk4::Button::with_label("Steam");
-        let steam = state.borrow().steam.clone();
-        let id_c = id.clone();
-        let save_dir_c = save_dir.clone();
-        let refresh = refresh_images.clone();
-        let btn_clone = btn.clone();
-        btn.connect_clicked(move |_| {
-            btn_clone.set_sensitive(false);
-            btn_clone.set_label("Downloading…");
-            let steam = steam.clone();
-            let id_c = id_c.clone();
-            let save_dir_c = save_dir_c.clone();
-            let (tx, rx) = std::sync::mpsc::channel();
-            let rx = std::cell::RefCell::new(rx);
-            std::thread::spawn(move || {
-                let _s = tracing::info_span!("steam_icon_download", app_id = %id_c).entered();
-                if let Ok(app_id_num) = id_c.parse::<u32>() {
-                    if let Some(clienticon) = ira_platforms::steam::get_clienticon(app_id_num) {
-                        let ico_file = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.ico");
-                        let _ = std::fs::create_dir_all(ico_file.parent().unwrap());
-                        let webp_file = ico_file.with_extension("webp");
-                        let ico_path = ira_platforms::steam::steam_install_dir()
-                            .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
-                        let have_local = ico_path.as_ref().is_some_and(|p| p.is_file());
-                        if have_local {
-                            if let Ok(ico_data) = std::fs::read(ico_path.as_ref().unwrap()) {
-                                if std::fs::write(&ico_file, &ico_data).is_ok() {
-                                    ira_parser::convert_to_lossless_webp(&ico_file);
-                                }
-                            }
-                        }
-                        if !have_local || (!ico_file.is_file() && !webp_file.is_file()) {
-                            let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
-                            let _ = std::fs::remove_file(&ico_file);
-                            if steam.download_file(&url, &ico_file).is_ok() {
-                                ira_parser::convert_to_lossless_webp(&ico_file);
-                            }
-                        }
-                    }
-                }
-                let _ = tx.send(());
-            });
-            let btn_weak = btn_clone.downgrade();
-            let refresh = refresh.clone();
-            glib::source::idle_add_local_full(glib::Priority::LOW, move || {
-                if rx.borrow_mut().try_recv().is_ok() {
-                    if let Some(btn) = btn_weak.upgrade() {
-                        btn.set_sensitive(true);
-                        btn.set_label("Steam");
-                    }
-                    refresh();
-                    glib::ControlFlow::Break
-                } else {
-                    glib::ControlFlow::Continue
-                }
-            });
-        });
+    if let Some(btn) = build_steam_icon_button(is_steam, asset_type, game.trophy_source, state, &id, &save_dir, &refresh_images) {
         btns.append(&btn);
     }
 
-    let sgdb_id_for_picker = if !game.sgdb_id.is_empty() {
-        game.sgdb_id.clone()
-    } else {
-        id.clone()
-    };
-    let sgdb_is_steam_id = is_steam && game.sgdb_id.is_empty();
-    let pending_copies_btn = pending_copies.clone();
-    if !sgdb_id_for_picker.is_empty() {
-        let btn = gtk4::Button::with_label("SGDB…");
-        let steam = state.borrow().steam.clone();
-        let asset_c = asset_type.to_string();
-        let parent = parent_win.clone();
-        let refresh = refresh_images.clone();
-        let dims_vec: Vec<&str> = dims.to_vec();
-    let sgdb_id_c = sgdb_id_for_picker.clone();
-    let save_dir_c = save_dir.clone();
-    btn.connect_clicked(move |_| {
-        show_sgdb_picker(ShowSgdbPickerParams {
-            steam: &steam, id: &sgdb_id_c, asset: &asset_c,
-            is_steam_id: sgdb_is_steam_id, dimensions: &dims_vec,
-            parent: &parent, on_done: refresh.clone(),
-            pending_copies: pending_copies_btn.clone(), save_dir: &save_dir_c,
-        });
-    });
-    btns.append(&btn);
+    let sgdb_ctx = SgdbPickerCtx { state, asset_type, parent_win, refresh_images: &refresh_images, dims, pending_copies: &pending_copies, save_dir: &save_dir };
+    if let Some(btn) = build_sgdb_picker_button(game, is_steam, &id, &sgdb_ctx) {
+        btns.append(&btn);
     }
 
-    if AssetType::from_string(asset_type) == Some(AssetType::Icon) && game.kind.is_trophy_console() {
-        let reset_btn = gtk4::Button::with_label("Reset");
-        let gc = game.clone();
-        let refresh = refresh_images.clone();
-        let pending_copies_reset = pending_copies.clone();
-        let asset_reset = asset_type.to_string();
-        let save_dir_c2 = save_dir.clone();
-        reset_btn.connect_clicked(move |_| {
-            let app_id = gc.app_id.clone();
-            let game_path = gc.game_path.clone();
-            let image_dir = std::path::Path::new(&save_dir_c2).join("data").join("ps4").join(&app_id);
-            let icon_png = image_dir.join("icon.png");
-            let default_path = if icon_png.is_file() {
-                Some(icon_png.to_string_lossy().into_owned())
-            } else {
-                let game_icon = std::path::Path::new(&game_path).join("sce_sys").join("icon0.png");
-                if game_icon.is_file() {
-                    let _ = std::fs::create_dir_all(&image_dir);
-                    let _ = std::fs::copy(&game_icon, &icon_png);
-                    Some(icon_png.to_string_lossy().into_owned())
-                } else {
-                    None
-                }
-            };
-            if let Some(ref pc) = pending_copies_reset {
-                pc.borrow_mut().remove(&asset_reset);
-                if let Some(path) = default_path {
-                    pc.borrow_mut().insert(asset_reset.clone(), path);
-                }
-            }
-            refresh();
-        });
-        btns.append(&reset_btn);
+    if let Some(btn) = build_reset_icon_button(asset_type, game, &refresh_images, &pending_copies, &save_dir) {
+        btns.append(&btn);
     }
 
     row.append(&btns);
@@ -347,9 +429,6 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     section
 }
 
-/// Build a compact image section for a variant directory.
-/// Images are saved directly to `target_dir` (no pending_copies).
-/// Used inside variant cards' expandable "Manage images" section.
 pub struct VariantImageSectionParams<'a> {
     pub target_dir: &'a std::path::Path,
     pub label: &'a str,
@@ -362,35 +441,46 @@ pub struct VariantImageSectionParams<'a> {
     pub parent_win: &'a adw::Window,
 }
 
-pub fn build_image_section_for_dir(params: VariantImageSectionParams) -> adw::ActionRow {
-    let VariantImageSectionParams { target_dir, label, file_base, asset_type, dimensions, max_h, state, entry, parent_win } = params;
-    let row = adw::ActionRow::new();
-    row.set_title(label);
-
-    let preview_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    preview_wrapper.set_valign(gtk4::Align::Center);
-
-    let refresh_preview = {
-        let target_dir = target_dir.to_path_buf();
-        let preview_wrapper = preview_wrapper.clone();
-        let file_base = file_base.to_string();
-        Rc::new(move || {
-            clear_children(&preview_wrapper);
-            if let Some(p) = ira_parser::find_image_file(&target_dir, &file_base) {
-                let pic = gtk4::Picture::new();
-                ira_images::set_picture_contain_async(&pic, &p.to_string_lossy(), max_h);
-                preview_wrapper.append(&pic);
-            } else {
-                let ph = gtk4::Label::new(Some("—"));
-                ph.add_css_class("dim-label");
-                ph.set_height_request(max_h);
-                preview_wrapper.append(&ph);
-            }
-        })
-    };
+fn setup_dir_preview(
+    target_dir: &std::path::Path,
+    file_base: &str,
+    max_h: i32,
+    preview_wrapper: &gtk4::Box,
+) -> Rc<dyn Fn()> {
+    let target_dir = target_dir.to_path_buf();
+    let preview_wrapper = preview_wrapper.clone();
+    let file_base = file_base.to_string();
+    let refresh_preview: Rc<dyn Fn()> = Rc::new(move || {
+        clear_children(&preview_wrapper);
+        if let Some(p) = ira_parser::find_image_file(&target_dir, &file_base) {
+            let pic = gtk4::Picture::new();
+            ira_images::set_picture_contain_async(&pic, &p.to_string_lossy(), max_h);
+            preview_wrapper.append(&pic);
+        } else {
+            let ph = gtk4::Label::new(Some("—"));
+            ph.add_css_class(CSS_DIM_LABEL);
+            ph.set_height_request(max_h);
+            preview_wrapper.append(&ph);
+        }
+    });
     refresh_preview();
-    row.add_prefix(&preview_wrapper);
+    refresh_preview
+}
 
+struct DirButtonsCtx<'a> {
+    state: &'a SharedState,
+    asset_type: &'a str,
+    dimensions: &'static [&'static str],
+    refresh_preview: &'a Rc<dyn Fn()>,
+}
+
+fn build_dir_buttons(
+    parent_win: &adw::Window,
+    target_dir: &std::path::Path,
+    file_base: &str,
+    entry: &ira_models::GameEntry,
+    ctx: &DirButtonsCtx,
+) -> gtk4::Box {
     let btns = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
 
     let browse_btn = make_browse_button(
@@ -401,7 +491,7 @@ pub fn build_image_section_for_dir(params: VariantImageSectionParams) -> adw::Ac
         {
             let target_dir = target_dir.to_path_buf();
             let file_base = file_base.to_string();
-            let refresh = refresh_preview.clone();
+            let refresh = Rc::clone(ctx.refresh_preview);
             move |path| {
                 ira_parser::remove_image_variants(&target_dir, &file_base);
                 ira_parser::remove_image_variants(&target_dir, &format!("{}_small", file_base));
@@ -431,14 +521,15 @@ pub fn build_image_section_for_dir(params: VariantImageSectionParams) -> adw::Ac
     };
     if !sgdb_id_for_picker.is_empty() {
         let btn = gtk4::Button::with_label("SGDB");
-        btn.add_css_class("flat");
-        let steam = state.borrow().steam.clone();
-        let asset_c = asset_type.to_string();
+        btn.add_css_class(CSS_FLAT);
+        let steam = ctx.state.borrow().steam.clone();
+        let asset_c = ctx.asset_type.to_string();
         let parent = parent_win.clone();
-        let refresh = refresh_preview.clone();
+        let refresh = Rc::clone(ctx.refresh_preview);
         let sgdb_id_c = sgdb_id_for_picker.clone();
-        let save_dir = state.borrow().save_dir.clone();
+        let save_dir = ctx.state.borrow().save_dir.clone();
         let sgdb_id_empty = sgdb_id.is_empty();
+        let dims_vec: Vec<&str> = ctx.dimensions.to_vec();
         btn.connect_clicked(move |_| {
             let on_done: Rc<dyn Fn()> = {
                 let refresh = refresh.clone();
@@ -449,7 +540,7 @@ pub fn build_image_section_for_dir(params: VariantImageSectionParams) -> adw::Ac
             show_sgdb_picker(ShowSgdbPickerParams {
                 steam: &steam, id: &sgdb_id_c, asset: &asset_c,
                 is_steam_id: is_steam && sgdb_id_empty,
-                dimensions,
+                dimensions: &dims_vec,
                 parent: &parent, on_done,
                 pending_copies: None,
                 save_dir: &save_dir,
@@ -459,11 +550,11 @@ pub fn build_image_section_for_dir(params: VariantImageSectionParams) -> adw::Ac
     }
 
     let reset_btn = gtk4::Button::with_label("Reset");
-    reset_btn.add_css_class("flat");
+    reset_btn.add_css_class(CSS_FLAT);
     {
         let target_dir = target_dir.to_path_buf();
         let file_base = file_base.to_string();
-        let refresh = refresh_preview.clone();
+        let refresh = Rc::clone(ctx.refresh_preview);
         reset_btn.connect_clicked(move |_| {
             ira_parser::remove_image_variants(&target_dir, &file_base);
             let small = format!("{}_small", file_base);
@@ -473,6 +564,22 @@ pub fn build_image_section_for_dir(params: VariantImageSectionParams) -> adw::Ac
     }
     btns.append(&reset_btn);
 
+    btns
+}
+
+pub fn build_image_section_for_dir(params: VariantImageSectionParams) -> adw::ActionRow {
+    let VariantImageSectionParams { target_dir, label, file_base, asset_type, dimensions, max_h, state, entry, parent_win } = params;
+    let row = adw::ActionRow::new();
+    row.set_title(label);
+
+    let preview_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    preview_wrapper.set_valign(gtk4::Align::Center);
+
+    let refresh_preview = setup_dir_preview(target_dir, file_base, max_h, &preview_wrapper);
+    row.add_prefix(&preview_wrapper);
+
+    let dir_ctx = DirButtonsCtx { state, asset_type, dimensions, refresh_preview: &refresh_preview };
+    let btns = build_dir_buttons(parent_win, target_dir, file_base, entry, &dir_ctx);
     row.add_suffix(&btns);
     row
 }

@@ -8,6 +8,7 @@ use super::grid_view::show_grid_view;
 use super::helpers::clear_children;
 use super::sidebar_item::{SidebarItem, SidebarItemKind};
 use std::collections::{HashMap, HashSet};
+use super::css::*;
 
 fn queue_icon_load(icon: gtk4::Image, path: String) {
     let _s = tracing::info_span!("queue_icon_load", path = %path).entered();
@@ -271,214 +272,237 @@ fn restore_selection(state: &SharedState) {
 
 pub fn rebuild_sidebar_and_show_grid(state: &SharedState) {
     rebuild_sidebar(state);
-    if state.borrow().selected_id.is_empty() && !state.borrow().content_unloaded {
+    let show = {
+        let s = state.borrow();
+        s.selected_id.is_empty() && !s.content_unloaded
+    };
+    if show {
         show_grid_view(state);
+    }
+}
+
+fn sidebar_setup_factory(_factory: &gtk4::SignalListItemFactory, list_item_obj: &glib::Object) {
+    let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
+    list_item.set_activatable(true);
+    list_item.set_selectable(true);
+
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+
+    list_item.set_child(Some(&row));
+}
+
+fn sidebar_bind_all_games(state: &SharedState, row: &gtk4::Box) {
+    row.add_css_class(CSS_SIDEBAR_ROW_PAD_GAME);
+    let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
+    icon.set_pixel_size(16);
+    row.append(&icon);
+    let label = gtk4::Label::new(Some(S::ALL_GAMES));
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    row.append(&label);
+
+    let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    add_btn.add_css_class(CSS_FLAT);
+    add_btn.set_tooltip_text(Some(S::ADD_COLLECTION));
+    add_btn.set_valign(gtk4::Align::Center);
+    let sc = state.clone();
+    add_btn.connect_clicked(move |_| {
+        super::group_dialog::show_create_group_dialog(&sc);
+    });
+    row.append(&add_btn);
+}
+
+fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {
+    row.add_css_class(CSS_SIDEBAR_ROW_PAD_HEADER);
+    let group_id = item.group_id();
+    let collapsed = item.collapsed();
+
+    let arrow_icon = if collapsed { "pan-end-symbolic" } else { "pan-down-symbolic" };
+    let arrow = gtk4::Image::from_icon_name(arrow_icon);
+    arrow.set_pixel_size(14);
+    arrow.set_valign(gtk4::Align::Center);
+
+    let sc = state.clone();
+    let click = gtk4::GestureClick::new();
+    click.connect_pressed(move |_, _, _, _| {
+        let mut s = sc.borrow_mut();
+        if s.collapsed_collections.contains(&group_id) {
+            s.collapsed_collections.remove(&group_id);
+        } else {
+            s.collapsed_collections.insert(group_id);
+        }
+        drop(s);
+        rebuild_sidebar(&sc);
+    });
+    arrow.add_controller(click);
+    row.append(&arrow);
+
+    let header_name = if item.kind() == SidebarItemKind::UncategorizedHeader {
+        "Uncategorized".to_string()
+    } else {
+        item.name()
+    };
+    let label = gtk4::Label::new(Some(&header_name));
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    row.append(&label);
+
+    let count_label = gtk4::Label::new(Some(&item.count().to_string()));
+    count_label.add_css_class(CSS_DIM_LABEL);
+    row.append(&count_label);
+
+    if item.kind() == SidebarItemKind::CollectionHeader {
+        let sc = state.clone();
+        let group_name = header_name.clone();
+        let row_weak = row.downgrade();
+        let right_click = gtk4::GestureClick::new();
+        right_click.set_button(3);
+        right_click.connect_pressed(move |_, _, x, y| {
+            if let Some(r) = row_weak.upgrade() {
+                let menu = gio::Menu::new();
+                menu.append(Some("Rename"), Some("grp.rename"));
+                menu.append(Some("Delete"), Some("grp.delete"));
+
+                let popover = gtk4::PopoverMenu::from_model(Some(&menu));
+                popover.set_halign(gtk4::Align::Start);
+                popover.set_has_arrow(false);
+
+                let actions = gio::SimpleActionGroup::new();
+                let sc2 = sc.clone();
+                let gname = group_name.clone();
+                let rename_action = gio::SimpleAction::new("rename", None);
+                rename_action.connect_activate(move |_, _| {
+                    super::group_dialog::show_rename_group_dialog(&sc2, group_id, &gname);
+                });
+                actions.add_action(&rename_action);
+
+                let sc2 = sc.clone();
+                let gname = group_name.clone();
+                let delete_action = gio::SimpleAction::new("delete", None);
+                delete_action.connect_activate(move |_, _| {
+                    super::group_dialog::show_delete_group_dialog(&sc2, group_id, &gname);
+                });
+                actions.add_action(&delete_action);
+
+                r.insert_action_group("grp", Some(&actions));
+                popover.set_parent(&r);
+                popover.set_pointing_to(Some(&gdk4::Rectangle::new(x as i32, y as i32, 1, 1)));
+                popover.popup();
+            }
+        });
+        row.add_controller(right_click);
+    }
+}
+
+fn sidebar_bind_game(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {
+    row.add_css_class(CSS_SIDEBAR_ROW_PAD_GAME);
+    let icon = gtk4::Image::from_icon_name("application-x-executable");
+    icon.set_pixel_size(24);
+    if !item.icon_path().is_empty() {
+        queue_icon_load(icon.clone(), item.icon_path());
+    }
+    row.append(&icon);
+
+    let title_label = gtk4::Label::new(Some(&item.name()));
+    title_label.set_xalign(0.0);
+    title_label.add_css_class(CSS_SIDEBAR_ROW_TITLE);
+    title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    title_label.set_hexpand(true);
+    title_label.set_tooltip_text(Some(&item.name()));
+    row.append(&title_label);
+
+    if item.hidden() {
+        row.add_css_class(CSS_HIDDEN_GAME);
+    }
+    if item.playing() {
+        row.add_css_class(CSS_PLAYING_GAME);
+    }
+
+    let sc = state.clone();
+    let db_id = item.db_id();
+    let variant_id = item.variant_id();
+    let row_weak = row.downgrade();
+    let right_click = gtk4::GestureClick::new();
+    right_click.set_button(3);
+    right_click.connect_pressed(move |_, _, x, y| {
+        if let Some(r) = row_weak.upgrade() {
+            let selected_ids = {
+                let s = sc.borrow();
+                s.sidebar_selection.selected_db_ids()
+            };
+            let item_grid_id = match variant_id {
+                Some(vid) => format!("{}-v{}", db_id, vid),
+                None => db_id.to_string(),
+            };
+            if selected_ids.len() > 1 && selected_ids.contains(&item_grid_id) {
+                let db_ids: HashSet<i64> = selected_ids.iter()
+                    .map(|s| ira_models::parse_db_id(s))
+                    .collect();
+                show_multi_game_context_menu(&sc, &db_ids, &r, x, y);
+            } else {
+                if !selected_ids.contains(&item_grid_id) || selected_ids.len() != 1 {
+                    if let Some(pos) = find_game_index(&sc, db_id, variant_id) {
+                        let selection = sc.borrow().sidebar_selection.clone();
+                        selection.select_item(pos, true);
+                    }
+                }
+                let game = sc.borrow().games.iter()
+                    .find(|g| g.db_id == db_id && g.variant_id == variant_id)
+                    .cloned();
+                if let Some(game) = game {
+                    show_game_context_menu(&sc, &game, &r, x, y, None::<&gtk4::ListBoxRow>);
+                }
+            }
+        }
+    });
+    row.add_controller(right_click);
+}
+
+fn sidebar_bind_factory(
+    _factory: &gtk4::SignalListItemFactory,
+    list_item_obj: &glib::Object,
+    state: &SharedState,
+) {
+    let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
+    let row = list_item.child().unwrap().downcast::<gtk4::Box>().unwrap();
+
+    let item = list_item.item().unwrap()
+        .downcast::<SidebarItem>().unwrap();
+
+    clear_children(&row);
+
+    row.remove_css_class(CSS_PLAYING_GAME);
+    row.remove_css_class(CSS_HIDDEN_GAME);
+    row.remove_css_class(CSS_SIDEBAR_ROW_PAD_GAME);
+    row.remove_css_class(CSS_SIDEBAR_ROW_PAD_HEADER);
+
+    match item.kind() {
+        SidebarItemKind::AllGames => sidebar_bind_all_games(state, &row),
+        SidebarItemKind::CollectionHeader | SidebarItemKind::UncategorizedHeader => {
+            sidebar_bind_collection_header(state, &row, &item);
+        }
+        SidebarItemKind::Game => sidebar_bind_game(state, &row, &item),
+    }
+}
+
+fn sidebar_unbind_factory(_factory: &gtk4::SignalListItemFactory, list_item_obj: &glib::Object) {
+    let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
+    if let Some(child) = list_item.child() {
+        let row = child.downcast::<gtk4::Box>().unwrap();
+        clear_children(&row);
     }
 }
 
 pub fn build_factory(state: &SharedState) -> gtk4::SignalListItemFactory {
     let factory = gtk4::SignalListItemFactory::new();
 
-    factory.connect_setup(move |_, list_item_obj| {
-        let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
-        list_item.set_activatable(true);
-        list_item.set_selectable(true);
-
-        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-
-        list_item.set_child(Some(&row));
-    });
+    factory.connect_setup(sidebar_setup_factory);
 
     let state_for_bind = state.clone();
-    factory.connect_bind(move |_, list_item_obj| {
-        let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
-        let row = list_item.child().unwrap().downcast::<gtk4::Box>().unwrap();
+    factory.connect_bind(move |f, item| sidebar_bind_factory(f, item, &state_for_bind));
 
-        let item = list_item.item().unwrap()
-            .downcast::<SidebarItem>().unwrap();
-
-        clear_children(&row);
-
-        row.remove_css_class("playing-game");
-        row.remove_css_class("hidden-game");
-        row.remove_css_class("sidebar-row-pad-game");
-        row.remove_css_class("sidebar-row-pad-header");
-
-        match item.kind() {
-            SidebarItemKind::AllGames => {
-                row.add_css_class("sidebar-row-pad-game");
-                let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
-                icon.set_pixel_size(16);
-                row.append(&icon);
-                let label = gtk4::Label::new(Some(S::ALL_GAMES));
-                label.set_xalign(0.0);
-                label.set_hexpand(true);
-                row.append(&label);
-
-                let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-                add_btn.add_css_class("flat");
-                add_btn.set_tooltip_text(Some(S::ADD_COLLECTION));
-                add_btn.set_valign(gtk4::Align::Center);
-                let sc = state_for_bind.clone();
-                add_btn.connect_clicked(move |_| {
-                    super::group_dialog::show_create_group_dialog(&sc);
-                });
-                row.append(&add_btn);
-            }
-            SidebarItemKind::CollectionHeader | SidebarItemKind::UncategorizedHeader => {
-                row.add_css_class("sidebar-row-pad-header");
-                let group_id = item.group_id();
-                let collapsed = item.collapsed();
-
-                let arrow_icon = if collapsed { "pan-end-symbolic" } else { "pan-down-symbolic" };
-                let arrow = gtk4::Image::from_icon_name(arrow_icon);
-                arrow.set_pixel_size(14);
-                arrow.set_valign(gtk4::Align::Center);
-
-                let sc = state_for_bind.clone();
-                let click = gtk4::GestureClick::new();
-                click.connect_pressed(move |_, _, _, _| {
-                    let mut s = sc.borrow_mut();
-                    if s.collapsed_collections.contains(&group_id) {
-                        s.collapsed_collections.remove(&group_id);
-                    } else {
-                        s.collapsed_collections.insert(group_id);
-                    }
-                    drop(s);
-                    rebuild_sidebar(&sc);
-                });
-                arrow.add_controller(click);
-                row.append(&arrow);
-
-                let header_name = if item.kind() == SidebarItemKind::UncategorizedHeader {
-                    "Uncategorized".to_string()
-                } else {
-                    item.name()
-                };
-                let label = gtk4::Label::new(Some(&header_name));
-                label.set_xalign(0.0);
-                label.set_hexpand(true);
-                label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-                row.append(&label);
-
-                let count_label = gtk4::Label::new(Some(&item.count().to_string()));
-                count_label.add_css_class("dim-label");
-                row.append(&count_label);
-
-                if item.kind() == SidebarItemKind::CollectionHeader {
-                    let sc = state_for_bind.clone();
-                    let group_name = header_name.clone();
-                    let row_weak = row.downgrade();
-                    let right_click = gtk4::GestureClick::new();
-                    right_click.set_button(3);
-                    right_click.connect_pressed(move |_, _, x, y| {
-                        if let Some(r) = row_weak.upgrade() {
-                            let menu = gio::Menu::new();
-                            menu.append(Some("Rename"), Some("grp.rename"));
-                            menu.append(Some("Delete"), Some("grp.delete"));
-
-                            let popover = gtk4::PopoverMenu::from_model(Some(&menu));
-                            popover.set_halign(gtk4::Align::Start);
-                            popover.set_has_arrow(false);
-
-                            let actions = gio::SimpleActionGroup::new();
-                            let sc2 = sc.clone();
-                            let gname = group_name.clone();
-                            let rename_action = gio::SimpleAction::new("rename", None);
-                            rename_action.connect_activate(move |_, _| {
-                                super::group_dialog::show_rename_group_dialog(&sc2, group_id, &gname);
-                            });
-                            actions.add_action(&rename_action);
-
-                            let sc2 = sc.clone();
-                            let gname = group_name.clone();
-                            let delete_action = gio::SimpleAction::new("delete", None);
-                            delete_action.connect_activate(move |_, _| {
-                                super::group_dialog::show_delete_group_dialog(&sc2, group_id, &gname);
-                            });
-                            actions.add_action(&delete_action);
-
-                            r.insert_action_group("grp", Some(&actions));
-                            popover.set_parent(&r);
-                            popover.set_pointing_to(Some(&gdk4::Rectangle::new(x as i32, y as i32, 1, 1)));
-                            popover.popup();
-                        }
-                    });
-                    row.add_controller(right_click);
-                }
-            }
-            SidebarItemKind::Game => {
-                row.add_css_class("sidebar-row-pad-game");
-                let icon = gtk4::Image::from_icon_name("application-x-executable");
-                icon.set_pixel_size(24);
-                if !item.icon_path().is_empty() {
-                    queue_icon_load(icon.clone(), item.icon_path());
-                }
-                row.append(&icon);
-
-                let title_label = gtk4::Label::new(Some(&item.name()));
-                title_label.set_xalign(0.0);
-                title_label.add_css_class("sidebar-row-title");
-                title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-                title_label.set_hexpand(true);
-                title_label.set_tooltip_text(Some(&item.name()));
-                row.append(&title_label);
-
-                if item.hidden() {
-                    row.add_css_class("hidden-game");
-                }
-                if item.playing() {
-                    row.add_css_class("playing-game");
-                }
-
-                let sc = state_for_bind.clone();
-                let db_id = item.db_id();
-                let row_weak = row.downgrade();
-                let right_click = gtk4::GestureClick::new();
-                right_click.set_button(3);
-                right_click.connect_pressed(move |_, _, x, y| {
-                    if let Some(r) = row_weak.upgrade() {
-                        let selected_ids = {
-                            let s = sc.borrow();
-                            s.sidebar_selection.selected_db_ids()
-                        };
-                        let item_grid_id = match item.variant_id() {
-                            Some(vid) => format!("{}-v{}", db_id, vid),
-                            None => db_id.to_string(),
-                        };
-                        if selected_ids.len() > 1 && selected_ids.contains(&item_grid_id) {
-                            let db_ids: HashSet<i64> = selected_ids.iter()
-                                .map(|s| ira_models::parse_db_id(s))
-                                .collect();
-                            show_multi_game_context_menu(&sc, &db_ids, &r, x, y);
-                        } else {
-                            if !selected_ids.contains(&item_grid_id) || selected_ids.len() != 1 {
-                                if let Some(pos) = find_game_index(&sc, db_id, item.variant_id()) {
-                                    let selection = sc.borrow().sidebar_selection.clone();
-                                    selection.select_item(pos, true);
-                                }
-                            }
-                            let game = sc.borrow().games.iter()
-                                .find(|g| g.db_id == db_id && g.variant_id == item.variant_id())
-                                .cloned();
-                            if let Some(game) = game {
-                                show_game_context_menu(&sc, &game, &r, x, y, None::<&gtk4::ListBoxRow>);
-                            }
-                        }
-                    }
-                });
-                row.add_controller(right_click);
-            }
-        }
-    });
-
-    factory.connect_unbind(move |_, list_item_obj| {
-        let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
-        if let Some(child) = list_item.child() {
-            let row = child.downcast::<gtk4::Box>().unwrap();
-            clear_children(&row);
-        }
-    });
+    factory.connect_unbind(sidebar_unbind_factory);
 
     factory
 }

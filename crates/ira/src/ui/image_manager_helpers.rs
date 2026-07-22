@@ -8,6 +8,7 @@ use super::helpers::clear_children;
 use super::message_helpers::apply_game_update;
 use super::state::SharedState;
 use super::game_item::GameItem;
+use super::css::*;
 
 pub(super) fn find_best_image_path(game: &Game, field: &str, _base: &str, id: &str, save_dir: &str) -> String {
     let field_path = match AssetType::from_string(field) {
@@ -101,7 +102,7 @@ pub(super) fn make_refresh_closure(
                     preview_wrapper.append(&p);
                 } else {
                     let ph = gtk4::Label::new(Some("—"));
-                    ph.add_css_class("dim-label");
+                    ph.add_css_class(CSS_DIM_LABEL);
                     ph.set_height_request(th.max(tw));
                     preview_wrapper.append(&ph);
                 }

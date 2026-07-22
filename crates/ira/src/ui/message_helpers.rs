@@ -127,47 +127,59 @@ pub(super) fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
 }
 
 fn start_background_enrichment(state: &SharedState) {
-    let (steam, sender, db, save_dir, ra_username, ra_token, ra_password) = {
+    let (steam, sender, db, save_dir, ra_username, ra_token, ra_password, enrich_targets, ra_games, sgdb_games) = {
         let s = state.borrow();
-        (s.steam.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
+        (
+            s.steam.clone(),
+            s.sender.clone(),
+            s.db.clone(),
+            s.save_dir.clone(),
+            s.cfg.ra_username.clone(),
+            s.cfg.ra_token.clone(),
+            s.cfg.ra_password.clone(),
+            s.games.iter()
+                .filter(|g| !g.app_id.is_empty()
+                    && g.variant_id.is_none()
+                    && g.kind != ira_models::GameKind::Ps4
+                    && g.kind != ira_models::GameKind::Ps3
+                    && g.kind != ira_models::GameKind::Retro)
+                .map(|g| (g.app_id.clone(), g.trophy_source, g.platform_id.clone(), g.db_id, g.name.clone(), g.clone()))
+                .collect::<Vec<_>>(),
+            s.games.iter()
+                .filter(|g| g.kind == ira_models::GameKind::Retro
+                    && g.trophy_source == ira_models::TrophySource::Ra
+                    && !g.app_id.is_empty())
+                .map(|g| (g.db_id, g.app_id.clone(), g.platform_id.clone()))
+                .collect::<Vec<_>>(),
+            s.games.iter()
+                .filter(|g| !g.sgdb_id.is_empty()
+                    && g.variant_id.is_none()
+                    && (g.icon_path.is_empty() || g.hero_image_path.is_empty()
+                        || g.grid_path.is_empty() || g.logo_path.is_empty()
+                        || g.header_path.is_empty()))
+                .map(|g| (g.db_id, g.sgdb_id.clone(), g.kind == ira_models::GameKind::Retro))
+                .collect::<Vec<_>>(),
+        )
     };
 
-    let s = state.borrow();
-    for g in &s.games {
-        if g.app_id.is_empty() || g.variant_id.is_some() {
-            continue;
-        }
-
-        if g.kind == ira_models::GameKind::Ps4 || g.kind == ira_models::GameKind::Ps3 || g.kind == ira_models::GameKind::Retro {
-            continue;
-        }
-
+    for (app_id, trophy_source, platform_id, db_id, title, game) in enrich_targets {
         enrich_game_async(crate::ui::enrichment::EnrichGameParams {
-            app_id: g.app_id.clone(),
-            trophy_source: g.trophy_source,
-            platform_id: g.platform_id.clone(),
-            db_id: g.db_id,
-            title: g.name.clone(),
+            app_id,
+            trophy_source,
+            platform_id,
+            db_id,
+            title,
             steam: steam.clone(),
             sender: sender.clone(),
-            save_dir: state.borrow().save_dir.clone(),
+            save_dir: save_dir.clone(),
             db: db.clone(),
             ra_username: ra_username.clone(),
             ra_token: ra_token.clone(),
             ra_password: ra_password.clone(),
-            game: Some(g.clone()),
+            game: Some(game),
         });
     }
 
-    let ra_games: Vec<(i64, String, String)> = {
-        let s = state.borrow();
-        s.games.iter()
-            .filter(|g| g.kind == ira_models::GameKind::Retro
-                && g.trophy_source == ira_models::TrophySource::Ra
-                && !g.app_id.is_empty())
-            .map(|g| (g.db_id, g.app_id.clone(), g.platform_id.clone()))
-            .collect()
-    };
     if !ra_games.is_empty() {
         let db = db.clone();
         let sender = sender.clone();
@@ -210,21 +222,7 @@ fn start_background_enrichment(state: &SharedState) {
         });
     }
 
-    let sgdb_games: Vec<(i64, String, bool)> = {
-        let s = state.borrow();
-        s.games.iter()
-            .filter(|g| !g.sgdb_id.is_empty()
-                && g.variant_id.is_none()
-                && (g.icon_path.is_empty() || g.hero_image_path.is_empty()
-                    || g.grid_path.is_empty() || g.logo_path.is_empty()
-                    || g.header_path.is_empty()))
-            .map(|g| (g.db_id, g.sgdb_id.clone(), g.kind == ira_models::GameKind::Retro))
-            .collect()
-    };
     if !sgdb_games.is_empty() {
-        let steam = state.borrow().steam.clone();
-        let sender = state.borrow().sender.clone();
-        let save_dir = state.borrow().save_dir.clone();
         std::thread::spawn(move || {
             let _s = tracing::info_span!("background_sgdb_redownload", count = sgdb_games.len()).entered();
             for (db_id, sgdb_id, is_retro) in sgdb_games {
@@ -300,8 +298,6 @@ pub(super) fn apply_game_update(state: &SharedState, updated: Game) {
         let game_for_grid = if needs_grid_update { Some(updated.clone()) } else { None };
         let game = if needs_rebuild { Some(updated.clone()) } else { None };
 
-        // Sync variant entries: copy achievements and counts from base game.
-        // Playtime and last_played are variant-specific — do not overwrite.
         let sync_db_id = updated.db_id;
         let sync_achievements = updated.achievements.clone();
         let sync_earned = updated.earned_count;
@@ -323,8 +319,6 @@ pub(super) fn apply_game_update(state: &SharedState, updated: Game) {
 
         s.games[i] = updated;
 
-        // If the selected game is a variant of this base game, refresh its display
-        // (variant entries were just synced with achievements from the base game)
         let game = game.or_else(|| {
             if s.content_unloaded { return None; }
             s.games.iter()

@@ -5,6 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use super::helpers::{esc, format_duration};
 use super::play_history_chart::{DayData, color_hex, other_hex};
+use super::css::*;
 
 const Y_AXIS_W: i32 = 34;
 const BAR_MARGIN: i32 = 8;
@@ -287,7 +288,7 @@ impl BarChart {
         for i in 0..num_lines {
             let val = i as f64 * interval;
             let lbl = gtk4::Label::new(Some(&fmt_axis(val)));
-            lbl.add_css_class("dim-label");
+            lbl.add_css_class(CSS_DIM_LABEL);
             lbl.set_halign(gtk4::Align::Start);
             lbl.set_parent(self);
             y_labels.push(lbl);

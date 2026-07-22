@@ -1,5 +1,7 @@
 use gtk4::prelude::*;
 use adw::prelude::*;
+use std::sync::Arc;
+use std::sync::Mutex;
 use super::state::SharedState;
 
 pub fn show_log_dialog(state: &SharedState, db_id: i64) {
@@ -39,9 +41,23 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
 
     let buffer = text_view.buffer();
 
-    let initial_content = std::fs::read_to_string(&log_path)
-        .unwrap_or_else(|_| format!("No log file found at:\n{}\n\nThe log will be created when the game is launched.", log_path));
-    buffer.set_text(&initial_content.replace('\0', "\u{FFFD}"));
+    let shared_initial = Arc::new(Mutex::new(None::<String>));
+    let shared_c = shared_initial.clone();
+    let log_path_c = log_path.clone();
+    std::thread::spawn(move || {
+        let content = std::fs::read_to_string(&log_path_c)
+            .unwrap_or_else(|_| format!("No log file found at:\n{}\n\nThe log will be created when the game is launched.", log_path_c));
+        *shared_c.lock().unwrap() = Some(content.replace('\0', "\u{FFFD}"));
+    });
+    let buffer_c = buffer.clone();
+    glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+        if let Some(content) = shared_initial.lock().unwrap().take() {
+            buffer_c.set_text(&content);
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
 
     let mark = buffer.create_mark(None, &buffer.end_iter(), false);
 
@@ -61,8 +77,16 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
     let log_path_clone = log_path.clone();
     let is_running = state.borrow().running_games.lock().unwrap().contains_key(&db_id);
     if is_running {
+        let shared = Arc::new(Mutex::new(None::<String>));
         glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
-            if let Ok(content) = std::fs::read_to_string(&log_path_clone) {
+            let shared_c = shared.clone();
+            let lpc = log_path_clone.clone();
+            std::thread::spawn(move || {
+                if let Ok(content) = std::fs::read_to_string(&lpc) {
+                    *shared_c.lock().unwrap() = Some(content);
+                }
+            });
+            if let Some(content) = shared.try_lock().ok().and_then(|mut g| g.take()) {
                 let current = buf_clone.text(&buf_clone.start_iter(), &buf_clone.end_iter(), false);
                 if current != content {
                     buf_clone.set_text(&content.replace('\0', "\u{FFFD}"));

@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::state::SharedState;
+use super::css::*;
 
 pub struct DialogLayout {
     pub window: adw::Window,
@@ -26,12 +27,12 @@ pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
     let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
 
     let sidebar_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    sidebar_area.add_css_class("settings-sidebar");
+    sidebar_area.add_css_class(CSS_SETTINGS_SIDEBAR);
     sidebar_area.set_size_request(200, -1);
     sidebar_area.set_vexpand(true);
 
     let sidebar = gtk4::ListBox::new();
-    sidebar.add_css_class("navigation-sidebar");
+    sidebar.add_css_class(CSS_NAVIGATION_SIDEBAR);
     sidebar.set_margin_top(6);
     sidebar.set_margin_bottom(6);
 
@@ -49,7 +50,7 @@ pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
     content_area.set_hexpand(true);
 
     let header = adw::HeaderBar::new();
-    header.add_css_class("settings-header");
+    header.add_css_class(CSS_SETTINGS_HEADER);
     content_area.append(&header);
 
     let stack = gtk4::Stack::new();
@@ -81,7 +82,7 @@ pub fn make_browse_button(
     on_select: impl Fn(&std::path::Path) + 'static,
 ) -> gtk4::Button {
     let browse = gtk4::Button::with_label("Browse…");
-    browse.add_css_class("flat");
+    browse.add_css_class(CSS_FLAT);
     browse.set_valign(gtk4::Align::Center);
     let parent = parent.cloned();
     let title = title.to_string();
@@ -348,6 +349,7 @@ pub fn spawn_terminal(env: &[(String, String)]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ira_models::LogoPosition;
 
     #[test]
     fn test_format_duration_zero() {
@@ -408,7 +410,7 @@ mod tests {
         let enriched = Game {
             platform_id: "OLDPID".to_string(),
             trophy_source: ira_models::TrophySource::SteamNative,
-            logo_position: "bottom-left".to_string(),
+            logo_position: LogoPosition::BottomLeft.to_string(),
             logo_size: 50,
             ..Default::default()
         };

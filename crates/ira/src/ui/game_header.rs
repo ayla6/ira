@@ -4,267 +4,17 @@ use crate::Game;
 use super::state::SharedState;
 use super::play_button::play_button;
 use super::game_display::{format_last_played, format_playtime, logo_scaled_dims, logo_position_align};
+use super::css::*;
 
 pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_width: i32) -> gtk4::Widget {
     let _span = tracing::info_span!("build_game_header", db_id = game.db_id).entered();
-    let title_row = {
-        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 14);
-        let title_label = gtk4::Label::new(Some(&game.name));
-        title_label.set_xalign(0.0);
-        title_label.add_css_class("title-1");
-        row.append(&title_label);
-        row
-    };
-
-    let stats_row = {
-        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
-        row.set_valign(gtk4::Align::Center);
-        row.set_hexpand(true);
-        row.append(&play_button(state, game.db_id, game.variant_id));
-        row.append(&stat_label("Last played", &format_last_played(game.last_played)));
-        let pt_box = stat_label("Play time", &format_playtime(game.playtime));
-        pt_box.add_css_class("clickable-stat");
-        pt_box.set_tooltip_text(Some("View play history"));
-        let sc = state.clone();
-        let db_id = game.db_id;
-        let variant_id = game.variant_id;
-        let click = gtk4::GestureClick::new();
-        click.connect_pressed(move |_, _, _, _| {
-            super::play_history::show_play_history_dialog(&sc, db_id, variant_id);
-        });
-        pt_box.add_controller(click);
-        row.append(&pt_box);
-        if game.total_count > 0 {
-            let tbox = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
-            tbox.set_valign(gtk4::Align::Center);
-            let cap = gtk4::Label::new(Some("Trophies"));
-            cap.set_xalign(0.0);
-            cap.add_css_class("dim-label");
-            cap.add_css_class("caption");
-            tbox.append(&cap);
-            let trow = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-            trow.set_valign(gtk4::Align::Center);
-            let val = gtk4::Label::new(Some(&format!("{}/{}", game.earned_count, game.total_count)));
-            val.set_xalign(0.0);
-            val.set_valign(gtk4::Align::Center);
-            val.add_css_class("heading");
-            trow.append(&val);
-            let prog = gtk4::ProgressBar::new();
-            prog.set_fraction(fraction);
-            prog.set_valign(gtk4::Align::Center);
-            prog.set_size_request(120, -1);
-            trow.append(&prog);
-            tbox.append(&trow);
-            row.append(&tbox);
-        }
-        row
-    };
+    let title_row = build_header_title(game);
+    let stats_row = build_header_stats(game, fraction, state);
+    let wine_enabled = check_wine_enabled(game, state);
+    let wine_btn = build_wine_tools_button(state, game.db_id, wine_enabled);
+    let settings_btn = build_settings_button(state, game.db_id);
 
     let has_hero = !game.hero_image_path.is_empty();
-
-    // Wine tools button (only shown if wine is enabled — skip DB lookup for native platforms)
-    let wine_enabled = if game.kind == ira_models::GameKind::Steam || game.kind == ira_models::GameKind::Ps4 || game.kind == ira_models::GameKind::Ps3 {
-        false
-    } else {
-        let s = state.borrow();
-        let config = ira_db::get_game_config(&s.db, game.db_id).ok().flatten();
-        let app_default = s.cfg.default_wine_config.clone();
-        let (_, mut wine, profile_id) = config.unwrap_or_default();
-        if let Some(pid) = profile_id {
-            if let Ok(Some(profile)) = ira_db::get_profile(&s.db, pid) {
-                wine.version = profile.wine_version;
-                wine.custom_wine_path = profile.custom_wine_path;
-                wine.prefix = profile.prefix;
-                wine.arch = profile.arch;
-                wine.umu_enabled = profile.umu_enabled;
-            }
-        }
-        wine = wine.merge_with_default(&app_default);
-        wine.enabled
-    };
-
-    let wine_btn = if wine_enabled {
-        let menu = gio::Menu::new();
-        menu.append(Some("Winetricks"), Some("wine.winetricks"));
-        menu.append(Some("Wine Task Manager"), Some("wine.taskmgr"));
-        menu.append(Some("Wine Control Panel"), Some("wine.control"));
-        menu.append(Some("Wine registry"), Some("wine.regedit"));
-        menu.append(Some("Wine configuration"), Some("wine.winecfg"));
-        menu.append(Some("Open Wine console"), Some("wine.console"));
-        menu.append(Some("Open Bash terminal"), Some("wine.bash"));
-        menu.append(Some("Run EXE inside Wine prefix"), Some("wine.run_exe"));
-
-        let btn = gtk4::MenuButton::new();
-        btn.set_icon_name("applications-engineering-symbolic");
-        btn.add_css_class("flat");
-        btn.set_valign(gtk4::Align::Center);
-        btn.set_tooltip_text(Some("Wine tools"));
-        btn.set_menu_model(Some(&menu));
-
-        let actions = gio::SimpleActionGroup::new();
-        let st = state.clone();
-        let db_id = game.db_id;
-
-        let st_winetricks = st.clone();
-        let winetricks = gio::SimpleAction::new("winetricks", None);
-        winetricks.connect_activate(move |_, _| {
-            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_winetricks, db_id);
-            if let Some(exe) = wine_exe {
-                let mut cmd = std::process::Command::new("winetricks");
-                cmd.arg("--gui");
-                cmd.env("WINEPREFIX", &prefix);
-                if let Some(dir) = std::path::Path::new(&exe).parent() {
-                    let path = std::env::var("PATH").unwrap_or_default();
-                    cmd.env("PATH", format!("{}:{}", dir.display(), path));
-                }
-                for (k, v) in &env { cmd.env(k, v); }
-                let _ = cmd.spawn();
-            }
-        });
-        actions.add_action(&winetricks);
-
-        let st_taskmgr = st.clone();
-        let taskmgr = gio::SimpleAction::new("taskmgr", None);
-        taskmgr.connect_activate(move |_, _| {
-            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_taskmgr, db_id);
-            if let Some(exe) = wine_exe {
-                let mut cmd = std::process::Command::new(&exe);
-                cmd.arg("taskmgr").env("WINEPREFIX", &prefix);
-                for (k, v) in &env { cmd.env(k, v); }
-                let _ = cmd.spawn();
-            }
-        });
-        actions.add_action(&taskmgr);
-
-        let st_control = st.clone();
-        let control = gio::SimpleAction::new("control", None);
-        control.connect_activate(move |_, _| {
-            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_control, db_id);
-            if let Some(exe) = wine_exe {
-                let mut cmd = std::process::Command::new(&exe);
-                cmd.arg("control").env("WINEPREFIX", &prefix);
-                for (k, v) in &env { cmd.env(k, v); }
-                let _ = cmd.spawn();
-            }
-        });
-        actions.add_action(&control);
-
-        let st_regedit = st.clone();
-        let regedit = gio::SimpleAction::new("regedit", None);
-        regedit.connect_activate(move |_, _| {
-            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_regedit, db_id);
-            if let Some(exe) = wine_exe {
-                let mut cmd = std::process::Command::new(&exe);
-                cmd.arg("regedit").env("WINEPREFIX", &prefix);
-                for (k, v) in &env { cmd.env(k, v); }
-                let _ = cmd.spawn();
-            }
-        });
-        actions.add_action(&regedit);
-
-        let st_winecfg = st.clone();
-        let winecfg = gio::SimpleAction::new("winecfg", None);
-        winecfg.connect_activate(move |_, _| {
-            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_winecfg, db_id);
-            if let Some(exe) = wine_exe {
-                let mut cmd = std::process::Command::new(&exe);
-                cmd.arg("winecfg").env("WINEPREFIX", &prefix);
-                for (k, v) in &env { cmd.env(k, v); }
-                let _ = cmd.spawn();
-            }
-        });
-        actions.add_action(&winecfg);
-
-        let st_console = st.clone();
-        let console = gio::SimpleAction::new("console", None);
-        console.connect_activate(move |_, _| {
-            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_console, db_id);
-            if let Some(exe) = wine_exe {
-                let mut cmd = std::process::Command::new(&exe);
-                cmd.arg("wineconsole").env("WINEPREFIX", &prefix);
-                for (k, v) in &env { cmd.env(k, v); }
-                let _ = cmd.spawn();
-            }
-        });
-        actions.add_action(&console);
-
-        let st_bash = st.clone();
-        let bash = gio::SimpleAction::new("bash", None);
-        bash.connect_activate(move |_, _| {
-            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_bash, db_id);
-            let mut full_env = env;
-            full_env.push(("WINEPREFIX".to_string(), prefix));
-            if let Some(exe) = wine_exe {
-                if let Some(dir) = std::path::Path::new(&exe).parent() {
-                    let path = std::env::var("PATH").unwrap_or_default();
-                    full_env.push(("PATH".to_string(), format!("{}:{}", dir.display(), path)));
-                }
-            }
-            super::helpers::spawn_terminal(&full_env);
-        });
-        actions.add_action(&bash);
-
-        let st_runexe = st.clone();
-        let run_exe = gio::SimpleAction::new("run_exe", None);
-        run_exe.connect_activate(move |_, _| {
-            let (wine_exe, prefix, env) = get_wine_cmd_env(&st_runexe, db_id);
-            let dialog = gtk4::FileDialog::new();
-            dialog.set_title("Select EXE to run in Wine prefix");
-            let filter = gtk4::FileFilter::new();
-            filter.add_pattern("*.exe");
-            filter.add_pattern("*.msi");
-            dialog.set_default_filter(Some(&filter));
-            dialog.open(None::<&adw::ApplicationWindow>, None::<&gio::Cancellable>, move |result| {
-                if let Ok(file) = result {
-                    if let Some(path) = file.path() {
-                        if let Some(ref exe) = wine_exe {
-                            let mut cmd = std::process::Command::new(exe);
-                            cmd.arg(&path).env("WINEPREFIX", &prefix);
-                            for (k, v) in &env { cmd.env(k, v); }
-                            let _ = cmd.spawn();
-                        }
-                    }
-                }
-            });
-        });
-        actions.add_action(&run_exe);
-
-        btn.insert_action_group("wine", Some(&actions));
-        Some(btn)
-    } else {
-        None
-    };
-
-    let settings_btn = {
-        let menu = gio::Menu::new();
-        menu.append(Some("View Log"), Some("game.view_log"));
-
-        let btn = adw::SplitButton::new();
-        btn.set_icon_name("preferences-system-symbolic");
-        btn.add_css_class("flat");
-        btn.set_valign(gtk4::Align::Center);
-        btn.set_tooltip_text(Some("Settings"));
-        btn.set_menu_model(Some(&menu));
-
-        let st = state.clone();
-        let edit_db_id = game.db_id;
-        btn.connect_clicked(move |_| {
-            super::edit_game_dialog::show_edit_game_dialog(&st, edit_db_id);
-        });
-
-        let actions = gio::SimpleActionGroup::new();
-        let st_log = state.clone();
-        let log_db_id = game.db_id;
-        let log_action = gio::SimpleAction::new("view_log", None);
-        log_action.connect_activate(move |_, _| {
-            super::log_viewer::show_log_dialog(&st_log, log_db_id);
-        });
-        actions.add_action(&log_action);
-        btn.insert_action_group("game", Some(&actions));
-
-        btn.upcast::<gtk4::Widget>()
-    };
-
     if !has_hero {
         let header = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
         header.set_margin_top(24);
@@ -282,6 +32,262 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
         return header.upcast();
     }
 
+    let overlay = build_hero_overlay(game, content_width);
+    let stats_container = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
+    stats_container.set_margin_start(24);
+    stats_container.set_margin_end(24);
+    stats_container.set_margin_top(12);
+    stats_container.set_margin_bottom(12);
+    stats_container.append(&stats_row);
+    let btn_group = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+    if let Some(ref wb) = wine_btn { btn_group.append(wb); }
+    btn_group.append(&settings_btn);
+    stats_container.append(&btn_group);
+
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    outer.append(&overlay);
+    outer.append(&stats_container);
+    outer.upcast()
+}
+
+fn build_header_title(game: &Game) -> gtk4::Box {
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 14);
+    let title_label = gtk4::Label::new(Some(&game.name));
+    title_label.set_xalign(0.0);
+    title_label.add_css_class(CSS_TITLE_1);
+    row.append(&title_label);
+    row
+}
+
+fn build_header_stats(game: &Game, fraction: f64, state: &SharedState) -> gtk4::Box {
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
+    row.set_valign(gtk4::Align::Center);
+    row.set_hexpand(true);
+    row.append(&play_button(state, game.db_id, game.variant_id));
+    row.append(&stat_label("Last played", &format_last_played(game.last_played)));
+    let pt_box = stat_label("Play time", &format_playtime(game.playtime));
+    pt_box.add_css_class(CSS_CLICKABLE_STAT);
+    pt_box.set_tooltip_text(Some("View play history"));
+    let sc = state.clone();
+    let db_id = game.db_id;
+    let variant_id = game.variant_id;
+    let click = gtk4::GestureClick::new();
+    click.connect_pressed(move |_, _, _, _| {
+        super::play_history::show_play_history_dialog(&sc, db_id, variant_id);
+    });
+    pt_box.add_controller(click);
+    row.append(&pt_box);
+    if game.total_count > 0 {
+        let tbox = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+        tbox.set_valign(gtk4::Align::Center);
+        let cap = gtk4::Label::new(Some("Trophies"));
+        cap.set_xalign(0.0);
+        cap.add_css_class(CSS_DIM_LABEL);
+        cap.add_css_class(CSS_CAPTION);
+        tbox.append(&cap);
+        let trow = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        trow.set_valign(gtk4::Align::Center);
+        let val = gtk4::Label::new(Some(&format!("{}/{}", game.earned_count, game.total_count)));
+        val.set_xalign(0.0);
+        val.set_valign(gtk4::Align::Center);
+        val.add_css_class(CSS_HEADING);
+        trow.append(&val);
+        let prog = gtk4::ProgressBar::new();
+        prog.set_fraction(fraction);
+        prog.set_valign(gtk4::Align::Center);
+        prog.set_size_request(120, -1);
+        trow.append(&prog);
+        tbox.append(&trow);
+        row.append(&tbox);
+    }
+    row
+}
+
+fn check_wine_enabled(game: &Game, state: &SharedState) -> bool {
+    if game.kind == ira_models::GameKind::Steam || game.kind == ira_models::GameKind::Ps4 || game.kind == ira_models::GameKind::Ps3 {
+        return false;
+    }
+    let s = state.borrow();
+    let config = ira_db::get_game_config(&s.db, game.db_id).ok().flatten();
+    let app_default = s.cfg.default_wine_config.clone();
+    let (_, mut wine, profile_id) = config.unwrap_or_default();
+    if let Some(pid) = profile_id {
+        if let Ok(Some(profile)) = ira_db::get_profile(&s.db, pid) {
+            wine.version = profile.wine_version;
+            wine.custom_wine_path = profile.custom_wine_path;
+            wine.prefix = profile.prefix;
+            wine.arch = profile.arch;
+            wine.umu_enabled = profile.umu_enabled;
+        }
+    }
+    wine = wine.merge_with_default(&app_default);
+    wine.enabled
+}
+
+fn build_wine_tools_button(state: &SharedState, db_id: i64, wine_enabled: bool) -> Option<gtk4::Widget> {
+    if !wine_enabled {
+        return None;
+    }
+
+    let menu = gio::Menu::new();
+    menu.append(Some("Winetricks"), Some("wine.winetricks"));
+    menu.append(Some("Wine Task Manager"), Some("wine.taskmgr"));
+    menu.append(Some("Wine Control Panel"), Some("wine.control"));
+    menu.append(Some("Wine registry"), Some("wine.regedit"));
+    menu.append(Some("Wine configuration"), Some("wine.winecfg"));
+    menu.append(Some("Open Wine console"), Some("wine.console"));
+    menu.append(Some("Open Bash terminal"), Some("wine.bash"));
+    menu.append(Some("Run EXE inside Wine prefix"), Some("wine.run_exe"));
+
+    let btn = gtk4::MenuButton::new();
+    btn.set_icon_name("applications-engineering-symbolic");
+    btn.add_css_class(CSS_FLAT);
+    btn.set_valign(gtk4::Align::Center);
+    btn.set_tooltip_text(Some("Wine tools"));
+    btn.set_menu_model(Some(&menu));
+
+    let actions = gio::SimpleActionGroup::new();
+
+    add_wine_winetricks_action(&actions, state, db_id);
+    add_wine_cmd_action(&actions, state, db_id, "taskmgr", "taskmgr");
+    add_wine_cmd_action(&actions, state, db_id, "control", "control");
+    add_wine_cmd_action(&actions, state, db_id, "regedit", "regedit");
+    add_wine_cmd_action(&actions, state, db_id, "winecfg", "winecfg");
+    add_wine_cmd_action(&actions, state, db_id, "console", "wineconsole");
+    add_wine_bash_action(&actions, state, db_id);
+    add_wine_run_exe_action(&actions, state, db_id);
+
+    btn.insert_action_group("wine", Some(&actions));
+    Some(btn.upcast())
+}
+
+fn add_wine_cmd_action(
+    actions: &gio::SimpleActionGroup,
+    state: &SharedState,
+    db_id: i64,
+    action_name: &'static str,
+    cmd_arg: &'static str,
+) {
+    let st = state.clone();
+    let action = gio::SimpleAction::new(action_name, None);
+    action.connect_activate(move |_, _| {
+        let (wine_exe, prefix, env) = get_wine_cmd_env(&st, db_id);
+        if let Some(exe) = wine_exe {
+            let mut cmd = std::process::Command::new(&exe);
+            cmd.arg(cmd_arg).env("WINEPREFIX", &prefix);
+            for (k, v) in &env { cmd.env(k, v); }
+            let _ = cmd.spawn();
+        }
+    });
+    actions.add_action(&action);
+}
+
+fn add_wine_winetricks_action(
+    actions: &gio::SimpleActionGroup,
+    state: &SharedState,
+    db_id: i64,
+) {
+    let st = state.clone();
+    let action = gio::SimpleAction::new("winetricks", None);
+    action.connect_activate(move |_, _| {
+        let (wine_exe, prefix, env) = get_wine_cmd_env(&st, db_id);
+        if let Some(exe) = wine_exe {
+            let mut cmd = std::process::Command::new("winetricks");
+            cmd.arg("--gui");
+            cmd.env("WINEPREFIX", &prefix);
+            if let Some(dir) = std::path::Path::new(&exe).parent() {
+                let path = std::env::var("PATH").unwrap_or_default();
+                cmd.env("PATH", format!("{}:{}", dir.display(), path));
+            }
+            for (k, v) in &env { cmd.env(k, v); }
+            let _ = cmd.spawn();
+        }
+    });
+    actions.add_action(&action);
+}
+
+fn add_wine_bash_action(
+    actions: &gio::SimpleActionGroup,
+    state: &SharedState,
+    db_id: i64,
+) {
+    let st = state.clone();
+    let action = gio::SimpleAction::new("bash", None);
+    action.connect_activate(move |_, _| {
+        let (wine_exe, prefix, env) = get_wine_cmd_env(&st, db_id);
+        let mut full_env = env;
+        full_env.push(("WINEPREFIX".to_string(), prefix));
+        if let Some(exe) = wine_exe {
+            if let Some(dir) = std::path::Path::new(&exe).parent() {
+                let path = std::env::var("PATH").unwrap_or_default();
+                full_env.push(("PATH".to_string(), format!("{}:{}", dir.display(), path)));
+            }
+        }
+        super::helpers::spawn_terminal(&full_env);
+    });
+    actions.add_action(&action);
+}
+
+fn add_wine_run_exe_action(
+    actions: &gio::SimpleActionGroup,
+    state: &SharedState,
+    db_id: i64,
+) {
+    let st = state.clone();
+    let action = gio::SimpleAction::new("run_exe", None);
+    action.connect_activate(move |_, _| {
+        let (wine_exe, prefix, env) = get_wine_cmd_env(&st, db_id);
+        let dialog = gtk4::FileDialog::new();
+        dialog.set_title("Select EXE to run in Wine prefix");
+        let filter = gtk4::FileFilter::new();
+        filter.add_pattern("*.exe");
+        filter.add_pattern("*.msi");
+        dialog.set_default_filter(Some(&filter));
+        dialog.open(None::<&adw::ApplicationWindow>, None::<&gio::Cancellable>, move |result| {
+            if let Ok(file) = result {
+                if let Some(path) = file.path() {
+                    if let Some(ref exe) = wine_exe {
+                        let mut cmd = std::process::Command::new(exe);
+                        cmd.arg(&path).env("WINEPREFIX", &prefix);
+                        for (k, v) in &env { cmd.env(k, v); }
+                        let _ = cmd.spawn();
+                    }
+                }
+            }
+        });
+    });
+    actions.add_action(&action);
+}
+
+fn build_settings_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
+    let menu = gio::Menu::new();
+    menu.append(Some("View Log"), Some("game.view_log"));
+
+    let btn = adw::SplitButton::new();
+    btn.set_icon_name("preferences-system-symbolic");
+    btn.add_css_class(CSS_FLAT);
+    btn.set_valign(gtk4::Align::Center);
+    btn.set_tooltip_text(Some("Settings"));
+    btn.set_menu_model(Some(&menu));
+
+    let st = state.clone();
+    btn.connect_clicked(move |_| {
+        super::edit_game_dialog::show_edit_game_dialog(&st, db_id);
+    });
+
+    let actions = gio::SimpleActionGroup::new();
+    let st_log = state.clone();
+    let log_action = gio::SimpleAction::new("view_log", None);
+    log_action.connect_activate(move |_, _| {
+        super::log_viewer::show_log_dialog(&st_log, db_id);
+    });
+    actions.add_action(&log_action);
+    btn.insert_action_group("game", Some(&actions));
+
+    btn.upcast::<gtk4::Widget>()
+}
+
+fn build_hero_overlay(game: &Game, content_width: i32) -> gtk4::Overlay {
     let overlay = gtk4::Overlay::new();
     overlay.set_vexpand(false);
     overlay.set_hexpand(true);
@@ -346,6 +352,7 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
             overlay.add_overlay(&logo_area);
         }
     }
+
     {
         let overlay_weak = overlay.downgrade();
         let size_monitor = gtk4::DrawingArea::new();
@@ -365,21 +372,8 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
         });
         overlay.add_overlay(&size_monitor);
     }
-    let stats_container = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
-    stats_container.set_margin_start(24);
-    stats_container.set_margin_end(24);
-    stats_container.set_margin_top(12);
-    stats_container.set_margin_bottom(12);
-    stats_container.append(&stats_row);
-    let btn_group = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
-    if let Some(ref wb) = wine_btn { btn_group.append(wb); }
-    btn_group.append(&settings_btn);
-    stats_container.append(&btn_group);
 
-    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    outer.append(&overlay);
-    outer.append(&stats_container);
-    outer.upcast()
+    overlay
 }
 
 fn stat_label(caption: &str, value: &str) -> gtk4::Box {
@@ -388,12 +382,12 @@ fn stat_label(caption: &str, value: &str) -> gtk4::Box {
     vbox.set_size_request(110, -1);
     let cap = gtk4::Label::new(Some(caption));
     cap.set_xalign(0.0);
-    cap.add_css_class("dim-label");
-    cap.add_css_class("caption");
+    cap.add_css_class(CSS_DIM_LABEL);
+    cap.add_css_class(CSS_CAPTION);
     vbox.append(&cap);
     let val = gtk4::Label::new(Some(value));
     val.set_xalign(0.0);
-    val.add_css_class("heading");
+    val.add_css_class(CSS_HEADING);
     vbox.append(&val);
     vbox
 }

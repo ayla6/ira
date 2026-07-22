@@ -4,6 +4,7 @@ use super::add_game_dialog::build_env_var_row;
 use super::settings_dialog;
 use super::wine_config_env_dll::build_dll_override_row;
 use super::wine_config_widget::WineConfigWidgets;
+use super::css::*;
 
 #[derive(Clone)]
 pub(super) struct AdvancedWidgets {
@@ -44,11 +45,11 @@ pub(super) fn build_advanced_page(
     let add_env_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_env_btn.set_tooltip_text(Some("Add variable"));
     add_env_btn.set_valign(gtk4::Align::Center);
-    add_env_btn.add_css_class("flat");
+    add_env_btn.add_css_class(CSS_FLAT);
     env_group.set_header_suffix(Some(&add_env_btn));
 
     let env_vars_box = gtk4::ListBox::new();
-    env_vars_box.add_css_class("boxed-list");
+    env_vars_box.add_css_class(CSS_BOXED_LIST);
 
     if let Some(data) = wine_data {
         for (name, value) in data {
@@ -74,11 +75,11 @@ pub(super) fn build_advanced_page(
         let add_dll_btn = gtk4::Button::from_icon_name("list-add-symbolic");
         add_dll_btn.set_tooltip_text(Some("Add override"));
         add_dll_btn.set_valign(gtk4::Align::Center);
-        add_dll_btn.add_css_class("flat");
+        add_dll_btn.add_css_class(CSS_FLAT);
         dll_group.set_header_suffix(Some(&add_dll_btn));
 
         let dob = gtk4::ListBox::new();
-        dob.add_css_class("boxed-list");
+        dob.add_css_class(CSS_BOXED_LIST);
         for (name, value) in data {
             dob.append(&build_dll_override_row(name, value));
         }

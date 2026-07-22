@@ -15,6 +15,7 @@ use super::settings_pages::{
 use super::settings_console::{
     build_shadps4_settings_page, build_rpcs3_settings_page, build_console_settings_page, ConsolePageWidgets,
 };
+use super::css::*;
 
 pub(super) fn settings_page_container() -> gtk4::Box {
     gtk4::Box::new(gtk4::Orientation::Vertical, 16)
@@ -154,7 +155,7 @@ pub fn show_settings_dialog(
     cancel_btn.connect_clicked(move |_| win_c.close());
 
     let save_btn = gtk4::Button::with_label(S::SAVE);
-    save_btn.add_css_class("suggested-action");
+    save_btn.add_css_class(CSS_SUGGESTED_ACTION);
 
     let state_clone = state.clone();
     let win_clone = win.clone();

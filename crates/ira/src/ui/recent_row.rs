@@ -6,6 +6,7 @@ use super::grid_view::queue_cover_load_priority;
 use super::message_helpers::switch_to_game;
 use super::sidebar::scroll_to_row;
 use super::context_menu::show_game_context_menu;
+use super::css::*;
 
 pub(super) fn build_recent_row(
     state: &SharedState,
@@ -20,15 +21,15 @@ pub(super) fn build_recent_row(
     let title = gtk4::Label::new(Some("Recently played"));
     title.set_xalign(0.0);
     title.set_hexpand(true);
-    title.add_css_class("section-title");
+    title.add_css_class(CSS_SECTION_TITLE);
     title_row.append(&title);
 
     let left_btn = gtk4::Button::from_icon_name("go-previous-symbolic");
-    left_btn.add_css_class("flat");
+    left_btn.add_css_class(CSS_FLAT);
     left_btn.set_sensitive(false);
 
     let right_btn = gtk4::Button::from_icon_name("go-next-symbolic");
-    right_btn.add_css_class("flat");
+    right_btn.add_css_class(CSS_FLAT);
 
     let btn_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
     btn_box.append(&left_btn);
@@ -62,7 +63,7 @@ pub(super) fn build_recent_row(
     scrolled.set_valign(gtk4::Align::Start);
     scrolled.set_margin_top(4);
     scrolled.set_margin_bottom(4);
-    scrolled.add_css_class("recent-scroll");
+    scrolled.add_css_class(CSS_RECENT_SCROLL);
     scrolled.set_child(Some(&hbox));
 
     vbox.append(&scrolled);
@@ -134,14 +135,14 @@ pub(super) fn build_cover(
     vbox.set_halign(gtk4::Align::Center);
     vbox.set_margin_top(8);
     vbox.set_margin_bottom(8);
-    vbox.add_css_class("cover-item");
+    vbox.add_css_class(CSS_COVER_ITEM);
     vbox.set_size_request(w, h);
     vbox.set_overflow(gtk4::Overflow::Visible);
 
     let pic = gtk4::Picture::new();
     pic.set_content_fit(gtk4::ContentFit::Cover);
     pic.set_size_request(w, h);
-    pic.add_css_class("game-cover-pic");
+    pic.add_css_class(CSS_GAME_COVER_PIC);
     if !image_path.is_empty() {
         queue_cover_load_priority(pic.clone(), image_path.to_string(), (w, h), game.db_id, game.variant_id.unwrap_or(0), vbox.clone(), glib::Priority::DEFAULT);
     }

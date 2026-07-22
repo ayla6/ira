@@ -13,6 +13,7 @@ use super::sidebar::scroll_to_row;
 use super::context_menu::show_game_context_menu;
 use super::helpers::clear_children;
 use super::filter::filtered_games;
+use super::css::*;
 
 pub(super) fn is_stale(vbox: &gtk4::Box, db_id: i64, variant_id: i64) -> bool {
     let db_mismatch = unsafe { vbox.data::<AtomicI64>("game-db-id") }
@@ -87,19 +88,7 @@ fn badge_text(game: &Game, mode: SortMode) -> Option<String> {
     }
 }
 
-pub fn show_grid_view(state: &SharedState) {
-    state.borrow_mut().selected_id.clear();
-
-    let content_scroll = state.borrow().content_scroll.clone();
-    let grid_header = state.borrow().grid_header.clone();
-
-    content_scroll.vadjustment().set_value(0.0);
-    clear_children(&grid_header);
-
-    let cover_width = state.borrow().cfg.grid_cover_width.clamp(100, 350);
-    let show_hidden = state.borrow().cfg.show_hidden_games;
-    let cover_height = ((cover_width as f64) * 1.5) as i32;
-
+fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
     let header_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     header_box.set_margin_start(16);
     header_box.set_margin_end(16);
@@ -109,9 +98,8 @@ pub fn show_grid_view(state: &SharedState) {
     let selected_group = state.borrow().selected_group.clone();
     let show_recent = !searching && selected_group == GroupSelection::AllGames;
 
-    let games = filtered_games(state);
-
     if show_recent {
+        let show_hidden = state.borrow().cfg.show_hidden_games;
         let mut recent: Vec<Game> = state
             .borrow()
             .games
@@ -144,192 +132,226 @@ pub fn show_grid_view(state: &SharedState) {
 
     let heading = gtk4::Label::new(Some(&heading_text));
     heading.set_xalign(0.0);
-    heading.add_css_class("section-title");
+    heading.add_css_class(CSS_SECTION_TITLE);
+    let show_hidden = state.borrow().cfg.show_hidden_games;
     heading.set_margin_top(if show_recent && state.borrow().games.iter().any(|g| g.last_played > 0 && (!g.hidden || show_hidden)) { 20 } else { 0 });
     heading.set_margin_bottom(8);
     header_box.append(&heading);
 
-    let sort_mode = state.borrow().cfg.sort_mode;
+    header_box
+}
 
+fn grid_setup_factory(
+    _factory: &gtk4::SignalListItemFactory,
+    list_item_obj: &glib::Object,
+    state: &SharedState,
+    cover_width: i32,
+    cover_height: i32,
+) {
+    let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
+    list_item.set_activatable(false);
+    list_item.set_selectable(false);
+
+    let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    vbox.set_valign(gtk4::Align::Start);
+    vbox.set_halign(gtk4::Align::Center);
+    vbox.set_margin_start(8);
+    vbox.set_margin_end(8);
+    vbox.set_margin_top(8);
+    vbox.set_margin_bottom(8);
+    vbox.set_size_request(cover_width, cover_height);
+    vbox.add_css_class(CSS_COVER_ITEM);
+    vbox.set_overflow(gtk4::Overflow::Visible);
+
+    let overlay = gtk4::Overlay::new();
+    overlay.set_overflow(gtk4::Overflow::Visible);
+
+    let pic = gtk4::Picture::new();
+    pic.set_content_fit(gtk4::ContentFit::Cover);
+    pic.set_size_request(cover_width, cover_height);
+    pic.add_css_class(CSS_GAME_COVER_PIC);
+    let placeholder = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
+    pic.set_paintable(Some(&placeholder));
+    overlay.set_child(Some(&pic));
+
+    let name_label = gtk4::Label::new(None);
+    name_label.set_wrap(true);
+    name_label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+    name_label.set_max_width_chars(15);
+    name_label.set_halign(gtk4::Align::Center);
+    name_label.set_valign(gtk4::Align::Center);
+    name_label.set_margin_start(6);
+    name_label.set_margin_end(6);
+    name_label.add_css_class(CSS_COVER_NAME_FALLBACK);
+    name_label.set_visible(false);
+    overlay.add_overlay(&name_label);
+
+    vbox.append(&overlay);
+
+    unsafe { vbox.set_data::<AtomicI64>("game-db-id", AtomicI64::new(0)) };
+    unsafe { vbox.set_data::<AtomicI64>("game-variant-id", AtomicI64::new(0)) };
+    unsafe { vbox.set_data::<gtk4::Label>("name-label", name_label.clone()) };
+
+    let sc = state.clone();
+    let click = gtk4::GestureClick::new();
+    click.connect_pressed(move |gesture, _, _, _| {
+        let widget = gesture.widget().unwrap();
+        if let Some(ptr) = unsafe { widget.data::<AtomicI64>("game-db-id") } {
+            let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
+            if db_id != 0 {
+                let variant_id = unsafe { widget.data::<AtomicI64>("game-variant-id") }
+                    .and_then(|ptr| {
+                        let v = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
+                        if v > 0 { Some(v) } else { None }
+                    });
+                switch_to_game(&sc, db_id, variant_id);
+                scroll_to_row(&sc, db_id, variant_id);
+            }
+        }
+    });
+    vbox.add_controller(click);
+
+    let sc2 = state.clone();
+    let right_click = gtk4::GestureClick::new();
+    right_click.set_button(3);
+    right_click.connect_pressed(move |gesture, _, x, y| {
+        let widget = gesture.widget().unwrap();
+        if let Some(ptr) = unsafe { widget.data::<AtomicI64>("game-db-id") } {
+            let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
+            if db_id != 0 {
+                let variant_id = unsafe { widget.data::<AtomicI64>("game-variant-id") }
+                    .and_then(|ptr| {
+                        let v = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
+                        if v > 0 { Some(v) } else { None }
+                    });
+                let game = sc2
+                    .borrow()
+                    .games
+                    .iter()
+                    .find(|g| g.db_id == db_id && g.variant_id == variant_id)
+                    .cloned();
+                if let Some(game) = game {
+                    show_game_context_menu(&sc2, &game, &widget, x, y, None::<&gtk4::ListBoxRow>);
+                }
+            }
+        }
+    });
+    vbox.add_controller(right_click);
+
+    list_item.set_child(Some(&vbox));
+}
+
+fn grid_bind_factory(
+    _factory: &gtk4::SignalListItemFactory,
+    list_item_obj: &glib::Object,
+    cover_width: i32,
+    cover_height: i32,
+    sort_mode: SortMode,
+) {
+    let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
+    let child = list_item.child().unwrap();
+    let vbox = child.downcast_ref::<gtk4::Box>().unwrap();
+    let overlay_widget = vbox.first_child().unwrap();
+    let overlay = overlay_widget.downcast_ref::<gtk4::Overlay>().unwrap();
+    let pic_widget = overlay.child().unwrap();
+    let pic = pic_widget.downcast_ref::<gtk4::Picture>().unwrap();
+
+    let name_label = unsafe { vbox.data::<gtk4::Label>("name-label") }
+        .map(|ptr| unsafe { ptr.as_ref() }.clone());
+
+    let game_item = list_item
+        .item()
+        .unwrap()
+        .downcast::<GameItem>()
+        .unwrap();
+
+    if let Some(game) = game_item.game() {
+        if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-db-id") } {
+            unsafe { ptr.as_ref() }.store(game.db_id, Ordering::Relaxed);
+        }
+        if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-variant-id") } {
+            unsafe { ptr.as_ref() }.store(game.variant_id.unwrap_or(0), Ordering::Relaxed);
+        }
+        if !game.grid_path.is_empty() {
+            queue_cover_load(pic.clone(), game.grid_path.clone(), cover_width, cover_height, game.db_id, game.variant_id.unwrap_or(0), vbox.clone());
+            if let Some(ref label) = name_label {
+                label.set_visible(false);
+            }
+        } else {
+            let placeholder = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
+            pic.set_paintable(Some(&placeholder));
+            if let Some(ref label) = name_label {
+                label.set_text(&game.name);
+                label.set_visible(true);
+            }
+        }
+
+        if let Some(text) = badge_text(&game, sort_mode) {
+            let badge = gtk4::Label::new(Some(&text));
+            badge.set_valign(gtk4::Align::End);
+            badge.set_halign(gtk4::Align::Center);
+            badge.set_margin_bottom(-12);
+            badge.add_css_class(CSS_COVER_BADGE);
+            overlay.add_overlay(&badge);
+            unsafe { vbox.set_data::<gtk4::Label>("badge", badge) };
+        }
+    }
+}
+
+fn grid_unbind_factory(
+    _factory: &gtk4::SignalListItemFactory,
+    list_item_obj: &glib::Object,
+    cover_width: i32,
+    cover_height: i32,
+) {
+    let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
+    let child = list_item.child().unwrap();
+    let vbox = child.downcast_ref::<gtk4::Box>().unwrap();
+    let overlay_widget = vbox.first_child().unwrap();
+    let overlay = overlay_widget.downcast_ref::<gtk4::Overlay>().unwrap();
+    let pic_widget = overlay.child().unwrap();
+    let pic = pic_widget.downcast_ref::<gtk4::Picture>().unwrap();
+
+    if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-db-id") } {
+        unsafe { ptr.as_ref() }.store(0, Ordering::Relaxed);
+    }
+    if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-variant-id") } {
+        unsafe { ptr.as_ref() }.store(0, Ordering::Relaxed);
+    }
+    let placeholder = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
+    pic.set_paintable(Some(&placeholder));
+
+    if let Some(label) = unsafe { vbox.data::<gtk4::Label>("name-label") } {
+        let label = unsafe { label.as_ref() };
+        label.set_text("");
+        label.set_visible(false);
+    }
+
+    if let Some(badge) = unsafe { vbox.steal_data::<gtk4::Label>("badge") } {
+        overlay.remove_overlay(&badge);
+    }
+}
+
+fn build_grid_view(
+    state: &SharedState,
+    games: &[Game],
+    cover_width: i32,
+    cover_height: i32,
+    sort_mode: SortMode,
+    header_box: &gtk4::Box,
+    content_scroll: &gtk4::ScrolledWindow,
+) {
     let factory = gtk4::SignalListItemFactory::new();
 
     let state_for_setup = state.clone();
-    factory.connect_setup(move |_, list_item_obj| {
-        let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
-        list_item.set_activatable(false);
-        list_item.set_selectable(false);
+    factory.connect_setup(move |f, item| grid_setup_factory(f, item, &state_for_setup, cover_width, cover_height));
 
-        let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-        vbox.set_valign(gtk4::Align::Start);
-        vbox.set_halign(gtk4::Align::Center);
-        vbox.set_margin_start(8);
-        vbox.set_margin_end(8);
-        vbox.set_margin_top(8);
-        vbox.set_margin_bottom(8);
-        vbox.set_size_request(cover_width, cover_height);
-        vbox.add_css_class("cover-item");
-        vbox.set_overflow(gtk4::Overflow::Visible);
+    factory.connect_bind(move |f, item| grid_bind_factory(f, item, cover_width, cover_height, sort_mode));
 
-        let overlay = gtk4::Overlay::new();
-        overlay.set_overflow(gtk4::Overflow::Visible);
-
-        let pic = gtk4::Picture::new();
-        pic.set_content_fit(gtk4::ContentFit::Cover);
-        pic.set_size_request(cover_width, cover_height);
-        pic.add_css_class("game-cover-pic");
-        let placeholder = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
-        pic.set_paintable(Some(&placeholder));
-        overlay.set_child(Some(&pic));
-
-        let name_label = gtk4::Label::new(None);
-        name_label.set_wrap(true);
-        name_label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-        name_label.set_max_width_chars(15);
-        name_label.set_halign(gtk4::Align::Center);
-        name_label.set_valign(gtk4::Align::Center);
-        name_label.set_margin_start(6);
-        name_label.set_margin_end(6);
-        name_label.add_css_class("cover-name-fallback");
-        name_label.set_visible(false);
-        overlay.add_overlay(&name_label);
-
-        vbox.append(&overlay);
-
-        unsafe { vbox.set_data::<AtomicI64>("game-db-id", AtomicI64::new(0)) };
-        unsafe { vbox.set_data::<AtomicI64>("game-variant-id", AtomicI64::new(0)) };
-        unsafe { vbox.set_data::<gtk4::Label>("name-label", name_label.clone()) };
-
-        let sc = state_for_setup.clone();
-        let click = gtk4::GestureClick::new();
-        click.connect_pressed(move |gesture, _, _, _| {
-            let widget = gesture.widget().unwrap();
-            if let Some(ptr) = unsafe { widget.data::<AtomicI64>("game-db-id") } {
-                let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
-                if db_id != 0 {
-                    let variant_id = unsafe { widget.data::<AtomicI64>("game-variant-id") }
-                        .and_then(|ptr| {
-                            let v = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
-                            if v > 0 { Some(v) } else { None }
-                        });
-                    switch_to_game(&sc, db_id, variant_id);
-                    scroll_to_row(&sc, db_id, variant_id);
-                }
-            }
-        });
-        vbox.add_controller(click);
-
-        let sc2 = state_for_setup.clone();
-        let right_click = gtk4::GestureClick::new();
-        right_click.set_button(3);
-        right_click.connect_pressed(move |gesture, _, x, y| {
-            let widget = gesture.widget().unwrap();
-            if let Some(ptr) = unsafe { widget.data::<AtomicI64>("game-db-id") } {
-                let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
-                if db_id != 0 {
-                    let variant_id = unsafe { widget.data::<AtomicI64>("game-variant-id") }
-                        .and_then(|ptr| {
-                            let v = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
-                            if v > 0 { Some(v) } else { None }
-                        });
-                    let game = sc2
-                        .borrow()
-                        .games
-                        .iter()
-                        .find(|g| g.db_id == db_id && g.variant_id == variant_id)
-                        .cloned();
-                    if let Some(game) = game {
-                        show_game_context_menu(&sc2, &game, &widget, x, y, None::<&gtk4::ListBoxRow>);
-                    }
-                }
-            }
-        });
-        vbox.add_controller(right_click);
-
-        list_item.set_child(Some(&vbox));
-    });
-
-    factory.connect_bind(move |_, list_item_obj| {
-        let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
-        let child = list_item.child().unwrap();
-        let vbox = child.downcast_ref::<gtk4::Box>().unwrap();
-        let overlay_widget = vbox.first_child().unwrap();
-        let overlay = overlay_widget.downcast_ref::<gtk4::Overlay>().unwrap();
-        let pic_widget = overlay.child().unwrap();
-        let pic = pic_widget.downcast_ref::<gtk4::Picture>().unwrap();
-
-        let name_label = unsafe { vbox.data::<gtk4::Label>("name-label") }
-            .map(|ptr| unsafe { ptr.as_ref() }.clone());
-
-        let game_item = list_item
-            .item()
-            .unwrap()
-            .downcast::<GameItem>()
-            .unwrap();
-
-        if let Some(game) = game_item.game() {
-            if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-db-id") } {
-                unsafe { ptr.as_ref() }.store(game.db_id, Ordering::Relaxed);
-            }
-            if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-variant-id") } {
-                unsafe { ptr.as_ref() }.store(game.variant_id.unwrap_or(0), Ordering::Relaxed);
-            }
-            if !game.grid_path.is_empty() {
-                queue_cover_load(pic.clone(), game.grid_path.clone(), cover_width, cover_height, game.db_id, game.variant_id.unwrap_or(0), vbox.clone());
-                if let Some(ref label) = name_label {
-                    label.set_visible(false);
-                }
-            } else {
-                let placeholder = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
-                pic.set_paintable(Some(&placeholder));
-                if let Some(ref label) = name_label {
-                    label.set_text(&game.name);
-                    label.set_visible(true);
-                }
-            }
-
-            if let Some(text) = badge_text(&game, sort_mode) {
-                let badge = gtk4::Label::new(Some(&text));
-                badge.set_valign(gtk4::Align::End);
-                badge.set_halign(gtk4::Align::Center);
-                badge.set_margin_bottom(-12);
-                badge.add_css_class("cover-badge");
-                overlay.add_overlay(&badge);
-                unsafe { vbox.set_data::<gtk4::Label>("badge", badge) };
-            }
-        }
-    });
-
-    factory.connect_unbind(move |_, list_item_obj| {
-        let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
-        let child = list_item.child().unwrap();
-        let vbox = child.downcast_ref::<gtk4::Box>().unwrap();
-        let overlay_widget = vbox.first_child().unwrap();
-        let overlay = overlay_widget.downcast_ref::<gtk4::Overlay>().unwrap();
-        let pic_widget = overlay.child().unwrap();
-        let pic = pic_widget.downcast_ref::<gtk4::Picture>().unwrap();
-
-        if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-db-id") } {
-            unsafe { ptr.as_ref() }.store(0, Ordering::Relaxed);
-        }
-        if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-variant-id") } {
-            unsafe { ptr.as_ref() }.store(0, Ordering::Relaxed);
-        }
-        let placeholder = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
-        pic.set_paintable(Some(&placeholder));
-
-        if let Some(label) = unsafe { vbox.data::<gtk4::Label>("name-label") } {
-            let label = unsafe { label.as_ref() };
-            label.set_text("");
-            label.set_visible(false);
-        }
-
-        if let Some(badge) = unsafe { vbox.steal_data::<gtk4::Label>("badge") } {
-            overlay.remove_overlay(&badge);
-        }
-    });
+    factory.connect_unbind(move |f, item| grid_unbind_factory(f, item, cover_width, cover_height));
 
     let store = gio::ListStore::new::<GameItem>();
-    for game in &games {
+    for game in games {
         store.append(&GameItem::new(game));
     }
     state.borrow_mut().grid_store = store.clone();
@@ -340,13 +362,13 @@ pub fn show_grid_view(state: &SharedState) {
     grid.set_max_columns(30);
     grid.set_hexpand(true);
     grid.set_halign(gtk4::Align::Fill);
-    grid.add_css_class("game-grid");
-    grid.remove_css_class("view");
+    grid.add_css_class(CSS_GAME_GRID);
+    grid.remove_css_class(CSS_VIEW);
 
     let n_items = games.len() as u32;
     let row_h = cover_height + 16;
     let col_nat = cover_width + 16;
-    let bin = GridBin::new(&grid, &header_box.upcast(), row_h, n_items, col_nat);
+    let bin = GridBin::new(&grid, &header_box.clone().upcast(), row_h, n_items, col_nat);
     bin.set_hexpand(true);
     bin.set_halign(gtk4::Align::Fill);
     bin.set_vexpand(true);
@@ -355,4 +377,22 @@ pub fn show_grid_view(state: &SharedState) {
     content_scroll.set_child(Some(&bin));
 }
 
+pub fn show_grid_view(state: &SharedState) {
+    state.borrow_mut().selected_id.clear();
 
+    let content_scroll = state.borrow().content_scroll.clone();
+    let grid_header = state.borrow().grid_header.clone();
+
+    content_scroll.vadjustment().set_value(0.0);
+    clear_children(&grid_header);
+
+    let cover_width = state.borrow().cfg.grid_cover_width.clamp(100, 350);
+    let cover_height = ((cover_width as f64) * 1.5) as i32;
+
+    let header_box = build_grid_header(state, cover_height);
+
+    let sort_mode = state.borrow().cfg.sort_mode;
+    let games = filtered_games(state);
+
+    build_grid_view(state, &games, cover_width, cover_height, sort_mode, &header_box, &content_scroll);
+}

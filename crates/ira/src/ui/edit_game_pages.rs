@@ -4,6 +4,7 @@ use super::helpers;
 use super::settings_dialog;
 use super::state::SharedState;
 use ira_db::DbConn;
+use super::css::*;
 
 /// Converts a single Lutris game to a managed game by reading its Lutris config
 /// and saving a GameLaunchConfig + WineConfig to the database.
@@ -156,7 +157,7 @@ pub(super) fn build_api_emulator_page(
 
     if is_installed {
         let uninstall_btn = gtk4::Button::with_label("Uninstall API emulator");
-        uninstall_btn.add_css_class("destructive-action");
+        uninstall_btn.add_css_class(CSS_DESTRUCTIVE_ACTION);
         let exe_c = emu_exe.to_string();
         let status_c = status_row.clone();
         let ts_c = emu_trophy_source;
@@ -218,7 +219,7 @@ pub(super) fn build_api_emulator_page(
         };
 
         let install_btn = gtk4::Button::with_label("Install API emulator");
-        install_btn.add_css_class("suggested-action");
+        install_btn.add_css_class(CSS_SUGGESTED_ACTION);
         install_btn.set_sensitive(has_dlls);
         let exe_c = emu_exe.to_string();
         let app_id_c = emu_app_id.to_string();
@@ -248,7 +249,7 @@ pub(super) fn build_api_emulator_page(
 
     if emu_trophy_source == ira_models::TrophySource::Gse && is_installed {
         let gen_btn = gtk4::Button::with_label("Generate steam_interfaces.txt");
-        gen_btn.add_css_class("flat");
+        gen_btn.add_css_class(CSS_FLAT);
         let exe_c = emu_exe.to_string();
         gen_btn.connect_clicked(move |_| {
             let game_dir = std::path::Path::new(&exe_c).parent();
@@ -312,7 +313,7 @@ pub(super) fn build_profile_dropdown(params: ProfileDropdownParams) -> Option<ad
         edit_btn.set_icon_name("document-edit-symbolic");
         edit_btn.set_tooltip_text(Some("Edit profile"));
         edit_btn.set_valign(gtk4::Align::Center);
-        edit_btn.add_css_class("flat");
+        edit_btn.add_css_class(CSS_FLAT);
         let profiles_c: Vec<WineProfile> = params.profiles.to_vec();
         let pr_c = pr.clone();
         let state_c = params.state.clone();

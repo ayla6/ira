@@ -8,6 +8,7 @@ use super::state::SharedState;
 use super::matching::{match_game_to_steam, match_game_to_sgdb};
 use super::helpers::clear_children;
 use super::add_game::prompt_for_steam_id;
+use super::css::*;
 
 type MatchCallback = Rc<dyn Fn(&str, &str)>;
 
@@ -43,11 +44,11 @@ pub(super) fn handle_steam_search_result(
         match_game_to_steam(state, db_id, sid.clone(), game_name.to_string());
 
         let label = gtk4::Label::new(Some(&format!("Matched: {} ({})", matched_name, sid)));
-        label.add_css_class("success-label");
+        label.add_css_class(CSS_SUCCESS_LABEL);
         action_box.append(&label);
     } else {
         let label = gtk4::Label::new(Some("Not found"));
-        label.add_css_class("dim-label");
+        label.add_css_class(CSS_DIM_LABEL);
         action_box.append(&label);
 
         let ab = action_box.clone();
@@ -59,7 +60,7 @@ pub(super) fn handle_steam_search_result(
                 format!("Matched: {} ({})", name, sid)
             };
             let l = gtk4::Label::new(Some(&text));
-            l.add_css_class("success-label");
+            l.add_css_class(CSS_SUCCESS_LABEL);
             ab.append(&l);
         });
 
@@ -145,7 +146,7 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
     results_list.set_margin_bottom(8);
 
     let placeholder = gtk4::Label::new(Some("Searching..."));
-    placeholder.add_css_class("dim-label");
+    placeholder.add_css_class(CSS_DIM_LABEL);
     results_list.append(&placeholder);
 
     scrolled.set_child(Some(&results_list));
@@ -177,7 +178,7 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
 
         clear_children(&results_clone);
         let searching = gtk4::Label::new(Some("Searching..."));
-        searching.add_css_class("dim-label");
+        searching.add_css_class(CSS_DIM_LABEL);
         results_clone.append(&searching);
 
         let (tx, rx) = std::sync::mpsc::channel::<Vec<(String, String)>>();
@@ -204,7 +205,7 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
 
                 if search_results.is_empty() {
                     let none = gtk4::Label::new(Some("No results found"));
-                    none.add_css_class("dim-label");
+                    none.add_css_class(CSS_DIM_LABEL);
                     results.append(&none);
                     return glib::ControlFlow::Break;
                 }
@@ -221,7 +222,7 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
                     row.append(&label);
 
                     let match_btn = gtk4::Button::with_label("Match");
-                    match_btn.add_css_class("suggested-action");
+                    match_btn.add_css_class(CSS_SUGGESTED_ACTION);
                     let sc2 = sc.clone();
                     let name2 = name.clone();
                     let sid = app_id.clone();

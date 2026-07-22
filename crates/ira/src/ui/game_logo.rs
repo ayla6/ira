@@ -2,6 +2,7 @@ use gtk4::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use crate::Game;
+use super::css::*;
 
 pub(super) type LogoControls = (gtk4::Box, Rc<RefCell<String>>, gtk4::Adjustment, Rc<Cell<bool>>);
 
@@ -97,9 +98,9 @@ pub(super) fn build_game_logo_page(game: &Game, show_reset: bool) -> Option<Logo
     let mut all_btns: Vec<gtk4::Button> = Vec::new();
     for (i, &pos) in logo_positions.iter().enumerate() {
         let btn = gtk4::Button::new();
-        btn.add_css_class("logo-pos-overlay-btn");
+        btn.add_css_class(CSS_LOGO_POS_OVERLAY_BTN);
         if pos.to_string() == current_pos {
-            btn.add_css_class("selected");
+            btn.add_css_class(CSS_SELECTED);
         }
         btn.set_hexpand(true);
         btn.set_vexpand(true);
@@ -118,9 +119,9 @@ pub(super) fn build_game_logo_page(game: &Game, show_reset: bool) -> Option<Logo
         let modified_c = modified.clone();
         btns[i].connect_clicked(move |btn| {
             for b in btns_c.iter() {
-                b.remove_css_class("selected");
+                b.remove_css_class(CSS_SELECTED);
             }
-            btn.add_css_class("selected");
+            btn.add_css_class(CSS_SELECTED);
             *selected_pos_c.borrow_mut() = pos_owned.clone();
             modified_c.set(true);
             preview_clone.queue_draw();
@@ -139,12 +140,12 @@ pub(super) fn build_game_logo_page(game: &Game, show_reset: bool) -> Option<Logo
     let pos_label = gtk4::Label::new(Some("Logo position"));
     pos_label.set_halign(gtk4::Align::Start);
     pos_label.set_hexpand(true);
-    pos_label.add_css_class("heading");
+    pos_label.add_css_class(CSS_HEADING);
     header_row.append(&pos_label);
 
     if show_reset && !inherited {
         let reset_btn = gtk4::Button::from_icon_name("edit-undo-symbolic");
-        reset_btn.add_css_class("flat");
+        reset_btn.add_css_class(CSS_FLAT);
         reset_btn.set_tooltip_text(Some("Reset to base game"));
         let selected_pos_reset = selected_pos.clone();
         let size_adj_reset = size_adj.clone();
@@ -156,11 +157,11 @@ pub(super) fn build_game_logo_page(game: &Game, show_reset: bool) -> Option<Logo
             size_adj_reset.set_value(50.0);
             modified_reset.set(false);
             for b in btns_reset.iter() {
-                b.remove_css_class("selected");
+                b.remove_css_class(CSS_SELECTED);
             }
             for (i, &pos) in ira_models::LogoPosition::all().iter().enumerate() {
                 if pos == ira_models::LogoPosition::DEFAULT {
-                    btns_reset[i].add_css_class("selected");
+                    btns_reset[i].add_css_class(CSS_SELECTED);
                 }
             }
             preview_reset.queue_draw();

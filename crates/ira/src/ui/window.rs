@@ -14,7 +14,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use super::state::{AppState, SharedState};
-use super::css::APP_CSS;
+use super::css::*;
 use super::sidebar::{rebuild_sidebar, rebuild_sidebar_and_show_grid, select_row_silently};
 use super::grid_view::show_grid_view;
 use super::message_helpers::switch_to_game;
@@ -129,7 +129,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     let sidebar_selection = super::game_selection_model::GameSelectionModel::new(Some(&sidebar_store));
     let factory = super::sidebar::build_factory(state);
     let sidebar_view = gtk4::ListView::new(Some(sidebar_selection.clone()), Some(factory));
-    sidebar_view.add_css_class("navigation-sidebar");
+    sidebar_view.add_css_class(CSS_NAVIGATION_SIDEBAR);
     sidebar_view.set_show_separators(false);
     sidebar_scroll.set_child(Some(&sidebar_view));
 
@@ -158,13 +158,13 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     let menu_btn = gtk4::MenuButton::new();
     menu_btn.set_icon_name("open-menu-symbolic");
     menu_btn.set_tooltip_text(Some(S::MENU));
-    menu_btn.add_css_class("flat");
+    menu_btn.add_css_class(CSS_FLAT);
     header_bar.pack_end(&menu_btn);
 
     let (_sort_popover, sort_btn, sort_label) = build_sort_popover(state);
     sort_btn.set_icon_name("view-sort-descending-symbolic");
     sort_btn.set_tooltip_text(Some(S::SORT_BY));
-    sort_btn.add_css_class("flat");
+    sort_btn.add_css_class(CSS_FLAT);
     header_bar.pack_end(&sort_btn);
 
     let (popover, settings_btn) = build_menu_popover(state);
@@ -172,7 +172,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
 
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.set_tooltip_text(Some(S::ADD_GAME));
-    add_btn.add_css_class("flat");
+    add_btn.add_css_class(CSS_FLAT);
     header_bar.pack_start(&add_btn);
 
     let toolbar_view = adw::ToolbarView::new();
@@ -217,20 +217,20 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
     let settings_label = gtk4::Label::new(Some(S::SETTINGS));
     settings_label.set_xalign(0.0);
     settings_btn.set_child(Some(&settings_label));
-    settings_btn.add_css_class("flat");
+    settings_btn.add_css_class(CSS_FLAT);
     settings_btn.set_halign(gtk4::Align::Fill);
     settings_btn.set_size_request(-1, 36);
-    settings_btn.add_css_class("popover-menu-row");
+    settings_btn.add_css_class(CSS_POPOVER_MENU_ROW);
     popover_box.append(&settings_btn);
 
     let match_btn = gtk4::Button::new();
     let match_label = gtk4::Label::new(Some("Match unmatched games"));
     match_label.set_xalign(0.0);
     match_btn.set_child(Some(&match_label));
-    match_btn.add_css_class("flat");
+    match_btn.add_css_class(CSS_FLAT);
     match_btn.set_halign(gtk4::Align::Fill);
     match_btn.set_size_request(-1, 36);
-    match_btn.add_css_class("popover-menu-row");
+    match_btn.add_css_class(CSS_POPOVER_MENU_ROW);
 
     let state_clone2 = state.clone();
     match_btn.connect_clicked(move |_| show_mass_match_dialog(&state_clone2));
@@ -241,10 +241,10 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
     let history_label = gtk4::Label::new(Some(S::PLAY_HISTORY));
     history_label.set_xalign(0.0);
     history_btn.set_child(Some(&history_label));
-    history_btn.add_css_class("flat");
+    history_btn.add_css_class(CSS_FLAT);
     history_btn.set_halign(gtk4::Align::Fill);
     history_btn.set_size_request(-1, 36);
-    history_btn.add_css_class("popover-menu-row");
+    history_btn.add_css_class(CSS_POPOVER_MENU_ROW);
 
     let state_clone_hist = state.clone();
     history_btn.connect_clicked(move |_| super::play_history::show_daily_history_dialog(&state_clone_hist));
@@ -259,7 +259,7 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
     let hidden_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     hidden_row.set_hexpand(true);
     hidden_row.set_size_request(-1, 36);
-    hidden_row.add_css_class("popover-menu-row");
+    hidden_row.add_css_class(CSS_POPOVER_MENU_ROW);
     let hidden_label = gtk4::Label::new(Some(S::SHOW_HIDDEN_GAMES));
     hidden_label.set_xalign(0.0);
     hidden_label.set_hexpand(true);
@@ -272,7 +272,7 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
     let zoom_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     zoom_row.set_hexpand(true);
     zoom_row.set_size_request(-1, 36);
-    zoom_row.add_css_class("popover-menu-row");
+    zoom_row.add_css_class(CSS_POPOVER_MENU_ROW);
     let zoom_label = gtk4::Label::new(Some(S::COVER_SIZE));
     zoom_label.set_xalign(0.0);
     zoom_label.set_hexpand(true);
@@ -292,7 +292,9 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
     hidden_switch.connect_active_notify(move |sw| {
         let active = sw.is_active();
         state_clone.borrow_mut().cfg.show_hidden_games = active;
-        let _ = state_clone.borrow().cfg.save();
+        if let Err(e) = state_clone.borrow().cfg.save() {
+            eprintln!("Failed to save config: {}", e);
+        }
         rebuild_sidebar_and_show_grid(&state_clone);
     });
 
@@ -301,10 +303,14 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
     zoom_scale.connect_value_changed(move |scale| {
         let val = scale.value() as i32;
         state_clone.borrow_mut().cfg.grid_cover_width = val;
-        let _ = state_clone.borrow().cfg.save();
-        if !state_clone.borrow().selected_id.is_empty()
-            || state_clone.borrow().content_unloaded
-        {
+        let (has_selection, content_unloaded) = {
+            let s = state_clone.borrow();
+            if let Err(e) = s.cfg.save() {
+                eprintln!("Failed to save config: {}", e);
+            }
+            (!s.selected_id.is_empty(), s.content_unloaded)
+        };
+        if has_selection || content_unloaded {
             return;
         }
         let gen = zoom_gen.get() + 1;
@@ -361,7 +367,9 @@ fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, 
         check.connect_toggled(move |_| {
             if check_clone.is_active() {
                 state_clone.borrow_mut().cfg.sort_mode = mode_c;
-                let _ = state_clone.borrow().cfg.save();
+                if let Err(e) = state_clone.borrow().cfg.save() {
+                    eprintln!("Failed to save config: {}", e);
+                }
                 state_clone.borrow().sort_label.set_text(mode_c.display_label());
                 rebuild_sidebar_and_show_grid(&state_clone);
             }

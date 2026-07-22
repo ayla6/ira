@@ -4,6 +4,7 @@ use crate::MergedAchievement;
 use crate::strings as S;
 use super::image_budget::ImageLoadBudget;
 use super::state::SharedState;
+use super::css::*;
 
 pub fn build_global_tab(game: &crate::Game, global_vbox: &gtk4::Box, state: &SharedState, gen: u32) {
     let mut all_ach: Vec<MergedAchievement> = game.achievements.clone();
@@ -106,8 +107,8 @@ pub fn create_achievement_row(
     desc.set_valign(gtk4::Align::Start);
     desc.set_wrap(true);
     desc.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-    desc.add_css_class("dim-label");
-    desc.add_css_class("caption");
+    desc.add_css_class(CSS_DIM_LABEL);
+    desc.add_css_class(CSS_CAPTION);
     vbox.append(&desc);
 
     content.append(&vbox);
@@ -116,8 +117,8 @@ pub fn create_achievement_row(
         let time_label = gtk4::Label::new(Some(""));
         time_label.set_justify(gtk4::Justification::Right);
         time_label.set_valign(gtk4::Align::Start);
-        time_label.add_css_class("dim-label");
-        time_label.add_css_class("caption");
+        time_label.add_css_class(CSS_DIM_LABEL);
+        time_label.add_css_class(CSS_CAPTION);
         if ach.earned_time > 0 {
             let t = chrono::DateTime::from_timestamp(ach.earned_time, 0)
                 .map(|dt| {
@@ -164,7 +165,7 @@ pub fn create_global_stats_row(
     progress.set_hexpand(true);
     progress.set_vexpand(true);
     progress.set_opacity(0.18);
-    progress.add_css_class("global-bar");
+    progress.add_css_class(CSS_GLOBAL_BAR);
 
     let is_hidden_spoiler = ach.hidden && !ach.earned;
 
@@ -191,14 +192,14 @@ pub fn create_global_stats_row(
         desc_label.set_wrap(true);
         desc_label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
         desc_label.set_xalign(0.0);
-        desc_label.add_css_class("dim-label");
-        desc_label.add_css_class("caption");
+        desc_label.add_css_class(CSS_DIM_LABEL);
+        desc_label.add_css_class(CSS_CAPTION);
         vbox.append(&desc_label);
         content.append(&vbox);
 
         let pct_label = gtk4::Label::new(Some(&format!("{:.1}%", ach.global_percent)));
         pct_label.set_valign(gtk4::Align::Start);
-        pct_label.add_css_class("heading");
+        pct_label.add_css_class(CSS_HEADING);
         content.append(&pct_label);
         content
     };
@@ -228,14 +229,14 @@ pub fn create_global_stats_row(
         vbox_spoiler.append(&title_spoiler);
         let desc_spoiler = gtk4::Label::new(Some(S::CLICK_TO_REVEAL));
         desc_spoiler.set_xalign(0.0);
-        desc_spoiler.add_css_class("dim-label");
-        desc_spoiler.add_css_class("caption");
+        desc_spoiler.add_css_class(CSS_DIM_LABEL);
+        desc_spoiler.add_css_class(CSS_CAPTION);
         vbox_spoiler.append(&desc_spoiler);
         spoiler_content.append(&vbox_spoiler);
 
         let pct_label = gtk4::Label::new(Some(&pct_str));
         pct_label.set_valign(gtk4::Align::Start);
-        pct_label.add_css_class("heading");
+        pct_label.add_css_class(CSS_HEADING);
         spoiler_content.append(&pct_label);
 
         content_stack.add_named(&spoiler_content, Some("spoiler"));

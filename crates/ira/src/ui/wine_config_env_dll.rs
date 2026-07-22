@@ -1,4 +1,5 @@
 use adw::prelude::*;
+use super::css::*;
 
 pub(super) fn build_env_var_row(name: &str, value: &str) -> gtk4::ListBoxRow {
     let row = gtk4::ListBoxRow::new();
@@ -21,8 +22,8 @@ pub(super) fn build_env_var_row(name: &str, value: &str) -> gtk4::ListBoxRow {
     hbox.append(&value_entry);
 
     let remove_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
-    remove_btn.add_css_class("flat");
-    remove_btn.add_css_class("circular");
+    remove_btn.add_css_class(CSS_FLAT);
+    remove_btn.add_css_class(CSS_CIRCULAR);
     let row_clone = row.clone();
     remove_btn.connect_clicked(move |_| {
         if let Some(list) = row_clone.parent().and_then(|p| p.downcast::<gtk4::ListBox>().ok()) {
@@ -99,8 +100,8 @@ pub(super) fn build_dll_override_row(name: &str, value: &str) -> gtk4::ListBoxRo
     hbox.append(&value_combo);
 
     let remove_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
-    remove_btn.add_css_class("flat");
-    remove_btn.add_css_class("circular");
+    remove_btn.add_css_class(CSS_FLAT);
+    remove_btn.add_css_class(CSS_CIRCULAR);
     let row_clone = row.clone();
     remove_btn.connect_clicked(move |_| {
         if let Some(list) = row_clone.parent().and_then(|p| p.downcast::<gtk4::ListBox>().ok()) {

@@ -5,6 +5,11 @@ use std::rc::Rc;
 
 use super::play_button_helpers;
 use super::state::SharedState;
+use super::css::*;
+
+fn is_game_running(state: &SharedState, db_id: i64) -> bool {
+    state.borrow().running_games.lock().map(|m| m.contains_key(&db_id)).unwrap_or(false)
+}
 
 pub fn stop_game(state: &SharedState, game_id: i64) {
     let pid = state.borrow().running_games.lock().unwrap().remove(&game_id);
@@ -59,7 +64,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         )
     };
 
-    if running_games.lock().unwrap().contains_key(&game_id) {
+    if is_game_running(state, game_id) {
         return Ok(());
     }
 
@@ -104,7 +109,6 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
 }
 
 pub fn play_button(state: &SharedState, db_id: i64, variant_id: Option<i64>) -> gtk4::Widget {
-    let running_games = state.borrow().running_games.clone();
     let sender = state.borrow().sender.clone();
 
     let variants = ira_db::get_variants(&state.borrow().db, db_id).unwrap_or_default();
@@ -112,7 +116,7 @@ pub fn play_button(state: &SharedState, db_id: i64, variant_id: Option<i64>) -> 
     let has_variants = !variants.is_empty();
     let has_discs = !discs.is_empty();
 
-    let is_running = running_games.lock().unwrap().contains_key(&db_id);
+    let is_running = is_game_running(state, db_id);
 
     if !has_variants && !has_discs {
         return build_simple_play_button(state, db_id, &sender, is_running);
@@ -146,7 +150,7 @@ fn build_simple_play_button(
     hbox.append(&icon);
 
     let label = gtk4::Label::new(Some("Play"));
-    label.add_css_class("play-btn-label");
+    label.add_css_class(CSS_PLAY_BTN_LABEL);
     label.set_width_chars(5);
     hbox.append(&label);
 
@@ -156,7 +160,7 @@ fn build_simple_play_button(
         icon.set_icon_name(Some("window-close-symbolic"));
         label.set_text("Stop");
     } else {
-        btn.add_css_class("suggested-action");
+        btn.add_css_class(CSS_SUGGESTED_ACTION);
     }
 
     let icon_click = icon.clone();
@@ -164,18 +168,18 @@ fn build_simple_play_button(
     let st = state.clone();
     let sender_c = sender.clone();
     btn.connect_clicked(move |btn| {
-        let is_running = st.borrow().running_games.lock().unwrap().contains_key(&db_id);
+        let is_running = is_game_running(&st, db_id);
         if is_running {
             stop_game(&st, db_id);
             icon_click.set_icon_name(Some("media-playback-start-symbolic"));
             label_click.set_text("Play");
-            btn.add_css_class("suggested-action");
+            btn.add_css_class(CSS_SUGGESTED_ACTION);
         } else {
             match launch_game(&st, db_id, None) {
                 Ok(()) => {
                     icon_click.set_icon_name(Some("window-close-symbolic"));
                     label_click.set_text("Stop");
-                    btn.remove_css_class("suggested-action");
+                    btn.remove_css_class(CSS_SUGGESTED_ACTION);
                 }
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);
@@ -208,7 +212,7 @@ fn build_disc_play_button(
     hbox.append(&icon);
 
     let label = gtk4::Label::new(Some("Play"));
-    label.add_css_class("play-btn-label");
+    label.add_css_class(CSS_PLAY_BTN_LABEL);
     label.set_width_chars(5);
     hbox.append(&label);
 
@@ -221,7 +225,7 @@ fn build_disc_play_button(
         icon.set_icon_name(Some("window-close-symbolic"));
         label.set_text("Stop");
     } else {
-        split.add_css_class("suggested-action");
+        split.add_css_class(CSS_SUGGESTED_ACTION);
     }
 
     let default_did = ira_db::get_default_disc(&state.borrow().db, db_id);
@@ -266,18 +270,18 @@ fn build_disc_play_button(
     let st_launch = state.clone();
     let sender_c = sender.clone();
     split.connect_clicked(move |btn| {
-        let is_running = st_launch.borrow().running_games.lock().unwrap().contains_key(&db_id);
+        let is_running = is_game_running(&st_launch, db_id);
         if is_running {
             stop_game(&st_launch, db_id);
             icon_click.set_icon_name(Some("media-playback-start-symbolic"));
             label_click.set_text("Play");
-            btn.add_css_class("suggested-action");
+            btn.add_css_class(CSS_SUGGESTED_ACTION);
         } else {
             match launch_game(&st_launch, db_id, None) {
                 Ok(()) => {
                     icon_click.set_icon_name(Some("window-close-symbolic"));
                     label_click.set_text("Stop");
-                    btn.remove_css_class("suggested-action");
+                    btn.remove_css_class(CSS_SUGGESTED_ACTION);
                 }
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);
@@ -311,7 +315,7 @@ fn build_variant_play_button(
     hbox.append(&icon);
 
     let label = gtk4::Label::new(Some("Play"));
-    label.add_css_class("play-btn-label");
+    label.add_css_class(CSS_PLAY_BTN_LABEL);
     label.set_width_chars(5);
     hbox.append(&label);
 
@@ -324,7 +328,7 @@ fn build_variant_play_button(
         icon.set_icon_name(Some("window-close-symbolic"));
         label.set_text("Stop");
     } else {
-        split.add_css_class("suggested-action");
+        split.add_css_class(CSS_SUGGESTED_ACTION);
     }
 
     let default_vid = variant_id.or_else(|| ira_db::get_default_variant(&state.borrow().db, db_id));
@@ -375,19 +379,19 @@ fn build_variant_play_button(
     let current_variant_launch = current_variant.clone();
     let sender_c = sender.clone();
     split.connect_clicked(move |btn| {
-        let is_running = st_launch.borrow().running_games.lock().unwrap().contains_key(&db_id);
+        let is_running = is_game_running(&st_launch, db_id);
         if is_running {
             stop_game(&st_launch, db_id);
             icon_click.set_icon_name(Some("media-playback-start-symbolic"));
             label_click.set_text("Play");
-            btn.add_css_class("suggested-action");
+            btn.add_css_class(CSS_SUGGESTED_ACTION);
         } else {
             let vid = current_variant_launch.get();
             match launch_game(&st_launch, db_id, vid) {
                 Ok(()) => {
                     icon_click.set_icon_name(Some("window-close-symbolic"));
                     label_click.set_text("Stop");
-                    btn.remove_css_class("suggested-action");
+                    btn.remove_css_class(CSS_SUGGESTED_ACTION);
                 }
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);

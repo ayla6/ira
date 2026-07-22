@@ -5,6 +5,7 @@ use std::rc::Rc;
 use super::state::SharedState;
 use super::helpers::clear_children;
 use super::enrichment::{enrich_game_async, EnrichGameParams};
+use super::css::*;
 
 pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, platform_id: &str, parent: &adw::Window, on_match: Option<Rc<dyn Fn()>>) {
     let console_id = match ira_models::find_console(platform_id) {
@@ -33,7 +34,7 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
     entry.set_text(game_name);
     entry.set_hexpand(true);
     let search_btn = gtk4::Button::with_label("Search");
-    search_btn.add_css_class("suggested-action");
+    search_btn.add_css_class(CSS_SUGGESTED_ACTION);
     search_box.append(&entry);
     search_box.append(&search_btn);
     outer.append(&search_box);
@@ -73,7 +74,7 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                 row.set_title(&super::helpers::esc(&game.title));
                 row.set_subtitle(&format!("RA ID: {} · {} achievements", game.id, game.num_achievements));
                 let match_btn = gtk4::Button::with_label("Match");
-                match_btn.add_css_class("suggested-action");
+                match_btn.add_css_class(CSS_SUGGESTED_ACTION);
                 match_btn.set_valign(gtk4::Align::Center);
                 let sc = state_c.clone();
                 let dc = dialog_c.clone();

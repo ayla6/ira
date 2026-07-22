@@ -1,3 +1,38 @@
+pub const CSS_BOXED_LIST: &str = "boxed-list";
+pub const CSS_CAPTION: &str = "caption";
+pub const CSS_CIRCULAR: &str = "circular";
+pub const CSS_CLICKABLE_STAT: &str = "clickable-stat";
+pub const CSS_COVER_BADGE: &str = "cover-badge";
+pub const CSS_COVER_ITEM: &str = "cover-item";
+pub const CSS_COVER_NAME_FALLBACK: &str = "cover-name-fallback";
+pub const CSS_DESTRUCTIVE_ACTION: &str = "destructive-action";
+pub const CSS_DIM_LABEL: &str = "dim-label";
+pub const CSS_ERROR: &str = "error";
+pub const CSS_FLAT: &str = "flat";
+pub const CSS_GAME_COVER_PIC: &str = "game-cover-pic";
+pub const CSS_GAME_GRID: &str = "game-grid";
+pub const CSS_GLOBAL_BAR: &str = "global-bar";
+pub const CSS_HEADING: &str = "heading";
+pub const CSS_HIDDEN_GAME: &str = "hidden-game";
+pub const CSS_LOGO_POS_OVERLAY_BTN: &str = "logo-pos-overlay-btn";
+pub const CSS_NAVIGATION_SIDEBAR: &str = "navigation-sidebar";
+pub const CSS_PLAY_BTN_LABEL: &str = "play-btn-label";
+pub const CSS_PLAYING_GAME: &str = "playing-game";
+pub const CSS_POPOVER_MENU_ROW: &str = "popover-menu-row";
+pub const CSS_RECENT_SCROLL: &str = "recent-scroll";
+pub const CSS_SECTION_TITLE: &str = "section-title";
+pub const CSS_SELECTED: &str = "selected";
+pub const CSS_SETTINGS_HEADER: &str = "settings-header";
+pub const CSS_SETTINGS_SIDEBAR: &str = "settings-sidebar";
+pub const CSS_SIDEBAR_ROW_PAD_GAME: &str = "sidebar-row-pad-game";
+pub const CSS_SIDEBAR_ROW_PAD_HEADER: &str = "sidebar-row-pad-header";
+pub const CSS_SIDEBAR_ROW_TITLE: &str = "sidebar-row-title";
+pub const CSS_SIDEBAR_SEPARATOR_ROW: &str = "sidebar-separator-row";
+pub const CSS_SUCCESS_LABEL: &str = "success-label";
+pub const CSS_SUGGESTED_ACTION: &str = "suggested-action";
+pub const CSS_TITLE_1: &str = "title-1";
+pub const CSS_VIEW: &str = "view";
+
 pub const APP_CSS: &str = "
 .sidebar-row-title { min-width: 0; }
 .global-bar trough { background-color: transparent; border: none; }

@@ -4,6 +4,7 @@ use ira_config::{Config, ConsoleConfig};
 use ira_models::ConsoleDef;
 use super::helpers::{make_browse_button, string_list_from};
 use super::settings_dialog::settings_page_container;
+use super::css::*;
 
 pub(super) fn build_shadps4_version_dropdown(current_path: &str, include_global: bool) -> gtk4::DropDown {
     let shadps4_versions = ira_platforms::ps4::read_shadps4_versions();
@@ -89,7 +90,7 @@ pub(super) fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (g
 
     if let Some(ref detected) = detected_path {
         let auto_btn = gtk4::Button::with_label("Auto-detect");
-        auto_btn.add_css_class("flat");
+        auto_btn.add_css_class(CSS_FLAT);
         auto_btn.set_valign(gtk4::Align::Center);
         let exe_row = ps4_exe_row.clone();
         let detected_path = detected.clone();
@@ -163,7 +164,7 @@ pub(super) fn build_rpcs3_settings_page(cfg: &Config, win: &adw::Window) -> (gtk
 
     if let Some(emu) = &detected {
         let auto_btn = gtk4::Button::with_label("Auto-detect");
-        auto_btn.add_css_class("flat");
+        auto_btn.add_css_class(CSS_FLAT);
         auto_btn.set_valign(gtk4::Align::Center);
         let exe_row_c = exe_row.clone();
         let path = emu.launch_command.clone();
@@ -295,7 +296,7 @@ pub(super) fn build_console_settings_page(
     }
 
     let auto_btn = gtk4::Button::with_label("Auto-detect");
-    auto_btn.add_css_class("flat");
+    auto_btn.add_css_class(CSS_FLAT);
     auto_btn.set_valign(gtk4::Align::Center);
     {
         let exe_row_c = exe_row.clone();

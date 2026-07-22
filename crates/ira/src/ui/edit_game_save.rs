@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Read;
 use std::rc::Rc;
+use std::sync::mpsc;
 use adw::prelude::*;
 use ira_models::{AssetType, GameLaunchConfig, TrophySource, WineConfig};
 use super::add_game_dialog::collect_env_vars;
@@ -56,19 +57,23 @@ pub(super) struct SaveGameSettingsParams {
     pub saved_profile_id: Option<i64>,
 }
 
-pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
-    let title = params.title_entry.text().to_string();
-    let sort_title = params.sort_entry.text().to_string();
+struct AppIdResult {
+    changed: bool,
+    new_val: String,
+}
 
-    let db = params.state.borrow().db.clone();
-
-    if let Err(e) = ira_db::update_game_title(&db, params.db_id, &title) {
+fn save_title_and_sort(db: &ira_db::DbConn, db_id: i64, title_entry: &adw::EntryRow, sort_entry: &adw::EntryRow) {
+    let title = title_entry.text().to_string();
+    let sort_title = sort_entry.text().to_string();
+    if let Err(e) = ira_db::update_game_title(db, db_id, &title) {
         eprintln!("Failed to update game: {}", e);
     }
-    if let Err(e) = ira_db::update_sort_title(&db, params.db_id, &sort_title) {
+    if let Err(e) = ira_db::update_sort_title(db, db_id, &sort_title) {
         eprintln!("Failed to update sort title: {}", e);
     }
+}
 
+fn save_app_id(db: &ira_db::DbConn, params: &SaveGameSettingsParams) -> AppIdResult {
     let mut app_id_changed = false;
     let mut new_app_id_val = String::new();
     if let Some(ref app_id_row) = params.app_id_entry {
@@ -77,220 +82,166 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
             app_id_changed = true;
             new_app_id_val = new_id.clone();
             let ts = if new_id.is_empty() { TrophySource::Empty } else { params.trophy_source };
-            let pid = if params.game_kind == ira_models::GameKind::Ps4 || params.game_kind == ira_models::GameKind::Ps3 || params.game_kind == ira_models::GameKind::Retro {
+            let pid = if params.game_kind == ira_models::GameKind::Ps4
+                || params.game_kind == ira_models::GameKind::Ps3
+                || params.game_kind == ira_models::GameKind::Retro
+            {
                 &params.saved_platform_id
             } else if new_id.is_empty() { "" } else { &new_id };
-            let (steam_id, game_id): (&str, &str) = if params.game_kind == ira_models::GameKind::Ps4 || params.game_kind == ira_models::GameKind::Ps3 || params.game_kind == ira_models::GameKind::Retro { ("", &new_id) } else { (&new_id, "") };
-            if let Err(e) = ira_db::update_game_ids(&db, params.db_id, steam_id, game_id, ts, pid) {
+            let (steam_id, game_id): (&str, &str) = if params.game_kind == ira_models::GameKind::Ps4
+                || params.game_kind == ira_models::GameKind::Ps3
+                || params.game_kind == ira_models::GameKind::Retro
+            {
+                ("", &new_id)
+            } else {
+                (&new_id, "")
+            };
+            if let Err(e) = ira_db::update_game_ids(db, params.db_id, steam_id, game_id, ts, pid) {
                 eprintln!("Failed to update app ID: {}", e);
             }
         }
     }
+    AppIdResult { changed: app_id_changed, new_val: new_app_id_val }
+}
 
+fn save_version_and_overrides(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {
     if let Some(ver) = params.pending_version.borrow().as_ref() {
-        if let Err(e) = ira_db::set_shadps4_version(&db, params.db_id, ver) {
+        if let Err(e) = ira_db::set_shadps4_version(db, params.db_id, ver) {
             eprintln!("Failed to set shadps4 version: {}", e);
         }
     }
-
     if let Some(core) = params.pending_ra_core.borrow().as_ref() {
-        if let Err(e) = ira_db::set_ra_core(&db, params.db_id, core) {
+        if let Err(e) = ira_db::set_ra_core(db, params.db_id, core) {
             eprintln!("Failed to set RA core: {}", e);
         }
     }
     if let Some(emu) = params.pending_emulator.borrow().as_ref() {
-        if let Err(e) = ira_db::set_emulator_override(&db, params.db_id, emu) {
+        if let Err(e) = ira_db::set_emulator_override(db, params.db_id, emu) {
             eprintln!("Failed to set emulator override: {}", e);
         }
     }
+}
 
-    if let Some(ref lc) = params.launch_config_widgets {
-        let env_vars = if let Some(ref aw) = params.advanced_widgets {
-            collect_env_vars(&aw.env_vars_box)
-        } else {
-            Vec::new()
-        };
-        let ld_preload = if let Some(ref aw) = params.advanced_widgets {
-            aw.ld_preload_entry.text().to_string()
-        } else {
-            String::new()
-        };
-        let ld_library_path = if let Some(ref aw) = params.advanced_widgets {
-            aw.ld_library_path_entry.text().to_string()
-        } else {
-            String::new()
-        };
-        let launch = GameLaunchConfig {
-            exe: lc.exe_entry.text().to_string(),
-            args: lc.args_entry.text().to_string(),
-            working_dir: lc.wd_entry.text().to_string(),
-            env_vars: if params.show_wine_tabs { Vec::new() } else { env_vars.clone() },
-            ld_preload,
-            ld_library_path,
-            pre_launch: lc.pre_launch_entry.text().to_string(),
-        };
-        let mut wine = params.wine_widgets.as_ref().map_or(WineConfig::default(), |ww| ww.to_wine_config());
+fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchConfig, WineConfig, Option<i64>) {
+    let env_vars = if let Some(ref aw) = params.advanced_widgets {
+        collect_env_vars(&aw.env_vars_box)
+    } else {
+        Vec::new()
+    };
+    let ld_preload = if let Some(ref aw) = params.advanced_widgets {
+        aw.ld_preload_entry.text().to_string()
+    } else {
+        String::new()
+    };
+    let ld_library_path = if let Some(ref aw) = params.advanced_widgets {
+        aw.ld_library_path_entry.text().to_string()
+    } else {
+        String::new()
+    };
+    let lc = params.launch_config_widgets.as_ref().unwrap();
+    let launch = GameLaunchConfig {
+        exe: lc.exe_entry.text().to_string(),
+        args: lc.args_entry.text().to_string(),
+        working_dir: lc.wd_entry.text().to_string(),
+        env_vars: if params.show_wine_tabs { Vec::new() } else { env_vars.clone() },
+        ld_preload,
+        ld_library_path,
+        pre_launch: lc.pre_launch_entry.text().to_string(),
+    };
+    let mut wine = params.wine_widgets.as_ref().map_or(WineConfig::default(), |ww| ww.to_wine_config());
 
-        if params.show_wine_tabs {
-            wine.wine_env_vars = env_vars;
-            if let Some(ref aw) = params.advanced_widgets {
-                if let Some(ref dob) = aw.dll_overrides_box {
-                    wine.dll_overrides = collect_dll_overrides(dob);
-                }
+    if params.show_wine_tabs {
+        wine.wine_env_vars = env_vars;
+        if let Some(ref aw) = params.advanced_widgets {
+            if let Some(ref dob) = aw.dll_overrides_box {
+                wine.dll_overrides = collect_dll_overrides(dob);
             }
         }
+    }
 
-        if wine.dll_overrides != params.app_default_wine.dll_overrides {
-            if !wine.overridden_fields.contains(&"dll_overrides".to_string()) {
-                wine.overridden_fields.push("dll_overrides".to_string());
-            }
-        } else {
-            wine.overridden_fields.retain(|f| f != "dll_overrides");
+    if wine.dll_overrides != params.app_default_wine.dll_overrides {
+        if !wine.overridden_fields.contains(&"dll_overrides".to_string()) {
+            wine.overridden_fields.push("dll_overrides".to_string());
         }
-        if wine.wine_env_vars != params.app_default_wine.wine_env_vars {
-            if !wine.overridden_fields.contains(&"wine_env_vars".to_string()) {
-                wine.overridden_fields.push("wine_env_vars".to_string());
-            }
-        } else {
-            wine.overridden_fields.retain(|f| f != "wine_env_vars");
+    } else {
+        wine.overridden_fields.retain(|f| f != "dll_overrides");
+    }
+    if wine.wine_env_vars != params.app_default_wine.wine_env_vars {
+        if !wine.overridden_fields.contains(&"wine_env_vars".to_string()) {
+            wine.overridden_fields.push("wine_env_vars".to_string());
         }
-        let new_profile_id = if let Some(ref lc) = params.launch_config_widgets {
-            if let Some(ref profile_row) = lc.profile_row {
-                if profile_row.selected() > 0 {
-                    params.profiles.get((profile_row.selected() - 1) as usize).map(|p| p.id)
-                } else {
-                    None
-                }
+    } else {
+        wine.overridden_fields.retain(|f| f != "wine_env_vars");
+    }
+
+    let new_profile_id = if let Some(ref lc) = params.launch_config_widgets {
+        if let Some(ref profile_row) = lc.profile_row {
+            if profile_row.selected() > 0 {
+                params.profiles.get((profile_row.selected() - 1) as usize).map(|p| p.id)
             } else {
-                params.saved_profile_id
+                None
             }
         } else {
             params.saved_profile_id
-        };
-        if let Err(e) = ira_db::save_game_config(&db, params.db_id, &launch, &wine, new_profile_id) {
-            eprintln!("Failed to save game config: {}", e);
         }
+    } else {
+        params.saved_profile_id
+    };
 
-        if wine.enabled {
-            let reg_changed = wine.mouse_warp_override != params.old_wine.mouse_warp_override
-                || wine.virtual_desktop != params.old_wine.virtual_desktop
-                || wine.virtual_desktop_res != params.old_wine.virtual_desktop_res
-                || wine.dpi_enabled != params.old_wine.dpi_enabled
-                || wine.dpi != params.old_wine.dpi
-                || wine.show_crash_dialogs != params.old_wine.show_crash_dialogs
-                || wine.audio != params.old_wine.audio;
+    (launch, wine, new_profile_id)
+}
 
-            if reg_changed {
-                let pfx = ira_launcher::wine_launch::wine_prefix(&wine);
-                let prefix_ready = std::path::Path::new(&pfx).join("system.reg").is_file();
-                if prefix_ready {
-                    let wine_exe = ira_launcher::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path);
-                    if let Ok(wine_exe) = wine_exe {
-                        let reg_cmds = ira_launcher::wine_launch::build_wine_reg_commands(&wine, &wine_exe);
-                        let env = ira_launcher::wine_launch::build_wine_env(&wine, &wine_exe);
-                        std::thread::spawn(move || {
-                            for reg_cmd in reg_cmds {
-                                let mut child = std::process::Command::new(&reg_cmd[0]);
-                                for arg in &reg_cmd[1..] {
-                                    child.arg(arg);
-                                }
-                                child.envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
-                                match child.status() {
-                                    Ok(s) if !s.success() && s.code() != Some(1) => {
-                                        eprintln!("Wine reg command failed (exit {:?}): {:?}", s.code(), reg_cmd);
-                                    }
-                                    Err(e) => eprintln!("Failed to run wine reg command: {}", e),
-                                    _ => {}
-                                }
-                            }
-                        });
-                    }
-                }
-            }
-        }
+fn apply_wine_registry(old_wine: &WineConfig, wine: &WineConfig) {
+    if !wine.enabled {
+        return;
+    }
+    let reg_changed = wine.mouse_warp_override != old_wine.mouse_warp_override
+        || wine.virtual_desktop != old_wine.virtual_desktop
+        || wine.virtual_desktop_res != old_wine.virtual_desktop_res
+        || wine.dpi_enabled != old_wine.dpi_enabled
+        || wine.dpi != old_wine.dpi
+        || wine.show_crash_dialogs != old_wine.show_crash_dialogs
+        || wine.audio != old_wine.audio;
+
+    if !reg_changed {
+        return;
     }
 
-    {
-        let pc = params.pending_copies.borrow();
-        let _s = tracing::info_span!("pending_image_copies", db_id = params.db_id, count = pc.len()).entered();
-
-        if !pc.is_empty() {
-            if let Some(g) = params.state.borrow().games.iter().find(|g| g.db_id == params.db_id).cloned() {
-                for path in [&g.icon_path, &g.hero_image_path, &g.grid_path, &g.header_path, &g.logo_path] {
-                    if !path.is_empty() {
-                        ira_images::invalidate_texture(path);
-                    }
-                }
-            }
-        }
-
-        let game = params.state.borrow().games.iter().find(|g| g.db_id == params.db_id).cloned();
-        let cloud_dir = game.as_ref().map(|g| ira_parser::game_data_dir(&params.save_dir, g)).unwrap_or_default();
-        let _ = std::fs::create_dir_all(&cloud_dir);
-        let mut pending_images: Vec<(String, std::path::PathBuf, u32, u32)> = Vec::new();
-        for (asset, src_path) in pc.iter() {
-            if asset == "__unmatch__" { continue; }
-            if asset.starts_with("__ra_unmatch_") { continue; }
-            let Some(at) = AssetType::from_string(asset) else { continue; };
-            let base_name = at.file_base();
-            let (max_w, max_h) = at.thumb_dims();
-            ira_parser::remove_image_variants(&cloud_dir, base_name);
-            ira_parser::remove_image_variants(&cloud_dir, &format!("{}_small", base_name));
-            let is_ico = is_ico_bytes(src_path);
-            let dest = if is_ico {
-                let ico_path = cloud_dir.join(format!("{}.ico", base_name));
-                std::fs::copy(src_path, &ico_path).ok();
-                ico_path
-            } else {
-                let ext = std::path::Path::new(src_path).extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("png");
-                let dest = cloud_dir.join(format!("{}.{}", base_name, ext));
-                if let Err(e) = std::fs::copy(src_path, &dest) {
-                    eprintln!("Failed to copy {}: {}", asset, e);
-                }
-                dest
-            };
-            if dest.is_file() {
-                pending_images.push((base_name.to_string(), dest, max_w, max_h));
-            }
-        }
-        if !pending_images.is_empty() {
-            let cloud_dir_bg = cloud_dir.clone();
-            let db_id_bg = params.db_id;
-            std::thread::spawn(move || {
-                let _s = tracing::info_span!("pending_image_conversion", db_id = db_id_bg, count = pending_images.len()).entered();
-                for (base_name, dest, max_w, max_h) in &pending_images {
-                    let ext = dest.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                    if ext != "webp" && ext != "jpg" {
-                        ira_parser::convert_to_lossless_webp(dest);
-                    }
-                    let small_base = format!("{}_small", base_name);
-                    ira_parser::remove_image_variants(&cloud_dir_bg, &small_base);
-                    ira_parser::ensure_small_image(&cloud_dir_bg, base_name, *max_w, *max_h);
-                }
-                let base_names: Vec<String> = pending_images.into_iter().map(|(b, _, _, _)| b).collect();
-                glib::idle_add_once(move || {
-                    for base_name in &base_names {
-                        let webp = cloud_dir_bg.join(format!("{}.webp", base_name));
-                        if webp.is_file() {
-                            ira_images::invalidate_texture(&webp.to_string_lossy());
-                        }
-                        let small = cloud_dir_bg.join(format!("{}_small.webp", base_name));
-                        if small.is_file() {
-                            ira_images::invalidate_texture(&small.to_string_lossy());
-                        }
-                    }
-                });
-            });
-        }
+    let pfx = ira_launcher::wine_launch::wine_prefix(wine);
+    let prefix_ready = std::path::Path::new(&pfx).join("system.reg").is_file();
+    if !prefix_ready {
+        return;
     }
 
+    let wine_exe = ira_launcher::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path);
+    let Ok(wine_exe) = wine_exe else { return };
+
+    let reg_cmds = ira_launcher::wine_launch::build_wine_reg_commands(wine, &wine_exe);
+    let env = ira_launcher::wine_launch::build_wine_env(wine, &wine_exe);
+    std::thread::spawn(move || {
+        for reg_cmd in reg_cmds {
+            let mut child = std::process::Command::new(&reg_cmd[0]);
+            for arg in &reg_cmd[1..] {
+                child.arg(arg);
+            }
+            child.envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+            match child.status() {
+                Ok(s) if !s.success() && s.code() != Some(1) => {
+                    eprintln!("Wine reg command failed (exit {:?}): {:?}", s.code(), reg_cmd);
+                }
+                Err(e) => eprintln!("Failed to run wine reg command: {}", e),
+                _ => {}
+            }
+        }
+    });
+}
+
+fn handle_unmatch(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {
     if params.pending_copies.borrow().contains_key("__unmatch__") {
-        if let Err(e) = ira_db::set_sgdb_id(&db, params.db_id, "") {
+        if let Err(e) = ira_db::set_sgdb_id(db, params.db_id, "") {
             eprintln!("Failed to clear SGDB ID: {}", e);
         }
-        if let Err(e) = ira_db::set_manual_unmatch(&db, params.db_id, true) {
+        if let Err(e) = ira_db::set_manual_unmatch(db, params.db_id, true) {
             eprintln!("Failed to set manual unmatch: {}", e);
         }
         if let Some(g) = params.state.borrow_mut().games.iter_mut().find(|g| g.db_id == params.db_id) {
@@ -302,10 +253,10 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
 
     let ra_unmatch_key = format!("__ra_unmatch_{}", params.db_id);
     if params.pending_copies.borrow().contains_key(&ra_unmatch_key) {
-        if let Err(e) = ira_db::update_game_ids(&db, params.db_id, "", "", TrophySource::Empty, &params.saved_platform_id) {
+        if let Err(e) = ira_db::update_game_ids(db, params.db_id, "", "", TrophySource::Empty, &params.saved_platform_id) {
             eprintln!("Failed to unmatch RA game: {}", e);
         }
-        if let Err(e) = ira_db::set_manual_unmatch(&db, params.db_id, true) {
+        if let Err(e) = ira_db::set_manual_unmatch(db, params.db_id, true) {
             eprintln!("Failed to set manual unmatch: {}", e);
         }
         {
@@ -321,12 +272,14 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
         }
         params.pending_copies.borrow_mut().remove(&ra_unmatch_key);
     }
+}
 
+fn save_logo_settings(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {
     if let Some((ref selected_pos, ref size_adj)) = params.logo_controls {
         let pos = selected_pos.borrow().clone();
         let size = size_adj.value() as i32;
         if params.db_id != 0 {
-            if let Err(e) = ira_db::set_logo_settings(&db, params.db_id, &pos, size) {
+            if let Err(e) = ira_db::set_logo_settings(db, params.db_id, &pos, size) {
                 eprintln!("Failed to update logo settings: {}", e);
             }
         }
@@ -335,29 +288,31 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
             g.logo_size = size;
         }
     }
+}
 
-    {
-        let details = crate::game_loader::read_app_details(&params.save_dir, &params.app_id);
-        if let Some(ref details) = details {
-            if !params.dlc_switches.is_empty() {
-                let mut details = details.clone();
-                let dlcs_vec: Vec<_> = details.dlcs.iter_mut().collect();
-                for (i, (_, dlc)) in dlcs_vec.into_iter().enumerate() {
-                    if i < params.dlc_switches.len() {
-                        dlc.enabled = params.dlc_switches[i].is_active();
-                    }
-                }
-                let path = ira_parser::data_dir(&params.save_dir, &params.app_id).join("appdetails.json");
-                if let Ok(b) = serde_json::to_vec(&details) {
-                    let _ = std::fs::write(&path, b);
-                }
-                ira_platforms::api_emulators::write_dlc_configs(
-                    params.trophy_source, &params.game_exe, &params.save_dir, &params.app_id, &details,
-                );
-            }
+fn save_dlc_config(params: &SaveGameSettingsParams) {
+    let details = crate::game_loader::read_app_details(&params.save_dir, &params.app_id);
+    let Some(ref details) = details else { return };
+    if params.dlc_switches.is_empty() {
+        return;
+    }
+    let mut details = details.clone();
+    let dlcs_vec: Vec<_> = details.dlcs.iter_mut().collect();
+    for (i, (_, dlc)) in dlcs_vec.into_iter().enumerate() {
+        if i < params.dlc_switches.len() {
+            dlc.enabled = params.dlc_switches[i].is_active();
         }
     }
+    let path = ira_parser::data_dir(&params.save_dir, &params.app_id).join("appdetails.json");
+    if let Ok(b) = serde_json::to_vec(&details) {
+        let _ = std::fs::write(&path, b);
+    }
+    ira_platforms::api_emulators::write_dlc_configs(
+        params.trophy_source, &params.game_exe, &params.save_dir, &params.app_id, &details,
+    );
+}
 
+fn save_language_config(params: &SaveGameSettingsParams) {
     if let Some(ref lang_row) = params.language_row {
         let idx = lang_row.selected() as usize;
         if let Some(lang) = params.languages.get(idx) {
@@ -366,44 +321,205 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
             );
         }
     }
+}
 
-    if let Some(g) = params.state.borrow_mut().games.iter_mut().find(|g| g.db_id == params.db_id) {
-        g.name = title.clone();
-        g.sort_title = sort_title.clone();
-        if let Some(ver) = params.pending_version.borrow().as_ref() {
-            g.shadps4_version = ver.clone();
+fn update_game_state_in_memory(params: &SaveGameSettingsParams, title: &str, sort_title: &str, app_id_result: &AppIdResult) {
+    let mut state_borrow = params.state.borrow_mut();
+    let Some(g) = state_borrow.games.iter_mut().find(|g| g.db_id == params.db_id) else {
+        return;
+    };
+    g.name = title.to_string();
+    g.sort_title = sort_title.to_string();
+    if let Some(ver) = params.pending_version.borrow().as_ref() {
+        g.shadps4_version = ver.clone();
+    }
+    if let Some(core) = params.pending_ra_core.borrow().as_ref() {
+        g.ra_core = core.clone();
+    }
+    if let Some(emu) = params.pending_emulator.borrow().as_ref() {
+        g.emulator_override = emu.clone();
+    }
+    if app_id_result.changed {
+        if app_id_result.new_val.is_empty() {
+            g.app_id.clear();
+            g.trophy_source = TrophySource::Empty;
+            g.platform_id.clear();
+            g.achievements.clear();
+            g.earned_count = 0;
+            g.total_count = 0;
+            g.manual_unmatch = true;
+        } else {
+            params.state.borrow().game_names.lock().unwrap().remove(&params.app_id);
+            g.app_id = app_id_result.new_val.clone();
+            g.platform_id = app_id_result.new_val.clone();
+            g.manual_unmatch = false;
         }
-        if let Some(core) = params.pending_ra_core.borrow().as_ref() {
-            g.ra_core = core.clone();
-        }
-        if let Some(emu) = params.pending_emulator.borrow().as_ref() {
-            g.emulator_override = emu.clone();
-        }
-        if app_id_changed {
-            if new_app_id_val.is_empty() {
-                g.app_id.clear();
-                g.trophy_source = TrophySource::Empty;
-                g.platform_id.clear();
-                g.achievements.clear();
-                g.earned_count = 0;
-                g.total_count = 0;
-                g.manual_unmatch = true;
+    }
+}
+
+fn update_game_names(state: &SharedState, app_id_result: &AppIdResult, old_app_id: &str, title: &str) {
+    if !app_id_result.new_val.is_empty() {
+        state.borrow().game_names.lock().unwrap().insert(app_id_result.new_val.clone(), title.to_string());
+    } else if app_id_result.changed {
+        state.borrow().game_names.lock().unwrap().remove(old_app_id);
+    }
+}
+
+fn spawn_image_copy_thread(
+    images: Vec<(String, String)>,
+    cloud_dir: std::path::PathBuf,
+    db_id: i64,
+    tx: mpsc::Sender<Vec<String>>,
+) {
+    std::thread::spawn(move || {
+        let _s = tracing::info_span!("pending_image_copy_convert", db_id = db_id, count = images.len()).entered();
+        let mut pending_images = Vec::new();
+        for (asset, src_path) in &images {
+            let Some(at) = AssetType::from_string(asset) else { continue; };
+            let base_name = at.file_base();
+            let (max_w, max_h) = at.thumb_dims();
+            ira_parser::remove_image_variants(&cloud_dir, base_name);
+            ira_parser::remove_image_variants(&cloud_dir, &format!("{}_small", base_name));
+
+            let is_ico = is_ico_bytes(src_path);
+            let dest = if is_ico {
+                let ico_path = cloud_dir.join(format!("{}.ico", base_name));
+                let _ = std::fs::copy(src_path, &ico_path);
+                ico_path
             } else {
-                params.state.borrow().game_names.lock().unwrap().remove(&params.app_id);
-                g.app_id = new_app_id_val.clone();
-                g.platform_id = new_app_id_val.clone();
-                g.manual_unmatch = false;
+                let ext = std::path::Path::new(src_path).extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("png");
+                let dest = cloud_dir.join(format!("{}.{}", base_name, ext));
+                if let Err(e) = std::fs::copy(src_path, &dest) {
+                    eprintln!("Failed to copy {}: {}", asset, e);
+                }
+                dest
+            };
+            if dest.is_file() {
+                pending_images.push((base_name.to_string(), dest, max_w, max_h));
+            }
+        }
+
+        for (base_name, dest, max_w, max_h) in &pending_images {
+            let ext = dest.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            if ext != "webp" && ext != "jpg" {
+                ira_parser::convert_to_lossless_webp(dest);
+            }
+            let small_base = format!("{}_small", base_name);
+            ira_parser::remove_image_variants(&cloud_dir, &small_base);
+            ira_parser::ensure_small_image(&cloud_dir, base_name, *max_w, *max_h);
+        }
+
+        let base_names: Vec<String> = pending_images.into_iter().map(|(b, _, _, _)| b).collect();
+        let _ = tx.send(base_names);
+    });
+}
+
+fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_db::DbConn) -> bool {
+    let pc = params.pending_copies.borrow();
+    if pc.is_empty() {
+        return false;
+    }
+
+    if let Some(g) = params.state.borrow().games.iter().find(|g| g.db_id == params.db_id).cloned() {
+        for path in [&g.icon_path, &g.hero_image_path, &g.grid_path, &g.header_path, &g.logo_path] {
+            if !path.is_empty() {
+                ira_images::invalidate_texture(path);
             }
         }
     }
-    if !new_app_id_val.is_empty() {
-        params.state.borrow().game_names.lock().unwrap().insert(new_app_id_val.clone(), title);
-    } else if app_id_changed {
-        params.state.borrow().game_names.lock().unwrap().remove(&params.app_id);
+    let game = params.state.borrow().games.iter().find(|g| g.db_id == params.db_id).cloned();
+    let cloud_dir = game.as_ref().map(|g| ira_parser::game_data_dir(&params.save_dir, g)).unwrap_or_default();
+    let _ = std::fs::create_dir_all(&cloud_dir);
+
+    let image_list: Vec<(String, String)> = pc.iter()
+        .filter(|(k, _)| !k.starts_with("__"))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let has_image_assets = !image_list.is_empty();
+    drop(pc);
+    if !has_image_assets {
+        return false;
     }
 
+    let (tx, rx) = mpsc::channel::<Vec<String>>();
+    let state_cb = params.state.clone();
+    let win_cb = params.win.clone();
+    let var_widgets_cb = params.var_widgets.clone();
+    let db_cb = db.clone();
+    let db_id_cb = params.db_id;
+    let save_dir_cb = params.save_dir.clone();
+    let cloud_dir_cb = cloud_dir.clone();
+
+    glib::idle_add_local(move || {
+        let base_names = match rx.try_recv() {
+            Ok(names) => names,
+            Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                win_cb.close();
+                return glib::ControlFlow::Break;
+            }
+        };
+        for base_name in &base_names {
+            let webp = cloud_dir_cb.join(format!("{}.webp", base_name));
+            if webp.is_file() {
+                ira_images::invalidate_texture(&webp.to_string_lossy());
+            }
+            let small = cloud_dir_cb.join(format!("{}_small.webp", base_name));
+            if small.is_file() {
+                ira_images::invalidate_texture(&small.to_string_lossy());
+            }
+        }
+        if let Ok(Some(entry)) = ira_db::find_by_db_id(&db_cb, db_id_cb) {
+            if let Ok(reloaded) = crate::game_loader::load_game(&entry, &save_dir_cb) {
+                if let Some(g) = state_cb.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id_cb) {
+                    g.icon_path = reloaded.icon_path;
+                    g.hero_image_path = reloaded.hero_image_path;
+                    g.grid_path = reloaded.grid_path;
+                    g.header_path = reloaded.header_path;
+                    g.logo_path = reloaded.logo_path;
+                }
+            }
+        }
+
+        super::sidebar::rebuild_sidebar(&state_cb);
+        {
+            let store = state_cb.borrow().grid_store.clone();
+            let games = state_cb.borrow().games.clone();
+            for i in 0..store.n_items() {
+                if let Some(item) = store.item(i).and_then(|o| o.downcast::<super::game_item::GameItem>().ok()) {
+                    if let Some(gi) = item.game() {
+                        if let Some(g) = games.iter().find(|g| g.db_id == gi.db_id) {
+                            store.splice(i, 1, &[super::game_item::GameItem::new(g)]);
+                        }
+                    }
+                }
+            }
+        }
+        let selected = state_cb.borrow().selected_id.clone();
+        let game_after_save = if selected == db_id_cb.to_string() {
+            state_cb.borrow().games.iter().find(|g| g.db_id == db_id_cb).cloned()
+        } else {
+            None
+        };
+        if let Some(g) = game_after_save {
+            super::game_display::display_game(&g, &state_cb);
+        }
+
+        super::edit_game_variants::save_variants(&db_cb, db_id_cb, &var_widgets_cb);
+        let _ = state_cb.borrow().sender.send(crate::AppMessage::VariantsChanged(db_id_cb));
+        win_cb.close();
+        glib::ControlFlow::Break
+    });
+
+    spawn_image_copy_thread(image_list, cloud_dir, params.db_id, tx);
+    true
+}
+
+fn finish_save(params: &SaveGameSettingsParams, db: &ira_db::DbConn) {
     if !params.pending_copies.borrow().is_empty() {
-        if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, params.db_id) {
+        if let Ok(Some(entry)) = ira_db::find_by_db_id(db, params.db_id) {
             if let Ok(reloaded) = crate::game_loader::load_game(&entry, &params.save_dir) {
                 if let Some(g) = params.state.borrow_mut().games.iter_mut().find(|g| g.db_id == params.db_id) {
                     g.icon_path = reloaded.icon_path;
@@ -442,8 +558,41 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
         super::game_display::display_game(&g, &params.state);
     }
 
-    super::edit_game_variants::save_variants(&db, params.db_id, &params.var_widgets);
-
+    super::edit_game_variants::save_variants(db, params.db_id, &params.var_widgets);
     let _ = params.state.borrow().sender.send(crate::AppMessage::VariantsChanged(params.db_id));
     params.win.close();
+}
+
+pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
+    let title = params.title_entry.text().to_string();
+    let sort_title = params.sort_entry.text().to_string();
+    let db = params.state.borrow().db.clone();
+
+    save_title_and_sort(&db, params.db_id, &params.title_entry, &params.sort_entry);
+
+    let app_id_result = save_app_id(&db, &params);
+
+    save_version_and_overrides(&db, &params);
+
+    if params.launch_config_widgets.is_some() {
+        let (launch, wine, new_profile_id) = build_launch_config_and_wine(&params);
+        if let Err(e) = ira_db::save_game_config(&db, params.db_id, &launch, &wine, new_profile_id) {
+            eprintln!("Failed to save game config: {}", e);
+        }
+        apply_wine_registry(&params.old_wine, &wine);
+    }
+
+    let has_images = process_pending_images_background(&params, &db);
+
+    handle_unmatch(&db, &params);
+    save_logo_settings(&db, &params);
+    save_dlc_config(&params);
+    save_language_config(&params);
+    update_game_state_in_memory(&params, &title, &sort_title, &app_id_result);
+    update_game_names(&params.state, &app_id_result, &params.app_id, &title);
+
+    if has_images {
+        return;
+    }
+    finish_save(&params, &db);
 }

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use super::helpers::clear_children;
+use super::css::*;
 
 fn build_sgdb_asset_card(
     a: &SgdbAsset,
@@ -47,11 +48,11 @@ fn build_sgdb_asset_card(
     ilbl.set_max_width_chars(20);
     ilbl.set_wrap(true);
     ilbl.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-    ilbl.add_css_class("dim-label");
+    ilbl.add_css_class(CSS_DIM_LABEL);
     card.append(&ilbl);
 
     let gdl = gtk4::Button::with_label("Download");
-    gdl.add_css_class("suggested-action");
+    gdl.add_css_class(CSS_SUGGESTED_ACTION);
     gdl.set_hexpand(true);
     card.append(&gdl);
 
@@ -72,7 +73,7 @@ fn build_sgdb_asset_card(
     row.append(&rlbl);
 
     let ldl = gtk4::Button::with_label("Download");
-    ldl.add_css_class("suggested-action");
+    ldl.add_css_class(CSS_SUGGESTED_ACTION);
     row.append(&ldl);
 
     all_buttons.borrow_mut().push(gdl.clone());
@@ -148,7 +149,7 @@ fn rebuild_assets_view(
 
     if assets.is_empty() {
         let none = gtk4::Label::new(Some("No images found on SteamGridDB"));
-        none.add_css_class("dim-label");
+        none.add_css_class(CSS_DIM_LABEL);
         flow.append(&none);
         list_view.append(&gtk4::Label::new(Some("No images found on SteamGridDB")));
         return;
@@ -271,14 +272,14 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let toggle_btn = gtk4::ToggleButton::new();
     toggle_btn.set_icon_name("view-list-symbolic");
     toggle_btn.set_tooltip_text(Some("Switch to list view"));
-    toggle_btn.add_css_class("flat");
+    toggle_btn.add_css_class(CSS_FLAT);
 
     let zoom_adj = gtk4::Adjustment::new(300.0, 100.0, 500.0, 50.0, 100.0, 0.0);
     let zoom_scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, Some(&zoom_adj));
     zoom_scale.set_tooltip_text(Some("Zoom"));
     zoom_scale.set_width_request(120);
     zoom_scale.set_draw_value(false);
-    zoom_scale.add_css_class("flat");
+    zoom_scale.add_css_class(CSS_FLAT);
 
     header_bar.pack_end(&zoom_scale);
     header_bar.pack_end(&toggle_btn);
@@ -315,7 +316,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     stack.set_visible_child_name("grid");
 
     let loading = gtk4::Label::new(Some("Loading\u{2026}"));
-    loading.add_css_class("dim-label");
+    loading.add_css_class(CSS_DIM_LABEL);
     flow.append(&loading);
     list_view.append(&gtk4::Label::new(Some("Loading\u{2026}")));
 

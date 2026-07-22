@@ -6,6 +6,7 @@ use std::rc::Rc;
 use chrono::Datelike;
 use super::helpers::{clear_children, format_duration};
 use super::bar_chart::BarChart;
+use super::css::*;
 
 const Y_AXIS_W: i32 = 34;
 const SIDEBAR_W: i32 = 260;
@@ -68,11 +69,11 @@ pub(super) fn build_weekly_chart(weeks: Vec<WeekData>, is_single_game: bool) -> 
 
     let week_label = gtk4::Label::new(Some(""));
     week_label.set_halign(gtk4::Align::Start); week_label.set_hexpand(true);
-    week_label.set_xalign(0.0); week_label.add_css_class("heading");
+    week_label.set_xalign(0.0); week_label.add_css_class(CSS_HEADING);
 
     let sidebar_header = gtk4::Label::new(Some(""));
     sidebar_header.set_halign(gtk4::Align::Start); sidebar_header.set_xalign(0.0);
-    sidebar_header.add_css_class("heading");
+    sidebar_header.add_css_class(CSS_HEADING);
     sidebar_header.set_width_request(SIDEBAR_W);
     sidebar_header.set_margin_start(12);
 
@@ -98,7 +99,7 @@ pub(super) fn build_weekly_chart(weeks: Vec<WeekData>, is_single_game: bool) -> 
     day_labels.set_hexpand(true); day_labels.set_margin_end(Y_AXIS_W);
     for name in &["Mon","Tue","Wed","Thu","Fri","Sat","Sun"] {
         let l = gtk4::Label::new(Some(name));
-        l.add_css_class("dim-label"); l.set_hexpand(true);
+        l.add_css_class(CSS_DIM_LABEL); l.set_hexpand(true);
         day_labels.append(&l);
     }
 
@@ -116,7 +117,7 @@ pub(super) fn build_weekly_chart(weeks: Vec<WeekData>, is_single_game: bool) -> 
     sidebar_box.set_margin_start(12);
 
     let sidebar_list = gtk4::ListBox::new();
-    sidebar_list.add_css_class("boxed-list");
+    sidebar_list.add_css_class(CSS_BOXED_LIST);
     sidebar_list.set_selection_mode(gtk4::SelectionMode::None);
     let scroll = gtk4::ScrolledWindow::new();
     scroll.set_child(Some(&sidebar_list));
@@ -223,10 +224,10 @@ fn build_nav() -> (gtk4::Box, gtk4::Button, gtk4::Button, gtk4::Button, gtk4::Bu
     let b = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     b.set_halign(gtk4::Align::Center);
     b.set_margin_top(4);
-    let pw = gtk4::Button::from_icon_name("go-first-symbolic"); pw.add_css_class("circular"); pw.set_tooltip_text(Some("Previous week"));
-    let pd = gtk4::Button::from_icon_name("go-previous-symbolic"); pd.add_css_class("circular"); pd.set_tooltip_text(Some("Previous day"));
-    let nd = gtk4::Button::from_icon_name("go-next-symbolic"); nd.add_css_class("circular"); nd.set_tooltip_text(Some("Next day"));
-    let nw = gtk4::Button::from_icon_name("go-last-symbolic"); nw.add_css_class("circular"); nw.set_tooltip_text(Some("Next week"));
+    let pw = gtk4::Button::from_icon_name("go-first-symbolic"); pw.add_css_class(CSS_CIRCULAR); pw.set_tooltip_text(Some("Previous week"));
+    let pd = gtk4::Button::from_icon_name("go-previous-symbolic"); pd.add_css_class(CSS_CIRCULAR); pd.set_tooltip_text(Some("Previous day"));
+    let nd = gtk4::Button::from_icon_name("go-next-symbolic"); nd.add_css_class(CSS_CIRCULAR); nd.set_tooltip_text(Some("Next day"));
+    let nw = gtk4::Button::from_icon_name("go-last-symbolic"); nw.add_css_class(CSS_CIRCULAR); nw.set_tooltip_text(Some("Next week"));
     b.append(&pw); b.append(&pd); b.append(&nd); b.append(&nw);
     (b, pw, pd, nd, nw)
 }
@@ -258,24 +259,24 @@ fn update_stats(s: &State) {
 fn update_sidebar(s: &State, day: &DayData) {
     clear_children(&s.sidebar_list);
     if day.details.is_empty() {
-        let r = adw::ActionRow::new(); r.set_title("No sessions"); r.add_css_class("dim-label");
+        let r = adw::ActionRow::new(); r.set_title("No sessions"); r.add_css_class(CSS_DIM_LABEL);
         s.sidebar_list.append(&r); return;
     }
     for d in &day.details {
         if d.sessions.is_empty() {
             let r = adw::ActionRow::new();
             r.set_title(&d.label);
-            let v = gtk4::Label::new(Some(&d.value)); v.add_css_class("dim-label"); r.add_suffix(&v);
+            let v = gtk4::Label::new(Some(&d.value)); v.add_css_class(CSS_DIM_LABEL); r.add_suffix(&v);
             if let Some(h) = &d.color_hex { let sw = gtk4::Label::new(None); sw.set_markup(&format!("<span foreground=\"{}\">\u{25A0}</span>", h)); r.add_prefix(&sw); }
             s.sidebar_list.append(&r);
         } else {
             let ex = adw::ExpanderRow::new();
             ex.set_title(&d.label);
-            let v = gtk4::Label::new(Some(&d.value)); v.add_css_class("dim-label"); ex.add_suffix(&v);
+            let v = gtk4::Label::new(Some(&d.value)); v.add_css_class(CSS_DIM_LABEL); ex.add_suffix(&v);
             if let Some(h) = &d.color_hex { let sw = gtk4::Label::new(None); sw.set_markup(&format!("<span foreground=\"{}\">\u{25A0}</span>", h)); ex.add_prefix(&sw); }
             for ses in &d.sessions {
                 let sub = adw::ActionRow::new(); sub.set_title(&ses.label);
-                let sv = gtk4::Label::new(Some(&ses.value)); sv.add_css_class("dim-label"); sub.add_suffix(&sv);
+                let sv = gtk4::Label::new(Some(&ses.value)); sv.add_css_class(CSS_DIM_LABEL); sub.add_suffix(&sv);
                 ex.add_row(&sub);
             }
             s.sidebar_list.append(&ex);

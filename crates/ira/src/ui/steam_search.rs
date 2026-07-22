@@ -4,6 +4,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use super::helpers::clear_children;
 use super::state::SharedState;
+use super::css::*;
 
 pub(super) fn show_steam_id_search_popup(
     state: &SharedState,
@@ -33,7 +34,7 @@ pub(super) fn show_steam_id_search_popup(
     entry.set_text(game_name);
     entry.set_hexpand(true);
     let search_btn = gtk4::Button::with_label("Search");
-    search_btn.add_css_class("suggested-action");
+    search_btn.add_css_class(CSS_SUGGESTED_ACTION);
     search_box.append(&entry);
     search_box.append(&search_btn);
     outer.append(&search_box);
@@ -47,7 +48,7 @@ pub(super) fn show_steam_id_search_popup(
     list.set_margin_top(8);
     list.set_margin_bottom(12);
     list.set_valign(gtk4::Align::Start);
-    list.add_css_class("boxed-list");
+    list.add_css_class(CSS_BOXED_LIST);
     scrolled.set_child(Some(&list));
     outer.append(&scrolled);
 
@@ -101,7 +102,7 @@ pub(super) fn show_steam_id_search_popup(
                         row.set_title(name);
                         row.set_subtitle(&format!("App ID: {}", app_id));
                         let match_btn = gtk4::Button::with_label(&btn_label);
-                        match_btn.add_css_class("suggested-action");
+                        match_btn.add_css_class(CSS_SUGGESTED_ACTION);
                         match_btn.set_valign(gtk4::Align::Center);
                         let sid = app_id.clone();
                         let on_select_c3 = on_select_c2.clone();

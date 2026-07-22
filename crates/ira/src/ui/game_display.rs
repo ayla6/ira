@@ -5,6 +5,7 @@ use super::state::SharedState;
 use super::helpers::clear_children;
 use super::game_header::build_game_header;
 use super::achievement_view::build_achievements_view;
+use super::css::*;
 pub fn display_game(game: &Game, state: &SharedState) {
     let _span = tracing::info_span!("display_game", db_id = game.db_id).entered();
     let content_box = state.borrow().content_box.clone();
@@ -42,7 +43,7 @@ pub fn display_game(game: &Game, state: &SharedState) {
         box_.set_margin_bottom(32);
         box_.set_halign(gtk4::Align::Center);
         let label = gtk4::Label::new(Some("This game isn't linked to a trophy source yet.\nUse \"Match unmatched games\" in the menu to find a match."));
-        label.add_css_class("dim-label");
+        label.add_css_class(CSS_DIM_LABEL);
         label.set_wrap(true);
         label.set_justify(gtk4::Justification::Center);
         box_.append(&label);

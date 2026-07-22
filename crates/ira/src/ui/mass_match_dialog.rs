@@ -9,6 +9,7 @@ use super::helpers::clear_children;
 use super::steam_search_dialog::handle_steam_search_result;
 use super::sgdb_match_dialog::handle_unified_sgdb_result;
 use super::ra_match_dialog::show_ra_search_dialog;
+use super::css::*;
 
 pub fn normalize_title(s: &str) -> String {
     let lower = s.to_lowercase();
@@ -25,74 +26,42 @@ pub fn normalize_title(s: &str) -> String {
     words[..end].join(" ")
 }
 
-pub fn show_mass_match_dialog(state: &SharedState) {
-    let window = state.borrow().window.clone();
-
-    let (needs_matching, title_map) = {
-        let s = state.borrow();
-        let games = s.games.clone();
-        let needs_matching: Vec<Game> = games.into_iter().filter(|g| {
-            (g.app_id.is_empty() && !g.manual_unmatch)
-            || (g.kind == ira_models::GameKind::Retro && g.trophy_source == ira_models::TrophySource::Empty && !g.manual_unmatch)
-            || (g.sgdb_id.is_empty() && !g.manual_unmatch && (g.app_id.is_empty() || g.kind == ira_models::GameKind::Retro))
-        }).collect();
-        let save_dir = &s.save_dir;
-        let data_dir = std::path::Path::new(save_dir).join("data").join("steam");
-        let mut map: Vec<(String, String, String)> = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&data_dir) {
-            for entry in entries.flatten() {
-                let app_id = match entry.file_name().to_str() {
-                    Some(s) if s.parse::<i64>().is_ok() => s.to_string(),
-                    _ => continue,
-                };
-                if let Some(name) = ira_parser::read_app_name(save_dir, &app_id) {
-                    map.push((normalize_title(&name), app_id, name));
-                }
+fn collect_unmatched_games(state: &SharedState) -> (Vec<Game>, Vec<(String, String, String)>) {
+    let s = state.borrow();
+    let games = s.games.clone();
+    let needs_matching: Vec<Game> = games.into_iter().filter(|g| {
+        (g.app_id.is_empty() && !g.manual_unmatch)
+        || (g.kind == ira_models::GameKind::Retro && g.trophy_source == ira_models::TrophySource::Empty && !g.manual_unmatch)
+        || (g.sgdb_id.is_empty() && !g.manual_unmatch && (g.app_id.is_empty() || g.kind == ira_models::GameKind::Retro))
+    }).collect();
+    let save_dir = &s.save_dir;
+    let data_dir = std::path::Path::new(save_dir).join("data").join("steam");
+    let mut map: Vec<(String, String, String)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&data_dir) {
+        for entry in entries.flatten() {
+            let app_id = match entry.file_name().to_str() {
+                Some(s) if s.parse::<i64>().is_ok() => s.to_string(),
+                _ => continue,
+            };
+            if let Some(name) = ira_parser::read_app_name(save_dir, &app_id) {
+                map.push((normalize_title(&name), app_id, name));
             }
         }
-        (needs_matching, map)
-    };
-
-    if needs_matching.is_empty() {
-        let d = adw::AlertDialog::new(Some("Nothing to match"), Some("Every game already has a trophy source and image assets linked."));
-        d.add_response("ok", "OK");
-        d.present(Some(&window));
-        return;
     }
+    (needs_matching, map)
+}
 
-    let dialog = adw::Window::new();
-    dialog.set_default_width(600);
-    dialog.set_default_height(500);
-    dialog.set_transient_for(Some(&window));
-    dialog.set_modal(true);
-
-    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-
-    let header_bar = adw::HeaderBar::new();
-    header_bar.set_title_widget(Some(&gtk4::Label::new(Some("Match unmatched games"))));
-    outer.append(&header_bar);
-
-    let header = gtk4::Label::new(Some(&format!("{} game(s) to match", needs_matching.len())));
-    header.set_margin_top(16);
-    header.set_margin_bottom(8);
-    header.set_margin_start(16);
-    header.set_margin_end(16);
-    header.set_xalign(0.0);
-    header.add_css_class("heading");
-    outer.append(&header);
-
-    let scrolled = gtk4::ScrolledWindow::new();
-    scrolled.set_vexpand(true);
-    scrolled.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-
-    let list = gtk4::ListBox::new();
-    list.set_selection_mode(gtk4::SelectionMode::None);
-
+fn populate_match_list(
+    list: &gtk4::ListBox,
+    needs_matching: &[Game],
+    state: &SharedState,
+    dialog: &adw::Window,
+) -> Vec<gtk4::Box> {
     let mut row_action_boxes: Vec<gtk4::Box> = Vec::new();
 
     for game in needs_matching.iter() {
         let action_box = if game.kind == ira_models::GameKind::Retro && game.trophy_source == ira_models::TrophySource::Empty {
-            let ac = create_match_row(&list, &game.name, "RA: not matched");
+            let ac = create_match_row(list, &game.name, "RA: not matched");
             let inner = ac.clone();
             let sc = state.clone();
             let gn = game.name.clone();
@@ -100,7 +69,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
             let did = game.db_id;
             let dlg = dialog.clone();
             let ra_btn = gtk4::Button::with_label("Search RA…");
-            ra_btn.add_css_class("suggested-action");
+            ra_btn.add_css_class(CSS_SUGGESTED_ACTION);
             let sc2 = sc.clone();
             let gn2 = gn.clone();
             let pid2 = pid.clone();
@@ -112,7 +81,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
                 show_ra_search_dialog(&sc2, did2, &gn2, &pid2, &dlg2, Some(Rc::new(move || {
                     clear_children(&inner_update);
                     let label = gtk4::Label::new(Some("RA: matched"));
-                    label.add_css_class("success-label");
+                    label.add_css_class(CSS_SUCCESS_LABEL);
                     inner_update.append(&label);
                 })));
             });
@@ -124,30 +93,21 @@ pub fn show_mass_match_dialog(state: &SharedState) {
             } else {
                 "Searching SGDB..."
             };
-            create_match_row(&list, &game.name, searching_text)
+            create_match_row(list, &game.name, searching_text)
         };
         row_action_boxes.push(action_box);
     }
 
-    scrolled.set_child(Some(&list));
-    outer.append(&scrolled);
+    row_action_boxes
+}
 
-    let close_btn = gtk4::Button::with_label("Close");
-    close_btn.set_halign(gtk4::Align::End);
-    close_btn.set_margin_top(8);
-    close_btn.set_margin_bottom(12);
-    close_btn.set_margin_start(16);
-    close_btn.set_margin_end(16);
-    let win = dialog.clone();
-    close_btn.connect_clicked(move |_| win.close());
-    outer.append(&close_btn);
-
-    dialog.set_content(Some(&outer));
-    dialog.present();
-
-    let steam = state.borrow().steam.clone();
-
-    // --- Steam auto-batch thread (games without app_id) ---
+fn start_steam_batch_matching(
+    state: &SharedState,
+    needs_matching: &[Game],
+    title_map: Vec<(String, String, String)>,
+    row_action_boxes: &[gtk4::Box],
+    dialog: &adw::Window,
+) {
     let steam_games: Vec<(String, i64, ira_models::GameKind)> = needs_matching.iter()
         .filter(|g| g.app_id.is_empty() && !g.manual_unmatch)
         .map(|g| (g.name.clone(), g.db_id, g.kind))
@@ -157,9 +117,15 @@ pub fn show_mass_match_dialog(state: &SharedState) {
         .map(|(i, _)| i)
         .collect();
 
+    if steam_games.is_empty() {
+        return;
+    }
+
     let (steam_tx, steam_rx) = std::sync::mpsc::channel::<(usize, Option<(String, String)>, String, i64)>();
     let steam_rx = std::cell::RefCell::new(steam_rx);
     let steam_remaining = Cell::new(steam_games.len());
+
+    let steam = state.borrow().steam.clone();
 
     {
         let steam_games = steam_games.clone();
@@ -198,8 +164,8 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     }
 
     let state_rx = state.clone();
-    let steam_rx_steam = state.borrow().steam.clone();
-    let row_boxes = row_action_boxes.clone();
+    let steam_rx_steam = steam.clone();
+    let row_boxes = row_action_boxes.to_vec();
     let parent_dialog = dialog.clone();
     let steam_row_indices = steam_row_indices.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
@@ -220,12 +186,23 @@ pub fn show_mass_match_dialog(state: &SharedState) {
         }
         glib::ControlFlow::Continue
     });
+}
 
-    // --- SGDB auto-batch thread (games without sgdb_id, including RA-matched retro games) ---
+fn start_sgdb_batch_matching(
+    state: &SharedState,
+    needs_matching: &[Game],
+    row_action_boxes: &[gtk4::Box],
+    dialog: &adw::Window,
+) {
     let sgdb_games: Vec<(String, i64, usize)> = needs_matching.iter().enumerate()
         .filter(|(_, g)| g.sgdb_id.is_empty() && !g.manual_unmatch && (g.app_id.is_empty() || g.kind == ira_models::GameKind::Retro))
         .map(|(row_idx, g)| (g.name.clone(), g.db_id, row_idx))
         .collect();
+
+    if sgdb_games.is_empty() {
+        return;
+    }
+
     let (sgdb_tx, sgdb_rx) = std::sync::mpsc::channel::<(usize, Option<(String, String)>, i64, String)>();
     let sgdb_rx = std::cell::RefCell::new(sgdb_rx);
     let sgdb_remaining = Cell::new(sgdb_games.len());
@@ -244,7 +221,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 
     let state_sgdb = state.clone();
     let parent_dialog_sgdb = dialog.clone();
-    let sgdb_row_boxes = row_action_boxes.clone();
+    let sgdb_row_boxes = row_action_boxes.to_vec();
     glib::timeout_add_local(std::time::Duration::from_millis(150), move || {
         if let Ok((idx, matched, db_id, game_name)) = sgdb_rx.borrow_mut().try_recv() {
             if let Some(row_idx) = sgdb_games.get(idx).map(|(_, _, r)| *r) {
@@ -265,6 +242,68 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     });
 }
 
+pub fn show_mass_match_dialog(state: &SharedState) {
+    let window = state.borrow().window.clone();
+
+    let (needs_matching, title_map) = collect_unmatched_games(state);
+
+    if needs_matching.is_empty() {
+        let d = adw::AlertDialog::new(Some("Nothing to match"), Some("Every game already has a trophy source and image assets linked."));
+        d.add_response("ok", "OK");
+        d.present(Some(&window));
+        return;
+    }
+
+    let dialog = adw::Window::new();
+    dialog.set_default_width(600);
+    dialog.set_default_height(500);
+    dialog.set_transient_for(Some(&window));
+    dialog.set_modal(true);
+
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+
+    let header_bar = adw::HeaderBar::new();
+    header_bar.set_title_widget(Some(&gtk4::Label::new(Some("Match unmatched games"))));
+    outer.append(&header_bar);
+
+    let header = gtk4::Label::new(Some(&format!("{} game(s) to match", needs_matching.len())));
+    header.set_margin_top(16);
+    header.set_margin_bottom(8);
+    header.set_margin_start(16);
+    header.set_margin_end(16);
+    header.set_xalign(0.0);
+    header.add_css_class(CSS_HEADING);
+    outer.append(&header);
+
+    let scrolled = gtk4::ScrolledWindow::new();
+    scrolled.set_vexpand(true);
+    scrolled.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+
+    let list = gtk4::ListBox::new();
+    list.set_selection_mode(gtk4::SelectionMode::None);
+
+    let row_action_boxes = populate_match_list(&list, &needs_matching, state, &dialog);
+
+    scrolled.set_child(Some(&list));
+    outer.append(&scrolled);
+
+    let close_btn = gtk4::Button::with_label("Close");
+    close_btn.set_halign(gtk4::Align::End);
+    close_btn.set_margin_top(8);
+    close_btn.set_margin_bottom(12);
+    close_btn.set_margin_start(16);
+    close_btn.set_margin_end(16);
+    let win = dialog.clone();
+    close_btn.connect_clicked(move |_| win.close());
+    outer.append(&close_btn);
+
+    dialog.set_content(Some(&outer));
+    dialog.present();
+
+    start_steam_batch_matching(state, &needs_matching, title_map, &row_action_boxes, &dialog);
+    start_sgdb_batch_matching(state, &needs_matching, &row_action_boxes, &dialog);
+}
+
 fn create_match_row(list: &gtk4::ListBox, name: &str, searching_text: &str) -> gtk4::Box {
     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     row.set_margin_start(12);
@@ -280,7 +319,7 @@ fn create_match_row(list: &gtk4::ListBox, name: &str, searching_text: &str) -> g
 
     let action_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     let searching = gtk4::Label::new(Some(searching_text));
-    searching.add_css_class("dim-label");
+    searching.add_css_class(CSS_DIM_LABEL);
     action_box.append(&searching);
     row.append(&action_box);
 

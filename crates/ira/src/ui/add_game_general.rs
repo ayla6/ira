@@ -1,7 +1,10 @@
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Mutex;
 use gtk4::prelude::*;
 use adw::prelude::*;
 use super::state::SharedState;
+use super::css::*;
 
 pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::WineProfile], state: &SharedState) -> (gtk4::Box, adw::EntryRow, adw::ComboRow, adw::EntryRow, adw::EntryRow, adw::EntryRow, gtk4::Button, adw::ComboRow, adw::EntryRow, adw::EntryRow) {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -69,7 +72,7 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
     edit_btn.set_icon_name("document-edit-symbolic");
     edit_btn.set_tooltip_text(Some("Edit profile"));
     edit_btn.set_valign(gtk4::Align::Center);
-    edit_btn.add_css_class("flat");
+    edit_btn.add_css_class(CSS_FLAT);
     let profiles_c: Vec<ira_models::WineProfile> = profiles.to_vec();
     let pr_c = profile_row.clone();
     let state_c = state.clone();
@@ -97,7 +100,7 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
     let steam_search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
     steam_search_btn.set_valign(gtk4::Align::Center);
     steam_search_btn.set_tooltip_text(Some("Search Steam Store"));
-    steam_search_btn.add_css_class("flat");
+    steam_search_btn.add_css_class(CSS_FLAT);
     {
         let sc = state.clone();
         let win_c = win.clone();
@@ -159,17 +162,34 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
                     }
                 }
                 if exe.text().is_empty() {
-                    if let Ok(entries) = std::fs::read_dir(&folder) {
-                        for e in entries.flatten() {
-                            let p = e.path();
-                            if let Some(ext) = p.extension() {
-                                if ext == "exe" || ext == "x86_64" || ext == "AppRun" || ext == "sh" {
-                                    exe.set_text(&p.to_string_lossy());
-                                    break;
+                    let shared = Arc::new(Mutex::new(None::<String>));
+                    let shared_c = shared.clone();
+                    let exe_c = exe.clone();
+                    let folder_c = folder.clone();
+                    std::thread::spawn(move || {
+                        let path = std::fs::read_dir(&folder_c).ok().and_then(|dir| {
+                            for entry in dir.flatten() {
+                                let p = entry.path();
+                                if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+                                    if ext == "exe" || ext == "x86_64" || ext == "AppRun" || ext == "sh" {
+                                        return Some(p.to_string_lossy().into_owned());
+                                    }
                                 }
                             }
+                            None
+                        });
+                        if let Some(p) = path {
+                            *shared_c.lock().unwrap() = Some(p);
                         }
-                    }
+                    });
+                    glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+                        if let Some(p) = shared.lock().unwrap().take() {
+                            exe_c.set_text(&p);
+                            glib::ControlFlow::Break
+                        } else {
+                            glib::ControlFlow::Continue
+                        }
+                    });
                 }
             }
         },

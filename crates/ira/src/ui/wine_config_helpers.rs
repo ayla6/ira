@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
+use super::css::*;
 
 pub(super) type OverrideList = Rc<RefCell<Vec<String>>>;
 
@@ -49,7 +50,7 @@ pub(super) fn page_with_content(content: gtk4::Box) -> gtk4::ScrolledWindow {
 
 pub(super) fn make_revert_btn() -> gtk4::Button {
     let btn = gtk4::Button::from_icon_name("edit-undo-symbolic");
-    btn.add_css_class("flat");
+    btn.add_css_class(CSS_FLAT);
     btn.set_valign(gtk4::Align::Center);
     btn.set_tooltip_text(Some("Revert to app default"));
     btn

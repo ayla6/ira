@@ -4,6 +4,7 @@ use ira_config::Config;
 use crate::strings as S;
 use super::helpers::string_list_from;
 use super::settings_dialog::settings_page_container;
+use super::css::*;
 
 pub(super) fn settings_sidebar_row(icon: &str, label: &str) -> gtk4::ListBoxRow {
     let row = gtk4::ListBoxRow::new();
@@ -24,7 +25,7 @@ pub(super) fn sidebar_separator() -> gtk4::ListBoxRow {
     row.set_child(Some(&sep));
     row.set_selectable(false);
     row.set_sensitive(false);
-    row.add_css_class("sidebar-separator-row");
+    row.add_css_class(CSS_SIDEBAR_SEPARATOR_ROW);
     row
 }
 
@@ -90,7 +91,7 @@ pub(super) fn build_lutris_settings_page(state: &super::state::SharedState, sett
     migrate_row.set_title("Import Lutris games");
     migrate_row.set_subtitle("Reads each Lutris game's config and creates a game entry with wine settings");
     let migrate_btn = gtk4::Button::with_label("Import All");
-    migrate_btn.add_css_class("suggested-action");
+    migrate_btn.add_css_class(CSS_SUGGESTED_ACTION);
     migrate_btn.set_valign(gtk4::Align::Center);
     migrate_row.add_suffix(&migrate_btn);
     migrate_group.add(&migrate_row);
@@ -268,7 +269,7 @@ pub(super) fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRo
     dir_row.set_sensitive(false);
 
     let open_btn = gtk4::Button::with_label("Open");
-    open_btn.add_css_class("flat");
+    open_btn.add_css_class(CSS_FLAT);
     open_btn.set_valign(gtk4::Align::Center);
     {
         let path = emu_dir.clone();

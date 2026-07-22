@@ -9,6 +9,7 @@ use super::helpers::clear_children;
 use super::helpers::refresh_settings_images_page;
 use super::game_display::display_game;
 use super::grid_view::show_grid_view;
+use super::css::*;
 
 pub(super) fn handle_unified_sgdb_result(
     state: &SharedState,
@@ -58,7 +59,7 @@ pub(super) fn handle_unified_sgdb_result(
         });
 
         let label = gtk4::Label::new(Some(&format!("SGDB: {}", matched_name)));
-        label.add_css_class("success-label");
+        label.add_css_class(CSS_SUCCESS_LABEL);
         action_box.append(&label);
 
         let undo_btn = gtk4::Button::with_label("Undo SGDB");
@@ -101,24 +102,29 @@ pub(super) fn handle_unified_sgdb_result(
                     }
                 }
             }
-            let selected_id = sc.borrow().selected_id.clone();
-            if ira_models::parse_db_id(&selected_id) == db_id {
-                let game = sc.borrow().games.iter().find(|g| g.grid_id() == selected_id).cloned();
-                if let Some(game) = game {
-                    display_game(&game, &sc);
-                }
+            let (game_to_display, is_grid_showing) = {
+                let s = sc.borrow();
+                let sid = s.selected_id.clone();
+                let game = if ira_models::parse_db_id(&sid) == db_id {
+                    s.games.iter().find(|g| g.grid_id() == sid).cloned()
+                } else {
+                    None
+                };
+                (game, s.selected_id.is_empty() && !s.content_unloaded)
+            };
+            if let Some(game) = game_to_display {
+                display_game(&game, &sc);
             }
             refresh_settings_images_page(&sc, db_id, |s, game, win, pc| {
                 build_image_manager_content_with_drafts(s, game, win, pc).upcast()
             });
-            let is_grid_showing = sc.borrow().selected_id.is_empty() && !sc.borrow().content_unloaded;
             if is_grid_showing {
                 show_grid_view(&sc);
             }
             // Update the mass match row to show unmatched state with manual search
             clear_children(&action_box_c);
             let label = gtk4::Label::new(Some("SGDB: unmatched"));
-            label.add_css_class("dim-label");
+            label.add_css_class(CSS_DIM_LABEL);
             action_box_c.append(&label);
             let sgdb_btn = gtk4::Button::with_label("Search SGDB…");
             let sc2 = sc.clone();
@@ -132,7 +138,7 @@ pub(super) fn handle_unified_sgdb_result(
                     move || {
                         clear_children(&ab);
                         let label = gtk4::Label::new(Some(&format!("Matched to SGDB: {}", name)));
-                        label.add_css_class("success-label");
+                        label.add_css_class(CSS_SUCCESS_LABEL);
                         ab.append(&label);
                     }
                 });
@@ -143,7 +149,7 @@ pub(super) fn handle_unified_sgdb_result(
         action_box.append(&undo_btn);
     } else {
         let label = gtk4::Label::new(Some("SGDB: not found"));
-        label.add_css_class("dim-label");
+        label.add_css_class(CSS_DIM_LABEL);
         action_box.append(&label);
 
         let sgdb_btn = gtk4::Button::with_label("Search SGDB…");
@@ -159,7 +165,7 @@ pub(super) fn handle_unified_sgdb_result(
                 move || {
                     clear_children(&ab);
                     let label = gtk4::Label::new(Some(&format!("Matched to SGDB: {}", name)));
-                    label.add_css_class("success-label");
+                    label.add_css_class(CSS_SUCCESS_LABEL);
                     ab.append(&label);
                 }
             });
@@ -191,7 +197,7 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
     entry.set_text(game_name);
     entry.set_hexpand(true);
     let search_btn = gtk4::Button::with_label("Search");
-    search_btn.add_css_class("suggested-action");
+    search_btn.add_css_class(CSS_SUGGESTED_ACTION);
     search_box.append(&entry);
     search_box.append(&search_btn);
     outer.append(&search_box);
@@ -247,7 +253,7 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
                         row.set_title(&super::helpers::esc(name));
                         row.set_subtitle(&format!("SGDB ID: {}", sgdb_id));
                         let match_btn = gtk4::Button::with_label("Match");
-                        match_btn.add_css_class("suggested-action");
+                        match_btn.add_css_class(CSS_SUGGESTED_ACTION);
                         match_btn.set_valign(gtk4::Align::Center);
                         let sgdb_id_c = sgdb_id.clone();
                         let state_c3 = state_c2.clone();

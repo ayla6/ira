@@ -104,78 +104,110 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             }
         }
         AppMessage::ShadPS4PlaytimeChanged => {
-            let play_times = ira_platforms::ps4::read_play_times();
-            let mut updated_ids = Vec::new();
-            for g in state.borrow_mut().games.iter_mut() {
-                if g.kind == ira_models::GameKind::Ps4 {
-                    let serial = &g.platform_id;
-                    if let Some(time_str) = play_times.get(serial) {
-                        let new_playtime = ira_platforms::ps4::parse_playtime(time_str);
-                        if (g.playtime - new_playtime).abs() > 0.001 {
-                            g.playtime = new_playtime;
-                            updated_ids.push(g.db_id);
+            let (tx, rx) = std::sync::mpsc::channel();
+            let rx = std::cell::RefCell::new(rx);
+            std::thread::spawn(move || {
+                let _s = tracing::info_span!("ps4_read_playtimes").entered();
+                let play_times = ira_platforms::ps4::read_play_times();
+                let _ = tx.send(play_times);
+            });
+            let state = state.clone();
+            glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+                match rx.borrow_mut().try_recv() {
+                    Ok(play_times) => {
+                        let mut updated_ids = Vec::new();
+                        for g in state.borrow_mut().games.iter_mut() {
+                            if g.kind == ira_models::GameKind::Ps4 {
+                                let serial = &g.platform_id;
+                                if let Some(time_str) = play_times.get(serial) {
+                                    let new_playtime = ira_platforms::ps4::parse_playtime(time_str);
+                                    if (g.playtime - new_playtime).abs() > 0.001 {
+                                        g.playtime = new_playtime;
+                                        updated_ids.push(g.db_id);
+                                    }
+                                }
+                            }
                         }
-                    }
-                }
-            }
-            if !updated_ids.is_empty() {
-                rebuild_sidebar(state);
-                let selected_id = state.borrow().selected_id.clone();
-                if let Some(id) = updated_ids.first() {
-                    if ira_models::parse_db_id(&selected_id) == *id {
-                        let game = state.borrow().games.iter()
-                            .find(|g| g.grid_id() == selected_id)
-                            .cloned();
-                        if let Some(game) = game {
-                            display_game(&game, state);
+                        if !updated_ids.is_empty() {
+                            rebuild_sidebar(&state);
+                            let selected_id = state.borrow().selected_id.clone();
+                            if let Some(id) = updated_ids.first() {
+                                if ira_models::parse_db_id(&selected_id) == *id {
+                                    let game = state.borrow().games.iter()
+                                        .find(|g| g.grid_id() == selected_id)
+                                        .cloned();
+                                    if let Some(game) = game {
+                                        display_game(&game, &state);
+                                    }
+                                }
+                            }
                         }
+                        glib::ControlFlow::Break
                     }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
                 }
-            }
+            });
         }
         AppMessage::Rpcs3PlaytimeChanged => {
-            let persistent = ira_platforms::ps3::parse_persistent_settings(
-                &ira_platforms::ps3::persistent_settings_path(),
-            );
-            let mut updated_ids = Vec::new();
-            for g in state.borrow_mut().games.iter_mut() {
-                if g.kind == ira_models::GameKind::Ps3 {
-                    let serial = &g.platform_id;
-                    let new_playtime = persistent.playtime_ms.get(serial)
-                        .map(|ms| ira_platforms::ps3::ms_to_hours(*ms));
-                    let new_last_played = persistent.last_played.get(serial).copied();
-                    let changed = match new_playtime {
-                        Some(pt) if (g.playtime - pt).abs() > 0.001 => {
-                            g.playtime = pt;
-                            true
+            let (tx, rx) = std::sync::mpsc::channel();
+            let rx = std::cell::RefCell::new(rx);
+            std::thread::spawn(move || {
+                let _s = tracing::info_span!("ps3_read_persistent").entered();
+                let persistent = ira_platforms::ps3::parse_persistent_settings(
+                    &ira_platforms::ps3::persistent_settings_path(),
+                );
+                let _ = tx.send(persistent);
+            });
+            let state = state.clone();
+            glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+                match rx.borrow_mut().try_recv() {
+                    Ok(persistent) => {
+                        let mut updated_ids = Vec::new();
+                        for g in state.borrow_mut().games.iter_mut() {
+                            if g.kind == ira_models::GameKind::Ps3 {
+                                let serial = &g.platform_id;
+                                let new_playtime = persistent.playtime_ms.get(serial)
+                                    .map(|ms| ira_platforms::ps3::ms_to_hours(*ms));
+                                let new_last_played = persistent.last_played.get(serial).copied();
+                                let changed = match new_playtime {
+                                    Some(pt) if (g.playtime - pt).abs() > 0.001 => {
+                                        g.playtime = pt;
+                                        true
+                                    }
+                                    _ => false,
+                                } || match new_last_played {
+                                    Some(lp) if lp != g.last_played => {
+                                        g.last_played = lp;
+                                        true
+                                    }
+                                    _ => false,
+                                };
+                                if changed {
+                                    updated_ids.push(g.db_id);
+                                }
+                            }
                         }
-                        _ => false,
-                    } || match new_last_played {
-                        Some(lp) if lp != g.last_played => {
-                            g.last_played = lp;
-                            true
+                        if !updated_ids.is_empty() {
+                            rebuild_sidebar(&state);
+                            let selected_id = state.borrow().selected_id.clone();
+                            if let Some(id) = updated_ids.first() {
+                                if ira_models::parse_db_id(&selected_id) == *id {
+                                    let game = state.borrow().games.iter()
+                                        .find(|g| g.grid_id() == selected_id)
+                                        .cloned();
+                                    if let Some(game) = game {
+                                        display_game(&game, &state);
+                                    }
+                                }
+                            }
                         }
-                        _ => false,
-                    };
-                    if changed {
-                        updated_ids.push(g.db_id);
+                        glib::ControlFlow::Break
                     }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
                 }
-            }
-            if !updated_ids.is_empty() {
-                rebuild_sidebar(state);
-                let selected_id = state.borrow().selected_id.clone();
-                if let Some(id) = updated_ids.first() {
-                    if ira_models::parse_db_id(&selected_id) == *id {
-                        let game = state.borrow().games.iter()
-                            .find(|g| g.grid_id() == selected_id)
-                            .cloned();
-                        if let Some(game) = game {
-                            display_game(&game, state);
-                        }
-                    }
-                }
-            }
+            });
         }
         AppMessage::GamesLoaded(games) => {
             handle_games_loaded(state, games);
@@ -287,13 +319,29 @@ fn refresh_steam_playtimes_for(state: &SharedState, db_ids: &[i64]) {
         return;
     }
 
-    let all_playtimes = ira_platforms::steam::read_all_playtimes();
-    let map: HashMap<i64, (f64, i64)> = app_ids.iter()
-        .filter_map(|(db_id, app_id)| {
-            all_playtimes.get(app_id).map(|&(pt, lp)| (*db_id, (pt, lp)))
-        })
-        .collect();
-    apply_playtime_updates_db(state, &map);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let rx = std::cell::RefCell::new(rx);
+    std::thread::spawn(move || {
+        let _s = tracing::info_span!("steam_read_playtimes").entered();
+        let all_playtimes = ira_platforms::steam::read_all_playtimes();
+        let map: HashMap<i64, (f64, i64)> = app_ids.iter()
+            .filter_map(|(db_id, app_id)| {
+                all_playtimes.get(app_id).map(|&(pt, lp)| (*db_id, (pt, lp)))
+            })
+            .collect();
+        let _ = tx.send(map);
+    });
+    let state = state.clone();
+    glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+        match rx.borrow_mut().try_recv() {
+            Ok(map) => {
+                apply_playtime_updates_db(&state, &map);
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
 }
 
 fn apply_playtime_updates_db(state: &SharedState, updates: &HashMap<i64, (f64, i64)>) {
@@ -337,25 +385,28 @@ fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
         let mut s = state.borrow_mut();
         s.games = games;
 
-        // Validate default variants: reset if no longer eligible
         let db = s.db.clone();
         let mut db_ids_to_check: Vec<i64> = s.games.iter()
             .filter(|g| g.variant_id.is_none())
             .map(|g| g.db_id)
             .collect();
+        db_ids_to_check.sort();
         db_ids_to_check.dedup();
-        for db_id in &db_ids_to_check {
-            if let Some(default_vid) = ira_db::get_default_variant(&db, *db_id) {
-                let eligible = ira_db::get_variants(&db, *db_id)
-                    .unwrap_or_default()
-                    .iter()
-                    .find(|v| v.id == default_vid)
-                    .is_some_and(|v| v.count_playtime && !v.show_as_entry);
-                if !eligible {
-                    ira_db::set_default_variant(&db, *db_id, None);
+        std::thread::spawn(move || {
+            let _s = tracing::info_span!("validate_default_variants").entered();
+            for db_id in &db_ids_to_check {
+                if let Some(default_vid) = ira_db::get_default_variant(&db, *db_id) {
+                    let eligible = ira_db::get_variants(&db, *db_id)
+                        .unwrap_or_default()
+                        .iter()
+                        .find(|v| v.id == default_vid)
+                        .is_some_and(|v| v.count_playtime && !v.show_as_entry);
+                    if !eligible {
+                        ira_db::set_default_variant(&db, *db_id, None);
+                    }
                 }
             }
-        }
+        });
 
         let mut names = s.game_names.lock().unwrap();
         for g in &s.games {

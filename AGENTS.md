@@ -183,6 +183,10 @@ permanent migration mechanism.
 - **When you have `db_id`, use `find_by_db_id`.** Never look up a secondary key
   (steam_id, game_id, etc.) just to resolve the primary key you already have.
 
+## Style
+
+- **Prefer functional programming patterns when they are more readable and don't have a performance or memory drawback.**
+
 ## UI guidelines
 
 ### GTK patterns

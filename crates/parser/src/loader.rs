@@ -1,4 +1,4 @@
-use ira_models::{AchievementStatus, Game};
+use ira_models::{AchievementStatus, AssetType, Game};
 use std::collections::HashMap;
 use serde::Deserialize;
 
@@ -26,7 +26,9 @@ pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
             .collect())
         .unwrap_or_default();
 
-    for &(base, max_w, max_h) in &[("icon", 32u32, 32u32), ("hero", 1920, 620), ("vertical", 300, 450), ("header", 460, 215), ("logo", 620, 620)] {
+    for &at in AssetType::all() {
+        let base = at.file_base();
+        let (max_w, max_h) = at.thumb_dims();
         let small_webp = format!("{}_small.webp", base);
         let small_jpg = format!("{}_small.jpg", base);
         if !files.contains(&small_webp) && !files.contains(&small_jpg) {
@@ -47,19 +49,19 @@ pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
         None
     };
 
-    if let Some(p) = find("icon_small").or_else(|| find("icon")) {
+    if let Some(p) = find(&format!("{}_small", AssetType::Icon.file_base())).or_else(|| find(AssetType::Icon.file_base())) {
         game.icon_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = find("vertical_small").or_else(|| find("vertical")) {
+    if let Some(p) = find(&format!("{}_small", AssetType::Grid.file_base())).or_else(|| find(AssetType::Grid.file_base())) {
         game.grid_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = find("header_small").or_else(|| find("header")) {
+    if let Some(p) = find(&format!("{}_small", AssetType::Header.file_base())).or_else(|| find(AssetType::Header.file_base())) {
         game.header_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = find("hero_small").or_else(|| find("hero")) {
+    if let Some(p) = find(&format!("{}_small", AssetType::Hero.file_base())).or_else(|| find(AssetType::Hero.file_base())) {
         game.hero_image_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = find("logo_small").or_else(|| find("logo")) {
+    if let Some(p) = find(&format!("{}_small", AssetType::Logo.file_base())).or_else(|| find(AssetType::Logo.file_base())) {
         game.logo_path = p.to_string_lossy().into_owned();
     }
 }

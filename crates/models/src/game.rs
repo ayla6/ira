@@ -1,4 +1,5 @@
 use super::achievement::MergedAchievement;
+use super::asset_type::LogoPosition;
 use super::kind::{GameKind, TrophySource};
 
 #[derive(Debug, Clone)]
@@ -79,7 +80,7 @@ impl Default for Game {
             slug: String::new(),
             playtime: 0.0,
             last_played: 0,
-            logo_position: "bottom-left".to_string(),
+            logo_position: LogoPosition::BottomLeft.to_string(),
             logo_size: 50,
             manual_unmatch: false,
             sort_title: String::new(),

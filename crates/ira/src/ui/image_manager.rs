@@ -4,6 +4,7 @@ use crate::Game;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use ira_models::AssetType;
 use super::helpers::{clear_children, make_browse_button, refresh_settings_images_page};
 use super::sgdb_match_dialog::show_sgdb_search_dialog;
 use super::sgdb_picker::{show_sgdb_picker, ShowSgdbPickerParams};
@@ -32,11 +33,11 @@ pub fn build_image_manager_content_with_drafts(
     let is_steam = game.trophy_source.has_steam_enrichment();
 
     let sections: [SectionEntry; 5] = [
-        ("Icon", "icon", "icon", 48, 48, &[]),
-        ("Hero", "hero", "hero", 96, 64, &[]),
-        ("Capsule", "vertical", "grid", 48, 64, &["600x900"]),
-        ("Header", "header", "header", 96, 48, &["460x215", "920x430"]),
-        ("Logo", "logo", "logo", 64, 64, &[]),
+        (AssetType::Icon.display_name(), AssetType::Icon.file_base(), AssetType::Icon.as_str(), 48, 48, &[]),
+        (AssetType::Hero.display_name(), AssetType::Hero.file_base(), AssetType::Hero.as_str(), 96, 64, &[]),
+        (AssetType::Grid.display_name(), AssetType::Grid.file_base(), AssetType::Grid.as_str(), 48, 64, &["600x900"]),
+        (AssetType::Header.display_name(), AssetType::Header.file_base(), AssetType::Header.as_str(), 96, 48, &["460x215", "920x430"]),
+        (AssetType::Logo.display_name(), AssetType::Logo.file_base(), AssetType::Logo.as_str(), 64, 64, &[]),
     ];
 
     for &(label, file, asset, thumb_w, thumb_h, dimensions) in &sections {
@@ -96,12 +97,12 @@ pub fn build_image_manager_content_with_drafts(
 }
 
 fn find_best_image_path(game: &Game, field: &str, _base: &str, id: &str, save_dir: &str) -> String {
-    let field_path = match field {
-        "icon" if !game.icon_path.is_empty() => game.icon_path.clone(),
-        "hero" if !game.hero_image_path.is_empty() => game.hero_image_path.clone(),
-        "grid" if !game.grid_path.is_empty() => game.grid_path.clone(),
-        "header" if !game.header_path.is_empty() => game.header_path.clone(),
-        "logo" if !game.logo_path.is_empty() => game.logo_path.clone(),
+    let field_path = match AssetType::from_string(field) {
+        Some(AssetType::Icon) if !game.icon_path.is_empty() => game.icon_path.clone(),
+        Some(AssetType::Hero) if !game.hero_image_path.is_empty() => game.hero_image_path.clone(),
+        Some(AssetType::Grid) if !game.grid_path.is_empty() => game.grid_path.clone(),
+        Some(AssetType::Header) if !game.header_path.is_empty() => game.header_path.clone(),
+        Some(AssetType::Logo) if !game.logo_path.is_empty() => game.logo_path.clone(),
         _ => String::new(),
     };
     if !field_path.is_empty() && std::path::Path::new(&field_path).is_file() {
@@ -128,19 +129,19 @@ fn find_best_image_path(game: &Game, field: &str, _base: &str, id: &str, save_di
     if let Some(f) = ira_parser::find_image_file(&native_dir, field) {
         return f.to_string_lossy().into_owned();
     }
-    if field == "icon" && game.kind.is_trophy_console() && !game.icon_path.is_empty() && std::path::Path::new(&game.icon_path).is_file() {
+    if AssetType::from_string(field) == Some(AssetType::Icon) && game.kind.is_trophy_console() && !game.icon_path.is_empty() && std::path::Path::new(&game.icon_path).is_file() {
         return game.icon_path.clone();
     }
     String::new()
 }
 
 fn image_path_for_asset<'a>(game: &'a Game, asset: &'a str) -> &'a str {
-    match asset {
-        "icon" => &game.icon_path,
-        "hero" => &game.hero_image_path,
-        "grid" => &game.grid_path,
-        "header" => &game.header_path,
-        "logo" => &game.logo_path,
+    match AssetType::from_string(asset) {
+        Some(AssetType::Icon) => &game.icon_path,
+        Some(AssetType::Hero) => &game.hero_image_path,
+        Some(AssetType::Grid) => &game.grid_path,
+        Some(AssetType::Header) => &game.header_path,
+        Some(AssetType::Logo) => &game.logo_path,
         _ => "",
     }
 }
@@ -309,7 +310,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     );
     btns.append(&browse_btn);
 
-    if is_steam && asset_type != "icon" {
+    if is_steam && AssetType::from_string(asset_type) != Some(AssetType::Icon) {
         let btn = gtk4::Button::with_label("Steam");
         let steam = state.borrow().steam.clone();
         let id_c = id.clone();
@@ -324,9 +325,10 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
             let asset_c = asset_c.clone();
             let (tx, rx) = std::sync::mpsc::channel();
             let rx = std::cell::RefCell::new(rx);
+            let asset_at = AssetType::from_string(&asset_c).unwrap_or(AssetType::Icon);
             std::thread::spawn(move || {
                 let _s = tracing::info_span!("steam_download", app_id = %id_c, asset = %asset_c).entered();
-                let _ = steam.force_download_steam(&id_c, &asset_c);
+                let _ = steam.force_download_steam(&id_c, asset_at);
                 let _ = tx.send(());
             });
             let btn_weak = btn_clone.downgrade();
@@ -347,7 +349,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         btns.append(&btn);
     }
 
-    if is_steam && asset_type == "icon" && game.trophy_source == ira_models::TrophySource::SteamNative {
+    if is_steam && AssetType::from_string(asset_type) == Some(AssetType::Icon) && game.trophy_source == ira_models::TrophySource::SteamNative {
         let btn = gtk4::Button::with_label("Steam");
         let steam = state.borrow().steam.clone();
         let id_c = id.clone();
@@ -435,7 +437,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     btns.append(&btn);
     }
 
-    if asset_type == "icon" && game.kind.is_trophy_console() {
+    if AssetType::from_string(asset_type) == Some(AssetType::Icon) && game.kind.is_trophy_console() {
         let reset_btn = gtk4::Button::with_label("Reset");
         let gc = game.clone();
         let refresh = refresh_images.clone();
@@ -536,13 +538,9 @@ pub fn build_image_section_for_dir(params: VariantImageSectionParams) -> adw::Ac
                 let dest = target_dir.join(format!("{}.{}", file_base, ext));
                 let _ = std::fs::copy(path, &dest);
                 ira_parser::convert_to_lossless_webp(&dest);
-                let (sw, sh) = match file_base.as_str() {
-                    "icon" => (32u32, 32u32),
-                    "hero" => (1920, 620),
-                    "vertical" => (300, 450),
-                    "header" => (460, 215),
-                    "logo" => (620, 620),
-                    _ => (128, 128),
+                let (sw, sh) = match AssetType::all().iter().find(|at| at.file_base() == file_base.as_str()) {
+                    Some(at) => at.thumb_dims(),
+                    None => (128, 128),
                 };
                 ira_parser::ensure_small_image(&target_dir, &file_base, sw, sh);
                 refresh();

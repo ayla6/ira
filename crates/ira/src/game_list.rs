@@ -145,7 +145,7 @@ fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
             Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title, e.sgdb_id.clone().unwrap_or_default(), e.shadps4_version.clone(), e.last_played),
             None => {
                 match db::add_game(db, ira_models::GameKind::Ps4, ira_models::TrophySource::Empty, "", &shad.npwr_id, &shad.serial, &shad.title) {
-                    Ok(id) => (id, shad.title.clone(), false, "bottom-left".to_string(), 50, String::new(), String::new(), String::new(), 0),
+                    Ok(id) => (id, shad.title.clone(), false, ira_models::LogoPosition::BottomLeft.to_string(), 50, String::new(), String::new(), String::new(), 0),
                     Err(e) => {
                         eprintln!("shadPS4: failed to add {} to DB: {}", shad.serial, e);
                         continue;
@@ -186,7 +186,7 @@ fn build_rpcs3_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
             Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title, e.sgdb_id.clone().unwrap_or_default(), e.last_played),
             None => {
                 match db::add_game(db, ira_models::GameKind::Ps3, ira_models::TrophySource::Empty, "", &ps3_game.npwr_id, &ps3_game.serial, &ps3_game.title) {
-                    Ok(id) => (id, ps3_game.title.clone(), false, "bottom-left".to_string(), 50, String::new(), String::new(), 0),
+                    Ok(id) => (id, ps3_game.title.clone(), false, ira_models::LogoPosition::BottomLeft.to_string(), 50, String::new(), String::new(), 0),
                     Err(e) => {
                         eprintln!("RPCS3: failed to add {} to DB: {}", ps3_game.serial, e);
                         continue;

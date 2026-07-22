@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::SteamDataClient;
-use ira_models::DlcInfo;
+use ira_models::{AssetType, DlcInfo};
 
 impl SteamDataClient {
     pub fn ensure_sgdb_assets(&self, sgdb_id: &str) -> (String, String, String, String, String) {
@@ -73,7 +73,7 @@ impl SteamDataClient {
         let grid_path = if let Some(existing) = ira_parser::find_image_file(dir, "vertical") {
             existing.to_string_lossy().into_owned()
         } else {
-            self.force_download_sgdb(dir, sgdb_id, "grid", false)
+            self.force_download_sgdb(dir, sgdb_id, AssetType::Grid, false)
         };
 
         let logo_path = if let Some(existing) = ira_parser::find_image_file(dir, "logo") {
@@ -93,14 +93,14 @@ impl SteamDataClient {
         let header_path = if let Some(existing) = ira_parser::find_image_file(dir, "header") {
             existing.to_string_lossy().into_owned()
         } else {
-            self.force_download_sgdb(dir, sgdb_id, "header", false)
+            self.force_download_sgdb(dir, sgdb_id, AssetType::Header, false)
         };
 
-        if !icon_path.is_empty() { ira_parser::ensure_small_image(dir, "icon", 32, 32); }
-        if !hero_path.is_empty() { ira_parser::ensure_small_image(dir, "hero", 1920, 620); }
-        if !grid_path.is_empty() { ira_parser::ensure_small_image(dir, "vertical", 300, 450); }
-        if !header_path.is_empty() { ira_parser::ensure_small_image(dir, "header", 460, 215); }
-        if !logo_path.is_empty() { ira_parser::ensure_small_image(dir, "logo", 620, 620); }
+        if !icon_path.is_empty() { ira_parser::ensure_small_image(dir, AssetType::Icon.file_base(), AssetType::Icon.thumb_dims().0, AssetType::Icon.thumb_dims().1); }
+        if !hero_path.is_empty() { ira_parser::ensure_small_image(dir, AssetType::Hero.file_base(), AssetType::Hero.thumb_dims().0, AssetType::Hero.thumb_dims().1); }
+        if !grid_path.is_empty() { ira_parser::ensure_small_image(dir, AssetType::Grid.file_base(), AssetType::Grid.thumb_dims().0, AssetType::Grid.thumb_dims().1); }
+        if !header_path.is_empty() { ira_parser::ensure_small_image(dir, AssetType::Header.file_base(), AssetType::Header.thumb_dims().0, AssetType::Header.thumb_dims().1); }
+        if !logo_path.is_empty() { ira_parser::ensure_small_image(dir, AssetType::Logo.file_base(), AssetType::Logo.thumb_dims().0, AssetType::Logo.thumb_dims().1); }
 
         (icon_path, hero_path, grid_path, logo_path, header_path)
     }
@@ -152,9 +152,9 @@ impl SteamDataClient {
             if webp.is_file() { webp.to_string_lossy().into_owned() } else { r }
         };
 
-        if !icon_path.is_empty() { ira_parser::ensure_small_image(&dir, "icon", 32, 32); }
-        if !hero_path.is_empty() { ira_parser::ensure_small_image(&dir, "hero", 1920, 620); }
-
+        if !icon_path.is_empty() { ira_parser::ensure_small_image(&dir, AssetType::Icon.file_base(), AssetType::Icon.thumb_dims().0, AssetType::Icon.thumb_dims().1); }
+        if !hero_path.is_empty() { ira_parser::ensure_small_image(&dir, AssetType::Hero.file_base(), AssetType::Hero.thumb_dims().0, AssetType::Hero.thumb_dims().1); }
+ 
         (icon_path, hero_path)
     }
 
@@ -201,9 +201,9 @@ impl SteamDataClient {
             if webp.is_file() { webp.to_string_lossy().into_owned() } else { r }
         };
 
-        if !grid_path.is_empty() { ira_parser::ensure_small_image(&dir, "vertical", 300, 450); }
-        if !header_path.is_empty() { ira_parser::ensure_small_image(&dir, "header", 460, 215); }
-        if !logo_path.is_empty() { ira_parser::ensure_small_image(&dir, "logo", 620, 620); }
+        if !grid_path.is_empty() { ira_parser::ensure_small_image(&dir, AssetType::Grid.file_base(), AssetType::Grid.thumb_dims().0, AssetType::Grid.thumb_dims().1); }
+        if !header_path.is_empty() { ira_parser::ensure_small_image(&dir, AssetType::Header.file_base(), AssetType::Header.thumb_dims().0, AssetType::Header.thumb_dims().1); }
+        if !logo_path.is_empty() { ira_parser::ensure_small_image(&dir, AssetType::Logo.file_base(), AssetType::Logo.thumb_dims().0, AssetType::Logo.thumb_dims().1); }
 
         (grid_path, header_path, logo_path)
     }
@@ -232,13 +232,13 @@ impl SteamDataClient {
         }
     }
 
-    pub fn force_download_steam(&self, app_id: &str, asset: &str) -> String {
-        let _s = tracing::info_span!("force_download_steam", app_id, asset).entered();
+    pub fn force_download_steam(&self, app_id: &str, asset: AssetType) -> String {
+        let _s = tracing::info_span!("force_download_steam", app_id, asset = %asset).entered();
         let dir = self.game_dir(app_id);
         let cdn = |suffix: &str| format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/{}", app_id, suffix);
         match asset {
-            "hero" => {
-                ira_parser::remove_image_variants(&dir, "hero");
+            AssetType::Hero => {
+                ira_parser::remove_image_variants(&dir, AssetType::Hero.file_base());
                 let dest = dir.join("hero.jpg");
                 let r = self.fetch_image(&cdn("library_hero_2x.jpg"), &dest);
                 let r = if r.is_empty() { self.fetch_image(&cdn("library_hero.jpg"), &dest) } else { r };
@@ -246,12 +246,12 @@ impl SteamDataClient {
                     ira_parser::convert_to_lossless_webp(&dest);
                     let webp = dir.join("hero.webp");
                     let r = if webp.is_file() { webp.to_string_lossy().into_owned() } else { r };
-                    ira_parser::ensure_small_image(&dir, "hero", 1920, 620);
+                    ira_parser::ensure_small_image(&dir, AssetType::Hero.file_base(), AssetType::Hero.thumb_dims().0, AssetType::Hero.thumb_dims().1);
                     r
                 } else { r }
             }
-            "grid" => {
-                ira_parser::remove_image_variants(&dir, "vertical");
+            AssetType::Grid => {
+                ira_parser::remove_image_variants(&dir, AssetType::Grid.file_base());
                 let dest = dir.join("vertical.jpg");
                 let r = self.fetch_image(&cdn("library_600x900_2x.jpg"), &dest);
                 let r = if r.is_empty() { self.fetch_image(&cdn("library_600x900.jpg"), &dest) } else { r };
@@ -259,31 +259,31 @@ impl SteamDataClient {
                     ira_parser::convert_to_lossless_webp(&dest);
                     let webp = dir.join("vertical.webp");
                     let r = if webp.is_file() { webp.to_string_lossy().into_owned() } else { r };
-                    ira_parser::ensure_small_image(&dir, "vertical", 300, 450);
+                    ira_parser::ensure_small_image(&dir, AssetType::Grid.file_base(), AssetType::Grid.thumb_dims().0, AssetType::Grid.thumb_dims().1);
                     r
                 } else { r }
             }
-            "header" => {
-                ira_parser::remove_image_variants(&dir, "header");
+            AssetType::Header => {
+                ira_parser::remove_image_variants(&dir, AssetType::Header.file_base());
                 let dest = dir.join("header.jpg");
                 let r = self.fetch_image(&cdn("header.jpg"), &dest);
                 if !r.is_empty() {
                     ira_parser::convert_to_lossless_webp(&dest);
                     let webp = dir.join("header.webp");
                     let r = if webp.is_file() { webp.to_string_lossy().into_owned() } else { r };
-                    ira_parser::ensure_small_image(&dir, "header", 460, 215);
+                    ira_parser::ensure_small_image(&dir, AssetType::Header.file_base(), AssetType::Header.thumb_dims().0, AssetType::Header.thumb_dims().1);
                     r
                 } else { r }
             }
-            "logo" => {
-                ira_parser::remove_image_variants(&dir, "logo");
+            AssetType::Logo => {
+                ira_parser::remove_image_variants(&dir, AssetType::Logo.file_base());
                 let dest = dir.join("logo.png");
                 let r = self.fetch_image(&cdn("logo.png"), &dest);
                 if !r.is_empty() {
                     ira_parser::convert_to_lossless_webp(&dest);
                     let webp = dir.join("logo.webp");
                     let r = if webp.is_file() { webp.to_string_lossy().into_owned() } else { r };
-                    ira_parser::ensure_small_image(&dir, "logo", 620, 620);
+                    ira_parser::ensure_small_image(&dir, AssetType::Logo.file_base(), AssetType::Logo.thumb_dims().0, AssetType::Logo.thumb_dims().1);
                     r
                 } else { r }
             }
@@ -291,16 +291,16 @@ impl SteamDataClient {
         }
     }
 
-    pub fn force_download_sgdb(&self, dir: &Path, id: &str, asset: &str, is_steam_id: bool) -> String {
-        let _s = tracing::info_span!("force_download_sgdb", sgdb_id = id, asset).entered();
+    pub fn force_download_sgdb(&self, dir: &Path, id: &str, asset: AssetType, is_steam_id: bool) -> String {
+        let _s = tracing::info_span!("force_download_sgdb", sgdb_id = id, asset = %asset).entered();
         let _ = std::fs::create_dir_all(dir);
     let endpoint = match crate::sgdb::sgdb_endpoint(asset, is_steam_id, id) {
         Some(e) => e,
         None => return String::new(),
     };
         let dims: &[&str] = match asset {
-            "grid" => &["600x900"],
-            "header" => &["460x215", "920x430"],
+            AssetType::Grid => &["600x900"],
+            AssetType::Header => &["460x215", "920x430"],
             _ => &[],
         };
         let url = match self.fetch_sgdb_endpoint(&endpoint, dims) {
@@ -310,14 +310,11 @@ impl SteamDataClient {
         let ext = Path::new(&url).extension().and_then(|e| e.to_str()).unwrap_or("png");
         let is_png = ext.eq_ignore_ascii_case("png");
 
-        let base_name = match asset {
-            "grid" => "vertical",
-            _ => asset,
-        };
+        let base_name = asset.file_base();
         ira_parser::remove_image_variants(dir, base_name);
 
         let dest = dir.join(format!("{}.{}", base_name, ext));
-        let r = if is_png || asset == "icon" {
+        let r = if is_png || asset == AssetType::Icon {
             if self.download_file(&url, &dest).is_ok() {
                 dest.to_string_lossy().into_owned()
             } else { String::new() }
@@ -331,15 +328,8 @@ impl SteamDataClient {
         } else { r };
 
         if !r.is_empty() {
-            let (small_name, sw, sh) = match asset {
-                "icon" => ("icon", 32u32, 32u32),
-                "hero" => ("hero", 1920, 620),
-                "grid" => ("vertical", 300, 450),
-                "header" => ("header", 460, 215),
-                "logo" => ("logo", 620, 620),
-                _ => return r,
-            };
-            ira_parser::ensure_small_image(dir, small_name, sw, sh);
+            let (sw, sh) = asset.thumb_dims();
+            ira_parser::ensure_small_image(dir, base_name, sw, sh);
         }
         r
     }

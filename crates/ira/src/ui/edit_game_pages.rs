@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use adw::prelude::*;
-use ira_models::{AppDetails, GameLaunchConfig, GameVariant, WineConfig, WineProfile};
+use ira_models::{AppDetails, AssetType, GameLaunchConfig, GameVariant, WineConfig, WineProfile};
 use super::helpers;
 use super::settings_dialog;
 use super::state::SharedState;
@@ -527,11 +527,11 @@ pub(super) fn build_variants_page(
                     let var_dir = image_dir.join(format!("variant-{}", variant_id));
                     let _ = std::fs::create_dir_all(&var_dir);
                     for &(label, file_base, asset_type, thumb_h) in &[
-                        ("Icon", "icon", "icon", 48i32),
-                        ("Hero", "hero", "hero", 64),
-                        ("Capsule", "vertical", "grid", 64),
-                        ("Header", "header", "header", 48),
-                        ("Logo", "logo", "logo", 64),
+                        (AssetType::Icon.display_name(), AssetType::Icon.file_base(), AssetType::Icon.as_str(), 48i32),
+                        (AssetType::Hero.display_name(), AssetType::Hero.file_base(), AssetType::Hero.as_str(), 64),
+                        (AssetType::Grid.display_name(), AssetType::Grid.file_base(), AssetType::Grid.as_str(), 64),
+                        (AssetType::Header.display_name(), AssetType::Header.file_base(), AssetType::Header.as_str(), 48),
+                        (AssetType::Logo.display_name(), AssetType::Logo.file_base(), AssetType::Logo.as_str(), 64),
                     ] {
                         let row = super::image_manager::build_image_section_for_dir(
                             super::image_manager::VariantImageSectionParams {

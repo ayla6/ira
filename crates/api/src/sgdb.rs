@@ -1,6 +1,7 @@
 use crate::SteamDataClient;
 use crate::types::SgdbAsset;
 use crate::util::urlencode;
+use ira_models::AssetType;
 
 impl SteamDataClient {
     fn sgdb_get_json(&self, url: &str) -> Option<serde_json::Value> {
@@ -73,8 +74,8 @@ impl SteamDataClient {
         }
     }
 
-    pub fn list_sgdb_assets(&self, id: &str, asset: &str, is_steam_id: bool, dimensions: &[&str]) -> Vec<SgdbAsset> {
-        let _s = tracing::info_span!("list_sgdb_assets", id, asset).entered();
+    pub fn list_sgdb_assets(&self, id: &str, asset: AssetType, is_steam_id: bool, dimensions: &[&str]) -> Vec<SgdbAsset> {
+        let _s = tracing::info_span!("list_sgdb_assets", id, asset = %asset).entered();
         let endpoint = match sgdb_endpoint(asset, is_steam_id, id) {
             Some(e) => e,
             None => return Vec::new(),
@@ -133,17 +134,16 @@ impl SteamDataClient {
     }
 }
 
-pub(super) fn sgdb_endpoint(asset: &str, is_steam_id: bool, id: &str) -> Option<String> {
+pub(super) fn sgdb_endpoint(asset: AssetType, is_steam_id: bool, id: &str) -> Option<String> {
     Some(match (asset, is_steam_id) {
-        ("icon", true) => format!("icons/steam/{}", id),
-        ("icon", false) => format!("icons/game/{}", id),
-        ("hero", true) => format!("heroes/steam/{}", id),
-        ("hero", false) => format!("heroes/game/{}", id),
-        ("grid", true) | ("header", true) => format!("grids/steam/{}", id),
-        ("grid", false) | ("header", false) => format!("grids/game/{}", id),
-        ("logo", true) => format!("logos/steam/{}", id),
-        ("logo", false) => format!("logos/game/{}", id),
-        _ => return None,
+        (AssetType::Icon, true) => format!("icons/steam/{}", id),
+        (AssetType::Icon, false) => format!("icons/game/{}", id),
+        (AssetType::Hero, true) => format!("heroes/steam/{}", id),
+        (AssetType::Hero, false) => format!("heroes/game/{}", id),
+        (AssetType::Grid, true) | (AssetType::Header, true) => format!("grids/steam/{}", id),
+        (AssetType::Grid, false) | (AssetType::Header, false) => format!("grids/game/{}", id),
+        (AssetType::Logo, true) => format!("logos/steam/{}", id),
+        (AssetType::Logo, false) => format!("logos/game/{}", id),
     })
 }
 
@@ -153,56 +153,51 @@ mod tests {
 
     #[test]
     fn test_sgdb_endpoint_icon_steam() {
-        assert_eq!(sgdb_endpoint("icon", true, "12345").as_deref(), Some("icons/steam/12345"));
+        assert_eq!(sgdb_endpoint(AssetType::Icon, true, "12345").as_deref(), Some("icons/steam/12345"));
     }
 
     #[test]
     fn test_sgdb_endpoint_icon_game() {
-        assert_eq!(sgdb_endpoint("icon", false, "12345").as_deref(), Some("icons/game/12345"));
+        assert_eq!(sgdb_endpoint(AssetType::Icon, false, "12345").as_deref(), Some("icons/game/12345"));
     }
 
     #[test]
     fn test_sgdb_endpoint_hero_steam() {
-        assert_eq!(sgdb_endpoint("hero", true, "67890").as_deref(), Some("heroes/steam/67890"));
+        assert_eq!(sgdb_endpoint(AssetType::Hero, true, "67890").as_deref(), Some("heroes/steam/67890"));
     }
 
     #[test]
     fn test_sgdb_endpoint_hero_game() {
-        assert_eq!(sgdb_endpoint("hero", false, "67890").as_deref(), Some("heroes/game/67890"));
+        assert_eq!(sgdb_endpoint(AssetType::Hero, false, "67890").as_deref(), Some("heroes/game/67890"));
     }
 
     #[test]
     fn test_sgdb_endpoint_grid_steam() {
-        assert_eq!(sgdb_endpoint("grid", true, "abc").as_deref(), Some("grids/steam/abc"));
+        assert_eq!(sgdb_endpoint(AssetType::Grid, true, "abc").as_deref(), Some("grids/steam/abc"));
     }
 
     #[test]
     fn test_sgdb_endpoint_grid_game() {
-        assert_eq!(sgdb_endpoint("grid", false, "abc").as_deref(), Some("grids/game/abc"));
+        assert_eq!(sgdb_endpoint(AssetType::Grid, false, "abc").as_deref(), Some("grids/game/abc"));
     }
 
     #[test]
     fn test_sgdb_endpoint_header_steam() {
-        assert_eq!(sgdb_endpoint("header", true, "def").as_deref(), Some("grids/steam/def"));
+        assert_eq!(sgdb_endpoint(AssetType::Header, true, "def").as_deref(), Some("grids/steam/def"));
     }
 
     #[test]
     fn test_sgdb_endpoint_header_game() {
-        assert_eq!(sgdb_endpoint("header", false, "def").as_deref(), Some("grids/game/def"));
+        assert_eq!(sgdb_endpoint(AssetType::Header, false, "def").as_deref(), Some("grids/game/def"));
     }
 
     #[test]
     fn test_sgdb_endpoint_logo_steam() {
-        assert_eq!(sgdb_endpoint("logo", true, "xyz").as_deref(), Some("logos/steam/xyz"));
+        assert_eq!(sgdb_endpoint(AssetType::Logo, true, "xyz").as_deref(), Some("logos/steam/xyz"));
     }
 
     #[test]
     fn test_sgdb_endpoint_logo_game() {
-        assert_eq!(sgdb_endpoint("logo", false, "xyz").as_deref(), Some("logos/game/xyz"));
-    }
-
-    #[test]
-    fn test_sgdb_endpoint_invalid_asset() {
-        assert_eq!(sgdb_endpoint("banner", true, "123"), None);
+        assert_eq!(sgdb_endpoint(AssetType::Logo, false, "xyz").as_deref(), Some("logos/game/xyz"));
     }
 }

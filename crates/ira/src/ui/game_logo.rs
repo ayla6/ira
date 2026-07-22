@@ -9,7 +9,7 @@ pub(super) fn build_game_logo_page(game: &Game, show_reset: bool) -> Option<Logo
     let logo_page = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
 
     let inherited = game.logo_position.is_empty();
-    let pos_str = if inherited { "bottom-left".to_string() } else { game.logo_position.clone() };
+    let pos_str = if inherited { ira_models::LogoPosition::DEFAULT.to_string() } else { game.logo_position.clone() };
     let selected_pos: Rc<RefCell<String>> = Rc::new(RefCell::new(pos_str));
     let modified: Rc<Cell<bool>> = Rc::new(Cell::new(false));
 
@@ -83,7 +83,7 @@ pub(super) fn build_game_logo_page(game: &Game, show_reset: bool) -> Option<Logo
 
     preview_overlay.add_overlay(&preview_draw);
 
-    let logo_positions = ["top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right"];
+    let logo_positions = ira_models::LogoPosition::all();
 
     let pos_grid = gtk4::Grid::new();
     pos_grid.set_column_spacing(2);
@@ -98,7 +98,7 @@ pub(super) fn build_game_logo_page(game: &Game, show_reset: bool) -> Option<Logo
     for (i, &pos) in logo_positions.iter().enumerate() {
         let btn = gtk4::Button::new();
         btn.add_css_class("logo-pos-overlay-btn");
-        if pos == current_pos {
+        if pos.to_string() == current_pos {
             btn.add_css_class("selected");
         }
         btn.set_hexpand(true);
@@ -152,14 +152,14 @@ pub(super) fn build_game_logo_page(game: &Game, show_reset: bool) -> Option<Logo
         let preview_reset = preview_draw.clone();
         let modified_reset = modified.clone();
         reset_btn.connect_clicked(move |_| {
-            *selected_pos_reset.borrow_mut() = "bottom-left".to_string();
+            *selected_pos_reset.borrow_mut() = ira_models::LogoPosition::DEFAULT.to_string();
             size_adj_reset.set_value(50.0);
             modified_reset.set(false);
             for b in btns_reset.iter() {
                 b.remove_css_class("selected");
             }
-            for (i, &pos) in ["top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right"].iter().enumerate() {
-                if pos == "bottom-left" {
+            for (i, &pos) in ira_models::LogoPosition::all().iter().enumerate() {
+                if pos == ira_models::LogoPosition::DEFAULT {
                     btns_reset[i].add_css_class("selected");
                 }
             }

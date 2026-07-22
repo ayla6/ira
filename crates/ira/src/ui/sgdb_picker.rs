@@ -2,6 +2,7 @@ use gtk4::prelude::*;
 use adw::prelude::*;
 use ira_api::SteamDataClient;
 use ira_api::types::SgdbAsset;
+use ira_models::AssetType;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -160,20 +161,20 @@ fn rebuild_assets_view(
     for a in assets {
         let data_subdir = if ctx.is_steam_id { "steam".to_string() } else { "steamgriddb".to_string() };
         let dest_dir = format!("{}/data/{}/{}", ctx.save_dir, data_subdir, ctx.id);
-        let file_name = match ctx.asset.as_str() {
-            "icon" => {
+        let Some(at) = AssetType::from_string(&ctx.asset) else { continue; };
+        let file_name = match at {
+            AssetType::Icon => {
                 let ext = if a.mime.contains("icon") || a.mime.contains("x-icon") { "ico" }
                 else if a.mime.contains("png") { "png" }
                 else if a.mime.contains("jpeg") || a.mime.contains("jpg") { "jpg" }
                 else if a.mime.contains("webp") { "webp" }
                 else { std::path::Path::new(&a.url).extension().and_then(|e| e.to_str()).unwrap_or("png") };
-                format!("icon.{}", ext)
+                format!("{}.{}", at.file_base(), ext)
             }
-            "hero" => "hero.jpg".to_string(),
-            "grid" => "vertical.jpg".to_string(),
-            "header" => "header.jpg".to_string(),
-            "logo" => "logo.png".to_string(),
-            _ => continue,
+            AssetType::Hero => format!("{}.jpg", at.file_base()),
+            AssetType::Grid => format!("{}.jpg", at.file_base()),
+            AssetType::Header => format!("{}.jpg", at.file_base()),
+            AssetType::Logo => format!("{}.png", at.file_base()),
         };
         let _dest = format!("{}/{}", dest_dir, file_name);
         let dl_url = a.url.clone();
@@ -337,11 +338,11 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let rx = std::cell::RefCell::new(rx);
     let steam_c = steam.clone();
     let id_c = id.to_string();
-    let asset_c = asset.to_string();
+    let asset_at = AssetType::from_string(asset).unwrap_or(AssetType::Icon);
     let dims: Vec<String> = dimensions.iter().map(|s| s.to_string()).collect();
     std::thread::spawn(move || {
         let dims_refs: Vec<&str> = dims.iter().map(|s| s.as_str()).collect();
-        let results = steam_c.list_sgdb_assets(&id_c, &asset_c, is_steam_id, &dims_refs);
+        let results = steam_c.list_sgdb_assets(&id_c, asset_at, is_steam_id, &dims_refs);
         let _ = tx.send(results);
     });
 

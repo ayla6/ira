@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::rc::Rc;
 use adw::prelude::*;
-use ira_models::{GameLaunchConfig, WineConfig};
+use ira_models::{AssetType, GameLaunchConfig, WineConfig};
 use super::state::SharedState;
 use super::add_game_dialog::collect_env_vars;
 use super::edit_game_launch::build_launch_config_page;
@@ -412,22 +412,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
             for (asset, src_path) in pc.iter() {
                 if asset == "__unmatch__" { continue; }
                 if asset.starts_with("__ra_unmatch_") { continue; }
-                let base_name = match asset.as_str() {
-                    "icon" => "icon",
-                    "hero" => "hero",
-                    "grid" => "vertical",
-                    "header" => "header",
-                    "logo" => "logo",
-                    _ => continue,
-                };
-                let (max_w, max_h) = match asset.as_str() {
-                    "icon" => (32u32, 32u32),
-                    "hero" => (1920, 620),
-                    "grid" => (300, 450),
-                    "header" => (460, 215),
-                    "logo" => (620, 620),
-                    _ => continue,
-                };
+                let Some(at) = AssetType::from_string(asset) else { continue; };
+                let base_name = at.file_base();
+                let (max_w, max_h) = at.thumb_dims();
                 ira_parser::remove_image_variants(&cloud_dir, base_name);
                 ira_parser::remove_image_variants(&cloud_dir, &format!("{}_small", base_name));
                 let is_ico = is_ico_bytes(src_path);

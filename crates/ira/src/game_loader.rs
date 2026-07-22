@@ -1,5 +1,5 @@
 use ira_db::DbConn;
-use ira_models::{AchievementStatus, AppDetails, Game, GameEntry, MergedAchievement};
+use ira_models::{AchievementStatus, AppDetails, AssetType, Game, GameEntry, MergedAchievement};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -90,7 +90,7 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
 
     let image_dir = ira_parser::entry_data_dir(save_dir, entry);
 
-    if let Some(icon_path) = ira_parser::find_image_file(&image_dir, "icon") {
+    if let Some(icon_path) = ira_parser::find_image_file(&image_dir, AssetType::Icon.file_base()) {
         game.icon_path = icon_path.to_string_lossy().into_owned();
     } else if entry.trophy_source == ira_models::TrophySource::Ra {
         let ra_icon = ira_parser::ra_icon_path(save_dir, app_id);

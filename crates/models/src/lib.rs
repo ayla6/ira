@@ -14,6 +14,7 @@ mod message;
 mod kind;
 mod consoles;
 mod app_details;
+mod asset_type;
 
 pub use game::Game;
 pub use game::parse_db_id;
@@ -29,3 +30,4 @@ pub use disc::GameDisc;
 pub use achievement::{AchievementStatus, MergedAchievement, StringOrMap, GogAchievementStatus};
 pub use message::{AppMessage, AppSender};
 pub use kind::*;
+pub use asset_type::{AssetType, LogoPosition};

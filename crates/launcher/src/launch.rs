@@ -94,7 +94,9 @@ pub fn launch_game(
                     _ => {}
                 }
             }
-            let _ = std::fs::write(&version_file, &wine.version);
+            if let Err(e) = std::fs::write(&version_file, &wine.version) {
+                eprintln!("Failed to write wine version file: {}", e);
+            }
         }
 
         (cmd, env)
@@ -144,7 +146,9 @@ fn run_pre_launch(cmd: &str, cwd: Option<&str>, save_dir: &str, game_id: i64) ->
         child.current_dir(dir);
     }
     if let Some(parent) = std::path::Path::new(&log_path).parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!("Failed to create log directory {}: {}", parent.display(), e);
+        }
     }
     match std::fs::File::create(&log_path) {
         Ok(f) => {

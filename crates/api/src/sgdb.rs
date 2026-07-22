@@ -35,13 +35,6 @@ impl SteamDataClient {
         chosen.get("url")?.as_str().map(|s| s.to_string())
     }
 
-    pub(super) fn fetch_sgdb_asset_url(&self, sgdb_id: &str, asset_type: &str) -> Option<String> {
-        let json = self.sgdb_get_json(&format!("https://www.steamgriddb.com/api/v2/{}/game/{}", asset_type, sgdb_id))?;
-        let data = json.get("data")?.as_array()?;
-        if data.is_empty() { return None; }
-        data[0].get("url")?.as_str().map(|s| s.to_string())
-    }
-
     pub(super) fn fetch_sgdb_endpoint(&self, endpoint: &str, dimensions: &[&str]) -> Option<String> {
         let sgdb_key = self.sgdb_api_key();
         if sgdb_key.is_empty() { return None; }

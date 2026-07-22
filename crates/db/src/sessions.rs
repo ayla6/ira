@@ -13,22 +13,24 @@ pub fn record_session(conn: &DbConn, game_id: i64, variant_id: Option<i64>, star
     Ok(c.last_insert_rowid())
 }
 
+fn play_session_from_row(row: &rusqlite::Row) -> rusqlite::Result<PlaySession> {
+    Ok(PlaySession {
+        id: row.get(0)?,
+        game_id: row.get(1)?,
+        variant_id: row.get(2)?,
+        started_at: row.get(3)?,
+        ended_at: row.get(4)?,
+        duration_seconds: row.get(5)?,
+    })
+}
+
 pub fn get_sessions_for_game(conn: &DbConn, game_id: i64, variant_id: Option<i64>) -> Result<Vec<PlaySession>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c
         .prepare("SELECT id, game_id, variant_id, started_at, ended_at, duration_seconds FROM play_sessions WHERE game_id = ?1 AND (variant_id IS ?2) ORDER BY started_at DESC")
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params![game_id, variant_id], |row| {
-            Ok(PlaySession {
-                id: row.get(0)?,
-                game_id: row.get(1)?,
-                variant_id: row.get(2)?,
-                started_at: row.get(3)?,
-                ended_at: row.get(4)?,
-                duration_seconds: row.get(5)?,
-            })
-        })
+        .query_map(params![game_id, variant_id], play_session_from_row)
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
@@ -50,16 +52,7 @@ pub fn get_sessions_range(conn: &DbConn, from: i64, to: i64) -> Result<Vec<PlayS
         .prepare("SELECT id, game_id, variant_id, started_at, ended_at, duration_seconds FROM play_sessions WHERE started_at >= ?1 AND started_at < ?2 ORDER BY started_at DESC")
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params![from, to], |row| {
-            Ok(PlaySession {
-                id: row.get(0)?,
-                game_id: row.get(1)?,
-                variant_id: row.get(2)?,
-                started_at: row.get(3)?,
-                ended_at: row.get(4)?,
-                duration_seconds: row.get(5)?,
-            })
-        })
+        .query_map(params![from, to], play_session_from_row)
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }

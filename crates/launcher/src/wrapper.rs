@@ -44,7 +44,9 @@ pub fn spawn_game(
     }
     if let Some(path) = log_path {
         if let Some(parent) = Path::new(path).parent() {
-            let _ = std::fs::create_dir_all(parent);
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                eprintln!("Failed to create log directory {}: {}", parent.display(), e);
+            }
         }
         match std::fs::File::create(path) {
             Ok(f) => {
@@ -115,17 +117,21 @@ pub fn monitor_process(
         if let Err(e) = record_session(&ctx.db, ctx.game_id, ctx.variant_id, ctx.started_at, ended_at) {
             eprintln!("Failed to record play session: {}", e);
         }
-        let _ = ctx.sender.send(AppMessage::SessionRecorded {
+        if let Err(e) = ctx.sender.send(AppMessage::SessionRecorded {
             game_id: ctx.game_id,
             variant_id: ctx.variant_id,
             duration_seconds: duration,
             started_at: ctx.started_at,
             ended_at,
-        });
+        }) {
+            eprintln!("Failed to send SessionRecorded message: {}", e);
+        }
     }
 
     ctx.running_games.lock().unwrap().remove(&ctx.game_id);
-    let _ = ctx.sender.send(AppMessage::GameStopped(ctx.game_id, ctx.variant_id));
+    if let Err(e) = ctx.sender.send(AppMessage::GameStopped(ctx.game_id, ctx.variant_id)) {
+        eprintln!("Failed to send GameStopped message: {}", e);
+    }
 
     // Continue reaping zombies for a few seconds after the game exits.
     // Wine background processes and stragglers may die after the main
@@ -251,7 +257,9 @@ pub fn stop_game_with_wine(pid: i32, wine_exe: Option<&str>, wine_prefix: Option
                 for (k, v) in &env {
                     cmd.env(k, v);
                 }
-                let _ = cmd.status();
+                if let Err(e) = cmd.status() {
+                    eprintln!("Failed to run wineserver -k: {}", e);
+                }
             }
         }
 

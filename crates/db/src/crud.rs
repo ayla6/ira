@@ -77,3 +77,70 @@ pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
     c.execute("DELETE FROM games WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::find_by_db_id;
+    use super::super::init_db;
+    use tempfile::TempDir;
+
+    fn setup_db() -> (DbConn, TempDir) {
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let db_path_str = db_path.to_string_lossy().to_string();
+        let conn = init_db(&db_path_str);
+        (conn, tmp)
+    }
+
+    #[test]
+    fn test_add_game_inserts_new_game() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(&conn, GameKind::Steam, TrophySource::Gse, "12345", "", "", "Test Game").unwrap();
+        assert!(id > 0);
+        let game = find_by_db_id(&conn, id).unwrap().unwrap();
+        assert_eq!(game.title, "Test Game");
+        assert_eq!(game.steam_id, "12345");
+        assert_eq!(game.kind, GameKind::Steam);
+    }
+
+    #[test]
+    fn test_add_game_conflict_updates_existing() {
+        let (conn, _tmp) = setup_db();
+        let id1 = add_game(&conn, GameKind::Steam, TrophySource::Gse, "12345", "", "", "").unwrap();
+        let id2 = add_game(&conn, GameKind::Steam, TrophySource::Gse, "12345", "", "", "Updated Title").unwrap();
+        assert_eq!(id1, id2);
+        let game = find_by_db_id(&conn, id1).unwrap().unwrap();
+        assert_eq!(game.title, "Updated Title");
+    }
+
+    #[test]
+    fn test_update_game_title() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(&conn, GameKind::Steam, TrophySource::Gse, "12345", "", "", "Test Game").unwrap();
+        update_game_title(&conn, id, "New Title").unwrap();
+        let game = find_by_db_id(&conn, id).unwrap().unwrap();
+        assert_eq!(game.title, "New Title");
+    }
+
+    #[test]
+    fn test_update_game_ids() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(&conn, GameKind::Steam, TrophySource::Gse, "12345", "", "", "Test Game").unwrap();
+        update_game_ids(&conn, id, "67890", "game123", TrophySource::Ra, "ps4").unwrap();
+        let game = find_by_db_id(&conn, id).unwrap().unwrap();
+        assert_eq!(game.steam_id, "67890");
+        assert_eq!(game.game_id, "game123");
+        assert_eq!(game.trophy_source, TrophySource::Ra);
+        assert_eq!(game.platform_id, "ps4");
+    }
+
+    #[test]
+    fn test_delete_game_removes_entry() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(&conn, GameKind::Steam, TrophySource::Gse, "12345", "", "", "Test Game").unwrap();
+        remove_game(&conn, id).unwrap();
+        let game = find_by_db_id(&conn, id).unwrap();
+        assert!(game.is_none());
+    }
+}

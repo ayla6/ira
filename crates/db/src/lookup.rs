@@ -1,5 +1,5 @@
 use crate::{DbConn, lock_db};
-use ira_models::GameEntry;
+use ira_models::{GameEntry, GameKind};
 use rusqlite::params;
 
 fn find_game_by(conn: &DbConn, where_clause: &str, params: &[&dyn rusqlite::ToSql]) -> Result<Option<GameEntry>, String> {
@@ -45,6 +45,61 @@ pub fn find_by_kind_platform(conn: &DbConn, kind: ira_models::GameKind, platform
 }
 
 pub fn find_all_retro_by_platform(conn: &DbConn, platform_id: &str) -> Result<Vec<GameEntry>, String> {
-    find_all_games_by(conn, "kind = 'retro' AND platform_id = ?1", params![platform_id])
+    find_all_games_by(conn, "kind = ?1 AND platform_id = ?2", params![GameKind::Retro.as_str(), platform_id])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::add_game;
+    use super::super::init_db;
+    use super::super::load_all_games;
+    use ira_models::TrophySource;
+    use tempfile::TempDir;
+
+    fn setup_db() -> (DbConn, TempDir) {
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let db_path_str = db_path.to_string_lossy().to_string();
+        let conn = init_db(&db_path_str);
+        (conn, tmp)
+    }
+
+    #[test]
+    fn test_get_all_games_returns_all() {
+        let (conn, _tmp) = setup_db();
+        add_game(&conn, GameKind::Steam, TrophySource::Gse, "1", "", "", "Game 1").unwrap();
+        add_game(&conn, GameKind::Steam, TrophySource::Gse, "2", "", "", "Game 2").unwrap();
+        add_game(&conn, GameKind::Retro, TrophySource::Ra, "", "r1", "nes", "Game 3").unwrap();
+        let games = load_all_games(&conn).unwrap();
+        assert_eq!(games.len(), 3);
+    }
+
+    #[test]
+    fn test_find_by_db_id_returns_correct_game() {
+        let (conn, _tmp) = setup_db();
+        add_game(&conn, GameKind::Steam, TrophySource::Gse, "1", "", "", "Game 1").unwrap();
+        let id2 = add_game(&conn, GameKind::Steam, TrophySource::Gse, "2", "", "", "Game 2").unwrap();
+        let game = find_by_db_id(&conn, id2).unwrap().unwrap();
+        assert_eq!(game.title, "Game 2");
+        assert_eq!(game.steam_id, "2");
+    }
+
+    #[test]
+    fn test_find_by_steam_id_returns_correct_game() {
+        let (conn, _tmp) = setup_db();
+        add_game(&conn, GameKind::Steam, TrophySource::Gse, "100", "", "", "Steam Game").unwrap();
+        add_game(&conn, GameKind::Steam, TrophySource::Gse, "200", "", "", "Other Game").unwrap();
+        let game = find_by_steam_id(&conn, "100").unwrap().unwrap();
+        assert_eq!(game.steam_id, "100");
+        assert_eq!(game.title, "Steam Game");
+    }
+
+    #[test]
+    fn test_find_by_db_id_nonexistent_returns_none() {
+        let (conn, _tmp) = setup_db();
+        let game = find_by_db_id(&conn, 999).unwrap();
+        assert!(game.is_none());
+    }
 }
 

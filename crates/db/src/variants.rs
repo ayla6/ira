@@ -112,18 +112,23 @@ pub fn get_default_variant(conn: &DbConn, game_id: i64) -> Option<i64> {
 }
 
 pub fn set_default_variant(conn: &DbConn, game_id: i64, variant_id: Option<i64>) {
-    let Ok(c) = crate::lock_db(conn) else { return; };
+    let Ok(c) = crate::lock_db(conn) else {
+        eprintln!("Failed to lock DB in set_default_variant");
+        return;
+    };
     if let Some(vid) = variant_id {
-        let _ = c.execute(
+        if let Err(e) = c.execute(
             "INSERT INTO game_default_variant (game_id, variant_id) VALUES (?1, ?2)
              ON CONFLICT(game_id) DO UPDATE SET variant_id = excluded.variant_id",
             params![game_id, vid],
-        );
-    } else {
-        let _ = c.execute(
-            "DELETE FROM game_default_variant WHERE game_id = ?1",
-            params![game_id],
-        );
+        ) {
+            eprintln!("Failed to set default variant: {e}");
+        }
+    } else if let Err(e) = c.execute(
+        "DELETE FROM game_default_variant WHERE game_id = ?1",
+        params![game_id],
+    ) {
+        eprintln!("Failed to delete default variant: {e}");
     }
 }
 

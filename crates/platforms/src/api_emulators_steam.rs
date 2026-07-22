@@ -210,12 +210,17 @@ pub fn install_gse(
     if gen_interfaces.is_file() {
         let dst = settings_dir.join("generate_interfaces");
         if !dst.exists() {
-            let _ = copy_file(&gen_interfaces, &dst);
+            if let Err(e) = copy_file(&gen_interfaces, &dst) {
+                eprintln!("Failed to copy generate_interfaces: {}", e);
+            }
         }
         // Run it from the steam_settings directory
-        let _ = std::process::Command::new(&dst)
+        if let Err(e) = std::process::Command::new(&dst)
             .current_dir(&settings_dir)
-            .output();
+            .output()
+        {
+            eprintln!("Failed to run generate_interfaces: {}", e);
+        }
     }
 
     // Step 3: Backup original DLLs and copy emulator files
@@ -239,17 +244,23 @@ pub fn install_gse(
     let lang_path = settings_dir.join("supported_languages.txt");
     if !lang_path.exists() && !languages.is_empty() {
         let content = languages.join("\n") + "\n";
-        let _ = std::fs::write(&lang_path, content);
+        if let Err(e) = std::fs::write(&lang_path, content) {
+            eprintln!("Failed to write supported_languages.txt: {}", e);
+        }
     }
 
     // Step 6: Create achievement symlink
     let ach_dir = ira_parser::achievements_dir(save_dir, app_id);
     if !ach_dir.exists() {
         if let Some(parent) = ach_dir.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                eprintln!("Failed to create achievement directory: {}", e);
+            }
         }
         #[cfg(unix)]
-        let _ = std::os::unix::fs::symlink(&settings_dir, &ach_dir);
+        if let Err(e) = std::os::unix::fs::symlink(&settings_dir, &ach_dir) {
+            eprintln!("Failed to create achievement symlink: {}", e);
+        }
     }
 
     Ok(())

@@ -34,6 +34,7 @@ pub fn run_schema_migrations(conn: &Connection) {
     ensure_column(conn, "games", "emulator_override", "TEXT NOT NULL DEFAULT ''");
     ensure_column(conn, "games", "rom_path", "TEXT NOT NULL DEFAULT ''");
     ensure_column(conn, "games", "game_id", "TEXT NOT NULL DEFAULT ''");
+    ensure_column(conn, "games", "playtime", "REAL NOT NULL DEFAULT 0.0");
     ensure_column(conn, "games", "cached_earned_count", "INTEGER NOT NULL DEFAULT 0");
     ensure_column(conn, "games", "cached_total_count", "INTEGER NOT NULL DEFAULT 0");
     ensure_column(conn, "games", "cached_achievement_mtime", "INTEGER NOT NULL DEFAULT 0");

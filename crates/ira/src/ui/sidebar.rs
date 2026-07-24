@@ -385,9 +385,19 @@ fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &S
                 });
                 actions.add_action(&delete_action);
 
-                r.insert_action_group("grp", Some(&actions));
-                popover.set_parent(&r);
-                popover.set_pointing_to(Some(&gdk4::Rectangle::new(x as i32, y as i32, 1, 1)));
+                let root = r.root().and_downcast::<gtk4::Window>();
+                let (parent_widget, rect): (&gtk4::Widget, gdk4::Rectangle) = if let Some(ref root) = root {
+                    let point = gtk4::graphene::Point::new(x as f32, y as f32);
+                    let translated = r.compute_point(root, &point)
+                        .map(|p| (p.x() as i32, p.y() as i32))
+                        .unwrap_or((x as i32, y as i32));
+                    (root.upcast_ref(), gdk4::Rectangle::new(translated.0, translated.1, 1, 1))
+                } else {
+                    (r.upcast_ref(), gdk4::Rectangle::new(x as i32, y as i32, 1, 1))
+                };
+                parent_widget.insert_action_group("grp", Some(&actions));
+                popover.set_parent(parent_widget);
+                popover.set_pointing_to(Some(&rect));
                 popover.popup();
             }
         });

@@ -63,9 +63,19 @@ fn setup_and_show_popover(
     let popover = gtk4::PopoverMenu::from_model(Some(menu));
     popover.set_halign(gtk4::Align::Start);
     popover.set_has_arrow(false);
-    parent.insert_action_group("game", Some(actions));
-    popover.set_parent(parent);
-    popover.set_pointing_to(Some(&gdk4::Rectangle::new(at_x as i32, at_y as i32, 1, 1)));
+    let root = parent.root().and_downcast::<gtk4::Window>();
+    let (parent_widget, rect): (&gtk4::Widget, gdk4::Rectangle) = if let Some(ref root) = root {
+        let point = gtk4::graphene::Point::new(at_x as f32, at_y as f32);
+        let translated = parent.compute_point(root, &point)
+            .map(|p| (p.x() as i32, p.y() as i32))
+            .unwrap_or((at_x as i32, at_y as i32));
+        (root.upcast_ref(), gdk4::Rectangle::new(translated.0, translated.1, 1, 1))
+    } else {
+        (parent.upcast_ref(), gdk4::Rectangle::new(at_x as i32, at_y as i32, 1, 1))
+    };
+    parent_widget.insert_action_group("game", Some(actions));
+    popover.set_parent(parent_widget);
+    popover.set_pointing_to(Some(&rect));
     popover.popup();
 }
 

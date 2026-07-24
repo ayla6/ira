@@ -93,15 +93,7 @@ pub(super) fn launch_ps4(
     };
     let cmd = vec![exe.to_string(), "-g".to_string(), game_path.to_string()];
 
-    let overlay_layer_path = format!("{}/../overlay", env!("CARGO_MANIFEST_DIR"));
-    let env: Vec<(String, String)> = std::env::vars()
-        .chain([
-            ("VK_LAYER_PATH".to_string(), overlay_layer_path.clone()),
-            ("VK_INSTANCE_LAYERS".to_string(), "VK_LAYER_IRA_OVERLAY".to_string()),
-        ])
-        .collect();
-
-    spawn_and_monitor(ctx, &cmd, &env, "shadPS4")
+    spawn_and_monitor(ctx, &cmd, &[], "shadPS4")
 }
 
 pub(super) fn launch_ps3(

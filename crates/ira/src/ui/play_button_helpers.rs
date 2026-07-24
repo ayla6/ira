@@ -18,9 +18,9 @@ pub(super) struct LaunchCtx<'a> {
     pub started_at: i64,
 }
 
-fn spawn_and_monitor(ctx: &LaunchCtx, cmd: &[String], err_label: &str) -> Result<(), String> {
+fn spawn_and_monitor(ctx: &LaunchCtx, cmd: &[String], env: &[(String, String)], err_label: &str) -> Result<(), String> {
     let log_path = ira_launcher::wrapper::game_log_path(ctx.save_dir, ctx.game_id);
-    match ira_launcher::wrapper::spawn_game(cmd, &[], None, Some(&log_path)) {
+    match ira_launcher::wrapper::spawn_game(cmd, env, None, Some(&log_path)) {
         Ok(child) => {
             let pid = child.id() as i32;
             ctx.running_games.lock().unwrap().insert(ctx.game_id, pid);
@@ -75,7 +75,7 @@ pub(super) fn launch_retro(
             .unwrap_or_else(|| game_path.to_string())
     };
     let cmd = ira_platforms::emulator_detect::build_launch_command(exe, &rom_path, core, cc.fullscreen, fullscreen_flag);
-    spawn_and_monitor(ctx, &cmd, ctx.game_name)
+    spawn_and_monitor(ctx, &cmd, &[], ctx.game_name)
 }
 
 pub(super) fn launch_ps4(
@@ -92,7 +92,16 @@ pub(super) fn launch_ps4(
         "shadps4"
     };
     let cmd = vec![exe.to_string(), "-g".to_string(), game_path.to_string()];
-    spawn_and_monitor(ctx, &cmd, "shadPS4")
+
+    let overlay_layer_path = format!("{}/../overlay", env!("CARGO_MANIFEST_DIR"));
+    let env: Vec<(String, String)> = std::env::vars()
+        .chain([
+            ("VK_LAYER_PATH".to_string(), overlay_layer_path.clone()),
+            ("VK_INSTANCE_LAYERS".to_string(), "VK_LAYER_IRA_OVERLAY".to_string()),
+        ])
+        .collect();
+
+    spawn_and_monitor(ctx, &cmd, &env, "shadPS4")
 }
 
 pub(super) fn launch_ps3(
@@ -109,7 +118,7 @@ pub(super) fn launch_ps3(
         "rpcs3"
     };
     let cmd = vec![exe.to_string(), "--no-gui".to_string(), game_path.to_string()];
-    spawn_and_monitor(ctx, &cmd, "RPCS3")
+    spawn_and_monitor(ctx, &cmd, &[], "RPCS3")
 }
 
 pub(super) fn launch_steam(app_id: &str) -> Result<(), String> {

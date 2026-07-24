@@ -1,0 +1,14 @@
+{
+    "file_format_version": "1.0.0",
+    "layer": {
+        "name": "VK_LAYER_IRA_OVERLAY",
+        "type": "GLOBAL",
+        "api_version": "1.2.0",
+        "library_path": "../../target/release/libira_overlay.so",
+        "implementation_version": "1",
+        "description": "Ira game overlay",
+        "functions": {
+            "vkNegotiateLoaderLayerInterfaceVersion": "vkNegotiateLoaderLayerInterfaceVersion"
+        }
+    }
+}

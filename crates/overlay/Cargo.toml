@@ -1,0 +1,13 @@
+[package]
+name = "ira-overlay"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ash = "0.38"
+libc = "0.2"
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash", "fontconfig"] }
+webp = { version = "0.3", default-features = false }

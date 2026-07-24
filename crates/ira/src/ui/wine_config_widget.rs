@@ -202,6 +202,7 @@ fn build_wine_gfx_page(
     };
 
     let wayland = build_switch_row("Enable Wayland", "Use Wayland for display instead of X11", wine.graphics == "wayland");
+    if let Some(dd) = dft { track_switch(&wayland, "graphics", dd.graphics == "wayland", overridden); }
     gfx_group.add(&wayland);
     let (mouse_warp_override, _warp_model) = build_combo_row("Mouse warp override", &[("Enable", "enable"), ("Disable", "disable"), ("Force", "force")]);
     {

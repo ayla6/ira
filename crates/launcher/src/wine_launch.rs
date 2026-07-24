@@ -46,6 +46,11 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
         env.push(("DXVK_ENABLE_NVAPI".to_string(), "1".to_string()));
     }
 
+    if wine.graphics == "wayland" {
+        env.push(("WINE_ENABLE_WAYLAND".to_string(), "1".to_string()));
+        env.push(("PROTON_ENABLE_WAYLAND".to_string(), "1".to_string()));
+    }
+
     if wine.dxvk {
         env.push(("WINE_LARGE_ADDRESS_AWARE".to_string(), "1".to_string()));
     }

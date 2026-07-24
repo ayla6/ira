@@ -162,21 +162,57 @@ fn start_background_enrichment(state: &SharedState) {
         )
     };
 
-    for (app_id, trophy_source, platform_id, db_id, title, game) in enrich_targets {
-        enrich_game_async(crate::ui::enrichment::EnrichGameParams {
-            app_id,
-            trophy_source,
-            platform_id,
-            db_id,
-            title,
-            steam: steam.clone(),
-            sender: sender.clone(),
-            save_dir: save_dir.clone(),
-            db: db.clone(),
-            ra_username: ra_username.clone(),
-            ra_token: ra_token.clone(),
-            ra_password: ra_password.clone(),
-            game: Some(game),
+    if !enrich_targets.is_empty() {
+        let n_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .min(enrich_targets.len())
+            .max(1);
+        let chunk_size = enrich_targets.len().div_ceil(n_threads).max(1);
+        let steam = steam.clone();
+        let sender = sender.clone();
+        let db = db.clone();
+        let save_dir = save_dir.clone();
+        let ra_username = ra_username.clone();
+        let ra_token = ra_token.clone();
+        let ra_password = ra_password.clone();
+        std::thread::spawn(move || {
+            let _s = tracing::info_span!("background_enrich", count = enrich_targets.len()).entered();
+            std::thread::scope(|s| {
+                let handles: Vec<_> = enrich_targets.chunks(chunk_size).map(|chunk| {
+                    let steam = &steam;
+                    let sender = &sender;
+                    let db = &db;
+                    let save_dir = &save_dir;
+                    let ra_username = &ra_username;
+                    let ra_token = &ra_token;
+                    let ra_password = &ra_password;
+                    s.spawn(move || {
+                        for (app_id, trophy_source, platform_id, db_id, title, game) in chunk {
+                            crate::ui::enrichment::enrich_game_blocking(
+                                crate::ui::enrichment::EnrichGameParams {
+                                    app_id: app_id.clone(),
+                                    trophy_source: *trophy_source,
+                                    platform_id: platform_id.clone(),
+                                    db_id: *db_id,
+                                    title: title.clone(),
+                                    steam: steam.clone(),
+                                    sender: sender.clone(),
+                                    save_dir: save_dir.clone(),
+                                    db: db.clone(),
+                                    ra_username: ra_username.clone(),
+                                    ra_token: ra_token.clone(),
+                                    ra_password: ra_password.clone(),
+                                    game: Some(game.clone()),
+                                },
+                            );
+                        }
+                    })
+                }).collect();
+                for h in handles {
+                    let _ = h.join();
+                }
+            });
         });
     }
 

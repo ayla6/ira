@@ -30,9 +30,14 @@ pub struct EnrichGameParams {
 }
 
 pub fn enrich_game_async(params: EnrichGameParams) {
-    let EnrichGameParams { app_id, trophy_source, platform_id, db_id, title, steam, sender, save_dir, db, ra_username, ra_token, ra_password, game } = params;
     std::thread::spawn(move || {
-        let _s = tracing::info_span!("enrich_game_async", app_id = %app_id, db_id = db_id).entered();
+        enrich_game_blocking(params);
+    });
+}
+
+pub fn enrich_game_blocking(params: EnrichGameParams) {
+    let EnrichGameParams { app_id, trophy_source, platform_id, db_id, title, steam, sender, save_dir, db, ra_username, ra_token, ra_password, game } = params;
+    let _s = tracing::info_span!("enrich_game", app_id = %app_id, db_id = db_id).entered();
         if trophy_source == ira_models::TrophySource::Ra {
             let _guard = RA_ENRICH_LOCK.lock().unwrap();
             enrich_ra(EnrichRaParams {
@@ -181,7 +186,6 @@ pub fn enrich_game_async(params: EnrichGameParams) {
         }
 
         let _ = sender.send(AppMessage::EnrichedGame(game));
-    });
 }
 
 /// Fetch the game icon from Steam's local clienticon cache or CDN.

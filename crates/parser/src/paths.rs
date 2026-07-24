@@ -74,6 +74,22 @@ pub fn find_image_file(dir: &Path, base_name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Generate a `_small` thumbnail variant of an image if one doesn't already exist.
+///
+/// Format conversion matrix:
+///
+/// | Source  | Already ≤ max dims? | Action                          |
+/// |---------|---------------------|---------------------------------|
+/// | JPEG    | Yes                 | Copy to `_small.jpg`            |
+/// | JPEG    | No                  | Resize → lossy WebP at 90%      |
+/// | PNG/ICO | Yes                 | Lossless WebP (no resize)       |
+/// | PNG/ICO | No                  | Resize → lossless WebP          |
+/// | Icon    | Any                 | Always lossless WebP            |
+///
+/// Icons are always lossless regardless of source format.
+/// JPEGs that are already the right size are copied as-is (no re-encode).
+/// JPEGs that need resizing are re-encoded as lossy WebP (resize requires re-encode anyway).
+/// PNGs/ICOs are always converted to lossless WebP (good compression, no loss).
 pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     let _s = tracing::info_span!("ensure_small_image", base_name, max_w, max_h).entered();
     if find_image_file(dir, &format!("{}_small", base_name)).is_some() {
@@ -84,6 +100,9 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
         let _ = std::fs::remove_file(dir.join(format!("{}.{}", small_name, ext)));
     }
     let Some(source) = find_image_file(dir, base_name) else { return };
+
+    let is_jpeg = source.extension().is_some_and(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg"));
+    let is_icon = base_name == "icon";
 
     let img = {
         let _s = tracing::info_span!("ensure_small_decode", base_name).entered();
@@ -98,11 +117,15 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     };
     let (w, h) = (img.width(), img.height());
 
-    let dest = dir.join(format!("{}.webp", small_name));
-
     if w <= max_w && h <= max_h {
+        if is_jpeg {
+            let dest = dir.join(format!("{}.jpg", small_name));
+            let _ = std::fs::copy(&source, &dest);
+            return;
+        }
         let data = img.to_rgba8();
         let (fw, fh) = data.dimensions();
+        let dest = dir.join(format!("{}.webp", small_name));
         let encoded = {
             let _s = tracing::info_span!("ensure_small_encode", base_name, w, h, mode = "lossless_no_resize").entered();
             webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless()
@@ -110,12 +133,6 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
         let _ = std::fs::write(&dest, &*encoded);
         return;
     }
-
-    let is_lossless = matches!(base_name, "icon")
-        || (base_name != "vertical" && base_name != "hero" && base_name != "header"
-            && source.extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| e.eq_ignore_ascii_case("png")));
 
     let ratio = (max_w as f64 / w as f64).min(max_h as f64 / h as f64);
     let new_w = (w as f64 * ratio).ceil() as u32;
@@ -129,13 +146,16 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
 
     let data = resized.to_rgba8();
     let (fw, fh) = data.dimensions();
+    let dest = dir.join(format!("{}.webp", small_name));
+
+    let is_lossless = is_icon || !is_jpeg;
 
     let encoded = {
         let _s = tracing::info_span!("ensure_small_encode", base_name, w = fw, h = fh, mode = if is_lossless { "lossless" } else { "lossy" }).entered();
         if is_lossless {
             webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless()
         } else {
-            webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode(85.0)
+            webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode(90.0)
         }
     };
     let _ = std::fs::write(&dest, &*encoded);
@@ -160,17 +180,20 @@ pub fn full_image_path(path: &str) -> String {
     let p = Path::new(path);
     let parent = p.parent().unwrap_or(Path::new(""));
     let fname = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
-    let full_name = fname.replacen("_small.", ".", 1);
-    let full = parent.join(&full_name);
-    if full.is_file() { full.to_string_lossy().into_owned() } else { path.to_string() }
+    let stem = fname.replace("_small", "");
+    let stem = stem.split('.').next().unwrap_or(&stem);
+    if let Some(full) = find_image_file(parent, stem) {
+        return full.to_string_lossy().into_owned();
+    }
+    path.to_string()
 }
 
-/// Open an image file (PNG, JPEG, ICO, etc.) and re-save as lossless WebP,
-/// removing the original. Does nothing if the file can't be decoded or is
-/// already WebP (re-encoding would self-delete: output path == input path).
+/// Open an image file (PNG, ICO, etc.) and re-save as lossless WebP,
+/// removing the original. Does nothing if the file is already WebP or is
+/// a JPEG (JPEGs are kept as-is to avoid generation loss).
 pub fn convert_to_lossless_webp(path: &Path) {
     let _s = tracing::info_span!("convert_to_lossless_webp", path = %path.display()).entered();
-    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("webp")) {
+    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("webp") || e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg")) {
         return;
     }
     let base = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
@@ -272,5 +295,34 @@ mod tests {
         assert!(!png_path.is_file(), "png file should be removed after conversion");
         let webp_out = tmp.path().join("icon.webp");
         assert!(webp_out.is_file(), "webp file should exist after conversion");
+    }
+
+    #[test]
+    fn test_convert_to_lossless_webp_skips_jpg() {
+        let tmp = tempfile::tempdir().unwrap();
+        let jpg_path = tmp.path().join("hero.jpg");
+        let img = image::DynamicImage::new_rgb8(4, 4);
+        img.save_with_format(&jpg_path, image::ImageFormat::Jpeg).unwrap();
+        convert_to_lossless_webp(&jpg_path);
+        assert!(jpg_path.is_file(), "jpg file should not be deleted or converted");
+        let webp_out = tmp.path().join("hero.webp");
+        assert!(!webp_out.is_file(), "webp file should not be created from jpg");
+    }
+
+    #[test]
+    fn test_full_image_path_finds_jpg_from_small_webp() {
+        let tmp = tempfile::tempdir().unwrap();
+        let jpg = tmp.path().join("header.jpg");
+        std::fs::write(&jpg, [0u8]).unwrap();
+        let small_webp = tmp.path().join("header_small.webp");
+        std::fs::write(&small_webp, [0u8]).unwrap();
+        let result = full_image_path(small_webp.to_str().unwrap());
+        assert!(result.ends_with("header.jpg"), "should find header.jpg, got: {result}");
+    }
+
+    #[test]
+    fn test_full_image_path_no_small_suffix() {
+        assert_eq!(full_image_path("/foo/bar/hero.jpg"), "/foo/bar/hero.jpg");
+        assert_eq!(full_image_path(""), "");
     }
 }

@@ -36,6 +36,9 @@ pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
             if image_dir.join(&small_webp).is_file() {
                 files.insert(small_webp);
             }
+            if image_dir.join(&small_jpg).is_file() {
+                files.insert(small_jpg);
+            }
         }
     }
 

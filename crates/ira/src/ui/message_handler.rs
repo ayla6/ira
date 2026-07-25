@@ -6,6 +6,7 @@ use crate::strings as S;
 use super::state::SharedState;
 use super::sidebar::{rebuild_sidebar, scroll_to_row, set_sidebar_playing};
 use super::game_display::display_game;
+use super::game_item::GameItem;
 use super::image_manager::build_image_manager_content_with_drafts;
 use super::message_helpers::{apply_game_update, insert_or_update_game, refresh_steam_playtimes_for, handle_games_loaded, switch_to_game};
 
@@ -252,14 +253,41 @@ fn handle_sgdb_assets_downloaded(state: &SharedState, db_id: i64, sgdb_id: Strin
             eprintln!("Failed to set SGDB ID: {}", e);
         }
     }
-    if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
-        g.sgdb_id = sgdb_id;
-        if !paths.icon.is_empty() { g.icon_path = paths.icon; }
-        if !paths.hero.is_empty() { g.hero_image_path = paths.hero; }
-        if !paths.grid.is_empty() { g.grid_path = paths.grid; }
-        if !paths.logo.is_empty() { g.logo_path = paths.logo; }
-        if !paths.header.is_empty() { g.header_path = paths.header; }
+    let game_for_grid = {
+        let mut s = state.borrow_mut();
+        if let Some(g) = s.games.iter_mut().find(|g| g.db_id == db_id) {
+            g.sgdb_id = sgdb_id;
+            if !paths.icon.is_empty() { g.icon_path = paths.icon; }
+            if !paths.hero.is_empty() { g.hero_image_path = paths.hero; }
+            if !paths.grid.is_empty() { g.grid_path = paths.grid; }
+            if !paths.logo.is_empty() { g.logo_path = paths.logo; }
+            if !paths.header.is_empty() { g.header_path = paths.header; }
+            Some(g.clone())
+        } else {
+            None
+        }
+    };
+
+    if let Some(g) = &game_for_grid {
+        for path in [&g.icon_path, &g.hero_image_path, &g.grid_path, &g.header_path, &g.logo_path] {
+            if !path.is_empty() {
+                ira_images::invalidate_texture(path);
+            }
+        }
     }
+
+    if let Some(g) = game_for_grid {
+        let store = state.borrow().grid_store.clone();
+        for i in 0..store.n_items() {
+            if let Some(item) = store.item(i).and_then(|o| o.downcast::<GameItem>().ok()) {
+                if item.game().is_some_and(|gi| gi.db_id == g.db_id && gi.variant_id.is_none()) {
+                    store.splice(i, 1, &[GameItem::new(&g)]);
+                    break;
+                }
+            }
+        }
+    }
+
     super::helpers::refresh_settings_images_page(state, db_id, |s, game, win, pc| {
         build_image_manager_content_with_drafts(s, game, win, pc).upcast()
     });

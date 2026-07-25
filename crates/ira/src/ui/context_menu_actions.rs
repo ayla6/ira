@@ -62,6 +62,7 @@ pub(super) fn setup_hide_action(actions: &gio::SimpleActionGroup, state: SharedS
             g.hidden = new_hidden;
         }
         super::sidebar::rebuild_sidebar(&state);
+        super::grid_view::refresh_grid_store(&state);
     });
     actions.add_action(&hide_action);
 }
@@ -269,6 +270,7 @@ pub(super) fn setup_multi_toggle_hide_action(actions: &gio::SimpleActionGroup, s
             }
         }
         super::sidebar::rebuild_sidebar(&state);
+        super::grid_view::refresh_grid_store(&state);
     });
     actions.add_action(&toggle_hide);
 }

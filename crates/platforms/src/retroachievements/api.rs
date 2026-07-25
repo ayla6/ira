@@ -309,7 +309,12 @@ impl RaClient {
                     Ok(bytes) => {
                         if std::fs::write(&tmp, &bytes).is_ok() {
                             ira_parser::convert_to_lossless_webp(&tmp);
-                            return dest.to_string_lossy().into_owned();
+                            if dest.is_file() {
+                                return dest.to_string_lossy().into_owned();
+                            }
+                            if tmp.is_file() {
+                                return tmp.to_string_lossy().into_owned();
+                            }
                         }
                     }
                     Err(e) => eprintln!("RA icon download read error: {}", e),

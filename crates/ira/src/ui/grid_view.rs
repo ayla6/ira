@@ -396,3 +396,10 @@ pub fn show_grid_view(state: &SharedState) {
 
     build_grid_view(state, &games, cover_width, cover_height, sort_mode, &header_box, &content_scroll);
 }
+
+pub fn refresh_grid_store(state: &SharedState) {
+    let games = filtered_games(state);
+    let store = state.borrow().grid_store.clone();
+    let new_items: Vec<GameItem> = games.iter().map(GameItem::new).collect();
+    store.splice(0, store.n_items(), &new_items);
+}

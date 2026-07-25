@@ -7,10 +7,10 @@ use std::cell::RefCell;
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use tracing::info_span;
 
-fn decode_queue() -> &'static mpsc::SyncSender<DecodeJob> {
-    static QUEUE: OnceLock<mpsc::SyncSender<DecodeJob>> = OnceLock::new();
+fn decode_queue() -> &'static mpsc::Sender<DecodeJob> {
+    static QUEUE: OnceLock<mpsc::Sender<DecodeJob>> = OnceLock::new();
     QUEUE.get_or_init(|| {
-        let (tx, rx) = mpsc::sync_channel::<DecodeJob>(32);
+        let (tx, rx) = mpsc::channel::<DecodeJob>();
         let rx = Arc::new(Mutex::new(rx));
         for i in 0..DECODE_POOL_SIZE {
             let rx = rx.clone();
@@ -70,7 +70,7 @@ where
     let rx = RefCell::new(rx);
 
     let path_for_decode = path_str.clone();
-    if decode_queue().try_send((path_for_decode, tx)).is_err() {
+    if decode_queue().send((path_for_decode, tx)).is_err() {
         let callbacks = PENDING_LOADS.with(|cell| cell.borrow_mut().remove(&path_str));
         if let Some(callbacks) = callbacks {
             for cb in callbacks {

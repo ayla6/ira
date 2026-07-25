@@ -191,23 +191,25 @@ fn start_background_enrichment(state: &SharedState) {
                     let ra_password = &ra_password;
                     s.spawn(move || {
                         for (app_id, trophy_source, platform_id, db_id, title, game) in chunk {
-                            crate::ui::enrichment::enrich_game_blocking(
-                                crate::ui::enrichment::EnrichGameParams {
-                                    app_id: app_id.clone(),
-                                    trophy_source: *trophy_source,
-                                    platform_id: platform_id.clone(),
-                                    db_id: *db_id,
-                                    title: title.clone(),
-                                    steam: steam.clone(),
-                                    sender: sender.clone(),
-                                    save_dir: save_dir.clone(),
-                                    db: db.clone(),
-                                    ra_username: ra_username.clone(),
-                                    ra_token: ra_token.clone(),
-                                    ra_password: ra_password.clone(),
-                                    game: Some(game.clone()),
-                                },
-                            );
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                crate::ui::enrichment::enrich_game_blocking(
+                                    crate::ui::enrichment::EnrichGameParams {
+                                        app_id: app_id.clone(),
+                                        trophy_source: *trophy_source,
+                                        platform_id: platform_id.clone(),
+                                        db_id: *db_id,
+                                        title: title.clone(),
+                                        steam: steam.clone(),
+                                        sender: sender.clone(),
+                                        save_dir: save_dir.clone(),
+                                        db: db.clone(),
+                                        ra_username: ra_username.clone(),
+                                        ra_token: ra_token.clone(),
+                                        ra_password: ra_password.clone(),
+                                        game: Some(game.clone()),
+                                    },
+                                );
+                            }));
                         }
                     })
                 }).collect();
@@ -265,15 +267,19 @@ fn start_background_enrichment(state: &SharedState) {
             let _s = tracing::info_span!("background_sgdb_redownload", count = sgdb_games.len()).entered();
             for (db_id, sgdb_id, kind, app_id) in sgdb_games {
                 std::thread::sleep(std::time::Duration::from_millis(100));
-                let dir = match kind {
-                    ira_models::GameKind::Ps3 => ira_parser::ps3_data_dir(&save_dir, &app_id),
-                    ira_models::GameKind::Ps4 => ira_parser::ps4_data_dir(&save_dir, &app_id),
-                    _ => ira_parser::sgdb_data_dir(&save_dir, &sgdb_id),
-                };
-                let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id);
-                let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
-                    db_id, sgdb_id, icon, hero, grid, logo, header,
-                });
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let dir = match kind {
+                        ira_models::GameKind::Ps3 => ira_parser::ps3_data_dir(&save_dir, &app_id),
+                        ira_models::GameKind::Ps4 => ira_parser::ps4_data_dir(&save_dir, &app_id),
+                        _ => ira_parser::sgdb_data_dir(&save_dir, &sgdb_id),
+                    };
+                    steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id)
+                }));
+                if let Ok((icon, hero, grid, logo, header)) = result {
+                    let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
+                        db_id, sgdb_id, icon, hero, grid, logo, header,
+                    });
+                }
             }
         });
     }

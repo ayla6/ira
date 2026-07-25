@@ -267,6 +267,9 @@ fn make_bind(item_size: Rc<Cell<(i32, i32)>>, sort_mode: SortMode) -> BindFn {
             }
         }
 
+        if let Some(badge) = unsafe { vbox.steal_data::<gtk4::Label>("badge") } {
+            overlay.remove_overlay(&badge);
+        }
         if let Some(text) = badge_text(game, sort_mode) {
             let badge = gtk4::Label::new(Some(&text));
             badge.set_valign(gtk4::Align::End);

@@ -9,14 +9,6 @@ use std::rc::Rc;
 use super::state::{PendingImage, SharedState};
 use super::css::*;
 
-pub fn topmost_visible_window(_widget: &gtk4::Widget) -> Option<gtk4::Window> {
-    gtk4::Window::list_toplevels()
-        .into_iter()
-        .rev()
-        .filter_map(|w| w.downcast::<gtk4::Window>().ok())
-        .find(|w: &gtk4::Window| w.is_visible())
-}
-
 pub struct DialogLayout {
     pub window: adw::Window,
     pub sidebar: gtk4::ListBox,

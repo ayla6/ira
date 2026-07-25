@@ -385,20 +385,9 @@ fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &S
                 });
                 actions.add_action(&delete_action);
 
-                let topmost = super::helpers::topmost_visible_window(r.upcast_ref::<gtk4::Widget>());
-                let Some(parent_win) = topmost.or(r.root().and_downcast::<gtk4::Window>()) else { return };
-                let point = gtk4::graphene::Point::new(x as f32, y as f32);
-                let translated = r.compute_point(&parent_win, &point)
-                    .map(|p| (p.x() as i32, p.y() as i32))
-                    .unwrap_or((x as i32, y as i32));
-                let rect = gdk4::Rectangle::new(translated.0, translated.1, 1, 1);
-                parent_win.insert_action_group("grp", Some(&actions));
-                popover.set_parent(&parent_win);
-                popover.set_pointing_to(Some(&rect));
-                let popover_clone = popover.clone();
-                popover.connect_closed(move |_| {
-                    popover_clone.unparent();
-                });
+                popover.set_parent(&r);
+                popover.set_pointing_to(Some(&gdk4::Rectangle::new(x as i32, y as i32, 1, 1)));
+                r.insert_action_group("grp", Some(&actions));
                 popover.popup();
             }
         });
@@ -452,12 +441,6 @@ fn sidebar_bind_game(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {
                     .collect();
                 show_multi_game_context_menu(&sc, &db_ids, &r, x, y);
             } else {
-                if !selected_ids.contains(&item_grid_id) || selected_ids.len() != 1 {
-                    if let Some(pos) = find_game_index(&sc, db_id, variant_id) {
-                        let selection = sc.borrow().sidebar_selection.clone();
-                        selection.select_item(pos, true);
-                    }
-                }
                 let game = sc.borrow().games.iter()
                     .find(|g| g.db_id == db_id && g.variant_id == variant_id)
                     .cloned();

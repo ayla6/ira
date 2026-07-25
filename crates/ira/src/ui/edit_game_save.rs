@@ -492,8 +492,10 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
             for i in 0..store.n_items() {
                 if let Some(item) = store.item(i).and_then(|o| o.downcast::<super::game_item::GameItem>().ok()) {
                     if let Some(gi) = item.game() {
-                        if let Some(g) = games.iter().find(|g| g.grid_id() == gi.grid_id()) {
-                            store.splice(i, 1, &[super::game_item::GameItem::new(g)]);
+                        if gi.db_id == db_id_cb {
+                            if let Some(g) = games.iter().find(|g| g.grid_id() == gi.grid_id()) {
+                                store.splice(i, 1, &[super::game_item::GameItem::new(g)]);
+                            }
                         }
                     }
                 }
@@ -536,14 +538,36 @@ fn finish_save(params: &SaveGameSettingsParams, db: &ira_db::DbConn) {
 
     super::sidebar::rebuild_sidebar(&params.state);
 
-    {
+    let sort_key_changed = {
+        let store = params.state.borrow().grid_store.clone();
+        let games = params.state.borrow().games.clone();
+        let mut changed = false;
+        for i in 0..store.n_items() {
+            if let Some(item) = store.item(i).and_then(|o| o.downcast::<super::game_item::GameItem>().ok()) {
+                if let Some(gi) = item.game() {
+                    if gi.db_id == params.db_id {
+                        if let Some(g) = games.iter().find(|g| g.db_id == params.db_id && g.variant_id.is_none()) {
+                            if gi.name != g.name || gi.sort_title != g.sort_title {
+                                changed = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        changed
+    };
+    if sort_key_changed {
+        super::grid_view::refresh_grid_store(&params.state);
+    } else {
         let store = params.state.borrow().grid_store.clone();
         let games = params.state.borrow().games.clone();
         for i in 0..store.n_items() {
             if let Some(item) = store.item(i).and_then(|o| o.downcast::<super::game_item::GameItem>().ok()) {
                 if let Some(gi) = item.game() {
                     if let Some(g) = games.iter().find(|g| g.grid_id() == gi.grid_id()) {
-                        store.splice(i, 1, &[super::game_item::GameItem::new(g)]);
+                        item.update_game(g);
                     }
                 }
             }

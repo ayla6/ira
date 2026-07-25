@@ -76,6 +76,7 @@ mod imp {
         pub vadj: RefCell<Option<gtk4::Adjustment>>,
         pub hadj: RefCell<Option<gtk4::Adjustment>>,
         pub freeze: Cell<bool>,
+        pub dirty: Cell<bool>,
 
         pub setup_fn: RefCell<Option<SetupFn>>,
         pub bind_fn: RefCell<Option<BindFn>>,
@@ -104,6 +105,7 @@ mod imp {
                 vadj: RefCell::new(None),
                 hadj: RefCell::new(None),
                 freeze: Cell::new(false),
+                dirty: Cell::new(false),
                 setup_fn: RefCell::new(None),
                 bind_fn: RefCell::new(None),
                 unbind_fn: RefCell::new(None),
@@ -403,6 +405,24 @@ mod imp {
                         }
                     }
                 }
+            } else if self.dirty.get() {
+                self.dirty.set(false);
+                let bind = self.bind_fn.borrow().clone();
+                let model = self.model.borrow().clone();
+                let visible = self.visible.borrow();
+                for (&position, widget) in visible.iter() {
+                    if let Some(ref model) = model {
+                        if let Some(item) = model.item(position as u32) {
+                            if let Some(game_item) = item.downcast_ref::<GameItem>() {
+                                if let Some(game) = game_item.game() {
+                                    if let Some(ref bind) = bind {
+                                        bind(widget, &game);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             if let Some(header) = self.header.borrow().as_ref() {
@@ -480,11 +500,15 @@ impl VirtualGrid {
         *imp.model.borrow_mut() = Some(model.clone());
 
         let obj = self.clone();
-        let handler = model.connect_items_changed(move |_, _, _, _| {
+        let handler = model.connect_items_changed(move |_, _, removed, added| {
             let imp = obj.imp();
             let new_n = imp.model.borrow().as_ref().map(|m| m.n_items()).unwrap_or(0);
             imp.n_items.set(new_n);
-            clear_visible(imp);
+            if removed != added {
+                clear_visible(imp);
+            } else {
+                imp.dirty.set(true);
+            }
             obj.queue_allocate();
         });
         *imp.model_handler.borrow_mut() = Some(handler);

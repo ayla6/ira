@@ -388,7 +388,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     picker.set_content(Some(&outer));
     picker.present();
 
-    let (tx, rx) = std::sync::mpsc::channel::<Vec<SgdbAsset>>();
+    let (tx, rx) = std::sync::mpsc::channel::<(Vec<SgdbAsset>, bool)>();
     let rx = std::cell::RefCell::new(rx);
     let steam_c = steam.clone();
     let id_c = id.to_string();
@@ -396,7 +396,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let dims: Vec<String> = dimensions.iter().map(|s| s.to_string()).collect();
     std::thread::spawn(move || {
         let dims_refs: Vec<&str> = dims.iter().map(|s| s.as_str()).collect();
-        let results = steam_c.list_sgdb_assets(&id_c, asset_at, is_steam_id, &dims_refs);
+        let results = steam_c.list_sgdb_assets(&id_c, asset_at, is_steam_id, &dims_refs, 0);
         let _ = tx.send(results);
     });
 
@@ -410,6 +410,9 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
 
     let assets_store: Rc<RefCell<Vec<SgdbAsset>>> = Rc::new(RefCell::new(Vec::new()));
     let zoom_level = Rc::new(Cell::new(300));
+    let current_page: Rc<Cell<u32>> = Rc::new(Cell::new(0));
+    let has_more: Rc<Cell<bool>> = Rc::new(Cell::new(true));
+    let loading_more: Rc<Cell<bool>> = Rc::new(Cell::new(false));
 
     let rebuild: Rc<dyn Fn()> = {
         let assets_store = assets_store.clone();
@@ -456,9 +459,19 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
 
     let assets_store_t = assets_store.clone();
     let rebuild_t = rebuild.clone();
+    let has_more_t = has_more.clone();
+    let current_page_t = current_page.clone();
+    let loading_more_t = loading_more.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        if let Ok(assets) = rx.borrow_mut().try_recv() {
-            *assets_store_t.borrow_mut() = assets;
+        if let Ok((new_assets, more)) = rx.borrow_mut().try_recv() {
+            if current_page_t.get() == 0 {
+                *assets_store_t.borrow_mut() = new_assets;
+            } else {
+                assets_store_t.borrow_mut().extend(new_assets);
+            }
+            has_more_t.set(more);
+            current_page_t.set(current_page_t.get() + 1);
+            loading_more_t.set(false);
             rebuild_t();
             glib::ControlFlow::Break
         } else {
@@ -470,5 +483,55 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     zoom_scale.connect_value_changed(move |s| {
         zoom_level.set(s.value() as i32);
         rebuild_z();
+    });
+
+    let _scrolled_clone = scrolled.clone();
+    let steam_scroll = steam.clone();
+    let id_scroll = id.to_string();
+    let asset_scroll = asset.to_string();
+    let dims_scroll: Vec<String> = dimensions.iter().map(|s| s.to_string()).collect();
+    let assets_store_scroll = assets_store.clone();
+    let rebuild_scroll = rebuild.clone();
+    let current_page_scroll = current_page.clone();
+    let has_more_scroll = has_more.clone();
+    let loading_more_scroll = loading_more.clone();
+    let picker_scroll = picker.clone();
+
+    scrolled.connect_edge_reached(move |_, edge| {
+        if edge != gtk4::PositionType::Bottom { return; }
+        if !has_more_scroll.get() || loading_more_scroll.get() { return; }
+        if !picker_scroll.is_visible() { return; }
+
+        loading_more_scroll.set(true);
+        let next_page = current_page_scroll.get();
+        let (tx_more, rx_more) = std::sync::mpsc::channel::<(Vec<SgdbAsset>, bool)>();
+        let rx_more = std::cell::RefCell::new(rx_more);
+        let steam_m = steam_scroll.clone();
+        let id_m = id_scroll.clone();
+        let asset_at_m = AssetType::from_string(&asset_scroll).unwrap_or(AssetType::Icon);
+        let dims_m = dims_scroll.clone();
+        std::thread::spawn(move || {
+            let dims_refs: Vec<&str> = dims_m.iter().map(|s| s.as_str()).collect();
+            let results = steam_m.list_sgdb_assets(&id_m, asset_at_m, is_steam_id, &dims_refs, next_page);
+            let _ = tx_more.send(results);
+        });
+
+        let assets_store_m = assets_store_scroll.clone();
+        let rebuild_m = rebuild_scroll.clone();
+        let current_page_m = current_page_scroll.clone();
+        let has_more_m = has_more_scroll.clone();
+        let loading_more_m = loading_more_scroll.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            if let Ok((new_assets, more)) = rx_more.borrow_mut().try_recv() {
+                assets_store_m.borrow_mut().extend(new_assets);
+                has_more_m.set(more);
+                current_page_m.set(current_page_m.get() + 1);
+                loading_more_m.set(false);
+                rebuild_m();
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
     });
 }

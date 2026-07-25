@@ -67,27 +67,35 @@ impl SteamDataClient {
         }
     }
 
-    pub fn list_sgdb_assets(&self, id: &str, asset: AssetType, is_steam_id: bool, dimensions: &[&str]) -> Vec<SgdbAsset> {
-        let _s = tracing::info_span!("list_sgdb_assets", id, asset = %asset).entered();
+    pub fn list_sgdb_assets(&self, id: &str, asset: AssetType, is_steam_id: bool, dimensions: &[&str], page: u32) -> (Vec<SgdbAsset>, bool) {
+        let _s = tracing::info_span!("list_sgdb_assets", id, asset = %asset, page).entered();
         let endpoint = match sgdb_endpoint(asset, is_steam_id, id) {
             Some(e) => e,
-            None => return Vec::new(),
+            None => return (Vec::new(), false),
         };
         let base = format!("https://www.steamgriddb.com/api/v2/{}", endpoint);
-        let url = if dimensions.is_empty() {
+        let mut params: Vec<String> = Vec::new();
+        if !dimensions.is_empty() {
+            params.push(format!("dimensions={}", dimensions.join(",")));
+        }
+        if page > 0 {
+            params.push(format!("page={}", page));
+        }
+        let url = if params.is_empty() {
             base
         } else {
-            format!("{}?dimensions={}", base, dimensions.join(","))
+            format!("{}?{}", base, params.join("&"))
         };
         let json = match self.sgdb_get_json(&url) {
             Some(j) => j,
-            None => return Vec::new(),
+            None => return (Vec::new(), false),
         };
+        let total: u64 = json.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
         let data = match json.get("data").and_then(|d| d.as_array()) {
             Some(d) => d,
-            None => return Vec::new(),
+            None => return (Vec::new(), false),
         };
-        data.iter().filter_map(|item| {
+        let items: Vec<SgdbAsset> = data.iter().filter_map(|item| {
             let url = item.get("url")?.as_str()?.to_string();
             let thumb = item.get("thumb").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let width = item.get("width").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -100,7 +108,9 @@ impl SteamDataClient {
                 .to_string();
             let mime = item.get("mime").and_then(|v| v.as_str()).unwrap_or("").to_string();
             Some(SgdbAsset { url, thumb, width, height, style, author, mime })
-        }).collect()
+        }).collect();
+        let has_more = (page as u64 + 1) * 30 < total;
+        (items, has_more)
     }
 
     pub fn search_sgdb(&self, term: &str) -> Vec<(String, String)> {

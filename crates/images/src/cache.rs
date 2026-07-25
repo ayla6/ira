@@ -9,7 +9,7 @@ pub(crate) type PendingMap = HashMap<String, Vec<PendingCallback>>;
 pub(crate) type DecodeResult = (String, Option<(Vec<u8>, u32, u32)>);
 
 pub(crate) const PIXBUF_CACHE_MAX: usize = 10;
-pub(crate) const DECODE_POOL_SIZE: usize = 6;
+pub(crate) const DECODE_POOL_SIZE: usize = 2;
 
 thread_local! {
     pub(crate) static TEXTURE_CACHE: RefCell<TextureCache> = RefCell::new(TextureCache::new());

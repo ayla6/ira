@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::io::Read;
 use std::rc::Rc;
 use std::sync::mpsc;
 use adw::prelude::*;
@@ -9,21 +8,9 @@ use super::add_game_dialog::collect_env_vars;
 use super::edit_game_advanced::AdvancedWidgets;
 use super::edit_game_launch::LaunchConfigWidgets;
 use super::edit_game_variants::VarW;
-use super::state::SharedState;
+use super::state::{PendingImage, SharedState};
 use super::wine_config_env_dll::collect_dll_overrides;
 use super::wine_config_widget::WineConfigWidgets;
-
-fn is_ico_bytes(path: &str) -> bool {
-    if path.ends_with(".ico") {
-        return true;
-    }
-    let mut f = match std::fs::File::open(path) {
-        Ok(f) => f,
-        Err(_) => return false,
-    };
-    let mut buf = [0u8; 4];
-    f.read_exact(&mut buf).is_ok() && buf == [0x00, 0x00, 0x01, 0x00]
-}
 
 pub(super) struct SaveGameSettingsParams {
     pub state: SharedState,
@@ -36,7 +23,7 @@ pub(super) struct SaveGameSettingsParams {
     pub save_dir: String,
     pub logo_controls: Option<(Rc<RefCell<String>>, gtk4::Adjustment)>,
     pub dlc_switches: Vec<adw::SwitchRow>,
-    pub pending_copies: Rc<RefCell<HashMap<String, String>>>,
+    pub pending_copies: Rc<RefCell<HashMap<String, PendingImage>>>,
     pub old_wine: WineConfig,
     pub app_default_wine: WineConfig,
     pub game_exe: String,
@@ -366,7 +353,7 @@ fn update_game_names(state: &SharedState, app_id_result: &AppIdResult, old_app_i
 }
 
 fn spawn_image_copy_thread(
-    images: Vec<(String, String)>,
+    images: Vec<(String, PendingImage)>,
     cloud_dir: std::path::PathBuf,
     db_id: i64,
     tx: mpsc::Sender<Vec<String>>,
@@ -374,27 +361,42 @@ fn spawn_image_copy_thread(
     std::thread::spawn(move || {
         let _s = tracing::info_span!("pending_image_copy_convert", db_id = db_id, count = images.len()).entered();
         let mut pending_images = Vec::new();
-        for (asset, src_path) in &images {
+        for (asset, img) in &images {
             let Some(at) = AssetType::from_string(asset) else { continue; };
             let base_name = at.file_base();
             let (max_w, max_h) = at.thumb_dims();
             ira_parser::remove_image_variants(&cloud_dir, base_name);
             ira_parser::remove_image_variants(&cloud_dir, &format!("{}_small", base_name));
 
-            let is_ico = is_ico_bytes(src_path);
-            let dest = if is_ico {
-                let ico_path = cloud_dir.join(format!("{}.ico", base_name));
-                let _ = std::fs::copy(src_path, &ico_path);
-                ico_path
-            } else {
-                let ext = std::path::Path::new(src_path).extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("png");
-                let dest = cloud_dir.join(format!("{}.{}", base_name, ext));
-                if let Err(e) = std::fs::copy(src_path, &dest) {
-                    eprintln!("Failed to copy {}: {}", asset, e);
+            let dest = match img {
+                PendingImage::Path(src_path) => {
+                    if ira_parser::is_ico_data(&std::fs::read(src_path).unwrap_or_default()) {
+                        let ico_path = cloud_dir.join(format!("{}.ico", base_name));
+                        let _ = std::fs::copy(src_path, &ico_path);
+                        ico_path
+                    } else {
+                        let ext = std::path::Path::new(src_path).extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("png");
+                        let dest = cloud_dir.join(format!("{}.{}", base_name, ext));
+                        if let Err(e) = std::fs::copy(src_path, &dest) {
+                            eprintln!("Failed to copy {}: {}", asset, e);
+                        }
+                        dest
+                    }
                 }
-                dest
+                PendingImage::Bytes(data) => {
+                    let ext = if ira_parser::is_ico_data(data) { "ico" }
+                    else if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) { "png" }
+                    else if data.starts_with(&[0xFF, 0xD8, 0xFF]) { "jpg" }
+                    else if data.starts_with(b"RIFF") && data.len() > 11 && &data[8..12] == b"WEBP" { "webp" }
+                    else { "png" };
+                    let dest = cloud_dir.join(format!("{}.{}", base_name, ext));
+                    if let Err(e) = std::fs::write(&dest, data) {
+                        eprintln!("Failed to write {}: {}", asset, e);
+                    }
+                    dest
+                }
             };
             if dest.is_file() {
                 pending_images.push((base_name.to_string(), dest, max_w, max_h));
@@ -433,7 +435,7 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
     let cloud_dir = game.as_ref().map(|g| ira_parser::game_data_dir(&params.save_dir, g)).unwrap_or_default();
     let _ = std::fs::create_dir_all(&cloud_dir);
 
-    let image_list: Vec<(String, String)> = pc.iter()
+    let image_list: Vec<(String, PendingImage)> = pc.iter()
         .filter(|(k, _)| !k.starts_with("__"))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();

@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::state::SharedState;
+use super::state::{PendingImage, SharedState};
 use super::css::*;
 
 pub struct DialogLayout {
@@ -277,7 +277,7 @@ pub fn esc(s: &str) -> String {
 pub fn refresh_settings_images_page(
     state: &SharedState,
     db_id: i64,
-    build_page: impl Fn(&SharedState, &Game, &adw::Window, Option<Rc<RefCell<HashMap<String, String>>>>) -> gtk4::Widget,
+    build_page: impl Fn(&SharedState, &Game, &adw::Window, Option<Rc<RefCell<HashMap<String, PendingImage>>>>) -> gtk4::Widget,
 ) {
     let sd = match state.borrow().settings_data.clone() {
         Some(d) => d,

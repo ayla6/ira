@@ -184,6 +184,33 @@ pub fn full_image_path(path: &str) -> String {
     path.to_string()
 }
 
+/// Check if raw bytes are an ICO file by reading the magic header.
+pub fn is_ico_data(data: &[u8]) -> bool {
+    data.len() >= 4 && data[0..4] == [0x00, 0x00, 0x01, 0x00]
+}
+
+/// Convert raw image bytes to lossless WebP if the source is PNG or ICO.
+/// Returns the original bytes unchanged if the format is WebP, JPEG, or
+/// unrecognizable.
+pub fn convert_bytes_to_lossless_webp(data: Vec<u8>) -> Vec<u8> {
+    let _s = tracing::info_span!("convert_bytes_to_lossless_webp").entered();
+    let format = image::guess_format(&data).ok();
+    match format {
+        Some(image::ImageFormat::Png) | Some(image::ImageFormat::Ico) => {}
+        _ => return data,
+    }
+    match image::load_from_memory(&data) {
+        Ok(img) => {
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            webp::Encoder::from_rgba(rgba.as_raw(), w, h)
+                .encode_lossless()
+                .to_vec()
+        }
+        Err(_) => data,
+    }
+}
+
 /// Open an image file (PNG, ICO, etc.) and re-save as lossless WebP,
 /// removing the original. Does nothing if the file is already WebP or is
 /// a JPEG (JPEGs are kept as-is to avoid generation loss).
@@ -320,5 +347,51 @@ mod tests {
     fn test_full_image_path_no_small_suffix() {
         assert_eq!(full_image_path("/foo/bar/hero.jpg"), "/foo/bar/hero.jpg");
         assert_eq!(full_image_path(""), "");
+    }
+
+    #[test]
+    fn test_is_ico_data_real_ico() {
+        let ico_bytes = [0x00, 0x00, 0x01, 0x00, 0x01, 0x00];
+        assert!(is_ico_data(&ico_bytes));
+    }
+
+    #[test]
+    fn test_is_ico_data_png() {
+        let png_bytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A];
+        assert!(!is_ico_data(&png_bytes));
+    }
+
+    #[test]
+    fn test_is_ico_data_empty() {
+        assert!(!is_ico_data(&[]));
+    }
+
+    #[test]
+    fn test_convert_bytes_to_lossless_webp_converts_png() {
+        let img = image::RgbaImage::new(4, 4);
+        let mut png_buf = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut png_buf), image::ImageFormat::Png).unwrap();
+        let result = convert_bytes_to_lossless_webp(png_buf);
+        let format = image::guess_format(&result).unwrap();
+        assert_eq!(format, image::ImageFormat::WebP);
+    }
+
+    #[test]
+    fn test_convert_bytes_to_lossless_webp_skips_jpeg() {
+        let img = image::DynamicImage::new_rgb8(4, 4);
+        let mut jpg_buf = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut jpg_buf), image::ImageFormat::Jpeg).unwrap();
+        let original = jpg_buf.clone();
+        let result = convert_bytes_to_lossless_webp(jpg_buf);
+        assert_eq!(result, original, "JPEG bytes should be returned unchanged");
+    }
+
+    #[test]
+    fn test_convert_bytes_to_lossless_webp_skips_webp() {
+        let raw = image::RgbaImage::new(2, 2);
+        let webp_bytes = webp::Encoder::from_rgba(raw.as_raw(), 2, 2).encode_lossless();
+        let original = webp_bytes.to_vec();
+        let result = convert_bytes_to_lossless_webp(original.clone());
+        assert_eq!(result, original, "WebP bytes should be returned unchanged");
     }
 }

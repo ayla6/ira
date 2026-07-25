@@ -6,7 +6,7 @@ use std::rc::Rc;
 use ira_models::AssetType;
 use super::helpers::clear_children;
 use super::message_helpers::apply_game_update;
-use super::state::SharedState;
+use super::state::{PendingImage, SharedState};
 use super::game_item::GameItem;
 use super::css::*;
 
@@ -72,7 +72,7 @@ pub(super) fn make_refresh_closure(
     ctx: AssetRefreshCtx,
     state: &SharedState,
     game: &Game,
-    pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
+    pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
 ) -> Rc<dyn Fn()> {
     let asset_type = ctx.asset_type;
     let _s = tracing::info_span!("make_refresh_closure", asset = %asset_type, db_id = game.db_id).entered();
@@ -89,22 +89,40 @@ pub(super) fn make_refresh_closure(
             move || {
                 clear_children(&preview_wrapper);
                 let from_pending = pending_copies.as_ref()
-                    .and_then(|pc| pc.borrow().get(&asset_c).cloned())
-                    .filter(|p| std::path::Path::new(p).is_file());
-                let preview_src = from_pending.clone()
-                    .or_else(|| {
-                        ira_parser::find_image_file(&cloud_dir, &base_name)
-                            .map(|p| p.to_string_lossy().into_owned())
-                    });
-                if let Some(path) = preview_src {
-                    let p = gtk4::Picture::new();
-                    ira_images::set_picture_contain_async(&p, &path, th.max(tw));
-                    preview_wrapper.append(&p);
-                } else {
-                    let ph = gtk4::Label::new(Some("—"));
-                    ph.add_css_class(CSS_DIM_LABEL);
-                    ph.set_height_request(th.max(tw));
-                    preview_wrapper.append(&ph);
+                    .and_then(|pc| pc.borrow().get(&asset_c).cloned());
+                let preview_src = match &from_pending {
+                    Some(PendingImage::Path(p)) if std::path::Path::new(p).is_file() => Some(p.clone()),
+                    Some(PendingImage::Bytes(b)) if !b.is_empty() => {
+                        if let Ok(texture) = gdk4::Texture::from_bytes(&glib::Bytes::from_owned(b.clone())) {
+                            let pic = gtk4::Picture::for_paintable(&texture);
+                            pic.set_content_fit(gtk4::ContentFit::Contain);
+                            pic.set_height_request(th.max(tw));
+                            preview_wrapper.append(&pic);
+                        } else {
+                            let ph = gtk4::Label::new(Some("—"));
+                            ph.add_css_class(CSS_DIM_LABEL);
+                            ph.set_height_request(th.max(tw));
+                            preview_wrapper.append(&ph);
+                        }
+                        None
+                    }
+                    _ => None,
+                };
+                if preview_src.is_none() {
+                    if let Some(p) = ira_parser::find_image_file(&cloud_dir, &base_name) {
+                        let pic = gtk4::Picture::new();
+                        ira_images::set_picture_contain_async(&pic, &p.to_string_lossy(), th.max(tw));
+                        preview_wrapper.append(&pic);
+                    } else {
+                        let ph = gtk4::Label::new(Some("—"));
+                        ph.add_css_class(CSS_DIM_LABEL);
+                        ph.set_height_request(th.max(tw));
+                        preview_wrapper.append(&ph);
+                    }
+                } else if let Some(path) = preview_src {
+                    let pic = gtk4::Picture::new();
+                    ira_images::set_picture_contain_async(&pic, &path, th.max(tw));
+                    preview_wrapper.append(&pic);
                 }
                 if from_pending.is_some() {
                     return;

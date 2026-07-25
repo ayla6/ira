@@ -12,11 +12,17 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
+pub enum PendingImage {
+    Path(String),
+    Bytes(Vec<u8>),
+}
+
+#[derive(Clone)]
 pub struct SettingsData {
     pub window: adw::Window,
     pub stack: gtk4::Stack,
     pub db_id: i64,
-    pub pending_copies: Rc<RefCell<HashMap<String, String>>>,
+    pub pending_copies: Rc<RefCell<HashMap<String, PendingImage>>>,
     pub ra_container: Option<gtk4::Box>,
 }
 

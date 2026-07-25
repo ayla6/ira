@@ -7,7 +7,7 @@ use crate::strings as S;
 use crate::Game;
 use super::matching::match_game_to_steam;
 use super::settings_dialog::build_shadps4_version_dropdown;
-use super::state::SharedState;
+use super::state::{PendingImage, SharedState};
 use super::helpers::clear_children;
 use super::ra_match_dialog::show_ra_search_dialog;
 use super::css::*;
@@ -16,7 +16,7 @@ type PendingCell = Rc<RefCell<Option<String>>>;
 
 type GameGeneralPageResult = (gtk4::Box, adw::EntryRow, adw::EntryRow, PendingCell, Option<adw::EntryRow>, Option<adw::ComboRow>, PendingCell, PendingCell, Option<gtk4::Box>);
 
-fn build_ra_section(state: &SharedState, game: &Game, win: &adw::Window, pending_copies: &Rc<RefCell<HashMap<String, String>>>) -> adw::PreferencesGroup {
+fn build_ra_section(state: &SharedState, game: &Game, win: &adw::Window, pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>) -> adw::PreferencesGroup {
     let ra_group = adw::PreferencesGroup::new();
     ra_group.set_title("RetroAchievements");
 
@@ -42,7 +42,7 @@ fn build_ra_section(state: &SharedState, game: &Game, win: &adw::Window, pending
         let sc = state.clone();
         let game_clone = game.clone();
         unmatch_btn.connect_clicked(move |_| {
-            pc.borrow_mut().insert(pkey.clone(), String::new());
+            pc.borrow_mut().insert(pkey.clone(), PendingImage::Path(String::new()));
             let sd = match sc.borrow().settings_data.clone() {
                 Some(d) => d,
                 None => return,
@@ -307,7 +307,7 @@ fn build_ra_container(
     state: &SharedState,
     game: &Game,
     win: &adw::Window,
-    pending_copies: &Rc<RefCell<HashMap<String, String>>>,
+    pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>,
 ) -> gtk4::Box {
     let ra_group = build_ra_section(state, game, win, pending_copies);
     let container = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -321,7 +321,7 @@ fn build_retro_emulator_and_ra(
     state: &SharedState,
     game: &Game,
     win: &adw::Window,
-    pending_copies: &Rc<RefCell<HashMap<String, String>>>,
+    pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>,
 ) -> (PendingCell, PendingCell, Option<gtk4::Box>) {
     let pending_ra_core: Rc<RefCell<Option<String>>> = Default::default();
     let pending_emulator: Rc<RefCell<Option<String>>> = Default::default();
@@ -457,7 +457,7 @@ pub(super) fn build_game_general_page(
     game: &Game,
     win: &adw::Window,
     languages: &[String],
-    pending_copies: &Rc<RefCell<HashMap<String, String>>>,
+    pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>,
 ) -> GameGeneralPageResult {
     let general_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 

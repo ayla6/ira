@@ -9,7 +9,7 @@ use super::helpers::{clear_children, make_browse_button, refresh_settings_images
 use super::image_manager_helpers::{find_best_image_path, AssetRefreshCtx, make_refresh_closure};
 use super::sgdb_match_dialog::show_sgdb_search_dialog;
 use super::sgdb_picker::{show_sgdb_picker, ShowSgdbPickerParams};
-use super::state::SharedState;
+use super::state::{PendingImage, SharedState};
 use super::css::*;
 
 pub fn build_image_manager_content(state: &SharedState, game: &Game, parent_win: &adw::Window) -> gtk4::Box {
@@ -20,7 +20,7 @@ pub fn build_image_manager_content_with_drafts(
     state: &SharedState,
     game: &Game,
     parent_win: &adw::Window,
-    pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
+    pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
 ) -> gtk4::Box {
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
     content.set_margin_start(16);
@@ -76,7 +76,7 @@ pub fn build_image_manager_content_with_drafts(
             let did = game.db_id;
             unmatch_btn.connect_clicked(move |_| {
                 if let Some(ref pc) = pending_pc {
-                    pc.borrow_mut().insert("__unmatch__".to_string(), String::new());
+                    pc.borrow_mut().insert("__unmatch__".to_string(), PendingImage::Path(String::new()));
                     refresh_settings_images_page(&sc, did, |s, game, win, pc| {
                         let mut g2 = game.clone();
                         g2.sgdb_id.clear();
@@ -103,36 +103,50 @@ struct BuildImageSectionParams<'a> {
     game: &'a Game,
     state: &'a SharedState,
     parent_win: &'a adw::Window,
-    pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
+    pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
 }
 
-fn resolve_image_path(
-    pending_copies: &Option<Rc<RefCell<HashMap<String, String>>>>,
+fn resolve_image_source(
+    pending_copies: &Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     asset_type: &str,
     game: &Game,
     file_base: &str,
     id: &str,
     save_dir: &str,
-) -> String {
-    let draft_path = pending_copies.as_ref()
-        .and_then(|pc| pc.borrow().get(asset_type).cloned());
-    if let Some(ref src) = draft_path {
-        if std::path::Path::new(src).is_file() {
-            src.clone()
-        } else {
-            find_best_image_path(game, asset_type, file_base, id, save_dir)
+) -> Option<PendingImage> {
+    if let Some(pc) = pending_copies {
+        if let Some(img) = pc.borrow().get(asset_type).cloned() {
+            match &img {
+                PendingImage::Path(p) if std::path::Path::new(p).is_file() => return Some(img),
+                PendingImage::Path(_) => {}
+                PendingImage::Bytes(_) => return Some(img),
+            }
         }
-    } else {
-        find_best_image_path(game, asset_type, file_base, id, save_dir)
     }
+    let path = find_best_image_path(game, asset_type, file_base, id, save_dir);
+    if path.is_empty() { None } else { Some(PendingImage::Path(path)) }
 }
 
-fn build_image_preview(img_path: &str, max_h: i32) -> gtk4::Box {
+fn build_image_preview(source: Option<&PendingImage>, max_h: i32) -> gtk4::Box {
     let preview = gtk4::Picture::new();
     let preview_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     preview_wrapper.set_valign(gtk4::Align::Center);
-    if !img_path.is_empty() && std::path::Path::new(&img_path).is_file() {
-        ira_images::set_picture_contain_async(&preview, img_path, max_h);
+    let has_image = match source {
+        Some(PendingImage::Path(p)) if !p.is_empty() && std::path::Path::new(p).is_file() => {
+            ira_images::set_picture_contain_async(&preview, p, max_h);
+            true
+        }
+        Some(PendingImage::Bytes(b)) if !b.is_empty() => {
+            if let Ok(texture) = gdk4::Texture::from_bytes(&glib::Bytes::from_owned(b.clone())) {
+                preview.set_paintable(Some(&texture));
+                true
+            } else {
+                false
+            }
+        }
+        _ => false,
+    };
+    if has_image {
         preview_wrapper.append(&preview);
     } else {
         let ph = gtk4::Label::new(Some("—"));
@@ -273,7 +287,7 @@ struct SgdbPickerCtx<'a> {
     parent_win: &'a adw::Window,
     refresh_images: &'a Rc<dyn Fn()>,
     dims: &'a [&'static str],
-    pending_copies: &'a Option<Rc<RefCell<HashMap<String, String>>>>,
+    pending_copies: &'a Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     save_dir: &'a str,
 }
 
@@ -317,7 +331,7 @@ fn build_reset_icon_button(
     asset_type: &str,
     game: &Game,
     refresh_images: &Rc<dyn Fn()>,
-    pending_copies: &Option<Rc<RefCell<HashMap<String, String>>>>,
+    pending_copies: &Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     save_dir: &str,
 ) -> Option<gtk4::Button> {
     if AssetType::from_string(asset_type) != Some(AssetType::Icon) || !game.kind.is_trophy_console() {
@@ -354,7 +368,7 @@ fn build_reset_icon_button(
         if let Some(ref pc) = pending_copies_reset {
             pc.borrow_mut().remove(&asset_reset);
             if let Some(path) = default_path {
-                pc.borrow_mut().insert(asset_reset.clone(), path);
+                pc.borrow_mut().insert(asset_reset.clone(), PendingImage::Path(path));
             }
         }
         refresh();
@@ -367,7 +381,7 @@ fn build_ra_icon_button(
     game: &Game,
     state: &SharedState,
     refresh_images: &Rc<dyn Fn()>,
-    pending_copies: &Option<Rc<RefCell<HashMap<String, String>>>>,
+    pending_copies: &Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
 ) -> Option<gtk4::Button> {
     if AssetType::from_string(asset_type) != Some(AssetType::Icon)
         || game.kind != ira_models::GameKind::Retro
@@ -423,7 +437,7 @@ fn build_ra_icon_button(
                 }
                 if let Some(path) = result {
                     if let Some(ref pc) = pc {
-                        pc.borrow_mut().insert(asset.clone(), path);
+                        pc.borrow_mut().insert(asset.clone(), PendingImage::Path(path));
                     }
                     refresh();
                 }
@@ -453,9 +467,9 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     row.set_hexpand(true);
     row.set_valign(gtk4::Align::Center);
 
-    let img_path = resolve_image_path(&pending_copies, asset_type, game, file_base, &id, &save_dir);
+    let img_source = resolve_image_source(&pending_copies, asset_type, game, file_base, &id, &save_dir);
     let max_h = thumb_h.max(thumb_w);
-    let preview_wrapper = build_image_preview(&img_path, max_h);
+    let preview_wrapper = build_image_preview(img_source.as_ref(), max_h);
     row.append(&preview_wrapper);
 
     let btns = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
@@ -479,7 +493,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
             let asset_name = asset_type.to_string();
             move |path| {
                 if let Some(ref pc_inner) = pc {
-                    pc_inner.borrow_mut().insert(asset_name.clone(), path.to_string_lossy().into_owned());
+                    pc_inner.borrow_mut().insert(asset_name.clone(), PendingImage::Path(path.to_string_lossy().into_owned()));
                     refresh();
                 }
             }

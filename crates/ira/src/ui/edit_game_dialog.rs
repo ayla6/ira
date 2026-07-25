@@ -4,7 +4,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk4::prelude::IsA;
 use ira_models::{AppDetails, GameLaunchConfig, WineConfig, WineProfile};
-use super::state::SharedState;
+use super::state::{PendingImage, SharedState};
 use super::edit_game_advanced::AdvancedWidgets;
 use super::edit_game_launch::{build_launch_config_page, LaunchConfigWidgets};
 use super::edit_game_pages::{build_api_emulator_page, build_dlc_page};
@@ -198,7 +198,7 @@ fn build_dialog_contents(
     let DialogContent { game, win, sidebar, stack, content_area, app_details, save_dir, has_config } = content;
     let DialogConfig { saved_launch, saved_wine, saved_profile_id, app_default_wine } = config;
     let languages = app_details.as_ref().map(|d| d.languages.clone()).unwrap_or_default();
-    let pending_copies: Rc<RefCell<HashMap<String, String>>> = Default::default();
+    let pending_copies: Rc<RefCell<HashMap<String, PendingImage>>> = Default::default();
     let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator, ra_container) =
         super::game_settings::build_game_general_page(&state, &game, &win, &languages, &pending_copies);
     sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General"));

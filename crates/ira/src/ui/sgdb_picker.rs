@@ -9,6 +9,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use super::helpers::clear_children;
 use super::css::*;
+use super::state::PendingImage;
 
 fn build_sgdb_asset_card(
     a: &SgdbAsset,
@@ -135,7 +136,7 @@ struct SgdbPickerCtx {
     is_steam_id: bool,
     picker: adw::Window,
     on_done: Rc<dyn Fn()>,
-    pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
+    pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     dest_dir: Option<String>,
 }
 
@@ -169,57 +170,48 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
     Rc::new(move || {
         let _s = tracing::info_span!("on_download", asset = %asset_dl, url = %dl_url).entered();
         if let Some(ref pc) = pending_dl {
-            let tmp = {
-                let url_path = std::path::Path::new(&dl_url);
-                let e = url_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                let ts = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0);
-                if e.is_empty() {
-                    std::env::temp_dir().join(format!("sgdb_{}_{}", asset_dl, ts))
-                } else {
-                    std::env::temp_dir().join(format!("sgdb_{}_{}.{}", asset_dl, ts, e))
-                }
-            };
-            let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+            let (tx, rx) = std::sync::mpsc::channel::<(Vec<u8>, bool)>();
             let rx = std::cell::RefCell::new(rx);
             let url = dl_url.clone();
             let steam = steam_dl.clone();
-            let tmp_c = tmp.clone();
             std::thread::spawn(move || {
                 let _s = tracing::info_span!("download_and_convert", url = %url).entered();
-                let result = if steam.download_file(&url, &tmp_c).is_ok() {
-                    let ext = tmp_c.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                    if ext == "png" || ext == "ico" {
-                        ira_parser::convert_to_lossless_webp(&tmp_c);
-                        let webp = tmp_c.with_extension("webp");
-                        if webp.is_file() { webp.to_string_lossy().into_owned() }
-                        else { tmp_c.to_string_lossy().into_owned() }
-                    } else {
-                        tmp_c.to_string_lossy().into_owned()
+                match steam.download_bytes(&url) {
+                    Ok(bytes) if !bytes.is_empty() => {
+                        let _ = tx.send((bytes.clone(), false));
+                        let converted = ira_parser::convert_bytes_to_lossless_webp(bytes);
+                        let _ = tx.send((converted, true));
                     }
-                } else {
-                    eprintln!("Download failed for {}", url);
-                    String::new()
-                };
-                let _ = tx.send(if result.is_empty() { None } else { Some(result) });
+                    _ => {
+                        eprintln!("Download failed for {}", url);
+                    }
+                }
             });
             let pc_c = pc.clone();
             let on_done_c = on_done_dl.clone();
             let picker_c = picker_dl.clone();
             let asset_c = asset_dl.clone();
+            let done = Rc::new(Cell::new(false));
             glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-                if let Ok(result) = rx.borrow_mut().try_recv() {
-                    if let Some(path) = result {
-                        pc_c.borrow_mut().insert(asset_c.clone(), path);
-                        on_done_c();
-                        picker_c.close();
+                loop {
+                    match rx.borrow_mut().try_recv() {
+                        Ok((bytes, is_converted)) => {
+                            pc_c.borrow_mut().insert(asset_c.clone(), PendingImage::Bytes(bytes));
+                            if !is_converted {
+                                on_done_c();
+                                picker_c.close();
+                            } else {
+                                done.set(true);
+                            }
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            done.set(true);
+                            break;
+                        }
                     }
-                    glib::ControlFlow::Break
-                } else {
-                    glib::ControlFlow::Continue
                 }
+                if done.get() { glib::ControlFlow::Break } else { glib::ControlFlow::Continue }
             });
         } else {
             let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
@@ -323,7 +315,7 @@ pub(crate) struct ShowSgdbPickerParams<'a> {
     pub dimensions: &'a [&'a str],
     pub parent: &'a adw::Window,
     pub on_done: Rc<dyn Fn()>,
-    pub pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
+    pub pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     pub save_dir: &'a str,
     pub dest_dir: Option<&'a str>,
 }

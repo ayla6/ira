@@ -63,19 +63,42 @@ fn setup_and_show_popover(
     let popover = gtk4::PopoverMenu::from_model(Some(menu));
     popover.set_halign(gtk4::Align::Start);
     popover.set_has_arrow(false);
-    let root = parent.root().and_downcast::<gtk4::Window>();
-    let (parent_widget, rect): (&gtk4::Widget, gdk4::Rectangle) = if let Some(ref root) = root {
-        let point = gtk4::graphene::Point::new(at_x as f32, at_y as f32);
-        let translated = parent.compute_point(root, &point)
+    let parent_widget: &gtk4::Widget = parent.upcast_ref();
+    let point = gtk4::graphene::Point::new(at_x as f32, at_y as f32);
+
+    let root = parent_widget.root().and_downcast::<gtk4::Window>();
+    let topmost = super::helpers::topmost_visible_window(parent_widget);
+
+    let (parent_win, translated) = if let Some(ref top) = topmost {
+        match parent_widget.compute_point(top, &point) {
+            Some(t) => (top.clone(), (t.x() as i32, t.y() as i32)),
+            None => {
+                let Some(r) = root else { return };
+                let t = parent_widget.compute_point(&r, &point)
+                    .map(|p| (p.x() as i32, p.y() as i32))
+                    .unwrap_or((at_x as i32, at_y as i32));
+                (r, t)
+            }
+        }
+    } else if let Some(r) = root {
+        let t = parent_widget.compute_point(&r, &point)
             .map(|p| (p.x() as i32, p.y() as i32))
             .unwrap_or((at_x as i32, at_y as i32));
-        (root.upcast_ref(), gdk4::Rectangle::new(translated.0, translated.1, 1, 1))
+        (r, t)
     } else {
-        (parent.upcast_ref(), gdk4::Rectangle::new(at_x as i32, at_y as i32, 1, 1))
+        return;
     };
-    parent_widget.insert_action_group("game", Some(actions));
-    popover.set_parent(parent_widget);
+
+    let rect = gdk4::Rectangle::new(translated.0, translated.1, 1, 1);
+    parent_win.insert_action_group("game", Some(actions));
+    popover.set_parent(&parent_win);
     popover.set_pointing_to(Some(&rect));
+
+    let popover_clone = popover.clone();
+    popover.connect_closed(move |_| {
+        popover_clone.unparent();
+    });
+
     popover.popup();
 }
 

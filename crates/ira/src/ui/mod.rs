@@ -1,7 +1,7 @@
 mod state;
 mod css;
 mod game_item;
-mod grid_bin;
+mod virtual_grid;
 mod game_selection_model;
 mod sidebar_item;
 mod window;
@@ -68,4 +68,4 @@ pub use message_helpers::switch_to_game;
 pub use background::{hide_to_background, restore_content};
 pub use enrichment::enrich_game_async;
 pub use game_item::GameItem;
-pub use grid_bin::GridBin;
+pub use virtual_grid::VirtualGrid;

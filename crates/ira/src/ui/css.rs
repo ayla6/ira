@@ -31,7 +31,6 @@ pub const CSS_SIDEBAR_SEPARATOR_ROW: &str = "sidebar-separator-row";
 pub const CSS_SUCCESS_LABEL: &str = "success-label";
 pub const CSS_SUGGESTED_ACTION: &str = "suggested-action";
 pub const CSS_TITLE_1: &str = "title-1";
-pub const CSS_VIEW: &str = "view";
 
 pub const APP_CSS: &str = "
 .sidebar-row-title { min-width: 0; }

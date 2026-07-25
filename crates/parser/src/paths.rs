@@ -28,14 +28,14 @@ pub fn retro_data_dir(save_dir: &str, db_id: i64) -> PathBuf {
 pub fn game_data_dir(save_dir: &str, game: &ira_models::Game) -> PathBuf {
     if game.kind == ira_models::GameKind::Retro {
         retro_data_dir(save_dir, game.db_id)
-    } else if game.trophy_source.has_steam_enrichment() {
-        data_dir(save_dir, &game.app_id)
-    } else if !game.sgdb_id.is_empty() {
-        sgdb_data_dir(save_dir, &game.sgdb_id)
     } else if game.kind == ira_models::GameKind::Ps4 {
         ps4_data_dir(save_dir, &game.app_id)
     } else if game.kind == ira_models::GameKind::Ps3 {
         ps3_data_dir(save_dir, &game.app_id)
+    } else if game.trophy_source.has_steam_enrichment() {
+        data_dir(save_dir, &game.app_id)
+    } else if !game.sgdb_id.is_empty() {
+        sgdb_data_dir(save_dir, &game.sgdb_id)
     } else {
         data_dir(save_dir, &game.app_id)
     }
@@ -47,21 +47,17 @@ pub fn entry_data_dir(save_dir: &str, entry: &ira_models::GameEntry) -> PathBuf 
     let sgdb_id = entry.sgdb_id.as_deref().unwrap_or("");
     if entry.kind == ira_models::GameKind::Retro {
         retro_data_dir(save_dir, entry.id)
-    } else if entry.trophy_source.has_steam_enrichment() {
-        data_dir(save_dir, app_id)
-    } else if !sgdb_id.is_empty() {
-        sgdb_data_dir(save_dir, sgdb_id)
     } else if entry.kind == ira_models::GameKind::Ps4 {
         ps4_data_dir(save_dir, app_id)
     } else if entry.kind == ira_models::GameKind::Ps3 {
         ps3_data_dir(save_dir, app_id)
+    } else if entry.trophy_source.has_steam_enrichment() {
+        data_dir(save_dir, app_id)
+    } else if !sgdb_id.is_empty() {
+        sgdb_data_dir(save_dir, sgdb_id)
     } else {
         data_dir(save_dir, app_id)
     }
-}
-
-pub fn ra_icon_path(save_dir: &str, game_id: &str) -> PathBuf {
-    Path::new(save_dir).join("data").join("ra").join(game_id).join("icon.webp")
 }
 
 pub fn find_image_file(dir: &Path, base_name: &str) -> Option<PathBuf> {

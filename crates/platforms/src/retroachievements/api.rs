@@ -290,9 +290,9 @@ impl RaClient {
         String::new()
     }
 
-    pub fn download_game_icon(&self, save_dir: &str, game_id: &str, image_icon: &str) -> String {
-        let _s = info_span!("download_game_icon", game_id).entered();
-        let dest = paths::game_icon_path(save_dir, game_id);
+    pub fn download_game_icon(&self, save_dir: &str, db_id: i64, image_icon: &str) -> String {
+        let _s = info_span!("download_game_icon", db_id).entered();
+        let dest = ira_parser::retro_data_dir(save_dir, db_id).join("icon.webp");
         if dest.is_file() {
             return dest.to_string_lossy().into_owned();
         }

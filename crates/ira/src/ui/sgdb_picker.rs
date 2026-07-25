@@ -135,6 +135,7 @@ struct SgdbPickerCtx {
     picker: adw::Window,
     on_done: Rc<dyn Fn()>,
     pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
+    dest_dir: Option<String>,
 }
 
 fn rebuild_assets_view(
@@ -160,8 +161,10 @@ fn rebuild_assets_view(
     let all_buttons: Rc<RefCell<Vec<gtk4::Button>>> = Rc::new(RefCell::new(Vec::new()));
 
     for a in assets {
-        let data_subdir = if ctx.is_steam_id { "steam".to_string() } else { "steamgriddb".to_string() };
-        let dest_dir = format!("{}/data/{}/{}", ctx.save_dir, data_subdir, ctx.id);
+        let dest_dir = ctx.dest_dir.clone().unwrap_or_else(|| {
+            let data_subdir = if ctx.is_steam_id { "steam".to_string() } else { "steamgriddb".to_string() };
+            format!("{}/data/{}/{}", ctx.save_dir, data_subdir, ctx.id)
+        });
         let Some(at) = AssetType::from_string(&ctx.asset) else { continue; };
         let file_name = match at {
             AssetType::Icon => {
@@ -235,6 +238,55 @@ fn rebuild_assets_view(
                         glib::ControlFlow::Continue
                     }
                 });
+            } else {
+                let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+                let rx = std::cell::RefCell::new(rx);
+                let url = dl_url.clone();
+                let steam = steam_dl.clone();
+                let dest_dir_c = dest_dir.clone();
+                let file_name_c = file_name.clone();
+                let asset_at = AssetType::from_string(&asset_dl).unwrap_or(AssetType::Icon);
+                std::thread::spawn(move || {
+                    let _s = tracing::info_span!("download_direct", url = %url).entered();
+                    let dest_path = std::path::Path::new(&dest_dir_c).join(&file_name_c);
+                    let _ = std::fs::create_dir_all(&dest_dir_c);
+                    let result = if steam.download_file(&url, &dest_path).is_ok() {
+                        let ext = dest_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                        if ext == "png" || ext == "ico" {
+                            ira_parser::convert_to_lossless_webp(&dest_path);
+                            let webp = dest_path.with_extension("webp");
+                            if webp.is_file() { webp.to_string_lossy().into_owned() }
+                            else { dest_path.to_string_lossy().into_owned() }
+                        } else {
+                            dest_path.to_string_lossy().into_owned()
+                        }
+                    } else {
+                        eprintln!("Download failed for {}", url);
+                        String::new()
+                    };
+                    if !result.is_empty() {
+                        let (sw, sh) = asset_at.thumb_dims();
+                        ira_parser::ensure_small_image(
+                            std::path::Path::new(&dest_dir_c),
+                            asset_at.file_base(),
+                            sw, sh,
+                        );
+                    }
+                    let _ = tx.send(if result.is_empty() { None } else { Some(result) });
+                });
+                let on_done_c = on_done_dl.clone();
+                let picker_c = picker_dl.clone();
+                glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+                    if let Ok(result) = rx.borrow_mut().try_recv() {
+                        if result.is_some() {
+                            on_done_c();
+                            picker_c.close();
+                        }
+                        glib::ControlFlow::Break
+                    } else {
+                        glib::ControlFlow::Continue
+                    }
+                });
             }
         });
 
@@ -254,10 +306,11 @@ pub(crate) struct ShowSgdbPickerParams<'a> {
     pub on_done: Rc<dyn Fn()>,
     pub pending_copies: Option<Rc<RefCell<HashMap<String, String>>>>,
     pub save_dir: &'a str,
+    pub dest_dir: Option<&'a str>,
 }
 
 pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
-    let ShowSgdbPickerParams { steam, id, asset, is_steam_id, dimensions, parent, on_done, pending_copies, save_dir } = params;
+    let ShowSgdbPickerParams { steam, id, asset, is_steam_id, dimensions, parent, on_done, pending_copies, save_dir, dest_dir } = params;
     let picker = adw::Window::new();
     picker.set_default_width(900);
     picker.set_default_height(700);
@@ -372,6 +425,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
             picker: picker_clone,
             on_done,
             pending_copies,
+            dest_dir: dest_dir.map(|s| s.to_string()),
         };
 
         Rc::new(move || {

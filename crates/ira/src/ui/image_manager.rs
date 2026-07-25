@@ -307,6 +307,7 @@ fn build_sgdb_picker_button(
             is_steam_id: sgdb_is_steam_id, dimensions: &dims_vec,
             parent: &parent, on_done: refresh.clone(),
             pending_copies: pending_copies_btn.clone(), save_dir: &save_dir_c,
+            dest_dir: None,
         });
     });
     Some(btn)
@@ -322,7 +323,7 @@ fn build_reset_icon_button(
     if AssetType::from_string(asset_type) != Some(AssetType::Icon) || !game.kind.is_trophy_console() {
         return None;
     }
-    let reset_btn = gtk4::Button::with_label("Reset");
+    let reset_btn = gtk4::Button::with_label("Use game icon");
     let gc = game.clone();
     let refresh = Rc::clone(refresh_images);
     let pending_copies_reset = pending_copies.clone();
@@ -331,7 +332,12 @@ fn build_reset_icon_button(
     reset_btn.connect_clicked(move |_| {
         let app_id = gc.app_id.clone();
         let game_path = gc.game_path.clone();
-        let image_dir = std::path::Path::new(&save_dir_c2).join("data").join("ps4").join(&app_id);
+        let kind = gc.kind;
+        let image_dir = match kind {
+            ira_models::GameKind::Ps4 => std::path::Path::new(&save_dir_c2).join("data").join("ps4").join(&app_id),
+            ira_models::GameKind::Ps3 => std::path::Path::new(&save_dir_c2).join("data").join("ps3").join(&app_id),
+            _ => return,
+        };
         let icon_png = image_dir.join("icon.png");
         let default_path = if icon_png.is_file() {
             Some(icon_png.to_string_lossy().into_owned())
@@ -354,6 +360,80 @@ fn build_reset_icon_button(
         refresh();
     });
     Some(reset_btn)
+}
+
+fn build_ra_icon_button(
+    asset_type: &str,
+    game: &Game,
+    state: &SharedState,
+    refresh_images: &Rc<dyn Fn()>,
+    pending_copies: &Option<Rc<RefCell<HashMap<String, String>>>>,
+) -> Option<gtk4::Button> {
+    if AssetType::from_string(asset_type) != Some(AssetType::Icon)
+        || game.kind != ira_models::GameKind::Retro
+        || game.trophy_source != ira_models::TrophySource::Ra {
+        return None;
+    }
+    let btn = gtk4::Button::with_label("RA icon");
+    let db_id = game.db_id;
+    let app_id = game.app_id.clone();
+    let save_dir = state.borrow().save_dir.clone();
+    let ra_username = state.borrow().cfg.ra_username.clone();
+    let ra_token = state.borrow().cfg.ra_token.clone();
+    let ra_password = state.borrow().cfg.ra_password.clone();
+    let refresh = Rc::clone(refresh_images);
+    let pending_copies_ra = pending_copies.clone();
+    let asset_ra = asset_type.to_string();
+    let btn_clone = btn.clone();
+    btn.connect_clicked(move |_| {
+        btn_clone.set_sensitive(false);
+        btn_clone.set_label("Downloading…");
+        let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+        let rx = std::cell::RefCell::new(rx);
+        let ra_username = ra_username.clone();
+        let ra_token = ra_token.clone();
+        let ra_password = ra_password.clone();
+        let app_id = app_id.clone();
+        let save_dir = save_dir.clone();
+        let db_id = db_id;
+        std::thread::spawn(move || {
+            let _s = tracing::info_span!("ra_icon_download", db_id).entered();
+            if ira_platforms::retroachievements::RaClient::auth_is_broken() {
+                let _ = tx.send(None);
+                return;
+            }
+            let client = ira_platforms::retroachievements::RaClient::new(&ra_username, &ra_token, &ra_password);
+            match client.fetch_game_data(&save_dir, &app_id) {
+                Ok(game_data) if !game_data.image_icon.is_empty() => {
+                    let icon = client.download_game_icon(&save_dir, db_id, &game_data.image_icon);
+                    let _ = tx.send(if icon.is_empty() { None } else { Some(icon) });
+                }
+                _ => { let _ = tx.send(None); }
+            }
+        });
+        let btn_weak = btn_clone.downgrade();
+        let refresh = refresh.clone();
+        let pc = pending_copies_ra.clone();
+        let asset = asset_ra.clone();
+        glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+            if let Ok(result) = rx.borrow_mut().try_recv() {
+                if let Some(btn) = btn_weak.upgrade() {
+                    btn.set_sensitive(true);
+                    btn.set_label("RA icon");
+                }
+                if let Some(path) = result {
+                    if let Some(ref pc) = pc {
+                        pc.borrow_mut().insert(asset.clone(), path);
+                    }
+                    refresh();
+                }
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
+    });
+    Some(btn)
 }
 
 fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
@@ -421,6 +501,10 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     }
 
     if let Some(btn) = build_reset_icon_button(asset_type, game, &refresh_images, &pending_copies, &save_dir) {
+        btns.append(&btn);
+    }
+
+    if let Some(btn) = build_ra_icon_button(asset_type, game, state, &refresh_images, &pending_copies) {
         btns.append(&btn);
     }
 
@@ -530,6 +614,7 @@ fn build_dir_buttons(
         let save_dir = ctx.state.borrow().save_dir.clone();
         let sgdb_id_empty = sgdb_id.is_empty();
         let dims_vec: Vec<&str> = ctx.dimensions.to_vec();
+        let target_dir_c = target_dir.to_string_lossy().into_owned();
         btn.connect_clicked(move |_| {
             let on_done: Rc<dyn Fn()> = {
                 let refresh = refresh.clone();
@@ -544,6 +629,7 @@ fn build_dir_buttons(
                 parent: &parent, on_done,
                 pending_copies: None,
                 save_dir: &save_dir,
+                dest_dir: Some(&target_dir_c),
             });
         });
         btns.append(&btn);

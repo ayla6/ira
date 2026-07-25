@@ -92,11 +92,6 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
 
     if let Some(icon_path) = ira_parser::find_image_file(&image_dir, AssetType::Icon.file_base()) {
         game.icon_path = icon_path.to_string_lossy().into_owned();
-    } else if entry.trophy_source == ira_models::TrophySource::Ra {
-        let ra_icon = ira_parser::ra_icon_path(save_dir, app_id);
-        if ra_icon.is_file() {
-            game.icon_path = ra_icon.to_string_lossy().into_owned();
-        }
     }
 
     ira_parser::populate_image_paths(&image_dir, &mut game);

@@ -187,7 +187,7 @@ pub fn enrich_ra_game(game: &mut Game, save_dir: &str, username: &str, token: &s
     game.achievements = achievements;
 
     if game.icon_path.is_empty() && !game_data.image_icon.is_empty() {
-        let icon = client.download_game_icon(save_dir, &game.app_id, &game_data.image_icon);
+        let icon = client.download_game_icon(save_dir, game.db_id, &game_data.image_icon);
         if !icon.is_empty() {
             game.icon_path = icon;
         }

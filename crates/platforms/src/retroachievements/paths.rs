@@ -31,7 +31,3 @@ pub fn badge_path(save_dir: &str, game_id: &str, badge_name: &str) -> PathBuf {
 pub fn badge_locked_path(save_dir: &str, game_id: &str, badge_name: &str) -> PathBuf {
     achievements_dir(save_dir, game_id).join(format!("{}_lock.webp", badge_name))
 }
-
-pub fn game_icon_path(save_dir: &str, game_id: &str) -> PathBuf {
-    game_dir(save_dir, game_id).join("icon.webp")
-}

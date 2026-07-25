@@ -154,10 +154,12 @@ fn start_background_enrichment(state: &SharedState) {
             s.games.iter()
                 .filter(|g| !g.sgdb_id.is_empty()
                     && g.variant_id.is_none()
+                    && g.kind != ira_models::GameKind::Ps4
+                    && g.kind != ira_models::GameKind::Retro
                     && (g.icon_path.is_empty() || g.hero_image_path.is_empty()
                         || g.grid_path.is_empty() || g.logo_path.is_empty()
                         || g.header_path.is_empty()))
-                .map(|g| (g.db_id, g.sgdb_id.clone(), g.kind == ira_models::GameKind::Retro))
+                .map(|g| (g.db_id, g.sgdb_id.clone(), g.kind, g.app_id.clone()))
                 .collect::<Vec<_>>(),
         )
     };
@@ -261,14 +263,14 @@ fn start_background_enrichment(state: &SharedState) {
     if !sgdb_games.is_empty() {
         std::thread::spawn(move || {
             let _s = tracing::info_span!("background_sgdb_redownload", count = sgdb_games.len()).entered();
-            for (db_id, sgdb_id, is_retro) in sgdb_games {
+            for (db_id, sgdb_id, kind, app_id) in sgdb_games {
                 std::thread::sleep(std::time::Duration::from_millis(100));
-                let (icon, hero, grid, logo, header) = if is_retro {
-                    let dir = ira_parser::retro_data_dir(&save_dir, db_id);
-                    steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id)
-                } else {
-                    steam.ensure_sgdb_assets(&sgdb_id)
+                let dir = match kind {
+                    ira_models::GameKind::Ps3 => ira_parser::ps3_data_dir(&save_dir, &app_id),
+                    ira_models::GameKind::Ps4 => ira_parser::ps4_data_dir(&save_dir, &app_id),
+                    _ => ira_parser::sgdb_data_dir(&save_dir, &sgdb_id),
                 };
+                let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id);
                 let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
                     db_id, sgdb_id, icon, hero, grid, logo, header,
                 });

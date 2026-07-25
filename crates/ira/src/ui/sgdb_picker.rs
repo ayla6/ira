@@ -172,10 +172,14 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
             let tmp = {
                 let url_path = std::path::Path::new(&dl_url);
                 let e = url_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0);
                 if e.is_empty() {
-                    std::env::temp_dir().join(format!("sgdb_{}", asset_dl))
+                    std::env::temp_dir().join(format!("sgdb_{}_{}", asset_dl, ts))
                 } else {
-                    std::env::temp_dir().join(format!("sgdb_{}.{}", asset_dl, e))
+                    std::env::temp_dir().join(format!("sgdb_{}_{}.{}", asset_dl, ts, e))
                 }
             };
             let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();

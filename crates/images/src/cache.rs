@@ -9,7 +9,7 @@ pub(crate) type PendingCallback = Box<dyn FnOnce(Option<Texture>)>;
 pub(crate) type PendingMap = HashMap<String, Vec<PendingCallback>>;
 pub(crate) type DecodeJob = (String, mpsc::Sender<Option<(Vec<u8>, u32, u32)>>);
 
-pub(crate) const PIXBUF_CACHE_MAX: usize = 15;
+pub(crate) const PIXBUF_CACHE_MAX: usize = 10;
 pub(crate) const DECODE_POOL_SIZE: usize = 6;
 
 thread_local! {
@@ -35,8 +35,8 @@ impl TextureCache {
             order: HashMap::new(),
             counter: 0,
             total_bytes: 0,
-            max_bytes: 400 * 1024 * 1024,
-            max_entries: 500,
+            max_bytes: 150 * 1024 * 1024,
+            max_entries: 200,
         }
     }
 

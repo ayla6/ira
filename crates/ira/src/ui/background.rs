@@ -43,6 +43,7 @@ pub fn show_close_choice_dialog(state: &SharedState) {
 
 pub fn hide_to_background(state: &SharedState) {
     teardown_content(state);
+    ira_images::clear_texture_cache();
 
     let app = state.borrow().window.application()
         .expect("no application")

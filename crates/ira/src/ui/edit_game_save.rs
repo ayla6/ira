@@ -490,7 +490,7 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
             for i in 0..store.n_items() {
                 if let Some(item) = store.item(i).and_then(|o| o.downcast::<super::game_item::GameItem>().ok()) {
                     if let Some(gi) = item.game() {
-                        if let Some(g) = games.iter().find(|g| g.db_id == gi.db_id) {
+                        if let Some(g) = games.iter().find(|g| g.grid_id() == gi.grid_id()) {
                             store.splice(i, 1, &[super::game_item::GameItem::new(g)]);
                         }
                     }
@@ -499,7 +499,7 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
         }
         let selected = state_cb.borrow().selected_id.clone();
         let game_after_save = if selected == db_id_cb.to_string() {
-            state_cb.borrow().games.iter().find(|g| g.db_id == db_id_cb).cloned()
+            state_cb.borrow().games.iter().find(|g| g.db_id == db_id_cb && g.variant_id.is_none()).cloned()
         } else {
             None
         };
@@ -540,7 +540,7 @@ fn finish_save(params: &SaveGameSettingsParams, db: &ira_db::DbConn) {
         for i in 0..store.n_items() {
             if let Some(item) = store.item(i).and_then(|o| o.downcast::<super::game_item::GameItem>().ok()) {
                 if let Some(gi) = item.game() {
-                    if let Some(g) = games.iter().find(|g| g.db_id == gi.db_id) {
+                    if let Some(g) = games.iter().find(|g| g.grid_id() == gi.grid_id()) {
                         store.splice(i, 1, &[super::game_item::GameItem::new(g)]);
                     }
                 }
@@ -550,7 +550,7 @@ fn finish_save(params: &SaveGameSettingsParams, db: &ira_db::DbConn) {
 
     let selected = params.state.borrow().selected_id.clone();
     let game_after_save = if selected == params.db_id.to_string() {
-        params.state.borrow().games.iter().find(|g| g.db_id == params.db_id).cloned()
+        params.state.borrow().games.iter().find(|g| g.db_id == params.db_id && g.variant_id.is_none()).cloned()
     } else {
         None
     };

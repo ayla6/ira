@@ -6,7 +6,7 @@ use ira_watcher::AchievementWatcher;
 use crate::AppSender;
 use crate::Game;
 use ira_models::{Group, GroupSelection};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -36,6 +36,7 @@ pub struct AppState {
     pub content_scroll: gtk4::ScrolledWindow,
     pub content_box: gtk4::Box,
     pub grid_header: gtk4::Box,
+    pub grid_item_height: Cell<i32>,
     pub selected_id: String,
     pub displayed_db_id: i64,
     pub cfg: Config,

@@ -9,6 +9,7 @@ use super::state::SharedState;
 use super::recent_row::build_recent_row;
 use super::game_item::GameItem;
 use super::virtual_grid::{VirtualGrid, SetupFn, BindFn, UnbindFn};
+use std::cell::Cell;
 use super::message_helpers::switch_to_game;
 use super::sidebar::scroll_to_row;
 use super::context_menu::show_game_context_menu;
@@ -142,9 +143,10 @@ fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
     header_box
 }
 
-fn make_setup(state: &SharedState, cover_width: i32, cover_height: i32) -> SetupFn {
+fn make_setup(state: &SharedState, item_size: Rc<Cell<(i32, i32)>>) -> SetupFn {
     let state = state.clone();
     Rc::new(move || {
+        let (cover_width, cover_height) = item_size.get();
         let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
         vbox.set_valign(gtk4::Align::Start);
         vbox.set_halign(gtk4::Align::Center);
@@ -231,13 +233,16 @@ fn make_setup(state: &SharedState, cover_width: i32, cover_height: i32) -> Setup
     })
 }
 
-fn make_bind(cover_width: i32, cover_height: i32, sort_mode: SortMode) -> BindFn {
+fn make_bind(item_size: Rc<Cell<(i32, i32)>>, sort_mode: SortMode) -> BindFn {
     Rc::new(move |widget, game| {
+        let (cover_width, cover_height) = item_size.get();
         let vbox = widget.downcast_ref::<gtk4::Box>().unwrap();
         let overlay_widget = vbox.first_child().unwrap();
         let overlay = overlay_widget.downcast_ref::<gtk4::Overlay>().unwrap();
         let pic_widget = overlay.child().unwrap();
         let pic = pic_widget.downcast_ref::<gtk4::Picture>().unwrap();
+        vbox.set_size_request(cover_width, cover_height);
+        pic.set_size_request(cover_width, cover_height);
 
         let name_label = unsafe { vbox.data::<gtk4::Label>("name-label") }
             .map(|ptr| unsafe { ptr.as_ref() }.clone());
@@ -274,13 +279,16 @@ fn make_bind(cover_width: i32, cover_height: i32, sort_mode: SortMode) -> BindFn
     })
 }
 
-fn make_unbind(cover_width: i32, cover_height: i32) -> UnbindFn {
+fn make_unbind(item_size: Rc<Cell<(i32, i32)>>) -> UnbindFn {
     Rc::new(move |widget| {
+        let (cover_width, cover_height) = item_size.get();
         let vbox = widget.downcast_ref::<gtk4::Box>().unwrap();
         let overlay_widget = vbox.first_child().unwrap();
         let overlay = overlay_widget.downcast_ref::<gtk4::Overlay>().unwrap();
         let pic_widget = overlay.child().unwrap();
         let pic = pic_widget.downcast_ref::<gtk4::Picture>().unwrap();
+        vbox.set_size_request(cover_width, cover_height);
+        pic.set_size_request(cover_width, cover_height);
 
         if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-db-id") } {
             unsafe { ptr.as_ref() }.store(0, Ordering::Relaxed);
@@ -307,7 +315,7 @@ fn build_grid_view(
     state: &SharedState,
     games: &[Game],
     cover_width: i32,
-    cover_height: i32,
+    _cover_height: i32,
     sort_mode: SortMode,
     header_box: &gtk4::Box,
     content_scroll: &gtk4::ScrolledWindow,
@@ -318,12 +326,28 @@ fn build_grid_view(
     }
     state.borrow_mut().grid_store = store.clone();
 
-    let grid = VirtualGrid::new(cover_width, cover_height);
+    let grid = VirtualGrid::new(cover_width);
+    let item_size = grid.item_size_cell();
     grid.set_factory(
-        make_setup(state, cover_width, cover_height),
-        make_bind(cover_width, cover_height, sort_mode),
-        make_unbind(cover_width, cover_height),
+        make_setup(state, item_size.clone()),
+        make_bind(item_size.clone(), sort_mode),
+        make_unbind(item_size),
     );
+
+    let state_clone = state.clone();
+    let grid_weak = grid.downgrade();
+    let gen = state.borrow().view_generation;
+    grid.set_size_changed(Rc::new(move |_w, h| {
+        if state_clone.borrow().view_generation != gen {
+            return;
+        }
+        state_clone.borrow_mut().grid_item_height.set(h);
+        if let Some(grid) = grid_weak.upgrade() {
+            let new_header = build_grid_header(&state_clone, h);
+            grid.set_header(Some(&new_header));
+        }
+    }));
+
     grid.set_model(&store);
     grid.set_header(Some(header_box));
     grid.set_hexpand(true);
@@ -337,6 +361,7 @@ fn build_grid_view(
 
 pub fn show_grid_view(state: &SharedState) {
     state.borrow_mut().selected_id.clear();
+    state.borrow_mut().view_generation += 1;
 
     let content_scroll = state.borrow().content_scroll.clone();
     let grid_header = state.borrow().grid_header.clone();
@@ -344,15 +369,33 @@ pub fn show_grid_view(state: &SharedState) {
     content_scroll.vadjustment().set_value(0.0);
     clear_children(&grid_header);
 
-    let cover_width = state.borrow().cfg.grid_cover_width.clamp(100, 350);
-    let cover_height = ((cover_width as f64) * 1.5) as i32;
+    let min_w = 110;
+    let stored_h = state.borrow().grid_item_height.get();
+    let item_h = if stored_h > 0 {
+        stored_h
+    } else {
+        let (cw, ch) = {
+            let cs = state.borrow().content_scroll.clone();
+            let w = cs.width();
+            let h = cs.height();
+            if w > 0 {
+                (w, h)
+            } else {
+                let win = state.borrow().window.clone();
+                let surface = win.surface();
+                surface.map(|s| (s.width(), s.height())).unwrap_or((800, 600))
+            }
+        };
+        let (_, h) = VirtualGrid::compute_item_size(cw.max(1), ch.max(1), min_w);
+        h
+    };
 
-    let header_box = build_grid_header(state, cover_height);
+    let header_box = build_grid_header(state, item_h);
 
     let sort_mode = state.borrow().cfg.sort_mode;
     let games = filtered_games(state);
 
-    build_grid_view(state, &games, cover_width, cover_height, sort_mode, &header_box, &content_scroll);
+    build_grid_view(state, &games, min_w, item_h, sort_mode, &header_box, &content_scroll);
 }
 
 pub fn refresh_grid_store(state: &SharedState) {

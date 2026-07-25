@@ -41,7 +41,7 @@ pub fn show_settings_dialog(
     let stack = layout.stack;
     let content_area = layout.content_area;
 
-    let (general_page, notif_row, bg_row, hidden_row, grid_spin) = build_general_settings_page(&cfg);
+    let (general_page, notif_row, bg_row, hidden_row) = build_general_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
 
@@ -167,7 +167,6 @@ pub fn show_settings_dialog(
         s.cfg.notifications_enabled = notif_row.is_active();
         s.cfg.close_to_background = bg_row.is_active();
         s.cfg.show_hidden_games = hidden_row.is_active();
-        s.cfg.grid_cover_width = grid_spin.value() as i32;
         if let Some(row) = &ps4_enable_row {
             s.cfg.shadps4_enabled = row.is_active();
         }

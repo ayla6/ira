@@ -10,6 +10,47 @@ use super::game_item::GameItem;
 pub type SetupFn = Rc<dyn Fn() -> gtk4::Widget>;
 pub type BindFn = Rc<dyn Fn(&gtk4::Widget, &Game)>;
 pub type UnbindFn = Rc<dyn Fn(&gtk4::Widget)>;
+pub type SizeChangedFn = Rc<dyn Fn(i32, i32)>;
+
+const ASPECT_RATIO: f64 = 1.5;
+const STEP_COLS: &[u32] = &[5, 7, 9, 11, 13, 15];
+const STEP_SIZES: &[i32] = &[110, 150, 200, 250, 300, 350];
+const MIN_VISIBLE_ROWS: f64 = 2.5;
+
+fn compute_grid_layout(width: i32, min_item_w: i32, base_sp: i32, viewport_h: i32) -> (u32, i32, i32, i32) {
+    let avail_w = (width - 2 * base_sp).max(min_item_w);
+    let raw_cols = (((avail_w + base_sp) / (min_item_w + base_sp)).max(1) as u32).min(30);
+
+    let width_step = STEP_COLS.iter().enumerate()
+        .rev()
+        .find(|(_, &c)| c <= raw_cols)
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+
+    let max_step = if viewport_h > 0 {
+        STEP_SIZES.iter().enumerate()
+            .rev()
+            .find(|(_, &w)| {
+                let h = ((w as f64) * ASPECT_RATIO) as i32;
+                let row_h = h + base_sp;
+                (viewport_h as f64) / (row_h as f64) >= MIN_VISIBLE_ROWS
+            })
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    } else {
+        STEP_SIZES.len() - 1
+    };
+
+    let step_idx = width_step.min(max_step);
+    let item_w = STEP_SIZES[step_idx].max(min_item_w);
+    let item_h = ((item_w as f64) * ASPECT_RATIO) as i32;
+
+    let sp = base_sp + step_idx as i32 * 4;
+    let avail_w = (width - 2 * sp).max(item_w);
+    let n_cols = (((avail_w + sp) / (item_w + sp)).max(1) as u32).min(30);
+
+    (n_cols, item_w, item_h, sp)
+}
 
 mod imp {
     use super::*;
@@ -19,8 +60,10 @@ mod imp {
         pub model_handler: RefCell<Option<glib::SignalHandlerId>>,
         pub n_items: Cell<u32>,
 
-        pub item_width: Cell<i32>,
-        pub item_height: Cell<i32>,
+        pub min_item_width: Cell<i32>,
+        pub cur_item_w: Cell<i32>,
+        pub cur_item_h: Cell<i32>,
+        pub item_size: Rc<Cell<(i32, i32)>>,
         pub min_spacing: Cell<i32>,
         pub prev_width: Cell<i32>,
 
@@ -37,17 +80,22 @@ mod imp {
         pub setup_fn: RefCell<Option<SetupFn>>,
         pub bind_fn: RefCell<Option<BindFn>>,
         pub unbind_fn: RefCell<Option<UnbindFn>>,
+        pub size_changed_fn: RefCell<Option<SizeChangedFn>>,
     }
 
     impl Default for VirtualGrid {
         fn default() -> Self {
+            let min_w = 110;
+            let min_h = ((min_w as f64) * ASPECT_RATIO) as i32;
             Self {
                 model: RefCell::new(None),
                 model_handler: RefCell::new(None),
                 n_items: Cell::new(0),
-                item_width: Cell::new(200),
-                item_height: Cell::new(300),
-                min_spacing: Cell::new(12),
+                min_item_width: Cell::new(min_w),
+                cur_item_w: Cell::new(min_w),
+                cur_item_h: Cell::new(min_h),
+                item_size: Rc::new(Cell::new((min_w, min_h))),
+                min_spacing: Cell::new(8),
                 prev_width: Cell::new(0),
                 header: RefCell::new(None),
                 header_height: Cell::new(0),
@@ -59,6 +107,7 @@ mod imp {
                 setup_fn: RefCell::new(None),
                 bind_fn: RefCell::new(None),
                 unbind_fn: RefCell::new(None),
+                size_changed_fn: RefCell::new(None),
             }
         }
     }
@@ -157,21 +206,19 @@ mod imp {
     impl WidgetImpl for VirtualGrid {
         fn measure(&self, orientation: gtk4::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
             let header_h = self.header_height.get();
-            let item_w = self.item_width.get();
-            let item_h = self.item_height.get();
+            let min_w = self.min_item_width.get();
             let min_sp = self.min_spacing.get();
             let n_items = self.n_items.get();
 
             if orientation == gtk4::Orientation::Vertical {
                 let width = if for_size > 0 { for_size } else { self.prev_width.get().max(1).max(800) };
-                let avail = (width - 2 * min_sp).max(item_w);
-                let n_cols = compute_n_cols(avail, item_w, min_sp);
+                let (n_cols, _item_w, item_h, sp) = compute_grid_layout(width, min_w, min_sp, 0);
                 let n_rows = if n_items == 0 { 0 } else { n_items.div_ceil(n_cols) };
-                let row_h = item_h + min_sp;
-                let h = header_h + min_sp + (n_rows as i32) * row_h;
+                let row_h = item_h + sp;
+                let h = header_h + sp + (n_rows as i32) * row_h;
                 (0, h, -1, -1)
             } else {
-                (item_w, item_w * 30, -1, -1)
+                (min_w, min_w * 30, -1, -1)
             }
         }
 
@@ -187,18 +234,16 @@ mod imp {
                 .unwrap_or(0);
             self.header_height.set(header_h);
 
-            let item_w = self.item_width.get();
-            let item_h = self.item_height.get();
+            let min_w = self.min_item_width.get();
             let min_sp = self.min_spacing.get();
             let n_items = self.n_items.get();
-            let row_h = item_h + min_sp;
 
-            if n_items == 0 || width <= 0 || height <= 0 || row_h <= 0 {
+            if n_items == 0 || width <= 0 || height <= 0 {
                 if let Some(adj) = self.vadj.borrow().as_ref() {
-                    let upper = header_h as f64;
-                    let ps = height.max(0) as f64;
+                    let upper = (header_h as f64).max(height as f64);
+                    let ps = (height as f64).min(upper);
                     self.freeze.set(true);
-                    adj.configure(0.0, 0.0, upper, 1.0, ps, ps);
+                    adj.configure(0.0, 0.0, upper, 1.0, ps * 0.9, ps);
                     self.freeze.set(false);
                 }
                 if let Some(header) = self.header.borrow().as_ref() {
@@ -209,14 +254,28 @@ mod imp {
                 return;
             }
 
-            let avail_width = (width - 2 * min_sp).max(item_w);
-            let n_cols = compute_n_cols(avail_width, item_w, min_sp);
+            let (n_cols, item_w, item_h, sp) = compute_grid_layout(width, min_w, min_sp, height);
+            let avail_width = (width - 2 * sp).max(min_w);
+            let row_h = item_h + sp;
             let n_rows = n_items.div_ceil(n_cols) as i32;
-            let content_h = n_rows * row_h + min_sp;
+            let content_h = n_rows * row_h + sp;
             let total_h = header_h + content_h;
 
+            let prev_w = self.cur_item_w.get();
+            let prev_h = self.cur_item_h.get();
+            let size_changed = prev_w != item_w || prev_h != item_h;
+            if size_changed {
+                self.cur_item_w.set(item_w);
+                self.cur_item_h.set(item_h);
+                self.item_size.set((item_w, item_h));
+                if let Some(cb) = self.size_changed_fn.borrow().as_ref() {
+                    let cb = cb.clone();
+                    glib::idle_add_local_once(move || cb(item_w, item_h));
+                }
+            }
+
             let col_spacing = if n_cols > 1 {
-                ((avail_width - n_cols as i32 * item_w) / (n_cols as i32 - 1)).max(0)
+                ((avail_width - n_cols as i32 * item_w) / (n_cols as i32 - 1)).max(sp)
             } else {
                 0
             };
@@ -229,8 +288,8 @@ mod imp {
                 .unwrap_or(0);
 
             if let Some(adj) = self.vadj.borrow().as_ref() {
-                let ps = (height as f64).min(total_h as f64);
-                let upper = total_h as f64;
+                let upper = total_h.max(height) as f64;
+                let ps = (height as f64).min(upper);
                 let max_val = (upper - ps).max(0.0);
                 let cur_val = (scroll_pos as f64).min(max_val).max(0.0);
                 let need_configure = (adj.upper() - upper).abs() > 0.5
@@ -323,6 +382,29 @@ mod imp {
                 }
             }
 
+            if size_changed {
+                let unbind = self.unbind_fn.borrow().clone();
+                let bind = self.bind_fn.borrow().clone();
+                let model = self.model.borrow().clone();
+                let visible = self.visible.borrow();
+                for (&position, widget) in visible.iter() {
+                    if let Some(ref unbind) = unbind {
+                        unbind(widget);
+                    }
+                    if let Some(ref model) = model {
+                        if let Some(item) = model.item(position as u32) {
+                            if let Some(game_item) = item.downcast_ref::<GameItem>() {
+                                if let Some(game) = game_item.game() {
+                                    if let Some(ref bind) = bind {
+                                        bind(widget, &game);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if let Some(header) = self.header.borrow().as_ref() {
                 if header_h > 0 {
                     let tx = gtk4::gsk::Transform::new()
@@ -336,8 +418,8 @@ mod imp {
                 for (&position, widget) in visible.iter() {
                     let row = position / n_cols as usize;
                     let col = position % n_cols as usize;
-                    let x = min_sp + col as i32 * (item_w + col_spacing);
-                    let y = header_h + min_sp + row as i32 * row_h - actual_scroll;
+                    let x = sp + col as i32 * (item_w + col_spacing);
+                    let y = header_h + sp + row as i32 * row_h - actual_scroll;
 
                     widget.set_child_visible(true);
                     let tx = gtk4::gsk::Transform::new()
@@ -355,10 +437,6 @@ mod imp {
     }
 }
 
-fn compute_n_cols(width: i32, item_w: i32, min_sp: i32) -> u32 {
-    (((width + min_sp) / (item_w + min_sp)).max(1) as u32).min(30)
-}
-
 glib::wrapper! {
     pub struct VirtualGrid(ObjectSubclass<imp::VirtualGrid>)
         @extends gtk4::Widget,
@@ -366,12 +444,24 @@ glib::wrapper! {
 }
 
 impl VirtualGrid {
-    pub fn new(item_width: i32, item_height: i32) -> Self {
+    pub fn new(min_item_width: i32) -> Self {
         let obj: Self = glib::Object::new();
         let imp = obj.imp();
-        imp.item_width.set(item_width);
-        imp.item_height.set(item_height);
+        let min_h = ((min_item_width as f64) * ASPECT_RATIO) as i32;
+        imp.min_item_width.set(min_item_width);
+        imp.cur_item_w.set(min_item_width);
+        imp.cur_item_h.set(min_h);
+        imp.item_size.set((min_item_width, min_h));
         obj
+    }
+
+    pub fn compute_item_size(width: i32, height: i32, min_item_width: i32) -> (i32, i32) {
+        let (_, item_w, item_h, _) = compute_grid_layout(width, min_item_width, 12, height);
+        (item_w, item_h)
+    }
+
+    pub fn item_size_cell(&self) -> Rc<Cell<(i32, i32)>> {
+        self.imp().item_size.clone()
     }
 
     pub fn set_model(&self, model: &gio::ListStore) {
@@ -425,6 +515,10 @@ impl VirtualGrid {
         *imp.setup_fn.borrow_mut() = Some(setup);
         *imp.bind_fn.borrow_mut() = Some(bind);
         *imp.unbind_fn.borrow_mut() = Some(unbind);
+    }
+
+    pub fn set_size_changed(&self, cb: SizeChangedFn) {
+        *self.imp().size_changed_fn.borrow_mut() = Some(cb);
     }
 
     pub fn clear_recycle_pool(&self) {

@@ -29,7 +29,7 @@ pub(super) fn sidebar_separator() -> gtk4::ListBoxRow {
     row
 }
 
-pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow, gtk4::SpinButton) {
+pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow) {
     let page = settings_page_container();
 
     let notif_group = adw::PreferencesGroup::new();
@@ -55,16 +55,7 @@ pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::Swit
     hidden_group.add(&hidden_row);
     page.append(&hidden_group);
 
-    let grid_group = adw::PreferencesGroup::new();
-    let grid_adj = gtk4::Adjustment::new(cfg.grid_cover_width as f64, 120.0, 320.0, 10.0, 20.0, 0.0);
-    let grid_spin = gtk4::SpinButton::new(Some(&grid_adj), 1.0, 0);
-    let grid_row = adw::ActionRow::new();
-    grid_row.set_title(S::COVER_SIZE);
-    grid_row.add_suffix(&grid_spin);
-    grid_group.add(&grid_row);
-    page.append(&grid_group);
-
-    (page, notif_row, bg_row, hidden_row, grid_spin)
+    (page, notif_row, bg_row, hidden_row)
 }
 
 pub(super) fn build_lutris_settings_page(state: &super::state::SharedState, settings_win: &adw::Window) -> gtk4::Box {

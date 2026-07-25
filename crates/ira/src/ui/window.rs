@@ -63,6 +63,7 @@ pub fn build_ui(
         content_scroll: gtk4::ScrolledWindow::new(),
         content_box: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
         grid_header: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
+        grid_item_height: Cell::new(0),
         selected_id: String::new(),
         displayed_db_id: 0,
         cfg: cfg.clone(),
@@ -105,7 +106,8 @@ pub fn build_ui(
 pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     let window = adw::ApplicationWindow::new(app);
     window.set_title(Some(S::APP_TITLE));
-    window.set_default_size(1100, 720);
+    window.set_default_size(1200, 720);
+    window.set_size_request(900, 650);
 
     let css = gtk4::CssProvider::new();
     css.load_from_string(APP_CSS);
@@ -269,23 +271,6 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
     hidden_row.append(&hidden_switch);
     popover_box.append(&hidden_row);
 
-    let zoom_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    zoom_row.set_hexpand(true);
-    zoom_row.set_size_request(-1, 36);
-    zoom_row.add_css_class(CSS_POPOVER_MENU_ROW);
-    let zoom_label = gtk4::Label::new(Some(S::COVER_SIZE));
-    zoom_label.set_xalign(0.0);
-    zoom_label.set_hexpand(true);
-    let zoom_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 100.0, 350.0, 10.0);
-    zoom_scale.set_value(state.borrow().cfg.grid_cover_width.clamp(100, 350) as f64);
-    zoom_scale.set_hexpand(true);
-    zoom_scale.set_draw_value(false);
-    zoom_scale.set_digits(0);
-    zoom_scale.set_margin_end(4);
-    zoom_row.append(&zoom_label);
-    zoom_row.append(&zoom_scale);
-    popover_box.append(&zoom_row);
-
     popover.set_child(Some(&popover_box));
 
     let state_clone = state.clone();
@@ -296,32 +281,6 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
             eprintln!("Failed to save config: {}", e);
         }
         rebuild_sidebar_and_show_grid(&state_clone);
-    });
-
-    let state_clone = state.clone();
-    let zoom_gen: Rc<Cell<u32>> = Rc::new(Cell::new(0));
-    zoom_scale.connect_value_changed(move |scale| {
-        let val = scale.value() as i32;
-        state_clone.borrow_mut().cfg.grid_cover_width = val;
-        let (has_selection, content_unloaded) = {
-            let s = state_clone.borrow();
-            if let Err(e) = s.cfg.save() {
-                eprintln!("Failed to save config: {}", e);
-            }
-            (!s.selected_id.is_empty(), s.content_unloaded)
-        };
-        if has_selection || content_unloaded {
-            return;
-        }
-        let gen = zoom_gen.get() + 1;
-        zoom_gen.set(gen);
-        let gen_cell = zoom_gen.clone();
-        let s = state_clone.clone();
-        glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
-            if gen_cell.get() == gen {
-                show_grid_view(&s);
-            }
-        });
     });
 
     (popover, settings_btn)

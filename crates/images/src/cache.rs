@@ -2,12 +2,11 @@ use gdk4::Texture;
 use gtk4::prelude::TextureExt;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::mpsc;
 use tracing::info_span;
 
 pub(crate) type PendingCallback = Box<dyn FnOnce(Option<Texture>)>;
 pub(crate) type PendingMap = HashMap<String, Vec<PendingCallback>>;
-pub(crate) type DecodeJob = (String, mpsc::Sender<Option<(Vec<u8>, u32, u32)>>);
+pub(crate) type DecodeResult = (String, Option<(Vec<u8>, u32, u32)>);
 
 pub(crate) const PIXBUF_CACHE_MAX: usize = 10;
 pub(crate) const DECODE_POOL_SIZE: usize = 6;

@@ -1,32 +1,98 @@
-use crate::cache::{DecodeJob, DECODE_POOL_SIZE, PENDING_LOADS, TEXTURE_CACHE};
+use crate::cache::{DecodeResult, DECODE_POOL_SIZE, PENDING_LOADS, TEXTURE_CACHE};
 use crate::scaled::ScaledPaintable;
 use crate::texture::{cached_texture, texture_for};
 use gdk4::{MemoryFormat, MemoryTexture, Texture};
 use gtk4::prelude::*;
-use std::cell::RefCell;
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::cell::Cell;
+use std::sync::mpsc::{self, TryRecvError};
+use std::sync::{Arc, Mutex, OnceLock};
 use tracing::info_span;
 
-fn decode_queue() -> &'static mpsc::Sender<DecodeJob> {
-    static QUEUE: OnceLock<mpsc::Sender<DecodeJob>> = OnceLock::new();
-    QUEUE.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<DecodeJob>();
-        let rx = Arc::new(Mutex::new(rx));
+struct DecodeInfra {
+    job_tx: mpsc::Sender<String>,
+    result_rx: Mutex<mpsc::Receiver<DecodeResult>>,
+}
+
+fn decode_infra() -> &'static DecodeInfra {
+    static INFRA: OnceLock<DecodeInfra> = OnceLock::new();
+    INFRA.get_or_init(|| {
+        let (job_tx, job_rx) = mpsc::channel::<String>();
+        let (result_tx, result_rx) = mpsc::channel::<DecodeResult>();
+        let job_rx = Arc::new(Mutex::new(job_rx));
         for i in 0..DECODE_POOL_SIZE {
-            let rx = rx.clone();
+            let job_rx = job_rx.clone();
+            let result_tx = result_tx.clone();
             std::thread::Builder::new()
                 .name(format!("ira-decode-{i}"))
                 .spawn(move || {
-                    while let Ok((path, result_tx)) = rx.lock().unwrap().recv() {
+                    while let Ok(path) = job_rx.lock().unwrap().recv() {
                         let _s = info_span!("bg_decode", path = %path).entered();
                         let result = ira_parser::decode_to_rgba(std::path::Path::new(&path));
-                        let _ = result_tx.send(result);
+                        let _ = result_tx.send((path, result));
                     }
                 })
                 .expect("Failed to spawn decode thread");
         }
-        tx
+        DecodeInfra { job_tx, result_rx: Mutex::new(result_rx) }
     })
+}
+
+thread_local! {
+    static DRAIN_ACTIVE: Cell<bool> = const { Cell::new(false) };
+}
+
+fn drain_results() -> glib::ControlFlow {
+    let infra = decode_infra();
+    loop {
+        match infra.result_rx.lock().unwrap().try_recv() {
+            Ok((path, result)) => {
+                let callbacks = PENDING_LOADS.with(|cell| cell.borrow_mut().remove(&path));
+                let texture = result.map(|(pixels, w, h)| {
+                    let bytes = glib::Bytes::from_owned(pixels);
+                    MemoryTexture::new(
+                        w as i32,
+                        h as i32,
+                        MemoryFormat::R8g8b8a8,
+                        &bytes,
+                        (w * 4) as usize,
+                    )
+                    .upcast::<Texture>()
+                });
+                if let Some(ref t) = texture {
+                    TEXTURE_CACHE.with(|cell| cell.borrow_mut().insert(&path, t.clone()));
+                }
+                if let Some(callbacks) = callbacks {
+                    for cb in callbacks {
+                        cb(texture.clone());
+                    }
+                }
+            }
+            Err(TryRecvError::Empty) => {
+                let has_pending = PENDING_LOADS.with(|cell| !cell.borrow().is_empty());
+                if has_pending {
+                    return glib::ControlFlow::Continue;
+                }
+                DRAIN_ACTIVE.with(|a| a.set(false));
+                return glib::ControlFlow::Break;
+            }
+            Err(TryRecvError::Disconnected) => {
+                let all: Vec<_> = PENDING_LOADS.with(|cell| cell.borrow_mut().drain().collect());
+                for (_, cbs) in all {
+                    for cb in cbs {
+                        cb(None);
+                    }
+                }
+                DRAIN_ACTIVE.with(|a| a.set(false));
+                return glib::ControlFlow::Break;
+            }
+        }
+    }
+}
+
+fn ensure_drain() {
+    if !DRAIN_ACTIVE.with(|a| a.replace(true)) {
+        glib::source::idle_add_local_full(glib::Priority::LOW, drain_results);
+    }
 }
 
 pub fn load_texture_async<F>(path: &str, callback: F)
@@ -36,7 +102,7 @@ where
     load_texture_async_with_priority(path, glib::Priority::LOW, callback);
 }
 
-pub fn load_texture_async_with_priority<F>(path: &str, priority: glib::Priority, callback: F)
+pub fn load_texture_async_with_priority<F>(path: &str, _priority: glib::Priority, callback: F)
 where
     F: FnOnce(Option<Texture>) + 'static,
 {
@@ -66,12 +132,8 @@ where
         return;
     }
 
-    let (tx, rx) = mpsc::channel::<Option<(Vec<u8>, u32, u32)>>();
-    let rx = RefCell::new(rx);
-
-    let path_for_decode = path_str.clone();
-    if decode_queue().send((path_for_decode, tx)).is_err() {
-        let callbacks = PENDING_LOADS.with(|cell| cell.borrow_mut().remove(&path_str));
+    if decode_infra().job_tx.send(path_str).is_err() {
+        let callbacks = PENDING_LOADS.with(|cell| cell.borrow_mut().remove(path));
         if let Some(callbacks) = callbacks {
             for cb in callbacks {
                 cb(None);
@@ -80,48 +142,7 @@ where
         return;
     }
 
-    let path_for_idle = path_str;
-    glib::source::idle_add_local_full(priority, move || {
-        match rx.borrow_mut().try_recv() {
-            Ok(result) => {
-                let callbacks = PENDING_LOADS.with(|cell| cell.borrow_mut().remove(&path_for_idle));
-
-                if let Some(callbacks) = callbacks {
-                    let texture: Option<Texture> = result.map(|(pixels, w, h)| {
-                        let _s = info_span!("MemoryTexture_new", path = %path_for_idle, w, h).entered();
-                        let bytes = glib::Bytes::from_owned(pixels);
-                        MemoryTexture::new(
-                            w as i32,
-                            h as i32,
-                            MemoryFormat::R8g8b8a8,
-                            &bytes,
-                            (w * 4) as usize,
-                        )
-                        .upcast::<Texture>()
-                    });
-
-                    if let Some(ref t) = texture {
-                        TEXTURE_CACHE.with(|cell| cell.borrow_mut().insert(&path_for_idle, t.clone()));
-                    }
-
-                    for cb in callbacks {
-                        cb(texture.clone());
-                    }
-                }
-                glib::ControlFlow::Break
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                let callbacks = PENDING_LOADS.with(|cell| cell.borrow_mut().remove(&path_for_idle));
-                if let Some(callbacks) = callbacks {
-                    for cb in callbacks {
-                        cb(None);
-                    }
-                }
-                glib::ControlFlow::Break
-            }
-        }
-    });
+    ensure_drain();
 }
 
 pub fn set_picture_natural_async(pic: &gtk4::Picture, path: &str, w: i32, h: i32) {

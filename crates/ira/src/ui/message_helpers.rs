@@ -265,7 +265,6 @@ fn start_background_enrichment(state: &SharedState) {
         std::thread::spawn(move || {
             let _s = tracing::info_span!("background_sgdb_redownload", count = sgdb_games.len()).entered();
             for (db_id, sgdb_id, kind, app_id, trophy_source) in sgdb_games {
-                std::thread::sleep(std::time::Duration::from_millis(100));
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let dir = if kind == ira_models::GameKind::Ps3 {
                         ira_parser::ps3_data_dir(&save_dir, &app_id)

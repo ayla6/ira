@@ -114,12 +114,14 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
             }
 
             let has_local_icon = !game.icon_path.is_empty();
-            let (icon_path, hero_path) = steam.ensure_assets(&app_id, has_local_icon);
-            if game.icon_path.is_empty() && !icon_path.is_empty() {
-                game.icon_path = icon_path;
-            }
-            if game.hero_image_path.is_empty() && !hero_path.is_empty() {
-                game.hero_image_path = hero_path;
+            if game.icon_path.is_empty() || game.hero_image_path.is_empty() {
+                let (icon_path, hero_path) = steam.ensure_assets(&app_id, has_local_icon);
+                if game.icon_path.is_empty() && !icon_path.is_empty() {
+                    game.icon_path = icon_path;
+                }
+                if game.hero_image_path.is_empty() && !hero_path.is_empty() {
+                    game.hero_image_path = hero_path;
+                }
             }
 
             if game.icon_path.is_empty() && trophy_source == ira_models::TrophySource::SteamNative {
@@ -128,15 +130,17 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
                 }
             }
 
-            let (grid_path, header_path, logo_path) = steam.ensure_grids(&app_id);
-            if game.grid_path.is_empty() && !grid_path.is_empty() {
-                game.grid_path = grid_path;
-            }
-            if game.header_path.is_empty() && !header_path.is_empty() {
-                game.header_path = header_path;
-            }
-            if game.logo_path.is_empty() && !logo_path.is_empty() {
-                game.logo_path = logo_path;
+            if game.grid_path.is_empty() || game.header_path.is_empty() || game.logo_path.is_empty() {
+                let (grid_path, header_path, logo_path) = steam.ensure_grids(&app_id);
+                if game.grid_path.is_empty() && !grid_path.is_empty() {
+                    game.grid_path = grid_path;
+                }
+                if game.header_path.is_empty() && !header_path.is_empty() {
+                    game.header_path = header_path;
+                }
+                if game.logo_path.is_empty() && !logo_path.is_empty() {
+                    game.logo_path = logo_path;
+                }
             }
 
             if !game.achievements.is_empty() && game.achievements.iter().any(|a| a.global_percent == 0.0) {

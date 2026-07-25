@@ -43,16 +43,15 @@ pub(super) fn handle_unified_sgdb_result(
         let sender = state.borrow().sender.clone();
         let sgdb_id_dl = sgdb_id.clone();
         let save_dir = state.borrow().save_dir.clone();
-        let is_retro = state.borrow().games.iter().find(|g| g.db_id == db_id).is_some_and(|g| g.kind == ira_models::GameKind::Retro);
+        let game_for_dir = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
         std::thread::spawn(move || {
             let _s = tracing::info_span!("handle_unified_sgdb_result", db_id = db_id, sgdb_id = %sgdb_id_dl).entered();
             std::thread::sleep(std::time::Duration::from_millis(100));
-            let (icon, hero, grid, logo, header) = if is_retro {
-                let dir = ira_parser::retro_data_dir(&save_dir, db_id);
-                steam_dl.ensure_sgdb_assets_in_dir(&dir, &sgdb_id_dl)
-            } else {
-                steam_dl.ensure_sgdb_assets(&sgdb_id_dl)
+            let dir = match &game_for_dir {
+                Some(g) => ira_parser::game_data_dir(&save_dir, g),
+                None => ira_parser::sgdb_data_dir(&save_dir, &sgdb_id_dl),
             };
+            let (icon, hero, grid, logo, header) = steam_dl.ensure_sgdb_assets_in_dir(&dir, &sgdb_id_dl);
             let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
                 db_id, sgdb_id: sgdb_id_dl, icon, hero, grid, logo, header,
             });
@@ -283,15 +282,14 @@ pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str,
                             let sender = state_c3.borrow().sender.clone();
                             let db_id_for_msg = db_id;
                             let save_dir = state_c3.borrow().save_dir.clone();
-                            let is_retro = state_c3.borrow().games.iter().find(|g| g.db_id == db_id).is_some_and(|g| g.kind == ira_models::GameKind::Retro);
+                            let game_for_dir = state_c3.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
                             std::thread::spawn(move || {
                                 let _s = tracing::info_span!("sgdb_search_result_match", db_id = db_id_for_msg, sgdb_id = %sgdb_id_d).entered();
-                                let (icon, hero, grid, logo, header) = if is_retro {
-                                    let dir = ira_parser::retro_data_dir(&save_dir, db_id_for_msg);
-                                    steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id_d)
-                                } else {
-                                    steam.ensure_sgdb_assets(&sgdb_id_d)
+                                let dir = match &game_for_dir {
+                                    Some(g) => ira_parser::game_data_dir(&save_dir, g),
+                                    None => ira_parser::sgdb_data_dir(&save_dir, &sgdb_id_d),
                                 };
+                                let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id_d);
                                 let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
                                     db_id: db_id_for_msg,
                                     sgdb_id: sgdb_id_d,

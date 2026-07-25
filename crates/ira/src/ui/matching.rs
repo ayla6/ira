@@ -58,9 +58,9 @@ pub fn match_game_to_steam(state: &SharedState, db_id: i64, steam_app_id: String
 }
 
 pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
-    let (steam, sender, db) = {
+    let (steam, sender, db, save_dir) = {
         let s = state.borrow();
-        (s.steam.clone(), s.sender.clone(), s.db.clone())
+        (s.steam.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone())
     };
     std::thread::spawn(move || {
         if let Err(e) = ira_db::set_sgdb_id(&db, db_id, &sgdb_id) {
@@ -70,7 +70,12 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
         if let Err(e) = ira_db::set_manual_unmatch(&db, db_id, false) {
             eprintln!("match_game_to_sgdb: set_manual_unmatch failed: {}", e);
         }
-        let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets(&sgdb_id);
+        let dir = if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, db_id) {
+            ira_parser::entry_data_dir(&save_dir, &entry)
+        } else {
+            ira_parser::sgdb_data_dir(&save_dir, &sgdb_id)
+        };
+        let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id);
 
         if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, db_id) {
             let game = Game {

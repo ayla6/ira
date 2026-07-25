@@ -155,7 +155,6 @@ fn start_background_enrichment(state: &SharedState) {
                 .filter(|g| !g.sgdb_id.is_empty()
                     && g.variant_id.is_none()
                     && g.kind != ira_models::GameKind::Ps4
-                    && g.kind != ira_models::GameKind::Retro
                     && (g.icon_path.is_empty() || g.hero_image_path.is_empty()
                         || g.grid_path.is_empty() || g.logo_path.is_empty()
                         || g.header_path.is_empty()))
@@ -270,6 +269,8 @@ fn start_background_enrichment(state: &SharedState) {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let dir = if kind == ira_models::GameKind::Ps3 {
                         ira_parser::ps3_data_dir(&save_dir, &app_id)
+                    } else if kind == ira_models::GameKind::Retro {
+                        ira_parser::retro_data_dir(&save_dir, db_id)
                     } else if trophy_source.has_steam_enrichment() {
                         ira_parser::data_dir(&save_dir, &app_id)
                     } else {

@@ -96,12 +96,8 @@ pub fn load_shadps4_game(
         }
     }
 
-    // Image paths — use SGDB dir if sgdb_id is set, otherwise data/ps4/{NPWR_ID}/
-    let image_dir = if !meta.sgdb_id.is_empty() {
-        Path::new(save_dir).join("data").join("steamgriddb").join(&meta.sgdb_id)
-    } else {
-        ps4_data_dir.clone()
-    };
+    // Image paths — always use data/ps4/{NPWR_ID}/ to match game_data_dir/entry_data_dir
+    let image_dir = ps4_data_dir.clone();
 
     let icon_png = image_dir.join("icon.png");
     if icon_png.is_file() {

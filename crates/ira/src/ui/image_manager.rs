@@ -323,7 +323,7 @@ fn build_reset_icon_button(
     if AssetType::from_string(asset_type) != Some(AssetType::Icon) || !game.kind.is_trophy_console() {
         return None;
     }
-    let reset_btn = gtk4::Button::with_label("Use game icon");
+    let reset_btn = gtk4::Button::with_label("Use PS4 icon");
     let gc = game.clone();
     let refresh = Rc::clone(refresh_images);
     let pending_copies_reset = pending_copies.clone();

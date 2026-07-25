@@ -10,7 +10,7 @@ pub(crate) type PendingMap = HashMap<String, Vec<PendingCallback>>;
 pub(crate) type DecodeJob = (String, mpsc::Sender<Option<(Vec<u8>, u32, u32)>>);
 
 pub(crate) const PIXBUF_CACHE_MAX: usize = 15;
-pub(crate) const DECODE_POOL_SIZE: usize = 3;
+pub(crate) const DECODE_POOL_SIZE: usize = 6;
 
 thread_local! {
     pub(crate) static TEXTURE_CACHE: RefCell<TextureCache> = RefCell::new(TextureCache::new());

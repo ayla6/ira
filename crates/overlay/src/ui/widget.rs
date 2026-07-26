@@ -1,4 +1,4 @@
-use super::vertex::{DrawCmd, Vertex, MODE_SHAPE, MODE_TEXT, MODE_FILLED};
+use super::vertex::{DrawCmd, Vertex, MODE_SHAPE, MODE_TEXT};
 
 #[derive(Clone, Copy, Default)]
 pub struct Rect {
@@ -41,6 +41,7 @@ pub enum Event {
     MouseMove { x: f32, y: f32 },
     MouseDown { x: f32, y: f32 },
     MouseUp { x: f32, y: f32 },
+    Scroll { delta_y: f32 },
 }
 
 pub struct LayoutCtx;
@@ -49,9 +50,14 @@ pub struct DrawCtx<'a> {
     pub vertices: &'a mut Vec<Vertex>,
     pub indices: &'a mut Vec<u32>,
     pub draw_cmds: &'a mut Vec<DrawCmd>,
-    pub screen_w: f32,
-    pub screen_h: f32,
     pub focused_index: Option<usize>,
+    /// Clipping rectangle — draw commands outside this rect are scissor-clipped
+    /// by the GPU. ScrollView sets this before drawing children and restores
+    /// afterwards.
+    pub clip_x: f32,
+    pub clip_y: f32,
+    pub clip_w: f32,
+    pub clip_h: f32,
 }
 
 pub struct EventCtx {
@@ -70,21 +76,7 @@ impl DrawCtx<'_> {
         self.draw_cmds.push(DrawCmd {
             index_count: 6, index_offset: i_off, vertex_offset: v_off,
             draw_mode: MODE_SHAPE, shape_size: [w, h], corner_radius,
-            clip_x: 0.0, clip_y: 0.0, clip_w: self.screen_w, clip_h: self.screen_h,
-        });
-    }
-
-    pub fn push_triangle(&mut self, p0: [f32; 2], p1: [f32; 2], p2: [f32; 2], color: [u8; 4]) {
-        let v_off = self.vertices.len() as i32;
-        let i_off = self.indices.len() as u32;
-        self.vertices.push(Vertex { pos: p0, uv: [0.0, 0.0], color });
-        self.vertices.push(Vertex { pos: p1, uv: [0.0, 0.0], color });
-        self.vertices.push(Vertex { pos: p2, uv: [0.0, 0.0], color });
-        self.indices.extend_from_slice(&[0, 1, 2]);
-        self.draw_cmds.push(DrawCmd {
-            index_count: 3, index_offset: i_off, vertex_offset: v_off,
-            draw_mode: MODE_FILLED, shape_size: [0.0, 0.0], corner_radius: 0.0,
-            clip_x: 0.0, clip_y: 0.0, clip_w: self.screen_w, clip_h: self.screen_h,
+            clip_x: self.clip_x, clip_y: self.clip_y, clip_w: self.clip_w, clip_h: self.clip_h,
         });
     }
 
@@ -99,7 +91,7 @@ impl DrawCtx<'_> {
             self.draw_cmds.push(DrawCmd {
                 index_count: ti_count, index_offset: i_off, vertex_offset: v_off,
                 draw_mode: MODE_TEXT, shape_size: [0.0, 0.0], corner_radius: 0.0,
-                clip_x: 0.0, clip_y: 0.0, clip_w: self.screen_w, clip_h: self.screen_h,
+                clip_x: self.clip_x, clip_y: self.clip_y, clip_w: self.clip_w, clip_h: self.clip_h,
             });
         }
     }

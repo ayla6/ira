@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use ira_models::WineConfig;
+use ira_overlay_ipc::OverlaySettings;
 
 use crate::load::{config_path, xdg_dir};
 use crate::secrets;
@@ -79,6 +80,8 @@ pub struct Config {
     pub ra_password: String,
     #[serde(default)]
     pub consoles: HashMap<String, ConsoleConfig>,
+    #[serde(default)]
+    pub overlay: OverlaySettings,
 }
 
 impl Default for Config {
@@ -112,6 +115,7 @@ impl Default for Config {
             ra_token: String::new(),
             ra_password: String::new(),
             consoles,
+            overlay: OverlaySettings::default(),
         }
     }
 }
@@ -161,6 +165,7 @@ impl Config {
             ra_enabled: self.ra_enabled,
             ra_username: self.ra_username.clone(),
             consoles: self.consoles.clone(),
+            overlay: self.overlay.clone(),
         };
         if steam_err.is_err() {
             plaintext.steam_api_key = self.steam_api_key.clone();

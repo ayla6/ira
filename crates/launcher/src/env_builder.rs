@@ -10,6 +10,63 @@ fn has_exec(name: &str) -> bool {
         .is_some()
 }
 
+/// Returns `(layer_json_dir, shim_so_path)` if the overlay files are found.
+/// In development, generates a temporary JSON manifest with the correct
+/// `library_path` (the static JSON points to release/, which is wrong in debug).
+fn overlay_paths() -> Option<(String, String)> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+
+    // Development: .so files are in target/debug or target/release alongside the exe.
+    let dev_shim = exe_dir.join("libira_overlay_shim.so");
+    let dev_vk = exe_dir.join("libira_overlay_vk.so");
+    if dev_shim.is_file() && dev_vk.is_file() {
+        // Generate a temporary JSON manifest with the correct absolute library_path.
+        // The static JSON in crates/overlay-vk/ points to release/, which is wrong
+        // for debug builds. Writing our own avoids modifying the source file.
+        let tmp_dir = std::env::temp_dir().join("ira_overlay");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+        let json_path = tmp_dir.join("ira_overlay.json");
+        let vk_abs = dev_vk.canonicalize().unwrap_or(dev_vk.clone());
+        let json_content = format!(
+            r#"{{
+    "file_format_version": "1.0.0",
+    "layer": {{
+        "name": "VK_LAYER_IRA_OVERLAY",
+        "type": "GLOBAL",
+        "api_version": "1.2.0",
+        "library_path": "{}",
+        "implementation_version": "1",
+        "description": "Ira game overlay",
+        "functions": {{
+            "vkNegotiateLoaderLayerInterfaceVersion": "vkNegotiateLoaderLayerInterfaceVersion"
+        }}
+    }}
+}}"#,
+            vk_abs.to_string_lossy()
+        );
+        if std::fs::write(&json_path, json_content).is_ok() {
+            return Some((
+                tmp_dir.to_string_lossy().into(),
+                dev_shim.to_string_lossy().into(),
+            ));
+        }
+    }
+
+    // Release: files installed in an overlay/ subdirectory alongside the exe.
+    let overlay_dir = exe_dir.join("overlay");
+    let rel_shim = overlay_dir.join("libira_overlay_shim.so");
+    let rel_json = overlay_dir.join("ira_overlay.json");
+    if rel_shim.is_file() && rel_json.is_file() {
+        return Some((
+            overlay_dir.to_string_lossy().into(),
+            rel_shim.to_string_lossy().into(),
+        ));
+    }
+
+    None
+}
+
 pub fn build_env(
     launch: &GameLaunchConfig,
     wine: Option<&WineConfig>,
@@ -98,4 +155,32 @@ pub fn build_env(
     }
 
     env
+}
+
+/// Adds overlay env vars (VK_LAYER_PATH, VK_INSTANCE_LAYERS, LD_PRELOAD, IRA_OVERLAY_SHM)
+/// to an existing env list. Call this after `build_env` when overlay is enabled.
+/// Does nothing if the overlay files are not found on disk.
+pub fn add_overlay_env(env: &mut Vec<(String, String)>, overlay_shm: Option<&str>) {
+    let Some((layer_dir, shim_path)) = overlay_paths() else {
+        eprintln!("ira-overlay: enabled but files not found — skipping injection");
+        return;
+    };
+
+    env.retain(|(k, _)| k != "VK_LAYER_PATH");
+    env.push(("VK_LAYER_PATH".to_string(), layer_dir));
+    env.retain(|(k, _)| k != "VK_INSTANCE_LAYERS");
+    env.push(("VK_INSTANCE_LAYERS".to_string(), "VK_LAYER_IRA_OVERLAY".to_string()));
+
+    let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
+    let merged = match existing {
+        Some(prev) if !prev.is_empty() => format!("{}:{}", shim_path, prev),
+        _ => shim_path,
+    };
+    env.retain(|(k, _)| k != "LD_PRELOAD");
+    env.push(("LD_PRELOAD".to_string(), merged));
+
+    if let Some(shm) = overlay_shm {
+        env.retain(|(k, _)| k != "IRA_OVERLAY_SHM");
+        env.push(("IRA_OVERLAY_SHM".to_string(), shm.to_string()));
+    }
 }

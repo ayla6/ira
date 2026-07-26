@@ -289,6 +289,7 @@ fn connect_add_handler(
             ld_preload: ld_preload_entry.text().to_string(),
             ld_library_path: ld_library_entry.text().to_string(),
             pre_launch: String::new(),
+            overlay_enabled: None,
         };
         let wine_config = if is_wine { wine_widgets.to_wine_config() } else { WineConfig::default() };
 

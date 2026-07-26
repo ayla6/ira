@@ -13,9 +13,12 @@ pub(super) struct LaunchCtx<'a> {
     pub game_id: i64,
     pub db_id: i64,
     pub game_name: &'a str,
+    pub game_kind: ira_models::GameKind,
     pub sender: &'a AppSender,
     pub running_games: &'a Arc<Mutex<HashMap<i64, i32>>>,
     pub started_at: i64,
+    pub overlay_shm: Option<String>,
+    pub overlay_global_enabled: bool,
 }
 
 fn spawn_and_monitor(ctx: &LaunchCtx, cmd: &[String], env: &[(String, String)], err_label: &str) -> Result<(), String> {
@@ -153,6 +156,12 @@ pub(super) fn launch_other(
 
     wine = wine.merge_with_default(app_default_wine);
 
+    // Only Wine games should use Wine. Linux/Other games must launch natively
+    // even if a default Wine config with enabled=true exists.
+    if ctx.game_kind != ira_models::GameKind::Wine {
+        wine.enabled = false;
+    }
+
     if let Some(vid) = variant_id {
         if let Ok(variants) = ira_db::get_variants(ctx.db, ctx.db_id) {
             if let Some(var) = variants.iter().find(|v| v.id == vid) {
@@ -185,6 +194,7 @@ pub(super) fn launch_other(
     }
 
     if !launch.exe.is_empty() {
+        let overlay_enabled = launch.overlay_enabled.unwrap_or(ctx.overlay_global_enabled);
         let wine_opt = if wine.enabled { Some(&wine) } else { None };
         ira_launcher::launch_game(
             &launch,
@@ -199,6 +209,8 @@ pub(super) fn launch_other(
                 db: ctx.db.clone(),
                 save_dir: ctx.save_dir.to_string(),
                 running_games: ctx.running_games.clone(),
+                overlay_enabled,
+                overlay_shm: if overlay_enabled { ctx.overlay_shm.clone() } else { None },
             },
         )?;
     } else {

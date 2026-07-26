@@ -2,6 +2,7 @@ use adw::prelude::*;
 use ira_models::{GameLaunchConfig, WineProfile};
 use super::helpers;
 use super::settings_dialog;
+use super::settings_pages::{build_source_overlay_row, OverlayOverrideState};
 use super::state::SharedState;
 
 #[derive(Clone)]
@@ -11,6 +12,7 @@ pub(super) struct LaunchConfigWidgets {
     pub(super) wd_entry: adw::EntryRow,
     pub(super) pre_launch_entry: adw::EntryRow,
     pub(super) profile_row: Option<adw::ComboRow>,
+    pub(super) overlay_state: OverlayOverrideState,
 }
 
 pub(super) struct LaunchConfigParams<'a> {
@@ -24,6 +26,7 @@ pub(super) struct LaunchConfigParams<'a> {
     pub profiles: &'a [WineProfile],
     pub state: &'a SharedState,
     pub game_slug: &'a str,
+    pub overlay_default: bool,
 }
 
 pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<LaunchConfigWidgets> {
@@ -91,6 +94,16 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
     lc_group.add(&pre_launch_entry);
 
     page.append(&lc_group);
+
+    // Overlay toggle (per-game override of the source setting)
+    let (overlay_row, overlay_state) = build_source_overlay_row(
+        params.overlay_default,
+        params.launch.overlay_enabled,
+    );
+    let overlay_group = adw::PreferencesGroup::new();
+    overlay_group.add(&overlay_row);
+    page.append(&overlay_group);
+
     params.sidebar.append(&settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Launch Config"));
     params.stack.add_named(&page, Some("launch"));
 
@@ -100,5 +113,6 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
         wd_entry,
         pre_launch_entry,
         profile_row,
+        overlay_state,
     })
 }

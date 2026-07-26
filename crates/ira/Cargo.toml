@@ -25,6 +25,7 @@ ira-config = { path = "../config" }
 ira-watcher = { path = "../watcher" }
 ira-launcher = { path = "../launcher" }
 ira-images = { path = "../images" }
+ira-overlay-ipc = { path = "../overlay-ipc" }
 opticaldiscs = "0.10"
 tracing-subscriber = { version = "0.3", optional = true }
 tracing-chrome = { version = "0.7", optional = true }

@@ -11,6 +11,9 @@ members = [
     "crates/images",
     "crates/ira",
     "crates/overlay",
+    "crates/overlay-ipc",
+    "crates/overlay-shim",
+    "crates/overlay-vk",
 ]
 resolver = "2"
 

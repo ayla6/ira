@@ -4,6 +4,7 @@ use ash::vk;
 use ash::vk::Handle;
 
 use crate::types::*;
+use ira_overlay::types::DeviceFns;
 
 pub(crate) unsafe extern "system" fn create_swapchain(
     device: vk::Device,
@@ -76,11 +77,11 @@ pub(crate) unsafe extern "system" fn create_swapchain(
         fences.push(fence);
     }
 
-    let ui_renderer = crate::ui::UiRenderer::new(
+    let ui_renderer = ira_overlay::ui::UiRenderer::new(
         fns, device, physical_device, cmd_pool, render_pass,
     );
 
-    crate::ui::capture::init(fns, device, physical_device, extent, format);
+    ira_overlay::ui::capture::init(fns, device, physical_device, extent, format);
 
     SWAPCHAINS.lock().unwrap().get_or_insert_with(HashMap::new).insert(
         sc.as_raw(),
@@ -109,7 +110,7 @@ pub(crate) unsafe extern "system" fn destroy_swapchain(
 
         let _ = (fns.device_wait_idle)(sc.device);
 
-        crate::ui::capture::drain_pending();
+        ira_overlay::ui::capture::drain_pending();
 
         if let Some(ui) = sc.ui_renderer {
             ui.destroy(fns);

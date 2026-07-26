@@ -72,6 +72,18 @@ fn build_launch_wine_advanced_pages(
     let app_default_wine = params.app_default_wine;
     let show_launch_config = game.kind != ira_models::GameKind::Steam && game.kind != ira_models::GameKind::Ps4 && game.kind != ira_models::GameKind::Ps3 && game.kind != ira_models::GameKind::Retro;
     let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
+
+    let overlay_source_id = match game.kind {
+        ira_models::GameKind::Steam => Some("steam"),
+        ira_models::GameKind::Retro => Some(game.platform_id.as_str()),
+        ira_models::GameKind::Ps4 => Some("ps4"),
+        ira_models::GameKind::Ps3 => Some("ps3"),
+        _ => None,
+    };
+    let overlay_default = overlay_source_id.map_or(state.borrow().cfg.overlay.enabled, |id| {
+        state.borrow().cfg.overlay.source_enabled(id)
+    });
+
     let launch_config_widgets = if show_launch_config {
         build_launch_config_page(super::edit_game_launch::LaunchConfigParams {
             launch: saved_launch,
@@ -79,11 +91,12 @@ fn build_launch_wine_advanced_pages(
             sidebar,
             stack,
             has_config,
-            saved_wine_enabled: saved_wine.enabled,
+            saved_wine_enabled: saved_wine.enabled && game.kind == ira_models::GameKind::Wine,
             saved_profile_id,
             profiles: &profiles,
             state,
             game_slug: &game.slug,
+            overlay_default,
         })
     } else {
         None

@@ -1,8 +1,6 @@
-use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use ash::vk;
-use cosmic_text::{CacheKey, SwashContent, SwashImage};
 
 use crate::types::DeviceFns;
 
@@ -15,8 +13,6 @@ pub struct AtlasSlot {
     pub y: u32,
     pub w: u32,
     pub h: u32,
-    pub offset_x: i32,
-    pub offset_y: i32,
 }
 
 pub struct PendingUpload {
@@ -27,21 +23,19 @@ pub struct PendingUpload {
     pub pixels: Vec<u8>,
 }
 
-pub(crate) struct GlyphCache {
+pub(crate) struct AtlasCache {
     cursor_x: u32,
     cursor_y: u32,
     row_height: u32,
-    pub(crate) entries: HashMap<CacheKey, AtlasSlot>,
     pub(crate) pending: Vec<PendingUpload>,
 }
 
-impl GlyphCache {
+impl AtlasCache {
     fn new() -> Self {
         Self {
             cursor_x: 1,
             cursor_y: 1,
             row_height: 1,
-            entries: HashMap::new(),
             pending: Vec::new(),
         }
     }
@@ -50,42 +44,24 @@ impl GlyphCache {
         self.cursor_x = 1;
         self.cursor_y = 1;
         self.row_height = 1;
-        self.entries.clear();
         self.pending.clear();
     }
 }
 
-static GLYPH_CACHE: OnceLock<Mutex<GlyphCache>> = OnceLock::new();
+static ATLAS_CACHE: OnceLock<Mutex<AtlasCache>> = OnceLock::new();
 
-pub(crate) fn lock_cache() -> std::sync::MutexGuard<'static, GlyphCache> {
-    GLYPH_CACHE.get_or_init(|| Mutex::new(GlyphCache::new())).lock().unwrap()
+pub(crate) fn lock_cache() -> std::sync::MutexGuard<'static, AtlasCache> {
+    ATLAS_CACHE.get_or_init(|| Mutex::new(AtlasCache::new())).lock().unwrap()
 }
 
 pub fn clear_cache() {
     lock_cache().reset();
 }
 
-pub fn convert_pixels(image: &SwashImage) -> Vec<u8> {
-    match image.content {
-        SwashContent::Mask => {
-            image.data.iter().flat_map(|&m| [m, m, m, m]).collect()
-        }
-        SwashContent::Color => {
-            image.data.chunks_exact(4)
-                .flat_map(|bgra| [bgra[2], bgra[1], bgra[0], bgra[3]])
-                .collect()
-        }
-        SwashContent::SubpixelMask => {
-            image.data.chunks_exact(4)
-                .flat_map(|rgba| [rgba[3], rgba[3], rgba[3], rgba[3]])
-                .collect()
-        }
-    }
-}
-
-pub fn pack_glyph(cache: &mut GlyphCache, w: u32, h: u32, offset_x: i32, offset_y: i32) -> AtlasSlot {
+/// Allocates space in the atlas texture for an image of the given size.
+pub fn pack(cache: &mut AtlasCache, w: u32, h: u32) -> AtlasSlot {
     if w == 0 || h == 0 {
-        return AtlasSlot { x: 0, y: 0, w: 0, h: 0, offset_x, offset_y };
+        return AtlasSlot { x: 0, y: 0, w: 0, h: 0 };
     }
     let padded_w = w + 1;
     let padded_h = h + 1;
@@ -95,13 +71,14 @@ pub fn pack_glyph(cache: &mut GlyphCache, w: u32, h: u32, offset_x: i32, offset_
         cache.row_height = 1;
     }
     if cache.cursor_y + padded_h > ATLAS_HEIGHT {
-        eprintln!("ira-overlay: glyph atlas full");
-        return AtlasSlot { x: 0, y: 0, w: 0, h: 0, offset_x, offset_y };
+        eprintln!("ira-overlay: texture atlas full");
+        return AtlasSlot { x: 0, y: 0, w: 0, h: 0 };
     }
     let slot = AtlasSlot {
         x: cache.cursor_x,
         y: cache.cursor_y,
-        w, h, offset_x, offset_y,
+        w,
+        h,
     };
     cache.cursor_x += padded_w;
     cache.row_height = cache.row_height.max(padded_h);

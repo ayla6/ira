@@ -2,6 +2,8 @@ use gtk4::prelude::*;
 use adw::prelude::*;
 use ira_config::Config;
 use crate::strings as S;
+use std::cell::RefCell;
+use std::rc::Rc;
 use super::helpers::string_list_from;
 use super::settings_dialog::settings_page_container;
 use super::css::*;
@@ -306,4 +308,135 @@ pub(super) fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRo
     page.append(&version_group);
 
     (page, version_row, version_model)
+}
+
+pub(super) struct OverlayPageWidgets {
+    pub enable_row: adw::SwitchRow,
+    pub encoder_row: adw::ComboRow,
+    pub quality_row: adw::ComboRow,
+}
+
+pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPageWidgets) {
+    let page = settings_page_container();
+    let o = &cfg.overlay;
+
+    let enable_group = adw::PreferencesGroup::new();
+    let enable_row = adw::SwitchRow::new();
+    enable_row.set_title("Enable in-game overlay");
+    enable_row.set_subtitle("Shows achievements, screenshots, and recording during gameplay (Vulkan games only)");
+    enable_row.set_active(o.enabled);
+    enable_group.add(&enable_row);
+    page.append(&enable_group);
+
+    let recording_group = adw::PreferencesGroup::new();
+    recording_group.set_title("Recording");
+
+    let encoder_model = gtk4::StringList::new(&["Auto", "VAAPI (AMD/Intel)", "NVENC (NVIDIA)", "Software (CPU)"]);
+    let encoder_row = adw::ComboRow::new();
+    encoder_row.set_title("Video encoder");
+    encoder_row.set_subtitle("Auto detects the best available encoder. Use Software if your GPU lacks hardware encoding.");
+    encoder_row.set_model(Some(&encoder_model));
+    encoder_row.set_selected(o.encoder as u32);
+    recording_group.add(&encoder_row);
+
+    let quality_model = gtk4::StringList::new(&["Low (720p 30fps)", "Medium (1080p 30fps)", "High (1080p 60fps)"]);
+    let quality_row = adw::ComboRow::new();
+    quality_row.set_title("Recording quality");
+    quality_row.set_model(Some(&quality_model));
+    quality_row.set_selected(o.recording_quality.as_u32());
+    recording_group.add(&quality_row);
+    page.append(&recording_group);
+
+    let hotkeys_group = adw::PreferencesGroup::new();
+    hotkeys_group.set_title("Hotkeys");
+
+    let toggle_row = adw::ActionRow::new();
+    toggle_row.set_title("Toggle overlay");
+    toggle_row.set_subtitle("Shift + Tab");
+    hotkeys_group.add(&toggle_row);
+
+    let screenshot_row = adw::ActionRow::new();
+    screenshot_row.set_title("Screenshot");
+    screenshot_row.set_subtitle("F12");
+    hotkeys_group.add(&screenshot_row);
+
+    let record_row = adw::ActionRow::new();
+    record_row.set_title("Toggle recording");
+    record_row.set_subtitle("F11");
+    hotkeys_group.add(&record_row);
+    page.append(&hotkeys_group);
+
+    (
+        page,
+        OverlayPageWidgets { enable_row, encoder_row, quality_row },
+    )
+}
+
+/// Tracks the override state of a per-source overlay toggle.
+/// `None` = follow global, `Some(v)` = forced to v.
+pub(super) type OverlayOverrideState = Rc<RefCell<Option<bool>>>;
+
+/// Builds a per-source overlay toggle row with a revert button.
+///
+/// - `global_enabled`: the current global overlay enabled state.
+/// - `override_value`: `None` if following global, `Some(v)` if overridden.
+///
+/// The revert button is visible only when an override is active.
+/// Clicking revert sets the value back to the global default and clears the override.
+pub(super) fn build_source_overlay_row(
+    global_enabled: bool,
+    override_value: Option<bool>,
+) -> (adw::SwitchRow, OverlayOverrideState) {
+    let row = adw::SwitchRow::new();
+    row.set_title("In-game overlay");
+    row.set_subtitle(if override_value.is_some() {
+        "Overridden from global setting"
+    } else if global_enabled {
+        "Follows global overlay setting (enabled)"
+    } else {
+        "Follows global overlay setting (disabled)"
+    });
+
+    let value = override_value.unwrap_or(global_enabled);
+    row.set_active(value);
+
+    let revert_btn = super::wine_config_helpers::make_revert_btn();
+    revert_btn.set_visible(override_value.is_some());
+    row.add_suffix(&revert_btn);
+
+    let state: OverlayOverrideState = Rc::new(RefCell::new(override_value));
+    let reverting = Rc::new(RefCell::new(false));
+
+    let state_c = state.clone();
+    let btn_c = revert_btn.clone();
+    let row_c = row.clone();
+    let rev_c = reverting.clone();
+    row.connect_active_notify(move |_| {
+        if *rev_c.borrow() {
+            return;
+        }
+        *state_c.borrow_mut() = Some(row_c.is_active());
+        btn_c.set_visible(true);
+        row_c.set_subtitle("Overridden from global setting");
+        let _ = rev_c; // keep alive
+    });
+
+    let state_c2 = state.clone();
+    let btn_c2 = revert_btn.clone();
+    let row_c2 = row.clone();
+    let rev_c2 = reverting.clone();
+    revert_btn.connect_clicked(move |_| {
+        *rev_c2.borrow_mut() = true;
+        row_c2.set_active(global_enabled);
+        *rev_c2.borrow_mut() = false;
+        *state_c2.borrow_mut() = None;
+        btn_c2.set_visible(false);
+        row_c2.set_subtitle(if global_enabled {
+            "Follows global overlay setting (enabled)"
+        } else {
+            "Follows global overlay setting (disabled)"
+        });
+    });
+
+    (row, state)
 }

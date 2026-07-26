@@ -11,6 +11,8 @@ pub struct GameLaunchConfig {
     pub ld_library_path: String,
     #[serde(default)]
     pub pre_launch: String,
+    #[serde(default)]
+    pub overlay_enabled: Option<bool>,
 }
 
 

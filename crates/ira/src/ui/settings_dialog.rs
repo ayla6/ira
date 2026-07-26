@@ -11,6 +11,7 @@ use super::wine_config_widget::build_wine_config_pages;
 use super::settings_pages::{
     build_general_settings_page, build_api_keys_page, build_lutris_settings_page,
     build_steam_settings_page, build_ra_settings_page, build_api_emulators_page,
+    build_overlay_settings_page, build_source_overlay_row,
 };
 use super::settings_console::{
     build_shadps4_settings_page, build_rpcs3_settings_page, build_console_settings_page, ConsolePageWidgets,
@@ -45,6 +46,11 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("preferences-system-symbolic", "General"));
     stack.add_named(&general_page, Some("general"));
 
+    let (overlay_page, overlay_widgets) = build_overlay_settings_page(&cfg);
+    sidebar.append(&settings_sidebar_row("view-grid-symbolic", "Overlay"));
+    stack.add_named(&overlay_page, Some("overlay"));
+
+    sidebar.append(&sidebar_separator());
     let (api_page, steam_entry, sgdb_entry) = build_api_keys_page(&cfg);
     sidebar.append(&settings_sidebar_row("dialog-password-symbolic", "API Keys"));
     stack.add_named(&api_page, Some("api"));
@@ -74,6 +80,30 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("applications-science-symbolic", "RetroAchievements"));
     stack.add_named(&ra_page, Some("ra"));
 
+    let mut source_overlay_states: Vec<(String, super::settings_pages::OverlayOverrideState)> = Vec::new();
+
+    {
+        let (overlay_row, state) = build_source_overlay_row(
+            cfg.overlay.enabled,
+            cfg.overlay.source_overrides.get("steam").copied(),
+        );
+        let g = adw::PreferencesGroup::new();
+        g.add(&overlay_row);
+        steam_page.append(&g);
+        source_overlay_states.push(("steam".to_string(), state));
+    }
+
+    {
+        let (overlay_row, state) = build_source_overlay_row(
+            cfg.overlay.enabled,
+            cfg.overlay.source_overrides.get("ra").copied(),
+        );
+        let g = adw::PreferencesGroup::new();
+        g.add(&overlay_row);
+        ra_page.append(&g);
+        source_overlay_states.push(("ra".to_string(), state));
+    }
+
     let mut console_widgets: Vec<(&'static str, ConsolePageWidgets)> = Vec::new();
     let mut ps4_enable_row: Option<adw::SwitchRow> = None;
     let mut ps4_exe_row: Option<adw::EntryRow> = None;
@@ -82,18 +112,48 @@ pub fn show_settings_dialog(
     for def in ira_models::CONSOLES {
         let cc = cfg.console(def.id);
         let (page, widgets) = build_console_settings_page(&win, def, cc);
+
+        let (overlay_row, overlay_state) = build_source_overlay_row(
+            cfg.overlay.enabled,
+            cfg.overlay.source_overrides.get(def.id).copied(),
+        );
+        let overlay_group = adw::PreferencesGroup::new();
+        overlay_group.add(&overlay_row);
+        page.append(&overlay_group);
+        source_overlay_states.push((def.id.to_string(), overlay_state));
+
         sidebar.append(&settings_sidebar_row("applications-games-symbolic", def.display_name));
         stack.add_named(&page, Some(def.display_name.to_lowercase().as_str()));
         console_widgets.push((def.id, widgets));
 
         if def.id == "ps2" {
             let (ps3_page, ps3_en, ps3_exe) = build_rpcs3_settings_page(&cfg, &win);
+
+            let (ps3_ov_row, ps3_ov_state) = build_source_overlay_row(
+                cfg.overlay.enabled,
+                cfg.overlay.source_overrides.get("ps3").copied(),
+            );
+            let ps3_ov_group = adw::PreferencesGroup::new();
+            ps3_ov_group.add(&ps3_ov_row);
+            ps3_page.append(&ps3_ov_group);
+            source_overlay_states.push(("ps3".to_string(), ps3_ov_state));
+
             sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS3"));
             stack.add_named(&ps3_page, Some("ps3"));
             ps3_enable_row = Some(ps3_en);
             ps3_exe_row = Some(ps3_exe);
 
             let (ps4_page, ps4_en, ps4_exe) = build_shadps4_settings_page(&cfg, &win);
+
+            let (ps4_ov_row, ps4_ov_state) = build_source_overlay_row(
+                cfg.overlay.enabled,
+                cfg.overlay.source_overrides.get("ps4").copied(),
+            );
+            let ps4_ov_group = adw::PreferencesGroup::new();
+            ps4_ov_group.add(&ps4_ov_row);
+            ps4_page.append(&ps4_ov_group);
+            source_overlay_states.push(("ps4".to_string(), ps4_ov_state));
+
             sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS4"));
             stack.add_named(&ps4_page, Some("ps4"));
             ps4_enable_row = Some(ps4_en);
@@ -184,6 +244,23 @@ pub fn show_settings_dialog(
         s.cfg.ra_username = ra_username_row.text().to_string();
         s.cfg.ra_password = ra_password_row.text().to_string();
         s.cfg.ra_token = ra_token_row.text().to_string();
+
+        s.cfg.overlay.enabled = overlay_widgets.enable_row.is_active();
+        s.cfg.overlay.encoder = match overlay_widgets.encoder_row.selected() {
+            1 => ira_overlay_ipc::VideoEncoder::Vaapi,
+            2 => ira_overlay_ipc::VideoEncoder::Nvenc,
+            3 => ira_overlay_ipc::VideoEncoder::Software,
+            _ => ira_overlay_ipc::VideoEncoder::Auto,
+        };
+        s.cfg.overlay.recording_quality = ira_overlay_ipc::RecordingQuality::from_u32(overlay_widgets.quality_row.selected());
+
+        for (source_id, state) in &source_overlay_states {
+            match *state.borrow() {
+                Some(v) => { s.cfg.overlay.source_overrides.insert(source_id.clone(), v); }
+                None => { s.cfg.overlay.source_overrides.remove(source_id); }
+            }
+        }
+
         for (console_id, widgets) in &console_widgets {
             let cc = s.cfg.console_mut(console_id);
             cc.enabled = widgets.enable_row.is_active();

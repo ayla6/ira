@@ -6,6 +6,7 @@ use ash::vk::Handle;
 
 use crate::negotiate::{into_vk_void_fn, transmute_fn};
 use crate::types::*;
+use ira_overlay::types::DeviceFns;
 
 pub unsafe extern "system" fn get_device_proc_addr(
     device: vk::Device,
@@ -207,8 +208,8 @@ pub(crate) unsafe extern "system" fn destroy_device(
         };
         if let Some(fns) = dd.fns {
             let _ = (fns.device_wait_idle)(device);
-            crate::ui::capture::destroy(fns, device);
-            crate::ui::capture::free_deferred(fns, device);
+            ira_overlay::ui::capture::destroy(fns, device);
+            ira_overlay::ui::capture::free_deferred(fns, device);
         }
         dd.destroy_device
     };

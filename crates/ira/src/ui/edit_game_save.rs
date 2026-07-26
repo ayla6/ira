@@ -134,8 +134,14 @@ fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchC
         ld_preload,
         ld_library_path,
         pre_launch: lc.pre_launch_entry.text().to_string(),
+        overlay_enabled: params.launch_config_widgets.as_ref().and_then(|lc| {
+            *lc.overlay_state.borrow()
+        }),
     };
-    let mut wine = params.wine_widgets.as_ref().map_or(WineConfig::default(), |ww| ww.to_wine_config());
+    let mut wine = params.wine_widgets.as_ref().map_or(
+        WineConfig { enabled: false, ..Default::default() },
+        |ww| ww.to_wine_config(),
+    );
 
     if params.show_wine_tabs {
         wine.wine_env_vars = env_vars;

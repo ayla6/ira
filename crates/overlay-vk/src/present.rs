@@ -19,14 +19,18 @@ pub unsafe extern "system" fn queue_present(
         return chain_present(queue, present_info);
     }
 
-    crate::ui::capture::check_and_readback();
+    ira_overlay::ui::capture::check_and_readback();
 
-    let overlay_visible = OVERLAY_VISIBLE.load(Ordering::Relaxed);
-    let screenshot_requested = crate::ui::capture::is_screenshot_requested()
-        || crate::ui::capture::is_recording();
+    let overlay_visible = crate::shim_bridge::is_visible();
+    let screenshot_requested = ira_overlay::ui::capture::is_screenshot_requested()
+        || ira_overlay::ui::capture::is_recording();
 
     if !overlay_visible && !screenshot_requested {
         return chain_present(queue, present_info);
+    }
+
+    if overlay_visible {
+        crate::shim_bridge::poll_and_forward();
     }
 
     if present_info.swapchain_count == 0 {
@@ -64,8 +68,8 @@ pub unsafe extern "system" fn queue_present(
         }
         return vk::Result::SUCCESS;
     }
-    crate::ui::capture::check_and_readback();
-    crate::ui::cleanup_old_staging();
+    ira_overlay::ui::capture::check_and_readback();
+    ira_overlay::ui::cleanup_old_staging();
     let _ = (sc.fns.reset_fences)(sc.device, 1, &fence);
     let _ = (sc.fns.reset_cmd_buffer)(cmd, vk::CommandBufferResetFlags::empty());
 
@@ -86,7 +90,7 @@ pub unsafe extern "system" fn queue_present(
         base_array_layer: 0, layer_count: 1,
     };
 
-    let captured = crate::ui::capture::capture(cmd, image, fence, sc.extent);
+    let captured = ira_overlay::ui::capture::capture(cmd, image, fence, sc.extent);
 
     let src_layout = if captured {
         vk::ImageLayout::TRANSFER_SRC_OPTIMAL

@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use ash::vk;
@@ -6,6 +6,7 @@ use ash::vk;
 use crate::types::DeviceFns;
 
 use super::atlas;
+use super::model;
 use super::resources;
 use super::text;
 use super::vertex::{DrawCmd, PushConstants, Vertex};
@@ -26,6 +27,8 @@ static FOCUSED_INDEX: AtomicUsize = AtomicUsize::new(0);
 static MOUSE_DOWN_INDEX: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 static FRAME_DATA: Mutex<Option<FrameData>> = Mutex::new(None);
+static REBUILD_COUNTER: AtomicU32 = AtomicU32::new(0);
+const REBUILD_INTERVAL: u32 = 30;
 
 pub struct UiRenderer {
     device: vk::Device,
@@ -55,6 +58,9 @@ impl Clone for UiRenderer { fn clone(&self) -> Self { *self } }
 impl Copy for UiRenderer {}
 
 impl UiRenderer {
+    /// # Safety
+    /// Caller must ensure `fns` contains valid function pointers for `device`,
+    /// and that `cmd_pool` and `render_pass` are valid for `device`.
     pub unsafe fn new(
         fns: DeviceFns,
         device: vk::Device,
@@ -89,16 +95,8 @@ impl UiRenderer {
 
         text::init_fonts();
         atlas::clear_cache();
-        text::pre_rasterize(&[
-            (20.0, "Ira Overlay"),
-            (14.0, "Screenshot"),
-            (14.0, "Side"),
-            (14.0, "Bottom"),
-            (14.0, "Diag"),
-            (12.0, "Shift+Tab / Guide to toggle"),
-            (12.0, "F12 screenshot | F11 record"),
-        ]);
-        *UI_TREE.lock().unwrap() = Some(build_ui());
+        text::clear_cache();
+        *UI_TREE.lock().unwrap() = model::build_ui().or_else(|| Some(build_fallback_ui()));
 
         Some(Self {
             device, physical_device,
@@ -110,6 +108,8 @@ impl UiRenderer {
         })
     }
 
+    /// # Safety
+    /// `fns` must be valid for `self.device`. `cmd` must be in the recording state.
     pub unsafe fn update_atlas(&self, fns: DeviceFns, cmd: vk::CommandBuffer) {
         let uploads = atlas::take_pending_uploads();
         if uploads.is_empty() { return; }
@@ -185,6 +185,14 @@ impl UiRenderer {
 
         super::set_screen_size(extent.width, extent.height);
 
+        // Rebuild the UI tree from shared memory periodically.
+        let count = REBUILD_COUNTER.fetch_add(1, Ordering::Relaxed);
+        if count.is_multiple_of(REBUILD_INTERVAL) {
+            if let Some(new_tree) = model::build_ui() {
+                *UI_TREE.lock().unwrap() = Some(new_tree);
+            }
+        }
+
         let mut tree_guard = UI_TREE.lock().unwrap();
         let Some(tree) = tree_guard.as_mut() else { return };
 
@@ -232,6 +240,10 @@ impl UiRenderer {
                         }
                     }
                 }
+                Event::Scroll { .. } => {
+                    let event_ctx = EventCtx { focused_index: Some(focused) };
+                    tree.handle_event(&event_ctx, event);
+                }
             }
         }
 
@@ -245,18 +257,18 @@ impl UiRenderer {
                 vertices: &mut vertices,
                 indices: &mut indices,
                 draw_cmds: &mut draw_cmds,
-                screen_w, screen_h,
                 focused_index: Some(focused),
+                clip_x: 0.0, clip_y: 0.0, clip_w: screen_w, clip_h: screen_h,
             };
             tree.draw(&mut draw_ctx);
-            if super::mouse_active() {
-                draw_cursor(&mut draw_ctx);
-            }
         }
 
         *FRAME_DATA.lock().unwrap() = Some(FrameData { vertices, indices, draw_cmds });
     }
 
+    /// # Safety
+    /// `fns` must be valid for `self.device`. `cmd` must be in the recording state
+    /// and inside an active render pass.
     pub unsafe fn draw(&self, fns: DeviceFns, cmd: vk::CommandBuffer, extent: vk::Extent2D) {
         let frame = FRAME_DATA.lock().unwrap().take();
         let Some(frame) = frame else { return };
@@ -311,6 +323,9 @@ impl UiRenderer {
         }
     }
 
+    /// # Safety
+    /// `fns` must be valid for `self.device`. No other references to GPU
+    /// resources may exist when this is called.
     pub unsafe fn destroy(&self, fns: DeviceFns) {
         let d = self.device;
         (fns.destroy_pipeline)(d, self.pipeline, std::ptr::null());
@@ -332,7 +347,7 @@ impl UiRenderer {
     }
 }
 
-fn build_ui() -> Box<dyn Widget> {
+fn build_fallback_ui() -> Box<dyn Widget> {
     Box::new(Panel::new(
         Padding::all(10.0),
         [30, 30, 30, 200],
@@ -357,16 +372,4 @@ fn hit_test(bounds: &[Rect], x: f32, y: f32) -> Option<usize> {
     bounds.iter().position(|r| {
         x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height
     })
-}
-
-fn draw_cursor(ctx: &mut DrawCtx) {
-    let (mx, my) = super::mouse_pos();
-    ctx.push_triangle(
-        [mx - 1.0, my - 1.0], [mx - 1.0, my + 17.0], [mx + 12.0, my + 8.0],
-        [0, 0, 0, 200],
-    );
-    ctx.push_triangle(
-        [mx, my], [mx, my + 16.0], [mx + 10.0, my + 7.0],
-        [255, 255, 255, 230],
-    );
 }

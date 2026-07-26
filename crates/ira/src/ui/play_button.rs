@@ -45,15 +45,30 @@ pub fn stop_game(state: &SharedState, game_id: i64) {
 }
 
 pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -> Result<(), String> {
-    let (running_games, sender, game_info, global_shadps4_exe, global_rpcs3_exe, db, save_dir, app_default_wine, default_native_env_vars, cfg_clone) = {
+    let (running_games, sender, game_info, global_shadps4_exe, global_rpcs3_exe, db, save_dir, app_default_wine, default_native_env_vars, cfg_clone, overlay_shm, overlay_global_enabled) = {
         let s = state.borrow();
+        let game = s.games.iter().find(|g| g.db_id == game_id);
+        let overlay_shm = game.and_then(|g| crate::overlay::write_game_shm(g, &s.cfg.overlay));
+        let overlay_global_enabled = game.map_or(s.cfg.overlay.enabled, |g| {
+            let source_id = match g.kind {
+                ira_models::GameKind::Steam => Some("steam"),
+                ira_models::GameKind::Retro => Some(g.platform_id.as_str()),
+                ira_models::GameKind::Ps4 => Some("ps4"),
+                ira_models::GameKind::Ps3 => Some("ps3"),
+                _ => None,
+            };
+            match source_id {
+                Some(id) => s.cfg.overlay.source_enabled(id),
+                None => s.cfg.overlay.enabled,
+            }
+        });
+        let game_info = game
+            .map(|g| (g.kind, g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone(), g.platform_id.clone(), g.ra_core.clone(), g.emulator_override.clone()))
+            .unwrap_or_default();
         (
             s.running_games.clone(),
             s.sender.clone(),
-            s.games.iter()
-                .find(|g| g.db_id == game_id)
-                .map(|g| (g.kind, g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone(), g.platform_id.clone(), g.ra_core.clone(), g.emulator_override.clone()))
-                .unwrap_or_default(),
+            game_info,
             s.cfg.shadps4_executable.clone(),
             s.cfg.rpcs3_executable.clone(),
             s.db.clone(),
@@ -61,6 +76,8 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             s.cfg.default_wine_config.clone(),
             s.cfg.default_native_env_vars.clone(),
             s.cfg.clone(),
+            overlay_shm,
+            overlay_global_enabled,
         )
     };
 
@@ -86,9 +103,12 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         game_id,
         db_id,
         game_name: &game_name,
+        game_kind: kind,
         sender: &sender,
         running_games: &running_games,
         started_at,
+        overlay_shm,
+        overlay_global_enabled,
     };
 
     if kind == ira_models::GameKind::Retro {

@@ -15,6 +15,8 @@ pub struct LaunchContext {
     pub db: DbConn,
     pub save_dir: String,
     pub running_games: Arc<Mutex<HashMap<i64, i32>>>,
+    pub overlay_enabled: bool,
+    pub overlay_shm: Option<String>,
 }
 
 pub fn launch_game(
@@ -59,7 +61,10 @@ pub fn launch_game(
         } else {
             super::wine_launch::build_wine_command(&wine_exe, &launch.exe, &args, wine)
         };
-        let env = super::env_builder::build_env(launch, Some(wine), &wine_exe, &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
+        let mut env = super::env_builder::build_env(launch, Some(wine), &wine_exe, &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
+        if ctx.overlay_enabled {
+            super::env_builder::add_overlay_env(&mut env, ctx.overlay_shm.as_deref());
+        }
 
         let pfx = super::wine_launch::wine_prefix(wine);
         let prefix_ready = std::path::Path::new(&pfx).join("system.reg").is_file();
@@ -108,7 +113,10 @@ pub fn launch_game(
             shlex::split(&launch.args).ok_or_else(|| "Failed to parse arguments".to_string())?
         };
         let mut cmd = super::native_launch::build_native_command(&launch.exe, &args);
-        let env = super::env_builder::build_env(launch, None, "", &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
+        let mut env = super::env_builder::build_env(launch, None, "", &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
+        if ctx.overlay_enabled {
+            super::env_builder::add_overlay_env(&mut env, ctx.overlay_shm.as_deref());
+        }
         (cmd, env)
     };
 

@@ -2,6 +2,7 @@ pub mod activate;
 pub mod bench;
 pub mod game_loader;
 pub mod game_list;
+pub mod overlay;
 pub mod strings;
 pub mod ui;
 

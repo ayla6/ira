@@ -1,19 +1,16 @@
 [package]
-name = "ira-overlay"
+name = "ira-overlay-vk"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
+ira-overlay = { path = "../overlay" }
 ira-overlay-ipc = { path = "../overlay-ipc" }
 ash = "0.38"
 libc = "0.2"
-pango = "0.22"
-cairo-rs = "0.22"
-pangocairo = "0.22"
-webp = { version = "0.3", default-features = false }
 
 [lints]
 workspace = true

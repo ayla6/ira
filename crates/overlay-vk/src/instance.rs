@@ -1,14 +1,11 @@
 use std::collections::HashMap;
 use std::ffi::CStr;
-use std::sync::Once;
 
 use ash::vk;
 use ash::vk::Handle;
 
 use crate::negotiate::into_vk_void_fn;
 use crate::types::*;
-
-static INPUT_THREAD_STARTED: Once = Once::new();
 
 pub unsafe extern "system" fn get_instance_proc_addr(
     instance: vk::Instance,
@@ -79,8 +76,6 @@ unsafe extern "system" fn create_instance(
     if result != vk::Result::SUCCESS {
         return result;
     }
-
-    INPUT_THREAD_STARTED.call_once(crate::input::start_input_thread);
 
     let inst = *instance;
     INSTANCES.lock().unwrap().get_or_insert_with(HashMap::new).insert(

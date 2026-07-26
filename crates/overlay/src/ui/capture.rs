@@ -324,6 +324,9 @@ pub fn drain_pending() {
     }
 }
 
+/// # Safety
+/// `cmd` must be in the recording state. `src_image` must be a valid swapchain
+/// image with `TRANSFER_SRC` usage. `fence` must be unsignaled.
 pub unsafe fn capture(
     cmd: vk::CommandBuffer,
     src_image: vk::Image,

@@ -9,6 +9,7 @@ which = "7.0"
 libc = "0.2"
 ira-models = { path = "../models" }
 ira-db = { path = "../db" }
+ira-overlay-ipc = { path = "../overlay-ipc" }
 
 [dev-dependencies]
 tempfile = "3"

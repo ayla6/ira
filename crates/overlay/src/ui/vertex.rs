@@ -20,7 +20,6 @@ const _: () = assert!(std::mem::size_of::<PushConstants>() == 24);
 
 pub const MODE_TEXT: u32 = 0;
 pub const MODE_SHAPE: u32 = 1;
-pub const MODE_FILLED: u32 = 2;
 
 pub struct DrawCmd {
     pub index_count: u32,

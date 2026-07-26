@@ -212,6 +212,9 @@ extern "C" fn keyboard_key(
 
     // Hotkeys work even when overlay is hidden.
     if pressed && shift && key == KC_TAB {
+        if !crate::shim_bridge::ready_for_overlay() {
+            return;
+        }
         let visible = crate::shim_bridge::is_visible();
         crate::shim_bridge::set_visible(!visible);
         return;

@@ -146,6 +146,13 @@ fn scan_devices() {
 
         if is_gamepad(fd) {
             eprintln!("ira-overlay: gamepad found at /dev/input/{name}");
+            // Drain stale events from the kernel buffer so we don't
+            // misinterpret old events as button presses.
+            let drain_buf = [0u8; 24 * 64];
+            loop {
+                let n = unsafe { libc::read(fd, drain_buf.as_ptr() as *mut _, drain_buf.len()) };
+                if n <= 0 { break; }
+            }
             fds.push(fd);
         } else {
             unsafe { libc::close(fd) };
@@ -210,7 +217,11 @@ fn handle_event(ev: &InputEvent) {
             if ev.value != KEY_PRESS { return; }
             // Guide button always toggles, even when overlay is hidden.
             if ev.code == BTN_MODE {
+                if !crate::shim_bridge::ready_for_overlay() {
+                    return;
+                }
                 let visible = crate::shim_bridge::is_visible();
+                eprintln!("ira-overlay: evdev BTN_MODE detected, toggling overlay (visible={} -> {})", visible, !visible);
                 crate::shim_bridge::set_visible(!visible);
                 return;
             }

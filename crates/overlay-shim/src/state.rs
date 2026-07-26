@@ -8,6 +8,10 @@ use ira_overlay_ipc::InputEventRaw;
 
 pub static OVERLAY_VISIBLE: AtomicBool = AtomicBool::new(false);
 static HAS_SDL: AtomicBool = AtomicBool::new(false);
+static SDL_CHECKED: AtomicBool = AtomicBool::new(false);
+static PRESENT_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+const MIN_PRESENTS: u64 = 60;
 
 static MOUSE_X: AtomicI32 = AtomicI32::new(0);
 static MOUSE_Y: AtomicI32 = AtomicI32::new(0);
@@ -15,8 +19,52 @@ static INPUT_QUEUE: Mutex<Vec<InputEventRaw>> = Mutex::new(Vec::new());
 
 /// Returns true if the overlay system is active (IRA_OVERLAY_SHM env var is set).
 /// When false, all hooks pass events through unmodified.
+/// Cached after first call — env vars don't change at runtime.
+static OVERLAY_ACTIVE_CACHED: AtomicBool = AtomicBool::new(false);
+static OVERLAY_ACTIVE_INIT: AtomicBool = AtomicBool::new(false);
+
 pub fn overlay_active() -> bool {
-    std::env::var_os("IRA_OVERLAY_SHM").is_some()
+    if !OVERLAY_ACTIVE_INIT.load(Ordering::Relaxed) {
+        let active = std::env::var_os("IRA_OVERLAY_SHM").is_some();
+        OVERLAY_ACTIVE_CACHED.store(active, Ordering::Relaxed);
+        OVERLAY_ACTIVE_INIT.store(true, Ordering::Relaxed);
+
+        let layer_path = std::env::var("VK_LAYER_PATH").unwrap_or_default();
+        let json_exists = std::path::Path::new(&layer_path).join("ira_overlay.json").is_file();
+        let ld_lib_path = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+        let vk_path = unsafe {
+            let h = libc::dlopen(c"libvulkan.so.1".as_ptr(), libc::RTLD_NOLOAD);
+            if !h.is_null() {
+                let sym = libc::dlsym(h, c"vkCreateInstance".as_ptr());
+                if !sym.is_null() {
+                    let mut info: libc::Dl_info = std::mem::zeroed();
+                    if libc::dladdr(sym, &mut info) != 0 {
+                        let p = std::ffi::CStr::from_ptr(info.dli_fname);
+                        p.to_string_lossy().into_owned()
+                    } else {
+                        "dladdr failed".to_string()
+                    }
+                } else {
+                    "vkCreateInstance not found".to_string()
+                }
+            } else {
+                "not loaded".to_string()
+            }
+        };
+        eprintln!(
+            "ira-overlay: overlay_active={} (IRA_OVERLAY_SHM={}, VK_INSTANCE_LAYERS={}, VK_LAYER_PATH={}, json_exists={}, LD_LIBRARY_PATH={}, libvulkan={})",
+            active,
+            std::env::var("IRA_OVERLAY_SHM").unwrap_or_default(),
+            std::env::var("VK_INSTANCE_LAYERS").unwrap_or_default(),
+            layer_path,
+            json_exists,
+            ld_lib_path,
+            vk_path,
+        );
+        active
+    } else {
+        OVERLAY_ACTIVE_CACHED.load(Ordering::Relaxed)
+    }
 }
 
 pub fn push_event(event: InputEventRaw) {
@@ -42,13 +90,48 @@ pub fn is_visible() -> bool {
     OVERLAY_VISIBLE.load(Ordering::SeqCst)
 }
 
+pub fn increment_present_count() {
+    PRESENT_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn reset_present_count() {
+    PRESENT_COUNT.store(0, Ordering::Relaxed);
+}
+
+pub fn ready_for_overlay() -> bool {
+    PRESENT_COUNT.load(Ordering::Relaxed) >= MIN_PRESENTS
+}
+
 /// Set by SDL hooks when SDL2 is detected. When true, the Vulkan layer
 /// skips evdev gamepad polling (SDL hooks handle it and can consume events).
 pub fn set_has_sdl(v: bool) {
     HAS_SDL.store(v, Ordering::SeqCst);
 }
 
+/// Returns true if SDL is loaded. On first call, detects SDL by checking
+/// if SDL functions are available via dlsym(RTLD_DEFAULT, ...).
+/// This catches games that use SDL without calling SDL_PollEvent (e.g. shadPS4
+/// uses SDL_GameControllerGetButton directly), which would otherwise cause
+/// evdev to poll and conflict with SDL's gamepad handling.
 pub fn has_sdl() -> bool {
+    if HAS_SDL.load(Ordering::SeqCst) {
+        return true;
+    }
+    if !SDL_CHECKED.swap(true, Ordering::SeqCst) {
+        // Use dlsym instead of dlopen(RTLD_NOLOAD) — dlsym(RTLD_DEFAULT, ...)
+        // searches all loaded libraries regardless of their path, which is
+        // more reliable for AppImages that load SDL from non-standard paths.
+        let sdl_init = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"SDL_Init".as_ptr()) };
+        let sdl_gamepad = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"SDL_GameControllerOpen".as_ptr()) };
+        let sdl3_gamepad = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"SDL_OpenGamepad".as_ptr()) };
+        let found = !sdl_init.is_null() || !sdl_gamepad.is_null() || !sdl3_gamepad.is_null();
+        if found {
+            eprintln!("ira-overlay: SDL detected via dlsym, disabling evdev");
+            HAS_SDL.store(true, Ordering::SeqCst);
+        } else {
+            eprintln!("ira-overlay: SDL not detected (dlsym found nothing)");
+        }
+    }
     HAS_SDL.load(Ordering::SeqCst)
 }
 

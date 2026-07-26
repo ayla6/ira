@@ -18,11 +18,17 @@ type PollEventsFn = unsafe extern "C" fn(*mut InputEventRaw, usize) -> usize;
 type IsVisibleFn = unsafe extern "C" fn() -> c_int;
 type SetVisibleFn = unsafe extern "C" fn(c_int);
 type HasSdlFn = unsafe extern "C" fn() -> c_int;
+type IncrementPresentFn = unsafe extern "C" fn();
+type ResetPresentFn = unsafe extern "C" fn();
+type ReadyForOverlayFn = unsafe extern "C" fn() -> c_int;
 
 static POLL_EVENTS: OnceLock<Option<PollEventsFn>> = OnceLock::new();
 static IS_VISIBLE: OnceLock<Option<IsVisibleFn>> = OnceLock::new();
 static SET_VISIBLE: OnceLock<Option<SetVisibleFn>> = OnceLock::new();
 static HAS_SDL: OnceLock<Option<HasSdlFn>> = OnceLock::new();
+static INCREMENT_PRESENT: OnceLock<Option<IncrementPresentFn>> = OnceLock::new();
+static RESET_PRESENT: OnceLock<Option<ResetPresentFn>> = OnceLock::new();
+static READY_FOR_OVERLAY: OnceLock<Option<ReadyForOverlayFn>> = OnceLock::new();
 
 fn poll_fn() -> Option<PollEventsFn> {
     *POLL_EVENTS.get_or_init(|| {
@@ -66,6 +72,37 @@ pub fn set_visible(v: bool) {
 pub fn has_sdl_hooks() -> bool {
     let f = *HAS_SDL.get_or_init(|| {
         let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_has_sdl".as_ptr()) };
+        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
+    });
+    f.is_some_and(|f| unsafe { f() != 0 })
+}
+
+/// Increments the present counter in the shim. Called on every queue_present.
+pub fn increment_present_count() {
+    let f = *INCREMENT_PRESENT.get_or_init(|| {
+        let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_increment_present_count".as_ptr()) };
+        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
+    });
+    if let Some(f) = f {
+        unsafe { f() };
+    }
+}
+
+/// Resets the present counter to zero. Called when a new swapchain is created.
+pub fn reset_present_count() {
+    let f = *RESET_PRESENT.get_or_init(|| {
+        let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_reset_present_count".as_ptr()) };
+        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
+    });
+    if let Some(f) = f {
+        unsafe { f() };
+    }
+}
+
+/// Returns true if enough frames have been presented for the overlay to be safe.
+pub fn ready_for_overlay() -> bool {
+    let f = *READY_FOR_OVERLAY.get_or_init(|| {
+        let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_ready_for_overlay".as_ptr()) };
         (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
     });
     f.is_some_and(|f| unsafe { f() != 0 })

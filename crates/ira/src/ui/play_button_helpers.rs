@@ -54,16 +54,18 @@ fn build_emulator_env(ctx: &LaunchCtx) -> Vec<(String, String)> {
         .flatten()
         .and_then(|(launch, _, _)| launch.overlay_enabled)
         .unwrap_or(ctx.overlay_global_enabled);
+    eprintln!("ira-overlay: emulator launch overlay_enabled={} (global={}, game_id={})", overlay_enabled, ctx.overlay_global_enabled, ctx.game_id);
     if overlay_enabled {
         ira_launcher::env_builder::add_overlay_env(&mut env, ctx.overlay_shm.as_deref());
+        eprintln!("ira-overlay: overlay env vars added to emulator launch");
     }
     env
 }
 
 /// If the command is a Flatpak invocation, inject overlay env vars as `--env` flags
-/// and add `--filesystem` for the layer directory. Flatpak sandboxes don't inherit
-/// arbitrary env vars from the parent process, so `VK_LAYER_PATH` etc. set via
-/// `Command::env()` never reach the sandboxed app.
+/// and add `--filesystem` for the layer directory and .so files. Flatpak sandboxes
+/// don't inherit arbitrary env vars from the parent process, so `VK_LAYER_PATH` etc.
+/// set via `Command::env()` never reach the sandboxed app.
 ///
 /// `LD_PRELOAD` is stripped — Flatpak blocks it for security. The overlay still
 /// works without the shim (Wayland keyboard + evdev gamepad provide input).
@@ -74,19 +76,32 @@ fn inject_flatpak_overlay_env(cmd: &mut Vec<String>, env: &mut Vec<(String, Stri
 
     let overlay_keys = ["VK_LAYER_PATH", "VK_INSTANCE_LAYERS", "IRA_OVERLAY_SHM"];
     let mut env_flags: Vec<String> = Vec::new();
+    let mut fs_dirs: Vec<String> = Vec::new();
 
     for key in &overlay_keys {
         if let Some(pos) = env.iter().position(|(k, _)| k == key) {
             let value = env[pos].1.clone();
             env_flags.push(format!("--env={}={}", key, value));
             if *key == "VK_LAYER_PATH" {
-                env_flags.push(format!("--filesystem={}", value));
+                fs_dirs.push(value);
             }
         }
     }
 
-    // LD_PRELOAD won't work in Flatpak sandbox — remove it to avoid confusion
-    env.retain(|(k, _)| k != "LD_PRELOAD");
+    // LD_PRELOAD won't work in Flatpak sandbox, but the .so directory
+    // also contains the Vulkan layer .so — grant filesystem access so
+    // the Vulkan loader can dlopen it.
+    if let Some(pos) = env.iter().position(|(k, _)| k == "LD_PRELOAD") {
+        let preload_path = env[pos].1.clone();
+        if let Some(parent) = std::path::Path::new(&preload_path).parent() {
+            fs_dirs.push(parent.to_string_lossy().into_owned());
+        }
+        env.retain(|(k, _)| k != "LD_PRELOAD");
+    }
+
+    for dir in &fs_dirs {
+        env_flags.push(format!("--filesystem={}", dir));
+    }
 
     // Insert --env flags after "run" and before the flatpak ID
     let insert_pos = 2;

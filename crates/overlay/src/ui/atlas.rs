@@ -95,6 +95,7 @@ struct StagingCleanup {
     device: vk::Device,
     buffer: vk::Buffer,
     memory: vk::DeviceMemory,
+    fence: vk::Fence,
 }
 
 static OLD_STAGING: Mutex<Option<StagingCleanup>> = Mutex::new(None);
@@ -103,6 +104,7 @@ pub fn cleanup_old_staging() {
     let mut guard = OLD_STAGING.lock().unwrap();
     if let Some(s) = guard.take() {
         unsafe {
+            let _ = (s.fns.wait_for_fences)(s.device, 1, &s.fence, vk::TRUE, 5_000_000_000);
             (s.fns.unmap_memory)(s.device, s.memory);
             (s.fns.destroy_buffer)(s.device, s.buffer, std::ptr::null());
             (s.fns.free_memory)(s.device, s.memory, std::ptr::null());
@@ -110,6 +112,6 @@ pub fn cleanup_old_staging() {
     }
 }
 
-pub fn queue_staging_cleanup(fns: DeviceFns, device: vk::Device, buffer: vk::Buffer, memory: vk::DeviceMemory) {
-    *OLD_STAGING.lock().unwrap() = Some(StagingCleanup { fns, device, buffer, memory });
+pub fn queue_staging_cleanup(fns: DeviceFns, device: vk::Device, buffer: vk::Buffer, memory: vk::DeviceMemory, fence: vk::Fence) {
+    *OLD_STAGING.lock().unwrap() = Some(StagingCleanup { fns, device, buffer, memory, fence });
 }

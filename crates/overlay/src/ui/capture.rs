@@ -365,7 +365,7 @@ pub unsafe fn capture(
     let src_barrier = vk::ImageMemoryBarrier::default()
         .old_layout(vk::ImageLayout::PRESENT_SRC_KHR)
         .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
-        .src_access_mask(vk::AccessFlags::MEMORY_READ)
+        .src_access_mask(vk::AccessFlags::NONE)
         .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
         .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
@@ -386,7 +386,7 @@ pub unsafe fn capture(
 
         let barriers = [src_barrier, dst_barrier];
         (fns.cmd_pipeline_barrier)(
-            cmd, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, vk::PipelineStageFlags::TRANSFER,
+            cmd, vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::TRANSFER,
             vk::DependencyFlags::empty(), 0, std::ptr::null(), 0, std::ptr::null(), 2, barriers.as_ptr(),
         );
 
@@ -450,7 +450,7 @@ pub unsafe fn capture(
         );
     } else {
         (fns.cmd_pipeline_barrier)(
-            cmd, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, vk::PipelineStageFlags::TRANSFER,
+            cmd, vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::TRANSFER,
             vk::DependencyFlags::empty(), 0, std::ptr::null(), 0, std::ptr::null(), 1, &src_barrier,
         );
 

@@ -23,8 +23,10 @@ pub(crate) unsafe extern "system" fn create_swapchain(
         (fns, dd.physical_device)
     };
 
-    let mut ci = *create_info;
-    ci.image_usage |= vk::ImageUsageFlags::TRANSFER_SRC;
+    let ci = *create_info;
+    // Don't force TRANSFER_SRC — some emulators (shadPS4) crash when the
+    // swapchain has unexpected usage flags. Screenshot capture will use
+    // a blit to a separate image instead.
     crate::present::DEVICE_LOST.store(false, std::sync::atomic::Ordering::Relaxed);
     let result = (fns.create_swapchain)(device, &ci, allocator, swapchain);
     if result != vk::Result::SUCCESS {
@@ -33,6 +35,12 @@ pub(crate) unsafe extern "system" fn create_swapchain(
     }
 
     eprintln!("ira-overlay: swapchain created {}x{}", ci.image_extent.width, ci.image_extent.height);
+
+    // Reset the present counter so the overlay "ready" delay restarts after
+    // swapchain recreation. Games like shadPS4 create multiple swapchains
+    // during loading (1280x720 → 1920x1080); the overlay should only become
+    // toggleable after the final swapchain is stable.
+    crate::shim_bridge::reset_present_count();
 
     let create_info = &ci;
     let sc = *swapchain;
@@ -162,9 +170,9 @@ unsafe fn create_render_pass(fns: DeviceFns, device: vk::Device, format: vk::For
     let dependency = vk::SubpassDependency::default()
         .src_subpass(vk::SUBPASS_EXTERNAL)
         .dst_subpass(0)
-        .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+        .src_stage_mask(vk::PipelineStageFlags::TOP_OF_PIPE)
         .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-        .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+        .src_access_mask(vk::AccessFlags::NONE)
         .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
 
     let rp_info = vk::RenderPassCreateInfo::default()

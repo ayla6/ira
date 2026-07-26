@@ -25,7 +25,7 @@ const SDL_JOYBUTTONDOWN: u32 = 0x603;
 
 // SDL2 controller button codes (same in SDL3)
 const BTN_A: u8 = 0;
-const BTN_GUIDE: u8 = 6;
+const BTN_GUIDE: u8 = 5;
 const BTN_LEFTSHOULDER: u8 = 9;
 const BTN_RIGHTSHOULDER: u8 = 10;
 const BTN_DPAD_UP: u8 = 11;
@@ -82,6 +82,9 @@ fn read_button(event: *const c_void) -> u8 {
 fn handle_button(button: u8) {
     // Guide button always toggles overlay.
     if button == BTN_GUIDE {
+        if !state::ready_for_overlay() {
+            return;
+        }
         state::set_visible(!state::is_visible());
         return;
     }
@@ -137,6 +140,12 @@ pub unsafe extern "C" fn SDL_PollEvent(event: *mut c_void) -> i32 {
         let event_type = *(event as *const u32);
         if event_type == SDL_CONTROLLERBUTTONDOWN || event_type == SDL_JOYBUTTONDOWN {
             let button = read_button(event);
+
+            // Log Guide button presses for diagnostics
+            if button == BTN_GUIDE {
+                eprintln!("ira-overlay: Guide button pressed (event_type=0x{:x}, visible={})", event_type, state::is_visible());
+            }
+
             handle_button(button);
 
             // Consume gamepad events when overlay is visible so the game

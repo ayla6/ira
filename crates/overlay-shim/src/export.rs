@@ -65,3 +65,26 @@ pub extern "C" fn ira_overlay_mouse_pos(x: *mut c_int, y: *mut c_int) {
         }
     }
 }
+
+/// Increments the present counter. Called by the Vulkan layer on every queue_present.
+#[no_mangle]
+pub extern "C" fn ira_overlay_increment_present_count() {
+    state::increment_present_count();
+}
+
+/// Resets the present counter to zero. Called by the Vulkan layer when a new
+/// swapchain is created, so the "ready" delay restarts after resolution changes.
+#[no_mangle]
+pub extern "C" fn ira_overlay_reset_present_count() {
+    state::reset_present_count();
+}
+
+/// Returns 1 if enough frames have been presented for the overlay to be safe.
+#[no_mangle]
+pub extern "C" fn ira_overlay_ready_for_overlay() -> c_int {
+    if state::ready_for_overlay() {
+        1
+    } else {
+        0
+    }
+}

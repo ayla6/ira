@@ -110,7 +110,9 @@ impl UiRenderer {
 
     /// # Safety
     /// `fns` must be valid for `self.device`. `cmd` must be in the recording state.
-    pub unsafe fn update_atlas(&self, fns: DeviceFns, cmd: vk::CommandBuffer) {
+    /// `fence` must be the fence that will be signaled after the command buffer
+    /// containing the copy is submitted, so the staging buffer can be safely freed later.
+    pub unsafe fn update_atlas(&self, fns: DeviceFns, cmd: vk::CommandBuffer, fence: vk::Fence) {
         let uploads = atlas::take_pending_uploads();
         if uploads.is_empty() { return; }
 
@@ -176,7 +178,7 @@ impl UiRenderer {
             vk::DependencyFlags::empty(), 0, std::ptr::null(), 0, std::ptr::null(), 1, &barrier_to_read,
         );
 
-        atlas::queue_staging_cleanup(fns, self.device, staging_buf, staging_mem);
+        atlas::queue_staging_cleanup(fns, self.device, staging_buf, staging_mem, fence);
     }
 
     pub fn prepare(&self, extent: vk::Extent2D) {

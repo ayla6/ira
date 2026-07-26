@@ -54,10 +54,8 @@ fn build_emulator_env(ctx: &LaunchCtx) -> Vec<(String, String)> {
         .flatten()
         .and_then(|(launch, _, _)| launch.overlay_enabled)
         .unwrap_or(ctx.overlay_global_enabled);
-    eprintln!("ira-overlay: emulator launch overlay_enabled={} (global={}, game_id={})", overlay_enabled, ctx.overlay_global_enabled, ctx.game_id);
     if overlay_enabled {
         ira_launcher::env_builder::add_overlay_env(&mut env, ctx.overlay_shm.as_deref());
-        eprintln!("ira-overlay: overlay env vars added to emulator launch");
     }
     env
 }

@@ -6,12 +6,17 @@ use ash::vk::Handle;
 use crate::types::*;
 
 pub(crate) static DEVICE_LOST: AtomicBool = AtomicBool::new(false);
+static PRESENT_LOGGED: AtomicBool = AtomicBool::new(false);
 
 pub unsafe extern "system" fn queue_present(
     queue: vk::Queue,
     present_info: *const vk::PresentInfoKHR,
 ) -> vk::Result {
     let present_info = &*present_info;
+
+    if !PRESENT_LOGGED.swap(true, Ordering::Relaxed) {
+        eprintln!("ira-overlay: queue_present hooked — overlay is active");
+    }
 
     crate::wayland::dispatch();
     crate::evdev::init();

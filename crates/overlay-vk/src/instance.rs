@@ -22,7 +22,18 @@ pub unsafe extern "system" fn get_instance_proc_addr(
         b"vkDestroySwapchainKHR" => into_vk_void_fn!(super::swapchain::destroy_swapchain, unsafe extern "system" fn(vk::Device, vk::SwapchainKHR, *const vk::AllocationCallbacks)),
         b"vkQueuePresentKHR" => into_vk_void_fn!(super::present::queue_present, unsafe extern "system" fn(vk::Queue, *const vk::PresentInfoKHR) -> vk::Result),
         b"vkDestroyDevice" => into_vk_void_fn!(super::device::destroy_device, unsafe extern "system" fn(vk::Device, *const vk::AllocationCallbacks)),
-        b"vkCreateWaylandSurfaceKHR" => into_vk_void_fn!(create_wayland_surface, unsafe extern "system" fn(vk::Instance, *const vk::WaylandSurfaceCreateInfoKHR, *const vk::AllocationCallbacks, *mut vk::SurfaceKHR) -> vk::Result),
+        b"vkCreateWaylandSurfaceKHR" => {
+            eprintln!("ira-overlay: vkCreateWaylandSurfaceKHR queried");
+            into_vk_void_fn!(create_wayland_surface, unsafe extern "system" fn(vk::Instance, *const vk::WaylandSurfaceCreateInfoKHR, *const vk::AllocationCallbacks, *mut vk::SurfaceKHR) -> vk::Result)
+        }
+        b"vkCreateXcbSurfaceKHR" => {
+            eprintln!("ira-overlay: vkCreateXcbSurfaceKHR queried (XWayland)");
+            into_vk_void_fn!(create_xcb_surface, unsafe extern "system" fn(vk::Instance, *const vk::XcbSurfaceCreateInfoKHR, *const vk::AllocationCallbacks, *mut vk::SurfaceKHR) -> vk::Result)
+        }
+        b"vkCreateXlibSurfaceKHR" => {
+            eprintln!("ira-overlay: vkCreateXlibSurfaceKHR queried (XWayland)");
+            into_vk_void_fn!(create_xlib_surface, unsafe extern "system" fn(vk::Instance, *const vk::XlibSurfaceCreateInfoKHR, *const vk::AllocationCallbacks, *mut vk::SurfaceKHR) -> vk::Result)
+        }
         _ => {
             let map = INSTANCES.lock().unwrap();
             if let Some(map) = map.as_ref() {
@@ -83,6 +94,17 @@ unsafe extern "system" fn create_instance(
         InstanceData { instance: inst, loader_gipa: Some(gipa) },
     );
 
+    if !(*create_info).p_application_info.is_null() {
+        let app = &*(*create_info).p_application_info;
+        if !app.p_application_name.is_null() {
+            eprintln!("ira-overlay: instance created for {:?}", CStr::from_ptr(app.p_application_name));
+        } else {
+            eprintln!("ira-overlay: instance created (no app name)");
+        }
+    } else {
+        eprintln!("ira-overlay: instance created (no app info)");
+    }
+
     result
 }
 
@@ -119,6 +141,7 @@ unsafe extern "system" fn create_wayland_surface(
     allocator: *const vk::AllocationCallbacks,
     surface: *mut vk::SurfaceKHR,
 ) -> vk::Result {
+    eprintln!("ira-overlay: Wayland surface created");
     let gipa = {
         let map = INSTANCES.lock().unwrap();
         map.as_ref()
@@ -135,4 +158,44 @@ unsafe extern "system" fn create_wayland_surface(
         crate::wayland::init((*create_info).display);
     }
     result
+}
+
+unsafe extern "system" fn create_xcb_surface(
+    instance: vk::Instance,
+    create_info: *const vk::XcbSurfaceCreateInfoKHR,
+    allocator: *const vk::AllocationCallbacks,
+    surface: *mut vk::SurfaceKHR,
+) -> vk::Result {
+    eprintln!("ira-overlay: Xcb surface created (XWayland — keyboard/mouse via X11 shim)");
+    let gipa = {
+        let map = INSTANCES.lock().unwrap();
+        map.as_ref()
+            .and_then(|m| m.get(&(instance.as_raw() as usize)))
+            .and_then(|d| d.loader_gipa)
+    };
+    let Some(gipa) = gipa else { return vk::Result::ERROR_INITIALIZATION_FAILED };
+
+    let func: vk::PFN_vkCreateXcbSurfaceKHR =
+        super::negotiate::transmute_fn(gipa(instance, c"vkCreateXcbSurfaceKHR".as_ptr()));
+    func(instance, create_info, allocator, surface)
+}
+
+unsafe extern "system" fn create_xlib_surface(
+    instance: vk::Instance,
+    create_info: *const vk::XlibSurfaceCreateInfoKHR,
+    allocator: *const vk::AllocationCallbacks,
+    surface: *mut vk::SurfaceKHR,
+) -> vk::Result {
+    eprintln!("ira-overlay: Xlib surface created (XWayland — keyboard/mouse via X11 shim)");
+    let gipa = {
+        let map = INSTANCES.lock().unwrap();
+        map.as_ref()
+            .and_then(|m| m.get(&(instance.as_raw() as usize)))
+            .and_then(|d| d.loader_gipa)
+    };
+    let Some(gipa) = gipa else { return vk::Result::ERROR_INITIALIZATION_FAILED };
+
+    let func: vk::PFN_vkCreateXlibSurfaceKHR =
+        super::negotiate::transmute_fn(gipa(instance, c"vkCreateXlibSurfaceKHR".as_ptr()));
+    func(instance, create_info, allocator, surface)
 }

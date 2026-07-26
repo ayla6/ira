@@ -45,6 +45,15 @@ fn spawn_and_monitor(ctx: &LaunchCtx, cmd: &[String], env: &[(String, String)], 
     }
 }
 
+/// Build env vars for emulator launches, including overlay env vars if enabled.
+fn build_emulator_env(ctx: &LaunchCtx) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = std::env::vars().collect();
+    if ctx.overlay_global_enabled {
+        ira_launcher::env_builder::add_overlay_env(&mut env, ctx.overlay_shm.as_deref());
+    }
+    env
+}
+
 pub(super) fn launch_retro(
     ctx: &LaunchCtx,
     cfg: &Config,
@@ -78,7 +87,8 @@ pub(super) fn launch_retro(
             .unwrap_or_else(|| game_path.to_string())
     };
     let cmd = ira_platforms::emulator_detect::build_launch_command(exe, &rom_path, core, cc.fullscreen, fullscreen_flag);
-    spawn_and_monitor(ctx, &cmd, &[], ctx.game_name)
+    let env = build_emulator_env(ctx);
+    spawn_and_monitor(ctx, &cmd, &env, ctx.game_name)
 }
 
 pub(super) fn launch_ps4(
@@ -95,8 +105,8 @@ pub(super) fn launch_ps4(
         "shadps4"
     };
     let cmd = vec![exe.to_string(), "-g".to_string(), game_path.to_string()];
-
-    spawn_and_monitor(ctx, &cmd, &[], "shadPS4")
+    let env = build_emulator_env(ctx);
+    spawn_and_monitor(ctx, &cmd, &env, "shadPS4")
 }
 
 pub(super) fn launch_ps3(
@@ -113,7 +123,8 @@ pub(super) fn launch_ps3(
         "rpcs3"
     };
     let cmd = vec![exe.to_string(), "--no-gui".to_string(), game_path.to_string()];
-    spawn_and_monitor(ctx, &cmd, &[], "RPCS3")
+    let env = build_emulator_env(ctx);
+    spawn_and_monitor(ctx, &cmd, &env, "RPCS3")
 }
 
 pub(super) fn launch_steam(app_id: &str) -> Result<(), String> {

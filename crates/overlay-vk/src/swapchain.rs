@@ -28,8 +28,11 @@ pub(crate) unsafe extern "system" fn create_swapchain(
     crate::present::DEVICE_LOST.store(false, std::sync::atomic::Ordering::Relaxed);
     let result = (fns.create_swapchain)(device, &ci, allocator, swapchain);
     if result != vk::Result::SUCCESS {
+        eprintln!("ira-overlay: swapchain creation failed: {:?}", result);
         return result;
     }
+
+    eprintln!("ira-overlay: swapchain created {}x{}", ci.image_extent.width, ci.image_extent.height);
 
     let create_info = &ci;
     let sc = *swapchain;

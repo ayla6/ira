@@ -6,34 +6,12 @@ use ash::vk::Handle;
 use crate::types::*;
 
 pub(crate) static DEVICE_LOST: AtomicBool = AtomicBool::new(false);
-static PRESENT_LOGGED: AtomicBool = AtomicBool::new(false);
-static FRAME_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static PRESENT_INFO_LOGGED: AtomicBool = AtomicBool::new(false);
 
 pub unsafe extern "system" fn queue_present(
     queue: vk::Queue,
     present_info: *const vk::PresentInfoKHR,
 ) -> vk::Result {
     let present_info = &*present_info;
-
-    if !PRESENT_LOGGED.swap(true, Ordering::Relaxed) {
-        eprintln!("ira-overlay: queue_present hooked — overlay is active");
-    }
-
-    if !PRESENT_INFO_LOGGED.swap(true, Ordering::Relaxed) {
-        let p_next = present_info.p_next as *const vk::BaseInStructure;
-        let p_next_type = if p_next.is_null() {
-            "none".to_string()
-        } else {
-            format!("{:?}", (*p_next).s_type)
-        };
-        eprintln!(
-            "ira-overlay: present_info: wait_sems={}, swapchains={}, p_next={}",
-            present_info.wait_semaphore_count,
-            present_info.swapchain_count,
-            p_next_type,
-        );
-    }
 
     crate::wayland::dispatch();
     crate::evdev::init();
@@ -53,23 +31,6 @@ pub unsafe extern "system" fn queue_present(
         || ira_overlay::ui::capture::is_recording();
 
     if !overlay_visible && !screenshot_requested {
-        return chain_present(queue, present_info);
-    }
-
-    // Log why we're rendering (first time only)
-    static RENDER_REASON_LOGGED: AtomicBool = AtomicBool::new(false);
-    if !RENDER_REASON_LOGGED.swap(true, Ordering::Relaxed) {
-        eprintln!(
-            "ira-overlay: rendering — visible={} screenshot={} recording={} has_sdl={} ready={}",
-            overlay_visible,
-            ira_overlay::ui::capture::is_screenshot_requested(),
-            ira_overlay::ui::capture::is_recording(),
-            crate::shim_bridge::has_sdl_hooks(),
-            crate::shim_bridge::ready_for_overlay(),
-        );
-    }
-
-    if std::env::var_os("IRA_OVERLAY_DISABLE_RENDER").is_some() {
         return chain_present(queue, present_info);
     }
 
@@ -146,10 +107,6 @@ pub unsafe extern "system" fn queue_present(
         let (src_stage, src_access) = if captured {
             (vk::PipelineStageFlags::TRANSFER, vk::AccessFlags::TRANSFER_READ)
         } else {
-            // Transitioning FROM PRESENT_SRC_KHR: no pipeline stage wrote to
-            // the image (it was just presented), so srcStage must be TOP_OF_PIPE
-            // and srcAccess must be empty. Using COLOR_ATTACHMENT_OUTPUT here
-            // causes device loss on NVIDIA's strict driver.
             (vk::PipelineStageFlags::TOP_OF_PIPE, vk::AccessFlags::empty())
         };
         let barrier = vk::ImageMemoryBarrier::default()
@@ -230,12 +187,7 @@ pub unsafe extern "system" fn queue_present(
         .command_buffers(std::slice::from_ref(&cmd))
         .signal_semaphores(std::slice::from_ref(&sem));
     let submit_result = (sc.fns.queue_submit)(queue, 1, &submit_info as *const vk::SubmitInfo, fence);
-    let frame = FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
-    if frame < 5 || submit_result != vk::Result::SUCCESS {
-        eprintln!("ira-overlay: frame {} submit={:?}", frame, submit_result);
-    }
     if submit_result != vk::Result::SUCCESS {
-        eprintln!("ira-overlay: queue_submit failed: {submit_result:?}");
         if submit_result == vk::Result::ERROR_DEVICE_LOST {
             DEVICE_LOST.store(true, Ordering::Relaxed);
         }
@@ -246,11 +198,7 @@ pub unsafe extern "system" fn queue_present(
     new_present_info.p_wait_semaphores = &sem;
     new_present_info.wait_semaphore_count = 1;
 
-    let present_result = (sc.fns.queue_present)(queue, &new_present_info);
-    if frame < 5 || present_result != vk::Result::SUCCESS {
-        eprintln!("ira-overlay: frame {} present={:?}", frame, present_result);
-    }
-    present_result
+    (sc.fns.queue_present)(queue, &new_present_info)
 }
 
 unsafe fn chain_present(queue: vk::Queue, present_info: &vk::PresentInfoKHR) -> vk::Result {

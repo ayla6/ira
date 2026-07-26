@@ -6,7 +6,6 @@ use crate::types::*;
 pub unsafe extern "system" fn vkNegotiateLoaderLayerInterfaceVersion(
     info: *mut NegotiateLoaderLayerInterface,
 ) -> vk::Result {
-    eprintln!("ira-overlay: vkNegotiateLoaderLayerInterfaceVersion called (loader v{})", (*info).loader_layer_interface_version);
     if (*info).loader_layer_interface_version < 2 {
         return vk::Result::ERROR_INITIALIZATION_FAILED;
     }

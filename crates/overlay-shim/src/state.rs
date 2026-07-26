@@ -28,39 +28,6 @@ pub fn overlay_active() -> bool {
         let active = std::env::var_os("IRA_OVERLAY_SHM").is_some();
         OVERLAY_ACTIVE_CACHED.store(active, Ordering::Relaxed);
         OVERLAY_ACTIVE_INIT.store(true, Ordering::Relaxed);
-
-        let layer_path = std::env::var("VK_LAYER_PATH").unwrap_or_default();
-        let json_exists = std::path::Path::new(&layer_path).join("ira_overlay.json").is_file();
-        let ld_lib_path = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
-        let vk_path = unsafe {
-            let h = libc::dlopen(c"libvulkan.so.1".as_ptr(), libc::RTLD_NOLOAD);
-            if !h.is_null() {
-                let sym = libc::dlsym(h, c"vkCreateInstance".as_ptr());
-                if !sym.is_null() {
-                    let mut info: libc::Dl_info = std::mem::zeroed();
-                    if libc::dladdr(sym, &mut info) != 0 {
-                        let p = std::ffi::CStr::from_ptr(info.dli_fname);
-                        p.to_string_lossy().into_owned()
-                    } else {
-                        "dladdr failed".to_string()
-                    }
-                } else {
-                    "vkCreateInstance not found".to_string()
-                }
-            } else {
-                "not loaded".to_string()
-            }
-        };
-        eprintln!(
-            "ira-overlay: overlay_active={} (IRA_OVERLAY_SHM={}, VK_INSTANCE_LAYERS={}, VK_LAYER_PATH={}, json_exists={}, LD_LIBRARY_PATH={}, libvulkan={})",
-            active,
-            std::env::var("IRA_OVERLAY_SHM").unwrap_or_default(),
-            std::env::var("VK_INSTANCE_LAYERS").unwrap_or_default(),
-            layer_path,
-            json_exists,
-            ld_lib_path,
-            vk_path,
-        );
         active
     } else {
         OVERLAY_ACTIVE_CACHED.load(Ordering::Relaxed)

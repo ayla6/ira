@@ -221,7 +221,6 @@ fn handle_event(ev: &InputEvent) {
                     return;
                 }
                 let visible = crate::shim_bridge::is_visible();
-                eprintln!("ira-overlay: evdev BTN_MODE detected, toggling overlay (visible={} -> {})", visible, !visible);
                 crate::shim_bridge::set_visible(!visible);
                 return;
             }

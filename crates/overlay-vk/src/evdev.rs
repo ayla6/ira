@@ -17,7 +17,7 @@
 
 use std::ffi::CString;
 use std::os::raw::c_int;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use ira_overlay::ui::{push_event, Event};
@@ -64,8 +64,14 @@ static OVERLAY_ACTIVE: OnceLock<bool> = OnceLock::new();
 static GAMEPAD_FDS: Mutex<Vec<c_int>> = Mutex::new(Vec::new());
 static INIT_DONE: AtomicBool = AtomicBool::new(false);
 static INOTIFY_FD: AtomicI32 = AtomicI32::new(-1);
+static RESCAN_TIMER: AtomicU32 = AtomicU32::new(0);
 static HAT_X: AtomicI32 = AtomicI32::new(0);
 static HAT_Y: AtomicI32 = AtomicI32::new(0);
+
+/// Frames to wait after inotify fires before re-scanning.
+/// The device node exists immediately but isn't fully initialized —
+/// the kernel needs a moment to set up evdev capabilities.
+const RESCAN_DELAY: u32 = 15; // ~250ms at 60fps
 
 fn overlay_active() -> bool {
     *OVERLAY_ACTIVE.get_or_init(|| std::env::var_os("IRA_OVERLAY_SHM").is_some())
@@ -166,7 +172,16 @@ pub fn poll() {
 
     // Instant hotplug detection via inotify
     if check_hotplug() {
-        scan_devices();
+        RESCAN_TIMER.store(RESCAN_DELAY, Ordering::Relaxed);
+    }
+
+    // Delayed re-scan — wait a few frames for the kernel to finish
+    // initializing the newly created device node.
+    if RESCAN_TIMER.load(Ordering::Relaxed) > 0 {
+        let prev = RESCAN_TIMER.fetch_sub(1, Ordering::Relaxed);
+        if prev == 1 {
+            scan_devices();
+        }
     }
 
     let fds = GAMEPAD_FDS.lock().unwrap();

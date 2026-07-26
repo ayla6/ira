@@ -19,11 +19,11 @@ use ira_overlay_ipc::InputEventRaw;
 
 use crate::state;
 
-// SDL2 event types
+// SDL2 event types (same values in SDL3)
 const SDL_CONTROLLERBUTTONDOWN: u32 = 0x651;
 const SDL_JOYBUTTONDOWN: u32 = 0x603;
 
-// SDL2 controller button codes
+// SDL2 controller button codes (same in SDL3)
 const BTN_A: u8 = 0;
 const BTN_GUIDE: u8 = 6;
 const BTN_LEFTSHOULDER: u8 = 9;
@@ -41,22 +41,32 @@ const KC_DOWN: u32 = 116;
 const KC_LEFT: u32 = 113;
 const KC_RIGHT: u32 = 114;
 
-// SDL_ControllerButtonEvent layout (SDL2):
-//   offset 0:  Uint32 type
-//   offset 4:  Uint32 timestamp
-//   offset 8:  Sint32 which
-//   offset 12: Uint8  button
-const EV_BUTTON_OFFSET: usize = 12;
+// SDL2: SDL_ControllerButtonEvent button is at offset 12
+//   Uint32 type (0), Uint32 timestamp (4), Sint32 which (8), Uint8 button (12)
+// SDL3: SDL_GamepadButtonEvent button is at offset 20
+//   Uint32 type (0), Uint32 reserved (4), Uint64 timestamp (8), Sint32 which (16), Uint8 button (20)
+const EV_BUTTON_OFFSET_SDL2: usize = 12;
+const EV_BUTTON_OFFSET_SDL3: usize = 20;
 
 type PollEventFn = unsafe extern "C" fn(*mut c_void) -> i32;
 
 static REAL_SDL_POLL_EVENT: OnceLock<Option<PollEventFn>> = OnceLock::new();
+static BUTTON_OFFSET: OnceLock<usize> = OnceLock::new();
 
 fn real_poll_event() -> Option<PollEventFn> {
     *REAL_SDL_POLL_EVENT.get_or_init(|| {
         let p = unsafe { libc::dlsym(libc::RTLD_NEXT, c"SDL_PollEvent".as_ptr()) };
         if !p.is_null() {
             state::set_has_sdl(true);
+            // Detect SDL3 by checking for SDL_OpenGamepad (SDL3-only name;
+            // SDL2 uses SDL_GameControllerOpen)
+            let is_sdl3 = unsafe {
+                let fn_ptr = libc::dlsym(libc::RTLD_DEFAULT, c"SDL_OpenGamepad".as_ptr());
+                !fn_ptr.is_null()
+            };
+            let offset = if is_sdl3 { EV_BUTTON_OFFSET_SDL3 } else { EV_BUTTON_OFFSET_SDL2 };
+            let _ = BUTTON_OFFSET.set(offset);
+            eprintln!("ira-overlay: SDL_PollEvent hooked (SDL3={}, button offset={})", is_sdl3, offset);
             Some(unsafe { std::mem::transmute::<*mut libc::c_void, PollEventFn>(p) })
         } else {
             None
@@ -65,7 +75,8 @@ fn real_poll_event() -> Option<PollEventFn> {
 }
 
 fn read_button(event: *const c_void) -> u8 {
-    unsafe { *(event as *const u8).add(EV_BUTTON_OFFSET) }
+    let offset = *BUTTON_OFFSET.get().unwrap_or(&EV_BUTTON_OFFSET_SDL2);
+    unsafe { *(event as *const u8).add(offset) }
 }
 
 fn handle_button(button: u8) {

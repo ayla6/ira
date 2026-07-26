@@ -162,13 +162,13 @@ mod tests {
 
     #[test]
     fn test_build_launch_command_native() {
-        let cmd = build_launch_command("/usr/bin/duckstation-qt", "/games/rom.bin", "", false, "--fullscreen");
+        let cmd = build_launch_command("/usr/bin/duckstation-qt", "/games/rom.bin", "", false, "-fullscreen");
         assert_eq!(cmd, vec!["/usr/bin/duckstation-qt", "/games/rom.bin"]);
     }
 
     #[test]
     fn test_build_launch_command_flatpak() {
-        let cmd = build_launch_command("flatpak:org.duckstation.DuckStation", "/games/rom.bin", "", false, "--fullscreen");
+        let cmd = build_launch_command("flatpak:org.duckstation.DuckStation", "/games/rom.bin", "", false, "-fullscreen");
         assert_eq!(cmd, vec!["flatpak", "run", "org.duckstation.DuckStation", "/games/rom.bin"]);
     }
 
@@ -180,8 +180,8 @@ mod tests {
 
     #[test]
     fn test_build_launch_command_fullscreen() {
-        let cmd = build_launch_command("/usr/bin/duckstation-qt", "/games/rom.bin", "", true, "--fullscreen");
-        assert_eq!(cmd, vec!["/usr/bin/duckstation-qt", "--fullscreen", "/games/rom.bin"]);
+        let cmd = build_launch_command("/usr/bin/duckstation-qt", "/games/rom.bin", "", true, "-fullscreen");
+        assert_eq!(cmd, vec!["/usr/bin/duckstation-qt", "-fullscreen", "/games/rom.bin"]);
     }
 
     #[test]

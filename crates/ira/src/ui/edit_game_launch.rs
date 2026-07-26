@@ -116,3 +116,32 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
         overlay_state,
     })
 }
+
+/// Minimal page for emulator games — only shows the overlay toggle.
+/// The exe/args/etc. fields are not shown because emulator games use
+/// `launch_retro`/`launch_ps4`/`launch_ps3` instead of `launch_other`.
+pub(super) fn build_emulator_overlay_page(
+    sidebar: &gtk4::ListBox,
+    stack: &gtk4::Stack,
+    overlay_default: bool,
+    overlay_override: Option<bool>,
+) -> Option<LaunchConfigWidgets> {
+    let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+
+    let (overlay_row, overlay_state) = build_source_overlay_row(overlay_default, overlay_override);
+    let overlay_group = adw::PreferencesGroup::new();
+    overlay_group.add(&overlay_row);
+    page.append(&overlay_group);
+
+    sidebar.append(&settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Overlay"));
+    stack.add_named(&page, Some("overlay"));
+
+    Some(LaunchConfigWidgets {
+        exe_entry: adw::EntryRow::new(),
+        args_entry: adw::EntryRow::new(),
+        wd_entry: adw::EntryRow::new(),
+        pre_launch_entry: adw::EntryRow::new(),
+        profile_row: None,
+        overlay_state,
+    })
+}

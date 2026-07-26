@@ -18,7 +18,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
         binary_names: &["duckstation-qt", "duckstation"],
         flatpak_id: "org.duckstation.DuckStation",
         emu_display_name: "DuckStation",
-        fullscreen_flag: "--fullscreen",
+        fullscreen_flag: "-fullscreen",
     },
     ConsoleDef {
         id: "ps2",

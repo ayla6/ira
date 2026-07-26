@@ -98,6 +98,8 @@ fn build_launch_wine_advanced_pages(
             game_slug: &game.slug,
             overlay_default,
         })
+    } else if matches!(game.kind, ira_models::GameKind::Ps4 | ira_models::GameKind::Ps3 | ira_models::GameKind::Retro) {
+        super::edit_game_launch::build_emulator_overlay_page(sidebar, stack, overlay_default, saved_launch.overlay_enabled)
     } else {
         None
     };

@@ -46,12 +46,53 @@ fn spawn_and_monitor(ctx: &LaunchCtx, cmd: &[String], env: &[(String, String)], 
 }
 
 /// Build env vars for emulator launches, including overlay env vars if enabled.
+/// Checks per-game overlay override first, then falls back to the global source setting.
 fn build_emulator_env(ctx: &LaunchCtx) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = std::env::vars().collect();
-    if ctx.overlay_global_enabled {
+    let overlay_enabled = ira_db::get_game_config(ctx.db, ctx.db_id)
+        .ok()
+        .flatten()
+        .and_then(|(launch, _, _)| launch.overlay_enabled)
+        .unwrap_or(ctx.overlay_global_enabled);
+    if overlay_enabled {
         ira_launcher::env_builder::add_overlay_env(&mut env, ctx.overlay_shm.as_deref());
     }
     env
+}
+
+/// If the command is a Flatpak invocation, inject overlay env vars as `--env` flags
+/// and add `--filesystem` for the layer directory. Flatpak sandboxes don't inherit
+/// arbitrary env vars from the parent process, so `VK_LAYER_PATH` etc. set via
+/// `Command::env()` never reach the sandboxed app.
+///
+/// `LD_PRELOAD` is stripped — Flatpak blocks it for security. The overlay still
+/// works without the shim (Wayland keyboard + evdev gamepad provide input).
+fn inject_flatpak_overlay_env(cmd: &mut Vec<String>, env: &mut Vec<(String, String)>) {
+    if cmd.len() < 3 || cmd[0] != "flatpak" || cmd[1] != "run" {
+        return;
+    }
+
+    let overlay_keys = ["VK_LAYER_PATH", "VK_INSTANCE_LAYERS", "IRA_OVERLAY_SHM"];
+    let mut env_flags: Vec<String> = Vec::new();
+
+    for key in &overlay_keys {
+        if let Some(pos) = env.iter().position(|(k, _)| k == key) {
+            let value = env[pos].1.clone();
+            env_flags.push(format!("--env={}={}", key, value));
+            if *key == "VK_LAYER_PATH" {
+                env_flags.push(format!("--filesystem={}", value));
+            }
+        }
+    }
+
+    // LD_PRELOAD won't work in Flatpak sandbox — remove it to avoid confusion
+    env.retain(|(k, _)| k != "LD_PRELOAD");
+
+    // Insert --env flags after "run" and before the flatpak ID
+    let insert_pos = 2;
+    for (i, flag) in env_flags.into_iter().enumerate() {
+        cmd.insert(insert_pos + i, flag);
+    }
 }
 
 pub(super) fn launch_retro(
@@ -86,8 +127,9 @@ pub(super) fn launch_retro(
             .map(|d| d.rom_path.clone())
             .unwrap_or_else(|| game_path.to_string())
     };
-    let cmd = ira_platforms::emulator_detect::build_launch_command(exe, &rom_path, core, cc.fullscreen, fullscreen_flag);
-    let env = build_emulator_env(ctx);
+    let mut cmd = ira_platforms::emulator_detect::build_launch_command(exe, &rom_path, core, cc.fullscreen, fullscreen_flag);
+    let mut env = build_emulator_env(ctx);
+    inject_flatpak_overlay_env(&mut cmd, &mut env);
     spawn_and_monitor(ctx, &cmd, &env, ctx.game_name)
 }
 
@@ -104,8 +146,9 @@ pub(super) fn launch_ps4(
     } else {
         "shadps4"
     };
-    let cmd = vec![exe.to_string(), "-g".to_string(), game_path.to_string()];
-    let env = build_emulator_env(ctx);
+    let mut cmd = vec![exe.to_string(), "-g".to_string(), game_path.to_string()];
+    let mut env = build_emulator_env(ctx);
+    inject_flatpak_overlay_env(&mut cmd, &mut env);
     spawn_and_monitor(ctx, &cmd, &env, "shadPS4")
 }
 
@@ -122,8 +165,9 @@ pub(super) fn launch_ps3(
     } else {
         "rpcs3"
     };
-    let cmd = vec![exe.to_string(), "--no-gui".to_string(), game_path.to_string()];
-    let env = build_emulator_env(ctx);
+    let mut cmd = vec![exe.to_string(), "--no-gui".to_string(), game_path.to_string()];
+    let mut env = build_emulator_env(ctx);
+    inject_flatpak_overlay_env(&mut cmd, &mut env);
     spawn_and_monitor(ctx, &cmd, &env, "RPCS3")
 }
 

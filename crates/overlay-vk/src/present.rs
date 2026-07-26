@@ -71,11 +71,11 @@ pub unsafe extern "system" fn queue_present(
 
     let fence_result = (sc.fns.wait_for_fences)(sc.device, 1, &fence, vk::TRUE, 200_000_000);
     if fence_result != vk::Result::SUCCESS {
-        eprintln!("ira-overlay: fence wait {:?}, skipping frame", fence_result);
+        eprintln!("ira-overlay: fence wait {:?}, presenting without overlay", fence_result);
         if fence_result == vk::Result::ERROR_DEVICE_LOST {
             DEVICE_LOST.store(true, Ordering::Relaxed);
         }
-        return vk::Result::SUCCESS;
+        return chain_present(queue, present_info);
     }
     ira_overlay::ui::capture::check_and_readback();
     ira_overlay::ui::cleanup_old_staging();

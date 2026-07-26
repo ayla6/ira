@@ -6,7 +6,7 @@ mod texture;
 
 pub use async_load::{
     load_texture_async, load_texture_async_with_priority, set_image_async,
-    set_picture_contain_async, set_picture_natural_async,
+    set_picture_contain_async,
 };
 pub use cache::{clear_texture_cache, invalidate_texture};
 pub use pixbuf::pixbuf_for;

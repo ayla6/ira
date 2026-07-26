@@ -312,11 +312,26 @@ fn save_language_config(params: &SaveGameSettingsParams) {
 
 fn update_game_state_in_memory(params: &SaveGameSettingsParams, title: &str, sort_title: &str, app_id_result: &AppIdResult) {
     let mut state_borrow = params.state.borrow_mut();
-    let Some(g) = state_borrow.games.iter_mut().find(|g| g.db_id == params.db_id) else {
+    let Some(i) = state_borrow.games.iter().position(|g| g.db_id == params.db_id && g.variant_id.is_none()) else {
         return;
     };
+    let old_name = state_borrow.games[i].name.clone();
+    let title_changed = old_name != title;
+
+    if title_changed {
+        for vg in state_borrow.games.iter_mut() {
+            if vg.db_id == params.db_id && vg.variant_id.is_some() {
+                if let Some(suffix) = vg.name.strip_prefix(&old_name) {
+                    vg.name = format!("{}{}", title, suffix);
+                }
+            }
+        }
+    }
+
+    let g = &mut state_borrow.games[i];
     g.name = title.to_string();
     g.sort_title = sort_title.to_string();
+
     if let Some(ver) = params.pending_version.borrow().as_ref() {
         g.shadps4_version = ver.clone();
     }
@@ -340,6 +355,9 @@ fn update_game_state_in_memory(params: &SaveGameSettingsParams, title: &str, sor
             g.app_id = app_id_result.new_val.clone();
             g.platform_id = app_id_result.new_val.clone();
             g.manual_unmatch = false;
+            g.achievements.clear();
+            g.earned_count = 0;
+            g.total_count = 0;
         }
     }
 }
@@ -537,42 +555,7 @@ fn finish_save(params: &SaveGameSettingsParams, db: &ira_db::DbConn) {
     }
 
     super::sidebar::rebuild_sidebar(&params.state);
-
-    let sort_key_changed = {
-        let store = params.state.borrow().grid_store.clone();
-        let games = params.state.borrow().games.clone();
-        let mut changed = false;
-        for i in 0..store.n_items() {
-            if let Some(item) = store.item(i).and_then(|o| o.downcast::<super::game_item::GameItem>().ok()) {
-                if let Some(gi) = item.game() {
-                    if gi.db_id == params.db_id {
-                        if let Some(g) = games.iter().find(|g| g.db_id == params.db_id && g.variant_id.is_none()) {
-                            if gi.name != g.name || gi.sort_title != g.sort_title {
-                                changed = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        changed
-    };
-    if sort_key_changed {
-        super::grid_view::refresh_grid_store(&params.state);
-    } else {
-        let store = params.state.borrow().grid_store.clone();
-        let games = params.state.borrow().games.clone();
-        for i in 0..store.n_items() {
-            if let Some(item) = store.item(i).and_then(|o| o.downcast::<super::game_item::GameItem>().ok()) {
-                if let Some(gi) = item.game() {
-                    if let Some(g) = games.iter().find(|g| g.grid_id() == gi.grid_id()) {
-                        item.update_game(g);
-                    }
-                }
-            }
-        }
-    }
+    super::grid_view::refresh_grid_store(&params.state);
 
     let selected = params.state.borrow().selected_id.clone();
     let game_after_save = if selected == params.db_id.to_string() {

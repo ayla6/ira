@@ -66,6 +66,13 @@ fn setup_and_show_popover(
     popover.set_parent(parent);
     popover.set_pointing_to(Some(&gdk4::Rectangle::new(at_x as i32, at_y as i32, 1, 1)));
     parent.insert_action_group("game", Some(actions));
+    let popover_clone = popover.clone();
+    popover.connect_closed(move |_| {
+        let p = popover_clone.clone();
+        glib::idle_add_local_once(move || {
+            p.unparent();
+        });
+    });
     popover.popup();
 }
 

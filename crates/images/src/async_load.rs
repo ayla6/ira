@@ -1,5 +1,4 @@
 use crate::cache::{DecodeResult, DECODE_POOL_SIZE, PENDING_LOADS, TEXTURE_CACHE};
-use crate::scaled::ScaledPaintable;
 use crate::texture::{cached_texture, texture_for};
 use gdk4::{MemoryFormat, MemoryTexture, Texture};
 use gtk4::prelude::*;
@@ -143,27 +142,6 @@ where
     }
 
     ensure_drain();
-}
-
-pub fn set_picture_natural_async(pic: &gtk4::Picture, path: &str, w: i32, h: i32) {
-    let _s = info_span!("set_picture_natural_async", path, w, h).entered();
-    if w <= 0 || h <= 0 || path.is_empty() {
-        return;
-    }
-    if let Some(t) = texture_for(path) {
-        let paintable = ScaledPaintable::new(&t, w, h);
-        pic.set_paintable(Some(&paintable));
-        return;
-    }
-    let pic_weak = pic.downgrade();
-    load_texture_async(path, move |texture| {
-        if let Some(pic) = pic_weak.upgrade() {
-            if let Some(t) = texture {
-                let paintable = ScaledPaintable::new(&t, w, h);
-                pic.set_paintable(Some(&paintable));
-            }
-        }
-    });
 }
 
 pub fn set_image_async(img: &gtk4::Image, path: &str) {

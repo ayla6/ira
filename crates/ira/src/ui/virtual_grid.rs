@@ -385,6 +385,7 @@ mod imp {
             }
 
             if size_changed {
+                self.dirty.set(false);
                 let unbind = self.unbind_fn.borrow().clone();
                 let bind = self.bind_fn.borrow().clone();
                 let model = self.model.borrow().clone();

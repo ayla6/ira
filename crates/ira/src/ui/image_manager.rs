@@ -602,6 +602,14 @@ fn build_dir_buttons(
                     None => (128, 128),
                 };
                 ira_parser::ensure_small_image(&target_dir, &file_base, sw, sh);
+                let webp = target_dir.join(format!("{}.webp", file_base));
+                if webp.is_file() {
+                    ira_images::invalidate_texture(&webp.to_string_lossy());
+                }
+                let small = target_dir.join(format!("{}_small.webp", file_base));
+                if small.is_file() {
+                    ira_images::invalidate_texture(&small.to_string_lossy());
+                }
                 refresh();
             }
         },

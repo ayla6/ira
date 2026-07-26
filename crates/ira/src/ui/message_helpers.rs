@@ -70,11 +70,12 @@ fn apply_playtime_updates_db(state: &SharedState, updates: &HashMap<i64, (f64, i
     }
 
     if changed_db_ids.contains(&selected_db_id) {
+        let selected_id = state.borrow().selected_id.clone();
         let game = state
             .borrow()
             .games
             .iter()
-            .find(|g| g.db_id == selected_db_id)
+            .find(|g| g.grid_id() == selected_id)
             .cloned();
         if let Some(game) = game {
             display_game(&game, state);

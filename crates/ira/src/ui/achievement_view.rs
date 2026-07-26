@@ -238,11 +238,16 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
             if stack.visible_child_name() == Some("global".into()) && !global_built.get() {
                 global_built.set(true);
                 if let Some(global_vbox) = global_vbox_weak.upgrade() {
-                    let s = state_for_global.borrow();
-                    if s.view_generation == gen_for_global {
-                        if let Some(game) = s.games.iter().find(|g| g.app_id == app_id_for_global) {
-                            build_global_tab(game, &global_vbox, &state_for_global, gen_for_global);
+                    let game = {
+                        let s = state_for_global.borrow();
+                        if s.view_generation != gen_for_global {
+                            None
+                        } else {
+                            s.games.iter().find(|g| g.app_id == app_id_for_global).cloned()
                         }
+                    };
+                    if let Some(game) = game {
+                        build_global_tab(&game, &global_vbox, &state_for_global, gen_for_global);
                     }
                 }
             }

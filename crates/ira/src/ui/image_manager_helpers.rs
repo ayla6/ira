@@ -7,7 +7,6 @@ use ira_models::AssetType;
 use super::helpers::clear_children;
 use super::message_helpers::apply_game_update;
 use super::state::{PendingImage, SharedState};
-use super::game_item::GameItem;
 use super::css::*;
 
 pub(super) fn find_best_image_path(game: &Game, field: &str, _base: &str, id: &str, save_dir: &str) -> String {
@@ -134,18 +133,6 @@ pub(super) fn make_refresh_closure(
                         ira_images::invalidate_texture(&new_path);
                     }
                     apply_game_update(&state_clone, updated);
-                    let store = state_clone.borrow().grid_store.clone();
-                    for i in 0..store.n_items() {
-                        if let Some(item) = store.item(i).and_then(|o| o.downcast::<GameItem>().ok()) {
-                            if item.game().is_some_and(|gi| gi.db_id == game_clone.db_id) {
-                                let s = state_clone.borrow();
-                                if let Some(g) = s.games.iter().find(|g| g.db_id == game_clone.db_id) {
-                                    store.splice(i, 1, &[GameItem::new(g)]);
-                                }
-                                break;
-                            }
-                        }
-                    }
                 }
             }
         }

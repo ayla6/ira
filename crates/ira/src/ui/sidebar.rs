@@ -388,6 +388,13 @@ fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &S
                 popover.set_parent(&r);
                 popover.set_pointing_to(Some(&gdk4::Rectangle::new(x as i32, y as i32, 1, 1)));
                 r.insert_action_group("grp", Some(&actions));
+                let popover_clone = popover.clone();
+                popover.connect_closed(move |_| {
+                    let p = popover_clone.clone();
+                    glib::idle_add_local_once(move || {
+                        p.unparent();
+                    });
+                });
                 popover.popup();
             }
         });
@@ -484,6 +491,13 @@ fn sidebar_unbind_factory(_factory: &gtk4::SignalListItemFactory, list_item_obj:
     let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
     if let Some(child) = list_item.child() {
         let row = child.downcast::<gtk4::Box>().unwrap();
+        let controllers = row.observe_controllers();
+        let to_remove: Vec<gtk4::EventController> = (0..controllers.n_items())
+            .filter_map(|i| controllers.item(i).and_then(|o| o.downcast::<gtk4::EventController>().ok()))
+            .collect();
+        for ctrl in to_remove {
+            row.remove_controller(&ctrl);
+        }
         clear_children(&row);
     }
 }

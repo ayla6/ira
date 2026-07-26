@@ -35,8 +35,4 @@ impl GameItem {
     pub fn game(&self) -> Option<Game> {
         self.imp().game.borrow().clone()
     }
-
-    pub fn update_game(&self, game: &Game) {
-        self.imp().game.replace(Some(game.clone()));
-    }
 }

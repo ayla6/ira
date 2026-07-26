@@ -34,7 +34,7 @@ fn overlay_paths() -> Option<(String, String)> {
     "layer": {{
         "name": "VK_LAYER_IRA_OVERLAY",
         "type": "GLOBAL",
-        "api_version": "1.2.0",
+        "api_version": "1.3.0",
         "library_path": "{}",
         "implementation_version": "1",
         "description": "Ira game overlay",
@@ -171,16 +171,63 @@ pub fn add_overlay_env(env: &mut Vec<(String, String)>, overlay_shm: Option<&str
     env.retain(|(k, _)| k != "VK_INSTANCE_LAYERS");
     env.push(("VK_INSTANCE_LAYERS".to_string(), "VK_LAYER_IRA_OVERLAY".to_string()));
 
+    // Preload system glib/gobject so the Vulkan layer's pango dependency
+    // resolves against the system glib, not an older glib bundled inside
+    // an AppImage (e.g. RPCS3). Without this, pango fails with
+    // "undefined symbol: g_once_init_leave_pointer" because the AppImage's
+    // glib is older than 2.80. LD_LIBRARY_PATH must also include /usr/lib
+    // so that bash (AppRun) can find glib's transitive deps like libpcre2.
+    let system_libs = find_system_glib();
+    let mut preload_parts: Vec<String> = system_libs.clone();
+    preload_parts.push(shim_path.clone());
     let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
-    let merged = match existing {
-        Some(prev) if !prev.is_empty() => format!("{}:{}", shim_path, prev),
-        _ => shim_path,
-    };
+    if let Some(prev) = existing {
+        if !prev.is_empty() {
+            preload_parts.push(prev);
+        }
+    }
+    let merged = preload_parts.join(":");
     env.retain(|(k, _)| k != "LD_PRELOAD");
     env.push(("LD_PRELOAD".to_string(), merged));
+
+    // Ensure /usr/lib is in LD_LIBRARY_PATH so preloaded glib's deps
+    // (libpcre2, etc.) are findable before AppRun sets its own paths.
+    let existing_llp = env.iter().find(|(k, _)| k == "LD_LIBRARY_PATH").map(|(_, v)| v.clone());
+    let new_llp = match existing_llp {
+        Some(prev) if !prev.is_empty() => format!("/usr/lib:{}", prev),
+        _ => "/usr/lib".to_string(),
+    };
+    env.retain(|(k, _)| k != "LD_LIBRARY_PATH");
+    env.push(("LD_LIBRARY_PATH".to_string(), new_llp));
 
     if let Some(shm) = overlay_shm {
         env.retain(|(k, _)| k != "IRA_OVERLAY_SHM");
         env.push(("IRA_OVERLAY_SHM".to_string(), shm.to_string()));
     }
+}
+
+/// Find the system's glib and gobject shared libraries via ldconfig.
+/// Returns absolute paths suitable for LD_PRELOAD.
+fn find_system_glib() -> Vec<String> {
+    let mut result = Vec::new();
+    let output = std::process::Command::new("ldconfig")
+        .arg("-p")
+        .output()
+        .ok();
+    let Some(output) = output else { return result };
+    let cache = String::from_utf8_lossy(&output.stdout);
+    for lib in ["libglib-2.0.so.0", "libgobject-2.0.so.0"] {
+        for line in cache.lines() {
+            if line.contains(lib) && line.contains("x86-64") {
+                if let Some(path) = line.split("=>").nth(1) {
+                    let path = path.trim();
+                    if !path.is_empty() {
+                        result.push(path.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    result
 }

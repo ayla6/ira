@@ -14,6 +14,10 @@ pub unsafe extern "system" fn queue_present(
     let present_info = &*present_info;
 
     crate::wayland::dispatch();
+    crate::evdev::init();
+    if !crate::shim_bridge::has_sdl_hooks() {
+        crate::evdev::poll();
+    }
 
     if DEVICE_LOST.load(Ordering::Relaxed) {
         return chain_present(queue, present_info);

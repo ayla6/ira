@@ -1,4 +1,5 @@
 mod device;
+pub mod evdev;
 mod instance;
 mod negotiate;
 mod present;

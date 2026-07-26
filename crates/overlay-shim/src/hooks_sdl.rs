@@ -1,0 +1,141 @@
+//! SDL2 gamepad input hooking via LD_PRELOAD symbol interposition.
+//!
+//! When loaded via `LD_PRELOAD`, calls to `SDL_PollEvent` are resolved to our
+//! version instead of the real SDL2 function. We chain through to the real
+//! function via `dlsym(RTLD_NEXT, ...)`.
+//!
+//! Gamepad button events (`SDL_CONTROLLERBUTTONDOWN`, `SDL_JOYBUTTONDOWN`) are
+//! intercepted. When the overlay is visible, they are consumed (removed from
+//! the queue) so the game doesn't see them. The Guide button always toggles
+//! the overlay, even when hidden.
+//!
+//! On first call, sets `HAS_SDL` flag so the Vulkan layer knows to skip evdev
+//! (SDL hooks can consume events; evdev can't).
+
+use std::ffi::c_void;
+use std::sync::OnceLock;
+
+use ira_overlay_ipc::InputEventRaw;
+
+use crate::state;
+
+// SDL2 event types
+const SDL_CONTROLLERBUTTONDOWN: u32 = 0x651;
+const SDL_JOYBUTTONDOWN: u32 = 0x603;
+
+// SDL2 controller button codes
+const BTN_A: u8 = 0;
+const BTN_GUIDE: u8 = 6;
+const BTN_LEFTSHOULDER: u8 = 9;
+const BTN_RIGHTSHOULDER: u8 = 10;
+const BTN_DPAD_UP: u8 = 11;
+const BTN_DPAD_DOWN: u8 = 12;
+const BTN_DPAD_LEFT: u8 = 13;
+const BTN_DPAD_RIGHT: u8 = 14;
+
+// X11 keycodes (evdev + 8) — these are what shim_bridge::convert_and_forward
+// expects for navigation mapping.
+const KC_RETURN: u32 = 36;
+const KC_UP: u32 = 111;
+const KC_DOWN: u32 = 116;
+const KC_LEFT: u32 = 113;
+const KC_RIGHT: u32 = 114;
+
+// SDL_ControllerButtonEvent layout (SDL2):
+//   offset 0:  Uint32 type
+//   offset 4:  Uint32 timestamp
+//   offset 8:  Sint32 which
+//   offset 12: Uint8  button
+const EV_BUTTON_OFFSET: usize = 12;
+
+type PollEventFn = unsafe extern "C" fn(*mut c_void) -> i32;
+
+static REAL_SDL_POLL_EVENT: OnceLock<Option<PollEventFn>> = OnceLock::new();
+
+fn real_poll_event() -> Option<PollEventFn> {
+    *REAL_SDL_POLL_EVENT.get_or_init(|| {
+        let p = unsafe { libc::dlsym(libc::RTLD_NEXT, c"SDL_PollEvent".as_ptr()) };
+        if !p.is_null() {
+            state::set_has_sdl(true);
+            Some(unsafe { std::mem::transmute::<*mut libc::c_void, PollEventFn>(p) })
+        } else {
+            None
+        }
+    })
+}
+
+fn read_button(event: *const c_void) -> u8 {
+    unsafe { *(event as *const u8).add(EV_BUTTON_OFFSET) }
+}
+
+fn handle_button(button: u8) {
+    // Guide button always toggles overlay.
+    if button == BTN_GUIDE {
+        state::set_visible(!state::is_visible());
+        return;
+    }
+
+    // Other buttons only when overlay is visible.
+    if !state::is_visible() { return; }
+
+    let event = match button {
+        BTN_A => InputEventRaw {
+            event_type: 3, x: 0, y: 0, button: 0, keycode: KC_RETURN,
+        },
+        BTN_DPAD_UP => InputEventRaw {
+            event_type: 3, x: 0, y: 0, button: 0, keycode: KC_UP,
+        },
+        BTN_DPAD_DOWN => InputEventRaw {
+            event_type: 3, x: 0, y: 0, button: 0, keycode: KC_DOWN,
+        },
+        BTN_DPAD_LEFT => InputEventRaw {
+            event_type: 3, x: 0, y: 0, button: 0, keycode: KC_LEFT,
+        },
+        BTN_DPAD_RIGHT => InputEventRaw {
+            event_type: 3, x: 0, y: 0, button: 0, keycode: KC_RIGHT,
+        },
+        BTN_LEFTSHOULDER => InputEventRaw {
+            event_type: 7, x: 0, y: -1, button: 0, keycode: 0,
+        },
+        BTN_RIGHTSHOULDER => InputEventRaw {
+            event_type: 7, x: 0, y: 1, button: 0, keycode: 0,
+        },
+        _ => return,
+    };
+    state::push_event(event);
+}
+
+/// LD_PRELOAD hook for `SDL_PollEvent`.
+///
+/// Intercepts gamepad button events. When the overlay is visible, gamepad
+/// events are consumed (the game never sees them). The Guide button always
+/// toggles the overlay. Non-gamepad events always pass through.
+#[no_mangle]
+pub unsafe extern "C" fn SDL_PollEvent(event: *mut c_void) -> i32 {
+    let Some(real_fn) = real_poll_event() else {
+        return 0;
+    };
+
+    let mut consumed = 0;
+    loop {
+        let result = real_fn(event);
+        if result == 0 { return 0; }
+
+        if !state::overlay_active() { return result; }
+
+        let event_type = *(event as *const u32);
+        if event_type == SDL_CONTROLLERBUTTONDOWN || event_type == SDL_JOYBUTTONDOWN {
+            let button = read_button(event);
+            handle_button(button);
+
+            // Consume gamepad events when overlay is visible so the game
+            // doesn't see them. Loop to fetch the next event.
+            if state::is_visible() && consumed < 64 {
+                consumed += 1;
+                continue;
+            }
+        }
+
+        return result;
+    }
+}

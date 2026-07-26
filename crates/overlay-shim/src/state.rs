@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use ira_overlay_ipc::InputEventRaw;
 
 pub static OVERLAY_VISIBLE: AtomicBool = AtomicBool::new(false);
+static HAS_SDL: AtomicBool = AtomicBool::new(false);
 
 static MOUSE_X: AtomicI32 = AtomicI32::new(0);
 static MOUSE_Y: AtomicI32 = AtomicI32::new(0);
@@ -39,6 +40,16 @@ pub fn set_visible(v: bool) {
 
 pub fn is_visible() -> bool {
     OVERLAY_VISIBLE.load(Ordering::SeqCst)
+}
+
+/// Set by SDL hooks when SDL2 is detected. When true, the Vulkan layer
+/// skips evdev gamepad polling (SDL hooks handle it and can consume events).
+pub fn set_has_sdl(v: bool) {
+    HAS_SDL.store(v, Ordering::SeqCst);
+}
+
+pub fn has_sdl() -> bool {
+    HAS_SDL.load(Ordering::SeqCst)
 }
 
 pub fn set_mouse_pos(x: i32, y: i32) {

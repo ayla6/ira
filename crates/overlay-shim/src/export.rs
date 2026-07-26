@@ -42,6 +42,18 @@ pub extern "C" fn ira_overlay_is_visible() -> c_int {
     }
 }
 
+/// Returns 1 if SDL2 hooks are active (SDL2 was detected via LD_PRELOAD).
+/// When true, the Vulkan layer skips evdev gamepad polling since SDL hooks
+/// can consume events (evdev can't).
+#[no_mangle]
+pub extern "C" fn ira_overlay_has_sdl() -> c_int {
+    if state::has_sdl() {
+        1
+    } else {
+        0
+    }
+}
+
 /// Returns the current mouse position (set by X11 motion events).
 #[no_mangle]
 pub extern "C" fn ira_overlay_mouse_pos(x: *mut c_int, y: *mut c_int) {

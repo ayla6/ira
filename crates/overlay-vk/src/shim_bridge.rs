@@ -17,10 +17,12 @@ use ira_overlay_ipc::InputEventRaw;
 type PollEventsFn = unsafe extern "C" fn(*mut InputEventRaw, usize) -> usize;
 type IsVisibleFn = unsafe extern "C" fn() -> c_int;
 type SetVisibleFn = unsafe extern "C" fn(c_int);
+type HasSdlFn = unsafe extern "C" fn() -> c_int;
 
 static POLL_EVENTS: OnceLock<Option<PollEventsFn>> = OnceLock::new();
 static IS_VISIBLE: OnceLock<Option<IsVisibleFn>> = OnceLock::new();
 static SET_VISIBLE: OnceLock<Option<SetVisibleFn>> = OnceLock::new();
+static HAS_SDL: OnceLock<Option<HasSdlFn>> = OnceLock::new();
 
 fn poll_fn() -> Option<PollEventsFn> {
     *POLL_EVENTS.get_or_init(|| {
@@ -56,6 +58,17 @@ pub fn set_visible(v: bool) {
     if let Some(f) = set_visible_fn() {
         unsafe { f(if v { 1 } else { 0 }) };
     }
+}
+
+/// Returns true if SDL2 hooks are active (SDL2 detected via LD_PRELOAD).
+/// When true, evdev gamepad polling is skipped since SDL hooks can consume
+/// events (evdev can't).
+pub fn has_sdl_hooks() -> bool {
+    let f = *HAS_SDL.get_or_init(|| {
+        let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_has_sdl".as_ptr()) };
+        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
+    });
+    f.is_some_and(|f| unsafe { f() != 0 })
 }
 
 /// Polls input events from the shim and forwards them to the overlay UI.

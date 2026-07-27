@@ -40,10 +40,6 @@ pub fn convert_lutris_to_managed(
         eac: config.wine.eac,
         show_debug: if config.wine.show_debug.is_empty() { "-all".to_string() } else { config.wine.show_debug.clone() },
         dll_overrides: config.wine.overrides.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-        gamemode: config.system.gamemode,
-        mangohud: config.system.mangohud,
-        gamescope: config.system.gamescope,
-        gamescope_flags: config.system.gamescope_flags.clone(),
         ..Default::default()
     };
     let profile_id = {
@@ -101,7 +97,7 @@ pub(super) fn build_dlc_page(
             dlc_scroll.set_vexpand(true);
             dlc_scroll.set_hexpand(true);
 
-            sidebar.append(&settings_dialog::settings_sidebar_row("package-x-generic-symbolic", "DLC"));
+            sidebar.append(&settings_dialog::settings_sidebar_row("package-x-generic-symbolic", "DLC", "dlc"));
             stack.add_named(&dlc_scroll, Some("dlc"));
             switches
         } else {
@@ -158,6 +154,7 @@ pub(super) fn build_api_emulator_page(
     if is_installed {
         let uninstall_btn = gtk4::Button::with_label("Uninstall API emulator");
         uninstall_btn.add_css_class(CSS_DESTRUCTIVE_ACTION);
+        uninstall_btn.set_valign(gtk4::Align::Center);
         let exe_c = emu_exe.to_string();
         let status_c = status_row.clone();
         let ts_c = emu_trophy_source;
@@ -174,7 +171,11 @@ pub(super) fn build_api_emulator_page(
                 Err(e) => eprintln!("Uninstall failed: {}", e),
             }
         });
-        action_group.add(&uninstall_btn);
+        let uninstall_row = adw::ActionRow::new();
+        uninstall_row.set_title("Remove emulator");
+        uninstall_row.set_subtitle("Restores original API DLLs");
+        uninstall_row.add_suffix(&uninstall_btn);
+        action_group.add(&uninstall_row);
     } else {
         let versions = if emu_trophy_source == ira_models::TrophySource::Gse {
             ira_platforms::api_emulators::list_gse_versions(save_dir)
@@ -221,6 +222,7 @@ pub(super) fn build_api_emulator_page(
         let install_btn = gtk4::Button::with_label("Install API emulator");
         install_btn.add_css_class(CSS_SUGGESTED_ACTION);
         install_btn.set_sensitive(has_dlls);
+        install_btn.set_valign(gtk4::Align::Center);
         let exe_c = emu_exe.to_string();
         let app_id_c = emu_app_id.to_string();
         let save_dir_c = save_dir.to_string();
@@ -244,12 +246,17 @@ pub(super) fn build_api_emulator_page(
                 Err(e) => eprintln!("Install failed: {}", e),
             }
         });
-        action_group.add(&install_btn);
+        let install_row = adw::ActionRow::new();
+        install_row.set_title("Install emulator");
+        install_row.set_subtitle("Patches the game to use the API emulator");
+        install_row.add_suffix(&install_btn);
+        action_group.add(&install_row);
     }
 
     if emu_trophy_source == ira_models::TrophySource::Gse && is_installed {
         let gen_btn = gtk4::Button::with_label("Generate steam_interfaces.txt");
         gen_btn.add_css_class(CSS_FLAT);
+        gen_btn.set_valign(gtk4::Align::Center);
         let exe_c = emu_exe.to_string();
         gen_btn.connect_clicked(move |_| {
             let game_dir = std::path::Path::new(&exe_c).parent();
@@ -265,7 +272,11 @@ pub(super) fn build_api_emulator_page(
                 }
             }
         });
-        action_group.add(&gen_btn);
+        let gen_row = adw::ActionRow::new();
+        gen_row.set_title("Generate steam_interfaces.txt");
+        gen_row.set_subtitle("Run the generate_interfaces tool from steam_settings");
+        gen_row.add_suffix(&gen_btn);
+        action_group.add(&gen_row);
     }
 
     emu_page.append(&action_group);
@@ -275,7 +286,7 @@ pub(super) fn build_api_emulator_page(
     emu_scroll.set_vexpand(true);
     emu_scroll.set_hexpand(true);
     sidebar.append(&settings_dialog::sidebar_separator());
-    sidebar.append(&settings_dialog::settings_sidebar_row("applications-engineering-symbolic", "API Emulator"));
+    sidebar.append(&settings_dialog::settings_sidebar_row("applications-engineering-symbolic", "API Emulator", "api_emulator"));
     stack.add_named(&emu_scroll, Some("api_emulator"));
 }
 

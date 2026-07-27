@@ -36,7 +36,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
     let (hidden, mut locked): (Vec<&MergedAchievement>, Vec<&MergedAchievement>) =
         rest.into_iter().partition(|a| a.hidden);
 
-    earned.sort_by(|a, b| b.earned_time.cmp(&a.earned_time));
+    earned.sort_by_key(|a| std::cmp::Reverse(a.earned_time));
     locked.sort_by(|a, b| {
         trophy_rank(a.trophy_type).cmp(&trophy_rank(b.trophy_type))
             .then_with(|| a.display_name.cmp(&b.display_name))

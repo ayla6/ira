@@ -109,7 +109,7 @@ fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
             .filter(|g| g.last_played > 0 && (!g.hidden || show_hidden))
             .cloned()
             .collect();
-        recent.sort_by(|a, b| b.last_played.cmp(&a.last_played));
+        recent.sort_by_key(|a| std::cmp::Reverse(a.last_played));
         recent.truncate(8);
 
         if !recent.is_empty() {

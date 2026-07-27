@@ -191,18 +191,18 @@ unsafe fn create_pipeline(
     render_pass: vk::RenderPass,
     extent: vk::Extent2D,
 ) -> (vk::Pipeline, vk::PipelineLayout, vk::ShaderModule, vk::ShaderModule) {
-    let vert_code: Vec<u32> = VERT_SPV
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect();
+    let vert_code: Vec<u32> = {
+        let (chunks, _) = VERT_SPV.as_chunks::<4>();
+        chunks.iter().map(|c| u32::from_le_bytes(*c)).collect()
+    };
     let vert_info = vk::ShaderModuleCreateInfo::default().code(&vert_code);
     let mut shader_vert = vk::ShaderModule::null();
     let _ = (fns.create_shader_module)(device, &vert_info, std::ptr::null(), &mut shader_vert);
 
-    let frag_code: Vec<u32> = FRAG_SPV
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect();
+    let frag_code: Vec<u32> = {
+        let (chunks, _) = FRAG_SPV.as_chunks::<4>();
+        chunks.iter().map(|c| u32::from_le_bytes(*c)).collect()
+    };
     let frag_info = vk::ShaderModuleCreateInfo::default().code(&frag_code);
     let mut shader_frag = vk::ShaderModule::null();
     let _ = (fns.create_shader_module)(device, &frag_info, std::ptr::null(), &mut shader_frag);

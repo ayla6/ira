@@ -24,8 +24,6 @@ pub unsafe extern "system" fn queue_present(
         return chain_present(queue, present_info);
     }
 
-    ira_overlay::ui::capture::check_and_readback();
-
     let overlay_visible = crate::shim_bridge::is_visible();
     let screenshot_requested = ira_overlay::ui::capture::is_screenshot_requested()
         || ira_overlay::ui::capture::is_recording();
@@ -74,7 +72,6 @@ pub unsafe extern "system" fn queue_present(
         return chain_present(queue, present_info);
     }
     ira_overlay::ui::capture::check_and_readback();
-    ira_overlay::ui::cleanup_old_staging();
     let _ = (sc.fns.reset_fences)(sc.device, 1, &fence);
     let _ = (sc.fns.reset_cmd_buffer)(cmd, vk::CommandBufferResetFlags::empty());
 
@@ -179,11 +176,12 @@ pub unsafe extern "system" fn queue_present(
 
     let wait_sem_count = present_info.wait_semaphore_count;
     let wait_sems = present_info.p_wait_semaphores;
-    let wait_stages = vec![vk::PipelineStageFlags::ALL_COMMANDS; wait_sem_count as usize];
+    let wait_stages = [vk::PipelineStageFlags::ALL_COMMANDS; 8];
+    let wait_stage_slice = &wait_stages[..wait_sem_count as usize];
 
     let submit_info = vk::SubmitInfo::default()
         .wait_semaphores(std::slice::from_raw_parts(wait_sems, wait_sem_count as usize))
-        .wait_dst_stage_mask(&wait_stages)
+        .wait_dst_stage_mask(wait_stage_slice)
         .command_buffers(std::slice::from_ref(&cmd))
         .signal_semaphores(std::slice::from_ref(&sem));
     let submit_result = (sc.fns.queue_submit)(queue, 1, &submit_info as *const vk::SubmitInfo, fence);

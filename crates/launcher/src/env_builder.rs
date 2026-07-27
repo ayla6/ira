@@ -1,5 +1,4 @@
-use ira_models::GameLaunchConfig;
-use ira_models::WineConfig;
+use ira_models::{GameLaunchConfig, WineConfig};
 use crate::wine_launch;
 
 fn has_exec(name: &str) -> bool {
@@ -124,22 +123,49 @@ pub fn build_env(
     env.push(("__GL_SHADER_DISK_CACHE".to_string(), "1".to_string()));
     env.push(("__GL_SHADER_DISK_CACHE_PATH".to_string(), shader_dir));
 
-    let has_wine = wine.is_some_and(|w| w.enabled);
+    // GPU selection — applies to all games, not just Wine.
+    if !launch.gpu.is_empty() {
+        for (k, v) in crate::gpu::build_gpu_env(&launch.gpu) {
+            env.retain(|(ek, _)| ek != &k);
+            env.push((k, v));
+        }
+    }
+
+    let default_wine = WineConfig::default();
+    let wine_cfg = wine.unwrap_or(&default_wine);
+    apply_performance(command, &mut env, launch, wine_cfg);
+
+    env
+}
+
+/// Wraps the command with gamemode/mangohud/gamescope if configured.
+/// Reads system settings from GameLaunchConfig (not WineConfig — these are
+/// system-level settings that apply to ALL games, not just Wine).
+/// Adds mangohud env vars to `env`.
+/// Returns `true` if gamescope is used (indicating standalone overlay mode).
+pub fn apply_performance(
+    command: &mut Vec<String>,
+    env: &mut Vec<(String, String)>,
+    launch: &GameLaunchConfig,
+    _wine_cfg: &WineConfig,
+) -> bool {
     let mut extra_prefix: Vec<String> = Vec::new();
 
-    if has_wine && wine.unwrap().gamemode && has_exec("gamemoderun") {
+    if launch.gamemode && has_exec("gamemoderun") {
         extra_prefix.push("gamemoderun".to_string());
     }
-    if has_wine && wine.unwrap().mangohud && has_exec("mangohud") {
+    if launch.mangohud && has_exec("mangohud") {
         extra_prefix.push("mangohud".to_string());
+        env.retain(|(k, _)| k != "MANGOHUD");
         env.push(("MANGOHUD".to_string(), "1".to_string()));
+        env.retain(|(k, _)| k != "MANGOHUD_DLSYM");
         env.push(("MANGOHUD_DLSYM".to_string(), "1".to_string()));
     }
 
-    if has_wine && wine.unwrap().gamescope && has_exec("gamescope") {
+    if launch.gamescope.unwrap_or(false) && has_exec("gamescope") {
         let mut gs_args = vec!["gamescope".to_string()];
-        if !wine.unwrap().gamescope_flags.is_empty() {
-            if let Some(flags) = shlex::split(&wine.unwrap().gamescope_flags) {
+        if !launch.gamescope_flags.is_empty() {
+            if let Some(flags) = shlex::split(&launch.gamescope_flags) {
                 gs_args.extend(flags);
             }
         }
@@ -147,20 +173,20 @@ pub fn build_env(
         gs_args.extend(extra_prefix);
         gs_args.append(command);
         *command = gs_args;
+        true
     } else {
         let mut final_cmd: Vec<String> = Vec::new();
         final_cmd.extend(extra_prefix);
         final_cmd.append(command);
         *command = final_cmd;
+        false
     }
-
-    env
 }
 
-/// Adds overlay env vars (VK_LAYER_PATH, VK_INSTANCE_LAYERS, LD_PRELOAD, IRA_OVERLAY_SHM)
-/// to an existing env list. Call this after `build_env` when overlay is enabled.
-/// Does nothing if the overlay files are not found on disk.
-pub fn add_overlay_env(env: &mut Vec<(String, String)>, overlay_shm: Option<&str>) {
+/// Adds overlay env vars (VK_LAYER_PATH, VK_INSTANCE_LAYERS, LD_PRELOAD, IRA_OVERLAY_SHM,
+/// IRA_OVERLAY_FONT_FAMILY) to an existing env list. Call this after `build_env` when
+/// overlay is enabled. Does nothing if the overlay files are not found on disk.
+pub fn add_overlay_env(env: &mut Vec<(String, String)>, overlay_shm: Option<&str>, font_family: Option<&str>) {
     let Some((layer_dir, shim_path)) = overlay_paths() else {
         eprintln!("ira-overlay: enabled but files not found — skipping injection");
         return;
@@ -171,63 +197,151 @@ pub fn add_overlay_env(env: &mut Vec<(String, String)>, overlay_shm: Option<&str
     env.retain(|(k, _)| k != "VK_INSTANCE_LAYERS");
     env.push(("VK_INSTANCE_LAYERS".to_string(), "VK_LAYER_IRA_OVERLAY".to_string()));
 
-    // Preload system glib/gobject so the Vulkan layer's pango dependency
-    // resolves against the system glib, not an older glib bundled inside
-    // an AppImage (e.g. RPCS3). Without this, pango fails with
-    // "undefined symbol: g_once_init_leave_pointer" because the AppImage's
-    // glib is older than 2.80. LD_LIBRARY_PATH must also include /usr/lib
-    // so that bash (AppRun) can find glib's transitive deps like libpcre2.
-    let system_libs = find_system_glib();
-    let mut preload_parts: Vec<String> = system_libs.clone();
-    preload_parts.push(shim_path.clone());
     let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
-    if let Some(prev) = existing {
-        if !prev.is_empty() {
-            preload_parts.push(prev);
-        }
-    }
-    let merged = preload_parts.join(":");
+    let merged = match existing {
+        Some(prev) if !prev.is_empty() => format!("{}:{}", shim_path, prev),
+        _ => shim_path,
+    };
     env.retain(|(k, _)| k != "LD_PRELOAD");
     env.push(("LD_PRELOAD".to_string(), merged));
-
-    // Ensure /usr/lib is in LD_LIBRARY_PATH so preloaded glib's deps
-    // (libpcre2, etc.) are findable before AppRun sets its own paths.
-    let existing_llp = env.iter().find(|(k, _)| k == "LD_LIBRARY_PATH").map(|(_, v)| v.clone());
-    let new_llp = match existing_llp {
-        Some(prev) if !prev.is_empty() => format!("/usr/lib:{}", prev),
-        _ => "/usr/lib".to_string(),
-    };
-    env.retain(|(k, _)| k != "LD_LIBRARY_PATH");
-    env.push(("LD_LIBRARY_PATH".to_string(), new_llp));
 
     if let Some(shm) = overlay_shm {
         env.retain(|(k, _)| k != "IRA_OVERLAY_SHM");
         env.push(("IRA_OVERLAY_SHM".to_string(), shm.to_string()));
     }
+
+    // Resolve font family: user config → system default via fontconfig → fallback.
+    let font = font_family
+        .map(str::to_string)
+        .or_else(detect_system_font)
+        .unwrap_or_else(|| "sans-serif".to_string());
+    env.retain(|(k, _)| k != "IRA_OVERLAY_FONT_FAMILY");
+    env.push(("IRA_OVERLAY_FONT_FAMILY".to_string(), font));
 }
 
-/// Find the system's glib and gobject shared libraries via ldconfig.
-/// Returns absolute paths suitable for LD_PRELOAD.
-fn find_system_glib() -> Vec<String> {
-    let mut result = Vec::new();
-    let output = std::process::Command::new("ldconfig")
-        .arg("-p")
+/// Queries fontconfig (`fc-match`) for the system's default sans-serif font family.
+fn detect_system_font() -> Option<String> {
+    let output = std::process::Command::new("fc-match")
+        .args(["-f", "%{family}", "sans-serif"])
         .output()
-        .ok();
-    let Some(output) = output else { return result };
-    let cache = String::from_utf8_lossy(&output.stdout);
-    for lib in ["libglib-2.0.so.0", "libgobject-2.0.so.0"] {
-        for line in cache.lines() {
-            if line.contains(lib) && line.contains("x86-64") {
-                if let Some(path) = line.split("=>").nth(1) {
-                    let path = path.trim();
-                    if !path.is_empty() {
-                        result.push(path.to_string());
-                        break;
-                    }
-                }
-            }
-        }
+        .ok()?;
+    if !output.status.success() {
+        return None;
     }
-    result
+    let family = String::from_utf8_lossy(&output.stdout)
+        .split(',')
+        .next()?
+        .trim()
+        .to_string();
+    if family.is_empty() || family == "sans-serif" {
+        None
+    } else {
+        Some(family)
+    }
+}
+
+// ─── Standalone overlay (gamescope mode) ───
+
+/// Finds the standalone overlay binary next to the main executable.
+fn standalone_binary_path() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+
+    let dev_bin = exe_dir.join("ira-overlay-standalone");
+    if dev_bin.is_file() {
+        return Some(dev_bin.to_string_lossy().into());
+    }
+
+    let rel_bin = exe_dir.join("overlay").join("ira-overlay-standalone");
+    if rel_bin.is_file() {
+        return Some(rel_bin.to_string_lossy().into());
+    }
+
+    None
+}
+
+/// Returns the shim path only (without the VK layer dir), for standalone mode.
+fn shim_path_only() -> Option<String> {
+    let (_, shim_path) = overlay_paths()?;
+    Some(shim_path)
+}
+
+/// Adds overlay env vars for standalone mode — injects the shim (LD_PRELOAD)
+/// and IRA_OVERLAY_SHM but NOT the Vulkan layer. The standalone overlay process
+/// has its own Vulkan instance and reads from SHM directly.
+pub fn add_overlay_env_standalone(
+    env: &mut Vec<(String, String)>,
+    overlay_shm: Option<&str>,
+    font_family: Option<&str>,
+) {
+    let Some(shim_path) = shim_path_only() else {
+        eprintln!("ira-overlay: shim not found — skipping standalone injection");
+        return;
+    };
+
+    let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
+    let merged = match existing {
+        Some(prev) if !prev.is_empty() => format!("{}:{}", shim_path, prev),
+        _ => shim_path,
+    };
+    env.retain(|(k, _)| k != "LD_PRELOAD");
+    env.push(("LD_PRELOAD".to_string(), merged));
+
+    if let Some(shm) = overlay_shm {
+        env.retain(|(k, _)| k != "IRA_OVERLAY_SHM");
+        env.push(("IRA_OVERLAY_SHM".to_string(), shm.to_string()));
+    }
+
+    let font = font_family
+        .map(str::to_string)
+        .or_else(detect_system_font)
+        .unwrap_or_else(|| "sans-serif".to_string());
+    env.retain(|(k, _)| k != "IRA_OVERLAY_FONT_FAMILY");
+    env.push(("IRA_OVERLAY_FONT_FAMILY".to_string(), font));
+}
+
+/// Wraps a gamescope command so the standalone overlay runs inside gamescope
+/// alongside the game. The overlay inherits `GAMESCOPE_WAYLAND_DISPLAY` from
+/// gamescope's environment, allowing it to create a layer surface.
+///
+/// Transforms: `gamescope -- wine ...`
+/// Into:       `gamescope -- sh -c 'ira-overlay-standalone & exec "$@"' -- wine ...`
+pub fn wrap_with_standalone_overlay(command: &mut Vec<String>) {
+    let Some(bin) = standalone_binary_path() else {
+        eprintln!("ira-overlay: standalone binary not found, skipping");
+        return;
+    };
+
+    // Find the `--` separator in the gamescope command.
+    // Everything before `--` is gamescope args, everything after is the game command.
+    let sep_pos = command.iter().position(|a| a == "--");
+    let Some(sep) = sep_pos else {
+        eprintln!("ira-overlay: no `--` in gamescope command, skipping standalone wrap");
+        return;
+    };
+
+    let game_cmd: Vec<String> = command.split_off(sep + 1);
+    // `command` now ends with `... -- `
+
+    let quoted_bin = shlex::try_quote(&bin)
+        .map(|c| c.into_owned())
+        .unwrap_or(bin);
+    let sh_script = format!("{} & exec \"$@\"", quoted_bin);
+
+    command.push("sh".to_string());
+    command.push("-c".to_string());
+    command.push(sh_script);
+    command.push("--".to_string());
+    command.extend(game_cmd);
+}
+
+/// Returns `true` if the command starts with `gamescope`.
+pub fn uses_gamescope(command: &[String]) -> bool {
+    command.first().is_some_and(|c| c == "gamescope")
+}
+
+/// Returns `true` if gamescope would be applied for this launch config.
+/// Use this to determine overlay mode before calling `apply_performance`.
+pub fn will_use_gamescope(launch: &GameLaunchConfig) -> bool {
+    launch.gamescope.unwrap_or(false) && has_exec("gamescope")
 }

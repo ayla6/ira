@@ -8,8 +8,23 @@ use super::helpers::string_list_from;
 use super::settings_dialog::settings_page_container;
 use super::css::*;
 
-pub(super) fn settings_sidebar_row(icon: &str, label: &str) -> gtk4::ListBoxRow {
+fn detect_system_font() -> Option<String> {
+    let output = std::process::Command::new("fc-match")
+        .args(["-f", "%{family}", "sans-serif"])
+        .output()
+        .ok()?;
+    if !output.status.success() { return None; }
+    let family = String::from_utf8_lossy(&output.stdout)
+        .split(',')
+        .next()?
+        .trim()
+        .to_string();
+    if family.is_empty() { None } else { Some(family) }
+}
+
+pub(super) fn settings_sidebar_row(icon: &str, label: &str, page_id: &str) -> gtk4::ListBoxRow {
     let row = gtk4::ListBoxRow::new();
+    row.set_widget_name(page_id);
     let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
     let icon = gtk4::Image::from_icon_name(icon);
     let text = gtk4::Label::new(Some(label));
@@ -31,7 +46,7 @@ pub(super) fn sidebar_separator() -> gtk4::ListBoxRow {
     row
 }
 
-pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow) {
+pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow, adw::PasswordEntryRow, adw::PasswordEntryRow) {
     let page = settings_page_container();
 
     let notif_group = adw::PreferencesGroup::new();
@@ -57,7 +72,101 @@ pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::Swit
     hidden_group.add(&hidden_row);
     page.append(&hidden_group);
 
-    (page, notif_row, bg_row, hidden_row)
+    let key_group = adw::PreferencesGroup::new();
+    key_group.set_title(S::API_KEYS);
+
+    let steam_entry = adw::PasswordEntryRow::new();
+    steam_entry.set_title(S::STEAM_WEB_API_KEY);
+    steam_entry.set_text(&cfg.steam_api_key);
+    key_group.add(&steam_entry);
+
+    let sgdb_entry = adw::PasswordEntryRow::new();
+    sgdb_entry.set_title(S::STEAMGRIDDB_KEY);
+    sgdb_entry.set_text(&cfg.steam_griddb_api_key);
+    key_group.add(&sgdb_entry);
+    page.append(&key_group);
+
+    (page, notif_row, bg_row, hidden_row, steam_entry, sgdb_entry)
+}
+
+pub(super) struct SystemDefaultsWidgets {
+    pub gamemode: adw::SwitchRow,
+    pub mangohud: adw::SwitchRow,
+    pub gamescope: adw::SwitchRow,
+    pub gamescope_flags: adw::EntryRow,
+    pub env_vars_box: gtk4::ListBox,
+    pub ld_preload: adw::EntryRow,
+    pub ld_library_path: adw::EntryRow,
+}
+
+pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefaultsWidgets) {
+    let page = settings_page_container();
+    let s = &cfg.default_system;
+
+    let perf_group = adw::PreferencesGroup::new();
+    perf_group.set_title("Performance");
+
+    let gamemode = adw::SwitchRow::new();
+    gamemode.set_title("Gamemode");
+    gamemode.set_subtitle("Feral Interactive GameMode");
+    gamemode.set_active(s.gamemode);
+    perf_group.add(&gamemode);
+
+    let mangohud = adw::SwitchRow::new();
+    mangohud.set_title("MangoHud");
+    mangohud.set_subtitle("Performance overlay");
+    mangohud.set_active(s.mangohud);
+    perf_group.add(&mangohud);
+
+    let gamescope = adw::SwitchRow::new();
+    gamescope.set_title("Gamescope");
+    gamescope.set_subtitle("Valve Gamescope compositor");
+    gamescope.set_active(s.gamescope);
+    perf_group.add(&gamescope);
+
+    let gamescope_flags = adw::EntryRow::new();
+    gamescope_flags.set_title("Gamescope flags");
+    gamescope_flags.set_text(&s.gamescope_flags);
+    gamescope_flags.set_visible(s.gamescope);
+    perf_group.add(&gamescope_flags);
+    {
+        let gf = gamescope_flags.clone();
+        gamescope.connect_active_notify(move |sw| { gf.set_visible(sw.is_active()); });
+    }
+    page.append(&perf_group);
+
+    let env_group = adw::PreferencesGroup::new();
+    env_group.set_title("Environment Variables");
+    let add_env_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    add_env_btn.set_tooltip_text(Some("Add variable"));
+    add_env_btn.set_valign(gtk4::Align::Center);
+    add_env_btn.add_css_class(CSS_FLAT);
+    env_group.set_header_suffix(Some(&add_env_btn));
+
+    let env_vars_box = gtk4::ListBox::new();
+    env_vars_box.add_css_class(CSS_BOXED_LIST);
+    for (name, value) in &s.env_vars {
+        env_vars_box.append(&super::add_game_dialog::build_env_var_row(name, value));
+    }
+    let env_box_clone = env_vars_box.clone();
+    add_env_btn.connect_clicked(move |_| {
+        env_box_clone.append(&super::add_game_dialog::build_env_var_row("", ""));
+    });
+    env_group.add(&env_vars_box);
+    page.append(&env_group);
+
+    let ld_group = adw::PreferencesGroup::new();
+    let ld_preload = adw::EntryRow::new();
+    ld_preload.set_title("LD_PRELOAD");
+    ld_preload.set_text(&s.ld_preload);
+    ld_group.add(&ld_preload);
+    let ld_library_path = adw::EntryRow::new();
+    ld_library_path.set_title("LD_LIBRARY_PATH");
+    ld_library_path.set_text(&s.ld_library_path);
+    ld_group.add(&ld_library_path);
+    page.append(&ld_group);
+
+    (page, SystemDefaultsWidgets { gamemode, mangohud, gamescope, gamescope_flags, env_vars_box, ld_preload, ld_library_path })
 }
 
 pub(super) fn build_lutris_settings_page(state: &super::state::SharedState, settings_win: &adw::Window) -> gtk4::Box {
@@ -151,27 +260,6 @@ pub(super) fn build_lutris_settings_page(state: &super::state::SharedState, sett
     page
 }
 
-pub(super) fn build_api_keys_page(cfg: &Config) -> (gtk4::Box, adw::EntryRow, adw::EntryRow) {
-    let page = settings_page_container();
-
-    let key_group = adw::PreferencesGroup::new();
-    key_group.set_title(S::API_KEYS);
-
-    let steam_entry = adw::PasswordEntryRow::new();
-    steam_entry.set_title(S::STEAM_WEB_API_KEY);
-    steam_entry.set_text(&cfg.steam_api_key);
-    key_group.add(&steam_entry);
-
-    let sgdb_entry = adw::PasswordEntryRow::new();
-    sgdb_entry.set_title(S::STEAMGRIDDB_KEY);
-    sgdb_entry.set_text(&cfg.steam_griddb_api_key);
-    key_group.add(&sgdb_entry);
-
-    page.append(&key_group);
-
-    (page, steam_entry.upcast(), sgdb_entry.upcast())
-}
-
 pub(super) fn build_steam_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow) {
     let page = settings_page_container();
 
@@ -213,7 +301,7 @@ pub(super) fn build_steam_settings_page(cfg: &Config) -> (gtk4::Box, adw::Switch
     (page, enable_row)
 }
 
-pub(super) fn build_ra_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow, adw::EntryRow, adw::EntryRow) {
+pub(super) fn build_ra_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow, adw::EntryRow) {
     let page = settings_page_container();
 
     let enable_group = adw::PreferencesGroup::new();
@@ -236,14 +324,9 @@ pub(super) fn build_ra_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow
     password_row.set_title("Password");
     password_row.set_text(&cfg.ra_password);
     creds_group.add(&password_row);
-
-    let token_row = adw::PasswordEntryRow::new();
-    token_row.set_title("API Token (optional — auto-fetched from password)");
-    token_row.set_text(&cfg.ra_token);
-    creds_group.add(&token_row);
     page.append(&creds_group);
 
-    (page, enable_row, username_row, password_row.upcast(), token_row.upcast())
+    (page, enable_row, username_row, password_row.upcast())
 }
 
 pub(super) fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRow, gtk4::StringList) {
@@ -314,6 +397,10 @@ pub(super) struct OverlayPageWidgets {
     pub enable_row: adw::SwitchRow,
     pub encoder_row: adw::ComboRow,
     pub quality_row: adw::ComboRow,
+    pub toggle_hotkey: super::hotkey_widget::HotkeyWidgets,
+    pub screenshot_hotkey: super::hotkey_widget::HotkeyWidgets,
+    pub record_hotkey: super::hotkey_widget::HotkeyWidgets,
+    pub font_button: gtk4::FontDialogButton,
 }
 
 pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPageWidgets) {
@@ -349,26 +436,70 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
 
     let hotkeys_group = adw::PreferencesGroup::new();
     hotkeys_group.set_title("Hotkeys");
+    hotkeys_group.set_description(Some("Keyboard and gamepad bindings. Click to set."));
 
-    let toggle_row = adw::ActionRow::new();
-    toggle_row.set_title("Toggle overlay");
-    toggle_row.set_subtitle("Shift + Tab");
-    hotkeys_group.add(&toggle_row);
-
-    let screenshot_row = adw::ActionRow::new();
-    screenshot_row.set_title("Screenshot");
-    screenshot_row.set_subtitle("F12");
-    hotkeys_group.add(&screenshot_row);
-
-    let record_row = adw::ActionRow::new();
-    record_row.set_title("Toggle recording");
-    record_row.set_subtitle("F11");
-    hotkeys_group.add(&record_row);
+    let toggle_hotkey = super::hotkey_widget::build_hotkey_row(
+        &hotkeys_group, "Toggle overlay",
+        &o.toggle_hotkey, &o.toggle_hotkey_gamepad,
+        "Shift+Tab", "Guide",
+    );
+    let screenshot_hotkey = super::hotkey_widget::build_hotkey_row(
+        &hotkeys_group, "Screenshot",
+        &o.screenshot_hotkey, &o.screenshot_hotkey_gamepad,
+        "F12", "Guide+DpadDown",
+    );
+    let record_hotkey = super::hotkey_widget::build_hotkey_row(
+        &hotkeys_group, "Toggle recording",
+        &o.record_hotkey, &o.record_hotkey_gamepad,
+        "F11", "Guide+DpadUp",
+    );
     page.append(&hotkeys_group);
+
+    let font_group = adw::PreferencesGroup::new();
+    font_group.set_title("Appearance");
+
+    let font_dialog = gtk4::FontDialog::new();
+    font_dialog.set_title("Select overlay font");
+
+    let font_button = gtk4::FontDialogButton::new(Some(font_dialog));
+    font_button.set_valign(gtk4::Align::Center);
+    font_button.set_level(gtk4::FontLevel::Family);
+    font_button.set_use_font(false);
+
+    let system_font = detect_system_font().unwrap_or_else(|| "Sans".to_string());
+    if let Some(ref family) = o.font_family {
+        let desc = pango::FontDescription::from_string(family);
+        font_button.set_font_desc(&desc);
+    } else {
+        let desc = pango::FontDescription::from_string(&system_font);
+        font_button.set_font_desc(&desc);
+    }
+
+    let font_reset = gtk4::Button::from_icon_name("edit-undo-symbolic");
+    font_reset.set_valign(gtk4::Align::Center);
+    font_reset.set_tooltip_text(Some("Reset to system default"));
+    font_reset.add_css_class("flat");
+    font_reset.set_visible(o.font_family.is_some());
+
+    let font_row = adw::ActionRow::new();
+    font_row.set_title("Font family");
+    font_row.add_suffix(&font_button);
+    font_row.add_suffix(&font_reset);
+    font_group.add(&font_row);
+    page.append(&font_group);
+
+    // Store font_reset in the widgets so the save handler can access it
+    font_reset.connect_clicked({
+        let fb = font_button.clone();
+        let desc = pango::FontDescription::from_string(&system_font);
+        move |_| {
+            fb.set_font_desc(&desc);
+        }
+    });
 
     (
         page,
-        OverlayPageWidgets { enable_row, encoder_row, quality_row },
+        OverlayPageWidgets { enable_row, encoder_row, quality_row, toggle_hotkey, screenshot_hotkey, record_hotkey, font_button },
     )
 }
 
@@ -435,6 +566,64 @@ pub(super) fn build_source_overlay_row(
             "Follows global overlay setting (enabled)"
         } else {
             "Follows global overlay setting (disabled)"
+        });
+    });
+
+    (row, state)
+}
+
+pub(super) type GamescopeOverrideState = Rc<RefCell<Option<bool>>>;
+
+pub(super) fn build_source_gamescope_row(
+    global_default: bool,
+    override_value: Option<bool>,
+) -> (adw::SwitchRow, GamescopeOverrideState) {
+    let row = adw::SwitchRow::new();
+    row.set_title("Gamescope");
+    row.set_subtitle(if override_value.is_some() {
+        "Overridden from default"
+    } else if global_default {
+        "Follows default (enabled)"
+    } else {
+        "Follows default (disabled)"
+    });
+
+    let value = override_value.unwrap_or(global_default);
+    row.set_active(value);
+
+    let revert_btn = super::wine_config_helpers::make_revert_btn();
+    revert_btn.set_visible(override_value.is_some());
+    row.add_suffix(&revert_btn);
+
+    let state: GamescopeOverrideState = Rc::new(RefCell::new(override_value));
+    let reverting = Rc::new(RefCell::new(false));
+
+    let state_c = state.clone();
+    let btn_c = revert_btn.clone();
+    let row_c = row.clone();
+    let rev_c = reverting.clone();
+    row.connect_active_notify(move |_| {
+        if *rev_c.borrow() { return; }
+        *state_c.borrow_mut() = Some(row_c.is_active());
+        btn_c.set_visible(true);
+        row_c.set_subtitle("Overridden from default");
+        let _ = rev_c;
+    });
+
+    let state_c2 = state.clone();
+    let btn_c2 = revert_btn.clone();
+    let row_c2 = row.clone();
+    let rev_c2 = reverting.clone();
+    revert_btn.connect_clicked(move |_| {
+        *rev_c2.borrow_mut() = true;
+        row_c2.set_active(global_default);
+        *rev_c2.borrow_mut() = false;
+        *state_c2.borrow_mut() = None;
+        btn_c2.set_visible(false);
+        row_c2.set_subtitle(if global_default {
+            "Follows default (enabled)"
+        } else {
+            "Follows default (disabled)"
         });
     });
 

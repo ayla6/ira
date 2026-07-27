@@ -19,6 +19,8 @@ pub(super) struct LaunchCtx<'a> {
     pub started_at: i64,
     pub overlay_shm: Option<String>,
     pub overlay_global_enabled: bool,
+    pub overlay_font_family: Option<String>,
+    pub gamescope_default: bool,
 }
 
 fn spawn_and_monitor(ctx: &LaunchCtx, cmd: &[String], env: &[(String, String)], err_label: &str) -> Result<(), String> {
@@ -45,18 +47,51 @@ fn spawn_and_monitor(ctx: &LaunchCtx, cmd: &[String], env: &[(String, String)], 
     }
 }
 
-/// Build env vars for emulator launches, including overlay env vars if enabled.
+/// Build env vars for emulator launches, apply performance wrappers (gamemode/
+/// mangohud/gamescope), and set up overlay env (VK layer or standalone mode).
 /// Checks per-game overlay override first, then falls back to the global source setting.
-fn build_emulator_env(ctx: &LaunchCtx) -> Vec<(String, String)> {
+fn build_emulator_env_and_wrap(ctx: &LaunchCtx, cmd: &mut Vec<String>) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = std::env::vars().collect();
-    let overlay_enabled = ira_db::get_game_config(ctx.db, ctx.db_id)
+
+    let (launch, wine, _profile_id) = ira_db::get_game_config(ctx.db, ctx.db_id)
         .ok()
         .flatten()
-        .and_then(|(launch, _, _)| launch.overlay_enabled)
-        .unwrap_or(ctx.overlay_global_enabled);
-    if overlay_enabled {
-        ira_launcher::env_builder::add_overlay_env(&mut env, ctx.overlay_shm.as_deref());
+        .unwrap_or_default();
+
+    let mut launch = launch;
+    if launch.gamescope.is_none() {
+        launch.gamescope = Some(ctx.gamescope_default);
     }
+
+    let overlay_enabled = launch.overlay_enabled.unwrap_or(ctx.overlay_global_enabled);
+
+    // Determine overlay mode before applying performance wrappers.
+    let will_use_gamescope = ira_launcher::env_builder::will_use_gamescope(&launch);
+
+    if overlay_enabled {
+        if will_use_gamescope {
+            ira_launcher::env_builder::add_overlay_env_standalone(
+                &mut env,
+                ctx.overlay_shm.as_deref(),
+                ctx.overlay_font_family.as_deref(),
+            );
+        } else {
+            ira_launcher::env_builder::add_overlay_env(
+                &mut env,
+                ctx.overlay_shm.as_deref(),
+                ctx.overlay_font_family.as_deref(),
+            );
+        }
+    }
+
+    inject_flatpak_overlay_env(cmd, &mut env);
+
+    ira_launcher::env_builder::apply_performance(cmd, &mut env, &launch, &wine);
+
+    if overlay_enabled && ira_launcher::env_builder::uses_gamescope(cmd) {
+        ira_launcher::env_builder::wrap_with_standalone_overlay(cmd);
+    }
+
     env
 }
 
@@ -141,8 +176,7 @@ pub(super) fn launch_retro(
             .unwrap_or_else(|| game_path.to_string())
     };
     let mut cmd = ira_platforms::emulator_detect::build_launch_command(exe, &rom_path, core, cc.fullscreen, fullscreen_flag);
-    let mut env = build_emulator_env(ctx);
-    inject_flatpak_overlay_env(&mut cmd, &mut env);
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd);
     spawn_and_monitor(ctx, &cmd, &env, ctx.game_name)
 }
 
@@ -160,8 +194,7 @@ pub(super) fn launch_ps4(
         "shadps4"
     };
     let mut cmd = vec![exe.to_string(), "-g".to_string(), game_path.to_string()];
-    let mut env = build_emulator_env(ctx);
-    inject_flatpak_overlay_env(&mut cmd, &mut env);
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd);
     spawn_and_monitor(ctx, &cmd, &env, "shadPS4")
 }
 
@@ -179,8 +212,7 @@ pub(super) fn launch_ps3(
         "rpcs3"
     };
     let mut cmd = vec![exe.to_string(), "--no-gui".to_string(), game_path.to_string()];
-    let mut env = build_emulator_env(ctx);
-    inject_flatpak_overlay_env(&mut cmd, &mut env);
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd);
     spawn_and_monitor(ctx, &cmd, &env, "RPCS3")
 }
 
@@ -211,6 +243,10 @@ pub(super) fn launch_other(
         .ok()
         .flatten()
         .unwrap_or_default();
+
+    if launch.gamescope.is_none() {
+        launch.gamescope = Some(ctx.gamescope_default);
+    }
 
     if let Some(pid) = profile_id {
         if let Ok(Some(profile)) = ira_db::get_profile(ctx.db, pid) {
@@ -279,6 +315,7 @@ pub(super) fn launch_other(
                 running_games: ctx.running_games.clone(),
                 overlay_enabled,
                 overlay_shm: if overlay_enabled { ctx.overlay_shm.clone() } else { None },
+                overlay_font_family: ctx.overlay_font_family.clone(),
             },
         )?;
     } else {

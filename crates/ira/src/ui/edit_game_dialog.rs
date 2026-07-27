@@ -5,8 +5,8 @@ use adw::prelude::*;
 use gtk4::prelude::IsA;
 use ira_models::{AppDetails, GameLaunchConfig, WineConfig, WineProfile};
 use super::state::{PendingImage, SharedState};
-use super::edit_game_advanced::AdvancedWidgets;
 use super::edit_game_launch::{build_launch_config_page, LaunchConfigWidgets};
+use super::edit_game_system::{build_system_page, SystemWidgets};
 use super::edit_game_pages::{build_api_emulator_page, build_dlc_page};
 use super::edit_game_variants::build_variants_page;
 use super::edit_game_save::{save_game_settings, SaveGameSettingsParams};
@@ -16,9 +16,9 @@ use super::css::*;
 
 struct LaunchWineAdvancedCtx {
     launch_config_widgets: Option<LaunchConfigWidgets>,
+    system_widgets: Option<SystemWidgets>,
     show_wine_tabs: bool,
     wine_widgets_opt: Option<WineConfigWidgets>,
-    advanced_widgets: Option<AdvancedWidgets>,
     profiles: Vec<WineProfile>,
 }
 
@@ -84,6 +84,7 @@ fn build_launch_wine_advanced_pages(
         state.borrow().cfg.overlay.source_enabled(id)
     });
 
+    // Launch Config page — only for non-emulator games (Wine, Linux native, etc.)
     let launch_config_widgets = if show_launch_config {
         build_launch_config_page(super::edit_game_launch::LaunchConfigParams {
             launch: saved_launch,
@@ -96,45 +97,28 @@ fn build_launch_wine_advanced_pages(
             profiles: &profiles,
             state,
             game_slug: &game.slug,
-            overlay_default,
         })
-    } else if matches!(game.kind, ira_models::GameKind::Ps4 | ira_models::GameKind::Ps3 | ira_models::GameKind::Retro) {
-        super::edit_game_launch::build_emulator_overlay_page(sidebar, stack, overlay_default, saved_launch.overlay_enabled)
     } else {
         None
     };
 
+    // System page — shown for ALL games (Wine, emulator, native, etc.)
+    let system_widgets = Some(build_system_page(super::edit_game_system::SystemPageParams {
+        launch: saved_launch,
+        overlay_default,
+        sidebar,
+        stack,
+    }));
+
+    // Wine pages — only for Wine games with wine enabled
     let show_wine_tabs = game.kind == ira_models::GameKind::Wine && saved_wine.enabled;
     let wine_widgets_opt = if show_wine_tabs {
         let (wine_pages, ww) = build_wine_config_pages(saved_wine, Some(app_default_wine));
         for wp in &wine_pages {
-            if wp.label == "Wine Advanced" { continue; }
-            sidebar.append(&super::settings_dialog::settings_sidebar_row(wp.icon, wp.label));
+            sidebar.append(&super::settings_dialog::settings_sidebar_row(wp.icon, wp.label, wp.label));
             stack.add_named(&wp.page, Some(wp.label));
         }
         Some(ww)
-    } else {
-        None
-    };
-
-    let show_advanced = show_launch_config;
-    let advanced_widgets = if show_advanced {
-        let ww_ref = wine_widgets_opt.as_ref();
-        let wine_env_data: Option<Vec<(String, String)>> = ww_ref.map(|ww| {
-            super::wine_config_env_dll::collect_env_vars(&ww.wine_env_vars_box)
-        });
-        let dll_data: Option<Vec<(String, String)>> = ww_ref.map(|ww| {
-            super::wine_config_env_dll::collect_dll_overrides(&ww.dll_overrides_box)
-        });
-        let aw = super::edit_game_advanced::build_advanced_page(
-            saved_launch,
-            wine_env_data.as_deref(),
-            dll_data.as_deref(),
-            ww_ref,
-            sidebar,
-            stack,
-        );
-        Some(aw)
     } else {
         None
     };
@@ -145,9 +129,9 @@ fn build_launch_wine_advanced_pages(
 
     LaunchWineAdvancedCtx {
         launch_config_widgets,
+        system_widgets,
         show_wine_tabs,
         wine_widgets_opt,
-        advanced_widgets,
         profiles,
     }
 }
@@ -156,29 +140,8 @@ fn setup_sidebar_navigation(sidebar: &gtk4::ListBox, stack: &gtk4::Stack) {
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
-            if let Some(child) = row.child() {
-                if let Some(hbox) = child.downcast_ref::<gtk4::Box>() {
-                    if let Some(sibling) = hbox.last_child() {
-                        if let Some(label) = sibling.downcast_ref::<gtk4::Label>() {
-                            let page_id = match label.text().as_str() {
-                                "General" => "general",
-                                "Launch Config" => "launch",
-                                "Advanced" => "advanced",
-                                "Performance" => "Performance",
-                                "Graphics" => "Graphics",
-                                "Wine Advanced" => "Wine Advanced",
-                                "Images" => "images",
-                                "Logo" => "logo",
-                                "DLC" => "dlc",
-                                "API Emulator" => "api_emulator",
-                                "Variants" => "variants",
-                                _ => "general",
-                            };
-                            stack_clone.set_visible_child_name(page_id);
-                        }
-                    }
-                }
-            }
+            let page_id = row.widget_name().to_string().to_string();
+            stack_clone.set_visible_child_name(&page_id);
         }
     });
     if let Some(first) = sidebar.row_at_index(0) {
@@ -216,7 +179,7 @@ fn build_dialog_contents(
     let pending_copies: Rc<RefCell<HashMap<String, PendingImage>>> = Default::default();
     let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator, ra_container) =
         super::game_settings::build_game_general_page(&state, &game, &win, &languages, &pending_copies);
-    sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General"));
+    sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General", "general"));
     stack.add_named(&general_page, Some("general"));
 
     let lwa = build_launch_wine_advanced_pages(
@@ -233,13 +196,13 @@ fn build_dialog_contents(
         let images_page = super::image_manager::build_image_manager_content_with_drafts(
             &state, &game, &win, Some(pending_copies.clone()),
         );
-        sidebar.append(&super::settings_dialog::settings_sidebar_row("image-x-generic-symbolic", "Images"));
+        sidebar.append(&super::settings_dialog::settings_sidebar_row("image-x-generic-symbolic", "Images", "images"));
         stack.add_named(&images_page, Some("images"));
     }
 
     let logo_controls: Option<(Rc<RefCell<String>>, gtk4::Adjustment)> =
         if let Some((logo_page, selected_pos, size_adj, _modified)) = super::game_logo::build_game_logo_page(&game, false) {
-            sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-desktop-wallpaper-symbolic", "Logo"));
+            sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-desktop-wallpaper-symbolic", "Logo", "logo"));
             stack.add_named(&logo_page, Some("logo"));
             Some((selected_pos, size_adj))
         } else {
@@ -300,7 +263,7 @@ fn build_dialog_contents(
     let language_row_s = language_row.clone();
     let languages_s = languages.clone();
     let saved_platform_id_s = game.platform_id.clone();
-    let advanced_widgets_s = lwa.advanced_widgets.clone();
+    let system_widgets_s = lwa.system_widgets.clone();
     let title_entry_s = title_entry.clone();
     let sort_entry_s = sort_entry.clone();
     let pending_version_s = pending_version.clone();
@@ -328,7 +291,7 @@ fn build_dialog_contents(
             language_row: language_row_s.clone(),
             languages: languages_s.clone(),
             saved_platform_id: saved_platform_id_s.clone(),
-            advanced_widgets: advanced_widgets_s.clone(),
+            system_widgets: system_widgets_s.clone(),
             title_entry: title_entry_s.clone(),
             sort_entry: sort_entry_s.clone(),
             pending_version: pending_version_s.clone(),

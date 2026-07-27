@@ -5,7 +5,7 @@ use adw::prelude::*;
 use ira_models::WineConfig;
 
 use super::wine_config_env_dll::{build_dll_override_row, build_env_var_row, collect_dll_overrides, collect_env_vars};
-use super::wine_config_helpers::{build_combo_row, build_entry_row, build_switch_row, make_section, page_with_content, track_spin, track_switch, OverrideList};
+use super::wine_config_helpers::{build_combo_row, build_switch_row, make_section, page_with_content, track_spin, track_switch, OverrideList};
 use super::css::*;
 
 #[derive(Clone)]
@@ -26,19 +26,11 @@ pub struct WineConfigWidgets {
     pub show_debug: adw::ComboRow,
     pub audio: adw::ComboRow,
     pub wayland: adw::SwitchRow,
-    pub gpu_row: Option<adw::ComboRow>,
-    pub gpu_options: Vec<String>,
     pub desktop_integration: adw::SwitchRow,
     pub show_crash_dialogs: adw::SwitchRow,
     pub mouse_warp_override: adw::ComboRow,
-    pub virtual_desktop: adw::SwitchRow,
-    pub virtual_desktop_res: adw::EntryRow,
     pub dpi_enabled: adw::SwitchRow,
     pub dpi: gtk4::SpinButton,
-    pub gamemode: adw::SwitchRow,
-    pub mangohud: adw::SwitchRow,
-    pub gamescope: adw::SwitchRow,
-    pub gamescope_flags: adw::EntryRow,
     pub dxvk_frame_rate: gtk4::SpinButton,
     pub proton_wow64: adw::SwitchRow,
     pub proton_ntsync: adw::SwitchRow,
@@ -59,10 +51,6 @@ struct PerfPageWidgets {
     esync: adw::SwitchRow,
     fsync: adw::SwitchRow,
     fsr: adw::SwitchRow,
-    gamemode: adw::SwitchRow,
-    mangohud: adw::SwitchRow,
-    gamescope: adw::SwitchRow,
-    gamescope_flags: adw::EntryRow,
     dxvk_frame_rate: gtk4::SpinButton,
     proton_wow64: adw::SwitchRow,
 }
@@ -72,12 +60,8 @@ struct GfxPageWidgets {
     vkd3d: adw::SwitchRow,
     d3d_extras: adw::SwitchRow,
     dxvk_nvapi: adw::SwitchRow,
-    gpu_row: Option<adw::ComboRow>,
-    gpu_options: Vec<String>,
     wayland: adw::SwitchRow,
     mouse_warp_override: adw::ComboRow,
-    virtual_desktop: adw::SwitchRow,
-    virtual_desktop_res: adw::EntryRow,
     dpi_enabled: adw::SwitchRow,
     dpi: gtk4::SpinButton,
     audio: adw::ComboRow,
@@ -113,18 +97,6 @@ fn build_wine_perf_page(
     let fsr = build_switch_row("FSR", "AMD FidelityFX Super Resolution", wine.fsr);
     if let Some(dd) = dft { track_switch(&fsr, "fsr", dd.fsr, overridden); }
     perf_group.add(&fsr);
-    let gamemode = build_switch_row("Gamemode", "Feral Interactive GameMode", wine.gamemode);
-    if let Some(dd) = dft { track_switch(&gamemode, "gamemode", dd.gamemode, overridden); }
-    perf_group.add(&gamemode);
-    let mangohud = build_switch_row("MangoHud", "Performance overlay", wine.mangohud);
-    if let Some(dd) = dft { track_switch(&mangohud, "mangohud", dd.mangohud, overridden); }
-    perf_group.add(&mangohud);
-    let gamescope = build_switch_row("Gamescope", "Valve Gamescope compositor", wine.gamescope);
-    if let Some(dd) = dft { track_switch(&gamescope, "gamescope", dd.gamescope, overridden); }
-    perf_group.add(&gamescope);
-    let gamescope_flags = build_entry_row("Gamescope flags", &wine.gamescope_flags);
-    gamescope_flags.set_visible(wine.gamescope);
-    perf_group.add(&gamescope_flags);
 
     let dxvk_frame_rate_adj = gtk4::Adjustment::new(wine.dxvk_frame_rate as f64, 0.0, 999.0, 1.0, 10.0, 0.0);
     let dxvk_frame_rate = gtk4::SpinButton::new(Some(&dxvk_frame_rate_adj), 1.0, 0);
@@ -143,16 +115,10 @@ fn build_wine_perf_page(
     perf_group.add(&proton_wow64);
 
     perf_page.append(&perf_group);
-    let page = WinePage { icon: "power-profile-performance-symbolic", label: "Performance", page: page_with_content(perf_page) };
-
-    {
-        let gf = gamescope_flags.clone();
-        gamescope.connect_active_notify(move |sw| { gf.set_visible(sw.is_active()); });
-    }
+    let page = WinePage { icon: "power-profile-performance-symbolic", label: "Wine: Performance", page: page_with_content(perf_page) };
 
     (page, PerfPageWidgets {
-        proton_ntsync, esync, fsync, fsr, gamemode, mangohud,
-        gamescope, gamescope_flags, dxvk_frame_rate, proton_wow64,
+        proton_ntsync, esync, fsync, fsr, dxvk_frame_rate, proton_wow64,
     })
 }
 
@@ -177,30 +143,6 @@ fn build_wine_gfx_page(
     if let Some(dd) = dft { track_switch(&dxvk_nvapi, "dxvk_nvapi", dd.dxvk_nvapi, overridden); }
     gfx_group.add(&dxvk_nvapi);
 
-    let gpus = ira_launcher::gpu::detect_gpus();
-    let gpu_options: Vec<String> = gpus.iter().map(|g| g.card.clone()).collect();
-    let gpu_row = if gpus.len() > 1 {
-        let mut gpu_labels: Vec<String> = vec!["Auto".to_string()];
-        gpu_labels.extend(gpus.iter().map(|g| format!("{} — {}", g.short_name(), g.card)));
-        let gpu_model = gtk4::StringList::new(&gpu_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>());
-        let gr = adw::ComboRow::new();
-        gr.set_title("GPU");
-        gr.set_subtitle("Graphics card to use for rendering");
-        gr.set_model(Some(&gpu_model));
-        if !wine.gpu.is_empty() {
-            for (i, card) in gpu_options.iter().enumerate() {
-                if card == &wine.gpu {
-                    gr.set_selected((i + 1) as u32);
-                    break;
-                }
-            }
-        }
-        gfx_group.add(&gr);
-        Some(gr)
-    } else {
-        None
-    };
-
     let wayland = build_switch_row("Enable Wayland", "Use Wayland for display instead of X11", wine.graphics == "wayland");
     if let Some(dd) = dft { track_switch(&wayland, "graphics", dd.graphics == "wayland", overridden); }
     gfx_group.add(&wayland);
@@ -210,12 +152,6 @@ fn build_wine_gfx_page(
         mouse_warp_override.set_selected(idx);
     }
     gfx_group.add(&mouse_warp_override);
-    let virtual_desktop = build_switch_row("Virtual desktop", "Run in a virtual desktop window", wine.virtual_desktop);
-    if let Some(dd) = dft { track_switch(&virtual_desktop, "virtual_desktop", dd.virtual_desktop, overridden); }
-    gfx_group.add(&virtual_desktop);
-    let virtual_desktop_res = build_entry_row("Virtual desktop resolution", &wine.virtual_desktop_res);
-    virtual_desktop_res.set_visible(wine.virtual_desktop);
-    gfx_group.add(&virtual_desktop_res);
     let dpi_enabled = build_switch_row("Enable DPI scaling", "Override DPI settings", wine.dpi_enabled);
     if let Some(dd) = dft { track_switch(&dpi_enabled, "dpi_enabled", dd.dpi_enabled, overridden); }
     gfx_group.add(&dpi_enabled);
@@ -236,20 +172,16 @@ fn build_wine_gfx_page(
     }
     gfx_group.add(&audio);
     gfx_page.append(&gfx_group);
-    let page = WinePage { icon: "video-display-symbolic", label: "Graphics", page: page_with_content(gfx_page) };
+    let page = WinePage { icon: "video-display-symbolic", label: "Wine: Graphics", page: page_with_content(gfx_page) };
 
-    {
-        let vr = virtual_desktop_res.clone();
-        virtual_desktop.connect_active_notify(move |sw| { vr.set_visible(sw.is_active()); });
-    }
     {
         let dr = dpi_row.clone();
         dpi_enabled.connect_active_notify(move |sw| { dr.set_visible(sw.is_active()); });
     }
 
     (page, GfxPageWidgets {
-        dxvk, vkd3d, d3d_extras, dxvk_nvapi, gpu_row, gpu_options,
-        wayland, mouse_warp_override, virtual_desktop, virtual_desktop_res,
+        dxvk, vkd3d, d3d_extras, dxvk_nvapi,
+        wayland, mouse_warp_override,
         dpi_enabled, dpi, audio,
     })
 }
@@ -357,14 +289,11 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
         dxvk_nvapi: gfx_w.dxvk_nvapi, fsr: perf_w.fsr,
         battleye: adv_w.battleye, eac: adv_w.eac,
         show_debug: adv_w.show_debug, audio: gfx_w.audio,
-        wayland: gfx_w.wayland, gpu_row: gfx_w.gpu_row, gpu_options: gfx_w.gpu_options,
+        wayland: gfx_w.wayland,
         desktop_integration: adv_w.desktop_integration,
         show_crash_dialogs: adv_w.show_crash_dialogs,
         mouse_warp_override: gfx_w.mouse_warp_override,
-        virtual_desktop: gfx_w.virtual_desktop, virtual_desktop_res: gfx_w.virtual_desktop_res,
         dpi_enabled: gfx_w.dpi_enabled, dpi: gfx_w.dpi,
-        gamemode: perf_w.gamemode, mangohud: perf_w.mangohud,
-        gamescope: perf_w.gamescope, gamescope_flags: perf_w.gamescope_flags,
         dxvk_frame_rate: perf_w.dxvk_frame_rate,
         proton_wow64: perf_w.proton_wow64, proton_ntsync: perf_w.proton_ntsync,
         wine_env_vars_box: adv_w.wine_env_vars_box, dll_overrides_box: adv_w.dll_overrides_box,
@@ -388,13 +317,6 @@ impl WineConfigWidgets {
         let warp_idx = self.mouse_warp_override.selected() as usize;
         let warp_value = match warp_idx { 1 => "disable", 2 => "force", _ => "enable" };
 
-        let gpu_value = if let Some(ref gr) = self.gpu_row {
-            let idx = gr.selected() as usize;
-            if idx == 0 { String::new() } else {
-                self.gpu_options.get(idx - 1).cloned().unwrap_or_default()
-            }
-        } else { String::new() };
-
         WineConfig {
             enabled: true,
             prefix: self.prefix.clone(),
@@ -417,21 +339,15 @@ impl WineConfigWidgets {
             desktop_integration: self.desktop_integration.is_active(),
             show_crash_dialogs: self.show_crash_dialogs.is_active(),
             mouse_warp_override: warp_value.to_string(),
-            virtual_desktop: self.virtual_desktop.is_active(),
-            virtual_desktop_res: self.virtual_desktop_res.text().to_string(),
             dpi_enabled: self.dpi_enabled.is_active(),
             dpi: self.dpi.value() as i32,
-            gamemode: self.gamemode.is_active(),
-            mangohud: self.mangohud.is_active(),
-            gamescope: self.gamescope.is_active(),
-            gamescope_flags: self.gamescope_flags.text().to_string(),
             dxvk_frame_rate: self.dxvk_frame_rate.value() as i32,
             proton_wow64: self.proton_wow64.is_active(),
             proton_ntsync: self.proton_ntsync.is_active(),
             wine_env_vars: collect_env_vars(&self.wine_env_vars_box),
             umu_enabled: self.umu_enabled,
             overridden_fields: self.overridden.borrow().clone(),
-            gpu: gpu_value,
+            ..Default::default()
         }
     }
 }

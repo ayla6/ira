@@ -9,6 +9,8 @@ pub struct ScrollView {
     scroll_offset: f32,
     content_height: f32,
     bounds: Rect,
+    /// (top_y, bottom_y) for each child, computed in `layout`.
+    child_ys: Vec<(f32, f32)>,
 }
 
 impl ScrollView {
@@ -20,6 +22,7 @@ impl ScrollView {
             scroll_offset: 0.0,
             content_height: 0.0,
             bounds: Rect::default(),
+            child_ys: Vec::new(),
         }
     }
 }
@@ -39,9 +42,12 @@ impl Widget for ScrollView {
 
         let mut y = bounds.y - self.scroll_offset;
         let mut content_h = 0.0f32;
+        self.child_ys.clear();
+        self.child_ys.reserve(self.children.len());
         for child in &mut self.children {
             let size = child.measure(ctx);
             child.layout(ctx, Rect { x: bounds.x, y, width: bounds.width, height: size.height });
+            self.child_ys.push((y, y + size.height));
             y += size.height + self.gap;
             content_h += size.height + self.gap;
         }
@@ -58,7 +64,15 @@ impl Widget for ScrollView {
         ctx.clip_w = self.bounds.width;
         ctx.clip_h = self.bounds.height;
 
-        for child in &self.children {
+        let top = self.bounds.y;
+        let bottom = self.bounds.y + self.bounds.height;
+
+        for (i, child) in self.children.iter().enumerate() {
+            if let Some(&(cy_top, cy_bottom)) = self.child_ys.get(i) {
+                if cy_bottom < top || cy_top > bottom {
+                    continue;
+                }
+            }
             child.draw(ctx);
         }
 

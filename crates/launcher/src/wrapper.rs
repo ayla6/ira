@@ -1,12 +1,13 @@
 use ira_models::AppSender;
 use ira_models::AppMessage;
 use ira_db::{DbConn, record_session};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::HashMap;
+use std::io::Read;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::os::unix::process::CommandExt;
 use std::time::Duration;
-use std::path::Path;
 
 const PR_SET_CHILD_SUBREAPER: i32 = 36;
 
@@ -17,6 +18,30 @@ const WINE_BG_PROCESSES: &[&str] = &[
     "tabtip.exe", "conhost.exe",
 ];
 
+// ─── In-memory game log store ───
+
+type GameLog = Arc<Mutex<Vec<String>>>;
+
+static GAME_LOGS: OnceLock<Mutex<HashMap<i64, GameLog>>> = OnceLock::new();
+
+fn game_logs() -> &'static Mutex<HashMap<i64, GameLog>> {
+    GAME_LOGS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Returns the shared log buffer for a game. Creates a new empty buffer if none exists.
+pub fn get_game_log(game_id: i64) -> GameLog {
+    let mut logs = game_logs().lock().unwrap();
+    logs.entry(game_id).or_insert_with(|| Arc::new(Mutex::new(Vec::new()))).clone()
+}
+
+/// Clears the log buffer for a game (called at launch start).
+pub fn clear_game_log(game_id: i64) {
+    let logs = game_logs().lock().unwrap();
+    if let Some(log) = logs.get(&game_id) {
+        log.lock().unwrap().clear();
+    }
+}
+
 fn set_subreaper() {
     let ret = unsafe { libc::prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) };
     if ret != 0 {
@@ -24,11 +49,12 @@ fn set_subreaper() {
     }
 }
 
+/// Spawns the game process with piped stdout/stderr for in-memory logging.
 pub fn spawn_game(
     command: &[String],
     env: &[(String, String)],
     cwd: Option<&str>,
-    log_path: Option<&str>,
+    _log_path: Option<&str>,
 ) -> Result<Child, String> {
     set_subreaper();
 
@@ -42,28 +68,9 @@ pub fn spawn_game(
     for (key, val) in env {
         cmd.env(key, val);
     }
-    if let Some(path) = log_path {
-        if let Some(parent) = Path::new(path).parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                eprintln!("Failed to create log directory {}: {}", parent.display(), e);
-            }
-        }
-        match std::fs::File::create(path) {
-            Ok(f) => {
-                cmd.stdout(Stdio::from(f.try_clone().unwrap_or_else(|_| {
-                    std::fs::OpenOptions::new().write(true).open("/dev/null").unwrap()
-                })));
-                cmd.stderr(Stdio::from(f));
-            }
-            Err(_) => {
-                cmd.stdout(Stdio::null());
-                cmd.stderr(Stdio::null());
-            }
-        }
-    } else {
-        cmd.stdout(Stdio::null());
-        cmd.stderr(Stdio::null());
-    }
+
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
     cmd.process_group(0);
 
     cmd.spawn().map_err(|e| format!("Failed to spawn game process: {}", e))
@@ -92,6 +99,67 @@ pub fn monitor_process(
     child_pid: i32,
     ctx: MonitorContext,
 ) {
+    let game_id = ctx.game_id;
+
+    // Clear previous log and get the shared buffer for this game.
+    clear_game_log(game_id);
+    let log_buf = get_game_log(game_id);
+
+    // Spawn a thread to read stdout and stderr from the game process
+    // and store lines in the shared in-memory buffer.
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let log_buf_c = log_buf.clone();
+    std::thread::spawn(move || {
+        let push_line = |line: &str| {
+            log_buf_c.lock().unwrap().push(line.to_string());
+        };
+        if let Some(mut out) = stdout {
+            let mut buf = [0u8; 4096];
+            let mut pending = String::new();
+            loop {
+                match out.read(&mut buf) {
+                    Ok(0) | Err(_) => {
+                        if !pending.is_empty() {
+                            push_line(&pending);
+                        }
+                        break;
+                    }
+                    Ok(n) => {
+                        pending.push_str(&String::from_utf8_lossy(&buf[..n]));
+                        while let Some(pos) = pending.find('\n') {
+                            let line = pending[..pos].trim_end_matches('\r').to_string();
+                            push_line(&line);
+                            pending = pending[pos + 1..].to_string();
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(mut err) = stderr {
+            let mut buf = [0u8; 4096];
+            let mut pending = String::new();
+            loop {
+                match err.read(&mut buf) {
+                    Ok(0) | Err(_) => {
+                        if !pending.is_empty() {
+                            push_line(&pending);
+                        }
+                        break;
+                    }
+                    Ok(n) => {
+                        pending.push_str(&String::from_utf8_lossy(&buf[..n]));
+                        while let Some(pos) = pending.find('\n') {
+                            let line = pending[..pos].trim_end_matches('\r').to_string();
+                            push_line(&line);
+                            pending = pending[pos + 1..].to_string();
+                        }
+                    }
+                }
+            }
+        }
+    });
+
     loop {
         std::thread::sleep(Duration::from_secs(2));
         reap_zombies(child_pid);

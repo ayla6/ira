@@ -389,7 +389,7 @@ pub(super) fn build_variants_page(
     variant_scroll.set_hexpand(true);
     if game_kind != ira_models::GameKind::Steam && game_kind != ira_models::GameKind::Ps4 && game_kind != ira_models::GameKind::Ps3 && game_kind != ira_models::GameKind::Retro {
         sidebar.append(&settings_dialog::sidebar_separator());
-        sidebar.append(&settings_dialog::settings_sidebar_row("application-x-executable-symbolic", "Variants"));
+        sidebar.append(&settings_dialog::settings_sidebar_row("application-x-executable-symbolic", "Variants", "variants"));
         stack.add_named(&variant_scroll, Some("variants"));
     }
 

@@ -28,7 +28,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
     let profiles = ira_db::get_all_profiles(&db).unwrap_or_default();
     let (general_page, name_entry, kind_row, exe_entry, args_entry, wd_entry, detect_btn, profile_row, steam_id_entry, gog_id_entry) =
         build_general_page(&win, &profiles, state);
-    sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General"));
+    sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General", "general"));
     stack.add_named(&general_page, Some("general"));
 
     let (wine_pages, wine_widgets) = {
@@ -42,7 +42,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
 
     let mut wine_sidebar_rows: Vec<gtk4::ListBoxRow> = Vec::new();
     for wp in &wine_pages {
-        let row = super::settings_dialog::settings_sidebar_row(wp.icon, wp.label);
+        let row = super::settings_dialog::settings_sidebar_row(wp.icon, wp.label, wp.label);
         sidebar.append(&row);
         stack.add_named(&wp.page, Some(wp.label));
         wine_sidebar_rows.push(row);
@@ -54,7 +54,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
     setup_wine_sidebar_visibility(&kind_row, &wine_sidebar_rows, &sep1, &sep2, &profile_row);
 
     let (env_page, env_vars_box, ld_preload_entry, ld_library_entry) = build_env_page();
-    sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Environment"));
+    sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Environment", "env"));
     stack.add_named(&env_page, Some("env"));
 
     let detect_group = adw::PreferencesGroup::new();
@@ -139,28 +139,12 @@ fn connect_sidebar_selection(sidebar: &gtk4::ListBox, stack: &gtk4::Stack) {
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
-            if let Some(child) = row.child() {
-                if let Some(hbox) = child.downcast_ref::<gtk4::Box>() {
-                    if let Some(sibling) = hbox.last_child() {
-                        if let Some(label) = sibling.downcast_ref::<gtk4::Label>() {
-                            let page_id = match label.text().as_str() {
-                                "General" => "general",
-                                "Performance" => "Performance",
-                                "Graphics" => "Graphics",
-                                "Wine Advanced" => "Wine Advanced",
-                                "Environment" => "env",
-                                _ => "general",
-                            };
-                            stack_clone.set_visible_child_name(page_id);
-                        }
-                    }
-                }
-            }
+            let page_id = row.widget_name().to_string().to_string();
+            stack_clone.set_visible_child_name(&page_id);
         }
     });
 }
-
-fn build_dialog_button_row(content_area: &gtk4::Box) -> (gtk4::Button, gtk4::Button) {
+        fn build_dialog_button_row(content_area: &gtk4::Box) -> (gtk4::Button, gtk4::Button) {
     let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     btn_row.set_halign(gtk4::Align::End);
     btn_row.set_margin_start(16);
@@ -290,6 +274,7 @@ fn connect_add_handler(
             ld_library_path: ld_library_entry.text().to_string(),
             pre_launch: String::new(),
             overlay_enabled: None,
+            ..Default::default()
         };
         let wine_config = if is_wine { wine_widgets.to_wine_config() } else { WineConfig::default() };
 

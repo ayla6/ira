@@ -13,6 +13,23 @@ pub struct GameLaunchConfig {
     pub pre_launch: String,
     #[serde(default)]
     pub overlay_enabled: Option<bool>,
+    // System-level settings (moved from WineConfig — these apply to ALL games, not just Wine)
+    #[serde(default)]
+    pub gamemode: bool,
+    #[serde(default)]
+    pub mangohud: bool,
+    #[serde(default)]
+    pub gamescope: Option<bool>,
+    #[serde(default)]
+    pub gamescope_flags: String,
+    #[serde(default)]
+    pub gpu: String,
+    #[serde(default)]
+    pub overlay_encoder: Option<u32>,
+    #[serde(default)]
+    pub overlay_recording_quality: Option<u32>,
+    #[serde(default)]
+    pub overlay_font_family: Option<String>,
 }
 
 
@@ -39,14 +56,24 @@ pub struct WineConfig {
     pub desktop_integration: bool,
     pub show_crash_dialogs: bool,
     pub mouse_warp_override: String,
-    pub virtual_desktop: bool,
-    pub virtual_desktop_res: String,
+    // Virtual desktop removed — barely works on newer Wine versions.
+    // Kept for backward-compat deserialization of old DB rows.
+    #[serde(default)]
+    pub _virtual_desktop: bool,
+    #[serde(default)]
+    pub _virtual_desktop_res: String,
     pub dpi_enabled: bool,
     pub dpi: i32,
-    pub gamemode: bool,
-    pub mangohud: bool,
-    pub gamescope: bool,
-    pub gamescope_flags: String,
+    // gamemode/mangohud/gamescope moved to GameLaunchConfig.
+    // Kept here with #[serde(default)] for backward-compat deserialization of old DB rows.
+    #[serde(default)]
+    pub _gamemode: bool,
+    #[serde(default)]
+    pub _mangohud: bool,
+    #[serde(default)]
+    pub _gamescope: bool,
+    #[serde(default)]
+    pub _gamescope_flags: String,
     #[serde(default)]
     pub dxvk_frame_rate: i32,
     #[serde(default = "default_true")]
@@ -59,8 +86,9 @@ pub struct WineConfig {
     pub umu_enabled: bool,
     #[serde(default)]
     pub overridden_fields: Vec<String>,
+    // GPU moved to GameLaunchConfig. Kept for backward-compat deserialization.
     #[serde(default)]
-    pub gpu: String,
+    pub _gpu: String,
 }
 
 fn default_true() -> bool { true }
@@ -89,21 +117,21 @@ impl Default for WineConfig {
             desktop_integration: false,
             show_crash_dialogs: false,
             mouse_warp_override: "enable".to_string(),
-            virtual_desktop: false,
-            virtual_desktop_res: String::new(),
+            _virtual_desktop: false,
+            _virtual_desktop_res: String::new(),
             dpi_enabled: false,
             dpi: 96,
-            gamemode: false,
-            mangohud: false,
-            gamescope: false,
-            gamescope_flags: String::new(),
+            _gamemode: false,
+            _mangohud: false,
+            _gamescope: false,
+            _gamescope_flags: String::new(),
             dxvk_frame_rate: 0,
             proton_wow64: true,
             proton_ntsync: true,
             wine_env_vars: Vec::new(),
             umu_enabled: true,
             overridden_fields: Vec::new(),
-            gpu: String::new(),
+            _gpu: String::new(),
         }
     }
 }
@@ -134,21 +162,21 @@ impl WineConfig {
             desktop_integration: if has("desktop_integration") { self.desktop_integration } else { default.desktop_integration },
             show_crash_dialogs: if has("show_crash_dialogs") { self.show_crash_dialogs } else { default.show_crash_dialogs },
             mouse_warp_override: if has("mouse_warp_override") { self.mouse_warp_override.clone() } else { default.mouse_warp_override.clone() },
-            virtual_desktop: if has("virtual_desktop") { self.virtual_desktop } else { default.virtual_desktop },
-            virtual_desktop_res: if has("virtual_desktop_res") { self.virtual_desktop_res.clone() } else { default.virtual_desktop_res.clone() },
+            _virtual_desktop: false,
+            _virtual_desktop_res: String::new(),
             dpi_enabled: if has("dpi_enabled") { self.dpi_enabled } else { default.dpi_enabled },
             dpi: if has("dpi") { self.dpi } else { default.dpi },
-            gamemode: if has("gamemode") { self.gamemode } else { default.gamemode },
-            mangohud: if has("mangohud") { self.mangohud } else { default.mangohud },
-            gamescope: if has("gamescope") { self.gamescope } else { default.gamescope },
-            gamescope_flags: if has("gamescope_flags") { self.gamescope_flags.clone() } else { default.gamescope_flags.clone() },
+            _gamemode: false,
+            _mangohud: false,
+            _gamescope: false,
+            _gamescope_flags: String::new(),
             dxvk_frame_rate: if has("dxvk_frame_rate") { self.dxvk_frame_rate } else { default.dxvk_frame_rate },
             proton_wow64: if has("proton_wow64") { self.proton_wow64 } else { default.proton_wow64 },
             proton_ntsync: if has("proton_ntsync") { self.proton_ntsync } else { default.proton_ntsync },
             wine_env_vars: if has("wine_env_vars") { self.wine_env_vars.clone() } else { default.wine_env_vars.clone() },
             umu_enabled: self.umu_enabled,
             overridden_fields: self.overridden_fields.clone(),
-            gpu: self.gpu.clone(),
+            _gpu: String::new(),
         }
     }
 }

@@ -114,7 +114,7 @@ pub(super) fn build_advanced_page(
     scroll.set_hexpand(true);
 
     sidebar.append(&settings_dialog::sidebar_separator());
-    sidebar.append(&settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Advanced"));
+    sidebar.append(&settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Advanced", "advanced"));
     stack.add_named(&scroll, Some("advanced"));
 
     AdvancedWidgets {

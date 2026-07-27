@@ -147,7 +147,7 @@ impl SteamDataClient {
         let dlc_dir = base_dir.join("dlc");
         let _ = std::fs::create_dir_all(&dlc_dir);
 
-        for (_, dlc) in dlcs.iter_mut() {
+        for dlc in dlcs.values_mut() {
             if dlc.image_url.is_empty() {
                 continue;
             }

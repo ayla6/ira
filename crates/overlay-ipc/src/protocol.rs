@@ -51,7 +51,10 @@ pub struct ShmHeader {
     pub screenshot_keysym: u32,
     /// X11 keysym for record hotkey (0 = use default F11).
     pub record_keysym: u32,
-    pub padding: [u8; 64],
+    /// Cross-process visibility flag for the standalone overlay.
+    /// Written by the shim (on hotkey), read by the standalone overlay.
+    pub overlay_visible: AtomicU32,
+    pub padding: [u8; 60],
 }
 
 /// One achievement entry in the shared memory array.

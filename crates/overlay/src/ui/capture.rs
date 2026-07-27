@@ -610,7 +610,8 @@ fn convert_8bpp(src: &[u8], w: usize, h: usize, row_pitch: usize, swap_bgr: bool
     for y in 0..h {
         let row = &src[y * row_pitch..y * row_pitch + w * 4];
         if swap_bgr {
-            for chunk in row.chunks_exact(4) {
+            let (chunks, _) = row.as_chunks::<4>();
+            for chunk in chunks {
                 rgba.extend_from_slice(&[chunk[2], chunk[1], chunk[0], chunk[3]]);
             }
         } else {
@@ -624,7 +625,8 @@ fn convert_f16(src: &[u8], w: usize, h: usize, row_pitch: usize) -> Vec<u8> {
     let mut rgba = Vec::with_capacity(w * h * 4);
     for y in 0..h {
         let row = &src[y * row_pitch..y * row_pitch + w * 8];
-        for px in row.chunks_exact(8) {
+        let (chunks, _) = row.as_chunks::<8>();
+        for px in chunks {
             let r = u16::from_le_bytes([px[0], px[1]]);
             let g = u16::from_le_bytes([px[2], px[3]]);
             let b = u16::from_le_bytes([px[4], px[5]]);
@@ -639,7 +641,8 @@ fn convert_10bpp(src: &[u8], w: usize, h: usize, row_pitch: usize, format: vk::F
     let mut rgba = Vec::with_capacity(w * h * 4);
     for y in 0..h {
         let row = &src[y * row_pitch..y * row_pitch + w * 4];
-        for px in row.chunks_exact(4) {
+        let (chunks, _) = row.as_chunks::<4>();
+        for px in chunks {
             let packed = u32::from_le_bytes([px[0], px[1], px[2], px[3]]);
             let r10 = packed & 0x3ff;
             let g10 = (packed >> 10) & 0x3ff;
@@ -803,7 +806,8 @@ unsafe fn create_intermediate_image(
 }
 
 fn encode_webp(mut rgba: Vec<u8>, width: u32, height: u32) {
-    for chunk in rgba.chunks_exact_mut(4) {
+    let (chunks, _) = rgba.as_chunks_mut::<4>();
+    for chunk in chunks {
         chunk[3] = 255;
     }
     let encoder = webp::Encoder::from_rgba(&rgba, width, height);

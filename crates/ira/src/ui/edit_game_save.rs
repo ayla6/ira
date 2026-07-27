@@ -5,8 +5,8 @@ use std::sync::mpsc;
 use adw::prelude::*;
 use ira_models::{AssetType, GameLaunchConfig, TrophySource, WineConfig};
 use super::add_game_dialog::collect_env_vars;
-use super::edit_game_advanced::AdvancedWidgets;
 use super::edit_game_launch::LaunchConfigWidgets;
+use super::edit_game_system::SystemWidgets;
 use super::edit_game_variants::VarW;
 use super::state::{PendingImage, SharedState};
 use super::wine_config_env_dll::collect_dll_overrides;
@@ -30,7 +30,7 @@ pub(super) struct SaveGameSettingsParams {
     pub language_row: Option<adw::ComboRow>,
     pub languages: Vec<String>,
     pub saved_platform_id: String,
-    pub advanced_widgets: Option<AdvancedWidgets>,
+    pub system_widgets: Option<SystemWidgets>,
     pub title_entry: adw::EntryRow,
     pub sort_entry: adw::EntryRow,
     pub pending_version: Rc<RefCell<Option<String>>>,
@@ -110,33 +110,50 @@ fn save_version_and_overrides(db: &ira_db::DbConn, params: &SaveGameSettingsPara
 }
 
 fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchConfig, WineConfig, Option<i64>) {
-    let env_vars = if let Some(ref aw) = params.advanced_widgets {
-        collect_env_vars(&aw.env_vars_box)
-    } else {
-        Vec::new()
-    };
-    let ld_preload = if let Some(ref aw) = params.advanced_widgets {
-        aw.ld_preload_entry.text().to_string()
-    } else {
-        String::new()
-    };
-    let ld_library_path = if let Some(ref aw) = params.advanced_widgets {
-        aw.ld_library_path_entry.text().to_string()
-    } else {
-        String::new()
-    };
-    let lc = params.launch_config_widgets.as_ref().unwrap();
+    let sw = params.system_widgets.as_ref();
+    let env_vars = sw.map_or(Vec::new(), |s| collect_env_vars(&s.env_vars_box));
+    let ld_preload = sw.map_or(String::new(), |s| s.ld_preload_entry.text().to_string());
+    let ld_library_path = sw.map_or(String::new(), |s| s.ld_library_path_entry.text().to_string());
+    let overlay_enabled = sw.and_then(|s| *s.overlay_state.borrow());
+    let gamemode = sw.is_some_and(|s| s.gamemode.is_active());
+    let mangohud = sw.is_some_and(|s| s.mangohud.is_active());
+    let gamescope = sw.is_some_and(|s| s.gamescope.is_active()).then_some(true);
+    let gamescope_flags = sw.map_or(String::new(), |s| s.gamescope_flags.text().to_string());
+    let gpu = sw.and_then(|s| {
+        s.gpu_row.as_ref().map(|gr| {
+            let idx = gr.selected() as usize;
+            if idx == 0 { String::new() } else {
+                s.gpu_options.get(idx - 1).cloned().unwrap_or_default()
+            }
+        })
+    }).unwrap_or_default();
+    let overlay_encoder = sw.and_then(|s| s.overlay_encoder_row.as_ref()).and_then(|r| {
+        let idx = r.selected();
+        if idx == 0 { None } else { Some(idx - 1) }
+    });
+    let overlay_recording_quality = sw.and_then(|s| s.overlay_quality_row.as_ref()).and_then(|r| {
+        let idx = r.selected();
+        if idx == 0 { None } else { Some(idx - 1) }
+    });
+
+    let lc = params.launch_config_widgets.as_ref();
     let launch = GameLaunchConfig {
-        exe: lc.exe_entry.text().to_string(),
-        args: lc.args_entry.text().to_string(),
-        working_dir: lc.wd_entry.text().to_string(),
-        env_vars: if params.show_wine_tabs { Vec::new() } else { env_vars.clone() },
+        exe: lc.map_or(String::new(), |l| l.exe_entry.text().to_string()),
+        args: lc.map_or(String::new(), |l| l.args_entry.text().to_string()),
+        working_dir: lc.map_or(String::new(), |l| l.wd_entry.text().to_string()),
+        env_vars: if params.show_wine_tabs { Vec::new() } else { env_vars },
         ld_preload,
         ld_library_path,
-        pre_launch: lc.pre_launch_entry.text().to_string(),
-        overlay_enabled: params.launch_config_widgets.as_ref().and_then(|lc| {
-            *lc.overlay_state.borrow()
-        }),
+        pre_launch: lc.map_or(String::new(), |l| l.pre_launch_entry.text().to_string()),
+        overlay_enabled,
+        gamemode,
+        mangohud,
+        gamescope,
+        gamescope_flags,
+        gpu,
+        overlay_encoder,
+        overlay_recording_quality,
+        overlay_font_family: None,
     };
     let mut wine = params.wine_widgets.as_ref().map_or(
         WineConfig { enabled: false, ..Default::default() },
@@ -144,11 +161,9 @@ fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchC
     );
 
     if params.show_wine_tabs {
-        wine.wine_env_vars = env_vars;
-        if let Some(ref aw) = params.advanced_widgets {
-            if let Some(ref dob) = aw.dll_overrides_box {
-                wine.dll_overrides = collect_dll_overrides(dob);
-            }
+        if let Some(ref ww) = params.wine_widgets {
+            wine.wine_env_vars = collect_env_vars(&ww.wine_env_vars_box);
+            wine.dll_overrides = collect_dll_overrides(&ww.dll_overrides_box);
         }
     }
 
@@ -189,8 +204,6 @@ fn apply_wine_registry(old_wine: &WineConfig, wine: &WineConfig) {
         return;
     }
     let reg_changed = wine.mouse_warp_override != old_wine.mouse_warp_override
-        || wine.virtual_desktop != old_wine.virtual_desktop
-        || wine.virtual_desktop_res != old_wine.virtual_desktop_res
         || wine.dpi_enabled != old_wine.dpi_enabled
         || wine.dpi != old_wine.dpi
         || wine.show_crash_dialogs != old_wine.show_crash_dialogs

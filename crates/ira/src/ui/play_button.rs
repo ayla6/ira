@@ -45,23 +45,23 @@ pub fn stop_game(state: &SharedState, game_id: i64) {
 }
 
 pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -> Result<(), String> {
-    let (running_games, sender, game_info, global_shadps4_exe, global_rpcs3_exe, db, save_dir, app_default_wine, default_native_env_vars, cfg_clone, overlay_shm, overlay_global_enabled) = {
+    let (running_games, sender, game_info, global_shadps4_exe, global_rpcs3_exe, db, save_dir, app_default_wine, default_native_env_vars, cfg_clone, overlay_shm, overlay_global_enabled, overlay_font_family, gamescope_default) = {
         let s = state.borrow();
         let game = s.games.iter().find(|g| g.db_id == game_id);
         let overlay_shm = game.and_then(|g| crate::overlay::write_game_shm(g, &s.cfg.overlay));
-        let overlay_global_enabled = game.map_or(s.cfg.overlay.enabled, |g| {
-            let source_id = match g.kind {
+        let source_id = game.and_then(|g| {
+            match g.kind {
                 ira_models::GameKind::Steam => Some("steam"),
                 ira_models::GameKind::Retro => Some(g.platform_id.as_str()),
                 ira_models::GameKind::Ps4 => Some("ps4"),
                 ira_models::GameKind::Ps3 => Some("ps3"),
                 _ => None,
-            };
-            match source_id {
-                Some(id) => s.cfg.overlay.source_enabled(id),
-                None => s.cfg.overlay.enabled,
             }
         });
+        let overlay_global_enabled = source_id
+            .map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id));
+        let gamescope_default = source_id
+            .map_or(s.cfg.default_system.gamescope, |id| s.cfg.overlay.source_gamescope(id));
         let game_info = game
             .map(|g| (g.kind, g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone(), g.platform_id.clone(), g.ra_core.clone(), g.emulator_override.clone()))
             .unwrap_or_default();
@@ -78,6 +78,8 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             s.cfg.clone(),
             overlay_shm,
             overlay_global_enabled,
+            s.cfg.overlay.font_family.clone(),
+            gamescope_default,
         )
     };
 
@@ -109,6 +111,8 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         started_at,
         overlay_shm,
         overlay_global_enabled,
+        overlay_font_family,
+        gamescope_default,
     };
 
     if kind == ira_models::GameKind::Retro {

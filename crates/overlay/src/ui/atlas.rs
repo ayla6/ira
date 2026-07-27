@@ -13,6 +13,10 @@ pub struct AtlasSlot {
     pub y: u32,
     pub w: u32,
     pub h: u32,
+    /// Glyph left bearing (placement.left).
+    pub offset_x: i32,
+    /// Glyph ascent (placement.top).
+    pub offset_y: i32,
 }
 
 pub struct PendingUpload {
@@ -58,10 +62,11 @@ pub fn clear_cache() {
     lock_cache().reset();
 }
 
-/// Allocates space in the atlas texture for an image of the given size.
-pub fn pack(cache: &mut AtlasCache, w: u32, h: u32) -> AtlasSlot {
+/// Packs a glyph of the given dimensions into the atlas.
+/// Stores the glyph's bearing offsets for later positioning.
+pub fn pack_glyph(cache: &mut AtlasCache, w: u32, h: u32, offset_x: i32, offset_y: i32) -> AtlasSlot {
     if w == 0 || h == 0 {
-        return AtlasSlot { x: 0, y: 0, w: 0, h: 0 };
+        return AtlasSlot { x: 0, y: 0, w: 0, h: 0, offset_x, offset_y };
     }
     let padded_w = w + 1;
     let padded_h = h + 1;
@@ -71,14 +76,13 @@ pub fn pack(cache: &mut AtlasCache, w: u32, h: u32) -> AtlasSlot {
         cache.row_height = 1;
     }
     if cache.cursor_y + padded_h > ATLAS_HEIGHT {
-        eprintln!("ira-overlay: texture atlas full");
-        return AtlasSlot { x: 0, y: 0, w: 0, h: 0 };
+        eprintln!("ira-overlay: glyph atlas full");
+        return AtlasSlot { x: 0, y: 0, w: 0, h: 0, offset_x, offset_y };
     }
     let slot = AtlasSlot {
         x: cache.cursor_x,
         y: cache.cursor_y,
-        w,
-        h,
+        w, h, offset_x, offset_y,
     };
     cache.cursor_x += padded_w;
     cache.row_height = cache.row_height.max(padded_h);
@@ -90,28 +94,85 @@ pub fn take_pending_uploads() -> Vec<PendingUpload> {
     std::mem::take(&mut cache.pending)
 }
 
-struct StagingCleanup {
+// --- Persistent staging buffer ---
+
+struct PersistentStaging {
     fns: DeviceFns,
     device: vk::Device,
     buffer: vk::Buffer,
     memory: vk::DeviceMemory,
+    ptr: *mut u8,
+    size: u64,
     fence: vk::Fence,
 }
 
-static OLD_STAGING: Mutex<Option<StagingCleanup>> = Mutex::new(None);
+unsafe impl Send for PersistentStaging {}
 
-pub fn cleanup_old_staging() {
-    let mut guard = OLD_STAGING.lock().unwrap();
+static STAGING: Mutex<Option<PersistentStaging>> = Mutex::new(None);
+
+pub(crate) fn prepare_staging(
+    fns: DeviceFns,
+    device: vk::Device,
+    physical_device: vk::PhysicalDevice,
+    needed_size: u64,
+) -> Option<(vk::Buffer, *mut u8, u64)> {
+    let mut guard = STAGING.lock().unwrap();
+
+    if let Some(ref s) = *guard {
+        if s.fence != vk::Fence::null() {
+            unsafe {
+                let _ = (s.fns.wait_for_fences)(s.device, 1, &s.fence, vk::TRUE, 5_000_000_000);
+            }
+        }
+    }
+
+    let need_recreate = guard.as_ref().is_none_or(|s| s.size < needed_size);
+    if need_recreate {
+        if let Some(ref s) = *guard {
+            unsafe {
+                (s.fns.unmap_memory)(s.device, s.memory);
+                (s.fns.destroy_buffer)(s.device, s.buffer, std::ptr::null());
+                (s.fns.free_memory)(s.device, s.memory, std::ptr::null());
+            }
+        }
+        let alloc_size = needed_size.max(1_048_576);
+        let (buffer, memory, ptr) = unsafe {
+            super::resources::create_buffer(
+                fns,
+                device,
+                physical_device,
+                alloc_size,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+            )?
+        };
+        *guard = Some(PersistentStaging {
+            fns,
+            device,
+            buffer,
+            memory,
+            ptr: ptr as *mut u8,
+            size: alloc_size,
+            fence: vk::Fence::null(),
+        });
+    }
+
+    guard.as_ref().map(|s| (s.buffer, s.ptr, s.size))
+}
+
+pub(crate) fn set_staging_fence(fence: vk::Fence) {
+    let mut guard = STAGING.lock().unwrap();
+    if let Some(ref mut s) = *guard {
+        s.fence = fence;
+    }
+}
+
+pub fn destroy_staging(_fns: DeviceFns, _device: vk::Device) {
+    let mut guard = STAGING.lock().unwrap();
     if let Some(s) = guard.take() {
         unsafe {
-            let _ = (s.fns.wait_for_fences)(s.device, 1, &s.fence, vk::TRUE, 5_000_000_000);
             (s.fns.unmap_memory)(s.device, s.memory);
             (s.fns.destroy_buffer)(s.device, s.buffer, std::ptr::null());
             (s.fns.free_memory)(s.device, s.memory, std::ptr::null());
         }
     }
-}
-
-pub fn queue_staging_cleanup(fns: DeviceFns, device: vk::Device, buffer: vk::Buffer, memory: vk::DeviceMemory, fence: vk::Fence) {
-    *OLD_STAGING.lock().unwrap() = Some(StagingCleanup { fns, device, buffer, memory, fence });
 }

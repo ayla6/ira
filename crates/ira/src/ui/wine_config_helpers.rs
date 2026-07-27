@@ -22,13 +22,6 @@ pub(super) fn build_switch_row(title: &str, subtitle: &str, active: bool) -> adw
     row
 }
 
-pub(super) fn build_entry_row(title: &str, text: &str) -> adw::EntryRow {
-    let row = adw::EntryRow::new();
-    row.set_title(title);
-    row.set_text(text);
-    row
-}
-
 pub(super) fn make_section(title: &str) -> adw::PreferencesGroup {
     let g = adw::PreferencesGroup::new();
     g.set_title(title);

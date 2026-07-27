@@ -4,14 +4,16 @@ mod focus;
 mod model;
 mod renderer;
 mod resources;
-pub(crate) mod text;
+pub mod text;
 mod vertex;
 pub(crate) mod widget;
 mod widgets;
 
-pub use atlas::cleanup_old_staging;
 pub use renderer::UiRenderer;
 pub use widget::Event;
+#[cfg(all(feature = "pango", feature = "cosmic-text"))]
+pub use text::toggle_backend;
+pub use renderer::mark_ui_dirty;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
@@ -31,7 +33,7 @@ pub fn take_events() -> Vec<Event> {
 static SCREEN_W: AtomicU32 = AtomicU32::new(1);
 static SCREEN_H: AtomicU32 = AtomicU32::new(1);
 
-pub(crate) fn set_screen_size(w: u32, h: u32) {
+pub fn set_screen_size(w: u32, h: u32) {
     SCREEN_W.store(w, Ordering::Relaxed);
     SCREEN_H.store(h, Ordering::Relaxed);
 }

@@ -4,10 +4,55 @@
 //! before launching the game. This module reads it each time the overlay
 //! becomes visible and rebuilds the UI tree.
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use ira_overlay_ipc::{MappedShm, SHM_MAGIC};
 
 use super::widget::{Padding, Widget};
 use super::widgets::{Button, Column, Label, Panel, ProgressBar, Row, ScrollView};
+
+static LAST_NOTIF_INDEX: AtomicU32 = AtomicU32::new(0);
+static LAST_UNLOCKED: AtomicU32 = AtomicU32::new(u32::MAX);
+
+/// Returns `Some(true)` if the SHM data has changed since the last call,
+/// `Some(false)` if unchanged, or `None` if the SHM is not available.
+pub fn check_shm_changed() -> Option<bool> {
+    let shm_path = std::env::var("IRA_OVERLAY_SHM").ok()?;
+    let shm = MappedShm::open(&shm_path).ok()?;
+    let hdr = shm.header();
+    if hdr.magic != SHM_MAGIC {
+        return None;
+    }
+
+    let notif_index = hdr.notification_write_index.load(Ordering::Relaxed);
+    let unlocked = hdr.unlocked_achievements;
+
+    let prev_notif = LAST_NOTIF_INDEX.swap(notif_index, Ordering::Relaxed);
+    let prev_unlocked = LAST_UNLOCKED.swap(unlocked, Ordering::Relaxed);
+
+    Some(notif_index != prev_notif || unlocked != prev_unlocked)
+}
+
+/// Resets change-tracking state. Call when a new UI is built to establish
+/// a baseline so we don't immediately rebuild.
+pub fn reset_change_tracker() {
+    let shm_path = match std::env::var("IRA_OVERLAY_SHM") {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let shm = match MappedShm::open(&shm_path) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let hdr = shm.header();
+    if hdr.magic == SHM_MAGIC {
+        LAST_NOTIF_INDEX.store(
+            hdr.notification_write_index.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        LAST_UNLOCKED.store(hdr.unlocked_achievements, Ordering::Relaxed);
+    }
+}
 
 /// Reads the shared memory and builds a widget tree for the overlay.
 /// Returns `None` if the SHM is not available or invalid.

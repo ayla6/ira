@@ -60,8 +60,18 @@ pub const APP_CSS: &str = "
 
 .success-label { color: @accent_color; font-weight: bold; }
 
+.app-content-header {
+    background: @window_bg_color;
+}
+.app-content-header > box.title {
+    margin: 0;
+    padding: 0;
+    min-width: 0;
+}
+
 .settings-sidebar { background-color: @headerbar_bg_color; }
 .settings-header { background-color: transparent; box-shadow: none; }
+
 
 .logo-pos-overlay-btn {
     background: transparent;

@@ -6,14 +6,24 @@ edition = "2021"
 [lib]
 crate-type = ["rlib"]
 
+[features]
+default = ["cosmic-text", "pango"]
+pango = ["dep:pango", "dep:cairo-rs", "dep:pangocairo"]
+cosmic-text = ["dep:cosmic-text"]
+
 [dependencies]
 ira-overlay-ipc = { path = "../overlay-ipc" }
 ash = "0.38"
 libc = "0.2"
-pango = "0.22"
-cairo-rs = "0.22"
-pangocairo = "0.22"
 webp = { version = "0.3", default-features = false }
+
+# Pango backend (optional)
+pango = { version = "0.22", optional = true }
+cairo-rs = { version = "0.22", optional = true }
+pangocairo = { version = "0.22", optional = true }
+
+# Cosmic-text backend (optional)
+cosmic-text = { path = "/home/ayla/Projects/cosmic-text", optional = true, features = ["default"] }
 
 [lints]
 workspace = true

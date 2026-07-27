@@ -156,11 +156,21 @@ pub struct OverlaySettings {
     pub screenshot_hotkey: String,
     #[serde(default = "default_record_hotkey")]
     pub record_hotkey: String,
+    #[serde(default)]
+    pub toggle_hotkey_gamepad: String,
+    #[serde(default)]
+    pub screenshot_hotkey_gamepad: String,
+    #[serde(default)]
+    pub record_hotkey_gamepad: String,
     /// Per-source overlay overrides. Key = source ID ("steam", "ra", "ps3",
     /// "ps4", or a console ID like "nes"). Value = forced enable/disable.
     /// Absent key = follow global `enabled` setting.
     #[serde(default)]
     pub source_overrides: HashMap<String, bool>,
+    #[serde(default)]
+    pub source_gamescope: HashMap<String, bool>,
+    #[serde(default)]
+    pub font_family: Option<String>,
 }
 
 fn default_toggle_hotkey() -> String {
@@ -182,6 +192,13 @@ impl OverlaySettings {
             .copied()
             .unwrap_or(self.enabled)
     }
+
+    pub fn source_gamescope(&self, source_id: &str) -> bool {
+        self.source_gamescope
+            .get(source_id)
+            .copied()
+            .unwrap_or(false)
+    }
 }
 
 impl Default for OverlaySettings {
@@ -195,7 +212,12 @@ impl Default for OverlaySettings {
             toggle_hotkey: default_toggle_hotkey(),
             screenshot_hotkey: default_screenshot_hotkey(),
             record_hotkey: default_record_hotkey(),
+            toggle_hotkey_gamepad: String::new(),
+            screenshot_hotkey_gamepad: String::new(),
+            record_hotkey_gamepad: String::new(),
             source_overrides: HashMap::new(),
+            source_gamescope: HashMap::new(),
+            font_family: None,
         }
     }
 }

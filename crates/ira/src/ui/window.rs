@@ -117,10 +117,32 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
         gtk4::STYLE_PROVIDER_PRIORITY_USER,
     );
 
-    let split_view = gtk4::Paned::new(gtk4::Orientation::Horizontal);
-    split_view.set_position(260);
-    split_view.set_shrink_start_child(false);
-    split_view.set_resize_start_child(false);
+    let split_view = adw::NavigationSplitView::new();
+    split_view.set_sidebar_width_fraction(0.22);
+    split_view.set_min_sidebar_width(200.0);
+    split_view.set_max_sidebar_width(280.0);
+
+    // ─── Sidebar ───
+    let sidebar_toolbar = adw::ToolbarView::new();
+
+    let sidebar_header = adw::HeaderBar::new();
+    sidebar_header.set_show_title(false);
+    sidebar_header.add_css_class("flat");
+
+    let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    add_btn.set_tooltip_text(Some(S::ADD_GAME));
+    add_btn.add_css_class(CSS_FLAT);
+    sidebar_header.pack_start(&add_btn);
+
+    let popover = build_menu_popover(state);
+    let menu_btn = gtk4::MenuButton::new();
+    menu_btn.set_icon_name("open-menu-symbolic");
+    menu_btn.set_tooltip_text(Some(S::MENU));
+    menu_btn.add_css_class(CSS_FLAT);
+    menu_btn.set_popover(Some(&popover));
+    sidebar_header.pack_end(&menu_btn);
+
+    sidebar_toolbar.add_top_bar(&sidebar_header);
 
     let sidebar_scroll = gtk4::ScrolledWindow::new();
     sidebar_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
@@ -134,53 +156,49 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     sidebar_view.add_css_class(CSS_NAVIGATION_SIDEBAR);
     sidebar_view.set_show_separators(false);
     sidebar_scroll.set_child(Some(&sidebar_view));
+    sidebar_toolbar.set_content(Some(&sidebar_scroll));
 
-    split_view.set_start_child(Some(&sidebar_scroll));
+    let sidebar_page = adw::NavigationPage::new(&sidebar_toolbar, "Games");
+    split_view.set_sidebar(Some(&sidebar_page));
 
-    let content_scroll = gtk4::ScrolledWindow::new();
-    content_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    content_scroll.set_vexpand(true);
-    let content_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    let grid_header = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    // ─── Content area (search + grid/detail) ───
+    let content_toolbar = adw::ToolbarView::new();
 
-    let content_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    content_area.append(&grid_header);
-    content_area.append(&content_scroll);
-    split_view.set_end_child(Some(&content_area));
-
-    let header_bar = adw::HeaderBar::new();
+    let content_header = adw::HeaderBar::new();
+    content_header.add_css_class("flat");
+    content_header.add_css_class("app-content-header");
 
     let search_entry = gtk4::SearchEntry::new();
     search_entry.set_placeholder_text(Some(S::SEARCH_GAMES));
-    search_entry.set_hexpand(false);
-    search_entry.set_max_width_chars(90);
-    search_entry.set_width_chars(50);
-    header_bar.set_title_widget(Some(&search_entry));
-
-    let menu_btn = gtk4::MenuButton::new();
-    menu_btn.set_icon_name("open-menu-symbolic");
-    menu_btn.set_tooltip_text(Some(S::MENU));
-    menu_btn.add_css_class(CSS_FLAT);
-    header_bar.pack_end(&menu_btn);
+    search_entry.set_hexpand(true);
+    let title_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    title_box.set_hexpand(true);
+    title_box.append(&search_entry);
+    content_header.set_title_widget(Some(&title_box));
 
     let (_sort_popover, sort_btn, sort_label) = build_sort_popover(state);
     sort_btn.set_icon_name("view-sort-descending-symbolic");
     sort_btn.set_tooltip_text(Some(S::SORT_BY));
     sort_btn.add_css_class(CSS_FLAT);
-    header_bar.pack_end(&sort_btn);
+    content_header.pack_end(&sort_btn);
 
-    let (popover, settings_btn) = build_menu_popover(state);
-    menu_btn.set_popover(Some(&popover));
+    content_toolbar.add_top_bar(&content_header);
 
-    let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_btn.set_tooltip_text(Some(S::ADD_GAME));
-    add_btn.add_css_class(CSS_FLAT);
-    header_bar.pack_start(&add_btn);
+    let grid_header = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let content_scroll = gtk4::ScrolledWindow::new();
+    content_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    content_scroll.set_vexpand(true);
+    let content_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
-    let toolbar_view = adw::ToolbarView::new();
-    toolbar_view.add_top_bar(&header_bar);
-    toolbar_view.set_content(Some(&split_view));
-    window.set_content(Some(&toolbar_view));
+    let content_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content_area.append(&grid_header);
+    content_area.append(&content_scroll);
+    content_toolbar.set_content(Some(&content_area));
+
+    let content_page = adw::NavigationPage::new(&content_toolbar, "Library");
+    split_view.set_content(Some(&content_page));
+
+    window.set_content(Some(&split_view));
 
     {
         let mut s = state.borrow_mut();
@@ -203,10 +221,10 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
         show_grid_view(state);
     }
 
-    connect_window_signals(state, &window, &sidebar_view, &sidebar_selection, &add_btn, &settings_btn, &search_entry);
+    connect_window_signals(state, &window, &sidebar_view, &sidebar_selection, &add_btn, &search_entry);
 }
 
-fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
+fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
     let popover = gtk4::Popover::new();
     popover.set_size_request(300, -1);
     let popover_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -215,15 +233,25 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
     popover_box.set_margin_top(8);
     popover_box.set_margin_bottom(8);
 
-    let settings_btn = gtk4::Button::new();
-    let settings_label = gtk4::Label::new(Some(S::SETTINGS));
-    settings_label.set_xalign(0.0);
-    settings_btn.set_child(Some(&settings_label));
-    settings_btn.add_css_class(CSS_FLAT);
-    settings_btn.set_halign(gtk4::Align::Fill);
-    settings_btn.set_size_request(-1, 36);
-    settings_btn.add_css_class(CSS_POPOVER_MENU_ROW);
-    popover_box.append(&settings_btn);
+    let popup_settings_btn = gtk4::Button::new();
+    let popup_settings_label = gtk4::Label::new(Some(S::SETTINGS));
+    popup_settings_label.set_xalign(0.0);
+    popup_settings_btn.set_child(Some(&popup_settings_label));
+    popup_settings_btn.add_css_class(CSS_FLAT);
+    popup_settings_btn.set_halign(gtk4::Align::Fill);
+    popup_settings_btn.set_size_request(-1, 36);
+    popup_settings_btn.add_css_class(CSS_POPOVER_MENU_ROW);
+    {
+        let state_clone = state.clone();
+        popup_settings_btn.connect_clicked(move |_| {
+            let (window, cfg, steam) = {
+                let s = state_clone.borrow();
+                (s.window.clone(), s.cfg.clone(), s.steam.clone())
+            };
+            show_settings_dialog(&window, cfg, steam, &state_clone);
+        });
+    }
+    popover_box.append(&popup_settings_btn);
 
     let match_btn = gtk4::Button::new();
     let match_label = gtk4::Label::new(Some("Match unmatched games"));
@@ -283,7 +311,7 @@ fn build_menu_popover(state: &SharedState) -> (gtk4::Popover, gtk4::Button) {
         rebuild_sidebar_and_show_grid(&state_clone);
     });
 
-    (popover, settings_btn)
+    popover
 }
 
 fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, gtk4::Label) {
@@ -352,7 +380,6 @@ fn connect_window_signals(
     sidebar_view: &gtk4::ListView,
     sidebar_selection: &super::game_selection_model::GameSelectionModel,
     add_btn: &gtk4::Button,
-    settings_btn: &gtk4::Button,
     search_entry: &gtk4::SearchEntry,
 ) {
     let state_clone = state.clone();
@@ -451,15 +478,6 @@ fn connect_window_signals(
     });
 
     let state_clone = state.clone();
-    settings_btn.connect_clicked(move |_| {
-        let (window, cfg, steam) = {
-            let s = state_clone.borrow();
-            (s.window.clone(), s.cfg.clone(), s.steam.clone())
-        };
-        show_settings_dialog(&window, cfg, steam, &state_clone);
-    });
-
-    let state_clone = state.clone();
     window.connect_close_request(move |_| {
         let close_to_bg = state_clone.borrow().cfg.close_to_background;
         if close_to_bg {
@@ -469,6 +487,4 @@ fn connect_window_signals(
             glib::Propagation::Proceed
         }
     });
-
-
 }

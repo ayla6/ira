@@ -17,6 +17,7 @@ pub struct LaunchContext {
     pub running_games: Arc<Mutex<HashMap<i64, i32>>>,
     pub overlay_enabled: bool,
     pub overlay_shm: Option<String>,
+    pub overlay_font_family: Option<String>,
 }
 
 pub fn launch_game(
@@ -63,7 +64,12 @@ pub fn launch_game(
         };
         let mut env = super::env_builder::build_env(launch, Some(wine), &wine_exe, &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
         if ctx.overlay_enabled {
-            super::env_builder::add_overlay_env(&mut env, ctx.overlay_shm.as_deref());
+            if super::env_builder::uses_gamescope(&cmd) {
+                super::env_builder::add_overlay_env_standalone(&mut env, ctx.overlay_shm.as_deref(), ctx.overlay_font_family.as_deref());
+                super::env_builder::wrap_with_standalone_overlay(&mut cmd);
+            } else {
+                super::env_builder::add_overlay_env(&mut env, ctx.overlay_shm.as_deref(), ctx.overlay_font_family.as_deref());
+            }
         }
 
         let pfx = super::wine_launch::wine_prefix(wine);
@@ -115,7 +121,12 @@ pub fn launch_game(
         let mut cmd = super::native_launch::build_native_command(&launch.exe, &args);
         let mut env = super::env_builder::build_env(launch, None, "", &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
         if ctx.overlay_enabled {
-            super::env_builder::add_overlay_env(&mut env, ctx.overlay_shm.as_deref());
+            if super::env_builder::uses_gamescope(&cmd) {
+                super::env_builder::add_overlay_env_standalone(&mut env, ctx.overlay_shm.as_deref(), ctx.overlay_font_family.as_deref());
+                super::env_builder::wrap_with_standalone_overlay(&mut cmd);
+            } else {
+                super::env_builder::add_overlay_env(&mut env, ctx.overlay_shm.as_deref(), ctx.overlay_font_family.as_deref());
+            }
         }
         (cmd, env)
     };

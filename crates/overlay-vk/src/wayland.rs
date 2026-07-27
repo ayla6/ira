@@ -36,6 +36,8 @@ const KC_TAB: u32 = 15;
 const KC_RETURN: u32 = 28;
 const KC_F11: u32 = 87;
 const KC_F12: u32 = 88;
+#[cfg(debug_assertions)]
+const KC_F10: u32 = 68;
 const KC_UP: u32 = 103;
 const KC_DOWN: u32 = 108;
 const KC_LEFT: u32 = 105;
@@ -228,8 +230,13 @@ extern "C" fn keyboard_key(
         return;
     }
 
-    // Navigation keys only when overlay is visible.
+    // Navigation keys and debug toggles only when overlay is visible.
     if !crate::shim_bridge::is_visible() { return; }
+    #[cfg(debug_assertions)]
+    if pressed && key == KC_F10 {
+        ira_overlay::ui::toggle_backend();
+        return;
+    }
     if pressed {
         let event = match key {
             KC_UP => Some(Event::NavUp),

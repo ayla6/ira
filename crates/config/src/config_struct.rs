@@ -31,6 +31,26 @@ pub struct ConsoleConfig {
     pub fullscreen: bool,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SystemDefaults {
+    #[serde(default)]
+    pub gamemode: bool,
+    #[serde(default)]
+    pub mangohud: bool,
+    #[serde(default)]
+    pub gamescope: bool,
+    #[serde(default)]
+    pub gamescope_flags: String,
+    #[serde(default)]
+    pub gpu: String,
+    #[serde(default)]
+    pub env_vars: Vec<(String, String)>,
+    #[serde(default)]
+    pub ld_preload: String,
+    #[serde(default)]
+    pub ld_library_path: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -60,6 +80,8 @@ pub struct Config {
     pub save_dir: String,
     #[serde(default)]
     pub default_wine_config: WineConfig,
+    #[serde(default)]
+    pub default_system: SystemDefaults,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub prefix_base_dir: String,
     #[serde(default)]
@@ -105,6 +127,7 @@ impl Default for Config {
 
             save_dir: default_save_dir(),
             default_wine_config: WineConfig::default(),
+            default_system: SystemDefaults::default(),
             prefix_base_dir: String::new(),
             default_native_env_vars: Vec::new(),
             default_api_emu_version: String::new(),
@@ -157,6 +180,7 @@ impl Config {
             steam_enabled: self.steam_enabled,
             save_dir: self.save_dir.clone(),
             default_wine_config: self.default_wine_config.clone(),
+            default_system: self.default_system.clone(),
             prefix_base_dir: self.prefix_base_dir.clone(),
             default_native_env_vars: self.default_native_env_vars.clone(),
             default_api_emu_version: self.default_api_emu_version.clone(),

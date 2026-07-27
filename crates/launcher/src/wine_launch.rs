@@ -103,25 +103,11 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
         env.push((k.clone(), v.clone()));
     }
 
-    for (k, v) in crate::gpu::build_gpu_env(&wine.gpu) {
-        env.retain(|(ek, _)| ek != &k);
-        env.push((k, v));
-    }
-
     env
 }
 
-pub fn build_wine_command(wine_exe: &str, game_exe: &str, args: &[String], wine: &WineConfig) -> Vec<String> {
+pub fn build_wine_command(wine_exe: &str, game_exe: &str, args: &[String], _wine: &WineConfig) -> Vec<String> {
     let mut cmd = vec![wine_exe.to_string()];
-    if wine.virtual_desktop {
-        let res = if wine.virtual_desktop_res.is_empty() {
-            "Default,1920x1080".to_string()
-        } else {
-            format!("Default,{}", wine.virtual_desktop_res)
-        };
-        cmd.push("explorer".to_string());
-        cmd.push(format!("/desktop={}", res));
-    }
     if game_exe.to_ascii_lowercase().ends_with(".msi") {
         cmd.push("msiexec".to_string());
         cmd.push("/i".to_string());
@@ -204,59 +190,27 @@ pub fn build_wine_reg_commands(wine: &WineConfig, wine_exe: &str) -> Vec<Vec<Str
         "/f".to_string(),
     ]);
 
+    // Virtual desktop removed — barely works on newer Wine versions.
+    // Always clean up any leftover Explorer registry keys from older configs.
     let desktop_name = "Default";
-    if wine.virtual_desktop {
-        let res = if wine.virtual_desktop_res.is_empty() {
-            "1920x1080".to_string()
-        } else {
-            wine.virtual_desktop_res.clone()
-        };
-        commands.push(vec![
-            wine_exe.to_string(),
-            "reg".to_string(),
-            "add".to_string(),
-            r"HKCU\Software\Wine\Explorer".to_string(),
-            "/v".to_string(),
-            "Desktop".to_string(),
-            "/t".to_string(),
-            "REG_SZ".to_string(),
-            "/d".to_string(),
-            desktop_name.to_string(),
-            "/f".to_string(),
-        ]);
-        commands.push(vec![
-            wine_exe.to_string(),
-            "reg".to_string(),
-            "add".to_string(),
-            r"HKCU\Software\Wine\Explorer\Desktops".to_string(),
-            "/v".to_string(),
-            desktop_name.to_string(),
-            "/t".to_string(),
-            "REG_SZ".to_string(),
-            "/d".to_string(),
-            res,
-            "/f".to_string(),
-        ]);
-    } else {
-        commands.push(vec![
-            wine_exe.to_string(),
-            "reg".to_string(),
-            "delete".to_string(),
-            r"HKCU\Software\Wine\Explorer".to_string(),
-            "/v".to_string(),
-            "Desktop".to_string(),
-            "/f".to_string(),
-        ]);
-        commands.push(vec![
-            wine_exe.to_string(),
-            "reg".to_string(),
-            "delete".to_string(),
-            r"HKCU\Software\Wine\Explorer\Desktops".to_string(),
-            "/v".to_string(),
-            desktop_name.to_string(),
-            "/f".to_string(),
-        ]);
-    }
+    commands.push(vec![
+        wine_exe.to_string(),
+        "reg".to_string(),
+        "delete".to_string(),
+        r"HKCU\Software\Wine\Explorer".to_string(),
+        "/v".to_string(),
+        "Desktop".to_string(),
+        "/f".to_string(),
+    ]);
+    commands.push(vec![
+        wine_exe.to_string(),
+        "reg".to_string(),
+        "delete".to_string(),
+        r"HKCU\Software\Wine\Explorer\Desktops".to_string(),
+        "/v".to_string(),
+        desktop_name.to_string(),
+        "/f".to_string(),
+    ]);
 
     if wine.dpi_enabled {
         commands.push(vec![

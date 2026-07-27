@@ -1,0 +1,16 @@
+[package]
+name = "ira-overlay-standalone"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "ira-overlay-standalone"
+
+[dependencies]
+ira-overlay = { path = "../overlay" }
+ira-overlay-ipc = { path = "../overlay-ipc" }
+ash = "0.38"
+libc = "0.2"
+
+[lints]
+workspace = true

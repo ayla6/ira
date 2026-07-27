@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use ash::vk;
@@ -22,13 +22,25 @@ struct FrameData {
     draw_cmds: Vec<DrawCmd>,
 }
 
+static FRAME_DATA: Mutex<Option<FrameData>> = Mutex::new(None);
+/// Frame buffers reused across frames to avoid per-frame allocations.
+static FRAME_VERTICES: Mutex<Vec<Vertex>> = Mutex::new(Vec::new());
+static FRAME_INDICES: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+static FRAME_CMDS: Mutex<Vec<DrawCmd>> = Mutex::new(Vec::new());
+
 static UI_TREE: Mutex<Option<Box<dyn Widget>>> = Mutex::new(None);
 static FOCUSED_INDEX: AtomicUsize = AtomicUsize::new(0);
 static MOUSE_DOWN_INDEX: AtomicUsize = AtomicUsize::new(usize::MAX);
 
-static FRAME_DATA: Mutex<Option<FrameData>> = Mutex::new(None);
 static REBUILD_COUNTER: AtomicU32 = AtomicU32::new(0);
-const REBUILD_INTERVAL: u32 = 30;
+
+/// Forces a UI rebuild on the next `prepare()` call.
+static UI_DIRTY: AtomicBool = AtomicBool::new(true);
+
+/// Marks the UI as dirty so it will be rebuilt on the next frame.
+pub fn mark_ui_dirty() {
+    UI_DIRTY.store(true, Ordering::Relaxed);
+}
 
 pub struct UiRenderer {
     device: vk::Device,
@@ -111,23 +123,22 @@ impl UiRenderer {
     /// # Safety
     /// `fns` must be valid for `self.device`. `cmd` must be in the recording state.
     /// `fence` must be the fence that will be signaled after the command buffer
-    /// containing the copy is submitted, so the staging buffer can be safely freed later.
+    /// containing the copy is submitted.
     pub unsafe fn update_atlas(&self, fns: DeviceFns, cmd: vk::CommandBuffer, fence: vk::Fence) {
         let uploads = atlas::take_pending_uploads();
         if uploads.is_empty() { return; }
 
         let total_size: u64 = uploads.iter().map(|u| u.pixels.len() as u64).sum();
-        let Some((staging_buf, staging_mem, staging_ptr)) = resources::create_buffer(
-            fns, self.device, self.physical_device, total_size,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-        ) else { return };
+        let Some((staging_buf, staging_ptr, _capacity)) =
+            atlas::prepare_staging(fns, self.device, self.physical_device, total_size)
+        else { return };
 
         let mut offset = 0u64;
         let mut regions = Vec::with_capacity(uploads.len());
         for u in &uploads {
             std::ptr::copy_nonoverlapping(
                 u.pixels.as_ptr(),
-                (staging_ptr as *mut u8).add(offset as usize),
+                staging_ptr.add(offset as usize),
                 u.pixels.len(),
             );
             regions.push(vk::BufferImageCopy::default()
@@ -178,7 +189,7 @@ impl UiRenderer {
             vk::DependencyFlags::empty(), 0, std::ptr::null(), 0, std::ptr::null(), 1, &barrier_to_read,
         );
 
-        atlas::queue_staging_cleanup(fns, self.device, staging_buf, staging_mem, fence);
+        atlas::set_staging_fence(fence);
     }
 
     pub fn prepare(&self, extent: vk::Extent2D) {
@@ -187,12 +198,20 @@ impl UiRenderer {
 
         super::set_screen_size(extent.width, extent.height);
 
-        // Rebuild the UI tree from shared memory periodically.
-        let count = REBUILD_COUNTER.fetch_add(1, Ordering::Relaxed);
-        if count.is_multiple_of(REBUILD_INTERVAL) {
+        // Rebuild the UI tree when dirty (first run or SHM data changed).
+        if UI_DIRTY.swap(false, Ordering::Relaxed) {
             if let Some(new_tree) = model::build_ui() {
                 *UI_TREE.lock().unwrap() = Some(new_tree);
+                model::reset_change_tracker();
             }
+        }
+
+        // Periodically check for SHM changes (every ~1s at 60fps).
+        let count = REBUILD_COUNTER.fetch_add(1, Ordering::Relaxed);
+        if count.is_multiple_of(60)
+            && model::check_shm_changed().unwrap_or(false)
+        {
+            UI_DIRTY.store(true, Ordering::Relaxed);
         }
 
         let mut tree_guard = UI_TREE.lock().unwrap();
@@ -251,9 +270,12 @@ impl UiRenderer {
 
         FOCUSED_INDEX.store(focused, Ordering::Relaxed);
 
-        let mut vertices = Vec::new();
-        let mut indices = Vec::new();
-        let mut draw_cmds = Vec::new();
+        let mut vertices = FRAME_VERTICES.lock().unwrap();
+        let mut indices = FRAME_INDICES.lock().unwrap();
+        let mut draw_cmds = FRAME_CMDS.lock().unwrap();
+        vertices.clear();
+        indices.clear();
+        draw_cmds.clear();
         {
             let mut draw_ctx = DrawCtx {
                 vertices: &mut vertices,
@@ -265,7 +287,11 @@ impl UiRenderer {
             tree.draw(&mut draw_ctx);
         }
 
-        *FRAME_DATA.lock().unwrap() = Some(FrameData { vertices, indices, draw_cmds });
+        *FRAME_DATA.lock().unwrap() = Some(FrameData {
+            vertices: std::mem::take(&mut *vertices),
+            indices: std::mem::take(&mut *indices),
+            draw_cmds: std::mem::take(&mut *draw_cmds),
+        });
     }
 
     /// # Safety
@@ -274,7 +300,7 @@ impl UiRenderer {
     pub unsafe fn draw(&self, fns: DeviceFns, cmd: vk::CommandBuffer, extent: vk::Extent2D) {
         let frame = FRAME_DATA.lock().unwrap().take();
         let Some(frame) = frame else { return };
-        let FrameData { vertices, indices, draw_cmds } = frame;
+        let FrameData { mut vertices, mut indices, draw_cmds } = frame;
 
         let v_bytes = vertices.len() * 20;
         let i_bytes = indices.len() * 4;
@@ -323,6 +349,12 @@ impl UiRenderer {
             (fns.cmd_set_scissor)(cmd, 0, 1, &scissor as *const vk::Rect2D);
             (fns.cmd_draw_indexed)(cmd, dc.index_count, 1, dc.index_offset, dc.vertex_offset, 0);
         }
+
+        vertices.clear();
+        indices.clear();
+        *FRAME_VERTICES.lock().unwrap() = vertices;
+        *FRAME_INDICES.lock().unwrap() = indices;
+        *FRAME_CMDS.lock().unwrap() = draw_cmds;
     }
 
     /// # Safety
@@ -346,6 +378,7 @@ impl UiRenderer {
         (fns.unmap_memory)(d, self.index_memory);
         (fns.destroy_buffer)(d, self.index_buffer, std::ptr::null());
         (fns.free_memory)(d, self.index_memory, std::ptr::null());
+        atlas::destroy_staging(fns, d);
     }
 }
 

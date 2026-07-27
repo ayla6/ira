@@ -2,9 +2,9 @@
 //! All state is process-local (the shim and Vulkan layer share the same process).
 
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
-use ira_overlay_ipc::InputEventRaw;
+use ira_overlay_ipc::{InputEventRaw, MappedShm};
 
 pub static OVERLAY_VISIBLE: AtomicBool = AtomicBool::new(false);
 static HAS_SDL: AtomicBool = AtomicBool::new(false);
@@ -49,8 +49,31 @@ pub fn drain_events(out: &mut [InputEventRaw]) -> usize {
     })
 }
 
+/// SHM mapping for cross-process visibility flag (used by standalone overlay).
+/// Lazily opened on first `set_visible` call.
+static SHM: OnceLock<Option<Mutex<MappedShm>>> = OnceLock::new();
+
+fn shm() -> Option<&'static Mutex<MappedShm>> {
+    let opt = SHM.get_or_init(|| {
+        let path = std::env::var_os("IRA_OVERLAY_SHM")?;
+        match MappedShm::open_rw(&path.to_string_lossy()) {
+            Ok(shm) => Some(Mutex::new(shm)),
+            Err(e) => {
+                eprintln!("ira-overlay-shim: failed to open SHM for visibility: {e}");
+                None
+            }
+        }
+    });
+    opt.as_ref()
+}
+
 pub fn set_visible(v: bool) {
     OVERLAY_VISIBLE.store(v, Ordering::SeqCst);
+    if let Some(shm) = shm() {
+        if let Ok(mut shm) = shm.lock() {
+            shm.header_mut().overlay_visible.store(if v { 1 } else { 0 }, Ordering::SeqCst);
+        }
+    }
 }
 
 pub fn is_visible() -> bool {

@@ -44,6 +44,20 @@ cargo build 2>&1 | grep warning     # Check for warnings (should be zero)
 
 **Always run `cargo build` and `cargo test` before committing.** Zero warnings is the baseline.
 
+### Adding dependencies
+
+**Always use `cargo add` from the CLI, never edit `Cargo.toml` files directly.**
+This ensures the lockfile stays in sync and features are set correctly:
+
+```bash
+cargo add <crate>@<version> -p <workspace-member>            # add a dependency
+cargo add <crate> -p <workspace-member> --features foo,bar   # add with features
+cargo add <crate>@<version> -p <workspace-member> --features bundled  # common pattern
+```
+
+If multiple workspace members depend on the same crate, update all of them
+in one `cargo add` command sequence so Cargo unifies the version.
+
 ### Dead code checks
 
 `#[allow(...)]` suppressions are forbidden. Either use the code or delete it.

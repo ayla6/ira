@@ -9,9 +9,10 @@ use super::profile_dialog::build_profiles_page;
 use super::state::SharedState;
 use super::wine_config_widget::build_wine_config_pages;
 use super::settings_pages::{
-    build_general_settings_page, build_api_keys_page, build_lutris_settings_page,
+    build_general_settings_page, build_lutris_settings_page,
     build_steam_settings_page, build_ra_settings_page, build_api_emulators_page,
-    build_overlay_settings_page, build_source_overlay_row,
+    build_overlay_settings_page, build_source_overlay_row, build_source_gamescope_row,
+    build_system_defaults_page,
 };
 use super::settings_console::{
     build_shadps4_settings_page, build_rpcs3_settings_page, build_console_settings_page, ConsolePageWidgets,
@@ -42,55 +43,61 @@ pub fn show_settings_dialog(
     let stack = layout.stack;
     let content_area = layout.content_area;
 
-    let (general_page, notif_row, bg_row, hidden_row) = build_general_settings_page(&cfg);
-    sidebar.append(&settings_sidebar_row("preferences-system-symbolic", "General"));
+    let (general_page, notif_row, bg_row, hidden_row, steam_entry, sgdb_entry) = build_general_settings_page(&cfg);
+    sidebar.append(&settings_sidebar_row("preferences-system-symbolic", "General", "general"));
     stack.add_named(&general_page, Some("general"));
 
     let (overlay_page, overlay_widgets) = build_overlay_settings_page(&cfg);
-    sidebar.append(&settings_sidebar_row("view-grid-symbolic", "Overlay"));
+    sidebar.append(&settings_sidebar_row("view-grid-symbolic", "Overlay", "overlay"));
     stack.add_named(&overlay_page, Some("overlay"));
 
-    sidebar.append(&sidebar_separator());
-    let (api_page, steam_entry, sgdb_entry) = build_api_keys_page(&cfg);
-    sidebar.append(&settings_sidebar_row("dialog-password-symbolic", "API Keys"));
-    stack.add_named(&api_page, Some("api"));
+    let (system_page, system_defaults_widgets) = build_system_defaults_page(&cfg);
+    sidebar.append(&settings_sidebar_row("applications-science-symbolic", "Game System", "system"));
+    stack.add_named(&system_page, Some("system"));
 
     let (wine_pages, wine_widgets) = build_wine_config_pages(&cfg.default_wine_config, None);
     sidebar.append(&sidebar_separator());
     for wp in &wine_pages {
-        sidebar.append(&settings_sidebar_row(wp.icon, wp.label));
+        sidebar.append(&settings_sidebar_row(wp.icon, wp.label, wp.label));
         stack.add_named(&wp.page, Some(wp.label));
     }
 
     let (profiles_page, prefix_base_row) = build_profiles_page(state, &win);
-    sidebar.append(&settings_sidebar_row("system-users-symbolic", "Wine Profiles"));
+    sidebar.append(&settings_sidebar_row("system-users-symbolic", "Wine Profiles", "profiles"));
     stack.add_named(&profiles_page, Some("profiles"));
 
     sidebar.append(&sidebar_separator());
     let (emu_page, emu_version_row, emu_version_model) = build_api_emulators_page(&cfg);
-    sidebar.append(&settings_sidebar_row("applications-engineering-symbolic", "API Emulators"));
+    sidebar.append(&settings_sidebar_row("applications-engineering-symbolic", "API Emulators", "api_emulators"));
     stack.add_named(&emu_page, Some("api_emulators"));
 
     sidebar.append(&sidebar_separator());
     let (steam_page, steam_enable_row) = build_steam_settings_page(&cfg);
-    sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Steam"));
+    sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Steam", "steam"));
     stack.add_named(&steam_page, Some("steam"));
 
-    let (ra_page, ra_enable_row, ra_username_row, ra_password_row, ra_token_row) = build_ra_settings_page(&cfg);
-    sidebar.append(&settings_sidebar_row("applications-science-symbolic", "RetroAchievements"));
+    let (ra_page, ra_enable_row, ra_username_row, ra_password_row) = build_ra_settings_page(&cfg);
+    sidebar.append(&settings_sidebar_row("applications-science-symbolic", "RetroAchievements", "ra"));
     stack.add_named(&ra_page, Some("ra"));
 
     let mut source_overlay_states: Vec<(String, super::settings_pages::OverlayOverrideState)> = Vec::new();
+    let mut source_gamescope_states: Vec<(String, super::settings_pages::GamescopeOverrideState)> = Vec::new();
 
     {
         let (overlay_row, state) = build_source_overlay_row(
             cfg.overlay.enabled,
             cfg.overlay.source_overrides.get("steam").copied(),
         );
+        let (gs_row, gs_state) = build_source_gamescope_row(
+            cfg.default_system.gamescope,
+            cfg.overlay.source_gamescope.get("steam").copied(),
+        );
         let g = adw::PreferencesGroup::new();
         g.add(&overlay_row);
+        g.add(&gs_row);
         steam_page.append(&g);
         source_overlay_states.push(("steam".to_string(), state));
+        source_gamescope_states.push(("steam".to_string(), gs_state));
     }
 
     {
@@ -98,10 +105,16 @@ pub fn show_settings_dialog(
             cfg.overlay.enabled,
             cfg.overlay.source_overrides.get("ra").copied(),
         );
+        let (gs_row, gs_state) = build_source_gamescope_row(
+            cfg.default_system.gamescope,
+            cfg.overlay.source_gamescope.get("ra").copied(),
+        );
         let g = adw::PreferencesGroup::new();
         g.add(&overlay_row);
+        g.add(&gs_row);
         ra_page.append(&g);
         source_overlay_states.push(("ra".to_string(), state));
+        source_gamescope_states.push(("ra".to_string(), gs_state));
     }
 
     let mut console_widgets: Vec<(&'static str, ConsolePageWidgets)> = Vec::new();
@@ -117,13 +130,20 @@ pub fn show_settings_dialog(
             cfg.overlay.enabled,
             cfg.overlay.source_overrides.get(def.id).copied(),
         );
+        let (gs_row, gs_state) = build_source_gamescope_row(
+            cfg.default_system.gamescope,
+            cfg.overlay.source_gamescope.get(def.id).copied(),
+        );
         let overlay_group = adw::PreferencesGroup::new();
         overlay_group.add(&overlay_row);
+        overlay_group.add(&gs_row);
         page.append(&overlay_group);
         source_overlay_states.push((def.id.to_string(), overlay_state));
+        source_gamescope_states.push((def.id.to_string(), gs_state));
 
-        sidebar.append(&settings_sidebar_row("applications-games-symbolic", def.display_name));
-        stack.add_named(&page, Some(def.display_name.to_lowercase().as_str()));
+        let page_id = def.display_name.to_lowercase();
+        sidebar.append(&settings_sidebar_row("applications-games-symbolic", def.display_name, &page_id));
+        stack.add_named(&page, Some(page_id.as_str()));
         console_widgets.push((def.id, widgets));
 
         if def.id == "ps2" {
@@ -133,12 +153,18 @@ pub fn show_settings_dialog(
                 cfg.overlay.enabled,
                 cfg.overlay.source_overrides.get("ps3").copied(),
             );
+            let (ps3_gs_row, ps3_gs_state) = build_source_gamescope_row(
+                cfg.default_system.gamescope,
+                cfg.overlay.source_gamescope.get("ps3").copied(),
+            );
             let ps3_ov_group = adw::PreferencesGroup::new();
             ps3_ov_group.add(&ps3_ov_row);
+            ps3_ov_group.add(&ps3_gs_row);
             ps3_page.append(&ps3_ov_group);
             source_overlay_states.push(("ps3".to_string(), ps3_ov_state));
+            source_gamescope_states.push(("ps3".to_string(), ps3_gs_state));
 
-            sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS3"));
+            sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS3", "ps3"));
             stack.add_named(&ps3_page, Some("ps3"));
             ps3_enable_row = Some(ps3_en);
             ps3_exe_row = Some(ps3_exe);
@@ -149,12 +175,18 @@ pub fn show_settings_dialog(
                 cfg.overlay.enabled,
                 cfg.overlay.source_overrides.get("ps4").copied(),
             );
+            let (ps4_gs_row, ps4_gs_state) = build_source_gamescope_row(
+                cfg.default_system.gamescope,
+                cfg.overlay.source_gamescope.get("ps4").copied(),
+            );
             let ps4_ov_group = adw::PreferencesGroup::new();
             ps4_ov_group.add(&ps4_ov_row);
+            ps4_ov_group.add(&ps4_gs_row);
             ps4_page.append(&ps4_ov_group);
             source_overlay_states.push(("ps4".to_string(), ps4_ov_state));
+            source_gamescope_states.push(("ps4".to_string(), ps4_gs_state));
 
-            sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS4"));
+            sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS4", "ps4"));
             stack.add_named(&ps4_page, Some("ps4"));
             ps4_enable_row = Some(ps4_en);
             ps4_exe_row = Some(ps4_exe);
@@ -162,40 +194,14 @@ pub fn show_settings_dialog(
     }
 
     let lutris_page = build_lutris_settings_page(state, &win);
-    sidebar.append(&settings_sidebar_row("system-software-install-symbolic", "Lutris Migration"));
+    sidebar.append(&settings_sidebar_row("system-software-install-symbolic", "Lutris Migration", "migration"));
     stack.add_named(&lutris_page, Some("migration"));
 
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
-            if let Some(child) = row.child() {
-                if let Some(hbox) = child.downcast_ref::<gtk4::Box>() {
-                    if let Some(sibling) = hbox.last_child() {
-                        if let Some(label) = sibling.downcast_ref::<gtk4::Label>() {
-                            let text = label.text().to_string();
-                            let page_id = match text.as_str() {
-                                "API Keys" => "api".to_string(),
-                                "RetroAchievements" => "ra".to_string(),
-                                "Wine Profiles" => "profiles".to_string(),
-                                "API Emulators" => "api_emulators".to_string(),
-                                _ => {
-                                    if stack_clone.child_by_name(&text).is_some() {
-                                        text
-                                    } else {
-                                        let lower = text.to_lowercase();
-                                        if stack_clone.child_by_name(&lower).is_some() {
-                                            lower
-                                        } else {
-                                            "general".to_string()
-                                        }
-                                    }
-                                }
-                            };
-                            stack_clone.set_visible_child_name(&page_id);
-                        }
-                    }
-                }
-            }
+            let page_id = row.widget_name().to_string().to_string();
+            stack_clone.set_visible_child_name(&page_id);
         }
     });
 
@@ -243,7 +249,6 @@ pub fn show_settings_dialog(
         s.cfg.ra_enabled = ra_enable_row.is_active();
         s.cfg.ra_username = ra_username_row.text().to_string();
         s.cfg.ra_password = ra_password_row.text().to_string();
-        s.cfg.ra_token = ra_token_row.text().to_string();
 
         s.cfg.overlay.enabled = overlay_widgets.enable_row.is_active();
         s.cfg.overlay.encoder = match overlay_widgets.encoder_row.selected() {
@@ -253,11 +258,41 @@ pub fn show_settings_dialog(
             _ => ira_overlay_ipc::VideoEncoder::Auto,
         };
         s.cfg.overlay.recording_quality = ira_overlay_ipc::RecordingQuality::from_u32(overlay_widgets.quality_row.selected());
+        s.cfg.overlay.toggle_hotkey = overlay_widgets.toggle_hotkey.kb_value.borrow().clone();
+        s.cfg.overlay.screenshot_hotkey = overlay_widgets.screenshot_hotkey.kb_value.borrow().clone();
+        s.cfg.overlay.record_hotkey = overlay_widgets.record_hotkey.kb_value.borrow().clone();
+        s.cfg.overlay.toggle_hotkey_gamepad = overlay_widgets.toggle_hotkey.gp_value.borrow().clone();
+        s.cfg.overlay.screenshot_hotkey_gamepad = overlay_widgets.screenshot_hotkey.gp_value.borrow().clone();
+        s.cfg.overlay.record_hotkey_gamepad = overlay_widgets.record_hotkey.gp_value.borrow().clone();
+        if let Some(desc) = overlay_widgets.font_button.font_desc() {
+            let family_str: String = desc.family().map(|s| s.to_string()).unwrap_or_default();
+            if family_str.is_empty() {
+                s.cfg.overlay.font_family = None;
+            } else {
+                s.cfg.overlay.font_family = Some(family_str);
+            }
+        } else {
+            s.cfg.overlay.font_family = None;
+        }
+
+        s.cfg.default_system.gamemode = system_defaults_widgets.gamemode.is_active();
+        s.cfg.default_system.mangohud = system_defaults_widgets.mangohud.is_active();
+        s.cfg.default_system.gamescope = system_defaults_widgets.gamescope.is_active();
+        s.cfg.default_system.gamescope_flags = system_defaults_widgets.gamescope_flags.text().to_string();
+        s.cfg.default_system.env_vars = super::wine_config_env_dll::collect_env_vars(&system_defaults_widgets.env_vars_box);
+        s.cfg.default_system.ld_preload = system_defaults_widgets.ld_preload.text().to_string();
+        s.cfg.default_system.ld_library_path = system_defaults_widgets.ld_library_path.text().to_string();
 
         for (source_id, state) in &source_overlay_states {
             match *state.borrow() {
                 Some(v) => { s.cfg.overlay.source_overrides.insert(source_id.clone(), v); }
                 None => { s.cfg.overlay.source_overrides.remove(source_id); }
+            }
+        }
+        for (source_id, state) in &source_gamescope_states {
+            match *state.borrow() {
+                Some(v) => { s.cfg.overlay.source_gamescope.insert(source_id.clone(), v); }
+                None => { s.cfg.overlay.source_gamescope.remove(source_id); }
             }
         }
 

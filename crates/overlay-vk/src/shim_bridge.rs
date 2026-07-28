@@ -9,10 +9,15 @@
 //! defaults — the overlay simply won't receive input.
 
 use std::ffi::c_int;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use ira_overlay::ui::{capture, push_event, Event};
 use ira_overlay_ipc::InputEventRaw;
+use ira_overlay_ipc::{
+    MappedShm, DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
+    DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS,
+    DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+};
 
 type PollEventsFn = unsafe extern "C" fn(*mut InputEventRaw, usize) -> usize;
 type IsVisibleFn = unsafe extern "C" fn() -> c_int;
@@ -100,12 +105,44 @@ pub fn reset_present_count() {
 }
 
 /// Returns true if enough frames have been presented for the overlay to be safe.
+/// If the shim isn't loaded (dlsym fails), returns true — no present count to wait for.
 pub fn ready_for_overlay() -> bool {
     let f = *READY_FOR_OVERLAY.get_or_init(|| {
         let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_ready_for_overlay".as_ptr()) };
         (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
     });
-    f.is_some_and(|f| unsafe { f() != 0 })
+    f.is_none_or(|f| unsafe { f() != 0 })
+}
+
+// ─── SHM-based hotkey config ───
+
+static SHM: OnceLock<Option<Mutex<MappedShm>>> = OnceLock::new();
+
+fn shm() -> Option<&'static Mutex<MappedShm>> {
+    SHM.get_or_init(|| {
+        let path = std::env::var_os("IRA_OVERLAY_SHM")?;
+        MappedShm::open_rw(&path.to_string_lossy()).ok().map(Mutex::new)
+    }).as_ref()
+}
+
+/// Reads hotkey config from SHM, falling back to defaults.
+/// Returns (toggle_kc, toggle_mods, screenshot_kc, screenshot_mods, record_kc, record_mods).
+pub fn hotkeys() -> (u32, u32, u32, u32, u32, u32) {
+    let Some(shm) = shm().and_then(|m| m.lock().ok()) else {
+        return (
+            DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
+            DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS,
+            DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+        );
+    };
+    let hdr = shm.header();
+    let tog_kc = if hdr.toggle_keysym == 0 { DEFAULT_TOGGLE_KEYCODE } else { hdr.toggle_keysym };
+    let tog_mods = if hdr.toggle_keysym == 0 { DEFAULT_TOGGLE_MODS } else { hdr.toggle_mods };
+    let ss_kc = if hdr.screenshot_keysym == 0 { DEFAULT_SCREENSHOT_KEYCODE } else { hdr.screenshot_keysym };
+    let ss_mods = if hdr.screenshot_keysym == 0 { DEFAULT_SCREENSHOT_MODS } else { hdr.screenshot_mods };
+    let rec_kc = if hdr.record_keysym == 0 { DEFAULT_RECORD_KEYCODE } else { hdr.record_keysym };
+    let rec_mods = if hdr.record_keysym == 0 { DEFAULT_RECORD_MODS } else { hdr.record_mods };
+    (tog_kc, tog_mods, ss_kc, ss_mods, rec_kc, rec_mods)
 }
 
 /// Polls input events from the shim and forwards them to the overlay UI.

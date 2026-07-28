@@ -14,3 +14,6 @@ libc = "0.2"
 
 [lints]
 workspace = true
+
+[build-dependencies]
+pkg-config = "0.3.33"

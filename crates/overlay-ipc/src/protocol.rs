@@ -45,16 +45,26 @@ pub struct ShmHeader {
     pub video_encoder: u32,
     /// Recording quality (value of RecordingQuality as u32).
     pub recording_quality: u32,
-    /// X11 keysym for toggle hotkey (0 = use default Shift+Tab).
+    /// Evdev keycode for toggle hotkey (0 = use default Shift+Tab).
     pub toggle_keysym: u32,
-    /// X11 keysym for screenshot hotkey (0 = use default F12).
+    /// Modifier mask for toggle hotkey (Shift=0x01, Ctrl=0x04, Alt=0x08, Super=0x40).
+    pub toggle_mods: u32,
+    /// Evdev keycode for screenshot hotkey (0 = use default F12).
     pub screenshot_keysym: u32,
-    /// X11 keysym for record hotkey (0 = use default F11).
+    /// Modifier mask for screenshot hotkey.
+    pub screenshot_mods: u32,
+    /// Evdev keycode for record hotkey (0 = use default F11).
     pub record_keysym: u32,
+    /// Modifier mask for record hotkey.
+    pub record_mods: u32,
     /// Cross-process visibility flag for the standalone overlay.
     /// Written by the shim (on hotkey), read by the standalone overlay.
     pub overlay_visible: AtomicU32,
-    pub padding: [u8; 60],
+    /// Timestamp (ms since epoch, lower 32 bits) of the last toggle.
+    /// Used for cross-process debounce — prevents multiple child processes
+    /// from toggling simultaneously on the same key event.
+    pub last_toggle_ms: AtomicU32,
+    pub padding: [u8; 44],
 }
 
 /// One achievement entry in the shared memory array.

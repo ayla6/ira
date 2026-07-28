@@ -2,11 +2,18 @@
 //! Level 0 crate: no deps on other ira crates. Both the Ira app and overlay crates depend on this.
 
 mod config;
+mod hotkey;
 mod protocol;
 mod shm;
 
 pub use config::{
     OverlayPosition, OverlaySettings, RecordingFormat, RecordingQuality, VideoEncoder,
+};
+pub use hotkey::{
+    parse_hotkey, resolve_defaults, MOD_ALT, MOD_CTRL, MOD_SHIFT, MOD_SUPER,
+    X11_KEYCODE_OFFSET, DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
+    DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS,
+    DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
 };
 pub use protocol::{
     AchievementEntry, InputEventRaw, NotificationEntry, NotificationType, ShmHeader,

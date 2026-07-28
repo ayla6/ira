@@ -44,11 +44,18 @@ fn overlay_paths() -> Option<(String, String)> {
 }}"#,
             vk_abs.to_string_lossy()
         );
-        if std::fs::write(&json_path, json_content).is_ok() {
-            return Some((
-                tmp_dir.to_string_lossy().into(),
-                dev_shim.to_string_lossy().into(),
-            ));
+        match std::fs::write(&json_path, &json_content) {
+            Ok(_) => {
+                eprintln!("ira-overlay: JSON manifest written to {} (library_path={})",
+                    json_path.display(), vk_abs.display());
+                return Some((
+                    tmp_dir.to_string_lossy().into(),
+                    dev_shim.to_string_lossy().into(),
+                ));
+            }
+            Err(e) => {
+                eprintln!("ira-overlay: failed to write JSON manifest: {e}");
+            }
         }
     }
 
@@ -156,8 +163,8 @@ pub fn apply_performance(
     if launch.gamemode.unwrap_or(false) && has_exec("gamemoderun") {
         extra_prefix.push("gamemoderun".to_string());
     }
-    if launch.mangohud.unwrap_or(false) && has_exec("mangohud") {
-        extra_prefix.push("mangohud".to_string());
+    let mangohud_enabled = launch.mangohud.unwrap_or(false) && has_exec("mangohud");
+    if mangohud_enabled {
         env.retain(|(k, _)| k != "MANGOHUD");
         env.push(("MANGOHUD".to_string(), "1".to_string()));
         env.retain(|(k, _)| k != "MANGOHUD_DLSYM");
@@ -189,6 +196,13 @@ pub fn apply_performance(
 
         gs_args.push("--fullscreen".to_string());
 
+        // With gamescope, use --mangoapp instead of mangohud in the command.
+        // mangoapp is the gamescope-native overlay; it reads the same MANGOHUD env vars.
+        // mangohud does not work inside gamescope — only mangoapp does.
+        if mangohud_enabled && has_exec("mangoapp") {
+            gs_args.push("--mangoapp".to_string());
+        }
+
         if !launch.gamescope_flags.is_empty() {
             if let Some(flags) = shlex::split(&launch.gamescope_flags) {
                 gs_args.extend(flags);
@@ -200,6 +214,9 @@ pub fn apply_performance(
         *command = gs_args;
         true
     } else {
+        if mangohud_enabled {
+            extra_prefix.push("mangohud".to_string());
+        }
         let mut final_cmd: Vec<String> = Vec::new();
         final_cmd.extend(extra_prefix);
         final_cmd.append(command);
@@ -218,9 +235,11 @@ pub fn add_overlay_env(env: &mut Vec<(String, String)>, overlay_shm: Option<&str
     };
 
     env.retain(|(k, _)| k != "VK_LAYER_PATH");
-    env.push(("VK_LAYER_PATH".to_string(), layer_dir));
+    env.push(("VK_LAYER_PATH".to_string(), layer_dir.clone()));
     env.retain(|(k, _)| k != "VK_INSTANCE_LAYERS");
     env.push(("VK_INSTANCE_LAYERS".to_string(), "VK_LAYER_IRA_OVERLAY".to_string()));
+
+    eprintln!("ira-overlay: injecting VK layer (path={layer_dir}) + shim + SHM");
 
     let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
     let merged = match existing {
@@ -303,6 +322,13 @@ pub fn add_overlay_env_standalone(
         eprintln!("ira-overlay: shim not found — skipping standalone injection");
         return;
     };
+    eprintln!("ira-overlay: injecting standalone overlay (shim + SHM, no VK layer)");
+
+    // In standalone mode, the VK layer must NOT be loaded — the standalone
+    // overlay process has its own Vulkan instance. If VK_INSTANCE_LAYERS is
+    // set (e.g. from a previous non-standalone launch in the same session),
+    // the layer would hook the game's Vulkan calls and conflict.
+    env.retain(|(k, _)| k != "VK_INSTANCE_LAYERS" && k != "VK_LAYER_PATH");
 
     let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
     let merged = match existing {
@@ -326,11 +352,16 @@ pub fn add_overlay_env_standalone(
 }
 
 /// Wraps a gamescope command so the standalone overlay runs inside gamescope
-/// alongside the game. The overlay inherits `GAMESCOPE_WAYLAND_DISPLAY` from
-/// gamescope's environment, allowing it to create a layer surface.
+/// alongside the game. The overlay inherits `DISPLAY` from gamescope's
+/// internal XWayland server, allowing it to create an X11 window via XCB.
+///
+/// The overlay window is marked as `GAMESCOPE_EXTERNAL_OVERLAY` so gamescope
+/// composites it on top of the game as a separate plane (like mangoapp).
+/// The Gamescope WSI layer handles the overlay's swapchain with pre-multiplied
+/// alpha support, so transparent parts of the overlay show the game beneath.
 ///
 /// Transforms: `gamescope -- wine ...`
-/// Into:       `gamescope -- sh -c 'ira-overlay-standalone & exec "$@"' -- wine ...`
+/// Into:       `gamescope -- sh -c 'env -u GAMESCOPE_WAYLAND_DISPLAY -u WAYLAND_DISPLAY ira-overlay-standalone & exec "$@"' -- wine ...`
 pub fn wrap_with_standalone_overlay(command: &mut Vec<String>) {
     let Some(bin) = standalone_binary_path() else {
         eprintln!("ira-overlay: standalone binary not found, skipping");
@@ -351,9 +382,12 @@ pub fn wrap_with_standalone_overlay(command: &mut Vec<String>) {
     let quoted_bin = shlex::try_quote(&bin)
         .map(|c| c.into_owned())
         .unwrap_or(bin);
-    let sh_script = format!("{} & exec \"$@\"", quoted_bin);
+    let sh_script = format!(
+        "env -u GAMESCOPE_WAYLAND_DISPLAY -u WAYLAND_DISPLAY ENABLE_GAMESCOPE_WSI=1 {} & exec \"$@\"",
+        quoted_bin
+    );
 
-    command.push("sh".to_string());
+    command.push("/usr/bin/sh".to_string());
     command.push("-c".to_string());
     command.push(sh_script);
     command.push("--".to_string());

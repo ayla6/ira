@@ -1,21 +1,25 @@
-//! Standalone overlay binary — renders to a wlr_layer_shell surface.
+//! Standalone overlay binary — renders to an X11 window via XCB.
 //!
-//! Used when running under gamescope (or any wlroots compositor).
-//! The overlay creates its own Wayland surface, Vulkan instance, and swapchain.
-//! Input is handled by the compositor via keyboard interactivity on the layer surface.
+//! Used when running under gamescope. The overlay creates its own X11 window,
+//! Vulkan instance, and swapchain. The Gamescope WSI layer handles swapchain
+//! creation and buffer management with pre-multiplied alpha support.
 //!
-//! The visibility toggle is read from shared memory (written by overlay-shim).
+//! The window is marked as `GAMESCOPE_EXTERNAL_OVERLAY` so gamescope composites
+//! it on top of the game as a separate plane (like mangoapp).
+//! Visibility is toggled via the `_NET_WM_WINDOW_OPACITY` property.
+//! When visible, the keyboard is grabbed so all key events go to the overlay.
+//! The visibility toggle is read from shared memory (written by overlay-shim
+//! when the overlay is hidden, or by the overlay itself when visible).
 
 use std::sync::atomic::Ordering;
 
-mod wayland;
+mod x11;
 mod vulkan;
 
 use ira_overlay::ui;
 use ira_overlay_ipc::MappedShm;
 
 fn main() {
-    // Default to pango backend for the standalone overlay.
     if std::env::var_os("IRA_OVERLAY_TEXT_BACKEND").is_none() {
         std::env::set_var("IRA_OVERLAY_TEXT_BACKEND", "pango");
     }
@@ -37,16 +41,25 @@ fn main() {
     };
     eprintln!("ira-overlay-standalone: connected to SHM '{shm_path}'");
 
-    let mut wl = match wayland::WaylandState::new() {
-        Ok(w) => w,
+    // Read hotkey config from SHM (written by Ira app before launch).
+    {
+        let hdr = shm.header();
+        if hdr.toggle_keysym != 0 {
+            x11::TOGGLE_KEYCODE.store(hdr.toggle_keysym + ira_overlay_ipc::X11_KEYCODE_OFFSET, Ordering::Relaxed);
+            x11::TOGGLE_MODS.store(hdr.toggle_mods, Ordering::Relaxed);
+        }
+    }
+
+    let x11_state = match x11::X11State::new() {
+        Ok(x) => x,
         Err(e) => {
-            eprintln!("ira-overlay-standalone: wayland init failed: {e}");
+            eprintln!("ira-overlay-standalone: X11 init failed: {e}");
             return;
         }
     };
-    eprintln!("ira-overlay-standalone: wayland connected, surface created");
 
-    let mut vk = match vulkan::VulkanState::new(wl.display_ptr(), wl.surface_ptr()) {
+    eprintln!("ira-overlay-standalone: starting Vulkan init...");
+    let mut vk = match vulkan::VulkanState::new(x11_state.connection_ptr(), x11_state.window_id()) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("ira-overlay-standalone: vulkan init failed: {e}");
@@ -55,13 +68,9 @@ fn main() {
     };
     eprintln!("ira-overlay-standalone: vulkan initialized, swapchain created");
 
-    // Initialize fonts (reads IRA_OVERLAY_TEXT_BACKEND env var)
     ui::text::init_fonts();
-
-    // Set screen size for the UI
     ui::set_screen_size(vk.extent.width, vk.extent.height);
 
-    // Create the UI renderer
     let ui_renderer = unsafe { ui::UiRenderer::new(vk.fns, vk.device, vk.physical_device, vk.cmd_pool, vk.render_pass) };
     let ui_renderer = match ui_renderer {
         Some(r) => r,
@@ -75,15 +84,22 @@ fn main() {
     let mut prev_visible = false;
 
     loop {
-        // Dispatch Wayland events
-        wl.dispatch();
+        // Poll XCB events (keyboard input when visible via keyboard grab).
+        // When the keyboard is grabbed, the shim doesn't see key events,
+        // so the overlay detects the toggle hotkey itself.
+        let toggle_pressed = x11_state.poll_events();
 
-        // Read visibility from SHM (written by overlay-shim)
+        if toggle_pressed {
+            let current = shm.header().overlay_visible.load(Ordering::SeqCst);
+            let new_val: u32 = if current != 0 { 0 } else { 1 };
+            shm.header().overlay_visible.store(new_val, Ordering::SeqCst);
+        }
+
+        // Read visibility from SHM (written by shim or by ourselves above).
         let visible = shm.header().overlay_visible.load(Ordering::SeqCst) != 0;
 
-        // Toggle keyboard interactivity when visibility changes
         if visible != prev_visible {
-            wl.set_keyboard_interactivity(visible);
+            x11_state.set_visible(visible);
             if visible {
                 ui::mark_ui_dirty();
             }
@@ -91,26 +107,14 @@ fn main() {
         }
 
         if !visible {
-            // Sleep briefly to avoid spinning when hidden
             std::thread::sleep(std::time::Duration::from_millis(16));
             continue;
-        }
-
-        // Check for resize
-        if let Some((w, h)) = wl.take_pending_resize() {
-            if w > 0 && h > 0 && (w != vk.extent.width || h != vk.extent.height) {
-                unsafe { vk.recreate_swapchain(w, h) };
-                ui::set_screen_size(vk.extent.width, vk.extent.height);
-                ui::mark_ui_dirty();
-            }
         }
 
         // Render frame
         unsafe {
             ui_renderer.prepare(vk.extent);
-            ui_renderer.update_atlas(vk.fns, vk.cmd, vk.fence);
             if !vk.render_frame(&ui_renderer) {
-                // Swapchain suboptimal or out of date — recreate on next frame
                 let (w, h) = (vk.extent.width, vk.extent.height);
                 vk.recreate_swapchain(w, h);
             }

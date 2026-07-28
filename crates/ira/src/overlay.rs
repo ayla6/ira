@@ -8,7 +8,7 @@
 
 use ira_models::Game;
 use ira_overlay_ipc::{
-    MappedShm, OverlaySettings, shm_path, MAX_ACHIEVEMENTS,
+    MappedShm, OverlaySettings, parse_hotkey, shm_path, MAX_ACHIEVEMENTS,
 };
 
 /// Creates the shared memory region and writes game data + achievements.
@@ -30,6 +30,17 @@ pub fn write_game_shm(game: &Game, settings: &OverlaySettings) -> Option<String>
         hdr.overlay_position = settings.position.as_u32();
         hdr.video_encoder = settings.encoder.as_u32();
         hdr.recording_quality = settings.recording_quality.as_u32();
+
+        // Write hotkey config as (evdev_keycode, modifier_mask).
+        let (toggle_kc, toggle_mods) = parse_hotkey(&settings.toggle_hotkey);
+        let (screenshot_kc, screenshot_mods) = parse_hotkey(&settings.screenshot_hotkey);
+        let (record_kc, record_mods) = parse_hotkey(&settings.record_hotkey);
+        hdr.toggle_keysym = toggle_kc;
+        hdr.toggle_mods = toggle_mods;
+        hdr.screenshot_keysym = screenshot_kc;
+        hdr.screenshot_mods = screenshot_mods;
+        hdr.record_keysym = record_kc;
+        hdr.record_mods = record_mods;
     }
 
     let achievements = shm.achievements_mut();

@@ -1,4 +1,10 @@
 //! Vulkan instance, surface, swapchain, and render loop for the standalone overlay.
+//!
+//! Uses an XCB surface under gamescope's XWayland server. The Gamescope WSI
+//! layer intercepts `vkCreateXcbSurfaceKHR` and handles swapchain creation
+//! with pre-multiplied alpha support and proper buffer release. The overlay
+//! window is marked as `GAMESCOPE_EXTERNAL_OVERLAY`, so gamescope composites
+//! it on top of the game as a separate plane.
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
@@ -8,12 +14,9 @@ use ash::vk;
 use ira_overlay::types::DeviceFns;
 use ira_overlay::ui::UiRenderer;
 
-// Instance-level KHR surface function pointers (loaded manually since ash 0.38
-// doesn't expose the extensions module publicly).
 struct SurfaceFns {
-    create_wayland_surface: vk::PFN_vkVoidFunction,
+    create_xcb_surface: vk::PFN_vkVoidFunction,
     destroy_surface: vk::PFN_vkVoidFunction,
-    get_physical_device_surface_support: vk::PFN_vkVoidFunction,
     get_physical_device_surface_capabilities: vk::PFN_vkVoidFunction,
     get_physical_device_surface_formats: vk::PFN_vkVoidFunction,
 }
@@ -27,12 +30,14 @@ pub struct VulkanState {
     pub fence: vk::Fence,
     pub render_pass: vk::RenderPass,
     pub extent: vk::Extent2D,
+    composite_alpha: vk::CompositeAlphaFlagsKHR,
 
     _entry: ash::Entry,
     instance: ash::Instance,
     surface: vk::SurfaceKHR,
     queue: vk::Queue,
     ash_device: ash::Device,
+    swapchain_ext: ash::khr::swapchain::Device,
     swapchain: vk::SwapchainKHR,
     swapchain_images: Vec<vk::Image>,
     framebuffers: Vec<vk::Framebuffer>,
@@ -42,14 +47,13 @@ pub struct VulkanState {
 }
 
 impl VulkanState {
-    pub fn new(display: *mut c_void, surface_wl: *mut c_void) -> Result<Self, String> {
+    pub fn new(xcb_conn: *mut c_void, xcb_window: u32) -> Result<Self, String> {
         let entry = unsafe { ash::Entry::load() }
             .map_err(|e| format!("failed to load Vulkan: {e}"))?;
 
-        // Create instance
         let ext_names: [*const c_char; 2] = [
             c"VK_KHR_surface".as_ptr(),
-            c"VK_KHR_wayland_surface".as_ptr(),
+            c"VK_KHR_xcb_surface".as_ptr(),
         ];
         let app_info = vk::ApplicationInfo {
             p_application_name: c"ira-overlay-standalone".as_ptr(),
@@ -66,36 +70,32 @@ impl VulkanState {
             .map_err(|e| format!("vkCreateInstance: {e}"))?
         };
 
-        // Load KHR surface functions via vkGetInstanceProcAddr
         let gipa = |name: &CStr| unsafe { entry.get_instance_proc_addr(instance.handle(), name.as_ptr()) };
         let surface_fns = SurfaceFns {
-            create_wayland_surface: gipa(c"vkCreateWaylandSurfaceKHR"),
+            create_xcb_surface: gipa(c"vkCreateXcbSurfaceKHR"),
             destroy_surface: gipa(c"vkDestroySurfaceKHR"),
-            get_physical_device_surface_support: gipa(c"vkGetPhysicalDeviceSurfaceSupportKHR"),
             get_physical_device_surface_capabilities: gipa(c"vkGetPhysicalDeviceSurfaceCapabilitiesKHR"),
             get_physical_device_surface_formats: gipa(c"vkGetPhysicalDeviceSurfaceFormatsKHR"),
         };
-        if surface_fns.create_wayland_surface.is_none() {
-            return Err("vkCreateWaylandSurfaceKHR not available".to_string());
+        if surface_fns.create_xcb_surface.is_none() {
+            return Err("vkCreateXcbSurfaceKHR not available".to_string());
         }
 
-        // Create Wayland surface
-        let wl_info = vk::WaylandSurfaceCreateInfoKHR {
-            display: display as *mut _,
-            surface: surface_wl as *mut _,
+        let xcb_info = vk::XcbSurfaceCreateInfoKHR {
+            connection: xcb_conn as *mut _,
+            window: xcb_window,
             ..Default::default()
         };
         let mut surface = vk::SurfaceKHR::null();
         let result = unsafe {
-            let f: unsafe extern "system" fn(vk::Instance, *const vk::WaylandSurfaceCreateInfoKHR, *const vk::AllocationCallbacks, *mut vk::SurfaceKHR) -> vk::Result =
-                std::mem::transmute(surface_fns.create_wayland_surface);
-            f(instance.handle(), &wl_info, std::ptr::null(), &mut surface)
+            let f: unsafe extern "system" fn(vk::Instance, *const vk::XcbSurfaceCreateInfoKHR, *const vk::AllocationCallbacks, *mut vk::SurfaceKHR) -> vk::Result =
+                std::mem::transmute(surface_fns.create_xcb_surface);
+            f(instance.handle(), &xcb_info, std::ptr::null(), &mut surface)
         };
         if result != vk::Result::SUCCESS {
-            return Err(format!("vkCreateWaylandSurfaceKHR: {result:?}"));
+            return Err(format!("vkCreateXcbSurfaceKHR: {result:?}"));
         }
 
-        // Pick physical device + queue family
         let phys_devices = unsafe {
             instance.enumerate_physical_devices()
                 .map_err(|e| format!("enumerate_physical_devices: {e}"))?
@@ -106,18 +106,13 @@ impl VulkanState {
                 let props = unsafe { instance.get_physical_device_queue_family_properties(pd) };
                 for (i, q) in props.iter().enumerate() {
                     if q.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
-                        let f: unsafe extern "system" fn(vk::PhysicalDevice, u32, vk::SurfaceKHR) -> vk::Bool32 =
-                            unsafe { std::mem::transmute(surface_fns.get_physical_device_surface_support) };
-                        if unsafe { f(pd, i as u32, surface) } == vk::TRUE {
-                            return Some((pd, i as u32));
-                        }
+                        return Some((pd, i as u32));
                     }
                 }
                 None
             })
-            .ok_or("no queue family with graphics + present")?;
+            .ok_or("no queue family with graphics")?;
 
-        // Create device
         let queue_priorities = [1.0f32];
         let device_ext_names: [*const c_char; 1] = [c"VK_KHR_swapchain".as_ptr()];
         let ash_device = unsafe {
@@ -138,10 +133,9 @@ impl VulkanState {
         let device = ash_device.handle();
         let queue = unsafe { ash_device.get_device_queue(queue_family, 0) };
 
-        // Build DeviceFns
+        let swapchain_ext = ash::khr::swapchain::Device::new(&instance, &ash_device);
         let fns = build_device_fns(&entry, &instance, device);
 
-        // Command pool + buffer
         let cmd_pool = unsafe {
             ash_device.create_command_pool(&vk::CommandPoolCreateInfo {
                 flags: vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
@@ -158,7 +152,6 @@ impl VulkanState {
             }).map_err(|e| format!("allocate_command_buffers: {e}"))?
         }[0];
 
-        // Fences + semaphores
         let fence = unsafe {
             ash_device.create_fence(&vk::FenceCreateInfo { flags: vk::FenceCreateFlags::SIGNALED, ..Default::default() }, None)
                 .map_err(|e| format!("create_fence: {e}"))?
@@ -166,7 +159,6 @@ impl VulkanState {
         let image_available = unsafe { ash_device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None).map_err(|e| format!("sem: {e}"))? };
         let render_finished = unsafe { ash_device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None).map_err(|e| format!("sem: {e}"))? };
 
-        // Surface capabilities + format
         let mut caps = vk::SurfaceCapabilitiesKHR::default();
         let f: unsafe extern "system" fn(vk::PhysicalDevice, vk::SurfaceKHR, *mut vk::SurfaceCapabilitiesKHR) -> vk::Result =
             unsafe { std::mem::transmute(surface_fns.get_physical_device_surface_capabilities) };
@@ -182,50 +174,48 @@ impl VulkanState {
         let format = formats.iter().find(|f| f.format == vk::Format::B8G8R8A8_UNORM)
             .map(|f| f.format).unwrap_or(vk::Format::B8G8R8A8_UNORM);
 
-        let extent = if caps.current_extent.width == 0 { vk::Extent2D { width: 1920, height: 1080 } } else { caps.current_extent };
+        let extent = if caps.current_extent.width == 0 || caps.current_extent.width == u32::MAX {
+            vk::Extent2D { width: 1920, height: 1080 }
+        } else {
+            caps.current_extent
+        };
+
+        let composite_alpha = if caps.supported_composite_alpha.contains(vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED) {
+            vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED
+        } else {
+            vk::CompositeAlphaFlagsKHR::OPAQUE
+        };
         let render_pass = create_render_pass(&ash_device, format);
 
-        // Create swapchain via DeviceFns (which has create_swapchain KHR)
-        let swapchain_create = vk::SwapchainCreateInfoKHR {
-            surface,
-            min_image_count: caps.min_image_count.max(2),
-            image_format: format,
-            image_color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
-            image_extent: extent,
-            image_array_layers: 1,
-            image_usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            pre_transform: caps.current_transform,
-            composite_alpha: vk::CompositeAlphaFlagsKHR::POST_MULTIPLIED,
-            present_mode: vk::PresentModeKHR::MAILBOX,
-            clipped: vk::TRUE,
-            ..Default::default()
-        };
-        let mut swapchain = vk::SwapchainKHR::null();
-        let r = unsafe {
-            let f: unsafe extern "system" fn(vk::Device, *const vk::SwapchainCreateInfoKHR, *const vk::AllocationCallbacks, *mut vk::SwapchainKHR) -> vk::Result =
-                std::mem::transmute(fns.create_swapchain);
-            f(device, &swapchain_create, std::ptr::null(), &mut swapchain)
-        };
-        if r != vk::Result::SUCCESS { return Err(format!("create_swapchain: {r:?}")); }
+        let swapchain = unsafe {
+            swapchain_ext.create_swapchain(&vk::SwapchainCreateInfoKHR {
+                surface,
+                min_image_count: caps.min_image_count.max(2),
+                image_format: format,
+                image_color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+                image_extent: extent,
+                image_array_layers: 1,
+                image_usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
+                pre_transform: caps.current_transform,
+                composite_alpha,
+                present_mode: vk::PresentModeKHR::MAILBOX,
+                clipped: vk::TRUE,
+                ..Default::default()
+            }, None)
+        }.map_err(|e| format!("create_swapchain: {e}"))?;
 
-        // Get swapchain images
-        let mut img_count = 0u32;
-        let f = fns.get_swapchain_images;
-        unsafe { f(device, swapchain, &mut img_count, std::ptr::null_mut()).result().ok() };
-        let mut swapchain_images = Vec::with_capacity(img_count as usize);
-        unsafe { f(device, swapchain, &mut img_count, swapchain_images.as_mut_ptr()).result().ok() };
-        unsafe { swapchain_images.set_len(img_count as usize) };
+        let swapchain_images = unsafe { swapchain_ext.get_swapchain_images(swapchain) }
+            .map_err(|e| format!("get_swapchain_images: {e}"))?;
 
-        // Create image views + framebuffers
         let (image_views, framebuffers) = create_views_and_framebuffers(&ash_device, &swapchain_images, render_pass, extent, format);
 
-        // Destroy surface fns (we don't need them after setup — except destroy_surface in Drop)
-        // Store destroy_surface in a way accessible from Drop
         SURFACE_DESTROY_FN.store(unsafe { std::mem::transmute_copy(&surface_fns.destroy_surface) }, std::sync::atomic::Ordering::Relaxed);
 
         Ok(VulkanState {
             fns, device, physical_device, cmd_pool, cmd, fence, render_pass, extent,
+            composite_alpha,
             _entry: entry, instance, surface, queue, ash_device,
+            swapchain_ext,
             swapchain, swapchain_images, framebuffers, image_views,
             image_available, render_finished,
         })
@@ -237,22 +227,22 @@ impl VulkanState {
             self.ash_device.reset_fences(&[self.fence]).ok();
         }
 
-        // Acquire next image — load vkAcquireNextImageKHR via get_device_proc_addr
-        // (DeviceFns doesn't include it since the overlay-vk crate uses the ash Device directly).
-        let acquire_fn = unsafe { self.instance.get_device_proc_addr(self.device, c"vkAcquireNextImageKHR".as_ptr()) };
-        let acquire: unsafe extern "system" fn(vk::Device, vk::SwapchainKHR, u64, vk::Semaphore, vk::Fence, *mut u32) -> vk::Result =
-            unsafe { std::mem::transmute(acquire_fn) };
-
         let mut image_index = 0u32;
-        let result = unsafe { acquire(self.device, self.swapchain, u64::MAX, self.image_available, vk::Fence::null(), &mut image_index) };
-        if result != vk::Result::SUCCESS && result != vk::Result::SUBOPTIMAL_KHR {
-            eprintln!("ira-overlay-standalone: acquire_next_image: {result:?}");
-            return false;
+        let acquire_result = unsafe {
+            self.swapchain_ext.acquire_next_image(self.swapchain, u64::MAX, self.image_available, vk::Fence::null())
+        };
+        match acquire_result {
+            Ok((idx, _)) => image_index = idx,
+            Err(vk::Result::SUBOPTIMAL_KHR) => {},
+            Err(_) => return false,
         }
 
         unsafe {
             self.ash_device.reset_command_buffer(self.cmd, vk::CommandBufferResetFlags::empty()).ok();
             self.ash_device.begin_command_buffer(self.cmd, &vk::CommandBufferBeginInfo::default()).ok();
+
+            // Update font atlas (must be after begin_command_buffer)
+            ui.update_atlas(self.fns, self.cmd, self.fence);
 
             let clear = [vk::ClearValue { color: vk::ClearColorValue { float32: [0.0, 0.0, 0.0, 0.0] } }];
             self.ash_device.cmd_begin_render_pass(self.cmd, &vk::RenderPassBeginInfo {
@@ -270,32 +260,32 @@ impl VulkanState {
             self.ash_device.end_command_buffer(self.cmd).ok();
         }
 
-        // Submit
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let submit_info = vk::SubmitInfo {
+            wait_semaphore_count: 1,
             p_wait_semaphores: &self.image_available,
             p_wait_dst_stage_mask: wait_stages.as_ptr(),
-            p_signal_semaphores: &self.render_finished,
+            command_buffer_count: 1,
             p_command_buffers: &self.cmd,
+            signal_semaphore_count: 1,
+            p_signal_semaphores: &self.render_finished,
             ..Default::default()
         };
         unsafe { self.ash_device.queue_submit(self.queue, &[submit_info], self.fence).ok(); }
 
-        // Present via DeviceFns
-        let present: unsafe extern "system" fn(vk::Queue, *const vk::PresentInfoKHR) -> vk::Result =
-            unsafe { std::mem::transmute(self.fns.queue_present) };
         let present_info = vk::PresentInfoKHR {
+            wait_semaphore_count: 1,
             p_wait_semaphores: &self.render_finished,
+            swapchain_count: 1,
             p_swapchains: &self.swapchain,
             p_image_indices: &image_index,
             ..Default::default()
         };
-        let result = unsafe { present(self.queue, &present_info) };
-        if result != vk::Result::SUCCESS {
-            eprintln!("ira-overlay-standalone: queue_present: {result:?}");
-            return false;
+        match unsafe { self.swapchain_ext.queue_present(self.queue, &present_info) } {
+            Ok(_) => true,
+            Err(vk::Result::SUBOPTIMAL_KHR) => true,
+            Err(_) => false,
         }
-        true
     }
 
     pub unsafe fn recreate_swapchain(&mut self, width: u32, height: u32) {
@@ -305,17 +295,12 @@ impl VulkanState {
         self.framebuffers.clear();
         self.image_views.clear();
 
-        let destroy_sc: unsafe extern "system" fn(vk::Device, vk::SwapchainKHR, *const vk::AllocationCallbacks) =
-            unsafe { std::mem::transmute(self.fns.destroy_swapchain) };
-        unsafe { destroy_sc(self.device, self.swapchain, std::ptr::null()) };
+        unsafe { self.swapchain_ext.destroy_swapchain(self.swapchain, None) };
 
         let extent = vk::Extent2D { width, height };
         let format = vk::Format::B8G8R8A8_UNORM;
-        let create_sc: unsafe extern "system" fn(vk::Device, *const vk::SwapchainCreateInfoKHR, *const vk::AllocationCallbacks, *mut vk::SwapchainKHR) -> vk::Result =
-            unsafe { std::mem::transmute(self.fns.create_swapchain) };
-        let mut swapchain = vk::SwapchainKHR::null();
-        unsafe {
-            create_sc(self.device, &vk::SwapchainCreateInfoKHR {
+        let swapchain = match unsafe {
+            self.swapchain_ext.create_swapchain(&vk::SwapchainCreateInfoKHR {
                 surface: self.surface,
                 min_image_count: 2,
                 image_format: format,
@@ -324,20 +309,22 @@ impl VulkanState {
                 image_array_layers: 1,
                 image_usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
                 pre_transform: vk::SurfaceTransformFlagsKHR::IDENTITY,
-                composite_alpha: vk::CompositeAlphaFlagsKHR::POST_MULTIPLIED,
+                composite_alpha: self.composite_alpha,
                 present_mode: vk::PresentModeKHR::MAILBOX,
                 clipped: vk::TRUE,
                 ..Default::default()
-            }, std::ptr::null(), &mut swapchain).result().map_err(|e| eprintln!("ira-overlay-standalone: recreate swapchain: {e:?}")).ok();
-        }
+            }, None)
+        } {
+            Ok(sc) => sc,
+            Err(e) => {
+                eprintln!("ira-overlay-standalone: recreate swapchain: {e:?}");
+                return;
+            }
+        };
         self.swapchain = swapchain;
 
-        let get_imgs = self.fns.get_swapchain_images;
-        let mut count = 0u32;
-        unsafe { get_imgs(self.device, swapchain, &mut count, std::ptr::null_mut()).result().ok() };
-        let mut images = Vec::with_capacity(count as usize);
-        unsafe { get_imgs(self.device, swapchain, &mut count, images.as_mut_ptr()).result().ok() };
-        unsafe { images.set_len(count as usize) };
+        let images = unsafe { self.swapchain_ext.get_swapchain_images(swapchain) }
+            .unwrap_or_default();
         self.swapchain_images = images;
 
         let (views, fbs) = create_views_and_framebuffers(&self.ash_device, &self.swapchain_images, self.render_pass, extent, format);

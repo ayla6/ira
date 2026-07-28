@@ -32,19 +32,13 @@ static POINTER: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
 // --- Evdev keycodes (Wayland uses evdev directly, no +8 offset like X11) ---
 
-const KC_TAB: u32 = 15;
 const KC_RETURN: u32 = 28;
-const KC_F11: u32 = 87;
-const KC_F12: u32 = 88;
 #[cfg(debug_assertions)]
 const KC_F10: u32 = 68;
 const KC_UP: u32 = 103;
 const KC_DOWN: u32 = 108;
 const KC_LEFT: u32 = 105;
 const KC_RIGHT: u32 = 106;
-
-// xkbcommon modifier mask for Shift (bit 0, standard on all Linux desktops).
-const SHIFT_MASK: u32 = 1;
 
 // Wayland key/button state values.
 const KEY_PRESSED: u32 = 1;
@@ -210,10 +204,11 @@ extern "C" fn keyboard_key(
 ) {
     if !overlay_active() { return; }
     let pressed = state == KEY_PRESSED;
-    let shift = (MODS_DEPRESSED.load(Ordering::Relaxed) & SHIFT_MASK) != 0;
+    let mods = MODS_DEPRESSED.load(Ordering::Relaxed);
 
     // Hotkeys work even when overlay is hidden.
-    if pressed && shift && key == KC_TAB {
+    let (tog_kc, tog_mods, ss_kc, ss_mods, rec_kc, rec_mods) = crate::shim_bridge::hotkeys();
+    if pressed && (mods & tog_mods) == tog_mods && key == tog_kc {
         if !crate::shim_bridge::ready_for_overlay() {
             return;
         }
@@ -221,11 +216,11 @@ extern "C" fn keyboard_key(
         crate::shim_bridge::set_visible(!visible);
         return;
     }
-    if pressed && key == KC_F12 {
+    if pressed && (mods & ss_mods) == ss_mods && key == ss_kc {
         capture::request_screenshot();
         return;
     }
-    if pressed && key == KC_F11 {
+    if pressed && (mods & rec_mods) == rec_mods && key == rec_kc {
         capture::toggle_recording();
         return;
     }

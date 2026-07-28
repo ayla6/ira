@@ -105,55 +105,56 @@ pub fn monitor_process(
     clear_game_log(game_id);
     let log_buf = get_game_log(game_id);
 
-    // Spawn a thread to read stdout and stderr from the game process
-    // and store lines in the shared in-memory buffer.
+    // Spawn separate threads for stdout and stderr so both are read live.
+    // Reading them sequentially would block stderr until stdout EOFs (i.e. never,
+    // while the game is running), losing all shim/VK-layer diagnostic output.
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let log_buf_c = log_buf.clone();
+
+    let log_buf_out = log_buf.clone();
     std::thread::spawn(move || {
-        let push_line = |line: &str| {
-            log_buf_c.lock().unwrap().push(line.to_string());
-        };
-        if let Some(mut out) = stdout {
-            let mut buf = [0u8; 4096];
-            let mut pending = String::new();
-            loop {
-                match out.read(&mut buf) {
-                    Ok(0) | Err(_) => {
-                        if !pending.is_empty() {
-                            push_line(&pending);
-                        }
-                        break;
+        let Some(mut out) = stdout else { return };
+        let mut buf = [0u8; 4096];
+        let mut pending = String::new();
+        loop {
+            match out.read(&mut buf) {
+                Ok(0) | Err(_) => {
+                    if !pending.is_empty() {
+                        log_buf_out.lock().unwrap().push(pending);
                     }
-                    Ok(n) => {
-                        pending.push_str(&String::from_utf8_lossy(&buf[..n]));
-                        while let Some(pos) = pending.find('\n') {
-                            let line = pending[..pos].trim_end_matches('\r').to_string();
-                            push_line(&line);
-                            pending = pending[pos + 1..].to_string();
-                        }
+                    break;
+                }
+                Ok(n) => {
+                    pending.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    while let Some(pos) = pending.find('\n') {
+                        let line = pending[..pos].trim_end_matches('\r').to_string();
+                        log_buf_out.lock().unwrap().push(line);
+                        pending = pending[pos + 1..].to_string();
                     }
                 }
             }
         }
-        if let Some(mut err) = stderr {
-            let mut buf = [0u8; 4096];
-            let mut pending = String::new();
-            loop {
-                match err.read(&mut buf) {
-                    Ok(0) | Err(_) => {
-                        if !pending.is_empty() {
-                            push_line(&pending);
-                        }
-                        break;
+    });
+
+    let log_buf_err = log_buf.clone();
+    std::thread::spawn(move || {
+        let Some(mut err) = stderr else { return };
+        let mut buf = [0u8; 4096];
+        let mut pending = String::new();
+        loop {
+            match err.read(&mut buf) {
+                Ok(0) | Err(_) => {
+                    if !pending.is_empty() {
+                        log_buf_err.lock().unwrap().push(pending);
                     }
-                    Ok(n) => {
-                        pending.push_str(&String::from_utf8_lossy(&buf[..n]));
-                        while let Some(pos) = pending.find('\n') {
-                            let line = pending[..pos].trim_end_matches('\r').to_string();
-                            push_line(&line);
-                            pending = pending[pos + 1..].to_string();
-                        }
+                    break;
+                }
+                Ok(n) => {
+                    pending.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    while let Some(pos) = pending.find('\n') {
+                        let line = pending[..pos].trim_end_matches('\r').to_string();
+                        log_buf_err.lock().unwrap().push(line);
+                        pending = pending[pos + 1..].to_string();
                     }
                 }
             }

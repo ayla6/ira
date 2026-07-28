@@ -17,6 +17,7 @@ use std::ffi::c_void;
 use std::sync::OnceLock;
 
 use ira_overlay_ipc::InputEventRaw;
+use ira_overlay_ipc::X11_KEYCODE_OFFSET;
 
 use crate::state;
 
@@ -26,14 +27,6 @@ const KEYRELEASE: i32 = 3;
 const BUTTONPRESS: i32 = 4;
 const BUTTONRELEASE: i32 = 5;
 const MOTIONNOTIFY: i32 = 6;
-
-// Modifier masks (from /usr/include/X11/X.h)
-const SHIFT_MASK: u32 = 0x01;
-
-// X11 keycodes (evdev, standard on modern Linux)
-const TAB_KEYCODE: u32 = 23;
-const F11_KEYCODE: u32 = 95;
-const F12_KEYCODE: u32 = 96;
 
 // X11 event struct field offsets (64-bit Linux).
 // Confirmed against /usr/include/X11/Xlib.h — XKeyEvent, XButtonEvent,
@@ -157,6 +150,11 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
         return false;
     }
 
+    static FIRST_EVENT: std::sync::Once = std::sync::Once::new();
+    FIRST_EVENT.call_once(|| {
+        eprintln!("ira-overlay-shim: intercepting X11 events in pid {}", std::process::id());
+    });
+
     let event_type = read_type(ev);
 
     // Always check for hotkeys, even when overlay is hidden.
@@ -164,18 +162,24 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
         let mods = read_state(ev);
         let keycode = read_detail(ev);
 
-        if (mods & SHIFT_MASK) != 0 && keycode == TAB_KEYCODE {
-            state::set_visible(!state::is_visible());
+        let (tog_kc, tog_mods, ss_kc, ss_mods, rec_kc, rec_mods) = state::hotkeys();
+        // X11 keycodes are evdev + 8.
+        let tog_x11 = tog_kc + X11_KEYCODE_OFFSET;
+        let ss_x11 = ss_kc + X11_KEYCODE_OFFSET;
+        let rec_x11 = rec_kc + X11_KEYCODE_OFFSET;
+
+        if (mods & tog_mods) == tog_mods && keycode == tog_x11 {
+            state::toggle_visible();
             return true;
         }
-        if keycode == F12_KEYCODE {
+        if (mods & ss_mods) == ss_mods && keycode == ss_x11 {
             state::push_event(InputEventRaw {
                 event_type: 5, // screenshot request
                 x: 0, y: 0, button: 0, keycode: 0,
             });
             return true;
         }
-        if keycode == F11_KEYCODE {
+        if (mods & rec_mods) == rec_mods && keycode == rec_x11 {
             state::push_event(InputEventRaw {
                 event_type: 6, // recording toggle
                 x: 0, y: 0, button: 0, keycode: 0,

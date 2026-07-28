@@ -5,6 +5,10 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use ira_overlay_ipc::{InputEventRaw, MappedShm};
+use ira_overlay_ipc::{
+    DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS, DEFAULT_SCREENSHOT_KEYCODE,
+    DEFAULT_SCREENSHOT_MODS, DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+};
 
 pub static OVERLAY_VISIBLE: AtomicBool = AtomicBool::new(false);
 static HAS_SDL: AtomicBool = AtomicBool::new(false);
@@ -26,6 +30,7 @@ static OVERLAY_ACTIVE_INIT: AtomicBool = AtomicBool::new(false);
 pub fn overlay_active() -> bool {
     if !OVERLAY_ACTIVE_INIT.load(Ordering::Relaxed) {
         let active = std::env::var_os("IRA_OVERLAY_SHM").is_some();
+        eprintln!("ira-overlay-shim: overlay_active={} shm={:?}", active, std::env::var_os("IRA_OVERLAY_SHM"));
         OVERLAY_ACTIVE_CACHED.store(active, Ordering::Relaxed);
         OVERLAY_ACTIVE_INIT.store(true, Ordering::Relaxed);
         active
@@ -68,16 +73,96 @@ fn shm() -> Option<&'static Mutex<MappedShm>> {
 }
 
 pub fn set_visible(v: bool) {
+    eprintln!("ira-overlay-shim: set_visible({v})");
     OVERLAY_VISIBLE.store(v, Ordering::SeqCst);
     if let Some(shm) = shm() {
-        if let Ok(mut shm) = shm.lock() {
-            shm.header_mut().overlay_visible.store(if v { 1 } else { 0 }, Ordering::SeqCst);
+        if let Ok(shm) = shm.lock() {
+            shm.header().overlay_visible.store(if v { 1 } else { 0 }, Ordering::SeqCst);
         }
     }
 }
 
+/// Atomically toggles overlay visibility via compare_exchange on SHM.
+/// Includes a 300ms cross-process debounce to prevent multiple child processes
+/// (game + zenity dialogs, etc.) from toggling simultaneously on the same key event.
+pub fn toggle_visible() {
+    if let Some(shm) = shm() {
+        if let Ok(shm) = shm.lock() {
+            let now = now_ms();
+            let last = shm.header().last_toggle_ms.load(Ordering::SeqCst);
+            // Debounce: ignore toggles within 300ms of the last one.
+            if now.wrapping_sub(last) < 300 {
+                return;
+            }
+            let current = shm.header().overlay_visible.load(Ordering::SeqCst);
+            let new_val: u32 = if current != 0 { 0 } else { 1 };
+            match shm.header().overlay_visible.compare_exchange(
+                current,
+                new_val,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => {
+                    shm.header().last_toggle_ms.store(now, Ordering::SeqCst);
+                    OVERLAY_VISIBLE.store(new_val != 0, Ordering::SeqCst);
+                    eprintln!("ira-overlay-shim: toggle -> {}", new_val != 0);
+                }
+                Err(_) => {
+                    // Another process toggled first — skip.
+                }
+            }
+            return;
+        }
+    }
+    // Fallback: local toggle (no SHM available).
+    let v = !OVERLAY_VISIBLE.load(Ordering::SeqCst);
+    OVERLAY_VISIBLE.store(v, Ordering::SeqCst);
+}
+
+fn now_ms() -> u32 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u32)
+        .unwrap_or(0)
+}
+
+/// Reads hotkey config from SHM, falling back to defaults if fields are 0.
+/// Returns (toggle_kc, toggle_mods, screenshot_kc, screenshot_mods, record_kc, record_mods).
+pub fn hotkeys() -> (u32, u32, u32, u32, u32, u32) {
+    let Some(shm) = shm() else {
+        return (
+            DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
+            DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS,
+            DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+        );
+    };
+    let Ok(shm) = shm.lock() else {
+        return (
+            DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
+            DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS,
+            DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+        );
+    };
+    let hdr = shm.header();
+    let tog_kc = if hdr.toggle_keysym == 0 { DEFAULT_TOGGLE_KEYCODE } else { hdr.toggle_keysym };
+    let tog_mods = if hdr.toggle_keysym == 0 { DEFAULT_TOGGLE_MODS } else { hdr.toggle_mods };
+    let ss_kc = if hdr.screenshot_keysym == 0 { DEFAULT_SCREENSHOT_KEYCODE } else { hdr.screenshot_keysym };
+    let ss_mods = if hdr.screenshot_keysym == 0 { DEFAULT_SCREENSHOT_MODS } else { hdr.screenshot_mods };
+    let rec_kc = if hdr.record_keysym == 0 { DEFAULT_RECORD_KEYCODE } else { hdr.record_keysym };
+    let rec_mods = if hdr.record_keysym == 0 { DEFAULT_RECORD_MODS } else { hdr.record_mods };
+    (tog_kc, tog_mods, ss_kc, ss_mods, rec_kc, rec_mods)
+}
+
 pub fn is_visible() -> bool {
-    OVERLAY_VISIBLE.load(Ordering::SeqCst)
+    if OVERLAY_VISIBLE.load(Ordering::SeqCst) {
+        return true;
+    }
+    // Also check SHM — the standalone overlay may have toggled visibility
+    // directly (e.g., via its own keyboard handler) without going through
+    // the shim's set_visible().
+    let Some(shm) = shm() else { return false; };
+    let Ok(shm) = shm.lock() else { return false; };
+    shm.header().overlay_visible.load(Ordering::SeqCst) != 0
 }
 
 pub fn increment_present_count() {

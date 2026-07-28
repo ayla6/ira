@@ -122,6 +122,8 @@ fn build_emulator_env_and_wrap(ctx: &LaunchCtx, cmd: &mut Vec<String>) -> Vec<(S
     // Determine overlay mode before applying performance wrappers.
     let will_use_gamescope = ira_launcher::env_builder::will_use_gamescope(&launch);
 
+    eprintln!("ira-overlay: overlay_enabled={} will_use_gamescope={} gamescope_cfg={:?}", overlay_enabled, will_use_gamescope, launch.gamescope);
+
     if overlay_enabled {
         if will_use_gamescope {
             ira_launcher::env_builder::add_overlay_env_standalone(

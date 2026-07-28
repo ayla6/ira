@@ -1827,6 +1827,7 @@ dependencies = [
  "ira-overlay",
  "ira-overlay-ipc",
  "libc",
+ "pkg-config",
 ]
 
 [[package]]

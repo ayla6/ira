@@ -257,17 +257,9 @@ fn fetch_steam_game_icon(
         }
     };
 
-    let tmp_ico = dest_webp.with_extension("ico");
-    if std::fs::write(&tmp_ico, &ico_bytes).is_err() { return None; }
-
-    ira_parser::convert_to_lossless_webp(&tmp_ico);
-    if dest_webp.is_file() {
-        Some(dest_webp.to_string_lossy().into_owned())
-    } else if tmp_ico.is_file() {
-        Some(tmp_ico.to_string_lossy().into_owned())
-    } else {
-        None
-    }
+    let webp = ira_parser::convert_bytes_to_lossless_webp(&ico_bytes)?;
+    std::fs::write(&dest_webp, &webp).ok()?;
+    Some(dest_webp.to_string_lossy().into_owned())
 }
 
 struct EnrichRaParams<'a> {

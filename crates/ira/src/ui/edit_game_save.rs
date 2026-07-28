@@ -75,13 +75,10 @@ fn save_app_id(db: &ira_db::DbConn, params: &SaveGameSettingsParams) -> AppIdRes
             {
                 &params.saved_platform_id
             } else if new_id.is_empty() { "" } else { &new_id };
-            let (steam_id, game_id): (&str, &str) = if params.game_kind == ira_models::GameKind::Ps4
-                || params.game_kind == ira_models::GameKind::Ps3
-                || params.game_kind == ira_models::GameKind::Retro
-            {
-                ("", &new_id)
-            } else {
+            let (steam_id, game_id): (&str, &str) = if params.trophy_source.has_steam_enrichment() {
                 (&new_id, "")
+            } else {
+                ("", &new_id)
             };
             if let Err(e) = ira_db::update_game_ids(db, params.db_id, steam_id, game_id, ts, pid) {
                 eprintln!("Failed to update app ID: {}", e);

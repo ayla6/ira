@@ -190,25 +190,17 @@ pub fn is_ico_data(data: &[u8]) -> bool {
 }
 
 /// Convert raw image bytes to lossless WebP if the source is PNG or ICO.
-/// Returns the original bytes unchanged if the format is WebP, JPEG, or
-/// unrecognizable.
-pub fn convert_bytes_to_lossless_webp(data: Vec<u8>) -> Vec<u8> {
+/// Returns `None` if the format is not convertible or decoding/encoding fails.
+pub fn convert_bytes_to_lossless_webp(data: &[u8]) -> Option<Vec<u8>> {
     let _s = tracing::info_span!("convert_bytes_to_lossless_webp").entered();
-    let format = image::guess_format(&data).ok();
-    match format {
-        Some(image::ImageFormat::Png) | Some(image::ImageFormat::Ico) => {}
-        _ => return data,
+    let format = image::guess_format(data).ok()?;
+    if !matches!(format, image::ImageFormat::Png | image::ImageFormat::Ico) {
+        return Some(data.to_vec());
     }
-    match image::load_from_memory(&data) {
-        Ok(img) => {
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            webp::Encoder::from_rgba(rgba.as_raw(), w, h)
-                .encode_lossless()
-                .to_vec()
-        }
-        Err(_) => data,
-    }
+    let img = image::load_from_memory(data).ok()?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    Some(webp::Encoder::from_rgba(rgba.as_raw(), w, h).encode_lossless().to_vec())
 }
 
 /// Open an image file (PNG, ICO, etc.) and re-save as lossless WebP,
@@ -371,7 +363,8 @@ mod tests {
         let img = image::RgbaImage::new(4, 4);
         let mut png_buf = Vec::new();
         img.write_to(&mut std::io::Cursor::new(&mut png_buf), image::ImageFormat::Png).unwrap();
-        let result = convert_bytes_to_lossless_webp(png_buf);
+        let result = convert_bytes_to_lossless_webp(&png_buf);
+        let result = result.expect("PNG should convert to WebP");
         let format = image::guess_format(&result).unwrap();
         assert_eq!(format, image::ImageFormat::WebP);
     }
@@ -382,8 +375,8 @@ mod tests {
         let mut jpg_buf = Vec::new();
         img.write_to(&mut std::io::Cursor::new(&mut jpg_buf), image::ImageFormat::Jpeg).unwrap();
         let original = jpg_buf.clone();
-        let result = convert_bytes_to_lossless_webp(jpg_buf);
-        assert_eq!(result, original, "JPEG bytes should be returned unchanged");
+        let result = convert_bytes_to_lossless_webp(&jpg_buf);
+        assert_eq!(result, Some(original), "JPEG bytes should be returned unchanged");
     }
 
     #[test]
@@ -391,7 +384,7 @@ mod tests {
         let raw = image::RgbaImage::new(2, 2);
         let webp_bytes = webp::Encoder::from_rgba(raw.as_raw(), 2, 2).encode_lossless();
         let original = webp_bytes.to_vec();
-        let result = convert_bytes_to_lossless_webp(original.clone());
-        assert_eq!(result, original, "WebP bytes should be returned unchanged");
+        let result = convert_bytes_to_lossless_webp(&original);
+        assert_eq!(result, Some(original), "WebP bytes should be returned unchanged");
     }
 }

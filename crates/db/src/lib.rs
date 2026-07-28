@@ -7,7 +7,6 @@ mod profiles;
 mod variants;
 mod groups;
 mod metadata;
-mod migration;
 mod discs;
 mod setup;
 mod row_mapping;

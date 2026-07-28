@@ -46,9 +46,22 @@ pub fn init_db(db_path: &str) -> DbConn {
                 manual_unmatch INTEGER NOT NULL DEFAULT 0,
                 sort_title TEXT NOT NULL DEFAULT '',
                 shadps4_version TEXT NOT NULL DEFAULT '',
-                last_played INTEGER NOT NULL DEFAULT 0
+                last_played INTEGER NOT NULL DEFAULT 0,
+                release_date TEXT NOT NULL DEFAULT '',
+                release_timestamp INTEGER NOT NULL DEFAULT 0,
+                metacritic_score INTEGER NOT NULL DEFAULT -1,
+                steam_review_score INTEGER NOT NULL DEFAULT -1,
+                steam_review_count INTEGER NOT NULL DEFAULT 0,
+                ra_core TEXT NOT NULL DEFAULT '',
+                emulator_override TEXT NOT NULL DEFAULT '',
+                rom_path TEXT NOT NULL DEFAULT '',
+                playtime REAL NOT NULL DEFAULT 0.0,
+                cached_earned_count INTEGER NOT NULL DEFAULT 0,
+                cached_total_count INTEGER NOT NULL DEFAULT 0,
+                cached_achievement_mtime INTEGER NOT NULL DEFAULT 0
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_games_game_id_platform ON games(game_id, platform_id) WHERE game_id != '';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps4_serial ON games(kind, platform_id) WHERE kind = 'ps4';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps3_serial ON games(kind, platform_id) WHERE kind = 'ps3';
             CREATE TABLE IF NOT EXISTS game_configs (
@@ -62,7 +75,8 @@ pub fn init_db(db_path: &str) -> DbConn {
                 game_id INTEGER NOT NULL,
                 started_at INTEGER NOT NULL,
                 ended_at INTEGER NOT NULL,
-                duration_seconds INTEGER NOT NULL
+                duration_seconds INTEGER NOT NULL,
+                variant_id INTEGER
             );
             CREATE INDEX IF NOT EXISTS idx_sessions_game_id ON play_sessions(game_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON play_sessions(started_at);
@@ -72,7 +86,8 @@ pub fn init_db(db_path: &str) -> DbConn {
                 wine_version TEXT NOT NULL DEFAULT 'system',
                 custom_wine_path TEXT NOT NULL DEFAULT '',
                 prefix TEXT NOT NULL DEFAULT '',
-                arch TEXT NOT NULL DEFAULT 'auto'
+                arch TEXT NOT NULL DEFAULT 'auto',
+                umu_enabled INTEGER NOT NULL DEFAULT 1
             );
             CREATE TABLE IF NOT EXISTS groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,7 +101,7 @@ pub fn init_db(db_path: &str) -> DbConn {
             CREATE INDEX IF NOT EXISTS idx_game_groups_group ON game_groups(group_id);",
         ).expect("failed to create tables");
 
-        crate::migration::run_schema_migrations(&conn);
+        // PRE-RELEASE: schema migrations merged into CREATE TABLE above
     }
 
     crate::create_variants_table(&pool);

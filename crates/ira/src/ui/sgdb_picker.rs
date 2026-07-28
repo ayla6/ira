@@ -179,8 +179,8 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
                 match steam.download_bytes(&url) {
                     Ok(bytes) if !bytes.is_empty() => {
                         let _ = tx.send((bytes.clone(), false));
-                        let converted = ira_parser::convert_bytes_to_lossless_webp(bytes);
-                        let _ = tx.send((converted, true));
+                        let converted = ira_parser::convert_bytes_to_lossless_webp(&bytes);
+                        let _ = tx.send((converted.unwrap_or_else(|| bytes.clone()), true));
                     }
                     _ => {
                         eprintln!("Download failed for {}", url);

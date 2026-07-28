@@ -157,7 +157,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
         state.borrow_mut().rpcs3_watcher = rpcs3_watcher;
     }
 
-    // Warm steamcmd.net cache for all Steam games in the background
+    // Warm steamcmd.net cache for any game with a steam_id in the background
     {
         let steam = state.borrow().steam.clone();
         let db = db.clone();
@@ -167,10 +167,13 @@ pub fn activate(app: &adw::Application) -> SharedState {
                 Err(_) => return,
             };
             for entry in &entries {
-                if entry.kind != ira_models::GameKind::Steam || entry.steam_id.is_empty() {
+                if entry.steam_id.is_empty() {
                     continue;
                 }
-                steam.fetch_steamcmd_info(&entry.steam_id);
+                if !entry.trophy_source.has_steam_enrichment() {
+                    continue;
+                }
+                steam.ensure_steamcmd_cache(&entry.steam_id);
             }
         });
     }

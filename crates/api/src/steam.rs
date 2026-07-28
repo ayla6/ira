@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::SteamDataClient;
 use crate::types::{
-    AppDetails, AppDetailsResponse, GlobalAchievementsResponse, SteamCmdApp, SteamCmdInfo,
+    AppDetails, AppDetailsResponse, GlobalAchievementsResponse, SteamCmdInfo,
     SteamCmdResponse, SteamGameDetails, SteamReviewSummary, SteamReviewsResponse,
 };
 use crate::util::{pick_lang, urlencode, NEMIRTINGAS_BASE_URL};
@@ -333,24 +333,35 @@ impl SteamDataClient {
     pub fn cached_clienticon(&self, app_id: &str) -> Option<String> {
         let cached = self.game_dir(app_id).join("steamcmd_info.json");
         let data = std::fs::read(&cached).ok()?;
-        let info: SteamCmdInfo = serde_json::from_slice(&data).ok()?;
-        if info.clienticon.is_empty() { None } else { Some(info.clienticon) }
+        let raw: SteamCmdResponse = serde_json::from_slice(&data).ok()?;
+        let entry = raw.data.get(app_id)?;
+        if entry.common.clienticon.is_empty() { None } else { Some(entry.common.clienticon.clone()) }
     }
 
-    /// Resolve the icon hash for a Steam app from cached steamcmd.net data.
-    /// Returns `None` if no cached data is available.
     pub fn cached_icon_hash(&self, app_id: &str) -> Option<String> {
         let cached = self.game_dir(app_id).join("steamcmd_info.json");
         let data = std::fs::read(&cached).ok()?;
-        let info: SteamCmdInfo = serde_json::from_slice(&data).ok()?;
-        if info.icon.is_empty() { None } else { Some(info.icon) }
+        let raw: SteamCmdResponse = serde_json::from_slice(&data).ok()?;
+        let entry = raw.data.get(app_id)?;
+        if entry.common.icon.is_empty() { None } else { Some(entry.common.icon.clone()) }
+    }
+
+    pub fn ensure_steamcmd_cache(&self, app_id: &str) -> bool {
+        let cache_path = self.game_dir(app_id).join("steamcmd_info.json");
+        if cache_path.is_file() {
+            return true;
+        }
+        self.fetch_steamcmd_info(app_id).is_some()
     }
 
     pub fn fetch_steamcmd_info(&self, app_id: &str) -> Option<SteamCmdInfo> {
         let cache_path = self.game_dir(app_id).join("steamcmd_info.json");
+
+        // Try cache first — read the full raw JSON and parse out what we need
         if let Ok(data) = std::fs::read(&cache_path) {
-            if let Ok(info) = serde_json::from_slice::<SteamCmdInfo>(&data) {
-                return Some(info);
+            let raw: SteamCmdResponse = serde_json::from_slice(&data).ok()?;
+            if raw.status == "success" {
+                return Self::parse_steamcmd_app(&raw, app_id);
             }
         }
 
@@ -363,7 +374,15 @@ impl SteamDataClient {
             }
         };
 
-        let raw: SteamCmdResponse = match resp.json() {
+        let raw_bytes = match resp.bytes() {
+            Ok(b) => b.to_vec(),
+            Err(e) => {
+                eprintln!("steamcmd.net read error for {}: {}", app_id, e);
+                return None;
+            }
+        };
+
+        let raw: SteamCmdResponse = match serde_json::from_slice(&raw_bytes) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("steamcmd.net decode error for {}: {}", app_id, e);
@@ -376,15 +395,16 @@ impl SteamDataClient {
             return None;
         }
 
-        let entry: &SteamCmdApp = match raw.data.get(app_id) {
-            Some(e) => e,
-            None => {
-                eprintln!("steamcmd.net no data for app {}", app_id);
-                return None;
-            }
-        };
+        // Save the FULL raw JSON response
+        let _ = std::fs::create_dir_all(self.game_dir(app_id));
+        let _ = std::fs::write(&cache_path, &raw_bytes);
 
-        let info = SteamCmdInfo {
+        Self::parse_steamcmd_app(&raw, app_id)
+    }
+
+    fn parse_steamcmd_app(raw: &SteamCmdResponse, app_id: &str) -> Option<SteamCmdInfo> {
+        let entry = raw.data.get(app_id)?;
+        Some(SteamCmdInfo {
             name: entry.common.name.clone(),
             release_timestamp: entry.steam_release_date.parse().unwrap_or(0),
             metacritic_score: entry.common.metacritic_score.parse().unwrap_or(-1),
@@ -396,12 +416,6 @@ impl SteamDataClient {
             install_dir: entry.config.installdir.clone(),
             clienticon: entry.common.clienticon.clone(),
             icon: entry.common.icon.clone(),
-        };
-
-        let _ = std::fs::create_dir_all(self.game_dir(app_id));
-        if let Ok(b) = serde_json::to_vec(&info) {
-            let _ = std::fs::write(&cache_path, b);
-        }
-        Some(info)
+        })
     }
 }

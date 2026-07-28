@@ -239,28 +239,24 @@ fn build_steam_icon_button(
                     ira_platforms::steam::get_clienticon(app_id_num)
                 });
             if let Some(clienticon) = clienticon {
-                let ico_file = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.ico");
-                if let Some(parent) = ico_file.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                let webp_file = ico_file.with_extension("webp");
-                let ico_path = ira_platforms::steam::steam_install_dir()
-                    .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
-                let have_local = ico_path.as_ref().is_some_and(|p| p.is_file());
-                if have_local {
-                    if let Some(ref ico_path_val) = ico_path {
-                        if let Ok(ico_data) = std::fs::read(ico_path_val) {
-                            if std::fs::write(&ico_file, &ico_data).is_ok() {
-                                ira_parser::convert_to_lossless_webp(&ico_file);
-                            }
-                        }
+                let dest_webp = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.webp");
+                if !dest_webp.is_file() {
+                    if let Some(parent) = dest_webp.parent() {
+                        let _ = std::fs::create_dir_all(parent);
                     }
-                }
-                if !have_local || (!ico_file.is_file() && !webp_file.is_file()) {
-                    let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
-                    let _ = std::fs::remove_file(&ico_file);
-                    if steam.download_file(&url, &ico_file).is_ok() {
-                        ira_parser::convert_to_lossless_webp(&ico_file);
+                    let ico_bytes = {
+                        let ico_path = ira_platforms::steam::steam_install_dir()
+                            .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
+                        ico_path.as_ref().and_then(|p| {
+                            if p.is_file() { std::fs::read(p).ok() } else { None }
+                        })
+                    };
+                    let ico_bytes = ico_bytes.unwrap_or_else(|| {
+                        let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
+                        steam.download_bytes(&url).ok().unwrap_or_default()
+                    });
+                    if let Some(webp) = ira_parser::convert_bytes_to_lossless_webp(&ico_bytes) {
+                        let _ = std::fs::write(&dest_webp, &webp);
                     }
                 }
             }

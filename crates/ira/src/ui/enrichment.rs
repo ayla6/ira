@@ -124,7 +124,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
                 }
             }
 
-            if game.icon_path.is_empty() && trophy_source == ira_models::TrophySource::SteamNative {
+            if game.icon_path.is_empty() && trophy_source.has_steam_enrichment() {
                 if let Some(png) = fetch_steam_game_icon(&app_id, &save_dir, &steam) {
                     game.icon_path = png;
                 }
@@ -153,7 +153,25 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
                 }
             }
 
-            if game.release_date.is_empty() || game.metacritic_score < 0 {
+            if game.release_date.is_empty() || game.metacritic_score < 0 || game.steam_review_score < 0 {
+                if let Some(cmd) = steam.fetch_steamcmd_info(&app_id) {
+                    if game.release_timestamp == 0 && cmd.release_timestamp > 0 {
+                        game.release_timestamp = cmd.release_timestamp;
+                    }
+                    if game.metacritic_score < 0 && cmd.metacritic_score >= 0 {
+                        game.metacritic_score = cmd.metacritic_score;
+                    }
+                    if game.steam_review_score < 0 && cmd.review_score >= 0 {
+                        game.steam_review_score = cmd.review_score;
+                        game.steam_review_count = cmd.review_percentage;
+                    }
+                    if game.name.starts_with("App ID:") && !cmd.name.is_empty() {
+                        game.name = cmd.name.clone();
+                    }
+                }
+            }
+
+            if (game.release_date.is_empty() || game.release_timestamp == 0) && game.metacritic_score < 0 {
                 if let Some(details) = steam.fetch_steam_store_data(&app_id) {
                     if let Some(rd) = details.release_date {
                         if !rd.coming_soon && game.release_date.is_empty() {
@@ -193,7 +211,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
 }
 
 /// Fetch the game icon from Steam's local clienticon cache or CDN.
-/// 1. Look up clienticon hash from appinfo.vdf
+/// 1. Look up clienticon hash from cached steamcmd.net data, fall back to appinfo.vdf
 /// 2. Try local steam/games/<hash>.ico
 /// 3. Fall back to Steam CDN download
 /// 4. Convert ICO to WebP and save to the game's data directory
@@ -203,8 +221,11 @@ fn fetch_steam_game_icon(
     steam: &std::sync::Arc<ira_api::SteamDataClient>,
 ) -> Option<String> {
     let _s = tracing::info_span!("fetch_steam_game_icon", app_id = %app_id).entered();
-    let app_id_num: u32 = app_id.parse().ok()?;
-    let clienticon = ira_platforms::steam::get_clienticon(app_id_num)?;
+    let clienticon = steam.cached_clienticon(app_id)
+        .or_else(|| {
+            let app_id_num: u32 = app_id.parse().ok()?;
+            ira_platforms::steam::get_clienticon(app_id_num)
+        })?;
     if clienticon.is_empty() { return None; }
 
     let dest_webp = ira_parser::data_dir(save_dir, app_id).join("icon.webp");

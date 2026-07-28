@@ -208,13 +208,13 @@ fn build_steam_non_icon_button(
 fn build_steam_icon_button(
     is_steam: bool,
     asset_type: &str,
-    trophy_source: ira_models::TrophySource,
+    _trophy_source: ira_models::TrophySource,
     state: &SharedState,
     id: &str,
     save_dir: &str,
     refresh_images: &Rc<dyn Fn()>,
 ) -> Option<gtk4::Button> {
-    if !is_steam || AssetType::from_string(asset_type) != Some(AssetType::Icon) || trophy_source != ira_models::TrophySource::SteamNative {
+    if !is_steam || AssetType::from_string(asset_type) != Some(AssetType::Icon) {
         return None;
     }
     let btn = gtk4::Button::with_label("Steam");
@@ -233,31 +233,34 @@ fn build_steam_icon_button(
         let rx = std::cell::RefCell::new(rx);
         std::thread::spawn(move || {
             let _s = tracing::info_span!("steam_icon_download", app_id = %id_c).entered();
-            if let Ok(app_id_num) = id_c.parse::<u32>() {
-                if let Some(clienticon) = ira_platforms::steam::get_clienticon(app_id_num) {
-                    let ico_file = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.ico");
-                    if let Some(parent) = ico_file.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let webp_file = ico_file.with_extension("webp");
-                    let ico_path = ira_platforms::steam::steam_install_dir()
-                        .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
-                    let have_local = ico_path.as_ref().is_some_and(|p| p.is_file());
-                    if have_local {
-                        if let Some(ref ico_path_val) = ico_path {
-                            if let Ok(ico_data) = std::fs::read(ico_path_val) {
-                                if std::fs::write(&ico_file, &ico_data).is_ok() {
-                                    ira_parser::convert_to_lossless_webp(&ico_file);
-                                }
+            let clienticon = steam.cached_clienticon(&id_c)
+                .or_else(|| {
+                    let app_id_num: u32 = id_c.parse().ok()?;
+                    ira_platforms::steam::get_clienticon(app_id_num)
+                });
+            if let Some(clienticon) = clienticon {
+                let ico_file = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.ico");
+                if let Some(parent) = ico_file.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let webp_file = ico_file.with_extension("webp");
+                let ico_path = ira_platforms::steam::steam_install_dir()
+                    .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
+                let have_local = ico_path.as_ref().is_some_and(|p| p.is_file());
+                if have_local {
+                    if let Some(ref ico_path_val) = ico_path {
+                        if let Ok(ico_data) = std::fs::read(ico_path_val) {
+                            if std::fs::write(&ico_file, &ico_data).is_ok() {
+                                ira_parser::convert_to_lossless_webp(&ico_file);
                             }
                         }
                     }
-                    if !have_local || (!ico_file.is_file() && !webp_file.is_file()) {
-                        let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
-                        let _ = std::fs::remove_file(&ico_file);
-                        if steam.download_file(&url, &ico_file).is_ok() {
-                            ira_parser::convert_to_lossless_webp(&ico_file);
-                        }
+                }
+                if !have_local || (!ico_file.is_file() && !webp_file.is_file()) {
+                    let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
+                    let _ = std::fs::remove_file(&ico_file);
+                    if steam.download_file(&url, &ico_file).is_ok() {
+                        ira_parser::convert_to_lossless_webp(&ico_file);
                     }
                 }
             }

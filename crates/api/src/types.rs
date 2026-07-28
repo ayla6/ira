@@ -144,3 +144,87 @@ pub(crate) struct NemirtingasAchievement {
     #[serde(default)]
     pub description: HashMap<String, String>,
 }
+
+// ── steamcmd.net API ────────────────────────────────────────────────
+
+/// Top-level response from `api.steamcmd.net/v1/info/{appid}`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct SteamCmdResponse {
+    pub data: HashMap<String, SteamCmdApp>,
+    pub status: String,
+}
+
+/// Per-app data from steamcmd.net.
+#[derive(Debug, Deserialize)]
+pub(crate) struct SteamCmdApp {
+    #[serde(rename = "appid")]
+    pub _appid: String,
+    #[serde(default)]
+    pub common: SteamCmdCommon,
+    #[serde(default)]
+    pub extended: SteamCmdExtended,
+    #[serde(default)]
+    pub config: SteamCmdConfig,
+    #[serde(default)]
+    pub steam_release_date: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdCommon {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub metacritic_score: String,
+    #[serde(default)]
+    pub review_percentage: String,
+    #[serde(default)]
+    pub review_score: String,
+    #[serde(default)]
+    pub clienticon: String,
+    #[serde(default)]
+    pub icon: String,
+    #[serde(default)]
+    pub _associations: HashMap<String, SteamCmdAssociation>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdAssociation {
+    #[serde(rename = "name")]
+    pub _name: String,
+    #[serde(rename = "type")]
+    pub _kind: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdExtended {
+    #[serde(default)]
+    pub developer: String,
+    #[serde(default)]
+    pub publisher: String,
+    #[serde(default)]
+    pub homepage: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdConfig {
+    #[serde(default)]
+    pub installdir: String,
+}
+
+/// Parsed fields extracted from a steamcmd.net response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SteamCmdInfo {
+    pub name: String,
+    pub release_timestamp: i64,
+    pub metacritic_score: i64,
+    pub review_percentage: i64,
+    pub review_score: i64,
+    pub developer: String,
+    pub publisher: String,
+    pub homepage: String,
+    pub install_dir: String,
+    /// Client icon hash (used for `steam/games/<hash>.ico` and CDN).
+    pub clienticon: String,
+    /// Community icon hash (used for CDN `apps/<appid>/<hash>.ico`).
+    pub icon: String,
+}

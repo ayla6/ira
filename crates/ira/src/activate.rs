@@ -123,7 +123,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
             steam_griddb_api_key,
             &format!("{}/data", save_dir),
         ));
-        state.borrow_mut().steam = steam;
+        state.borrow_mut().steam = steam.clone();
 
         let watcher = match AchievementWatcher::new(cfg_for_watcher, sender.clone(), save_dir.clone(), Arc::new(crate::game_loader::load_game)) {
             Ok(w) => {
@@ -155,6 +155,24 @@ pub fn activate(app: &adw::Application) -> SharedState {
             }
         };
         state.borrow_mut().rpcs3_watcher = rpcs3_watcher;
+    }
+
+    // Warm steamcmd.net cache for all Steam games in the background
+    {
+        let steam = state.borrow().steam.clone();
+        let db = db.clone();
+        std::thread::spawn(move || {
+            let entries = match db::load_all_games(&db) {
+                Ok(e) => e,
+                Err(_) => return,
+            };
+            for entry in &entries {
+                if entry.kind != ira_models::GameKind::Steam || entry.steam_id.is_empty() {
+                    continue;
+                }
+                steam.fetch_steamcmd_info(&entry.steam_id);
+            }
+        });
     }
 
     {

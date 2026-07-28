@@ -31,8 +31,8 @@ pub fn get_game_config(conn: &DbConn, game_id: i64) -> Result<Option<(GameLaunch
             // GameLaunchConfig but non-default in the old WineConfig JSON, copy them over.
             // This handles DB rows saved before these fields were moved.
             // PRE-RELEASE: remove after v0.X
-            if !launch.gamemode && wine._gamemode { launch.gamemode = true; }
-            if !launch.mangohud && wine._mangohud { launch.mangohud = true; }
+            if launch.gamemode != Some(true) && wine._gamemode { launch.gamemode = Some(true); }
+            if launch.mangohud != Some(true) && wine._mangohud { launch.mangohud = Some(true); }
             if launch.gamescope.is_none() && wine._gamescope { launch.gamescope = Some(true); }
             if launch.gamescope_flags.is_empty() && !wine._gamescope_flags.is_empty() {
                 launch.gamescope_flags = wine._gamescope_flags.clone();

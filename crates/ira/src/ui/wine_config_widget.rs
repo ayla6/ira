@@ -115,7 +115,7 @@ fn build_wine_perf_page(
     perf_group.add(&proton_wow64);
 
     perf_page.append(&perf_group);
-    let page = WinePage { icon: "power-profile-performance-symbolic", label: "Wine: Performance", page: page_with_content(perf_page) };
+    let page = WinePage { icon: "power-profile-performance-symbolic", label: "Wine Performance", page: page_with_content(perf_page) };
 
     (page, PerfPageWidgets {
         proton_ntsync, esync, fsync, fsr, dxvk_frame_rate, proton_wow64,
@@ -172,7 +172,7 @@ fn build_wine_gfx_page(
     }
     gfx_group.add(&audio);
     gfx_page.append(&gfx_group);
-    let page = WinePage { icon: "video-display-symbolic", label: "Wine: Graphics", page: page_with_content(gfx_page) };
+    let page = WinePage { icon: "video-display-symbolic", label: "Wine Graphics", page: page_with_content(gfx_page) };
 
     {
         let dr = dpi_row.clone();

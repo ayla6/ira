@@ -83,6 +83,17 @@ fn build_launch_wine_advanced_pages(
     let overlay_default = overlay_source_id.map_or(state.borrow().cfg.overlay.enabled, |id| {
         state.borrow().cfg.overlay.source_enabled(id)
     });
+    let gamemode_default = state.borrow().cfg.default_system.gamemode;
+    let mangohud_default = state.borrow().cfg.default_system.mangohud;
+    let default_gamescope = state.borrow().cfg.default_system.gamescope;
+    let gamescope_default = overlay_source_id
+        .and_then(|id| state.borrow().cfg.overlay.source_gamescope.get(id).copied())
+        .unwrap_or(default_gamescope);
+    let gs = state.borrow().cfg.default_system.clone();
+    let gamescope_w_default = gs.gamescope_w;
+    let gamescope_h_default = gs.gamescope_h;
+    let gamescope_fps_default = gs.gamescope_fps;
+    let gamescope_upscaling_default = gs.gamescope_upscaling;
 
     // Launch Config page — only for non-emulator games (Wine, Linux native, etc.)
     let launch_config_widgets = if show_launch_config {
@@ -106,6 +117,13 @@ fn build_launch_wine_advanced_pages(
     let system_widgets = Some(build_system_page(super::edit_game_system::SystemPageParams {
         launch: saved_launch,
         overlay_default,
+        gamemode_default,
+        mangohud_default,
+        gamescope_default,
+        gamescope_w_default,
+        gamescope_h_default,
+        gamescope_fps_default,
+        gamescope_upscaling_default,
         sidebar,
         stack,
     }));

@@ -4,8 +4,29 @@ use std::sync::{Arc, Mutex};
 use ira_config::Config;
 use ira_db::DbConn;
 use ira_models::{AppSender, WineConfig};
+use gio::prelude::ListModelExt;
+use glib::object::Cast;
+use gtk4::gdk::prelude::{DisplayExt, MonitorExt};
+use gtk4::gdk::{Display, Monitor};
 
 use super::state::SharedState;
+
+fn detect_screen_resolution() -> (u32, u32) {
+    Display::default()
+        .and_then(|d| {
+            let monitors = d.monitors();
+            (0..monitors.n_items()).find_map(|i| {
+                monitors
+                    .item(i)
+                    .and_then(|m| m.downcast::<Monitor>().ok())
+            })
+        })
+        .map(|m| {
+            let g = m.geometry();
+            (g.width() as u32, g.height() as u32)
+        })
+        .unwrap_or((1920, 1080))
+}
 
 pub(super) struct LaunchCtx<'a> {
     pub db: &'a DbConn,
@@ -21,6 +42,12 @@ pub(super) struct LaunchCtx<'a> {
     pub overlay_global_enabled: bool,
     pub overlay_font_family: Option<String>,
     pub gamescope_default: bool,
+    pub gamemode_default: bool,
+    pub mangohud_default: bool,
+    pub gamescope_w_default: u32,
+    pub gamescope_h_default: u32,
+    pub gamescope_fps_default: u32,
+    pub gamescope_upscaling_default: String,
 }
 
 fn spawn_and_monitor(ctx: &LaunchCtx, cmd: &[String], env: &[(String, String)], err_label: &str) -> Result<(), String> {
@@ -59,8 +86,35 @@ fn build_emulator_env_and_wrap(ctx: &LaunchCtx, cmd: &mut Vec<String>) -> Vec<(S
         .unwrap_or_default();
 
     let mut launch = launch;
+    if launch.gamemode.is_none() {
+        launch.gamemode = Some(ctx.gamemode_default);
+    }
+    if launch.mangohud.is_none() {
+        launch.mangohud = Some(ctx.mangohud_default);
+    }
     if launch.gamescope.is_none() {
         launch.gamescope = Some(ctx.gamescope_default);
+    }
+    if launch.gamescope_w.is_none() {
+        launch.gamescope_w = Some(ctx.gamescope_w_default);
+    }
+    if launch.gamescope_h.is_none() {
+        launch.gamescope_h = Some(ctx.gamescope_h_default);
+    }
+    if launch.gamescope_w == Some(0) || launch.gamescope_h == Some(0) {
+        let (sw, sh) = detect_screen_resolution();
+        if launch.gamescope_w == Some(0) {
+            launch.gamescope_w = Some(sw);
+        }
+        if launch.gamescope_h == Some(0) {
+            launch.gamescope_h = Some(sh);
+        }
+    }
+    if launch.gamescope_fps.is_none() {
+        launch.gamescope_fps = Some(ctx.gamescope_fps_default);
+    }
+    if launch.gamescope_upscaling.is_none() {
+        launch.gamescope_upscaling = Some(ctx.gamescope_upscaling_default.clone());
     }
 
     let overlay_enabled = launch.overlay_enabled.unwrap_or(ctx.overlay_global_enabled);
@@ -244,8 +298,35 @@ pub(super) fn launch_other(
         .flatten()
         .unwrap_or_default();
 
+    if launch.gamemode.is_none() {
+        launch.gamemode = Some(ctx.gamemode_default);
+    }
+    if launch.mangohud.is_none() {
+        launch.mangohud = Some(ctx.mangohud_default);
+    }
     if launch.gamescope.is_none() {
         launch.gamescope = Some(ctx.gamescope_default);
+    }
+    if launch.gamescope_w.is_none() {
+        launch.gamescope_w = Some(ctx.gamescope_w_default);
+    }
+    if launch.gamescope_h.is_none() {
+        launch.gamescope_h = Some(ctx.gamescope_h_default);
+    }
+    if launch.gamescope_w == Some(0) || launch.gamescope_h == Some(0) {
+        let (sw, sh) = detect_screen_resolution();
+        if launch.gamescope_w == Some(0) {
+            launch.gamescope_w = Some(sw);
+        }
+        if launch.gamescope_h == Some(0) {
+            launch.gamescope_h = Some(sh);
+        }
+    }
+    if launch.gamescope_fps.is_none() {
+        launch.gamescope_fps = Some(ctx.gamescope_fps_default);
+    }
+    if launch.gamescope_upscaling.is_none() {
+        launch.gamescope_upscaling = Some(ctx.gamescope_upscaling_default.clone());
     }
 
     if let Some(pid) = profile_id {

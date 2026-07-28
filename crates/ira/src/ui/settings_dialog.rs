@@ -279,6 +279,14 @@ pub fn show_settings_dialog(
         s.cfg.default_system.mangohud = system_defaults_widgets.mangohud.is_active();
         s.cfg.default_system.gamescope = system_defaults_widgets.gamescope.is_active();
         s.cfg.default_system.gamescope_flags = system_defaults_widgets.gamescope_flags.text().to_string();
+        s.cfg.default_system.gamescope_w = system_defaults_widgets.gamescope_w.value() as u32;
+        s.cfg.default_system.gamescope_h = system_defaults_widgets.gamescope_h.value() as u32;
+        s.cfg.default_system.gamescope_fps = system_defaults_widgets.gamescope_fps.value() as u32;
+        s.cfg.default_system.gamescope_upscaling = {
+            let upscale_values = ["linear", "fsr", "nis", "integer", "nearest"];
+            let idx = system_defaults_widgets.gamescope_upscaling_row.selected() as usize;
+            upscale_values.get(idx).copied().unwrap_or("").to_string()
+        };
         s.cfg.default_system.env_vars = super::wine_config_env_dll::collect_env_vars(&system_defaults_widgets.env_vars_box);
         s.cfg.default_system.ld_preload = system_defaults_widgets.ld_preload.text().to_string();
         s.cfg.default_system.ld_library_path = system_defaults_widgets.ld_library_path.text().to_string();

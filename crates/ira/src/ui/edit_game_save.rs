@@ -115,9 +115,9 @@ fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchC
     let ld_preload = sw.map_or(String::new(), |s| s.ld_preload_entry.text().to_string());
     let ld_library_path = sw.map_or(String::new(), |s| s.ld_library_path_entry.text().to_string());
     let overlay_enabled = sw.and_then(|s| *s.overlay_state.borrow());
-    let gamemode = sw.is_some_and(|s| s.gamemode.is_active());
-    let mangohud = sw.is_some_and(|s| s.mangohud.is_active());
-    let gamescope = sw.is_some_and(|s| s.gamescope.is_active()).then_some(true);
+    let gamemode = sw.and_then(|s| *s.gamemode_state.borrow());
+    let mangohud = sw.and_then(|s| *s.mangohud_state.borrow());
+    let gamescope = sw.and_then(|s| *s.gamescope_state.borrow());
     let gamescope_flags = sw.map_or(String::new(), |s| s.gamescope_flags.text().to_string());
     let gpu = sw.and_then(|s| {
         s.gpu_row.as_ref().map(|gr| {
@@ -136,6 +136,11 @@ fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchC
         if idx == 0 { None } else { Some(idx - 1) }
     });
 
+    let gamescope_w = sw.and_then(|s| *s.gamescope_w_state.borrow());
+    let gamescope_h = sw.and_then(|s| *s.gamescope_h_state.borrow());
+    let gamescope_fps = sw.and_then(|s| *s.gamescope_fps_state.borrow());
+    let gamescope_upscaling = sw.and_then(|s| s.gamescope_upscaling_state.borrow().clone());
+
     let lc = params.launch_config_widgets.as_ref();
     let launch = GameLaunchConfig {
         exe: lc.map_or(String::new(), |l| l.exe_entry.text().to_string()),
@@ -150,6 +155,10 @@ fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchC
         mangohud,
         gamescope,
         gamescope_flags,
+        gamescope_w,
+        gamescope_h,
+        gamescope_fps,
+        gamescope_upscaling,
         gpu,
         overlay_encoder,
         overlay_recording_quality,

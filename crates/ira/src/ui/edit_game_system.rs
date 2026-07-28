@@ -1,17 +1,25 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+use gtk4::prelude::*;
 use adw::prelude::*;
 use ira_models::GameLaunchConfig;
 use super::add_game_dialog::build_env_var_row;
 use super::settings_dialog;
 use super::settings_pages::{build_source_overlay_row, OverlayOverrideState};
+use super::wine_config_helpers::make_revert_btn;
 use super::css::*;
 
 #[derive(Clone)]
 pub(super) struct SystemWidgets {
     pub overlay_state: OverlayOverrideState,
-    pub gamemode: adw::SwitchRow,
-    pub mangohud: adw::SwitchRow,
-    pub gamescope: adw::SwitchRow,
+    pub gamemode_state: Rc<RefCell<Option<bool>>>,
+    pub mangohud_state: Rc<RefCell<Option<bool>>>,
+    pub gamescope_state: Rc<RefCell<Option<bool>>>,
     pub gamescope_flags: adw::EntryRow,
+    pub gamescope_w_state: Rc<RefCell<Option<u32>>>,
+    pub gamescope_h_state: Rc<RefCell<Option<u32>>>,
+    pub gamescope_fps_state: Rc<RefCell<Option<u32>>>,
+    pub gamescope_upscaling_state: Rc<RefCell<Option<String>>>,
     pub gpu_row: Option<adw::ComboRow>,
     pub gpu_options: Vec<String>,
     pub env_vars_box: gtk4::ListBox,
@@ -21,9 +29,62 @@ pub(super) struct SystemWidgets {
     pub overlay_quality_row: Option<adw::ComboRow>,
 }
 
+fn build_override_switch_row(
+    title: &str,
+    subtitle: &str,
+    global_default: bool,
+    override_value: Option<bool>,
+) -> (adw::SwitchRow, Rc<RefCell<Option<bool>>>) {
+    let row = adw::SwitchRow::new();
+    row.set_title(title);
+    row.set_subtitle(subtitle);
+
+    let value = override_value.unwrap_or(global_default);
+    row.set_active(value);
+
+    let revert_btn = make_revert_btn();
+    revert_btn.set_visible(override_value.is_some());
+    row.add_suffix(&revert_btn);
+
+    let state: Rc<RefCell<Option<bool>>> = Rc::new(RefCell::new(override_value));
+    let reverting = Rc::new(RefCell::new(false));
+
+    let state_c = state.clone();
+    let btn_c = revert_btn.clone();
+    let row_c = row.clone();
+    let rev_c = reverting.clone();
+    row.connect_active_notify(move |_| {
+        if *rev_c.borrow() { return; }
+        *state_c.borrow_mut() = Some(row_c.is_active());
+        btn_c.set_visible(true);
+        let _ = rev_c;
+    });
+
+    let state_c2 = state.clone();
+    let btn_c2 = revert_btn.clone();
+    let row_c2 = row.clone();
+    let rev_c2 = reverting.clone();
+    revert_btn.connect_clicked(move |_| {
+        *rev_c2.borrow_mut() = true;
+        row_c2.set_active(global_default);
+        *rev_c2.borrow_mut() = false;
+        *state_c2.borrow_mut() = None;
+        btn_c2.set_visible(false);
+    });
+
+    (row, state)
+}
+
 pub(super) struct SystemPageParams<'a> {
     pub launch: &'a GameLaunchConfig,
     pub overlay_default: bool,
+    pub gamemode_default: bool,
+    pub mangohud_default: bool,
+    pub gamescope_default: bool,
+    pub gamescope_w_default: u32,
+    pub gamescope_h_default: u32,
+    pub gamescope_fps_default: u32,
+    pub gamescope_upscaling_default: String,
     pub sidebar: &'a gtk4::ListBox,
     pub stack: &'a gtk4::Stack,
 }
@@ -63,34 +124,164 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     let perf_group = adw::PreferencesGroup::new();
     perf_group.set_title("Performance");
 
-    let gamemode = adw::SwitchRow::new();
-    gamemode.set_title("Gamemode");
-    gamemode.set_subtitle("Feral Interactive GameMode");
-    gamemode.set_active(params.launch.gamemode);
-    perf_group.add(&gamemode);
+    let (gamemode_row, gamemode_state) = build_override_switch_row(
+        "Gamemode", "Feral Interactive GameMode",
+        params.gamemode_default, params.launch.gamemode,
+    );
+    perf_group.add(&gamemode_row);
 
-    let mangohud = adw::SwitchRow::new();
-    mangohud.set_title("MangoHud");
-    mangohud.set_subtitle("Performance overlay");
-    mangohud.set_active(params.launch.mangohud);
-    perf_group.add(&mangohud);
+    let (mangohud_row, mangohud_state) = build_override_switch_row(
+        "MangoHud", "Performance overlay",
+        params.mangohud_default, params.launch.mangohud,
+    );
+    perf_group.add(&mangohud_row);
 
-    let gamescope = adw::SwitchRow::new();
-    gamescope.set_title("Gamescope");
-    gamescope.set_subtitle("Valve Gamescope compositor");
-    gamescope.set_active(params.launch.gamescope.unwrap_or(false));
-    perf_group.add(&gamescope);
+    let (gamescope_row, gamescope_state) = build_override_switch_row(
+        "Gamescope", "Valve Gamescope compositor",
+        params.gamescope_default, params.launch.gamescope,
+    );
+    perf_group.add(&gamescope_row);
+
+    let gs_resolved = params.launch.gamescope.unwrap_or(params.gamescope_default);
 
     let gamescope_flags = adw::EntryRow::new();
     gamescope_flags.set_title("Gamescope flags");
     gamescope_flags.set_text(&params.launch.gamescope_flags);
-    gamescope_flags.set_visible(params.launch.gamescope.unwrap_or(false));
+    gamescope_flags.set_visible(gs_resolved);
     perf_group.add(&gamescope_flags);
-    {
-        let gf = gamescope_flags.clone();
-        gamescope.connect_active_notify(move |sw| { gf.set_visible(sw.is_active()); });
-    }
     page.append(&perf_group);
+
+    // ─── Gamescope settings ───
+    let gs_group = adw::PreferencesGroup::new();
+    gs_group.set_title("Gamescope settings");
+    gs_group.set_visible(gs_resolved);
+
+    fn make_spin_override_row(
+        title: &str, subtitle: &str,
+        default_val: u32, override_val: Option<u32>,
+        min: f64, max: f64,
+    ) -> (adw::ActionRow, gtk4::SpinButton, Rc<RefCell<Option<u32>>>) {
+        let row = adw::ActionRow::new();
+        row.set_title(title);
+        row.set_subtitle(subtitle);
+        let val = override_val.unwrap_or(default_val);
+        let adj = gtk4::Adjustment::new(val as f64, min, max, 1.0, 10.0, 0.0);
+        let spin = gtk4::SpinButton::new(Some(&adj), 1.0, 0);
+        spin.set_valign(gtk4::Align::Center);
+        let state: Rc<RefCell<Option<u32>>> = Rc::new(RefCell::new(override_val));
+        let revert_btn = make_revert_btn();
+        revert_btn.set_visible(override_val.is_some());
+        let rev = Rc::new(RefCell::new(false));
+        {
+            let state_c = state.clone();
+            let btn_c = revert_btn.clone();
+            let rev_c = rev.clone();
+            spin.connect_value_changed(move |s| {
+                if *rev_c.borrow() { return; }
+                *state_c.borrow_mut() = Some(s.value() as u32);
+                btn_c.set_visible(true);
+            });
+        }
+        {
+            let state_c = state.clone();
+            let btn_c = revert_btn.clone();
+            let spin_c = spin.clone();
+            let rev_c = rev.clone();
+            let d = default_val as f64;
+            revert_btn.connect_clicked(move |_| {
+                *rev_c.borrow_mut() = true;
+                spin_c.set_value(d);
+                *rev_c.borrow_mut() = false;
+                *state_c.borrow_mut() = None;
+                btn_c.set_visible(false);
+            });
+        }
+        row.add_suffix(&revert_btn);
+        row.add_suffix(&spin);
+        (row, spin, state)
+    }
+
+    let w_dataset = params.launch.gamescope_w;
+    let h_dataset = params.launch.gamescope_h;
+    let fps_dataset = params.launch.gamescope_fps;
+    let upscale_dataset = params.launch.gamescope_upscaling.clone();
+
+    let (w_row, _w_spin, gamescope_w_state) = make_spin_override_row(
+        "Resolution width", "0 = auto", params.gamescope_w_default, w_dataset, 0.0, 16384.0,
+    );
+    gs_group.add(&w_row);
+
+    let (h_row, _h_spin, gamescope_h_state) = make_spin_override_row(
+        "Resolution height", "0 = auto", params.gamescope_h_default, h_dataset, 0.0, 16384.0,
+    );
+    gs_group.add(&h_row);
+
+    let (fps_row, _fps_spin, gamescope_fps_state) = make_spin_override_row(
+        "FPS limit", "0 = no limit", params.gamescope_fps_default, fps_dataset, 0.0, 360.0,
+    );
+    gs_group.add(&fps_row);
+
+    let upscaling_model = gtk4::StringList::new(&["Linear", "FSR", "NIS", "Integer", "Nearest"]);
+    let upscaling_row = adw::ComboRow::new();
+    upscaling_row.set_title("Upscaling method");
+    upscaling_row.set_model(Some(&upscaling_model));
+    let upscaling_values = ["linear", "fsr", "nis", "integer", "nearest"];
+    let upscale_current = params.launch.gamescope_upscaling.as_deref().unwrap_or("linear").to_string();
+    let upscale_default = params.gamescope_upscaling_default;
+    let upscale_selected = if upscale_dataset.is_some() {
+        upscaling_values.iter().position(|&v| v == upscale_current).unwrap_or(0)
+    } else {
+        upscaling_values.iter().position(|&v| v == upscale_default.as_str()).unwrap_or(0)
+    } as u32;
+    upscaling_row.set_selected(upscale_selected);
+
+    let gamescope_upscaling_state: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(upscale_dataset));
+    let upscale_revert_btn = make_revert_btn();
+    upscale_revert_btn.set_visible(params.launch.gamescope_upscaling.is_some());
+    upscaling_row.add_suffix(&upscale_revert_btn);
+
+    let upscale_rev = Rc::new(RefCell::new(false));
+    {
+        let state_c = gamescope_upscaling_state.clone();
+        let btn_c = upscale_revert_btn.clone();
+        let rev_c = upscale_rev.clone();
+        let values = upscaling_values;
+        upscaling_row.connect_selected_item_notify(move |r| {
+            if *rev_c.borrow() { return; }
+            let idx = r.selected() as usize;
+            let v = values.get(idx).copied().unwrap_or("linear");
+            *state_c.borrow_mut() = Some(v.to_string());
+            btn_c.set_visible(true);
+        });
+    }
+    {
+        let state_c = gamescope_upscaling_state.clone();
+        let btn_c = upscale_revert_btn.clone();
+        let rev_c = upscale_rev.clone();
+        let values = upscaling_values;
+        let default_idx = values.iter().position(|&v| v == upscale_default.as_str()).unwrap_or(0) as u32;
+        let row_c = upscaling_row.clone();
+        upscale_revert_btn.connect_clicked(move |_| {
+            *rev_c.borrow_mut() = true;
+            row_c.set_selected(default_idx);
+            *rev_c.borrow_mut() = false;
+            *state_c.borrow_mut() = None;
+            btn_c.set_visible(false);
+        });
+        gs_group.add(&upscaling_row);
+    }
+    page.append(&gs_group);
+
+    // Show/hide gamescope settings when gamescope toggle changes
+    {
+        let gsg = gs_group.clone();
+        let gf = gamescope_flags.clone();
+        gamescope_row.connect_active_notify(move |sw| {
+            let v = sw.is_active();
+            gsg.set_visible(v);
+            gf.set_visible(v);
+        });
+    }
 
     // ─── GPU (only when multiple GPUs detected) ───
     let gpus = ira_launcher::gpu::detect_gpus();
@@ -168,10 +359,14 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
 
     SystemWidgets {
         overlay_state,
-        gamemode,
-        mangohud,
-        gamescope,
+        gamemode_state,
+        mangohud_state,
+        gamescope_state,
         gamescope_flags,
+        gamescope_w_state,
+        gamescope_h_state,
+        gamescope_fps_state,
+        gamescope_upscaling_state,
         gpu_row,
         gpu_options,
         env_vars_box,

@@ -94,6 +94,10 @@ pub(super) struct SystemDefaultsWidgets {
     pub mangohud: adw::SwitchRow,
     pub gamescope: adw::SwitchRow,
     pub gamescope_flags: adw::EntryRow,
+    pub gamescope_w: gtk4::SpinButton,
+    pub gamescope_h: gtk4::SpinButton,
+    pub gamescope_fps: gtk4::SpinButton,
+    pub gamescope_upscaling_row: adw::ComboRow,
     pub env_vars_box: gtk4::ListBox,
     pub ld_preload: adw::EntryRow,
     pub ld_library_path: adw::EntryRow,
@@ -135,6 +139,56 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     }
     page.append(&perf_group);
 
+    // ─── Gamescope settings ───
+    let gs_group = adw::PreferencesGroup::new();
+    gs_group.set_title("Gamescope");
+    gs_group.set_visible(s.gamescope);
+    {
+        let gsg = gs_group.clone();
+        gamescope.connect_active_notify(move |sw| { gsg.set_visible(sw.is_active()); });
+    }
+
+    let w_adj = gtk4::Adjustment::new(s.gamescope_w as f64, 0.0, 16384.0, 1.0, 100.0, 0.0);
+    let gamescope_w = gtk4::SpinButton::new(Some(&w_adj), 1.0, 0);
+    let w_row = adw::ActionRow::new();
+    w_row.set_title("Resolution width");
+    w_row.set_subtitle("0 = auto");
+    gamescope_w.set_valign(gtk4::Align::Center);
+    w_row.add_suffix(&gamescope_w);
+    gs_group.add(&w_row);
+
+    let h_adj = gtk4::Adjustment::new(s.gamescope_h as f64, 0.0, 16384.0, 1.0, 100.0, 0.0);
+    let gamescope_h = gtk4::SpinButton::new(Some(&h_adj), 1.0, 0);
+    let h_row = adw::ActionRow::new();
+    h_row.set_title("Resolution height");
+    h_row.set_subtitle("0 = auto");
+    gamescope_h.set_valign(gtk4::Align::Center);
+    h_row.add_suffix(&gamescope_h);
+    gs_group.add(&h_row);
+
+    let fps_adj = gtk4::Adjustment::new(s.gamescope_fps as f64, 0.0, 360.0, 1.0, 10.0, 0.0);
+    let gamescope_fps = gtk4::SpinButton::new(Some(&fps_adj), 1.0, 0);
+    let fps_row = adw::ActionRow::new();
+    fps_row.set_title("FPS limit");
+    fps_row.set_subtitle("0 = no limit");
+    gamescope_fps.set_valign(gtk4::Align::Center);
+    fps_row.add_suffix(&gamescope_fps);
+    gs_group.add(&fps_row);
+
+    let upscale_model = gtk4::StringList::new(&["Linear", "FSR", "NIS", "Integer", "Nearest"]);
+    let gamescope_upscaling_row = adw::ComboRow::new();
+    gamescope_upscaling_row.set_title("Upscaling method");
+    gamescope_upscaling_row.set_model(Some(&upscale_model));
+    {
+        let idx = match s.gamescope_upscaling.as_str() {
+            "fsr" => 1, "nis" => 2, "integer" => 3, "nearest" => 4,
+            _ => 0,
+        };
+        gamescope_upscaling_row.set_selected(idx);
+    }
+    gs_group.add(&gamescope_upscaling_row);
+    page.append(&gs_group);
+
     let env_group = adw::PreferencesGroup::new();
     env_group.set_title("Environment Variables");
     let add_env_btn = gtk4::Button::from_icon_name("list-add-symbolic");
@@ -166,7 +220,7 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     ld_group.add(&ld_library_path);
     page.append(&ld_group);
 
-    (page, SystemDefaultsWidgets { gamemode, mangohud, gamescope, gamescope_flags, env_vars_box, ld_preload, ld_library_path })
+    (page, SystemDefaultsWidgets { gamemode, mangohud, gamescope, gamescope_flags, gamescope_w, gamescope_h, gamescope_fps, gamescope_upscaling_row, env_vars_box, ld_preload, ld_library_path })
 }
 
 pub(super) fn build_lutris_settings_page(state: &super::state::SharedState, settings_win: &adw::Window) -> gtk4::Box {
@@ -520,13 +574,7 @@ pub(super) fn build_source_overlay_row(
 ) -> (adw::SwitchRow, OverlayOverrideState) {
     let row = adw::SwitchRow::new();
     row.set_title("In-game overlay");
-    row.set_subtitle(if override_value.is_some() {
-        "Overridden from global setting"
-    } else if global_enabled {
-        "Follows global overlay setting (enabled)"
-    } else {
-        "Follows global overlay setting (disabled)"
-    });
+    row.set_subtitle("Achievements, screenshots, and recording");
 
     let value = override_value.unwrap_or(global_enabled);
     row.set_active(value);
@@ -543,13 +591,10 @@ pub(super) fn build_source_overlay_row(
     let row_c = row.clone();
     let rev_c = reverting.clone();
     row.connect_active_notify(move |_| {
-        if *rev_c.borrow() {
-            return;
-        }
+        if *rev_c.borrow() { return; }
         *state_c.borrow_mut() = Some(row_c.is_active());
         btn_c.set_visible(true);
-        row_c.set_subtitle("Overridden from global setting");
-        let _ = rev_c; // keep alive
+        let _ = rev_c;
     });
 
     let state_c2 = state.clone();
@@ -562,11 +607,6 @@ pub(super) fn build_source_overlay_row(
         *rev_c2.borrow_mut() = false;
         *state_c2.borrow_mut() = None;
         btn_c2.set_visible(false);
-        row_c2.set_subtitle(if global_enabled {
-            "Follows global overlay setting (enabled)"
-        } else {
-            "Follows global overlay setting (disabled)"
-        });
     });
 
     (row, state)
@@ -580,13 +620,7 @@ pub(super) fn build_source_gamescope_row(
 ) -> (adw::SwitchRow, GamescopeOverrideState) {
     let row = adw::SwitchRow::new();
     row.set_title("Gamescope");
-    row.set_subtitle(if override_value.is_some() {
-        "Overridden from default"
-    } else if global_default {
-        "Follows default (enabled)"
-    } else {
-        "Follows default (disabled)"
-    });
+    row.set_subtitle("Valve Gamescope compositor");
 
     let value = override_value.unwrap_or(global_default);
     row.set_active(value);
@@ -606,7 +640,6 @@ pub(super) fn build_source_gamescope_row(
         if *rev_c.borrow() { return; }
         *state_c.borrow_mut() = Some(row_c.is_active());
         btn_c.set_visible(true);
-        row_c.set_subtitle("Overridden from default");
         let _ = rev_c;
     });
 
@@ -620,11 +653,6 @@ pub(super) fn build_source_gamescope_row(
         *rev_c2.borrow_mut() = false;
         *state_c2.borrow_mut() = None;
         btn_c2.set_visible(false);
-        row_c2.set_subtitle(if global_default {
-            "Follows default (enabled)"
-        } else {
-            "Follows default (disabled)"
-        });
     });
 
     (row, state)

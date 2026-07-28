@@ -42,6 +42,14 @@ pub struct SystemDefaults {
     #[serde(default)]
     pub gamescope_flags: String,
     #[serde(default)]
+    pub gamescope_w: u32,
+    #[serde(default)]
+    pub gamescope_h: u32,
+    #[serde(default)]
+    pub gamescope_fps: u32,
+    #[serde(default)]
+    pub gamescope_upscaling: String,
+    #[serde(default)]
     pub gpu: String,
     #[serde(default)]
     pub env_vars: Vec<(String, String)>,

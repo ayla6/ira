@@ -151,10 +151,12 @@ pub fn apply_performance(
 ) -> bool {
     let mut extra_prefix: Vec<String> = Vec::new();
 
-    if launch.gamemode && has_exec("gamemoderun") {
+    // By the time apply_performance is called, gamemode/mangohud/gamescope
+    // should have been resolved from None to the system default.
+    if launch.gamemode.unwrap_or(false) && has_exec("gamemoderun") {
         extra_prefix.push("gamemoderun".to_string());
     }
-    if launch.mangohud && has_exec("mangohud") {
+    if launch.mangohud.unwrap_or(false) && has_exec("mangohud") {
         extra_prefix.push("mangohud".to_string());
         env.retain(|(k, _)| k != "MANGOHUD");
         env.push(("MANGOHUD".to_string(), "1".to_string()));
@@ -164,6 +166,29 @@ pub fn apply_performance(
 
     if launch.gamescope.unwrap_or(false) && has_exec("gamescope") {
         let mut gs_args = vec!["gamescope".to_string()];
+
+        let w = launch.gamescope_w.unwrap_or(0);
+        let h = launch.gamescope_h.unwrap_or(0);
+        if w > 0 && h > 0 {
+            gs_args.push("-W".to_string());
+            gs_args.push(w.to_string());
+            gs_args.push("-H".to_string());
+            gs_args.push(h.to_string());
+        }
+
+        let fps = launch.gamescope_fps.unwrap_or(0);
+        if fps > 0 {
+            gs_args.push("-r".to_string());
+            gs_args.push(fps.to_string());
+        }
+
+        if let Some(upscaling) = &launch.gamescope_upscaling {
+            gs_args.push("-F".to_string());
+            gs_args.push(upscaling.to_string());
+        }
+
+        gs_args.push("--fullscreen".to_string());
+
         if !launch.gamescope_flags.is_empty() {
             if let Some(flags) = shlex::split(&launch.gamescope_flags) {
                 gs_args.extend(flags);

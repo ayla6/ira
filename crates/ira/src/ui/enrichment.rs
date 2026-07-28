@@ -214,7 +214,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
 /// 1. Look up clienticon hash from cached steamcmd.net data, fall back to appinfo.vdf
 /// 2. Try local steam/games/<hash>.ico
 /// 3. Fall back to Steam CDN download
-/// 4. Convert ICO to WebP and save to the game's data directory
+/// 4. Convert ICO to WebP in memory and save to the game's data directory
 fn fetch_steam_game_icon(
     app_id: &str,
     save_dir: &str,
@@ -233,41 +233,27 @@ fn fetch_steam_game_icon(
 
     let _ = std::fs::create_dir_all(dest_webp.parent()?);
 
-    let ico_in_games = ira_platforms::steam::steam_install_dir()
-        .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
-
-    let ico_bytes = if let Some(ref path) = ico_in_games {
-        if path.is_file() {
-            std::fs::read(path).ok()
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    let ico_bytes = match ico_bytes {
-        Some(b) => b,
-        None => {
-            let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", app_id, clienticon);
-            match steam.download_bytes(&url) {
-                Ok(b) => b,
-                Err(_) => return None,
+    let ico_bytes = {
+        let ico_path = ira_platforms::steam::steam_install_dir()
+            .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
+        match ico_path.as_ref().and_then(|p| if p.is_file() { std::fs::read(p).ok() } else { None }) {
+            Some(b) => b,
+            None => {
+                let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", app_id, clienticon);
+                steam.download_bytes(&url).ok()?
             }
         }
     };
 
-    let tmp_ico = dest_webp.with_extension("ico");
-    if std::fs::write(&tmp_ico, &ico_bytes).is_err() { return None; }
-
-    ira_parser::convert_to_lossless_webp(&tmp_ico);
-    if dest_webp.is_file() {
-        Some(dest_webp.to_string_lossy().into_owned())
-    } else if tmp_ico.is_file() {
-        Some(tmp_ico.to_string_lossy().into_owned())
-    } else {
-        None
-    }
+    let webp_bytes = ira_parser::convert_bytes_to_lossless_webp(ico_bytes);
+    std::fs::write(&dest_webp, &webp_bytes).ok()?;
+    ira_parser::ensure_small_image(
+        dest_webp.parent()?,
+        "icon",
+        ira_models::AssetType::Icon.thumb_dims().0,
+        ira_models::AssetType::Icon.thumb_dims().1,
+    );
+    Some(dest_webp.to_string_lossy().into_owned())
 }
 
 struct EnrichRaParams<'a> {

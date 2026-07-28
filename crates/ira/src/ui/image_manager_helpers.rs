@@ -9,7 +9,7 @@ use super::message_helpers::apply_game_update;
 use super::state::{PendingImage, SharedState};
 use super::css::*;
 
-pub(super) fn find_best_image_path(game: &Game, field: &str, _base: &str, id: &str, save_dir: &str) -> String {
+pub(super) fn find_best_image_path(game: &Game, field: &str, _base: &str, _id: &str, save_dir: &str) -> String {
     let field_path = match AssetType::from_string(field) {
         Some(AssetType::Icon) if !game.icon_path.is_empty() => game.icon_path.clone(),
         Some(AssetType::Hero) if !game.hero_image_path.is_empty() => game.hero_image_path.clone(),
@@ -21,24 +21,7 @@ pub(super) fn find_best_image_path(game: &Game, field: &str, _base: &str, id: &s
     if !field_path.is_empty() && std::path::Path::new(&field_path).is_file() {
         return field_path;
     }
-    if game.kind == ira_models::GameKind::Retro {
-        if let Some(f) = ira_parser::find_image_file(&ira_parser::retro_data_dir(save_dir, game.db_id), field) {
-            return f.to_string_lossy().into_owned();
-        }
-    }
-    let is_steam = game.trophy_source.has_steam_enrichment();
-    if !is_steam && !game.sgdb_id.is_empty() {
-        if let Some(f) = ira_parser::find_image_file(&ira_parser::sgdb_data_dir(save_dir, &game.sgdb_id), field) {
-            return f.to_string_lossy().into_owned();
-        }
-    }
-    let native_dir = if game.kind == ira_models::GameKind::Ps4 {
-        ira_parser::ps4_data_dir(save_dir, id)
-    } else if game.kind == ira_models::GameKind::Ps3 {
-        ira_parser::ps3_data_dir(save_dir, id)
-    } else {
-        ira_parser::data_dir(save_dir, id)
-    };
+    let native_dir = ira_parser::game_data_dir(save_dir, game);
     if let Some(f) = ira_parser::find_image_file(&native_dir, field) {
         return f.to_string_lossy().into_owned();
     }

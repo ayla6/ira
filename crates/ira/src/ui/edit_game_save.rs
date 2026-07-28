@@ -611,11 +611,11 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
 
     save_version_and_overrides(&db, &params);
 
+    let (launch, wine, new_profile_id) = build_launch_config_and_wine(&params);
+    if let Err(e) = ira_db::save_game_config(&db, params.db_id, &launch, &wine, new_profile_id) {
+        eprintln!("Failed to save game config: {}", e);
+    }
     if params.launch_config_widgets.is_some() {
-        let (launch, wine, new_profile_id) = build_launch_config_and_wine(&params);
-        if let Err(e) = ira_db::save_game_config(&db, params.db_id, &launch, &wine, new_profile_id) {
-            eprintln!("Failed to save game config: {}", e);
-        }
         apply_wine_registry(&params.old_wine, &wine);
     }
 

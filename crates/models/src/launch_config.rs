@@ -1,14 +1,4 @@
-use serde::{Deserialize, Serialize, Deserializer};
-
-fn bool_false_is_none<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    match Option::<bool>::deserialize(deserializer)? {
-        Some(true) => Ok(Some(true)),
-        _ => Ok(None),
-    }
-}
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(Default)]
@@ -24,9 +14,9 @@ pub struct GameLaunchConfig {
     #[serde(default)]
     pub overlay_enabled: Option<bool>,
     // System-level settings (moved from WineConfig — these apply to ALL games, not just Wine)
-    #[serde(default, deserialize_with = "bool_false_is_none", skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gamemode: Option<bool>,
-    #[serde(default, deserialize_with = "bool_false_is_none", skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mangohud: Option<bool>,
     #[serde(default)]
     pub gamescope: Option<bool>,

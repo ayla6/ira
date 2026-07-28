@@ -345,11 +345,20 @@ fn handle_variants_changed(state: &SharedState, db_id: i64) {
         s.games.retain(|g| g.db_id != db_id || g.variant_id.is_none());
     }
     if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, db_id) {
-        if let Ok(game) = crate::game_loader::load_game_fast(&entry, &save_dir) {
-            let variant_entries = crate::game_loader::build_variant_entries(&db, &save_dir, &game);
+        if let Ok(reloaded) = crate::game_loader::load_game_fast(&entry, &save_dir) {
+            let variant_entries = crate::game_loader::build_variant_entries(&db, &save_dir, &reloaded);
             let mut s = state.borrow_mut();
             if let Some(idx) = s.games.iter().position(|g| g.db_id == db_id && g.variant_id.is_none()) {
-                s.games[idx] = game;
+                let old = &s.games[idx];
+                let mut merged = reloaded;
+                merged.game_path.clone_from(&old.game_path);
+                merged.slug.clone_from(&old.slug);
+                if merged.achievements.is_empty() {
+                    merged.achievements.clone_from(&old.achievements);
+                    merged.earned_count = old.earned_count;
+                    merged.total_count = old.total_count;
+                }
+                s.games[idx] = merged;
             }
             s.games.extend(variant_entries);
             let sort_mode = s.cfg.sort_mode;

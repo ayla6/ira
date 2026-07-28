@@ -270,10 +270,10 @@ extern "C" fn registry_global(
             let compositor = unsafe {
                 (fns.marshal_ctor)(
                     REGISTRY_PROXY.with(|r| *r.borrow()),
-                    0, // wl_registry::bind
+                    0,
                     fns.compositor_iface,
                     name,
-                    fns.compositor_iface,
+                    (*fns.compositor_iface).name,
                     version,
                 )
             };
@@ -286,7 +286,7 @@ extern "C" fn registry_global(
                     0,
                     fns.seat_iface,
                     name,
-                    fns.seat_iface,
+                    (*fns.seat_iface).name,
                     version.min(7),
                 )
             };
@@ -306,7 +306,7 @@ extern "C" fn registry_global(
                     0,
                     &ZWLR_LAYER_SHELL_V1_INTERFACE,
                     name,
-                    &ZWLR_LAYER_SHELL_V1_INTERFACE,
+                    ZWLR_LAYER_SHELL_V1_INTERFACE.name,
                     version.min(1),
                 )
             };

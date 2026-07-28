@@ -315,13 +315,14 @@ fn build_sgdb_picker_button(
     let dims_vec: Vec<&str> = ctx.dims.to_vec();
     let sgdb_id_c = sgdb_id_for_picker.clone();
     let save_dir_c = ctx.save_dir.to_string();
+    let dest_dir = ira_parser::game_data_dir(&save_dir_c, game).to_string_lossy().into_owned();
     btn.connect_clicked(move |_| {
         show_sgdb_picker(ShowSgdbPickerParams {
             steam: &steam, id: &sgdb_id_c, asset: &asset_c,
             is_steam_id: sgdb_is_steam_id, dimensions: &dims_vec,
             parent: &parent, on_done: refresh.clone(),
             pending_copies: pending_copies_btn.clone(), save_dir: &save_dir_c,
-            dest_dir: None,
+            dest_dir: Some(&dest_dir),
         });
     });
     Some(btn)
@@ -337,7 +338,12 @@ fn build_reset_icon_button(
     if AssetType::from_string(asset_type) != Some(AssetType::Icon) || !game.kind.is_trophy_console() {
         return None;
     }
-    let reset_btn = gtk4::Button::with_label("Use PS4 icon");
+    let label = match game.kind {
+        ira_models::GameKind::Ps4 => "Use PS4 icon",
+        ira_models::GameKind::Ps3 => "Use PS3 icon",
+        _ => "Use icon",
+    };
+    let reset_btn = gtk4::Button::with_label(label);
     let gc = game.clone();
     let refresh = Rc::clone(refresh_images);
     let pending_copies_reset = pending_copies.clone();

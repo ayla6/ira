@@ -239,37 +239,28 @@ fn build_steam_icon_button(
                     ira_platforms::steam::get_clienticon(app_id_num)
                 });
             if let Some(clienticon) = clienticon {
-                let webp_path = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.webp");
-                if !webp_path.is_file() {
-                    if let Some(parent) = webp_path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let raw_bytes = {
-                        let ico_path = ira_platforms::steam::steam_install_dir()
-                            .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
-                        match ico_path.as_ref().and_then(|p| if p.is_file() { std::fs::read(p).ok() } else { None }) {
-                            Some(b) => b,
-                            None => {
-                                let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
-                                match steam.download_bytes(&url) {
-                                    Ok(b) => b,
-                                    Err(_) => {
-                                        let _ = tx.send(());
-                                        return;
-                                    }
-                                }
+                let ico_file = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.ico");
+                if let Some(parent) = ico_file.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let webp_file = ico_file.with_extension("webp");
+                let ico_path = ira_platforms::steam::steam_install_dir()
+                    .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
+                let have_local = ico_path.as_ref().is_some_and(|p| p.is_file());
+                if have_local {
+                    if let Some(ref ico_path_val) = ico_path {
+                        if let Ok(ico_data) = std::fs::read(ico_path_val) {
+                            if std::fs::write(&ico_file, &ico_data).is_ok() {
+                                ira_parser::convert_to_lossless_webp(&ico_file);
                             }
                         }
-                    };
-                    let webp_bytes = ira_parser::convert_bytes_to_lossless_webp(raw_bytes);
-                    let _ = std::fs::write(&webp_path, &webp_bytes);
-                    if let Some(parent) = webp_path.parent() {
-                        ira_parser::ensure_small_image(
-                            parent,
-                            "icon",
-                            ira_models::AssetType::Icon.thumb_dims().0,
-                            ira_models::AssetType::Icon.thumb_dims().1,
-                        );
+                    }
+                }
+                if !have_local || (!ico_file.is_file() && !webp_file.is_file()) {
+                    let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
+                    let _ = std::fs::remove_file(&ico_file);
+                    if steam.download_file(&url, &ico_file).is_ok() {
+                        ira_parser::convert_to_lossless_webp(&ico_file);
                     }
                 }
             }

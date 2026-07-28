@@ -265,6 +265,7 @@ fn build_dialog_contents(
     let save_btn = gtk4::Button::with_label("Save");
     save_btn.add_css_class(CSS_SUGGESTED_ACTION);
 
+    let save_btn_c = save_btn.clone();
     let state_s = state.clone();
     let win_s = win.clone();
     let app_id = game.app_id.clone();
@@ -291,6 +292,7 @@ fn build_dialog_contents(
     let profiles_s = lwa.profiles.clone();
 
     save_btn.connect_clicked(move |_| {
+        save_btn_c.set_sensitive(false);
         save_game_settings(SaveGameSettingsParams {
             state: state_s.clone(),
             win: win_s.clone(),

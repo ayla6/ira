@@ -144,6 +144,25 @@ pub fn has_original_steam_dlls(game_exe: &str) -> bool {
     result.is_some()
 }
 
+/// All Steam API DLL/SO filenames (original and emulator share these names).
+const STEAM_DLL_NAMES: &[&str] = &[
+    "steam_api.dll", "steam_api64.dll",
+    "libsteam_api.so", "libsteam_api64.so",
+    "steamclient.dll", "steamclient64.dll",
+    "steamclient.so", "steamclient64.so",
+];
+
+/// Recursively search `game_folder` for directories containing Steam DLLs.
+/// Returns every directory that directly contains at least one Steam API file.
+pub fn find_steam_dlls_recursive(game_folder: &str) -> Vec<PathBuf> {
+    crate::api_emulators_shared::find_dll_dirs_recursive(Path::new(game_folder), STEAM_DLL_NAMES)
+}
+
+/// Check whether `dir` already has emulator backups (`.dll.bak`/`.bak.dll`/`.owo.dll`).
+pub fn has_steam_emulator_backups(dir: &Path) -> bool {
+    crate::api_emulators_shared::has_emulator_backups(dir, STEAM_DLL_NAMES)
+}
+
 /// List available GSE versions under api_emulators/steam/
 pub fn list_gse_versions(save_dir: &str) -> Vec<String> {
     let root = api_emulators_dir(save_dir).join("steam");

@@ -126,6 +126,19 @@ pub fn has_original_gog_dlls(game_exe: &str) -> bool {
     result.is_some()
 }
 
+/// All GOG Galaxy DLL filenames (case-insensitive match).
+const GOG_DLL_NAMES: &[&str] = &["galaxy.dll", "galaxy64.dll"];
+
+/// Recursively search `game_folder` for directories containing Galaxy DLLs.
+pub fn find_gog_dlls_recursive(game_folder: &str) -> Vec<PathBuf> {
+    crate::api_emulators_shared::find_dll_dirs_recursive(Path::new(game_folder), GOG_DLL_NAMES)
+}
+
+/// Check whether `dir` already has NGE backups (`.dll.bak`/`.bak.dll`/`.owo.dll`).
+pub fn has_gog_emulator_backups(dir: &Path) -> bool {
+    crate::api_emulators_shared::has_emulator_backups(dir, GOG_DLL_NAMES)
+}
+
 /// List available NGE versions under api_emulators/gog/
 pub fn list_gog_versions(save_dir: &str) -> Vec<String> {
     let root = api_emulators_dir(save_dir).join("gog");

@@ -79,6 +79,66 @@ pub(crate) fn find_api_emu_dll_folder(game_exe: &str, dll_names: &[&str]) -> Opt
     None
 }
 
+/// Recursively walk `base_folder` and return every directory that directly
+/// contains at least one of `dll_names` (case-insensitive). Iterative
+/// depth-first search — no recursion limit concerns.
+pub fn find_dll_dirs_recursive(base_folder: &Path, dll_names: &[&str]) -> Vec<PathBuf> {
+    let lower_names: Vec<String> = dll_names.iter().map(|s| s.to_lowercase()).collect();
+    let mut results = Vec::new();
+    let mut stack = vec![base_folder.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let mut found_here = false;
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                if let Ok(ft) = entry.file_type() {
+                    if ft.is_dir() {
+                        stack.push(entry.path());
+                    } else if !found_here {
+                        if let Some(name) = entry.file_name().to_str() {
+                            if lower_names.contains(&name.to_lowercase()) {
+                                found_here = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if found_here {
+            results.push(dir);
+        }
+    }
+    results
+}
+
+/// Backup filename variants for a given DLL name.
+/// For `steam_api64.dll` returns:
+///   `steam_api64.dll.bak`, `steam_api64.bak.dll`, `steam_api64.owo.dll`
+fn backup_variants(dll_name: &str) -> Vec<String> {
+    let (stem, ext) = match dll_name.rsplit_once('.') {
+        Some((s, e)) => (s, e),
+        None => return Vec::new(),
+    };
+    vec![
+        format!("{}.{}.bak", stem, ext),
+        format!("{}.bak.{}", stem, ext),
+        format!("{}.owo.{}", stem, ext),
+    ]
+}
+
+/// Check whether `dir` contains any emulator backup file for the given DLL
+/// names. Returns true if the emulator appears to already be installed
+/// (originals backed up as `.dll.bak`, `.bak.dll`, or `.owo.dll`).
+pub fn has_emulator_backups(dir: &Path, dll_names: &[&str]) -> bool {
+    for dll in dll_names {
+        for variant in backup_variants(dll) {
+            if dir.join(&variant).exists() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub fn ensure_skeleton(save_dir: &str) {
     let root = api_emulators_dir(save_dir);
     let dirs = [
@@ -87,5 +147,83 @@ pub fn ensure_skeleton(save_dir: &str) {
     ];
     for d in &dirs {
         let _ = std::fs::create_dir_all(root.join(d));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_backup_variants_dll() {
+        let v = backup_variants("steam_api64.dll");
+        assert_eq!(v, vec![
+            "steam_api64.dll.bak".to_string(),
+            "steam_api64.bak.dll".to_string(),
+            "steam_api64.owo.dll".to_string(),
+        ]);
+    }
+
+    #[test]
+    fn test_backup_variants_so() {
+        let v = backup_variants("libsteam_api.so");
+        assert_eq!(v, vec![
+            "libsteam_api.so.bak".to_string(),
+            "libsteam_api.bak.so".to_string(),
+            "libsteam_api.owo.so".to_string(),
+        ]);
+    }
+
+    #[test]
+    fn test_backup_variants_no_extension() {
+        let v = backup_variants("noext");
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn test_has_emulator_backups_detects_all_patterns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+
+        for name in &["steam_api64.dll.bak", "steam_api64.bak.dll", "steam_api64.owo.dll"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+            assert!(has_emulator_backups(dir, &["steam_api64.dll"]), "failed for {}", name);
+            std::fs::remove_file(dir.join(name)).unwrap();
+        }
+        assert!(!has_emulator_backups(dir, &["steam_api64.dll"]));
+    }
+
+    #[test]
+    fn test_find_dll_dirs_recursive_finds_nested() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // bin/win64/steam_api64.dll
+        let nested = root.join("bin").join("win64");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("steam_api64.dll"), b"x").unwrap();
+        // root also has a libsteam_api.so
+        std::fs::write(root.join("libsteam_api.so"), b"x").unwrap();
+
+        let found = find_dll_dirs_recursive(root, &["steam_api64.dll", "libsteam_api.so"]);
+        assert_eq!(found.len(), 2);
+        assert!(found.contains(&root.to_path_buf()));
+        assert!(found.contains(&nested));
+    }
+
+    #[test]
+    fn test_find_dll_dirs_recursive_case_insensitive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("Steam_API64.DLL"), b"x").unwrap();
+        let found = find_dll_dirs_recursive(root, &["steam_api64.dll"]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0], root);
+    }
+
+    #[test]
+    fn test_find_dll_dirs_recursive_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let found = find_dll_dirs_recursive(tmp.path(), &["steam_api64.dll"]);
+        assert!(found.is_empty());
     }
 }

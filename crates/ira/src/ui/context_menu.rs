@@ -162,7 +162,7 @@ pub fn show_game_context_menu(
     if wine_prefix.is_some() {
         folders_menu.append(Some("Wine prefix"), Some("game.open_wine_prefix"));
     }
-    folders_menu.append(Some("Image data"), Some("game.open_images"));
+    folders_menu.append(Some("Data"), Some("game.open_images"));
     if game.trophy_source == ira_models::TrophySource::Gse {
         folders_menu.append(Some("Achievement status"), Some("game.open_steam_status"));
     } else if game.trophy_source == ira_models::TrophySource::Nge {

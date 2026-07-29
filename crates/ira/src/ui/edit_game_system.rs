@@ -136,25 +136,54 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     );
     perf_group.add(&mangohud_row);
 
-    let (gamescope_row, gamescope_state) = build_override_switch_row(
-        "Gamescope", "Valve Gamescope compositor",
-        params.gamescope_default, params.launch.gamescope,
-    );
+    let gs_resolved = params.launch.gamescope.unwrap_or(params.gamescope_default);
+    let gamescope_row = adw::ExpanderRow::new();
+    gamescope_row.set_title("Gamescope");
+    gamescope_row.set_subtitle("Valve Gamescope compositor");
+    gamescope_row.set_expanded(gs_resolved);
+
+    let gs_switch = gtk4::Switch::new();
+    gs_switch.set_active(gs_resolved);
+    gs_switch.set_valign(gtk4::Align::Center);
+    let gs_revert_btn = make_revert_btn();
+    gs_revert_btn.set_visible(params.launch.gamescope.is_some());
+    gamescope_row.add_suffix(&gs_revert_btn);
+    gamescope_row.add_suffix(&gs_switch);
     perf_group.add(&gamescope_row);
 
-    let gs_resolved = params.launch.gamescope.unwrap_or(params.gamescope_default);
+    let gamescope_state: Rc<RefCell<Option<bool>>> = Rc::new(RefCell::new(params.launch.gamescope));
+    let gs_reverting = Rc::new(RefCell::new(false));
+    {
+        let state_c = gamescope_state.clone();
+        let btn_c = gs_revert_btn.clone();
+        let gse = gamescope_row.clone();
+        let rev_c = gs_reverting.clone();
+        gs_switch.connect_active_notify(move |sw| {
+            if *rev_c.borrow() { return; }
+            *state_c.borrow_mut() = Some(sw.is_active());
+            btn_c.set_visible(true);
+            if sw.is_active() { gse.set_expanded(true); }
+        });
+    }
+    {
+        let state_c = gamescope_state.clone();
+        let btn_c = gs_revert_btn.clone();
+        let sw_c = gs_switch.clone();
+        let rev_c = gs_reverting.clone();
+        gs_revert_btn.connect_clicked(move |_| {
+            *rev_c.borrow_mut() = true;
+            sw_c.set_active(params.gamescope_default);
+            *rev_c.borrow_mut() = false;
+            *state_c.borrow_mut() = None;
+            btn_c.set_visible(false);
+        });
+    }
 
     let gamescope_flags = adw::EntryRow::new();
     gamescope_flags.set_title("Gamescope flags");
     gamescope_flags.set_text(&params.launch.gamescope_flags);
-    gamescope_flags.set_visible(gs_resolved);
-    perf_group.add(&gamescope_flags);
+    gamescope_row.add_row(&gamescope_flags);
     page.append(&perf_group);
-
-    // ─── Gamescope settings ───
-    let gs_group = adw::PreferencesGroup::new();
-    gs_group.set_title("Gamescope settings");
-    gs_group.set_visible(gs_resolved);
 
     fn make_spin_override_row(
         title: &str, subtitle: &str,
@@ -209,17 +238,17 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     let (w_row, _w_spin, gamescope_w_state) = make_spin_override_row(
         "Resolution width", "0 = auto", params.gamescope_w_default, w_dataset, 0.0, 16384.0,
     );
-    gs_group.add(&w_row);
+    gamescope_row.add_row(&w_row);
 
     let (h_row, _h_spin, gamescope_h_state) = make_spin_override_row(
         "Resolution height", "0 = auto", params.gamescope_h_default, h_dataset, 0.0, 16384.0,
     );
-    gs_group.add(&h_row);
+    gamescope_row.add_row(&h_row);
 
     let (fps_row, _fps_spin, gamescope_fps_state) = make_spin_override_row(
         "FPS limit", "0 = no limit", params.gamescope_fps_default, fps_dataset, 0.0, 360.0,
     );
-    gs_group.add(&fps_row);
+    gamescope_row.add_row(&fps_row);
 
     let upscaling_model = gtk4::StringList::new(&["Linear", "FSR", "NIS", "Integer", "Nearest"]);
     let upscaling_row = adw::ComboRow::new();
@@ -268,19 +297,7 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
             *state_c.borrow_mut() = None;
             btn_c.set_visible(false);
         });
-        gs_group.add(&upscaling_row);
-    }
-    page.append(&gs_group);
-
-    // Show/hide gamescope settings when gamescope toggle changes
-    {
-        let gsg = gs_group.clone();
-        let gf = gamescope_flags.clone();
-        gamescope_row.connect_active_notify(move |sw| {
-            let v = sw.is_active();
-            gsg.set_visible(v);
-            gf.set_visible(v);
-        });
+        gamescope_row.add_row(&upscaling_row);
     }
 
     // ─── GPU (only when multiple GPUs detected) ───

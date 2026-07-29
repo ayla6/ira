@@ -92,7 +92,7 @@ pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::Swit
 pub(super) struct SystemDefaultsWidgets {
     pub gamemode: adw::SwitchRow,
     pub mangohud: adw::SwitchRow,
-    pub gamescope: adw::SwitchRow,
+    pub gamescope: gtk4::Switch,
     pub gamescope_flags: adw::EntryRow,
     pub gamescope_w: gtk4::SpinButton,
     pub gamescope_h: gtk4::SpinButton,
@@ -122,31 +122,26 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     mangohud.set_active(s.mangohud);
     perf_group.add(&mangohud);
 
-    let gamescope = adw::SwitchRow::new();
+    let gamescope = adw::ExpanderRow::new();
     gamescope.set_title("Gamescope");
     gamescope.set_subtitle("Valve Gamescope compositor");
-    gamescope.set_active(s.gamescope);
+    let gs_switch = gtk4::Switch::new();
+    gs_switch.set_active(s.gamescope);
+    gs_switch.set_valign(gtk4::Align::Center);
+    gamescope.add_suffix(&gs_switch);
+    gamescope.set_expanded(s.gamescope);
     perf_group.add(&gamescope);
+    {
+        let gse = gamescope.clone();
+        gs_switch.connect_active_notify(move |sw| {
+            if sw.is_active() { gse.set_expanded(true); }
+        });
+    }
 
     let gamescope_flags = adw::EntryRow::new();
     gamescope_flags.set_title("Gamescope flags");
     gamescope_flags.set_text(&s.gamescope_flags);
-    gamescope_flags.set_visible(s.gamescope);
-    perf_group.add(&gamescope_flags);
-    {
-        let gf = gamescope_flags.clone();
-        gamescope.connect_active_notify(move |sw| { gf.set_visible(sw.is_active()); });
-    }
-    page.append(&perf_group);
-
-    // ─── Gamescope settings ───
-    let gs_group = adw::PreferencesGroup::new();
-    gs_group.set_title("Gamescope");
-    gs_group.set_visible(s.gamescope);
-    {
-        let gsg = gs_group.clone();
-        gamescope.connect_active_notify(move |sw| { gsg.set_visible(sw.is_active()); });
-    }
+    gamescope.add_row(&gamescope_flags);
 
     let w_adj = gtk4::Adjustment::new(s.gamescope_w as f64, 0.0, 16384.0, 1.0, 100.0, 0.0);
     let gamescope_w = gtk4::SpinButton::new(Some(&w_adj), 1.0, 0);
@@ -155,7 +150,7 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     w_row.set_subtitle("0 = auto");
     gamescope_w.set_valign(gtk4::Align::Center);
     w_row.add_suffix(&gamescope_w);
-    gs_group.add(&w_row);
+    gamescope.add_row(&w_row);
 
     let h_adj = gtk4::Adjustment::new(s.gamescope_h as f64, 0.0, 16384.0, 1.0, 100.0, 0.0);
     let gamescope_h = gtk4::SpinButton::new(Some(&h_adj), 1.0, 0);
@@ -164,7 +159,7 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     h_row.set_subtitle("0 = auto");
     gamescope_h.set_valign(gtk4::Align::Center);
     h_row.add_suffix(&gamescope_h);
-    gs_group.add(&h_row);
+    gamescope.add_row(&h_row);
 
     let fps_adj = gtk4::Adjustment::new(s.gamescope_fps as f64, 0.0, 360.0, 1.0, 10.0, 0.0);
     let gamescope_fps = gtk4::SpinButton::new(Some(&fps_adj), 1.0, 0);
@@ -173,7 +168,7 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     fps_row.set_subtitle("0 = no limit");
     gamescope_fps.set_valign(gtk4::Align::Center);
     fps_row.add_suffix(&gamescope_fps);
-    gs_group.add(&fps_row);
+    gamescope.add_row(&fps_row);
 
     let upscale_model = gtk4::StringList::new(&["Linear", "FSR", "NIS", "Integer", "Nearest"]);
     let gamescope_upscaling_row = adw::ComboRow::new();
@@ -186,8 +181,8 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
         };
         gamescope_upscaling_row.set_selected(idx);
     }
-    gs_group.add(&gamescope_upscaling_row);
-    page.append(&gs_group);
+    gamescope.add_row(&gamescope_upscaling_row);
+    page.append(&perf_group);
 
     let env_group = adw::PreferencesGroup::new();
     env_group.set_title("Environment Variables");
@@ -220,7 +215,7 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     ld_group.add(&ld_library_path);
     page.append(&ld_group);
 
-    (page, SystemDefaultsWidgets { gamemode, mangohud, gamescope, gamescope_flags, gamescope_w, gamescope_h, gamescope_fps, gamescope_upscaling_row, env_vars_box, ld_preload, ld_library_path })
+    (page, SystemDefaultsWidgets { gamemode, mangohud, gamescope: gs_switch, gamescope_flags, gamescope_w, gamescope_h, gamescope_fps, gamescope_upscaling_row, env_vars_box, ld_preload, ld_library_path })
 }
 
 pub(super) fn build_lutris_settings_page(state: &super::state::SharedState, settings_win: &adw::Window) -> gtk4::Box {

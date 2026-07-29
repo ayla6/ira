@@ -56,6 +56,7 @@ pub fn init_db(db_path: &str) -> DbConn {
                 ra_core TEXT NOT NULL DEFAULT '',
                 emulator_override TEXT NOT NULL DEFAULT '',
                 rom_path TEXT NOT NULL DEFAULT '',
+                game_folder TEXT NOT NULL DEFAULT '',
                 playtime REAL NOT NULL DEFAULT 0.0,
                 cached_earned_count INTEGER NOT NULL DEFAULT 0,
                 cached_total_count INTEGER NOT NULL DEFAULT 0,

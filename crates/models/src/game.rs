@@ -56,6 +56,8 @@ pub struct Game {
     pub emulator_override: String,
     /// Path to the ROM file (for retro games).
     pub rom_path: String,
+    /// Path to the game install directory (for Wine/Linux games).
+    pub game_folder: String,
     /// If Some(variant_id), this is a pseudo-game entry for a variant
     /// shown as a separate grid entry. None for real games.
     pub variant_id: Option<i64>,
@@ -98,6 +100,7 @@ impl Default for Game {
             ra_core: String::new(),
             emulator_override: String::new(),
             rom_path: String::new(),
+            game_folder: String::new(),
             variant_id: None,
         }
     }

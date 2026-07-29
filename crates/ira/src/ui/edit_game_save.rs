@@ -42,6 +42,7 @@ pub(super) struct SaveGameSettingsParams {
     pub wine_widgets: Option<WineConfigWidgets>,
     pub profiles: Vec<ira_models::WineProfile>,
     pub saved_profile_id: Option<i64>,
+    pub game_folder_entry: Option<adw::EntryRow>,
 }
 
 struct AppIdResult {
@@ -595,6 +596,13 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
     let db = params.state.borrow().db.clone();
 
     save_title_and_sort(&db, params.db_id, &params.title_entry, &params.sort_entry);
+
+    if let Some(ref folder_row) = params.game_folder_entry {
+        let folder = folder_row.text().to_string();
+        if let Err(e) = ira_db::update_game_folder(&db, params.db_id, &folder) {
+            eprintln!("Failed to update game folder: {}", e);
+        }
+    }
 
     let app_id_result = save_app_id(&db, &params);
 

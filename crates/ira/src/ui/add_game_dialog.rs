@@ -26,7 +26,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
     let content_area = layout.content_area;
 
     let profiles = ira_db::get_all_profiles(&db).unwrap_or_default();
-    let (general_page, name_entry, kind_row, exe_entry, args_entry, wd_entry, detect_btn, profile_row, steam_id_entry, gog_id_entry) =
+    let (general_page, name_entry, kind_row, folder_entry, exe_entry, args_entry, wd_entry, detect_btn, profile_row, steam_id_entry, gog_id_entry) =
         build_general_page(&win, &profiles, state);
     sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General", "general"));
     stack.add_named(&general_page, Some("general"));
@@ -82,6 +82,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
         AddGameWidgets {
             name_entry: &name_entry,
             kind_row: &kind_row,
+            folder_entry: &folder_entry,
             exe_entry: &exe_entry,
             args_entry: &args_entry,
             wd_entry: &wd_entry,
@@ -166,6 +167,7 @@ fn connect_sidebar_selection(sidebar: &gtk4::ListBox, stack: &gtk4::Stack) {
 struct AddGameWidgets<'a> {
     name_entry: &'a adw::EntryRow,
     kind_row: &'a adw::ComboRow,
+    folder_entry: &'a adw::EntryRow,
     exe_entry: &'a adw::EntryRow,
     args_entry: &'a adw::EntryRow,
     wd_entry: &'a adw::EntryRow,
@@ -195,6 +197,7 @@ fn connect_add_handler(
     let AddGameWidgets {
         name_entry,
         kind_row,
+        folder_entry,
         exe_entry,
         args_entry,
         wd_entry,
@@ -219,6 +222,7 @@ fn connect_add_handler(
 
     let name_entry = name_entry.clone();
     let kind_row = kind_row.clone();
+    let folder_entry = folder_entry.clone();
     let exe_entry = exe_entry.clone();
     let args_entry = args_entry.clone();
     let wd_entry = wd_entry.clone();
@@ -249,9 +253,13 @@ fn connect_add_handler(
             return;
         }
         let exe_path = exe_entry.text().to_string();
+        let game_folder = folder_entry.text().to_string();
         let is_wine = kind_row.selected() == 1;
         let args = args_entry.text().to_string();
-        let wd = wd_entry.text().to_string();
+        let wd = {
+            let wd_text = wd_entry.text().to_string();
+            if wd_text.is_empty() && !game_folder.is_empty() { game_folder.clone() } else { wd_text }
+        };
         let steam_app_id = steam_id_entry.text().to_string();
         let gog_product_id = gog_id_entry.text().to_string();
 
@@ -282,6 +290,7 @@ fn connect_add_handler(
         let sender_c = sender.clone();
         let name_c = name.clone();
         let app_id_c = platform_id.clone();
+        let game_folder_c = game_folder.clone();
         let kind_c = kind;
         let ts_c = trophy_source;
         let steam_c = steam.clone();
@@ -294,6 +303,7 @@ fn connect_add_handler(
             match add_game_to_db(AddGameToDbParams {
                 db: &db_c, name: &name_c, kind: kind_c,
                 trophy_source: ts_c, app_id: &app_id_c, platform_id: &platform_id,
+                game_folder: &game_folder_c,
                 launch_config: &launch_config, wine_config: &wine_config,
                 profile_id: selected_profile_id, steam: &steam_c, save_dir: &save_dir_c,
             }) {
@@ -303,6 +313,9 @@ fn connect_add_handler(
                         if let Ok(mut game) = crate::game_loader::load_game(&entry, &save_dir_c) {
                             game.set_name(&name_c);
                             game.game_path = launch_config.exe.clone();
+                            if game.game_folder.is_empty() {
+                                game.game_folder = game_folder_c.clone();
+                            }
                             if let Err(e) = ira_db::update_game_title(&db_c, game.db_id, &name_c) {
                                 eprintln!("Failed to update game title: {}", e);
                             }

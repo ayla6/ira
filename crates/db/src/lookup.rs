@@ -44,6 +44,10 @@ pub fn find_by_kind_platform(conn: &DbConn, kind: ira_models::GameKind, platform
     find_game_by(conn, "kind = ?1 AND platform_id = ?2", params![kind.as_str(), platform_id])
 }
 
+pub fn find_by_game_folder(conn: &DbConn, game_folder: &str) -> Result<Option<GameEntry>, String> {
+    find_game_by(conn, "game_folder = ?1 AND game_folder != ''", params![game_folder])
+}
+
 pub fn find_all_retro_by_platform(conn: &DbConn, platform_id: &str) -> Result<Vec<GameEntry>, String> {
     find_all_games_by(conn, "kind = ?1 AND platform_id = ?2", params![GameKind::Retro.as_str(), platform_id])
 }
@@ -100,6 +104,26 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let game = find_by_db_id(&conn, 999).unwrap();
         assert!(game.is_none());
+    }
+
+    #[test]
+    fn test_find_by_game_folder_returns_match() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(&conn, GameKind::Wine, TrophySource::Gse, "555", "", "", "Folder Game").unwrap();
+        super::super::update_game_folder(&conn, id, "/games/MyGame").unwrap();
+        let game = find_by_game_folder(&conn, "/games/MyGame").unwrap().unwrap();
+        assert_eq!(game.id, id);
+        assert_eq!(game.game_folder, "/games/MyGame");
+    }
+
+    #[test]
+    fn test_find_by_game_folder_empty_returns_none() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(&conn, GameKind::Linux, TrophySource::Empty, "", "manual_1", "manual_1", "No Folder").unwrap();
+        // game_folder defaults to "" — must NOT match an empty-string query
+        let game = find_by_game_folder(&conn, "").unwrap();
+        assert!(game.is_none());
+        let _ = id;
     }
 }
 

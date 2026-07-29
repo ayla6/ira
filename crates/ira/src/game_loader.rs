@@ -92,8 +92,9 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
         steam_review_count: entry.steam_review_count,
         ra_core: entry.ra_core.clone(),
         emulator_override: entry.emulator_override.clone(),
-        rom_path: entry.rom_path.clone(),
-    };
+            rom_path: entry.rom_path.clone(),
+            game_folder: entry.game_folder.clone(),
+        };
 
     if entry.kind == ira_models::GameKind::Retro && !entry.rom_path.is_empty() {
         game.game_path = entry.rom_path.clone();

@@ -45,6 +45,13 @@ pub fn update_sort_title(conn: &DbConn, id: i64, sort_title: &str) -> Result<(),
     Ok(())
 }
 
+pub fn update_game_folder(conn: &DbConn, id: i64, game_folder: &str) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute("UPDATE games SET game_folder = ?1 WHERE id = ?2", params![game_folder, id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn update_achievement_counts(conn: &DbConn, id: i64, earned: i64, total: i64, mtime: i64) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.execute(

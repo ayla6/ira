@@ -41,6 +41,8 @@ pub struct GameEntry {
     pub emulator_override: String,
     /// Path to the ROM file (for retro games).
     pub rom_path: String,
+    /// Path to the game install directory (for Wine/Linux games).
+    pub game_folder: String,
     /// Playtime in hours.
     pub playtime: f64,
     /// Cached achievement count (earned) from last full load.
@@ -79,6 +81,7 @@ impl GameEntry {
             ra_core: String::new(),
             emulator_override: String::new(),
             rom_path: String::new(),
+            game_folder: String::new(),
             playtime: 0.0,
             cached_earned_count: 0,
             cached_total_count: 0,
@@ -111,6 +114,7 @@ impl GameEntry {
             ra_core: g.ra_core.clone(),
             emulator_override: g.emulator_override.clone(),
             rom_path: g.rom_path.clone(),
+            game_folder: g.game_folder.clone(),
             playtime: g.playtime,
             cached_earned_count: g.earned_count as i64,
             cached_total_count: g.total_count as i64,
@@ -153,6 +157,7 @@ mod tests {
         assert_eq!(entry.ra_core, "");
         assert_eq!(entry.emulator_override, "");
         assert_eq!(entry.rom_path, "");
+        assert_eq!(entry.game_folder, "");
         assert_eq!(entry.playtime, 0.0);
         assert_eq!(entry.cached_earned_count, 0);
         assert_eq!(entry.cached_total_count, 0);
@@ -184,6 +189,7 @@ mod tests {
             ra_core: "nestopia".to_string(),
             emulator_override: "retroarch".to_string(),
             rom_path: "/path/to/rom".to_string(),
+            game_folder: "/path/to/game".to_string(),
             playtime: 12.5,
             earned_count: 10,
             total_count: 20,
@@ -214,6 +220,7 @@ mod tests {
         assert_eq!(entry.ra_core, g.ra_core);
         assert_eq!(entry.emulator_override, g.emulator_override);
         assert_eq!(entry.rom_path, g.rom_path);
+        assert_eq!(entry.game_folder, g.game_folder);
         assert_eq!(entry.playtime, g.playtime);
         assert_eq!(entry.cached_earned_count, g.earned_count as i64);
         assert_eq!(entry.cached_total_count, g.total_count as i64);

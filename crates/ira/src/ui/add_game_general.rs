@@ -6,7 +6,7 @@ use adw::prelude::*;
 use super::state::SharedState;
 use super::css::*;
 
-pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::WineProfile], state: &SharedState) -> (gtk4::Box, adw::EntryRow, adw::ComboRow, adw::EntryRow, adw::EntryRow, adw::EntryRow, gtk4::Button, adw::ComboRow, adw::EntryRow, adw::EntryRow) {
+pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::WineProfile], state: &SharedState) -> (gtk4::Box, adw::EntryRow, adw::ComboRow, adw::EntryRow, adw::EntryRow, adw::EntryRow, adw::EntryRow, gtk4::Button, adw::ComboRow, adw::EntryRow, adw::EntryRow) {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let info_group = adw::PreferencesGroup::new();
@@ -22,6 +22,22 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
     kind_row.set_model(Some(&kind_model));
     kind_row.set_selected(1);
     info_group.add(&kind_row);
+
+    let folder_entry = adw::EntryRow::new();
+    folder_entry.set_title("Game folder");
+
+    let folder_browse = super::helpers::make_browse_button(
+        Some(win),
+        "Select game folder",
+        true,
+        None,
+        {
+            let entry = folder_entry.clone();
+            move |path| entry.set_text(&path.to_string_lossy())
+        },
+    );
+    folder_entry.add_suffix(&folder_browse);
+    info_group.add(&folder_entry);
 
     let exe_entry = adw::EntryRow::new();
     exe_entry.set_title("Executable");
@@ -195,5 +211,5 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
         },
     );
 
-    (page, name_entry, kind_row, exe_entry, args_entry, wd_entry, detect_btn, profile_row, steam_id_entry, gog_id_entry)
+    (page, name_entry, kind_row, folder_entry, exe_entry, args_entry, wd_entry, detect_btn, profile_row, steam_id_entry, gog_id_entry)
 }

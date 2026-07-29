@@ -87,6 +87,7 @@ pub fn load_rpcs3_game(
         ra_core: String::new(),
         emulator_override: String::new(),
         rom_path: String::new(),
+        game_folder: String::new(),
         variant_id: None,
     };
     out.name_lower = out.name.to_lowercase();

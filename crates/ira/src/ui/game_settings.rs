@@ -14,7 +14,7 @@ use super::css::*;
 
 type PendingCell = Rc<RefCell<Option<String>>>;
 
-type GameGeneralPageResult = (gtk4::Box, adw::EntryRow, adw::EntryRow, PendingCell, Option<adw::EntryRow>, Option<adw::ComboRow>, PendingCell, PendingCell, Option<gtk4::Box>);
+type GameGeneralPageResult = (gtk4::Box, adw::EntryRow, adw::EntryRow, PendingCell, Option<adw::EntryRow>, Option<adw::ComboRow>, PendingCell, PendingCell, Option<gtk4::Box>, Option<adw::EntryRow>);
 
 fn build_ra_section(state: &SharedState, game: &Game, win: &adw::Window, pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>) -> adw::PreferencesGroup {
     let ra_group = adw::PreferencesGroup::new();
@@ -135,6 +135,31 @@ fn add_game_path_if_needed(page: &gtk4::Box, game: &Game) {
     path_row.set_sensitive(false);
     path_group.add(&path_row);
     page.append(&path_group);
+}
+
+fn build_game_folder_row(page: &gtk4::Box, game: &Game, win: &adw::Window) -> Option<adw::EntryRow> {
+    if game.kind != ira_models::GameKind::Wine && game.kind != ira_models::GameKind::Linux {
+        return None;
+    }
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Game folder");
+    let row = adw::EntryRow::new();
+    row.set_title("Install directory");
+    row.set_text(&game.game_folder);
+    let browse = super::helpers::make_browse_button(
+        Some(win),
+        "Select game folder",
+        true,
+        None,
+        {
+            let row_c = row.clone();
+            move |path| row_c.set_text(&path.to_string_lossy())
+        },
+    );
+    row.add_suffix(&browse);
+    group.add(&row);
+    page.append(&group);
+    Some(row)
 }
 
 fn build_shadps4_version_section(
@@ -463,6 +488,7 @@ pub(super) fn build_game_general_page(
 
     let (title_entry, sort_entry) = build_title_and_sort_inputs(&general_page, game);
     add_game_path_if_needed(&general_page, game);
+    let game_folder_entry = build_game_folder_row(&general_page, game, win);
     let pending_version = build_shadps4_version_section(&general_page, game);
     let (pending_ra_core, pending_emulator, ra_container) =
         build_retro_emulator_and_ra(&general_page, state, game, win, pending_copies);
@@ -479,5 +505,6 @@ pub(super) fn build_game_general_page(
         pending_ra_core,
         pending_emulator,
         ra_container,
+        game_folder_entry,
     )
 }

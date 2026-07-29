@@ -113,6 +113,7 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
                 ra_core: entry.ra_core.clone(),
                 emulator_override: entry.emulator_override.clone(),
                 rom_path: entry.rom_path.clone(),
+                game_folder: entry.game_folder.clone(),
                 variant_id: None,
             };
             let _ = sender.send(AppMessage::NewGame(game));

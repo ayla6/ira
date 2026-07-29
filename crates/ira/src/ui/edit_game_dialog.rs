@@ -200,7 +200,7 @@ fn build_dialog_contents(
     let DialogConfig { saved_launch, saved_wine, saved_profile_id, app_default_wine } = config;
     let languages = app_details.as_ref().map(|d| d.languages.clone()).unwrap_or_default();
     let pending_copies: Rc<RefCell<HashMap<String, PendingImage>>> = Default::default();
-    let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator, ra_container) =
+    let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator, ra_container, game_folder_entry) =
         super::game_settings::build_game_general_page(&state, &game, &win, &languages, &pending_copies);
     sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General", "general"));
     stack.add_named(&general_page, Some("general"));
@@ -295,6 +295,7 @@ fn build_dialog_contents(
     let pending_ra_core_s = pending_ra_core.clone();
     let pending_emulator_s = pending_emulator.clone();
     let profiles_s = lwa.profiles.clone();
+    let game_folder_entry_s = game_folder_entry.clone();
 
     save_btn.connect_clicked(move |_| {
         save_btn_c.set_sensitive(false);
@@ -328,6 +329,7 @@ fn build_dialog_contents(
             wine_widgets: lwa.wine_widgets_opt.clone(),
             profiles: profiles_s.clone(),
             saved_profile_id,
+            game_folder_entry: game_folder_entry_s.clone(),
         });
     });
 

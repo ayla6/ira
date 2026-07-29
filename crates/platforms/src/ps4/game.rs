@@ -83,6 +83,7 @@ pub fn load_shadps4_game(
         ra_core: String::new(),
         emulator_override: String::new(),
         rom_path: String::new(),
+        game_folder: String::new(),
         variant_id: None,
     };
     game.name_lower = game.name.to_lowercase();

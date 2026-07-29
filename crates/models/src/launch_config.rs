@@ -89,8 +89,6 @@ pub struct WineConfig {
     #[serde(default = "default_true")]
     pub proton_ntsync: bool,
     #[serde(default)]
-    pub wine_env_vars: Vec<(String, String)>,
-    #[serde(default)]
     pub umu_enabled: bool,
     #[serde(default)]
     pub overridden_fields: Vec<String>,
@@ -136,7 +134,6 @@ impl Default for WineConfig {
             dxvk_frame_rate: 0,
             proton_wow64: true,
             proton_ntsync: true,
-            wine_env_vars: Vec::new(),
             umu_enabled: true,
             overridden_fields: Vec::new(),
             _gpu: String::new(),
@@ -181,7 +178,6 @@ impl WineConfig {
             dxvk_frame_rate: if has("dxvk_frame_rate") { self.dxvk_frame_rate } else { default.dxvk_frame_rate },
             proton_wow64: if has("proton_wow64") { self.proton_wow64 } else { default.proton_wow64 },
             proton_ntsync: if has("proton_ntsync") { self.proton_ntsync } else { default.proton_ntsync },
-            wine_env_vars: if has("wine_env_vars") { self.wine_env_vars.clone() } else { default.wine_env_vars.clone() },
             umu_enabled: self.umu_enabled,
             overridden_fields: self.overridden_fields.clone(),
             _gpu: String::new(),

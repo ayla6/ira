@@ -4,7 +4,7 @@ use gtk4::prelude::*;
 use adw::prelude::*;
 use ira_models::WineConfig;
 
-use super::wine_config_env_dll::{build_dll_override_row, build_env_var_row, collect_dll_overrides, collect_env_vars};
+use super::wine_config_env_dll::{build_dll_override_row, collect_dll_overrides};
 use super::wine_config_helpers::{build_combo_row, build_switch_row, make_section, page_with_content, track_spin, track_switch, OverrideList};
 use super::css::*;
 
@@ -34,7 +34,6 @@ pub struct WineConfigWidgets {
     pub dxvk_frame_rate: gtk4::SpinButton,
     pub proton_wow64: adw::SwitchRow,
     pub proton_ntsync: adw::SwitchRow,
-    pub wine_env_vars_box: gtk4::ListBox,
     pub dll_overrides_box: gtk4::ListBox,
     pub overridden: OverrideList,
     pub umu_enabled: bool,
@@ -73,7 +72,6 @@ struct AdvPageWidgets {
     desktop_integration: adw::SwitchRow,
     show_debug: adw::ComboRow,
     show_crash_dialogs: adw::SwitchRow,
-    wine_env_vars_box: gtk4::ListBox,
     dll_overrides_box: gtk4::ListBox,
 }
 
@@ -217,28 +215,6 @@ fn build_wine_adv_page(
     dbg_group.add(&show_crash_dialogs);
     adv_page.append(&dbg_group);
 
-    let env_group = make_section("Environment Variables");
-
-    let wine_env_vars_box = gtk4::ListBox::new();
-    wine_env_vars_box.add_css_class(CSS_BOXED_LIST);
-    for (name, value) in &wine.wine_env_vars {
-        let row = build_env_var_row(name, value);
-        wine_env_vars_box.append(&row);
-    }
-
-    let add_env_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_env_btn.set_tooltip_text(Some("Add variable"));
-    add_env_btn.set_valign(gtk4::Align::Center);
-    add_env_btn.add_css_class(CSS_FLAT);
-    let env_box_clone = wine_env_vars_box.clone();
-    add_env_btn.connect_clicked(move |_| {
-        let row = build_env_var_row("", "");
-        env_box_clone.append(&row);
-    });
-    env_group.set_header_suffix(Some(&add_env_btn));
-    env_group.add(&wine_env_vars_box);
-    adv_page.append(&env_group);
-
     let dll_group = make_section("DLL Overrides");
 
     let dll_overrides_box = gtk4::ListBox::new();
@@ -265,7 +241,7 @@ fn build_wine_adv_page(
 
     (page, AdvPageWidgets {
         battleye, eac, desktop_integration, show_debug, show_crash_dialogs,
-        wine_env_vars_box, dll_overrides_box,
+        dll_overrides_box,
     })
 }
 
@@ -296,7 +272,7 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
         dpi_enabled: gfx_w.dpi_enabled, dpi: gfx_w.dpi,
         dxvk_frame_rate: perf_w.dxvk_frame_rate,
         proton_wow64: perf_w.proton_wow64, proton_ntsync: perf_w.proton_ntsync,
-        wine_env_vars_box: adv_w.wine_env_vars_box, dll_overrides_box: adv_w.dll_overrides_box,
+        dll_overrides_box: adv_w.dll_overrides_box,
         overridden,
         umu_enabled: wine.umu_enabled,
     };
@@ -344,7 +320,6 @@ impl WineConfigWidgets {
             dxvk_frame_rate: self.dxvk_frame_rate.value() as i32,
             proton_wow64: self.proton_wow64.is_active(),
             proton_ntsync: self.proton_ntsync.is_active(),
-            wine_env_vars: collect_env_vars(&self.wine_env_vars_box),
             umu_enabled: self.umu_enabled,
             overridden_fields: self.overridden.borrow().clone(),
             ..Default::default()

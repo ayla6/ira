@@ -148,6 +148,9 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                     }
                 } else if !ach.icon_gray_path.is_empty() {
                     ira_images::set_image_async(&img, &ach.icon_gray_path);
+                    if ach.trophy_type != '\0' {
+                        img.add_css_class(super::css::CSS_LOCKED_TROPHY);
+                    }
                 }
                 ach_row.add_prefix(&img);
 

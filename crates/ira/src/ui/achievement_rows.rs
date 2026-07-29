@@ -75,6 +75,9 @@ fn achievement_icon(ach: &MergedAchievement, budget: &mut ImageLoadBudget) -> gt
         }
     } else if !ach.icon_gray_path.is_empty() {
         budget.load(&img, &ach.icon_gray_path);
+        if ach.trophy_type != '\0' {
+            img.add_css_class(CSS_LOCKED_TROPHY);
+        }
     }
     img
 }
@@ -215,6 +218,9 @@ pub fn create_global_stats_row(
         spoiler_img.set_valign(gtk4::Align::Start);
         if !ach.icon_gray_path.is_empty() {
             budget.load(&spoiler_img, &ach.icon_gray_path);
+            if ach.trophy_type != '\0' {
+                spoiler_img.add_css_class(CSS_LOCKED_TROPHY);
+            }
         }
 
         let spoiler_content = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
@@ -249,6 +255,9 @@ pub fn create_global_stats_row(
         real_img.set_valign(gtk4::Align::Start);
         if !ach.icon_gray_path.is_empty() {
             budget.load(&real_img, &ach.icon_gray_path);
+            if ach.trophy_type != '\0' {
+                real_img.add_css_class(CSS_LOCKED_TROPHY);
+            }
         }
 
         let real_content = make_content(real_img, &ach.display_name, &ach.description);

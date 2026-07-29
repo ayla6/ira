@@ -1,42 +1,6 @@
 use adw::prelude::*;
 use super::css::*;
 
-pub(super) fn build_env_var_row(name: &str, value: &str) -> gtk4::ListBoxRow {
-    let row = gtk4::ListBoxRow::new();
-    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    hbox.set_margin_start(8);
-    hbox.set_margin_end(8);
-    hbox.set_margin_top(4);
-    hbox.set_margin_bottom(4);
-
-    let name_entry = gtk4::Entry::new();
-    name_entry.set_placeholder_text(Some("Variable name (e.g. WINEESYNC)"));
-    name_entry.set_text(name);
-    name_entry.set_hexpand(true);
-    hbox.append(&name_entry);
-
-    let value_entry = gtk4::Entry::new();
-    value_entry.set_placeholder_text(Some("Value (e.g. 1)"));
-    value_entry.set_text(value);
-    value_entry.set_hexpand(true);
-    hbox.append(&value_entry);
-
-    let remove_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
-    remove_btn.add_css_class(CSS_FLAT);
-    remove_btn.add_css_class(CSS_CIRCULAR);
-    let row_clone = row.clone();
-    remove_btn.connect_clicked(move |_| {
-        if let Some(list) = row_clone.parent().and_then(|p| p.downcast::<gtk4::ListBox>().ok()) {
-            row_clone.unparent();
-            list.remove(&row_clone);
-        }
-    });
-    hbox.append(&remove_btn);
-
-    row.set_child(Some(&hbox));
-    row
-}
-
 pub(super) fn collect_env_vars(box_: &gtk4::ListBox) -> Vec<(String, String)> {
     let mut result = Vec::new();
     let mut child = box_.first_child();

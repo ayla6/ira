@@ -98,11 +98,6 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
         env.push(("PROTON_USE_NTSYNC".to_string(), "1".to_string()));
     }
 
-    for (k, v) in &wine.wine_env_vars {
-        env.retain(|(ek, _)| ek != k);
-        env.push((k.clone(), v.clone()));
-    }
-
     env
 }
 

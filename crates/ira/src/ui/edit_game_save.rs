@@ -168,7 +168,6 @@ fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchC
 
     if params.show_wine_tabs {
         if let Some(ref ww) = params.wine_widgets {
-            wine.wine_env_vars = collect_env_vars(&ww.wine_env_vars_box);
             wine.dll_overrides = collect_dll_overrides(&ww.dll_overrides_box);
         }
     }
@@ -179,13 +178,6 @@ fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchC
         }
     } else {
         wine.overridden_fields.retain(|f| f != "dll_overrides");
-    }
-    if wine.wine_env_vars != params.app_default_wine.wine_env_vars {
-        if !wine.overridden_fields.contains(&"wine_env_vars".to_string()) {
-            wine.overridden_fields.push("wine_env_vars".to_string());
-        }
-    } else {
-        wine.overridden_fields.retain(|f| f != "wine_env_vars");
     }
 
     let new_profile_id = if let Some(ref lc) = params.launch_config_widgets {

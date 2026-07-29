@@ -99,16 +99,9 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
             let appdetails_path = ira_parser::data_dir(&save_dir, &app_id).join("appdetails.json");
             let needs_app_details = game.name.starts_with("App ID:") || !appdetails_path.exists();
             if needs_app_details {
-                if let Some(mut details) = steam.fetch_app_details(&app_id) {
+                if let Some(details) = steam.fetch_app_details(&app_id) {
                     if !details.name.is_empty() && game.name.starts_with("App ID:") {
                         game.name = details.name.clone();
-                    }
-                    if !details.dlcs.is_empty() {
-                        steam.ensure_dlc_images(&app_id, &mut details.dlcs);
-                        let path = ira_parser::data_dir(&save_dir, &app_id).join("appdetails.json");
-                        if let Ok(b) = serde_json::to_vec(&details) {
-                            let _ = std::fs::write(&path, b);
-                        }
                     }
                 }
             }
@@ -167,22 +160,6 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
                     }
                     if game.name.starts_with("App ID:") && !cmd.name.is_empty() {
                         game.name = cmd.name.clone();
-                    }
-                }
-            }
-
-            if (game.release_date.is_empty() || game.release_timestamp == 0) && game.metacritic_score < 0 {
-                if let Some(details) = steam.fetch_steam_store_data(&app_id) {
-                    if let Some(rd) = details.release_date {
-                        if !rd.coming_soon && game.release_date.is_empty() {
-                            game.release_date = rd.date.clone();
-                            game.release_timestamp = ira_parser::parse_steam_release_date(&rd.date);
-                        }
-                    }
-                    if let Some(mc) = details.metacritic {
-                        if game.metacritic_score < 0 {
-                            game.metacritic_score = mc.score as i64;
-                        }
                     }
                 }
             }

@@ -2,52 +2,12 @@ use std::path::Path;
 
 use crate::SteamDataClient;
 use crate::types::{
-    AppDetails, AppDetailsResponse, GlobalAchievementsResponse, SteamCmdInfo,
-    SteamCmdResponse, SteamGameDetails, SteamReviewSummary, SteamReviewsResponse,
+    AppDetails, DlcInfo, GlobalAchievementsResponse, SteamCmdInfo,
+    SteamCmdResponse, SteamReviewSummary, SteamReviewsResponse,
 };
-use crate::util::{pick_lang, urlencode, NEMIRTINGAS_BASE_URL};
+use crate::util::{pick_lang, urlencode};
 
 impl SteamDataClient {
-    pub fn fetch_game_details(&self, app_id: &str) -> Option<SteamGameDetails> {
-        let cache_path = self.game_dir(app_id).join("appdetails.json");
-        if let Ok(data) = std::fs::read(&cache_path) {
-            if let Ok(d) = serde_json::from_slice::<SteamGameDetails>(&data) {
-                return Some(d);
-            }
-        }
-
-        let url = format!("https://store.steampowered.com/api/appdetails?appids={}", app_id);
-        let resp = match self.http.get(&url).send() {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Steam details unavailable for {}: {}", app_id, e);
-                return None;
-            }
-        };
-
-        let raw: AppDetailsResponse = match resp.json() {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Steam details decode error for {}: {}", app_id, e);
-                return None;
-            }
-        };
-
-        let entry = match raw.apps.get(app_id) {
-            Some(e) if e.success => e,
-            _ => {
-                eprintln!("No store data for app {}", app_id);
-                return None;
-            }
-        };
-
-        let _ = std::fs::create_dir_all(self.game_dir(app_id));
-        if let Ok(b) = serde_json::to_vec(&entry.data) {
-            let _ = std::fs::write(&cache_path, b);
-        }
-        Some(entry.data.clone())
-    }
-
     pub fn fetch_global_achievements(&self, app_id: &str) -> Option<std::collections::HashMap<String, f64>> {
         let cache_path = self.game_dir(app_id).join("global_achievements.json");
         if let Ok(data) = std::fs::read(&cache_path) {
@@ -124,77 +84,9 @@ impl SteamDataClient {
         Some(raw.query_summary)
     }
 
-    pub fn fetch_steam_store_data(&self, app_id: &str) -> Option<SteamGameDetails> {
-        let url = format!("https://store.steampowered.com/api/appdetails?appids={}", app_id);
-        let resp = match self.http.get(&url).send() {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Steam store data unavailable for {}: {}", app_id, e);
-                return None;
-            }
-        };
-        let raw: AppDetailsResponse = match resp.json() {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Steam store data decode error for {}: {}", app_id, e);
-                return None;
-            }
-        };
-        let entry = match raw.apps.get(app_id) {
-            Some(e) if e.success => e,
-            _ => {
-                eprintln!("No store data for app {}", app_id);
-                return None;
-            }
-        };
-        Some(entry.data.clone())
-    }
-
     pub fn fetch_app_details(&self, app_id: &str) -> Option<AppDetails> {
-        let cache_path = self.game_dir(app_id).join("appdetails.json");
-
-        if let Ok(data) = std::fs::read(&cache_path) {
-            if let Ok(d) = serde_json::from_slice::<AppDetails>(&data) {
-                return Some(d);
-            }
-        }
-
-        let url = format!("{}/{}/{}.json", NEMIRTINGAS_BASE_URL, app_id, app_id);
-        if let Ok(resp) = self.http.get(&url).send() {
-            if resp.status().is_success() {
-                if let Ok(details) = resp.json::<AppDetails>() {
-                    if !details.name.is_empty() {
-                        let _ = std::fs::create_dir_all(self.game_dir(app_id));
-                        if let Ok(b) = serde_json::to_vec(&details) {
-                            let _ = std::fs::write(&cache_path, b);
-                        }
-                        return Some(details);
-                    }
-                }
-            }
-        }
-
-        let url = format!("https://store.steampowered.com/api/appdetails?appids={}", app_id);
-        if let Ok(resp) = self.http.get(&url).send() {
-            if let Ok(raw) = resp.json::<AppDetailsResponse>() {
-                if let Some(entry) = raw.apps.get(app_id) {
-                    if entry.success && !entry.data.name.is_empty() {
-                        let details = AppDetails {
-                            name: entry.data.name.clone(),
-                            languages: Vec::new(),
-                            dlcs: std::collections::HashMap::new(),
-                        };
-                        let _ = std::fs::create_dir_all(self.game_dir(app_id));
-                        if let Ok(b) = serde_json::to_vec(&details) {
-                            let _ = std::fs::write(&cache_path, b);
-                        }
-                        return Some(details);
-                    }
-                }
-            }
-        }
-
-        None
+        let raw = self.ensure_steamcmd_raw(app_id)?;
+        Self::extract_app_details(&raw, app_id)
     }
 
     pub fn search_steam_store(&self, term: &str) -> Vec<(String, String)> {
@@ -331,7 +223,7 @@ impl SteamDataClient {
     /// Resolve the clienticon hash for a Steam app from cached steamcmd.net data.
     /// Returns `None` if no cached data is available.
     pub fn cached_clienticon(&self, app_id: &str) -> Option<String> {
-        let cached = self.game_dir(app_id).join("steamcmd_info.json");
+        let cached = self.game_dir(app_id).join("appdetails.json");
         let data = std::fs::read(&cached).ok()?;
         let raw: SteamCmdResponse = serde_json::from_slice(&data).ok()?;
         let entry = raw.data.get(app_id)?;
@@ -339,7 +231,7 @@ impl SteamDataClient {
     }
 
     pub fn cached_icon_hash(&self, app_id: &str) -> Option<String> {
-        let cached = self.game_dir(app_id).join("steamcmd_info.json");
+        let cached = self.game_dir(app_id).join("appdetails.json");
         let data = std::fs::read(&cached).ok()?;
         let raw: SteamCmdResponse = serde_json::from_slice(&data).ok()?;
         let entry = raw.data.get(app_id)?;
@@ -347,7 +239,7 @@ impl SteamDataClient {
     }
 
     pub fn ensure_steamcmd_cache(&self, app_id: &str) -> bool {
-        let cache_path = self.game_dir(app_id).join("steamcmd_info.json");
+        let cache_path = self.game_dir(app_id).join("appdetails.json");
         if cache_path.is_file() {
             return true;
         }
@@ -355,13 +247,18 @@ impl SteamDataClient {
     }
 
     pub fn fetch_steamcmd_info(&self, app_id: &str) -> Option<SteamCmdInfo> {
-        let cache_path = self.game_dir(app_id).join("steamcmd_info.json");
+        let raw = self.ensure_steamcmd_raw(app_id)?;
+        Self::parse_steamcmd_app(&raw, app_id)
+    }
 
-        // Try cache first — read the full raw JSON and parse out what we need
+    fn ensure_steamcmd_raw(&self, app_id: &str) -> Option<SteamCmdResponse> {
+        let cache_path = self.game_dir(app_id).join("appdetails.json");
+
         if let Ok(data) = std::fs::read(&cache_path) {
-            let raw: SteamCmdResponse = serde_json::from_slice(&data).ok()?;
-            if raw.status == "success" {
-                return Self::parse_steamcmd_app(&raw, app_id);
+            if let Ok(raw) = serde_json::from_slice::<SteamCmdResponse>(&data) {
+                if raw.status == "success" {
+                    return Some(raw);
+                }
             }
         }
 
@@ -395,11 +292,10 @@ impl SteamDataClient {
             return None;
         }
 
-        // Save the FULL raw JSON response
         let _ = std::fs::create_dir_all(self.game_dir(app_id));
         let _ = std::fs::write(&cache_path, &raw_bytes);
 
-        Self::parse_steamcmd_app(&raw, app_id)
+        serde_json::from_slice(&raw_bytes).ok()
     }
 
     fn parse_steamcmd_app(raw: &SteamCmdResponse, app_id: &str) -> Option<SteamCmdInfo> {
@@ -418,4 +314,51 @@ impl SteamDataClient {
             icon: entry.common.icon.clone(),
         })
     }
+
+    fn extract_app_details(raw: &SteamCmdResponse, app_id: &str) -> Option<AppDetails> {
+        extract_app_details(raw, app_id)
+    }
+}
+
+fn extract_app_details(raw: &SteamCmdResponse, app_id: &str) -> Option<AppDetails> {
+    let entry = raw.data.get(app_id)?;
+    let languages: Vec<String> = entry.common.supported_languages.keys()
+        .cloned()
+        .collect();
+
+    let mut dlcs = std::collections::HashMap::new();
+    if !entry.extended.listofdlc.is_empty() {
+        let launch_names: std::collections::HashMap<&str, &str> = entry.config.launch.values()
+            .filter_map(|l| {
+                let dlc_id = l.config.ownsdlc.as_str();
+                if dlc_id.is_empty() { None } else { Some((dlc_id, l.description.as_str())) }
+            })
+            .collect();
+
+        for dlc_id_str in entry.extended.listofdlc.split(',') {
+            let dlc_id_str = dlc_id_str.trim();
+            if dlc_id_str.is_empty() { continue; }
+            let app_id_val: i64 = dlc_id_str.parse().unwrap_or(0);
+            let name = launch_names.get(dlc_id_str).map(|s| s.to_string()).unwrap_or_default();
+            dlcs.insert(dlc_id_str.to_string(), DlcInfo {
+                name,
+                app_id: app_id_val,
+                image_url: String::new(),
+                enabled: true,
+            });
+        }
+    }
+
+    Some(AppDetails {
+        name: entry.common.name.clone(),
+        languages,
+        dlcs,
+    })
+}
+
+pub fn read_app_details_from_cache(path: &Path) -> Option<AppDetails> {
+    let data = std::fs::read(path).ok()?;
+    let raw: SteamCmdResponse = serde_json::from_slice(&data).ok()?;
+    let app_id = raw.data.keys().next()?.clone();
+    extract_app_details(&raw, &app_id)
 }

@@ -307,7 +307,7 @@ fn save_dlc_config(params: &SaveGameSettingsParams) {
             dlc.enabled = params.dlc_switches[i].is_active();
         }
     }
-    let path = ira_parser::data_dir(&params.save_dir, &params.app_id).join("appdetails.json");
+    let path = ira_parser::data_dir(&params.save_dir, &params.app_id).join("dlc_config.json");
     if let Ok(b) = serde_json::to_vec(&details) {
         let _ = std::fs::write(&path, b);
     }

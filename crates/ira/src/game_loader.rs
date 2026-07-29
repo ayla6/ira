@@ -5,8 +5,20 @@ use std::path::PathBuf;
 
 pub fn read_app_details(save_dir: &str, app_id: &str) -> Option<AppDetails> {
     let path = ira_parser::data_dir(save_dir, app_id).join("appdetails.json");
-    let data = std::fs::read(&path).ok()?;
-    serde_json::from_slice(&data).ok()
+    let mut details = ira_api::steam::read_app_details_from_cache(&path)?;
+
+    let dlc_config_path = ira_parser::data_dir(save_dir, app_id).join("dlc_config.json");
+    if let Ok(data) = std::fs::read(&dlc_config_path) {
+        if let Ok(saved) = serde_json::from_slice::<AppDetails>(&data) {
+            for (id, saved_dlc) in &saved.dlcs {
+                if let Some(dlc) = details.dlcs.get_mut(id) {
+                    dlc.enabled = saved_dlc.enabled;
+                }
+            }
+        }
+    }
+
+    Some(details)
 }
 
 pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {

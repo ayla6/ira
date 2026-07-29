@@ -14,18 +14,6 @@ pub struct SgdbAsset {
     pub mime: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct AppDetailsResponse {
-    #[serde(flatten)]
-    pub apps: HashMap<String, AppDetailsEntry>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct AppDetailsEntry {
-    pub success: bool,
-    pub data: SteamGameDetails,
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SteamGameDetails {
     pub name: String,
@@ -185,6 +173,8 @@ pub(crate) struct SteamCmdCommon {
     pub icon: String,
     #[serde(default)]
     pub _associations: HashMap<String, SteamCmdAssociation>,
+    #[serde(default)]
+    pub supported_languages: HashMap<String, SteamCmdLanguage>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -203,12 +193,42 @@ pub(crate) struct SteamCmdExtended {
     pub publisher: String,
     #[serde(default)]
     pub homepage: String,
+    #[serde(default)]
+    pub listofdlc: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdLanguage {
+    #[serde(default)]
+    pub _supported: String,
+    #[serde(default)]
+    pub _full_audio: String,
+    #[serde(default)]
+    pub _subtitles: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct SteamCmdConfig {
     #[serde(default)]
     pub installdir: String,
+    #[serde(default)]
+    pub launch: HashMap<String, SteamCmdLaunch>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdLaunch {
+    #[serde(default)]
+    pub _executable: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub config: SteamCmdLaunchConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdLaunchConfig {
+    #[serde(default)]
+    pub ownsdlc: String,
 }
 
 /// Parsed fields extracted from a steamcmd.net response.

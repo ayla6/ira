@@ -21,7 +21,7 @@ pub use variants::*;
 pub use groups::*;
 pub use metadata::*;
 pub use discs::*;
-pub use setup::{checkpoint, init_db, update_field};
+pub use setup::{checkpoint, init_db, migrate_rom_paths_to_relative, update_field};
 pub(crate) use row_mapping::{game_entry_from_row, lock_db, GAME_COLUMNS};
 
 pub type DbConn = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;

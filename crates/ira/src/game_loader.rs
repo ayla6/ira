@@ -82,6 +82,10 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
         rom_path: entry.rom_path.clone(),
     };
 
+    if entry.kind == ira_models::GameKind::Retro && !entry.rom_path.is_empty() {
+        game.game_path = entry.rom_path.clone();
+    }
+
     if entry.title.is_empty() {
         if let Some(name) = ira_parser::read_app_name(save_dir, app_id) {
             game.name = name;

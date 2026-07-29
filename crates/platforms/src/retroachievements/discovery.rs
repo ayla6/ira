@@ -81,6 +81,12 @@ fn build_ra_games_for_console(
         scan_roms(&console.folder, console.def.extensions)
     };
 
+    let to_relative = |abs_path: &std::path::Path| -> String {
+        abs_path.strip_prefix(&console.folder)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| abs_path.to_string_lossy().into_owned())
+    };
+
     let existing_entries = {
         let _s = tracing::info_span!("db_find_retro").entered();
         ira_db::find_all_retro_by_platform(db, console.def.id).unwrap_or_default()
@@ -94,19 +100,19 @@ fn build_ra_games_for_console(
         ira_db::get_disc_paths_for_platform(db, console.def.id).unwrap_or_default()
     };
 
-    let known_paths: HashSet<&str> = existing_by_path.keys()
-        .map(|s| s.as_str())
-        .chain(disc_paths.iter().map(|s| s.as_str()))
+    let known_paths: HashSet<String> = existing_by_path.keys()
+        .cloned()
+        .chain(disc_paths)
         .collect();
 
     let mut seen_paths: HashSet<String> = HashSet::new();
     let mut new_roms: Vec<(String, PathBuf)> = Vec::new();
     for (name, path) in roms {
-        let path_str = path.to_string_lossy().into_owned();
-        seen_paths.insert(path_str.clone());
-        if !known_paths.contains(path_str.as_str()) {
+        let relative = to_relative(&path);
+        if !known_paths.contains(&relative) {
             new_roms.push((name, path));
         }
+        seen_paths.insert(relative);
     }
 
     let needs_ra_cache = !new_roms.is_empty()
@@ -184,7 +190,7 @@ fn build_ra_games_for_console(
         let groups = group_multi_disc_roms(new_roms);
         for group in &groups {
             let (rom_name, rom_path, _disc_num) = &group.roms[0];
-            let rom_path_str = rom_path.to_string_lossy().into_owned();
+            let rom_path_str = to_relative(rom_path);
 
             let matched_id = if !ra_title_map.is_empty() {
                 let rom_norm = normalize_name(rom_name);
@@ -264,7 +270,7 @@ fn build_ra_games_for_console(
             if group.roms.len() > 1 {
                 for (i, (_, disc_path, disc_num)) in group.roms.iter().enumerate() {
                     let disc_num = disc_num.unwrap_or((i + 1) as i32);
-                    let disc_path_str = disc_path.to_string_lossy().into_owned();
+                    let disc_path_str = to_relative(disc_path);
                     let label = format!("Disc {}", disc_num);
                     if let Err(e) = ira_db::add_disc(db, &GameDisc {
                         id: 0,

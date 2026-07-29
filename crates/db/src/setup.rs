@@ -2,6 +2,7 @@ use crate::DbConn;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
+use std::collections::HashMap;
 
 pub fn checkpoint(conn: &DbConn) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
@@ -119,6 +120,67 @@ pub fn init_db(db_path: &str) -> DbConn {
     crate::create_discs_table(&pool);
     crate::create_default_disc_table(&pool);
     pool
+}
+
+// PRE-RELEASE: remove after v0.X
+pub fn migrate_rom_paths_to_relative(
+    conn: &DbConn,
+    console_folders: &HashMap<String, String>,
+) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+
+    let mut stmt = c.prepare(
+        "SELECT id, platform_id, rom_path FROM games WHERE kind = 'retro' AND rom_path != ''"
+    ).map_err(|e| e.to_string())?;
+    let rows: Vec<(i64, String, String)> = stmt.query_map([], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    }).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+    drop(stmt);
+
+    for (id, platform_id, rom_path) in &rows {
+        if let Some(folder) = console_folders.get(platform_id) {
+            if !folder.is_empty() && rom_path.starts_with(folder) {
+                let relative = rom_path[folder.len()..].trim_start_matches('/');
+                if relative != rom_path.as_str() {
+                    c.execute(
+                        "UPDATE games SET rom_path = ?1 WHERE id = ?2",
+                        rusqlite::params![relative, id],
+                    ).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
+
+    let mut stmt = c.prepare(
+        "SELECT gd.id, g.platform_id, gd.rom_path
+         FROM game_discs gd
+         JOIN games g ON gd.game_id = g.id
+         WHERE g.kind = 'retro' AND gd.rom_path != ''"
+    ).map_err(|e| e.to_string())?;
+    let disc_rows: Vec<(i64, String, String)> = stmt.query_map([], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    }).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+    drop(stmt);
+
+    for (id, platform_id, rom_path) in &disc_rows {
+        if let Some(folder) = console_folders.get(platform_id) {
+            if !folder.is_empty() && rom_path.starts_with(folder) {
+                let relative = rom_path[folder.len()..].trim_start_matches('/');
+                if relative != rom_path.as_str() {
+                    c.execute(
+                        "UPDATE game_discs SET rom_path = ?1 WHERE id = ?2",
+                        rusqlite::params![relative, id],
+                    ).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug)]

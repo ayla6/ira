@@ -97,17 +97,30 @@ pub fn show_game_context_menu(
             }
         }
         wine = wine.merge_with_default(&app_default);
+        let console_folder = if game.kind == ira_models::GameKind::Retro {
+            s.cfg.console(&game.platform_id).folder.clone()
+        } else {
+            String::new()
+        };
+        let resolve_path = |p: &str| -> String {
+            if p.is_empty() || std::path::Path::new(p).is_absolute() {
+                p.to_string()
+            } else {
+                format!("{}/{}", console_folder.trim_end_matches('/'), p)
+            }
+        };
+        let resolved_game_path = resolve_path(&game.game_path);
         let game_dir = if !launch.working_dir.is_empty() {
             Some(launch.working_dir)
         } else if !launch.exe.is_empty() {
             std::path::Path::new(&launch.exe).parent().map(|p| p.to_string_lossy().to_string())
-        } else if !game.game_path.is_empty() {
-            std::path::Path::new(&game.game_path).parent().map(|p| p.to_string_lossy().to_string())
+        } else if !resolved_game_path.is_empty() {
+            std::path::Path::new(&resolved_game_path).parent().map(|p| p.to_string_lossy().to_string())
         } else {
             None
         };
-        let game_file = if !game.game_path.is_empty() && game.kind != ira_models::GameKind::Steam {
-            Some(game.game_path.clone())
+        let game_file = if !resolved_game_path.is_empty() && game.kind != ira_models::GameKind::Steam {
+            Some(resolved_game_path)
         } else {
             None
         };

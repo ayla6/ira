@@ -226,10 +226,15 @@ pub(super) fn launch_retro(
     let rom_path = {
         let discs = ira_db::get_discs(ctx.db, ctx.db_id).unwrap_or_default();
         let default_disc_id = ira_db::get_default_disc(ctx.db, ctx.db_id).ok().flatten();
-        discs.iter()
+        let raw = discs.iter()
             .find(|d| Some(d.id) == default_disc_id)
             .map(|d| d.rom_path.clone())
-            .unwrap_or_else(|| game_path.to_string())
+            .unwrap_or_else(|| game_path.to_string());
+        if raw.is_empty() || std::path::Path::new(&raw).is_absolute() {
+            raw
+        } else {
+            format!("{}/{}", cc.folder.trim_end_matches('/'), raw)
+        }
     };
     let mut cmd = ira_platforms::emulator_detect::build_launch_command(exe, &rom_path, core, cc.fullscreen, fullscreen_flag);
     let env = build_emulator_env_and_wrap(ctx, &mut cmd);

@@ -55,6 +55,16 @@ pub fn activate(app: &adw::Application) -> SharedState {
     };
 
     {
+        let _s = tracing::info_span!("migrate_rom_paths").entered();
+        let console_folders: std::collections::HashMap<String, String> = cfg.consoles.iter()
+            .map(|(k, v)| (k.clone(), v.folder.clone()))
+            .collect();
+        if let Err(e) = db::migrate_rom_paths_to_relative(&db, &console_folders) {
+            eprintln!("ROM path migration failed: {e}");
+        }
+    }
+
+    {
         let _s = tracing::info_span!("ensure_skeleton").entered();
         ira_platforms::api_emulators::ensure_skeleton(&cfg.save_dir);
     }

@@ -338,8 +338,8 @@ fn build_reset_icon_button(
         return None;
     }
     let label = match game.kind {
-        ira_models::GameKind::Ps4 => "Use PS4 icon",
-        ira_models::GameKind::Ps3 => "Use PS3 icon",
+        ira_models::GameKind::Ps4 => "PS4",
+        ira_models::GameKind::Ps3 => "PS3",
         _ => "Use icon",
     };
     let reset_btn = gtk4::Button::with_label(label);
@@ -357,28 +357,26 @@ fn build_reset_icon_button(
             ira_models::GameKind::Ps3 => std::path::Path::new(&save_dir_c2).join("data").join("ps3").join(&app_id),
             _ => return,
         };
-        let default_path = if ira_parser::find_image_file(&image_dir, "icon").is_some() {
-            ira_parser::find_image_file(&image_dir, "icon").map(|p| p.to_string_lossy().into_owned())
-        } else {
-            let game_icon = match kind {
-                ira_models::GameKind::Ps4 => std::path::Path::new(&game_path).join("sce_sys").join("icon0.png"),
-                ira_models::GameKind::Ps3 => std::path::Path::new(&game_path).join("ICON0.PNG"),
-                _ => return,
-            };
-            if game_icon.is_file() {
-                let _ = std::fs::create_dir_all(&image_dir);
-                let tmp_png = image_dir.join("icon.png");
-                let _ = std::fs::copy(&game_icon, &tmp_png);
-                ira_parser::convert_to_lossless_webp(&tmp_png);
-                ira_parser::find_image_file(&image_dir, "icon").map(|p| p.to_string_lossy().into_owned())
-            } else {
-                None
-            }
+        let game_icon = match kind {
+            ira_models::GameKind::Ps4 => std::path::Path::new(&game_path).join("sce_sys").join("icon0.png"),
+            ira_models::GameKind::Ps3 => std::path::Path::new(&game_path).join("ICON0.PNG"),
+            _ => return,
         };
-        if let Some(ref pc) = pending_copies_reset {
-            pc.borrow_mut().remove(&asset_reset);
-            if let Some(path) = default_path {
-                pc.borrow_mut().insert(asset_reset.clone(), PendingImage::Path(path));
+        if !game_icon.is_file() {
+            return;
+        }
+        let _ = std::fs::create_dir_all(&image_dir);
+        ira_parser::remove_image_variants(&image_dir, "icon");
+        ira_parser::remove_image_variants(&image_dir, "icon_small");
+        let tmp_png = image_dir.join("icon.png");
+        if std::fs::copy(&game_icon, &tmp_png).is_ok() {
+            ira_parser::convert_to_lossless_webp(&tmp_png);
+            ira_parser::ensure_small_image(&image_dir, "icon", AssetType::Icon.thumb_dims().0, AssetType::Icon.thumb_dims().1);
+            if let Some(p) = ira_parser::find_image_file(&image_dir, "icon") {
+                ira_images::invalidate_texture(&p.to_string_lossy());
+            }
+            if let Some(ref pc) = pending_copies_reset {
+                pc.borrow_mut().remove(&asset_reset);
             }
         }
         refresh();
@@ -519,12 +517,12 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         btns.append(&btn);
     }
 
-    let sgdb_ctx = SgdbPickerCtx { state, asset_type, parent_win, refresh_images: &refresh_images, dims, pending_copies: &pending_copies, save_dir: &save_dir };
-    if let Some(btn) = build_sgdb_picker_button(game, is_steam, &id, &sgdb_ctx) {
+    if let Some(btn) = build_reset_icon_button(asset_type, game, &refresh_images, &pending_copies, &save_dir) {
         btns.append(&btn);
     }
 
-    if let Some(btn) = build_reset_icon_button(asset_type, game, &refresh_images, &pending_copies, &save_dir) {
+    let sgdb_ctx = SgdbPickerCtx { state, asset_type, parent_win, refresh_images: &refresh_images, dims, pending_copies: &pending_copies, save_dir: &save_dir };
+    if let Some(btn) = build_sgdb_picker_button(game, is_steam, &id, &sgdb_ctx) {
         btns.append(&btn);
     }
 

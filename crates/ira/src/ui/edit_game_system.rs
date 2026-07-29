@@ -179,126 +179,29 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
         });
     }
 
-    let gamescope_flags = adw::EntryRow::new();
-    gamescope_flags.set_title("Gamescope flags");
-    gamescope_flags.set_text(&params.launch.gamescope_flags);
-    gamescope_row.add_row(&gamescope_flags);
+    let gs_widgets = super::gamescope_settings::add_gamescope_rows(
+        &gamescope_row,
+        &super::gamescope_settings::GamescopeDefaults {
+            flags: String::new(),
+            w: params.gamescope_w_default,
+            h: params.gamescope_h_default,
+            fps: params.gamescope_fps_default,
+            upscaling: params.gamescope_upscaling_default.clone(),
+        },
+        Some(&super::gamescope_settings::GamescopeOverride {
+            flags: params.launch.gamescope_flags.clone(),
+            w: params.launch.gamescope_w,
+            h: params.launch.gamescope_h,
+            fps: params.launch.gamescope_fps,
+            upscaling: params.launch.gamescope_upscaling.clone(),
+        }),
+    );
+    let gamescope_flags = gs_widgets.flags;
+    let gamescope_w_state = gs_widgets.w_state.unwrap();
+    let gamescope_h_state = gs_widgets.h_state.unwrap();
+    let gamescope_fps_state = gs_widgets.fps_state.unwrap();
+    let gamescope_upscaling_state = gs_widgets.upscaling_state.unwrap();
     page.append(&perf_group);
-
-    fn make_spin_override_row(
-        title: &str, subtitle: &str,
-        default_val: u32, override_val: Option<u32>,
-        min: f64, max: f64,
-    ) -> (adw::ActionRow, gtk4::SpinButton, Rc<RefCell<Option<u32>>>) {
-        let row = adw::ActionRow::new();
-        row.set_title(title);
-        row.set_subtitle(subtitle);
-        let val = override_val.unwrap_or(default_val);
-        let adj = gtk4::Adjustment::new(val as f64, min, max, 1.0, 10.0, 0.0);
-        let spin = gtk4::SpinButton::new(Some(&adj), 1.0, 0);
-        spin.set_valign(gtk4::Align::Center);
-        let state: Rc<RefCell<Option<u32>>> = Rc::new(RefCell::new(override_val));
-        let revert_btn = make_revert_btn();
-        revert_btn.set_visible(override_val.is_some());
-        let rev = Rc::new(RefCell::new(false));
-        {
-            let state_c = state.clone();
-            let btn_c = revert_btn.clone();
-            let rev_c = rev.clone();
-            spin.connect_value_changed(move |s| {
-                if *rev_c.borrow() { return; }
-                *state_c.borrow_mut() = Some(s.value() as u32);
-                btn_c.set_visible(true);
-            });
-        }
-        {
-            let state_c = state.clone();
-            let btn_c = revert_btn.clone();
-            let spin_c = spin.clone();
-            let rev_c = rev.clone();
-            let d = default_val as f64;
-            revert_btn.connect_clicked(move |_| {
-                *rev_c.borrow_mut() = true;
-                spin_c.set_value(d);
-                *rev_c.borrow_mut() = false;
-                *state_c.borrow_mut() = None;
-                btn_c.set_visible(false);
-            });
-        }
-        row.add_suffix(&revert_btn);
-        row.add_suffix(&spin);
-        (row, spin, state)
-    }
-
-    let w_dataset = params.launch.gamescope_w;
-    let h_dataset = params.launch.gamescope_h;
-    let fps_dataset = params.launch.gamescope_fps;
-    let upscale_dataset = params.launch.gamescope_upscaling.clone();
-
-    let (w_row, _w_spin, gamescope_w_state) = make_spin_override_row(
-        "Resolution width", "0 = auto", params.gamescope_w_default, w_dataset, 0.0, 16384.0,
-    );
-    gamescope_row.add_row(&w_row);
-
-    let (h_row, _h_spin, gamescope_h_state) = make_spin_override_row(
-        "Resolution height", "0 = auto", params.gamescope_h_default, h_dataset, 0.0, 16384.0,
-    );
-    gamescope_row.add_row(&h_row);
-
-    let (fps_row, _fps_spin, gamescope_fps_state) = make_spin_override_row(
-        "FPS limit", "0 = no limit", params.gamescope_fps_default, fps_dataset, 0.0, 360.0,
-    );
-    gamescope_row.add_row(&fps_row);
-
-    let upscaling_model = gtk4::StringList::new(&["Linear", "FSR", "NIS", "Integer", "Nearest"]);
-    let upscaling_row = adw::ComboRow::new();
-    upscaling_row.set_title("Upscaling method");
-    upscaling_row.set_model(Some(&upscaling_model));
-    let upscaling_values = ["linear", "fsr", "nis", "integer", "nearest"];
-    let upscale_current = params.launch.gamescope_upscaling.as_deref().unwrap_or("linear").to_string();
-    let upscale_default = params.gamescope_upscaling_default;
-    let upscale_selected = if upscale_dataset.is_some() {
-        upscaling_values.iter().position(|&v| v == upscale_current).unwrap_or(0)
-    } else {
-        upscaling_values.iter().position(|&v| v == upscale_default.as_str()).unwrap_or(0)
-    } as u32;
-    upscaling_row.set_selected(upscale_selected);
-
-    let gamescope_upscaling_state: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(upscale_dataset));
-    let upscale_revert_btn = make_revert_btn();
-    upscale_revert_btn.set_visible(params.launch.gamescope_upscaling.is_some());
-    upscaling_row.add_suffix(&upscale_revert_btn);
-
-    let upscale_rev = Rc::new(RefCell::new(false));
-    {
-        let state_c = gamescope_upscaling_state.clone();
-        let btn_c = upscale_revert_btn.clone();
-        let rev_c = upscale_rev.clone();
-        let values = upscaling_values;
-        upscaling_row.connect_selected_item_notify(move |r| {
-            if *rev_c.borrow() { return; }
-            let idx = r.selected() as usize;
-            let v = values.get(idx).copied().unwrap_or("linear");
-            *state_c.borrow_mut() = Some(v.to_string());
-            btn_c.set_visible(true);
-        });
-    }
-    {
-        let state_c = gamescope_upscaling_state.clone();
-        let btn_c = upscale_revert_btn.clone();
-        let rev_c = upscale_rev.clone();
-        let values = upscaling_values;
-        let default_idx = values.iter().position(|&v| v == upscale_default.as_str()).unwrap_or(0) as u32;
-        let row_c = upscaling_row.clone();
-        upscale_revert_btn.connect_clicked(move |_| {
-            *rev_c.borrow_mut() = true;
-            row_c.set_selected(default_idx);
-            *rev_c.borrow_mut() = false;
-            *state_c.borrow_mut() = None;
-            btn_c.set_visible(false);
-        });
-        gamescope_row.add_row(&upscaling_row);
-    }
 
     // ─── GPU (only when multiple GPUs detected) ───
     let gpus = ira_launcher::gpu::detect_gpus();

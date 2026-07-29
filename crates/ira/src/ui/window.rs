@@ -92,10 +92,16 @@ pub fn build_ui(
         multi_selected_ids: HashSet::new(),
     }));
 
+    // The placeholder window created in AppState above is replaced by
+    // build_window, but never destroyed — it keeps the app alive even after
+    // the real window closes (the "close to background doesn't work" bug).
+    // Destroy it after build_window creates the real one.
+    let placeholder = state.borrow().window.clone();
     {
         let _s = tracing::info_span!("build_window").entered();
         build_window(&state, app);
     }
+    placeholder.destroy();
 
     let win = state.borrow().window.clone();
     win.present();

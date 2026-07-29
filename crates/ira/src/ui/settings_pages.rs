@@ -138,50 +138,22 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
         });
     }
 
-    let gamescope_flags = adw::EntryRow::new();
-    gamescope_flags.set_title("Gamescope flags");
-    gamescope_flags.set_text(&s.gamescope_flags);
-    gamescope.add_row(&gamescope_flags);
-
-    let w_adj = gtk4::Adjustment::new(s.gamescope_w as f64, 0.0, 16384.0, 1.0, 100.0, 0.0);
-    let gamescope_w = gtk4::SpinButton::new(Some(&w_adj), 1.0, 0);
-    let w_row = adw::ActionRow::new();
-    w_row.set_title("Resolution width");
-    w_row.set_subtitle("0 = auto");
-    gamescope_w.set_valign(gtk4::Align::Center);
-    w_row.add_suffix(&gamescope_w);
-    gamescope.add_row(&w_row);
-
-    let h_adj = gtk4::Adjustment::new(s.gamescope_h as f64, 0.0, 16384.0, 1.0, 100.0, 0.0);
-    let gamescope_h = gtk4::SpinButton::new(Some(&h_adj), 1.0, 0);
-    let h_row = adw::ActionRow::new();
-    h_row.set_title("Resolution height");
-    h_row.set_subtitle("0 = auto");
-    gamescope_h.set_valign(gtk4::Align::Center);
-    h_row.add_suffix(&gamescope_h);
-    gamescope.add_row(&h_row);
-
-    let fps_adj = gtk4::Adjustment::new(s.gamescope_fps as f64, 0.0, 360.0, 1.0, 10.0, 0.0);
-    let gamescope_fps = gtk4::SpinButton::new(Some(&fps_adj), 1.0, 0);
-    let fps_row = adw::ActionRow::new();
-    fps_row.set_title("FPS limit");
-    fps_row.set_subtitle("0 = no limit");
-    gamescope_fps.set_valign(gtk4::Align::Center);
-    fps_row.add_suffix(&gamescope_fps);
-    gamescope.add_row(&fps_row);
-
-    let upscale_model = gtk4::StringList::new(&["Linear", "FSR", "NIS", "Integer", "Nearest"]);
-    let gamescope_upscaling_row = adw::ComboRow::new();
-    gamescope_upscaling_row.set_title("Upscaling method");
-    gamescope_upscaling_row.set_model(Some(&upscale_model));
-    {
-        let idx = match s.gamescope_upscaling.as_str() {
-            "fsr" => 1, "nis" => 2, "integer" => 3, "nearest" => 4,
-            _ => 0,
-        };
-        gamescope_upscaling_row.set_selected(idx);
-    }
-    gamescope.add_row(&gamescope_upscaling_row);
+    let gs_widgets = super::gamescope_settings::add_gamescope_rows(
+        &gamescope,
+        &super::gamescope_settings::GamescopeDefaults {
+            flags: s.gamescope_flags.clone(),
+            w: s.gamescope_w,
+            h: s.gamescope_h,
+            fps: s.gamescope_fps,
+            upscaling: s.gamescope_upscaling.clone(),
+        },
+        None,
+    );
+    let gamescope_flags = gs_widgets.flags;
+    let gamescope_w = gs_widgets.w;
+    let gamescope_h = gs_widgets.h;
+    let gamescope_fps = gs_widgets.fps;
+    let gamescope_upscaling_row = gs_widgets.upscaling;
     page.append(&perf_group);
 
     let env_group = adw::PreferencesGroup::new();

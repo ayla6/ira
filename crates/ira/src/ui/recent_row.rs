@@ -138,6 +138,9 @@ pub(super) fn build_cover(
     vbox.set_size_request(w, h);
     vbox.set_overflow(gtk4::Overflow::Visible);
 
+    let overlay = gtk4::Overlay::new();
+    overlay.set_overflow(gtk4::Overflow::Visible);
+
     let pic = gtk4::Picture::new();
     pic.set_content_fit(gtk4::ContentFit::Cover);
     pic.set_size_request(w, h);
@@ -145,8 +148,22 @@ pub(super) fn build_cover(
     if !image_path.is_empty() {
         queue_cover_load_priority(pic.clone(), image_path.to_string(), (w, h), game.db_id, game.variant_id.unwrap_or(0), vbox.clone(), glib::Priority::DEFAULT);
     }
+    overlay.set_child(Some(&pic));
 
-    vbox.append(&pic);
+    if image_path.is_empty() {
+        let name_label = gtk4::Label::new(Some(&game.name));
+        name_label.set_wrap(true);
+        name_label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+        name_label.set_max_width_chars(15);
+        name_label.set_halign(gtk4::Align::Center);
+        name_label.set_valign(gtk4::Align::Center);
+        name_label.set_margin_start(6);
+        name_label.set_margin_end(6);
+        name_label.add_css_class(CSS_COVER_NAME_FALLBACK);
+        overlay.add_overlay(&name_label);
+    }
+
+    vbox.append(&overlay);
 
     let state_clone = state.clone();
     let db_id = game.db_id;

@@ -179,11 +179,13 @@ gridview.game-grid child:focus-within {
 }
 .sidebar-section-title > box > separator {
     min-height: 1px;
+    margin-top: 1px;
 }
 .sidebar-section-title > box > label {
     opacity: 0.65;
     font-weight: 700;
     font-size: 0.85em;
+    margin-bottom: 2px;
 }
 
 .dim-label {
@@ -208,4 +210,6 @@ gridview.game-grid child:focus-within {
 .clickable-stat { transition: 100ms ease; border-radius: 6px; padding: 6px 10px; margin: -6px -10px; }
 .clickable-stat:hover { background-color: alpha(@theme_fg_color, 0.07); }
 .locked-trophy { filter: grayscale(100%); }
+.hero-fallback-bg { background: shade(@theme_bg_color, 0.5); }
+.hero-title-overlay { color: white; font-size: 1.4em; font-weight: 700; text-shadow: 0 2px 8px rgba(0,0,0,0.8); }
 ";

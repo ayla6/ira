@@ -15,7 +15,10 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
     let settings_btn = build_settings_button(state, game.db_id);
 
     let has_hero = !game.hero_image_path.is_empty();
-    if !has_hero {
+    let has_logo = !game.logo_path.is_empty();
+    let has_grid = !game.grid_path.is_empty();
+
+    if !has_hero && !has_logo && !has_grid {
         let header = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
         header.set_margin_top(24);
         header.set_margin_bottom(8);
@@ -32,7 +35,13 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
         return header.upcast();
     }
 
-    let overlay = build_hero_overlay(game, content_width);
+    let hero_path = if has_hero {
+        game.hero_image_path.clone()
+    } else {
+        String::new()
+    };
+
+    let overlay = build_hero_overlay(game, content_width, &hero_path, has_hero, has_logo);
     let stats_container = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
     stats_container.set_margin_start(24);
     stats_container.set_margin_end(24);
@@ -290,23 +299,28 @@ fn build_settings_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
     btn.upcast::<gtk4::Widget>()
 }
 
-fn build_hero_overlay(game: &Game, content_width: i32) -> gtk4::Overlay {
+fn build_hero_overlay(game: &Game, content_width: i32, hero_path: &str, has_hero: bool, has_logo: bool) -> gtk4::Overlay {
     let overlay = gtk4::Overlay::new();
     overlay.set_vexpand(false);
     overlay.set_hexpand(true);
     overlay.set_height_request(((content_width as f64) / 3.1).max(150.0) as i32);
 
     let hero = gtk4::Picture::new();
-    if let Some(t) = ira_images::texture_for(&game.hero_image_path) {
-        hero.set_paintable(Some(&t));
+    if !hero_path.is_empty() {
+        if let Some(t) = ira_images::texture_for(hero_path) {
+            hero.set_paintable(Some(&t));
+        }
     }
     hero.set_halign(gtk4::Align::Fill);
     hero.set_valign(gtk4::Align::Fill);
     hero.set_hexpand(true);
     hero.set_content_fit(gtk4::ContentFit::Cover);
+    if !has_hero {
+        hero.add_css_class("hero-fallback-bg");
+    }
     overlay.set_child(Some(&hero));
 
-    if !game.logo_path.is_empty() {
+    if has_logo && !game.logo_path.is_empty() {
         let logo_pct = game.logo_size.clamp(5, 100);
         let logo_pos = game.logo_position.clone();
 
@@ -354,6 +368,15 @@ fn build_hero_overlay(game: &Game, content_width: i32) -> gtk4::Overlay {
 
             overlay.add_overlay(&logo_area);
         }
+    } else if !has_logo {
+        let title_label = gtk4::Label::new(Some(&game.name));
+        title_label.set_xalign(0.0);
+        title_label.set_valign(gtk4::Align::Center);
+        title_label.set_halign(gtk4::Align::Start);
+        title_label.set_margin_start(24);
+        title_label.set_margin_end(24);
+        title_label.add_css_class("hero-title-overlay");
+        overlay.add_overlay(&title_label);
     }
 
     {

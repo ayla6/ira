@@ -2,8 +2,8 @@ use std::path::Path;
 
 use crate::SteamDataClient;
 use crate::types::{
-    AppDetails, DlcInfo, GlobalAchievementsResponse, SteamCmdInfo,
-    SteamCmdResponse, SteamReviewSummary, SteamReviewsResponse,
+    AppDetails, DlcInfo, GlobalAchievementsResponse, SteamCmdInfo, SteamCmdLaunch,
+    SteamCmdLaunchInfo, SteamCmdResponse, SteamReviewSummary, SteamReviewsResponse,
 };
 use crate::util::{pick_lang, urlencode};
 
@@ -312,12 +312,29 @@ impl SteamDataClient {
             install_dir: entry.config.installdir.clone(),
             clienticon: entry.common.clienticon.clone(),
             icon: entry.common.icon.clone(),
+            oslist: entry.common.oslist.clone(),
+            launches: sorted_launches(&entry.config.launch),
         })
     }
 
     fn extract_app_details(raw: &SteamCmdResponse, app_id: &str) -> Option<AppDetails> {
         extract_app_details(raw, app_id)
     }
+}
+
+/// Collect launch entries sorted by their numeric key (0, 1, 2, …) so that
+/// launch.0 — the default — comes first. `config.launch` is a JSON object
+/// whose keys are stringified indices, so HashMap iteration order is random.
+fn sorted_launches(launch: &std::collections::HashMap<String, SteamCmdLaunch>) -> Vec<SteamCmdLaunchInfo> {
+    let mut entries: Vec<(u32, &SteamCmdLaunch)> = launch.iter()
+        .filter_map(|(k, v)| k.parse::<u32>().ok().map(|n| (n, v)))
+        .collect();
+    entries.sort_by_key(|(n, _)| *n);
+    entries.into_iter().map(|(_, l)| SteamCmdLaunchInfo {
+        executable: l.executable.clone(),
+        oslist: l.config.oslist.clone(),
+        description: l.description.clone(),
+    }).collect()
 }
 
 fn extract_app_details(raw: &SteamCmdResponse, app_id: &str) -> Option<AppDetails> {
@@ -361,4 +378,53 @@ pub fn read_app_details_from_cache(path: &Path) -> Option<AppDetails> {
     let raw: SteamCmdResponse = serde_json::from_slice(&data).ok()?;
     let app_id = raw.data.keys().next()?.clone();
     extract_app_details(&raw, &app_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::SteamCmdConfig;
+
+    #[test]
+    fn test_sorted_launches_orders_by_numeric_key() {
+        // Keys deliberately out of order; iteration order is random in a HashMap.
+        let json = r#"{
+            "installdir": "MyGame",
+            "launch": {
+                "2": {"executable": "linux_run", "config": {"oslist": "linux"}},
+                "0": {"executable": "game.exe", "config": {"oslist": "windows"}},
+                "1": {"executable": "launcher.exe", "description": "Start Launcher", "config": {"oslist": "windows"}}
+            }
+        }"#;
+        let config: SteamCmdConfig = serde_json::from_str(json).unwrap();
+        let launches = sorted_launches(&config.launch);
+        assert_eq!(launches.len(), 3);
+        assert_eq!(launches[0].executable, "game.exe");
+        assert_eq!(launches[0].oslist, "windows");
+        assert_eq!(launches[1].executable, "launcher.exe");
+        assert_eq!(launches[1].description, "Start Launcher");
+        assert_eq!(launches[2].executable, "linux_run");
+        assert_eq!(launches[2].oslist, "linux");
+    }
+
+    #[test]
+    fn test_sorted_launches_empty() {
+        let config: SteamCmdConfig = serde_json::from_str(r#"{"installdir":"x"}"#).unwrap();
+        assert!(sorted_launches(&config.launch).is_empty());
+    }
+
+    #[test]
+    fn test_sorted_launches_skips_non_numeric_keys() {
+        let json = r#"{
+            "installdir": "x",
+            "launch": {
+                "0": {"executable": "a.exe", "config": {}},
+                "beta": {"executable": "b.exe", "config": {}}
+            }
+        }"#;
+        let config: SteamCmdConfig = serde_json::from_str(json).unwrap();
+        let launches = sorted_launches(&config.launch);
+        assert_eq!(launches.len(), 1);
+        assert_eq!(launches[0].executable, "a.exe");
+    }
 }

@@ -137,6 +137,8 @@ pub(crate) struct SteamCmdCommon {
     #[serde(default)]
     pub icon: String,
     #[serde(default)]
+    pub oslist: String,
+    #[serde(default)]
     pub supported_languages: HashMap<String, SteamCmdLanguage>,
 }
 
@@ -173,7 +175,7 @@ pub(crate) struct SteamCmdConfig {
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct SteamCmdLaunch {
     #[serde(default)]
-    pub _executable: String,
+    pub executable: String,
     #[serde(default)]
     pub description: String,
     #[serde(default)]
@@ -184,6 +186,8 @@ pub(crate) struct SteamCmdLaunch {
 pub(crate) struct SteamCmdLaunchConfig {
     #[serde(default)]
     pub ownsdlc: String,
+    #[serde(default)]
+    pub oslist: String,
 }
 
 /// Parsed fields extracted from a steamcmd.net response.
@@ -202,4 +206,21 @@ pub struct SteamCmdInfo {
     pub clienticon: String,
     /// Community icon hash (used for CDN `apps/<appid>/<hash>.ico`).
     pub icon: String,
+    /// Comma-separated OS list from `common.oslist` (e.g. "windows,macos,linux").
+    #[serde(default)]
+    pub oslist: String,
+    /// Sorted launch entries (launch.0 is the default). Empty if none.
+    #[serde(default)]
+    pub launches: Vec<SteamCmdLaunchInfo>,
+}
+
+/// A single launch entry from steamcmd.net `config.launch`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SteamCmdLaunchInfo {
+    /// Executable path relative to the install directory.
+    pub executable: String,
+    /// OS list for this launch (e.g. "windows", "linux").
+    pub oslist: String,
+    /// Optional human-readable description (e.g. "Start Launcher").
+    pub description: String,
 }

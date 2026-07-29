@@ -357,15 +357,20 @@ fn build_reset_icon_button(
             ira_models::GameKind::Ps3 => std::path::Path::new(&save_dir_c2).join("data").join("ps3").join(&app_id),
             _ => return,
         };
-        let icon_png = image_dir.join("icon.png");
-        let default_path = if icon_png.is_file() {
-            Some(icon_png.to_string_lossy().into_owned())
+        let default_path = if ira_parser::find_image_file(&image_dir, "icon").is_some() {
+            ira_parser::find_image_file(&image_dir, "icon").map(|p| p.to_string_lossy().into_owned())
         } else {
-            let game_icon = std::path::Path::new(&game_path).join("sce_sys").join("icon0.png");
+            let game_icon = match kind {
+                ira_models::GameKind::Ps4 => std::path::Path::new(&game_path).join("sce_sys").join("icon0.png"),
+                ira_models::GameKind::Ps3 => std::path::Path::new(&game_path).join("ICON0.PNG"),
+                _ => return,
+            };
             if game_icon.is_file() {
                 let _ = std::fs::create_dir_all(&image_dir);
-                let _ = std::fs::copy(&game_icon, &icon_png);
-                Some(icon_png.to_string_lossy().into_owned())
+                let tmp_png = image_dir.join("icon.png");
+                let _ = std::fs::copy(&game_icon, &tmp_png);
+                ira_parser::convert_to_lossless_webp(&tmp_png);
+                ira_parser::find_image_file(&image_dir, "icon").map(|p| p.to_string_lossy().into_owned())
             } else {
                 None
             }

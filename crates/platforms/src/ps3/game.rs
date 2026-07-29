@@ -89,30 +89,25 @@ pub fn load_rpcs3_game(
         variant_id: None,
     };
 
-    // Default icon: copy the game's ICON0.PNG to data/ps3/{NPWR}/icon.png.
+    // Default icon: copy the game's ICON0.PNG to data/ps3/{NPWR}/ and convert
+    // to WebP. Only copies if no icon (webp/jpg) already exists in the data dir.
     let ps3_data_dir = Path::new(save_dir).join("data").join("ps3").join(npwr_id);
-    let ps3_icon = ps3_data_dir.join("icon.png");
-    if !ps3_icon.is_file() {
+    if ira_parser::find_image_file(&ps3_data_dir, "icon").is_none() {
         let default_icon = game.game_path.join("ICON0.PNG");
         if default_icon.is_file() {
             let _ = std::fs::create_dir_all(&ps3_data_dir);
-            let _ = std::fs::copy(&default_icon, &ps3_icon);
+            let tmp_png = ps3_data_dir.join("icon.png");
+            let _ = std::fs::copy(&default_icon, &tmp_png);
+            ira_parser::convert_to_lossless_webp(&tmp_png);
         }
     }
 
-    // Image paths — use SGDB dir if sgdb_id is set, otherwise data/ps3/{NPWR_ID}/.
-    let image_dir = if !meta.sgdb_id.is_empty() {
-        Path::new(save_dir).join("data").join("steamgriddb").join(&meta.sgdb_id)
-    } else {
-        ps3_data_dir.clone()
-    };
+    // Image paths — always use data/ps3/{NPWR_ID}/ to match game_data_dir/
+    // entry_data_dir and the background SGDB enrichment download target.
+    let image_dir = ps3_data_dir.clone();
 
-    let icon_png = image_dir.join("icon.png");
-    if icon_png.is_file() {
-        out.icon_path = icon_png.to_string_lossy().into_owned();
-    } else if ps3_icon.is_file() {
-        out.icon_path = ps3_icon.to_string_lossy().into_owned();
-    } else {
+    // Fallback to the emulator's original ICON0.PNG if no icon in data dir.
+    if ira_parser::find_image_file(&image_dir, "icon").is_none() {
         let default_icon = game.game_path.join("ICON0.PNG");
         if default_icon.is_file() {
             out.icon_path = default_icon.to_string_lossy().into_owned();

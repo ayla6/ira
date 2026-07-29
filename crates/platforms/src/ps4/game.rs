@@ -85,27 +85,24 @@ pub fn load_shadps4_game(
         variant_id: None,
     };
 
-    // PS4 default icon: always copy from the game's sce_sys/icon0.png to data/ps4/{NPWR}/icon.png
+    // Default icon: copy the game's sce_sys/icon0.png to data/ps4/{NPWR}/ and
+    // convert to WebP. Only copies if no icon (webp/jpg) already exists in the data dir.
     let ps4_data_dir = Path::new(save_dir).join("data").join("ps4").join(npwr_id);
-    let ps4_icon = ps4_data_dir.join("icon.png");
-    if !ps4_icon.is_file() {
+    if ira_parser::find_image_file(&ps4_data_dir, "icon").is_none() {
         let default_icon = shad.game_path.join("sce_sys").join("icon0.png");
         if default_icon.is_file() {
             let _ = std::fs::create_dir_all(&ps4_data_dir);
-            let _ = std::fs::copy(&default_icon, &ps4_icon);
+            let tmp_png = ps4_data_dir.join("icon.png");
+            let _ = std::fs::copy(&default_icon, &tmp_png);
+            ira_parser::convert_to_lossless_webp(&tmp_png);
         }
     }
 
     // Image paths — always use data/ps4/{NPWR_ID}/ to match game_data_dir/entry_data_dir
     let image_dir = ps4_data_dir.clone();
 
-    let icon_png = image_dir.join("icon.png");
-    if icon_png.is_file() {
-        game.icon_path = icon_png.to_string_lossy().into_owned();
-    } else if ps4_icon.is_file() {
-        game.icon_path = ps4_icon.to_string_lossy().into_owned();
-    } else {
-        // Fallback: game's sce_sys/icon0.png
+    // Fallback to the emulator's original sce_sys/icon0.png if no icon in data dir.
+    if ira_parser::find_image_file(&image_dir, "icon").is_none() {
         let default_icon = shad.game_path.join("sce_sys").join("icon0.png");
         if default_icon.is_file() {
             game.icon_path = default_icon.to_string_lossy().into_owned();

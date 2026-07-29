@@ -267,8 +267,8 @@ fn connect_add_handler(
         let kind = if is_wine { ira_models::GameKind::Wine } else { ira_models::GameKind::Linux };
         let platform_id = if !steam_app_id.is_empty() { steam_app_id.clone() } else if !gog_product_id.is_empty() { gog_product_id.clone() } else { format!("manual_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()) };
 
-        let selected_profile_id = if is_wine && profile_row.selected() > 0 {
-            profiles.get((profile_row.selected() - 1) as usize).map(|p| p.id)
+        let selected_profile_id = if is_wine {
+            super::wine_profile_picker::selected_profile_id(&profile_row, &profiles)
         } else {
             None
         };

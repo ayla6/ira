@@ -58,6 +58,7 @@ mod wine_config_helpers;
 mod wine_config_env_dll;
 mod wine_config_widget;
 mod profile_dialog;
+mod wine_profile_picker;
 mod matching;
 mod filter;
 mod group_dialog;

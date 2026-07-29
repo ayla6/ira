@@ -92,6 +92,8 @@ pub struct Config {
     pub default_system: SystemDefaults,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub prefix_base_dir: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub default_game_folder: String,
     #[serde(default)]
     pub default_native_env_vars: Vec<(String, String)>,
     #[serde(default)]
@@ -137,6 +139,7 @@ impl Default for Config {
             default_wine_config: WineConfig::default(),
             default_system: SystemDefaults::default(),
             prefix_base_dir: String::new(),
+            default_game_folder: String::new(),
             default_native_env_vars: Vec::new(),
             default_api_emu_version: String::new(),
             sort_mode: ira_models::SortMode::default(),
@@ -190,6 +193,7 @@ impl Config {
             default_wine_config: self.default_wine_config.clone(),
             default_system: self.default_system.clone(),
             prefix_base_dir: self.prefix_base_dir.clone(),
+            default_game_folder: self.default_game_folder.clone(),
             default_native_env_vars: self.default_native_env_vars.clone(),
             default_api_emu_version: self.default_api_emu_version.clone(),
             sort_mode: self.sort_mode,

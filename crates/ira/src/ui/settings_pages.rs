@@ -297,6 +297,37 @@ pub(super) fn build_steam_settings_page(cfg: &Config) -> (gtk4::Box, adw::Switch
     (page, enable_row)
 }
 
+pub(super) fn build_computer_games_page(
+    win: &adw::Window,
+    cfg: &Config,
+) -> (gtk4::Box, adw::EntryRow) {
+    let page = settings_page_container();
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Default game folder");
+    group.set_description(Some("Default location for Wine and Linux game executables"));
+
+    let folder_row = adw::EntryRow::new();
+    folder_row.set_title("Game folder");
+    folder_row.set_text(&cfg.default_game_folder);
+
+    let folder_browse = super::helpers::make_browse_button(
+        Some(win),
+        "Select default game folder",
+        true,
+        None,
+        {
+            let row = folder_row.clone();
+            move |path| row.set_text(&path.to_string_lossy())
+        },
+    );
+    folder_row.add_suffix(&folder_browse);
+    group.add(&folder_row);
+    page.append(&group);
+
+    (page, folder_row)
+}
+
 pub(super) fn build_ra_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow, adw::EntryRow) {
     let page = settings_page_container();
 

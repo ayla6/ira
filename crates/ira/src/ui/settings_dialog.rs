@@ -12,7 +12,7 @@ use super::settings_pages::{
     build_general_settings_page, build_lutris_settings_page,
     build_steam_settings_page, build_ra_settings_page, build_api_emulators_page,
     build_overlay_settings_page,
-    build_system_defaults_page,
+    build_system_defaults_page, build_computer_games_page,
 };
 use super::system_settings::{build_override_switch_row, OverrideState};
 use super::settings_console::{
@@ -76,6 +76,11 @@ pub fn show_settings_dialog(
     let (steam_page, steam_enable_row) = build_steam_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Steam", "steam"));
     stack.add_named(&steam_page, Some("steam"));
+
+    sidebar.append(&sidebar_separator());
+    let (computer_games_page, default_game_folder_row) = build_computer_games_page(&win, &cfg);
+    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "Computer Games", "computer_games"));
+    stack.add_named(&computer_games_page, Some("computer_games"));
 
     let (ra_page, ra_enable_row, ra_username_row, ra_password_row) = build_ra_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("applications-science-symbolic", "RetroAchievements", "ra"));
@@ -257,6 +262,7 @@ pub fn show_settings_dialog(
             s.cfg.rpcs3_executable = row.text().to_string();
         }
         s.cfg.steam_enabled = steam_enable_row.is_active();
+        s.cfg.default_game_folder = default_game_folder_row.text().to_string();
         s.cfg.ra_enabled = ra_enable_row.is_active();
         s.cfg.ra_username = ra_username_row.text().to_string();
         s.cfg.ra_password = ra_password_row.text().to_string();

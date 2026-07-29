@@ -1,6 +1,6 @@
 use ira_db as db;
 use ira_config::Config;
-use ira_models::{Game, SortMode};
+use ira_models::{Game, GameKind, GameEntry, SortMode};
 use crate::game_loader;
 use ira_platforms::ps4::{discover_games, load_shadps4_game, ShadPS4GameMeta};
 use ira_platforms::ps3::{discover_games as discover_rpcs3_games, load_rpcs3_game, Rpcs3GameMeta};
@@ -134,38 +134,114 @@ pub fn build_game_list(db: &db::DbConn, save_dir: &str, cfg: &Config, options: &
     })
 }
 
+/// Fields from a DB entry needed to build console game metadata.
+struct ConsoleDbMeta {
+    db_id: i64,
+    title: String,
+    hidden: bool,
+    logo_position: String,
+    logo_size: i32,
+    sort_title: String,
+    sgdb_id: String,
+    shadps4_version: String,
+    last_played: i64,
+}
+
+impl ConsoleDbMeta {
+    fn from_entry(e: &GameEntry, include_version: bool) -> Self {
+        Self {
+            db_id: e.id,
+            title: e.title.clone(),
+            hidden: e.hidden,
+            logo_position: e.logo_position.clone(),
+            logo_size: e.logo_size,
+            sort_title: e.sort_title.clone(),
+            sgdb_id: e.sgdb_id.clone().unwrap_or_default(),
+            shadps4_version: if include_version { e.shadps4_version.clone() } else { String::new() },
+            last_played: e.last_played,
+        }
+    }
+
+    fn new_db_entry(id: i64, title: String) -> Self {
+        Self {
+            db_id: id,
+            title,
+            hidden: false,
+            logo_position: ira_models::LogoPosition::BottomLeft.to_string(),
+            logo_size: 50,
+            sort_title: String::new(),
+            sgdb_id: String::new(),
+            shadps4_version: String::new(),
+            last_played: 0,
+        }
+    }
+}
+
+/// Look up or create a DB entry for a discovered console game.
+/// Tries `find_by_game_id` first, then `find_by_kind_platform` as fallback.
+/// Logs DB errors instead of silently swallowing them.
+fn find_or_create_console_entry(
+    db: &db::DbConn,
+    kind: GameKind,
+    npwr_id: &str,
+    serial: &str,
+    title: &str,
+    include_version: bool,
+) -> Option<ConsoleDbMeta> {
+    let entry = match db::find_by_game_id(db, npwr_id, serial) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("DB error looking up {kind} game {serial}: {e}");
+            None
+        }
+    };
+    let entry = match entry {
+        Some(e) => Some(e),
+        None => match db::find_by_kind_platform(db, kind, serial) {
+            Ok(Some(e)) => Some(e),
+            Ok(None) => None,
+            Err(e) => {
+                eprintln!("DB error looking up {kind} game {serial} by kind/platform: {e}");
+                None
+            }
+        },
+    };
+
+    match entry {
+        Some(e) => Some(ConsoleDbMeta::from_entry(&e, include_version)),
+        None => {
+            match db::add_game(db, kind, ira_models::TrophySource::Empty, "", npwr_id, serial, title) {
+                Ok(id) => Some(ConsoleDbMeta::new_db_entry(id, title.to_string())),
+                Err(e) => {
+                    eprintln!("{kind}: failed to add {serial} to DB: {e}");
+                    None
+                }
+            }
+        }
+    }
+}
+
 fn build_shadps4_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
     let shad_games = discover_games();
     let mut games = Vec::new();
 
     for shad in &shad_games {
-        let entry = db::find_by_game_id(db, &shad.npwr_id, &shad.serial).ok().flatten()
-            .or_else(|| db::find_by_kind_platform(db, ira_models::GameKind::Ps4, &shad.serial).ok().flatten());
-        let (db_id, title, hidden, logo_position, logo_size, sort_title, sgdb_id, shadps4_version, last_played) = match entry {
-            Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title, e.sgdb_id.clone().unwrap_or_default(), e.shadps4_version.clone(), e.last_played),
-            None => {
-                match db::add_game(db, ira_models::GameKind::Ps4, ira_models::TrophySource::Empty, "", &shad.npwr_id, &shad.serial, &shad.title) {
-                    Ok(id) => (id, shad.title.clone(), false, ira_models::LogoPosition::BottomLeft.to_string(), 50, String::new(), String::new(), String::new(), 0),
-                    Err(e) => {
-                        eprintln!("shadPS4: failed to add {} to DB: {}", shad.serial, e);
-                        continue;
-                    }
-                }
-            }
-        };
+        let Some(meta) = find_or_create_console_entry(
+            db, GameKind::Ps4, &shad.npwr_id, &shad.serial, &shad.title, true,
+        ) else { continue };
 
         let game = load_shadps4_game(
             shad,
-            db_id,
+            meta.db_id,
             &ShadPS4GameMeta {
-                title,
-                hidden,
-                logo_position,
-                logo_size,
-                sort_title,
-                sgdb_id,
-                shadps4_version,
-                last_played,
+                title: meta.title,
+                hidden: meta.hidden,
+                logo_position: meta.logo_position,
+                logo_size: meta.logo_size,
+                sort_title: meta.sort_title,
+                sgdb_id: meta.sgdb_id,
+                shadps4_version: meta.shadps4_version,
+                last_played: meta.last_played,
             },
             save_dir,
         );
@@ -180,32 +256,21 @@ fn build_rpcs3_games(db: &db::DbConn, save_dir: &str) -> Vec<Game> {
     let mut games = Vec::new();
 
     for ps3_game in &ps3_games {
-        let entry = db::find_by_game_id(db, &ps3_game.npwr_id, &ps3_game.serial).ok().flatten()
-            .or_else(|| db::find_by_kind_platform(db, ira_models::GameKind::Ps3, &ps3_game.serial).ok().flatten());
-        let (db_id, title, hidden, logo_position, logo_size, sort_title, sgdb_id, last_played) = match entry {
-            Some(e) => (e.id, e.title, e.hidden, e.logo_position, e.logo_size, e.sort_title, e.sgdb_id.clone().unwrap_or_default(), e.last_played),
-            None => {
-                match db::add_game(db, ira_models::GameKind::Ps3, ira_models::TrophySource::Empty, "", &ps3_game.npwr_id, &ps3_game.serial, &ps3_game.title) {
-                    Ok(id) => (id, ps3_game.title.clone(), false, ira_models::LogoPosition::BottomLeft.to_string(), 50, String::new(), String::new(), 0),
-                    Err(e) => {
-                        eprintln!("RPCS3: failed to add {} to DB: {}", ps3_game.serial, e);
-                        continue;
-                    }
-                }
-            }
-        };
+        let Some(meta) = find_or_create_console_entry(
+            db, GameKind::Ps3, &ps3_game.npwr_id, &ps3_game.serial, &ps3_game.title, false,
+        ) else { continue };
 
         let game = load_rpcs3_game(
             ps3_game,
-            db_id,
+            meta.db_id,
             &Rpcs3GameMeta {
-                title,
-                hidden,
-                logo_position,
-                logo_size,
-                sort_title,
-                sgdb_id,
-                last_played,
+                title: meta.title,
+                hidden: meta.hidden,
+                logo_position: meta.logo_position,
+                logo_size: meta.logo_size,
+                sort_title: meta.sort_title,
+                sgdb_id: meta.sgdb_id,
+                last_played: meta.last_played,
             },
             save_dir,
         );
@@ -220,10 +285,18 @@ fn cleanup_steam_entries(db: &db::DbConn, discovered: &[steam::SteamGame]) {
         .map(|g| g.app_id.clone())
         .collect();
 
-    let all_entries = db::load_all_games(db).unwrap_or_default();
+    let all_entries = match db::load_all_games(db) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("DB error loading all games for Steam cleanup: {e}");
+            return;
+        }
+    };
     for entry in &all_entries {
-        if entry.kind == ira_models::GameKind::Steam && !discovered_ids.contains(&entry.steam_id) {
-            let _ = db::remove_game(db, entry.id);
+        if entry.kind == GameKind::Steam && !discovered_ids.contains(&entry.steam_id) {
+            if let Err(e) = db::remove_game(db, entry.id) {
+                eprintln!("DB error removing stale Steam entry {}: {e}", entry.steam_id);
+            }
         }
     }
 }
@@ -235,33 +308,52 @@ fn build_steam_games(db: &db::DbConn, save_dir: &str, steam_games: &[steam::Stea
         if sg.app_id.is_empty() {
             continue;
         }
-        let entry = db::find_by_steam_id(db, &sg.app_id).ok().flatten();
-        if entry.is_none() {
-            let kind = ira_models::GameKind::Steam;
-            let trophy_source = ira_models::TrophySource::SteamNative;
-            if let Err(e) = db::add_game(db, kind, trophy_source, &sg.app_id, "", &sg.app_id, &sg.name) {
-                eprintln!("Steam: failed to add {} to DB: {}", sg.app_id, e);
+
+        let entry = match db::find_by_steam_id(db, &sg.app_id) {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("DB error looking up Steam app {}: {e}", sg.app_id);
                 continue;
             }
-        }
+        };
 
-        let db_entry = db::find_by_steam_id(db, &sg.app_id).ok().flatten();
-        if let Some(e) = db_entry {
-            match game_loader::load_game_fast(&e, save_dir) {
-                Ok(mut game) => {
-                    if (game.name.is_empty() || game.name.starts_with("App ID:"))
-                        && !sg.name.is_empty() {
-                            game.name = sg.name.clone();
-                        }
-                    game.game_path = sg.install_dir.to_string_lossy().into_owned();
-                    if let Some(&(pt, lp)) = playtimes.get(&sg.app_id) {
-                        game.playtime = pt;
-                        game.last_played = lp;
-                    }
-                    games.push(game);
+        let entry = match entry {
+            Some(e) => e,
+            None => {
+                if let Err(e) = db::add_game(db, GameKind::Steam, ira_models::TrophySource::SteamNative, &sg.app_id, "", &sg.app_id, &sg.name) {
+                    eprintln!("Steam: failed to add {} to DB: {e}", sg.app_id);
+                    continue;
                 }
-                Err(e) => eprintln!("Steam: failed to load {}: {}", sg.app_id, e),
+                match db::find_by_steam_id(db, &sg.app_id) {
+                    Ok(e) => match e {
+                        Some(e) => e,
+                        None => {
+                            eprintln!("Steam: entry for {} vanished after insert", sg.app_id);
+                            continue;
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("DB error re-looking up Steam app {}: {e}", sg.app_id);
+                        continue;
+                    }
+                }
             }
+        };
+
+        match game_loader::load_game_fast(&entry, save_dir) {
+            Ok(mut game) => {
+                if (game.name.is_empty() || game.name.starts_with("App ID:"))
+                    && !sg.name.is_empty() {
+                    game.name = sg.name.clone();
+                }
+                game.game_path = sg.install_dir.to_string_lossy().into_owned();
+                if let Some(&(pt, lp)) = playtimes.get(&sg.app_id) {
+                    game.playtime = pt;
+                    game.last_played = lp;
+                }
+                games.push(game);
+            }
+            Err(e) => eprintln!("Steam: failed to load {}: {e}", sg.app_id),
         }
     }
 

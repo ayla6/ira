@@ -7,6 +7,42 @@ use super::play_button_helpers;
 use super::state::SharedState;
 use super::css::*;
 
+const PLAY_BTN_HEIGHT: i32 = 48;
+const PLAY_BTN_H_MARGIN: i32 = 16;
+const PLAY_BTN_ICON_SIZE: i32 = 20;
+const PLAY_BTN_LABEL_WIDTH: i32 = 5;
+
+fn build_play_btn_hbox() -> gtk4::Box {
+    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    hbox.set_valign(gtk4::Align::Center);
+    hbox.set_halign(gtk4::Align::Center);
+    hbox.set_margin_start(PLAY_BTN_H_MARGIN);
+    hbox.set_margin_end(PLAY_BTN_H_MARGIN);
+
+    let icon = gtk4::Image::from_icon_name("media-playback-start-symbolic");
+    icon.set_pixel_size(PLAY_BTN_ICON_SIZE);
+    hbox.append(&icon);
+
+    let label = gtk4::Label::new(Some("Play"));
+    label.add_css_class(CSS_PLAY_BTN_LABEL);
+    label.set_width_chars(PLAY_BTN_LABEL_WIDTH);
+    hbox.append(&label);
+
+    hbox
+}
+
+fn set_running_state(icon: &gtk4::Image, label: &gtk4::Label, btn: &impl IsA<gtk4::Widget>, running: bool) {
+    if running {
+        icon.set_icon_name(Some("window-close-symbolic"));
+        label.set_text("Stop");
+        btn.remove_css_class(CSS_SUGGESTED_ACTION);
+    } else {
+        icon.set_icon_name(Some("media-playback-start-symbolic"));
+        label.set_text("Play");
+        btn.add_css_class(CSS_SUGGESTED_ACTION);
+    }
+}
+
 fn is_game_running(state: &SharedState, db_id: i64) -> bool {
     state.borrow().running_games.lock().map(|m| m.contains_key(&db_id)).unwrap_or(false)
 }
@@ -152,10 +188,13 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
 }
 
 pub fn play_button(state: &SharedState, db_id: i64, variant_id: Option<i64>) -> gtk4::Widget {
-    let sender = state.borrow().sender.clone();
+    let (sender, db) = {
+        let s = state.borrow();
+        (s.sender.clone(), s.db.clone())
+    };
 
-    let variants = ira_db::get_variants(&state.borrow().db, db_id).unwrap_or_default();
-    let discs = ira_db::get_discs(&state.borrow().db, db_id).unwrap_or_default();
+    let variants = ira_db::get_variants(&db, db_id).unwrap_or_default();
+    let discs = ira_db::get_discs(&db, db_id).unwrap_or_default();
     let has_variants = !variants.is_empty();
     let has_discs = !discs.is_empty();
 
@@ -180,30 +219,23 @@ fn build_simple_play_button(
 ) -> gtk4::Widget {
     let btn = gtk4::Button::new();
     btn.set_valign(gtk4::Align::Center);
-    btn.set_height_request(48);
+    btn.set_height_request(PLAY_BTN_HEIGHT);
 
-    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    hbox.set_valign(gtk4::Align::Center);
-    hbox.set_halign(gtk4::Align::Center);
-    hbox.set_margin_start(16);
-    hbox.set_margin_end(16);
-
-    let icon = gtk4::Image::from_icon_name("media-playback-start-symbolic");
-    icon.set_pixel_size(20);
-    hbox.append(&icon);
-
-    let label = gtk4::Label::new(Some("Play"));
-    label.add_css_class(CSS_PLAY_BTN_LABEL);
-    label.set_width_chars(5);
-    hbox.append(&label);
+    let hbox = build_play_btn_hbox();
+    let icon = hbox.first_child()
+        .and_then(|c| c.downcast::<gtk4::Image>().ok())
+        .unwrap();
+    let label = hbox.last_child()
+        .and_then(|c| c.downcast::<gtk4::Label>().ok())
+        .unwrap();
 
     btn.set_child(Some(&hbox));
 
-    if is_running {
+    if !is_running {
+        btn.add_css_class(CSS_SUGGESTED_ACTION);
+    } else {
         icon.set_icon_name(Some("window-close-symbolic"));
         label.set_text("Stop");
-    } else {
-        btn.add_css_class(CSS_SUGGESTED_ACTION);
     }
 
     let icon_click = icon.clone();
@@ -214,15 +246,11 @@ fn build_simple_play_button(
         let is_running = is_game_running(&st, db_id);
         if is_running {
             stop_game(&st, db_id);
-            icon_click.set_icon_name(Some("media-playback-start-symbolic"));
-            label_click.set_text("Play");
-            btn.add_css_class(CSS_SUGGESTED_ACTION);
+            set_running_state(&icon_click, &label_click, btn, false);
         } else {
             match launch_game(&st, db_id, None) {
                 Ok(()) => {
-                    icon_click.set_icon_name(Some("window-close-symbolic"));
-                    label_click.set_text("Stop");
-                    btn.remove_css_class(CSS_SUGGESTED_ACTION);
+                    set_running_state(&icon_click, &label_click, btn, true);
                 }
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);
@@ -244,34 +272,27 @@ fn build_disc_play_button(
 ) -> gtk4::Widget {
     let split = adw::SplitButton::new();
 
-    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    hbox.set_valign(gtk4::Align::Center);
-    hbox.set_halign(gtk4::Align::Center);
-    hbox.set_margin_start(16);
-    hbox.set_margin_end(16);
-
-    let icon = gtk4::Image::from_icon_name("media-playback-start-symbolic");
-    icon.set_pixel_size(20);
-    hbox.append(&icon);
-
-    let label = gtk4::Label::new(Some("Play"));
-    label.add_css_class(CSS_PLAY_BTN_LABEL);
-    label.set_width_chars(5);
-    hbox.append(&label);
+    let hbox = build_play_btn_hbox();
+    let icon = hbox.first_child()
+        .and_then(|c| c.downcast::<gtk4::Image>().ok())
+        .unwrap();
+    let label = hbox.last_child()
+        .and_then(|c| c.downcast::<gtk4::Label>().ok())
+        .unwrap();
 
     split.set_child(Some(&hbox));
-    split.set_height_request(48);
+    split.set_height_request(PLAY_BTN_HEIGHT);
     split.set_valign(gtk4::Align::Center);
     split.set_dropdown_tooltip("Select disc");
 
-    if is_running {
+    if !is_running {
+        split.add_css_class(CSS_SUGGESTED_ACTION);
+    } else {
         icon.set_icon_name(Some("window-close-symbolic"));
         label.set_text("Stop");
-    } else {
-        split.add_css_class(CSS_SUGGESTED_ACTION);
     }
 
-    let default_did = ira_db::get_default_disc(&state.borrow().db, db_id);
+    let default_did = ira_db::get_default_disc(&state.borrow().db, db_id).ok().flatten();
     let default_target = match default_did {
         Some(did) => format!("{}", did),
         None => "0".to_string(),
@@ -289,7 +310,9 @@ fn build_disc_play_button(
         if let Some(param) = param {
             let target_str = param.get::<String>().unwrap_or_default();
             let did = target_str.parse::<i64>().ok();
-            ira_db::set_default_disc(&st_c.borrow().db, db_id, did);
+            if let Err(e) = ira_db::set_default_disc(&st_c.borrow().db, db_id, did) {
+                eprintln!("Failed to set default disc: {e}");
+            }
             action.change_state(param);
         }
     });
@@ -316,15 +339,11 @@ fn build_disc_play_button(
         let is_running = is_game_running(&st_launch, db_id);
         if is_running {
             stop_game(&st_launch, db_id);
-            icon_click.set_icon_name(Some("media-playback-start-symbolic"));
-            label_click.set_text("Play");
-            btn.add_css_class(CSS_SUGGESTED_ACTION);
+            set_running_state(&icon_click, &label_click, btn, false);
         } else {
             match launch_game(&st_launch, db_id, None) {
                 Ok(()) => {
-                    icon_click.set_icon_name(Some("window-close-symbolic"));
-                    label_click.set_text("Stop");
-                    btn.remove_css_class(CSS_SUGGESTED_ACTION);
+                    set_running_state(&icon_click, &label_click, btn, true);
                 }
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);
@@ -347,34 +366,27 @@ fn build_variant_play_button(
 ) -> gtk4::Widget {
     let split = adw::SplitButton::new();
 
-    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    hbox.set_valign(gtk4::Align::Center);
-    hbox.set_halign(gtk4::Align::Center);
-    hbox.set_margin_start(16);
-    hbox.set_margin_end(16);
-
-    let icon = gtk4::Image::from_icon_name("media-playback-start-symbolic");
-    icon.set_pixel_size(20);
-    hbox.append(&icon);
-
-    let label = gtk4::Label::new(Some("Play"));
-    label.add_css_class(CSS_PLAY_BTN_LABEL);
-    label.set_width_chars(5);
-    hbox.append(&label);
+    let hbox = build_play_btn_hbox();
+    let icon = hbox.first_child()
+        .and_then(|c| c.downcast::<gtk4::Image>().ok())
+        .unwrap();
+    let label = hbox.last_child()
+        .and_then(|c| c.downcast::<gtk4::Label>().ok())
+        .unwrap();
 
     split.set_child(Some(&hbox));
-    split.set_height_request(48);
+    split.set_height_request(PLAY_BTN_HEIGHT);
     split.set_valign(gtk4::Align::Center);
     split.set_dropdown_tooltip("Select variant");
 
-    if is_running {
+    if !is_running {
+        split.add_css_class(CSS_SUGGESTED_ACTION);
+    } else {
         icon.set_icon_name(Some("window-close-symbolic"));
         label.set_text("Stop");
-    } else {
-        split.add_css_class(CSS_SUGGESTED_ACTION);
     }
 
-    let default_vid = variant_id.or_else(|| ira_db::get_default_variant(&state.borrow().db, db_id));
+    let default_vid = variant_id.or_else(|| ira_db::get_default_variant(&state.borrow().db, db_id).ok().flatten());
     let default_target = match default_vid {
         Some(vid) => format!("{}", vid),
         None => "none".to_string(),
@@ -399,7 +411,9 @@ fn build_variant_play_button(
             } else {
                 target_str.parse::<i64>().ok()
             };
-            ira_db::set_default_variant(&st_c.borrow().db, db_id, vid);
+            if let Err(e) = ira_db::set_default_variant(&st_c.borrow().db, db_id, vid) {
+                eprintln!("Failed to set default variant: {e}");
+            }
             let _ = st_c.borrow().sender.send(crate::AppMessage::VariantSelected(db_id, vid));
             current_variant_c.set(vid);
             action.change_state(param);
@@ -425,16 +439,12 @@ fn build_variant_play_button(
         let is_running = is_game_running(&st_launch, db_id);
         if is_running {
             stop_game(&st_launch, db_id);
-            icon_click.set_icon_name(Some("media-playback-start-symbolic"));
-            label_click.set_text("Play");
-            btn.add_css_class(CSS_SUGGESTED_ACTION);
+            set_running_state(&icon_click, &label_click, btn, false);
         } else {
             let vid = current_variant_launch.get();
             match launch_game(&st_launch, db_id, vid) {
                 Ok(()) => {
-                    icon_click.set_icon_name(Some("window-close-symbolic"));
-                    label_click.set_text("Stop");
-                    btn.remove_css_class(CSS_SUGGESTED_ACTION);
+                    set_running_state(&icon_click, &label_click, btn, true);
                 }
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);

@@ -4,7 +4,6 @@ use std::rc::Rc;
 use super::state::SharedState;
 use super::grid_view::queue_cover_load_priority;
 use super::message_helpers::switch_to_game;
-use super::sidebar::scroll_to_row;
 use super::context_menu::show_game_context_menu;
 use super::css::*;
 
@@ -155,7 +154,7 @@ pub(super) fn build_cover(
     let click = gtk4::GestureClick::new();
     click.connect_pressed(move |_, _, _, _| {
         switch_to_game(&state_clone, db_id, variant_id);
-        scroll_to_row(&state_clone, db_id, variant_id);
+        super::sidebar::scroll_to_row(&state_clone, db_id, variant_id);
     });
     vbox.add_controller(click);
 

@@ -68,9 +68,8 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
         });
     };
 
-    const FIRST_BATCH: usize = 8;
-    const BATCH_SIZE: usize = 20;
-    let mut budget = ImageLoadBudget::new(8);
+    use super::achievement_rows::{FIRST_BATCH, BATCH_SIZE};
+    let mut budget = ImageLoadBudget::new(FIRST_BATCH);
 
     if !earned.is_empty() {
         let earned_group = adw::PreferencesGroup::new();

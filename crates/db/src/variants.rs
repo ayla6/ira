@@ -102,34 +102,34 @@ pub fn delete_variant(conn: &DbConn, variant_id: i64) -> Result<(), String> {
     Ok(())
 }
 
-pub fn get_default_variant(conn: &DbConn, game_id: i64) -> Option<i64> {
-    let c = crate::lock_db(conn).ok()?;
-    c.query_row(
+pub fn get_default_variant(conn: &DbConn, game_id: i64) -> Result<Option<i64>, String> {
+    let c = crate::lock_db(conn)?;
+    match c.query_row(
         "SELECT variant_id FROM game_default_variant WHERE game_id = ?1",
         params![game_id],
         |row| row.get(0),
-    ).ok()
+    ) {
+        Ok(vid) => Ok(Some(vid)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
-pub fn set_default_variant(conn: &DbConn, game_id: i64, variant_id: Option<i64>) {
-    let Ok(c) = crate::lock_db(conn) else {
-        eprintln!("Failed to lock DB in set_default_variant");
-        return;
-    };
+pub fn set_default_variant(conn: &DbConn, game_id: i64, variant_id: Option<i64>) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
     if let Some(vid) = variant_id {
-        if let Err(e) = c.execute(
+        c.execute(
             "INSERT INTO game_default_variant (game_id, variant_id) VALUES (?1, ?2)
              ON CONFLICT(game_id) DO UPDATE SET variant_id = excluded.variant_id",
             params![game_id, vid],
-        ) {
-            eprintln!("Failed to set default variant: {e}");
-        }
-    } else if let Err(e) = c.execute(
-        "DELETE FROM game_default_variant WHERE game_id = ?1",
-        params![game_id],
-    ) {
-        eprintln!("Failed to delete default variant: {e}");
+        ).map_err(|e| e.to_string())?;
+    } else {
+        c.execute(
+            "DELETE FROM game_default_variant WHERE game_id = ?1",
+            params![game_id],
+        ).map_err(|e| e.to_string())?;
     }
+    Ok(())
 }
 
 pub fn delete_all_variants(conn: &DbConn, game_id: i64) -> Result<(), String> {

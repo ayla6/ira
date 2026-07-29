@@ -69,29 +69,34 @@ pub fn delete_discs(conn: &DbConn, game_id: i64) -> Result<(), String> {
     Ok(())
 }
 
-pub fn get_default_disc(conn: &DbConn, game_id: i64) -> Option<i64> {
-    let c = crate::lock_db(conn).ok()?;
-    c.query_row(
+pub fn get_default_disc(conn: &DbConn, game_id: i64) -> Result<Option<i64>, String> {
+    let c = crate::lock_db(conn)?;
+    match c.query_row(
         "SELECT disc_id FROM game_default_disc WHERE game_id = ?1",
         params![game_id],
         |row| row.get(0),
-    ).ok()
+    ) {
+        Ok(did) => Ok(Some(did)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
-pub fn set_default_disc(conn: &DbConn, game_id: i64, disc_id: Option<i64>) {
-    let Ok(c) = crate::lock_db(conn) else { return; };
+pub fn set_default_disc(conn: &DbConn, game_id: i64, disc_id: Option<i64>) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
     if let Some(did) = disc_id {
-        let _ = c.execute(
+        c.execute(
             "INSERT INTO game_default_disc (game_id, disc_id) VALUES (?1, ?2)
              ON CONFLICT(game_id) DO UPDATE SET disc_id = excluded.disc_id",
             params![game_id, did],
-        );
+        ).map_err(|e| e.to_string())?;
     } else {
-        let _ = c.execute(
+        c.execute(
             "DELETE FROM game_default_disc WHERE game_id = ?1",
             params![game_id],
-        );
+        ).map_err(|e| e.to_string())?;
     }
+    Ok(())
 }
 
 pub fn create_default_disc_table(conn: &DbConn) {

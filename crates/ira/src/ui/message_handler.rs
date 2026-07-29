@@ -4,7 +4,7 @@ use crate::AppMessage;
 use crate::GameEntry;
 use crate::strings as S;
 use super::state::SharedState;
-use super::sidebar::{rebuild_sidebar, scroll_to_row, set_sidebar_playing};
+use super::sidebar::{rebuild_sidebar, set_sidebar_playing};
 use super::game_display::display_game;
 use super::game_item::GameItem;
 use super::image_manager::build_image_manager_content_with_drafts;
@@ -311,7 +311,7 @@ fn handle_variant_selected(state: &SharedState, db_id: i64, variant_id: Option<i
             .is_some_and(|v| v.show_as_entry);
         if is_show_as_entry {
             switch_to_game(state, db_id, Some(vid));
-            scroll_to_row(state, db_id, Some(vid));
+            super::sidebar::scroll_to_row(state, db_id, Some(vid));
             return;
         }
     }

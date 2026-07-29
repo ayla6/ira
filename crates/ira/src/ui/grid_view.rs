@@ -11,7 +11,6 @@ use super::game_item::GameItem;
 use super::virtual_grid::{VirtualGrid, SetupFn, BindFn, UnbindFn};
 use std::cell::Cell;
 use super::message_helpers::switch_to_game;
-use super::sidebar::scroll_to_row;
 use super::context_menu::show_game_context_menu;
 use super::helpers::clear_children;
 use super::filter::filtered_games;
@@ -196,7 +195,7 @@ fn make_setup(state: &SharedState, item_size: Rc<Cell<(i32, i32)>>) -> SetupFn {
                             if v > 0 { Some(v) } else { None }
                         });
                     switch_to_game(&sc, db_id, variant_id);
-                    scroll_to_row(&sc, db_id, variant_id);
+                    super::sidebar::scroll_to_row(&sc, db_id, variant_id);
                 }
             }
         });

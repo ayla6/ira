@@ -6,7 +6,6 @@ use crate::strings as S;
 use super::state::SharedState;
 use super::helpers::{open_folder, open_file_location};
 use super::edit_game_dialog::show_edit_game_dialog;
-use super::context_menu::show_collection_name_dialog;
 
 pub(super) fn setup_play_action(actions: &gio::SimpleActionGroup, state: SharedState, game: Game) {
     let play_action = gio::SimpleAction::new("play", None);
@@ -273,4 +272,50 @@ pub(super) fn setup_multi_toggle_hide_action(actions: &gio::SimpleActionGroup, s
         super::grid_view::refresh_grid_store(&state);
     });
     actions.add_action(&toggle_hide);
+}
+
+pub(super) fn show_collection_name_dialog(
+    window: adw::ApplicationWindow,
+    state: SharedState,
+    add_games: impl Fn(&ira_db::DbConn, i64) + 'static,
+) {
+    let dialog = adw::AlertDialog::new(Some("New Collection"), Some("Enter a name for the collection:"));
+    let entry = gtk4::Entry::new();
+    entry.set_placeholder_text(Some("Collection name"));
+    entry.set_margin_start(12);
+    entry.set_margin_end(12);
+    entry.set_margin_top(8);
+    entry.set_margin_bottom(8);
+    dialog.set_extra_child(Some(&entry));
+    dialog.add_response("cancel", S::CANCEL);
+    dialog.add_response("create", "Create");
+    dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("create"));
+    dialog.set_close_response("cancel");
+
+    let entry_clone = entry.clone();
+    dialog.connect_response(None, move |_, resp| {
+        if resp != "create" {
+            return;
+        }
+        let name = entry_clone.text().trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        let db = state.borrow().db.clone();
+        match ira_db::create_group(&db, &name) {
+            Ok(group_id) => {
+                add_games(&db, group_id);
+                let groups = ira_db::get_all_groups(&db).unwrap_or_default();
+                let members = ira_db::get_game_ids_in_group(&db, group_id).unwrap_or_default();
+                state.borrow_mut().groups = groups;
+                state.borrow_mut().group_members.insert(group_id, members.into_iter().collect());
+                super::sidebar::rebuild_sidebar(&state);
+            }
+            Err(e) => {
+                eprintln!("Failed to create group: {}", e);
+            }
+        }
+    });
+    dialog.present(Some(&window));
 }

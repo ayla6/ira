@@ -446,7 +446,7 @@ fn connect_window_signals(
             let item_variant_id = item.variant_id();
             let s = state_clone.borrow();
             if s.games.iter().any(|g| g.db_id == db_id) {
-                let vid = item_variant_id.or_else(|| ira_db::get_default_variant(&s.db, db_id));
+                let vid = item_variant_id.or_else(|| ira_db::get_default_variant(&s.db, db_id).ok().flatten());
                 drop(s);
                 if !state_clone.borrow().running_games.lock().unwrap().contains_key(&db_id) {
                     let _ = super::play_button::launch_game(&state_clone, db_id, vid);

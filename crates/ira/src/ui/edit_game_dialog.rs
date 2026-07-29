@@ -80,20 +80,25 @@ fn build_launch_wine_advanced_pages(
         ira_models::GameKind::Ps3 => Some("ps3"),
         _ => None,
     };
-    let overlay_default = overlay_source_id.map_or(state.borrow().cfg.overlay.enabled, |id| {
-        state.borrow().cfg.overlay.source_enabled(id)
-    });
-    let gamemode_default = state.borrow().cfg.default_system.gamemode;
-    let mangohud_default = state.borrow().cfg.default_system.mangohud;
-    let default_gamescope = state.borrow().cfg.default_system.gamescope;
-    let gamescope_default = overlay_source_id
-        .and_then(|id| state.borrow().cfg.overlay.source_gamescope.get(id).copied())
-        .unwrap_or(default_gamescope);
-    let gs = state.borrow().cfg.default_system.clone();
-    let gamescope_w_default = gs.gamescope_w;
-    let gamescope_h_default = gs.gamescope_h;
-    let gamescope_fps_default = gs.gamescope_fps;
-    let gamescope_upscaling_default = gs.gamescope_upscaling;
+    let (overlay_default, gamemode_default, mangohud_default, gamescope_default, gamescope_w_default, gamescope_h_default, gamescope_fps_default, gamescope_upscaling_default) = {
+        let s = state.borrow();
+        let gs_default = s.cfg.default_system.gamescope;
+        let gs = overlay_source_id
+            .and_then(|id| s.cfg.overlay.source_gamescope.get(id).copied())
+            .unwrap_or(gs_default);
+        let overlay_def = overlay_source_id
+            .map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id));
+        (
+            overlay_def,
+            s.cfg.default_system.gamemode,
+            s.cfg.default_system.mangohud,
+            gs,
+            s.cfg.default_system.gamescope_w,
+            s.cfg.default_system.gamescope_h,
+            s.cfg.default_system.gamescope_fps,
+            s.cfg.default_system.gamescope_upscaling.clone(),
+        )
+    };
 
     // Launch Config page — only for non-emulator games (Wine, Linux native, etc.)
     let launch_config_widgets = if show_launch_config {

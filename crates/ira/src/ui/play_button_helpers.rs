@@ -225,7 +225,7 @@ pub(super) fn launch_retro(
         .unwrap_or("--fullscreen");
     let rom_path = {
         let discs = ira_db::get_discs(ctx.db, ctx.db_id).unwrap_or_default();
-        let default_disc_id = ira_db::get_default_disc(ctx.db, ctx.db_id);
+        let default_disc_id = ira_db::get_default_disc(ctx.db, ctx.db_id).ok().flatten();
         discs.iter()
             .find(|d| Some(d.id) == default_disc_id)
             .map(|d| d.rom_path.clone())

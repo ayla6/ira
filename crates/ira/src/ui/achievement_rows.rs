@@ -6,6 +6,9 @@ use super::image_budget::ImageLoadBudget;
 use super::state::SharedState;
 use super::css::*;
 
+pub const FIRST_BATCH: usize = 8;
+pub const BATCH_SIZE: usize = 20;
+
 pub fn build_global_tab(game: &crate::Game, global_vbox: &gtk4::Box, state: &SharedState, gen: u32) {
     let mut all_ach: Vec<MergedAchievement> = game.achievements.clone();
     all_ach.sort_by(|a, b| b.global_percent.partial_cmp(&a.global_percent).unwrap_or(std::cmp::Ordering::Equal));
@@ -14,17 +17,17 @@ pub fn build_global_tab(game: &crate::Game, global_vbox: &gtk4::Box, state: &Sha
     global_group.set_title(S::GLOBAL_UNLOCK_RATES);
     global_group.set_margin_bottom(24);
 
-    let mut budget = ImageLoadBudget::new(18);
+    let mut budget = ImageLoadBudget::new(FIRST_BATCH);
 
-    let first_batch = 30.min(all_ach.len());
-    for ach in &all_ach[..first_batch] {
+    let first_n = FIRST_BATCH.min(all_ach.len());
+    for ach in &all_ach[..first_n] {
         add_global_row(&global_group, ach, &mut budget);
     }
     global_vbox.append(&global_group);
     budget.flush(state, gen);
 
-    if all_ach.len() > first_batch {
-        let remaining = all_ach[first_batch..].to_vec();
+    if all_ach.len() > first_n {
+        let remaining = all_ach[first_n..].to_vec();
         let group = global_group.clone();
         let state = state.clone();
         let mut i = 0;
@@ -32,7 +35,7 @@ pub fn build_global_tab(game: &crate::Game, global_vbox: &gtk4::Box, state: &Sha
             if state.borrow().view_generation != gen {
                 return glib::ControlFlow::Break;
             }
-            let end = (i + 20).min(remaining.len());
+            let end = (i + BATCH_SIZE).min(remaining.len());
             let mut batch_budget = ImageLoadBudget::new(0);
             for ach in &remaining[i..end] {
                 add_global_row(&group, ach, &mut batch_budget);

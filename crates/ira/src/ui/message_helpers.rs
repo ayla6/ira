@@ -98,14 +98,16 @@ pub(super) fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
         std::thread::spawn(move || {
             let _s = tracing::info_span!("validate_default_variants").entered();
             for db_id in &db_ids_to_check {
-                if let Some(default_vid) = ira_db::get_default_variant(&db, *db_id) {
+                if let Ok(Some(default_vid)) = ira_db::get_default_variant(&db, *db_id) {
                     let eligible = ira_db::get_variants(&db, *db_id)
                         .unwrap_or_default()
                         .iter()
                         .find(|v| v.id == default_vid)
                         .is_some_and(|v| v.count_playtime && !v.show_as_entry);
                     if !eligible {
-                        ira_db::set_default_variant(&db, *db_id, None);
+                        if let Err(e) = ira_db::set_default_variant(&db, *db_id, None) {
+                            eprintln!("Failed to clear default variant for {}: {e}", db_id);
+                        }
                     }
                 }
             }

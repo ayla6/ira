@@ -64,10 +64,13 @@ fn build_header_stats(game: &Game, fraction: f64, state: &SharedState) -> gtk4::
     row.set_valign(gtk4::Align::Center);
     row.set_hexpand(true);
     row.append(&play_button(state, game.db_id, game.variant_id));
-    row.append(&stat_label("Last played", &format_last_played(game.last_played)));
+    let history_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
+    history_box.set_valign(gtk4::Align::Center);
+    history_box.append(&stat_label("Last played", &format_last_played(game.last_played)));
     let pt_box = stat_label("Play time", &format_playtime(game.playtime));
-    pt_box.add_css_class(CSS_CLICKABLE_STAT);
-    pt_box.set_tooltip_text(Some("View play history"));
+    history_box.append(&pt_box);
+    history_box.add_css_class(CSS_CLICKABLE_STAT);
+    history_box.set_tooltip_text(Some("View play history"));
     let sc = state.clone();
     let db_id = game.db_id;
     let variant_id = game.variant_id;
@@ -75,8 +78,8 @@ fn build_header_stats(game: &Game, fraction: f64, state: &SharedState) -> gtk4::
     click.connect_pressed(move |_, _, _, _| {
         super::play_history::show_play_history_dialog(&sc, db_id, variant_id);
     });
-    pt_box.add_controller(click);
-    row.append(&pt_box);
+    history_box.add_controller(click);
+    row.append(&history_box);
     if game.total_count > 0 {
         let tbox = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
         tbox.set_valign(gtk4::Align::Center);

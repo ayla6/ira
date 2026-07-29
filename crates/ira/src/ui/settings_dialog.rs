@@ -11,9 +11,10 @@ use super::wine_config_widget::build_wine_config_pages;
 use super::settings_pages::{
     build_general_settings_page, build_lutris_settings_page,
     build_steam_settings_page, build_ra_settings_page, build_api_emulators_page,
-    build_overlay_settings_page, build_source_overlay_row, build_source_gamescope_row,
+    build_overlay_settings_page,
     build_system_defaults_page,
 };
+use super::system_settings::{build_override_switch_row, OverrideState};
 use super::settings_console::{
     build_shadps4_settings_page, build_rpcs3_settings_page, build_console_settings_page, ConsolePageWidgets,
 };
@@ -80,15 +81,17 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("applications-science-symbolic", "RetroAchievements", "ra"));
     stack.add_named(&ra_page, Some("ra"));
 
-    let mut source_overlay_states: Vec<(String, super::settings_pages::OverlayOverrideState)> = Vec::new();
-    let mut source_gamescope_states: Vec<(String, super::settings_pages::GamescopeOverrideState)> = Vec::new();
+    let mut source_overlay_states: Vec<(String, OverrideState)> = Vec::new();
+    let mut source_gamescope_states: Vec<(String, OverrideState)> = Vec::new();
 
     {
-        let (overlay_row, state) = build_source_overlay_row(
+        let (overlay_row, state) = build_override_switch_row(
+            "In-game overlay", "Achievements, screenshots, and recording",
             cfg.overlay.enabled,
             cfg.overlay.source_overrides.get("steam").copied(),
         );
-        let (gs_row, gs_state) = build_source_gamescope_row(
+        let (gs_row, gs_state) = build_override_switch_row(
+            "Gamescope", "Valve Gamescope compositor",
             cfg.default_system.gamescope,
             cfg.overlay.source_gamescope.get("steam").copied(),
         );
@@ -101,11 +104,13 @@ pub fn show_settings_dialog(
     }
 
     {
-        let (overlay_row, state) = build_source_overlay_row(
+        let (overlay_row, state) = build_override_switch_row(
+            "In-game overlay", "Achievements, screenshots, and recording",
             cfg.overlay.enabled,
             cfg.overlay.source_overrides.get("ra").copied(),
         );
-        let (gs_row, gs_state) = build_source_gamescope_row(
+        let (gs_row, gs_state) = build_override_switch_row(
+            "Gamescope", "Valve Gamescope compositor",
             cfg.default_system.gamescope,
             cfg.overlay.source_gamescope.get("ra").copied(),
         );
@@ -126,11 +131,13 @@ pub fn show_settings_dialog(
         let cc = cfg.console(def.id);
         let (page, widgets) = build_console_settings_page(&win, def, cc);
 
-        let (overlay_row, overlay_state) = build_source_overlay_row(
+        let (overlay_row, overlay_state) = build_override_switch_row(
+            "In-game overlay", "Achievements, screenshots, and recording",
             cfg.overlay.enabled,
             cfg.overlay.source_overrides.get(def.id).copied(),
         );
-        let (gs_row, gs_state) = build_source_gamescope_row(
+        let (gs_row, gs_state) = build_override_switch_row(
+            "Gamescope", "Valve Gamescope compositor",
             cfg.default_system.gamescope,
             cfg.overlay.source_gamescope.get(def.id).copied(),
         );
@@ -149,11 +156,13 @@ pub fn show_settings_dialog(
         if def.id == "ps2" {
             let (ps3_page, ps3_en, ps3_exe) = build_rpcs3_settings_page(&cfg, &win);
 
-            let (ps3_ov_row, ps3_ov_state) = build_source_overlay_row(
+            let (ps3_ov_row, ps3_ov_state) = build_override_switch_row(
+                "In-game overlay", "Achievements, screenshots, and recording",
                 cfg.overlay.enabled,
                 cfg.overlay.source_overrides.get("ps3").copied(),
             );
-            let (ps3_gs_row, ps3_gs_state) = build_source_gamescope_row(
+            let (ps3_gs_row, ps3_gs_state) = build_override_switch_row(
+                "Gamescope", "Valve Gamescope compositor",
                 cfg.default_system.gamescope,
                 cfg.overlay.source_gamescope.get("ps3").copied(),
             );
@@ -171,11 +180,13 @@ pub fn show_settings_dialog(
 
             let (ps4_page, ps4_en, ps4_exe) = build_shadps4_settings_page(&cfg, &win);
 
-            let (ps4_ov_row, ps4_ov_state) = build_source_overlay_row(
+            let (ps4_ov_row, ps4_ov_state) = build_override_switch_row(
+                "In-game overlay", "Achievements, screenshots, and recording",
                 cfg.overlay.enabled,
                 cfg.overlay.source_overrides.get("ps4").copied(),
             );
-            let (ps4_gs_row, ps4_gs_state) = build_source_gamescope_row(
+            let (ps4_gs_row, ps4_gs_state) = build_override_switch_row(
+                "Gamescope", "Valve Gamescope compositor",
                 cfg.default_system.gamescope,
                 cfg.overlay.source_gamescope.get("ps4").copied(),
             );

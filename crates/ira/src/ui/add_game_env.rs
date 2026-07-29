@@ -1,26 +1,10 @@
 use gtk4::prelude::*;
 use adw::prelude::*;
-use super::css::*;
 
 pub(super) fn build_env_page() -> (gtk4::Box, gtk4::ListBox, adw::EntryRow, adw::EntryRow) {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
-    let env_group = adw::PreferencesGroup::new();
-    env_group.set_title("Environment Variables");
-
-    let env_vars_box = gtk4::ListBox::new();
-    env_vars_box.add_css_class(CSS_BOXED_LIST);
-
-    let add_env_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_env_btn.set_tooltip_text(Some("Add variable"));
-    add_env_btn.set_valign(gtk4::Align::Center);
-    add_env_btn.add_css_class(CSS_FLAT);
-    let env_box_clone = env_vars_box.clone();
-    add_env_btn.connect_clicked(move |_| {
-        env_box_clone.append(&super::add_game_dialog::build_env_var_row("", ""));
-    });
-    env_group.set_header_suffix(Some(&add_env_btn));
-    env_group.add(&env_vars_box);
+    let (env_group, env_vars_box) = super::system_settings::build_env_vars_group(&[]);
     page.append(&env_group);
 
     let expander = adw::ExpanderRow::new();

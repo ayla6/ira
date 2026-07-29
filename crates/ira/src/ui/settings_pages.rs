@@ -2,8 +2,6 @@ use gtk4::prelude::*;
 use adw::prelude::*;
 use ira_config::Config;
 use crate::strings as S;
-use std::cell::RefCell;
-use std::rc::Rc;
 use super::helpers::string_list_from;
 use super::settings_dialog::settings_page_container;
 use super::css::*;
@@ -138,9 +136,9 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
         });
     }
 
-    let gs_widgets = super::gamescope_settings::add_gamescope_rows(
+    let gs_widgets = super::system_settings::add_gamescope_rows(
         &gamescope,
-        &super::gamescope_settings::GamescopeDefaults {
+        &super::system_settings::GamescopeDefaults {
             flags: s.gamescope_flags.clone(),
             w: s.gamescope_w,
             h: s.gamescope_h,
@@ -156,35 +154,12 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     let gamescope_upscaling_row = gs_widgets.upscaling;
     page.append(&perf_group);
 
-    let env_group = adw::PreferencesGroup::new();
-    env_group.set_title("Environment Variables");
-    let add_env_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_env_btn.set_tooltip_text(Some("Add variable"));
-    add_env_btn.set_valign(gtk4::Align::Center);
-    add_env_btn.add_css_class(CSS_FLAT);
-    env_group.set_header_suffix(Some(&add_env_btn));
-
-    let env_vars_box = gtk4::ListBox::new();
-    env_vars_box.add_css_class(CSS_BOXED_LIST);
-    for (name, value) in &s.env_vars {
-        env_vars_box.append(&super::add_game_dialog::build_env_var_row(name, value));
-    }
-    let env_box_clone = env_vars_box.clone();
-    add_env_btn.connect_clicked(move |_| {
-        env_box_clone.append(&super::add_game_dialog::build_env_var_row("", ""));
-    });
-    env_group.add(&env_vars_box);
+    let (env_group, env_vars_box) = super::system_settings::build_env_vars_group(&s.env_vars);
     page.append(&env_group);
 
-    let ld_group = adw::PreferencesGroup::new();
-    let ld_preload = adw::EntryRow::new();
-    ld_preload.set_title("LD_PRELOAD");
-    ld_preload.set_text(&s.ld_preload);
-    ld_group.add(&ld_preload);
-    let ld_library_path = adw::EntryRow::new();
-    ld_library_path.set_title("LD_LIBRARY_PATH");
-    ld_library_path.set_text(&s.ld_library_path);
-    ld_group.add(&ld_library_path);
+    let (ld_group, ld_preload, ld_library_path) = super::system_settings::build_ld_paths_group(
+        &s.ld_preload, &s.ld_library_path,
+    );
     page.append(&ld_group);
 
     (page, SystemDefaultsWidgets { gamemode, mangohud, gamescope: gs_switch, gamescope_flags, gamescope_w, gamescope_h, gamescope_fps, gamescope_upscaling_row, env_vars_box, ld_preload, ld_library_path })
@@ -522,105 +497,4 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
         page,
         OverlayPageWidgets { enable_row, encoder_row, quality_row, toggle_hotkey, screenshot_hotkey, record_hotkey, font_button },
     )
-}
-
-/// Tracks the override state of a per-source overlay toggle.
-/// `None` = follow global, `Some(v)` = forced to v.
-pub(super) type OverlayOverrideState = Rc<RefCell<Option<bool>>>;
-
-/// Builds a per-source overlay toggle row with a revert button.
-///
-/// - `global_enabled`: the current global overlay enabled state.
-/// - `override_value`: `None` if following global, `Some(v)` if overridden.
-///
-/// The revert button is visible only when an override is active.
-/// Clicking revert sets the value back to the global default and clears the override.
-pub(super) fn build_source_overlay_row(
-    global_enabled: bool,
-    override_value: Option<bool>,
-) -> (adw::SwitchRow, OverlayOverrideState) {
-    let row = adw::SwitchRow::new();
-    row.set_title("In-game overlay");
-    row.set_subtitle("Achievements, screenshots, and recording");
-
-    let value = override_value.unwrap_or(global_enabled);
-    row.set_active(value);
-
-    let revert_btn = super::wine_config_helpers::make_revert_btn();
-    revert_btn.set_visible(override_value.is_some());
-    row.add_suffix(&revert_btn);
-
-    let state: OverlayOverrideState = Rc::new(RefCell::new(override_value));
-    let reverting = Rc::new(RefCell::new(false));
-
-    let state_c = state.clone();
-    let btn_c = revert_btn.clone();
-    let row_c = row.clone();
-    let rev_c = reverting.clone();
-    row.connect_active_notify(move |_| {
-        if *rev_c.borrow() { return; }
-        *state_c.borrow_mut() = Some(row_c.is_active());
-        btn_c.set_visible(true);
-        let _ = rev_c;
-    });
-
-    let state_c2 = state.clone();
-    let btn_c2 = revert_btn.clone();
-    let row_c2 = row.clone();
-    let rev_c2 = reverting.clone();
-    revert_btn.connect_clicked(move |_| {
-        *rev_c2.borrow_mut() = true;
-        row_c2.set_active(global_enabled);
-        *rev_c2.borrow_mut() = false;
-        *state_c2.borrow_mut() = None;
-        btn_c2.set_visible(false);
-    });
-
-    (row, state)
-}
-
-pub(super) type GamescopeOverrideState = Rc<RefCell<Option<bool>>>;
-
-pub(super) fn build_source_gamescope_row(
-    global_default: bool,
-    override_value: Option<bool>,
-) -> (adw::SwitchRow, GamescopeOverrideState) {
-    let row = adw::SwitchRow::new();
-    row.set_title("Gamescope");
-    row.set_subtitle("Valve Gamescope compositor");
-
-    let value = override_value.unwrap_or(global_default);
-    row.set_active(value);
-
-    let revert_btn = super::wine_config_helpers::make_revert_btn();
-    revert_btn.set_visible(override_value.is_some());
-    row.add_suffix(&revert_btn);
-
-    let state: GamescopeOverrideState = Rc::new(RefCell::new(override_value));
-    let reverting = Rc::new(RefCell::new(false));
-
-    let state_c = state.clone();
-    let btn_c = revert_btn.clone();
-    let row_c = row.clone();
-    let rev_c = reverting.clone();
-    row.connect_active_notify(move |_| {
-        if *rev_c.borrow() { return; }
-        *state_c.borrow_mut() = Some(row_c.is_active());
-        btn_c.set_visible(true);
-        let _ = rev_c;
-    });
-
-    let state_c2 = state.clone();
-    let btn_c2 = revert_btn.clone();
-    let row_c2 = row.clone();
-    let rev_c2 = reverting.clone();
-    revert_btn.connect_clicked(move |_| {
-        *rev_c2.borrow_mut() = true;
-        row_c2.set_active(global_default);
-        *rev_c2.borrow_mut() = false;
-        *state_c2.borrow_mut() = None;
-        btn_c2.set_visible(false);
-    });
-
-    (row, state)
 }

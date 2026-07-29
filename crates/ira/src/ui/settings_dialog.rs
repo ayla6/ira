@@ -25,7 +25,7 @@ pub(super) fn settings_page_container() -> gtk4::Box {
 }
 
 // Re-exports for backward compatibility with files that use super::settings_dialog::*
-pub(super) use super::settings_pages::{settings_sidebar_row, sidebar_separator};
+pub(super) use super::settings_pages::{settings_sidebar_row, sidebar_separator, sidebar_section_title};
 pub(super) use super::settings_console::build_shadps4_version_dropdown;
 
 pub fn show_settings_dialog(
@@ -53,35 +53,37 @@ pub fn show_settings_dialog(
     stack.add_named(&overlay_page, Some("overlay"));
 
     let (system_page, system_defaults_widgets) = build_system_defaults_page(&cfg);
-    sidebar.append(&settings_sidebar_row("applications-science-symbolic", "Game System", "system"));
+    sidebar.append(&settings_sidebar_row("applications-science-symbolic", "Game system", "system"));
     stack.add_named(&system_page, Some("system"));
 
+    sidebar.append(&sidebar_section_title("Game sources"));
+    let (computer_games_page, default_game_folder_row) = build_computer_games_page(&win, &cfg);
+    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "Desktop games", "computer_games"));
+    stack.add_named(&computer_games_page, Some("computer_games"));
+
+    let (steam_page, steam_enable_row) = build_steam_settings_page(&cfg);
+    sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Steam", "steam"));
+    stack.add_named(&steam_page, Some("steam"));
+
+    let (emu_page, emu_version_row, emu_version_model) = build_api_emulators_page(&cfg);
+    sidebar.append(&settings_sidebar_row("applications-engineering-symbolic", "API emulators", "api_emulators"));
+    stack.add_named(&emu_page, Some("api_emulators"));
+
+    let lutris_page = build_lutris_settings_page(state, &win);
+    sidebar.append(&settings_sidebar_row("system-software-install-symbolic", "Lutris migration", "migration"));
+    stack.add_named(&lutris_page, Some("migration"));
+
+    sidebar.append(&sidebar_section_title("Wine"));
     let (wine_pages, wine_widgets) = build_wine_config_pages(&cfg.default_wine_config, None);
-    sidebar.append(&sidebar_separator());
+    let (profiles_page, prefix_base_row) = build_profiles_page(state, &win);
+    sidebar.append(&settings_sidebar_row("system-users-symbolic", "Profiles", "profiles"));
+    stack.add_named(&profiles_page, Some("profiles"));
     for wp in &wine_pages {
         sidebar.append(&settings_sidebar_row(wp.icon, wp.label, wp.label));
         stack.add_named(&wp.page, Some(wp.label));
     }
 
-    let (profiles_page, prefix_base_row) = build_profiles_page(state, &win);
-    sidebar.append(&settings_sidebar_row("system-users-symbolic", "Wine Profiles", "profiles"));
-    stack.add_named(&profiles_page, Some("profiles"));
-
-    sidebar.append(&sidebar_separator());
-    let (emu_page, emu_version_row, emu_version_model) = build_api_emulators_page(&cfg);
-    sidebar.append(&settings_sidebar_row("applications-engineering-symbolic", "API Emulators", "api_emulators"));
-    stack.add_named(&emu_page, Some("api_emulators"));
-
-    sidebar.append(&sidebar_separator());
-    let (steam_page, steam_enable_row) = build_steam_settings_page(&cfg);
-    sidebar.append(&settings_sidebar_row("application-x-executable-symbolic", "Steam", "steam"));
-    stack.add_named(&steam_page, Some("steam"));
-
-    sidebar.append(&sidebar_separator());
-    let (computer_games_page, default_game_folder_row) = build_computer_games_page(&win, &cfg);
-    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "Computer Games", "computer_games"));
-    stack.add_named(&computer_games_page, Some("computer_games"));
-
+    sidebar.append(&sidebar_section_title("Emulation"));
     let (ra_page, ra_enable_row, ra_username_row, ra_password_row) = build_ra_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("applications-science-symbolic", "RetroAchievements", "ra"));
     stack.add_named(&ra_page, Some("ra"));
@@ -208,10 +210,6 @@ pub fn show_settings_dialog(
             ps4_exe_row = Some(ps4_exe);
         }
     }
-
-    let lutris_page = build_lutris_settings_page(state, &win);
-    sidebar.append(&settings_sidebar_row("system-software-install-symbolic", "Lutris Migration", "migration"));
-    stack.add_named(&lutris_page, Some("migration"));
 
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {

@@ -32,6 +32,7 @@ pub const CSS_SUCCESS_LABEL: &str = "success-label";
 pub const CSS_SUGGESTED_ACTION: &str = "suggested-action";
 pub const CSS_TITLE_1: &str = "title-1";
 pub const CSS_LOCKED_TROPHY: &str = "locked-trophy";
+pub const CSS_SIDEBAR_SECTION_TITLE: &str = "sidebar-section-title";
 
 pub const APP_CSS: &str = "
 .sidebar-row-title { min-width: 0; }
@@ -162,6 +163,27 @@ gridview.game-grid child:focus-within {
     margin-top: 4px;
     margin-bottom: 4px;
     min-height: 1px;
+}
+
+.sidebar-section-title {
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+.sidebar-section-title:hover,
+.sidebar-section-title:selected {
+    background: transparent;
+}
+.sidebar-section-title > box > separator {
+    min-height: 1px;
+}
+.sidebar-section-title > box > label {
+    opacity: 0.65;
+    font-weight: 700;
+    font-size: 0.85em;
 }
 
 .dim-label {

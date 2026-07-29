@@ -44,6 +44,32 @@ pub(super) fn sidebar_separator() -> gtk4::ListBoxRow {
     row
 }
 
+pub(super) fn sidebar_section_title(title: &str) -> gtk4::ListBoxRow {
+    let row = gtk4::ListBoxRow::new();
+    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    hbox.set_margin_top(6);
+    hbox.set_margin_bottom(2);
+    hbox.set_margin_start(10);
+    hbox.set_margin_end(10);
+
+    let label = gtk4::Label::new(Some(title));
+    label.set_halign(gtk4::Align::Start);
+    label.set_valign(gtk4::Align::Center);
+    hbox.append(&label);
+
+    let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
+    sep.set_halign(gtk4::Align::Fill);
+    sep.set_hexpand(true);
+    sep.set_valign(gtk4::Align::Center);
+    hbox.append(&sep);
+
+    row.set_child(Some(&hbox));
+    row.set_selectable(false);
+    row.set_sensitive(false);
+    row.add_css_class(super::css::CSS_SIDEBAR_SECTION_TITLE);
+    row
+}
+
 pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow, adw::PasswordEntryRow, adw::PasswordEntryRow) {
     let page = settings_page_container();
 
@@ -305,7 +331,6 @@ pub(super) fn build_computer_games_page(
 
     let group = adw::PreferencesGroup::new();
     group.set_title("Default game folder");
-    group.set_description(Some("Default location for Wine and Linux game executables"));
 
     let folder_row = adw::EntryRow::new();
     folder_row.set_title("Game folder");

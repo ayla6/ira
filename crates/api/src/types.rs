@@ -14,39 +14,6 @@ pub struct SgdbAsset {
     pub mime: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SteamGameDetails {
-    pub name: String,
-    #[serde(rename = "header_image")]
-    pub _header_image: String,
-    #[serde(rename = "capsule_imagev5")]
-    pub capsule_image: String,
-    #[serde(default)]
-    pub release_date: Option<SteamReleaseDate>,
-    #[serde(default)]
-    pub metacritic: Option<SteamMetacritic>,
-    #[serde(default)]
-    pub recommendations: Option<SteamRecommendations>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SteamReleaseDate {
-    pub coming_soon: bool,
-    pub date: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SteamMetacritic {
-    pub score: i32,
-    #[serde(default)]
-    pub url: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SteamRecommendations {
-    pub total: i32,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct SteamReviewSummary {
     pub review_score: i32,
@@ -145,8 +112,6 @@ pub(crate) struct SteamCmdResponse {
 /// Per-app data from steamcmd.net.
 #[derive(Debug, Deserialize)]
 pub(crate) struct SteamCmdApp {
-    #[serde(rename = "appid")]
-    pub _appid: String,
     #[serde(default)]
     pub common: SteamCmdCommon,
     #[serde(default)]
@@ -172,17 +137,7 @@ pub(crate) struct SteamCmdCommon {
     #[serde(default)]
     pub icon: String,
     #[serde(default)]
-    pub _associations: HashMap<String, SteamCmdAssociation>,
-    #[serde(default)]
     pub supported_languages: HashMap<String, SteamCmdLanguage>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-pub(crate) struct SteamCmdAssociation {
-    #[serde(rename = "name")]
-    pub _name: String,
-    #[serde(rename = "type")]
-    pub _kind: String,
 }
 
 #[derive(Debug, Default, Deserialize)]

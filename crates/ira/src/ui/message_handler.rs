@@ -304,20 +304,14 @@ fn handle_sgdb_assets_downloaded(state: &SharedState, db_id: i64, sgdb_id: Strin
 
 fn handle_variant_selected(state: &SharedState, db_id: i64, variant_id: Option<i64>) {
     if let Some(vid) = variant_id {
-        let (is_show_as_entry, has_custom_images) = ira_db::get_variants(&state.borrow().db, db_id)
+        let is_show_as_entry = ira_db::get_variants(&state.borrow().db, db_id)
             .unwrap_or_default()
             .iter()
             .find(|v| v.id == vid)
-            .map(|v| (v.show_as_entry, v.custom_images))
-            .unwrap_or((false, false));
-
+            .is_some_and(|v| v.show_as_entry);
         if is_show_as_entry {
             switch_to_game(state, db_id, Some(vid));
             super::sidebar::scroll_to_row(state, db_id, Some(vid));
-            return;
-        }
-
-        if !has_custom_images {
             return;
         }
     }

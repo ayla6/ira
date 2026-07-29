@@ -183,7 +183,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
             (s.search_query.to_lowercase(), s.cfg.sort_mode, s.cfg.sort_descending)
         };
         let mut filtered: Vec<&Game> = visible_games.iter()
-            .filter(|g| g.name.to_lowercase().contains(&search))
+            .filter(|g| g.name_lower.contains(&search))
             .copied()
             .collect();
         filtered.sort_by(|a, b| {

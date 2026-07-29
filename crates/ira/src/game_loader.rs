@@ -64,6 +64,7 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
         } else {
             entry.title.clone()
         },
+        name_lower: String::new(),
         icon_path: String::new(),
         hero_image_path: String::new(),
         grid_path: String::new(),
@@ -103,6 +104,7 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
             game.name = name;
         }
     }
+    game.name_lower = game.name.to_lowercase();
 
     let image_dir = ira_parser::entry_data_dir(save_dir, entry);
 
@@ -313,7 +315,7 @@ pub fn build_variant_entries(db: &DbConn, save_dir: &str, game: &Game) -> Vec<Ga
         .map(|v| {
             let mut entry = game.clone();
             entry.variant_id = Some(v.id);
-            entry.name = format!("{} - {}", game.name, v.name);
+            entry.set_name(format!("{} - {}", game.name, v.name));
             entry.playtime = v.playtime;
             entry.last_played = v.last_played;
     if !v.logo_position.is_empty() { entry.logo_position = v.logo_position.clone(); }

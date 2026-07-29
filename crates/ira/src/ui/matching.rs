@@ -28,7 +28,7 @@ pub fn match_game_to_steam(state: &SharedState, db_id: i64, steam_app_id: String
                 match crate::game_loader::load_game(&entry, &save_dir) {
                     Ok(mut game) => {
                         if game.name.is_empty() || game.name.starts_with("App ID:") {
-                            game.name = game_name.clone();
+                            game.set_name(&game_name);
                         }
                         let name = game.name.clone();
                         let _ = sender.send(AppMessage::NewGame(game));
@@ -85,6 +85,7 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
                 platform_id: entry.platform_id.clone(),
                 db_id: entry.id,
                 name: entry.title.clone(),
+                name_lower: entry.title.to_lowercase(),
                 icon_path: icon,
                 hero_image_path: hero,
                 grid_path: grid,

@@ -178,6 +178,9 @@ fn build_ra_games_for_console(
                 name: if entry.title.is_empty() { rom_path_str.clone() } else { entry.title.clone() },
                 ..Default::default()
             });
+            if g.name_lower.is_empty() {
+                g.name_lower = g.name.to_lowercase();
+            }
             g.game_path = rom_path_str.clone();
             g.rom_path = rom_path_str.clone();
             games.push(g);
@@ -234,6 +237,9 @@ fn build_ra_games_for_console(
                             name: if e.title.is_empty() { title.clone() } else { e.title.clone() },
                             ..Default::default()
                         });
+                    if g.name_lower.is_empty() {
+                        g.name_lower = g.name.to_lowercase();
+                    }
                     g.game_path = rom_path_str.clone();
                     g.rom_path = rom_path_str;
                     g
@@ -251,6 +257,7 @@ fn build_ra_games_for_console(
                                 platform_id: console.def.id.to_string(),
                                 db_id: id,
                                 name: title.clone(),
+                                name_lower: title.to_lowercase(),
                                 game_path: rom_path_str.clone(),
                                 rom_path: rom_path_str,
                                 ..Default::default()

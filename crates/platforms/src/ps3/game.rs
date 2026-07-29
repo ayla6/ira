@@ -59,6 +59,7 @@ pub fn load_rpcs3_game(
         } else {
             meta.title.clone()
         },
+        name_lower: String::new(),
         icon_path: String::new(),
         hero_image_path: String::new(),
         grid_path: String::new(),
@@ -88,6 +89,7 @@ pub fn load_rpcs3_game(
         rom_path: String::new(),
         variant_id: None,
     };
+    out.name_lower = out.name.to_lowercase();
 
     // Default icon: copy the game's ICON0.PNG to data/ps3/{NPWR}/ and convert
     // to WebP. Only copies if no icon (webp/jpg) already exists in the data dir.

@@ -339,14 +339,14 @@ fn update_game_state_in_memory(params: &SaveGameSettingsParams, title: &str, sor
         for vg in state_borrow.games.iter_mut() {
             if vg.db_id == params.db_id && vg.variant_id.is_some() {
                 if let Some(suffix) = vg.name.strip_prefix(&old_name) {
-                    vg.name = format!("{}{}", title, suffix);
+                    vg.set_name(format!("{}{}", title, suffix));
                 }
             }
         }
     }
 
     let g = &mut state_borrow.games[i];
-    g.name = title.to_string();
+    g.set_name(title.to_string());
     g.sort_title = sort_title.to_string();
 
     if let Some(ver) = params.pending_version.borrow().as_ref() {

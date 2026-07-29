@@ -55,6 +55,7 @@ pub fn load_shadps4_game(
         } else {
             meta.title.clone()
         },
+        name_lower: String::new(),
         icon_path: String::new(),
         hero_image_path: String::new(),
         grid_path: String::new(),
@@ -84,6 +85,7 @@ pub fn load_shadps4_game(
         rom_path: String::new(),
         variant_id: None,
     };
+    game.name_lower = game.name.to_lowercase();
 
     // Default icon: copy the game's sce_sys/icon0.png to data/ps4/{NPWR}/ and
     // convert to WebP. Only copies if no icon (webp/jpg) already exists in the data dir.

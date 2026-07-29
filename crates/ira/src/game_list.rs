@@ -344,7 +344,7 @@ fn build_steam_games(db: &db::DbConn, save_dir: &str, steam_games: &[steam::Stea
             Ok(mut game) => {
                 if (game.name.is_empty() || game.name.starts_with("App ID:"))
                     && !sg.name.is_empty() {
-                    game.name = sg.name.clone();
+                    game.set_name(&sg.name);
                 }
                 game.game_path = sg.install_dir.to_string_lossy().into_owned();
                 if let Some(&(pt, lp)) = playtimes.get(&sg.app_id) {

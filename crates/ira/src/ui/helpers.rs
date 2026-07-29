@@ -168,7 +168,7 @@ pub fn merge_game_enrichment(existing: &Game, enriched: &Game) -> Game {
 
     // Name — apply only if existing is a placeholder.
     if existing.name.is_empty() || existing.name.starts_with("App ID:") {
-        result.name = enriched.name.clone();
+        result.set_name(&enriched.name);
     }
 
     // Metadata — apply only if enrichment fetched something.

@@ -32,7 +32,7 @@ pub fn filtered_games(state: &SharedState) -> Vec<Game> {
         .filter(|g| !g.hidden || show_hidden)
         .filter(|g| {
             if !search.is_empty() {
-                g.name.to_lowercase().contains(&search)
+                g.name_lower.contains(&search)
             } else {
                 match &selected_group {
                     GroupSelection::AllGames => true,

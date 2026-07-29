@@ -101,7 +101,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
             if needs_app_details {
                 if let Some(details) = steam.fetch_app_details(&app_id) {
                     if !details.name.is_empty() && game.name.starts_with("App ID:") {
-                        game.name = details.name.clone();
+                        game.set_name(&details.name);
                     }
                 }
             }
@@ -159,7 +159,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
                         game.steam_review_count = cmd.review_percentage;
                     }
                     if game.name.starts_with("App ID:") && !cmd.name.is_empty() {
-                        game.name = cmd.name.clone();
+                        game.set_name(&cmd.name);
                     }
                 }
             }
@@ -278,7 +278,7 @@ fn enrich_ra(params: EnrichRaParams) {
         }
     };
     if !title.is_empty() {
-        game.name = title.to_string();
+        game.set_name(title);
     }
 
     ira_platforms::retroachievements::enrich_ra_game(&mut game, save_dir, ra_username, ra_token, ra_password);

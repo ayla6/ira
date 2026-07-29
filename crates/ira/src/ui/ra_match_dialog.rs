@@ -93,7 +93,7 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                     if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                         g.app_id = app_id.clone();
                         g.trophy_source = ira_models::TrophySource::Ra;
-                        g.name = ra_title.clone();
+                        g.set_name(&ra_title);
                         g.total_count = 0;
                         g.achievements.clear();
                     }

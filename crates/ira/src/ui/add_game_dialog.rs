@@ -301,7 +301,7 @@ fn connect_add_handler(
                     let entry = ira_db::find_by_db_id(&db_c, game_id).ok().flatten();
                     if let Some(entry) = entry {
                         if let Ok(mut game) = crate::game_loader::load_game(&entry, &save_dir_c) {
-                            game.name = name_c.clone();
+                            game.set_name(&name_c);
                             game.game_path = launch_config.exe.clone();
                             if let Err(e) = ira_db::update_game_title(&db_c, game.db_id, &name_c) {
                                 eprintln!("Failed to update game title: {}", e);

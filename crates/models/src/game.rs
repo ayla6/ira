@@ -10,6 +10,8 @@ pub struct Game {
     pub platform_id: String,
     pub db_id: i64,
     pub name: String,
+    /// Precomputed lowercase name for fast search filtering.
+    pub name_lower: String,
     pub icon_path: String,
     pub hero_image_path: String,
     pub grid_path: String,
@@ -68,6 +70,7 @@ impl Default for Game {
             platform_id: String::new(),
             db_id: 0,
             name: String::new(),
+            name_lower: String::new(),
             icon_path: String::new(),
             hero_image_path: String::new(),
             grid_path: String::new(),
@@ -101,6 +104,11 @@ impl Default for Game {
 }
 
 impl Game {
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+        self.name_lower = self.name.to_lowercase();
+    }
+
     pub fn sort_key(&self) -> &str {
         if self.sort_title.is_empty() { &self.name } else { &self.sort_title }
     }

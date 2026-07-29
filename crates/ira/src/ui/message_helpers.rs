@@ -123,7 +123,6 @@ pub(super) fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
 
     rebuild_sidebar(state);
 
-    select_row_silently(state, Some(0));
     show_grid_view(state);
 
     start_background_enrichment(state);
@@ -410,8 +409,7 @@ pub(super) fn apply_game_update(state: &SharedState, updated: Game) {
 
 pub(super) fn insert_or_update_game(state: &SharedState, game: Game) {
     let app_id = game.app_id.clone();
-
-    {
+    let (db_id, is_existing) = {
         let mut s = state.borrow_mut();
         if !app_id.is_empty() {
             s.game_names.lock().unwrap().insert(app_id.clone(), game.name.clone());
@@ -424,7 +422,9 @@ pub(super) fn insert_or_update_game(state: &SharedState, game: Game) {
             g.hidden = s.games[i].hidden;
             g.manual_unmatch = s.games[i].manual_unmatch;
             s.games[i] = g;
+            (s.games[i].db_id, true)
         } else {
+            let db_id = game.db_id;
             s.games.push(game);
             let sort_mode = s.cfg.sort_mode;
             let sort_descending = s.cfg.sort_descending;
@@ -432,10 +432,22 @@ pub(super) fn insert_or_update_game(state: &SharedState, game: Game) {
                 let ord = sort_mode.compare(a, b);
                 if sort_descending { ord.reverse() } else { ord }
             });
+            (db_id, false)
         }
+    };
+
+    if state.borrow().content_unloaded {
+        return;
     }
 
-    if !state.borrow().content_unloaded {
+    if is_existing {
+        let (name, icon_path) = {
+            let s = state.borrow();
+            let g = s.games.iter().find(|g| g.db_id == db_id);
+            g.map(|g| (g.name.clone(), g.icon_path.clone())).unwrap_or_default()
+        };
+        super::sidebar::update_sidebar_game(state, db_id, &name, &icon_path);
+    } else {
         let needs_rebuild = !state.borrow().sidebar_rebuild_pending;
         if needs_rebuild {
             state.borrow_mut().sidebar_rebuild_pending = true;

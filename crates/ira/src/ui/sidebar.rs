@@ -267,6 +267,8 @@ fn restore_selection(state: &SharedState) {
         }
     }
 
+    state.borrow_mut().selected_id.clear();
+    state.borrow_mut().selected_group = GroupSelection::AllGames;
     select_row_silently(state, Some(0));
 }
 

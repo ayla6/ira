@@ -463,11 +463,13 @@ fn run_terminal_interactive(
         let _ = std::fs::set_permissions(&installer, std::fs::Permissions::from_mode(0o755));
     }
 
-    let installer_str = installer.to_string_lossy().to_string();
-    let spawned = spawn_terminal_with_command(&installer_str);
-
-    if !spawned {
-        show_error(wizard, "No terminal emulator found. Set $TERMINAL or install gnome-terminal/konsole/xterm.");
+    // Run the installer directly as a process — most Linux game installers
+    // (LinuxRulez/YAD, makeself, mojosetup) have their own GUI and don't
+    // need a terminal. The process runs in the background; the user clicks
+    // "Done" on the Ira status page when finished.
+    let mut command = std::process::Command::new(&installer);
+    if let Err(e) = command.spawn() {
+        show_error(wizard, &format!("Failed to start installer: {e}"));
         on_installer_complete(wizard, ist, index, false);
         return;
     }
@@ -755,43 +757,4 @@ fn detect_new_subdirs(before: &[String], folder: &Path) -> Vec<String> {
         .into_iter()
         .filter(|d| !before.contains(d))
         .collect()
-}
-
-fn spawn_terminal_with_command(cmd: &str) -> bool {
-    // Run the script directly — it has a shebang and we chmod +x it.
-    // Don't use `bash -c <cmd>` because that breaks $0 self-reference
-    // in scripts like LinuxRulez that use `readlink -f "$0"`.
-    let terminals: &[(&str, &[&str])] = &[
-        ("gnome-terminal", &["--"]),
-        ("konsole", &["-e"]),
-        ("xfce4-terminal", &["-e"]),
-        ("mate-terminal", &["--"]),
-        ("alacritty", &["-e"]),
-        ("kitty", &["-e"]),
-        ("foot", &["-e"]),
-        ("wezterm", &["start", "--"]),
-        ("tilix", &["-e"]),
-        ("qterminal", &["-e"]),
-        ("lxterminal", &["-e"]),
-        ("terminator", &["-e"]),
-        ("xterm", &["-e"]),
-    ];
-
-    if let Ok(term) = std::env::var("TERMINAL") {
-        let mut command = std::process::Command::new(&term);
-        command.arg("-e").arg(cmd);
-        if command.spawn().is_ok() {
-            return true;
-        }
-    }
-
-    for (term, args) in terminals {
-        let mut command = std::process::Command::new(term);
-        command.args(*args);
-        command.arg(cmd);
-        if command.spawn().is_ok() {
-            return true;
-        }
-    }
-    false
 }

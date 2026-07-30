@@ -14,3 +14,4 @@ pub mod retroachievements;
 pub mod emulator_detect;
 pub mod rom_serial;
 pub mod watcher_util;
+pub mod installer;

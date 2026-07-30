@@ -807,8 +807,9 @@ fn start_identify_from_install(
     glib::source::idle_add_local_full(glib::Priority::LOW, move || {
         match rx.borrow_mut().try_recv() {
             Ok(ev) => {
+                let terminal = !matches!(ev, WizardEvent::Status(_));
                 handle_installer_identify_event(&wizard_c, &ist_c, ev);
-                glib::ControlFlow::Continue
+                if terminal { glib::ControlFlow::Break } else { glib::ControlFlow::Continue }
             }
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,

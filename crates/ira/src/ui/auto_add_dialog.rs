@@ -182,8 +182,9 @@ pub(super) fn start_identify(path: PathBuf, move_to: Option<PathBuf>, wizard: &R
     glib::source::idle_add_local_full(glib::Priority::LOW, move || {
         match rx.borrow_mut().try_recv() {
             Ok(ev) => {
+                let terminal = !matches!(ev, WizardEvent::Status(_));
                 handle_identify_event(&wizard_c, ev);
-                glib::ControlFlow::Continue
+                if terminal { glib::ControlFlow::Break } else { glib::ControlFlow::Continue }
             }
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
@@ -410,8 +411,9 @@ pub(super) fn start_add(
     glib::source::idle_add_local_full(glib::Priority::LOW, move || {
         match rx.borrow_mut().try_recv() {
             Ok(ev) => {
+                let terminal = !matches!(ev, WizardEvent::Status(_));
                 handle_add_event(&wizard_c, ev);
-                glib::ControlFlow::Continue
+                if terminal { glib::ControlFlow::Break } else { glib::ControlFlow::Continue }
             }
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
@@ -535,7 +537,10 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
         let needs_gse = !needs_nge
             && ira_platforms::api_emulators::find_steam_dlls_recursive(&game_folder_str)
                 .iter()
-                .any(|d| !ira_platforms::api_emulators::has_steam_emulator_backups(d));
+                .any(|d| {
+                    !ira_platforms::api_emulators::has_steam_emulator_backups(d)
+                        && !d.join("steam_settings").is_dir()
+                });
 
         if needs_nge {
             let _ = tx.send(WizardEvent::EmulatorPrompt {

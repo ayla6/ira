@@ -233,8 +233,8 @@ pub fn install_gse_from_folder(
 ) -> Result<(), String> {
     let dirs = find_steam_dlls_recursive(game_folder);
     let dll_folder = dirs.iter()
-        .find(|d| !has_steam_emulator_backups(d))
-        .ok_or_else(|| "No unpatched Steam DLLs found in game folder".to_string())?;
+        .find(|d| !has_steam_emulator_backups(d) && !d.join("steam_settings").is_dir())
+        .ok_or_else(|| "Steam DLLs already have an emulator (backups or steam_settings found)".to_string())?;
 
     let is_win = dll_folder.join("steam_api.dll").exists()
         || dll_folder.join("steam_api64.dll").exists();

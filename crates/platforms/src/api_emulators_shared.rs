@@ -112,7 +112,8 @@ pub fn find_dll_dirs_recursive(base_folder: &Path, dll_names: &[&str]) -> Vec<Pa
 
 /// Backup filename variants for a given DLL name.
 /// For `steam_api64.dll` returns:
-///   `steam_api64.dll.bak`, `steam_api64.bak.dll`, `steam_api64.owo.dll`
+///   `steam_api64.dll.bak`, `steam_api64.bak.dll`,
+///   `steam_api64.owo.dll`, `steam_api64.dll.owo`
 fn backup_variants(dll_name: &str) -> Vec<String> {
     let (stem, ext) = match dll_name.rsplit_once('.') {
         Some((s, e)) => (s, e),
@@ -122,12 +123,13 @@ fn backup_variants(dll_name: &str) -> Vec<String> {
         format!("{}.{}.bak", stem, ext),
         format!("{}.bak.{}", stem, ext),
         format!("{}.owo.{}", stem, ext),
+        format!("{}.{}.owo", stem, ext),
     ]
 }
 
 /// Check whether `dir` contains any emulator backup file for the given DLL
 /// names. Returns true if the emulator appears to already be installed
-/// (originals backed up as `.dll.bak`, `.bak.dll`, or `.owo.dll`).
+/// (originals backed up as `.dll.bak`, `.bak.dll`, `.owo.dll`, or `.dll.owo`).
 pub fn has_emulator_backups(dir: &Path, dll_names: &[&str]) -> bool {
     for dll in dll_names {
         for variant in backup_variants(dll) {
@@ -161,6 +163,7 @@ mod tests {
             "steam_api64.dll.bak".to_string(),
             "steam_api64.bak.dll".to_string(),
             "steam_api64.owo.dll".to_string(),
+            "steam_api64.dll.owo".to_string(),
         ]);
     }
 
@@ -171,6 +174,7 @@ mod tests {
             "libsteam_api.so.bak".to_string(),
             "libsteam_api.bak.so".to_string(),
             "libsteam_api.owo.so".to_string(),
+            "libsteam_api.so.owo".to_string(),
         ]);
     }
 

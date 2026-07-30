@@ -463,18 +463,60 @@ fn run_terminal_interactive(
         let _ = std::fs::set_permissions(&installer, std::fs::Permissions::from_mode(0o755));
     }
 
-    // Run the installer directly as a process — most Linux game installers
-    // (LinuxRulez/YAD, makeself, mojosetup) have their own GUI and don't
-    // need a terminal. The process runs in the background; the user clicks
-    // "Done" on the Ira status page when finished.
-    let mut command = std::process::Command::new(&installer);
-    if let Err(e) = command.spawn() {
-        show_error(wizard, &format!("Failed to start installer: {e}"));
-        on_installer_complete(wizard, ist, index, false);
-        return;
+    // Try running directly first — most Linux installers (LinuxRulez/YAD,
+    // makeself, mojosetup) have their own GUI. If direct execution fails
+    // immediately, fall back to a terminal emulator for TUI installers.
+    match std::process::Command::new(&installer).spawn() {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("Direct execution failed ({}), trying terminal fallback", e);
+            let installer_str = installer.to_string_lossy().to_string();
+            if !spawn_terminal_fallback(&installer_str) {
+                show_error(wizard, "Failed to start installer: no terminal emulator found");
+                on_installer_complete(wizard, ist, index, false);
+                return;
+            }
+        }
     }
 
     show_interactive_done_page(wizard, ist, index);
+}
+
+/// Fallback: spawn a terminal emulator to run the installer.
+fn spawn_terminal_fallback(cmd: &str) -> bool {
+    let terminals: &[(&str, &[&str])] = &[
+        ("gnome-terminal", &["--"]),
+        ("konsole", &["-e"]),
+        ("xfce4-terminal", &["-e"]),
+        ("mate-terminal", &["--"]),
+        ("alacritty", &["-e"]),
+        ("kitty", &["-e"]),
+        ("foot", &["-e"]),
+        ("wezterm", &["start", "--"]),
+        ("tilix", &["-e"]),
+        ("qterminal", &["-e"]),
+        ("lxterminal", &["-e"]),
+        ("terminator", &["-e"]),
+        ("xterm", &["-e"]),
+    ];
+
+    if let Ok(term) = std::env::var("TERMINAL") {
+        let mut command = std::process::Command::new(&term);
+        command.arg("-e").arg(cmd);
+        if command.spawn().is_ok() {
+            return true;
+        }
+    }
+
+    for (term, args) in terminals {
+        let mut command = std::process::Command::new(term);
+        command.args(*args);
+        command.arg(cmd);
+        if command.spawn().is_ok() {
+            return true;
+        }
+    }
+    false
 }
 
 fn show_interactive_done_page(
@@ -595,11 +637,92 @@ fn start_post_install(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerSt
         0 => pick_install_folder(wizard, ist),
         1 => {
             let folder = default_folder.join(&new_dirs[0]);
-            ist.borrow_mut().detected_folder = Some(folder.clone());
-            start_identify_from_install(wizard, ist, folder);
+            let final_folder = flatten_linuxrulez_if_needed(wizard, &folder);
+            ist.borrow_mut().detected_folder = Some(final_folder.clone());
+            start_identify_from_install(wizard, ist, final_folder);
         }
         _ => pick_from_multiple(wizard, ist, new_dirs),
     }
+}
+
+/// LinuxRulez installers create a nested `game/game/` structure where the
+/// actual game files live. If detected, flatten it by moving `game/game/*`
+/// to a clean folder and renaming the original to `<name>.lrz`.
+/// Returns the final game folder path (may be the same as input if no
+/// flattening was needed).
+fn flatten_linuxrulez_if_needed(wizard: &Rc<RefCell<Wizard>>, folder: &Path) -> PathBuf {
+    let game_game = folder.join("game").join("game");
+    if !game_game.is_dir() {
+        return folder.to_path_buf();
+    }
+
+    let parent = folder.parent().unwrap_or(folder);
+    let name = folder
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("game");
+    let lrz_dir = parent.join(format!("{name}.lrz"));
+    let clean_dir = parent.join(name);
+
+    // Rename original folder to <name>.lrz
+    if let Err(e) = std::fs::rename(folder, &lrz_dir) {
+        eprintln!("Failed to rename {} to {:?}: {}", folder.display(), lrz_dir, e);
+        return folder.to_path_buf();
+    }
+
+    // Create clean folder and move game/game/* into it
+    if let Err(e) = std::fs::create_dir_all(&clean_dir) {
+        eprintln!("Failed to create {:?}: {}", clean_dir, e);
+        // Rename back
+        let _ = std::fs::rename(&lrz_dir, folder);
+        return folder.to_path_buf();
+    }
+
+    let entries = match std::fs::read_dir(&game_game) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("Failed to read game/game: {}", e);
+            return clean_dir;
+        }
+    };
+
+    for entry in entries.flatten() {
+        let src = entry.path();
+        let dst = clean_dir.join(entry.file_name());
+        if let Err(e) = std::fs::rename(&src, &dst) {
+            eprintln!("Failed to move {:?} \u{2192} {:?}: {}", src, dst, e);
+        }
+    }
+
+    // Prompt user about deleting the .lrz folder
+    let win = wizard.borrow().win.clone();
+    let lrz_name = lrz_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("folder")
+        .to_string();
+    let alert = adw::AlertDialog::new(
+        Some("Clean up installer files?"),
+        Some(&format!(
+            "Game files were moved to a clean folder.\n\nDelete the leftover \"{lrz_name}\" folder (contains umu wrapper, desktop shortcuts, etc.)?"
+        )),
+    );
+    alert.add_response("keep", "Keep");
+    alert.add_response("delete", "Delete");
+    alert.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+    alert.set_default_response(Some("delete"));
+    alert.set_close_response("keep");
+
+    let lrz_dir_c = lrz_dir.clone();
+    alert.choose(Some(&win), None::<&gtk4::gio::Cancellable>, move |response| {
+        if response == "delete" {
+            if let Err(e) = std::fs::remove_dir_all(&lrz_dir_c) {
+                eprintln!("Failed to delete {:?}: {}", lrz_dir_c, e);
+            }
+        }
+    });
+
+    clean_dir
 }
 
 fn pick_install_folder(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>) {

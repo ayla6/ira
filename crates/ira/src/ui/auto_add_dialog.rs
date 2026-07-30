@@ -42,6 +42,8 @@ struct Wizard {
     profiles: Vec<WineProfile>,
     identified: Option<IdentifiedGame>,
     profile_row: Option<adw::ComboRow>,
+    last_folder: Option<PathBuf>,
+    last_is_windows: bool,
 }
 
 pub fn show_auto_add_dialog(state: &SharedState) {
@@ -63,6 +65,8 @@ pub fn show_auto_add_dialog(state: &SharedState) {
         profiles: ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default(),
         identified: None,
         profile_row: None,
+        last_folder: None,
+        last_is_windows: false,
     }));
 
     show_pick_page(&wizard);
@@ -320,9 +324,13 @@ fn show_identified_form(wizard: &Rc<RefCell<Wizard>>, game: IdentifiedGame) {
     add_btn.set_halign(gtk4::Align::Center);
 
     {
+        let folder = game.game_folder.clone();
+        let is_windows = game.is_windows;
         let mut w = wizard.borrow_mut();
         w.identified = Some(game);
         w.profile_row = profile_row.clone();
+        w.last_folder = Some(folder);
+        w.last_is_windows = is_windows;
     }
     let name_c = name_entry.clone();
     let appid_c = appid_row.clone();
@@ -568,6 +576,104 @@ fn handle_install_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent, db_id: i6
 }
 
 fn finalize(wizard: &Rc<RefCell<Wizard>>, db_id: i64) {
+    let (folder, is_windows) = {
+        let w = wizard.borrow();
+        (w.last_folder.clone(), w.last_is_windows)
+    };
+    if is_windows {
+        if let Some(folder) = folder {
+            if let Some(steamapps) = ira_platforms::steam::steamapps_in_path(&folder) {
+                let packages = ira_platforms::steam::detect_redists(&steamapps);
+                if !packages.is_empty() {
+                    prompt_redists(wizard, db_id, packages);
+                    return;
+                }
+            }
+        }
+    }
+    close_and_open_edit(wizard, db_id);
+}
+
+fn prompt_redists(wizard: &Rc<RefCell<Wizard>>, db_id: i64, packages: Vec<ira_platforms::steam::RedistPackage>) {
+    let (win, state) = {
+        let w = wizard.borrow();
+        (w.win.clone(), w.state.clone())
+    };
+    let body = format!(
+        "Steamworks redistributables were found:\n{}\n\nInstall the selected ones now via Wine?",
+        packages.iter().map(|p| format!("- {}", p.name)).collect::<Vec<_>>().join("\n")
+    );
+    let alert = adw::AlertDialog::new(Some("Install redistributables?"), Some(&body));
+    alert.add_response("skip", "Skip");
+    alert.add_response("install", "Install");
+    alert.set_response_appearance("install", adw::ResponseAppearance::Suggested);
+    alert.set_default_response(Some("install"));
+    alert.set_close_response("skip");
+
+    let wizard_c = wizard.clone();
+    alert.choose(Some(&win), None::<&gtk4::gio::Cancellable>, move |response| {
+        if response == "install" {
+            start_redist_install(wizard_c.clone(), db_id, packages);
+        } else {
+            close_and_open_edit(&wizard_c, db_id);
+        }
+        let _ = state;
+    });
+}
+
+fn start_redist_install(
+    wizard: Rc<RefCell<Wizard>>, db_id: i64, packages: Vec<ira_platforms::steam::RedistPackage>,
+) {
+    let (db, save_dir) = {
+        let w = wizard.borrow();
+        let s = w.state.borrow();
+        (s.db.clone(), s.save_dir.clone())
+    };
+    set_status(&wizard, "Installing redistributables via Wine…");
+
+    let (tx, rx) = mpsc::channel::<WizardEvent>();
+    let rx = Rc::new(RefCell::new(rx));
+    std::thread::spawn(move || {
+        let wine_config = ira_db::get_game_config(&db, db_id)
+            .ok().flatten()
+            .map(|(_, wine, _)| wine)
+            .unwrap_or_default();
+        let wine_exe = ira_launcher::wine_launch::find_wine_binary(&wine_config.version, &wine_config.custom_wine_path)
+            .unwrap_or_else(|_| "wine".to_string());
+        let env = ira_launcher::wine_launch::build_wine_env(&wine_config, &wine_exe);
+        for package in &packages {
+            for installer in &package.installers {
+                eprintln!("Running redist installer: {} ({})", package.name, installer.display());
+                let mut cmd = std::process::Command::new(&wine_exe);
+                cmd.arg(installer);
+                for (k, v) in &env {
+                    cmd.env(k, v);
+                }
+                match cmd.status() {
+                    Ok(s) if !s.success() => eprintln!("Installer {} exited with {:?}", installer.display(), s.code()),
+                    Err(e) => eprintln!("Failed to run {}: {}", installer.display(), e),
+                    _ => {}
+                }
+            }
+        }
+        let _ = save_dir;
+        let _ = tx.send(WizardEvent::InstallDone);
+    });
+
+    let wizard_c = wizard.clone();
+    glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+        match rx.borrow_mut().try_recv() {
+            Ok(_) => {
+                close_and_open_edit(&wizard_c, db_id);
+                glib::ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
+}
+
+fn close_and_open_edit(wizard: &Rc<RefCell<Wizard>>, db_id: i64) {
     let (state, win) = {
         let w = wizard.borrow();
         (w.state.clone(), w.win.clone())

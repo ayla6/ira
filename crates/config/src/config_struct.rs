@@ -98,6 +98,10 @@ pub struct Config {
     pub default_native_env_vars: Vec<(String, String)>,
     #[serde(default)]
     pub default_api_emu_version: String,
+    /// Remembered auto-add emulator choice. `None` = ask every time,
+    /// `Some(true)` = always install without prompting, `Some(false)` = never install.
+    #[serde(default)]
+    pub auto_emu_install: Option<bool>,
     #[serde(default)]
     pub sort_mode: ira_models::SortMode,
     #[serde(default)]
@@ -142,6 +146,7 @@ impl Default for Config {
             default_game_folder: String::new(),
             default_native_env_vars: Vec::new(),
             default_api_emu_version: String::new(),
+            auto_emu_install: None,
             sort_mode: ira_models::SortMode::default(),
             sort_descending: false,
             ra_enabled: false,
@@ -196,6 +201,7 @@ impl Config {
             default_game_folder: self.default_game_folder.clone(),
             default_native_env_vars: self.default_native_env_vars.clone(),
             default_api_emu_version: self.default_api_emu_version.clone(),
+            auto_emu_install: self.auto_emu_install,
             sort_mode: self.sort_mode,
             sort_descending: self.sort_descending,
             ra_enabled: self.ra_enabled,

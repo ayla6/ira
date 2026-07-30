@@ -14,6 +14,14 @@ use super::edit_game_dialog::show_edit_game_dialog;
 use super::state::SharedState;
 use super::wine_profile_picker::{build_wine_profile_picker, selected_profile_id};
 
+/// Which API emulator to install (GOG checked first — a GOG game may ship Steam
+/// DLLs that must stay default, so only the Galaxy ones get patched).
+#[derive(Clone, Copy)]
+enum EmuKind {
+    Nge,
+    Gse,
+}
+
 /// Events sent from background threads to the wizard (polled on the main thread).
 enum WizardEvent {
     Status(String),
@@ -21,7 +29,7 @@ enum WizardEvent {
     Identified(Box<IdentifiedGame>),
     Failed(String),
     Added(i64),
-    EmulatorPrompt { db_id: i64, game_folder: PathBuf, app_id: String },
+    EmulatorPrompt { db_id: i64, game_folder: PathBuf, app_id: String, emu_kind: EmuKind },
     InstallDone,
 }
 
@@ -471,17 +479,30 @@ fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams) {
         });
 
         // After the game is added, check whether the folder contains unpatched
-        // Steam API DLLs. If so, prompt to install the Goldberg emulator.
+        // API-emulator DLLs. GOG (Galaxy) is checked first: a GOG game may ship
+        // Steam DLLs that must remain default, so only the Galaxy ones get patched.
         let game_folder_str = game.game_folder.to_string_lossy().into_owned();
-        let needs_gse = ira_platforms::api_emulators::find_steam_dlls_recursive(&game_folder_str)
+        let needs_nge = ira_platforms::api_emulators::find_gog_dlls_recursive(&game_folder_str)
             .iter()
-            .any(|d| !ira_platforms::api_emulators::has_steam_emulator_backups(d));
+            .any(|d| !ira_platforms::api_emulators::has_gog_emulator_backups(d));
+        let needs_gse = !needs_nge
+            && ira_platforms::api_emulators::find_steam_dlls_recursive(&game_folder_str)
+                .iter()
+                .any(|d| !ira_platforms::api_emulators::has_steam_emulator_backups(d));
 
-        if needs_gse {
+        if needs_nge {
             let _ = tx.send(WizardEvent::EmulatorPrompt {
                 db_id,
                 game_folder: game.game_folder.clone(),
                 app_id: app_id.clone(),
+                emu_kind: EmuKind::Nge,
+            });
+        } else if needs_gse {
+            let _ = tx.send(WizardEvent::EmulatorPrompt {
+                db_id,
+                game_folder: game.game_folder.clone(),
+                app_id: app_id.clone(),
+                emu_kind: EmuKind::Gse,
             });
         } else {
             let _ = tx.send(WizardEvent::Added(db_id));
@@ -492,8 +513,8 @@ fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams) {
 fn handle_add_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
     match ev {
         WizardEvent::Added(db_id) => finalize(wizard, db_id),
-        WizardEvent::EmulatorPrompt { db_id, game_folder, app_id } => {
-            prompt_install_emulator(wizard, db_id, game_folder, app_id);
+        WizardEvent::EmulatorPrompt { db_id, game_folder, app_id, emu_kind } => {
+            prompt_install_emulator(wizard, db_id, game_folder, app_id, emu_kind);
         }
         WizardEvent::InstallDone => {}
         WizardEvent::Failed(e) => {
@@ -506,73 +527,152 @@ fn handle_add_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
 }
 
 fn prompt_install_emulator(
-    wizard: &Rc<RefCell<Wizard>>, db_id: i64, game_folder: PathBuf, app_id: String,
+    wizard: &Rc<RefCell<Wizard>>, db_id: i64, game_folder: PathBuf, app_id: String, emu_kind: EmuKind,
 ) {
+    // Honor a remembered choice so the user isn't asked every time.
+    let remembered = wizard.borrow().state.borrow().cfg.auto_emu_install;
+    match remembered {
+        Some(true) => {
+            let version = wizard.borrow().state.borrow().cfg.default_api_emu_version.clone();
+            start_install(wizard.clone(), game_folder, app_id, version, db_id, emu_kind);
+            return;
+        }
+        Some(false) => {
+            finalize(wizard, db_id);
+            return;
+        }
+        None => {}
+    }
+
     let (win, default_version) = {
         let w = wizard.borrow();
         let default_version = w.state.borrow().cfg.default_api_emu_version.clone();
         (w.win.clone(), default_version)
     };
-    let alert = adw::AlertDialog::new(
-        Some("Install Goldberg emulator?"),
-        Some("Steam API DLLs were found in this game. Install the Goldberg Steam Emulator to enable achievements?"),
-    );
-    alert.add_response("no", "No");
-    alert.add_response("yes", "Yes");
-    alert.set_response_appearance("yes", adw::ResponseAppearance::Suggested);
-    alert.set_default_response(Some("yes"));
-    alert.set_close_response("no");
+    let (title, body) = match emu_kind {
+        EmuKind::Nge => (
+            "Install Nemirtingas Galaxy emulator?",
+            "GOG Galaxy DLLs were found in this game. Install the Nemirtingas Galaxy Emulator to enable achievements? (Steam DLLs, if any, will be left untouched.)",
+        ),
+        EmuKind::Gse => (
+            "Install Goldberg emulator?",
+            "Steam API DLLs were found in this game. Install the Goldberg Steam Emulator to enable achievements?",
+        ),
+    };
+
+    let dialog = adw::Window::new();
+    dialog.set_title(Some(title));
+    dialog.set_default_size(380, 240);
+    dialog.set_modal(true);
+    dialog.set_transient_for(Some(&win));
+
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    outer.set_margin_start(20);
+    outer.set_margin_end(20);
+    outer.set_margin_top(16);
+    outer.set_margin_bottom(16);
+
+    let header = adw::HeaderBar::new();
+    header.add_css_class(CSS_FLAT);
+    outer.append(&header);
+
+    let msg = gtk4::Label::new(Some(body));
+    msg.set_wrap(true);
+    msg.set_halign(gtk4::Align::Start);
+    outer.append(&msg);
+
+    let remember = adw::SwitchRow::new();
+    remember.set_title("Don't ask me again");
+    let group = adw::PreferencesGroup::new();
+    group.add(&remember);
+    outer.append(&group);
+
+    let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    btn_row.set_halign(gtk4::Align::End);
+    let no_btn = gtk4::Button::with_label("No");
+    let yes_btn = gtk4::Button::with_label("Yes");
+    yes_btn.add_css_class(CSS_SUGGESTED_ACTION);
+    btn_row.append(&no_btn);
+    btn_row.append(&yes_btn);
+    outer.append(&btn_row);
+
+    dialog.set_content(Some(&outer));
+    dialog.present();
 
     let wizard_c = wizard.clone();
-    alert.choose(Some(&win), None::<&gtk4::gio::Cancellable>, move |response| {
-        if response == "yes" {
-            start_install(wizard_c.clone(), game_folder, app_id, default_version, db_id);
-        } else {
-            finalize(&wizard_c, db_id);
-        }
+    let remember_c = remember.clone();
+    let dialog_c = dialog.clone();
+    yes_btn.connect_clicked(move |_| {
+        persist_remember(&wizard_c, remember_c.is_active(), true);
+        let version = wizard_c.borrow().state.borrow().cfg.default_api_emu_version.clone();
+        dialog_c.close();
+        start_install(wizard_c.clone(), game_folder.clone(), app_id.clone(), version, db_id, emu_kind);
     });
+
+    let wizard_c2 = wizard.clone();
+    let remember_c2 = remember.clone();
+    let dialog_c2 = dialog.clone();
+    no_btn.connect_clicked(move |_| {
+        persist_remember(&wizard_c2, remember_c2.is_active(), false);
+        dialog_c2.close();
+        finalize(&wizard_c2, db_id);
+    });
+    let _ = default_version;
+}
+
+fn persist_remember(wizard: &Rc<RefCell<Wizard>>, remember: bool, install: bool) {
+    if remember {
+        let wizard_ref = wizard.borrow_mut();
+        let mut state_ref = wizard_ref.state.borrow_mut();
+        state_ref.cfg.auto_emu_install = Some(install);
+        if let Err(e) = state_ref.cfg.save() {
+            eprintln!("Failed to save auto_emu_install preference: {}", e);
+        }
+    }
 }
 
 fn start_install(
     wizard: Rc<RefCell<Wizard>>, game_folder: PathBuf, app_id: String, version: String, db_id: i64,
+    emu_kind: EmuKind,
 ) {
     let save_dir = wizard.borrow().state.borrow().save_dir.clone();
-    set_status(&wizard, "Installing Goldberg emulator…");
+    let status = match emu_kind {
+        EmuKind::Nge => "Installing Nemirtingas Galaxy emulator…",
+        EmuKind::Gse => "Installing Goldberg emulator…",
+    };
+    set_status(&wizard, status);
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
-    let rx = Rc::new(RefCell::new(rx));
     let tx_c = tx.clone();
     let game_folder_c = game_folder.clone();
     let app_id_c = app_id.clone();
     let version_c = version.clone();
     std::thread::spawn(move || {
-        let result = ira_platforms::api_emulators::install_gse_from_folder(
-            &save_dir, &game_folder_c.to_string_lossy(), &app_id_c, &[], &version_c,
-        );
+        let result = match emu_kind {
+            EmuKind::Nge => ira_platforms::api_emulators::install_nge_from_folder(
+                &save_dir, &game_folder_c.to_string_lossy(), &app_id_c, &version_c,
+            ),
+            EmuKind::Gse => ira_platforms::api_emulators::install_gse_from_folder(
+                &save_dir, &game_folder_c.to_string_lossy(), &app_id_c, &[], &version_c,
+            ),
+        };
         if let Err(e) = result {
-            eprintln!("GSE install failed: {}", e);
+            eprintln!("Emulator install failed: {}", e);
         }
         let _ = tx_c.send(WizardEvent::InstallDone);
     });
 
     let wizard_c = wizard.clone();
     glib::source::idle_add_local_full(glib::Priority::LOW, move || {
-        match rx.borrow_mut().try_recv() {
-            Ok(ev) => {
-                handle_install_event(&wizard_c, ev, db_id);
+        match rx.try_recv() {
+            Ok(_) => {
+                finalize(&wizard_c, db_id);
                 glib::ControlFlow::Break
             }
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
         }
     });
-}
-
-fn handle_install_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent, db_id: i64) {
-    match ev {
-        WizardEvent::InstallDone => finalize(wizard, db_id),
-        _ => finalize(wizard, db_id),
-    }
 }
 
 fn finalize(wizard: &Rc<RefCell<Wizard>>, db_id: i64) {

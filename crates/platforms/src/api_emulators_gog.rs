@@ -187,13 +187,42 @@ pub fn install_nge(
         return Err("No original GOG Galaxy DLL found in game folder. Cannot install API emulator.".to_string());
     }
 
-    let version_dir = resolve_gog_version(save_dir, version)?;
-
-    let is64 = detect_arch(game_exe) == "x64";
-
     let dll_folder = find_api_emu_dll_folder(game_exe, NGE_VERSION_FILES)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
+
+    let is64 = detect_arch(game_exe) == "x64";
+    install_nge_into_folder(save_dir, &dll_folder, is64, product_id, version)
+}
+
+/// Recursively search `game_folder` for the directory containing Galaxy DLLs and
+/// install the Nemirtingas Galaxy Emulator there. Skips directories that already
+/// have emulator backups. Used by the auto-add flow which only knows the install
+/// folder, not the exe. NGE is Windows-only.
+pub fn install_nge_from_folder(
+    save_dir: &str,
+    game_folder: &str,
+    product_id: &str,
+    version: &str,
+) -> Result<(), String> {
+    let dirs = find_gog_dlls_recursive(game_folder);
+    let dll_folder = dirs.iter()
+        .find(|d| !has_gog_emulator_backups(d))
+        .ok_or_else(|| "No unpatched GOG Galaxy DLLs found in game folder".to_string())?;
+
+    let is64 = dll_folder.join("Galaxy64.dll").exists()
+        || dll_folder.join("galaxy64.dll").exists();
+    install_nge_into_folder(save_dir, dll_folder, is64, product_id, version)
+}
+
+fn install_nge_into_folder(
+    save_dir: &str,
+    dll_folder: &Path,
+    is64: bool,
+    product_id: &str,
+    version: &str,
+) -> Result<(), String> {
+    let version_dir = resolve_gog_version(save_dir, version)?;
 
     // Backup original DLL and copy emulator file
     for (src_name, dst_name) in nge_file_map(is64) {

@@ -74,11 +74,59 @@ pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
     }
 }
 
+/// Create a closure that returns the current text of an EntryRow as
+/// `Option<String>`, for use as the `initial_path` parameter of
+/// `make_browse_button`.
+pub fn entry_path_closure(entry: &adw::EntryRow) -> impl Fn() -> Option<String> + 'static {
+    let entry = entry.clone();
+    move || {
+        let t = entry.text().to_string();
+        if t.is_empty() { None } else { Some(t) }
+    }
+}
+
+/// Set the initial folder for a `FileDialog` based on a path string.
+/// If the path is a file, uses its parent directory. If the path doesn't
+/// exist, walks up to find the nearest existing parent, falling back to
+/// the home directory.
+pub fn set_initial_folder(dialog: &gtk4::FileDialog, path_str: &str) {
+    if path_str.is_empty() {
+        return;
+    }
+    let path = std::path::Path::new(path_str);
+    let folder = if path.is_file() {
+        path.parent()
+    } else if path.is_dir() {
+        Some(path)
+    } else {
+        path.parent()
+    };
+    let final_folder = folder
+        .filter(|p| p.exists())
+        .or_else(|| {
+            let mut p = path.parent();
+            while let Some(parent) = p {
+                if parent.exists() {
+                    return Some(parent);
+                }
+                p = parent.parent();
+            }
+            None
+        })
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()));
+    if final_folder.exists() {
+        let file = gio::File::for_path(final_folder);
+        dialog.set_initial_folder(Some(&file));
+    }
+}
+
 pub fn make_browse_button(
     parent: Option<&adw::Window>,
     title: &str,
     select_folder: bool,
     filter: Option<(&str, &[&str])>,
+    initial_path: impl Fn() -> Option<String> + 'static,
     on_select: impl Fn(&std::path::Path) + 'static,
 ) -> gtk4::Button {
     let browse = gtk4::Button::with_label("Browse…");
@@ -88,6 +136,7 @@ pub fn make_browse_button(
     let title = title.to_string();
     let filter = filter.map(|(name, mimes)| (name.to_string(), mimes.iter().map(|s| s.to_string()).collect::<Vec<_>>()));
     let on_select = std::rc::Rc::new(on_select);
+    let initial_path = std::rc::Rc::new(initial_path);
     browse.connect_clicked(move |_| {
         let dialog = gtk4::FileDialog::new();
         dialog.set_title(&title);
@@ -99,6 +148,9 @@ pub fn make_browse_button(
             }
             f.add_pattern("*");
             dialog.set_default_filter(Some(&f));
+        }
+        if let Some(path_str) = initial_path() {
+            set_initial_folder(&dialog, &path_str);
         }
         let on_select = on_select.clone();
         let cb = move |result: Result<gio::File, glib::Error>| {

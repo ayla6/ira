@@ -54,6 +54,7 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
         "Select executable",
         false,
         Some(("Executable", &["application/x-executable"])),
+        helpers::entry_path_closure(&exe_entry),
         {
             let entry = exe_entry.clone();
             move |path| entry.set_text(&path.to_string_lossy())
@@ -76,6 +77,7 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
         "Select working directory",
         true,
         None,
+        helpers::entry_path_closure(&wd_entry),
         {
             let entry = wd_entry.clone();
             move |path| entry.set_text(&path.to_string_lossy())

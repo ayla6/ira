@@ -495,6 +495,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         "Select image",
         false,
         Some(("Images", &["image/png", "image/jpeg", "image/webp", "image/x-icon"])),
+        || None,
         {
             let pc = pending_copies.clone();
             let refresh = Rc::clone(&refresh_images);
@@ -594,6 +595,7 @@ fn build_dir_buttons(
         "Select image",
         false,
         Some(("Images", &["image/png", "image/jpeg", "image/webp", "image/x-icon"])),
+        || None,
         {
             let target_dir = target_dir.to_path_buf();
             let file_base = file_base.to_string();

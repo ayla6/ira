@@ -151,6 +151,7 @@ fn build_game_folder_row(page: &gtk4::Box, game: &Game, win: &adw::Window) -> Op
         "Select game folder",
         true,
         None,
+        super::helpers::entry_path_closure(&row),
         {
             let row_c = row.clone();
             move |path| row_c.set_text(&path.to_string_lossy())

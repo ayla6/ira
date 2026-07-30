@@ -21,6 +21,7 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> (
         "Select prefix base directory",
         true,
         None,
+        super::helpers::entry_path_closure(&prefix_base_row),
         {
             let entry = prefix_base_row.clone();
             move |path| entry.set_text(&path.to_string_lossy())
@@ -209,6 +210,7 @@ pub fn show_profile_dialog(
         "Select wine prefix",
         true,
         None,
+        super::helpers::entry_path_closure(&prefix_entry),
         {
             let entry = prefix_entry.clone();
             move |path| entry.set_text(&path.to_string_lossy())

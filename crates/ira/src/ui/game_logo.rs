@@ -1,12 +1,25 @@
 use gtk4::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::mpsc;
 use crate::Game;
 use super::css::*;
 
 pub(super) type LogoControls = (gtk4::Box, Rc<RefCell<String>>, gtk4::Adjustment, Rc<Cell<bool>>);
 
-pub(super) fn build_game_logo_page(game: &Game, show_reset: bool) -> Option<LogoControls> {
+/// Info needed to show a "Reset to Steam" button on the logo page.
+pub(super) struct SteamLogoReset {
+    pub steam: std::sync::Arc<ira_api::SteamDataClient>,
+    pub app_id: String,
+    pub db: ira_db::DbConn,
+    pub db_id: i64,
+}
+
+pub(super) fn build_game_logo_page(
+    game: &Game,
+    show_reset: bool,
+    steam_reset: Option<SteamLogoReset>,
+) -> Option<LogoControls> {
     let logo_page = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
 
     let inherited = game.logo_position.is_empty();
@@ -170,6 +183,77 @@ pub(super) fn build_game_logo_page(game: &Game, show_reset: bool) -> Option<Logo
             reset_btn.set_sensitive(false);
         }
         header_row.append(&reset_btn);
+    }
+
+    if let Some(info) = steam_reset {
+        let steam_reset_btn = gtk4::Button::from_icon_name("view-refresh-symbolic");
+        steam_reset_btn.add_css_class(CSS_FLAT);
+        steam_reset_btn.set_tooltip_text(Some("Reset"));
+        let selected_pos_r = selected_pos.clone();
+        let size_adj_r = size_adj.clone();
+        let btns_r = btns.clone();
+        let preview_r = preview_draw.clone();
+        let modified_r = modified.clone();
+        let btn_clone = steam_reset_btn.clone();
+        let (tx, rx) = mpsc::channel::<Option<(String, i32)>>();
+        let app_id_clone = info.app_id.clone();
+        let steam_clone = info.steam.clone();
+        steam_reset_btn.connect_clicked(move |_| {
+            btn_clone.set_sensitive(false);
+            let tx = tx.clone();
+            let app_id = app_id_clone.clone();
+            let steam = steam_clone.clone();
+            std::thread::spawn(move || {
+                let info = steam.fetch_steamcmd_info(&app_id);
+                let _ = tx.send(info.map(|i| (i.logo_position, i.logo_size)));
+            });
+        });
+        let rx = Rc::new(RefCell::new(rx));
+        let db = info.db.clone();
+        let db_id = info.db_id;
+        let btns_for_idle = btns_r.clone();
+        let selected_for_idle = selected_pos_r.clone();
+        let size_for_idle = size_adj_r.clone();
+        let preview_for_idle = preview_r.clone();
+        let modified_for_idle = modified_r.clone();
+        let btn_for_idle = steam_reset_btn.clone();
+        glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+            match rx.borrow_mut().try_recv() {
+                Ok(Some((pos, size))) => {
+                    let pos_str = if pos.is_empty() {
+                        ira_models::LogoPosition::DEFAULT.to_string()
+                    } else {
+                        pos
+                    };
+                    *selected_for_idle.borrow_mut() = pos_str.clone();
+                    size_for_idle.set_value(size.clamp(5, 100) as f64);
+                    modified_for_idle.set(true);
+                    for b in btns_for_idle.iter() {
+                        b.remove_css_class(CSS_SELECTED);
+                    }
+                    let target = ira_models::LogoPosition::from_string(&pos_str);
+                    for (i, &p) in ira_models::LogoPosition::all().iter().enumerate() {
+                        if p == target {
+                            btns_for_idle[i].add_css_class(CSS_SELECTED);
+                        }
+                    }
+                    preview_for_idle.queue_draw();
+                    let _ = ira_db::set_logo_settings(&db, db_id, &pos_str, size.clamp(5, 100));
+                    btn_for_idle.set_sensitive(true);
+                    glib::ControlFlow::Break
+                }
+                Ok(None) => {
+                    btn_for_idle.set_sensitive(true);
+                    glib::ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    btn_for_idle.set_sensitive(true);
+                    glib::ControlFlow::Break
+                }
+            }
+        });
+        header_row.append(&steam_reset_btn);
     }
     logo_page.append(&header_row);
 

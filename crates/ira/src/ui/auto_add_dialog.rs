@@ -40,6 +40,8 @@ pub(super) struct IdentifiedGame {
     pub game_folder: PathBuf,
     pub exe: String,
     pub variants: Vec<String>,
+    pub logo_position: String,
+    pub logo_size: i32,
 }
 
 /// Wizard state shared between the main-thread poll closure and signal handlers.
@@ -111,8 +113,10 @@ fn show_pick_page(wizard: &Rc<RefCell<Wizard>>) {
 }
 
 fn pick_folder_and_start(win: &adw::Window, state: &SharedState, wizard: &Rc<RefCell<Wizard>>) {
+    let default_folder = state.borrow().cfg.default_game_folder.clone();
     let dialog = gtk4::FileDialog::new();
     dialog.set_title("Select game folder");
+    super::helpers::set_initial_folder(&dialog, &default_folder);
     let state_c = state.clone();
     let win_c = win.clone();
     let wizard_c = wizard.clone();
@@ -228,7 +232,15 @@ pub(super) fn spawn_identify_thread(
         let is_windows = default
             .map(|l| l.oslist.contains("windows") || l.oslist.is_empty())
             .unwrap_or(info.oslist.contains("windows") || info.oslist.is_empty());
-        let variants: Vec<String> = launches.iter().skip(1).map(|l| l.executable.clone()).collect();
+
+        let target_os = if is_windows { "windows" } else { "linux" };
+        let variants: Vec<String> = launches
+            .iter()
+            .skip(1)
+            .filter(|l| l.oslist.contains(target_os) || l.oslist.is_empty())
+            .filter(|l| !l.oslist.contains("macos"))
+            .map(|l| l.executable.clone())
+            .collect();
 
         let _ = tx.send(WizardEvent::Identified(Box::new(IdentifiedGame {
             app_id,
@@ -237,6 +249,8 @@ pub(super) fn spawn_identify_thread(
             game_folder: final_folder,
             exe,
             variants,
+            logo_position: info.logo_position,
+            logo_size: info.logo_size,
         })));
     });
 }
@@ -452,6 +466,10 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
                 return;
             }
         };
+
+        if !game.logo_position.is_empty() {
+            let _ = ira_db::set_logo_settings(&db, db_id, &game.logo_position, game.logo_size);
+        }
 
         for (i, variant_exe) in game.variants.iter().enumerate() {
             let exe_path = game.game_folder.join(variant_exe).to_string_lossy().into_owned();
@@ -710,13 +728,18 @@ pub(super) fn finalize(wizard: &Rc<RefCell<Wizard>>, db_id: i64) {
         (w.last_folder.clone(), w.last_is_windows)
     };
     if is_windows {
-        if let Some(folder) = folder {
-            if let Some(steamapps) = ira_platforms::steam::steamapps_in_path(&folder) {
+        if let Some(folder) = &folder {
+            if let Some(steamapps) = ira_platforms::steam::steamapps_in_path(folder) {
                 let packages = ira_platforms::steam::detect_redists(&steamapps);
                 if !packages.is_empty() {
                     prompt_redists(wizard, db_id, packages);
                     return;
                 }
+            }
+            let local = ira_platforms::steam::detect_redists_in_game_folder(folder);
+            if !local.is_empty() {
+                prompt_redists(wizard, db_id, local);
+                return;
             }
         }
     }

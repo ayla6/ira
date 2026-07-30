@@ -31,6 +31,7 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
         "Select game folder",
         true,
         None,
+        super::helpers::entry_path_closure(&folder_entry),
         {
             let entry = folder_entry.clone();
             move |path| entry.set_text(&path.to_string_lossy())
@@ -47,6 +48,7 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
         "Select executable",
         false,
         Some(("Executable", &["application/x-executable", "application/x-msdos-program"])),
+        super::helpers::entry_path_closure(&exe_entry),
         {
             let entry = exe_entry.clone();
             move |path| entry.set_text(&path.to_string_lossy())
@@ -67,6 +69,7 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
         "Select working directory",
         true,
         None,
+        super::helpers::entry_path_closure(&wd_entry),
         {
             let entry = wd_entry.clone();
             move |path| entry.set_text(&path.to_string_lossy())
@@ -108,6 +111,7 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
         "Select game folder",
         true,
         None,
+        super::helpers::entry_path_closure(&gog_id_entry),
         {
             let row = gog_id_entry.clone();
             let name_row = name_entry.clone();
@@ -130,6 +134,7 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
         "Select game folder",
         true,
         None,
+        || None,
         {
             let n = name_entry.clone();
             let exe = exe_entry.clone();

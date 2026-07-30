@@ -223,14 +223,26 @@ fn build_dialog_contents(
         stack.add_named(&images_page, Some("images"));
     }
 
-    let logo_controls: Option<(Rc<RefCell<String>>, gtk4::Adjustment)> =
-        if let Some((logo_page, selected_pos, size_adj, _modified)) = super::game_logo::build_game_logo_page(&game, false) {
+    let logo_controls: Option<(Rc<RefCell<String>>, gtk4::Adjustment)> = {
+        let steam_reset = if game.trophy_source.has_steam_enrichment() && !game.app_id.is_empty() {
+            let s = state.borrow();
+            Some(super::game_logo::SteamLogoReset {
+                steam: s.steam.clone(),
+                app_id: game.app_id.clone(),
+                db: s.db.clone(),
+                db_id: game.db_id,
+            })
+        } else {
+            None
+        };
+        if let Some((logo_page, selected_pos, size_adj, _modified)) = super::game_logo::build_game_logo_page(&game, false, steam_reset) {
             sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-desktop-wallpaper-symbolic", "Logo", "logo"));
             stack.add_named(&logo_page, Some("logo"));
             Some((selected_pos, size_adj))
         } else {
             None
-        };
+        }
+    };
 
     let dlc_switches = if game.kind != ira_models::GameKind::Steam {
         build_dlc_page(&app_details, &sidebar, &stack)

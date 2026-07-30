@@ -341,6 +341,7 @@ pub(super) fn build_computer_games_page(
         "Select default game folder",
         true,
         None,
+        super::helpers::entry_path_closure(&folder_row),
         {
             let row = folder_row.clone();
             move |path| row.set_text(&path.to_string_lossy())

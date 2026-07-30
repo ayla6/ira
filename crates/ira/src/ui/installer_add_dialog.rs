@@ -591,8 +591,10 @@ fn start_post_install(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerSt
 
 fn pick_install_folder(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>) {
     let win = wizard.borrow().win.clone();
+    let default_folder = ist.borrow().default_game_folder.clone();
     let dialog = gtk4::FileDialog::new();
     dialog.set_title("Select installed game folder");
+    super::helpers::set_initial_folder(&dialog, &default_folder.to_string_lossy());
     let wizard_c = wizard.clone();
     let ist_c = ist.clone();
     dialog.select_folder(Some(&win), None::<&gtk4::gio::Cancellable>, move |result| {
@@ -706,6 +708,8 @@ fn handle_installer_identify_event(
                     game_folder: folder,
                     exe: String::new(),
                     variants: Vec::new(),
+                    logo_position: String::new(),
+                    logo_size: 0,
                 };
                 let profile_id = ist.borrow().profile_id;
                 show_identified_form(wizard, game, profile_id, true);

@@ -54,7 +54,7 @@ fn build_variant_name_entry_buttons(
     group: &adw::PreferencesGroup,
     var_widgets: &Rc<RefCell<Vec<VarW>>>,
     container: &gtk4::Box,
-    main_win: adw::ApplicationWindow,
+    main_win: adw::Window,
 ) {
     let up_btn = gtk4::Button::from_icon_name("go-up-symbolic");
     up_btn.set_tooltip_text(Some("Move up"));
@@ -176,7 +176,7 @@ fn build_variant_images_and_logo_section(
             }
             var_game.logo_position = v.logo_position.clone();
             var_game.logo_size = v.logo_size;
-            if let Some((logo_ui, logo_pos, logo_size_adj, logo_mod)) = super::game_logo::build_game_logo_page(&var_game, true) {
+            if let Some((logo_ui, logo_pos, logo_size_adj, logo_mod)) = super::game_logo::build_game_logo_page(&var_game, true, None) {
                 let logo_expander = adw::ExpanderRow::new();
                 logo_expander.set_title("Logo position");
                 logo_expander.set_subtitle(if v.logo_position.is_empty() { "Inherited from base game" } else { "" });
@@ -217,7 +217,7 @@ fn build_variant_card(
     name_entry.set_title("Variant name");
     name_entry.set_text(&v.name);
 
-    let main_win = state.borrow().window.clone();
+    let main_win = win.clone();
     build_variant_name_entry_buttons(&name_entry, &group, var_widgets, container, main_win);
 
     group.add(&name_entry);
@@ -230,6 +230,7 @@ fn build_variant_card(
         "Select variant executable",
         false,
         Some(("Executable", &["application/x-executable"])),
+        helpers::entry_path_closure(&exe_entry),
         {
             let entry = exe_entry.clone();
             move |path| entry.set_text(&path.to_string_lossy())
@@ -251,6 +252,7 @@ fn build_variant_card(
         "Select working directory",
         true,
         None,
+        helpers::entry_path_closure(&wd_entry),
         {
             let entry = wd_entry.clone();
             move |path| entry.set_text(&path.to_string_lossy())

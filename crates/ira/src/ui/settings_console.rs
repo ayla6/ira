@@ -2,7 +2,7 @@ use gtk4::prelude::*;
 use adw::prelude::*;
 use ira_config::{Config, ConsoleConfig};
 use ira_models::ConsoleDef;
-use super::helpers::{make_browse_button, string_list_from};
+use super::helpers::{entry_path_closure, make_browse_button, string_list_from};
 use super::settings_dialog::settings_page_container;
 use super::css::*;
 
@@ -105,6 +105,7 @@ pub(super) fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (g
         "Select shadPS4 executable",
         false,
         Some(("Executable", &["application/x-executable"])),
+        entry_path_closure(&ps4_exe_row),
         {
             let row = ps4_exe_row.clone();
             move |path| row.set_text(&path.to_string_lossy())
@@ -179,6 +180,7 @@ pub(super) fn build_rpcs3_settings_page(cfg: &Config, win: &adw::Window) -> (gtk
         "Select RPCS3 executable",
         false,
         Some(("Executable", &["application/x-executable"])),
+        entry_path_closure(&exe_row),
         {
             let row = exe_row.clone();
             move |path| row.set_text(&path.to_string_lossy())
@@ -236,6 +238,7 @@ pub(super) fn build_console_settings_page(
         "Select ROM folder",
         true,
         None,
+        entry_path_closure(&folder_row),
         {
             let row = folder_row.clone();
             move |path| row.set_text(&path.to_string_lossy())
@@ -313,6 +316,7 @@ pub(super) fn build_console_settings_page(
         "Select emulator executable",
         false,
         Some(("Executable", &["application/x-executable"])),
+        entry_path_closure(&exe_row),
         {
             let row = exe_row.clone();
             move |path| row.set_text(&path.to_string_lossy())

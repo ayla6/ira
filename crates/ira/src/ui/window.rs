@@ -20,7 +20,7 @@ use super::grid_view::show_grid_view;
 use super::message_helpers::switch_to_game;
 use super::settings_dialog::show_settings_dialog;
 use super::mass_match_dialog::show_mass_match_dialog;
-use super::add_game_dialog::show_add_game_dialog;
+use super::add_game_method::show_add_game_method;
 use super::background::show_close_choice_dialog;
 
 pub struct AppContext {
@@ -474,7 +474,7 @@ fn connect_window_signals(
 
     let state_clone = state.clone();
     add_btn.connect_clicked(move |_| {
-        show_add_game_dialog(&state_clone);
+        show_add_game_method(&state_clone);
     });
 
     let state_clone = state.clone();

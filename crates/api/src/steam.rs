@@ -86,7 +86,28 @@ impl SteamDataClient {
 
     pub fn fetch_app_details(&self, app_id: &str) -> Option<AppDetails> {
         let raw = self.ensure_steamcmd_raw(app_id)?;
-        Self::extract_app_details(&raw, app_id)
+        let mut details = Self::extract_app_details(&raw, app_id)?;
+        self.fill_dlc_names(&mut details);
+        Some(details)
+    }
+
+    /// Fetch DLC names from steamcmd for any DLCs with empty names.
+    fn fill_dlc_names(&self, details: &mut AppDetails) {
+        let empty_dlcs: Vec<String> = details
+            .dlcs
+            .iter()
+            .filter(|(_, d)| d.name.is_empty())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for dlc_id in empty_dlcs {
+            if let Some(raw) = self.ensure_steamcmd_raw(&dlc_id) {
+                if let Some(entry) = raw.data.get(&dlc_id) {
+                    if let Some(d) = details.dlcs.get_mut(&dlc_id) {
+                        d.name = entry.common.name.clone();
+                    }
+                }
+            }
+        }
     }
 
     pub fn search_steam_store(&self, term: &str) -> Vec<(String, String)> {

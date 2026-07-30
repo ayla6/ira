@@ -531,6 +531,13 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
         }
 
         let game_folder_str = game.game_folder.to_string_lossy().into_owned();
+
+        // Centralize any steam_settings/ found in subdirectories to the game
+        // root, and create symlinks from each Steam DLL directory.
+        if let Err(e) = ira_platforms::api_emulators::centralize_steam_settings(&game_folder_str) {
+            eprintln!("Failed to centralize steam_settings: {}", e);
+        }
+
         let needs_nge = ira_platforms::api_emulators::find_gog_dlls_recursive(&game_folder_str)
             .iter()
             .any(|d| !ira_platforms::api_emulators::has_gog_emulator_backups(d));

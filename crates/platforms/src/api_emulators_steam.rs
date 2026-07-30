@@ -32,6 +32,113 @@ pub fn find_steam_settings(game_exe: &str, save_dir: &str, app_id: &str) -> Opti
     None
 }
 
+/// Find `steam_settings/` directories recursively in `game_folder`, move the
+/// first one found to the game root, then create relative symlinks from every
+/// directory containing Steam DLLs back to the root `steam_settings/`.
+///
+/// This ensures GBE/GSE finds its config regardless of which subdirectory the
+/// Steam DLL lives in, without duplicating the config files.
+pub fn centralize_steam_settings(game_folder: &str) -> Result<Option<PathBuf>, String> {
+    let root = Path::new(game_folder);
+    let root_settings = root.join("steam_settings");
+
+    // If steam_settings/ is already at the root, just symlink DLL dirs.
+    if root_settings.is_dir() {
+        symlink_dll_dirs_to_settings(root, &root_settings);
+        return Ok(Some(root_settings));
+    }
+
+    // Search recursively for steam_settings/ in subdirectories
+    let found = find_steam_settings_recursive(root);
+    let Some(found_dir) = found else {
+        return Ok(None);
+    };
+
+    // Move it to the root
+    std::fs::rename(&found_dir, &root_settings)
+        .map_err(|e| format!("move steam_settings to root: {e}"))?;
+
+    // Create a symlink at the original location back to root
+    #[cfg(unix)]
+    {
+        let rel = compute_relative(&found_dir, &root_settings);
+        let _ = std::os::unix::fs::symlink(&rel, &found_dir);
+    }
+
+    // Symlink all DLL directories to the root steam_settings/
+    symlink_dll_dirs_to_settings(root, &root_settings);
+
+    Ok(Some(root_settings))
+}
+
+/// Recursively search for a `steam_settings/` directory under `root`.
+fn find_steam_settings_recursive(root: &Path) -> Option<PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if path.file_name().and_then(|n| n.to_str()) == Some("steam_settings") {
+                        return Some(path);
+                    }
+                    stack.push(path);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// For every directory containing Steam DLLs under `root`, create a relative
+/// symlink to `settings_dir` if the directory doesn't already have one.
+fn symlink_dll_dirs_to_settings(root: &Path, settings_dir: &Path) {
+    let dll_dirs = super::api_emulators_shared::find_dll_dirs_recursive(
+        root,
+        &["steam_api.dll", "steam_api64.dll", "libsteam_api.so"],
+    );
+    for dir in dll_dirs {
+        let link = dir.join("steam_settings");
+        if link.exists() {
+            continue;
+        }
+        #[cfg(unix)]
+        {
+            let rel = compute_relative(&dir, settings_dir);
+            let _ = std::os::unix::fs::symlink(&rel, &link);
+        }
+    }
+}
+
+/// Compute a relative path from `from_dir` to `to_path`.
+#[cfg(unix)]
+fn compute_relative(from_dir: &Path, to_path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let from_components: Vec<_> = from_dir.components().collect();
+    let to_components: Vec<_> = to_path.components().collect();
+
+    let mut common = 0;
+    while common < from_components.len()
+        && common < to_components.len()
+        && from_components[common] == to_components[common]
+    {
+        common += 1;
+    }
+
+    let up = from_components.len() - common;
+    let mut result = PathBuf::new();
+    for _ in 0..up {
+        result.push("..");
+    }
+    for comp in &to_components[common..] {
+        if let Component::Normal(s) = comp {
+            result.push(s);
+        }
+    }
+    result
+}
+
 pub fn write_gse_dlc_config(settings_dir: &Path, details: &AppDetails) -> Result<(), String> {
     let mut content = String::from("[app::dlcs]\n");
     let any_disabled = details.dlcs.values().any(|d| !d.enabled);

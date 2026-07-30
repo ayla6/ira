@@ -108,8 +108,10 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
     list.add_css_class(CSS_BOXED_LIST);
     list.set_selection_mode(gtk4::SelectionMode::None);
     installer_group.add(&list);
+    body.append(&installer_group);
 
     let add_btn = gtk4::Button::with_label("Add installer…");
+    add_btn.set_margin_top(8);
     let ist_c = ist.clone();
     let list_c = list.clone();
     let win_c = win.clone();
@@ -136,8 +138,7 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
             }
         });
     });
-    installer_group.add(&add_btn);
-    body.append(&installer_group);
+    body.append(&add_btn);
 
     let wine_group = adw::PreferencesGroup::new();
     wine_group.set_title("Wine");
@@ -669,7 +670,7 @@ fn start_identify_from_install(
         match rx.borrow_mut().try_recv() {
             Ok(ev) => {
                 handle_installer_identify_event(&wizard_c, &ist_c, ev);
-                glib::ControlFlow::Break
+                glib::ControlFlow::Continue
             }
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,

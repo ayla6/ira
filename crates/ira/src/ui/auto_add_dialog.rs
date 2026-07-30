@@ -179,7 +179,7 @@ pub(super) fn start_identify(path: PathBuf, move_to: Option<PathBuf>, wizard: &R
         match rx.borrow_mut().try_recv() {
             Ok(ev) => {
                 handle_identify_event(&wizard_c, ev);
-                glib::ControlFlow::Break
+                glib::ControlFlow::Continue
             }
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
@@ -397,7 +397,7 @@ pub(super) fn start_add(
         match rx.borrow_mut().try_recv() {
             Ok(ev) => {
                 handle_add_event(&wizard_c, ev);
-                glib::ControlFlow::Break
+                glib::ControlFlow::Continue
             }
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
@@ -863,22 +863,17 @@ fn move_dir(src: &Path, dst: &Path) -> Result<(), String> {
     if std::fs::rename(src, dst).is_ok() {
         return Ok(());
     }
-    copy_dir_recursive(src, dst)?;
-    std::fs::remove_dir_all(src).map_err(|e| format!("remove source after copy: {}", e))?;
-    Ok(())
-}
-
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
-    let entries = std::fs::read_dir(src).map_err(|e| e.to_string())?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let dest = dst.join(entry.file_name());
-        if path.is_dir() {
-            copy_dir_recursive(&path, &dest)?;
-        } else {
-            std::fs::copy(&path, &dest).map_err(|e| e.to_string())?;
-        }
+    let output = std::process::Command::new("mv")
+        .arg(src)
+        .arg(dst)
+        .output()
+        .map_err(|e| format!("run mv: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "mv failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
     Ok(())
 }

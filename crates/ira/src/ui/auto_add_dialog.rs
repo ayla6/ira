@@ -17,13 +17,13 @@ use super::wine_profile_picker::{build_wine_profile_picker, selected_profile_id}
 /// Which API emulator to install (GOG checked first — a GOG game may ship Steam
 /// DLLs that must stay default, so only the Galaxy ones get patched).
 #[derive(Clone, Copy)]
-enum EmuKind {
+pub(super) enum EmuKind {
     Nge,
     Gse,
 }
 
 /// Events sent from background threads to the wizard (polled on the main thread).
-enum WizardEvent {
+pub(super) enum WizardEvent {
     Status(String),
     AlreadyExists,
     Identified(Box<IdentifiedGame>),
@@ -33,25 +33,25 @@ enum WizardEvent {
     InstallDone,
 }
 
-struct IdentifiedGame {
-    app_id: String,
-    name: String,
-    is_windows: bool,
-    game_folder: PathBuf,
-    exe: String,
-    variants: Vec<String>,
+pub(super) struct IdentifiedGame {
+    pub app_id: String,
+    pub name: String,
+    pub is_windows: bool,
+    pub game_folder: PathBuf,
+    pub exe: String,
+    pub variants: Vec<String>,
 }
 
 /// Wizard state shared between the main-thread poll closure and signal handlers.
-struct Wizard {
-    win: adw::Window,
-    content: gtk4::Box,
-    state: SharedState,
-    profiles: Vec<WineProfile>,
-    identified: Option<IdentifiedGame>,
-    profile_row: Option<adw::ComboRow>,
-    last_folder: Option<PathBuf>,
-    last_is_windows: bool,
+pub(super) struct Wizard {
+    pub win: adw::Window,
+    pub content: gtk4::Box,
+    pub state: SharedState,
+    pub profiles: Vec<WineProfile>,
+    pub identified: Option<IdentifiedGame>,
+    pub profile_row: Option<adw::ComboRow>,
+    pub last_folder: Option<PathBuf>,
+    pub last_is_windows: bool,
 }
 
 pub fn show_auto_add_dialog(state: &SharedState) {
@@ -161,7 +161,7 @@ fn on_folder_picked(path: &Path, state: &SharedState, win: &adw::Window, wizard:
     });
 }
 
-fn start_identify(path: PathBuf, move_to: Option<PathBuf>, wizard: &Rc<RefCell<Wizard>>) {
+pub(super) fn start_identify(path: PathBuf, move_to: Option<PathBuf>, wizard: &Rc<RefCell<Wizard>>) {
     let (db, steam) = {
         let w = wizard.borrow();
         let s = w.state.borrow();
@@ -187,7 +187,7 @@ fn start_identify(path: PathBuf, move_to: Option<PathBuf>, wizard: &Rc<RefCell<W
     });
 }
 
-fn spawn_identify_thread(
+pub(super) fn spawn_identify_thread(
     tx: mpsc::Sender<WizardEvent>, path: PathBuf, move_to: Option<PathBuf>,
     db: ira_db::DbConn, steam: std::sync::Arc<ira_api::SteamDataClient>,
 ) {
@@ -257,7 +257,7 @@ fn resolve_final_folder(
     }
 }
 
-fn identify_app_id(folder: &Path, steam: &ira_api::SteamDataClient) -> Option<String> {
+pub(super) fn identify_app_id(folder: &Path, steam: &ira_api::SteamDataClient) -> Option<String> {
     if let Some(steamapps) = ira_platforms::steam::steamapps_in_path(folder) {
         let installdir = folder.file_name()?.to_string_lossy().to_string();
         if let Some((appid, _name)) = ira_platforms::steam::find_appid_for_installdir(&steamapps, &installdir) {
@@ -269,7 +269,7 @@ fn identify_app_id(folder: &Path, steam: &ira_api::SteamDataClient) -> Option<St
     results.into_iter().next().map(|(id, _)| id)
 }
 
-fn handle_identify_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
+pub(super) fn handle_identify_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
     match ev {
         WizardEvent::Status(msg) => set_status(wizard, &msg),
         WizardEvent::AlreadyExists => {
@@ -280,13 +280,18 @@ fn handle_identify_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
             show_error(wizard, &e);
             show_pick_page(wizard);
         }
-        WizardEvent::Identified(game) => show_identified_form(wizard, *game),
+        WizardEvent::Identified(game) => show_identified_form(wizard, *game, None, false),
         // Add-phase events are handled by handle_add_event.
         WizardEvent::Added(_) | WizardEvent::EmulatorPrompt { .. } | WizardEvent::InstallDone => {}
     }
 }
 
-fn show_identified_form(wizard: &Rc<RefCell<Wizard>>, game: IdentifiedGame) {
+pub(super) fn show_identified_form(
+    wizard: &Rc<RefCell<Wizard>>,
+    game: IdentifiedGame,
+    preselected_profile_id: Option<i64>,
+    skip_emu_prompt: bool,
+) {
     let (content, win, state, profiles) = {
         let w = wizard.borrow();
         (w.content.clone(), w.win.clone(), w.state.clone(), w.profiles.clone())
@@ -309,7 +314,7 @@ fn show_identified_form(wizard: &Rc<RefCell<Wizard>>, game: IdentifiedGame) {
     group.add(&appid_row);
 
     let profile_row = if is_windows {
-        let row = build_wine_profile_picker(&profiles, None, None, &state, &win);
+        let row = build_wine_profile_picker(&profiles, preselected_profile_id, None, &state, &win);
         group.add(&row);
         Some(row)
     } else {
@@ -350,15 +355,15 @@ fn show_identified_form(wizard: &Rc<RefCell<Wizard>>, game: IdentifiedGame) {
             let app_id = appid_c.text().to_string();
             let profile_id = w.profile_row.as_ref()
                 .and_then(|r| selected_profile_id(r, &w.profiles));
-            start_add(wizard_c.clone(), game, name, app_id, profile_id);
+            start_add(wizard_c.clone(), game, name, app_id, profile_id, skip_emu_prompt);
         }
     });
     content.append(&add_btn);
 }
 
-fn start_add(
+pub(super) fn start_add(
     wizard: Rc<RefCell<Wizard>>, game: IdentifiedGame, name: String, app_id: String,
-    profile_id: Option<i64>,
+    profile_id: Option<i64>, skip_emu_prompt: bool,
 ) {
     let (db, steam, save_dir, sender, profiles) = {
         let w = wizard.borrow();
@@ -369,7 +374,7 @@ fn start_add(
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
     let rx = Rc::new(RefCell::new(rx));
-    spawn_add_thread(tx, AddParams { db, steam, save_dir, sender, game, name, app_id, profile_id, profiles });
+    spawn_add_thread(tx, AddParams { db, steam, save_dir, sender, game, name, app_id, profile_id, profiles, skip_emu_prompt });
 
     let wizard_c = wizard.clone();
     glib::source::idle_add_local_full(glib::Priority::LOW, move || {
@@ -384,21 +389,22 @@ fn start_add(
     });
 }
 
-struct AddParams {
-    db: ira_db::DbConn,
-    steam: std::sync::Arc<ira_api::SteamDataClient>,
-    save_dir: String,
-    sender: crate::AppSender,
-    game: IdentifiedGame,
-    name: String,
-    app_id: String,
-    profile_id: Option<i64>,
-    profiles: Vec<WineProfile>,
+pub(super) struct AddParams {
+    pub db: ira_db::DbConn,
+    pub steam: std::sync::Arc<ira_api::SteamDataClient>,
+    pub save_dir: String,
+    pub sender: crate::AppSender,
+    pub game: IdentifiedGame,
+    pub name: String,
+    pub app_id: String,
+    pub profile_id: Option<i64>,
+    pub profiles: Vec<WineProfile>,
+    pub skip_emu_prompt: bool,
 }
 
-fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams) {
+pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams) {
     std::thread::spawn(move || {
-        let AddParams { db, steam, save_dir, sender, game, name, app_id, profile_id, profiles } = params;
+        let AddParams { db, steam, save_dir, sender, game, name, app_id, profile_id, profiles, skip_emu_prompt } = params;
         let kind = if game.is_windows { GameKind::Wine } else { GameKind::Linux };
         let exe_path = if game.exe.is_empty() {
             String::new()
@@ -481,6 +487,13 @@ fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams) {
         // After the game is added, check whether the folder contains unpatched
         // API-emulator DLLs. GOG (Galaxy) is checked first: a GOG game may ship
         // Steam DLLs that must remain default, so only the Galaxy ones get patched.
+        // When skip_emu_prompt is set (installer flow), the bundled DLLs are
+        // assumed to be working — skip the check entirely.
+        if skip_emu_prompt {
+            let _ = tx.send(WizardEvent::Added(db_id));
+            return;
+        }
+
         let game_folder_str = game.game_folder.to_string_lossy().into_owned();
         let needs_nge = ira_platforms::api_emulators::find_gog_dlls_recursive(&game_folder_str)
             .iter()
@@ -510,7 +523,7 @@ fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams) {
     });
 }
 
-fn handle_add_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
+pub(super) fn handle_add_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
     match ev {
         WizardEvent::Added(db_id) => finalize(wizard, db_id),
         WizardEvent::EmulatorPrompt { db_id, game_folder, app_id, emu_kind } => {
@@ -675,7 +688,7 @@ fn start_install(
     });
 }
 
-fn finalize(wizard: &Rc<RefCell<Wizard>>, db_id: i64) {
+pub(super) fn finalize(wizard: &Rc<RefCell<Wizard>>, db_id: i64) {
     let (folder, is_windows) = {
         let w = wizard.borrow();
         (w.last_folder.clone(), w.last_is_windows)
@@ -694,7 +707,7 @@ fn finalize(wizard: &Rc<RefCell<Wizard>>, db_id: i64) {
     close_and_open_edit(wizard, db_id);
 }
 
-fn prompt_redists(wizard: &Rc<RefCell<Wizard>>, db_id: i64, packages: Vec<ira_platforms::steam::RedistPackage>) {
+pub(super) fn prompt_redists(wizard: &Rc<RefCell<Wizard>>, db_id: i64, packages: Vec<ira_platforms::steam::RedistPackage>) {
     let (win, state) = {
         let w = wizard.borrow();
         (w.win.clone(), w.state.clone())
@@ -721,7 +734,7 @@ fn prompt_redists(wizard: &Rc<RefCell<Wizard>>, db_id: i64, packages: Vec<ira_pl
     });
 }
 
-fn start_redist_install(
+pub(super) fn start_redist_install(
     wizard: Rc<RefCell<Wizard>>, db_id: i64, packages: Vec<ira_platforms::steam::RedistPackage>,
 ) {
     let (db, save_dir) = {
@@ -773,7 +786,7 @@ fn start_redist_install(
     });
 }
 
-fn close_and_open_edit(wizard: &Rc<RefCell<Wizard>>, db_id: i64) {
+pub(super) fn close_and_open_edit(wizard: &Rc<RefCell<Wizard>>, db_id: i64) {
     let (state, win) = {
         let w = wizard.borrow();
         (w.state.clone(), w.win.clone())
@@ -782,7 +795,7 @@ fn close_and_open_edit(wizard: &Rc<RefCell<Wizard>>, db_id: i64) {
     show_edit_game_dialog(&state, db_id);
 }
 
-fn resolve_wine_config(profiles: &[WineProfile], profile_id: Option<i64>) -> WineConfig {
+pub(super) fn resolve_wine_config(profiles: &[WineProfile], profile_id: Option<i64>) -> WineConfig {
     let mut wine = WineConfig { enabled: true, ..Default::default() };
     if let Some(pid) = profile_id {
         if let Some(profile) = profiles.iter().find(|p| p.id == pid) {
@@ -796,7 +809,7 @@ fn resolve_wine_config(profiles: &[WineProfile], profile_id: Option<i64>) -> Win
     wine
 }
 
-fn set_status(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
+pub(super) fn set_status(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
     let content = wizard.borrow().content.clone();
     clear_children(&content);
     let status = adw::StatusPage::new();
@@ -809,7 +822,7 @@ fn set_status(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
     content.append(&status);
 }
 
-fn show_error(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
+pub(super) fn show_error(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
     let win = wizard.borrow().win.clone();
     let alert = adw::AlertDialog::new(Some("Auto-add failed"), Some(msg));
     alert.add_response("ok", "OK");
@@ -818,7 +831,7 @@ fn show_error(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
     alert.present(Some(&win));
 }
 
-fn clear_children(container: &gtk4::Box) {
+pub(super) fn clear_children(container: &gtk4::Box) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }

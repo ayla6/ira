@@ -541,6 +541,7 @@ fn on_installer_complete(
     if !success {
         alert.add_response("retry", "Retry");
         alert.set_response_appearance("retry", adw::ResponseAppearance::Suggested);
+        alert.add_response("skip", "Skip");
     }
     if !is_last {
         alert.add_response("next", "Next");
@@ -561,8 +562,18 @@ fn on_installer_complete(
     alert.choose(Some(&win), None::<&gtk4::gio::Cancellable>, move |response| {
         match response.as_str() {
             "retry" => run_installer(&wizard_c, &ist_c, index),
+            "skip" => {
+                if is_last {
+                    start_post_install(&wizard_c, &ist_c);
+                } else {
+                    run_installer(&wizard_c, &ist_c, index + 1);
+                }
+            }
             "next" => run_installer(&wizard_c, &ist_c, index + 1),
             "done" => start_post_install(&wizard_c, &ist_c),
+            "cancel" => {
+                wizard_c.borrow().win.close();
+            }
             _ => {}
         }
     });
@@ -747,25 +758,28 @@ fn detect_new_subdirs(before: &[String], folder: &Path) -> Vec<String> {
 }
 
 fn spawn_terminal_with_command(cmd: &str) -> bool {
+    // Run the script directly — it has a shebang and we chmod +x it.
+    // Don't use `bash -c <cmd>` because that breaks $0 self-reference
+    // in scripts like LinuxRulez that use `readlink -f "$0"`.
     let terminals: &[(&str, &[&str])] = &[
-        ("gnome-terminal", &["--", "bash", "-c"]),
-        ("konsole", &["-e", "bash", "-c"]),
-        ("xfce4-terminal", &["-e", "bash", "-c"]),
-        ("mate-terminal", &["--", "bash", "-c"]),
-        ("alacritty", &["-e", "bash", "-c"]),
-        ("kitty", &["-e", "bash", "-c"]),
-        ("foot", &["-e", "bash", "-c"]),
-        ("wezterm", &["start", "--", "bash", "-c"]),
-        ("tilix", &["-e", "bash", "-c"]),
-        ("qterminal", &["-e", "bash", "-c"]),
-        ("lxterminal", &["-e", "bash", "-c"]),
-        ("terminator", &["-e", "bash", "-c"]),
-        ("xterm", &["-e", "bash", "-c"]),
+        ("gnome-terminal", &["--"]),
+        ("konsole", &["-e"]),
+        ("xfce4-terminal", &["-e"]),
+        ("mate-terminal", &["--"]),
+        ("alacritty", &["-e"]),
+        ("kitty", &["-e"]),
+        ("foot", &["-e"]),
+        ("wezterm", &["start", "--"]),
+        ("tilix", &["-e"]),
+        ("qterminal", &["-e"]),
+        ("lxterminal", &["-e"]),
+        ("terminator", &["-e"]),
+        ("xterm", &["-e"]),
     ];
 
     if let Ok(term) = std::env::var("TERMINAL") {
         let mut command = std::process::Command::new(&term);
-        command.arg("-e").arg("bash").arg("-c").arg(cmd);
+        command.arg("-e").arg(cmd);
         if command.spawn().is_ok() {
             return true;
         }

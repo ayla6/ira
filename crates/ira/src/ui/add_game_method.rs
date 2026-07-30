@@ -3,6 +3,7 @@ use super::state::SharedState;
 use super::css::*;
 use super::add_game_dialog::show_add_game_dialog;
 use super::auto_add_dialog::show_auto_add_dialog;
+use super::installer_add_dialog::show_installer_add_dialog;
 
 /// Small window shown when the user clicks the "+" button, letting them
 /// choose how to add a game: manually or via the auto-add wizard.
@@ -51,6 +52,17 @@ pub fn show_add_game_method(state: &SharedState) {
         show_auto_add_dialog(&sc2);
     });
     body.append(&auto_btn);
+
+    let installer_btn = gtk4::Button::with_label("Install from installer");
+    installer_btn.set_tooltip_text(Some("Run installer files (exe, sh, GOG) and let Ira detect the installed game"));
+    installer_btn.set_size_request(-1, 44);
+    let sc3 = state.clone();
+    let win_c3 = win.clone();
+    installer_btn.connect_clicked(move |_| {
+        win_c3.close();
+        show_installer_add_dialog(&sc3);
+    });
+    body.append(&installer_btn);
 
     outer.append(&body);
     win.set_content(Some(&outer));

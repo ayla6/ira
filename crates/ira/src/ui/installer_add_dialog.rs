@@ -1,0 +1,770 @@
+use std::cell::RefCell;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::sync::mpsc;
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
+use adw::prelude::*;
+
+use ira_platforms::installer::{
+    extract_data_zip, extract_inno, game_platform, installer_type, is_gog_makeself,
+    is_inno_setup, is_linuxrulez, innoextract_available, split_gog_installer, GamePlatform,
+    InstallerType,
+};
+
+use super::auto_add_dialog::{
+    clear_children, resolve_wine_config, set_status, show_error, show_identified_form,
+    spawn_identify_thread, IdentifiedGame, Wizard, WizardEvent,
+};
+use super::css::*;
+use super::state::SharedState;
+use super::wine_profile_picker::{build_wine_profile_picker, selected_profile_id};
+
+struct InstallerState {
+    installers: Vec<PathBuf>,
+    current_index: usize,
+    profile_id: Option<i64>,
+    wow64: bool,
+    gamescope: bool,
+    default_game_folder: PathBuf,
+    pre_snapshot: Vec<String>,
+    game_platform: GamePlatform,
+    detected_folder: Option<PathBuf>,
+}
+
+pub fn show_installer_add_dialog(state: &SharedState) {
+    let parent = state.borrow().window.clone();
+    let win = adw::Window::new();
+    win.set_title(Some("Install from Installer"));
+    win.set_default_size(520, 580);
+    win.set_modal(true);
+    win.set_transient_for(Some(&parent));
+
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    win.set_content(Some(&content));
+    win.present();
+
+    let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
+    let wizard = Rc::new(RefCell::new(Wizard {
+        win: win.clone(),
+        content: content.clone(),
+        state: state.clone(),
+        profiles,
+        identified: None,
+        profile_row: None,
+        last_folder: None,
+        last_is_windows: false,
+    }));
+
+    let default_game_folder =
+        PathBuf::from(&state.borrow().cfg.default_game_folder);
+    let ist = Rc::new(RefCell::new(InstallerState {
+        installers: Vec::new(),
+        current_index: 0,
+        profile_id: None,
+        wow64: false,
+        gamescope: false,
+        default_game_folder,
+        pre_snapshot: Vec::new(),
+        game_platform: GamePlatform::Linux,
+        detected_folder: None,
+    }));
+
+    show_config_page(&wizard, &ist);
+
+    let win_close = win.clone();
+    win.connect_close_request(move |_| {
+        let _ = win_close;
+        glib::Propagation::Proceed
+    });
+}
+
+fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>) {
+    let (content, win, state, profiles) = {
+        let w = wizard.borrow();
+        (w.content.clone(), w.win.clone(), w.state.clone(), w.profiles.clone())
+    };
+    clear_children(&content);
+
+    let header = adw::HeaderBar::new();
+    header.add_css_class(CSS_FLAT);
+    content.append(&header);
+
+    let scrolled = gtk4::ScrolledWindow::new();
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
+    body.set_margin_start(16);
+    body.set_margin_end(16);
+    body.set_margin_top(8);
+    body.set_margin_bottom(16);
+    scrolled.set_child(Some(&body));
+    content.append(&scrolled);
+
+    let installer_group = adw::PreferencesGroup::new();
+    installer_group.set_title("Installers");
+    let list = gtk4::ListBox::new();
+    list.add_css_class(CSS_BOXED_LIST);
+    list.set_selection_mode(gtk4::SelectionMode::None);
+    installer_group.add(&list);
+
+    let add_btn = gtk4::Button::with_label("Add installer…");
+    let ist_c = ist.clone();
+    let list_c = list.clone();
+    let win_c = win.clone();
+    add_btn.connect_clicked(move |_| {
+        let dialog = gtk4::FileDialog::new();
+        dialog.set_title("Select installer files");
+        let ist_c2 = ist_c.clone();
+        let list_c2 = list_c.clone();
+        dialog.open_multiple(Some(&win_c), None::<&gtk4::gio::Cancellable>, move |result| {
+            if let Ok(files) = result {
+                let mut ist = ist_c2.borrow_mut();
+                let mut added = false;
+                let mut idx = files.iter::<gtk4::gio::File>();
+                while let Some(Ok(file)) = idx.next() {
+                    if let Some(path) = file.path() {
+                        ist.installers.push(path);
+                        added = true;
+                    }
+                }
+                drop(ist);
+                if added {
+                    rebuild_installer_list(&list_c2, &ist_c2);
+                }
+            }
+        });
+    });
+    installer_group.add(&add_btn);
+    body.append(&installer_group);
+
+    let wine_group = adw::PreferencesGroup::new();
+    wine_group.set_title("Wine");
+    let profile_row =
+        build_wine_profile_picker(&profiles, None, None, &state, &win);
+    wine_group.add(&profile_row);
+    let wow64_row = adw::SwitchRow::new();
+    wow64_row.set_title("Use WOW64");
+    wow64_row.set_subtitle("Some installers don't work with it (Proton only)");
+    wine_group.add(&wow64_row);
+    let gamescope_row = adw::SwitchRow::new();
+    gamescope_row.set_title("Run under gamescope");
+    gamescope_row.set_subtitle("Useful for installers with flaky windows");
+    wine_group.add(&gamescope_row);
+    body.append(&wine_group);
+
+    let guide_group = adw::PreferencesGroup::new();
+    let default_folder = ist.borrow().default_game_folder.clone();
+    if default_folder.as_os_str().is_empty() {
+        let row = adw::ActionRow::new();
+        row.set_title("Set your PC games folder");
+        row.set_subtitle("Set a default games folder in Settings to enable auto-detection of installed games.");
+        guide_group.add(&row);
+    } else {
+        let row = adw::ActionRow::new();
+        row.set_title("Install to this folder");
+        row.set_subtitle(&default_folder.to_string_lossy());
+        let open_btn = gtk4::Button::new();
+        open_btn.set_icon_name("folder-open-symbolic");
+        open_btn.set_valign(gtk4::Align::Center);
+        open_btn.add_css_class(CSS_FLAT);
+        let path = default_folder.clone();
+        open_btn.connect_clicked(move |_| {
+            let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+        });
+        row.add_suffix(&open_btn);
+        guide_group.add(&row);
+    }
+    body.append(&guide_group);
+
+    let start_btn = gtk4::Button::with_label("Start installation");
+    start_btn.add_css_class(CSS_SUGGESTED_ACTION);
+    start_btn.set_size_request(-1, 44);
+
+    let wizard_c = wizard.clone();
+    let ist_c = ist.clone();
+    let profile_row_c = profile_row.clone();
+    let wow64_row_c = wow64_row.clone();
+    let gamescope_row_c = gamescope_row.clone();
+    let profiles_c = wizard.borrow().profiles.clone();
+    start_btn.connect_clicked(move |_| {
+        let installers = ist_c.borrow().installers.clone();
+        if installers.is_empty() {
+            return;
+        }
+        let game_platform = installers
+            .iter()
+            .map(|p| game_platform(p, installer_type(p)))
+            .find(|p| *p == GamePlatform::Windows)
+            .unwrap_or(GamePlatform::Linux);
+
+        {
+            let mut ist = ist_c.borrow_mut();
+            ist.profile_id = selected_profile_id(&profile_row_c, &profiles_c);
+            ist.wow64 = wow64_row_c.is_active();
+            ist.gamescope = gamescope_row_c.is_active();
+            ist.game_platform = game_platform;
+            ist.current_index = 0;
+            let df = &ist.default_game_folder;
+            ist.pre_snapshot = if df.as_os_str().is_empty() || !df.exists() {
+                Vec::new()
+            } else {
+                snapshot_subdirs(df)
+            };
+        }
+        start_installation(&wizard_c, &ist_c);
+    });
+    body.append(&start_btn);
+
+    rebuild_installer_list(&list, ist);
+}
+
+fn rebuild_installer_list(list: &gtk4::ListBox, ist: &Rc<RefCell<InstallerState>>) {
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+    let installers = ist.borrow().installers.clone();
+    for (i, path) in installers.iter().enumerate() {
+        let row = adw::ActionRow::new();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        row.set_title(name);
+
+        let itype = installer_type(path);
+        let badge = if itype == InstallerType::Linux && is_gog_makeself(path) {
+            "GOG"
+        } else if itype == InstallerType::Linux && is_linuxrulez(path) {
+            "LinuxRulez"
+        } else if itype == InstallerType::Windows && is_inno_setup(path) {
+            "Inno Setup"
+        } else if itype == InstallerType::Windows {
+            "Windows"
+        } else {
+            "Linux"
+        };
+        row.set_subtitle(badge);
+
+        let btn_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+        if i > 0 {
+            let up_btn = gtk4::Button::new();
+            up_btn.set_icon_name("go-up-symbolic");
+            up_btn.add_css_class(CSS_FLAT);
+            up_btn.set_valign(gtk4::Align::Center);
+            let ist_c = ist.clone();
+            let list_c = list.clone();
+            up_btn.connect_clicked(move |_| {
+                let mut s = ist_c.borrow_mut();
+                s.installers.swap(i, i - 1);
+                drop(s);
+                rebuild_installer_list(&list_c, &ist_c);
+            });
+            btn_box.append(&up_btn);
+        }
+        if i + 1 < installers.len() {
+            let down_btn = gtk4::Button::new();
+            down_btn.set_icon_name("go-down-symbolic");
+            down_btn.add_css_class(CSS_FLAT);
+            down_btn.set_valign(gtk4::Align::Center);
+            let ist_c = ist.clone();
+            let list_c = list.clone();
+            down_btn.connect_clicked(move |_| {
+                let mut s = ist_c.borrow_mut();
+                s.installers.swap(i, i + 1);
+                drop(s);
+                rebuild_installer_list(&list_c, &ist_c);
+            });
+            btn_box.append(&down_btn);
+        }
+        let rm_btn = gtk4::Button::new();
+        rm_btn.set_icon_name("user-trash-symbolic");
+        rm_btn.add_css_class(CSS_FLAT);
+        rm_btn.set_valign(gtk4::Align::Center);
+        let ist_c = ist.clone();
+        let list_c = list.clone();
+        rm_btn.connect_clicked(move |_| {
+            ist_c.borrow_mut().installers.remove(i);
+            rebuild_installer_list(&list_c, &ist_c);
+        });
+        btn_box.append(&rm_btn);
+        row.add_suffix(&btn_box);
+        list.append(&row);
+    }
+}
+
+fn start_installation(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>) {
+    run_installer(wizard, ist, 0);
+}
+
+fn run_installer(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>, index: usize) {
+    let installer = ist.borrow().installers[index].clone();
+    let itype = installer_type(&installer);
+    let total = ist.borrow().installers.len();
+    let name = installer
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("installer")
+        .to_string();
+    set_status(
+        wizard,
+        &format!("Running installer {}/{}: {}", index + 1, total, name),
+    );
+
+    match itype {
+        InstallerType::Windows => {
+            if is_inno_setup(&installer) && innoextract_available() {
+                run_silent_extraction(wizard, ist, index, ExtractionMethod::Inno);
+            } else {
+                run_wine_interactive(wizard, ist, index);
+            }
+        }
+        InstallerType::Linux => {
+            if is_gog_makeself(&installer) {
+                run_silent_extraction(wizard, ist, index, ExtractionMethod::Gog);
+            } else {
+                run_terminal_interactive(wizard, ist, index);
+            }
+        }
+    }
+}
+
+enum ExtractionMethod {
+    Inno,
+    Gog,
+}
+
+fn run_silent_extraction(
+    wizard: &Rc<RefCell<Wizard>>,
+    ist: &Rc<RefCell<InstallerState>>,
+    index: usize,
+    method: ExtractionMethod,
+) {
+    let installer = ist.borrow().installers[index].clone();
+    let default_folder = ist.borrow().default_game_folder.clone();
+    let stem = installer
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("game")
+        .to_string();
+    let dest = default_folder.join(&stem);
+
+    let (tx, rx) = mpsc::channel::<WizardEvent>();
+    let rx = Rc::new(RefCell::new(rx));
+
+    std::thread::spawn(move || {
+        let result = match method {
+            ExtractionMethod::Inno => extract_inno(&installer, &dest).map(|_| ()),
+            ExtractionMethod::Gog => {
+                let split_tmp = dest.join(".gog_split");
+                match split_gog_installer(&installer, &split_tmp) {
+                    Ok(zip_path) => {
+                        let r = extract_data_zip(&zip_path, &dest, |_, _| {});
+                        let _ = std::fs::remove_dir_all(&split_tmp);
+                        r
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+        };
+        match result {
+            Ok(_) => {
+                let _ = tx.send(WizardEvent::InstallDone);
+            }
+            Err(e) => {
+                let _ = tx.send(WizardEvent::Failed(e));
+            }
+        }
+    });
+
+    let wizard_c = wizard.clone();
+    let ist_c = ist.clone();
+    glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+        match rx.borrow_mut().try_recv() {
+            Ok(ev) => {
+                match ev {
+                    WizardEvent::InstallDone => {
+                        on_installer_complete(&wizard_c, &ist_c, index, true);
+                    }
+                    WizardEvent::Failed(e) => {
+                        show_error(&wizard_c, &e);
+                        on_installer_complete(&wizard_c, &ist_c, index, false);
+                    }
+                    _ => {}
+                }
+                glib::ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
+}
+
+fn run_wine_interactive(
+    wizard: &Rc<RefCell<Wizard>>,
+    ist: &Rc<RefCell<InstallerState>>,
+    index: usize,
+) {
+    let installer = ist.borrow().installers[index].clone();
+    let (profiles, profile_id, wow64, gamescope) = {
+        let w = wizard.borrow();
+        let s = ist.borrow();
+        (w.profiles.clone(), s.profile_id, s.wow64, s.gamescope)
+    };
+
+    let mut wine = resolve_wine_config(&profiles, profile_id);
+    wine.proton_wow64 = wow64;
+    let wine_exe =
+        ira_launcher::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path)
+            .unwrap_or_else(|_| "wine".to_string());
+    let env = ira_launcher::wine_launch::build_wine_env(&wine, &wine_exe);
+
+    let mut cmd = vec![wine_exe.clone(), installer.to_string_lossy().to_string()];
+    if gamescope {
+        let launch_cfg = ira_models::GameLaunchConfig {
+            gamescope: Some(true),
+            ..Default::default()
+        };
+        ira_launcher::env_builder::apply_performance(&mut cmd, &mut env.clone(), &launch_cfg, &wine);
+    }
+
+    let mut command = std::process::Command::new(&cmd[0]);
+    command.args(&cmd[1..]);
+    for (k, v) in &env {
+        command.env(k, v);
+    }
+    if let Err(e) = command.spawn() {
+        show_error(wizard, &format!("Failed to start installer: {e}"));
+        on_installer_complete(wizard, ist, index, false);
+        return;
+    }
+
+    show_interactive_done_page(wizard, ist, index);
+}
+
+fn run_terminal_interactive(
+    wizard: &Rc<RefCell<Wizard>>,
+    ist: &Rc<RefCell<InstallerState>>,
+    index: usize,
+) {
+    let installer = ist.borrow().installers[index].clone();
+
+    #[cfg(unix)]
+    {
+        let _ = std::fs::set_permissions(&installer, std::fs::Permissions::from_mode(0o755));
+    }
+
+    let installer_str = installer.to_string_lossy().to_string();
+    let spawned = spawn_terminal_with_command(&installer_str);
+
+    if !spawned {
+        show_error(wizard, "No terminal emulator found. Set $TERMINAL or install gnome-terminal/konsole/xterm.");
+        on_installer_complete(wizard, ist, index, false);
+        return;
+    }
+
+    show_interactive_done_page(wizard, ist, index);
+}
+
+fn show_interactive_done_page(
+    wizard: &Rc<RefCell<Wizard>>,
+    ist: &Rc<RefCell<InstallerState>>,
+    index: usize,
+) {
+    let content = wizard.borrow().content.clone();
+    clear_children(&content);
+
+    let header = adw::HeaderBar::new();
+    header.add_css_class(CSS_FLAT);
+    content.append(&header);
+
+    let status = adw::StatusPage::new();
+    let total = ist.borrow().installers.len();
+    status.set_title(&format!("Running installer {}/{}", index + 1, total));
+    status.set_description(Some("Click Done when the installer has finished."));
+    status.set_icon_name(Some("system-software-install-symbolic"));
+
+    let done_btn = gtk4::Button::with_label("Done");
+    done_btn.add_css_class(CSS_SUGGESTED_ACTION);
+    done_btn.set_halign(gtk4::Align::Center);
+
+    let wizard_c = wizard.clone();
+    let ist_c = ist.clone();
+    done_btn.connect_clicked(move |_| {
+        on_installer_complete(&wizard_c, &ist_c, index, true);
+    });
+    status.set_child(Some(&done_btn));
+    content.append(&status);
+}
+
+fn on_installer_complete(
+    wizard: &Rc<RefCell<Wizard>>,
+    ist: &Rc<RefCell<InstallerState>>,
+    index: usize,
+    success: bool,
+) {
+    let win = wizard.borrow().win.clone();
+    let total = ist.borrow().installers.len();
+    let is_last = index + 1 >= total;
+    let installer_name = ist.borrow().installers[index]
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("installer")
+        .to_string();
+
+    let title = if success {
+        if is_last {
+            "Installation complete"
+        } else {
+            "Installer finished"
+        }
+    } else {
+        "Installer failed"
+    };
+    let body = format!(
+        "{} ({} of {})\n\nWhat do you want to do?",
+        installer_name,
+        index + 1,
+        total
+    );
+
+    let alert = adw::AlertDialog::new(Some(title), Some(&body));
+    if !success {
+        alert.add_response("retry", "Retry");
+        alert.set_response_appearance("retry", adw::ResponseAppearance::Suggested);
+    }
+    if !is_last {
+        alert.add_response("next", "Next");
+        if success {
+            alert.set_response_appearance("next", adw::ResponseAppearance::Suggested);
+        }
+    } else {
+        alert.add_response("done", "Continue");
+        if success {
+            alert.set_response_appearance("done", adw::ResponseAppearance::Suggested);
+        }
+    }
+    alert.add_response("cancel", "Cancel");
+    alert.set_close_response("cancel");
+
+    let wizard_c = wizard.clone();
+    let ist_c = ist.clone();
+    alert.choose(Some(&win), None::<&gtk4::gio::Cancellable>, move |response| {
+        match response.as_str() {
+            "retry" => run_installer(&wizard_c, &ist_c, index),
+            "next" => run_installer(&wizard_c, &ist_c, index + 1),
+            "done" => start_post_install(&wizard_c, &ist_c),
+            _ => {}
+        }
+    });
+}
+
+fn start_post_install(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>) {
+    let default_folder = ist.borrow().default_game_folder.clone();
+    if default_folder.as_os_str().is_empty() || !default_folder.exists() {
+        pick_install_folder(wizard, ist);
+        return;
+    }
+
+    let before = ist.borrow().pre_snapshot.clone();
+    let new_dirs = detect_new_subdirs(&before, &default_folder);
+
+    match new_dirs.len() {
+        0 => pick_install_folder(wizard, ist),
+        1 => {
+            let folder = default_folder.join(&new_dirs[0]);
+            ist.borrow_mut().detected_folder = Some(folder.clone());
+            start_identify_from_install(wizard, ist, folder);
+        }
+        _ => pick_from_multiple(wizard, ist, new_dirs),
+    }
+}
+
+fn pick_install_folder(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>) {
+    let win = wizard.borrow().win.clone();
+    let dialog = gtk4::FileDialog::new();
+    dialog.set_title("Select installed game folder");
+    let wizard_c = wizard.clone();
+    let ist_c = ist.clone();
+    dialog.select_folder(Some(&win), None::<&gtk4::gio::Cancellable>, move |result| {
+        if let Ok(file) = result {
+            if let Some(path) = file.path() {
+                ist_c.borrow_mut().detected_folder = Some(path.clone());
+                start_identify_from_install(&wizard_c, &ist_c, path);
+            }
+        }
+    });
+}
+
+fn pick_from_multiple(
+    wizard: &Rc<RefCell<Wizard>>,
+    ist: &Rc<RefCell<InstallerState>>,
+    dirs: Vec<String>,
+) {
+    let content = wizard.borrow().content.clone();
+    clear_children(&content);
+
+    let header = adw::HeaderBar::new();
+    header.add_css_class(CSS_FLAT);
+    content.append(&header);
+
+    let status = adw::StatusPage::new();
+    status.set_title("Multiple folders detected");
+    status.set_description(Some("Select the folder where the game was installed."));
+    content.append(&status);
+
+    let list = gtk4::ListBox::new();
+    list.add_css_class(CSS_BOXED_LIST);
+    list.set_selection_mode(gtk4::SelectionMode::Single);
+
+    for (idx, dir) in dirs.iter().enumerate() {
+        let row = adw::ActionRow::new();
+        row.set_title(dir);
+        row.set_activatable(true);
+        list.append(&row);
+        let _ = idx;
+    }
+
+    let wizard_c = wizard.clone();
+    let ist_c = ist.clone();
+    let dirs_c = dirs.clone();
+    list.connect_row_activated(move |_list, row| {
+        let idx = row.index() as usize;
+        if let Some(dir) = dirs_c.get(idx) {
+            let folder = ist_c.borrow().default_game_folder.join(dir);
+            ist_c.borrow_mut().detected_folder = Some(folder.clone());
+            start_identify_from_install(&wizard_c, &ist_c, folder);
+        }
+    });
+    content.append(&list);
+}
+
+fn start_identify_from_install(
+    wizard: &Rc<RefCell<Wizard>>,
+    ist: &Rc<RefCell<InstallerState>>,
+    folder: PathBuf,
+) {
+    let (db, steam) = {
+        let w = wizard.borrow();
+        let s = w.state.borrow();
+        (s.db.clone(), s.steam.clone())
+    };
+    set_status(wizard, "Identifying game…");
+
+    let (tx, rx) = mpsc::channel::<WizardEvent>();
+    let rx = Rc::new(RefCell::new(rx));
+    spawn_identify_thread(tx, folder, None, db, steam);
+
+    let wizard_c = wizard.clone();
+    let ist_c = ist.clone();
+    glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+        match rx.borrow_mut().try_recv() {
+            Ok(ev) => {
+                handle_installer_identify_event(&wizard_c, &ist_c, ev);
+                glib::ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
+}
+
+fn handle_installer_identify_event(
+    wizard: &Rc<RefCell<Wizard>>,
+    ist: &Rc<RefCell<InstallerState>>,
+    ev: WizardEvent,
+) {
+    match ev {
+        WizardEvent::Status(msg) => set_status(wizard, &msg),
+        WizardEvent::AlreadyExists => {
+            show_error(wizard, "This folder is already in your library.");
+        }
+        WizardEvent::Failed(e) => {
+            show_error(wizard, &e);
+            let folder = ist.borrow().detected_folder.clone();
+            let name = folder
+                .as_ref()
+                .and_then(|f| f.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or("Game")
+                .to_string();
+            let is_windows = ist.borrow().game_platform == GamePlatform::Windows;
+            if let Some(folder) = folder {
+                let game = IdentifiedGame {
+                    app_id: String::new(),
+                    name,
+                    is_windows,
+                    game_folder: folder,
+                    exe: String::new(),
+                    variants: Vec::new(),
+                };
+                let profile_id = ist.borrow().profile_id;
+                show_identified_form(wizard, game, profile_id, true);
+            }
+        }
+        WizardEvent::Identified(mut game) => {
+            if ist.borrow().game_platform == GamePlatform::Windows {
+                game.is_windows = true;
+            }
+            let profile_id = ist.borrow().profile_id;
+            show_identified_form(wizard, *game, profile_id, true);
+        }
+        _ => {}
+    }
+}
+
+fn snapshot_subdirs(folder: &Path) -> Vec<String> {
+    std::fs::read_dir(folder)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn detect_new_subdirs(before: &[String], folder: &Path) -> Vec<String> {
+    let current = snapshot_subdirs(folder);
+    current
+        .into_iter()
+        .filter(|d| !before.contains(d))
+        .collect()
+}
+
+fn spawn_terminal_with_command(cmd: &str) -> bool {
+    let terminals: &[(&str, &[&str])] = &[
+        ("gnome-terminal", &["--", "bash", "-c"]),
+        ("konsole", &["-e", "bash", "-c"]),
+        ("xfce4-terminal", &["-e", "bash", "-c"]),
+        ("mate-terminal", &["--", "bash", "-c"]),
+        ("alacritty", &["-e", "bash", "-c"]),
+        ("kitty", &["-e", "bash", "-c"]),
+        ("foot", &["-e", "bash", "-c"]),
+        ("wezterm", &["start", "--", "bash", "-c"]),
+        ("tilix", &["-e", "bash", "-c"]),
+        ("qterminal", &["-e", "bash", "-c"]),
+        ("lxterminal", &["-e", "bash", "-c"]),
+        ("terminator", &["-e", "bash", "-c"]),
+        ("xterm", &["-e", "bash", "-c"]),
+    ];
+
+    if let Ok(term) = std::env::var("TERMINAL") {
+        let mut command = std::process::Command::new(&term);
+        command.arg("-e").arg("bash").arg("-c").arg(cmd);
+        if command.spawn().is_ok() {
+            return true;
+        }
+    }
+
+    for (term, args) in terminals {
+        let mut command = std::process::Command::new(term);
+        command.args(*args);
+        command.arg(cmd);
+        if command.spawn().is_ok() {
+            return true;
+        }
+    }
+    false
+}

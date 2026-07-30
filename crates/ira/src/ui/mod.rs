@@ -45,6 +45,7 @@ mod add_game_general;
 mod add_game_env;
 mod add_game_db;
 mod auto_add_dialog;
+mod installer_add_dialog;
 mod edit_game_dialog;
 mod edit_game_launch;
 mod edit_game_save;

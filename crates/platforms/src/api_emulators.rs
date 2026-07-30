@@ -7,8 +7,8 @@ pub use crate::api_emulators_gog::{
 pub use crate::api_emulators_shared::{api_emulators_dir, ensure_skeleton, find_dll_dirs_recursive, has_emulator_backups};
 pub use crate::api_emulators_steam::{
     find_steam_settings, find_steam_dlls_recursive, has_original_steam_dlls,
-    has_steam_emulator_backups, install_gse, is_gse_installed, list_gse_versions,
-    read_gse_language, uninstall_gse, write_gse_dlc_config, write_gse_language,
+    has_steam_emulator_backups, install_gse, install_gse_from_folder, is_gse_installed,
+    list_gse_versions, read_gse_language, uninstall_gse, write_gse_dlc_config, write_gse_language,
 };
 
 pub fn read_current_language(

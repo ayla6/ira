@@ -21,6 +21,8 @@ enum WizardEvent {
     Identified(Box<IdentifiedGame>),
     Failed(String),
     Added(i64),
+    EmulatorPrompt { db_id: i64, game_folder: PathBuf, app_id: String },
+    InstallDone,
 }
 
 struct IdentifiedGame {
@@ -267,7 +269,8 @@ fn handle_identify_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
             show_pick_page(wizard);
         }
         WizardEvent::Identified(game) => show_identified_form(wizard, *game),
-        WizardEvent::Added(_) => {}
+        // Add-phase events are handled by handle_add_event.
+        WizardEvent::Added(_) | WizardEvent::EmulatorPrompt { .. } | WizardEvent::InstallDone => {}
     }
 }
 
@@ -459,20 +462,32 @@ fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams) {
             ra_password: String::new(),
         });
 
-        let _ = tx.send(WizardEvent::Added(db_id));
+        // After the game is added, check whether the folder contains unpatched
+        // Steam API DLLs. If so, prompt to install the Goldberg emulator.
+        let game_folder_str = game.game_folder.to_string_lossy().into_owned();
+        let needs_gse = ira_platforms::api_emulators::find_steam_dlls_recursive(&game_folder_str)
+            .iter()
+            .any(|d| !ira_platforms::api_emulators::has_steam_emulator_backups(d));
+
+        if needs_gse {
+            let _ = tx.send(WizardEvent::EmulatorPrompt {
+                db_id,
+                game_folder: game.game_folder.clone(),
+                app_id: app_id.clone(),
+            });
+        } else {
+            let _ = tx.send(WizardEvent::Added(db_id));
+        }
     });
 }
 
 fn handle_add_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
     match ev {
-        WizardEvent::Added(db_id) => {
-            let (state, win) = {
-                let w = wizard.borrow();
-                (w.state.clone(), w.win.clone())
-            };
-            win.close();
-            show_edit_game_dialog(&state, db_id);
+        WizardEvent::Added(db_id) => finalize(wizard, db_id),
+        WizardEvent::EmulatorPrompt { db_id, game_folder, app_id } => {
+            prompt_install_emulator(wizard, db_id, game_folder, app_id);
         }
+        WizardEvent::InstallDone => {}
         WizardEvent::Failed(e) => {
             show_error(wizard, &e);
             show_pick_page(wizard);
@@ -480,6 +495,85 @@ fn handle_add_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
         WizardEvent::Status(msg) => set_status(wizard, &msg),
         _ => {}
     }
+}
+
+fn prompt_install_emulator(
+    wizard: &Rc<RefCell<Wizard>>, db_id: i64, game_folder: PathBuf, app_id: String,
+) {
+    let (win, default_version) = {
+        let w = wizard.borrow();
+        let default_version = w.state.borrow().cfg.default_api_emu_version.clone();
+        (w.win.clone(), default_version)
+    };
+    let alert = adw::AlertDialog::new(
+        Some("Install Goldberg emulator?"),
+        Some("Steam API DLLs were found in this game. Install the Goldberg Steam Emulator to enable achievements?"),
+    );
+    alert.add_response("no", "No");
+    alert.add_response("yes", "Yes");
+    alert.set_response_appearance("yes", adw::ResponseAppearance::Suggested);
+    alert.set_default_response(Some("yes"));
+    alert.set_close_response("no");
+
+    let wizard_c = wizard.clone();
+    alert.choose(Some(&win), None::<&gtk4::gio::Cancellable>, move |response| {
+        if response == "yes" {
+            start_install(wizard_c.clone(), game_folder, app_id, default_version, db_id);
+        } else {
+            finalize(&wizard_c, db_id);
+        }
+    });
+}
+
+fn start_install(
+    wizard: Rc<RefCell<Wizard>>, game_folder: PathBuf, app_id: String, version: String, db_id: i64,
+) {
+    let save_dir = wizard.borrow().state.borrow().save_dir.clone();
+    set_status(&wizard, "Installing Goldberg emulator…");
+
+    let (tx, rx) = mpsc::channel::<WizardEvent>();
+    let rx = Rc::new(RefCell::new(rx));
+    let tx_c = tx.clone();
+    let game_folder_c = game_folder.clone();
+    let app_id_c = app_id.clone();
+    let version_c = version.clone();
+    std::thread::spawn(move || {
+        let result = ira_platforms::api_emulators::install_gse_from_folder(
+            &save_dir, &game_folder_c.to_string_lossy(), &app_id_c, &[], &version_c,
+        );
+        if let Err(e) = result {
+            eprintln!("GSE install failed: {}", e);
+        }
+        let _ = tx_c.send(WizardEvent::InstallDone);
+    });
+
+    let wizard_c = wizard.clone();
+    glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+        match rx.borrow_mut().try_recv() {
+            Ok(ev) => {
+                handle_install_event(&wizard_c, ev, db_id);
+                glib::ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
+}
+
+fn handle_install_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent, db_id: i64) {
+    match ev {
+        WizardEvent::InstallDone => finalize(wizard, db_id),
+        _ => finalize(wizard, db_id),
+    }
+}
+
+fn finalize(wizard: &Rc<RefCell<Wizard>>, db_id: i64) {
+    let (state, win) = {
+        let w = wizard.borrow();
+        (w.state.clone(), w.win.clone())
+    };
+    win.close();
+    show_edit_game_dialog(&state, db_id);
 }
 
 fn resolve_wine_config(profiles: &[WineProfile], profile_id: Option<i64>) -> WineConfig {

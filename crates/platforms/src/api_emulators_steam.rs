@@ -210,14 +210,52 @@ pub fn install_gse(
         return Err("No original Steam DLL found in game folder. Cannot install API emulator.".to_string());
     }
 
-    let version_dir = resolve_gse_version(save_dir, version)?;
-
     let dll_folder = find_api_emu_dll_folder(game_exe, GSE_VERSION_FILES)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
     let is_win = is_windows(game_exe);
     let is64 = detect_arch(game_exe) == "x64";
+
+    install_gse_into_folder(save_dir, &dll_folder, is_win, is64, app_id, languages, version)
+}
+
+/// Recursively search `game_folder` for the directory containing Steam DLLs and
+/// install the Goldberg emulator there. Used by the auto-add flow which only
+/// knows the install folder, not the exe. Skips directories that already have
+/// emulator backups (already patched).
+pub fn install_gse_from_folder(
+    save_dir: &str,
+    game_folder: &str,
+    app_id: &str,
+    languages: &[String],
+    version: &str,
+) -> Result<(), String> {
+    let dirs = find_steam_dlls_recursive(game_folder);
+    let dll_folder = dirs.iter()
+        .find(|d| !has_steam_emulator_backups(d))
+        .ok_or_else(|| "No unpatched Steam DLLs found in game folder".to_string())?;
+
+    let is_win = dll_folder.join("steam_api.dll").exists()
+        || dll_folder.join("steam_api64.dll").exists();
+    let is64 = dll_folder.join("steam_api64.dll").exists()
+        || dll_folder.join("steamclient64.dll").exists()
+        || dll_folder.join("libsteam_api64.so").exists()
+        || dll_folder.join("steamclient64.so").exists();
+
+    install_gse_into_folder(save_dir, dll_folder, is_win, is64, app_id, languages, version)
+}
+
+fn install_gse_into_folder(
+    save_dir: &str,
+    dll_folder: &Path,
+    is_win: bool,
+    is64: bool,
+    app_id: &str,
+    languages: &[String],
+    version: &str,
+) -> Result<(), String> {
+    let version_dir = resolve_gse_version(save_dir, version)?;
 
     // Step 1: Create steam_settings dir before running generate_interfaces
     let settings_dir = dll_folder.join("steam_settings");

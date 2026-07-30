@@ -776,12 +776,19 @@ pub(super) fn prompt_redists(wizard: &Rc<RefCell<Wizard>>, db_id: i64, packages:
 pub(super) fn start_redist_install(
     wizard: Rc<RefCell<Wizard>>, db_id: i64, packages: Vec<ira_platforms::steam::RedistPackage>,
 ) {
-    let (db, save_dir) = {
+    let (db, save_dir, game_folder) = {
         let w = wizard.borrow();
         let s = w.state.borrow();
-        (s.db.clone(), s.save_dir.clone())
+        (s.db.clone(), s.save_dir.clone(), w.last_folder.clone())
     };
     set_status(&wizard, "Installing redistributables via Wine…");
+
+    // Copy _CommonRedist into the game folder so redists persist across
+    // prefix changes. Installer paths are remapped to the local copy.
+    let packages = match game_folder.as_deref() {
+        Some(folder) => ira_platforms::steam::localize_redists(folder, packages),
+        None => packages,
+    };
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
     let rx = Rc::new(RefCell::new(rx));

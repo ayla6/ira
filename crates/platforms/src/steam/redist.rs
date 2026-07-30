@@ -25,6 +25,97 @@ pub fn detect_redists_in_game_folder(game_dir: &Path) -> Vec<RedistPackage> {
     detect_redists_in_base(&game_dir.join("_CommonRedist"))
 }
 
+/// If redist installer paths point to a shared `_CommonRedist` (e.g. in
+/// `Steamworks Shared`), copy that directory into `game_dir/_CommonRedist`
+/// and remap the installer paths. If the installers are already inside the
+/// game dir, they're returned unchanged.
+pub fn localize_redists(game_dir: &Path, packages: Vec<RedistPackage>) -> Vec<RedistPackage> {
+    if packages.is_empty() {
+        return packages;
+    }
+
+    let local_base = game_dir.join("_CommonRedist");
+    let game_dir_canonical = game_dir.canonicalize().unwrap_or_else(|_| game_dir.to_path_buf());
+
+    // Check if installers are already inside the game folder
+    let already_local = packages.iter().all(|p| {
+        p.installers.iter().all(|inst| {
+            inst.canonicalize()
+                .map(|c| c.starts_with(&game_dir_canonical))
+                .unwrap_or(false)
+        })
+    });
+    if already_local {
+        return packages;
+    }
+
+    // Find the _CommonRedist source directory from the first installer path
+    let source_base = packages
+        .iter()
+        .flat_map(|p| &p.installers)
+        .find_map(|inst| find_common_redist_ancestor(inst));
+
+    let Some(source_base) = source_base else {
+        return packages;
+    };
+
+    // Copy _CommonRedist to game_dir if it doesn't already exist
+    if !local_base.exists() {
+        if let Err(e) = copy_dir_recursive(&source_base, &local_base) {
+            eprintln!("Failed to copy _CommonRedist to game folder: {}", e);
+            return packages;
+        }
+    }
+
+    // Remap installer paths from source_base to local_base
+    packages
+        .into_iter()
+        .map(|pkg| RedistPackage {
+            name: pkg.name,
+            installers: pkg
+                .installers
+                .into_iter()
+                .map(|inst| remap_path(&inst, &source_base, &local_base))
+                .collect(),
+        })
+        .collect()
+}
+
+/// Walk up from a path to find the nearest `_CommonRedist` ancestor.
+fn find_common_redist_ancestor(path: &Path) -> Option<PathBuf> {
+    let mut current = path.parent()?;
+    loop {
+        if current.file_name().and_then(|n| n.to_str()) == Some("_CommonRedist") {
+            return Some(current.to_path_buf());
+        }
+        current = current.parent()?;
+    }
+}
+
+/// Replace the `source_base` prefix of `path` with `local_base`.
+fn remap_path(path: &Path, source_base: &Path, local_base: &Path) -> PathBuf {
+    if let Ok(rel) = path.strip_prefix(source_base) {
+        local_base.join(rel)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
+    let entries = std::fs::read_dir(src).map_err(|e| e.to_string())?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let dest = dst.join(entry.file_name());
+        if path.is_dir() {
+            copy_dir_recursive(&path, &dest)?;
+        } else {
+            std::fs::copy(&path, &dest).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 fn detect_redists_in_base(base: &Path) -> Vec<RedistPackage> {
     let Ok(entries) = std::fs::read_dir(base) else {
         return Vec::new();
@@ -147,5 +238,43 @@ mod tests {
     fn test_detect_redists_in_game_folder_missing() {
         let tmp = TempDir::new().unwrap();
         assert!(detect_redists_in_game_folder(tmp.path()).is_empty());
+    }
+
+    #[test]
+    fn test_localize_redists_copies_to_game_folder() {
+        let shared = TempDir::new().unwrap();
+        let redist_base = shared.path().join("_CommonRedist");
+        touch(&redist_base.join("vcredist").join("vcredist_x64.exe"));
+
+        let game_dir = TempDir::new().unwrap();
+        let packages = detect_redists_in_base(&redist_base);
+        assert!(!packages.is_empty());
+
+        let localized = localize_redists(game_dir.path(), packages);
+        // _CommonRedist should now exist in the game folder
+        assert!(game_dir.path().join("_CommonRedist").exists());
+        // Installer paths should be remapped to game folder
+        assert!(localized[0].installers[0].starts_with(game_dir.path()));
+    }
+
+    #[test]
+    fn test_localize_redists_already_local() {
+        let game_dir = TempDir::new().unwrap();
+        let redist_base = game_dir.path().join("_CommonRedist");
+        touch(&redist_base.join("vcredist").join("vcredist_x64.exe"));
+
+        let packages = detect_redists_in_game_folder(game_dir.path());
+        let localized = localize_redists(game_dir.path(), packages);
+
+        // Paths should be unchanged (already in game folder)
+        assert!(localized[0].installers[0].starts_with(game_dir.path()));
+    }
+
+    #[test]
+    fn test_localize_redists_empty() {
+        let game_dir = TempDir::new().unwrap();
+        let localized = localize_redists(game_dir.path(), Vec::new());
+        assert!(localized.is_empty());
+        assert!(!game_dir.path().join("_CommonRedist").exists());
     }
 }

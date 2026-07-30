@@ -16,7 +16,17 @@ pub fn detect_redists(steamapps_dir: &Path) -> Vec<RedistPackage> {
         .join("common")
         .join("Steamworks Shared")
         .join("_CommonRedist");
-    let Ok(entries) = std::fs::read_dir(&base) else {
+    detect_redists_in_base(&base)
+}
+
+/// Scan `<game_dir>/_CommonRedist` for redistributable packages.
+/// Same logic as `detect_redists` but for games not in a Steam library.
+pub fn detect_redists_in_game_folder(game_dir: &Path) -> Vec<RedistPackage> {
+    detect_redists_in_base(&game_dir.join("_CommonRedist"))
+}
+
+fn detect_redists_in_base(base: &Path) -> Vec<RedistPackage> {
+    let Ok(entries) = std::fs::read_dir(base) else {
         return Vec::new();
     };
     let mut names: Vec<(String, PathBuf)> = Vec::new();
@@ -120,5 +130,22 @@ mod tests {
         let packages = detect_redists(tmp.path());
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].name, "DotNet");
+    }
+
+    #[test]
+    fn test_detect_redists_in_game_folder() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().join("_CommonRedist");
+        touch(&base.join("DirectX").join("DXSETUP.exe"));
+        touch(&base.join("vcredist").join("vcredist_x64.exe"));
+        let packages = detect_redists_in_game_folder(tmp.path());
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name, "vcredist");
+    }
+
+    #[test]
+    fn test_detect_redists_in_game_folder_missing() {
+        let tmp = TempDir::new().unwrap();
+        assert!(detect_redists_in_game_folder(tmp.path()).is_empty());
     }
 }

@@ -140,6 +140,24 @@ pub(crate) struct SteamCmdCommon {
     pub oslist: String,
     #[serde(default)]
     pub supported_languages: HashMap<String, SteamCmdLanguage>,
+    #[serde(default)]
+    pub library_assets: SteamCmdLibraryAssets,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdLibraryAssets {
+    #[serde(default)]
+    pub logo_position: SteamCmdLogoPosition,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdLogoPosition {
+    #[serde(default)]
+    pub pinned_position: String,
+    #[serde(default)]
+    pub width_pct: String,
+    #[serde(default)]
+    pub _height_pct: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -212,6 +230,12 @@ pub struct SteamCmdInfo {
     /// Sorted launch entries (launch.0 is the default). Empty if none.
     #[serde(default)]
     pub launches: Vec<SteamCmdLaunchInfo>,
+    /// Logo position from Steam library_assets (kebab-case, e.g. "bottom-left").
+    #[serde(default)]
+    pub logo_position: String,
+    /// Logo width percentage from Steam (0 if not available).
+    #[serde(default)]
+    pub logo_size: i32,
 }
 
 /// A single launch entry from steamcmd.net `config.launch`.

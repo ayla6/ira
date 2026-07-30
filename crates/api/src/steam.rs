@@ -314,12 +314,27 @@ impl SteamDataClient {
             icon: entry.common.icon.clone(),
             oslist: entry.common.oslist.clone(),
             launches: sorted_launches(&entry.config.launch),
+            logo_position: convert_pinned_position(&entry.common.library_assets.logo_position.pinned_position),
+            logo_size: entry.common.library_assets.logo_position.width_pct.parse::<f64>().unwrap_or(0.0).round() as i32,
         })
     }
 
     fn extract_app_details(raw: &SteamCmdResponse, app_id: &str) -> Option<AppDetails> {
         extract_app_details(raw, app_id)
     }
+}
+
+/// Convert Steam's CamelCase pinned_position to kebab-case.
+/// "BottomCenter" → "bottom-center", "BottomLeft" → "bottom-left"
+fn convert_pinned_position(s: &str) -> String {
+    let mut result = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && c.is_uppercase() {
+            result.push('-');
+        }
+        result.push(c.to_ascii_lowercase());
+    }
+    result
 }
 
 /// Collect launch entries sorted by their numeric key (0, 1, 2, …) so that
@@ -426,5 +441,14 @@ mod tests {
         let launches = sorted_launches(&config.launch);
         assert_eq!(launches.len(), 1);
         assert_eq!(launches[0].executable, "a.exe");
+    }
+
+    #[test]
+    fn test_convert_pinned_position() {
+        assert_eq!(convert_pinned_position("BottomLeft"), "bottom-left");
+        assert_eq!(convert_pinned_position("BottomCenter"), "bottom-center");
+        assert_eq!(convert_pinned_position("TopLeft"), "top-left");
+        assert_eq!(convert_pinned_position("Center"), "center");
+        assert_eq!(convert_pinned_position(""), "");
     }
 }

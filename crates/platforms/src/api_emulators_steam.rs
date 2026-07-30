@@ -246,6 +246,113 @@ pub fn install_gse_from_folder(
     install_gse_into_folder(save_dir, dll_folder, is_win, is64, app_id, languages, version)
 }
 
+/// Scan a Steam API DLL for exported interface version strings and write
+/// them to `steam_interfaces.txt`. This replaces the GSE `generate_interfaces`
+/// tool, which is a Windows executable that can't run on Linux.
+///
+/// Ported from `references/gbe_fork/tools/generate_interfaces/generate_interfaces.cpp`.
+fn generate_steam_interfaces(dll_path: &Path, output_path: &Path) -> Result<(), String> {
+    let data = std::fs::read(dll_path).map_err(|e| format!("read DLL: {e}"))?;
+
+    let mut all_matches: Vec<String> = Vec::new();
+
+    for prefix in INTERFACE_PREFIXES {
+        let found = find_prefix_matches(&data, prefix);
+        // Special case: if SteamClient has multiple matches and 017 is among them,
+        // keep only SteamClient017 (legacy compatibility from GSE source).
+        if *prefix == "SteamClient" && found.len() > 1 && found.contains(&"SteamClient017".to_string()) {
+            all_matches.push("SteamClient017".to_string());
+        } else {
+            all_matches.extend(found);
+        }
+    }
+
+    if all_matches.is_empty() {
+        return Err("no Steam interfaces found in DLL".to_string());
+    }
+
+    all_matches.sort();
+    all_matches.dedup();
+    let content = all_matches.join("\n") + "\n";
+    std::fs::write(output_path, content)
+        .map_err(|e| format!("write steam_interfaces.txt: {e}"))?;
+    Ok(())
+}
+
+/// Interface name prefixes from the GSE generate_interfaces.cpp source.
+/// Each is followed by 0+ digits in the binary.
+const INTERFACE_PREFIXES: &[&str] = &[
+    "STEAMAPPS_INTERFACE_VERSION",
+    "SteamApps",
+    "STEAMAPPLIST_INTERFACE_VERSION",
+    "STEAMAPPTICKET_INTERFACE_VERSION",
+    "SteamClient",
+    "STEAMCONTROLLER_INTERFACE_VERSION",
+    "SteamController",
+    "SteamFriends",
+    "SteamGameServerStats",
+    "SteamGameCoordinator",
+    "SteamGameServer",
+    "STEAMHTMLSURFACE_INTERFACE_VERSION_",
+    "STEAMHTTP_INTERFACE_VERSION",
+    "SteamInput",
+    "STEAMINVENTORY_INTERFACE_V",
+    "SteamMatchMakingServers",
+    "SteamMatchMaking",
+    "SteamMatchGameSearch",
+    "SteamParties",
+    "STEAMMUSIC_INTERFACE_VERSION",
+    "STEAMMUSICREMOTE_INTERFACE_VERSION",
+    "SteamNetworkingMessages",
+    "SteamNetworkingSockets",
+    "SteamNetworkingUtils",
+    "SteamNetworking",
+    "STEAMPARENTALSETTINGS_INTERFACE_VERSION",
+    "STEAMREMOTEPLAY_INTERFACE_VERSION",
+    "STEAMREMOTESTORAGE_INTERFACE_VERSION",
+    "STEAMSCREENSHOTS_INTERFACE_VERSION",
+    "STEAMTIMELINE_INTERFACE_V",
+    "STEAMUGC_INTERFACE_VERSION",
+    "SteamUser",
+    "STEAMUSERSTATS_INTERFACE_VERSION",
+    "SteamUtils",
+    "STEAMVIDEO_INTERFACE_V",
+    "STEAMUNIFIEDMESSAGES_INTERFACE_VERSION",
+    "SteamMasterServerUpdater",
+];
+
+/// Find all occurrences of `prefix` in the binary data, followed by 0+ digits.
+/// Returns full matches (prefix + trailing digits), deduplicated.
+fn find_prefix_matches(data: &[u8], prefix: &str) -> Vec<String> {
+    let prefix_bytes = prefix.as_bytes();
+    let mut matches = Vec::new();
+
+    let mut i = 0;
+    while i + prefix_bytes.len() <= data.len() {
+        if &data[i..i + prefix_bytes.len()] == prefix_bytes {
+            // Collect trailing digits
+            let mut j = i + prefix_bytes.len();
+            while j < data.len() && data[j].is_ascii_digit() {
+                j += 1;
+            }
+            let full = &data[i..j];
+            if let Ok(s) = std::str::from_utf8(full) {
+                // Must have at least one digit, unless the prefix itself is the full match
+                // (STEAMCONTROLLER_INTERFACE_VERSION has no digits in some SDKs)
+                if (s.len() > prefix.len() || prefix.ends_with("VERSION"))
+                    && !matches.contains(&s.to_string())
+                {
+                    matches.push(s.to_string());
+                }
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    matches
+}
+
 fn install_gse_into_folder(
     save_dir: &str,
     dll_folder: &Path,
@@ -262,21 +369,17 @@ fn install_gse_into_folder(
     std::fs::create_dir_all(&settings_dir)
         .map_err(|e| format!("create steam_settings: {}", e))?;
 
-    // Step 2: Run generate_interfaces BEFORE swapping DLLs
-    let gen_interfaces = api_emulators_dir(save_dir).join("steam").join("generate_interfaces");
-    if gen_interfaces.is_file() {
-        let dst = settings_dir.join("generate_interfaces");
-        if !dst.exists() {
-            if let Err(e) = copy_file(&gen_interfaces, &dst) {
-                eprintln!("Failed to copy generate_interfaces: {}", e);
+    // Step 2: Generate steam_interfaces.txt by scanning the original DLL
+    // (before it's swapped in Step 3). We do this natively in Rust instead
+    // of running the GSE generate_interfaces.exe, which doesn't work on Linux.
+    let interfaces_path = settings_dir.join("steam_interfaces.txt");
+    if !interfaces_path.exists() {
+        let dll_name = if is64 { "steam_api64.dll" } else { "steam_api.dll" };
+        let dll_path = dll_folder.join(dll_name);
+        if dll_path.is_file() {
+            if let Err(e) = generate_steam_interfaces(&dll_path, &interfaces_path) {
+                eprintln!("Failed to generate steam_interfaces.txt: {}", e);
             }
-        }
-        // Run it from the steam_settings directory
-        if let Err(e) = std::process::Command::new(&dst)
-            .current_dir(&settings_dir)
-            .output()
-        {
-            eprintln!("Failed to run generate_interfaces: {}", e);
         }
     }
 
@@ -342,5 +445,94 @@ pub fn is_gse_installed(game_exe: &str) -> bool {
         folder.join("steam_settings").is_dir()
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_prefix_matches_camelcase() {
+        let data = b"\x00SteamClient017\x00SteamUser019\x00junk\x00";
+        let matches = find_prefix_matches(data, "SteamClient");
+        assert_eq!(matches, vec!["SteamClient017"]);
+        let matches = find_prefix_matches(data, "SteamUser");
+        assert_eq!(matches, vec!["SteamUser019"]);
+    }
+
+    #[test]
+    fn test_find_prefix_matches_all_caps() {
+        let data = b"\x00STEAMAPPS_INTERFACE_VERSION001\x00STEAMHTTP_INTERFACE_VERSION003\x00";
+        let matches = find_prefix_matches(data, "STEAMAPPS_INTERFACE_VERSION");
+        assert_eq!(matches, vec!["STEAMAPPS_INTERFACE_VERSION001"]);
+        let matches = find_prefix_matches(data, "STEAMHTTP_INTERFACE_VERSION");
+        assert_eq!(matches, vec!["STEAMHTTP_INTERFACE_VERSION003"]);
+    }
+
+    #[test]
+    fn test_find_prefix_matches_no_digits() {
+        // STEAMCONTROLLER_INTERFACE_VERSION may have no trailing digits
+        let data = b"\x00STEAMCONTROLLER_INTERFACE_VERSION\x00";
+        let matches = find_prefix_matches(data, "STEAMCONTROLLER_INTERFACE_VERSION");
+        assert_eq!(matches, vec!["STEAMCONTROLLER_INTERFACE_VERSION"]);
+    }
+
+    #[test]
+    fn test_find_prefix_matches_dedup() {
+        let data = b"SteamClient017\x00SteamClient017\x00SteamClient020\x00";
+        let matches = find_prefix_matches(data, "SteamClient");
+        assert_eq!(matches.len(), 2);
+        assert!(matches.contains(&"SteamClient017".to_string()));
+        assert!(matches.contains(&"SteamClient020".to_string()));
+    }
+
+    #[test]
+    fn test_generate_steam_interfaces_extracts_both_patterns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dll_data = b"\x00SteamClient017\x00SteamUser019\x00STEAMAPPS_INTERFACE_VERSION001\x00STEAMHTTP_INTERFACE_VERSION003\x00junk\x00";
+        let dll_path = tmp.path().join("steam_api64.dll");
+        std::fs::write(&dll_path, dll_data).unwrap();
+
+        let output_path = tmp.path().join("steam_interfaces.txt");
+        generate_steam_interfaces(&dll_path, &output_path).unwrap();
+
+        let content = std::fs::read_to_string(&output_path).unwrap();
+        let lines: Vec<&str> = content.trim().lines().collect();
+        assert!(lines.contains(&"SteamClient017"));
+        assert!(lines.contains(&"SteamUser019"));
+        assert!(lines.contains(&"STEAMAPPS_INTERFACE_VERSION001"));
+        assert!(lines.contains(&"STEAMHTTP_INTERFACE_VERSION003"));
+        assert!(!lines.contains(&"junk"));
+        assert_eq!(lines.len(), 4);
+    }
+
+    #[test]
+    fn test_generate_steam_interfaces_steamclient_legacy() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Multiple SteamClient versions, 017 among them → keep only 017
+        let dll_data = b"SteamClient017\x00SteamClient020\x00SteamUser019\x00";
+        let dll_path = tmp.path().join("steam_api64.dll");
+        std::fs::write(&dll_path, dll_data).unwrap();
+
+        let output_path = tmp.path().join("steam_interfaces.txt");
+        generate_steam_interfaces(&dll_path, &output_path).unwrap();
+
+        let content = std::fs::read_to_string(&output_path).unwrap();
+        let lines: Vec<&str> = content.trim().lines().collect();
+        assert!(lines.contains(&"SteamClient017"));
+        assert!(!lines.contains(&"SteamClient020"));
+        assert!(lines.contains(&"SteamUser019"));
+    }
+
+    #[test]
+    fn test_generate_steam_interfaces_no_matches() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dll_data = b"random\x00data\x00without\x00interfaces\x00";
+        let dll_path = tmp.path().join("steam_api64.dll");
+        std::fs::write(&dll_path, dll_data).unwrap();
+
+        let output_path = tmp.path().join("steam_interfaces.txt");
+        assert!(generate_steam_interfaces(&dll_path, &output_path).is_err());
     }
 }

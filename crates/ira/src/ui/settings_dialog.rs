@@ -56,9 +56,9 @@ pub fn show_settings_dialog(
     sidebar.append(&settings_sidebar_row("applications-science-symbolic", "Game system", "system"));
     stack.add_named(&system_page, Some("system"));
 
-    sidebar.append(&sidebar_section_title("Game sources"));
+    sidebar.append(&sidebar_section_title("PC games"));
     let (computer_games_page, default_game_folder_row) = build_computer_games_page(&win, &cfg);
-    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "Desktop games", "computer_games"));
+    sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PC games", "computer_games"));
     stack.add_named(&computer_games_page, Some("computer_games"));
 
     let (steam_page, steam_enable_row) = build_steam_settings_page(&cfg);

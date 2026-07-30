@@ -396,16 +396,16 @@ pub(super) fn start_add(
     wizard: Rc<RefCell<Wizard>>, game: IdentifiedGame, name: String, app_id: String,
     profile_id: Option<i64>, skip_emu_prompt: bool,
 ) {
-    let (db, steam, save_dir, sender, profiles) = {
+    let (db, steam, save_dir, sender, profiles, language_preferences) = {
         let w = wizard.borrow();
         let s = w.state.borrow();
-        (s.db.clone(), s.steam.clone(), s.save_dir.clone(), s.sender.clone(), w.profiles.clone())
+        (s.db.clone(), s.steam.clone(), s.save_dir.clone(), s.sender.clone(), w.profiles.clone(), s.cfg.language_preferences.clone())
     };
     set_status(&wizard, "Adding game and downloading assets…");
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
     let rx = Rc::new(RefCell::new(rx));
-    spawn_add_thread(tx, AddParams { db, steam, save_dir, sender, game, name, app_id, profile_id, profiles, skip_emu_prompt });
+    spawn_add_thread(tx, AddParams { db, steam, save_dir, sender, game, name, app_id, profile_id, profiles, skip_emu_prompt, language_preferences });
 
     let wizard_c = wizard.clone();
     glib::source::idle_add_local_full(glib::Priority::LOW, move || {
@@ -432,11 +432,12 @@ pub(super) struct AddParams {
     pub profile_id: Option<i64>,
     pub profiles: Vec<WineProfile>,
     pub skip_emu_prompt: bool,
+    pub language_preferences: Vec<String>,
 }
 
 pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams) {
     std::thread::spawn(move || {
-        let AddParams { db, steam, save_dir, sender, game, name, app_id, profile_id, profiles, skip_emu_prompt } = params;
+        let AddParams { db, steam, save_dir, sender, game, name, app_id, profile_id, profiles, skip_emu_prompt, language_preferences } = params;
         let kind = if game.is_windows { GameKind::Wine } else { GameKind::Linux };
         let exe_path = if game.exe.is_empty() {
             String::new()
@@ -507,7 +508,8 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
         let _ = ira_db::update_game_title(&db, game_obj.db_id, &name);
         let _ = sender.send(AppMessage::NewGame(game_obj.clone()));
 
-        crate::ui::enrichment::enrich_game_async(crate::ui::enrichment::EnrichGameParams {
+        let save_dir_for_lang = save_dir.clone();
+        crate::ui::enrichment::enrich_game_blocking(crate::ui::enrichment::EnrichGameParams {
             app_id: game_obj.app_id.clone(),
             trophy_source: game_obj.trophy_source,
             platform_id: game_obj.platform_id.clone(),
@@ -520,11 +522,30 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
             ra_password: String::new(),
         });
 
-        // After the game is added, check whether the folder contains unpatched
-        // API-emulator DLLs. GOG (Galaxy) is checked first: a GOG game may ship
-        // Steam DLLs that must remain default, so only the Galaxy ones get patched.
-        // When skip_emu_prompt is set (installer flow), the bundled DLLs are
-        // assumed to be working — skip the check entirely.
+        // After enrichment, pick a default language from the user's preferences.
+        let game_exe = game.game_folder.join(&game.exe);
+        let game_exe_str = game_exe.to_string_lossy().to_string();
+        if !language_preferences.is_empty() {
+            let appdetails_path = ira_parser::data_dir(&save_dir_for_lang, &app_id).join("appdetails.json");
+            if let Ok(content) = std::fs::read_to_string(&appdetails_path) {
+                if let Ok(details) = serde_json::from_str::<ira_models::AppDetails>(&content) {
+                    let chosen = language_preferences.iter()
+                        .find(|pref| details.languages.iter().any(|l| l == *pref))
+                        .or_else(|| details.languages.iter().find(|l| **l == "english"))
+                        .or_else(|| details.languages.first());
+                    if let Some(lang) = chosen {
+                        ira_platforms::api_emulators::write_language_configs(
+                            game_obj.trophy_source,
+                            &game_exe_str,
+                            &save_dir_for_lang,
+                            &app_id,
+                            lang,
+                        );
+                    }
+                }
+            }
+        }
+
         if skip_emu_prompt {
             let _ = tx.send(WizardEvent::Added(db_id));
             return;

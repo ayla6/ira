@@ -15,6 +15,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_language_preferences() -> Vec<String> {
+    vec!["english".to_string()]
+}
+
 fn default_save_dir() -> String {
     xdg_dir(xdg::BaseDirectories::new().get_data_home())
         .join("ira")
@@ -102,6 +106,10 @@ pub struct Config {
     /// `Some(true)` = always install without prompting, `Some(false)` = never install.
     #[serde(default)]
     pub auto_emu_install: Option<bool>,
+    /// Preferred languages for game emulator configs, in priority order.
+    /// When a game is added, the first matching supported language is used.
+    #[serde(default = "default_language_preferences")]
+    pub language_preferences: Vec<String>,
     #[serde(default)]
     pub sort_mode: ira_models::SortMode,
     #[serde(default)]
@@ -147,6 +155,7 @@ impl Default for Config {
             default_native_env_vars: Vec::new(),
             default_api_emu_version: String::new(),
             auto_emu_install: None,
+            language_preferences: default_language_preferences(),
             sort_mode: ira_models::SortMode::default(),
             sort_descending: false,
             ra_enabled: false,
@@ -202,6 +211,7 @@ impl Config {
             default_native_env_vars: self.default_native_env_vars.clone(),
             default_api_emu_version: self.default_api_emu_version.clone(),
             auto_emu_install: self.auto_emu_install,
+            language_preferences: self.language_preferences.clone(),
             sort_mode: self.sort_mode,
             sort_descending: self.sort_descending,
             ra_enabled: self.ra_enabled,

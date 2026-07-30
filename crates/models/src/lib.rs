@@ -15,6 +15,7 @@ mod kind;
 mod consoles;
 mod app_details;
 mod asset_type;
+mod steam_languages;
 
 pub use game::Game;
 pub use game::parse_db_id;
@@ -31,3 +32,4 @@ pub use achievement::{AchievementStatus, MergedAchievement, StringOrMap, GogAchi
 pub use message::{AppMessage, AppSender};
 pub use kind::*;
 pub use asset_type::{AssetType, LogoPosition};
+pub use steam_languages::{SteamLanguage, STEAM_LANGUAGES, steam_language_name};

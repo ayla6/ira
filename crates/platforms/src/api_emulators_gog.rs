@@ -127,6 +127,94 @@ pub fn has_original_gog_dlls(game_exe: &str) -> bool {
 }
 
 /// All GOG Galaxy DLL filenames (case-insensitive match).
+/// Find `ngalaxye_settings/` directories recursively in `game_folder`, move
+/// the first one found to the game root, then create relative symlinks from
+/// every directory containing Galaxy DLLs back to the root settings.
+pub fn centralize_galaxy_settings(game_folder: &str) -> Result<Option<PathBuf>, String> {
+    let root = Path::new(game_folder);
+    let root_settings = root.join("ngalaxye_settings");
+
+    if root_settings.is_dir() {
+        symlink_gog_dll_dirs_to_settings(root, &root_settings);
+        return Ok(Some(root_settings));
+    }
+
+    let found = find_galaxy_settings_recursive(root);
+    let Some(found_dir) = found else {
+        return Ok(None);
+    };
+
+    std::fs::rename(&found_dir, &root_settings)
+        .map_err(|e| format!("move ngalaxye_settings to root: {e}"))?;
+
+    #[cfg(unix)]
+    {
+        let rel = compute_relative(&found_dir, &root_settings);
+        let _ = std::os::unix::fs::symlink(&rel, &found_dir);
+    }
+
+    symlink_gog_dll_dirs_to_settings(root, &root_settings);
+    Ok(Some(root_settings))
+}
+
+fn find_galaxy_settings_recursive(root: &Path) -> Option<PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if path.file_name().and_then(|n| n.to_str()) == Some("ngalaxye_settings") {
+                        return Some(path);
+                    }
+                    stack.push(path);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn symlink_gog_dll_dirs_to_settings(root: &Path, settings_dir: &Path) {
+    let dll_dirs = find_gog_dlls_recursive(&root.to_string_lossy());
+    for dir in dll_dirs {
+        let link = dir.join("ngalaxye_settings");
+        if link.exists() {
+            continue;
+        }
+        #[cfg(unix)]
+        {
+            let rel = compute_relative(&dir, settings_dir);
+            let _ = std::os::unix::fs::symlink(&rel, &link);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn compute_relative(from_dir: &Path, to_path: &Path) -> PathBuf {
+    use std::path::Component;
+    let from_components: Vec<_> = from_dir.components().collect();
+    let to_components: Vec<_> = to_path.components().collect();
+    let mut common = 0;
+    while common < from_components.len()
+        && common < to_components.len()
+        && from_components[common] == to_components[common]
+    {
+        common += 1;
+    }
+    let up = from_components.len() - common;
+    let mut result = PathBuf::new();
+    for _ in 0..up {
+        result.push("..");
+    }
+    for comp in &to_components[common..] {
+        if let Component::Normal(s) = comp {
+            result.push(s);
+        }
+    }
+    result
+}
+
 const GOG_DLL_NAMES: &[&str] = &["galaxy.dll", "galaxy64.dll"];
 
 /// Recursively search `game_folder` for directories containing Galaxy DLLs.

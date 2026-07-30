@@ -532,10 +532,13 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
 
         let game_folder_str = game.game_folder.to_string_lossy().into_owned();
 
-        // Centralize any steam_settings/ found in subdirectories to the game
-        // root, and create symlinks from each Steam DLL directory.
+        // Centralize any steam_settings/ or ngalaxye_settings/ found in
+        // subdirectories to the game root, with symlinks from DLL dirs.
         if let Err(e) = ira_platforms::api_emulators::centralize_steam_settings(&game_folder_str) {
             eprintln!("Failed to centralize steam_settings: {}", e);
+        }
+        if let Err(e) = ira_platforms::api_emulators::centralize_galaxy_settings(&game_folder_str) {
+            eprintln!("Failed to centralize ngalaxye_settings: {}", e);
         }
 
         let needs_nge = ira_platforms::api_emulators::find_gog_dlls_recursive(&game_folder_str)

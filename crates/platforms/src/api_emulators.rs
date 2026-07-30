@@ -1,8 +1,9 @@
 use ira_models::AppDetails;
 pub use crate::api_emulators_gog::{
-    find_galaxy_settings, find_gog_dlls_recursive, has_gog_emulator_backups, has_original_gog_dlls,
-    install_nge, install_nge_from_folder, is_nge_installed, list_gog_versions, read_nge_language,
-    uninstall_nge, write_nge_dlc_config, write_nge_language,
+    centralize_galaxy_settings, find_galaxy_settings, find_gog_dlls_recursive,
+    has_gog_emulator_backups, has_original_gog_dlls, install_nge, install_nge_from_folder,
+    is_nge_installed, list_gog_versions, read_nge_language, uninstall_nge, write_nge_dlc_config,
+    write_nge_language,
 };
 pub use crate::api_emulators_shared::{api_emulators_dir, ensure_skeleton, find_dll_dirs_recursive, has_emulator_backups};
 pub use crate::api_emulators_steam::{

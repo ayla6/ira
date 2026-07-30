@@ -602,6 +602,25 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
         if let Err(e) = ira_db::update_game_folder(&db, params.db_id, &folder) {
             eprintln!("Failed to update game folder: {}", e);
         }
+    } else {
+        let entry = ira_db::find_by_db_id(&db, params.db_id).ok().flatten();
+        let existing_folder = entry.as_ref().map(|e| e.game_folder.clone()).unwrap_or_default();
+        if existing_folder.is_empty() {
+            let (launch, _wine, _) = build_launch_config_and_wine(&params);
+            let cfg = params.state.borrow().cfg.clone();
+            let title = params.title_entry.text().to_string();
+            let install_dir = String::new();
+            if let Some(detected) = ira_platforms::game_folder::detect_game_folder(
+                &launch.exe,
+                &cfg.default_game_folder,
+                &install_dir,
+                &title,
+            ) {
+                if let Err(e) = ira_db::update_game_folder(&db, params.db_id, &detected.to_string_lossy()) {
+                    eprintln!("Failed to auto-detect game folder: {}", e);
+                }
+            }
+        }
     }
 
     let app_id_result = save_app_id(&db, &params);

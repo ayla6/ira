@@ -93,6 +93,7 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
     content.append(&header);
 
     let scrolled = gtk4::ScrolledWindow::new();
+    scrolled.set_vexpand(true);
     let body = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
     body.set_margin_start(16);
     body.set_margin_end(16);
@@ -224,6 +225,13 @@ fn rebuild_installer_list(list: &gtk4::ListBox, ist: &Rc<RefCell<InstallerState>
         list.remove(&child);
     }
     let installers = ist.borrow().installers.clone();
+    if installers.is_empty() {
+        let row = adw::ActionRow::new();
+        row.set_title("No installers added yet");
+        row.set_subtitle("Click \"Add installer…\" to select installer files");
+        list.append(&row);
+        return;
+    }
     for (i, path) in installers.iter().enumerate() {
         let row = adw::ActionRow::new();
         let name = path

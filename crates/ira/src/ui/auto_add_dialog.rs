@@ -298,6 +298,16 @@ pub(super) fn show_identified_form(
     };
     clear_children(&content);
 
+    let header = adw::HeaderBar::new();
+    header.add_css_class(CSS_FLAT);
+    content.append(&header);
+
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    body.set_margin_start(16);
+    body.set_margin_end(16);
+    body.set_margin_top(8);
+    body.set_margin_bottom(16);
+
     let is_windows = game.is_windows;
     let group = adw::PreferencesGroup::new();
     group.set_title("Confirm game");
@@ -321,7 +331,7 @@ pub(super) fn show_identified_form(
         None
     };
 
-    content.append(&group);
+    body.append(&group);
 
     let info_label = gtk4::Label::new(Some(if is_windows {
         "Detected: Windows game — a Wine profile is recommended."
@@ -329,8 +339,8 @@ pub(super) fn show_identified_form(
         "Detected: Linux native game."
     }));
     info_label.set_halign(gtk4::Align::Start);
-    info_label.add_css_class("dim-label");
-    content.append(&info_label);
+    info_label.add_css_class(CSS_DIM_LABEL);
+    body.append(&info_label);
 
     let add_btn = gtk4::Button::with_label("Add Game");
     add_btn.add_css_class(CSS_SUGGESTED_ACTION);
@@ -349,16 +359,22 @@ pub(super) fn show_identified_form(
     let appid_c = appid_row.clone();
     let wizard_c = wizard.clone();
     add_btn.connect_clicked(move |_| {
-        let mut w = wizard_c.borrow_mut();
-        if let Some(game) = w.identified.take() {
-            let name = name_c.text().to_string();
-            let app_id = appid_c.text().to_string();
-            let profile_id = w.profile_row.as_ref()
-                .and_then(|r| selected_profile_id(r, &w.profiles));
+        let extracted = {
+            let mut w = wizard_c.borrow_mut();
+            w.identified.take().map(|game| {
+                let name = name_c.text().to_string();
+                let app_id = appid_c.text().to_string();
+                let profile_id = w.profile_row.as_ref()
+                    .and_then(|r| selected_profile_id(r, &w.profiles));
+                (game, name, app_id, profile_id)
+            })
+        };
+        if let Some((game, name, app_id, profile_id)) = extracted {
             start_add(wizard_c.clone(), game, name, app_id, profile_id, skip_emu_prompt);
         }
     });
-    content.append(&add_btn);
+    body.append(&add_btn);
+    content.append(&body);
 }
 
 pub(super) fn start_add(

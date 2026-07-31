@@ -126,33 +126,38 @@ pub fn has_original_gog_dlls(game_exe: &str) -> bool {
     result.is_some()
 }
 
-/// All GOG Galaxy DLL filenames (case-insensitive match).
-/// Find `ngalaxye_settings/` directories recursively in `game_folder`, move
-/// the first one found to the game root, then create relative symlinks from
-/// every directory containing Galaxy DLLs back to the root settings.
+/// Find `ngalaxye_settings/` in the game folder. If it exists somewhere other
+/// than the root, leave it in place and create a symlink at the game root
+/// pointing to it. If it doesn't exist, create it at the root. Then create
+/// symlinks from every directory containing Galaxy DLLs to the root settings.
 pub fn centralize_galaxy_settings(game_folder: &str) -> Result<Option<PathBuf>, String> {
     let root = Path::new(game_folder);
     let root_settings = root.join("ngalaxye_settings");
 
-    if root_settings.is_dir() {
+    // If ngalaxye_settings/ is already at the root (real dir, not symlink), just symlink DLL dirs.
+    if root_settings.is_dir() && !std::fs::symlink_metadata(&root_settings).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
         symlink_gog_dll_dirs_to_settings(root, &root_settings);
         return Ok(Some(root_settings));
     }
 
     let found = find_galaxy_settings_recursive(root);
-    let Some(found_dir) = found else {
-        return Ok(None);
-    };
 
-    std::fs::rename(&found_dir, &root_settings)
-        .map_err(|e| format!("move ngalaxye_settings to root: {e}"))?;
-
-    #[cfg(unix)]
-    {
-        let rel = compute_relative(&found_dir, &root_settings);
-        let _ = std::os::unix::fs::symlink(&rel, &found_dir);
+    if let Some(found_dir) = found {
+        // ngalaxye_settings exists somewhere — symlink root to it (don't move)
+        #[cfg(unix)]
+        {
+            if !root_settings.exists() {
+                let rel = compute_relative(&root_settings, &found_dir);
+                let _ = std::os::unix::fs::symlink(&rel, &root_settings);
+            }
+        }
+        symlink_gog_dll_dirs_to_settings(root, &root_settings);
+        return Ok(Some(root_settings));
     }
 
+    // No ngalaxye_settings found — create at root and symlink DLL dirs
+    std::fs::create_dir_all(&root_settings)
+        .map_err(|e| format!("create ngalaxye_settings at root: {e}"))?;
     symlink_gog_dll_dirs_to_settings(root, &root_settings);
     Ok(Some(root_settings))
 }

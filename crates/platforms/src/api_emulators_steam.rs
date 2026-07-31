@@ -32,42 +32,44 @@ pub fn find_steam_settings(game_exe: &str, save_dir: &str, app_id: &str) -> Opti
     None
 }
 
-/// Find `steam_settings/` directories recursively in `game_folder`, move the
-/// first one found to the game root, then create relative symlinks from every
-/// directory containing Steam DLLs back to the root `steam_settings/`.
+/// Find `steam_settings/` in the game folder. If it exists somewhere other
+/// than the root, leave it in place and create a symlink at the game root
+/// pointing to it. If it doesn't exist, create it at the root. Then create
+/// symlinks from every directory containing Steam DLLs to the root
+/// `steam_settings/`.
 ///
 /// This ensures GBE/GSE finds its config regardless of which subdirectory the
-/// Steam DLL lives in, without duplicating the config files.
+/// Steam DLL lives in, without duplicating or moving config files.
 pub fn centralize_steam_settings(game_folder: &str) -> Result<Option<PathBuf>, String> {
     let root = Path::new(game_folder);
     let root_settings = root.join("steam_settings");
 
-    // If steam_settings/ is already at the root, just symlink DLL dirs.
-    if root_settings.is_dir() {
+    // If steam_settings/ is already at the root (real dir, not symlink), just symlink DLL dirs.
+    if root_settings.is_dir() && !std::fs::symlink_metadata(&root_settings).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
         symlink_dll_dirs_to_settings(root, &root_settings);
         return Ok(Some(root_settings));
     }
 
     // Search recursively for steam_settings/ in subdirectories
     let found = find_steam_settings_recursive(root);
-    let Some(found_dir) = found else {
-        return Ok(None);
-    };
 
-    // Move it to the root
-    std::fs::rename(&found_dir, &root_settings)
-        .map_err(|e| format!("move steam_settings to root: {e}"))?;
-
-    // Create a symlink at the original location back to root
-    #[cfg(unix)]
-    {
-        let rel = compute_relative(&found_dir, &root_settings);
-        let _ = std::os::unix::fs::symlink(&rel, &found_dir);
+    if let Some(found_dir) = found {
+        // steam_settings exists somewhere — symlink root to it (don't move)
+        #[cfg(unix)]
+        {
+            if !root_settings.exists() {
+                let rel = compute_relative(&root_settings, &found_dir);
+                let _ = std::os::unix::fs::symlink(&rel, &root_settings);
+            }
+        }
+        symlink_dll_dirs_to_settings(root, &root_settings);
+        return Ok(Some(root_settings));
     }
 
-    // Symlink all DLL directories to the root steam_settings/
+    // No steam_settings found — create at root and symlink DLL dirs
+    std::fs::create_dir_all(&root_settings)
+        .map_err(|e| format!("create steam_settings at root: {e}"))?;
     symlink_dll_dirs_to_settings(root, &root_settings);
-
     Ok(Some(root_settings))
 }
 

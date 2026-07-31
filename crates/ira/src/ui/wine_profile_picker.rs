@@ -1,8 +1,10 @@
+use std::rc::Rc;
+
 use adw::prelude::*;
 use ira_models::WineProfile;
 use super::css::CSS_FLAT;
 use super::helpers::string_list_from;
-use super::profile_dialog::show_profile_dialog;
+use super::profile_dialog::{show_profile_dialog, ProfileDialogCallbacks};
 use super::state::SharedState;
 
 /// Build a wine profile `ComboRow` with an attached edit button.
@@ -52,10 +54,32 @@ pub fn build_wine_profile_picker(
         let parent = state_c.borrow().window.clone();
         let db = state_c.borrow().db.clone();
         let slug_arg = slug_c.as_deref();
+
+        let make_on_saved = |select_id: bool| -> Rc<dyn Fn(i64)> {
+            let row_c2 = row_c.clone();
+            let state_c2 = state_c.clone();
+            Rc::new(move |new_id: i64| {
+                let profiles = ira_db::get_all_profiles(&state_c2.borrow().db).unwrap_or_default();
+                let labels: Vec<String> = std::iter::once("New prefix".to_string())
+                    .chain(profiles.iter().map(|p| p.name.clone()))
+                    .collect();
+                let model = string_list_from(&labels);
+                row_c2.set_model(Some(&model));
+                if select_id {
+                    for (i, p) in profiles.iter().enumerate() {
+                        if p.id == new_id {
+                            row_c2.set_selected((i + 1) as u32);
+                            break;
+                        }
+                    }
+                }
+            })
+        };
+
         if idx == 0 {
-            show_profile_dialog(&parent, &db, None, &state_c, &win_c, None, slug_arg);
+            show_profile_dialog(&parent, &db, None, &state_c, &win_c, slug_arg, ProfileDialogCallbacks { list_rc: None, on_saved: Some(make_on_saved(true)) });
         } else if let Some(p) = profiles_c.get(idx - 1) {
-            show_profile_dialog(&parent, &db, Some(p.clone()), &state_c, &win_c, None, slug_arg);
+            show_profile_dialog(&parent, &db, Some(p.clone()), &state_c, &win_c, slug_arg, ProfileDialogCallbacks { list_rc: None, on_saved: Some(make_on_saved(false)) });
         }
     });
     row.add_suffix(&edit_btn);

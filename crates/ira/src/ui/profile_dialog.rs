@@ -56,7 +56,7 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> (
     let sw_add = settings_win_clone.clone();
     let list_rc_add = list_rc.clone();
     add_btn.connect_clicked(move |_| {
-        show_profile_dialog(&win_add, &db_add, None, &sc_add, &sw_add, Some(list_rc_add.clone()), None);
+        show_profile_dialog(&win_add, &db_add, None, &sc_add, &sw_add, None, ProfileDialogCallbacks { list_rc: Some(list_rc_add.clone()), on_saved: None });
     });
     group.set_header_suffix(Some(&add_btn));
 
@@ -89,6 +89,8 @@ fn repopulate_profiles(
 
         let edit_btn = gtk4::Button::from_icon_name("document-edit-symbolic");
         edit_btn.add_css_class(CSS_FLAT);
+        edit_btn.set_valign(gtk4::Align::Center);
+        edit_btn.set_vexpand(false);
         let p_edit = p.clone();
         let win_edit = window.clone();
         let db_edit = db.clone();
@@ -96,12 +98,14 @@ fn repopulate_profiles(
         let sw_edit = settings_win.clone();
         let list_rc_edit = list_rc.clone();
         edit_btn.connect_clicked(move |_| {
-            show_profile_dialog(&win_edit, &db_edit, Some(p_edit.clone()), &sc_edit, &sw_edit, Some(list_rc_edit.clone()), None);
+            show_profile_dialog(&win_edit, &db_edit, Some(p_edit.clone()), &sc_edit, &sw_edit, None, ProfileDialogCallbacks { list_rc: Some(list_rc_edit.clone()), on_saved: None });
         });
         row.add_suffix(&edit_btn);
 
         let del_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
         del_btn.add_css_class(CSS_FLAT);
+        del_btn.set_valign(gtk4::Align::Center);
+        del_btn.set_vexpand(false);
         let p_id = p.id;
         let db_del = db.clone();
         let sw_del = settings_win.clone();
@@ -137,14 +141,19 @@ fn repopulate_profiles(
     }
 }
 
+pub struct ProfileDialogCallbacks {
+    pub list_rc: Option<ListRef>,
+    pub on_saved: Option<Rc<dyn Fn(i64)>>,
+}
+
 pub fn show_profile_dialog(
     parent: &adw::ApplicationWindow,
     db: &ira_db::DbConn,
     existing: Option<ira_models::WineProfile>,
     state: &SharedState,
     settings_win: &adw::Window,
-    list_rc: Option<ListRef>,
     game_slug: Option<&str>,
+    callbacks: ProfileDialogCallbacks,
 ) {
     let win = adw::Window::new();
     win.set_default_width(450);
@@ -194,7 +203,7 @@ pub fn show_profile_dialog(
     group.add(&version_row);
 
     let prefix_entry = adw::EntryRow::new();
-    prefix_entry.set_title("Wine prefix path (empty = default ~/.wine)");
+    prefix_entry.set_title("Wine prefix path");
     if let Some(p) = existing.as_ref() {
         prefix_entry.set_text(&p.prefix);
     } else if let Some(slug) = game_slug {
@@ -270,7 +279,8 @@ pub fn show_profile_dialog(
     let parent_c = parent.clone();
     let sc_c = state.clone();
     let sw_c = settings_win.clone();
-    let list_rc_c = list_rc.clone();
+    let list_rc_c = callbacks.list_rc.clone();
+    let on_saved_c = callbacks.on_saved.clone();
     save_btn.connect_clicked(move |_| {
         let name = name_c.text().to_string();
         if name.is_empty() {
@@ -286,7 +296,7 @@ pub fn show_profile_dialog(
             _ => "auto".to_string(),
         };
         let umu_enabled = umu_row_c.is_active();
-        if let Some(p) = existing.as_ref() {
+        let saved_id = if let Some(p) = existing.as_ref() {
             let mut updated = p.clone();
             updated.name = name;
             updated.wine_version = wine_version;
@@ -297,6 +307,7 @@ pub fn show_profile_dialog(
             if let Err(e) = ira_db::update_profile(&db_c, &updated) {
                 eprintln!("Failed to update profile: {}", e);
             }
+            Some(p.id)
         } else {
             let new_profile = ira_models::WineProfile {
                 id: 0,
@@ -307,13 +318,20 @@ pub fn show_profile_dialog(
                 arch,
                 umu_enabled,
             };
-            if let Err(e) = ira_db::add_profile(&db_c, &new_profile) {
-                eprintln!("Failed to add profile: {}", e);
+            match ira_db::add_profile(&db_c, &new_profile) {
+                Ok(id) => Some(id),
+                Err(e) => {
+                    eprintln!("Failed to add profile: {}", e);
+                    None
+                }
             }
-        }
+        };
         win_c2.close();
         if let Some(ref lr) = list_rc_c {
             repopulate_profiles(lr, &db_c, &parent_c, &sc_c, &sw_c);
+        }
+        if let (Some(id), Some(cb)) = (saved_id, &on_saved_c) {
+            cb(id);
         }
     });
 }

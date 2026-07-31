@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use adw::prelude::*;
 use ira_models::{AppDetails, GameLaunchConfig, WineConfig, WineProfile};
 use super::helpers;
@@ -121,11 +124,11 @@ pub(super) fn build_api_emulator_page(
     languages: &[String],
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
-) {
+) -> Option<Rc<RefCell<bool>>> {
     let (emu_exe, emu_trophy_source, emu_app_id, save_dir) = 
         (params.emu_exe, params.emu_trophy_source, params.emu_app_id, params.save_dir);
     if (emu_trophy_source != ira_models::TrophySource::Gse && emu_trophy_source != ira_models::TrophySource::Nge) || emu_exe.is_empty() {
-        return;
+        return None;
     }
 
     let emu_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -151,29 +154,37 @@ pub(super) fn build_api_emulator_page(
     let action_group = adw::PreferencesGroup::new();
     action_group.set_title("Actions");
 
+    let pending_uninstall: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
+
     if is_installed {
         let uninstall_btn = gtk4::Button::with_label("Uninstall API emulator");
         uninstall_btn.add_css_class(CSS_DESTRUCTIVE_ACTION);
         uninstall_btn.set_valign(gtk4::Align::Center);
-        let exe_c = emu_exe.to_string();
         let status_c = status_row.clone();
-        let ts_c = emu_trophy_source;
+        let pu_c = pending_uninstall.clone();
+        let win_c = state.borrow().window.clone();
         uninstall_btn.connect_clicked(move |_| {
-            let result = if ts_c == ira_models::TrophySource::Gse {
-                ira_platforms::api_emulators::uninstall_gse(&exe_c)
-            } else {
-                ira_platforms::api_emulators::uninstall_nge(&exe_c)
-            };
-            match result {
-                Ok(()) => {
-                    status_c.set_title("API emulator not installed");
+            let alert = adw::AlertDialog::new(
+                Some("Uninstall API emulator?"),
+                Some("This will restore the original Steam/GOG DLLs. The change will be applied when you save."),
+            );
+            alert.add_response("cancel", "Cancel");
+            alert.add_response("uninstall", "Uninstall");
+            alert.set_response_appearance("uninstall", adw::ResponseAppearance::Destructive);
+            alert.set_default_response(Some("cancel"));
+            alert.set_close_response("cancel");
+            let pu_c = pu_c.clone();
+            let status_c = status_c.clone();
+            alert.choose(Some(&win_c), None::<&gio::Cancellable>, move |response| {
+                if response == "uninstall" {
+                    *pu_c.borrow_mut() = true;
+                    status_c.set_title("API emulator will be uninstalled on save");
                 }
-                Err(e) => eprintln!("Uninstall failed: {}", e),
-            }
+            });
         });
         let uninstall_row = adw::ActionRow::new();
         uninstall_row.set_title("Remove emulator");
-        uninstall_row.set_subtitle("Restores original API DLLs");
+        uninstall_row.set_subtitle("Restores original API DLLs (applies on save)");
         uninstall_row.add_suffix(&uninstall_btn);
         action_group.add(&uninstall_row);
     } else {
@@ -288,6 +299,7 @@ pub(super) fn build_api_emulator_page(
     sidebar.append(&settings_dialog::sidebar_separator());
     sidebar.append(&settings_dialog::settings_sidebar_row("applications-engineering-symbolic", "API Emulator", "api_emulator"));
     stack.add_named(&emu_scroll, Some("api_emulator"));
+    Some(pending_uninstall)
 }
 
 pub(super) struct ProfileDropdownParams<'a> {

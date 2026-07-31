@@ -251,7 +251,7 @@ fn build_dialog_contents(
     };
 
     let emu_save_dir = state.borrow().save_dir.clone();
-    build_api_emulator_page(
+    let pending_emu_uninstall = build_api_emulator_page(
         super::edit_game_pages::ApiEmuPageParams {
             emu_exe: &saved_launch.exe,
             emu_trophy_source: game.trophy_source,
@@ -381,6 +381,7 @@ fn build_dialog_contents(
             profiles: profiles_s.clone(),
             saved_profile_id,
             game_folder_entry: game_folder_entry_s.clone(),
+            pending_emu_uninstall: pending_emu_uninstall.clone(),
         });
     });
 

@@ -43,6 +43,7 @@ pub(super) struct SaveGameSettingsParams {
     pub profiles: Vec<ira_models::WineProfile>,
     pub saved_profile_id: Option<i64>,
     pub game_folder_entry: Option<adw::EntryRow>,
+    pub pending_emu_uninstall: Option<Rc<RefCell<bool>>>,
 }
 
 struct AppIdResult {
@@ -641,6 +642,23 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
     save_logo_settings(&db, &params);
     save_dlc_config(&params);
     save_language_config(&params);
+
+    // Apply pending API emulator uninstall
+    if let Some(ref pu) = params.pending_emu_uninstall {
+        if *pu.borrow() {
+            let exe = params.game_exe.clone();
+            let ts = params.trophy_source;
+            let result = if ts == TrophySource::Gse {
+                ira_platforms::api_emulators::uninstall_gse(&exe)
+            } else {
+                ira_platforms::api_emulators::uninstall_nge(&exe)
+            };
+            if let Err(e) = result {
+                eprintln!("Failed to uninstall API emulator: {}", e);
+            }
+        }
+    }
+
     update_game_state_in_memory(&params, &title, &sort_title, &app_id_result);
     update_game_names(&params.state, &app_id_result, &params.app_id, &title);
 

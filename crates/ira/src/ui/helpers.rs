@@ -21,7 +21,7 @@ pub struct DialogLayout {
 pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
     let win = adw::Window::new();
     win.set_default_size(720, 540);
-    win.set_modal(true);
+    win.set_modal(false);
     win.set_transient_for(Some(parent));
 
     let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);

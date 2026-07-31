@@ -483,6 +483,8 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     let btns = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     btns.set_hexpand(true);
     btns.set_halign(gtk4::Align::End);
+    btns.set_valign(gtk4::Align::Center);
+    btns.set_vexpand(false);
 
     let refresh_images = make_refresh_closure(
         &preview_wrapper,
@@ -589,6 +591,8 @@ fn build_dir_buttons(
     ctx: &DirButtonsCtx,
 ) -> gtk4::Box {
     let btns = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    btns.set_valign(gtk4::Align::Center);
+    btns.set_vexpand(false);
 
     let browse_btn = make_browse_button(
         Some(parent_win),

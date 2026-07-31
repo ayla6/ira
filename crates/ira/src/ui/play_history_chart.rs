@@ -1,6 +1,6 @@
 use gtk4::prelude::*;
 use adw::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use chrono::Datelike;
@@ -64,6 +64,7 @@ struct State {
     sidebar_header: gtk4::Label, sidebar_list: gtk4::ListBox, week_label: gtk4::Label,
     prev_w: gtk4::Button, next_w: gtk4::Button, prev_d: gtk4::Button, next_d: gtk4::Button,
     on_delete: Option<DeleteSessionFn>,
+    ctrl_held: Rc<Cell<bool>>,
 }
 
 pub(super) fn build_weekly_chart(weeks: Vec<WeekData>, is_single_game: bool, on_delete: Option<DeleteSessionFn>) -> gtk4::Widget {
@@ -137,6 +138,7 @@ pub(super) fn build_weekly_chart(weeks: Vec<WeekData>, is_single_game: bool, on_
         week_label: week_label.clone(),
         prev_w: pw.clone(), next_w: nw.clone(), prev_d: pd.clone(), next_d: nd.clone(),
         on_delete,
+        ctrl_held: Rc::new(Cell::new(false)),
     }));
 
     {
@@ -152,12 +154,25 @@ pub(super) fn build_weekly_chart(weeks: Vec<WeekData>, is_single_game: bool, on_
         let st = state.clone();
         let kc = gtk4::EventControllerKey::new();
         kc.set_propagation_phase(gtk4::PropagationPhase::Capture);
-        kc.connect_key_pressed(move |_, key, _, _| match key {
-            gtk4::gdk::Key::Left | gtk4::gdk::Key::KP_Left => { nav_day(&st, -1); glib::Propagation::Stop }
-            gtk4::gdk::Key::Right | gtk4::gdk::Key::KP_Right => { nav_day(&st, 1); glib::Propagation::Stop }
-            gtk4::gdk::Key::Up | gtk4::gdk::Key::KP_Up => { nav_week(&st, -1); glib::Propagation::Stop }
-            gtk4::gdk::Key::Down | gtk4::gdk::Key::KP_Down => { nav_week(&st, 1); glib::Propagation::Stop }
-            _ => glib::Propagation::Proceed,
+        let ctrl = { let s = st.borrow(); s.ctrl_held.clone() };
+        let ctrl_pressed = ctrl.clone();
+        let ctrl_released = ctrl.clone();
+        kc.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk4::gdk::Key::Control_L || key == gtk4::gdk::Key::Control_R {
+                ctrl_pressed.set(true);
+            }
+            match key {
+                gtk4::gdk::Key::Left | gtk4::gdk::Key::KP_Left => { nav_day(&st, -1); glib::Propagation::Stop }
+                gtk4::gdk::Key::Right | gtk4::gdk::Key::KP_Right => { nav_day(&st, 1); glib::Propagation::Stop }
+                gtk4::gdk::Key::Up | gtk4::gdk::Key::KP_Up => { nav_week(&st, -1); glib::Propagation::Stop }
+                gtk4::gdk::Key::Down | gtk4::gdk::Key::KP_Down => { nav_week(&st, 1); glib::Propagation::Stop }
+                _ => glib::Propagation::Proceed,
+            }
+        });
+        kc.connect_key_released(move |_, key, _, _| {
+            if key == gtk4::gdk::Key::Control_L || key == gtk4::gdk::Key::Control_R {
+                ctrl_released.set(false);
+            }
         });
         container.add_controller(kc);
     }
@@ -273,7 +288,7 @@ fn update_sidebar(s: &State, day: &DayData) {
             let v = gtk4::Label::new(Some(&d.value)); v.add_css_class(CSS_DIM_LABEL); r.add_suffix(&v);
             if let Some(h) = &d.color_hex { let sw = gtk4::Label::new(None); sw.set_markup(&format!("<span foreground=\"{}\">\u{25A0}</span>", h)); r.add_prefix(&sw); }
             if let (Some(sid), Some(on_delete)) = (d.session_id, &s.on_delete) {
-                r.add_suffix(&make_delete_button(sid, on_delete));
+                r.add_suffix(&make_delete_button(sid, on_delete, &s.ctrl_held));
             }
             s.sidebar_list.append(&r);
         } else {
@@ -285,7 +300,7 @@ fn update_sidebar(s: &State, day: &DayData) {
                 let sub = adw::ActionRow::new(); sub.set_title(&ses.label);
                 let sv = gtk4::Label::new(Some(&ses.value)); sv.add_css_class(CSS_DIM_LABEL); sub.add_suffix(&sv);
                 if let Some(on_delete) = &s.on_delete {
-                    sub.add_suffix(&make_delete_button(ses.session_id, on_delete));
+                    sub.add_suffix(&make_delete_button(ses.session_id, on_delete, &s.ctrl_held));
                 }
                 ex.add_row(&sub);
             }
@@ -294,18 +309,18 @@ fn update_sidebar(s: &State, day: &DayData) {
     }
 }
 
-fn make_delete_button(session_id: i64, on_delete: &DeleteSessionFn) -> gtk4::Widget {
-    let img = gtk4::Image::from_icon_name("user-trash-symbolic");
-    img.set_tooltip_text(Some("Delete session (hold Ctrl to skip confirmation)"));
-    img.add_css_class(CSS_DIM_LABEL);
+fn make_delete_button(session_id: i64, on_delete: &DeleteSessionFn, ctrl_held: &Rc<Cell<bool>>) -> gtk4::Widget {
+    let btn = gtk4::Button::from_icon_name("user-trash-symbolic");
+    btn.add_css_class(CSS_FLAT);
+    btn.add_css_class(CSS_SESSION_DELETE);
+    btn.set_valign(gtk4::Align::Center);
+    btn.set_tooltip_text(Some("Delete session (hold Ctrl to skip confirmation)"));
     let on_delete = on_delete.clone();
-    let g = gtk4::GestureClick::new();
-    g.connect_pressed(move |gesture, _, _, _| {
-        let ctrl = gesture.current_event_state().contains(gtk4::gdk::ModifierType::CONTROL_MASK);
-        on_delete(session_id, ctrl);
+    let ctrl_held = ctrl_held.clone();
+    btn.connect_clicked(move |_| {
+        on_delete(session_id, ctrl_held.get());
     });
-    img.add_controller(g);
-    img.upcast()
+    btn.upcast()
 }
 
 #[cfg(test)]

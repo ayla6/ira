@@ -21,6 +21,7 @@ pub const CSS_PLAYING_GAME: &str = "playing-game";
 pub const CSS_POPOVER_MENU_ROW: &str = "popover-menu-row";
 pub const CSS_RECENT_SCROLL: &str = "recent-scroll";
 pub const CSS_SECTION_TITLE: &str = "section-title";
+pub const CSS_SESSION_DELETE: &str = "session-delete";
 pub const CSS_SELECTED: &str = "selected";
 pub const CSS_SETTINGS_HEADER: &str = "settings-header";
 pub const CSS_SETTINGS_SIDEBAR: &str = "settings-sidebar";
@@ -212,4 +213,18 @@ gridview.game-grid child:focus-within {
 .locked-trophy { filter: grayscale(100%); }
 .hero-fallback-bg { background: shade(@theme_bg_color, 0.5); }
 .hero-title-overlay { color: white; font-size: 1.4em; font-weight: 700; text-shadow: 0 2px 8px rgba(0,0,0,0.8); }
+
+.session-delete {
+    margin-left: 6px;
+    padding: 2px;
+    color: alpha(@theme_fg_color, 0.75);
+}
+.session-delete:hover {
+    color: @error_color;
+    background-color: alpha(@error_color, 0.12);
+}
+.session-delete:active {
+    color: @error_color;
+    background-color: alpha(@error_color, 0.22);
+}
 ";

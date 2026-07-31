@@ -113,6 +113,22 @@ pub fn show_play_history_dialog(state: &SharedState, game_id: i64, variant_id: O
     toolbar_view.set_content(Some(&box_));
     dialog.set_child(Some(&toolbar_view));
     dialog.present(Some(&state.borrow().window));
+
+    let refresh_state = state.clone();
+    dialog.connect_closed(move |_| {
+        let still_active = refresh_state.borrow().displayed_db_id == game_id;
+        let game = if still_active {
+            refresh_state.borrow().games.iter()
+                .find(|g| g.db_id == game_id && g.variant_id == variant_id)
+                .cloned()
+        } else {
+            None
+        };
+        if let Some(game) = game {
+            super::game_display::display_game(&game, &refresh_state);
+        }
+    });
+
     dialog
 }
 

@@ -45,8 +45,12 @@ pub fn show_settings_dialog(
     let content_area = layout.content_area;
 
     let (general_page, notif_row, bg_row, hidden_row, steam_entry, sgdb_entry, lang_list) = build_general_settings_page(&cfg);
+    let general_scroll = gtk4::ScrolledWindow::new();
+    general_scroll.set_hexpand(true);
+    general_scroll.set_vexpand(true);
+    general_scroll.set_child(Some(&general_page));
     sidebar.append(&settings_sidebar_row("preferences-system-symbolic", "General", "general"));
-    stack.add_named(&general_page, Some("general"));
+    stack.add_named(&general_scroll, Some("general"));
 
     let (overlay_page, overlay_widgets) = build_overlay_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("view-grid-symbolic", "Overlay", "overlay"));

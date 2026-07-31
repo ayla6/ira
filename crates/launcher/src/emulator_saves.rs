@@ -1,35 +1,26 @@
 use std::path::{Path, PathBuf};
 
-/// Convert a Linux absolute path to a Wine UNC path.
-/// `/home/user/.local/share/ira` → `Z:\home\user\.local\share\ira`
-fn to_wine_unc_path(path: &Path) -> String {
-    format!("Z:{}", path.to_string_lossy().replace('/', "\\"))
-}
-
-/// Set up centralized save path for GBE by pushing the `GseSavePath` env var.
-/// Called at launch time when `trophy_source == Gse`.
+/// Set up centralized save path for GBE by symlinking its save directories
+/// inside the Wine prefix. Called at launch time when `trophy_source == Gse`.
 ///
-/// GBE checks this env var first (before `configs.user.ini`). When set, all
-/// save data goes to `<centralized>/<appid>/` and the global settings folder
-/// is ignored (fine — we put everything in `steam_settings/configs.user.ini`).
-pub fn setup_gbe_saves(
-    env: &mut Vec<(String, String)>,
-    save_dir: &str,
-    is_wine: bool,
-) {
+/// GBE saves to `%APPDATA%\GSE Saves\` (legacy name: `Goldberg SteamEmu Saves`).
+/// We replace those directories with symlinks to `<save_dir>/emulator_saves/gbe/`
+/// so saves persist across prefix resets.
+///
+/// The previous approach passed `GseSavePath` as an env var to redirect GBE's
+/// save root. That broke Denuvo/reflex hypervisor games (P5T, P5R): with the
+/// env var set, GBE ignores its existing settings folder under the default save
+/// root, and the game refuses to start. Symlinks keep GBE on its default path,
+/// so the game can't tell saves were redirected.
+pub fn setup_gbe_saves(wine_prefix: &str, save_dir: &str) {
     let centralized = Path::new(save_dir).join("emulator_saves").join("gbe");
     let _ = std::fs::create_dir_all(&centralized);
 
-    let path_str = if is_wine {
-        to_wine_unc_path(&centralized)
-    } else {
-        centralized.to_string_lossy().into_owned()
-    };
-
-    env.retain(|(k, _)| k != "GseSavePath");
-    env.push(("GseSavePath".to_string(), path_str));
+    for user_dir in prefix_user_dirs(wine_prefix) {
+        create_roaming_symlink(&user_dir, &centralized, "GSE Saves");
+        create_roaming_symlink(&user_dir, &centralized, "Goldberg SteamEmu Saves");
+    }
 }
-
 /// Set up centralized save path for NGE by creating symlinks in the Wine prefix.
 /// Called at launch time when `trophy_source == Nge` and Wine is enabled.
 ///
@@ -41,17 +32,30 @@ pub fn setup_nge_saves(wine_prefix: &str, save_dir: &str) {
     let centralized = Path::new(save_dir).join("emulator_saves").join("nge");
     let _ = std::fs::create_dir_all(&centralized);
 
+    for user_dir in prefix_user_dirs(wine_prefix) {
+        create_roaming_symlink(&user_dir, &centralized, "NemirtingasGalaxyEmu");
+    }
+}
+
+/// Resolve the user directories to place save symlinks in, creating a
+/// `steamuser` dir when the prefix has none yet.
+///
+/// Returns an empty vec for an empty `wine_prefix` — an empty string would
+/// resolve to the current working directory (`Path::new("").join("drive_c")`),
+/// which could create a stray `drive_c/` wherever the app is running from.
+fn prefix_user_dirs(wine_prefix: &str) -> Vec<PathBuf> {
+    if wine_prefix.is_empty() {
+        return Vec::new();
+    }
     let users_dir = Path::new(wine_prefix).join("drive_c").join("users");
     let user_dirs = list_wine_users(&users_dir);
 
     if user_dirs.is_empty() {
         let steamuser = users_dir.join("steamuser");
         let _ = std::fs::create_dir_all(steamuser.join("AppData").join("Roaming"));
-        create_nge_symlink(&steamuser, &centralized);
+        vec![steamuser]
     } else {
-        for user_dir in user_dirs {
-            create_nge_symlink(&user_dir, &centralized);
-        }
+        user_dirs
     }
 }
 
@@ -98,17 +102,21 @@ fn list_wine_users(users_dir: &Path) -> Vec<PathBuf> {
     result
 }
 
-/// Create the `NemirtingasGalaxyEmu` symlink in a user's AppData/Roaming.
+/// Create a symlink `<user_dir>/AppData/Roaming/<name>` → `centralized`.
+fn create_roaming_symlink(user_dir: &Path, centralized: &Path, name: &str) {
+    let roaming = user_dir.join("AppData").join("Roaming");
+    let _ = std::fs::create_dir_all(&roaming);
+    create_save_symlink(&roaming, name, centralized);
+}
+
+/// Create a symlink `<base>/<name>` → `centralized`.
 ///
 /// - If it's already a symlink → skip.
 /// - If it's a real directory → migrate contents to centralized path, then
 ///   replace with symlink.
 /// - If it doesn't exist → create symlink.
-fn create_nge_symlink(user_dir: &Path, centralized: &Path) {
-    let roaming = user_dir.join("AppData").join("Roaming");
-    let _ = std::fs::create_dir_all(&roaming);
-
-    let target = roaming.join("NemirtingasGalaxyEmu");
+fn create_save_symlink(base: &Path, name: &str, centralized: &Path) {
+    let target = base.join(name);
 
     if let Ok(meta) = std::fs::symlink_metadata(&target) {
         if meta.file_type().is_symlink() {
@@ -116,7 +124,8 @@ fn create_nge_symlink(user_dir: &Path, centralized: &Path) {
         }
         // Real directory — migrate contents safely before replacing
         eprintln!(
-            "Migrating NemirtingasGalaxyEmu saves from {} to centralized path",
+            "Migrating {} saves from {} to centralized path",
+            name,
             target.display()
         );
         crate::game_saves::safe_migrate_dir_contents(&target, centralized);
@@ -129,24 +138,34 @@ fn create_nge_symlink(user_dir: &Path, centralized: &Path) {
     }
 }
 
+/// GBE's native Linux save root: `$XDG_DATA_HOME`, falling back to
+/// `~/.local/share`.
+fn native_saves_base() -> PathBuf {
+    std::env::var("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::env::var("HOME")
+                .map(|h| Path::new(&h).join(".local/share"))
+                .unwrap_or_else(|_| PathBuf::from("/tmp"))
+        })
+}
+
+/// Set up centralized save path for GBE for a native Linux game by symlinking
+/// GBE's native save directories (`$XDG_DATA_HOME/GSE Saves` and legacy
+/// `Goldberg SteamEmu Saves`) to `<save_dir>/emulator_saves/gbe/`.
+pub fn setup_gbe_saves_native(save_dir: &str) {
+    let centralized = Path::new(save_dir).join("emulator_saves").join("gbe");
+    let _ = std::fs::create_dir_all(&centralized);
+
+    let base = native_saves_base();
+    let _ = std::fs::create_dir_all(&base);
+    create_save_symlink(&base, "GSE Saves", &centralized);
+    create_save_symlink(&base, "Goldberg SteamEmu Saves", &centralized);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_to_wine_unc_path() {
-        let path = Path::new("/home/user/.local/share/ira/emulator_saves/gbe");
-        assert_eq!(
-            to_wine_unc_path(path),
-            "Z:\\home\\user\\.local\\share\\ira\\emulator_saves\\gbe"
-        );
-    }
-
-    #[test]
-    fn test_to_wine_unc_path_root() {
-        let path = Path::new("/");
-        assert_eq!(to_wine_unc_path(path), "Z:\\");
-    }
 
     #[test]
     fn test_list_wine_users_empty_dir() {
@@ -191,14 +210,14 @@ mod tests {
     }
 
     #[test]
-    fn test_create_nge_symlink_creates_when_missing() {
+    fn test_create_roaming_symlink_creates_when_missing() {
         let tmp = tempfile::tempdir().unwrap();
         let centralized = tmp.path().join("nge");
         std::fs::create_dir_all(&centralized).unwrap();
         let user_dir = tmp.path().join("steamuser");
         std::fs::create_dir_all(user_dir.join("AppData").join("Roaming")).unwrap();
 
-        create_nge_symlink(&user_dir, &centralized);
+        create_roaming_symlink(&user_dir, &centralized, "NemirtingasGalaxyEmu");
 
         let target = user_dir.join("AppData").join("Roaming").join("NemirtingasGalaxyEmu");
         assert!(target.is_symlink());
@@ -206,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_nge_symlink_migrates_real_dir() {
+    fn test_create_roaming_symlink_migrates_real_dir() {
         let tmp = tempfile::tempdir().unwrap();
         let centralized = tmp.path().join("nge");
         std::fs::create_dir_all(&centralized).unwrap();
@@ -216,7 +235,7 @@ mod tests {
         std::fs::create_dir_all(&nge_dir).unwrap();
         std::fs::write(nge_dir.join("save.dat"), b"save data").unwrap();
 
-        create_nge_symlink(&user_dir, &centralized);
+        create_roaming_symlink(&user_dir, &centralized, "NemirtingasGalaxyEmu");
 
         // Original is now a symlink
         assert!(nge_dir.is_symlink());
@@ -225,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_nge_symlink_skips_existing_symlink() {
+    fn test_create_roaming_symlink_skips_existing_symlink() {
         let tmp = tempfile::tempdir().unwrap();
         let centralized = tmp.path().join("nge");
         std::fs::create_dir_all(&centralized).unwrap();
@@ -241,7 +260,7 @@ mod tests {
             std::fs::create_dir_all(&other).unwrap();
             std::os::unix::fs::symlink(&other, &target).unwrap();
 
-            create_nge_symlink(&user_dir, &centralized);
+            create_roaming_symlink(&user_dir, &centralized, "NemirtingasGalaxyEmu");
 
             // Symlink should still point to the original target, not overwritten
             assert_eq!(std::fs::read_link(&target).unwrap(), other);
@@ -249,31 +268,77 @@ mod tests {
     }
 
     #[test]
-    fn test_setup_gbe_saves_sets_env_var() {
+    fn test_setup_gbe_saves_creates_both_symlinks() {
         let tmp = tempfile::tempdir().unwrap();
         let save_dir = tmp.path().to_str().unwrap();
-        let mut env = vec![("FOO".to_string(), "bar".to_string())];
+        let prefix = tmp.path().join("prefix");
+        let user_dir = prefix.join("drive_c").join("users").join("steamuser");
+        std::fs::create_dir_all(user_dir.join("AppData").join("Roaming")).unwrap();
 
-        setup_gbe_saves(&mut env, save_dir, false);
+        setup_gbe_saves(prefix.to_str().unwrap(), save_dir);
 
-        let gse = env.iter().find(|(k, _)| k == "GseSavePath");
-        assert!(gse.is_some());
-        let path = gse.unwrap().1.clone();
-        assert!(path.ends_with("emulator_saves/gbe"));
+        let roaming = user_dir.join("AppData").join("Roaming");
+        let gse = roaming.join("GSE Saves");
+        let legacy = roaming.join("Goldberg SteamEmu Saves");
+        assert!(gse.is_symlink());
+        assert!(legacy.is_symlink());
+        assert_eq!(
+            std::fs::read_link(&gse).unwrap(),
+            Path::new(save_dir).join("emulator_saves").join("gbe")
+        );
+        assert_eq!(std::fs::read_link(&legacy).unwrap(), gse.read_link().unwrap());
     }
 
     #[test]
-    fn test_setup_gbe_saves_wine_uses_unc_path() {
+    fn test_setup_gbe_saves_skips_existing_symlinks() {
         let tmp = tempfile::tempdir().unwrap();
         let save_dir = tmp.path().to_str().unwrap();
-        let mut env = Vec::new();
+        let prefix = tmp.path().join("prefix");
+        let user_dir = prefix.join("drive_c").join("users").join("steamuser");
+        let roaming = user_dir.join("AppData").join("Roaming");
+        std::fs::create_dir_all(&roaming).unwrap();
 
-        setup_gbe_saves(&mut env, save_dir, true);
+        let manual = tmp.path().join("manual_saves");
+        std::fs::create_dir_all(&manual).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&manual, roaming.join("GSE Saves")).unwrap();
 
-        let gse = env.iter().find(|(k, _)| k == "GseSavePath");
-        assert!(gse.is_some());
-        let path = &gse.unwrap().1;
-        assert!(path.starts_with("Z:\\"));
-        assert!(path.contains("emulator_saves\\gbe"));
+        setup_gbe_saves(prefix.to_str().unwrap(), save_dir);
+
+        // Pre-existing symlink is left alone, pointing at the manual location
+        assert_eq!(std::fs::read_link(roaming.join("GSE Saves")).unwrap(), manual);
+    }
+
+    #[test]
+    fn test_prefix_user_dirs_empty_prefix_creates_nothing() {
+        let cwd = std::env::current_dir().unwrap();
+        let users = prefix_user_dirs("");
+        assert!(users.is_empty());
+        assert!(!cwd.join("drive_c").exists());
+    }
+
+    #[test]
+    fn test_setup_gbe_saves_native_creates_symlinks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().join("ira").to_str().unwrap().to_string();
+        let data_home = tmp.path().join("data_home");
+        std::fs::create_dir_all(&data_home).unwrap();
+
+        // Redirect XDG_DATA_HOME for the test
+        std::env::set_var("XDG_DATA_HOME", &data_home);
+        std::env::remove_var("HOME");
+
+        setup_gbe_saves_native(&save_dir);
+
+        std::env::remove_var("XDG_DATA_HOME");
+
+        let gse = data_home.join("GSE Saves");
+        let legacy = data_home.join("Goldberg SteamEmu Saves");
+        assert!(gse.is_symlink());
+        assert!(legacy.is_symlink());
+        assert_eq!(
+            std::fs::read_link(&gse).unwrap(),
+            Path::new(&save_dir).join("emulator_saves").join("gbe")
+        );
     }
 }

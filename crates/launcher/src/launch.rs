@@ -97,11 +97,6 @@ pub fn launch_game(
             }
         }
 
-        // Centralize GBE saves via GseSavePath env var
-        if ctx.trophy_source == TrophySource::Gse {
-            super::emulator_saves::setup_gbe_saves(&mut env, &ctx.save_dir, true);
-        }
-
         if ctx.overlay_enabled {
             if super::env_builder::uses_gamescope(&cmd) {
                 super::env_builder::add_overlay_env_standalone(&mut env, ctx.overlay_shm.as_deref(), ctx.overlay_font_family.as_deref());
@@ -133,9 +128,11 @@ pub fn launch_game(
             }
         }
 
-        // Centralize NGE saves via symlinks in the Wine prefix
-        if ctx.trophy_source == TrophySource::Nge {
-            super::emulator_saves::setup_nge_saves(&pfx, &ctx.save_dir);
+        // Centralize emulator saves via symlinks in the Wine prefix
+        match ctx.trophy_source {
+            TrophySource::Gse => super::emulator_saves::setup_gbe_saves(&pfx, &ctx.save_dir),
+            TrophySource::Nge => super::emulator_saves::setup_nge_saves(&pfx, &ctx.save_dir),
+            _ => {}
         }
 
         (cmd, env)
@@ -149,9 +146,9 @@ pub fn launch_game(
         let mut cmd = super::native_launch::build_native_command(&launch.exe, &args);
         let mut env = super::env_builder::build_env(launch, None, "", &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
 
-        // Centralize GBE saves via GseSavePath env var (native Linux)
+        // Centralize GBE saves via symlinks in GBE's native save directory
         if ctx.trophy_source == TrophySource::Gse {
-            super::emulator_saves::setup_gbe_saves(&mut env, &ctx.save_dir, false);
+            super::emulator_saves::setup_gbe_saves_native(&ctx.save_dir);
         }
 
         if ctx.overlay_enabled {

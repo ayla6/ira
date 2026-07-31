@@ -54,6 +54,11 @@ fn centralized_base(save_dir: &str, app_id: &str) -> PathBuf {
     Path::new(save_dir).join("saves").join(app_id)
 }
 
+/// Centralized save directory for a game, for UI display (e.g. "Open folder").
+pub fn centralized_save_dir(save_dir: &str, app_id: &str) -> PathBuf {
+    centralized_base(save_dir, app_id)
+}
+
 /// Set up centralized save symlinks for a game. Called at launch time and
 /// at game-add time. For each UFS savefile, resolves the default save
 /// location and creates a symlink to the centralized path.
@@ -136,6 +141,12 @@ fn resolve_wine_paths(
 
     let (parent_path, symlink_name) = split_at_variable(&sf.path);
     if symlink_name.is_empty() {
+        return Vec::new();
+    }
+
+    // An empty prefix resolves to the current working directory; without this
+    // guard a stray `drive_c/` would be created wherever the app is run from.
+    if prefix.is_empty() {
         return Vec::new();
     }
 

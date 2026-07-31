@@ -319,6 +319,17 @@ fn connect_add_handler(
                             if let Err(e) = ira_db::update_game_title(&db_c, game.db_id, &name_c) {
                                 eprintln!("Failed to update game title: {}", e);
                             }
+
+                            // One-time migration of existing emulator saves to centralized path
+                            let wine_prefix = if kind_c == ira_models::GameKind::Wine {
+                                Some(ira_launcher::wine_launch::wine_prefix(&wine_config))
+                            } else {
+                                None
+                            };
+                            ira_platforms::api_emulators::migrate_emulator_saves(
+                                &save_dir_c, ts_c, &app_id_c, wine_prefix.as_deref(),
+                            );
+
                             let _ = sender_c.send(AppMessage::NewGame(game.clone()));
                             let g_name = game.name.clone();
                             crate::ui::enrichment::enrich_game_async(crate::ui::enrichment::EnrichGameParams {

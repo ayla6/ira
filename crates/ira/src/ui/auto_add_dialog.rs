@@ -562,6 +562,21 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
             eprintln!("Failed to centralize ngalaxye_settings: {}", e);
         }
 
+        // One-time migration of existing emulator saves to centralized path.
+        // Check both GBE and NGE default locations since the auto-add flow
+        // may detect GOG DLLs even though trophy_source is Gse.
+        let wine_prefix = if game.is_windows {
+            Some(ira_launcher::wine_launch::wine_prefix(&wine_config))
+        } else {
+            None
+        };
+        ira_platforms::emulator_save_migration::migrate_gbe_saves(
+            &save_dir_for_lang, &app_id, wine_prefix.as_deref(),
+        );
+        ira_platforms::emulator_save_migration::migrate_nge_saves(
+            &save_dir_for_lang, wine_prefix.as_deref(),
+        );
+
         let needs_nge = ira_platforms::api_emulators::find_gog_dlls_recursive(&game_folder_str)
             .iter()
             .any(|d| !ira_platforms::api_emulators::has_gog_emulator_backups(d));

@@ -12,6 +12,7 @@ pub use crate::api_emulators_steam::{
     is_gse_installed, list_gse_versions, read_gse_language, uninstall_gse, write_gse_dlc_config,
     write_gse_language,
 };
+pub use crate::emulator_save_migration::migrate_emulator_saves;
 
 pub fn read_current_language(
     trophy_source: ira_models::TrophySource,

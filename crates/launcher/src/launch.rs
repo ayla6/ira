@@ -1,4 +1,4 @@
-use ira_models::{GameLaunchConfig, WineConfig};
+use ira_models::{GameLaunchConfig, WineConfig, TrophySource};
 use ira_db::DbConn;
 use ira_models::AppSender;
 
@@ -12,6 +12,7 @@ pub struct LaunchContext {
     pub variant_id: Option<i64>,
     pub count_playtime: bool,
     pub app_id: String,
+    pub trophy_source: TrophySource,
     pub db: DbConn,
     pub save_dir: String,
     pub running_games: Arc<Mutex<HashMap<i64, i32>>>,
@@ -63,6 +64,12 @@ pub fn launch_game(
             super::wine_launch::build_wine_command(&wine_exe, &launch.exe, &args, wine)
         };
         let mut env = super::env_builder::build_env(launch, Some(wine), &wine_exe, &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
+
+        // Centralize GBE saves via GseSavePath env var
+        if ctx.trophy_source == TrophySource::Gse {
+            super::emulator_saves::setup_gbe_saves(&mut env, &ctx.save_dir, true);
+        }
+
         if ctx.overlay_enabled {
             if super::env_builder::uses_gamescope(&cmd) {
                 super::env_builder::add_overlay_env_standalone(&mut env, ctx.overlay_shm.as_deref(), ctx.overlay_font_family.as_deref());
@@ -110,6 +117,11 @@ pub fn launch_game(
             }
         }
 
+        // Centralize NGE saves via symlinks in the Wine prefix
+        if ctx.trophy_source == TrophySource::Nge {
+            super::emulator_saves::setup_nge_saves(&pfx, &ctx.save_dir);
+        }
+
         (cmd, env)
     } else {
         super::native_launch::validate_executable(&launch.exe)?;
@@ -120,6 +132,12 @@ pub fn launch_game(
         };
         let mut cmd = super::native_launch::build_native_command(&launch.exe, &args);
         let mut env = super::env_builder::build_env(launch, None, "", &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
+
+        // Centralize GBE saves via GseSavePath env var (native Linux)
+        if ctx.trophy_source == TrophySource::Gse {
+            super::emulator_saves::setup_gbe_saves(&mut env, &ctx.save_dir, false);
+        }
+
         if ctx.overlay_enabled {
             if super::env_builder::uses_gamescope(&cmd) {
                 super::env_builder::add_overlay_env_standalone(&mut env, ctx.overlay_shm.as_deref(), ctx.overlay_font_family.as_deref());

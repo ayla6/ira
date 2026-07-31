@@ -106,7 +106,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         let gamescope_fps_default = s.cfg.default_system.gamescope_fps;
         let gamescope_upscaling_default = s.cfg.default_system.gamescope_upscaling.clone();
         let game_info = game
-            .map(|g| (g.kind, g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone(), g.platform_id.clone(), g.ra_core.clone(), g.emulator_override.clone()))
+            .map(|g| (g.kind, g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone(), g.platform_id.clone(), g.ra_core.clone(), g.emulator_override.clone(), g.trophy_source))
             .unwrap_or_default();
         (
             s.running_games.clone(),
@@ -136,7 +136,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         return Ok(());
     }
 
-    let (kind, game_path, game_name, per_game_version, db_id, app_id, platform_id, per_game_ra_core, per_game_emu) = game_info;
+    let (kind, game_path, game_name, per_game_version, db_id, app_id, platform_id, per_game_ra_core, per_game_emu, trophy_source) = game_info;
 
     let started_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -155,6 +155,7 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         db_id,
         game_name: &game_name,
         game_kind: kind,
+        trophy_source,
         sender: &sender,
         running_games: &running_games,
         started_at,

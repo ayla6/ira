@@ -21,7 +21,12 @@ use super::settings_console::{
 use super::css::*;
 
 pub(super) fn settings_page_container() -> gtk4::Box {
-    gtk4::Box::new(gtk4::Orientation::Vertical, 16)
+    let b = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
+    b.set_margin_start(12);
+    b.set_margin_end(12);
+    b.set_margin_top(12);
+    b.set_margin_bottom(12);
+    b
 }
 
 // Re-exports for backward compatibility with files that use super::settings_dialog::*
@@ -48,6 +53,7 @@ pub fn show_settings_dialog(
     let general_scroll = gtk4::ScrolledWindow::new();
     general_scroll.set_hexpand(true);
     general_scroll.set_vexpand(true);
+    general_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
     general_scroll.set_child(Some(&general_page));
     sidebar.append(&settings_sidebar_row("preferences-system-symbolic", "General", "general"));
     stack.add_named(&general_scroll, Some("general"));

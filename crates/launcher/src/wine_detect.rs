@@ -44,6 +44,14 @@ pub(crate) fn get_proton_path(version: &str, wine_exe: &str) -> Option<String> {
     Some(proton_root.to_string_lossy().into_owned())
 }
 
+/// True if the wine version is a Proton build (either the ge-proton sentinel
+/// or a specific Proton version name like "GE-Proton9-20" or "Proton Experimental").
+/// Proton versions must be launched through umu-run, not directly.
+pub(crate) fn is_proton_version(version: &str) -> bool {
+    let v = version.to_lowercase();
+    v == "ge-proton" || v.contains("proton")
+}
+
 pub fn find_wine_binary(version: &str, custom_path: &str) -> Result<String, String> {
     match version {
         "system" => {

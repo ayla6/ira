@@ -85,7 +85,7 @@ fn repopulate_profiles(
     for p in &profiles {
         let row = adw::ActionRow::new();
         row.set_title(&p.name);
-        row.set_subtitle(&format!("{} — {}{}", p.wine_version, if p.prefix.is_empty() { "(default prefix)" } else { &p.prefix }, if p.umu_enabled { " — UMU" } else { "" }));
+        row.set_subtitle(&format!("{} — {}{}", p.wine_version, if p.prefix.is_empty() { "(no prefix)" } else { &p.prefix }, if p.umu_enabled { " — UMU" } else { "" }));
 
         let edit_btn = gtk4::Button::from_icon_name("document-edit-symbolic");
         edit_btn.add_css_class(CSS_FLAT);
@@ -204,6 +204,11 @@ pub fn show_profile_dialog(
 
     let prefix_entry = adw::EntryRow::new();
     prefix_entry.set_title("Wine prefix path");
+
+    // Track whether the user has manually modified the prefix field.
+    // When false, the prefix auto-updates from the profile name.
+    let prefix_manually_edited = Rc::new(RefCell::new(existing.is_some()));
+
     if let Some(p) = existing.as_ref() {
         prefix_entry.set_text(&p.prefix);
     } else if let Some(slug) = game_slug {
@@ -214,6 +219,29 @@ pub fn show_profile_dialog(
         }
     }
 
+    // Auto-update prefix from name when not manually edited
+    let prefix_entry_for_name = prefix_entry.clone();
+    let prefix_me_for_name = prefix_manually_edited.clone();
+    let state_for_name = state.clone();
+    name_entry.connect_changed(move |entry| {
+        if *prefix_me_for_name.borrow() {
+            return;
+        }
+        let name = entry.text().to_string();
+        if name.is_empty() {
+            return;
+        }
+        let base = state_for_name.borrow().cfg.prefix_base_dir.clone();
+        let generated = ira_launcher::wine_launch::generate_prefix_path(&base, &name);
+        prefix_entry_for_name.set_text(&generated);
+    });
+
+    // Mark as manually edited when the user types in the prefix field
+    let prefix_me_for_edit = prefix_manually_edited.clone();
+    prefix_entry.connect_changed(move |_| {
+        *prefix_me_for_edit.borrow_mut() = true;
+    });
+
     let prefix_browse = super::helpers::make_browse_button(
         Some(&win),
         "Select wine prefix",
@@ -222,10 +250,36 @@ pub fn show_profile_dialog(
         super::helpers::entry_path_closure(&prefix_entry),
         {
             let entry = prefix_entry.clone();
-            move |path| entry.set_text(&path.to_string_lossy())
+            let me = prefix_manually_edited.clone();
+            move |path| {
+                entry.set_text(&path.to_string_lossy());
+                *me.borrow_mut() = true;
+            }
         },
     );
     prefix_entry.add_suffix(&prefix_browse);
+
+    // Reset button — regenerate prefix from name, clear manual flag
+    let prefix_reset = gtk4::Button::from_icon_name("edit-undo-symbolic");
+    prefix_reset.add_css_class(CSS_FLAT);
+    prefix_reset.set_valign(gtk4::Align::Center);
+    prefix_reset.set_tooltip_text(Some("Reset to auto-generated path"));
+    let prefix_entry_for_reset = prefix_entry.clone();
+    let name_entry_for_reset = name_entry.clone();
+    let me_for_reset = prefix_manually_edited.clone();
+    let state_for_reset = state.clone();
+    prefix_reset.connect_clicked(move |_| {
+        let name = name_entry_for_reset.text().to_string();
+        if name.is_empty() {
+            return;
+        }
+        let base = state_for_reset.borrow().cfg.prefix_base_dir.clone();
+        let generated = ira_launcher::wine_launch::generate_prefix_path(&base, &name);
+        prefix_entry_for_reset.set_text(&generated);
+        *me_for_reset.borrow_mut() = false;
+    });
+    prefix_entry.add_suffix(&prefix_reset);
+
     group.add(&prefix_entry);
 
     let arch_model = gtk4::StringList::new(&["Auto", "32-bit (win32)", "64-bit (win64)"]);
@@ -246,6 +300,31 @@ pub fn show_profile_dialog(
     umu_row.set_title("UMU Launcher");
     umu_row.set_subtitle("Launch via umu-run (required for Proton versions)");
     umu_row.set_active(existing.as_ref().is_none_or(|p| p.umu_enabled));
+
+    // Auto-enable and disable UMU toggle based on wine version selection
+    let umu_row_for_version = umu_row.clone();
+    let version_row_for_cb = version_row.clone();
+    version_row_for_cb.clone().connect_selected_notify(move |_| {
+        let idx = version_row_for_cb.selected() as usize;
+        if let Some((_, ver)) = ira_launcher::wine_launch::detect_wine_versions().get(idx) {
+            let is_proton = ver.to_lowercase().contains("proton");
+            umu_row_for_version.set_active(is_proton || umu_row_for_version.is_active());
+            umu_row_for_version.set_sensitive(!is_proton);
+        }
+    });
+
+    // Set initial state based on selected version
+    {
+        let idx = version_row.selected() as usize;
+        if let Some((_, ver)) = versions.get(idx) {
+            let is_proton = ver.to_lowercase().contains("proton");
+            if is_proton {
+                umu_row.set_active(true);
+                umu_row.set_sensitive(false);
+            }
+        }
+    }
+
     group.add(&umu_row);
 
     content.append(&group);
@@ -287,9 +366,15 @@ pub fn show_profile_dialog(
             name_c.add_css_class(CSS_ERROR);
             return;
         }
+        let prefix = prefix_c.text().trim().to_string();
+        if prefix.is_empty() {
+            prefix_c.add_css_class(CSS_ERROR);
+            return;
+        }
+        name_c.remove_css_class(CSS_ERROR);
+        prefix_c.remove_css_class(CSS_ERROR);
         let vidx = version_row_c.selected() as usize;
         let wine_version = versions_c.get(vidx).map(|(_, v)| v.clone()).unwrap_or_else(|| "system".to_string());
-        let prefix = prefix_c.text().to_string();
         let arch = match arch_row_c.selected() {
             1 => "win32".to_string(),
             2 => "win64".to_string(),

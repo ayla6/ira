@@ -70,7 +70,11 @@ pub fn launch_game(
             shlex::split(&launch.args).ok_or_else(|| "Failed to parse arguments".to_string())?
         };
 
-        let mut cmd = if wine.umu_enabled {
+        let is_proton = super::wine_detect::is_proton_version(&wine.version);
+
+        // For Proton versions, the command uses umu-run, but WINE env var
+        // must still point to the actual Proton wine binary (umu reads it).
+        let mut cmd = if wine.umu_enabled || is_proton {
             let mut c = vec!["umu-run".to_string()];
             if !launch.exe.is_empty() {
                 c.push(launch.exe.clone());
@@ -81,6 +85,16 @@ pub fn launch_game(
             super::wine_launch::build_wine_command(&wine_exe, &launch.exe, &args, wine)
         };
         let mut env = super::env_builder::build_env(launch, Some(wine), &wine_exe, &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
+
+        // Set umu env vars for Proton versions (automatic) or explicit umu_enabled
+        if wine.umu_enabled || is_proton {
+            env.retain(|(k, _)| k != "PROTON_VERB");
+            env.push(("PROTON_VERB".to_string(), "waitforexitandrun".to_string()));
+            if !ctx.app_id.is_empty() {
+                env.retain(|(k, _)| k != "GAMEID");
+                env.push(("GAMEID".to_string(), ctx.app_id.to_string()));
+            }
+        }
 
         // Centralize GBE saves via GseSavePath env var
         if ctx.trophy_source == TrophySource::Gse {
@@ -112,7 +126,7 @@ pub fn launch_game(
             eprintln!("Warning: wine version mismatch for prefix {}. Configured: '{}', expected: '{}'", pfx, wine.version, std::fs::read_to_string(&version_file).unwrap_or_default().trim());
         }
 
-        if !prefix_ready && !wine.umu_enabled {
+        if !prefix_ready && !wine.umu_enabled && !is_proton {
             for reg_cmd in super::wine_launch::build_wine_reg_commands(wine, &wine_exe) {
                 let mut child = std::process::Command::new(&reg_cmd[0]);
                 for arg in &reg_cmd[1..] {

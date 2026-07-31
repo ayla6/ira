@@ -30,6 +30,7 @@ works or find patterns to adapt:
 - `retro-achievements-docs/`, `retro-achievements-rcheevos/` — RetroAchievements
   API docs and C library.
 - `steam-rom-manager/` — Steam grid asset management in relation to ROMs.
+- NEVER grep references without having a specific project you specifically want to see. It's extremely slow and probably won't have what you want.
 
 ## Build & test commands
 

@@ -8,11 +8,15 @@ pub use crate::wine_detect::{detect_wine_versions, find_wine_binary};
 pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)> {
     let mut env = Vec::new();
 
+    let is_proton = crate::wine_detect::is_proton_version(&wine.version);
+
     env.push(("WINEDEBUG".to_string(), wine.show_debug.clone()));
     env.push(("WINE".to_string(), wine_exe.to_string()));
 
     let pfx = wine_prefix(wine);
-    let arch = if wine.arch != "auto" {
+    let arch = if is_proton {
+        "win64".to_string()
+    } else if wine.arch != "auto" {
         wine.arch.clone()
     } else {
         detect_arch(&pfx, wine_exe)
@@ -88,8 +92,55 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
         env.push(("PROTONPATH".to_string(), proton_path));
     }
 
+    // Proton-specific env vars
+    if is_proton {
+        // Proton needs PROTON_USE_WINED3D when DXVK is not enabled
+        if !wine.dxvk {
+            env.push(("PROTON_USE_WINED3D".to_string(), "1".to_string()));
+        }
+
+        // DXVK D3D8 support when DXVK is enabled
+        if wine.dxvk {
+            env.push(("PROTON_DXVK_D3D8".to_string(), "1".to_string()));
+        }
+
+        // Disable LSteam client integration (we're not Steam)
+        env.push(("PROTON_DISABLE_LSTEAMCLIENT".to_string(), "1".to_string()));
+
+        // Set wayland explicitly (0 or 1, not absent)
+        if wine.graphics == "wayland" {
+            env.push(("PROTON_ENABLE_WAYLAND".to_string(), "1".to_string()));
+        } else {
+            env.push(("PROTON_ENABLE_WAYLAND".to_string(), "0".to_string()));
+        }
+
+        // Propagate LC_ALL to HOST_LC_ALL for Proton (umu/pressure-vessel needs it)
+        if let Ok(lc_all) = std::env::var("LC_ALL") {
+            if !lc_all.is_empty() {
+                env.retain(|(k, _)| k != "HOST_LC_ALL");
+                env.push(("HOST_LC_ALL".to_string(), lc_all));
+            }
+        }
+
+        // Set mono/gecko cache dirs from the Proton installation
+        let wine_path = std::path::Path::new(wine_exe);
+        if let Some(files_dir) = wine_path.parent().and_then(|p| p.parent()) {
+            let mono = files_dir.join("mono");
+            let gecko = files_dir.join("gecko");
+            if mono.is_dir() {
+                env.push(("WINE_MONO_CACHE_DIR".to_string(), mono.to_string_lossy().to_string()));
+            }
+            if gecko.is_dir() {
+                env.push(("WINE_GECKO_CACHE_DIR".to_string(), gecko.to_string_lossy().to_string()));
+            }
+        }
+    }
+
     if wine.dxvk_frame_rate > 0 {
         env.push(("DXVK_FRAME_RATE".to_string(), wine.dxvk_frame_rate.to_string()));
+    }
+    if wine.dxvk_hud {
+        env.push(("DXVK_HUD".to_string(), "1".to_string()));
     }
     if wine.proton_wow64 {
         env.push(("PROTON_USE_WOW64".to_string(), "1".to_string()));
@@ -113,12 +164,7 @@ pub fn build_wine_command(wine_exe: &str, game_exe: &str, args: &[String], _wine
 }
 
 pub fn wine_prefix(wine: &WineConfig) -> String {
-    if wine.prefix.is_empty() {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-        format!("{}/.wine", home)
-    } else {
-        wine.prefix.clone()
-    }
+    wine.prefix.clone()
 }
 
 /// Generate a unique prefix path from a game slug.

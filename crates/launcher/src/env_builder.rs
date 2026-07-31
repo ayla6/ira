@@ -79,7 +79,7 @@ pub fn build_env(
     wine_exe: &str,
     save_dir: &str,
     game_id: i64,
-    app_id: &str,
+    _app_id: &str,
     command: &mut Vec<String>,
 ) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = std::env::vars().collect();
@@ -116,12 +116,6 @@ pub fn build_env(
         if w.enabled {
             let wine_env = wine_launch::build_wine_env(w, wine_exe);
             env.extend(wine_env);
-            if w.umu_enabled {
-                env.push(("PROTON_VERB".to_string(), "waitforexitandrun".to_string()));
-                if !app_id.is_empty() {
-                    env.push(("GAMEID".to_string(), app_id.to_string()));
-                }
-            }
         }
     }
 

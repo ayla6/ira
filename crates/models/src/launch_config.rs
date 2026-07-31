@@ -84,6 +84,8 @@ pub struct WineConfig {
     pub _gamescope_flags: String,
     #[serde(default)]
     pub dxvk_frame_rate: i32,
+    #[serde(default)]
+    pub dxvk_hud: bool,
     #[serde(default = "default_true")]
     pub proton_wow64: bool,
     #[serde(default = "default_true")]
@@ -132,6 +134,7 @@ impl Default for WineConfig {
             _gamescope: false,
             _gamescope_flags: String::new(),
             dxvk_frame_rate: 0,
+            dxvk_hud: false,
             proton_wow64: true,
             proton_ntsync: true,
             umu_enabled: true,
@@ -176,6 +179,7 @@ impl WineConfig {
             _gamescope: false,
             _gamescope_flags: String::new(),
             dxvk_frame_rate: if has("dxvk_frame_rate") { self.dxvk_frame_rate } else { default.dxvk_frame_rate },
+            dxvk_hud: if has("dxvk_hud") { self.dxvk_hud } else { default.dxvk_hud },
             proton_wow64: if has("proton_wow64") { self.proton_wow64 } else { default.proton_wow64 },
             proton_ntsync: if has("proton_ntsync") { self.proton_ntsync } else { default.proton_ntsync },
             umu_enabled: self.umu_enabled,

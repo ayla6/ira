@@ -20,6 +20,7 @@ pub struct WineConfigWidgets {
     pub vkd3d: adw::SwitchRow,
     pub d3d_extras: adw::SwitchRow,
     pub dxvk_nvapi: adw::SwitchRow,
+    pub dxvk_hud: adw::SwitchRow,
     pub fsr: adw::SwitchRow,
     pub battleye: adw::SwitchRow,
     pub eac: adw::SwitchRow,
@@ -59,6 +60,7 @@ struct GfxPageWidgets {
     vkd3d: adw::SwitchRow,
     d3d_extras: adw::SwitchRow,
     dxvk_nvapi: adw::SwitchRow,
+    dxvk_hud: adw::SwitchRow,
     wayland: adw::SwitchRow,
     mouse_warp_override: adw::ComboRow,
     dpi_enabled: adw::SwitchRow,
@@ -141,6 +143,10 @@ fn build_wine_gfx_page(
     if let Some(dd) = dft { track_switch(&dxvk_nvapi, "dxvk_nvapi", dd.dxvk_nvapi, overridden); }
     gfx_group.add(&dxvk_nvapi);
 
+    let dxvk_hud = build_switch_row("DXVK HUD", "Show shader compilation, FPS, and frame timing", wine.dxvk_hud);
+    if let Some(dd) = dft { track_switch(&dxvk_hud, "dxvk_hud", dd.dxvk_hud, overridden); }
+    gfx_group.add(&dxvk_hud);
+
     let wayland = build_switch_row("Enable Wayland", "Use Wayland for display instead of X11", wine.graphics == "wayland");
     if let Some(dd) = dft { track_switch(&wayland, "graphics", dd.graphics == "wayland", overridden); }
     gfx_group.add(&wayland);
@@ -178,7 +184,7 @@ fn build_wine_gfx_page(
     }
 
     (page, GfxPageWidgets {
-        dxvk, vkd3d, d3d_extras, dxvk_nvapi,
+        dxvk, vkd3d, d3d_extras, dxvk_nvapi, dxvk_hud,
         wayland, mouse_warp_override,
         dpi_enabled, dpi, audio,
     })
@@ -262,7 +268,7 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
         arch: wine.arch.clone(), prefix: wine.prefix.clone(),
         esync: perf_w.esync, fsync: perf_w.fsync,
         dxvk: gfx_w.dxvk, vkd3d: gfx_w.vkd3d, d3d_extras: gfx_w.d3d_extras,
-        dxvk_nvapi: gfx_w.dxvk_nvapi, fsr: perf_w.fsr,
+        dxvk_nvapi: gfx_w.dxvk_nvapi, dxvk_hud: gfx_w.dxvk_hud, fsr: perf_w.fsr,
         battleye: adv_w.battleye, eac: adv_w.eac,
         show_debug: adv_w.show_debug, audio: gfx_w.audio,
         wayland: gfx_w.wayland,
@@ -305,6 +311,7 @@ impl WineConfigWidgets {
             vkd3d: self.vkd3d.is_active(),
             d3d_extras: self.d3d_extras.is_active(),
             dxvk_nvapi: self.dxvk_nvapi.is_active(),
+            dxvk_hud: self.dxvk_hud.is_active(),
             fsr: self.fsr.is_active(),
             battleye: self.battleye.is_active(),
             eac: self.eac.is_active(),

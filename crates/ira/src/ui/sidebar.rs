@@ -91,6 +91,7 @@ pub fn set_sidebar_playing(state: &SharedState, db_id: i64, playing: bool) {
 }
 
 pub fn rebuild_sidebar(state: &SharedState) {
+    let _span = tracing::info_span!("rebuild_sidebar").entered();
     let sidebar_scroll = state.borrow().sidebar_scroll.clone();
     let store = state.borrow().sidebar_store.clone();
     let saved_scroll = sidebar_scroll.vadjustment().value();
@@ -467,6 +468,7 @@ fn sidebar_bind_factory(
     list_item_obj: &glib::Object,
     state: &SharedState,
 ) {
+    let _span = tracing::info_span!("sidebar_bind").entered();
     let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
     let row = list_item.child().unwrap().downcast::<gtk4::Box>().unwrap();
 

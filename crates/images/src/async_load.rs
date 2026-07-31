@@ -1,5 +1,5 @@
 use crate::cache::{DecodeResult, DECODE_POOL_SIZE, PENDING_LOADS, TEXTURE_CACHE};
-use crate::texture::{cached_texture, texture_for};
+use crate::texture::cached_texture;
 use gdk4::{MemoryFormat, MemoryTexture, Texture};
 use gtk4::prelude::*;
 use std::cell::Cell;
@@ -146,7 +146,7 @@ where
 
 pub fn set_image_async(img: &gtk4::Image, path: &str) {
     let _s = info_span!("set_image_async", path).entered();
-    if let Some(t) = texture_for(path) {
+    if let Some(t) = cached_texture(path) {
         img.set_paintable(Some(&t));
         return;
     }
@@ -165,7 +165,7 @@ pub fn set_picture_contain_async(pic: &gtk4::Picture, path: &str, max_h: i32) {
     if path.is_empty() {
         return;
     }
-    if let Some(t) = texture_for(path) {
+    if let Some(t) = cached_texture(path) {
         pic.set_paintable(Some(&t));
     } else {
         let pic_weak = pic.downgrade();

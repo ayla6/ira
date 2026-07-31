@@ -39,16 +39,20 @@ pub fn build_ui(
 ) -> SharedState {
     let _span = tracing::info_span!("build_ui").entered();
     let save_dir = cfg.save_dir.clone();
-    let groups = ira_db::get_all_groups(&ctx.db).unwrap_or_else(|e| {
-        eprintln!("Failed to load groups: {}", e);
-        Vec::new()
-    });
-    let group_members: HashMap<i64, HashSet<i64>> = groups.iter()
-        .map(|g| {
-            let ids = ira_db::get_game_ids_in_group(&ctx.db, g.id).unwrap_or_default();
-            (g.id, ids.into_iter().collect())
-        })
-        .collect();
+    let (groups, group_members) = {
+        let _s = tracing::info_span!("build_ui_load_groups").entered();
+        let groups = ira_db::get_all_groups(&ctx.db).unwrap_or_else(|e| {
+            eprintln!("Failed to load groups: {}", e);
+            Vec::new()
+        });
+        let group_members: HashMap<i64, HashSet<i64>> = groups.iter()
+            .map(|g| {
+                let ids = ira_db::get_game_ids_in_group(&ctx.db, g.id).unwrap_or_default();
+                (g.id, ids.into_iter().collect())
+            })
+            .collect();
+        (groups, group_members)
+    };
 
     let sidebar_store = gio::ListStore::new::<super::sidebar_item::SidebarItem>();
     let sidebar_selection = super::game_selection_model::GameSelectionModel::new(Some(&sidebar_store));

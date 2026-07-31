@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use super::state::SharedState;
 
 pub fn filtered_games(state: &SharedState) -> Vec<Game> {
+    let _span = tracing::info_span!("filtered_games").entered();
     let (sort_mode, sort_descending, search, show_hidden, selected_group, games, group_members) = {
         let s = state.borrow();
         (

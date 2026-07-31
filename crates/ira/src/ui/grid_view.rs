@@ -234,6 +234,7 @@ fn make_setup(state: &SharedState, item_size: Rc<Cell<(i32, i32)>>) -> SetupFn {
 
 fn make_bind(item_size: Rc<Cell<(i32, i32)>>, sort_mode: SortMode) -> BindFn {
     Rc::new(move |widget, game| {
+        let _span = tracing::info_span!("grid_bind", db_id = game.db_id).entered();
         let (cover_width, cover_height) = item_size.get();
         let vbox = widget.downcast_ref::<gtk4::Box>().unwrap();
         let overlay_widget = vbox.first_child().unwrap();
@@ -322,6 +323,7 @@ fn build_grid_view(
     header_box: &gtk4::Box,
     content_scroll: &gtk4::ScrolledWindow,
 ) {
+    let _span = tracing::info_span!("build_grid_view", count = games.len()).entered();
     let store = gio::ListStore::new::<GameItem>();
     for game in games {
         store.append(&GameItem::new(game));
@@ -362,6 +364,7 @@ fn build_grid_view(
 }
 
 pub fn show_grid_view(state: &SharedState) {
+    let _span = tracing::info_span!("show_grid_view").entered();
     state.borrow_mut().selected_id.clear();
     state.borrow_mut().view_generation += 1;
 

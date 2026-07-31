@@ -70,7 +70,7 @@ pub(super) fn sidebar_section_title(title: &str) -> gtk4::ListBoxRow {
     row
 }
 
-pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow, adw::PasswordEntryRow, adw::PasswordEntryRow, gtk4::ListBox) {
+pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow, adw::PasswordEntryRow, adw::PasswordEntryRow, gtk4::ListBox, adw::SwitchRow) {
     let page = settings_page_container();
 
     let notif_group = adw::PreferencesGroup::new();
@@ -94,6 +94,12 @@ pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::Swit
     hidden_row.set_title(S::SHOW_HIDDEN_GAMES);
     hidden_row.set_active(cfg.show_hidden_games);
     hidden_group.add(&hidden_row);
+
+    let saves_row = adw::SwitchRow::new();
+    saves_row.set_title("Centralize game saves");
+    saves_row.set_subtitle("Symlink save data to a central location so it persists across Wine prefix resets");
+    saves_row.set_active(cfg.centralize_game_saves);
+    hidden_group.add(&saves_row);
     page.append(&hidden_group);
 
     let key_group = adw::PreferencesGroup::new();
@@ -124,7 +130,7 @@ pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::Swit
     lang_section.append(&lang_list);
     page.append(&lang_section);
 
-    (page, notif_row, bg_row, hidden_row, steam_entry, sgdb_entry, lang_list)
+    (page, notif_row, bg_row, hidden_row, steam_entry, sgdb_entry, lang_list, saves_row)
 }
 
 pub(super) struct SystemDefaultsWidgets {

@@ -330,6 +330,19 @@ fn connect_add_handler(
                                 &save_dir_c, ts_c, &app_id_c, wine_prefix.as_deref(),
                             );
 
+                            // Centralize game saves if UFS data is available
+                            if let Some(details) = crate::game_loader::read_app_details(&save_dir_c, &app_id_c) {
+                                if !details.ufs_savefiles.is_empty() {
+                                    ira_launcher::game_saves::setup_game_saves(
+                                        &details.ufs_savefiles,
+                                        &details.ufs_rootoverrides,
+                                        &app_id_c,
+                                        &save_dir_c,
+                                        wine_prefix.as_deref(),
+                                    );
+                                }
+                            }
+
                             let _ = sender_c.send(AppMessage::NewGame(game.clone()));
                             let g_name = game.name.clone();
                             crate::ui::enrichment::enrich_game_async(crate::ui::enrichment::EnrichGameParams {

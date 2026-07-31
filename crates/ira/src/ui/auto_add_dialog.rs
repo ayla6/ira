@@ -577,6 +577,19 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
             &save_dir_for_lang, wine_prefix.as_deref(),
         );
 
+        // Centralize game saves if UFS data is available
+        if let Some(details) = crate::game_loader::read_app_details(&save_dir_for_lang, &app_id) {
+            if !details.ufs_savefiles.is_empty() {
+                ira_launcher::game_saves::setup_game_saves(
+                    &details.ufs_savefiles,
+                    &details.ufs_rootoverrides,
+                    &app_id,
+                    &save_dir_for_lang,
+                    wine_prefix.as_deref(),
+                );
+            }
+        }
+
         let needs_nge = ira_platforms::api_emulators::find_gog_dlls_recursive(&game_folder_str)
             .iter()
             .any(|d| !ira_platforms::api_emulators::has_gog_emulator_backups(d));

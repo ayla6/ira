@@ -20,7 +20,7 @@ mod steam_languages;
 pub use game::Game;
 pub use game::parse_db_id;
 pub use consoles::{ConsoleDef, CONSOLES, find_console};
-pub use app_details::{AppDetails, DlcInfo};
+pub use app_details::{AppDetails, DlcInfo, UfsSaveFile, UfsRootOverride, UfsPathTransform};
 pub use game_entry::GameEntry;
 pub use group::{Group, GroupSelection};
 pub use sort_mode::SortMode;

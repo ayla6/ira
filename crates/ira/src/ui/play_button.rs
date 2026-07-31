@@ -138,6 +138,10 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
 
     let (kind, game_path, game_name, per_game_version, db_id, app_id, platform_id, per_game_ra_core, per_game_emu, trophy_source) = game_info;
 
+    let (ufs_savefiles, ufs_rootoverrides) = crate::game_loader::read_app_details(&save_dir, &app_id)
+        .map(|d| (d.ufs_savefiles, d.ufs_rootoverrides))
+        .unwrap_or_default();
+
     let started_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -156,6 +160,9 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         game_name: &game_name,
         game_kind: kind,
         trophy_source,
+        ufs_savefiles,
+        ufs_rootoverrides,
+        centralize_saves: cfg_clone.centralize_game_saves,
         sender: &sender,
         running_games: &running_games,
         started_at,

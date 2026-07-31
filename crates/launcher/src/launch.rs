@@ -1,4 +1,4 @@
-use ira_models::{GameLaunchConfig, WineConfig, TrophySource};
+use ira_models::{GameLaunchConfig, WineConfig, TrophySource, UfsSaveFile, UfsRootOverride};
 use ira_db::DbConn;
 use ira_models::AppSender;
 
@@ -13,6 +13,9 @@ pub struct LaunchContext {
     pub count_playtime: bool,
     pub app_id: String,
     pub trophy_source: TrophySource,
+    pub ufs_savefiles: Vec<UfsSaveFile>,
+    pub ufs_rootoverrides: Vec<UfsRootOverride>,
+    pub centralize_saves: bool,
     pub db: DbConn,
     pub save_dir: String,
     pub running_games: Arc<Mutex<HashMap<i64, i32>>>,
@@ -39,6 +42,20 @@ pub fn launch_game(
 
     if !launch.pre_launch.is_empty() {
         run_pre_launch(&launch.pre_launch, game_dir.as_deref(), &ctx.save_dir, ctx.game_id)?;
+    }
+
+    // Centralize game saves via symlinks if enabled globally
+    if ctx.centralize_saves && !ctx.ufs_savefiles.is_empty() {
+        let pfx = wine
+            .filter(|w| w.enabled)
+            .map(super::wine_launch::wine_prefix);
+        super::game_saves::setup_game_saves(
+            &ctx.ufs_savefiles,
+            &ctx.ufs_rootoverrides,
+            &ctx.app_id,
+            &ctx.save_dir,
+            pfx.as_deref(),
+        );
     }
 
     let (command, env) = if wine.is_some_and(|w| w.enabled) {

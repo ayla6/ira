@@ -119,6 +119,8 @@ pub(crate) struct SteamCmdApp {
     #[serde(default)]
     pub config: SteamCmdConfig,
     #[serde(default)]
+    pub ufs: SteamCmdUfs,
+    #[serde(default)]
     pub steam_release_date: String,
 }
 
@@ -208,7 +210,49 @@ pub(crate) struct SteamCmdLaunchConfig {
     pub oslist: String,
 }
 
-/// Parsed fields extracted from a steamcmd.net response.
+// ── UFS (Unified File System) ───────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdUfs {
+    #[serde(default)]
+    pub savefiles: HashMap<String, SteamCmdSaveFile>,
+    #[serde(default)]
+    pub rootoverrides: HashMap<String, SteamCmdRootOverride>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdSaveFile {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub root: String,
+    #[serde(default)]
+    pub recursive: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdRootOverride {
+    #[serde(default)]
+    pub os: String,
+    #[serde(default)]
+    pub root: String,
+    #[serde(default)]
+    pub useinstead: String,
+    #[serde(default)]
+    pub addpath: String,
+    #[serde(default)]
+    pub pathtransforms: HashMap<String, SteamCmdPathTransform>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdPathTransform {
+    #[serde(default)]
+    pub find: String,
+    #[serde(default)]
+    pub replace: String,
+}
+
+// ── Parsed app details ──────────────────────────────────────────────
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SteamCmdInfo {
     pub name: String,

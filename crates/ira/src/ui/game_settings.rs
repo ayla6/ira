@@ -14,7 +14,7 @@ use super::css::*;
 
 type PendingCell = Rc<RefCell<Option<String>>>;
 
-type GameGeneralPageResult = (gtk4::Box, adw::EntryRow, adw::EntryRow, PendingCell, Option<adw::EntryRow>, Option<adw::ComboRow>, PendingCell, PendingCell, Option<gtk4::Box>, Option<adw::EntryRow>);
+type GameGeneralPageResult = (gtk4::Box, adw::EntryRow, adw::EntryRow, PendingCell, Option<adw::EntryRow>, Option<adw::ComboRow>, PendingCell, PendingCell, Option<gtk4::Box>, Option<adw::EntryRow>, Option<gtk4::Button>);
 
 fn build_ra_section(state: &SharedState, game: &Game, win: &adw::Window, pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>) -> adw::PreferencesGroup {
     let ra_group = adw::PreferencesGroup::new();
@@ -482,6 +482,40 @@ fn build_language_section(
     Some(row)
 }
 
+/// Build the save migration section. Shows a "Migrate saves" button for
+/// games that have UFS save data. Hidden for games without UFS data.
+fn build_save_migration_section(
+    page: &gtk4::Box,
+    state: &SharedState,
+    game: &Game,
+) -> Option<gtk4::Button> {
+    if !game.trophy_source.has_steam_enrichment() || game.app_id.is_empty() {
+        return None;
+    }
+
+    let save_dir = state.borrow().save_dir.clone();
+    let details = crate::game_loader::read_app_details(&save_dir, &game.app_id)?;
+    if details.ufs_savefiles.is_empty() {
+        return None;
+    }
+
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Save data");
+
+    let row = adw::ActionRow::new();
+    row.set_title("Centralize save data");
+    row.set_subtitle("Move saves to a persistent location and create symlinks");
+
+    let btn = gtk4::Button::with_label("Migrate");
+    btn.add_css_class(CSS_SUGGESTED_ACTION);
+    btn.set_valign(gtk4::Align::Center);
+    row.add_suffix(&btn);
+    group.add(&row);
+    page.append(&group);
+
+    Some(btn)
+}
+
 pub(super) fn build_game_general_page(
     state: &SharedState,
     game: &Game,
@@ -499,6 +533,7 @@ pub(super) fn build_game_general_page(
         build_retro_emulator_and_ra(&general_page, state, game, win, pending_copies);
     let app_id_entry = build_service_ids_section(&general_page, game, state, win);
     let language_row = build_language_section(&general_page, state, game, languages);
+    let migrate_btn = build_save_migration_section(&general_page, state, game);
 
     (
         general_page,
@@ -511,5 +546,6 @@ pub(super) fn build_game_general_page(
         pending_emulator,
         ra_container,
         game_folder_entry,
+        migrate_btn,
     )
 }

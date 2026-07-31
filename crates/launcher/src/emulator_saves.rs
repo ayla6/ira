@@ -114,20 +114,12 @@ fn create_nge_symlink(user_dir: &Path, centralized: &Path) {
         if meta.file_type().is_symlink() {
             return;
         }
-        // Real directory — migrate contents before replacing
+        // Real directory — migrate contents safely before replacing
         eprintln!(
             "Migrating NemirtingasGalaxyEmu saves from {} to centralized path",
             target.display()
         );
-        if let Ok(entries) = std::fs::read_dir(&target) {
-            for entry in entries.flatten() {
-                let src = entry.path();
-                let dst = centralized.join(entry.file_name());
-                if !dst.exists() {
-                    let _ = std::fs::rename(&src, &dst);
-                }
-            }
-        }
+        crate::game_saves::safe_migrate_dir_contents(&target, centralized);
         let _ = std::fs::remove_dir(&target);
     }
 

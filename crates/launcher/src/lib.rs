@@ -6,5 +6,6 @@ pub mod wine_dlls;
 pub mod native_launch;
 pub mod gpu;
 pub mod emulator_saves;
+pub mod game_saves;
 mod launch;
 pub use launch::*;

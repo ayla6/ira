@@ -402,10 +402,35 @@ fn extract_app_details(raw: &SteamCmdResponse, app_id: &str) -> Option<AppDetail
         }
     }
 
+    let ufs_savefiles: Vec<ira_models::UfsSaveFile> = entry.ufs.savefiles.values()
+        .map(|sf| ira_models::UfsSaveFile {
+            path: sf.path.clone(),
+            root: sf.root.clone(),
+            recursive: sf.recursive == "1",
+        })
+        .collect();
+
+    let ufs_rootoverrides: Vec<ira_models::UfsRootOverride> = entry.ufs.rootoverrides.values()
+        .map(|ro| ira_models::UfsRootOverride {
+            os: ro.os.clone(),
+            root: ro.root.clone(),
+            useinstead: ro.useinstead.clone(),
+            addpath: ro.addpath.clone(),
+            pathtransforms: ro.pathtransforms.values()
+                .map(|pt| ira_models::UfsPathTransform {
+                    find: pt.find.clone(),
+                    replace: pt.replace.clone(),
+                })
+                .collect(),
+        })
+        .collect();
+
     Some(AppDetails {
         name: entry.common.name.clone(),
         languages,
         dlcs,
+        ufs_savefiles,
+        ufs_rootoverrides,
     })
 }
 

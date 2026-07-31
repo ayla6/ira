@@ -200,7 +200,7 @@ fn build_dialog_contents(
     let DialogConfig { saved_launch, saved_wine, saved_profile_id, app_default_wine } = config;
     let languages = app_details.as_ref().map(|d| d.languages.clone()).unwrap_or_default();
     let pending_copies: Rc<RefCell<HashMap<String, PendingImage>>> = Default::default();
-    let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator, ra_container, game_folder_entry) =
+    let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator, ra_container, game_folder_entry, migrate_btn) =
         super::game_settings::build_game_general_page(&state, &game, &win, &languages, &pending_copies);
     sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General", "general"));
     stack.add_named(&general_page, Some("general"));
@@ -278,6 +278,45 @@ fn build_dialog_contents(
     let cancel_btn = gtk4::Button::with_label("Cancel");
     let win_c = win.clone();
     cancel_btn.connect_clicked(move |_| win_c.close());
+
+    if let Some(btn) = &migrate_btn {
+        let state_m = state.clone();
+        let game_m = game.clone();
+        let save_dir_m = save_dir.clone();
+        let btn_m = btn.clone();
+        btn.connect_clicked(move |_| {
+            let Some(details) = crate::game_loader::read_app_details(&save_dir_m, &game_m.app_id) else {
+                btn_m.set_label("No save paths known");
+                return;
+            };
+            if details.ufs_savefiles.is_empty() {
+                btn_m.set_label("No save paths known");
+                return;
+            }
+            let (wine_prefix, is_wine) = {
+                let s = state_m.borrow();
+                let cfg = ira_db::get_game_config(&s.db, game_m.db_id)
+                    .ok().flatten()
+                    .map(|(_, w, _)| w)
+                    .unwrap_or_default();
+                (ira_launcher::wine_launch::wine_prefix(&cfg), cfg.enabled)
+            };
+            let pfx = if is_wine { Some(wine_prefix.as_str()) } else { None };
+            let count = ira_launcher::game_saves::setup_game_saves(
+                &details.ufs_savefiles,
+                &details.ufs_rootoverrides,
+                &game_m.app_id,
+                &save_dir_m,
+                pfx,
+            );
+            if count > 0 {
+                btn_m.set_label(&format!("Migrated {} save folder(s)", count));
+            } else {
+                btn_m.set_label("Already centralized");
+            }
+            btn_m.set_sensitive(false);
+        });
+    }
 
     let save_btn = gtk4::Button::with_label("Save");
     save_btn.add_css_class(CSS_SUGGESTED_ACTION);

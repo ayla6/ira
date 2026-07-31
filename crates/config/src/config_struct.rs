@@ -106,6 +106,10 @@ pub struct Config {
     /// `Some(true)` = always install without prompting, `Some(false)` = never install.
     #[serde(default)]
     pub auto_emu_install: Option<bool>,
+    /// When enabled, game save data is centralized to <save_dir>/saves/<app_id>/
+    /// at launch time via symlinks. Per-game migrate button works regardless.
+    #[serde(default = "default_true")]
+    pub centralize_game_saves: bool,
     /// Preferred languages for game emulator configs, in priority order.
     /// When a game is added, the first matching supported language is used.
     #[serde(default = "default_language_preferences")]
@@ -155,6 +159,7 @@ impl Default for Config {
             default_native_env_vars: Vec::new(),
             default_api_emu_version: String::new(),
             auto_emu_install: None,
+            centralize_game_saves: true,
             language_preferences: default_language_preferences(),
             sort_mode: ira_models::SortMode::default(),
             sort_descending: false,
@@ -211,6 +216,7 @@ impl Config {
             default_native_env_vars: self.default_native_env_vars.clone(),
             default_api_emu_version: self.default_api_emu_version.clone(),
             auto_emu_install: self.auto_emu_install,
+            centralize_game_saves: self.centralize_game_saves,
             language_preferences: self.language_preferences.clone(),
             sort_mode: self.sort_mode,
             sort_descending: self.sort_descending,

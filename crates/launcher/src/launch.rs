@@ -70,7 +70,8 @@ pub fn launch_game(
             shlex::split(&launch.args).ok_or_else(|| "Failed to parse arguments".to_string())?
         };
 
-        let is_proton = super::wine_detect::is_proton_version(&wine.version);
+        let is_proton = super::wine_detect::is_proton_version(&wine.version)
+            || super::wine_detect::is_proton_binary(&wine_exe);
 
         // For Proton versions, the command uses umu-run, but WINE env var
         // must still point to the actual Proton wine binary (umu reads it).

@@ -30,26 +30,59 @@ fn find_proton_wine(dir: &std::path::Path) -> Option<String> {
     None
 }
 
-pub(crate) fn get_proton_path(version: &str, wine_exe: &str) -> Option<String> {
-    let v = version.to_lowercase();
-    if v == "ge-proton" || wine_exe.ends_with("umu-run") || wine_exe.contains("/umu") {
-        return Some("GE-Proton".to_string());
-    }
-    if !v.contains("proton") {
-        return None;
-    }
-    let path = std::path::Path::new(wine_exe);
-    let bin_dir = path.parent()?;
-    let proton_root = bin_dir.parent()?.parent()?;
-    Some(proton_root.to_string_lossy().into_owned())
-}
-
-/// True if the wine version is a Proton build (either the ge-proton sentinel
-/// or a specific Proton version name like "GE-Proton9-20" or "Proton Experimental").
-/// Proton versions must be launched through umu-run, not directly.
+/// True if the wine version is a Proton build. This includes:
+/// - The "ge-proton" sentinel (downloaded on demand by umu)
+/// - Any version name containing "proton"
+/// - Any wine binary found inside a Proton directory structure (has a
+///   `proton` file sibling to `dist/` or `files/`)
 pub(crate) fn is_proton_version(version: &str) -> bool {
     let v = version.to_lowercase();
     v == "ge-proton" || v.contains("proton")
+}
+
+/// True if the wine executable path lives inside a Proton installation
+/// (detected by the presence of a `proton` file in the installation root).
+pub(crate) fn is_proton_binary(wine_exe: &str) -> bool {
+    let path = std::path::Path::new(wine_exe);
+    // Proton wine lives at <root>/dist/bin/wine or <root>/files/bin/wine
+    // The <root> contains a file named "proton"
+    let bin_dir = match path.parent() {
+        Some(p) => p,
+        None => return false,
+    };
+    let root_candidate = bin_dir
+        .parent()            // dist or files
+        .and_then(|p| p.parent());  // root
+    match root_candidate {
+        Some(root) => root.join("proton").is_file(),
+        None => false,
+    }
+}
+
+/// Resolve PROTONPATH for a given wine version and executable.
+/// - "ge-proton" sentinel → "GE-Proton" (umu downloads it)
+/// - Specific Proton version → the Proton installation directory
+/// - Non-Proton → None
+pub(crate) fn get_proton_path(version: &str, wine_exe: &str) -> Option<String> {
+    let v = version.to_lowercase();
+    if v == "ge-proton" {
+        return Some("GE-Proton".to_string());
+    }
+    // If the wine binary is inside a Proton directory, compute PROTONPATH from it
+    if is_proton_binary(wine_exe) {
+        let path = std::path::Path::new(wine_exe);
+        let bin_dir = path.parent()?;
+        let proton_root = bin_dir.parent()?.parent()?;
+        return Some(proton_root.to_string_lossy().into_owned());
+    }
+    // Fall back to version name check for names that contain "proton"
+    if v.contains("proton") {
+        let path = std::path::Path::new(wine_exe);
+        let bin_dir = path.parent()?;
+        let proton_root = bin_dir.parent()?.parent()?;
+        return Some(proton_root.to_string_lossy().into_owned());
+    }
+    None
 }
 
 pub fn find_wine_binary(version: &str, custom_path: &str) -> Result<String, String> {

@@ -8,7 +8,8 @@ pub use crate::wine_detect::{detect_wine_versions, find_wine_binary};
 pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)> {
     let mut env = Vec::new();
 
-    let is_proton = crate::wine_detect::is_proton_version(&wine.version);
+    let is_proton = crate::wine_detect::is_proton_version(&wine.version)
+        || crate::wine_detect::is_proton_binary(wine_exe);
 
     env.push(("WINEDEBUG".to_string(), wine.show_debug.clone()));
     env.push(("WINE".to_string(), wine_exe.to_string()));

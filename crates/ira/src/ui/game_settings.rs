@@ -102,47 +102,38 @@ pub(super) fn refresh_ra_section(state: &SharedState, db_id: i64) {
 }
 
 fn build_title_and_sort_inputs(
-    page: &gtk4::Box,
+    group: &adw::PreferencesGroup,
     game: &Game,
 ) -> (adw::EntryRow, adw::EntryRow) {
     let title_entry = adw::EntryRow::new();
     title_entry.set_title(S::GAME_TITLE);
     title_entry.set_text(&game.name);
-    let general_group = adw::PreferencesGroup::new();
-    general_group.set_title("Identity");
-    general_group.add(&title_entry);
-    page.append(&general_group);
+    group.add(&title_entry);
 
     let sort_entry = adw::EntryRow::new();
     sort_entry.set_title("Sort title");
     sort_entry.set_text(&game.sort_title);
-    let sort_group = adw::PreferencesGroup::new();
-    sort_group.add(&sort_entry);
-    page.append(&sort_group);
+    group.add(&sort_entry);
 
     (title_entry, sort_entry)
 }
 
-fn add_game_path_if_needed(page: &gtk4::Box, game: &Game) {
+fn add_game_path_if_needed(group: &adw::PreferencesGroup, game: &Game) {
     if game.game_path.is_empty() || game.kind == ira_models::GameKind::Steam {
         return;
     }
-    let path_group = adw::PreferencesGroup::new();
     let path_row = adw::ActionRow::new();
     path_row.set_title("Game file");
     let escaped = glib::markup_escape_text(&game.game_path).to_string();
     path_row.set_subtitle(&escaped);
     path_row.set_sensitive(false);
-    path_group.add(&path_row);
-    page.append(&path_group);
+    group.add(&path_row);
 }
 
-fn build_game_folder_row(page: &gtk4::Box, game: &Game, win: &adw::Window) -> Option<adw::EntryRow> {
+fn build_game_folder_row(parent: &adw::PreferencesGroup, game: &Game, win: &adw::Window) -> Option<adw::EntryRow> {
     if game.kind != ira_models::GameKind::Wine && game.kind != ira_models::GameKind::Linux {
         return None;
     }
-    let group = adw::PreferencesGroup::new();
-    group.set_title("Game folder");
     let row = adw::EntryRow::new();
     row.set_title("Install directory");
     row.set_text(&game.game_folder);
@@ -158,8 +149,7 @@ fn build_game_folder_row(page: &gtk4::Box, game: &Game, win: &adw::Window) -> Op
         },
     );
     row.add_suffix(&browse);
-    group.add(&row);
-    page.append(&group);
+    parent.add(&row);
     Some(row)
 }
 
@@ -244,7 +234,7 @@ fn build_core_row(
     });
 
     let cr = adw::ActionRow::new();
-    cr.set_title("RetroArch Core");
+    cr.set_title("RetroArch core");
     cr.set_subtitle("Override the RetroArch core for this game");
     core_dropdown.set_valign(gtk4::Align::Center);
     cr.add_suffix(&core_dropdown);
@@ -363,7 +353,7 @@ fn build_retro_emulator_and_ra(
 }
 
 fn build_service_ids_section(
-    page: &gtk4::Box,
+    parent: &adw::PreferencesGroup,
     game: &Game,
     state: &SharedState,
     win: &adw::Window,
@@ -377,27 +367,24 @@ fn build_service_ids_section(
         return None;
     }
 
-    let ids_group = adw::PreferencesGroup::new();
-    ids_group.set_title("Service IDs");
-
     if game.kind.is_trophy_console() {
         let row = adw::ActionRow::new();
-        row.set_title("NPWR Code");
+        row.set_title("NPWR code");
         row.set_subtitle(&game.app_id);
         row.set_sensitive(false);
-        ids_group.add(&row);
+        parent.add(&row);
         let serial_row = adw::ActionRow::new();
-        serial_row.set_title("Game Serial");
+        serial_row.set_title("Game serial");
         serial_row.set_subtitle(&game.platform_id);
         serial_row.set_sensitive(false);
-        ids_group.add(&serial_row);
+        parent.add(&serial_row);
     } else if game.trophy_source == ira_models::TrophySource::Gse {
         let row = adw::EntryRow::new();
-        row.set_title("Steam App ID");
+        row.set_title("Steam app ID");
         row.set_text(&game.app_id);
         let search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
         search_btn.set_valign(gtk4::Align::Center);
-        search_btn.set_tooltip_text(Some("Search Steam Store"));
+        search_btn.set_tooltip_text(Some("Search Steam store"));
         search_btn.add_css_class(CSS_FLAT);
         let sc = state.clone();
         let game_name = game.name.clone();
@@ -418,22 +405,21 @@ fn build_service_ids_section(
             );
         });
         row.add_suffix(&search_btn);
-        ids_group.add(&row);
+        parent.add(&row);
         app_id_entry = Some(row);
     } else if game.trophy_source == ira_models::TrophySource::Nge {
         let row = adw::EntryRow::new();
-        row.set_title("GOG Product ID");
+        row.set_title("GOG product ID");
         row.set_text(&game.app_id);
-        ids_group.add(&row);
+        parent.add(&row);
         app_id_entry = Some(row);
     }
 
-    page.append(&ids_group);
     app_id_entry
 }
 
 fn build_language_section(
-    page: &gtk4::Box,
+    parent: &adw::PreferencesGroup,
     state: &SharedState,
     game: &Game,
     languages: &[String],
@@ -445,8 +431,6 @@ fn build_language_section(
         return None;
     }
 
-    let lang_group = adw::PreferencesGroup::new();
-    lang_group.set_title("Language");
     let display_names: Vec<String> = languages
         .iter()
         .map(|code| ira_models::steam_language_name(code).to_string())
@@ -481,15 +465,15 @@ fn build_language_section(
         .unwrap_or(0);
     row.set_selected(selected as u32);
 
-    lang_group.add(&row);
-    page.append(&lang_group);
+    parent.add(&row);
     Some(row)
 }
 
 /// Build the save migration section. Shows a "Migrate saves" button for
-/// games that have UFS save data. Hidden for games without UFS data.
+/// games that have UFS save data. Hidden for games without UFS data and for
+/// games whose saves are already centralized.
 fn build_save_migration_section(
-    page: &gtk4::Box,
+    parent: &adw::PreferencesGroup,
     state: &SharedState,
     game: &Game,
 ) -> Option<gtk4::Button> {
@@ -513,10 +497,6 @@ fn build_save_migration_section(
     };
     let pfx = if is_wine { Some(wine_prefix.as_str()) } else { None };
 
-    let group = adw::PreferencesGroup::new();
-    group.set_title("Save data");
-
-    let row = adw::ActionRow::new();
     let db = state.borrow().db.clone();
     let cached = ira_db::get_saves_centralized(&db, game.db_id).unwrap_or(false);
     let already_centralized = cached || ira_launcher::game_saves::saves_are_centralized(
@@ -526,26 +506,24 @@ fn build_save_migration_section(
         &save_dir,
         pfx,
     );
-    if already_centralized && !cached {
-        if let Err(e) = ira_db::set_saves_centralized(&db, game.db_id, true) {
-            eprintln!("Failed to cache saves centralized: {}", e);
-        }
-    }
     if already_centralized {
-        row.set_title("Save data centralized");
-        row.set_subtitle("Saves already moved to a persistent location");
-    } else {
-        row.set_title("Centralize save data");
-        row.set_subtitle("Move saves to a persistent location and create symlinks");
+        if !cached {
+            if let Err(e) = ira_db::set_saves_centralized(&db, game.db_id, true) {
+                eprintln!("Failed to cache saves centralized: {}", e);
+            }
+        }
+        return None;
     }
 
-    let btn = gtk4::Button::with_label(if already_centralized { "Centralized" } else { "Migrate" });
+    let row = adw::ActionRow::new();
+    row.set_title("Centralize save data");
+    row.set_subtitle("Move saves to a persistent location and create symlinks");
+
+    let btn = gtk4::Button::with_label("Migrate");
     btn.add_css_class(CSS_SUGGESTED_ACTION);
     btn.set_valign(gtk4::Align::Center);
-    btn.set_sensitive(!already_centralized);
     row.add_suffix(&btn);
-    group.add(&row);
-    page.append(&group);
+    parent.add(&row);
 
     Some(btn)
 }
@@ -559,15 +537,25 @@ pub(super) fn build_game_general_page(
 ) -> GameGeneralPageResult {
     let general_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
-    let (title_entry, sort_entry) = build_title_and_sort_inputs(&general_page, game);
-    add_game_path_if_needed(&general_page, game);
-    let game_folder_entry = build_game_folder_row(&general_page, game, win);
+    let identity_group = adw::PreferencesGroup::new();
+    identity_group.set_title("Identity");
+    let (title_entry, sort_entry) = build_title_and_sort_inputs(&identity_group, game);
+    add_game_path_if_needed(&identity_group, game);
+    let game_folder_entry = build_game_folder_row(&identity_group, game, win);
+    general_page.append(&identity_group);
+
     let pending_version = build_shadps4_version_section(&general_page, game);
     let (pending_ra_core, pending_emulator, ra_container) =
         build_retro_emulator_and_ra(&general_page, state, game, win, pending_copies);
-    let app_id_entry = build_service_ids_section(&general_page, game, state, win);
-    let language_row = build_language_section(&general_page, state, game, languages);
-    let migrate_btn = build_save_migration_section(&general_page, state, game);
+
+    let service_group = adw::PreferencesGroup::new();
+    service_group.set_title("Service");
+    let app_id_entry = build_service_ids_section(&service_group, game, state, win);
+    let language_row = build_language_section(&service_group, state, game, languages);
+    let migrate_btn = build_save_migration_section(&service_group, state, game);
+    if app_id_entry.is_some() || language_row.is_some() || migrate_btn.is_some() {
+        general_page.append(&service_group);
+    }
 
     (
         general_page,

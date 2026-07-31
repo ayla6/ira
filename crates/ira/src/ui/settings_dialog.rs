@@ -44,7 +44,7 @@ pub fn show_settings_dialog(
     let stack = layout.stack;
     let content_area = layout.content_area;
 
-    let (general_page, notif_row, bg_row, hidden_row, steam_entry, sgdb_entry) = build_general_settings_page(&cfg);
+    let (general_page, notif_row, bg_row, hidden_row, steam_entry, sgdb_entry, lang_list) = build_general_settings_page(&cfg);
     sidebar.append(&settings_sidebar_row("preferences-system-symbolic", "General", "general"));
     stack.add_named(&general_page, Some("general"));
 
@@ -261,6 +261,7 @@ pub fn show_settings_dialog(
         }
         s.cfg.steam_enabled = steam_enable_row.is_active();
         s.cfg.default_game_folder = default_game_folder_row.text().to_string();
+        s.cfg.language_preferences = super::settings_pages::read_language_preferences(&lang_list);
         s.cfg.ra_enabled = ra_enable_row.is_active();
         s.cfg.ra_username = ra_username_row.text().to_string();
         s.cfg.ra_password = ra_password_row.text().to_string();

@@ -70,7 +70,7 @@ pub(super) fn sidebar_section_title(title: &str) -> gtk4::ListBoxRow {
     row
 }
 
-pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow, adw::PasswordEntryRow, adw::PasswordEntryRow) {
+pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow, adw::PasswordEntryRow, adw::PasswordEntryRow, gtk4::ListBox) {
     let page = settings_page_container();
 
     let notif_group = adw::PreferencesGroup::new();
@@ -110,7 +110,21 @@ pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::Swit
     key_group.add(&sgdb_entry);
     page.append(&key_group);
 
-    (page, notif_row, bg_row, hidden_row, steam_entry, sgdb_entry)
+    let lang_list = build_language_preferences_list(&cfg.language_preferences);
+    let lang_section = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+    let lang_title = gtk4::Label::new(Some("Language preferences"));
+    lang_title.set_halign(gtk4::Align::Start);
+    lang_title.add_css_class("heading");
+    let lang_desc = gtk4::Label::new(Some("When a game is added, the first supported language from this list is used for the emulator config"));
+    lang_desc.set_halign(gtk4::Align::Start);
+    lang_desc.set_wrap(true);
+    lang_desc.add_css_class("dim-label");
+    lang_section.append(&lang_title);
+    lang_section.append(&lang_desc);
+    lang_section.append(&lang_list);
+    page.append(&lang_section);
+
+    (page, notif_row, bg_row, hidden_row, steam_entry, sgdb_entry, lang_list)
 }
 
 pub(super) struct SystemDefaultsWidgets {
@@ -554,4 +568,171 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
         page,
         OverlayPageWidgets { enable_row, encoder_row, quality_row, toggle_hotkey, screenshot_hotkey, record_hotkey, font_button },
     )
+}
+
+/// Build a reorderable list of preferred languages.
+/// Each row shows the English language name with up/down/remove buttons.
+/// An "add" row at the bottom uses a dropdown of unused languages.
+fn build_language_preferences_list(enabled: &[String]) -> gtk4::ListBox {
+    let list = gtk4::ListBox::new();
+    list.set_selection_mode(gtk4::SelectionMode::None);
+    list.add_css_class("boxed-list");
+
+    for code in enabled {
+        add_language_row(&list, code);
+    }
+    add_add_language_row(&list);
+    list
+}
+
+fn add_language_row(list: &gtk4::ListBox, code: &str) {
+    let row = gtk4::ListBoxRow::new();
+    row.set_widget_name(code);
+
+    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    hbox.set_margin_start(12);
+    hbox.set_margin_end(12);
+    hbox.set_margin_top(8);
+    hbox.set_margin_bottom(8);
+
+    let name = gtk4::Label::new(Some(ira_models::steam_language_name(code)));
+    name.set_halign(gtk4::Align::Start);
+    name.set_hexpand(true);
+
+    let up_btn = gtk4::Button::from_icon_name("go-up-symbolic");
+    up_btn.add_css_class(CSS_FLAT);
+    up_btn.set_valign(gtk4::Align::Center);
+
+    let down_btn = gtk4::Button::from_icon_name("go-down-symbolic");
+    down_btn.add_css_class(CSS_FLAT);
+    down_btn.set_valign(gtk4::Align::Center);
+
+    let remove_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
+    remove_btn.add_css_class(CSS_FLAT);
+    remove_btn.set_valign(gtk4::Align::Center);
+
+    hbox.append(&name);
+    hbox.append(&up_btn);
+    hbox.append(&down_btn);
+    hbox.append(&remove_btn);
+    row.set_child(Some(&hbox));
+
+    let list_c = list.clone();
+    let row_c = row.clone();
+    up_btn.connect_clicked(move |_| {
+        let pos = row_c.index();
+        if pos > 0 {
+            list_c.remove(&row_c);
+            list_c.insert(&row_c, pos - 1);
+        }
+    });
+
+    let list_c = list.clone();
+    let row_c = row.clone();
+    down_btn.connect_clicked(move |_| {
+        let pos = row_c.index();
+        let total = count_language_rows(&list_c) as i32;
+        if pos >= 0 && pos < total - 1 {
+            list_c.remove(&row_c);
+            list_c.insert(&row_c, pos + 1);
+        }
+    });
+
+    let list_c = list.clone();
+    let row_c = row.clone();
+    remove_btn.connect_clicked(move |_| {
+        list_c.remove(&row_c);
+    });
+
+    list.insert(&row, count_language_rows(list) as i32);
+}
+
+/// Count only language rows (not the "add" row, which has no widget name).
+fn count_language_rows(list: &gtk4::ListBox) -> u32 {
+    let mut count = 0u32;
+    let mut child = list.first_child();
+    while let Some(c) = child {
+        if c.widget_name() != "add_language" && c.is::<gtk4::ListBoxRow>() {
+            count += 1;
+        }
+        child = c.next_sibling();
+    }
+    count
+}
+
+fn add_add_language_row(list: &gtk4::ListBox) {
+    let row = gtk4::ListBoxRow::new();
+    row.set_widget_name("add_language");
+    row.set_selectable(false);
+
+    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    hbox.set_margin_start(12);
+    hbox.set_margin_end(12);
+    hbox.set_margin_top(8);
+    hbox.set_margin_bottom(8);
+
+    let initial_strings = available_language_strings(list);
+    let initial_refs: Vec<&str> = initial_strings.iter().map(|s| s.as_str()).collect();
+    let dropdown = gtk4::DropDown::from_strings(&initial_refs);
+    dropdown.set_hexpand(true);
+
+    let add_btn = gtk4::Button::with_label("Add");
+    add_btn.add_css_class(CSS_SUGGESTED_ACTION);
+    add_btn.set_valign(gtk4::Align::Center);
+
+    hbox.append(&dropdown);
+    hbox.append(&add_btn);
+    row.set_child(Some(&hbox));
+
+    let list_c = list.clone();
+    let dropdown_c = dropdown.clone();
+    add_btn.connect_clicked(move |_| {
+        let selected = dropdown_c.selected() as usize;
+        let available = available_language_codes(&list_c);
+        if let Some(code) = available.get(selected) {
+            add_language_row(&list_c, code);
+            let strings = available_language_strings(&list_c);
+            let refs: Vec<&str> = strings.iter().map(|s| s.as_str()).collect();
+            dropdown_c.set_model(Some(&gtk4::StringList::new(&refs)));
+            dropdown_c.set_selected(0);
+        }
+    });
+
+    list.append(&row);
+}
+
+fn enabled_language_codes(list: &gtk4::ListBox) -> Vec<String> {
+    let mut codes = Vec::new();
+    let mut child = list.first_child();
+    while let Some(c) = child {
+        if let Some(row) = c.downcast_ref::<gtk4::ListBoxRow>() {
+            let name = row.widget_name().to_string();
+            if name != "add_language" && !name.is_empty() {
+                codes.push(name);
+            }
+        }
+        child = c.next_sibling();
+    }
+    codes
+}
+
+fn available_language_codes(list: &gtk4::ListBox) -> Vec<&'static str> {
+    let enabled = enabled_language_codes(list);
+    ira_models::STEAM_LANGUAGES
+        .iter()
+        .map(|l| l.code)
+        .filter(|code| !enabled.iter().any(|e| e == code))
+        .collect()
+}
+
+fn available_language_strings(list: &gtk4::ListBox) -> Vec<String> {
+    available_language_codes(list)
+        .iter()
+        .map(|code| ira_models::steam_language_name(code).to_string())
+        .collect()
+}
+
+/// Read the ordered language codes from the ListBox (for saving).
+pub(super) fn read_language_preferences(list: &gtk4::ListBox) -> Vec<String> {
+    enabled_language_codes(list)
 }

@@ -66,7 +66,7 @@ pub(super) fn build_env_vars_group(
     vars: &[(String, String)],
 ) -> (adw::PreferencesGroup, gtk4::ListBox) {
     let group = adw::PreferencesGroup::new();
-    group.set_title("Environment Variables");
+    group.set_title("Environment variables");
 
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.set_tooltip_text(Some("Add variable"));

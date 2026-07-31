@@ -10,7 +10,7 @@ use super::installer_add_dialog::show_installer_add_dialog;
 pub fn show_add_game_method(state: &SharedState) {
     let parent = state.borrow().window.clone();
     let win = adw::Window::new();
-    win.set_title(Some("Add Game"));
+    win.set_title(Some("Add game"));
     win.set_default_size(420, 260);
     win.set_modal(false);
     win.set_transient_for(Some(&parent));

@@ -94,7 +94,7 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
 
     page.append(&lc_group);
 
-    params.sidebar.append(&settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Launch Config", "launch"));
+    params.sidebar.append(&settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Launch config", "launch"));
     params.stack.add_named(&page, Some("launch"));
 
     Some(LaunchConfigWidgets {

@@ -25,7 +25,7 @@ pub fn build_wine_profile_picker(
         .collect();
     let model = string_list_from(&labels);
     let row = adw::ComboRow::new();
-    row.set_title("Wine Profile");
+    row.set_title("Wine profile");
     row.set_subtitle("Links wine version + prefix together");
     row.set_model(Some(&model));
 

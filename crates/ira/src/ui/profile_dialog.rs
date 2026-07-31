@@ -11,7 +11,7 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> (
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let settings_group = adw::PreferencesGroup::new();
-    settings_group.set_title("Prefix Settings");
+    settings_group.set_title("Prefix settings");
 
     let prefix_base_row = adw::EntryRow::new();
     prefix_base_row.set_title("Prefix base directory (new prefixes created as {base}/{game-slug})");
@@ -32,7 +32,7 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> (
     page.append(&settings_group);
 
     let group = adw::PreferencesGroup::new();
-    group.set_title("Wine Profiles");
+    group.set_title("Wine profiles");
 
     let list = gtk4::ListBox::new();
     list.add_css_class(CSS_BOXED_LIST);
@@ -113,7 +113,7 @@ fn repopulate_profiles(
         let row_for_del = row.clone();
         del_btn.connect_clicked(move |_| {
             let alert = adw::AlertDialog::new(
-                Some("Delete Profile"),
+                Some("Delete profile"),
                 Some("Are you sure you want to delete this profile? Games using it will keep their settings but lose the profile link."),
             );
             alert.add_response("cancel", "Cancel");
@@ -174,9 +174,9 @@ pub fn show_profile_dialog(
 
     let group = adw::PreferencesGroup::new();
     if existing.is_some() {
-        group.set_title("Edit Profile");
+        group.set_title("Edit profile");
     } else {
-        group.set_title("Create Profile");
+        group.set_title("Create profile");
     }
 
     let name_entry = adw::EntryRow::new();
@@ -297,7 +297,7 @@ pub fn show_profile_dialog(
     group.add(&arch_row);
 
     let umu_row = adw::SwitchRow::new();
-    umu_row.set_title("UMU Launcher");
+    umu_row.set_title("UMU launcher");
     umu_row.set_subtitle("Launch via umu-run (required for Proton versions)");
     umu_row.set_active(existing.as_ref().is_none_or(|p| p.umu_enabled));
 

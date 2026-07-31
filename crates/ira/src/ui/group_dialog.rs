@@ -6,7 +6,7 @@ use super::sidebar::rebuild_sidebar;
 
 pub fn show_create_group_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
-    let dialog = adw::AlertDialog::new(Some("New Collection"), Some("Enter a name for the collection:"));
+    let dialog = adw::AlertDialog::new(Some("New collection"), Some("Enter a name for the collection:"));
 
     let entry = gtk4::Entry::new();
     entry.set_placeholder_text(Some("Collection name"));
@@ -50,7 +50,7 @@ pub fn show_create_group_dialog(state: &SharedState) {
 
 pub fn show_rename_group_dialog(state: &SharedState, group_id: i64, current_name: &str) {
     let window = state.borrow().window.clone();
-    let dialog = adw::AlertDialog::new(Some("Rename Collection"), Some("Enter a new name:"));
+    let dialog = adw::AlertDialog::new(Some("Rename collection"), Some("Enter a new name:"));
 
     let entry = gtk4::Entry::new();
     entry.set_text(current_name);
@@ -95,7 +95,7 @@ pub fn show_rename_group_dialog(state: &SharedState, group_id: i64, current_name
 pub fn show_delete_group_dialog(state: &SharedState, group_id: i64, name: &str) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
-        Some("Delete Collection"),
+        Some("Delete collection"),
         Some(&format!("Delete \"{}\"? Games in this collection will not be removed.", name)),
     );
 

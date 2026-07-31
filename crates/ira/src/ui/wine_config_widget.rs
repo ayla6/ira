@@ -233,7 +233,7 @@ fn build_wine_adv_page(
     compat_group.add(&proton_disable_lsteamclient);
     adv_page.append(&compat_group);
 
-    let dll_group = make_section("DLL Overrides");
+    let dll_group = make_section("DLL overrides");
 
     let dll_overrides_box = gtk4::ListBox::new();
     dll_overrides_box.add_css_class(CSS_BOXED_LIST);

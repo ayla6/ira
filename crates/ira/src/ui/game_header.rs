@@ -143,8 +143,8 @@ fn build_wine_tools_button(state: &SharedState, db_id: i64, wine_enabled: bool) 
 
     let menu = gio::Menu::new();
     menu.append(Some("Winetricks"), Some("wine.winetricks"));
-    menu.append(Some("Wine Task Manager"), Some("wine.taskmgr"));
-    menu.append(Some("Wine Control Panel"), Some("wine.control"));
+    menu.append(Some("Wine task manager"), Some("wine.taskmgr"));
+    menu.append(Some("Wine control panel"), Some("wine.control"));
     menu.append(Some("Wine registry"), Some("wine.regedit"));
     menu.append(Some("Wine configuration"), Some("wine.winecfg"));
     menu.append(Some("Open Wine console"), Some("wine.console"));
@@ -273,7 +273,7 @@ fn add_wine_run_exe_action(
 
 fn build_settings_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
     let menu = gio::Menu::new();
-    menu.append(Some("View Log"), Some("game.view_log"));
+    menu.append(Some("View log"), Some("game.view_log"));
 
     let btn = adw::SplitButton::new();
     btn.set_icon_name("preferences-system-symbolic");

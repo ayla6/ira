@@ -263,7 +263,7 @@ fn update_stats(s: &State) {
     let dash = "<span weight=\"normal\">\u{2014}</span>";
 
     let wt = if week.week_start <= today && today <= we {
-        format!("This Week {} {}", dash, format_duration(week.week_total as i64))
+        format!("This week {} {}", dash, format_duration(week.week_total as i64))
     } else if week.week_start.month() == we.month() {
         format!("{} \u{2013} {} {} {}", week.week_start.format("%b %-d"), we.format("%-d"), dash, format_duration(week.week_total as i64))
     } else {

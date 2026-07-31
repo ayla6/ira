@@ -293,7 +293,7 @@ pub(super) fn show_collection_name_dialog(
     state: SharedState,
     add_games: impl Fn(&ira_db::DbConn, i64) + 'static,
 ) {
-    let dialog = adw::AlertDialog::new(Some("New Collection"), Some("Enter a name for the collection:"));
+    let dialog = adw::AlertDialog::new(Some("New collection"), Some("Enter a name for the collection:"));
     let entry = gtk4::Entry::new();
     entry.set_placeholder_text(Some("Collection name"));
     entry.set_margin_start(12);

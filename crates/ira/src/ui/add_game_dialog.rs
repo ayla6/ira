@@ -16,8 +16,8 @@ pub fn show_add_game_dialog(state: &SharedState) {
     };
 
     let layout = super::helpers::dialog_layout(&window);
-    layout.window.set_title(Some("Add Game"));
-    layout.header.set_title_widget(Some(&gtk4::Label::new(Some("Add Game"))));
+    layout.window.set_title(Some("Add game"));
+    layout.header.set_title_widget(Some(&gtk4::Label::new(Some("Add game"))));
     layout.stack.set_vexpand(true);
 
     let win = layout.window;
@@ -154,7 +154,7 @@ fn connect_sidebar_selection(sidebar: &gtk4::ListBox, stack: &gtk4::Stack) {
     btn_row.set_margin_bottom(12);
 
     let cancel_btn = gtk4::Button::with_label("Cancel");
-    let add_btn = gtk4::Button::with_label("Add Game");
+    let add_btn = gtk4::Button::with_label("Add game");
     add_btn.add_css_class(CSS_SUGGESTED_ACTION);
 
     btn_row.append(&cancel_btn);

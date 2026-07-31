@@ -10,7 +10,7 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let info_group = adw::PreferencesGroup::new();
-    info_group.set_title("Game Info");
+    info_group.set_title("Game info");
 
     let name_entry = adw::EntryRow::new();
     name_entry.set_title("Name");
@@ -86,10 +86,10 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
     let ids_group = adw::PreferencesGroup::new();
     ids_group.set_title("Service IDs");
     let steam_id_entry = adw::EntryRow::new();
-    steam_id_entry.set_title("Steam App ID");
+    steam_id_entry.set_title("Steam app ID");
     let steam_search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
     steam_search_btn.set_valign(gtk4::Align::Center);
-    steam_search_btn.set_tooltip_text(Some("Search Steam Store"));
+    steam_search_btn.set_tooltip_text(Some("Search Steam store"));
     steam_search_btn.add_css_class(CSS_FLAT);
     {
         let sc = state.clone();
@@ -105,7 +105,7 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
     steam_id_entry.add_suffix(&steam_search_btn);
     ids_group.add(&steam_id_entry);
     let gog_id_entry = adw::EntryRow::new();
-    gog_id_entry.set_title("GOG Product ID");
+    gog_id_entry.set_title("GOG product ID");
     let gog_browse_btn = super::helpers::make_browse_button(
         Some(win),
         "Select game folder",

@@ -19,7 +19,7 @@ pub(super) fn show_steam_id_search_popup(
     dialog.set_default_height(400);
     dialog.set_modal(true);
     dialog.set_transient_for(Some(parent));
-    dialog.set_title(Some("Search Steam Store"));
+    dialog.set_title(Some("Search Steam store"));
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header = adw::HeaderBar::new();

@@ -267,7 +267,7 @@ pub(super) fn build_lutris_settings_page(state: &super::state::SharedState, sett
     let migrate_row = adw::ActionRow::new();
     migrate_row.set_title("Import Lutris games");
     migrate_row.set_subtitle("Reads each Lutris game's config and creates a game entry with wine settings");
-    let migrate_btn = gtk4::Button::with_label("Import All");
+    let migrate_btn = gtk4::Button::with_label("Import all");
     migrate_btn.add_css_class(CSS_SUGGESTED_ACTION);
     migrate_btn.set_valign(gtk4::Align::Center);
     migrate_row.add_suffix(&migrate_btn);
@@ -442,7 +442,7 @@ pub(super) fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRo
     let _ = std::fs::create_dir_all(&emu_dir);
 
     let group = adw::PreferencesGroup::new();
-    group.set_title("API Emulator Files");
+    group.set_title("API emulator files");
     group.set_description(Some("Drop emulator files into the structure below"));
 
     let dir_row = adw::ActionRow::new();
@@ -464,7 +464,7 @@ pub(super) fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRo
     page.append(&group);
 
     let version_group = adw::PreferencesGroup::new();
-    version_group.set_title("Default Version");
+    version_group.set_title("Default version");
     version_group.set_description(Some("Version to use when installing API emulators on games"));
 
     let gse_versions = ira_platforms::api_emulators::list_gse_versions(&cfg.save_dir);

@@ -347,7 +347,7 @@ pub(super) fn build_api_emulator_page(
     emu_scroll.set_vexpand(true);
     emu_scroll.set_hexpand(true);
     sidebar.append(&settings_dialog::sidebar_separator());
-    sidebar.append(&settings_dialog::settings_sidebar_row("applications-engineering-symbolic", "API Emulator", "api_emulator"));
+    sidebar.append(&settings_dialog::settings_sidebar_row("applications-engineering-symbolic", "API emulator", "api_emulator"));
     stack.add_named(&emu_scroll, Some("api_emulator"));
     Some(pending_uninstall)
 }

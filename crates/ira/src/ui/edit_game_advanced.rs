@@ -41,7 +41,7 @@ pub(super) fn build_advanced_page(
 
     // Environment Variables section
     let env_group = adw::PreferencesGroup::new();
-    env_group.set_title("Environment Variables");
+    env_group.set_title("Environment variables");
     let add_env_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_env_btn.set_tooltip_text(Some("Add variable"));
     add_env_btn.set_valign(gtk4::Align::Center);
@@ -71,7 +71,7 @@ pub(super) fn build_advanced_page(
     // DLL Overrides section (wine only)
     let dll_overrides_box = if let Some(data) = wine_dll_data {
         let dll_group = adw::PreferencesGroup::new();
-        dll_group.set_title("DLL Overrides");
+        dll_group.set_title("DLL overrides");
         let add_dll_btn = gtk4::Button::from_icon_name("list-add-symbolic");
         add_dll_btn.set_tooltip_text(Some("Add override"));
         add_dll_btn.set_valign(gtk4::Align::Center);

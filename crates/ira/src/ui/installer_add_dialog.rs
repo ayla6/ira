@@ -331,6 +331,8 @@ fn run_installer(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>
         InstallerType::Linux => {
             if is_gog_makeself(&installer) {
                 run_silent_extraction(wizard, ist, index, ExtractionMethod::Gog);
+            } else if is_linuxrulez(&installer) && ira_platforms::ysi_installer::is_ysi_installer(&installer) {
+                run_silent_extraction(wizard, ist, index, ExtractionMethod::Ysi);
             } else {
                 run_terminal_interactive(wizard, ist, index);
             }
@@ -341,6 +343,7 @@ fn run_installer(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>
 enum ExtractionMethod {
     Inno,
     Gog,
+    Ysi,
 }
 
 fn run_silent_extraction(
@@ -374,6 +377,14 @@ fn run_silent_extraction(
                     }
                     Err(e) => Err(e),
                 }
+            }
+            ExtractionMethod::Ysi => {
+                let progress: ira_platforms::ysi_installer::ProgressFn =
+                    Box::new(move |_extracted, _total| {});
+                let result = ira_platforms::ysi_installer::extract_ysi_installer(
+                    &installer, &dest, Some(progress), None, None,
+                );
+                result.map(|_| ())
             }
         };
         match result {

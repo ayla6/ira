@@ -17,3 +17,4 @@ pub mod watcher_util;
 pub mod installer;
 pub mod game_folder;
 pub mod emulator_save_migration;
+pub mod ysi_installer;

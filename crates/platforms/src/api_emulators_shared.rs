@@ -110,6 +110,24 @@ pub fn find_dll_dirs_recursive(base_folder: &Path, dll_names: &[&str]) -> Vec<Pa
     results
 }
 
+/// Find the directory containing one of `dll_names` inside a game install.
+///
+/// Tries the shallow exe-relative scan first (fast path for games whose DLLs
+/// sit next to or one level under the exe), then falls back to a recursive
+/// scan of `game_folder`. Prefers the deepest match — for nested installs
+/// (e.g. Unreal Engine games) the API DLLs live several levels below the exe.
+pub(crate) fn find_game_dll_folder(game_exe: &str, game_folder: &str, dll_names: &[&str]) -> Option<PathBuf> {
+    if let Some(folder) = find_api_emu_dll_folder(game_exe, dll_names) {
+        return Some(folder);
+    }
+    if game_folder.is_empty() {
+        return None;
+    }
+    let mut dirs = find_dll_dirs_recursive(Path::new(game_folder), dll_names);
+    dirs.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
+    dirs.into_iter().next()
+}
+
 /// Backup filename variants for a given DLL name.
 /// For `steam_api64.dll` returns:
 ///   `steam_api64.dll.bak`, `steam_api64.bak.dll`,

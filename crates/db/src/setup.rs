@@ -18,6 +18,25 @@ pub fn update_field(conn: &DbConn, id: i64, column: &str, value: &dyn rusqlite::
     Ok(())
 }
 
+/// Add a column to the games table if it doesn't exist yet (for databases
+/// created before the column was introduced).
+fn ensure_game_column(conn: &Connection, column: &str, ddl: &str) {
+    let has_column = conn
+        .prepare("PRAGMA table_info(games)")
+        .map(|mut stmt| {
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .map(|rows| rows.filter_map(|r| r.ok()).any(|name| name == column))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
+    if has_column {
+        return;
+    }
+    if let Err(e) = conn.execute_batch(&format!("ALTER TABLE games ADD COLUMN {}", ddl)) {
+        eprintln!("Failed to add games column {}: {}", column, e);
+    }
+}
+
 pub fn init_db(db_path: &str) -> DbConn {
     if let Some(parent) = std::path::Path::new(db_path).parent() {
         std::fs::create_dir_all(parent).expect("failed to create database directory");
@@ -60,7 +79,9 @@ pub fn init_db(db_path: &str) -> DbConn {
                 playtime REAL NOT NULL DEFAULT 0.0,
                 cached_earned_count INTEGER NOT NULL DEFAULT 0,
                 cached_total_count INTEGER NOT NULL DEFAULT 0,
-                cached_achievement_mtime INTEGER NOT NULL DEFAULT 0
+                cached_achievement_mtime INTEGER NOT NULL DEFAULT 0,
+                api_dll_folder TEXT NOT NULL DEFAULT '',
+                saves_centralized INTEGER NOT NULL DEFAULT 0
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_game_id_platform ON games(game_id, platform_id) WHERE game_id != '';
@@ -103,7 +124,14 @@ pub fn init_db(db_path: &str) -> DbConn {
             CREATE INDEX IF NOT EXISTS idx_game_groups_group ON game_groups(group_id);",
         ).expect("failed to create tables");
 
-        // PRE-RELEASE: schema migrations merged into CREATE TABLE above
+        // Schema migrations: add columns that predate the CREATE TABLE above
+        // to databases created by older versions.
+        for (column, ddl) in [
+            ("api_dll_folder", "api_dll_folder TEXT NOT NULL DEFAULT ''"),
+            ("saves_centralized", "saves_centralized INTEGER NOT NULL DEFAULT 0"),
+        ] {
+            ensure_game_column(&conn, column, ddl);
+        }
     }
 
     crate::create_variants_table(&pool);

@@ -28,6 +28,7 @@ pub(super) struct SaveGameSettingsParams {
     pub old_wine: WineConfig,
     pub app_default_wine: WineConfig,
     pub game_exe: String,
+    pub game_folder: String,
     pub language_row: Option<adw::ComboRow>,
     pub languages: Vec<String>,
     pub saved_platform_id: String,
@@ -662,14 +663,20 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
     if let Some(ref pu) = params.pending_emu_uninstall {
         if *pu.borrow() {
             let exe = params.game_exe.clone();
+            let game_folder = params.game_folder.clone();
             let ts = params.trophy_source;
             let result = if ts == TrophySource::Gse {
-                ira_platforms::api_emulators::uninstall_gse(&exe)
+                ira_platforms::api_emulators::uninstall_gse(&exe, &game_folder)
             } else {
-                ira_platforms::api_emulators::uninstall_nge(&exe)
+                ira_platforms::api_emulators::uninstall_nge(&exe, &game_folder)
             };
-            if let Err(e) = result {
-                eprintln!("Failed to uninstall API emulator: {}", e);
+            match result {
+                Ok(()) => {
+                    if let Err(e) = ira_db::set_api_dll_folder(&db, params.db_id, "") {
+                        eprintln!("Failed to clear API DLL folder cache: {}", e);
+                    }
+                }
+                Err(e) => eprintln!("Failed to uninstall API emulator: {}", e),
             }
         }
     }

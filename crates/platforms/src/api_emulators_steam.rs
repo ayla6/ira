@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use ira_models::AppDetails;
 use crate::api_emulators_shared::{
-    api_emulators_dir, backup_file, copy_file, detect_arch, find_api_emu_dll_folder, is_windows,
+    api_emulators_dir, backup_file, copy_file, detect_arch, find_game_dll_folder, is_windows,
     restore_backup,
 };
 
@@ -235,22 +235,18 @@ fn gse_file_map(is_64: bool, is_win: bool) -> &'static [(&'static str, &'static 
     }
 }
 
-/// Check if the game folder contains original Steam API DLLs
-pub fn has_original_steam_dlls(game_exe: &str) -> bool {
-    let dlls = &["libsteam_api.so", "steam_api.dll", "steam_api64.dll"];
-    let result = find_api_emu_dll_folder(game_exe, dlls);
-    if result.is_none() {
-        let search_dir = Path::new(game_exe).parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        eprintln!("has_original_steam_dlls: no Steam DLL found in {} (exe={})", search_dir.display(), game_exe);
-        if let Ok(entries) = std::fs::read_dir(&search_dir) {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    eprintln!("  file: {}", name);
-                }
-            }
-        }
-    }
-    result.is_some()
+/// Resolve the directory holding the Steam API DLLs for a game install.
+/// Falls back from a shallow exe-relative scan to a recursive scan of the
+/// full game folder (nested installs like Unreal Engine games).
+pub fn find_steam_dll_folder(game_exe: &str, game_folder: &str) -> Option<PathBuf> {
+    find_game_dll_folder(game_exe, game_folder, GSE_VERSION_FILES)
+}
+
+/// Check if `dll_folder` contains original Steam API DLLs.
+pub fn has_original_steam_dlls(dll_folder: &Path) -> bool {
+    ["libsteam_api.so", "steam_api.dll", "steam_api64.dll"]
+        .iter()
+        .any(|d| dll_folder.join(d).exists())
 }
 
 /// All Steam API DLL/SO filenames (original and emulator share these names).
@@ -311,22 +307,24 @@ fn resolve_gse_version(save_dir: &str, version: &str) -> Result<PathBuf, String>
 pub fn install_gse(
     save_dir: &str,
     game_exe: &str,
+    game_folder: &str,
     app_id: &str,
     languages: &[String],
     version: &str,
-) -> Result<(), String> {
-    if !has_original_steam_dlls(game_exe) {
-        return Err("No original Steam DLL found in game folder. Cannot install API emulator.".to_string());
-    }
-
-    let dll_folder = find_api_emu_dll_folder(game_exe, GSE_VERSION_FILES)
+) -> Result<PathBuf, String> {
+    let dll_folder = find_game_dll_folder(game_exe, game_folder, GSE_VERSION_FILES)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
+
+    if !has_original_steam_dlls(&dll_folder) {
+        return Err("No original Steam DLL found in game folder. Cannot install API emulator.".to_string());
+    }
 
     let is_win = is_windows(game_exe);
     let is64 = detect_arch(game_exe) == "x64";
 
-    install_gse_into_folder(save_dir, &dll_folder, is_win, is64, app_id, languages, version)
+    install_gse_into_folder(save_dir, &dll_folder, is_win, is64, app_id, languages, version)?;
+    Ok(dll_folder)
 }
 
 /// Recursively search `game_folder` for the directory containing Steam DLLs and
@@ -535,9 +533,9 @@ fn install_gse_into_folder(
     Ok(())
 }
 
-pub fn uninstall_gse(game_exe: &str) -> Result<(), String> {
+pub fn uninstall_gse(game_exe: &str, game_folder: &str) -> Result<(), String> {
     let all_files: Vec<&str> = GSE_VERSION_FILES.to_vec();
-    let dll_folder = find_api_emu_dll_folder(game_exe, &all_files)
+    let dll_folder = find_game_dll_folder(game_exe, game_folder, &all_files)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
@@ -548,13 +546,8 @@ pub fn uninstall_gse(game_exe: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn is_gse_installed(game_exe: &str) -> bool {
-    let all_files: Vec<&str> = GSE_VERSION_FILES.to_vec();
-    if let Some(folder) = find_api_emu_dll_folder(game_exe, &all_files) {
-        folder.join("steam_settings").is_dir()
-    } else {
-        false
-    }
+pub fn is_gse_installed(dll_folder: &Path) -> bool {
+    dll_folder.join("steam_settings").is_dir()
 }
 
 #[cfg(test)]

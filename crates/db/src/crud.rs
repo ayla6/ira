@@ -85,6 +85,22 @@ pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// Cache of the resolved API-emulator DLL folder (Steam/GOG), empty if unknown.
+pub fn set_api_dll_folder(conn: &DbConn, id: i64, folder: &str) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute("UPDATE games SET api_dll_folder = ?1 WHERE id = ?2", params![folder, id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Cache of whether the game's UFS saves have been centralized.
+pub fn set_saves_centralized(conn: &DbConn, id: i64, centralized: bool) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute("UPDATE games SET saves_centralized = ?1 WHERE id = ?2", params![centralized as i64, id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,5 +165,33 @@ mod tests {
         remove_game(&conn, id).unwrap();
         let game = find_by_db_id(&conn, id).unwrap();
         assert!(game.is_none());
+    }
+
+    #[test]
+    fn test_api_dll_folder_cache_defaults_empty() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(&conn, GameKind::Wine, TrophySource::Gse, "", "g1", "g1", "Cached Game").unwrap();
+        assert_eq!(super::super::get_api_dll_folder(&conn, id).unwrap(), "");
+    }
+
+    #[test]
+    fn test_set_and_get_api_dll_folder() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(&conn, GameKind::Wine, TrophySource::Gse, "", "g1", "g1", "Cached Game").unwrap();
+        set_api_dll_folder(&conn, id, "/games/Game/bin/win64").unwrap();
+        assert_eq!(super::super::get_api_dll_folder(&conn, id).unwrap(), "/games/Game/bin/win64");
+        set_api_dll_folder(&conn, id, "").unwrap();
+        assert_eq!(super::super::get_api_dll_folder(&conn, id).unwrap(), "");
+    }
+
+    #[test]
+    fn test_set_and_get_saves_centralized() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(&conn, GameKind::Wine, TrophySource::Gse, "", "g1", "g1", "Cached Game").unwrap();
+        assert!(!super::super::get_saves_centralized(&conn, id).unwrap());
+        set_saves_centralized(&conn, id, true).unwrap();
+        assert!(super::super::get_saves_centralized(&conn, id).unwrap());
+        set_saves_centralized(&conn, id, false).unwrap();
+        assert!(!super::super::get_saves_centralized(&conn, id).unwrap());
     }
 }

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use ira_models::AppDetails;
 use crate::api_emulators_shared::{
-    api_emulators_dir, backup_file, copy_file, detect_arch, find_api_emu_dll_folder, is_windows,
+    api_emulators_dir, backup_file, copy_file, detect_arch, find_game_dll_folder, is_windows,
     restore_backup,
 };
 
@@ -108,22 +108,18 @@ fn nge_file_map(is_64: bool) -> &'static [(&'static str, &'static str)] {
     }
 }
 
-/// Check if the game folder contains original GOG Galaxy DLLs
-pub fn has_original_gog_dlls(game_exe: &str) -> bool {
-    let dlls = &["galaxy.dll", "galaxy64.dll"];
-    let result = find_api_emu_dll_folder(game_exe, dlls);
-    if result.is_none() {
-        let search_dir = Path::new(game_exe).parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        eprintln!("has_original_gog_dlls: no Galaxy DLL found in {} (exe={})", search_dir.display(), game_exe);
-        if let Ok(entries) = std::fs::read_dir(&search_dir) {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    eprintln!("  file: {}", name);
-                }
-            }
-        }
-    }
-    result.is_some()
+/// Resolve the directory holding the GOG Galaxy DLLs for a game install.
+/// Falls back from a shallow exe-relative scan to a recursive scan of the
+/// full game folder (nested installs like Unreal Engine games).
+pub fn find_gog_dll_folder(game_exe: &str, game_folder: &str) -> Option<PathBuf> {
+    find_game_dll_folder(game_exe, game_folder, NGE_VERSION_FILES)
+}
+
+/// Check if `dll_folder` contains original GOG Galaxy DLLs.
+pub fn has_original_gog_dlls(dll_folder: &Path) -> bool {
+    ["galaxy.dll", "galaxy64.dll", "Galaxy.dll", "Galaxy64.dll"]
+        .iter()
+        .any(|d| dll_folder.join(d).exists())
 }
 
 /// Find `ngalaxye_settings/` in the game folder. If it exists somewhere other
@@ -269,23 +265,25 @@ fn resolve_gog_version(save_dir: &str, version: &str) -> Result<PathBuf, String>
 pub fn install_nge(
     save_dir: &str,
     game_exe: &str,
+    game_folder: &str,
     product_id: &str,
     version: &str,
-) -> Result<(), String> {
+) -> Result<PathBuf, String> {
     if !is_windows(game_exe) {
         return Err("Nemirtingas API emulator is Windows-only (no Linux .so)".to_string());
     }
 
-    if !has_original_gog_dlls(game_exe) {
-        return Err("No original GOG Galaxy DLL found in game folder. Cannot install API emulator.".to_string());
-    }
-
-    let dll_folder = find_api_emu_dll_folder(game_exe, NGE_VERSION_FILES)
+    let dll_folder = find_game_dll_folder(game_exe, game_folder, NGE_VERSION_FILES)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
+    if !has_original_gog_dlls(&dll_folder) {
+        return Err("No original GOG Galaxy DLL found in game folder. Cannot install API emulator.".to_string());
+    }
+
     let is64 = detect_arch(game_exe) == "x64";
-    install_nge_into_folder(save_dir, &dll_folder, is64, product_id, version)
+    install_nge_into_folder(save_dir, &dll_folder, is64, product_id, version)?;
+    Ok(dll_folder)
 }
 
 /// Recursively search `game_folder` for the directory containing Galaxy DLLs and
@@ -339,9 +337,9 @@ fn install_nge_into_folder(
     Ok(())
 }
 
-pub fn uninstall_nge(game_exe: &str) -> Result<(), String> {
+pub fn uninstall_nge(game_exe: &str, game_folder: &str) -> Result<(), String> {
     let all_files: Vec<&str> = NGE_VERSION_FILES.to_vec();
-    let dll_folder = find_api_emu_dll_folder(game_exe, &all_files)
+    let dll_folder = find_game_dll_folder(game_exe, game_folder, &all_files)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
@@ -352,11 +350,6 @@ pub fn uninstall_nge(game_exe: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn is_nge_installed(game_exe: &str) -> bool {
-    let all_files: Vec<&str> = NGE_VERSION_FILES.to_vec();
-    if let Some(folder) = find_api_emu_dll_folder(game_exe, &all_files) {
-        folder.join("ngalaxye_settings").is_dir()
-    } else {
-        false
-    }
+pub fn is_nge_installed(dll_folder: &Path) -> bool {
+    dll_folder.join("ngalaxye_settings").is_dir()
 }

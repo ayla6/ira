@@ -267,6 +267,8 @@ fn build_dialog_contents(
     let pending_emu_uninstall = build_api_emulator_page(
         super::edit_game_pages::ApiEmuPageParams {
             emu_exe: &saved_launch.exe,
+            emu_game_folder: &game.game_folder,
+            emu_db_id: game.db_id,
             emu_trophy_source: game.trophy_source,
             emu_app_id: &game.app_id,
             save_dir: &emu_save_dir,
@@ -324,6 +326,9 @@ fn build_dialog_contents(
             );
             if count > 0 {
                 btn_m.set_label(&format!("Migrated {} save folder(s)", count));
+                if let Err(e) = ira_db::set_saves_centralized(&state_m.borrow().db, game_m.db_id, true) {
+                    eprintln!("Failed to cache saves centralized: {}", e);
+                }
             } else {
                 btn_m.set_label("Already centralized");
             }
@@ -379,6 +384,7 @@ fn build_dialog_contents(
             old_wine: old_wine_s.clone(),
             app_default_wine: app_default_wine_s.clone(),
             game_exe: game_exe_s.clone(),
+            game_folder: game.game_folder.clone(),
             language_row: language_row_s.clone(),
             languages: languages_s.clone(),
             saved_platform_id: saved_platform_id_s.clone(),

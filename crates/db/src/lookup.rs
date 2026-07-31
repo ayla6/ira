@@ -37,8 +37,7 @@ pub fn find_by_db_id(conn: &DbConn, db_id: i64) -> Result<Option<GameEntry>, Str
 }
 
 pub fn find_by_trophy_platform(conn: &DbConn, trophy_source: ira_models::TrophySource, platform_id: &str) -> Result<Option<GameEntry>, String> {
-    find_game_by(conn, "trophy_source = ?1 AND platform_id = ?2", params![trophy_source.as_str(), platform_id])
-}
+    find_game_by(conn, "trophy_source = ?1 AND platform_id = ?2", params![trophy_source.as_str(), platform_id])}
 
 pub fn find_by_kind_platform(conn: &DbConn, kind: ira_models::GameKind, platform_id: &str) -> Result<Option<GameEntry>, String> {
     find_game_by(conn, "kind = ?1 AND platform_id = ?2", params![kind.as_str(), platform_id])
@@ -50,6 +49,21 @@ pub fn find_by_game_folder(conn: &DbConn, game_folder: &str) -> Result<Option<Ga
 
 pub fn find_all_retro_by_platform(conn: &DbConn, platform_id: &str) -> Result<Vec<GameEntry>, String> {
     find_all_games_by(conn, "kind = ?1 AND platform_id = ?2", params![GameKind::Retro.as_str(), platform_id])
+}
+
+/// Cached API-emulator DLL folder for the game (empty string if unknown).
+pub fn get_api_dll_folder(conn: &DbConn, game_id: i64) -> Result<String, String> {
+    let c = lock_db(conn)?;
+    c.query_row("SELECT api_dll_folder FROM games WHERE id = ?1", params![game_id], |r| r.get(0))
+        .map_err(|e| e.to_string())
+}
+
+/// Whether the game's UFS saves are known to be centralized.
+pub fn get_saves_centralized(conn: &DbConn, game_id: i64) -> Result<bool, String> {
+    let c = lock_db(conn)?;
+    c.query_row("SELECT saves_centralized FROM games WHERE id = ?1", params![game_id], |r| r.get::<_, i64>(0))
+        .map(|v| v != 0)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

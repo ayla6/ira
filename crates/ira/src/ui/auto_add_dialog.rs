@@ -509,6 +509,7 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
         let _ = sender.send(AppMessage::NewGame(game_obj.clone()));
 
         let save_dir_for_lang = save_dir.clone();
+        let db_for_cache = db.clone();
         crate::ui::enrichment::enrich_game_blocking(crate::ui::enrichment::EnrichGameParams {
             app_id: game_obj.app_id.clone(),
             trophy_source: game_obj.trophy_source,
@@ -580,13 +581,18 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
         // Centralize game saves if UFS data is available
         if let Some(details) = crate::game_loader::read_app_details(&save_dir_for_lang, &app_id) {
             if !details.ufs_savefiles.is_empty() {
-                ira_launcher::game_saves::setup_game_saves(
+                let count = ira_launcher::game_saves::setup_game_saves(
                     &details.ufs_savefiles,
                     &details.ufs_rootoverrides,
                     &app_id,
                     &save_dir_for_lang,
                     wine_prefix.as_deref(),
                 );
+                if count > 0 {
+                    if let Err(e) = ira_db::set_saves_centralized(&db_for_cache, db_id, true) {
+                        eprintln!("Failed to cache saves centralized: {}", e);
+                    }
+                }
             }
         }
 

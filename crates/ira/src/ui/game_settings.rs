@@ -507,12 +507,19 @@ fn build_save_migration_section(
     group.set_title("Save data");
 
     let row = adw::ActionRow::new();
-    row.set_title("Centralize save data");
-    row.set_subtitle("Move saves to a persistent location and create symlinks");
+    let already_centralized = ira_db::get_saves_centralized(&state.borrow().db, game.db_id).unwrap_or(false);
+    if already_centralized {
+        row.set_title("Save data centralized");
+        row.set_subtitle("Saves already moved to a persistent location");
+    } else {
+        row.set_title("Centralize save data");
+        row.set_subtitle("Move saves to a persistent location and create symlinks");
+    }
 
-    let btn = gtk4::Button::with_label("Migrate");
+    let btn = gtk4::Button::with_label(if already_centralized { "Centralized" } else { "Migrate" });
     btn.add_css_class(CSS_SUGGESTED_ACTION);
     btn.set_valign(gtk4::Align::Center);
+    btn.set_sensitive(!already_centralized);
     row.add_suffix(&btn);
     group.add(&row);
     page.append(&group);

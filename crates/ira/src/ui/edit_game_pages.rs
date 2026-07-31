@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -113,9 +114,41 @@ pub(super) fn build_dlc_page(
 
 pub(super) struct ApiEmuPageParams<'a> {
     pub emu_exe: &'a str,
+    pub emu_game_folder: &'a str,
+    pub emu_db_id: i64,
     pub emu_trophy_source: ira_models::TrophySource,
     pub emu_app_id: &'a str,
     pub save_dir: &'a str,
+}
+
+/// Resolve the game's API-emulator DLL folder, preferring the per-game DB
+/// cache and falling back to a scan of the install folder (written back to
+/// the cache on a miss).
+fn resolve_emu_dll_folder(
+    db: &DbConn,
+    db_id: i64,
+    emu_exe: &str,
+    emu_game_folder: &str,
+    ts: ira_models::TrophySource,
+) -> Option<PathBuf> {
+    let cached = ira_db::get_api_dll_folder(db, db_id).unwrap_or_default();
+    if !cached.is_empty() {
+        let folder = PathBuf::from(&cached);
+        if folder.is_dir() {
+            return Some(folder);
+        }
+    }
+    let found = if ts == ira_models::TrophySource::Gse {
+        ira_platforms::api_emulators::find_steam_dll_folder(emu_exe, emu_game_folder)
+    } else {
+        ira_platforms::api_emulators::find_gog_dll_folder(emu_exe, emu_game_folder)
+    };
+    if let Some(f) = &found {
+        if let Err(e) = ira_db::set_api_dll_folder(db, db_id, &f.to_string_lossy()) {
+            eprintln!("Failed to cache API DLL folder: {e}");
+        }
+    }
+    found
 }
 
 pub(super) fn build_api_emulator_page(
@@ -125,11 +158,14 @@ pub(super) fn build_api_emulator_page(
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
 ) -> Option<Rc<RefCell<bool>>> {
-    let (emu_exe, emu_trophy_source, emu_app_id, save_dir) = 
-        (params.emu_exe, params.emu_trophy_source, params.emu_app_id, params.save_dir);
+    let (emu_exe, emu_game_folder, emu_db_id, emu_trophy_source, emu_app_id, save_dir) =
+        (params.emu_exe, params.emu_game_folder, params.emu_db_id, params.emu_trophy_source, params.emu_app_id, params.save_dir);
     if (emu_trophy_source != ira_models::TrophySource::Gse && emu_trophy_source != ira_models::TrophySource::Nge) || emu_exe.is_empty() {
         return None;
     }
+
+    let db = state.borrow().db.clone();
+    let dll_folder = resolve_emu_dll_folder(&db, emu_db_id, emu_exe, emu_game_folder, emu_trophy_source);
 
     let emu_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     emu_page.set_margin_start(12);
@@ -140,11 +176,13 @@ pub(super) fn build_api_emulator_page(
     status_group.set_title("Status");
 
     let status_row = adw::ActionRow::new();
-    let is_installed = if emu_trophy_source == ira_models::TrophySource::Gse {
-        ira_platforms::api_emulators::is_gse_installed(emu_exe)
-    } else {
-        ira_platforms::api_emulators::is_nge_installed(emu_exe)
-    };
+    let is_installed = dll_folder.as_deref().map(|d| {
+        if emu_trophy_source == ira_models::TrophySource::Gse {
+            ira_platforms::api_emulators::is_gse_installed(d)
+        } else {
+            ira_platforms::api_emulators::is_nge_installed(d)
+        }
+    }).unwrap_or(false);
     status_row.set_title(if is_installed { "API emulator installed" } else { "API emulator not installed" });
     status_row.set_sensitive(false);
     status_group.add(&status_row);
@@ -193,11 +231,13 @@ pub(super) fn build_api_emulator_page(
         } else {
             ira_platforms::api_emulators::list_gog_versions(save_dir)
         };
-        let has_dlls = if emu_trophy_source == ira_models::TrophySource::Gse {
-            ira_platforms::api_emulators::has_original_steam_dlls(emu_exe)
-        } else {
-            ira_platforms::api_emulators::has_original_gog_dlls(emu_exe)
-        };
+        let has_dlls = dll_folder.as_deref().map(|d| {
+            if emu_trophy_source == ira_models::TrophySource::Gse {
+                ira_platforms::api_emulators::has_original_steam_dlls(d)
+            } else {
+                ira_platforms::api_emulators::has_original_gog_dlls(d)
+            }
+        }).unwrap_or(false);
 
         if !has_dlls {
             let missing_row = adw::ActionRow::new();
@@ -235,8 +275,11 @@ pub(super) fn build_api_emulator_page(
         install_btn.set_sensitive(has_dlls);
         install_btn.set_valign(gtk4::Align::Center);
         let exe_c = emu_exe.to_string();
+        let game_folder_c = emu_game_folder.to_string();
         let app_id_c = emu_app_id.to_string();
         let save_dir_c = save_dir.to_string();
+        let db_c = db.clone();
+        let db_id_c = emu_db_id;
         let status_c = status_row.clone();
         let langs_c = languages.to_vec();
         let ts_c = emu_trophy_source;
@@ -246,13 +289,20 @@ pub(super) fn build_api_emulator_page(
                 if idx < versions.len() { versions[idx].clone() } else { String::new() }
             }).unwrap_or_default();
             let result = if ts_c == ira_models::TrophySource::Gse {
-                ira_platforms::api_emulators::install_gse(&save_dir_c, &exe_c, &app_id_c, &langs_c, &ver)
+                ira_platforms::api_emulators::install_gse(
+                    &save_dir_c, &exe_c, &game_folder_c, &app_id_c, &langs_c, &ver,
+                )
             } else {
-                ira_platforms::api_emulators::install_nge(&save_dir_c, &exe_c, &app_id_c, &ver)
+                ira_platforms::api_emulators::install_nge(
+                    &save_dir_c, &exe_c, &game_folder_c, &app_id_c, &ver,
+                )
             };
             match result {
-                Ok(()) => {
+                Ok(folder) => {
                     status_c.set_title("API emulator installed");
+                    if let Err(e) = ira_db::set_api_dll_folder(&db_c, db_id_c, &folder.to_string_lossy()) {
+                        eprintln!("Failed to cache API DLL folder: {}", e);
+                    }
                 }
                 Err(e) => eprintln!("Install failed: {}", e),
             }

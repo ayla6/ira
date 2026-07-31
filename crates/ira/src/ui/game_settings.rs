@@ -447,7 +447,11 @@ fn build_language_section(
 
     let lang_group = adw::PreferencesGroup::new();
     lang_group.set_title("Language");
-    let model = super::helpers::string_list_from(languages);
+    let display_names: Vec<String> = languages
+        .iter()
+        .map(|code| ira_models::steam_language_name(code).to_string())
+        .collect();
+    let model = super::helpers::string_list_from(&display_names);
     let row = adw::ComboRow::new();
     row.set_title("Game language");
     row.set_subtitle("Language reported to the game by the API emulator");

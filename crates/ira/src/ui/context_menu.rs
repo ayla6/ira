@@ -8,7 +8,7 @@ use super::context_menu_actions::{
     setup_play_action, setup_edit_action, setup_play_history_action,
     setup_hide_action, setup_delete_game_action, setup_open_game_folder_action,
     setup_open_wine_prefix_action, setup_open_images_action, setup_open_steam_status_action,
-    setup_open_gog_status_action, setup_toggle_group_action, setup_new_collection_action,
+    setup_open_gog_status_action, setup_open_save_location_action, setup_toggle_group_action, setup_new_collection_action,
     setup_multi_toggle_group_action, setup_multi_new_collection_action, setup_multi_toggle_hide_action,
 };
 
@@ -134,7 +134,8 @@ pub fn show_game_context_menu(
     if wine_prefix.is_some() {
         folders_menu.append(Some("Wine prefix"), Some("game.open_wine_prefix"));
     }
-    folders_menu.append(Some("Data"), Some("game.open_images"));
+    folders_menu.append(Some("Data location"), Some("game.open_images"));
+    folders_menu.append(Some("Save location"), Some("game.open_save_location"));
     if game.trophy_source == ira_models::TrophySource::Gse {
         folders_menu.append(Some("Achievement status"), Some("game.open_steam_status"));
     } else if game.trophy_source == ira_models::TrophySource::Nge {
@@ -177,6 +178,7 @@ pub fn show_game_context_menu(
     }
     setup_open_wine_prefix_action(&actions, wine_prefix.clone());
     setup_open_images_action(&actions, state.clone(), game.clone());
+    setup_open_save_location_action(&actions, state.clone(), game.clone());
     if game.trophy_source == ira_models::TrophySource::Gse {
         setup_open_steam_status_action(&actions, state.clone(), game.clone());
     }

@@ -145,6 +145,20 @@ pub(super) fn setup_open_images_action(actions: &gio::SimpleActionGroup, state: 
     actions.add_action(&open_images);
 }
 
+pub(super) fn setup_open_save_location_action(actions: &gio::SimpleActionGroup, state: SharedState, game: Game) {
+    let open_save = gio::SimpleAction::new("open_save_location", None);
+    let save_dir = state.borrow().save_dir.clone();
+    open_save.connect_activate(move |_, _| {
+        let path = match game.trophy_source {
+            ira_models::TrophySource::Gse => format!("{}/emulator_saves/gbe", save_dir),
+            ira_models::TrophySource::Nge => format!("{}/emulator_saves/nge", save_dir),
+            _ => ira_launcher::game_saves::centralized_save_dir(&save_dir, &game.app_id).to_string_lossy().into_owned(),
+        };
+        open_folder(&path);
+    });
+    actions.add_action(&open_save);
+}
+
 pub(super) fn setup_open_steam_status_action(actions: &gio::SimpleActionGroup, state: SharedState, game: Game) {
     let open_status = gio::SimpleAction::new("open_steam_status", None);
     let save_dir = state.borrow().save_dir.clone();

@@ -2,12 +2,15 @@ use gtk4::prelude::*;
 use adw::prelude::*;
 use crate::strings as S;
 use super::state::SharedState;
-use super::helpers::format_duration;
+use super::helpers::{clear_children, format_duration};
 use super::play_history_chart::{
     assign_game_colors, build_weekly_chart, color_hex, other_hex, BarSegment, DayData,
     DayDetail, DaySession, GameColorAssignment, WeekData,
 };
 use std::collections::HashMap;
+
+type RebuildFn = std::rc::Rc<dyn Fn()>;
+type RebuildHandle = std::rc::Rc<std::cell::RefCell<Option<RebuildFn>>>;
 
 fn format_time(timestamp: i64) -> String {
     let secs = if timestamp > 1_000_000_000_000 { timestamp / 1000 } else { timestamp };
@@ -65,23 +68,119 @@ pub fn show_play_history_dialog(state: &SharedState, game_id: i64, variant_id: O
     box_.set_margin_top(12);
     box_.set_margin_bottom(12);
 
-    let sessions = ira_db::get_sessions_for_game(&state.borrow().db, game_id, variant_id)
-        .unwrap_or_default();
+    // Rebuild handle stored in a RefCell so the delete callback can reference
+    // the rebuild closure that creates it (self-referential).
+    let rebuild_handle: RebuildHandle = std::rc::Rc::new(std::cell::RefCell::new(None));
 
-    if sessions.is_empty() {
-        let empty_label = gtk4::Label::new(Some(S::NO_SESSIONS));
-        empty_label.set_xalign(0.0);
-        empty_label.set_opacity(0.6);
-        box_.append(&empty_label);
-    } else {
-        let weeks = compute_game_weeks(&sessions, &game_name);
-        box_.append(&build_weekly_chart(weeks, true));
+    {
+        let state = state.clone();
+        let box_ = box_.clone();
+        let game_name = game_name.clone();
+        let dialog = dialog.clone();
+        let rebuild_handle_c = rebuild_handle.clone();
+        let rebuild: RebuildFn = std::rc::Rc::new(move || {
+            let sessions = ira_db::get_sessions_for_game(&state.borrow().db, game_id, variant_id)
+                .unwrap_or_default();
+            clear_children(&box_);
+            if sessions.is_empty() {
+                let empty_label = gtk4::Label::new(Some(S::NO_SESSIONS));
+                empty_label.set_xalign(0.0);
+                empty_label.set_opacity(0.6);
+                box_.append(&empty_label);
+            } else {
+                let on_delete: super::play_history_chart::DeleteSessionFn = {
+                    let state = state.clone();
+                    let dialog = dialog.clone();
+                    let rebuild_handle = rebuild_handle_c.clone();
+                    std::rc::Rc::new(move |session_id: i64, ctrl: bool| {
+                        let rebuild = rebuild_handle.borrow().clone();
+                        if let Some(rebuild) = rebuild {
+                            delete_session_with_confirm(&state, &dialog, session_id, ctrl, rebuild);
+                        }
+                    })
+                };
+                let weeks = compute_game_weeks(&sessions, &game_name);
+                box_.append(&build_weekly_chart(weeks, true, Some(on_delete)));
+            }
+        });
+        *rebuild_handle.borrow_mut() = Some(rebuild);
+    }
+
+    if let Some(rebuild) = rebuild_handle.borrow().clone() {
+        rebuild();
     }
 
     toolbar_view.set_content(Some(&box_));
     dialog.set_child(Some(&toolbar_view));
     dialog.present(Some(&state.borrow().window));
     dialog
+}
+
+fn delete_session_with_confirm(
+    state: &SharedState,
+    parent: &adw::Dialog,
+    session_id: i64,
+    ctrl: bool,
+    rebuild: RebuildFn,
+) {
+    let do_delete = {
+        let state = state.clone();
+        let rebuild = rebuild.clone();
+        move || {
+            if let Err(e) = delete_session_from_db(&state, session_id) {
+                eprintln!("Failed to delete session: {}", e);
+            }
+            rebuild();
+        }
+    };
+    if ctrl {
+        do_delete();
+    } else {
+        let dialog = adw::AlertDialog::new(
+            Some(S::DELETE_SESSION),
+            Some(S::DELETE_SESSION_BODY),
+        );
+        dialog.add_response("cancel", S::CANCEL);
+        dialog.add_response("delete", S::DELETE);
+        dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+        dialog.connect_response(None, move |_, resp| {
+            if resp == "delete" {
+                do_delete();
+            }
+        });
+        dialog.present(Some(parent));
+    }
+}
+
+fn delete_session_from_db(state: &SharedState, session_id: i64) -> Result<(), String> {
+    let session = ira_db::delete_session(&state.borrow().db, session_id)?
+        .ok_or_else(|| format!("session {} not found", session_id))?;
+    let hours = (session.duration_seconds as f64) / 3600.0;
+    let (db, new_base_playtime, new_variant_playtime) = {
+        let mut s = state.borrow_mut();
+        let db = s.db.clone();
+        let mut base_pt = 0.0;
+        let mut var_pt: Option<(i64, f64)> = None;
+        for g in &mut s.games {
+            if g.db_id == session.game_id && g.variant_id.is_none() {
+                g.playtime = (g.playtime - hours).max(0.0);
+                base_pt = g.playtime;
+            } else if g.db_id == session.game_id && g.variant_id == session.variant_id && session.variant_id.is_some() {
+                g.playtime = (g.playtime - hours).max(0.0);
+                var_pt = Some((session.variant_id.unwrap(), g.playtime));
+            }
+        }
+        (db, base_pt, var_pt)
+    };
+    if session.variant_id.is_none() {
+        ira_db::update_field(&db, session.game_id, "playtime", &new_base_playtime)?;
+    }
+    if let Some((vid, vpt)) = new_variant_playtime {
+        ira_db::update_variant_playtime(&db, vid, vpt)?;
+    }
+    Ok(())
 }
 
 fn compute_game_weeks(
@@ -117,6 +216,7 @@ fn compute_game_weeks(
                     .map(|ss| {
                         ss.iter()
                             .map(|s| DayDetail {
+                                session_id: Some(s.id),
                                 label: format_time(s.started_at),
                                 value: format_duration(s.duration_seconds),
                                 color_hex: None,
@@ -179,7 +279,7 @@ pub fn show_daily_history_dialog(state: &SharedState) {
         let assignment = assign_game_colors(&all_sessions);
         let weeks = compute_app_weeks(&all_sessions, &assignment, &game_names);
 
-        box_.append(&build_weekly_chart(weeks, false));
+        box_.append(&build_weekly_chart(weeks, false, None));
     }
 
     toolbar_view.set_content(Some(&box_));
@@ -246,6 +346,7 @@ fn build_day_data(
                 let hex = color_hex(color_idx.unwrap_or(0)).to_string();
                 let sub_sessions: Vec<DaySession> = sessions.iter()
                     .map(|s| DaySession {
+                        session_id: s.id,
                         label: format_time(s.started_at),
                         value: format_duration(s.duration_seconds),
                     })
@@ -256,6 +357,7 @@ fn build_day_data(
                     label: name.clone(),
                 });
                 details.push(DayDetail {
+                    session_id: None,
                     label: name,
                     value: format_duration(total as i64),
                     color_hex: Some(hex),
@@ -289,11 +391,13 @@ fn build_day_data(
             let name = game_names.get(&gid).cloned().unwrap_or_default();
             let sub_sessions: Vec<DaySession> = sessions.iter()
                 .map(|s| DaySession {
+                    session_id: s.id,
                     label: format_time(s.started_at),
                     value: format_duration(s.duration_seconds),
                 })
                 .collect();
             details.push(DayDetail {
+                session_id: None,
                 label: name,
                 value: format_duration(total as i64),
                 color_hex: Some(other_hex().to_string()),

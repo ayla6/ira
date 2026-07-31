@@ -18,11 +18,13 @@ pub(super) fn color_hex(i: usize) -> &'static str { COLOR_HEX[i.min(COLOR_HEX.le
 pub(super) fn other_hex() -> &'static str { OTHER_HEX }
 
 #[derive(Clone)] pub(super) struct BarSegment { pub value: f64, pub color_index: Option<usize>, pub label: String }
-#[derive(Clone)] pub(super) struct DaySession { pub label: String, pub value: String }
-#[derive(Clone)] pub(super) struct DayDetail { pub label: String, pub value: String, pub color_hex: Option<String>, pub sessions: Vec<DaySession> }
+#[derive(Clone)] pub(super) struct DaySession { pub session_id: i64, pub label: String, pub value: String }
+#[derive(Clone)] pub(super) struct DayDetail { pub session_id: Option<i64>, pub label: String, pub value: String, pub color_hex: Option<String>, pub sessions: Vec<DaySession> }
 #[derive(Clone)] pub(super) struct DayData { pub date: chrono::NaiveDate, pub total: f64, pub segments: Vec<BarSegment>, pub details: Vec<DayDetail> }
 #[derive(Clone)] pub(super) struct WeekData { pub week_start: chrono::NaiveDate, pub days: Vec<DayData>, pub week_total: f64 }
 pub(super) struct GameColorAssignment { pub top_games: Vec<i64>, pub color_map: HashMap<i64, usize> }
+
+pub(super) type DeleteSessionFn = Rc<dyn Fn(i64, bool)>;
 
 pub(super) fn assign_game_colors(s: &[ira_models::PlaySession]) -> GameColorAssignment {
     let mut t: HashMap<i64,f64> = HashMap::new();
@@ -61,9 +63,10 @@ struct State {
     chart: BarChart,
     sidebar_header: gtk4::Label, sidebar_list: gtk4::ListBox, week_label: gtk4::Label,
     prev_w: gtk4::Button, next_w: gtk4::Button, prev_d: gtk4::Button, next_d: gtk4::Button,
+    on_delete: Option<DeleteSessionFn>,
 }
 
-pub(super) fn build_weekly_chart(weeks: Vec<WeekData>, is_single_game: bool) -> gtk4::Widget {
+pub(super) fn build_weekly_chart(weeks: Vec<WeekData>, is_single_game: bool, on_delete: Option<DeleteSessionFn>) -> gtk4::Widget {
     let container = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     container.set_focusable(true);
 
@@ -133,6 +136,7 @@ pub(super) fn build_weekly_chart(weeks: Vec<WeekData>, is_single_game: bool) -> 
         sidebar_header: sidebar_header.clone(), sidebar_list: sidebar_list.clone(),
         week_label: week_label.clone(),
         prev_w: pw.clone(), next_w: nw.clone(), prev_d: pd.clone(), next_d: nd.clone(),
+        on_delete,
     }));
 
     {
@@ -268,6 +272,9 @@ fn update_sidebar(s: &State, day: &DayData) {
             r.set_title(&d.label);
             let v = gtk4::Label::new(Some(&d.value)); v.add_css_class(CSS_DIM_LABEL); r.add_suffix(&v);
             if let Some(h) = &d.color_hex { let sw = gtk4::Label::new(None); sw.set_markup(&format!("<span foreground=\"{}\">\u{25A0}</span>", h)); r.add_prefix(&sw); }
+            if let (Some(sid), Some(on_delete)) = (d.session_id, &s.on_delete) {
+                r.add_suffix(&make_delete_button(sid, on_delete));
+            }
             s.sidebar_list.append(&r);
         } else {
             let ex = adw::ExpanderRow::new();
@@ -277,11 +284,28 @@ fn update_sidebar(s: &State, day: &DayData) {
             for ses in &d.sessions {
                 let sub = adw::ActionRow::new(); sub.set_title(&ses.label);
                 let sv = gtk4::Label::new(Some(&ses.value)); sv.add_css_class(CSS_DIM_LABEL); sub.add_suffix(&sv);
+                if let Some(on_delete) = &s.on_delete {
+                    sub.add_suffix(&make_delete_button(ses.session_id, on_delete));
+                }
                 ex.add_row(&sub);
             }
             s.sidebar_list.append(&ex);
         }
     }
+}
+
+fn make_delete_button(session_id: i64, on_delete: &DeleteSessionFn) -> gtk4::Widget {
+    let img = gtk4::Image::from_icon_name("user-trash-symbolic");
+    img.set_tooltip_text(Some("Delete session (hold Ctrl to skip confirmation)"));
+    img.add_css_class(CSS_DIM_LABEL);
+    let on_delete = on_delete.clone();
+    let g = gtk4::GestureClick::new();
+    g.connect_pressed(move |gesture, _, _, _| {
+        let ctrl = gesture.current_event_state().contains(gtk4::gdk::ModifierType::CONTROL_MASK);
+        on_delete(session_id, ctrl);
+    });
+    img.add_controller(g);
+    img.upcast()
 }
 
 #[cfg(test)]

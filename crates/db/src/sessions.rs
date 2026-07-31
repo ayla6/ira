@@ -92,6 +92,28 @@ pub fn delete_sessions_for_game(conn: &DbConn, game_id: i64) -> Result<(), Strin
     Ok(())
 }
 
+/// Delete a single session, returning the removed row so the caller can
+/// subtract its duration from the game's playtime.
+pub fn delete_session(conn: &DbConn, session_id: i64) -> Result<Option<PlaySession>, String> {
+    let c = crate::lock_db(conn)?;
+    let session = c
+        .query_row(
+            "SELECT id, game_id, variant_id, started_at, ended_at, duration_seconds FROM play_sessions WHERE id = ?1",
+            params![session_id],
+            play_session_from_row,
+        )
+        .map(Some)
+        .or_else(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            e => Err(e.to_string()),
+        })?;
+    if session.is_some() {
+        c.execute("DELETE FROM play_sessions WHERE id = ?1", params![session_id])
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(session)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,5 +233,23 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let total = get_total_playtime_for_game(&conn, 1, None).unwrap();
         assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn test_delete_session_single() {
+        let (conn, _tmp) = setup_db();
+        let id = record_session(&conn, 1, None, 1000, 1050).unwrap();
+
+        let removed = delete_session(&conn, id).unwrap().unwrap();
+        assert_eq!(removed.id, id);
+        assert_eq!(removed.duration_seconds, 50);
+        assert!(get_sessions_for_game(&conn, 1, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_delete_session_missing_returns_none() {
+        let (conn, _tmp) = setup_db();
+        let removed = delete_session(&conn, 9999).unwrap();
+        assert!(removed.is_none());
     }
 }

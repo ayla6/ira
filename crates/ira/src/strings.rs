@@ -55,3 +55,6 @@ pub const COLLECTIONS: &str = "Collections";
 pub const ADD_COLLECTION: &str = "Add collection";
 pub const SEARCH_GAMES: &str = "Search games…";
 pub const SORT_BY: &str = "Sort by";
+pub const DELETE_SESSION: &str = "Delete session";
+pub const DELETE_SESSION_BODY: &str = "Delete this play session and subtract its playtime?";
+pub const DELETE: &str = "Delete";

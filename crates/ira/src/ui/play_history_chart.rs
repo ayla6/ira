@@ -67,7 +67,7 @@ struct State {
     ctrl_held: Rc<Cell<bool>>,
 }
 
-pub(super) fn build_weekly_chart(weeks: Vec<WeekData>, is_single_game: bool, on_delete: Option<DeleteSessionFn>) -> gtk4::Widget {
+pub(super) fn build_weekly_chart(weeks: Vec<WeekData>, is_single_game: bool, on_delete: Option<DeleteSessionFn>, focus_week: Option<chrono::NaiveDate>) -> gtk4::Widget {
     let container = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     container.set_focusable(true);
 
@@ -131,8 +131,12 @@ pub(super) fn build_weekly_chart(weeks: Vec<WeekData>, is_single_game: bool, on_
     row.append(&sidebar_box);
     container.append(&row);
 
+    let initial_idx = focus_week
+        .and_then(|fw| weeks.iter().position(|w| w.week_start == fw))
+        .unwrap_or_else(|| weeks.len().saturating_sub(1));
+
     let state = Rc::new(RefCell::new(State {
-        current_idx: weeks.len().saturating_sub(1), selected_day: 6, is_single_game, weeks,
+        current_idx: initial_idx, selected_day: 6, is_single_game, weeks,
         chart: chart.clone(),
         sidebar_header: sidebar_header.clone(), sidebar_list: sidebar_list.clone(),
         week_label: week_label.clone(),

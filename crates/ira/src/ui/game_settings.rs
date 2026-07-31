@@ -473,9 +473,13 @@ fn build_language_section(
     let selected = current_lang
         .as_ref()
         .and_then(|lang| languages.iter().position(|l| l == lang))
-        .map(|i| i as u32)
+        .or_else(|| {
+            let prefs = &state.borrow().cfg.language_preferences;
+            prefs.iter().find_map(|p| languages.iter().position(|l| l == p))
+        })
+        .or_else(|| languages.iter().position(|l| l == "english"))
         .unwrap_or(0);
-    row.set_selected(selected);
+    row.set_selected(selected as u32);
 
     lang_group.add(&row);
     page.append(&lang_group);

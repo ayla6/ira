@@ -188,7 +188,9 @@ fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchC
     let new_profile_id = if let Some(ref lc) = params.launch_config_widgets {
         if let Some(ref profile_row) = lc.profile_row {
             if profile_row.selected() > 0 {
-                params.profiles.get((profile_row.selected() - 1) as usize).map(|p| p.id)
+                let profiles = ira_db::get_all_profiles(&params.state.borrow().db)
+                    .unwrap_or_else(|_| params.profiles.clone());
+                profiles.get((profile_row.selected() - 1) as usize).map(|p| p.id)
             } else {
                 None
             }
@@ -198,6 +200,16 @@ fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchC
     } else {
         params.saved_profile_id
     };
+
+    if let Some(pid) = new_profile_id {
+        if let Ok(Some(profile)) = ira_db::get_profile(&params.state.borrow().db, pid) {
+            wine.version = profile.wine_version;
+            wine.custom_wine_path = profile.custom_wine_path;
+            wine.prefix = profile.prefix;
+            wine.arch = profile.arch;
+            wine.umu_enabled = profile.umu_enabled;
+        }
+    }
 
     (launch, wine, new_profile_id)
 }

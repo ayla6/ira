@@ -9,7 +9,7 @@ use super::play_history_chart::{
 };
 use std::collections::HashMap;
 
-type RebuildFn = std::rc::Rc<dyn Fn()>;
+type RebuildFn = std::rc::Rc<dyn Fn(Option<chrono::NaiveDate>)>;
 type RebuildHandle = std::rc::Rc<std::cell::RefCell<Option<RebuildFn>>>;
 
 fn format_time(timestamp: i64) -> String {
@@ -78,7 +78,7 @@ pub fn show_play_history_dialog(state: &SharedState, game_id: i64, variant_id: O
         let game_name = game_name.clone();
         let dialog = dialog.clone();
         let rebuild_handle_c = rebuild_handle.clone();
-        let rebuild: RebuildFn = std::rc::Rc::new(move || {
+        let rebuild: RebuildFn = std::rc::Rc::new(move |focus_week: Option<chrono::NaiveDate>| {
             let sessions = ira_db::get_sessions_for_game(&state.borrow().db, game_id, variant_id)
                 .unwrap_or_default();
             clear_children(&box_);
@@ -100,14 +100,14 @@ pub fn show_play_history_dialog(state: &SharedState, game_id: i64, variant_id: O
                     })
                 };
                 let weeks = compute_game_weeks(&sessions, &game_name);
-                box_.append(&build_weekly_chart(weeks, true, Some(on_delete)));
+                box_.append(&build_weekly_chart(weeks, true, Some(on_delete), focus_week));
             }
         });
         *rebuild_handle.borrow_mut() = Some(rebuild);
     }
 
     if let Some(rebuild) = rebuild_handle.borrow().clone() {
-        rebuild();
+        rebuild(None);
     }
 
     toolbar_view.set_content(Some(&box_));
@@ -143,10 +143,11 @@ fn delete_session_with_confirm(
         let state = state.clone();
         let rebuild = rebuild.clone();
         move || {
-            if let Err(e) = delete_session_from_db(&state, session_id) {
-                eprintln!("Failed to delete session: {}", e);
-            }
-            rebuild();
+            let focus = delete_session_from_db(&state, session_id)
+                .map_err(|e| eprintln!("Failed to delete session: {}", e))
+                .ok()
+                .flatten();
+            rebuild(focus);
         }
     };
     if ctrl {
@@ -170,9 +171,10 @@ fn delete_session_with_confirm(
     }
 }
 
-fn delete_session_from_db(state: &SharedState, session_id: i64) -> Result<(), String> {
+fn delete_session_from_db(state: &SharedState, session_id: i64) -> Result<Option<chrono::NaiveDate>, String> {
     let session = ira_db::delete_session(&state.borrow().db, session_id)?
         .ok_or_else(|| format!("session {} not found", session_id))?;
+    let deleted_week = Some(week_start(ts_to_date(session.started_at)));
     let hours = (session.duration_seconds as f64) / 3600.0;
     let (db, new_base_playtime, new_variant_playtime) = {
         let mut s = state.borrow_mut();
@@ -196,7 +198,7 @@ fn delete_session_from_db(state: &SharedState, session_id: i64) -> Result<(), St
     if let Some((vid, vpt)) = new_variant_playtime {
         ira_db::update_variant_playtime(&db, vid, vpt)?;
     }
-    Ok(())
+    Ok(deleted_week)
 }
 
 fn compute_game_weeks(
@@ -295,7 +297,7 @@ pub fn show_daily_history_dialog(state: &SharedState) {
         let assignment = assign_game_colors(&all_sessions);
         let weeks = compute_app_weeks(&all_sessions, &assignment, &game_names);
 
-        box_.append(&build_weekly_chart(weeks, false, None));
+        box_.append(&build_weekly_chart(weeks, false, None, None));
     }
 
     toolbar_view.set_content(Some(&box_));

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone)]
 pub struct DetectedEmulator {
@@ -12,6 +13,8 @@ pub struct RaCore {
     pub display_name: String,
     pub path: String,
 }
+
+static RA_CORE_CACHE: OnceLock<Vec<RaCore>> = OnceLock::new();
 
 fn is_flatpak_installed(flatpak_id: &str) -> bool {
     Command::new("flatpak")
@@ -82,6 +85,10 @@ fn core_display_name(filename: &str) -> String {
 }
 
 pub fn detect_ra_cores() -> Vec<RaCore> {
+    RA_CORE_CACHE.get_or_init(detect_ra_cores_uncached).clone()
+}
+
+fn detect_ra_cores_uncached() -> Vec<RaCore> {
     let mut cores = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for dir in ra_core_dirs() {

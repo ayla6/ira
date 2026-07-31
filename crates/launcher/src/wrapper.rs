@@ -65,6 +65,9 @@ pub fn spawn_game(
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
+    // Clear the parent env entirely so filtered vars (CARGO_*, RUSTUP_*, etc.)
+    // don't leak into the child. Our env list is the complete env for the child.
+    cmd.env_clear();
     for (key, val) in env {
         cmd.env(key, val);
     }
@@ -92,6 +95,8 @@ pub struct MonitorContext {
     pub started_at: i64,
     pub db: DbConn,
     pub running_games: Arc<Mutex<HashMap<i64, i32>>>,
+    pub env: Vec<(String, String)>,
+    pub command: Vec<String>,
 }
 
 pub fn monitor_process(
@@ -104,6 +109,21 @@ pub fn monitor_process(
     // Clear previous log and get the shared buffer for this game.
     clear_game_log(game_id);
     let log_buf = get_game_log(game_id);
+
+    // Log the command and env vars to the in-memory buffer (matching Lutris/umu format).
+    // This runs in the monitor thread so it doesn't block the main thread.
+    {
+        let mut log = log_buf.lock().unwrap();
+        log.push(format!("Started initial process from {}", ctx.command.join(" ")));
+        let mut sorted_env = ctx.env.clone();
+        sorted_env.sort_by(|a, b| a.0.cmp(&b.0));
+        for (k, v) in &sorted_env {
+            if k.starts_with("CARGO_") || k.starts_with("RUSTUP_") || k.starts_with("RUST_") {
+                continue;
+            }
+            log.push(format!("DEBUG: {}={}", k, v));
+        }
+    }
 
     // Spawn separate threads for stdout and stderr so both are read live.
     // Reading them sequentially would block stderr until stdout EOFs (i.e. never,

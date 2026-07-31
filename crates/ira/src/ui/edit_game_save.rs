@@ -7,6 +7,7 @@ use ira_models::{AssetType, GameLaunchConfig, TrophySource, WineConfig};
 use super::add_game_dialog::collect_env_vars;
 use super::edit_game_launch::LaunchConfigWidgets;
 use super::edit_game_system::SystemWidgets;
+use super::edit_game_overlay::OverlayWidgets;
 use super::edit_game_variants::VarW;
 use super::state::{PendingImage, SharedState};
 use super::wine_config_env_dll::collect_dll_overrides;
@@ -31,6 +32,7 @@ pub(super) struct SaveGameSettingsParams {
     pub languages: Vec<String>,
     pub saved_platform_id: String,
     pub system_widgets: Option<SystemWidgets>,
+    pub overlay_widgets: Option<OverlayWidgets>,
     pub title_entry: adw::EntryRow,
     pub sort_entry: adw::EntryRow,
     pub pending_version: Rc<RefCell<Option<String>>>,
@@ -110,10 +112,11 @@ fn save_version_and_overrides(db: &ira_db::DbConn, params: &SaveGameSettingsPara
 
 fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchConfig, WineConfig, Option<i64>) {
     let sw = params.system_widgets.as_ref();
+    let ow = params.overlay_widgets.as_ref();
     let env_vars = sw.map_or(Vec::new(), |s| collect_env_vars(&s.env_vars_box));
     let ld_preload = sw.map_or(String::new(), |s| s.ld_preload_entry.text().to_string());
     let ld_library_path = sw.map_or(String::new(), |s| s.ld_library_path_entry.text().to_string());
-    let overlay_enabled = sw.and_then(|s| *s.overlay_state.borrow());
+    let overlay_enabled = ow.and_then(|s| *s.overlay_state.borrow());
     let gamemode = sw.and_then(|s| *s.gamemode_state.borrow());
     let mangohud = sw.and_then(|s| *s.mangohud_state.borrow());
     let gamescope = sw.and_then(|s| *s.gamescope_state.borrow());
@@ -126,11 +129,11 @@ fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchC
             }
         })
     }).unwrap_or_default();
-    let overlay_encoder = sw.and_then(|s| s.overlay_encoder_row.as_ref()).and_then(|r| {
+    let overlay_encoder = ow.and_then(|s| s.overlay_encoder_row.as_ref()).and_then(|r| {
         let idx = r.selected();
         if idx == 0 { None } else { Some(idx - 1) }
     });
-    let overlay_recording_quality = sw.and_then(|s| s.overlay_quality_row.as_ref()).and_then(|r| {
+    let overlay_recording_quality = ow.and_then(|s| s.overlay_quality_row.as_ref()).and_then(|r| {
         let idx = r.selected();
         if idx == 0 { None } else { Some(idx - 1) }
     });
@@ -145,7 +148,7 @@ fn build_launch_config_and_wine(params: &SaveGameSettingsParams) -> (GameLaunchC
         exe: lc.map_or(String::new(), |l| l.exe_entry.text().to_string()),
         args: lc.map_or(String::new(), |l| l.args_entry.text().to_string()),
         working_dir: lc.map_or(String::new(), |l| l.wd_entry.text().to_string()),
-        env_vars: if params.show_wine_tabs { Vec::new() } else { env_vars },
+        env_vars,
         ld_preload,
         ld_library_path,
         pre_launch: lc.map_or(String::new(), |l| l.pre_launch_entry.text().to_string()),

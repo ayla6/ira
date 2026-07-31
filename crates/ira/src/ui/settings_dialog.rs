@@ -317,6 +317,12 @@ pub fn show_settings_dialog(
         s.cfg.default_system.env_vars = super::wine_config_env_dll::collect_env_vars(&system_defaults_widgets.env_vars_box);
         s.cfg.default_system.ld_preload = system_defaults_widgets.ld_preload.text().to_string();
         s.cfg.default_system.ld_library_path = system_defaults_widgets.ld_library_path.text().to_string();
+        s.cfg.default_system.gpu = system_defaults_widgets.gpu_row.as_ref().map(|gr| {
+            let idx = gr.selected() as usize;
+            if idx == 0 { String::new() } else {
+                system_defaults_widgets.gpu_options.get(idx - 1).cloned().unwrap_or_default()
+            }
+        }).unwrap_or_default();
 
         for (source_id, state) in &source_overlay_states {
             match *state.borrow() {

@@ -9,6 +9,20 @@ fn has_exec(name: &str) -> bool {
         .is_some()
 }
 
+/// Splits a `:`-separated path list and drops empty entries plus development
+/// directories (cargo, rustup, target dirs), so the dev environment never
+/// leaks into launched games.
+fn filter_dev_paths(v: &str) -> Vec<&str> {
+    v.split(':')
+        .filter(|p| {
+            !p.is_empty()
+                && !p.contains("/.cargo/")
+                && !p.contains("/.rustup/")
+                && !p.contains("/target/")
+        })
+        .collect()
+}
+
 /// Returns `(layer_json_dir, shim_so_path)` if the overlay files are found.
 /// In development, generates a temporary JSON manifest with the correct
 /// `library_path` (the static JSON points to release/, which is wrong in debug).
@@ -82,41 +96,83 @@ pub fn build_env(
     _app_id: &str,
     command: &mut Vec<String>,
 ) -> Vec<(String, String)> {
-    let mut env: Vec<(String, String)> = std::env::vars().collect();
-
     let has_wine = wine.is_some_and(|w| w.enabled);
+    let is_proton = has_wine && (
+        crate::wine_detect::is_proton_version(&wine.unwrap().version)
+        || crate::wine_detect::is_proton_binary(wine_exe)
+    );
 
-    if !has_wine {
-        for (k, v) in &launch.env_vars {
-            env.retain(|(ek, _)| ek != k);
-            env.push((k.clone(), v.clone()));
-        }
-
-        if !launch.ld_preload.is_empty() {
-            let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
-            let merged = match existing {
-                Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_preload, prev),
-                _ => launch.ld_preload.clone(),
-            };
-            env.retain(|(k, _)| k != "LD_PRELOAD");
-            env.push(("LD_PRELOAD".to_string(), merged));
-        }
-        if !launch.ld_library_path.is_empty() {
-            let existing = env.iter().find(|(k, _)| k == "LD_LIBRARY_PATH").map(|(_, v)| v.clone());
-            let merged = match existing {
-                Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_library_path, prev),
-                _ => launch.ld_library_path.clone(),
-            };
-            env.retain(|(k, _)| k != "LD_LIBRARY_PATH");
-            env.push(("LD_LIBRARY_PATH".to_string(), merged));
-        }
-    }
+    let mut env: Vec<(String, String)> = std::env::vars()
+        .filter(|(k, _)| {
+            // Filter out build/dev environment variables that shouldn't reach the game
+            k != "CARGO"
+            && !k.starts_with("CARGO_")
+            && k != "RUSTUP"
+            && !k.starts_with("RUSTUP_")
+            && !k.starts_with("RUST_")
+        })
+        .filter(|(k, v)| {
+            if k == "LD_LIBRARY_PATH" {
+                if is_proton {
+                    // For Proton/umu, don't pass host LD_LIBRARY_PATH at all.
+                    // pressure-vessel builds its own STEAM_RUNTIME_LIBRARY_PATH
+                    // from this — host paths cause library conflicts in the container.
+                    return false;
+                }
+                // For non-Proton: remove if only dev paths (cargo, rustup, target dirs)
+                !filter_dev_paths(v).is_empty()
+            } else if k == "PATH" {
+                // Strip cargo/rustup dev directories from PATH so they never
+                // reach the game (e.g. /home/ayla/.cargo/bin under cargo run).
+                !filter_dev_paths(v).is_empty()
+            } else {
+                true
+            }
+        })
+        .map(|(k, v)| {
+            if k == "LD_LIBRARY_PATH" || k == "PATH" {
+                (k, filter_dev_paths(&v).join(":"))
+            } else {
+                (k, v)
+            }
+        })
+        .collect();
 
     if let Some(w) = wine {
         if w.enabled {
             let wine_env = wine_launch::build_wine_env(w, wine_exe);
+            // Remove any existing keys that wine_env overrides, then extend
+            for (k, _) in &wine_env {
+                env.retain(|(ek, _)| ek != k);
+            }
             env.extend(wine_env);
         }
+    }
+
+    // User-configured env vars and LD_* overrides apply to ALL games (Wine too)
+    // and are applied last, matching Lutris's "Apply user overrides at the end".
+    for (k, v) in &launch.env_vars {
+        env.retain(|(ek, _)| ek != k);
+        env.push((k.clone(), v.clone()));
+    }
+
+    if !launch.ld_preload.is_empty() {
+        let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
+        let merged = match existing {
+            Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_preload, prev),
+            _ => launch.ld_preload.clone(),
+        };
+        env.retain(|(k, _)| k != "LD_PRELOAD");
+        env.push(("LD_PRELOAD".to_string(), merged));
+    }
+    if !launch.ld_library_path.is_empty() {
+        let existing = env.iter().find(|(k, _)| k == "LD_LIBRARY_PATH").map(|(_, v)| v.clone());
+        let merged = match existing {
+            Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_library_path, prev),
+            _ => launch.ld_library_path.clone(),
+        };
+        env.retain(|(k, _)| k != "LD_LIBRARY_PATH");
+        env.push(("LD_LIBRARY_PATH".to_string(), merged));
     }
 
     let shader_dir = format!("{}/shader_cache/{}", save_dir, game_id);
@@ -397,4 +453,24 @@ pub fn uses_gamescope(command: &[String]) -> bool {
 /// Use this to determine overlay mode before calling `apply_performance`.
 pub fn will_use_gamescope(launch: &GameLaunchConfig) -> bool {
     launch.gamescope.unwrap_or(false) && has_exec("gamescope")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_filter_dev_paths_strips_cargo_rustup_target() {
+        let filtered = filter_dev_paths(
+            "/usr/bin:/home/ayla/.cargo/bin:/home/ayla/.rustup/toolchains/nightly-x86_64/bin:/data/build/target/debug:/usr/local/bin",
+        );
+        assert_eq!(filtered, vec!["/usr/bin", "/usr/local/bin"]);
+    }
+
+    #[test]
+    fn test_filter_dev_paths_empty_and_dev_only() {
+        assert!(filter_dev_paths("").is_empty());
+        assert!(filter_dev_paths("/home/ayla/.cargo/bin").is_empty());
+        assert!(filter_dev_paths(":/home/ayla/.rustup/bin/:").is_empty());
+    }
 }

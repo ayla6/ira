@@ -90,6 +90,8 @@ pub struct WineConfig {
     pub proton_wow64: bool,
     #[serde(default = "default_true")]
     pub proton_ntsync: bool,
+    #[serde(default = "default_true")]
+    pub proton_disable_lsteamclient: bool,
     #[serde(default)]
     pub umu_enabled: bool,
     #[serde(default)]
@@ -137,6 +139,7 @@ impl Default for WineConfig {
             dxvk_hud: false,
             proton_wow64: true,
             proton_ntsync: true,
+            proton_disable_lsteamclient: true,
             umu_enabled: true,
             overridden_fields: Vec::new(),
             _gpu: String::new(),
@@ -182,6 +185,7 @@ impl WineConfig {
             dxvk_hud: if has("dxvk_hud") { self.dxvk_hud } else { default.dxvk_hud },
             proton_wow64: if has("proton_wow64") { self.proton_wow64 } else { default.proton_wow64 },
             proton_ntsync: if has("proton_ntsync") { self.proton_ntsync } else { default.proton_ntsync },
+            proton_disable_lsteamclient: if has("proton_disable_lsteamclient") { self.proton_disable_lsteamclient } else { default.proton_disable_lsteamclient },
             umu_enabled: self.umu_enabled,
             overridden_fields: self.overridden_fields.clone(),
             _gpu: String::new(),
@@ -239,6 +243,7 @@ mod tests {
         assert!(cfg.dll_overrides.is_empty());
         assert!(cfg.proton_ntsync);
         assert!(cfg.proton_wow64);
+        assert!(cfg.proton_disable_lsteamclient);
         assert!(cfg.overridden_fields.is_empty());
     }
 
@@ -258,6 +263,7 @@ mod tests {
         let deserialized: WineConfig = serde_json::from_str(json).unwrap();
         assert!(deserialized.proton_ntsync);
         assert!(deserialized.proton_wow64);
+        assert!(deserialized.proton_disable_lsteamclient);
         assert!(deserialized.overridden_fields.is_empty());
     }
 

@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone)]
 pub struct GpuInfo {
@@ -10,9 +11,86 @@ pub struct GpuInfo {
     pub is_nvidia: bool,
 }
 
+#[derive(Debug, Clone)]
+struct VulkanDevice {
+    pci_id: String,
+    device_uuid: String,
+}
+
+static VULKAN_DEVICES: OnceLock<Vec<VulkanDevice>> = OnceLock::new();
+
+fn vulkan_devices() -> &'static Vec<VulkanDevice> {
+    VULKAN_DEVICES.get_or_init(vulkan_devices_uncached)
+}
+
+/// Enumerates Vulkan devices via `vulkaninfo --summary` and maps each to a
+/// `vendor:device` PCI ID plus its device UUID (dashes stripped, lowercase).
+/// Empty on failure so callers can fall back gracefully.
+fn vulkan_devices_uncached() -> Vec<VulkanDevice> {
+    let output = match std::process::Command::new("vulkaninfo").arg("--summary").output() {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => return Vec::new(),
+    };
+    parse_vulkaninfo_summary(&String::from_utf8_lossy(&output))
+}
+
+fn parse_vulkaninfo_summary(output: &str) -> Vec<VulkanDevice> {
+    let mut devices = Vec::new();
+    let mut current: Option<(String, String)> = None;
+    for line in output.lines() {
+        let line = line.trim();
+        if line.starts_with("GPU") {
+            if let Some((pci_id, uuid)) = current.take() {
+                if !pci_id.is_empty() && !uuid.is_empty() {
+                    devices.push(VulkanDevice { pci_id, device_uuid: uuid });
+                }
+            }
+            current = Some((String::new(), String::new()));
+            continue;
+        }
+        let Some((key, value)) = line.split_once("= ") else { continue };
+        let Some((pci_id, uuid)) = current.as_mut() else { continue };
+        match key.trim() {
+            "vendorID" | "deviceID" => {
+                let num = u64::from_str_radix(value.trim().trim_start_matches("0x"), 16).unwrap_or(0);
+                if key.trim() == "vendorID" {
+                    pci_id.push_str(&format!("{:04x}:", num));
+                } else {
+                    pci_id.push_str(&format!("{:04x}", num));
+                }
+            }
+            "deviceUUID" => uuid.push_str(&value.trim().replace('-', "").to_lowercase()),
+            _ => {}
+        }
+    }
+    if let Some((pci_id, uuid)) = current.take() {
+        if !pci_id.is_empty() && !uuid.is_empty() {
+            devices.push(VulkanDevice { pci_id, device_uuid: uuid });
+        }
+    }
+    devices
+}
+
 impl GpuInfo {
+    /// A display-friendly GPU name: strips the vendor corporation prefix
+    /// ("NVIDIA Corporation", "Intel Corporation", ...) and parenthetical
+    /// suffixes like "(rev a2)" so both the app-wide and per-game GPU
+    /// dropdowns show e.g. "GM108M [GeForce MX130]" instead.
     pub fn short_name(&self) -> String {
-        let n = self.name.trim();
+        const VENDOR_PREFIXES: [&str; 5] = [
+            "NVIDIA Corporation",
+            "Intel Corporation",
+            "Advanced Micro Devices, Inc.",
+            "AMD/ATI",
+            "ATI Technologies Inc",
+        ];
+        let mut n = self.name.trim();
+        for prefix in VENDOR_PREFIXES {
+            if let Some(rest) = n.strip_prefix(prefix) {
+                n = rest.trim_start();
+                break;
+            }
+        }
         if let Some(idx) = n.find(" (") {
             n[..idx].trim().to_string()
         } else {
@@ -21,9 +99,16 @@ impl GpuInfo {
     }
 }
 
+static GPU_CACHE: OnceLock<Vec<GpuInfo>> = OnceLock::new();
+
 /// Detect all GPUs on the system by reading /sys/class/drm/.
+/// Results are cached after the first call (GPUs don't change at runtime).
 /// Returns a list of GpuInfo, one per cardN entry.
 pub fn detect_gpus() -> Vec<GpuInfo> {
+    GPU_CACHE.get_or_init(detect_gpus_uncached).clone()
+}
+
+fn detect_gpus_uncached() -> Vec<GpuInfo> {
     let drm_dir = Path::new("/sys/class/drm");
     let entries = match fs::read_dir(drm_dir) {
         Ok(e) => e,
@@ -34,7 +119,12 @@ pub fn detect_gpus() -> Vec<GpuInfo> {
         .filter_map(|entry| {
             let name = entry.file_name();
             let name_str = name.to_str()?;
-            if !name_str.starts_with("card") || name_str.contains(':') {
+            // Only match cardN (e.g. card0, card1), not card1-HDMI-A-1 or renderD128
+            if !name_str.starts_with("card") || name_str.contains('-') || name_str.contains(':') {
+                return None;
+            }
+            let suffix = &name_str[4..];
+            if !suffix.chars().all(|c| c.is_ascii_digit()) || suffix.is_empty() {
                 return None;
             }
             read_gpu_info(name_str)
@@ -118,6 +208,12 @@ pub fn build_gpu_env(gpu_card: &str) -> Vec<(String, String)> {
         env.push(("VK_ICD_FILENAMES".to_string(), icd_files.clone()));
         env.push(("VK_DRIVER_FILES".to_string(), icd_files));
     }
+    // Pin the selected GPU in DXVK by device UUID (matches Lutris). Required on
+    // multi-GPU (Optimus) systems where pressure-vessel injects both drivers —
+    // otherwise DXVK may pick the iGPU, which breaks GPU-sensitive games.
+    if let Some(uuid) = vulkan_devices().iter().find(|d| d.pci_id == gpu.pci_id).map(|d| d.device_uuid.clone()) {
+        env.push(("DXVK_FILTER_DEVICE_UUID".to_string(), uuid));
+    }
     env
 }
 
@@ -187,6 +283,39 @@ mod tests {
     }
 
     #[test]
+    fn test_short_name_strips_corporation_prefix() {
+        let gpu = GpuInfo {
+            card: "card0".to_string(),
+            driver: "nvidia".to_string(),
+            pci_id: "10de:174d".to_string(),
+            name: "NVIDIA Corporation GM108M [GeForce MX130] (rev a2)".to_string(),
+            is_nvidia: true,
+        };
+        assert_eq!(gpu.short_name(), "GM108M [GeForce MX130]");
+
+        let gpu = GpuInfo {
+            card: "card1".to_string(),
+            driver: "i915".to_string(),
+            pci_id: "8086:3ea0".to_string(),
+            name: "Intel Corporation WhiskeyLake-U GT2 [UHD Graphics 620] (rev 02)".to_string(),
+            is_nvidia: false,
+        };
+        assert_eq!(gpu.short_name(), "WhiskeyLake-U GT2 [UHD Graphics 620]");
+    }
+
+    #[test]
+    fn test_short_name_amd_prefix() {
+        let gpu = GpuInfo {
+            card: "card0".to_string(),
+            driver: "amdgpu".to_string(),
+            pci_id: "1002:73bf".to_string(),
+            name: "Advanced Micro Devices, Inc. [AMD/ATI] NAVI 21 [Radeon RX 6800 XT]".to_string(),
+            is_nvidia: false,
+        };
+        assert_eq!(gpu.short_name(), "[AMD/ATI] NAVI 21 [Radeon RX 6800 XT]");
+    }
+
+    #[test]
     fn test_build_gpu_env_empty() {
         let env = build_gpu_env("");
         assert!(env.is_empty());
@@ -196,5 +325,39 @@ mod tests {
     fn test_build_gpu_env_nonexistent() {
         let env = build_gpu_env("card99");
         assert!(env.is_empty());
+    }
+
+    #[test]
+    fn test_parse_vulkaninfo_summary_multiple_gpus() {
+        let output = r#"Devices:
+========
+GPU0:
+	apiVersion         = 0x420008
+	vendorID           = 0x8086
+	deviceID           = 0x3ea0
+	deviceType         = INTEGRATED_GPU
+	deviceName         = Intel(R) UHD Graphics 620 (WHL GT2)
+	driverName         = Intel open-source Mesa driver
+	driverInfo         = 24.0.9
+	deviceUUID         = 8680a03e-0200-0000-0002-000000000000
+GPU1:
+	vendorID           = 0x10de
+	deviceID           = 0x174d
+	deviceType         = DISCRETE_GPU
+	deviceName         = NVIDIA GeForce MX130
+	deviceUUID         = 35433f11-93fc-0291-b19b-f9e05c68b2a0
+"#;
+        let devices = parse_vulkaninfo_summary(output);
+        assert_eq!(devices.len(), 2);
+        assert_eq!(devices[0].pci_id, "8086:3ea0");
+        assert_eq!(devices[0].device_uuid, "8680a03e020000000002000000000000");
+        assert_eq!(devices[1].pci_id, "10de:174d");
+        assert_eq!(devices[1].device_uuid, "35433f1193fc0291b19bf9e05c68b2a0");
+    }
+
+    #[test]
+    fn test_parse_vulkaninfo_summary_no_gpus() {
+        assert!(parse_vulkaninfo_summary("Failed to detect any valid GPUs").is_empty());
+        assert!(parse_vulkaninfo_summary("").is_empty());
     }
 }

@@ -52,6 +52,7 @@ mod edit_game_save;
 mod edit_game_pages;
 mod edit_game_variants;
 mod edit_game_system;
+mod edit_game_overlay;
 mod system_settings;
 mod hotkey_widget;
 mod bar_chart;

@@ -58,7 +58,7 @@ pub fn launch_game(
         );
     }
 
-    let (command, env) = if wine.is_some_and(|w| w.enabled) {
+    let (command, mut env) = if wine.is_some_and(|w| w.enabled) {
         let wine = wine.unwrap();
         let wine_exe = super::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path)?;
         if launch.exe.is_empty() {
@@ -114,19 +114,6 @@ pub fn launch_game(
         let pfx = super::wine_launch::wine_prefix(wine);
         let prefix_ready = std::path::Path::new(&pfx).join("system.reg").is_file();
 
-        let version_file = std::path::Path::new(&pfx).join(".av_wine_version");
-        let version_matches = if version_file.is_file() {
-            std::fs::read_to_string(&version_file)
-                .map(|v| v.trim() == wine.version)
-                .unwrap_or(false)
-        } else {
-            false
-        };
-
-        if prefix_ready && !version_matches {
-            eprintln!("Warning: wine version mismatch for prefix {}. Configured: '{}', expected: '{}'", pfx, wine.version, std::fs::read_to_string(&version_file).unwrap_or_default().trim());
-        }
-
         if !prefix_ready && !wine.umu_enabled && !is_proton {
             for reg_cmd in super::wine_launch::build_wine_reg_commands(wine, &wine_exe) {
                 let mut child = std::process::Command::new(&reg_cmd[0]);
@@ -143,9 +130,6 @@ pub fn launch_game(
                     }
                     _ => {}
                 }
-            }
-            if let Err(e) = std::fs::write(&version_file, &wine.version) {
-                eprintln!("Failed to write wine version file: {}", e);
             }
         }
 
@@ -181,7 +165,41 @@ pub fn launch_game(
         (cmd, env)
     };
 
+    // Set PWD to the game's working directory
+    if let Some(ref dir) = game_dir {
+        env.retain(|(k, _)| k != "PWD");
+        env.push(("PWD".to_string(), dir.clone()));
+    }
+
+    // Match Lutris: expose the game name/dir for pre/post-launch scripts and games.
+    env.retain(|(k, _)| k != "GAME_NAME");
+    env.push(("GAME_NAME".to_string(), ctx.game_name.clone()));
+    if let Some(ref dir) = game_dir {
+        env.retain(|(k, _)| k != "GAME_DIRECTORY");
+        env.push(("GAME_DIRECTORY".to_string(), dir.clone()));
+    }
+
+    // Lutris's update_proton_env propagates LC_ALL → HOST_LC_ALL for Proton.
+    // Applied after user env overrides so a per-game LC_ALL wins. Defaults to
+    // the host locale so umu/pressure-vessel get a valid HOST_LC_ALL.
+    if wine.is_some_and(|w| w.enabled) {
+        let lc_all = env
+            .iter()
+            .find(|(k, _)| k == "LC_ALL")
+            .map(|(_, v)| v.clone())
+            .filter(|v| !v.is_empty())
+            .or_else(|| std::env::var("LC_ALL").ok().filter(|v| !v.is_empty()))
+            .or_else(|| std::env::var("LANG").ok().filter(|v| !v.is_empty()));
+        if let Some(lc) = lc_all {
+            env.retain(|(k, _)| k != "LC_ALL");
+            env.push(("LC_ALL".to_string(), lc.clone()));
+            env.retain(|(k, _)| k != "HOST_LC_ALL");
+            env.push(("HOST_LC_ALL".to_string(), lc));
+        }
+    }
+
     let log_path = super::wrapper::game_log_path(&ctx.save_dir, ctx.game_id);
+
     let child = super::wrapper::spawn_game(&command, &env, game_dir.as_deref(), Some(&log_path))?;
     let child_pid = child.id() as i32;
 
@@ -197,6 +215,8 @@ pub fn launch_game(
         started_at,
         db: ctx.db.clone(),
         running_games: ctx.running_games.clone(),
+        env: env.clone(),
+        command: command.clone(),
     };
     std::thread::spawn(move || {
         super::wrapper::monitor_process(child, child_pid, mc);
@@ -219,19 +239,30 @@ fn run_pre_launch(cmd: &str, cwd: Option<&str>, save_dir: &str, game_id: i64) ->
             eprintln!("Failed to create log directory {}: {}", parent.display(), e);
         }
     }
-    match std::fs::File::create(&log_path) {
-        Ok(f) => {
-            let stderr = f.try_clone().unwrap_or_else(|_| {
-                std::fs::File::create("/dev/null").unwrap()
-            });
-            child.stdout(std::process::Stdio::from(f));
-            child.stderr(std::process::Stdio::from(stderr));
+    match child.output() {
+        Ok(out) => {
+            if let Ok(mut f) = std::fs::File::create(&log_path) {
+                use std::io::Write;
+                let _ = f.write_all(&out.stdout);
+                let _ = f.write_all(&out.stderr);
+            }
+            if out.status.success() {
+                return Ok(());
+            }
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let combined = format!("{}\n{}", stdout.trim(), stderr.trim());
+            let snippet = if combined.trim().is_empty() {
+                "no output".to_string()
+            } else {
+                combined.trim().lines().take(10).collect::<Vec<_>>().join("\n")
+            };
+            Err(format!(
+                "Pre-launch command failed (exit code {:?}):\n{}",
+                out.status.code(),
+                snippet
+            ))
         }
-        Err(e) => eprintln!("Could not open log file {}: {}", log_path, e),
-    }
-    match child.status() {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(format!("Pre-launch command failed (exit code {:?})", s.code())),
         Err(e) => Err(format!("Failed to run pre-launch command: {}", e)),
     }
 }

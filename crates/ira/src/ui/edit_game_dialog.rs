@@ -7,6 +7,7 @@ use ira_models::{AppDetails, GameLaunchConfig, WineConfig, WineProfile};
 use super::state::{PendingImage, SharedState};
 use super::edit_game_launch::{build_launch_config_page, LaunchConfigWidgets};
 use super::edit_game_system::{build_system_page, SystemWidgets};
+use super::edit_game_overlay::{build_overlay_page, OverlayWidgets};
 use super::edit_game_pages::{build_api_emulator_page, build_dlc_page};
 use super::edit_game_variants::build_variants_page;
 use super::edit_game_save::{save_game_settings, SaveGameSettingsParams};
@@ -17,6 +18,7 @@ use super::css::*;
 struct LaunchWineAdvancedCtx {
     launch_config_widgets: Option<LaunchConfigWidgets>,
     system_widgets: Option<SystemWidgets>,
+    overlay_widgets: Option<OverlayWidgets>,
     show_wine_tabs: bool,
     wine_widgets_opt: Option<WineConfigWidgets>,
     profiles: Vec<WineProfile>,
@@ -80,7 +82,7 @@ fn build_launch_wine_advanced_pages(
         ira_models::GameKind::Ps3 => Some("ps3"),
         _ => None,
     };
-    let (overlay_default, gamemode_default, mangohud_default, gamescope_default, gamescope_w_default, gamescope_h_default, gamescope_fps_default, gamescope_upscaling_default) = {
+    let (overlay_default, gamemode_default, mangohud_default, gamescope_default, gamescope_w_default, gamescope_h_default, gamescope_fps_default, gamescope_upscaling_default, gpu_default) = {
         let s = state.borrow();
         let gs_default = s.cfg.default_system.gamescope;
         let gs = overlay_source_id
@@ -97,6 +99,7 @@ fn build_launch_wine_advanced_pages(
             s.cfg.default_system.gamescope_h,
             s.cfg.default_system.gamescope_fps,
             s.cfg.default_system.gamescope_upscaling.clone(),
+            s.cfg.default_system.gpu.clone(),
         )
     };
 
@@ -121,7 +124,7 @@ fn build_launch_wine_advanced_pages(
     // System page — shown for ALL games (Wine, emulator, native, etc.)
     let system_widgets = Some(build_system_page(super::edit_game_system::SystemPageParams {
         launch: saved_launch,
-        overlay_default,
+        gpu_default: &gpu_default,
         gamemode_default,
         mangohud_default,
         gamescope_default,
@@ -129,6 +132,14 @@ fn build_launch_wine_advanced_pages(
         gamescope_h_default,
         gamescope_fps_default,
         gamescope_upscaling_default,
+        sidebar,
+        stack,
+    }));
+
+    // Overlay page — shown for ALL games
+    let overlay_widgets = Some(build_overlay_page(super::edit_game_overlay::OverlayPageParams {
+        launch: saved_launch,
+        overlay_default,
         sidebar,
         stack,
     }));
@@ -153,6 +164,7 @@ fn build_launch_wine_advanced_pages(
     LaunchWineAdvancedCtx {
         launch_config_widgets,
         system_widgets,
+        overlay_widgets,
         show_wine_tabs,
         wine_widgets_opt,
         profiles,
@@ -339,6 +351,7 @@ fn build_dialog_contents(
     let languages_s = languages.clone();
     let saved_platform_id_s = game.platform_id.clone();
     let system_widgets_s = lwa.system_widgets.clone();
+    let overlay_widgets_s = lwa.overlay_widgets.clone();
     let title_entry_s = title_entry.clone();
     let sort_entry_s = sort_entry.clone();
     let pending_version_s = pending_version.clone();
@@ -369,6 +382,7 @@ fn build_dialog_contents(
             languages: languages_s.clone(),
             saved_platform_id: saved_platform_id_s.clone(),
             system_widgets: system_widgets_s.clone(),
+            overlay_widgets: overlay_widgets_s.clone(),
             title_entry: title_entry_s.clone(),
             sort_entry: sort_entry_s.clone(),
             pending_version: pending_version_s.clone(),

@@ -150,10 +150,20 @@ impl SteamDataClient {
 
         let settings_dir = self.game_dir(app_id).join("achievements");
         let img_dir = settings_dir.join("achievement_images");
-        if img_dir.exists() && !img_dir.is_dir() {
-            let _ = std::fs::remove_file(&img_dir);
+        // If the directories already exist, skip creation entirely
+        if img_dir.is_dir() {
+            // Already exists and is a directory — nothing to do
+        } else {
+            // Remove any file/symlink that conflicts with the paths we need
+            for dir in [&settings_dir, &img_dir] {
+                if let Ok(meta) = std::fs::symlink_metadata(dir) {
+                    if !meta.is_dir() {
+                        let _ = std::fs::remove_file(dir);
+                    }
+                }
+            }
+            std::fs::create_dir_all(&img_dir).map_err(|e| format!("could not create achievements dir: {}", e))?;
         }
-        std::fs::create_dir_all(&img_dir).map_err(|e| format!("could not create achievements dir: {}", e))?;
 
         let mut jobs: Vec<IconJob> = Vec::new();
         let mut out: Vec<serde_json::Value> = Vec::new();

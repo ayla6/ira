@@ -52,6 +52,7 @@ pub(super) struct LaunchCtx<'a> {
     pub gamescope_h_default: u32,
     pub gamescope_fps_default: u32,
     pub gamescope_upscaling_default: String,
+    pub gpu_default: String,
 }
 
 fn spawn_and_monitor(ctx: &LaunchCtx, cmd: &[String], env: &[(String, String)], err_label: &str) -> Result<(), String> {
@@ -68,6 +69,8 @@ fn spawn_and_monitor(ctx: &LaunchCtx, cmd: &[String], env: &[(String, String)], 
                 started_at: ctx.started_at,
                 db: ctx.db.clone(),
                 running_games: ctx.running_games.clone(),
+                env: env.to_vec(),
+                command: cmd.to_vec(),
             };
             std::thread::spawn(move || {
                 ira_launcher::wrapper::monitor_process(child, pid, mc);
@@ -82,7 +85,33 @@ fn spawn_and_monitor(ctx: &LaunchCtx, cmd: &[String], env: &[(String, String)], 
 /// mangohud/gamescope), and set up overlay env (VK layer or standalone mode).
 /// Checks per-game overlay override first, then falls back to the global source setting.
 fn build_emulator_env_and_wrap(ctx: &LaunchCtx, cmd: &mut Vec<String>) -> Vec<(String, String)> {
-    let mut env: Vec<(String, String)> = std::env::vars().collect();
+    let mut env: Vec<(String, String)> = std::env::vars()
+        .filter(|(k, _)| {
+            !k.starts_with("CARGO_")
+            && !k.starts_with("RUSTUP_")
+            && !k.starts_with("RUST_")
+        })
+        .filter(|(k, v)| {
+            if k == "LD_LIBRARY_PATH" {
+                let filtered: Vec<&str> = v.split(':')
+                    .filter(|p| !p.is_empty() && !p.contains("/.rustup/") && !p.contains("/target/"))
+                    .collect();
+                !filtered.is_empty()
+            } else {
+                true
+            }
+        })
+        .map(|(k, v)| {
+            if k == "LD_LIBRARY_PATH" {
+                let filtered: Vec<&str> = v.split(':')
+                    .filter(|p| !p.is_empty() && !p.contains("/.rustup/") && !p.contains("/target/"))
+                    .collect();
+                (k, filtered.join(":"))
+            } else {
+                (k, v)
+            }
+        })
+        .collect();
 
     let (launch, wine, _profile_id) = ira_db::get_game_config(ctx.db, ctx.db_id)
         .ok()
@@ -119,6 +148,9 @@ fn build_emulator_env_and_wrap(ctx: &LaunchCtx, cmd: &mut Vec<String>) -> Vec<(S
     }
     if launch.gamescope_upscaling.is_none() {
         launch.gamescope_upscaling = Some(ctx.gamescope_upscaling_default.clone());
+    }
+    if launch.gpu.is_empty() && !ctx.gpu_default.is_empty() {
+        launch.gpu = ctx.gpu_default.clone();
     }
 
     let overlay_enabled = launch.overlay_enabled.unwrap_or(ctx.overlay_global_enabled);
@@ -338,6 +370,9 @@ pub(super) fn launch_other(
     }
     if launch.gamescope_upscaling.is_none() {
         launch.gamescope_upscaling = Some(ctx.gamescope_upscaling_default.clone());
+    }
+    if launch.gpu.is_empty() && !ctx.gpu_default.is_empty() {
+        launch.gpu = ctx.gpu_default.clone();
     }
 
     if let Some(pid) = profile_id {

@@ -142,6 +142,8 @@ pub(super) struct SystemDefaultsWidgets {
     pub gamescope_h: gtk4::SpinButton,
     pub gamescope_fps: gtk4::SpinButton,
     pub gamescope_upscaling_row: adw::ComboRow,
+    pub gpu_row: Option<adw::ComboRow>,
+    pub gpu_options: Vec<String>,
     pub env_vars_box: gtk4::ListBox,
     pub ld_preload: adw::EntryRow,
     pub ld_library_path: adw::EntryRow,
@@ -200,6 +202,37 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     let gamescope_upscaling_row = gs_widgets.upscaling;
     page.append(&perf_group);
 
+    // ─── GPU (only when multiple GPUs detected) ───
+    let gpus = ira_launcher::gpu::detect_gpus();
+    let gpu_options: Vec<String> = gpus.iter().map(|g| g.card.clone()).collect();
+    let gpu_row = if gpus.len() > 1 {
+        let group = adw::PreferencesGroup::new();
+        group.set_title("Graphics");
+
+        let model = gtk4::StringList::new(&[]);
+        model.append("Auto");
+        for g in &gpus {
+            model.append(&g.short_name());
+        }
+        let row = adw::ComboRow::new();
+        row.set_title("GPU");
+        row.set_subtitle("Graphics card to use for rendering by default");
+        row.set_model(Some(&model));
+        let idx = if s.gpu.is_empty() {
+            0
+        } else {
+            gpu_options.iter().position(|c| c == &s.gpu)
+                .map(|i| i + 1)
+                .unwrap_or(0)
+        };
+        row.set_selected(idx as u32);
+        group.add(&row);
+        page.append(&group);
+        Some(row)
+    } else {
+        None
+    };
+
     let (env_group, env_vars_box) = super::system_settings::build_env_vars_group(&s.env_vars);
     page.append(&env_group);
 
@@ -208,7 +241,7 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     );
     page.append(&ld_group);
 
-    (page, SystemDefaultsWidgets { gamemode, mangohud, gamescope: gs_switch, gamescope_flags, gamescope_w, gamescope_h, gamescope_fps, gamescope_upscaling_row, env_vars_box, ld_preload, ld_library_path })
+    (page, SystemDefaultsWidgets { gamemode, mangohud, gamescope: gs_switch, gamescope_flags, gamescope_w, gamescope_h, gamescope_fps, gamescope_upscaling_row, gpu_row, gpu_options, env_vars_box, ld_preload, ld_library_path })
 }
 
 pub(super) fn build_lutris_settings_page(state: &super::state::SharedState, settings_win: &adw::Window) -> gtk4::Box {

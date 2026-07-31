@@ -53,7 +53,6 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
 
     if wine.graphics == "wayland" {
         env.push(("WINE_ENABLE_WAYLAND".to_string(), "1".to_string()));
-        env.push(("PROTON_ENABLE_WAYLAND".to_string(), "1".to_string()));
     }
 
     if wine.dxvk {
@@ -95,58 +94,64 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
 
     // Proton-specific env vars
     if is_proton {
+        // Enable umu logging
+        env.retain(|(k, _)| k != "UMU_LOG");
+        env.push(("UMU_LOG".to_string(), "1".to_string()));
+        env.retain(|(k, _)| k != "UMU_RUNTIME_UPDATE");
+        env.push(("UMU_RUNTIME_UPDATE".to_string(), "0".to_string()));
+
         // Proton needs PROTON_USE_WINED3D when DXVK is not enabled
         if !wine.dxvk {
+            env.retain(|(k, _)| k != "PROTON_USE_WINED3D");
             env.push(("PROTON_USE_WINED3D".to_string(), "1".to_string()));
         }
 
         // DXVK D3D8 support when DXVK is enabled
         if wine.dxvk {
+            env.retain(|(k, _)| k != "PROTON_DXVK_D3D8");
             env.push(("PROTON_DXVK_D3D8".to_string(), "1".to_string()));
         }
 
         // Disable LSteam client integration (we're not Steam)
-        env.push(("PROTON_DISABLE_LSTEAMCLIENT".to_string(), "1".to_string()));
+        if wine.proton_disable_lsteamclient {
+            env.retain(|(k, _)| k != "PROTON_DISABLE_LSTEAMCLIENT");
+            env.push(("PROTON_DISABLE_LSTEAMCLIENT".to_string(), "1".to_string()));
+        }
 
         // Set wayland explicitly (0 or 1, not absent)
+        env.retain(|(k, _)| k != "PROTON_ENABLE_WAYLAND");
         if wine.graphics == "wayland" {
             env.push(("PROTON_ENABLE_WAYLAND".to_string(), "1".to_string()));
         } else {
             env.push(("PROTON_ENABLE_WAYLAND".to_string(), "0".to_string()));
         }
 
-        // Propagate LC_ALL to HOST_LC_ALL for Proton (umu/pressure-vessel needs it)
-        if let Ok(lc_all) = std::env::var("LC_ALL") {
-            if !lc_all.is_empty() {
-                env.retain(|(k, _)| k != "HOST_LC_ALL");
-                env.push(("HOST_LC_ALL".to_string(), lc_all));
-            }
-        }
-
-        // Set mono/gecko cache dirs from the Proton installation
+        // Set mono/gecko cache dirs from the Proton installation. Lutris sets
+        // these unconditionally; wine falls back to its own detection if absent.
         let wine_path = std::path::Path::new(wine_exe);
         if let Some(files_dir) = wine_path.parent().and_then(|p| p.parent()) {
             let mono = files_dir.join("mono");
             let gecko = files_dir.join("gecko");
-            if mono.is_dir() {
-                env.push(("WINE_MONO_CACHE_DIR".to_string(), mono.to_string_lossy().to_string()));
-            }
-            if gecko.is_dir() {
-                env.push(("WINE_GECKO_CACHE_DIR".to_string(), gecko.to_string_lossy().to_string()));
-            }
+            env.retain(|(k, _)| k != "WINE_MONO_CACHE_DIR");
+            env.push(("WINE_MONO_CACHE_DIR".to_string(), mono.to_string_lossy().to_string()));
+            env.retain(|(k, _)| k != "WINE_GECKO_CACHE_DIR");
+            env.push(("WINE_GECKO_CACHE_DIR".to_string(), gecko.to_string_lossy().to_string()));
         }
     }
 
     if wine.dxvk_frame_rate > 0 {
         env.push(("DXVK_FRAME_RATE".to_string(), wine.dxvk_frame_rate.to_string()));
     }
-    if wine.dxvk_hud {
-        env.push(("DXVK_HUD".to_string(), "1".to_string()));
-    }
+    // Always pass DXVK_HUD explicitly: some Proton builds enable the HUD by
+    // default, so setting it to 0 when the toggle is off is required to disable it.
+    env.retain(|(k, _)| k != "DXVK_HUD");
+    env.push(("DXVK_HUD".to_string(), if wine.dxvk_hud { "1" } else { "0" }.to_string()));
     if wine.proton_wow64 {
+        env.retain(|(k, _)| k != "PROTON_USE_WOW64");
         env.push(("PROTON_USE_WOW64".to_string(), "1".to_string()));
     }
     if wine.proton_ntsync {
+        env.retain(|(k, _)| k != "PROTON_USE_NTSYNC");
         env.push(("PROTON_USE_NTSYNC".to_string(), "1".to_string()));
     }
 

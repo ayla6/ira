@@ -9,7 +9,6 @@ use super::wine_config_helpers::make_revert_btn;
 
 #[derive(Clone)]
 pub(super) struct SystemWidgets {
-    pub overlay_state: OverrideState,
     pub gamemode_state: OverrideState,
     pub mangohud_state: OverrideState,
     pub gamescope_state: OverrideState,
@@ -23,13 +22,11 @@ pub(super) struct SystemWidgets {
     pub env_vars_box: gtk4::ListBox,
     pub ld_preload_entry: adw::EntryRow,
     pub ld_library_path_entry: adw::EntryRow,
-    pub overlay_encoder_row: Option<adw::ComboRow>,
-    pub overlay_quality_row: Option<adw::ComboRow>,
 }
 
 pub(super) struct SystemPageParams<'a> {
     pub launch: &'a GameLaunchConfig,
-    pub overlay_default: bool,
+    pub gpu_default: &'a str,
     pub gamemode_default: bool,
     pub mangohud_default: bool,
     pub gamescope_default: bool,
@@ -43,34 +40,6 @@ pub(super) struct SystemPageParams<'a> {
 
 pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-
-    // ─── Overlay ───
-    let (overlay_row, overlay_state) = build_override_switch_row(
-        "In-game overlay", "Achievements, screenshots, and recording",
-        params.overlay_default, params.launch.overlay_enabled,
-    );
-    let overlay_group = adw::PreferencesGroup::new();
-    overlay_group.add(&overlay_row);
-    page.append(&overlay_group);
-
-    // ─── Overlay settings (per-game overrides) ───
-    let overlay_cfg_group = adw::PreferencesGroup::new();
-    overlay_cfg_group.set_title("Overlay");
-
-    let encoder_model = gtk4::StringList::new(&["Default", "Auto", "VAAPI (AMD/Intel)", "NVENC (NVIDIA)", "Software (CPU)"]);
-    let encoder_row = adw::ComboRow::new();
-    encoder_row.set_title("Video encoder");
-    encoder_row.set_model(Some(&encoder_model));
-    encoder_row.set_selected(params.launch.overlay_encoder.map(|v| v + 1).unwrap_or(0));
-    overlay_cfg_group.add(&encoder_row);
-
-    let quality_model = gtk4::StringList::new(&["Default", "Low (720p 30fps)", "Medium (1080p 30fps)", "High (1080p 60fps)"]);
-    let quality_row = adw::ComboRow::new();
-    quality_row.set_title("Recording quality");
-    quality_row.set_model(Some(&quality_model));
-    quality_row.set_selected(params.launch.overlay_recording_quality.map(|v| v + 1).unwrap_or(0));
-    overlay_cfg_group.add(&quality_row);
-    page.append(&overlay_cfg_group);
 
     // ─── Performance ───
     let perf_group = adw::PreferencesGroup::new();
@@ -163,7 +132,7 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
         group.set_title("Graphics");
 
         let model = gtk4::StringList::new(&[]);
-        model.append("Default");
+        model.append("Auto");
         for g in &gpus {
             model.append(&g.short_name());
         }
@@ -172,7 +141,14 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
         row.set_subtitle("Graphics card to use for rendering");
         row.set_model(Some(&model));
         let idx = if params.launch.gpu.is_empty() {
-            0
+            // If app-level default is set, select it; otherwise "Auto"
+            if !params.gpu_default.is_empty() {
+                gpu_options.iter().position(|c| c == params.gpu_default)
+                    .map(|i| i + 1)
+                    .unwrap_or(0)
+            } else {
+                0
+            }
         } else {
             gpu_options.iter().position(|c| c == &params.launch.gpu)
                 .map(|i| i + 1)
@@ -205,7 +181,6 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     params.stack.add_named(&scroll, Some("system"));
 
     SystemWidgets {
-        overlay_state,
         gamemode_state,
         mangohud_state,
         gamescope_state,
@@ -219,7 +194,5 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
         env_vars_box,
         ld_preload_entry,
         ld_library_path_entry,
-        overlay_encoder_row: Some(encoder_row),
-        overlay_quality_row: Some(quality_row),
     }
 }

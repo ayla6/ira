@@ -35,6 +35,7 @@ pub struct WineConfigWidgets {
     pub dxvk_frame_rate: gtk4::SpinButton,
     pub proton_wow64: adw::SwitchRow,
     pub proton_ntsync: adw::SwitchRow,
+    pub proton_disable_lsteamclient: adw::SwitchRow,
     pub dll_overrides_box: gtk4::ListBox,
     pub overridden: OverrideList,
     pub umu_enabled: bool,
@@ -74,6 +75,7 @@ struct AdvPageWidgets {
     desktop_integration: adw::SwitchRow,
     show_debug: adw::ComboRow,
     show_crash_dialogs: adw::SwitchRow,
+    proton_disable_lsteamclient: adw::SwitchRow,
     dll_overrides_box: gtk4::ListBox,
 }
 
@@ -221,6 +223,16 @@ fn build_wine_adv_page(
     dbg_group.add(&show_crash_dialogs);
     adv_page.append(&dbg_group);
 
+    let compat_group = make_section("Steam");
+    let proton_disable_lsteamclient = build_switch_row(
+        "Disable LSteamClient",
+        "Avoid loading the Steam client library (PROTON_DISABLE_LSTEAMCLIENT)",
+        wine.proton_disable_lsteamclient,
+    );
+    if let Some(dd) = dft { track_switch(&proton_disable_lsteamclient, "proton_disable_lsteamclient", dd.proton_disable_lsteamclient, overridden); }
+    compat_group.add(&proton_disable_lsteamclient);
+    adv_page.append(&compat_group);
+
     let dll_group = make_section("DLL Overrides");
 
     let dll_overrides_box = gtk4::ListBox::new();
@@ -247,6 +259,7 @@ fn build_wine_adv_page(
 
     (page, AdvPageWidgets {
         battleye, eac, desktop_integration, show_debug, show_crash_dialogs,
+        proton_disable_lsteamclient,
         dll_overrides_box,
     })
 }
@@ -278,6 +291,7 @@ pub fn build_wine_config_pages(wine: &WineConfig, app_default: Option<&WineConfi
         dpi_enabled: gfx_w.dpi_enabled, dpi: gfx_w.dpi,
         dxvk_frame_rate: perf_w.dxvk_frame_rate,
         proton_wow64: perf_w.proton_wow64, proton_ntsync: perf_w.proton_ntsync,
+        proton_disable_lsteamclient: adv_w.proton_disable_lsteamclient,
         dll_overrides_box: adv_w.dll_overrides_box,
         overridden,
         umu_enabled: wine.umu_enabled,
@@ -327,6 +341,7 @@ impl WineConfigWidgets {
             dxvk_frame_rate: self.dxvk_frame_rate.value() as i32,
             proton_wow64: self.proton_wow64.is_active(),
             proton_ntsync: self.proton_ntsync.is_active(),
+            proton_disable_lsteamclient: self.proton_disable_lsteamclient.is_active(),
             umu_enabled: self.umu_enabled,
             overridden_fields: self.overridden.borrow().clone(),
             ..Default::default()

@@ -1,3 +1,7 @@
+use std::sync::OnceLock;
+
+static WINE_VERSIONS_CACHE: OnceLock<Vec<(String, String)>> = OnceLock::new();
+
 fn steam_data_dirs() -> Vec<String> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     vec![
@@ -206,6 +210,10 @@ fn scan_proton_versions() -> Vec<(String, String)> {
 }
 
 pub fn detect_wine_versions() -> Vec<(String, String)> {
+    WINE_VERSIONS_CACHE.get_or_init(detect_wine_versions_uncached).clone()
+}
+
+fn detect_wine_versions_uncached() -> Vec<(String, String)> {
     let mut versions: Vec<(String, String)> = Vec::new();
 
     versions.push(("System Wine".to_string(), "system".to_string()));

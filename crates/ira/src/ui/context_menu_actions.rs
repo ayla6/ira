@@ -149,7 +149,7 @@ pub(super) fn setup_open_steam_status_action(actions: &gio::SimpleActionGroup, s
     let open_status = gio::SimpleAction::new("open_steam_status", None);
     let save_dir = state.borrow().save_dir.clone();
     open_status.connect_activate(move |_, _| {
-        let path = format!("{}/steam/{}", save_dir, game.app_id);
+        let path = format!("{}/emulator_saves/gbe/{}", save_dir, game.app_id);
         open_folder(&path);
     });
     actions.add_action(&open_status);
@@ -159,7 +159,7 @@ pub(super) fn setup_open_gog_status_action(actions: &gio::SimpleActionGroup, sta
     let open_gog = gio::SimpleAction::new("open_gog_status", None);
     let save_dir = state.borrow().save_dir.clone();
     open_gog.connect_activate(move |_, _| {
-        let path = format!("{}/gog/{}/{}", save_dir, ira_parser::GALAXY_ID, game.platform_id);
+        let path = format!("{}/emulator_saves/nge/{}/{}", save_dir, ira_parser::GALAXY_ID, game.platform_id);
         open_folder(&path);
     });
     actions.add_action(&open_gog);

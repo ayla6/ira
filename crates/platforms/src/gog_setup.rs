@@ -22,9 +22,10 @@ pub fn add_gog_game_from_folder(
     // Generate NemirtingasGalaxyEmu.json in the game's ngalaxye_settings
     generate_galaxy_emu_config(galaxy_dll_folder, product_id)?;
 
-    // Create GOG saves directory: save_dir/gog/<GALAXY_ID>/<product_id>/
+    // Create GOG saves directory: save_dir/emulator_saves/nge/<GALAXY_ID>/<product_id>/
     let gog_game_dir = Path::new(save_dir)
-        .join("gog")
+        .join("emulator_saves")
+        .join("nge")
         .join(GALAXY_ID)
         .join(product_id);
     std::fs::create_dir_all(&gog_game_dir).map_err(|e| format!("could not create GOG saves dir: {}", e))?;

@@ -54,8 +54,8 @@ pub fn add_game_from_folder(
         std::os::unix::fs::symlink(&game_settings_dir, &data_ach_dir).map_err(|e| format!("could not symlink achievements: {}", e))?;
     }
 
-    // Create steam/<app_id>/ save directory
-    let saves_game_dir = Path::new(save_dir).join("steam").join(app_id);
+    // Create emulator_saves/gbe/<app_id>/ save directory
+    let saves_game_dir = Path::new(save_dir).join("emulator_saves").join("gbe").join(app_id);
     std::fs::create_dir_all(&saves_game_dir).map_err(|e| format!("could not create saves directory: {}", e))?;
 
     // Generate achievement definitions

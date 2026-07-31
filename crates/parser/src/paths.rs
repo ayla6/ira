@@ -258,8 +258,8 @@ pub fn achievements_dir(save_dir: &str, app_id: &str) -> PathBuf {
 
 pub fn unlock_status_path(save_dir: &str, trophy_source: ira_models::TrophySource, app_id: &str, platform_id: &str) -> PathBuf {
     match trophy_source {
-        ira_models::TrophySource::Nge => Path::new(save_dir).join("gog").join(GALAXY_ID).join(platform_id).join("achievements.json"),
-        _ => Path::new(save_dir).join("steam").join(app_id).join("achievements.json"),
+        ira_models::TrophySource::Nge => Path::new(save_dir).join("emulator_saves").join("nge").join(GALAXY_ID).join(platform_id).join("achievements.json"),
+        _ => Path::new(save_dir).join("emulator_saves").join("gbe").join(app_id).join("achievements.json"),
     }
 }
 

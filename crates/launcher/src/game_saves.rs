@@ -94,6 +94,58 @@ pub fn setup_game_saves(
     count
 }
 
+/// True when `dir` contains at least one file or non-empty subdirectory.
+fn has_save_data(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            return true;
+        }
+        if path.is_dir() && has_save_data(&path) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check whether the game's saves are already fully centralized.
+///
+/// Returns true when the centralized save directory exists and every resolved
+/// default save location is already a symlink to it, or the game hasn't
+/// created a save there yet but the centralized path already holds data.
+pub fn saves_are_centralized(
+    savefiles: &[UfsSaveFile],
+    rootoverrides: &[UfsRootOverride],
+    app_id: &str,
+    save_dir: &str,
+    wine_prefix: Option<&str>,
+) -> bool {
+    if savefiles.is_empty() {
+        return false;
+    }
+    let centralized = centralized_base(save_dir, app_id);
+    if !centralized.is_dir() {
+        return false;
+    }
+    let resolved = resolve_save_paths(savefiles, rootoverrides, &centralized, wine_prefix);
+    let deduped = deduplicate_paths(resolved);
+    if deduped.is_empty() {
+        return false;
+    }
+    deduped.iter().all(|rp| {
+        if rp.default_path.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            return true;
+        }
+        if !rp.default_path.exists() {
+            return has_save_data(&rp.centralized_path);
+        }
+        false
+    })
+}
+
 struct ResolvedSavePath {
     /// Where the symlink lives (default save location)
     default_path: PathBuf,
@@ -618,5 +670,115 @@ mod tests {
         );
 
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_saves_are_centralized_false_when_no_centralized_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let savefiles = vec![UfsSaveFile {
+            path: "SUPERHOT_Team/SHMCD".to_string(),
+            root: "WinAppDataLocalLow".to_string(),
+            recursive: false,
+        }];
+        assert!(!saves_are_centralized(
+            &savefiles, &[], "123456",
+            tmp.path().to_str().unwrap(), None,
+        ));
+    }
+
+    #[test]
+    fn test_saves_are_centralized_true_after_setup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().join("saves_dir");
+        let prefix = tmp.path().join("prefix");
+        let steamuser = prefix.join("drive_c/users/steamuser/AppData/Roaming");
+        std::fs::create_dir_all(&steamuser).unwrap();
+
+        let savefiles = vec![UfsSaveFile {
+            path: "SEGA/P5R/Steam/{64BitSteamID}".to_string(),
+            root: "WinAppDataRoaming".to_string(),
+            recursive: false,
+        }];
+
+        let save_dir_str = save_dir.to_str().unwrap();
+        let prefix_str = prefix.to_str().unwrap();
+        let count = setup_game_saves(&savefiles, &[], "123456", save_dir_str, Some(prefix_str));
+        assert_eq!(count, 1);
+
+        assert!(saves_are_centralized(&savefiles, &[], "123456", save_dir_str, Some(prefix_str)));
+    }
+
+    #[test]
+    fn test_saves_are_centralized_false_when_default_is_real_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().join("saves_dir");
+        let default = tmp.path().join("default").join("Saves");
+        std::fs::create_dir_all(&default).unwrap();
+        std::fs::write(default.join("save.dat"), b"data").unwrap();
+
+        // Centralized dir exists with data too, but the default path is a
+        // real directory (not a symlink) — not centralized yet.
+        let centralized = save_dir.join("saves").join("123456").join("default").join("Saves");
+        std::fs::create_dir_all(&centralized).unwrap();
+        std::fs::write(centralized.join("save.dat"), b"data").unwrap();
+
+        let savefiles = vec![UfsSaveFile {
+            path: "default/Saves".to_string(),
+            root: "gameinstall".to_string(),
+            recursive: false,
+        }];
+
+        let rootoverrides = vec![UfsRootOverride {
+            os: "Linux".to_string(),
+            root: "gameinstall".to_string(),
+            useinstead: "LinuxHome".to_string(),
+            addpath: String::new(),
+            pathtransforms: vec![ira_models::UfsPathTransform {
+                find: "default/Saves".to_string(),
+                replace: "default/Saves".to_string(),
+            }],
+        }];
+
+        let home = tmp.path().to_str().unwrap();
+        std::env::set_var("HOME", home);
+
+        assert!(!saves_are_centralized(
+            &savefiles, &rootoverrides, "123456",
+            save_dir.to_str().unwrap(), None,
+        ));
+    }
+
+    #[test]
+    fn test_saves_are_centralized_true_when_data_in_centralized_but_default_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().join("saves_dir");
+        let centralized = save_dir.join("saves").join("123456").join("Game").join("Saves");
+        std::fs::create_dir_all(&centralized).unwrap();
+        std::fs::write(centralized.join("save.dat"), b"data").unwrap();
+
+        let savefiles = vec![UfsSaveFile {
+            path: "Game/Saves".to_string(),
+            root: "gameinstall".to_string(),
+            recursive: false,
+        }];
+
+        let rootoverrides = vec![UfsRootOverride {
+            os: "Linux".to_string(),
+            root: "gameinstall".to_string(),
+            useinstead: "LinuxHome".to_string(),
+            addpath: String::new(),
+            pathtransforms: vec![ira_models::UfsPathTransform {
+                find: "Game/Saves".to_string(),
+                replace: "Game/Saves".to_string(),
+            }],
+        }];
+
+        let home = tmp.path().to_str().unwrap();
+        std::env::set_var("HOME", home);
+
+        assert!(saves_are_centralized(
+            &savefiles, &rootoverrides, "123456",
+            save_dir.to_str().unwrap(), None,
+        ));
     }
 }

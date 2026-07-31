@@ -503,11 +503,34 @@ fn build_save_migration_section(
         return None;
     }
 
+    let (wine_prefix, is_wine) = {
+        let s = state.borrow();
+        let cfg = ira_db::get_game_config(&s.db, game.db_id)
+            .ok().flatten()
+            .map(|(_, w, _)| w)
+            .unwrap_or_default();
+        (ira_launcher::wine_launch::wine_prefix(&cfg), cfg.enabled)
+    };
+    let pfx = if is_wine { Some(wine_prefix.as_str()) } else { None };
+
     let group = adw::PreferencesGroup::new();
     group.set_title("Save data");
 
     let row = adw::ActionRow::new();
-    let already_centralized = ira_db::get_saves_centralized(&state.borrow().db, game.db_id).unwrap_or(false);
+    let db = state.borrow().db.clone();
+    let cached = ira_db::get_saves_centralized(&db, game.db_id).unwrap_or(false);
+    let already_centralized = cached || ira_launcher::game_saves::saves_are_centralized(
+        &details.ufs_savefiles,
+        &details.ufs_rootoverrides,
+        &game.app_id,
+        &save_dir,
+        pfx,
+    );
+    if already_centralized && !cached {
+        if let Err(e) = ira_db::set_saves_centralized(&db, game.db_id, true) {
+            eprintln!("Failed to cache saves centralized: {}", e);
+        }
+    }
     if already_centralized {
         row.set_title("Save data centralized");
         row.set_subtitle("Saves already moved to a persistent location");

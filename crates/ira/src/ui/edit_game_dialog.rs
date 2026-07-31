@@ -326,11 +326,11 @@ fn build_dialog_contents(
             );
             if count > 0 {
                 btn_m.set_label(&format!("Migrated {} save folder(s)", count));
-                if let Err(e) = ira_db::set_saves_centralized(&state_m.borrow().db, game_m.db_id, true) {
-                    eprintln!("Failed to cache saves centralized: {}", e);
-                }
             } else {
                 btn_m.set_label("Already centralized");
+            }
+            if let Err(e) = ira_db::set_saves_centralized(&state_m.borrow().db, game_m.db_id, true) {
+                eprintln!("Failed to cache saves centralized: {}", e);
             }
             btn_m.set_sensitive(false);
         });

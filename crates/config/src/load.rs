@@ -57,19 +57,27 @@ pub fn load_config() -> Config {
             needs_migration = true;
         }
     }
-    let steam_key = secrets::get_secret("steam");
+    let (steam_key, sgdb_key, ra_token, ra_password) = std::thread::scope(|s| {
+        let steam_key = s.spawn(|| secrets::get_secret("steam"));
+        let sgdb_key = s.spawn(|| secrets::get_secret("steamgriddb"));
+        let ra_token = s.spawn(|| secrets::get_secret("ra_token"));
+        let ra_password = s.spawn(|| secrets::get_secret("ra_password"));
+        (
+            steam_key.join().unwrap_or_default(),
+            sgdb_key.join().unwrap_or_default(),
+            ra_token.join().unwrap_or_default(),
+            ra_password.join().unwrap_or_default(),
+        )
+    });
     if !steam_key.is_empty() {
         c.steam_api_key = steam_key;
     }
-    let sgdb_key = secrets::get_secret("steamgriddb");
     if !sgdb_key.is_empty() {
         c.steam_griddb_api_key = sgdb_key;
     }
-    let ra_token = secrets::get_secret("ra_token");
     if !ra_token.is_empty() {
         c.ra_token = ra_token;
     }
-    let ra_password = secrets::get_secret("ra_password");
     if !ra_password.is_empty() {
         c.ra_password = ra_password;
     }

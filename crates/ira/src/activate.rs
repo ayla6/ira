@@ -109,14 +109,20 @@ pub fn activate(app: &adw::Application) -> SharedState {
     let steam_griddb_api_key = cfg.steam_griddb_api_key.clone();
     let cfg_for_watcher = Arc::new(cfg.clone());
 
+    let steam = Arc::new(SteamDataClient::new(
+        steam_api_key,
+        steam_griddb_api_key,
+        &format!("{}/data", save_dir),
+    ));
+
     let state = {
-        let _s = tracing::info_span!("build_ui").entered();
+        let _s = tracing::info_span!("build_ui_wrap").entered();
         build_ui(
             app,
             Vec::new(),
             cfg,
             crate::ui::AppContext {
-                steam: Arc::new(SteamDataClient::new(String::new(), String::new(), &format!("{}/data", save_dir))),
+                steam: steam.clone(),
                 watcher: None,
                 db: db.clone(),
                 sender: sender.clone(),
@@ -128,11 +134,6 @@ pub fn activate(app: &adw::Application) -> SharedState {
     {
         let _s = tracing::info_span!("post_ui_setup").entered();
 
-        let steam = Arc::new(SteamDataClient::new(
-            steam_api_key,
-            steam_griddb_api_key,
-            &format!("{}/data", save_dir),
-        ));
         state.borrow_mut().steam = steam.clone();
 
         let watcher = match AchievementWatcher::new(cfg_for_watcher, sender.clone(), save_dir.clone(), Arc::new(crate::game_loader::load_game)) {

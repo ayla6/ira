@@ -211,7 +211,7 @@ fn find_matches(buffer: &gtk4::TextBuffer, query: &str, st: &mut SearchState) {
     let mut iter = buffer.start_iter();
     let mut matches = Vec::new();
     let limit = 5000;
-    loop {
+    while matches.len() < limit {
         let Some((match_start, match_end)) = iter.forward_search(
             query,
             gtk4::TextSearchFlags::CASE_INSENSITIVE,
@@ -221,9 +221,6 @@ fn find_matches(buffer: &gtk4::TextBuffer, query: &str, st: &mut SearchState) {
         };
         buffer.apply_tag_by_name("search-highlight", &match_start, &match_end);
         matches.push(match_start);
-        if matches.len() >= limit {
-            break;
-        }
         // Advance past the match; use forward_char instead of forward_cursor_position
         // to avoid "Char offset off the end of the line" crashes on long lines.
         let mut after = match_end;

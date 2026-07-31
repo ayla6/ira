@@ -19,14 +19,17 @@ pub enum SearchSource {
 }
 
 pub(super) struct SearchResultsDialogParams<'a> {
-    state: &'a SharedState,
-    steam: Arc<SteamDataClient>,
-    source_name: &'a str,
-    game_name: &'a str,
-    db_id: i64,
-    source: SearchSource,
-    on_match: MatchCallback,
-    parent: &'a gtk4::Window,
+    pub(super) state: &'a SharedState,
+    pub(super) steam: Arc<SteamDataClient>,
+    pub(super) source_name: &'a str,
+    pub(super) game_name: &'a str,
+    pub(super) db_id: i64,
+    pub(super) source: SearchSource,
+    pub(super) on_match: MatchCallback,
+    pub(super) parent: &'a gtk4::Window,
+    /// When false, the Match button only invokes `on_match` and does not
+    /// persist a DB match (used by the auto-add flow where no game exists yet).
+    pub(super) match_in_db: bool,
 }
 
 pub(super) fn handle_steam_search_result(
@@ -91,7 +94,7 @@ pub(super) fn handle_steam_search_result(
             show_search_results_dialog(SearchResultsDialogParams {
                 state: &sc2, steam: steam2.clone(), source_name: "Steam",
                 game_name: &name2, db_id, source: SearchSource::Steam,
-                on_match: cb2.clone(), parent: pd.upcast_ref(),
+                on_match: cb2.clone(), parent: pd.upcast_ref(), match_in_db: true,
             });
         });
         action_box.append(&steam_btn);
@@ -106,7 +109,7 @@ pub(super) fn handle_steam_search_result(
             show_search_results_dialog(SearchResultsDialogParams {
                 state: &sc3, steam: steam3.clone(), source_name: "SteamGridDB",
                 game_name: &name3, db_id, source: SearchSource::Sgdb,
-                on_match: cb3.clone(), parent: pd.upcast_ref(),
+                on_match: cb3.clone(), parent: pd.upcast_ref(), match_in_db: true,
             });
         });
         action_box.append(&sgdb_btn);
@@ -114,7 +117,7 @@ pub(super) fn handle_steam_search_result(
 }
 
 pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
-    let SearchResultsDialogParams { state, steam, source_name, game_name, db_id, source, on_match, parent } = params;
+    let SearchResultsDialogParams { state, steam, source_name, game_name, db_id, source, on_match, parent, match_in_db } = params;
 
     let dialog = adw::Window::new();
     dialog.set_default_width(450);
@@ -199,6 +202,7 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
         let name = name_clone.clone();
         let cb = on_match_clone.clone();
         let dlg = dialog_clone.clone();
+        let match_db = match_in_db;
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
             if let Ok(search_results) = rx.borrow_mut().try_recv() {
                 clear_children(&results);
@@ -232,9 +236,11 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
                     let callback = cb.clone();
                     let src_type = source;
                     match_btn.connect_clicked(move |_| {
-                        match src_type {
-                            SearchSource::Steam => match_game_to_steam(&sc2, did, sid.clone(), name2.clone()),
-                            SearchSource::Sgdb => match_game_to_sgdb(&sc2, did, sid.clone()),
+                        if match_db {
+                            match src_type {
+                                SearchSource::Steam => match_game_to_steam(&sc2, did, sid.clone(), name2.clone()),
+                                SearchSource::Sgdb => match_game_to_sgdb(&sc2, did, sid.clone()),
+                            }
                         }
                         callback(&sid, &matched_name);
                         dialog_clone.close();

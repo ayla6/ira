@@ -43,13 +43,18 @@ pub fn show_installer_add_dialog(state: &SharedState) {
     win.set_transient_for(Some(&parent));
 
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let header = adw::HeaderBar::new();
+    header.add_css_class(CSS_FLAT);
+    content.append(&header);
+    let page = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content.append(&page);
     win.set_content(Some(&content));
     win.present();
 
     let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
     let wizard = Rc::new(RefCell::new(Wizard {
         win: win.clone(),
-        content: content.clone(),
+        content: page.clone(),
         state: state.clone(),
         profiles,
         identified: None,
@@ -87,10 +92,6 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
         (w.content.clone(), w.win.clone(), w.state.clone(), w.profiles.clone())
     };
     clear_children(&content);
-
-    let header = adw::HeaderBar::new();
-    header.add_css_class(CSS_FLAT);
-    content.append(&header);
 
     let scrolled = gtk4::ScrolledWindow::new();
     scrolled.set_vexpand(true);
@@ -538,10 +539,6 @@ fn show_interactive_done_page(
     let content = wizard.borrow().content.clone();
     clear_children(&content);
 
-    let header = adw::HeaderBar::new();
-    header.add_css_class(CSS_FLAT);
-    content.append(&header);
-
     let status = adw::StatusPage::new();
     let total = ist.borrow().installers.len();
     status.set_title(&format!("Running installer {}/{}", index + 1, total));
@@ -762,10 +759,6 @@ fn pick_from_multiple(
     let content = wizard.borrow().content.clone();
     clear_children(&content);
 
-    let header = adw::HeaderBar::new();
-    header.add_css_class(CSS_FLAT);
-    content.append(&header);
-
     let status = adw::StatusPage::new();
     status.set_title("Multiple folders detected");
     status.set_description(Some("Select the folder where the game was installed."));
@@ -840,29 +833,9 @@ fn handle_installer_identify_event(
         }
         WizardEvent::Failed(e) => {
             show_error(wizard, &e);
-            let folder = ist.borrow().detected_folder.clone();
-            let name = folder
-                .as_ref()
-                .and_then(|f| f.file_name())
-                .and_then(|n| n.to_str())
-                .unwrap_or("Game")
-                .to_string();
-            let is_windows = ist.borrow().game_platform == GamePlatform::Windows;
-            if let Some(folder) = folder {
-                let game = IdentifiedGame {
-                    app_id: String::new(),
-                    name,
-                    is_windows,
-                    game_folder: folder,
-                    exe: String::new(),
-                    variants: Vec::new(),
-                    logo_position: String::new(),
-                    logo_size: 0,
-                };
-                let profile_id = ist.borrow().profile_id;
-                show_identified_form(wizard, game, profile_id, true);
-            }
+            show_manual_fallback(wizard, ist);
         }
+        WizardEvent::NeedSteamSearch { .. } => show_manual_fallback(wizard, ist),
         WizardEvent::Identified(mut game) => {
             if ist.borrow().game_platform == GamePlatform::Windows {
                 game.is_windows = true;
@@ -871,6 +844,33 @@ fn handle_installer_identify_event(
             show_identified_form(wizard, *game, profile_id, true);
         }
         _ => {}
+    }
+}
+
+/// The installer flow keeps the manual entry fallback: present the identified
+/// form with an empty Steam app ID so non-Steam games can still be added.
+fn show_manual_fallback(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>) {
+    let folder = ist.borrow().detected_folder.clone();
+    let name = folder
+        .as_ref()
+        .and_then(|f| f.file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or("Game")
+        .to_string();
+    let is_windows = ist.borrow().game_platform == GamePlatform::Windows;
+    if let Some(folder) = folder {
+        let game = IdentifiedGame {
+            app_id: String::new(),
+            name,
+            is_windows,
+            game_folder: folder,
+            exe: String::new(),
+            variants: Vec::new(),
+            logo_position: String::new(),
+            logo_size: 0,
+        };
+        let profile_id = ist.borrow().profile_id;
+        show_identified_form(wizard, game, profile_id, true);
     }
 }
 

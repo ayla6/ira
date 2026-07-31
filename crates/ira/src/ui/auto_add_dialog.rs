@@ -12,6 +12,7 @@ use super::add_game_db::{add_game_to_db, AddGameToDbParams};
 use super::css::*;
 use super::edit_game_dialog::show_edit_game_dialog;
 use super::state::SharedState;
+use super::steam_search_dialog::{show_search_results_dialog, SearchResultsDialogParams, SearchSource};
 use super::wine_profile_picker::{build_wine_profile_picker, selected_profile_id};
 
 /// Which API emulator to install (GOG checked first — a GOG game may ship Steam
@@ -31,6 +32,8 @@ pub(super) enum WizardEvent {
     Added(i64),
     EmulatorPrompt { db_id: i64, game_folder: PathBuf, app_id: String, emu_kind: EmuKind },
     InstallDone,
+    /// Automatic identification found no Steam game; ask the user to search.
+    NeedSteamSearch { folder: PathBuf },
 }
 
 pub(super) struct IdentifiedGame {
@@ -59,18 +62,23 @@ pub(super) struct Wizard {
 pub fn show_auto_add_dialog(state: &SharedState) {
     let parent = state.borrow().window.clone();
     let win = adw::Window::new();
-    win.set_title(Some("Auto Add Game"));
+    win.set_title(Some("Auto add game"));
     win.set_default_size(480, 420);
     win.set_modal(false);
     win.set_transient_for(Some(&parent));
 
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let header = adw::HeaderBar::new();
+    header.add_css_class(CSS_FLAT);
+    content.append(&header);
+    let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    content.append(&page);
     win.set_content(Some(&content));
     win.present();
 
     let wizard = Rc::new(RefCell::new(Wizard {
         win: win.clone(),
-        content: content.clone(),
+        content: page.clone(),
         state: state.clone(),
         profiles: ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default(),
         identified: None,
@@ -96,7 +104,7 @@ fn show_pick_page(wizard: &Rc<RefCell<Wizard>>) {
     clear_children(&content);
 
     let status = adw::StatusPage::new();
-    status.set_title("Auto Add Game");
+    status.set_title("Auto add game");
     status.set_description(Some("Pick the game's install folder. Ira will identify it, download assets and set everything up."));
     status.set_icon_name(Some("folder-open-symbolic"));
 
@@ -178,6 +186,10 @@ pub(super) fn start_identify(path: PathBuf, move_to: Option<PathBuf>, wizard: &R
     let rx = Rc::new(RefCell::new(rx));
     spawn_identify_thread(tx, path, move_to, db, steam);
 
+    poll_events(wizard, rx);
+}
+
+pub(super) fn poll_events(wizard: &Rc<RefCell<Wizard>>, rx: Rc<RefCell<mpsc::Receiver<WizardEvent>>>) {
     let wizard_c = wizard.clone();
     glib::source::idle_add_local_full(glib::Priority::LOW, move || {
         match rx.borrow_mut().try_recv() {
@@ -190,6 +202,20 @@ pub(super) fn start_identify(path: PathBuf, move_to: Option<PathBuf>, wizard: &R
             Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
         }
     });
+}
+
+/// Resume identification from a user-chosen Steam app ID, used when
+/// automatic identification found nothing and the user picked a game
+/// via the Steam search fallback.
+pub(super) fn continue_identify(folder: PathBuf, app_id: String, wizard: &Rc<RefCell<Wizard>>) {
+    let steam = wizard.borrow().state.borrow().steam.clone();
+    set_status(wizard, "Identifying game…");
+
+    let (tx, rx) = mpsc::channel::<WizardEvent>();
+    let rx = Rc::new(RefCell::new(rx));
+    std::thread::spawn(move || finish_identify(tx, folder, app_id, steam));
+
+    poll_events(wizard, rx);
 }
 
 pub(super) fn spawn_identify_thread(
@@ -210,50 +236,55 @@ pub(super) fn spawn_identify_thread(
         let app_id = match identify_app_id(&final_folder, &steam) {
             Some(id) => id,
             None => {
-                let _ = tx.send(WizardEvent::Failed(
-                    "Could not identify this game on Steam. Auto-add only works for Steam games.".to_string(),
-                ));
+                let _ = tx.send(WizardEvent::NeedSteamSearch { folder: final_folder });
                 return;
             }
         };
 
-        let info = match steam.fetch_steamcmd_info(&app_id) {
-            Some(i) => i,
-            None => {
-                let _ = tx.send(WizardEvent::Failed(format!(
-                    "Failed to fetch Steam data for app {}.", app_id
-                )));
-                return;
-            }
-        };
-
-        let launches = info.launches;
-        let default = launches.first();
-        let exe = default.map(|l| l.executable.clone()).unwrap_or_default();
-        let is_windows = default
-            .map(|l| l.oslist.contains("windows") || l.oslist.is_empty())
-            .unwrap_or(info.oslist.contains("windows") || info.oslist.is_empty());
-
-        let target_os = if is_windows { "windows" } else { "linux" };
-        let variants: Vec<String> = launches
-            .iter()
-            .skip(1)
-            .filter(|l| l.oslist.contains(target_os) || l.oslist.is_empty())
-            .filter(|l| !l.oslist.contains("macos"))
-            .map(|l| l.executable.clone())
-            .collect();
-
-        let _ = tx.send(WizardEvent::Identified(Box::new(IdentifiedGame {
-            app_id,
-            name: info.name,
-            is_windows,
-            game_folder: final_folder,
-            exe,
-            variants,
-            logo_position: info.logo_position,
-            logo_size: info.logo_size,
-        })));
+        finish_identify(tx, final_folder, app_id, steam);
     });
+}
+
+fn finish_identify(
+    tx: mpsc::Sender<WizardEvent>, folder: PathBuf, app_id: String,
+    steam: std::sync::Arc<ira_api::SteamDataClient>,
+) {
+    let info = match steam.fetch_steamcmd_info(&app_id) {
+        Some(i) => i,
+        None => {
+            let _ = tx.send(WizardEvent::Failed(format!(
+                "Failed to fetch Steam data for app {}.", app_id
+            )));
+            return;
+        }
+    };
+
+    let launches = info.launches;
+    let default = launches.first();
+    let exe = default.map(|l| l.executable.clone()).unwrap_or_default();
+    let is_windows = default
+        .map(|l| l.oslist.contains("windows") || l.oslist.is_empty())
+        .unwrap_or(info.oslist.contains("windows") || info.oslist.is_empty());
+
+    let target_os = if is_windows { "windows" } else { "linux" };
+    let variants: Vec<String> = launches
+        .iter()
+        .skip(1)
+        .filter(|l| l.oslist.contains(target_os) || l.oslist.is_empty())
+        .filter(|l| !l.oslist.contains("macos"))
+        .map(|l| l.executable.clone())
+        .collect();
+
+    let _ = tx.send(WizardEvent::Identified(Box::new(IdentifiedGame {
+        app_id,
+        name: info.name,
+        is_windows,
+        game_folder: folder,
+        exe,
+        variants,
+        logo_position: info.logo_position,
+        logo_size: info.logo_size,
+    })));
 }
 
 fn resolve_final_folder(
@@ -296,9 +327,91 @@ pub(super) fn handle_identify_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEven
             show_pick_page(wizard);
         }
         WizardEvent::Identified(game) => show_identified_form(wizard, *game, None, false),
+        WizardEvent::NeedSteamSearch { folder } => show_steam_search_page(wizard, folder),
         // Add-phase events are handled by handle_add_event.
         WizardEvent::Added(_) | WizardEvent::EmulatorPrompt { .. } | WizardEvent::InstallDone => {}
     }
+}
+
+/// Fallback shown when automatic identification finds no Steam game: let the
+/// user search Steam manually, or fall back to setting the game up by hand.
+fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf) {
+    let (content, win, state, steam) = {
+        let w = wizard.borrow();
+        let s = w.state.borrow();
+        (w.content.clone(), w.win.clone(), w.state.clone(), s.steam.clone())
+    };
+    clear_children(&content);
+
+    let title = gtk4::Label::new(Some("Couldn't identify this game."));
+    title.add_css_class(CSS_TITLE_1);
+    title.set_halign(gtk4::Align::Center);
+    content.append(&title);
+
+    let hint = gtk4::Label::new(Some("Search Steam for the game, or set it up manually."));
+    hint.add_css_class(CSS_DIM_LABEL);
+    hint.set_halign(gtk4::Align::Center);
+    content.append(&hint);
+
+    let name = folder
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("game")
+        .to_string();
+
+    let search_btn = gtk4::Button::with_label("Search Steam…");
+    search_btn.add_css_class(CSS_SUGGESTED_ACTION);
+    search_btn.set_halign(gtk4::Align::Center);
+    let state_c = state.clone();
+    let steam_c = steam.clone();
+    let win_c = win.clone();
+    let wizard_c = wizard.clone();
+    let folder_c = folder.clone();
+    let name_c = name.clone();
+    search_btn.connect_clicked(move |_| {
+        show_search_results_dialog(SearchResultsDialogParams {
+            state: &state_c,
+            steam: steam_c.clone(),
+            source_name: "Steam",
+            game_name: &name_c,
+            db_id: 0,
+            source: SearchSource::Steam,
+            on_match: {
+                let wizard_c = wizard_c.clone();
+                let folder_c = folder_c.clone();
+                Rc::new(move |app_id: &str, _matched_name: &str| {
+                    continue_identify(folder_c.clone(), app_id.to_string(), &wizard_c);
+                })
+            },
+            parent: win_c.upcast_ref(),
+            match_in_db: false,
+        });
+    });
+    content.append(&search_btn);
+
+    let manual_btn = gtk4::Button::with_label("Set up manually");
+    manual_btn.set_halign(gtk4::Align::Center);
+    let wizard_c = wizard.clone();
+    let folder_c = folder.clone();
+    let name_c = name.clone();
+    manual_btn.connect_clicked(move |_| {
+        show_identified_form(
+            &wizard_c,
+            IdentifiedGame {
+                app_id: String::new(),
+                name: name_c.clone(),
+                is_windows: true,
+                game_folder: folder_c.clone(),
+                exe: String::new(),
+                variants: Vec::new(),
+                logo_position: String::new(),
+                logo_size: 0,
+            },
+            None,
+            false,
+        );
+    });
+    content.append(&manual_btn);
 }
 
 pub(super) fn show_identified_form(
@@ -312,10 +425,6 @@ pub(super) fn show_identified_form(
         (w.content.clone(), w.win.clone(), w.state.clone(), w.profiles.clone())
     };
     clear_children(&content);
-
-    let header = adw::HeaderBar::new();
-    header.add_css_class(CSS_FLAT);
-    content.append(&header);
 
     let body = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     body.set_margin_start(16);
@@ -333,7 +442,7 @@ pub(super) fn show_identified_form(
     group.add(&name_entry);
 
     let appid_row = adw::EntryRow::new();
-    appid_row.set_title("Steam App ID");
+    appid_row.set_title("Steam app ID");
     appid_row.set_text(&game.app_id);
     appid_row.set_sensitive(false);
     group.add(&appid_row);
@@ -357,7 +466,7 @@ pub(super) fn show_identified_form(
     info_label.add_css_class(CSS_DIM_LABEL);
     body.append(&info_label);
 
-    let add_btn = gtk4::Button::with_label("Add Game");
+    let add_btn = gtk4::Button::with_label("Add game");
     add_btn.add_css_class(CSS_SUGGESTED_ACTION);
     add_btn.set_halign(gtk4::Align::Center);
 
@@ -929,7 +1038,7 @@ pub(super) fn set_status(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
     let content = wizard.borrow().content.clone();
     clear_children(&content);
     let status = adw::StatusPage::new();
-    status.set_title("Auto Add Game");
+    status.set_title("Auto add game");
     status.set_description(Some(msg));
     status.set_icon_name(Some("folder-open-symbolic"));
     let spinner = gtk4::Spinner::new();

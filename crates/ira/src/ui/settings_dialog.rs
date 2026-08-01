@@ -63,8 +63,13 @@ pub fn show_settings_dialog(
     stack.add_named(&overlay_page, Some("overlay"));
 
     let (system_page, system_defaults_widgets) = build_system_defaults_page(&cfg);
+    let system_scroll = gtk4::ScrolledWindow::new();
+    system_scroll.set_hexpand(true);
+    system_scroll.set_vexpand(true);
+    system_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    system_scroll.set_child(Some(&system_page));
     sidebar.append(&settings_sidebar_row("applications-science-symbolic", "Game system", "system"));
-    stack.add_named(&system_page, Some("system"));
+    stack.add_named(&system_scroll, Some("system"));
 
     sidebar.append(&sidebar_section_title("PC games"));
     let (computer_games_page, default_game_folder_row) = build_computer_games_page(&win, &cfg);

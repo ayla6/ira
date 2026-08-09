@@ -407,11 +407,13 @@ pub fn add_overlay_env_standalone(
 ///
 /// The overlay window is marked as `GAMESCOPE_EXTERNAL_OVERLAY` so gamescope
 /// composites it on top of the game as a separate plane (like mangoapp).
-/// The Gamescope WSI layer handles the overlay's swapchain with pre-multiplied
-/// alpha support, so transparent parts of the overlay show the game beneath.
+/// The overlay runs under the Gamescope WSI layer (inheriting
+/// `GAMESCOPE_WAYLAND_DISPLAY`): the layer intercepts `vkCreateXcbSurfaceKHR`
+/// and presents the overlay's frames to gamescope via Wayland, bypassing
+/// XWayland, with pre-multiplied alpha for transparency.
 ///
 /// Transforms: `gamescope -- wine ...`
-/// Into:       `gamescope -- sh -c 'env -u GAMESCOPE_WAYLAND_DISPLAY -u WAYLAND_DISPLAY ira-overlay-standalone & exec "$@"' -- wine ...`
+/// Into:       `gamescope -- sh -c 'ENABLE_GAMESCOPE_WSI=1 ira-overlay-standalone & exec "$@"' -- wine ...`
 pub fn wrap_with_standalone_overlay(command: &mut Vec<String>) {
     let Some(bin) = standalone_binary_path() else {
         eprintln!("ira-overlay: standalone binary not found, skipping");
@@ -433,7 +435,7 @@ pub fn wrap_with_standalone_overlay(command: &mut Vec<String>) {
         .map(|c| c.into_owned())
         .unwrap_or(bin);
     let sh_script = format!(
-        "env -u GAMESCOPE_WAYLAND_DISPLAY -u WAYLAND_DISPLAY ENABLE_GAMESCOPE_WSI=1 {} & exec \"$@\"",
+        "ENABLE_GAMESCOPE_WSI=1 {} & exec \"$@\"",
         quoted_bin
     );
 

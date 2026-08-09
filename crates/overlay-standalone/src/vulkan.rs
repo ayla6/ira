@@ -1,10 +1,11 @@
 //! Vulkan instance, surface, swapchain, and render loop for the standalone overlay.
 //!
-//! Uses an XCB surface under gamescope's XWayland server. The Gamescope WSI
-//! layer intercepts `vkCreateXcbSurfaceKHR` and handles swapchain creation
-//! with pre-multiplied alpha support and proper buffer release. The overlay
-//! window is marked as `GAMESCOPE_EXTERNAL_OVERLAY`, so gamescope composites
-//! it on top of the game as a separate plane.
+//! Uses an XCB surface under gamescope. The Gamescope WSI layer intercepts
+//! `vkCreateXcbSurfaceKHR` and creates a Wayland surface on gamescope's socket
+//! that presents the overlay's frames directly to gamescope (bypassing
+//! XWayland) with pre-multiplied alpha. The window is marked as
+//! `GAMESCOPE_EXTERNAL_OVERLAY`, so gamescope composites it on top of the game
+//! as a separate plane.
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
@@ -112,6 +113,12 @@ impl VulkanState {
                 None
             })
             .ok_or("no queue family with graphics")?;
+        let props = unsafe { instance.get_physical_device_properties(physical_device) };
+        let device_name = unsafe { CStr::from_ptr(props.device_name.as_ptr()) }
+            .to_string_lossy();
+        eprintln!(
+            "ira-overlay-standalone: using physical device '{device_name}'"
+        );
 
         let queue_priorities = [1.0f32];
         let device_ext_names: [*const c_char; 1] = [c"VK_KHR_swapchain".as_ptr()];
@@ -162,7 +169,22 @@ impl VulkanState {
         let mut caps = vk::SurfaceCapabilitiesKHR::default();
         let f: unsafe extern "system" fn(vk::PhysicalDevice, vk::SurfaceKHR, *mut vk::SurfaceCapabilitiesKHR) -> vk::Result =
             unsafe { std::mem::transmute(surface_fns.get_physical_device_surface_capabilities) };
-        unsafe { f(physical_device, surface, &mut caps) }.result().map_err(|e| format!("get_surface_caps: {e}"))?;
+        let mut caps_result = unsafe { f(physical_device, surface, &mut caps) };
+        for attempt in 1..20 {
+            if caps_result == vk::Result::SUCCESS {
+                break;
+            }
+            if attempt >= 5 {
+                eprintln!("ira-overlay-standalone: get_surface_caps attempt {attempt} failed: {caps_result:?}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            caps_result = unsafe { f(physical_device, surface, &mut caps) };
+        }
+        if caps_result != vk::Result::SUCCESS {
+            return Err(format!("get_surface_caps: {caps_result:?}"));
+        }
+        eprintln!("ira-overlay-standalone: surface caps ok (extent {}x{}, min_images {}, composite {:?})",
+            caps.current_extent.width, caps.current_extent.height, caps.min_image_count, caps.supported_composite_alpha);
 
         let mut format_count = 0u32;
         let f: unsafe extern "system" fn(vk::PhysicalDevice, vk::SurfaceKHR, *mut u32, *mut vk::SurfaceFormatKHR) -> vk::Result =

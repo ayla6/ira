@@ -146,7 +146,7 @@ pub fn show_settings_dialog(
 
     let mut console_widgets: Vec<(&'static str, ConsolePageWidgets)> = Vec::new();
     let mut ps4_enable_row: Option<adw::SwitchRow> = None;
-    let mut ps4_exe_row: Option<adw::EntryRow> = None;
+    let mut ps4_version_dd: Option<gtk4::DropDown> = None;
     let mut ps3_enable_row: Option<adw::SwitchRow> = None;
     let mut ps3_exe_row: Option<adw::EntryRow> = None;
     for def in ira_models::CONSOLES {
@@ -200,7 +200,7 @@ pub fn show_settings_dialog(
             ps3_enable_row = Some(ps3_en);
             ps3_exe_row = Some(ps3_exe);
 
-            let (ps4_page, ps4_en, ps4_exe) = build_shadps4_settings_page(&cfg, &win);
+            let (ps4_page, ps4_en, ps4_dd) = build_shadps4_settings_page(&cfg);
 
             let (ps4_ov_row, ps4_ov_state) = build_override_switch_row(
                 "In-game overlay", "Achievements, screenshots, and recording",
@@ -222,7 +222,7 @@ pub fn show_settings_dialog(
             sidebar.append(&settings_sidebar_row("applications-games-symbolic", "PS4", "ps4"));
             stack.add_named(&ps4_page, Some("ps4"));
             ps4_enable_row = Some(ps4_en);
-            ps4_exe_row = Some(ps4_exe);
+            ps4_version_dd = ps4_dd;
         }
     }
 
@@ -266,8 +266,17 @@ pub fn show_settings_dialog(
         if let Some(row) = &ps4_enable_row {
             s.cfg.shadps4_enabled = row.is_active();
         }
-        if let Some(row) = &ps4_exe_row {
-            s.cfg.shadps4_executable = row.text().to_string();
+        if let Some(dd) = &ps4_version_dd {
+            let idx = dd.selected();
+            s.cfg.shadps4_executable = if idx == 0 {
+                String::new()
+            } else {
+                ira_platforms::ps4::read_shadps4_versions()
+                    .into_iter()
+                    .nth((idx - 1) as usize)
+                    .map(|v| v.path.trim_matches('"').to_string())
+                    .unwrap_or_default()
+            };
         }
         if let Some(row) = &ps3_enable_row {
             s.cfg.rpcs3_enabled = row.is_active();

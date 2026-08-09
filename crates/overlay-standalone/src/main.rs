@@ -1,12 +1,15 @@
-//! Standalone overlay binary — renders to an X11 window via XCB.
+//! Standalone overlay binary — renders an overlay under gamescope.
 //!
-//! Used when running under gamescope. The overlay creates its own X11 window,
-//! Vulkan instance, and swapchain. The Gamescope WSI layer handles swapchain
-//! creation and buffer management with pre-multiplied alpha support.
+//! Used when running under gamescope. The overlay creates its own X11 window
+//! and Vulkan instance, and runs under the Gamescope WSI layer: the layer
+//! intercepts `vkCreateXcbSurfaceKHR` and presents the overlay's frames to
+//! gamescope via Wayland (bypassing XWayland), blending with pre-multiplied
+//! alpha over the game.
 //!
 //! The window is marked as `GAMESCOPE_EXTERNAL_OVERLAY` so gamescope composites
 //! it on top of the game as a separate plane (like mangoapp).
-//! Visibility is toggled via the `_NET_WM_WINDOW_OPACITY` property.
+//! Visibility is toggled via the `_NET_WM_WINDOW_OPACITY` and
+//! `GAMESCOPE_EXTERNAL_OVERLAY` properties.
 //! When visible, the keyboard is grabbed so all key events go to the overlay.
 //! The visibility toggle is read from shared memory (written by overlay-shim
 //! when the overlay is hidden, or by the overlay itself when visible).

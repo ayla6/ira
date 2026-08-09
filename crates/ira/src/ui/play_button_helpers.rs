@@ -283,14 +283,8 @@ pub(super) fn launch_ps4(
     global_shadps4_exe: &str,
     game_path: &str,
 ) -> Result<(), String> {
-    let exe = if !per_game_version.is_empty() {
-        per_game_version
-    } else if !global_shadps4_exe.is_empty() {
-        global_shadps4_exe
-    } else {
-        "shadps4"
-    };
-    let mut cmd = vec![exe.to_string(), "-g".to_string(), game_path.to_string()];
+    let exe = ira_platforms::ps4::resolve_shadps4_executable(per_game_version, global_shadps4_exe);
+    let mut cmd = vec![exe, "-g".to_string(), game_path.to_string()];
     let env = build_emulator_env_and_wrap(ctx, &mut cmd);
     spawn_and_monitor(ctx, &cmd, &env, "shadPS4")
 }

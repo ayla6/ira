@@ -328,6 +328,17 @@ impl UiRenderer {
 
         let screen_w = extent.width as f32;
         let screen_h = extent.height as f32;
+
+        // The pipeline uses dynamic viewport state; without an explicit
+        // vkCmdSetViewport every draw is clipped to undefined state.
+        let viewport = vk::Viewport {
+            x: 0.0, y: 0.0,
+            width: screen_w,
+            height: screen_h,
+            min_depth: 0.0, max_depth: 1.0,
+        };
+        (fns.cmd_set_viewport)(cmd, 0, 1, &viewport as *const vk::Viewport);
+
         for dc in &draw_cmds {
             let pc = PushConstants {
                 screen_size: [screen_w, screen_h],

@@ -4,9 +4,19 @@
 //! The window is marked as a `GAMESCOPE_EXTERNAL_OVERLAY` so gamescope
 //! composites it on top of the game as a separate plane (like mangoapp).
 //!
-//! Visibility is toggled via the `_NET_WM_WINDOW_OPACITY` property:
-//!   - 0xFFFFFFFF = visible (gamescope paints the external overlay plane)
-//!   - 0x00000000 = hidden (gamescope skips painting)
+//! The overlay runs under the Gamescope WSI layer, which intercepts
+//! `vkCreateXcbSurfaceKHR` and presents frames to gamescope via Wayland
+//! (bypassing XWayland) with pre-multiplied alpha. The X11 window itself is a
+//! plain depth-24 window — it exists so gamescope can match the overlay's
+//! Wayland surface to a window and read the overlay/opacity properties.
+//!
+//! Visibility is toggled via the `_NET_WM_WINDOW_OPACITY` and
+//! `GAMESCOPE_EXTERNAL_OVERLAY` properties:
+//!   - visible:  opacity 0xFFFFFFFF, external overlay 1
+//!   - hidden:   opacity 0, external overlay 0
+//!     Both are set BEFORE the window is mapped so gamescope's initial focus
+//!     reroll picks the overlay up; toggling the external-overlay property
+//!     later re-triggers that reroll (see `set_visible`).
 //!
 //! When visible, the keyboard is grabbed (`xcb_grab_keyboard`) so all key
 //! events go to the overlay. The toggle hotkey is detected by the overlay
@@ -107,6 +117,21 @@ struct XcbGenericEvent {
 }
 
 #[repr(C)]
+struct XcbGetGeometryReply {
+    _response_type: u8,
+    _depth: u8,
+    _sequence: u16,
+    _length: u32,
+    _root: u32,
+    _x: i16,
+    _y: i16,
+    width: u16,
+    height: u16,
+    _border_width: u16,
+    _pad0: [u8; 2],
+}
+
+#[repr(C)]
 struct XcbInternAtomReply {
     _response_type: u8,
     _pad0: u8,
@@ -120,6 +145,7 @@ struct XcbInternAtomReply {
 extern "C" {
     fn xcb_connect(display: *const c_char, screen: *mut *mut c_char) -> *mut c_void;
     fn xcb_disconnect(c: *mut c_void);
+    fn xcb_connection_has_error(c: *mut c_void) -> c_int;
     fn xcb_get_setup(c: *mut c_void) -> *const XcbSetup;
     fn xcb_setup_roots_iterator(setup: *const XcbSetup) -> XcbScreenIterator;
     fn xcb_generate_id(c: *mut c_void) -> u32;
@@ -141,6 +167,12 @@ extern "C" {
     fn xcb_map_window(c: *mut c_void, window: u32);
     fn xcb_destroy_window(c: *mut c_void, window: u32);
     fn xcb_flush(c: *mut c_void) -> c_int;
+    fn xcb_get_geometry(c: *mut c_void, drawable: u32) -> u32;
+    fn xcb_get_geometry_reply(
+        c: *mut c_void,
+        cookie: u32,
+        error: *mut *mut c_void,
+    ) -> *mut XcbGetGeometryReply;
     fn xcb_poll_for_event(c: *mut c_void) -> *mut XcbGenericEvent;
     fn xcb_intern_atom(
         c: *mut c_void,
@@ -212,6 +244,7 @@ pub struct X11State {
     conn: *mut c_void,
     window: u32,
     opacity_atom: u32,
+    external_overlay_atom: u32,
 }
 
 unsafe impl Send for X11State {}
@@ -223,10 +256,24 @@ impl X11State {
         let display_c = CString::new(display.as_str())
             .map_err(|e| format!("invalid DISPLAY: {e}"))?;
 
-        let conn = unsafe { xcb_connect(display_c.as_ptr(), std::ptr::null_mut()) };
-        if conn.is_null() {
-            return Err(format!("failed to connect to X display '{display}'"));
-        }
+        // Retry the connection until gamescope's XWayland is up and answering
+        // requests. The overlay is spawned at the same time as the game, so
+        // XWayland's socket may not exist yet when we start.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let conn = loop {
+            let c = unsafe { xcb_connect(display_c.as_ptr(), std::ptr::null_mut()) };
+            if !c.is_null() && unsafe { xcb_connection_has_error(c) } == 0 {
+                break c;
+            }
+            if !c.is_null() {
+                unsafe { xcb_disconnect(c) };
+            }
+            if std::time::Instant::now() > deadline {
+                return Err(format!("timed out connecting to X display '{display}'"));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        eprintln!("ira-overlay-standalone: connected to X display '{display}'");
 
         let setup = unsafe { xcb_get_setup(conn) };
         if setup.is_null() {
@@ -246,6 +293,10 @@ impl X11State {
 
         let window = unsafe { xcb_generate_id(conn) };
 
+        // Plain depth-24 root-visual window. The Gamescope WSI layer presents
+        // the overlay's frames to gamescope via Wayland (with alpha), so the
+        // X11 window is just a handle gamescope uses to read the overlay and
+        // opacity properties.
         let values: [u32; 2] = [
             0x00000000, // back pixel = black
             XCB_EVENT_MASK_KEY_PRESS | XCB_EVENT_MASK_KEY_RELEASE,
@@ -269,10 +320,13 @@ impl X11State {
         // Mark as external overlay so gamescope composites us on top of the game.
         let external_overlay_atom = intern_atom(conn, c"GAMESCOPE_EXTERNAL_OVERLAY");
         set_cardinal(conn, window, external_overlay_atom, 1);
-
-        // Set opacity to 0 (hidden) initially.
+        // Set opacity to fully visible BEFORE mapping. gamescope only copies
+        // the context focus's externalOverlayWindow into the global focus
+        // during a full focus reroll (MakeFocusDirty). If we map hidden, the
+        // map-time reroll selects no external overlay and the later opacity
+        // change never propagates to the global focus, so we'd never paint.
         let opacity_atom = intern_atom(conn, c"_NET_WM_WINDOW_OPACITY");
-        set_cardinal(conn, window, opacity_atom, 0);
+        set_cardinal(conn, window, opacity_atom, 0xFFFFFFFF);
 
         // Map the window once — it stays mapped forever.
         // Visibility is controlled via the opacity property.
@@ -281,9 +335,31 @@ impl X11State {
             xcb_flush(conn);
         }
 
+        // Force XWayland to realize the window before we hand it to Vulkan.
+        // Querying surface caps on a window XWayland hasn't processed yet can
+        // fail (e.g. VK_ERROR_OUT_OF_HOST_MEMORY on a racing driver), so do a
+        // geometry round-trip and retry until the window exists on the server.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let cookie = unsafe { xcb_get_geometry(conn, window) };
+            let reply = unsafe { xcb_get_geometry_reply(conn, cookie, std::ptr::null_mut()) };
+            if !reply.is_null() {
+                let w = unsafe { (*reply).width };
+                let h = unsafe { (*reply).height };
+                unsafe { libc::free(reply as *mut c_void) };
+                if w == width && h == height {
+                    break;
+                }
+            }
+            if std::time::Instant::now() > deadline {
+                return Err("timed out waiting for XWayland to realize the overlay window".to_string());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
         eprintln!("ira-overlay-standalone: XCB window {window} created ({width}x{height})");
 
-        Ok(X11State { conn, window, opacity_atom })
+        Ok(X11State { conn, window, opacity_atom, external_overlay_atom })
     }
 
     pub fn connection_ptr(&self) -> *mut c_void { self.conn }
@@ -293,6 +369,13 @@ impl X11State {
         eprintln!("ira-overlay-standalone: set_visible({visible})");
         let opacity: u32 = if visible { 0xFFFFFFFF } else { 0 };
         set_cardinal(self.conn, self.window, self.opacity_atom, opacity);
+        // Toggle the GAMESCOPE_EXTERNAL_OVERLAY property (like mangoapp).
+        // gamescope only refreshes its global external overlay selection during
+        // a focus reroll (triggered by MakeFocusDirty), which happens when this
+        // property changes. Relying on opacity alone means the overlay shows
+        // only until the first reroll after startup.
+        let overlay: u32 = if visible { 1 } else { 0 };
+        set_cardinal(self.conn, self.window, self.external_overlay_atom, overlay);
         if visible {
             // Grab keyboard so all key events come to the overlay window.
             unsafe {
@@ -328,6 +411,7 @@ impl X11State {
                 let state = unsafe {
                     *event.cast::<u16>().add(OFF_STATE / 2)
                 };
+                eprintln!("ira-overlay-standalone: key event detail={detail} state={state}");
 
                 // Check toggle key
                 let tog_kc = TOGGLE_KEYCODE.load(Ordering::Relaxed) as u8;

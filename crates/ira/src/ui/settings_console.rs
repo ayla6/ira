@@ -6,7 +6,11 @@ use super::helpers::{entry_path_closure, make_browse_button, string_list_from};
 use super::settings_dialog::settings_page_container;
 use super::css::*;
 
-pub(super) fn build_shadps4_version_dropdown(current_path: &str, include_global: bool) -> gtk4::DropDown {
+pub(super) fn build_shadps4_version_dropdown(
+    current_path: &str,
+    include_global: bool,
+    follow_label: &str,
+) -> gtk4::DropDown {
     let shadps4_versions = ira_platforms::ps4::read_shadps4_versions();
     let trunc = |s: &str, max: usize| -> String {
         if s.len() > max {
@@ -17,7 +21,7 @@ pub(super) fn build_shadps4_version_dropdown(current_path: &str, include_global:
     };
     let mut version_strings: Vec<String> = Vec::new();
     if include_global {
-        version_strings.push("Follow global".to_string());
+        version_strings.push(follow_label.to_string());
     }
     for v in &shadps4_versions {
         let extra = if !v.date.is_empty() { v.date.clone() } else { v.codename.clone() };
@@ -40,7 +44,9 @@ pub(super) fn build_shadps4_version_dropdown(current_path: &str, include_global:
     version_dropdown
 }
 
-pub(super) fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
+pub(super) fn build_shadps4_settings_page(
+    cfg: &Config,
+) -> (gtk4::Box, adw::SwitchRow, Option<gtk4::DropDown>) {
     let page = settings_page_container();
 
     let ps4_enable_group = adw::PreferencesGroup::new();
@@ -51,69 +57,24 @@ pub(super) fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (g
     ps4_enable_group.add(&ps4_enable_row);
     page.append(&ps4_enable_group);
 
-    let ps4_exe_group = adw::PreferencesGroup::new();
-    ps4_exe_group.set_title("Emulator");
-
-    let ps4_exe_row = adw::EntryRow::new();
-    ps4_exe_row.set_title("shadPS4 executable path");
-
+    let mut version_dropdown: Option<gtk4::DropDown> = None;
     let shadps4_versions = ira_platforms::ps4::read_shadps4_versions();
-    let detected_path = ira_platforms::ps4::detect_shadps4_version_path();
-
-    let initial_exe = if cfg.shadps4_executable.is_empty() {
-        detected_path.clone().unwrap_or_default()
-    } else {
-        cfg.shadps4_executable.clone()
-    };
-    ps4_exe_row.set_text(&initial_exe);
-
     if !shadps4_versions.is_empty() {
-        let current_exe = ps4_exe_row.text().to_string();
-        let version_dropdown = build_shadps4_version_dropdown(&current_exe, false);
+        let emu_group = adw::PreferencesGroup::new();
+        emu_group.set_title("Emulator");
 
-        let ps4_exe_row_c = ps4_exe_row.clone();
-        version_dropdown.connect_selected_notify(move |dd| {
-            let idx = dd.selected();
-            if let Some(versions) = ira_platforms::ps4::read_shadps4_versions().into_iter().nth(idx as usize) {
-                let path = versions.path.trim_matches('"').to_string();
-                ps4_exe_row_c.set_text(&path);
-            }
-        });
+        let dd = build_shadps4_version_dropdown(&cfg.shadps4_executable, true, "Follow launcher");
 
         let version_row = adw::ActionRow::new();
         version_row.set_title("Version");
-        version_row.set_subtitle("Select a shadPS4 version");
-        version_dropdown.set_valign(gtk4::Align::Center);
-        version_row.add_suffix(&version_dropdown);
-        ps4_exe_group.add(&version_row);
-    }
+        version_row.set_subtitle("Which shadPS4 build to launch. \"Follow launcher\" uses the version selected in the shadPS4 Qt Launcher.");
+        dd.set_valign(gtk4::Align::Center);
+        version_row.add_suffix(&dd);
+        emu_group.add(&version_row);
+        page.append(&emu_group);
 
-    if let Some(ref detected) = detected_path {
-        let auto_btn = gtk4::Button::with_label("Auto-detect");
-        auto_btn.add_css_class(CSS_FLAT);
-        auto_btn.set_valign(gtk4::Align::Center);
-        let exe_row = ps4_exe_row.clone();
-        let detected_path = detected.clone();
-        auto_btn.connect_clicked(move |_| {
-            exe_row.set_text(&detected_path);
-        });
-        ps4_exe_row.add_suffix(&auto_btn);
+        version_dropdown = Some(dd);
     }
-
-    let ps4_exe_browse = make_browse_button(
-        Some(win),
-        "Select shadPS4 executable",
-        false,
-        Some(("Executable", &["application/x-executable"])),
-        entry_path_closure(&ps4_exe_row),
-        {
-            let row = ps4_exe_row.clone();
-            move |path| row.set_text(&path.to_string_lossy())
-        },
-    );
-    ps4_exe_row.add_suffix(&ps4_exe_browse);
-    ps4_exe_group.add(&ps4_exe_row);
-    page.append(&ps4_exe_group);
 
     let ps4_dirs_group = adw::PreferencesGroup::new();
     ps4_dirs_group.set_title("Install directories");
@@ -134,7 +95,7 @@ pub(super) fn build_shadps4_settings_page(cfg: &Config, win: &adw::Window) -> (g
     }
     page.append(&ps4_dirs_group);
 
-    (page, ps4_enable_row, ps4_exe_row)
+    (page, ps4_enable_row, version_dropdown)
 }
 
 pub(super) fn build_rpcs3_settings_page(cfg: &Config, win: &adw::Window) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {

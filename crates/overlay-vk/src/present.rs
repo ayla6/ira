@@ -133,17 +133,16 @@ pub unsafe extern "system" fn queue_present(
             .clear_values(std::slice::from_ref(&clear));
         (sc.fns.cmd_begin_render_pass)(cmd, &rp_begin, vk::SubpassContents::INLINE);
 
-        let viewport = vk::Viewport {
-            x: 0.0, y: 0.0,
-            width: sc.extent.width as f32,
-            height: sc.extent.height as f32,
-            min_depth: 0.0, max_depth: 1.0,
-        };
-        (sc.fns.cmd_set_viewport)(cmd, 0, 1, &viewport as *const vk::Viewport);
-
         if let Some(ui) = sc.ui_renderer {
             ui.draw(sc.fns, cmd, sc.extent);
         } else {
+            let viewport = vk::Viewport {
+                x: 0.0, y: 0.0,
+                width: sc.extent.width as f32,
+                height: sc.extent.height as f32,
+                min_depth: 0.0, max_depth: 1.0,
+            };
+            (sc.fns.cmd_set_viewport)(cmd, 0, 1, &viewport as *const vk::Viewport);
             let scissor = vk::Rect2D { offset: vk::Offset2D { x: 0, y: 0 }, extent: sc.extent };
             (sc.fns.cmd_set_scissor)(cmd, 0, 1, &scissor as *const vk::Rect2D);
             (sc.fns.cmd_bind_pipeline)(cmd, vk::PipelineBindPoint::GRAPHICS, sc.pipeline);

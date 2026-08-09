@@ -164,7 +164,7 @@ fn build_shadps4_version_section(
             let version_group = adw::PreferencesGroup::new();
             version_group.set_title("shadPS4 Version");
 
-            let version_dropdown = build_shadps4_version_dropdown(&game.shadps4_version, true);
+            let version_dropdown = build_shadps4_version_dropdown(&game.shadps4_version, true, "Follow global");
 
             let pending_version_c = pending_version.clone();
             version_dropdown.connect_selected_notify(move |dd| {

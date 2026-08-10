@@ -1,8 +1,8 @@
-use adw::prelude::*;
-use ira_models::{GameLaunchConfig, WineProfile};
 use super::helpers;
 use super::settings_dialog;
 use super::state::SharedState;
+use adw::prelude::*;
+use ira_models::{GameLaunchConfig, WineProfile};
 
 #[derive(Clone)]
 pub(super) struct LaunchConfigWidgets {
@@ -39,7 +39,7 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
             state: params.state,
             win: params.win,
             game_slug: params.game_slug,
-        }
+        },
     );
 
     let lc_group = adw::PreferencesGroup::new();
@@ -89,12 +89,20 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
     let pre_launch_entry = adw::EntryRow::new();
     pre_launch_entry.set_title("Run before game");
     pre_launch_entry.set_text(&params.launch.pre_launch);
-    pre_launch_entry.set_tooltip_text(Some("Shell command to run before launching the game. If it fails, the game will not launch."));
+    pre_launch_entry.set_tooltip_text(Some(
+        "Shell command to run before launching the game. If it fails, the game will not launch.",
+    ));
     lc_group.add(&pre_launch_entry);
 
     page.append(&lc_group);
 
-    params.sidebar.append(&settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Launch config", "launch"));
+    params
+        .sidebar
+        .append(&settings_dialog::settings_sidebar_row(
+            "preferences-other-symbolic",
+            "Launch config",
+            "launch",
+        ));
     params.stack.add_named(&page, Some("launch"));
 
     Some(LaunchConfigWidgets {

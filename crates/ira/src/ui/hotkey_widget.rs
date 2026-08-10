@@ -4,15 +4,30 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 const GAMEPAD_BUTTON_NAMES: &[(u16, &str)] = &[
-    (0x130, "A"), (0x131, "B"), (0x132, "X"), (0x133, "Y"),
-    (0x136, "L1"), (0x137, "R1"), (0x138, "L2"), (0x139, "R2"),
-    (0x13a, "Select"), (0x13b, "Start"), (0x13c, "Guide"),
-    (0x13d, "L3"), (0x13e, "R3"),
-    (0x220, "DpadUp"), (0x221, "DpadDown"), (0x222, "DpadLeft"), (0x223, "DpadRight"),
+    (0x130, "A"),
+    (0x131, "B"),
+    (0x132, "X"),
+    (0x133, "Y"),
+    (0x136, "L1"),
+    (0x137, "R1"),
+    (0x138, "L2"),
+    (0x139, "R2"),
+    (0x13a, "Select"),
+    (0x13b, "Start"),
+    (0x13c, "Guide"),
+    (0x13d, "L3"),
+    (0x13e, "R3"),
+    (0x220, "DpadUp"),
+    (0x221, "DpadDown"),
+    (0x222, "DpadLeft"),
+    (0x223, "DpadRight"),
 ];
 
 fn button_code_to_name(code: u16) -> Option<&'static str> {
-    GAMEPAD_BUTTON_NAMES.iter().find(|(c, _)| *c == code).map(|(_, n)| *n)
+    GAMEPAD_BUTTON_NAMES
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map(|(_, n)| *n)
 }
 
 pub struct HotkeyWidgets {
@@ -219,9 +234,8 @@ fn setup_gamepad(
                     let value_cc2 = value_cc.clone();
                     let reset_cc2 = reset_cc.clone();
                     let default_cc2 = default_cc.clone();
-                    let id2 = glib::timeout_add_local(
-                        std::time::Duration::from_millis(300),
-                        move || {
+                    let id2 =
+                        glib::timeout_add_local(std::time::Duration::from_millis(300), move || {
                             let captured = pressed_cc2.borrow().clone();
                             let combo = captured.join("+");
                             *value_cc2.borrow_mut() = combo.clone();
@@ -229,8 +243,7 @@ fn setup_gamepad(
                             reset_cc2.set_visible(combo != default_cc2);
                             *capturing_cc2.borrow_mut() = false;
                             glib::ControlFlow::Break
-                        },
-                    );
+                        });
                     *timeout_cc.borrow_mut() = Some(id2);
                 }
                 glib::ControlFlow::Continue
@@ -301,7 +314,9 @@ fn poll_gamepad_buttons() -> Option<String> {
 
         let mut buf = [0u8; 24 * 16]; // up to 16 events
         let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut _, buf.len()) };
-        unsafe { libc::close(fd); }
+        unsafe {
+            libc::close(fd);
+        }
 
         if n <= 0 {
             continue;
@@ -326,21 +341,35 @@ fn poll_gamepad_buttons() -> Option<String> {
 }
 
 fn is_modifier(keyval: gdk4::Key) -> bool {
-    matches!(keyval,
-        gdk4::Key::Shift_L | gdk4::Key::Shift_R |
-        gdk4::Key::Control_L | gdk4::Key::Control_R |
-        gdk4::Key::Alt_L | gdk4::Key::Alt_R |
-        gdk4::Key::Meta_L | gdk4::Key::Meta_R |
-        gdk4::Key::Super_L | gdk4::Key::Super_R
+    matches!(
+        keyval,
+        gdk4::Key::Shift_L
+            | gdk4::Key::Shift_R
+            | gdk4::Key::Control_L
+            | gdk4::Key::Control_R
+            | gdk4::Key::Alt_L
+            | gdk4::Key::Alt_R
+            | gdk4::Key::Meta_L
+            | gdk4::Key::Meta_R
+            | gdk4::Key::Super_L
+            | gdk4::Key::Super_R
     )
 }
 
 fn modifier_names(state: gdk4::ModifierType) -> String {
     let mut parts = Vec::new();
-    if state.contains(gdk4::ModifierType::CONTROL_MASK) { parts.push("Ctrl"); }
-    if state.contains(gdk4::ModifierType::SHIFT_MASK) { parts.push("Shift"); }
-    if state.contains(gdk4::ModifierType::ALT_MASK) { parts.push("Alt"); }
-    if state.contains(gdk4::ModifierType::SUPER_MASK) { parts.push("Super"); }
+    if state.contains(gdk4::ModifierType::CONTROL_MASK) {
+        parts.push("Ctrl");
+    }
+    if state.contains(gdk4::ModifierType::SHIFT_MASK) {
+        parts.push("Shift");
+    }
+    if state.contains(gdk4::ModifierType::ALT_MASK) {
+        parts.push("Alt");
+    }
+    if state.contains(gdk4::ModifierType::SUPER_MASK) {
+        parts.push("Super");
+    }
     parts.join("+")
 }
 

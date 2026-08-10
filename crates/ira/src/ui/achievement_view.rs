@@ -1,15 +1,14 @@
-use gtk4::prelude::*;
-use adw::prelude::*;
-use crate::GameEntry;
-use crate::Game;
-use crate::MergedAchievement;
 use crate::game_loader::load_game;
 use crate::strings as S;
+use crate::Game;
+use crate::GameEntry;
+use crate::MergedAchievement;
+use adw::prelude::*;
 use std::cell::Cell;
 
-use super::state::SharedState;
+use super::achievement_rows::{build_global_tab, create_achievement_row};
 use super::image_budget::ImageLoadBudget;
-use super::achievement_rows::{create_achievement_row, build_global_tab};
+use super::state::SharedState;
 
 pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::Widget {
     let _span = tracing::info_span!("build_achievements_view", db_id = game.db_id).entered();
@@ -38,12 +37,19 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
 
     earned.sort_by_key(|a| std::cmp::Reverse(a.earned_time));
     locked.sort_by(|a, b| {
-        trophy_rank(a.trophy_type).cmp(&trophy_rank(b.trophy_type))
+        trophy_rank(a.trophy_type)
+            .cmp(&trophy_rank(b.trophy_type))
             .then_with(|| a.display_name.cmp(&b.display_name))
     });
 
     fn trophy_rank(t: char) -> u8 {
-        match t { 'B' => 0, 'S' => 1, 'G' => 2, 'P' => 3, _ => 4 }
+        match t {
+            'B' => 0,
+            'S' => 1,
+            'G' => 2,
+            'P' => 3,
+            _ => 4,
+        }
     }
 
     let app_id_for_reload = game.app_id.clone();
@@ -51,14 +57,30 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
     let trophy_source_for_reload = game.trophy_source;
     let platform_id_for_reload = game.platform_id.clone();
     let db_id_for_reload = game.db_id;
-    let is_retro_or_ps4 = kind_for_reload == ira_models::GameKind::Ps4 || kind_for_reload == ira_models::GameKind::Ps3 || kind_for_reload == ira_models::GameKind::Retro;
-    let can_mark_unlocked = matches!(kind_for_reload, ira_models::GameKind::Wine | ira_models::GameKind::Linux);
+    let is_retro_or_ps4 = kind_for_reload == ira_models::GameKind::Ps4
+        || kind_for_reload == ira_models::GameKind::Ps3
+        || kind_for_reload == ira_models::GameKind::Retro;
+    let can_mark_unlocked = matches!(
+        kind_for_reload,
+        ira_models::GameKind::Wine | ira_models::GameKind::Linux
+    );
 
     let sender = state.borrow().sender.clone();
     let save_dir = state.borrow().save_dir.clone();
     let reload = move || {
-        let (steam_id, game_id): (&str, &str) = if is_retro_or_ps4 { ("", &app_id_for_reload) } else { (&app_id_for_reload, "") };
-        let entry = GameEntry::for_reload(db_id_for_reload, kind_for_reload, trophy_source_for_reload, steam_id, game_id, &platform_id_for_reload);
+        let (steam_id, game_id): (&str, &str) = if is_retro_or_ps4 {
+            ("", &app_id_for_reload)
+        } else {
+            (&app_id_for_reload, "")
+        };
+        let entry = GameEntry::for_reload(
+            db_id_for_reload,
+            kind_for_reload,
+            trophy_source_for_reload,
+            steam_id,
+            game_id,
+            &platform_id_for_reload,
+        );
         let sender = sender.clone();
         let save_dir = save_dir.clone();
         std::thread::spawn(move || {
@@ -68,7 +90,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
         });
     };
 
-    use super::achievement_rows::{FIRST_BATCH, BATCH_SIZE};
+    use super::achievement_rows::{BATCH_SIZE, FIRST_BATCH};
     let mut budget = ImageLoadBudget::new(FIRST_BATCH);
 
     if !earned.is_empty() {
@@ -121,7 +143,14 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                 let platform_id_clone = game.platform_id.clone();
                 let state_clone = state.clone();
                 Some(Box::new(move || {
-                    super::matching::confirm_mark_unlocked(&state_clone, trophy_source_clone, &app_id_clone, &platform_id_clone, &ach_clone, reload_clone.clone());
+                    super::matching::confirm_mark_unlocked(
+                        &state_clone,
+                        trophy_source_clone,
+                        &app_id_clone,
+                        &platform_id_clone,
+                        &ach_clone,
+                        reload_clone.clone(),
+                    );
                 }) as Box<dyn Fn()>)
             } else {
                 None
@@ -164,7 +193,14 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                     let mclick = gtk4::GestureClick::new();
                     mclick.set_button(3);
                     mclick.connect_pressed(move |_, _, _, _| {
-                        super::matching::confirm_mark_unlocked(&state_inner, trophy_source_inner, &app_id_inner, &platform_id_inner, &ach_clone, reload_inner.clone());
+                        super::matching::confirm_mark_unlocked(
+                            &state_inner,
+                            trophy_source_inner,
+                            &app_id_inner,
+                            &platform_id_inner,
+                            &ach_clone,
+                            reload_inner.clone(),
+                        );
                     });
                     ach_row.add_controller(mclick);
                 }
@@ -203,7 +239,14 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                         let platform_id_clone = platform_id.clone();
                         let state_clone = state.clone();
                         Some(Box::new(move || {
-                            super::matching::confirm_mark_unlocked(&state_clone, trophy_source_clone, &app_id_clone, &platform_id_clone, &ach_clone, reload_clone.clone());
+                            super::matching::confirm_mark_unlocked(
+                                &state_clone,
+                                trophy_source_clone,
+                                &app_id_clone,
+                                &platform_id_clone,
+                                &ach_clone,
+                                reload_clone.clone(),
+                            );
                         }) as Box<dyn Fn()>)
                     } else {
                         None
@@ -245,7 +288,10 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                         if s.view_generation != gen_for_global {
                             None
                         } else {
-                            s.games.iter().find(|g| g.app_id == app_id_for_global).cloned()
+                            s.games
+                                .iter()
+                                .find(|g| g.app_id == app_id_for_global)
+                                .cloned()
                         }
                     };
                     if let Some(game) = game {

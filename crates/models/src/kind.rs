@@ -8,6 +8,8 @@ pub enum GameKind {
     Other,
     Ps4,
     Ps3,
+    PsVita,
+    WiiU,
     Steam,
     Retro,
 }
@@ -19,6 +21,8 @@ impl GameKind {
             GameKind::Linux => "linux",
             GameKind::Ps4 => "ps4",
             GameKind::Ps3 => "ps3",
+            GameKind::PsVita => "psvita",
+            GameKind::WiiU => "wiiu",
             GameKind::Steam => "steam",
             GameKind::Retro => "retro",
             GameKind::Other => "other",
@@ -31,6 +35,8 @@ impl GameKind {
             "linux" => GameKind::Linux,
             "ps4" => GameKind::Ps4,
             "ps3" => GameKind::Ps3,
+            "psvita" => GameKind::PsVita,
+            "wiiu" => GameKind::WiiU,
             "steam" => GameKind::Steam,
             "retro" => GameKind::Retro,
             _ => GameKind::Other,
@@ -43,6 +49,8 @@ impl GameKind {
             GameKind::Linux => "Linux",
             GameKind::Ps4 => "PS4",
             GameKind::Ps3 => "PS3",
+            GameKind::PsVita => "PS Vita",
+            GameKind::WiiU => "Wii U",
             GameKind::Steam => "Steam",
             GameKind::Retro => "Retro",
             GameKind::Other => "Other",
@@ -53,6 +61,10 @@ impl GameKind {
     /// with TROP.XML / TROPCONF.SFM definitions and per-trophy icons.
     pub fn is_trophy_console(self) -> bool {
         matches!(self, GameKind::Ps4 | GameKind::Ps3)
+    }
+
+    pub fn is_managed_pc(self) -> bool {
+        matches!(self, GameKind::Wine | GameKind::Linux)
     }
 }
 
@@ -107,7 +119,10 @@ impl TrophySource {
     }
 
     pub fn has_steam_enrichment(self) -> bool {
-        matches!(self, TrophySource::Gse | TrophySource::Nge | TrophySource::SteamNative)
+        matches!(
+            self,
+            TrophySource::Gse | TrophySource::Nge | TrophySource::SteamNative
+        )
     }
 }
 
@@ -136,7 +151,17 @@ mod tests {
 
     #[test]
     fn test_game_kind_roundtrip() {
-        for kind in [GameKind::Wine, GameKind::Linux, GameKind::Ps4, GameKind::Ps3, GameKind::Steam, GameKind::Retro, GameKind::Other] {
+        for kind in [
+            GameKind::Wine,
+            GameKind::Linux,
+            GameKind::Ps4,
+            GameKind::Ps3,
+            GameKind::PsVita,
+            GameKind::WiiU,
+            GameKind::Steam,
+            GameKind::Retro,
+            GameKind::Other,
+        ] {
             let s = kind.as_str();
             let back = GameKind::from_string(s);
             assert_eq!(kind, back);
@@ -155,7 +180,13 @@ mod tests {
 
     #[test]
     fn test_trophy_source_roundtrip() {
-        for ts in [TrophySource::Gse, TrophySource::Nge, TrophySource::SteamNative, TrophySource::Ra, TrophySource::Empty] {
+        for ts in [
+            TrophySource::Gse,
+            TrophySource::Nge,
+            TrophySource::SteamNative,
+            TrophySource::Ra,
+            TrophySource::Empty,
+        ] {
             let s = ts.as_str();
             let back = TrophySource::from_string(s);
             assert_eq!(ts, back);
@@ -198,6 +229,8 @@ mod tests {
         assert_eq!(GameKind::Linux.display_name(), "Linux");
         assert_eq!(GameKind::Ps4.display_name(), "PS4");
         assert_eq!(GameKind::Ps3.display_name(), "PS3");
+        assert_eq!(GameKind::PsVita.display_name(), "PS Vita");
+        assert_eq!(GameKind::WiiU.display_name(), "Wii U");
         assert_eq!(GameKind::Steam.display_name(), "Steam");
         assert_eq!(GameKind::Retro.display_name(), "Retro");
         assert_eq!(GameKind::Other.display_name(), "Other");
@@ -211,5 +244,12 @@ mod tests {
         assert!(!GameKind::Retro.is_trophy_console());
         assert!(!GameKind::Wine.is_trophy_console());
         assert!(!GameKind::Other.is_trophy_console());
+    }
+
+    #[test]
+    fn test_is_managed_pc() {
+        assert!(GameKind::Wine.is_managed_pc());
+        assert!(GameKind::Linux.is_managed_pc());
+        assert!(!GameKind::Retro.is_managed_pc());
     }
 }

@@ -50,7 +50,10 @@ impl MappedShm {
 
         let fd = unsafe { libc::shm_open(c_path.as_ptr(), libc::O_RDWR | libc::O_CREAT, 0o600) };
         if fd < 0 {
-            return Err(format!("shm_open failed: {}", std::io::Error::last_os_error()));
+            return Err(format!(
+                "shm_open failed: {}",
+                std::io::Error::last_os_error()
+            ));
         }
         Self::map_fd(fd, true)
     }
@@ -60,7 +63,10 @@ impl MappedShm {
         let c_path = CString::new(path).map_err(|e| e.to_string())?;
         let fd = unsafe { libc::shm_open(c_path.as_ptr(), libc::O_RDONLY, 0o600) };
         if fd < 0 {
-            return Err(format!("shm_open failed: {}", std::io::Error::last_os_error()));
+            return Err(format!(
+                "shm_open failed: {}",
+                std::io::Error::last_os_error()
+            ));
         }
         Self::map_fd(fd, false)
     }
@@ -71,17 +77,21 @@ impl MappedShm {
         let c_path = CString::new(path).map_err(|e| e.to_string())?;
         let fd = unsafe { libc::shm_open(c_path.as_ptr(), libc::O_RDWR, 0o600) };
         if fd < 0 {
-            return Err(format!("shm_open failed: {}", std::io::Error::last_os_error()));
+            return Err(format!(
+                "shm_open failed: {}",
+                std::io::Error::last_os_error()
+            ));
         }
         Self::map_fd(fd, true)
     }
 
     fn map_fd(fd: RawFd, writable: bool) -> Result<Self, String> {
-        if writable
-            && unsafe { libc::ftruncate(fd, SHM_SIZE as libc::off_t) } < 0
-        {
+        if writable && unsafe { libc::ftruncate(fd, SHM_SIZE as libc::off_t) } < 0 {
             unsafe { libc::close(fd) };
-            return Err(format!("ftruncate failed: {}", std::io::Error::last_os_error()));
+            return Err(format!(
+                "ftruncate failed: {}",
+                std::io::Error::last_os_error()
+            ));
         }
 
         let prot = if writable {
@@ -167,10 +177,16 @@ impl MappedShm {
         let idx = unsafe { (*hdr_ptr).notification_write_index.load(Ordering::SeqCst) };
         let slot = idx as usize % crate::protocol::MAX_NOTIFICATIONS;
         let notif_ptr = unsafe { self.ptr.add(notifications_offset()) as *mut NotificationEntry };
-        unsafe { *notif_ptr.add(slot) = entry; }
+        unsafe {
+            *notif_ptr.add(slot) = entry;
+        }
         // SeqCst fence ensures the write above is visible before the index update.
         std::sync::atomic::fence(Ordering::SeqCst);
-        unsafe { (*hdr_ptr).notification_write_index.store(idx + 1, Ordering::SeqCst); }
+        unsafe {
+            (*hdr_ptr)
+                .notification_write_index
+                .store(idx + 1, Ordering::SeqCst);
+        }
     }
 }
 
@@ -221,7 +237,10 @@ mod tests {
         });
 
         let reader = MappedShm::open(&shm_path(db_id)).unwrap();
-        let write_idx = reader.header().notification_write_index.load(Ordering::SeqCst);
+        let write_idx = reader
+            .header()
+            .notification_write_index
+            .load(Ordering::SeqCst);
         assert_eq!(write_idx, 1);
         assert_eq!(reader.notifications()[0].achievement_index, 3);
 

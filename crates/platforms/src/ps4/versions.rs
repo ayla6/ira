@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use super::paths::SHADPS4_FLATPAK_ID;
+
 /// Path to the shadPS4 Qt Launcher data directory.
 fn shadps4qt_dir() -> PathBuf {
     xdg::BaseDirectories::new()
@@ -7,7 +9,10 @@ fn shadps4qt_dir() -> PathBuf {
         .map(|p| p.join("shadPS4QtLauncher"))
         .unwrap_or_else(|| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            PathBuf::from(home).join(".local").join("share").join("shadPS4QtLauncher")
+            PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join("shadPS4QtLauncher")
         })
 }
 
@@ -30,6 +35,36 @@ pub fn read_shadps4_versions() -> Vec<ShadPs4Version> {
         .ok()
         .and_then(|data| serde_json::from_str::<Vec<ShadPs4Version>>(&data).ok())
         .unwrap_or_default()
+}
+
+pub fn read_shadps4_launch_options() -> Vec<crate::emulator_detect::DetectedEmulator> {
+    let mut options = read_shadps4_versions()
+        .into_iter()
+        .map(|version| crate::emulator_detect::DetectedEmulator {
+            display_name: if version.date.is_empty() {
+                version.name
+            } else {
+                format!("{} ({})", version.name, version.date)
+            },
+            launch_command: version.path.trim_matches('"').to_string(),
+        })
+        .collect::<Vec<_>>();
+    let native_options =
+        crate::emulator_detect::detect_emulator_choices(&["shadps4"], &[], "shadPS4");
+    for detected in native_options {
+        if !options
+            .iter()
+            .any(|option| option.launch_command == detected.launch_command)
+        {
+            options.push(detected);
+        }
+    }
+    options.extend(crate::emulator_detect::detect_emulator_choices(
+        &[],
+        &[(SHADPS4_FLATPAK_ID, "shadPS4")],
+        "shadPS4",
+    ));
+    options
 }
 
 /// Find the path of the currently selected shadPS4 version by reading qt_ui.ini.
@@ -72,7 +107,7 @@ pub fn resolve_shadps4_executable(per_game: &str, global: &str) -> String {
     pick_shadps4_executable(
         per_game,
         global,
-        &read_shadps4_versions(),
+        &read_shadps4_launch_options(),
         detect_shadps4_version_path().as_deref(),
     )
 }
@@ -80,7 +115,7 @@ pub fn resolve_shadps4_executable(per_game: &str, global: &str) -> String {
 fn pick_shadps4_executable(
     per_game: &str,
     global: &str,
-    versions: &[ShadPs4Version],
+    versions: &[crate::emulator_detect::DetectedEmulator],
     detected: Option<&str>,
 ) -> String {
     for candidate in [per_game, global] {
@@ -88,7 +123,10 @@ fn pick_shadps4_executable(
         if candidate.is_empty() {
             continue;
         }
-        let is_known = versions.iter().any(|v| v.path.trim_matches('"') == candidate);
+        if candidate.starts_with("flatpak:") {
+            return candidate.to_string();
+        }
+        let is_known = versions.iter().any(|v| v.launch_command == candidate);
         if is_known && Path::new(candidate).exists() {
             return candidate.to_string();
         }
@@ -106,13 +144,10 @@ fn pick_shadps4_executable(
 mod tests {
     use super::*;
 
-    fn version(path: &str) -> ShadPs4Version {
-        ShadPs4Version {
-            codename: String::new(),
-            name: String::new(),
-            path: path.to_string(),
-            version_type: 0,
-            date: String::new(),
+    fn version(path: &str) -> crate::emulator_detect::DetectedEmulator {
+        crate::emulator_detect::DetectedEmulator {
+            display_name: String::new(),
+            launch_command: path.to_string(),
         }
     }
 

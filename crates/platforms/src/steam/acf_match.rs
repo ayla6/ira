@@ -20,7 +20,10 @@ pub fn steamapps_in_path(path: &Path) -> Option<PathBuf> {
 /// Scan `appmanifest_*.acf` files in `steamapps_dir` and return the
 /// `(appid, name)` of the manifest whose `installdir` matches
 /// `installdir_name` (case-insensitive).
-pub fn find_appid_for_installdir(steamapps_dir: &Path, installdir_name: &str) -> Option<(String, String)> {
+pub fn find_appid_for_installdir(
+    steamapps_dir: &Path,
+    installdir_name: &str,
+) -> Option<(String, String)> {
     let entries = std::fs::read_dir(steamapps_dir).ok()?;
     let target = installdir_name.to_lowercase();
     for entry in entries.flatten() {
@@ -29,8 +32,12 @@ pub fn find_appid_for_installdir(steamapps_dir: &Path, installdir_name: &str) ->
         if !name_str.starts_with("appmanifest_") || !name_str.ends_with(".acf") {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(entry.path()) else { continue };
-        let Some(parsed) = vdf::parse_vdf(&text) else { continue };
+        let Ok(text) = std::fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let Some(parsed) = vdf::parse_vdf(&text) else {
+            continue;
+        };
         let installdir = vdf::get_str(&parsed, "installdir").unwrap_or("");
         if installdir.to_lowercase() == target {
             let appid = vdf::get_str(&parsed, "appid")?.to_string();
@@ -79,17 +86,30 @@ mod tests {
     fn test_find_appid_for_installdir_matches_case_insensitive() {
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path();
-        write_acf(dir, "413410", "Danganronpa", "Danganronpa Trigger Happy Havoc");
+        write_acf(
+            dir,
+            "413410",
+            "Danganronpa",
+            "Danganronpa Trigger Happy Havoc",
+        );
         write_acf(dir, "1687950", "Persona 5 Royal", "P5R");
 
         let result = find_appid_for_installdir(dir, "danganronpa trigger happy havoc");
-        assert_eq!(result, Some(("413410".to_string(), "Danganronpa".to_string())));
+        assert_eq!(
+            result,
+            Some(("413410".to_string(), "Danganronpa".to_string()))
+        );
     }
 
     #[test]
     fn test_find_appid_for_installdir_no_match() {
         let tmp = TempDir::new().unwrap();
-        write_acf(tmp.path(), "413410", "Danganronpa", "Danganronpa Trigger Happy Havoc");
+        write_acf(
+            tmp.path(),
+            "413410",
+            "Danganronpa",
+            "Danganronpa Trigger Happy Havoc",
+        );
         assert!(find_appid_for_installdir(tmp.path(), "Nonexistent").is_none());
     }
 

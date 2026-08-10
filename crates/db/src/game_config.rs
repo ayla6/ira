@@ -2,18 +2,24 @@ use crate::DbConn;
 use ira_models::{GameLaunchConfig, WineConfig};
 use rusqlite::params;
 
-pub fn get_game_config(conn: &DbConn, game_id: i64) -> Result<Option<(GameLaunchConfig, WineConfig, Option<i64>)>, String> {
+pub fn get_game_config(
+    conn: &DbConn,
+    game_id: i64,
+) -> Result<Option<(GameLaunchConfig, WineConfig, Option<i64>)>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c
-        .prepare("SELECT launch_config, wine_config, profile_id FROM game_configs WHERE game_id = ?1")
+        .prepare(
+            "SELECT launch_config, wine_config, profile_id FROM game_configs WHERE game_id = ?1",
+        )
         .map_err(|e| e.to_string())?;
-    let mut rows = stmt.query_map(params![game_id], |row| {
-        let launch_str: String = row.get(0)?;
-        let wine_str: String = row.get(1)?;
-        let profile_id: Option<i64> = row.get(2)?;
-        Ok((launch_str, wine_str, profile_id))
-    })
-    .map_err(|e| e.to_string())?;
+    let mut rows = stmt
+        .query_map(params![game_id], |row| {
+            let launch_str: String = row.get(0)?;
+            let wine_str: String = row.get(1)?;
+            let profile_id: Option<i64> = row.get(2)?;
+            Ok((launch_str, wine_str, profile_id))
+        })
+        .map_err(|e| e.to_string())?;
 
     match rows.next() {
         Some(Ok((launch_str, wine_str, profile_id))) => {
@@ -31,9 +37,15 @@ pub fn get_game_config(conn: &DbConn, game_id: i64) -> Result<Option<(GameLaunch
             // GameLaunchConfig but non-default in the old WineConfig JSON, copy them over.
             // This handles DB rows saved before these fields were moved.
             // PRE-RELEASE: remove after v0.X
-            if launch.gamemode != Some(true) && wine._gamemode { launch.gamemode = Some(true); }
-            if launch.mangohud != Some(true) && wine._mangohud { launch.mangohud = Some(true); }
-            if launch.gamescope.is_none() && wine._gamescope { launch.gamescope = Some(true); }
+            if launch.gamemode != Some(true) && wine._gamemode {
+                launch.gamemode = Some(true);
+            }
+            if launch.mangohud != Some(true) && wine._mangohud {
+                launch.mangohud = Some(true);
+            }
+            if launch.gamescope.is_none() && wine._gamescope {
+                launch.gamescope = Some(true);
+            }
             if launch.gamescope_flags.is_empty() && !wine._gamescope_flags.is_empty() {
                 launch.gamescope_flags = wine._gamescope_flags.clone();
             }
@@ -65,15 +77,18 @@ pub fn save_game_config(
 
 pub fn delete_game_config(conn: &DbConn, game_id: i64) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute("DELETE FROM game_configs WHERE game_id = ?1", params![game_id])
-        .map_err(|e| e.to_string())?;
+    c.execute(
+        "DELETE FROM game_configs WHERE game_id = ?1",
+        params![game_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::init_db;
+    use super::*;
     use tempfile::TempDir;
 
     fn setup_db() -> (DbConn, TempDir) {

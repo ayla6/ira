@@ -50,7 +50,8 @@ fn flatten_app_subdir(dest: &Path) -> Result<(), String> {
         let path = entry.path();
         let name = entry.file_name();
         let target = dest.join(&name);
-        fs::rename(&path, &target).map_err(|e| format!("move {:?} \u{2192} {:?}: {e}", path, target))?;
+        fs::rename(&path, &target)
+            .map_err(|e| format!("move {:?} \u{2192} {:?}: {e}", path, target))?;
     }
 
     fs::remove_dir(&app_dir).map_err(|e| format!("remove app dir: {e}"))?;

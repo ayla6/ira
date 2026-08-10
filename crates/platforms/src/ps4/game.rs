@@ -1,10 +1,9 @@
 use std::path::Path;
 
-use ira_models::{Game, MergedAchievement};
 use crate::ps4::{
-    trophy_dir, user_trophy_path, parse_trop_xml, parse_user_trophies,
-    read_play_times, parse_playtime, ShadPS4Game,
+    parse_playtime, parse_trop_xml, parse_user_trophies, read_play_times_from_path, ShadPS4Game,
 };
+use ira_models::{Game, MergedAchievement};
 
 pub struct ShadPS4GameMeta {
     pub title: String,
@@ -28,18 +27,28 @@ pub fn load_shadps4_game(
     let serial = &shad.serial;
 
     // Trophy definitions
-    let trop_xml = trophy_dir(npwr_id).join("Xml").join("TROP.XML");
+    let trop_xml = shad
+        .user_dir
+        .join("trophy")
+        .join(npwr_id)
+        .join("Xml")
+        .join("TROP.XML");
     let defs = parse_trop_xml(&trop_xml);
 
     // User unlock state
-    let user_xml = user_trophy_path(npwr_id);
+    let user_xml = shad
+        .user_dir
+        .join("home")
+        .join("1000")
+        .join("trophy")
+        .join(format!("{}.xml", npwr_id));
     let unlock_states = parse_user_trophies(&user_xml);
 
     // Trophy icons dir
-    let icons_dir = trophy_dir(npwr_id).join("Icons");
+    let icons_dir = shad.user_dir.join("trophy").join(npwr_id).join("Icons");
 
     // Playtime
-    let play_times = read_play_times();
+    let play_times = read_play_times_from_path(&shad.user_dir.join("play_time.txt"));
     let playtime_str = play_times.get(serial).cloned().unwrap_or_default();
     let playtime = parse_playtime(&playtime_str);
 
@@ -116,10 +125,7 @@ pub fn load_shadps4_game(
 
     // Build achievements
     for def in &defs {
-        let (earned, timestamp) = unlock_states
-            .get(&def.id)
-            .cloned()
-            .unwrap_or((false, 0));
+        let (earned, timestamp) = unlock_states.get(&def.id).cloned().unwrap_or((false, 0));
 
         // Icon path: TROP000.PNG, TROP001.PNG, etc.
         let icon_name = format!("TROP{:03}.PNG", def.id.parse::<u32>().unwrap_or(0));

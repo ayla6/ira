@@ -18,10 +18,7 @@ fn disc_info_binary() -> Option<PathBuf> {
 
 fn read_disc_info(path: &Path) -> Option<DiscInfo> {
     let bin = disc_info_binary()?;
-    let output = std::process::Command::new(&bin)
-        .arg(path)
-        .output()
-        .ok()?;
+    let output = std::process::Command::new(&bin).arg(path).output().ok()?;
 
     if !output.status.success() {
         return None;
@@ -36,8 +33,14 @@ fn read_disc_info(path: &Path) -> Option<DiscInfo> {
 
     let v: serde_json::Value = serde_json::from_str(stdout).ok()?;
     Some(DiscInfo {
-        serial: v.get("serial").and_then(|s| s.as_str()).map(|s| s.to_string()),
-        title: v.get("title").and_then(|s| s.as_str()).map(|s| s.to_string()),
+        serial: v
+            .get("serial")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string()),
+        title: v
+            .get("title")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string()),
     })
 }
 

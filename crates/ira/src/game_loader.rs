@@ -42,7 +42,16 @@ pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
                 games.push(game);
                 games.extend(variant_entries);
             }
-            Err(e) => eprintln!("Skipping game {} ({}): {}", if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id }, entry.kind, e),
+            Err(e) => eprintln!(
+                "Skipping game {} ({}): {}",
+                if !entry.steam_id.is_empty() {
+                    &entry.steam_id
+                } else {
+                    &entry.game_id
+                },
+                entry.kind,
+                e
+            ),
         }
     }
     games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
@@ -50,7 +59,11 @@ pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
 }
 
 fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
-    let app_id = if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id };
+    let app_id = if !entry.steam_id.is_empty() {
+        &entry.steam_id
+    } else {
+        &entry.game_id
+    };
     let kind = entry.kind;
 
     let mut game = Game {
@@ -92,9 +105,9 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
         steam_review_count: entry.steam_review_count,
         ra_core: entry.ra_core.clone(),
         emulator_override: entry.emulator_override.clone(),
-            rom_path: entry.rom_path.clone(),
-            game_folder: entry.game_folder.clone(),
-        };
+        rom_path: entry.rom_path.clone(),
+        game_folder: entry.game_folder.clone(),
+    };
 
     if entry.kind == ira_models::GameKind::Retro && !entry.rom_path.is_empty() {
         game.game_path = entry.rom_path.clone();
@@ -119,7 +132,11 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
 }
 
 pub fn load_game_fast(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
-    let app_id = if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id };
+    let app_id = if !entry.steam_id.is_empty() {
+        &entry.steam_id
+    } else {
+        &entry.game_id
+    };
     let _s = tracing::info_span!("load_game_fast", app_id).entered();
     let mut game = build_game_base(entry, save_dir);
     game.earned_count = entry.cached_earned_count as usize;
@@ -131,7 +148,10 @@ pub fn load_game_fast(entry: &GameEntry, save_dir: &str) -> Result<Game, String>
 /// Returns 0 if neither file exists. Used to skip background reloading
 /// when achievement files haven't changed since the last cache write.
 pub fn ra_achievement_mtime(save_dir: &str, game_id: &str) -> i64 {
-    let ra_dir = std::path::Path::new(save_dir).join("data").join("ra").join(game_id);
+    let ra_dir = std::path::Path::new(save_dir)
+        .join("data")
+        .join("ra")
+        .join(game_id);
     let mtime = |p: std::path::PathBuf| {
         p.metadata()
             .and_then(|m| m.modified())
@@ -144,7 +164,11 @@ pub fn ra_achievement_mtime(save_dir: &str, game_id: &str) -> i64 {
 }
 
 pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
-    let app_id = if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id };
+    let app_id = if !entry.steam_id.is_empty() {
+        &entry.steam_id
+    } else {
+        &entry.game_id
+    };
     let platform_id = &entry.platform_id;
     let _s = tracing::info_span!("load_game", app_id).entered();
 
@@ -163,12 +187,17 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     let steam_native_data = if is_steam_native {
         ira_platforms::steam::read_steam_achievements_full(app_id, save_dir)
     } else {
-        ira_platforms::steam::SteamAchievementData { achievements: Vec::new(), n_total: 0, n_achieved: 0 }
+        ira_platforms::steam::SteamAchievementData {
+            achievements: Vec::new(),
+            n_total: 0,
+            n_achieved: 0,
+        }
     };
 
     if entry.trophy_source == ira_models::TrophySource::Ra {
         let _s = tracing::info_span!("load_ra_achievements_from_cache").entered();
-        game.achievements = ira_platforms::retroachievements::load_ra_achievements_from_cache(save_dir, app_id);
+        game.achievements =
+            ira_platforms::retroachievements::load_ra_achievements_from_cache(save_dir, app_id);
         game.total_count = game.achievements.len();
         game.earned_count = game.achievements.iter().filter(|a| a.earned).count();
         return Ok(game);
@@ -178,18 +207,35 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     let has_meta = meta_path.is_file();
 
     let status_map = if is_steam_native {
-        let mut map: HashMap<String, AchievementStatus> = ira_platforms::steam::read_user_stats(app_id)
-            .into_iter()
-            .map(|(name, (earned, earned_time))| (name, AchievementStatus { earned, earned_time }))
-            .collect();
+        let mut map: HashMap<String, AchievementStatus> =
+            ira_platforms::steam::read_user_stats(app_id)
+                .into_iter()
+                .map(|(name, (earned, earned_time))| {
+                    (
+                        name,
+                        AchievementStatus {
+                            earned,
+                            earned_time,
+                        },
+                    )
+                })
+                .collect();
         for ach in &steam_native_data.achievements {
             map.entry(ach.id.clone())
-                .and_modify(|s| { if s.earned_time == 0 { s.earned_time = ach.earned_time; } })
-                .or_insert(AchievementStatus { earned: ach.earned, earned_time: ach.earned_time });
+                .and_modify(|s| {
+                    if s.earned_time == 0 {
+                        s.earned_time = ach.earned_time;
+                    }
+                })
+                .or_insert(AchievementStatus {
+                    earned: ach.earned,
+                    earned_time: ach.earned_time,
+                });
         }
         map
     } else {
-        let status_path = ira_parser::unlock_status_path(save_dir, entry.trophy_source, app_id, platform_id);
+        let status_path =
+            ira_parser::unlock_status_path(save_dir, entry.trophy_source, app_id, platform_id);
         ira_parser::load_status_map(&status_path)
     };
 
@@ -220,7 +266,8 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
             });
         }
     } else if has_meta {
-        let meta_data = std::fs::read(&meta_path).map_err(|e| format!("read achievements.json: {}", e))?;
+        let meta_data =
+            std::fs::read(&meta_path).map_err(|e| format!("read achievements.json: {}", e))?;
         let meta_list: Vec<ira_models::achievement::AchievementMeta> =
             serde_json::from_slice(&meta_data).map_err(|e| {
                 eprintln!("Meta load error for {}", app_id);
@@ -283,35 +330,66 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
 /// Apply a specific variant's images to the base game.
 /// Only applies if the variant has `custom_images=true` and `show_as_entry=false`.
 /// Called when the user selects a variant on the base game's play button.
-pub fn apply_variant_images_for(db: &DbConn, save_dir: &str, entry: &GameEntry, game: &mut Game, variant_id: i64) {
-    let Ok(variants) = ira_db::get_variants(db, entry.id) else { return };
-    let Some(var) = variants.iter().find(|v| v.id == variant_id) else { return };
-    if !var.custom_images || var.show_as_entry { return }
+pub fn apply_variant_images_for(
+    db: &DbConn,
+    save_dir: &str,
+    entry: &GameEntry,
+    game: &mut Game,
+    variant_id: i64,
+) {
+    let Ok(variants) = ira_db::get_variants(db, entry.id) else {
+        return;
+    };
+    let Some(var) = variants.iter().find(|v| v.id == variant_id) else {
+        return;
+    };
+    if !var.custom_images || var.show_as_entry {
+        return;
+    }
 
     let image_dir = ira_parser::entry_data_dir(save_dir, entry);
     let var_dir = image_dir.join(format!("variant-{}", variant_id));
-    if !var_dir.is_dir() { return }
+    if !var_dir.is_dir() {
+        return;
+    }
 
     let mut var_game = Game::default();
     ira_parser::populate_image_paths(&var_dir, &mut var_game);
-    if !var_game.icon_path.is_empty() { game.icon_path = var_game.icon_path; }
-    if !var_game.hero_image_path.is_empty() { game.hero_image_path = var_game.hero_image_path; }
-    if !var_game.grid_path.is_empty() { game.grid_path = var_game.grid_path; }
-    if !var_game.header_path.is_empty() { game.header_path = var_game.header_path; }
-    if !var_game.logo_path.is_empty() { game.logo_path = var_game.logo_path; }
+    if !var_game.icon_path.is_empty() {
+        game.icon_path = var_game.icon_path;
+    }
+    if !var_game.hero_image_path.is_empty() {
+        game.hero_image_path = var_game.hero_image_path;
+    }
+    if !var_game.grid_path.is_empty() {
+        game.grid_path = var_game.grid_path;
+    }
+    if !var_game.header_path.is_empty() {
+        game.header_path = var_game.header_path;
+    }
+    if !var_game.logo_path.is_empty() {
+        game.logo_path = var_game.logo_path;
+    }
 
-    if !var.logo_position.is_empty() { game.logo_position = var.logo_position.clone(); }
-    if var.logo_size != 0 { game.logo_size = var.logo_size; }
+    if !var.logo_position.is_empty() {
+        game.logo_position = var.logo_position.clone();
+    }
+    if var.logo_size != 0 {
+        game.logo_size = var.logo_size;
+    }
 }
 
 /// For each variant with `show_as_entry=true`, create a pseudo-Game entry
 /// that appears in the grid as a separate game. The pseudo-game shares
 /// achievements, playtime, etc. with the base game but has its own images.
 pub fn build_variant_entries(db: &DbConn, save_dir: &str, game: &Game) -> Vec<Game> {
-    let Ok(variants) = ira_db::get_variants(db, game.db_id) else { return Vec::new() };
+    let Ok(variants) = ira_db::get_variants(db, game.db_id) else {
+        return Vec::new();
+    };
     let image_dir = ira_parser::game_data_dir(save_dir, game);
 
-    variants.iter()
+    variants
+        .iter()
         .filter(|v| v.show_as_entry)
         .map(|v| {
             let mut entry = game.clone();
@@ -319,18 +397,32 @@ pub fn build_variant_entries(db: &DbConn, save_dir: &str, game: &Game) -> Vec<Ga
             entry.set_name(format!("{} - {}", game.name, v.name));
             entry.playtime = v.playtime;
             entry.last_played = v.last_played;
-    if !v.logo_position.is_empty() { entry.logo_position = v.logo_position.clone(); }
-    if v.logo_size != 0 { entry.logo_size = v.logo_size; }
+            if !v.logo_position.is_empty() {
+                entry.logo_position = v.logo_position.clone();
+            }
+            if v.logo_size != 0 {
+                entry.logo_size = v.logo_size;
+            }
 
             let var_dir = image_dir.join(format!("variant-{}", v.id));
             if var_dir.is_dir() {
                 let mut var_game = Game::default();
                 ira_parser::populate_image_paths(&var_dir, &mut var_game);
-                if !var_game.icon_path.is_empty() { entry.icon_path = var_game.icon_path; }
-                if !var_game.hero_image_path.is_empty() { entry.hero_image_path = var_game.hero_image_path; }
-                if !var_game.grid_path.is_empty() { entry.grid_path = var_game.grid_path; }
-                if !var_game.header_path.is_empty() { entry.header_path = var_game.header_path; }
-                if !var_game.logo_path.is_empty() { entry.logo_path = var_game.logo_path; }
+                if !var_game.icon_path.is_empty() {
+                    entry.icon_path = var_game.icon_path;
+                }
+                if !var_game.hero_image_path.is_empty() {
+                    entry.hero_image_path = var_game.hero_image_path;
+                }
+                if !var_game.grid_path.is_empty() {
+                    entry.grid_path = var_game.grid_path;
+                }
+                if !var_game.header_path.is_empty() {
+                    entry.header_path = var_game.header_path;
+                }
+                if !var_game.logo_path.is_empty() {
+                    entry.logo_path = var_game.logo_path;
+                }
             }
 
             entry

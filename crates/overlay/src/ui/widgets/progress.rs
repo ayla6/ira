@@ -25,7 +25,10 @@ impl ProgressBar {
 
 impl Widget for ProgressBar {
     fn measure(&self, _ctx: &LayoutCtx) -> Size {
-        Size { width: self.width, height: self.height }
+        Size {
+            width: self.width,
+            height: self.height,
+        }
     }
 
     fn layout(&mut self, _ctx: &LayoutCtx, bounds: Rect) {

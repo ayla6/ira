@@ -29,8 +29,8 @@ fn archive_offset(meta: &YsiMetadata) -> u64 {
 /// Parse YSI metadata from the first lines of an installer script.
 /// Reads up to 700 lines (matching the robust_extract.sh approach).
 pub fn parse_ysi_metadata(path: &Path) -> Result<YsiMetadata, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read installer: {e}"))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read installer: {e}"))?;
 
     let mut vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
@@ -46,7 +46,20 @@ pub fn parse_ysi_metadata(path: &Path) -> Result<YsiMetadata, String> {
                 rest.trim().to_string()
             };
             // Only keep known variables
-            if matches!(key.as_str(), "app" | "icon" | "ver" | "appurl" | "appsz" | "arcsz" | "ysisz" | "picsz" | "yadsz" | "pvsz" | "zstdsz") {
+            if matches!(
+                key.as_str(),
+                "app"
+                    | "icon"
+                    | "ver"
+                    | "appurl"
+                    | "appsz"
+                    | "arcsz"
+                    | "ysisz"
+                    | "picsz"
+                    | "yadsz"
+                    | "pvsz"
+                    | "zstdsz"
+            ) {
                 vars.insert(key, value);
             }
         }
@@ -130,11 +143,11 @@ pub fn extract_ysi_installer(
         .map_err(|e| format!("Failed to create zstd decoder: {e}"))?;
 
     // Extract tar stream
-    std::fs::create_dir_all(dest_dir)
-        .map_err(|e| format!("Failed to create destination: {e}"))?;
+    std::fs::create_dir_all(dest_dir).map_err(|e| format!("Failed to create destination: {e}"))?;
 
     let mut archive = tar::Archive::new(decoder);
-    let entries = archive.entries()
+    let entries = archive
+        .entries()
         .map_err(|e| format!("Failed to read tar entries: {e}"))?;
 
     let mut bytes_extracted: u64 = 0;
@@ -162,17 +175,22 @@ pub fn extract_ysi_installer(
 
         let mut entry = entry.map_err(|e| format!("Failed to read tar entry: {e}"))?;
         let size = entry.header().size().unwrap_or(0);
-        let entry_path = entry.path()
+        let entry_path = entry
+            .path()
             .map_err(|e| format!("Failed to get entry path: {e}"))?
             .to_path_buf();
 
         // Security: prevent path traversal
-        if entry_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        if entry_path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             eprintln!("YSI: skipping path traversal attempt: {:?}", entry_path);
             continue;
         }
 
-        entry.unpack_in(dest_dir)
+        entry
+            .unpack_in(dest_dir)
             .map_err(|e| format!("Failed to extract {:?}: {e}", entry_path))?;
 
         bytes_extracted += size;
@@ -196,7 +214,9 @@ mod tests {
     #[test]
     fn test_parse_ysi_metadata_basic() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(tmp.path(), r#"#!/usr/bin/env sh
+        std::fs::write(
+            tmp.path(),
+            r#"#!/usr/bin/env sh
 app="Test Game"
 icon="game/game/icon.png"
 ver="1.0.0"
@@ -208,7 +228,9 @@ picsz=200
 yadsz=300
 pvsz=400
 zstdsz=500
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let meta = parse_ysi_metadata(tmp.path()).unwrap();
         assert_eq!(meta.app, "Test Game");
@@ -220,9 +242,13 @@ zstdsz=500
     #[test]
     fn test_parse_ysi_metadata_missing_var() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(tmp.path(), r#"#!/usr/bin/env sh
+        std::fs::write(
+            tmp.path(),
+            r#"#!/usr/bin/env sh
 app="Test Game"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let result = parse_ysi_metadata(tmp.path());
         assert!(result.is_err());

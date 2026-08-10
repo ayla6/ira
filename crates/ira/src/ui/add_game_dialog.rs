@@ -1,23 +1,33 @@
-use ira_models::{GameLaunchConfig, WineConfig, WineProfile};
-use crate::AppMessage;
-use gtk4::prelude::*;
-use adw::prelude::*;
-use super::state::SharedState;
-use super::add_game_general::build_general_page;
-use super::add_game_env::build_env_page;
 use super::add_game_db::{add_game_to_db, AddGameToDbParams};
-use super::wine_config_widget::WineConfigWidgets;
+use super::add_game_env::build_env_page;
+use super::add_game_general::build_general_page;
 use super::css::*;
+use super::state::SharedState;
+use super::wine_config_widget::WineConfigWidgets;
+use crate::AppMessage;
+use adw::prelude::*;
+use ira_models::{GameLaunchConfig, WineConfig, WineProfile};
 
 pub fn show_add_game_dialog(state: &SharedState) {
     let (window, db, sender, steam, save_dir, ra_username, ra_token, ra_password) = {
         let s = state.borrow();
-        (s.window.clone(), s.db.clone(), s.sender.clone(), s.steam.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
+        (
+            s.window.clone(),
+            s.db.clone(),
+            s.sender.clone(),
+            s.steam.clone(),
+            s.save_dir.clone(),
+            s.cfg.ra_username.clone(),
+            s.cfg.ra_token.clone(),
+            s.cfg.ra_password.clone(),
+        )
     };
 
     let layout = super::helpers::dialog_layout(&window);
     layout.window.set_title(Some("Add game"));
-    layout.header.set_title_widget(Some(&gtk4::Label::new(Some("Add game"))));
+    layout
+        .header
+        .set_title_widget(Some(&gtk4::Label::new(Some("Add game"))));
     layout.stack.set_vexpand(true);
 
     let win = layout.window;
@@ -26,14 +36,36 @@ pub fn show_add_game_dialog(state: &SharedState) {
     let content_area = layout.content_area;
 
     let profiles = ira_db::get_all_profiles(&db).unwrap_or_default();
-    let (general_page, name_entry, kind_row, folder_entry, exe_entry, args_entry, wd_entry, detect_btn, profile_row, steam_id_entry, gog_id_entry) =
-        build_general_page(&win, &profiles, state);
-    sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General", "general"));
+    let (
+        general_page,
+        name_entry,
+        kind_row,
+        folder_entry,
+        exe_entry,
+        args_entry,
+        wd_entry,
+        detect_btn,
+        profile_row,
+        steam_id_entry,
+        gog_id_entry,
+    ) = build_general_page(&win, &profiles, state);
+    sidebar.append(&super::settings_dialog::settings_sidebar_row(
+        "preferences-system-symbolic",
+        "General",
+        "general",
+    ));
     stack.add_named(&general_page, Some("general"));
 
     let (wine_pages, wine_widgets) = {
         let dft = state.borrow().cfg.default_wine_config.clone();
-        let cfg = if dft.enabled { dft.clone() } else { WineConfig { enabled: true, ..dft.clone() } };
+        let cfg = if dft.enabled {
+            dft.clone()
+        } else {
+            WineConfig {
+                enabled: true,
+                ..dft.clone()
+            }
+        };
         super::wine_config_widget::build_wine_config_pages(&cfg, Some(&dft))
     };
 
@@ -54,7 +86,11 @@ pub fn show_add_game_dialog(state: &SharedState) {
     setup_wine_sidebar_visibility(&kind_row, &wine_sidebar_rows, &sep1, &sep2, &profile_row);
 
     let (env_page, env_vars_box, ld_preload_entry, ld_library_entry) = build_env_page();
-    sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-other-symbolic", "Environment", "env"));
+    sidebar.append(&super::settings_dialog::settings_sidebar_row(
+        "preferences-other-symbolic",
+        "Environment",
+        "env",
+    ));
     stack.add_named(&env_page, Some("env"));
 
     let detect_group = adw::PreferencesGroup::new();
@@ -145,7 +181,7 @@ fn connect_sidebar_selection(sidebar: &gtk4::ListBox, stack: &gtk4::Stack) {
         }
     });
 }
-        fn build_dialog_button_row(content_area: &gtk4::Box) -> (gtk4::Button, gtk4::Button) {
+fn build_dialog_button_row(content_area: &gtk4::Box) -> (gtk4::Button, gtk4::Button) {
     let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     btn_row.set_halign(gtk4::Align::End);
     btn_row.set_margin_start(16);
@@ -190,10 +226,7 @@ struct AddGameWidgets<'a> {
     state: &'a SharedState,
 }
 
-fn connect_add_handler(
-    add_btn: &gtk4::Button,
-    widgets: AddGameWidgets<'_>,
-) {
+fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
     let AddGameWidgets {
         name_entry,
         kind_row,
@@ -258,14 +291,40 @@ fn connect_add_handler(
         let args = args_entry.text().to_string();
         let wd = {
             let wd_text = wd_entry.text().to_string();
-            if wd_text.is_empty() && !game_folder.is_empty() { game_folder.clone() } else { wd_text }
+            if wd_text.is_empty() && !game_folder.is_empty() {
+                game_folder.clone()
+            } else {
+                wd_text
+            }
         };
         let steam_app_id = steam_id_entry.text().to_string();
         let gog_product_id = gog_id_entry.text().to_string();
 
-        let trophy_source = if !steam_app_id.is_empty() { ira_models::TrophySource::Gse } else if !gog_product_id.is_empty() { ira_models::TrophySource::Nge } else { ira_models::TrophySource::Empty };
-        let kind = if is_wine { ira_models::GameKind::Wine } else { ira_models::GameKind::Linux };
-        let platform_id = if !steam_app_id.is_empty() { steam_app_id.clone() } else if !gog_product_id.is_empty() { gog_product_id.clone() } else { format!("manual_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()) };
+        let trophy_source = if !steam_app_id.is_empty() {
+            ira_models::TrophySource::Gse
+        } else if !gog_product_id.is_empty() {
+            ira_models::TrophySource::Nge
+        } else {
+            ira_models::TrophySource::Empty
+        };
+        let kind = if is_wine {
+            ira_models::GameKind::Wine
+        } else {
+            ira_models::GameKind::Linux
+        };
+        let platform_id = if !steam_app_id.is_empty() {
+            steam_app_id.clone()
+        } else if !gog_product_id.is_empty() {
+            gog_product_id.clone()
+        } else {
+            format!(
+                "manual_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+            )
+        };
 
         let selected_profile_id = if is_wine {
             super::wine_profile_picker::selected_profile_id(&profile_row, &profiles)
@@ -284,7 +343,11 @@ fn connect_add_handler(
             overlay_enabled: None,
             ..Default::default()
         };
-        let wine_config = if is_wine { wine_widgets.to_wine_config() } else { WineConfig::default() };
+        let wine_config = if is_wine {
+            wine_widgets.to_wine_config()
+        } else {
+            WineConfig::default()
+        };
 
         let db_c = db.clone();
         let sender_c = sender.clone();
@@ -301,11 +364,18 @@ fn connect_add_handler(
 
         std::thread::spawn(move || {
             match add_game_to_db(AddGameToDbParams {
-                db: &db_c, name: &name_c, kind: kind_c,
-                trophy_source: ts_c, app_id: &app_id_c, platform_id: &platform_id,
+                db: &db_c,
+                name: &name_c,
+                kind: kind_c,
+                trophy_source: ts_c,
+                app_id: &app_id_c,
+                platform_id: &platform_id,
                 game_folder: &game_folder_c,
-                launch_config: &launch_config, wine_config: &wine_config,
-                profile_id: selected_profile_id, steam: &steam_c, save_dir: &save_dir_c,
+                launch_config: &launch_config,
+                wine_config: &wine_config,
+                profile_id: selected_profile_id,
+                steam: &steam_c,
+                save_dir: &save_dir_c,
             }) {
                 Ok(game_id) => {
                     let entry = ira_db::find_by_db_id(&db_c, game_id).ok().flatten();
@@ -327,11 +397,16 @@ fn connect_add_handler(
                                 None
                             };
                             ira_platforms::api_emulators::migrate_emulator_saves(
-                                &save_dir_c, ts_c, &app_id_c, wine_prefix.as_deref(),
+                                &save_dir_c,
+                                ts_c,
+                                &app_id_c,
+                                wine_prefix.as_deref(),
                             );
 
                             // Centralize game saves if UFS data is available
-                            if let Some(details) = crate::game_loader::read_app_details(&save_dir_c, &app_id_c) {
+                            if let Some(details) =
+                                crate::game_loader::read_app_details(&save_dir_c, &app_id_c)
+                            {
                                 if !details.ufs_savefiles.is_empty() {
                                     ira_launcher::game_saves::setup_game_saves(
                                         &details.ufs_savefiles,
@@ -345,21 +420,23 @@ fn connect_add_handler(
 
                             let _ = sender_c.send(AppMessage::NewGame(game.clone()));
                             let g_name = game.name.clone();
-                            crate::ui::enrichment::enrich_game_async(crate::ui::enrichment::EnrichGameParams {
-                                app_id: game.app_id.clone(),
-                                trophy_source: game.trophy_source,
-                                platform_id: game.platform_id.clone(),
-                                db_id: game.db_id,
-                                title: g_name,
-                                steam: steam_c,
-                                sender: sender_c,
-                                save_dir: save_dir_c,
-                                db: db_c,
-                                ra_username: ra_username_c,
-                                ra_token: ra_token_c,
-                                ra_password: ra_password_c,
-                                game: None,
-                            });
+                            crate::ui::enrichment::enrich_game_async(
+                                crate::ui::enrichment::EnrichGameParams {
+                                    app_id: game.app_id.clone(),
+                                    trophy_source: game.trophy_source,
+                                    platform_id: game.platform_id.clone(),
+                                    db_id: game.db_id,
+                                    title: g_name,
+                                    steam: steam_c,
+                                    sender: sender_c,
+                                    save_dir: save_dir_c,
+                                    db: db_c,
+                                    ra_username: ra_username_c,
+                                    ra_token: ra_token_c,
+                                    ra_password: ra_password_c,
+                                    game: None,
+                                },
+                            );
                         }
                     }
                 }
@@ -402,7 +479,10 @@ pub(super) fn build_env_var_row(key: &str, value: &str) -> gtk4::ListBoxRow {
     remove_btn.add_css_class(CSS_CIRCULAR);
     let row_clone = row.clone();
     remove_btn.connect_clicked(move |_| {
-        if let Some(list) = row_clone.parent().and_then(|p| p.downcast::<gtk4::ListBox>().ok()) {
+        if let Some(list) = row_clone
+            .parent()
+            .and_then(|p| p.downcast::<gtk4::ListBox>().ok())
+        {
             row_clone.unparent();
             list.remove(&row_clone);
         }

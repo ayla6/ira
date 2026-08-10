@@ -1,13 +1,19 @@
-use gtk4::prelude::*;
 use adw::prelude::*;
 use std::rc::Rc;
 
-use super::state::SharedState;
-use super::helpers::clear_children;
-use super::enrichment::{enrich_game_async, EnrichGameParams};
 use super::css::*;
+use super::enrichment::{enrich_game_async, EnrichGameParams};
+use super::helpers::clear_children;
+use super::state::SharedState;
 
-pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, platform_id: &str, parent: &adw::Window, on_match: Option<Rc<dyn Fn()>>) {
+pub fn show_ra_search_dialog(
+    state: &SharedState,
+    db_id: i64,
+    game_name: &str,
+    platform_id: &str,
+    parent: &adw::Window,
+    on_match: Option<Rc<dyn Fn()>>,
+) {
     let console_id = match ira_models::find_console(platform_id) {
         Some(c) => c.ra_console_id,
         None => return,
@@ -59,9 +65,13 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
     let entry_s = entry.clone();
     let do_search = move || {
         let term = entry_s.text().to_string();
-        if term.is_empty() { return; }
+        if term.is_empty() {
+            return;
+        }
         let save_dir = state_c.borrow().save_dir.clone();
-        let results = ira_platforms::retroachievements::api::RaClient::search_ra_games(&save_dir, console_id, &term);
+        let results = ira_platforms::retroachievements::api::RaClient::search_ra_games(
+            &save_dir, console_id, &term,
+        );
         clear_children(&list_c);
         if results.is_empty() {
             let row = adw::ActionRow::new();
@@ -72,7 +82,10 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
             for game in &results {
                 let row = adw::ActionRow::new();
                 row.set_title(&super::helpers::esc(&game.title));
-                row.set_subtitle(&format!("RA ID: {} · {} achievements", game.id, game.num_achievements));
+                row.set_subtitle(&format!(
+                    "RA ID: {} · {} achievements",
+                    game.id, game.num_achievements
+                ));
                 let match_btn = gtk4::Button::with_label("Match");
                 match_btn.add_css_class(CSS_SUGGESTED_ACTION);
                 match_btn.set_valign(gtk4::Align::Center);
@@ -84,7 +97,14 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                 let pid = platform_id.clone();
                 match_btn.connect_clicked(move |_| {
                     let app_id = ra_id.to_string();
-                    if let Err(e) = ira_db::update_game_ids(&sc.borrow().db, db_id, "", &app_id, ira_models::TrophySource::Ra, &pid) {
+                    if let Err(e) = ira_db::update_game_ids(
+                        &sc.borrow().db,
+                        db_id,
+                        "",
+                        &app_id,
+                        ira_models::TrophySource::Ra,
+                        &pid,
+                    ) {
                         eprintln!("Failed to update game IDs for RA match: {}", e);
                     }
                     if let Err(e) = ira_db::set_manual_unmatch(&sc.borrow().db, db_id, false) {
@@ -105,8 +125,15 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                     }
                     let (ra_username, ra_token, ra_password, steam, sender, save_dir, db) = {
                         let s = sc.borrow();
-                        (s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone(),
-                         s.steam.clone(), s.sender.clone(), s.save_dir.clone(), s.db.clone())
+                        (
+                            s.cfg.ra_username.clone(),
+                            s.cfg.ra_token.clone(),
+                            s.cfg.ra_password.clone(),
+                            s.steam.clone(),
+                            s.sender.clone(),
+                            s.save_dir.clone(),
+                            s.db.clone(),
+                        )
                     };
                     let g = sc.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
                     if let Some(g) = g {
@@ -116,19 +143,33 @@ pub fn show_ra_search_dialog(state: &SharedState, db_id: i64, game_name: &str, p
                             platform_id: g.platform_id.clone(),
                             db_id: g.db_id,
                             title: g.name.clone(),
-                            steam, sender, save_dir, db,
-                            ra_username, ra_token, ra_password,
+                            steam,
+                            sender,
+                            save_dir,
+                            db,
+                            ra_username,
+                            ra_token,
+                            ra_password,
                             game: None,
                         });
                     }
-                    if let Some(ref cb) = on_match_c { cb(); }
+                    if let Some(ref cb) = on_match_c {
+                        cb();
+                    }
                     dc.close();
                     let sc_refresh = sc.clone();
                     glib::idle_add_local_once(move || {
                         super::game_settings::refresh_ra_section(&sc_refresh, db_id);
-                        super::helpers::refresh_settings_images_page(&sc_refresh, db_id, |s, game, win, pc| {
-                            super::image_manager::build_image_manager_content_with_drafts(s, game, win, pc).upcast()
-                        });
+                        super::helpers::refresh_settings_images_page(
+                            &sc_refresh,
+                            db_id,
+                            |s, game, win, pc| {
+                                super::image_manager::build_image_manager_content_with_drafts(
+                                    s, game, win, pc,
+                                )
+                                .upcast()
+                            },
+                        );
                     });
                 });
                 row.add_suffix(&match_btn);

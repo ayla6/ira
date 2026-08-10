@@ -1,11 +1,11 @@
+use super::css::*;
+use super::helpers::{esc, format_duration};
+use super::play_history_chart::{color_hex, other_hex, DayData};
 use glib::subclass::prelude::*;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use super::helpers::{esc, format_duration};
-use super::play_history_chart::{DayData, color_hex, other_hex};
-use super::css::*;
 
 const Y_AXIS_W: i32 = 34;
 const BAR_MARGIN: i32 = 8;
@@ -14,9 +14,13 @@ const BAR_RADIUS: f32 = 5.0;
 type DayCallback = Rc<dyn Fn(usize) + 'static>;
 
 fn fmt_axis(s: f64) -> String {
-    if s < 60.0 { "0".into() }
-    else if s < 3600.0 { format!("{}m",(s/60.0).round() as i64) }
-    else { format!("{}h",(s/3600.0).round() as i64) }
+    if s < 60.0 {
+        "0".into()
+    } else if s < 3600.0 {
+        format!("{}m", (s / 60.0).round() as i64)
+    } else {
+        format!("{}h", (s / 3600.0).round() as i64)
+    }
 }
 
 fn parse_color(hex: &str) -> gtk4::gdk::RGBA {
@@ -63,8 +67,12 @@ mod imp {
 
     impl ObjectImpl for BarChart {
         fn dispose(&self) {
-            for w in self.bar_groups.borrow().iter() { w.unparent(); }
-            for w in self.y_labels.borrow().iter() { w.unparent(); }
+            for w in self.bar_groups.borrow().iter() {
+                w.unparent();
+            }
+            for w in self.y_labels.borrow().iter() {
+                w.unparent();
+            }
         }
     }
 
@@ -87,11 +95,10 @@ mod imp {
                 let val = i as f64 * interval;
                 let pct = val / nmax;
                 let y = height - (height as f64 * pct).round() as i32;
-                let tx = gtk4::gsk::Transform::new()
-                    .translate(&gtk4::graphene::Point::new(
-                        (chart_w + 6) as f32,
-                        (y - 9) as f32,
-                    ));
+                let tx = gtk4::gsk::Transform::new().translate(&gtk4::graphene::Point::new(
+                    (chart_w + 6) as f32,
+                    (y - 9) as f32,
+                ));
                 lbl.allocate(Y_AXIS_W - 6, 18, -1, Some(tx));
             }
 
@@ -107,7 +114,9 @@ mod imp {
         fn snapshot(&self, snapshot: &gtk4::Snapshot) {
             let width = self.obj().width();
             let height = self.obj().height();
-            if width <= 0 || height <= 0 { return; }
+            if width <= 0 || height <= 0 {
+                return;
+            }
 
             let nmax = self.nmax.get();
             let interval = self.interval.get();
@@ -119,9 +128,7 @@ mod imp {
             let selected = self.selected.get();
             let hovered = self.hovered.get();
 
-            let accent = adw::StyleManager::default()
-                .accent_color()
-                .to_rgba();
+            let accent = adw::StyleManager::default().accent_color().to_rgba();
             let fg = self.obj().color();
 
             let days = self.days.borrow();
@@ -160,7 +167,9 @@ mod imp {
 
             // Bars
             for (day_idx, day) in days.iter().enumerate() {
-                if day.total <= 0.0 { continue; }
+                if day.total <= 0.0 {
+                    continue;
+                }
 
                 let x = (day_idx as i32 * bar_w + BAR_MARGIN) as f32;
                 let total_h = (day.total * scale).max(1.0) as f32;
@@ -194,7 +203,8 @@ mod imp {
                         let color = match seg.color_index {
                             Some(idx) => parse_color(color_hex(idx)),
                             None => parse_color(other_hex()),
-                        }.with_alpha(seg_alpha);
+                        }
+                        .with_alpha(seg_alpha);
                         snapshot.append_color(
                             &color,
                             &gtk4::graphene::Rect::new(x, seg_y, inner_w, seg_h),
@@ -271,12 +281,22 @@ impl BarChart {
         self.imp().callback.replace(Some(Rc::new(f)));
     }
 
-    pub(super) fn set_data(&self, days: &[DayData], nmax: f64, interval: f64, is_single_game: bool) {
+    pub(super) fn set_data(
+        &self,
+        days: &[DayData],
+        nmax: f64,
+        interval: f64,
+        is_single_game: bool,
+    ) {
         let imp = self.imp();
 
         // Unparent old children
-        for w in imp.bar_groups.borrow().iter() { w.unparent(); }
-        for w in imp.y_labels.borrow().iter() { w.unparent(); }
+        for w in imp.bar_groups.borrow().iter() {
+            w.unparent();
+        }
+        for w in imp.y_labels.borrow().iter() {
+            w.unparent();
+        }
 
         imp.nmax.set(nmax);
         imp.interval.set(interval);
@@ -303,12 +323,26 @@ impl BarChart {
 
             if day.total > 0.0 {
                 let tooltip: String = if is_single_game {
-                    day.segments.first().map(|seg| {
-                        format!("<b>{}</b>\n{}", esc(&seg.label), format_duration(seg.value as i64))
-                    }).unwrap_or_default()
+                    day.segments
+                        .first()
+                        .map(|seg| {
+                            format!(
+                                "<b>{}</b>\n{}",
+                                esc(&seg.label),
+                                format_duration(seg.value as i64)
+                            )
+                        })
+                        .unwrap_or_default()
                 } else {
-                    day.segments.iter()
-                        .map(|seg| format!("<b>{}</b>\n{}", esc(&seg.label), format_duration(seg.value as i64)))
+                    day.segments
+                        .iter()
+                        .map(|seg| {
+                            format!(
+                                "<b>{}</b>\n{}",
+                                esc(&seg.label),
+                                format_duration(seg.value as i64)
+                            )
+                        })
                         .collect::<Vec<_>>()
                         .join("\n\n")
                 };
@@ -320,7 +354,9 @@ impl BarChart {
             let cb = imp.callback.borrow().clone();
             let click = gtk4::GestureClick::new();
             click.connect_pressed(move |_, _, _, _| {
-                if let Some(f) = &cb { f(i); }
+                if let Some(f) = &cb {
+                    f(i);
+                }
             });
             grp.add_controller(click);
             bar_groups.push(grp);
@@ -342,7 +378,8 @@ impl BarChart {
 mod tests {
     use super::*;
 
-    #[test] fn test_fmt_axis() {
+    #[test]
+    fn test_fmt_axis() {
         assert_eq!(fmt_axis(0.0), "0");
         assert_eq!(fmt_axis(1800.0), "30m");
         assert_eq!(fmt_axis(3600.0), "1h");

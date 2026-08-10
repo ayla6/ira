@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
-use ira_models::AppDetails;
 use crate::api_emulators_shared::{
     api_emulators_dir, backup_file, copy_file, detect_arch, find_game_dll_folder, is_windows,
     restore_backup,
 };
+use ira_models::AppDetails;
+use std::path::{Path, PathBuf};
 
 pub fn find_steam_settings(game_exe: &str, save_dir: &str, app_id: &str) -> Option<PathBuf> {
     let ach_dir = ira_parser::achievements_dir(save_dir, app_id);
@@ -45,7 +45,11 @@ pub fn centralize_steam_settings(game_folder: &str) -> Result<Option<PathBuf>, S
     let root_settings = root.join("steam_settings");
 
     // If steam_settings/ is already at the root (real dir, not symlink), just symlink DLL dirs.
-    if root_settings.is_dir() && !std::fs::symlink_metadata(&root_settings).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+    if root_settings.is_dir()
+        && !std::fs::symlink_metadata(&root_settings)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+    {
         symlink_dll_dirs_to_settings(root, &root_settings);
         return Ok(Some(root_settings));
     }
@@ -203,10 +207,14 @@ pub fn write_gse_language(settings_dir: &Path, language: &str) -> Result<(), Str
 }
 
 const GSE_VERSION_FILES: &[&str] = &[
-    "libsteam_api.so", "libsteam_api64.so",
-    "steamclient.so", "steamclient64.so",
-    "steam_api.dll", "steam_api64.dll",
-    "steamclient.dll", "steamclient64.dll",
+    "libsteam_api.so",
+    "libsteam_api64.so",
+    "steamclient.so",
+    "steamclient64.so",
+    "steam_api.dll",
+    "steam_api64.dll",
+    "steamclient.dll",
+    "steamclient64.dll",
 ];
 
 fn gse_file_map(is_64: bool, is_win: bool) -> &'static [(&'static str, &'static str)] {
@@ -251,10 +259,14 @@ pub fn has_original_steam_dlls(dll_folder: &Path) -> bool {
 
 /// All Steam API DLL/SO filenames (original and emulator share these names).
 const STEAM_DLL_NAMES: &[&str] = &[
-    "steam_api.dll", "steam_api64.dll",
-    "libsteam_api.so", "libsteam_api64.so",
-    "steamclient.dll", "steamclient64.dll",
-    "steamclient.so", "steamclient64.so",
+    "steam_api.dll",
+    "steam_api64.dll",
+    "libsteam_api.so",
+    "libsteam_api64.so",
+    "steamclient.dll",
+    "steamclient64.dll",
+    "steamclient.so",
+    "steamclient64.so",
 ];
 
 /// Recursively search `game_folder` for directories containing Steam DLLs.
@@ -291,9 +303,9 @@ fn resolve_gse_version(save_dir: &str, version: &str) -> Result<PathBuf, String>
     let root = api_emulators_dir(save_dir).join("steam");
     if version.is_empty() {
         let versions = list_gse_versions(save_dir);
-        let v = versions.first().ok_or_else(|| {
-            format!("No GSE versions found at {:?}", root)
-        })?;
+        let v = versions
+            .first()
+            .ok_or_else(|| format!("No GSE versions found at {:?}", root))?;
         Ok(root.join(v))
     } else {
         let dir = root.join(version);
@@ -317,13 +329,23 @@ pub fn install_gse(
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
     if !has_original_steam_dlls(&dll_folder) {
-        return Err("No original Steam DLL found in game folder. Cannot install API emulator.".to_string());
+        return Err(
+            "No original Steam DLL found in game folder. Cannot install API emulator.".to_string(),
+        );
     }
 
     let is_win = is_windows(game_exe);
     let is64 = detect_arch(game_exe) == "x64";
 
-    install_gse_into_folder(save_dir, &dll_folder, is_win, is64, app_id, languages, version)?;
+    install_gse_into_folder(
+        save_dir,
+        &dll_folder,
+        is_win,
+        is64,
+        app_id,
+        languages,
+        version,
+    )?;
     Ok(dll_folder)
 }
 
@@ -339,18 +361,23 @@ pub fn install_gse_from_folder(
     version: &str,
 ) -> Result<(), String> {
     let dirs = find_steam_dlls_recursive(game_folder);
-    let dll_folder = dirs.iter()
+    let dll_folder = dirs
+        .iter()
         .find(|d| !has_steam_emulator_backups(d) && !d.join("steam_settings").is_dir())
-        .ok_or_else(|| "Steam DLLs already have an emulator (backups or steam_settings found)".to_string())?;
+        .ok_or_else(|| {
+            "Steam DLLs already have an emulator (backups or steam_settings found)".to_string()
+        })?;
 
-    let is_win = dll_folder.join("steam_api.dll").exists()
-        || dll_folder.join("steam_api64.dll").exists();
+    let is_win =
+        dll_folder.join("steam_api.dll").exists() || dll_folder.join("steam_api64.dll").exists();
     let is64 = dll_folder.join("steam_api64.dll").exists()
         || dll_folder.join("steamclient64.dll").exists()
         || dll_folder.join("libsteam_api64.so").exists()
         || dll_folder.join("steamclient64.so").exists();
 
-    install_gse_into_folder(save_dir, dll_folder, is_win, is64, app_id, languages, version)
+    install_gse_into_folder(
+        save_dir, dll_folder, is_win, is64, app_id, languages, version,
+    )
 }
 
 /// Scan a Steam API DLL for exported interface version strings and write
@@ -367,7 +394,10 @@ fn generate_steam_interfaces(dll_path: &Path, output_path: &Path) -> Result<(), 
         let found = find_prefix_matches(&data, prefix);
         // Special case: if SteamClient has multiple matches and 017 is among them,
         // keep only SteamClient017 (legacy compatibility from GSE source).
-        if *prefix == "SteamClient" && found.len() > 1 && found.contains(&"SteamClient017".to_string()) {
+        if *prefix == "SteamClient"
+            && found.len() > 1
+            && found.contains(&"SteamClient017".to_string())
+        {
             all_matches.push("SteamClient017".to_string());
         } else {
             all_matches.extend(found);
@@ -381,8 +411,7 @@ fn generate_steam_interfaces(dll_path: &Path, output_path: &Path) -> Result<(), 
     all_matches.sort();
     all_matches.dedup();
     let content = all_matches.join("\n") + "\n";
-    std::fs::write(output_path, content)
-        .map_err(|e| format!("write steam_interfaces.txt: {e}"))?;
+    std::fs::write(output_path, content).map_err(|e| format!("write steam_interfaces.txt: {e}"))?;
     Ok(())
 }
 
@@ -473,15 +502,18 @@ fn install_gse_into_folder(
 
     // Step 1: Create steam_settings dir before running generate_interfaces
     let settings_dir = dll_folder.join("steam_settings");
-    std::fs::create_dir_all(&settings_dir)
-        .map_err(|e| format!("create steam_settings: {}", e))?;
+    std::fs::create_dir_all(&settings_dir).map_err(|e| format!("create steam_settings: {}", e))?;
 
     // Step 2: Generate steam_interfaces.txt by scanning the original DLL
     // (before it's swapped in Step 3). We do this natively in Rust instead
     // of running the GSE generate_interfaces.exe, which doesn't work on Linux.
     let interfaces_path = settings_dir.join("steam_interfaces.txt");
     if !interfaces_path.exists() {
-        let dll_name = if is64 { "steam_api64.dll" } else { "steam_api.dll" };
+        let dll_name = if is64 {
+            "steam_api64.dll"
+        } else {
+            "steam_api.dll"
+        };
         let dll_path = dll_folder.join(dll_name);
         if dll_path.is_file() {
             if let Err(e) = generate_steam_interfaces(&dll_path, &interfaces_path) {
@@ -503,8 +535,7 @@ fn install_gse_into_folder(
     // Step 4: Write steam_appid.txt
     let appid_path = settings_dir.join("steam_appid.txt");
     if !appid_path.exists() {
-        std::fs::write(&appid_path, app_id)
-            .map_err(|e| format!("write steam_appid.txt: {}", e))?;
+        std::fs::write(&appid_path, app_id).map_err(|e| format!("write steam_appid.txt: {}", e))?;
     }
 
     // Step 5: Write supported_languages.txt if languages available

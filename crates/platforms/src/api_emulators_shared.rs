@@ -36,11 +36,21 @@ pub fn api_emulators_dir(save_dir: &str) -> PathBuf {
 
 pub(crate) fn detect_arch(game_exe: &str) -> &'static str {
     if game_exe.ends_with(".exe") || game_exe.ends_with(".bat") {
-        let is64 = game_exe.contains("64") || std::fs::metadata(game_exe)
-            .map(|m| m.len() > 1_500_000).unwrap_or(false);
-        if is64 { "x64" } else { "x86" }
+        let is64 = game_exe.contains("64")
+            || std::fs::metadata(game_exe)
+                .map(|m| m.len() > 1_500_000)
+                .unwrap_or(false);
+        if is64 {
+            "x64"
+        } else {
+            "x86"
+        }
     } else {
-        if std::env::consts::ARCH == "x86_64" { "x64" } else { "x86" }
+        if std::env::consts::ARCH == "x86_64" {
+            "x64"
+        } else {
+            "x86"
+        }
     }
 }
 
@@ -116,7 +126,11 @@ pub fn find_dll_dirs_recursive(base_folder: &Path, dll_names: &[&str]) -> Vec<Pa
 /// sit next to or one level under the exe), then falls back to a recursive
 /// scan of `game_folder`. Prefers the deepest match — for nested installs
 /// (e.g. Unreal Engine games) the API DLLs live several levels below the exe.
-pub(crate) fn find_game_dll_folder(game_exe: &str, game_folder: &str, dll_names: &[&str]) -> Option<PathBuf> {
+pub(crate) fn find_game_dll_folder(
+    game_exe: &str,
+    game_folder: &str,
+    dll_names: &[&str],
+) -> Option<PathBuf> {
     if let Some(folder) = find_api_emu_dll_folder(game_exe, dll_names) {
         return Some(folder);
     }
@@ -161,10 +175,7 @@ pub fn has_emulator_backups(dir: &Path, dll_names: &[&str]) -> bool {
 
 pub fn ensure_skeleton(save_dir: &str) {
     let root = api_emulators_dir(save_dir);
-    let dirs = [
-        "steam",
-        "gog",
-    ];
+    let dirs = ["steam", "gog"];
     for d in &dirs {
         let _ = std::fs::create_dir_all(root.join(d));
     }
@@ -177,23 +188,29 @@ mod tests {
     #[test]
     fn test_backup_variants_dll() {
         let v = backup_variants("steam_api64.dll");
-        assert_eq!(v, vec![
-            "steam_api64.dll.bak".to_string(),
-            "steam_api64.bak.dll".to_string(),
-            "steam_api64.owo.dll".to_string(),
-            "steam_api64.dll.owo".to_string(),
-        ]);
+        assert_eq!(
+            v,
+            vec![
+                "steam_api64.dll.bak".to_string(),
+                "steam_api64.bak.dll".to_string(),
+                "steam_api64.owo.dll".to_string(),
+                "steam_api64.dll.owo".to_string(),
+            ]
+        );
     }
 
     #[test]
     fn test_backup_variants_so() {
         let v = backup_variants("libsteam_api.so");
-        assert_eq!(v, vec![
-            "libsteam_api.so.bak".to_string(),
-            "libsteam_api.bak.so".to_string(),
-            "libsteam_api.owo.so".to_string(),
-            "libsteam_api.so.owo".to_string(),
-        ]);
+        assert_eq!(
+            v,
+            vec![
+                "libsteam_api.so.bak".to_string(),
+                "libsteam_api.bak.so".to_string(),
+                "libsteam_api.owo.so".to_string(),
+                "libsteam_api.so.owo".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -207,9 +224,17 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
 
-        for name in &["steam_api64.dll.bak", "steam_api64.bak.dll", "steam_api64.owo.dll"] {
+        for name in &[
+            "steam_api64.dll.bak",
+            "steam_api64.bak.dll",
+            "steam_api64.owo.dll",
+        ] {
             std::fs::write(dir.join(name), b"x").unwrap();
-            assert!(has_emulator_backups(dir, &["steam_api64.dll"]), "failed for {}", name);
+            assert!(
+                has_emulator_backups(dir, &["steam_api64.dll"]),
+                "failed for {}",
+                name
+            );
             std::fs::remove_file(dir.join(name)).unwrap();
         }
         assert!(!has_emulator_backups(dir, &["steam_api64.dll"]));

@@ -63,21 +63,27 @@ impl SortMode {
 
     pub fn compare(&self, a: &Game, b: &Game) -> Ordering {
         match self {
-            SortMode::Alphabetical => a.sort_key().to_lowercase().cmp(&b.sort_key().to_lowercase()),
+            SortMode::Alphabetical => a
+                .sort_key()
+                .to_lowercase()
+                .cmp(&b.sort_key().to_lowercase()),
             SortMode::Completion => {
                 let pct_a = a.completion_pct();
                 let pct_b = b.completion_pct();
-                pct_b.partial_cmp(&pct_a).unwrap_or(Ordering::Equal)
+                pct_b
+                    .partial_cmp(&pct_a)
+                    .unwrap_or(Ordering::Equal)
                     .then_with(|| a.sort_key().cmp(b.sort_key()))
             }
-            SortMode::HoursPlayed => {
-                b.playtime.partial_cmp(&a.playtime).unwrap_or(Ordering::Equal)
-                    .then_with(|| a.sort_key().cmp(b.sort_key()))
-            }
-            SortMode::LastPlayed => {
-                b.last_played.cmp(&a.last_played)
-                    .then_with(|| a.sort_key().cmp(b.sort_key()))
-            }
+            SortMode::HoursPlayed => b
+                .playtime
+                .partial_cmp(&a.playtime)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.sort_key().cmp(b.sort_key())),
+            SortMode::LastPlayed => b
+                .last_played
+                .cmp(&a.last_played)
+                .then_with(|| a.sort_key().cmp(b.sort_key())),
             SortMode::ReleaseDate => {
                 sort_desc_unknowns_last(a.release_timestamp, b.release_timestamp)
                     .then_with(|| a.sort_key().cmp(b.sort_key()))
@@ -123,7 +129,10 @@ mod tests {
     use super::*;
 
     fn make_game(name: &str) -> Game {
-        Game { name: name.to_string(), ..Default::default() }
+        Game {
+            name: name.to_string(),
+            ..Default::default()
+        }
     }
 
     #[test]

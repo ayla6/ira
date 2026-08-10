@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use crate::SteamDataClient;
 use crate::util::MIN_IMAGE_BYTES;
+use crate::SteamDataClient;
 
 impl SteamDataClient {
     pub(super) fn game_dir(&self, app_id: &str) -> PathBuf {
@@ -25,7 +25,12 @@ impl SteamDataClient {
         String::new()
     }
 
-    pub(super) fn fetch_image_fallback(&self, primary: &str, fallback: &str, dest: &Path) -> String {
+    pub(super) fn fetch_image_fallback(
+        &self,
+        primary: &str,
+        fallback: &str,
+        dest: &Path,
+    ) -> String {
         let _s = tracing::info_span!("fetch_image_fallback", url = primary).entered();
         if dest.exists() {
             return dest.to_string_lossy().into_owned();
@@ -42,11 +47,7 @@ impl SteamDataClient {
         let _s = tracing::info_span!("download_file", url, dest = %dest.display()).entered();
         std::fs::create_dir_all(dest.parent().unwrap_or(Path::new(".")))
             .map_err(|e| e.to_string())?;
-        let resp = self
-            .http
-            .get(url)
-            .send()
-            .map_err(|e| e.to_string())?;
+        let resp = self.http.get(url).send().map_err(|e| e.to_string())?;
         if !resp.status().is_success() {
             return Err(format!("HTTP {}", resp.status()));
         }
@@ -57,11 +58,7 @@ impl SteamDataClient {
 
     pub fn download_bytes(&self, url: &str) -> Result<Vec<u8>, String> {
         let _s = tracing::info_span!("download_bytes", url).entered();
-        let resp = self
-            .http
-            .get(url)
-            .send()
-            .map_err(|e| e.to_string())?;
+        let resp = self.http.get(url).send().map_err(|e| e.to_string())?;
         if !resp.status().is_success() {
             return Err(format!("HTTP {}", resp.status()));
         }
@@ -83,5 +80,4 @@ impl SteamDataClient {
     pub(super) fn find_cached_hero(&self, app_id: &str) -> Option<PathBuf> {
         ira_parser::find_image_file(&self.game_dir(app_id), "hero")
     }
-
 }

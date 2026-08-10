@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use ira_db::DbConn;
-use ira_api::SteamDataClient;
-use ira_parser::GALAXY_ID;
 use crate::gog::generate_galaxy_emu_config;
+use ira_api::SteamDataClient;
+use ira_db::DbConn;
+use ira_parser::GALAXY_ID;
 
 pub fn add_gog_game_from_folder(
     galaxy_dll_folder: &str,
@@ -28,23 +28,34 @@ pub fn add_gog_game_from_folder(
         .join("nge")
         .join(GALAXY_ID)
         .join(product_id);
-    std::fs::create_dir_all(&gog_game_dir).map_err(|e| format!("could not create GOG saves dir: {}", e))?;
+    std::fs::create_dir_all(&gog_game_dir)
+        .map_err(|e| format!("could not create GOG saves dir: {}", e))?;
 
     // Create empty achievements.json so the parser has something to read
     let ach_path = gog_game_dir.join("achievements.json");
     if !ach_path.exists() {
-        std::fs::write(&ach_path, "{}").map_err(|e| format!("could not write achievements.json: {}", e))?;
+        std::fs::write(&ach_path, "{}")
+            .map_err(|e| format!("could not write achievements.json: {}", e))?;
     }
 
     // Create data/<steam_app_id>/achievements/ (real folder for GOG games)
     let data_ach_dir = ira_parser::achievements_dir(save_dir, steam_app_id);
-    std::fs::create_dir_all(&data_ach_dir).map_err(|e| format!("could not create data achievements dir: {}", e))?;
+    std::fs::create_dir_all(&data_ach_dir)
+        .map_err(|e| format!("could not create data achievements dir: {}", e))?;
 
     // Fetch achievement definitions from Steam API
     steam.generate_steam_settings(steam_app_id)?;
 
     // Add to DB
-    ira_db::add_game(db, ira_models::GameKind::Wine, ira_models::TrophySource::Nge, steam_app_id, "", product_id, game_name)?;
+    ira_db::add_game(
+        db,
+        ira_models::GameKind::Wine,
+        ira_models::TrophySource::Nge,
+        steam_app_id,
+        "",
+        product_id,
+        game_name,
+    )?;
 
     Ok(gog_game_dir.to_string_lossy().into_owned())
 }

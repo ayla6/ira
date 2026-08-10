@@ -1,9 +1,9 @@
-use ira_models::{GameLaunchConfig, WineConfig, TrophySource, UfsSaveFile, UfsRootOverride};
 use ira_db::DbConn;
 use ira_models::AppSender;
+use ira_models::{GameLaunchConfig, TrophySource, UfsRootOverride, UfsSaveFile, WineConfig};
 
-use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 pub struct LaunchContext {
     pub game_name: String,
@@ -35,13 +35,20 @@ pub fn launch_game(
         .as_secs() as i64;
 
     let game_dir = if launch.working_dir.is_empty() {
-        std::path::Path::new(&launch.exe).parent().map(|p| p.to_string_lossy().to_string())
+        std::path::Path::new(&launch.exe)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
     } else {
         Some(launch.working_dir.clone())
     };
 
     if !launch.pre_launch.is_empty() {
-        run_pre_launch(&launch.pre_launch, game_dir.as_deref(), &ctx.save_dir, ctx.game_id)?;
+        run_pre_launch(
+            &launch.pre_launch,
+            game_dir.as_deref(),
+            &ctx.save_dir,
+            ctx.game_id,
+        )?;
     }
 
     // Centralize game saves via symlinks if enabled globally
@@ -85,7 +92,15 @@ pub fn launch_game(
         } else {
             super::wine_launch::build_wine_command(&wine_exe, &launch.exe, &args, wine)
         };
-        let mut env = super::env_builder::build_env(launch, Some(wine), &wine_exe, &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
+        let mut env = super::env_builder::build_env(
+            launch,
+            Some(wine),
+            &wine_exe,
+            &ctx.save_dir,
+            ctx.game_id,
+            &ctx.app_id,
+            &mut cmd,
+        );
 
         // Set umu env vars for Proton versions (automatic) or explicit umu_enabled
         if wine.umu_enabled || is_proton {
@@ -99,10 +114,18 @@ pub fn launch_game(
 
         if ctx.overlay_enabled {
             if super::env_builder::uses_gamescope(&cmd) {
-                super::env_builder::add_overlay_env_standalone(&mut env, ctx.overlay_shm.as_deref(), ctx.overlay_font_family.as_deref());
+                super::env_builder::add_overlay_env_standalone(
+                    &mut env,
+                    ctx.overlay_shm.as_deref(),
+                    ctx.overlay_font_family.as_deref(),
+                );
                 super::env_builder::wrap_with_standalone_overlay(&mut cmd);
             } else {
-                super::env_builder::add_overlay_env(&mut env, ctx.overlay_shm.as_deref(), ctx.overlay_font_family.as_deref());
+                super::env_builder::add_overlay_env(
+                    &mut env,
+                    ctx.overlay_shm.as_deref(),
+                    ctx.overlay_font_family.as_deref(),
+                );
             }
         }
 
@@ -118,7 +141,11 @@ pub fn launch_game(
                 child.envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
                 match child.status() {
                     Ok(s) if !s.success() && s.code() != Some(1) => {
-                        eprintln!("Wine reg command failed (exit {:?}): {:?}", s.code(), reg_cmd);
+                        eprintln!(
+                            "Wine reg command failed (exit {:?}): {:?}",
+                            s.code(),
+                            reg_cmd
+                        );
                     }
                     Err(e) => {
                         eprintln!("Failed to run wine reg command: {}", e);
@@ -144,7 +171,15 @@ pub fn launch_game(
             shlex::split(&launch.args).ok_or_else(|| "Failed to parse arguments".to_string())?
         };
         let mut cmd = super::native_launch::build_native_command(&launch.exe, &args);
-        let mut env = super::env_builder::build_env(launch, None, "", &ctx.save_dir, ctx.game_id, &ctx.app_id, &mut cmd);
+        let mut env = super::env_builder::build_env(
+            launch,
+            None,
+            "",
+            &ctx.save_dir,
+            ctx.game_id,
+            &ctx.app_id,
+            &mut cmd,
+        );
 
         // Centralize GBE saves via symlinks in GBE's native save directory
         if ctx.trophy_source == TrophySource::Gse {
@@ -153,10 +188,18 @@ pub fn launch_game(
 
         if ctx.overlay_enabled {
             if super::env_builder::uses_gamescope(&cmd) {
-                super::env_builder::add_overlay_env_standalone(&mut env, ctx.overlay_shm.as_deref(), ctx.overlay_font_family.as_deref());
+                super::env_builder::add_overlay_env_standalone(
+                    &mut env,
+                    ctx.overlay_shm.as_deref(),
+                    ctx.overlay_font_family.as_deref(),
+                );
                 super::env_builder::wrap_with_standalone_overlay(&mut cmd);
             } else {
-                super::env_builder::add_overlay_env(&mut env, ctx.overlay_shm.as_deref(), ctx.overlay_font_family.as_deref());
+                super::env_builder::add_overlay_env(
+                    &mut env,
+                    ctx.overlay_shm.as_deref(),
+                    ctx.overlay_font_family.as_deref(),
+                );
             }
         }
         (cmd, env)
@@ -200,7 +243,10 @@ pub fn launch_game(
     let child = super::wrapper::spawn_game(&command, &env, game_dir.as_deref(), Some(&log_path))?;
     let child_pid = child.id() as i32;
 
-    ctx.running_games.lock().map_err(|e| e.to_string())?.insert(ctx.game_id, child_pid);
+    ctx.running_games
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(ctx.game_id, child_pid);
 
     let game_id = ctx.game_id;
     let variant_id = ctx.variant_id;
@@ -224,7 +270,12 @@ pub fn launch_game(
 
 /// Run a pre-launch command synchronously via `sh -c`.
 /// Uses the game's working directory. Aborts launch on non-zero exit.
-fn run_pre_launch(cmd: &str, cwd: Option<&str>, save_dir: &str, game_id: i64) -> Result<(), String> {
+fn run_pre_launch(
+    cmd: &str,
+    cwd: Option<&str>,
+    save_dir: &str,
+    game_id: i64,
+) -> Result<(), String> {
     let log_path = super::wrapper::game_log_path(save_dir, game_id);
     let mut child = std::process::Command::new("sh");
     child.arg("-c").arg(cmd);
@@ -252,7 +303,12 @@ fn run_pre_launch(cmd: &str, cwd: Option<&str>, save_dir: &str, game_id: i64) ->
             let snippet = if combined.trim().is_empty() {
                 "no output".to_string()
             } else {
-                combined.trim().lines().take(10).collect::<Vec<_>>().join("\n")
+                combined
+                    .trim()
+                    .lines()
+                    .take(10)
+                    .collect::<Vec<_>>()
+                    .join("\n")
             };
             Err(format!(
                 "Pre-launch command failed (exit code {:?}):\n{}",

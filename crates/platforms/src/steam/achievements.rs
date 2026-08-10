@@ -31,17 +31,30 @@ pub fn read_steam_achievements_full(app_id: &str, _save_dir: &str) -> SteamAchie
         let Some(path) = paths::librarycache_path(steam_id, app_id) else {
             continue;
         };
-        if !path.is_file() { continue; }
+        if !path.is_file() {
+            continue;
+        }
         match parse_librarycache_full(&path) {
             Ok((achs, n_total, n_achieved)) => {
-                return SteamAchievementData { achievements: achs, n_total, n_achieved };
+                return SteamAchievementData {
+                    achievements: achs,
+                    n_total,
+                    n_achieved,
+                };
             }
             Err(e) => {
-                eprintln!("[steam] parse_librarycache_full error for {}: {}", app_id, e);
+                eprintln!(
+                    "[steam] parse_librarycache_full error for {}: {}",
+                    app_id, e
+                );
             }
         }
     }
-    SteamAchievementData { achievements: Vec::new(), n_total: 0, n_achieved: 0 }
+    SteamAchievementData {
+        achievements: Vec::new(),
+        n_total: 0,
+        n_achieved: 0,
+    }
 }
 
 /// Read the FULL achievement unlock state from Steam's binary stats files.
@@ -62,32 +75,48 @@ pub fn read_user_stats(app_id: &str) -> std::collections::HashMap<String, (bool,
         return result;
     };
     let Ok(schema_data) = std::fs::read(&schema_path) else {
-        eprintln!("[steam] read_user_stats: cannot read schema {}", schema_path.display());
+        eprintln!(
+            "[steam] read_user_stats: cannot read schema {}",
+            schema_path.display()
+        );
         return result;
     };
 
     let bit_to_name = match parse_schema(&schema_data) {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("[steam] read_user_stats: schema parse error for {}: {}", app_id, e);
+            eprintln!(
+                "[steam] read_user_stats: schema parse error for {}: {}",
+                app_id, e
+            );
             return result;
         }
     };
 
     if bit_to_name.is_empty() {
-        eprintln!("[steam] read_user_stats: no achievements found in schema for {}", app_id);
+        eprintln!(
+            "[steam] read_user_stats: no achievements found in schema for {}",
+            app_id
+        );
         return result;
     }
 
     let user_ids = paths::get_steam_user_ids();
     for steam_id in &user_ids {
-        let Some(stats_path) = paths::stats_user_path(steam_id, app_id) else { continue };
-        let Ok(stats_data) = std::fs::read(&stats_path) else { continue };
+        let Some(stats_path) = paths::stats_user_path(steam_id, app_id) else {
+            continue;
+        };
+        let Ok(stats_data) = std::fs::read(&stats_path) else {
+            continue;
+        };
 
         let achieved = match parse_user_stats(&stats_data) {
             Ok(a) => a,
             Err(e) => {
-                eprintln!("[steam] read_user_stats: user stats parse error for {}: {}", app_id, e);
+                eprintln!(
+                    "[steam] read_user_stats: user stats parse error for {}: {}",
+                    app_id, e
+                );
                 continue;
             }
         };
@@ -101,7 +130,11 @@ pub fn read_user_stats(app_id: &str) -> std::collections::HashMap<String, (bool,
     }
 
     if result.is_empty() {
-        eprintln!("[steam] read_user_stats: no user stats file found for {} (tried {} users)", app_id, user_ids.len());
+        eprintln!(
+            "[steam] read_user_stats: no user stats file found for {} (tried {} users)",
+            app_id,
+            user_ids.len()
+        );
         for name in bit_to_name.values() {
             result.insert(name.clone(), (false, 0));
         }
@@ -120,10 +153,13 @@ fn parse_schema(data: &[u8]) -> Result<std::collections::HashMap<usize, String>,
 
     let mut pos = 0;
     while pos < data.len() {
-        let Some(bits_idx) = find_bytes(data, b"bits\x00", pos) else { break; };
+        let Some(bits_idx) = find_bytes(data, b"bits\x00", pos) else {
+            break;
+        };
 
         let val_start = skip_nulls(data, bits_idx + 5);
-        let val_end = data[val_start..].iter()
+        let val_end = data[val_start..]
+            .iter()
             .position(|&b| b == 0)
             .ok_or("bits value not null-terminated")?;
         let bits_str = std::str::from_utf8(&data[val_start..val_start + val_end])
@@ -133,8 +169,7 @@ fn parse_schema(data: &[u8]) -> Result<std::collections::HashMap<usize, String>,
             continue;
         };
 
-        let next_bits = find_bytes(data, b"bits\x00", val_start)
-            .unwrap_or(data.len());
+        let next_bits = find_bytes(data, b"bits\x00", val_start).unwrap_or(data.len());
 
         let mut idx_in_section = 0;
         let mut search_pos = bits_idx;
@@ -142,7 +177,8 @@ fn parse_schema(data: &[u8]) -> Result<std::collections::HashMap<usize, String>,
             match find_bytes(data, b"\x01name\x00", search_pos) {
                 Some(name_marker_pos) if name_marker_pos < next_bits => {
                     let name_start = name_marker_pos + 6;
-                    let name_end = data[name_start..next_bits].iter()
+                    let name_end = data[name_start..next_bits]
+                        .iter()
                         .position(|&b| b == 0)
                         .ok_or("name not null-terminated")?;
                     let name = std::str::from_utf8(&data[name_start..name_start + name_end])
@@ -181,11 +217,11 @@ fn parse_user_stats(data: &[u8]) -> Result<std::collections::HashMap<usize, i64>
         }
         pos += 1;
 
-        let end = data[pos..].iter()
+        let end = data[pos..]
+            .iter()
             .position(|&b| b == 0)
             .ok_or("index string not null-terminated")?;
-        let idx_str = std::str::from_utf8(&data[pos..pos + end])
-            .map_err(|e| e.to_string())?;
+        let idx_str = std::str::from_utf8(&data[pos..pos + end]).map_err(|e| e.to_string())?;
         pos += end + 1;
 
         let Ok(bit_pos) = idx_str.parse::<usize>() else {
@@ -196,7 +232,10 @@ fn parse_user_stats(data: &[u8]) -> Result<std::collections::HashMap<usize, i64>
             break;
         }
         let ts = i64::from(u32::from_le_bytes([
-            data[pos], data[pos + 1], data[pos + 2], data[pos + 3],
+            data[pos],
+            data[pos + 1],
+            data[pos + 2],
+            data[pos + 3],
         ]));
         achieved.insert(bit_pos, ts);
         pos += 4;
@@ -210,7 +249,8 @@ fn find_bytes(data: &[u8], pattern: &[u8], from: usize) -> Option<usize> {
     if from >= data.len() || pattern.is_empty() {
         return None;
     }
-    data[from..].windows(pattern.len())
+    data[from..]
+        .windows(pattern.len())
         .position(|w| w == pattern)
         .map(|pos| from + pos)
 }
@@ -232,17 +272,27 @@ fn parse_librarycache_full(path: &Path) -> Result<(Vec<SteamAchievement>, usize,
     let mut n_achieved = 0usize;
 
     for entry in &arr {
-        let Some(pair) = entry.as_array() else { continue };
-        if pair.len() < 2 { continue; }
-        if pair[0].as_str() != Some("achievements") { continue; }
+        let Some(pair) = entry.as_array() else {
+            continue;
+        };
+        if pair.len() < 2 {
+            continue;
+        }
+        if pair[0].as_str() != Some("achievements") {
+            continue;
+        }
 
         let data_obj = pair[1].get("data").ok_or("no data")?;
 
         n_total = data_obj.get("nTotal").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        n_achieved = data_obj.get("nAchieved").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        n_achieved = data_obj
+            .get("nAchieved")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
 
         if let Some(obj) = data_obj.as_object() {
-            let vec_keys: Vec<String> = obj.keys()
+            let vec_keys: Vec<String> = obj
+                .keys()
                 .filter(|k| k.starts_with("vec"))
                 .map(|k| k.to_string())
                 .collect();
@@ -250,18 +300,46 @@ fn parse_librarycache_full(path: &Path) -> Result<(Vec<SteamAchievement>, usize,
             for vec_name in &vec_keys {
                 if let Some(vec) = data_obj.get(vec_name).and_then(|v| v.as_array()) {
                     for ach in vec {
-                        let Some(id) = ach.get("strID").and_then(|s| s.as_str()) else { continue };
-                        if !seen.insert(id.to_string()) { continue }
+                        let Some(id) = ach.get("strID").and_then(|s| s.as_str()) else {
+                            continue;
+                        };
+                        if !seen.insert(id.to_string()) {
+                            continue;
+                        }
 
                         result.push(SteamAchievement {
                             id: id.to_string(),
-                            display_name: ach.get("strName").and_then(|s| s.as_str()).unwrap_or("").to_string(),
-                            description: ach.get("strDescription").and_then(|s| s.as_str()).unwrap_or("").to_string(),
-                            hidden: ach.get("bHidden").and_then(|b| b.as_bool()).unwrap_or(false),
-                            earned: ach.get("bAchieved").and_then(|b| b.as_bool()).unwrap_or(false),
-                            earned_time: ach.get("rtUnlocked").and_then(|t| t.as_i64()).unwrap_or(0),
-                            icon_url: ach.get("strImage").and_then(|s| s.as_str()).unwrap_or("").to_string(),
-                            global_percent: ach.get("flAchieved").and_then(|f| f.as_f64()).unwrap_or(0.0),
+                            display_name: ach
+                                .get("strName")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            description: ach
+                                .get("strDescription")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            hidden: ach
+                                .get("bHidden")
+                                .and_then(|b| b.as_bool())
+                                .unwrap_or(false),
+                            earned: ach
+                                .get("bAchieved")
+                                .and_then(|b| b.as_bool())
+                                .unwrap_or(false),
+                            earned_time: ach
+                                .get("rtUnlocked")
+                                .and_then(|t| t.as_i64())
+                                .unwrap_or(0),
+                            icon_url: ach
+                                .get("strImage")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            global_percent: ach
+                                .get("flAchieved")
+                                .and_then(|f| f.as_f64())
+                                .unwrap_or(0.0),
                         });
                     }
                 }
@@ -346,7 +424,8 @@ mod tests {
 
     #[test]
     fn test_parse_user_stats_skips_non_numeric() {
-        let data = b"\x02crc\x00\x2e\x7f\x28\xab\x02data\x00\x00\x00\x00\x00\x025\x00\x01\x00\x00\x00";
+        let data =
+            b"\x02crc\x00\x2e\x7f\x28\xab\x02data\x00\x00\x00\x00\x00\x025\x00\x01\x00\x00\x00";
         let achieved = parse_user_stats(data).unwrap();
         assert_eq!(achieved.len(), 1);
         assert!(achieved.contains_key(&5));
@@ -355,7 +434,8 @@ mod tests {
     #[test]
     fn test_read_user_stats_combines_schema_and_stats() {
         let schema = b"\x00app\x00\x00stats\x00\x001\x00\x00bits\x00\x0030\x00\x01name\x00ACH_A\x00\x00display\x00\x00name\x00\x01english\x00Test A\x00\x00stats\x00\x002\x00\x00bits\x00\x000\x00\x01name\x00ACH_B\x00\x00display\x00\x00name\x00\x01english\x00Test B\x00";
-        let user_stats = b"\x02crc\x00\x00\x00\x00\x00\x020\x00\x01\x02\x03\x04\x0230\x00\x05\x06\x07\x08";
+        let user_stats =
+            b"\x02crc\x00\x00\x00\x00\x00\x020\x00\x01\x02\x03\x04\x0230\x00\x05\x06\x07\x08";
 
         let bit_to_name = parse_schema(schema).unwrap();
         assert_eq!(bit_to_name.len(), 2);

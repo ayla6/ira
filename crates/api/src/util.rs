@@ -95,6 +95,9 @@ mod tests {
 
     #[test]
     fn test_urlencode_safe_chars() {
-        assert_eq!(urlencode("hello-world_foo.bar~baz"), "hello-world_foo.bar~baz");
+        assert_eq!(
+            urlencode("hello-world_foo.bar~baz"),
+            "hello-world_foo.bar~baz"
+        );
     }
 }

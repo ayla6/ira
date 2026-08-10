@@ -1,17 +1,25 @@
-use gtk4::prelude::*;
-use adw::prelude::*;
-use crate::MergedAchievement;
-use crate::strings as S;
+use super::css::*;
 use super::image_budget::ImageLoadBudget;
 use super::state::SharedState;
-use super::css::*;
+use crate::strings as S;
+use crate::MergedAchievement;
+use adw::prelude::*;
 
 pub const FIRST_BATCH: usize = 8;
 pub const BATCH_SIZE: usize = 20;
 
-pub fn build_global_tab(game: &crate::Game, global_vbox: &gtk4::Box, state: &SharedState, gen: u32) {
+pub fn build_global_tab(
+    game: &crate::Game,
+    global_vbox: &gtk4::Box,
+    state: &SharedState,
+    gen: u32,
+) {
     let mut all_ach: Vec<MergedAchievement> = game.achievements.clone();
-    all_ach.sort_by(|a, b| b.global_percent.partial_cmp(&a.global_percent).unwrap_or(std::cmp::Ordering::Equal));
+    all_ach.sort_by(|a, b| {
+        b.global_percent
+            .partial_cmp(&a.global_percent)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let global_group = adw::PreferencesGroup::new();
     global_group.set_title(S::GLOBAL_UNLOCK_RATES);
@@ -51,7 +59,11 @@ pub fn build_global_tab(game: &crate::Game, global_vbox: &gtk4::Box, state: &Sha
     }
 }
 
-pub fn add_global_row(group: &adw::PreferencesGroup, ach: &MergedAchievement, budget: &mut ImageLoadBudget) {
+pub fn add_global_row(
+    group: &adw::PreferencesGroup,
+    ach: &MergedAchievement,
+    budget: &mut ImageLoadBudget,
+) {
     let (row, reveal) = create_global_stats_row(ach, budget);
     group.add(&row);
     if let Some(reveal) = reveal {
@@ -274,8 +286,12 @@ pub fn create_global_stats_row(
         let stack_weak = content_stack.downgrade();
         let row_weak = row.downgrade();
         Some(Box::new(move || {
-            let Some(row) = row_weak.upgrade() else { return };
-            let Some(stack) = stack_weak.upgrade() else { return };
+            let Some(row) = row_weak.upgrade() else {
+                return;
+            };
+            let Some(stack) = stack_weak.upgrade() else {
+                return;
+            };
             stack.set_visible_child_name("real");
             row.set_activatable(false);
             row.set_selectable(false);

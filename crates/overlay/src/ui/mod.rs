@@ -9,11 +9,11 @@ mod vertex;
 pub(crate) mod widget;
 mod widgets;
 
+pub use renderer::mark_ui_dirty;
 pub use renderer::UiRenderer;
-pub use widget::Event;
 #[cfg(all(feature = "pango", feature = "cosmic-text"))]
 pub use text::toggle_backend;
-pub use renderer::mark_ui_dirty;
+pub use widget::Event;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;

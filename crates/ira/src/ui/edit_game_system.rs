@@ -1,11 +1,12 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-use gtk4::prelude::*;
+use super::settings_dialog;
+use super::system_settings::{
+    build_env_vars_group, build_ld_paths_group, build_override_switch_row, OverrideState,
+};
+use super::wine_config_helpers::make_revert_btn;
 use adw::prelude::*;
 use ira_models::GameLaunchConfig;
-use super::settings_dialog;
-use super::system_settings::{build_override_switch_row, build_env_vars_group, build_ld_paths_group, OverrideState};
-use super::wine_config_helpers::make_revert_btn;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Clone)]
 pub(super) struct SystemWidgets {
@@ -46,14 +47,18 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     perf_group.set_title("Performance");
 
     let (gamemode_row, gamemode_state) = build_override_switch_row(
-        "Gamemode", "Feral Interactive GameMode",
-        params.gamemode_default, params.launch.gamemode,
+        "Gamemode",
+        "Feral Interactive GameMode",
+        params.gamemode_default,
+        params.launch.gamemode,
     );
     perf_group.add(&gamemode_row);
 
     let (mangohud_row, mangohud_state) = build_override_switch_row(
-        "MangoHud", "Performance overlay",
-        params.mangohud_default, params.launch.mangohud,
+        "MangoHud",
+        "Performance overlay",
+        params.mangohud_default,
+        params.launch.mangohud,
     );
     perf_group.add(&mangohud_row);
 
@@ -80,10 +85,14 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
         let gse = gamescope_row.clone();
         let rev_c = gs_reverting.clone();
         gs_switch.connect_active_notify(move |sw| {
-            if *rev_c.borrow() { return; }
+            if *rev_c.borrow() {
+                return;
+            }
             *state_c.borrow_mut() = Some(sw.is_active());
             btn_c.set_visible(true);
-            if sw.is_active() { gse.set_expanded(true); }
+            if sw.is_active() {
+                gse.set_expanded(true);
+            }
         });
     }
     {
@@ -143,14 +152,18 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
         let idx = if params.launch.gpu.is_empty() {
             // If app-level default is set, select it; otherwise "Auto"
             if !params.gpu_default.is_empty() {
-                gpu_options.iter().position(|c| c == params.gpu_default)
+                gpu_options
+                    .iter()
+                    .position(|c| c == params.gpu_default)
                     .map(|i| i + 1)
                     .unwrap_or(0)
             } else {
                 0
             }
         } else {
-            gpu_options.iter().position(|c| c == &params.launch.gpu)
+            gpu_options
+                .iter()
+                .position(|c| c == &params.launch.gpu)
                 .map(|i| i + 1)
                 .unwrap_or(0)
         };
@@ -165,9 +178,8 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     let (env_group, env_vars_box) = build_env_vars_group(&params.launch.env_vars);
     page.append(&env_group);
 
-    let (ld_group, ld_preload_entry, ld_library_path_entry) = build_ld_paths_group(
-        &params.launch.ld_preload, &params.launch.ld_library_path,
-    );
+    let (ld_group, ld_preload_entry, ld_library_path_entry) =
+        build_ld_paths_group(&params.launch.ld_preload, &params.launch.ld_library_path);
     page.append(&ld_group);
 
     let scroll = gtk4::ScrolledWindow::new();
@@ -175,9 +187,13 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     scroll.set_vexpand(true);
     scroll.set_hexpand(true);
 
-    params.sidebar.append(&settings_dialog::settings_sidebar_row(
-        "applications-science-symbolic", "System", "system",
-    ));
+    params
+        .sidebar
+        .append(&settings_dialog::settings_sidebar_row(
+            "applications-science-symbolic",
+            "System",
+            "system",
+        ));
     params.stack.add_named(&scroll, Some("system"));
 
     SystemWidgets {

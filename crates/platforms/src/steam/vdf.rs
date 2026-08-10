@@ -52,7 +52,10 @@ struct VdfParser<'a> {
 
 impl<'a> VdfParser<'a> {
     fn new(text: &'a str) -> Self {
-        Self { chars: text.as_bytes(), pos: 0 }
+        Self {
+            chars: text.as_bytes(),
+            pos: 0,
+        }
     }
 
     fn skip_ws(&mut self) {
@@ -83,7 +86,9 @@ impl<'a> VdfParser<'a> {
                 self.pos += 1;
             }
         }
-        let s = std::str::from_utf8(&self.chars[start..self.pos]).ok()?.to_string();
+        let s = std::str::from_utf8(&self.chars[start..self.pos])
+            .ok()?
+            .to_string();
         if self.pos < self.chars.len() {
             self.pos += 1;
         }
@@ -157,7 +162,10 @@ mod tests {
 "#;
         let parsed = parse_vdf(vdf).unwrap();
         let folder0 = get_obj(&parsed, "0").unwrap();
-        assert_eq!(folder0.get("path"), Some(&VdfValue::Str("/home/user/.local/share/Steam".into())));
+        assert_eq!(
+            folder0.get("path"),
+            Some(&VdfValue::Str("/home/user/.local/share/Steam".into()))
+        );
     }
 
     #[test]
@@ -197,7 +205,10 @@ mod tests {
         let parsed = parse_vdf(vdf).unwrap();
         let user = get_obj(&parsed, "76561198000000000").unwrap();
         assert_eq!(user.get("MostRecent"), Some(&VdfValue::Str("1".into())));
-        assert_eq!(user.get("PersonaName"), Some(&VdfValue::Str("Display Name".into())));
+        assert_eq!(
+            user.get("PersonaName"),
+            Some(&VdfValue::Str("Display Name".into()))
+        );
     }
 
     #[test]

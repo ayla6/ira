@@ -1,10 +1,9 @@
-use gtk4::prelude::*;
+use super::css::*;
+use super::helpers::clear_children;
+use super::state::SharedState;
 use adw::prelude::*;
 use std::rc::Rc;
 use std::sync::Arc;
-use super::helpers::clear_children;
-use super::state::SharedState;
-use super::css::*;
 
 pub(super) fn show_steam_id_search_popup(
     state: &SharedState,
@@ -73,7 +72,9 @@ pub(super) fn show_steam_id_search_popup(
     let button_label_s = button_label.to_string();
     let do_search = move || {
         let term = entry_s.text().to_string();
-        if term.is_empty() { return; }
+        if term.is_empty() {
+            return;
+        }
         let steam = state_c.borrow().steam.clone();
         let results_shared = Arc::new(std::sync::Mutex::new(None::<Vec<(String, String)>>));
         let results_thread = results_shared.clone();
@@ -88,7 +89,9 @@ pub(super) fn show_steam_id_search_popup(
         let on_select_c2 = on_select_c.clone();
         let btn_label = button_label_s.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-            if !dialog_c2.is_visible() { return glib::ControlFlow::Break; }
+            if !dialog_c2.is_visible() {
+                return glib::ControlFlow::Break;
+            }
             if let Some(results) = results_poll.lock().unwrap().take() {
                 clear_children(&list_c2);
                 if results.is_empty() {

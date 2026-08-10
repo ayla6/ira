@@ -1,13 +1,13 @@
+use crate::strings as S;
+use crate::Game;
 use adw::prelude::{AdwDialogExt, AdwWindowExt, AlertDialogExt};
 use gtk4::prelude::*;
-use crate::Game;
-use crate::strings as S;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::state::{PendingImage, SharedState};
 use super::css::*;
+use super::state::{PendingImage, SharedState};
 
 pub struct DialogLayout {
     pub window: adw::Window,
@@ -81,7 +81,11 @@ pub fn entry_path_closure(entry: &adw::EntryRow) -> impl Fn() -> Option<String> 
     let entry = entry.clone();
     move || {
         let t = entry.text().to_string();
-        if t.is_empty() { None } else { Some(t) }
+        if t.is_empty() {
+            None
+        } else {
+            Some(t)
+        }
     }
 }
 
@@ -134,7 +138,12 @@ pub fn make_browse_button(
     browse.set_valign(gtk4::Align::Center);
     let parent = parent.cloned();
     let title = title.to_string();
-    let filter = filter.map(|(name, mimes)| (name.to_string(), mimes.iter().map(|s| s.to_string()).collect::<Vec<_>>()));
+    let filter = filter.map(|(name, mimes)| {
+        (
+            name.to_string(),
+            mimes.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+        )
+    });
     let on_select = std::rc::Rc::new(on_select);
     let initial_path = std::rc::Rc::new(initial_path);
     browse.connect_clicked(move |_| {
@@ -253,8 +262,11 @@ pub fn open_file_location(file_path: &str) {
     let uri = format!("file://{}", file_path);
     let dbus_result = std::process::Command::new("dbus-send")
         .args([
-            "--session", "--print-reply", "--dest=org.freedesktop.FileManager1",
-            "/org/freedesktop/FileManager1", "org.freedesktop.FileManager1.ShowItems",
+            "--session",
+            "--print-reply",
+            "--dest=org.freedesktop.FileManager1",
+            "/org/freedesktop/FileManager1",
+            "org.freedesktop.FileManager1.ShowItems",
             &format!("array:string:{}", uri),
             "string:",
         ])
@@ -329,7 +341,12 @@ pub fn esc(s: &str) -> String {
 pub fn refresh_settings_images_page(
     state: &SharedState,
     db_id: i64,
-    build_page: impl Fn(&SharedState, &Game, &adw::Window, Option<Rc<RefCell<HashMap<String, PendingImage>>>>) -> gtk4::Widget,
+    build_page: impl Fn(
+        &SharedState,
+        &Game,
+        &adw::Window,
+        Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
+    ) -> gtk4::Widget,
 ) {
     let sd = match state.borrow().settings_data.clone() {
         Some(d) => d,
@@ -339,7 +356,13 @@ pub fn refresh_settings_images_page(
         if let Some(old) = sd.stack.child_by_name("images") {
             sd.stack.remove(&old);
         }
-        if let Some(game) = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned() {
+        if let Some(game) = state
+            .borrow()
+            .games
+            .iter()
+            .find(|g| g.db_id == db_id)
+            .cloned()
+        {
             let new_page = build_page(state, &game, &sd.window, Some(sd.pending_copies.clone()));
             sd.stack.add_named(&new_page, Some("images"));
         }
@@ -385,15 +408,23 @@ pub fn spawn_terminal(env: &[(String, String)]) {
     if let Ok(term) = std::env::var("TERMINAL") {
         let mut cmd = std::process::Command::new(&term);
         cmd.arg("-e").arg("bash");
-        for (k, v) in env { cmd.env(k, v); }
-        if cmd.spawn().is_ok() { return; }
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        if cmd.spawn().is_ok() {
+            return;
+        }
     }
 
     for (term, args) in terminals {
         let mut cmd = std::process::Command::new(term);
         cmd.args(*args);
-        for (k, v) in env { cmd.env(k, v); }
-        if cmd.spawn().is_ok() { return; }
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        if cmd.spawn().is_ok() {
+            return;
+        }
     }
     eprintln!("No terminal emulator found. Set $TERMINAL or install gnome-terminal/konsole/xterm.");
 }

@@ -1,27 +1,30 @@
 mod crud;
-mod lookup;
-mod settings;
-mod game_config;
-mod sessions;
-mod profiles;
-mod variants;
-mod groups;
-mod metadata;
 mod discs;
-mod setup;
+mod game_config;
+mod groups;
+mod lookup;
+mod metadata;
+mod profiles;
 mod row_mapping;
+mod sessions;
+mod settings;
+mod setup;
+mod variants;
 
 pub use crud::*;
-pub use lookup::*;
-pub use settings::*;
-pub use game_config::*;
-pub use sessions::*;
-pub use profiles::*;
-pub use variants::*;
-pub use groups::*;
-pub use metadata::*;
 pub use discs::*;
-pub use setup::{checkpoint, init_db, migrate_rom_paths_to_relative, update_field};
+pub use game_config::*;
+pub use groups::*;
+pub use lookup::*;
+pub use metadata::*;
+pub use profiles::*;
 pub(crate) use row_mapping::{game_entry_from_row, lock_db, GAME_COLUMNS};
+pub use sessions::*;
+pub use settings::*;
+pub use setup::{
+    checkpoint, init_db, migrate_legacy_console_ids, migrate_rom_paths_to_relative,
+    migrate_rom_paths_to_relative_from_folders, update_field,
+};
+pub use variants::*;
 
 pub type DbConn = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;

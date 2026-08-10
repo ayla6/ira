@@ -19,14 +19,7 @@ pub(crate) fn set_secret(key: &str, value: &str) -> Result<(), String> {
         return Ok(());
     }
     let mut cmd = Command::new("secret-tool");
-    cmd.args([
-        "store",
-        "--label=Ira Key",
-        "app",
-        "ira",
-        "key",
-        key,
-    ]);
+    cmd.args(["store", "--label=Ira Key", "app", "ira", "key", key]);
     cmd.stdin(std::process::Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
     if let Some(stdin) = child.stdin.as_mut() {

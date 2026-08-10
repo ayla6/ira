@@ -14,9 +14,8 @@ use std::sync::{Mutex, OnceLock};
 use ira_overlay::ui::{capture, push_event, Event};
 use ira_overlay_ipc::InputEventRaw;
 use ira_overlay_ipc::{
-    MappedShm, DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
-    DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS,
-    DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+    MappedShm, DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS, DEFAULT_SCREENSHOT_KEYCODE,
+    DEFAULT_SCREENSHOT_MODS, DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
 };
 
 type PollEventsFn = unsafe extern "C" fn(*mut InputEventRaw, usize) -> usize;
@@ -85,7 +84,12 @@ pub fn has_sdl_hooks() -> bool {
 /// Increments the present counter in the shim. Called on every queue_present.
 pub fn increment_present_count() {
     let f = *INCREMENT_PRESENT.get_or_init(|| {
-        let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_increment_present_count".as_ptr()) };
+        let p = unsafe {
+            libc::dlsym(
+                libc::RTLD_DEFAULT,
+                c"ira_overlay_increment_present_count".as_ptr(),
+            )
+        };
         (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
     });
     if let Some(f) = f {
@@ -96,7 +100,12 @@ pub fn increment_present_count() {
 /// Resets the present counter to zero. Called when a new swapchain is created.
 pub fn reset_present_count() {
     let f = *RESET_PRESENT.get_or_init(|| {
-        let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_reset_present_count".as_ptr()) };
+        let p = unsafe {
+            libc::dlsym(
+                libc::RTLD_DEFAULT,
+                c"ira_overlay_reset_present_count".as_ptr(),
+            )
+        };
         (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
     });
     if let Some(f) = f {
@@ -108,7 +117,12 @@ pub fn reset_present_count() {
 /// If the shim isn't loaded (dlsym fails), returns true — no present count to wait for.
 pub fn ready_for_overlay() -> bool {
     let f = *READY_FOR_OVERLAY.get_or_init(|| {
-        let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_ready_for_overlay".as_ptr()) };
+        let p = unsafe {
+            libc::dlsym(
+                libc::RTLD_DEFAULT,
+                c"ira_overlay_ready_for_overlay".as_ptr(),
+            )
+        };
         (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
     });
     f.is_none_or(|f| unsafe { f() != 0 })
@@ -121,8 +135,11 @@ static SHM: OnceLock<Option<Mutex<MappedShm>>> = OnceLock::new();
 fn shm() -> Option<&'static Mutex<MappedShm>> {
     SHM.get_or_init(|| {
         let path = std::env::var_os("IRA_OVERLAY_SHM")?;
-        MappedShm::open_rw(&path.to_string_lossy()).ok().map(Mutex::new)
-    }).as_ref()
+        MappedShm::open_rw(&path.to_string_lossy())
+            .ok()
+            .map(Mutex::new)
+    })
+    .as_ref()
 }
 
 /// Reads hotkey config from SHM, falling back to defaults.
@@ -130,18 +147,45 @@ fn shm() -> Option<&'static Mutex<MappedShm>> {
 pub fn hotkeys() -> (u32, u32, u32, u32, u32, u32) {
     let Some(shm) = shm().and_then(|m| m.lock().ok()) else {
         return (
-            DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
-            DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS,
-            DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+            DEFAULT_TOGGLE_KEYCODE,
+            DEFAULT_TOGGLE_MODS,
+            DEFAULT_SCREENSHOT_KEYCODE,
+            DEFAULT_SCREENSHOT_MODS,
+            DEFAULT_RECORD_KEYCODE,
+            DEFAULT_RECORD_MODS,
         );
     };
     let hdr = shm.header();
-    let tog_kc = if hdr.toggle_keysym == 0 { DEFAULT_TOGGLE_KEYCODE } else { hdr.toggle_keysym };
-    let tog_mods = if hdr.toggle_keysym == 0 { DEFAULT_TOGGLE_MODS } else { hdr.toggle_mods };
-    let ss_kc = if hdr.screenshot_keysym == 0 { DEFAULT_SCREENSHOT_KEYCODE } else { hdr.screenshot_keysym };
-    let ss_mods = if hdr.screenshot_keysym == 0 { DEFAULT_SCREENSHOT_MODS } else { hdr.screenshot_mods };
-    let rec_kc = if hdr.record_keysym == 0 { DEFAULT_RECORD_KEYCODE } else { hdr.record_keysym };
-    let rec_mods = if hdr.record_keysym == 0 { DEFAULT_RECORD_MODS } else { hdr.record_mods };
+    let tog_kc = if hdr.toggle_keysym == 0 {
+        DEFAULT_TOGGLE_KEYCODE
+    } else {
+        hdr.toggle_keysym
+    };
+    let tog_mods = if hdr.toggle_keysym == 0 {
+        DEFAULT_TOGGLE_MODS
+    } else {
+        hdr.toggle_mods
+    };
+    let ss_kc = if hdr.screenshot_keysym == 0 {
+        DEFAULT_SCREENSHOT_KEYCODE
+    } else {
+        hdr.screenshot_keysym
+    };
+    let ss_mods = if hdr.screenshot_keysym == 0 {
+        DEFAULT_SCREENSHOT_MODS
+    } else {
+        hdr.screenshot_mods
+    };
+    let rec_kc = if hdr.record_keysym == 0 {
+        DEFAULT_RECORD_KEYCODE
+    } else {
+        hdr.record_keysym
+    };
+    let rec_mods = if hdr.record_keysym == 0 {
+        DEFAULT_RECORD_MODS
+    } else {
+        hdr.record_mods
+    };
     (tog_kc, tog_mods, ss_kc, ss_mods, rec_kc, rec_mods)
 }
 
@@ -169,13 +213,22 @@ fn convert_and_forward(raw: &InputEventRaw) {
     match raw.event_type {
         0 => {
             // Mouse move — push event with coordinates.
-            push_event(Event::MouseMove { x: raw.x as f32, y: raw.y as f32 });
+            push_event(Event::MouseMove {
+                x: raw.x as f32,
+                y: raw.y as f32,
+            });
         }
         1 => {
-            push_event(Event::MouseDown { x: raw.x as f32, y: raw.y as f32 });
+            push_event(Event::MouseDown {
+                x: raw.x as f32,
+                y: raw.y as f32,
+            });
         }
         2 => {
-            push_event(Event::MouseUp { x: raw.x as f32, y: raw.y as f32 });
+            push_event(Event::MouseUp {
+                x: raw.x as f32,
+                y: raw.y as f32,
+            });
         }
         3 => {
             // Key press — map navigation keys.
@@ -204,7 +257,9 @@ fn convert_and_forward(raw: &InputEventRaw) {
         }
         7 => {
             // Mouse scroll event.
-            push_event(Event::Scroll { delta_y: raw.y as f32 });
+            push_event(Event::Scroll {
+                delta_y: raw.y as f32,
+            });
         }
         _ => {}
     }

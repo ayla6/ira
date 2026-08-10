@@ -1,5 +1,5 @@
-mod client;
 pub mod assets;
+mod client;
 pub mod download;
 pub mod nemirtingas;
 pub mod sgdb;

@@ -47,8 +47,17 @@ const AXIS_VERTICAL: u32 = 0;
 type FnCreateQueue = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
 type FnDispatchPending = unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int;
 type FnRoundtrip = unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int;
-type FnMarshalCtor = unsafe extern "C" fn(*mut c_void, u32, *const c_void, *mut c_void) -> *mut c_void;
-type FnMarshalCtorBind = unsafe extern "C" fn(*mut c_void, u32, *const c_void, u32, *const c_char, u32, *mut c_void) -> *mut c_void;
+type FnMarshalCtor =
+    unsafe extern "C" fn(*mut c_void, u32, *const c_void, *mut c_void) -> *mut c_void;
+type FnMarshalCtorBind = unsafe extern "C" fn(
+    *mut c_void,
+    u32,
+    *const c_void,
+    u32,
+    *const c_char,
+    u32,
+    *mut c_void,
+) -> *mut c_void;
 type FnAddListener = unsafe extern "C" fn(*mut c_void, *const *const c_void, *mut c_void) -> c_int;
 type FnSetQueue = unsafe extern "C" fn(*mut c_void, *mut c_void);
 
@@ -164,8 +173,11 @@ static POINTER_LISTENER: PointerListener = PointerListener {
 // --- Registry / seat callbacks ---
 
 extern "C" fn registry_global(
-    _: *mut c_void, _: *mut c_void,
-    name: u32, interface: *const c_char, version: u32,
+    _: *mut c_void,
+    _: *mut c_void,
+    name: u32,
+    interface: *const c_char,
+    version: u32,
 ) {
     if unsafe { CStr::from_ptr(interface) }.to_bytes() == b"wl_seat" {
         SEAT_NAME.store(name, Ordering::Relaxed);
@@ -174,7 +186,9 @@ extern "C" fn registry_global(
 }
 
 extern "C" fn seat_capabilities(_: *mut c_void, seat: *mut c_void, caps: u32) {
-    let Some(fns) = FNS.get().and_then(|f| f.as_ref()) else { return };
+    let Some(fns) = FNS.get().and_then(|f| f.as_ref()) else {
+        return;
+    };
     // caps: 1 = pointer, 2 = keyboard, 4 = touch
     if caps & 1 != 0 && POINTER.load(Ordering::Relaxed).is_null() {
         let ptr = unsafe { (fns.marshal_ctor)(seat, 0, fns.pointer_iface, std::ptr::null_mut()) };
@@ -188,7 +202,13 @@ extern "C" fn seat_capabilities(_: *mut c_void, seat: *mut c_void, caps: u32) {
 
 // --- Keyboard callbacks ---
 
-extern "C" fn keyboard_enter(_: *mut c_void, _: *mut c_void, _: u32, _: *mut c_void, _: *mut c_void) {
+extern "C" fn keyboard_enter(
+    _: *mut c_void,
+    _: *mut c_void,
+    _: u32,
+    _: *mut c_void,
+    _: *mut c_void,
+) {
     HAS_FOCUS.store(true, Ordering::Relaxed);
     eprintln!("ira-overlay: keyboard enter (focus=true)");
 }
@@ -198,11 +218,10 @@ extern "C" fn keyboard_leave(_: *mut c_void, _: *mut c_void, _: u32, _: *mut c_v
     eprintln!("ira-overlay: keyboard leave (focus=false)");
 }
 
-extern "C" fn keyboard_key(
-    _: *mut c_void, _: *mut c_void,
-    _: u32, _: u32, key: u32, state: u32,
-) {
-    if !overlay_active() { return; }
+extern "C" fn keyboard_key(_: *mut c_void, _: *mut c_void, _: u32, _: u32, key: u32, state: u32) {
+    if !overlay_active() {
+        return;
+    }
     let pressed = state == KEY_PRESSED;
     let mods = MODS_DEPRESSED.load(Ordering::Relaxed);
 
@@ -226,7 +245,9 @@ extern "C" fn keyboard_key(
     }
 
     // Navigation keys and debug toggles only when overlay is visible.
-    if !crate::shim_bridge::is_visible() { return; }
+    if !crate::shim_bridge::is_visible() {
+        return;
+    }
     #[cfg(debug_assertions)]
     if pressed && key == KC_F10 {
         ira_overlay::ui::toggle_backend();
@@ -248,8 +269,13 @@ extern "C" fn keyboard_key(
 }
 
 extern "C" fn keyboard_modifiers(
-    _: *mut c_void, _: *mut c_void,
-    _: u32, mods_depressed: u32, _: u32, _: u32, _: u32,
+    _: *mut c_void,
+    _: *mut c_void,
+    _: u32,
+    mods_depressed: u32,
+    _: u32,
+    _: u32,
+    _: u32,
 ) {
     MODS_DEPRESSED.store(mods_depressed, Ordering::Relaxed);
 }
@@ -257,17 +283,18 @@ extern "C" fn keyboard_modifiers(
 // --- Pointer callbacks ---
 
 extern "C" fn pointer_enter(
-    _: *mut c_void, _: *mut c_void, _: u32, _: *mut c_void,
-    sx: i32, sy: i32,
+    _: *mut c_void,
+    _: *mut c_void,
+    _: u32,
+    _: *mut c_void,
+    sx: i32,
+    sy: i32,
 ) {
     MOUSE_SX.store(sx, Ordering::Relaxed);
     MOUSE_SY.store(sy, Ordering::Relaxed);
 }
 
-extern "C" fn pointer_motion(
-    _: *mut c_void, _: *mut c_void, _: u32,
-    sx: i32, sy: i32,
-) {
+extern "C" fn pointer_motion(_: *mut c_void, _: *mut c_void, _: u32, sx: i32, sy: i32) {
     MOUSE_SX.store(sx, Ordering::Relaxed);
     MOUSE_SY.store(sy, Ordering::Relaxed);
     if crate::shim_bridge::is_visible() {
@@ -277,10 +304,16 @@ extern "C" fn pointer_motion(
 }
 
 extern "C" fn pointer_button(
-    _: *mut c_void, _: *mut c_void, _: u32, _: u32,
-    _button: u32, state: u32,
+    _: *mut c_void,
+    _: *mut c_void,
+    _: u32,
+    _: u32,
+    _button: u32,
+    state: u32,
 ) {
-    if !crate::shim_bridge::is_visible() { return; }
+    if !crate::shim_bridge::is_visible() {
+        return;
+    }
     let (x, y) = fixed_to_f32(
         MOUSE_SX.load(Ordering::Relaxed),
         MOUSE_SY.load(Ordering::Relaxed),
@@ -292,12 +325,13 @@ extern "C" fn pointer_button(
     }
 }
 
-extern "C" fn pointer_axis(
-    _: *mut c_void, _: *mut c_void, _: u32,
-    axis: u32, value: i32,
-) {
-    if !crate::shim_bridge::is_visible() { return; }
-    if axis != AXIS_VERTICAL { return; }
+extern "C" fn pointer_axis(_: *mut c_void, _: *mut c_void, _: u32, axis: u32, value: i32) {
+    if !crate::shim_bridge::is_visible() {
+        return;
+    }
+    if axis != AXIS_VERTICAL {
+        return;
+    }
     let delta_y = if value > 0 { 1.0 } else { -1.0 };
     push_event(Event::Scroll { delta_y });
 }
@@ -310,12 +344,23 @@ pub fn init(display: *mut c_void) {
     let fns = FNS.get().and_then(|f| f.as_ref()).unwrap();
 
     let queue = unsafe { (fns.create_queue)(display) };
-    if queue.is_null() { return; }
+    if queue.is_null() {
+        return;
+    }
 
-    let registry = unsafe { (fns.marshal_ctor)(display, 1, fns.registry_iface, std::ptr::null_mut()) };
-    if registry.is_null() { return; }
+    let registry =
+        unsafe { (fns.marshal_ctor)(display, 1, fns.registry_iface, std::ptr::null_mut()) };
+    if registry.is_null() {
+        return;
+    }
     unsafe { (fns.set_queue)(registry, queue) };
-    unsafe { (fns.add_listener)(registry, &REGISTRY_LISTENER as *const _ as *const *const c_void, std::ptr::null_mut()) };
+    unsafe {
+        (fns.add_listener)(
+            registry,
+            &REGISTRY_LISTENER as *const _ as *const *const c_void,
+            std::ptr::null_mut(),
+        )
+    };
 
     DISPLAY.store(display, Ordering::Relaxed);
     QUEUE.store(queue, Ordering::Relaxed);
@@ -323,40 +368,74 @@ pub fn init(display: *mut c_void) {
     unsafe { (fns.roundtrip)(display, queue) };
 
     let name = SEAT_NAME.load(Ordering::Relaxed);
-    if name == 0 { return; }
+    if name == 0 {
+        return;
+    }
 
     let version = SEAT_VERSION.load(Ordering::Relaxed);
-    let seat = unsafe { (fns.marshal_ctor_bind)(
-        registry, 0, fns.seat_iface,
-        name, c"wl_seat".as_ptr(), version,
-        std::ptr::null_mut(),
-    ) };
-    if seat.is_null() { return; }
+    let seat = unsafe {
+        (fns.marshal_ctor_bind)(
+            registry,
+            0,
+            fns.seat_iface,
+            name,
+            c"wl_seat".as_ptr(),
+            version,
+            std::ptr::null_mut(),
+        )
+    };
+    if seat.is_null() {
+        return;
+    }
     unsafe { (fns.set_queue)(seat, queue) };
-    unsafe { (fns.add_listener)(seat, &SEAT_LISTENER as *const _ as *const *const c_void, std::ptr::null_mut()) };
+    unsafe {
+        (fns.add_listener)(
+            seat,
+            &SEAT_LISTENER as *const _ as *const *const c_void,
+            std::ptr::null_mut(),
+        )
+    };
 
     unsafe { (fns.roundtrip)(display, queue) };
 
     // seat_capabilities has now fired — keyboard and pointer objects are created.
     let kb = KEYBOARD.load(Ordering::Relaxed);
-    if kb.is_null() { return; }
+    if kb.is_null() {
+        return;
+    }
     unsafe { (fns.set_queue)(kb, queue) };
-    unsafe { (fns.add_listener)(kb, &KEYBOARD_LISTENER as *const _ as *const *const c_void, std::ptr::null_mut()) };
+    unsafe {
+        (fns.add_listener)(
+            kb,
+            &KEYBOARD_LISTENER as *const _ as *const *const c_void,
+            std::ptr::null_mut(),
+        )
+    };
 
     let ptr = POINTER.load(Ordering::Relaxed);
     if !ptr.is_null() {
         unsafe { (fns.set_queue)(ptr, queue) };
-        unsafe { (fns.add_listener)(ptr, &POINTER_LISTENER as *const _ as *const *const c_void, std::ptr::null_mut()) };
+        unsafe {
+            (fns.add_listener)(
+                ptr,
+                &POINTER_LISTENER as *const _ as *const *const c_void,
+                std::ptr::null_mut(),
+            )
+        };
     }
 
     unsafe { (fns.roundtrip)(display, queue) };
 }
 
 pub fn dispatch() {
-    let Some(fns) = FNS.get().and_then(|f| f.as_ref()) else { return };
+    let Some(fns) = FNS.get().and_then(|f| f.as_ref()) else {
+        return;
+    };
     let display = DISPLAY.load(Ordering::Relaxed);
     let queue = QUEUE.load(Ordering::Relaxed);
-    if display.is_null() || queue.is_null() { return; }
+    if display.is_null() || queue.is_null() {
+        return;
+    }
     unsafe { (fns.dispatch_pending)(display, queue) };
 }
 
@@ -379,7 +458,9 @@ fn dlsym_ptr(lib: *mut c_void, name: &str) -> *mut c_void {
 fn load_library() -> Option<Fns> {
     let lib_name = CString::new("libwayland-client.so.0").unwrap();
     let lib = unsafe { libc::dlopen(lib_name.as_ptr(), libc::RTLD_LAZY) };
-    if lib.is_null() { return None; }
+    if lib.is_null() {
+        return None;
+    }
 
     let p = |n: &str| dlsym_ptr(lib, n);
     let create_queue = p("wl_display_create_queue");
@@ -393,9 +474,15 @@ fn load_library() -> Option<Fns> {
     let pointer_iface = p("wl_pointer_interface");
     let registry_iface = p("wl_registry_interface");
 
-    if create_queue.is_null() || dispatch_pending.is_null() || roundtrip.is_null()
-        || marshal_ctor_raw.is_null() || add_listener.is_null() || set_queue.is_null()
-        || seat_iface.is_null() || keyboard_iface.is_null() || pointer_iface.is_null()
+    if create_queue.is_null()
+        || dispatch_pending.is_null()
+        || roundtrip.is_null()
+        || marshal_ctor_raw.is_null()
+        || add_listener.is_null()
+        || set_queue.is_null()
+        || seat_iface.is_null()
+        || keyboard_iface.is_null()
+        || pointer_iface.is_null()
         || registry_iface.is_null()
     {
         return None;
@@ -403,10 +490,16 @@ fn load_library() -> Option<Fns> {
 
     Some(Fns {
         create_queue: unsafe { std::mem::transmute::<*mut c_void, FnCreateQueue>(create_queue) },
-        dispatch_pending: unsafe { std::mem::transmute::<*mut c_void, FnDispatchPending>(dispatch_pending) },
+        dispatch_pending: unsafe {
+            std::mem::transmute::<*mut c_void, FnDispatchPending>(dispatch_pending)
+        },
         roundtrip: unsafe { std::mem::transmute::<*mut c_void, FnRoundtrip>(roundtrip) },
-        marshal_ctor: unsafe { std::mem::transmute::<*mut c_void, FnMarshalCtor>(marshal_ctor_raw) },
-        marshal_ctor_bind: unsafe { std::mem::transmute::<*mut c_void, FnMarshalCtorBind>(marshal_ctor_raw) },
+        marshal_ctor: unsafe {
+            std::mem::transmute::<*mut c_void, FnMarshalCtor>(marshal_ctor_raw)
+        },
+        marshal_ctor_bind: unsafe {
+            std::mem::transmute::<*mut c_void, FnMarshalCtorBind>(marshal_ctor_raw)
+        },
         add_listener: unsafe { std::mem::transmute::<*mut c_void, FnAddListener>(add_listener) },
         set_queue: unsafe { std::mem::transmute::<*mut c_void, FnSetQueue>(set_queue) },
         seat_iface: seat_iface as *const c_void,

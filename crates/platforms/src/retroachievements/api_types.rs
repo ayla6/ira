@@ -3,9 +3,9 @@ use std::collections::HashSet;
 use serde::Deserialize;
 use tracing::info_span;
 
-use ira_models::{Game, MergedAchievement};
 use crate::retroachievements::api::RaClient;
 use crate::retroachievements::paths;
+use ira_models::{Game, MergedAchievement};
 
 pub fn read_console_games_cache(save_dir: &str, console_id: u32) -> Option<Vec<RaGameEntry>> {
     let cache = paths::console_games_path(save_dir, console_id);
@@ -107,7 +107,12 @@ pub fn build_ra_achievements(
     save_dir: &str,
     game_id: &str,
 ) -> (Vec<MergedAchievement>, String, String) {
-    let _s = info_span!("build_ra_achievements", game_id, count = game_data.achievements.len()).entered();
+    let _s = info_span!(
+        "build_ra_achievements",
+        game_id,
+        count = game_data.achievements.len()
+    )
+    .entered();
     let mut achievements = Vec::new();
     let mut icon_path = String::new();
     let mut icon_gray_path = String::new();
@@ -162,7 +167,13 @@ pub fn build_ra_achievements(
     (achievements, icon_path, icon_gray_path)
 }
 
-pub fn enrich_ra_game(game: &mut Game, save_dir: &str, username: &str, token: &str, password: &str) {
+pub fn enrich_ra_game(
+    game: &mut Game,
+    save_dir: &str,
+    username: &str,
+    token: &str,
+    password: &str,
+) {
     let _s = info_span!("enrich_ra_game", game_id = &game.app_id[..]).entered();
     if RaClient::auth_is_broken() {
         return;
@@ -178,9 +189,12 @@ pub fn enrich_ra_game(game: &mut Game, save_dir: &str, username: &str, token: &s
         }
     };
 
-    let unlocks = client.fetch_user_unlocks(save_dir, &game.app_id).unwrap_or_default();
+    let unlocks = client
+        .fetch_user_unlocks(save_dir, &game.app_id)
+        .unwrap_or_default();
 
-    let (achievements, icon_path, _icon_gray) = build_ra_achievements(&game_data, &unlocks, &client, save_dir, &game.app_id);
+    let (achievements, icon_path, _icon_gray) =
+        build_ra_achievements(&game_data, &unlocks, &client, save_dir, &game.app_id);
 
     game.total_count = achievements.len();
     game.earned_count = achievements.iter().filter(|a| a.earned).count();
@@ -216,7 +230,11 @@ pub fn load_ra_achievements_from_cache(save_dir: &str, game_id: &str) -> Vec<Mer
 
     let ach_dir = paths::achievements_dir(save_dir, game_id);
     let badge_files: HashSet<String> = std::fs::read_dir(&ach_dir)
-        .map(|d| d.filter_map(|e| e.ok()).filter_map(|e| e.file_name().to_str().map(String::from)).collect())
+        .map(|d| {
+            d.filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().to_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
     let mut achievements = Vec::new();

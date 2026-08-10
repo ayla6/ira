@@ -16,12 +16,7 @@ pub fn notify_unlock(game_name: &str, ach: &MergedAchievement) {
 
     std::thread::spawn(move || {
         let _ = Command::new("notify-send")
-            .args([
-                "--app-name=Ira",
-                &format!("--icon={}", icon),
-                &title,
-                &body,
-            ])
+            .args(["--app-name=Ira", &format!("--icon={}", icon), &title, &body])
             .spawn()
             .and_then(|mut c| c.wait());
     });

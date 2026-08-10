@@ -1,22 +1,39 @@
-use gtk4::prelude::*;
+use super::css::*;
+use super::helpers::clear_children;
+use super::matching::match_game_to_steam;
+use super::ra_match_dialog::show_ra_search_dialog;
+use super::settings_console::build_emulator_dropdown;
+use super::state::{PendingImage, SharedState};
+use crate::strings as S;
+use crate::Game;
 use adw::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use crate::strings as S;
-use crate::Game;
-use super::matching::match_game_to_steam;
-use super::settings_dialog::build_shadps4_version_dropdown;
-use super::state::{PendingImage, SharedState};
-use super::helpers::clear_children;
-use super::ra_match_dialog::show_ra_search_dialog;
-use super::css::*;
 
 type PendingCell = Rc<RefCell<Option<String>>>;
 
-type GameGeneralPageResult = (gtk4::Box, adw::EntryRow, adw::EntryRow, PendingCell, Option<adw::EntryRow>, Option<adw::ComboRow>, PendingCell, PendingCell, Option<gtk4::Box>, Option<adw::EntryRow>, Option<gtk4::Button>);
+type GameGeneralPageResult = (
+    gtk4::Box,
+    adw::EntryRow,
+    adw::EntryRow,
+    PendingCell,
+    Option<adw::EntryRow>,
+    Option<adw::ComboRow>,
+    PendingCell,
+    PendingCell,
+    Option<gtk4::Box>,
+    Option<adw::EntryRow>,
+    Option<gtk4::Button>,
+    Option<adw::ComboRow>,
+);
 
-fn build_ra_section(state: &SharedState, game: &Game, win: &adw::Window, pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>) -> adw::PreferencesGroup {
+fn build_ra_section(
+    state: &SharedState,
+    game: &Game,
+    win: &adw::Window,
+    pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>,
+) -> adw::PreferencesGroup {
     let ra_group = adw::PreferencesGroup::new();
     ra_group.set_title("RetroAchievements");
 
@@ -42,7 +59,8 @@ fn build_ra_section(state: &SharedState, game: &Game, win: &adw::Window, pending
         let sc = state.clone();
         let game_clone = game.clone();
         unmatch_btn.connect_clicked(move |_| {
-            pc.borrow_mut().insert(pkey.clone(), PendingImage::Path(String::new()));
+            pc.borrow_mut()
+                .insert(pkey.clone(), PendingImage::Path(String::new()));
             let sd = match sc.borrow().settings_data.clone() {
                 Some(d) => d,
                 None => return,
@@ -92,7 +110,13 @@ pub(super) fn refresh_ra_section(state: &SharedState, db_id: i64) {
         Some(c) => c.clone(),
         None => return,
     };
-    let game = match state.borrow().games.iter().find(|g| g.db_id == db_id).cloned() {
+    let game = match state
+        .borrow()
+        .games
+        .iter()
+        .find(|g| g.db_id == db_id)
+        .cloned()
+    {
         Some(g) => g,
         None => return,
     };
@@ -130,7 +154,11 @@ fn add_game_path_if_needed(group: &adw::PreferencesGroup, game: &Game) {
     group.add(&path_row);
 }
 
-fn build_game_folder_row(parent: &adw::PreferencesGroup, game: &Game, win: &adw::Window) -> Option<adw::EntryRow> {
+fn build_game_folder_row(
+    parent: &adw::PreferencesGroup,
+    game: &Game,
+    win: &adw::Window,
+) -> Option<adw::EntryRow> {
     if game.kind != ira_models::GameKind::Wine && game.kind != ira_models::GameKind::Linux {
         return None;
     }
@@ -153,18 +181,39 @@ fn build_game_folder_row(parent: &adw::PreferencesGroup, game: &Game, win: &adw:
     Some(row)
 }
 
-fn build_shadps4_version_section(
-    page: &gtk4::Box,
-    game: &Game,
-) -> Rc<RefCell<Option<String>>> {
+fn build_runtime_row(parent: &adw::PreferencesGroup, game: &Game) -> Option<adw::ComboRow> {
+    if !game.kind.is_managed_pc() {
+        return None;
+    }
+    let row = adw::ComboRow::new();
+    row.set_title("Runtime");
+    row.set_subtitle("Choose native Linux or Windows through Wine");
+    let runtime_model =
+        super::helpers::string_list_from(&["Wine (Windows)".to_string(), "Linux".to_string()]);
+    row.set_model(Some(&runtime_model));
+    row.set_selected(if game.kind == ira_models::GameKind::Linux {
+        1
+    } else {
+        0
+    });
+    parent.add(&row);
+    Some(row)
+}
+
+fn build_shadps4_version_section(page: &gtk4::Box, game: &Game) -> Rc<RefCell<Option<String>>> {
     let pending_version: Rc<RefCell<Option<String>>> = Default::default();
     if game.kind == ira_models::GameKind::Ps4 {
-        let shadps4_versions = ira_platforms::ps4::read_shadps4_versions();
+        let shadps4_versions = ira_platforms::ps4::read_shadps4_launch_options();
         if !shadps4_versions.is_empty() {
             let version_group = adw::PreferencesGroup::new();
             version_group.set_title("shadPS4 Version");
 
-            let version_dropdown = build_shadps4_version_dropdown(&game.shadps4_version, true, "Follow global");
+            let version_dropdown = build_emulator_dropdown(
+                &game.shadps4_version,
+                true,
+                "Follow global",
+                &shadps4_versions,
+            );
 
             let pending_version_c = pending_version.clone();
             version_dropdown.connect_selected_notify(move |dd| {
@@ -172,8 +221,11 @@ fn build_shadps4_version_section(
                 let path = if idx == 0 {
                     String::new()
                 } else {
-                    match ira_platforms::ps4::read_shadps4_versions().into_iter().nth((idx - 1) as usize) {
-                        Some(v) => v.path.trim_matches('"').to_string(),
+                    match ira_platforms::ps4::read_shadps4_launch_options()
+                        .into_iter()
+                        .nth((idx - 1) as usize)
+                    {
+                        Some(v) => v.launch_command,
                         None => return,
                     }
                 };
@@ -254,7 +306,7 @@ fn add_emulator_dropdown_section(
     pending_emulator: &Rc<RefCell<Option<String>>>,
 ) {
     let emulators = ira_platforms::emulator_detect::detect_emulators(&game.platform_id);
-    let cores = ira_platforms::emulator_detect::detect_ra_cores();
+    let cores = ira_platforms::emulator_detect::detect_ra_cores_for_console(&game.platform_id);
     if emulators.is_empty() {
         return;
     }
@@ -459,7 +511,9 @@ fn build_language_section(
         .and_then(|lang| languages.iter().position(|l| l == lang))
         .or_else(|| {
             let prefs = &state.borrow().cfg.language_preferences;
-            prefs.iter().find_map(|p| languages.iter().position(|l| l == p))
+            prefs
+                .iter()
+                .find_map(|p| languages.iter().position(|l| l == p))
         })
         .or_else(|| languages.iter().position(|l| l == "english"))
         .unwrap_or(0);
@@ -490,22 +544,31 @@ fn build_save_migration_section(
     let (wine_prefix, is_wine) = {
         let s = state.borrow();
         let cfg = ira_db::get_game_config(&s.db, game.db_id)
-            .ok().flatten()
+            .ok()
+            .flatten()
             .map(|(_, w, _)| w)
             .unwrap_or_default();
-        (ira_launcher::wine_launch::wine_prefix(&cfg), cfg.enabled)
+        (
+            ira_launcher::wine_launch::wine_prefix(&cfg),
+            game.kind == ira_models::GameKind::Wine && cfg.enabled,
+        )
     };
-    let pfx = if is_wine { Some(wine_prefix.as_str()) } else { None };
+    let pfx = if is_wine {
+        Some(wine_prefix.as_str())
+    } else {
+        None
+    };
 
     let db = state.borrow().db.clone();
     let cached = ira_db::get_saves_centralized(&db, game.db_id).unwrap_or(false);
-    let already_centralized = cached || ira_launcher::game_saves::saves_are_centralized(
-        &details.ufs_savefiles,
-        &details.ufs_rootoverrides,
-        &game.app_id,
-        &save_dir,
-        pfx,
-    );
+    let already_centralized = cached
+        || ira_launcher::game_saves::saves_are_centralized(
+            &details.ufs_savefiles,
+            &details.ufs_rootoverrides,
+            &game.app_id,
+            &save_dir,
+            pfx,
+        );
     if already_centralized {
         if !cached {
             if let Err(e) = ira_db::set_saves_centralized(&db, game.db_id, true) {
@@ -541,6 +604,7 @@ pub(super) fn build_game_general_page(
     identity_group.set_title("Identity");
     let (title_entry, sort_entry) = build_title_and_sort_inputs(&identity_group, game);
     add_game_path_if_needed(&identity_group, game);
+    let runtime_row = build_runtime_row(&identity_group, game);
     let game_folder_entry = build_game_folder_row(&identity_group, game, win);
     general_page.append(&identity_group);
 
@@ -569,5 +633,6 @@ pub(super) fn build_game_general_page(
         ra_container,
         game_folder_entry,
         migrate_btn,
+        runtime_row,
     )
 }

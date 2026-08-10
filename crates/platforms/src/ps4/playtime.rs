@@ -4,9 +4,12 @@ use crate::ps4::play_time_path;
 
 /// Read play_time.txt, returning CUSA_ID → playtime string ("H:MM:SS").
 pub fn read_play_times() -> HashMap<String, String> {
+    read_play_times_from_path(&play_time_path())
+}
+
+pub fn read_play_times_from_path(path: &std::path::Path) -> HashMap<String, String> {
     let mut result = HashMap::new();
-    let path = play_time_path();
-    let data = match std::fs::read_to_string(&path) {
+    let data = match std::fs::read_to_string(path) {
         Ok(d) => d,
         Err(_) => return result,
     };

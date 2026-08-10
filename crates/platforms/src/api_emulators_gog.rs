@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
-use ira_models::AppDetails;
 use crate::api_emulators_shared::{
     api_emulators_dir, backup_file, copy_file, detect_arch, find_game_dll_folder, is_windows,
     restore_backup,
 };
+use ira_models::AppDetails;
+use std::path::{Path, PathBuf};
 
 pub fn find_galaxy_settings(game_exe: &str) -> Option<PathBuf> {
     let mut current = Path::new(game_exe).parent()?.to_path_buf();
@@ -29,15 +29,20 @@ pub fn write_nge_dlc_config(settings_dir: &Path, details: &AppDetails) -> Result
     let config_path = settings_dir.join("NemirtingasGalaxyEmu.json");
     let data = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read NGE config: {}", e))?;
-    let mut json: serde_json::Value = serde_json::from_str(&data)
-        .map_err(|e| format!("Failed to parse NGE config: {}", e))?;
+    let mut json: serde_json::Value =
+        serde_json::from_str(&data).map_err(|e| format!("Failed to parse NGE config: {}", e))?;
 
     let any_disabled = details.dlcs.values().any(|d| !d.enabled);
     let dlcs_map: serde_json::Map<String, serde_json::Value> = details
         .dlcs
         .iter()
         .filter(|(_, d)| d.enabled)
-        .map(|(_, d)| (d.app_id.to_string(), serde_json::Value::String(d.name.clone())))
+        .map(|(_, d)| {
+            (
+                d.app_id.to_string(),
+                serde_json::Value::String(d.name.clone()),
+            )
+        })
         .collect();
 
     if let Some(galaxy) = json.get_mut("GalaxyEmu") {
@@ -55,8 +60,7 @@ pub fn write_nge_dlc_config(settings_dir: &Path, details: &AppDetails) -> Result
 
     let out = serde_json::to_string_pretty(&json)
         .map_err(|e| format!("Failed to serialize NGE config: {}", e))?;
-    std::fs::write(&config_path, out)
-        .map_err(|e| format!("Failed to write NGE config: {}", e))
+    std::fs::write(&config_path, out).map_err(|e| format!("Failed to write NGE config: {}", e))
 }
 
 pub fn read_nge_language(settings_dir: &Path) -> Option<String> {
@@ -65,18 +69,23 @@ pub fn read_nge_language(settings_dir: &Path) -> Option<String> {
     let json: serde_json::Value = serde_json::from_str(&data).ok()?;
     if let Some(galaxy) = json.get("GalaxyEmu") {
         if let Some(user) = galaxy.get("User") {
-            return user.get("Language").and_then(|v| v.as_str()).map(|s| s.to_string());
+            return user
+                .get("Language")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
         }
     }
-    json.get("language").and_then(|v| v.as_str()).map(|s| s.to_string())
+    json.get("language")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 pub fn write_nge_language(settings_dir: &Path, language: &str) -> Result<(), String> {
     let config_path = settings_dir.join("NemirtingasGalaxyEmu.json");
     let data = std::fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read NGE config: {}", e))?;
-    let mut json: serde_json::Value = serde_json::from_str(&data)
-        .map_err(|e| format!("Failed to parse NGE config: {}", e))?;
+    let mut json: serde_json::Value =
+        serde_json::from_str(&data).map_err(|e| format!("Failed to parse NGE config: {}", e))?;
 
     if let Some(galaxy) = json.get_mut("GalaxyEmu") {
         if let Some(user) = galaxy.get_mut("User") {
@@ -94,8 +103,7 @@ pub fn write_nge_language(settings_dir: &Path, language: &str) -> Result<(), Str
 
     let out = serde_json::to_string_pretty(&json)
         .map_err(|e| format!("Failed to serialize NGE config: {}", e))?;
-    std::fs::write(&config_path, out)
-        .map_err(|e| format!("Failed to write NGE config: {}", e))
+    std::fs::write(&config_path, out).map_err(|e| format!("Failed to write NGE config: {}", e))
 }
 
 const NGE_VERSION_FILES: &[&str] = &["Galaxy.dll", "Galaxy64.dll"];
@@ -131,7 +139,11 @@ pub fn centralize_galaxy_settings(game_folder: &str) -> Result<Option<PathBuf>, 
     let root_settings = root.join("ngalaxye_settings");
 
     // If ngalaxye_settings/ is already at the root (real dir, not symlink), just symlink DLL dirs.
-    if root_settings.is_dir() && !std::fs::symlink_metadata(&root_settings).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+    if root_settings.is_dir()
+        && !std::fs::symlink_metadata(&root_settings)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+    {
         symlink_gog_dll_dirs_to_settings(root, &root_settings);
         return Ok(Some(root_settings));
     }
@@ -249,9 +261,9 @@ fn resolve_gog_version(save_dir: &str, version: &str) -> Result<PathBuf, String>
     let root = api_emulators_dir(save_dir).join("gog");
     if version.is_empty() {
         let versions = list_gog_versions(save_dir);
-        let v = versions.first().ok_or_else(|| {
-            format!("No NGE versions found at {:?}", root)
-        })?;
+        let v = versions
+            .first()
+            .ok_or_else(|| format!("No NGE versions found at {:?}", root))?;
         Ok(root.join(v))
     } else {
         let dir = root.join(version);
@@ -278,7 +290,10 @@ pub fn install_nge(
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
     if !has_original_gog_dlls(&dll_folder) {
-        return Err("No original GOG Galaxy DLL found in game folder. Cannot install API emulator.".to_string());
+        return Err(
+            "No original GOG Galaxy DLL found in game folder. Cannot install API emulator."
+                .to_string(),
+        );
     }
 
     let is64 = detect_arch(game_exe) == "x64";
@@ -297,12 +312,12 @@ pub fn install_nge_from_folder(
     version: &str,
 ) -> Result<(), String> {
     let dirs = find_gog_dlls_recursive(game_folder);
-    let dll_folder = dirs.iter()
+    let dll_folder = dirs
+        .iter()
         .find(|d| !has_gog_emulator_backups(d))
         .ok_or_else(|| "No unpatched GOG Galaxy DLLs found in game folder".to_string())?;
 
-    let is64 = dll_folder.join("Galaxy64.dll").exists()
-        || dll_folder.join("galaxy64.dll").exists();
+    let is64 = dll_folder.join("Galaxy64.dll").exists() || dll_folder.join("galaxy64.dll").exists();
     install_nge_into_folder(save_dir, dll_folder, is64, product_id, version)
 }
 
@@ -329,10 +344,7 @@ fn install_nge_into_folder(
     std::fs::create_dir_all(&settings_dir)
         .map_err(|e| format!("create ngalaxye_settings: {}", e))?;
 
-    crate::gog::generate_galaxy_emu_config(
-        &dll_folder.to_string_lossy(),
-        product_id,
-    )?;
+    crate::gog::generate_galaxy_emu_config(&dll_folder.to_string_lossy(), product_id)?;
 
     Ok(())
 }

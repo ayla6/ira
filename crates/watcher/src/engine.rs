@@ -1,6 +1,6 @@
+use ::notify::{Config as NotifyConfig, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use ira_config::Config;
 use ira_models::{AppMessage, AppSender, GameEntry, MergedAchievement};
-use ::notify::{Config as NotifyConfig, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -28,7 +28,12 @@ pub struct AchievementWatcher {
 }
 
 impl AchievementWatcher {
-    pub fn new(cfg: Arc<Config>, sender: AppSender, save_dir: String, load_game: LoadGameFn) -> Result<Self, String> {
+    pub fn new(
+        cfg: Arc<Config>,
+        sender: AppSender,
+        save_dir: String,
+        load_game: LoadGameFn,
+    ) -> Result<Self, String> {
         let state = Arc::new(Mutex::new(WatcherState {
             dir_to_game: HashMap::new(),
             last_earned: HashMap::new(),
@@ -63,10 +68,15 @@ impl AchievementWatcher {
     /// The parent directory is created if it doesn't exist (e.g. when GSE
     /// hasn't generated its folder yet).
     pub fn watch(&self, entry: &GameEntry, watch_file: &Path, achievements: &[MergedAchievement]) {
-        let earned: HashMap<String, bool> =
-            achievements.iter().map(|a| (a.name.clone(), a.earned)).collect();
+        let earned: HashMap<String, bool> = achievements
+            .iter()
+            .map(|a| (a.name.clone(), a.earned))
+            .collect();
 
-        let watch_dir = watch_file.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        let watch_dir = watch_file
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default();
         let watch_filename = watch_file
             .file_name()
             .and_then(|n| n.to_str())
@@ -87,10 +97,13 @@ impl AchievementWatcher {
 
         if !already_watching {
             let mut st = self.state.lock().unwrap();
-            st.dir_to_game.insert(watch_dir.clone(), WatchedGame {
-                entry: entry.clone(),
-                watch_filename,
-            });
+            st.dir_to_game.insert(
+                watch_dir.clone(),
+                WatchedGame {
+                    entry: entry.clone(),
+                    watch_filename,
+                },
+            );
             drop(st);
             let mut w = self.watcher.lock().unwrap();
             if let Err(e) = w.watch(&watch_dir, RecursiveMode::NonRecursive) {
@@ -103,7 +116,9 @@ impl AchievementWatcher {
     pub fn unwatch(&self, db_id: i64) {
         let watch_dir = {
             let mut st = self.state.lock().unwrap();
-            let dir = st.dir_to_game.iter()
+            let dir = st
+                .dir_to_game
+                .iter()
                 .find(|(_, wg)| wg.entry.id == db_id)
                 .map(|(k, _)| k.clone());
             if let Some(ref dir) = dir {
@@ -217,7 +232,10 @@ fn process_reload(
     let game_name = {
         let st = state.lock().unwrap();
         let names = st.game_names.lock().unwrap();
-        names.get(&game.app_id).cloned().unwrap_or_else(|| game.name.clone())
+        names
+            .get(&game.app_id)
+            .cloned()
+            .unwrap_or_else(|| game.name.clone())
     };
 
     let _ = sender.send(AppMessage::WatcherGameUpdated(game));

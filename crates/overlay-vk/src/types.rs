@@ -13,7 +13,10 @@ pub type PfnGetDeviceProcAddr = Option<
     unsafe extern "system" fn(vk::Device, *const std::os::raw::c_char) -> vk::PFN_vkVoidFunction,
 >;
 pub type PfnGetPhysicalDeviceProcAddr = Option<
-    unsafe extern "system" fn(vk::PhysicalDevice, *const std::os::raw::c_char) -> vk::PFN_vkVoidFunction,
+    unsafe extern "system" fn(
+        vk::PhysicalDevice,
+        *const std::os::raw::c_char,
+    ) -> vk::PFN_vkVoidFunction,
 >;
 
 #[repr(C)]

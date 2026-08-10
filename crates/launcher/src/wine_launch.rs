@@ -25,8 +25,14 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
     env.push(("WINEPREFIX".to_string(), pfx));
     env.push(("WINEARCH".to_string(), arch));
 
-    env.push(("WINEESYNC".to_string(), if wine.esync { "1" } else { "0" }.to_string()));
-    env.push(("WINEFSYNC".to_string(), if wine.fsync { "1" } else { "0" }.to_string()));
+    env.push((
+        "WINEESYNC".to_string(),
+        if wine.esync { "1" } else { "0" }.to_string(),
+    ));
+    env.push((
+        "WINEFSYNC".to_string(),
+        if wine.fsync { "1" } else { "0" }.to_string(),
+    ));
 
     if wine.esync && !is_esync_limit_set() {
         eprintln!("Warning: esync enabled but fs.file-max too low (< 1,000,000). Games may crash.");
@@ -133,19 +139,31 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
             let mono = files_dir.join("mono");
             let gecko = files_dir.join("gecko");
             env.retain(|(k, _)| k != "WINE_MONO_CACHE_DIR");
-            env.push(("WINE_MONO_CACHE_DIR".to_string(), mono.to_string_lossy().to_string()));
+            env.push((
+                "WINE_MONO_CACHE_DIR".to_string(),
+                mono.to_string_lossy().to_string(),
+            ));
             env.retain(|(k, _)| k != "WINE_GECKO_CACHE_DIR");
-            env.push(("WINE_GECKO_CACHE_DIR".to_string(), gecko.to_string_lossy().to_string()));
+            env.push((
+                "WINE_GECKO_CACHE_DIR".to_string(),
+                gecko.to_string_lossy().to_string(),
+            ));
         }
     }
 
     if wine.dxvk_frame_rate > 0 {
-        env.push(("DXVK_FRAME_RATE".to_string(), wine.dxvk_frame_rate.to_string()));
+        env.push((
+            "DXVK_FRAME_RATE".to_string(),
+            wine.dxvk_frame_rate.to_string(),
+        ));
     }
     // Always pass DXVK_HUD explicitly: some Proton builds enable the HUD by
     // default, so setting it to 0 when the toggle is off is required to disable it.
     env.retain(|(k, _)| k != "DXVK_HUD");
-    env.push(("DXVK_HUD".to_string(), if wine.dxvk_hud { "1" } else { "0" }.to_string()));
+    env.push((
+        "DXVK_HUD".to_string(),
+        if wine.dxvk_hud { "1" } else { "0" }.to_string(),
+    ));
     if wine.proton_wow64 {
         env.retain(|(k, _)| k != "PROTON_USE_WOW64");
         env.push(("PROTON_USE_WOW64".to_string(), "1".to_string()));
@@ -158,7 +176,12 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
     env
 }
 
-pub fn build_wine_command(wine_exe: &str, game_exe: &str, args: &[String], _wine: &WineConfig) -> Vec<String> {
+pub fn build_wine_command(
+    wine_exe: &str,
+    game_exe: &str,
+    args: &[String],
+    _wine: &WineConfig,
+) -> Vec<String> {
     let mut cmd = vec![wine_exe.to_string()];
     if game_exe.to_ascii_lowercase().ends_with(".msi") {
         cmd.push("msiexec".to_string());
@@ -180,7 +203,9 @@ pub fn wine_prefix(wine: &WineConfig) -> String {
 /// If `{base}/{slug}` already exists, tries `{slug}1`, `{slug}2`, etc.
 pub fn generate_prefix_path(base_dir: &str, slug: &str) -> String {
     let base = if base_dir.is_empty() {
-        let xdg = std::env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty());
+        let xdg = std::env::var("XDG_DATA_HOME")
+            .ok()
+            .filter(|s| !s.is_empty());
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
         match xdg {
             Some(x) => format!("{}/ira/prefixes", x),
@@ -193,9 +218,19 @@ pub fn generate_prefix_path(base_dir: &str, slug: &str) -> String {
     let clean: String = slug
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
-    let clean: String = clean.split('-').filter(|s| !s.is_empty()).collect::<Vec<_>>().join("-");
+    let clean: String = clean
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
     let candidate = format!("{}/{}", base, clean);
     if !std::path::Path::new(&candidate).exists() {
         return candidate;

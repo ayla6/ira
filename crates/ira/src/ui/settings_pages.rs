@@ -1,23 +1,28 @@
-use gtk4::prelude::*;
-use adw::prelude::*;
-use ira_config::Config;
-use crate::strings as S;
+use super::css::*;
 use super::helpers::string_list_from;
 use super::settings_dialog::settings_page_container;
-use super::css::*;
+use crate::strings as S;
+use adw::prelude::*;
+use ira_config::Config;
 
 fn detect_system_font() -> Option<String> {
     let output = std::process::Command::new("fc-match")
         .args(["-f", "%{family}", "sans-serif"])
         .output()
         .ok()?;
-    if !output.status.success() { return None; }
+    if !output.status.success() {
+        return None;
+    }
     let family = String::from_utf8_lossy(&output.stdout)
         .split(',')
         .next()?
         .trim()
         .to_string();
-    if family.is_empty() { None } else { Some(family) }
+    if family.is_empty() {
+        None
+    } else {
+        Some(family)
+    }
 }
 
 pub(super) fn settings_sidebar_row(icon: &str, label: &str, page_id: &str) -> gtk4::ListBoxRow {
@@ -70,7 +75,18 @@ pub(super) fn sidebar_section_title(title: &str) -> gtk4::ListBoxRow {
     row
 }
 
-pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::SwitchRow, adw::SwitchRow, adw::PasswordEntryRow, adw::PasswordEntryRow, gtk4::ListBox, adw::SwitchRow) {
+pub(super) fn build_general_settings_page(
+    cfg: &Config,
+) -> (
+    gtk4::Box,
+    adw::SwitchRow,
+    adw::SwitchRow,
+    adw::SwitchRow,
+    adw::PasswordEntryRow,
+    adw::PasswordEntryRow,
+    gtk4::ListBox,
+    adw::SwitchRow,
+) {
     let page = settings_page_container();
 
     let notif_group = adw::PreferencesGroup::new();
@@ -97,7 +113,9 @@ pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::Swit
 
     let saves_row = adw::SwitchRow::new();
     saves_row.set_title("Centralize game saves");
-    saves_row.set_subtitle("Symlink save data to a central location so it persists across Wine prefix resets");
+    saves_row.set_subtitle(
+        "Symlink save data to a central location so it persists across Wine prefix resets",
+    );
     saves_row.set_active(cfg.centralize_game_saves);
     hidden_group.add(&saves_row);
     page.append(&hidden_group);
@@ -130,7 +148,16 @@ pub(super) fn build_general_settings_page(cfg: &Config) -> (gtk4::Box, adw::Swit
     lang_section.append(&lang_list);
     page.append(&lang_section);
 
-    (page, notif_row, bg_row, hidden_row, steam_entry, sgdb_entry, lang_list, saves_row)
+    (
+        page,
+        notif_row,
+        bg_row,
+        hidden_row,
+        steam_entry,
+        sgdb_entry,
+        lang_list,
+        saves_row,
+    )
 }
 
 pub(super) struct SystemDefaultsWidgets {
@@ -180,7 +207,9 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     {
         let gse = gamescope.clone();
         gs_switch.connect_active_notify(move |sw| {
-            if sw.is_active() { gse.set_expanded(true); }
+            if sw.is_active() {
+                gse.set_expanded(true);
+            }
         });
     }
 
@@ -221,7 +250,9 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
         let idx = if s.gpu.is_empty() {
             0
         } else {
-            gpu_options.iter().position(|c| c == &s.gpu)
+            gpu_options
+                .iter()
+                .position(|c| c == &s.gpu)
                 .map(|i| i + 1)
                 .unwrap_or(0)
         };
@@ -236,21 +267,41 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     let (env_group, env_vars_box) = super::system_settings::build_env_vars_group(&s.env_vars);
     page.append(&env_group);
 
-    let (ld_group, ld_preload, ld_library_path) = super::system_settings::build_ld_paths_group(
-        &s.ld_preload, &s.ld_library_path,
-    );
+    let (ld_group, ld_preload, ld_library_path) =
+        super::system_settings::build_ld_paths_group(&s.ld_preload, &s.ld_library_path);
     page.append(&ld_group);
 
-    (page, SystemDefaultsWidgets { gamemode, mangohud, gamescope: gs_switch, gamescope_flags, gamescope_w, gamescope_h, gamescope_fps, gamescope_upscaling_row, gpu_row, gpu_options, env_vars_box, ld_preload, ld_library_path })
+    (
+        page,
+        SystemDefaultsWidgets {
+            gamemode,
+            mangohud,
+            gamescope: gs_switch,
+            gamescope_flags,
+            gamescope_w,
+            gamescope_h,
+            gamescope_fps,
+            gamescope_upscaling_row,
+            gpu_row,
+            gpu_options,
+            env_vars_box,
+            ld_preload,
+            ld_library_path,
+        },
+    )
 }
 
-pub(super) fn build_lutris_settings_page(state: &super::state::SharedState, settings_win: &adw::Window) -> gtk4::Box {
+pub(super) fn build_lutris_settings_page(
+    state: &super::state::SharedState,
+    settings_win: &adw::Window,
+) -> gtk4::Box {
     let page = settings_page_container();
 
     let info_group = adw::PreferencesGroup::new();
     info_group.set_title("Lutris installation");
 
-    let lutris_dir = std::path::Path::new(&std::env::var("HOME").unwrap_or_default()).join(".local/share/lutris");
+    let lutris_dir = std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
+        .join(".local/share/lutris");
     let dir_row = adw::ActionRow::new();
     dir_row.set_title("Lutris data directory");
     if lutris_dir.is_dir() {
@@ -266,7 +317,9 @@ pub(super) fn build_lutris_settings_page(state: &super::state::SharedState, sett
     migrate_group.set_title("Migration");
     let migrate_row = adw::ActionRow::new();
     migrate_row.set_title("Import Lutris games");
-    migrate_row.set_subtitle("Reads each Lutris game's config and creates a game entry with wine settings");
+    migrate_row.set_subtitle(
+        "Reads each Lutris game's config and creates a game entry with wine settings",
+    );
     let migrate_btn = gtk4::Button::with_label("Import all");
     migrate_btn.add_css_class(CSS_SUGGESTED_ACTION);
     migrate_btn.set_valign(gtk4::Align::Center);
@@ -291,7 +344,10 @@ pub(super) fn build_lutris_settings_page(state: &super::state::SharedState, sett
 
         let alert = adw::AlertDialog::new(
             Some("Import Lutris games"),
-            Some(&format!("Import {} Lutris game(s) as managed Wine games?", lutris_games.len())),
+            Some(&format!(
+                "Import {} Lutris game(s) as managed Wine games?",
+                lutris_games.len()
+            )),
         );
         alert.add_response("cancel", "Cancel");
         alert.add_response("migrate", "Migrate");
@@ -309,9 +365,19 @@ pub(super) fn build_lutris_settings_page(state: &super::state::SharedState, sett
                     let mut ok = 0;
                     let mut errors = 0;
                     for lg in &lutris_games {
-                        match ira_db::add_game(&db, ira_models::GameKind::Wine, ira_models::TrophySource::Empty, "", "", "", &lg.name) {
+                        match ira_db::add_game(
+                            &db,
+                            ira_models::GameKind::Wine,
+                            ira_models::TrophySource::Empty,
+                            "",
+                            "",
+                            "",
+                            &lg.name,
+                        ) {
                             Ok(db_id) => {
-                                match super::edit_game_pages::convert_lutris_to_managed(&db, db_id, lg.id, &lg.name) {
+                                match super::edit_game_pages::convert_lutris_to_managed(
+                                    &db, db_id, lg.id, &lg.name,
+                                ) {
                                     Ok(()) => ok += 1,
                                     Err(e) => {
                                         errors += 1;
@@ -407,13 +473,60 @@ pub(super) fn build_computer_games_page(
     (page, folder_row)
 }
 
-pub(super) fn build_ra_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow, adw::EntryRow) {
+pub(super) fn build_rom_settings_page(
+    win: &adw::Window,
+    cfg: &Config,
+) -> (gtk4::Box, adw::EntryRow) {
+    let page = settings_page_container();
+    let rom_group = adw::PreferencesGroup::new();
+    rom_group.set_title("ROM library");
+    let missing_systems: Vec<&str> = ira_models::all_consoles()
+        .filter(|def| def.uses_rom_folder())
+        .filter(|def| cfg.console(def.id).enabled && !cfg.rom_folder(def.id).is_dir())
+        .map(|def| def.id)
+        .collect();
+    if !cfg.roms_folder.is_empty() && !std::path::Path::new(&cfg.roms_folder).is_dir() {
+        rom_group.set_description(Some("The ROM root is missing. Choose a new location; game metadata and relative paths will be kept."));
+    } else if !missing_systems.is_empty() {
+        rom_group.set_description(Some(&format!(
+            "Missing system folders: {}. Choose another base folder if these games were moved; metadata is retained.",
+            missing_systems.join(", ")
+        )));
+    } else {
+        rom_group.set_description(Some("ROMs are stored in one folder with a subfolder for each system, such as gba, psx, and ps2."));
+    }
+
+    let roms_folder_row = adw::EntryRow::new();
+    roms_folder_row.set_title("Base ROM folder");
+    roms_folder_row.set_text(&cfg.roms_folder);
+    let roms_browse = super::helpers::make_browse_button(
+        Some(win),
+        "Select base ROM folder",
+        true,
+        None,
+        super::helpers::entry_path_closure(&roms_folder_row),
+        {
+            let row = roms_folder_row.clone();
+            move |path| row.set_text(&path.to_string_lossy())
+        },
+    );
+    roms_folder_row.add_suffix(&roms_browse);
+    rom_group.add(&roms_folder_row);
+    page.append(&rom_group);
+
+    (page, roms_folder_row)
+}
+
+pub(super) fn build_ra_settings_page(
+    cfg: &Config,
+) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow, adw::EntryRow) {
     let page = settings_page_container();
 
     let enable_group = adw::PreferencesGroup::new();
     let enable_row = adw::SwitchRow::new();
     enable_row.set_title("Enable RetroAchievements");
-    enable_row.set_subtitle("Fetch achievements for matched retro games from retroachievements.org");
+    enable_row
+        .set_subtitle("Fetch achievements for matched retro games from retroachievements.org");
     enable_row.set_active(cfg.ra_enabled);
     enable_group.add(&enable_row);
     page.append(&enable_group);
@@ -435,7 +548,9 @@ pub(super) fn build_ra_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow
     (page, enable_row, username_row, password_row.upcast())
 }
 
-pub(super) fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRow, gtk4::StringList) {
+pub(super) fn build_api_emulators_page(
+    cfg: &Config,
+) -> (gtk4::Box, adw::ComboRow, gtk4::StringList) {
     let page = settings_page_container();
 
     let emu_dir = ira_platforms::api_emulators::api_emulators_dir(&cfg.save_dir);
@@ -465,11 +580,14 @@ pub(super) fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRo
 
     let version_group = adw::PreferencesGroup::new();
     version_group.set_title("Default version");
-    version_group.set_description(Some("Version to use when installing API emulators on games"));
+    version_group.set_description(Some(
+        "Version to use when installing API emulators on games",
+    ));
 
     let gse_versions = ira_platforms::api_emulators::list_gse_versions(&cfg.save_dir);
     let gog_versions = ira_platforms::api_emulators::list_gog_versions(&cfg.save_dir);
-    let mut all_versions: Vec<String> = gse_versions.iter()
+    let mut all_versions: Vec<String> = gse_versions
+        .iter()
         .chain(gog_versions.iter())
         .cloned()
         .collect();
@@ -487,7 +605,10 @@ pub(super) fn build_api_emulators_page(cfg: &Config) -> (gtk4::Box, adw::ComboRo
     version_row.set_subtitle("Default version directory to use when installing");
     version_row.set_model(Some(&version_model));
     if !cfg.default_api_emu_version.is_empty() {
-        if let Some(idx) = all_versions.iter().position(|v| v == &cfg.default_api_emu_version) {
+        if let Some(idx) = all_versions
+            .iter()
+            .position(|v| v == &cfg.default_api_emu_version)
+        {
             version_row.set_selected(idx as u32);
         }
     } else if !all_versions.is_empty() {
@@ -516,7 +637,9 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
     let enable_group = adw::PreferencesGroup::new();
     let enable_row = adw::SwitchRow::new();
     enable_row.set_title("Enable in-game overlay");
-    enable_row.set_subtitle("Shows achievements, screenshots, and recording during gameplay (Vulkan games only)");
+    enable_row.set_subtitle(
+        "Shows achievements, screenshots, and recording during gameplay (Vulkan games only)",
+    );
     enable_row.set_active(o.enabled);
     enable_group.add(&enable_row);
     page.append(&enable_group);
@@ -524,7 +647,12 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
     let recording_group = adw::PreferencesGroup::new();
     recording_group.set_title("Recording");
 
-    let encoder_model = gtk4::StringList::new(&["Auto", "VAAPI (AMD/Intel)", "NVENC (NVIDIA)", "Software (CPU)"]);
+    let encoder_model = gtk4::StringList::new(&[
+        "Auto",
+        "VAAPI (AMD/Intel)",
+        "NVENC (NVIDIA)",
+        "Software (CPU)",
+    ]);
     let encoder_row = adw::ComboRow::new();
     encoder_row.set_title("Video encoder");
     encoder_row.set_subtitle("Auto detects the best available encoder. Use Software if your GPU lacks hardware encoding.");
@@ -532,7 +660,11 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
     encoder_row.set_selected(o.encoder as u32);
     recording_group.add(&encoder_row);
 
-    let quality_model = gtk4::StringList::new(&["Low (720p 30fps)", "Medium (1080p 30fps)", "High (1080p 60fps)"]);
+    let quality_model = gtk4::StringList::new(&[
+        "Low (720p 30fps)",
+        "Medium (1080p 30fps)",
+        "High (1080p 60fps)",
+    ]);
     let quality_row = adw::ComboRow::new();
     quality_row.set_title("Recording quality");
     quality_row.set_model(Some(&quality_model));
@@ -545,19 +677,28 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
     hotkeys_group.set_description(Some("Keyboard and gamepad bindings. Click to set."));
 
     let toggle_hotkey = super::hotkey_widget::build_hotkey_row(
-        &hotkeys_group, "Toggle overlay",
-        &o.toggle_hotkey, &o.toggle_hotkey_gamepad,
-        "Shift+Tab", "Guide",
+        &hotkeys_group,
+        "Toggle overlay",
+        &o.toggle_hotkey,
+        &o.toggle_hotkey_gamepad,
+        "Shift+Tab",
+        "Guide",
     );
     let screenshot_hotkey = super::hotkey_widget::build_hotkey_row(
-        &hotkeys_group, "Screenshot",
-        &o.screenshot_hotkey, &o.screenshot_hotkey_gamepad,
-        "F12", "Guide+DpadDown",
+        &hotkeys_group,
+        "Screenshot",
+        &o.screenshot_hotkey,
+        &o.screenshot_hotkey_gamepad,
+        "F12",
+        "Guide+DpadDown",
     );
     let record_hotkey = super::hotkey_widget::build_hotkey_row(
-        &hotkeys_group, "Toggle recording",
-        &o.record_hotkey, &o.record_hotkey_gamepad,
-        "F11", "Guide+DpadUp",
+        &hotkeys_group,
+        "Toggle recording",
+        &o.record_hotkey,
+        &o.record_hotkey_gamepad,
+        "F11",
+        "Guide+DpadUp",
     );
     page.append(&hotkeys_group);
 
@@ -605,7 +746,15 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
 
     (
         page,
-        OverlayPageWidgets { enable_row, encoder_row, quality_row, toggle_hotkey, screenshot_hotkey, record_hotkey, font_button },
+        OverlayPageWidgets {
+            enable_row,
+            encoder_row,
+            quality_row,
+            toggle_hotkey,
+            screenshot_hotkey,
+            record_hotkey,
+            font_button,
+        },
     )
 }
 

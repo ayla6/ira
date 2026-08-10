@@ -30,7 +30,11 @@ fn main() {
         .filter(|s| !s.is_empty());
 
     match (serial, title) {
-        (Some(s), Some(t)) => print!(r#"{{"serial":"{}","title":"{}"}}"#, json_escape(&s), json_escape(&t)),
+        (Some(s), Some(t)) => print!(
+            r#"{{"serial":"{}","title":"{}"}}"#,
+            json_escape(&s),
+            json_escape(&t)
+        ),
         (Some(s), None) => print!(r#"{{"serial":"{}"}}"#, json_escape(&s)),
         (None, Some(t)) => print!(r#"{{"title":"{}"}}"#, json_escape(&t)),
         (None, None) => print!("null"),

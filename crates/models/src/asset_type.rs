@@ -102,7 +102,8 @@ impl Serialize for AssetType {
 impl<'de> Deserialize<'de> for AssetType {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let s = String::deserialize(d)?;
-        AssetType::from_string(&s).ok_or_else(|| serde::de::Error::custom(format!("unknown asset type: {s}")))
+        AssetType::from_string(&s)
+            .ok_or_else(|| serde::de::Error::custom(format!("unknown asset type: {s}")))
     }
 }
 
@@ -233,6 +234,9 @@ mod tests {
 
     #[test]
     fn test_logo_position_from_string_fallback() {
-        assert_eq!(LogoPosition::from_string("garbage"), LogoPosition::BottomLeft);
+        assert_eq!(
+            LogoPosition::from_string("garbage"),
+            LogoPosition::BottomLeft
+        );
     }
 }

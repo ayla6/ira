@@ -1,11 +1,11 @@
+use super::game_item::GameItem;
+use crate::Game;
 use glib::subclass::prelude::*;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use crate::Game;
-use super::game_item::GameItem;
 
 pub type SetupFn = Rc<dyn Fn() -> gtk4::Widget>;
 pub type BindFn = Rc<dyn Fn(&gtk4::Widget, &Game)>;
@@ -17,18 +17,27 @@ const STEP_COLS: &[u32] = &[5, 7, 9, 11, 13, 15];
 const STEP_SIZES: &[i32] = &[110, 150, 200, 250, 300, 350];
 const MIN_VISIBLE_ROWS: f64 = 2.5;
 
-fn compute_grid_layout(width: i32, min_item_w: i32, base_sp: i32, viewport_h: i32) -> (u32, i32, i32, i32) {
+fn compute_grid_layout(
+    width: i32,
+    min_item_w: i32,
+    base_sp: i32,
+    viewport_h: i32,
+) -> (u32, i32, i32, i32) {
     let avail_w = (width - 2 * base_sp).max(min_item_w);
     let raw_cols = (((avail_w + base_sp) / (min_item_w + base_sp)).max(1) as u32).min(30);
 
-    let width_step = STEP_COLS.iter().enumerate()
+    let width_step = STEP_COLS
+        .iter()
+        .enumerate()
         .rev()
         .find(|(_, &c)| c <= raw_cols)
         .map(|(i, _)| i)
         .unwrap_or(0);
 
     let max_step = if viewport_h > 0 {
-        STEP_SIZES.iter().enumerate()
+        STEP_SIZES
+            .iter()
+            .enumerate()
             .rev()
             .find(|(_, &w)| {
                 let h = ((w as f64) * ASPECT_RATIO) as i32;
@@ -213,9 +222,17 @@ mod imp {
             let n_items = self.n_items.get();
 
             if orientation == gtk4::Orientation::Vertical {
-                let width = if for_size > 0 { for_size } else { self.prev_width.get().max(1).max(800) };
+                let width = if for_size > 0 {
+                    for_size
+                } else {
+                    self.prev_width.get().max(1).max(800)
+                };
                 let (n_cols, _item_w, item_h, sp) = compute_grid_layout(width, min_w, min_sp, 0);
-                let n_rows = if n_items == 0 { 0 } else { n_items.div_ceil(n_cols) };
+                let n_rows = if n_items == 0 {
+                    0
+                } else {
+                    n_items.div_ceil(n_cols)
+                };
                 let row_h = item_h + sp;
                 let h = header_h + sp + (n_rows as i32) * row_h;
                 (0, h, -1, -1)
@@ -294,8 +311,8 @@ mod imp {
                 let ps = (height as f64).min(upper);
                 let max_val = (upper - ps).max(0.0);
                 let cur_val = (scroll_pos as f64).min(max_val).max(0.0);
-                let need_configure = (adj.upper() - upper).abs() > 0.5
-                    || (adj.page_size() - ps).abs() > 0.5;
+                let need_configure =
+                    (adj.upper() - upper).abs() > 0.5 || (adj.page_size() - ps).abs() > 0.5;
                 if need_configure {
                     self.freeze.set(true);
                     adj.configure(cur_val, 0.0, upper, row_h as f64, ps * 0.9, ps);
@@ -321,7 +338,8 @@ mod imp {
             let visible_h = (height - grid_y).max(0);
             let last_row = ((grid_scroll + visible_h) / row_h + 1) as usize;
             let first_item = first_row.saturating_mul(n_cols as usize);
-            let last_item = (n_items as usize).min(last_row.saturating_add(1).saturating_mul(n_cols as usize));
+            let last_item =
+                (n_items as usize).min(last_row.saturating_add(1).saturating_mul(n_cols as usize));
 
             let setup = self.setup_fn.borrow().clone();
             let bind = self.bind_fn.borrow().clone();
@@ -503,7 +521,12 @@ impl VirtualGrid {
         let obj = self.clone();
         let handler = model.connect_items_changed(move |_, _, removed, added| {
             let imp = obj.imp();
-            let new_n = imp.model.borrow().as_ref().map(|m| m.n_items()).unwrap_or(0);
+            let new_n = imp
+                .model
+                .borrow()
+                .as_ref()
+                .map(|m| m.n_items())
+                .unwrap_or(0);
             imp.n_items.set(new_n);
             if removed != added {
                 clear_visible(imp);
@@ -530,12 +553,7 @@ impl VirtualGrid {
         self.queue_allocate();
     }
 
-    pub fn set_factory(
-        &self,
-        setup: SetupFn,
-        bind: BindFn,
-        unbind: UnbindFn,
-    ) {
+    pub fn set_factory(&self, setup: SetupFn, bind: BindFn, unbind: UnbindFn) {
         let imp = self.imp();
         *imp.setup_fn.borrow_mut() = Some(setup);
         *imp.bind_fn.borrow_mut() = Some(bind);

@@ -107,20 +107,14 @@ fn match_by_title(default_game_folder: &str, title: &str) -> Option<PathBuf> {
 
     let title_norm = normalize(title);
     if !title_norm.is_empty() {
-        if let Some(dir) = dirs
-            .iter()
-            .find(|d| normalize(d) == title_norm)
-        {
+        if let Some(dir) = dirs.iter().find(|d| normalize(d) == title_norm) {
             return Some(base.join(dir));
         }
     }
 
     let acronym = make_acronym(title);
     if acronym.len() >= 2 {
-        if let Some(dir) = dirs
-            .iter()
-            .find(|d| normalize(d) == acronym)
-        {
+        if let Some(dir) = dirs.iter().find(|d| normalize(d) == acronym) {
             return Some(base.join(dir));
         }
     }
@@ -136,10 +130,7 @@ fn normalize(s: &str) -> String {
         .trim_end_matches(": game of the year edition")
         .trim_end_matches("(gog.com)")
         .trim_end_matches("(steam)");
-    trimmed
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .collect()
+    trimmed.chars().filter(|c| c.is_alphanumeric()).collect()
 }
 
 /// Create an acronym from a title's words (e.g. "Metaphor ReFantazio" → "mr").
@@ -166,10 +157,7 @@ mod tests {
         let exe = game_dir.join("bin").join("game.exe");
         fs::write(&exe, b"x").unwrap();
 
-        let detected = detect_from_exe(
-            &exe.to_string_lossy(),
-            &games.to_string_lossy(),
-        );
+        let detected = detect_from_exe(&exe.to_string_lossy(), &games.to_string_lossy());
         assert_eq!(detected, Some(game_dir));
     }
 

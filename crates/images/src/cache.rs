@@ -45,7 +45,14 @@ impl TextureCache {
 
     pub(crate) fn get(&mut self, path: &str) -> Option<Texture> {
         let hit = self.map.contains_key(path);
-        let _s = info_span!("cache_get", path, hit, entries = self.map.len(), total_bytes = self.total_bytes).entered();
+        let _s = info_span!(
+            "cache_get",
+            path,
+            hit,
+            entries = self.map.len(),
+            total_bytes = self.total_bytes
+        )
+        .entered();
         if let Some(t) = self.map.get(path) {
             self.counter += 1;
             self.order.insert(path.to_string(), self.counter);
@@ -56,7 +63,14 @@ impl TextureCache {
 
     pub(crate) fn insert(&mut self, path: &str, texture: Texture) {
         let bytes = Self::texture_bytes(&texture);
-        let _s = info_span!("cache_insert", path, bytes, entries_before = self.map.len(), total_bytes_before = self.total_bytes).entered();
+        let _s = info_span!(
+            "cache_insert",
+            path,
+            bytes,
+            entries_before = self.map.len(),
+            total_bytes_before = self.total_bytes
+        )
+        .entered();
         while (self.total_bytes + bytes > self.max_bytes || self.map.len() >= self.max_entries)
             && !self.map.is_empty()
         {
@@ -80,7 +94,14 @@ impl TextureCache {
 
     pub(crate) fn remove(&mut self, path: &str) {
         let hit = self.map.contains_key(path);
-        let _s = info_span!("cache_remove", path, hit, entries_before = self.map.len(), total_bytes_before = self.total_bytes).entered();
+        let _s = info_span!(
+            "cache_remove",
+            path,
+            hit,
+            entries_before = self.map.len(),
+            total_bytes_before = self.total_bytes
+        )
+        .entered();
         if let Some(texture) = self.map.remove(path) {
             self.total_bytes -= Self::texture_bytes(&texture);
         }
@@ -88,7 +109,12 @@ impl TextureCache {
     }
 
     pub(crate) fn clear(&mut self) {
-        let _s = info_span!("cache_clear", entries_before = self.map.len(), total_bytes_before = self.total_bytes).entered();
+        let _s = info_span!(
+            "cache_clear",
+            entries_before = self.map.len(),
+            total_bytes_before = self.total_bytes
+        )
+        .entered();
         self.map.clear();
         self.order.clear();
         self.total_bytes = 0;

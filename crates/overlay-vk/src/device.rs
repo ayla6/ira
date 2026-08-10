@@ -1,5 +1,5 @@
-use std::ffi::CStr;
 use std::collections::HashMap;
+use std::ffi::CStr;
 
 use ash::vk;
 use ash::vk::Handle;
@@ -14,11 +14,34 @@ pub unsafe extern "system" fn get_device_proc_addr(
 ) -> vk::PFN_vkVoidFunction {
     let name = CStr::from_ptr(name);
     match name.to_bytes() {
-        b"vkGetDeviceProcAddr" => into_vk_void_fn!(get_device_proc_addr, unsafe extern "system" fn(vk::Device, *const std::os::raw::c_char) -> vk::PFN_vkVoidFunction),
-        b"vkDestroyDevice" => into_vk_void_fn!(destroy_device, unsafe extern "system" fn(vk::Device, *const vk::AllocationCallbacks)),
-        b"vkCreateSwapchainKHR" => into_vk_void_fn!(super::swapchain::create_swapchain, unsafe extern "system" fn(vk::Device, *const vk::SwapchainCreateInfoKHR, *const vk::AllocationCallbacks, *mut vk::SwapchainKHR) -> vk::Result),
-        b"vkDestroySwapchainKHR" => into_vk_void_fn!(super::swapchain::destroy_swapchain, unsafe extern "system" fn(vk::Device, vk::SwapchainKHR, *const vk::AllocationCallbacks)),
-        b"vkQueuePresentKHR" => into_vk_void_fn!(super::present::queue_present, unsafe extern "system" fn(vk::Queue, *const vk::PresentInfoKHR) -> vk::Result),
+        b"vkGetDeviceProcAddr" => into_vk_void_fn!(
+            get_device_proc_addr,
+            unsafe extern "system" fn(
+                vk::Device,
+                *const std::os::raw::c_char,
+            ) -> vk::PFN_vkVoidFunction
+        ),
+        b"vkDestroyDevice" => into_vk_void_fn!(
+            destroy_device,
+            unsafe extern "system" fn(vk::Device, *const vk::AllocationCallbacks)
+        ),
+        b"vkCreateSwapchainKHR" => into_vk_void_fn!(
+            super::swapchain::create_swapchain,
+            unsafe extern "system" fn(
+                vk::Device,
+                *const vk::SwapchainCreateInfoKHR,
+                *const vk::AllocationCallbacks,
+                *mut vk::SwapchainKHR,
+            ) -> vk::Result
+        ),
+        b"vkDestroySwapchainKHR" => into_vk_void_fn!(
+            super::swapchain::destroy_swapchain,
+            unsafe extern "system" fn(vk::Device, vk::SwapchainKHR, *const vk::AllocationCallbacks)
+        ),
+        b"vkQueuePresentKHR" => into_vk_void_fn!(
+            super::present::queue_present,
+            unsafe extern "system" fn(vk::Queue, *const vk::PresentInfoKHR) -> vk::Result
+        ),
         _ => {
             let map = DEVICES.lock().unwrap();
             if let Some(map) = map.as_ref() {
@@ -33,7 +56,9 @@ pub unsafe extern "system" fn get_device_proc_addr(
     }
 }
 
-unsafe fn find_layer_link_info(create_info: *const vk::DeviceCreateInfo) -> *mut LayerDeviceCreateInfo {
+unsafe fn find_layer_link_info(
+    create_info: *const vk::DeviceCreateInfo,
+) -> *mut LayerDeviceCreateInfo {
     let mut chain = (*create_info).p_next as *mut vk::BaseInStructure;
     while !chain.is_null() {
         if (*chain).s_type == vk::StructureType::LOADER_DEVICE_CREATE_INFO {
@@ -177,22 +202,37 @@ pub(crate) unsafe extern "system" fn create_device(
 
     let swapchain_test = real_gdpa(dev, c"vkCreateSwapchainKHR".as_ptr());
     let fns = if swapchain_test.is_some() {
-        let get_mem_props = transmute_fn(gipa(instance, c"vkGetPhysicalDeviceMemoryProperties".as_ptr()));
-        let get_format_props = transmute_fn(gipa(instance, c"vkGetPhysicalDeviceFormatProperties".as_ptr()));
-        Some(load_device_fns(real_gdpa, dev, get_mem_props, get_format_props))
+        let get_mem_props = transmute_fn(gipa(
+            instance,
+            c"vkGetPhysicalDeviceMemoryProperties".as_ptr(),
+        ));
+        let get_format_props = transmute_fn(gipa(
+            instance,
+            c"vkGetPhysicalDeviceFormatProperties".as_ptr(),
+        ));
+        Some(load_device_fns(
+            real_gdpa,
+            dev,
+            get_mem_props,
+            get_format_props,
+        ))
     } else {
         None
     };
 
-    DEVICES.lock().unwrap().get_or_insert_with(HashMap::new).insert(
-        dev.as_raw() as usize,
-        DeviceData {
-            next_gdpa: Some(real_gdpa),
-            destroy_device: destroy_dev_fn,
-            physical_device,
-            fns,
-        },
-    );
+    DEVICES
+        .lock()
+        .unwrap()
+        .get_or_insert_with(HashMap::new)
+        .insert(
+            dev.as_raw() as usize,
+            DeviceData {
+                next_gdpa: Some(real_gdpa),
+                destroy_device: destroy_dev_fn,
+                physical_device,
+                fns,
+            },
+        );
 
     result
 }
@@ -203,7 +243,10 @@ pub(crate) unsafe extern "system" fn destroy_device(
 ) {
     let destroy_fn = {
         let map = DEVICES.lock().unwrap();
-        let Some(dd) = map.as_ref().and_then(|m| m.get(&(device.as_raw() as usize))) else {
+        let Some(dd) = map
+            .as_ref()
+            .and_then(|m| m.get(&(device.as_raw() as usize)))
+        else {
             return;
         };
         if let Some(fns) = dd.fns {
@@ -214,7 +257,11 @@ pub(crate) unsafe extern "system" fn destroy_device(
         dd.destroy_device
     };
 
-    DEVICES.lock().unwrap().as_mut().map(|m| m.remove(&(device.as_raw() as usize)));
+    DEVICES
+        .lock()
+        .unwrap()
+        .as_mut()
+        .map(|m| m.remove(&(device.as_raw() as usize)));
 
     destroy_fn(device, allocator);
 }

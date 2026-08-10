@@ -1,7 +1,7 @@
-use ira_models::GroupSelection;
-use crate::Game;
-use std::collections::HashSet;
 use super::state::SharedState;
+use crate::Game;
+use ira_models::GroupSelection;
+use std::collections::HashSet;
 
 pub fn filtered_games(state: &SharedState) -> Vec<Game> {
     let _span = tracing::info_span!("filtered_games").entered();
@@ -22,9 +22,7 @@ pub fn filtered_games(state: &SharedState) -> Vec<Game> {
         GroupSelection::Collection(group_id) => {
             group_members.get(group_id).cloned().unwrap_or_default()
         }
-        GroupSelection::Uncategorized => {
-            group_members.values().flatten().copied().collect()
-        }
+        GroupSelection::Uncategorized => group_members.values().flatten().copied().collect(),
         _ => HashSet::new(),
     };
 
@@ -47,7 +45,11 @@ pub fn filtered_games(state: &SharedState) -> Vec<Game> {
 
     games.sort_by(|a, b| {
         let ord = sort_mode.compare(a, b);
-        if sort_descending { ord.reverse() } else { ord }
+        if sort_descending {
+            ord.reverse()
+        } else {
+            ord
+        }
     });
     games
 }

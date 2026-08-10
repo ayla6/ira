@@ -53,7 +53,9 @@ where
     let v = serde_json::Value::deserialize(d)?;
     match v {
         serde_json::Value::String(s) => s.parse::<f64>().map_err(serde::de::Error::custom),
-        serde_json::Value::Number(n) => n.as_f64().ok_or_else(|| serde::de::Error::custom("invalid number")),
+        serde_json::Value::Number(n) => n
+            .as_f64()
+            .ok_or_else(|| serde::de::Error::custom("invalid number")),
         _ => Err(serde::de::Error::custom("expected string or number")),
     }
 }

@@ -243,9 +243,7 @@ impl GameSelectionModel {
         if let Some(store) = model.as_ref() {
             for i in 0..store.n_items() {
                 if selected.contains(i) {
-                    if let Some(item) = store
-                        .item(i)
-                        .and_then(|o| o.downcast::<SidebarItem>().ok())
+                    if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok())
                     {
                         if item.kind() == SidebarItemKind::Game {
                             ids.insert(match item.variant_id() {

@@ -1,16 +1,19 @@
 use std::path::Path;
-use std::time::Duration;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use tracing::info_span;
 
-use ira_config::Config;
 use crate::retroachievements::paths;
+use ira_config::Config;
 
-use super::api_types::{ConsoleGamesResponse, GameDataResponse, LoginResponse, UnlocksResponse};
-pub use super::api_types::{RaGameEntry, RaGameData, RaAchievementDef, build_ra_achievements, enrich_ra_game, load_ra_achievements_from_cache, redownload_missing_ra_badges};
 pub use super::api_types::read_console_games_cache;
+pub use super::api_types::{
+    build_ra_achievements, enrich_ra_game, load_ra_achievements_from_cache,
+    redownload_missing_ra_badges, RaAchievementDef, RaGameData, RaGameEntry,
+};
+use super::api_types::{ConsoleGamesResponse, GameDataResponse, LoginResponse, UnlocksResponse};
 
 const RA_BASE_URL: &str = "https://retroachievements.org/dorequest.php";
 const RA_BADGE_URL: &str = "https://media.retroachievements.org/Badge";
@@ -52,7 +55,10 @@ impl RaClient {
         if !password.is_empty() {
             match client.login_with_password(password) {
                 Ok(fresh_token) => {
-                    eprintln!("RA: login successful, got fresh token (len {})", fresh_token.len());
+                    eprintln!(
+                        "RA: login successful, got fresh token (len {})",
+                        fresh_token.len()
+                    );
                     client.token = fresh_token.clone();
                     *RA_CACHED_TOKEN.lock().unwrap() = Some(fresh_token);
                 }
@@ -66,14 +72,10 @@ impl RaClient {
     }
 
     fn login_with_password(&self, password: &str) -> Result<String, String> {
-        let params = [
-            ("r", "login2"),
-            ("u", &self.username),
-            ("p", password),
-        ];
+        let params = [("r", "login2"), ("u", &self.username), ("p", password)];
         let text = self.get_raw(&params)?;
-        let resp: LoginResponse = serde_json::from_str(&text)
-            .map_err(|e| format!("parse login response: {}", e))?;
+        let resp: LoginResponse =
+            serde_json::from_str(&text).map_err(|e| format!("parse login response: {}", e))?;
         if resp.token.is_empty() {
             return Err("login returned empty token".to_string());
         }
@@ -89,8 +91,12 @@ impl RaClient {
             eprintln!("RA: no password or token set, skipping");
             return None;
         }
-        eprintln!("RA: creating client for user '{}' (password_len={}, token_len={})",
-            cfg.ra_username, cfg.ra_password.len(), cfg.ra_token.len());
+        eprintln!(
+            "RA: creating client for user '{}' (password_len={}, token_len={})",
+            cfg.ra_username,
+            cfg.ra_password.len(),
+            cfg.ra_token.len()
+        );
         Some(Self::new(&cfg.ra_username, &cfg.ra_token, &cfg.ra_password))
     }
 
@@ -109,8 +115,8 @@ impl RaClient {
 
     fn get_raw(&self, params: &[(&str, &str)]) -> Result<String, String> {
         self.rate_limit();
-        let url = reqwest::Url::parse_with_params(RA_BASE_URL, params)
-            .map_err(|e| e.to_string())?;
+        let url =
+            reqwest::Url::parse_with_params(RA_BASE_URL, params).map_err(|e| e.to_string())?;
         let resp = self
             .http
             .get(url.clone())
@@ -130,8 +136,8 @@ impl RaClient {
         }
 
         self.rate_limit();
-        let url = reqwest::Url::parse_with_params(RA_BASE_URL, params)
-            .map_err(|e| e.to_string())?;
+        let url =
+            reqwest::Url::parse_with_params(RA_BASE_URL, params).map_err(|e| e.to_string())?;
         let resp = self
             .http
             .get(url.clone())
@@ -141,10 +147,16 @@ impl RaClient {
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
             let failures = RA_AUTH_FAILURES.fetch_add(1, Ordering::Relaxed) + 1;
-            eprintln!("RA: 401 Unauthorized (failure {}/{}) for {}", failures, RA_MAX_AUTH_FAILURES, url);
+            eprintln!(
+                "RA: 401 Unauthorized (failure {}/{}) for {}",
+                failures, RA_MAX_AUTH_FAILURES, url
+            );
             if failures >= RA_MAX_AUTH_FAILURES {
                 RA_AUTH_BROKEN.store(true, Ordering::Relaxed);
-                eprintln!("RA: auth marked as broken after {} failures — stopping all RA API calls", failures);
+                eprintln!(
+                    "RA: auth marked as broken after {} failures — stopping all RA API calls",
+                    failures
+                );
             }
             return Err(format!("HTTP {}", status));
         }
@@ -161,7 +173,11 @@ impl RaClient {
         resp.text().map_err(|e| e.to_string())
     }
 
-    pub fn fetch_console_games(&self, save_dir: &str, console_id: u32) -> Result<Vec<RaGameEntry>, String> {
+    pub fn fetch_console_games(
+        &self,
+        save_dir: &str,
+        console_id: u32,
+    ) -> Result<Vec<RaGameEntry>, String> {
         let cache = paths::console_games_path(save_dir, console_id);
         if cache.is_file() {
             if let Ok(data) = std::fs::read(&cache) {
@@ -173,8 +189,8 @@ impl RaClient {
 
         let params = [("r", "systemgames"), ("s", &console_id.to_string())];
         let text = self.get(&params)?;
-        let resp: ConsoleGamesResponse = serde_json::from_str(&text)
-            .map_err(|e| format!("parse console games: {}", e))?;
+        let resp: ConsoleGamesResponse =
+            serde_json::from_str(&text).map_err(|e| format!("parse console games: {}", e))?;
 
         let _ = std::fs::create_dir_all(cache.parent().unwrap_or(Path::new(".")));
         let _ = std::fs::write(&cache, &text);
@@ -187,7 +203,9 @@ impl RaClient {
         if let Ok(data) = std::fs::read(&cache) {
             if let Ok(resp) = serde_json::from_slice::<ConsoleGamesResponse>(&data) {
                 let q = query.to_lowercase();
-                return resp.response.into_iter()
+                return resp
+                    .response
+                    .into_iter()
                     .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset"))
                     .filter(|g| g.title.to_lowercase().contains(&q))
                     .collect();
@@ -213,8 +231,8 @@ impl RaClient {
             ("g", game_id),
         ];
         let text = self.get(&params)?;
-        let resp: GameDataResponse = serde_json::from_str(&text)
-            .map_err(|e| format!("parse game data: {}", e))?;
+        let resp: GameDataResponse =
+            serde_json::from_str(&text).map_err(|e| format!("parse game data: {}", e))?;
 
         let _ = std::fs::create_dir_all(cache.parent().unwrap_or(Path::new(".")));
         let _ = std::fs::write(&cache, &text);
@@ -228,7 +246,9 @@ impl RaClient {
         if cache.is_file() {
             if let Ok(meta) = std::fs::metadata(&cache) {
                 if let Ok(modified) = meta.modified() {
-                    if modified.elapsed().unwrap_or(Duration::from_secs(UNLOCKS_CACHE_SECS + 1))
+                    if modified
+                        .elapsed()
+                        .unwrap_or(Duration::from_secs(UNLOCKS_CACHE_SECS + 1))
                         < Duration::from_secs(UNLOCKS_CACHE_SECS)
                     {
                         if let Ok(data) = std::fs::read(&cache) {
@@ -249,8 +269,8 @@ impl RaClient {
             ("h", "1"),
         ];
         let text = self.get(&params)?;
-        let resp: UnlocksResponse = serde_json::from_str(&text)
-            .map_err(|e| format!("parse unlocks: {}", e))?;
+        let resp: UnlocksResponse =
+            serde_json::from_str(&text).map_err(|e| format!("parse unlocks: {}", e))?;
 
         let _ = std::fs::create_dir_all(cache.parent().unwrap_or(Path::new(".")));
         let _ = std::fs::write(&cache, &text);
@@ -258,7 +278,13 @@ impl RaClient {
         Ok(resp.user_unlocks)
     }
 
-    pub fn download_badge(&self, save_dir: &str, game_id: &str, badge_name: &str, locked: bool) -> String {
+    pub fn download_badge(
+        &self,
+        save_dir: &str,
+        game_id: &str,
+        badge_name: &str,
+        locked: bool,
+    ) -> String {
         let _s = info_span!("download_badge", badge_name).entered();
         let dest = if locked {
             paths::badge_locked_path(save_dir, game_id, badge_name)
@@ -273,17 +299,15 @@ impl RaClient {
         let url = format!("{}/{}{}.png", RA_BADGE_URL, badge_name, suffix);
         let tmp = dest.with_extension("png");
         match self.http.get(&url).send() {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.bytes() {
-                    Ok(bytes) => {
-                        if std::fs::write(&tmp, &bytes).is_ok() {
-                            ira_parser::convert_to_lossless_webp(&tmp);
-                            return dest.to_string_lossy().into_owned();
-                        }
+            Ok(resp) if resp.status().is_success() => match resp.bytes() {
+                Ok(bytes) => {
+                    if std::fs::write(&tmp, &bytes).is_ok() {
+                        ira_parser::convert_to_lossless_webp(&tmp);
+                        return dest.to_string_lossy().into_owned();
                     }
-                    Err(e) => eprintln!("RA badge download read error: {}", e),
                 }
-            }
+                Err(e) => eprintln!("RA badge download read error: {}", e),
+            },
             Ok(resp) => eprintln!("RA badge HTTP {}", resp.status()),
             Err(e) => eprintln!("RA badge download error: {}", e),
         }
@@ -304,22 +328,20 @@ impl RaClient {
         };
         let tmp = dest.with_extension("png");
         match self.http.get(&url).send() {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.bytes() {
-                    Ok(bytes) => {
-                        if std::fs::write(&tmp, &bytes).is_ok() {
-                            ira_parser::convert_to_lossless_webp(&tmp);
-                            if dest.is_file() {
-                                return dest.to_string_lossy().into_owned();
-                            }
-                            if tmp.is_file() {
-                                return tmp.to_string_lossy().into_owned();
-                            }
+            Ok(resp) if resp.status().is_success() => match resp.bytes() {
+                Ok(bytes) => {
+                    if std::fs::write(&tmp, &bytes).is_ok() {
+                        ira_parser::convert_to_lossless_webp(&tmp);
+                        if dest.is_file() {
+                            return dest.to_string_lossy().into_owned();
+                        }
+                        if tmp.is_file() {
+                            return tmp.to_string_lossy().into_owned();
                         }
                     }
-                    Err(e) => eprintln!("RA icon download read error: {}", e),
                 }
-            }
+                Err(e) => eprintln!("RA icon download read error: {}", e),
+            },
             Ok(resp) => eprintln!("RA icon HTTP {}", resp.status()),
             Err(e) => eprintln!("RA icon download error: {}", e),
         }

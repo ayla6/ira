@@ -12,7 +12,11 @@ pub(super) fn normalize_name(s: &str) -> String {
     for c in s.chars() {
         match c {
             '(' | '[' => in_brackets += 1,
-            ')' | ']' => { if in_brackets > 0 { in_brackets -= 1; } }
+            ')' | ']' => {
+                if in_brackets > 0 {
+                    in_brackets -= 1;
+                }
+            }
             _ if in_brackets > 0 => {}
             _ => {
                 let c = if c == '_' || c == '.' { ' ' } else { c };
@@ -64,7 +68,11 @@ pub(super) fn strip_disc_pattern(name: &str) -> Option<(String, i32)> {
             let closing = name[after_kw..].find([')', ']'])?;
             let num_str = name[after_kw..after_kw + closing].trim();
             if let Ok(n) = num_str.parse::<i32>() {
-                let base = format!("{} {}", name[..bracket_start].trim(), name[after_kw + closing + 1..].trim());
+                let base = format!(
+                    "{} {}",
+                    name[..bracket_start].trim(),
+                    name[after_kw + closing + 1..].trim()
+                );
                 let base = remove_version_tags(base.trim()).to_string();
                 return Some((base, n));
             }
@@ -86,7 +94,10 @@ pub(super) fn group_multi_disc_roms(roms: Vec<(String, PathBuf)>) -> Vec<DiscGro
     for (name, path) in roms {
         match strip_disc_pattern(&name) {
             Some((base, disc_num)) => {
-                by_pattern.entry(base).or_default().push((name, path, Some(disc_num)));
+                by_pattern
+                    .entry(base)
+                    .or_default()
+                    .push((name, path, Some(disc_num)));
             }
             None => {
                 ungrouped.push((name, path, None));
@@ -100,16 +111,25 @@ pub(super) fn group_multi_disc_roms(roms: Vec<(String, PathBuf)>) -> Vec<DiscGro
         if rom_list.len() >= 2 {
             rom_list.sort_by_key(|(_, _, disc)| disc.unwrap_or(0));
         }
-        groups.push(DiscGroup { roms: rom_list, serial: None });
+        groups.push(DiscGroup {
+            roms: rom_list,
+            serial: None,
+        });
     }
 
     let mut by_serial: HashMap<String, Vec<(String, PathBuf, Option<i32>)>> = HashMap::new();
     for (name, path, _) in ungrouped {
         let serial = crate::rom_serial::read_serial(&path);
         if let Some(ref s) = serial {
-            by_serial.entry(s.clone()).or_default().push((name, path, None));
+            by_serial
+                .entry(s.clone())
+                .or_default()
+                .push((name, path, None));
         } else {
-            groups.push(DiscGroup { roms: vec![(name, path, None)], serial: None });
+            groups.push(DiscGroup {
+                roms: vec![(name, path, None)],
+                serial: None,
+            });
         }
     }
 
@@ -120,21 +140,24 @@ pub(super) fn group_multi_disc_roms(roms: Vec<(String, PathBuf)>) -> Vec<DiscGro
                 entry.2 = Some((i + 1) as i32);
             }
         }
-        groups.push(DiscGroup { roms: rom_list, serial: Some(s) });
+        groups.push(DiscGroup {
+            roms: rom_list,
+            serial: Some(s),
+        });
     }
 
     groups
 }
 
-pub(super) fn scan_roms(folder: &str, extensions: &[&str]) -> Vec<(String, PathBuf)> {
+pub(super) fn scan_roms(folder: &str, extensions: &[&str]) -> Option<Vec<(String, PathBuf)>> {
     let mut roms = Vec::new();
     let path = Path::new(folder);
     if !path.is_dir() {
-        return roms;
+        return None;
     }
     let entries = match std::fs::read_dir(path) {
         Ok(e) => e,
-        Err(_) => return roms,
+        Err(_) => return None,
     };
     for entry in entries.flatten() {
         let file_path = entry.path();
@@ -152,7 +175,7 @@ pub(super) fn scan_roms(folder: &str, extensions: &[&str]) -> Vec<(String, PathB
             }
         }
     }
-    roms
+    Some(roms)
 }
 
 #[cfg(test)]
@@ -169,4 +192,25 @@ pub(super) fn match_rom_to_game(rom_name: &str, games: &[RaGameEntry]) -> Option
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_scan_roms_missing_folder_is_not_successful() {
+        assert!(scan_roms("/does/not/exist", &["gba"]).is_none());
+    }
+
+    #[test]
+    fn test_scan_roms_empty_folder_is_successful() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            scan_roms(dir.path().to_str().unwrap(), &["gba"])
+                .unwrap()
+                .len(),
+            0
+        );
+    }
 }

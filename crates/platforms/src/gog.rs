@@ -49,7 +49,8 @@ pub fn find_gog_info(start: &str) -> Option<(PathBuf, String, String)> {
                     if name.starts_with("goggame-") && name.ends_with(".info") {
                         if let Ok(data) = std::fs::read_to_string(entry.path()) {
                             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
-                                let product_id = json.get("rootGameId")
+                                let product_id = json
+                                    .get("rootGameId")
                                     .or_else(|| json.get("gameId"))
                                     .and_then(|v| {
                                         if let Some(s) = v.as_str() {
@@ -161,7 +162,8 @@ fn write_new_emu_config(settings_dir: &Path, product_id: &str) -> Result<(), Str
 /// Uses XXH3 checksum of the Galaxy DLL to determine old vs new config format.
 pub fn generate_galaxy_emu_config(galaxy_dll_folder: &str, product_id: &str) -> Result<(), String> {
     let settings_dir = Path::new(galaxy_dll_folder).join("ngalaxye_settings");
-    std::fs::create_dir_all(&settings_dir).map_err(|e| format!("could not create ngalaxye_settings: {}", e))?;
+    std::fs::create_dir_all(&settings_dir)
+        .map_err(|e| format!("could not create ngalaxye_settings: {}", e))?;
 
     let config_path = settings_dir.join("NemirtingasGalaxyEmu.json");
     if config_path.exists() {

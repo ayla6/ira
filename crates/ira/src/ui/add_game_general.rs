@@ -1,12 +1,27 @@
+use super::css::*;
+use super::state::SharedState;
+use adw::prelude::*;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
-use gtk4::prelude::*;
-use adw::prelude::*;
-use super::state::SharedState;
-use super::css::*;
 
-pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::WineProfile], state: &SharedState) -> (gtk4::Box, adw::EntryRow, adw::ComboRow, adw::EntryRow, adw::EntryRow, adw::EntryRow, adw::EntryRow, gtk4::Button, adw::ComboRow, adw::EntryRow, adw::EntryRow) {
+pub(super) fn build_general_page(
+    win: &adw::Window,
+    profiles: &[ira_models::WineProfile],
+    state: &SharedState,
+) -> (
+    gtk4::Box,
+    adw::EntryRow,
+    adw::ComboRow,
+    adw::EntryRow,
+    adw::EntryRow,
+    adw::EntryRow,
+    adw::EntryRow,
+    gtk4::Button,
+    adw::ComboRow,
+    adw::EntryRow,
+    adw::EntryRow,
+) {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let info_group = adw::PreferencesGroup::new();
@@ -47,7 +62,10 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
         Some(win),
         "Select executable",
         false,
-        Some(("Executable", &["application/x-executable", "application/x-msdos-program"])),
+        Some((
+            "Executable",
+            &["application/x-executable", "application/x-msdos-program"],
+        )),
         super::helpers::entry_path_closure(&exe_entry),
         {
             let entry = exe_entry.clone();
@@ -78,7 +96,8 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
     wd_entry.add_suffix(&wd_browse);
     info_group.add(&wd_entry);
 
-    let profile_row = super::wine_profile_picker::build_wine_profile_picker(profiles, None, None, state, win);
+    let profile_row =
+        super::wine_profile_picker::build_wine_profile_picker(profiles, None, None, state, win);
     info_group.add(&profile_row);
 
     page.append(&info_group);
@@ -99,7 +118,14 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
         steam_search_btn.connect_clicked(move |_| {
             let search_text = name_entry_c.text().to_string();
             let on_select = Rc::new(|_: &str| {});
-            super::steam_search::show_steam_id_search_popup(&sc, &search_text, &win_c, &row_c, "Select", on_select);
+            super::steam_search::show_steam_id_search_popup(
+                &sc,
+                &search_text,
+                &win_c,
+                &row_c,
+                "Select",
+                on_select,
+            );
         });
     }
     steam_id_entry.add_suffix(&steam_search_btn);
@@ -116,7 +142,9 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
             let row = gog_id_entry.clone();
             let name_row = name_entry.clone();
             move |path| {
-                if let Some((_, product_id, name)) = ira_platforms::gog::find_gog_info(&path.to_string_lossy()) {
+                if let Some((_, product_id, name)) =
+                    ira_platforms::gog::find_gog_info(&path.to_string_lossy())
+                {
                     row.set_text(&product_id);
                     if name_row.text().is_empty() {
                         name_row.set_text(&name);
@@ -129,13 +157,8 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
     ids_group.add(&gog_id_entry);
     page.append(&ids_group);
 
-    let detect_btn = super::helpers::make_browse_button(
-        Some(win),
-        "Select game folder",
-        true,
-        None,
-        || None,
-        {
+    let detect_btn =
+        super::helpers::make_browse_button(Some(win), "Select game folder", true, None, || None, {
             let n = name_entry.clone();
             let exe = exe_entry.clone();
             let sid = steam_id_entry.clone();
@@ -146,7 +169,9 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
                     sid.set_text(&app_id);
                 }
                 if ira_platforms::gog::is_gog_game(&folder) {
-                    if let Some((_info_dir, product_id, game_name)) = ira_platforms::gog::find_gog_info(&folder) {
+                    if let Some((_info_dir, product_id, game_name)) =
+                        ira_platforms::gog::find_gog_info(&folder)
+                    {
                         gid.set_text(&product_id);
                         if n.text().is_empty() {
                             n.set_text(&game_name);
@@ -163,7 +188,11 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
                             for entry in dir.flatten() {
                                 let p = entry.path();
                                 if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
-                                    if ext == "exe" || ext == "x86_64" || ext == "AppRun" || ext == "sh" {
+                                    if ext == "exe"
+                                        || ext == "x86_64"
+                                        || ext == "AppRun"
+                                        || ext == "sh"
+                                    {
                                         return Some(p.to_string_lossy().into_owned());
                                     }
                                 }
@@ -184,8 +213,19 @@ pub(super) fn build_general_page(win: &adw::Window, profiles: &[ira_models::Wine
                     });
                 }
             }
-        },
-    );
+        });
 
-    (page, name_entry, kind_row, folder_entry, exe_entry, args_entry, wd_entry, detect_btn, profile_row, steam_id_entry, gog_id_entry)
+    (
+        page,
+        name_entry,
+        kind_row,
+        folder_entry,
+        exe_entry,
+        args_entry,
+        wd_entry,
+        detect_btn,
+        profile_row,
+        steam_id_entry,
+        gog_id_entry,
+    )
 }

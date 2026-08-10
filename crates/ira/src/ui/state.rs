@@ -1,11 +1,11 @@
-use ira_config::Config;
 use super::game_selection_model::GameSelectionModel;
-use ira_db::DbConn;
-use ira_api::SteamDataClient;
-use ira_watcher::AchievementWatcher;
 use crate::AppSender;
 use crate::Game;
+use ira_api::SteamDataClient;
+use ira_config::Config;
+use ira_db::DbConn;
 use ira_models::{Group, GroupSelection};
+use ira_watcher::AchievementWatcher;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -36,6 +36,8 @@ pub struct AppState {
     pub content_scroll: gtk4::ScrolledWindow,
     pub content_box: gtk4::Box,
     pub grid_header: gtk4::Box,
+    pub loading_status: Option<gtk4::Label>,
+    pub loading_progress: Option<gtk4::ProgressBar>,
     pub grid_item_height: Cell<i32>,
     pub selected_id: String,
     pub displayed_db_id: i64,

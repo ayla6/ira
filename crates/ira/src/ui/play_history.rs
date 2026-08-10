@@ -1,19 +1,22 @@
-use gtk4::prelude::*;
-use adw::prelude::*;
-use crate::strings as S;
-use super::state::SharedState;
 use super::helpers::{clear_children, format_duration};
 use super::play_history_chart::{
-    assign_game_colors, build_weekly_chart, color_hex, other_hex, BarSegment, DayData,
-    DayDetail, DaySession, GameColorAssignment, WeekData,
+    assign_game_colors, build_weekly_chart, color_hex, other_hex, BarSegment, DayData, DayDetail,
+    DaySession, GameColorAssignment, WeekData,
 };
+use super::state::SharedState;
+use crate::strings as S;
+use adw::prelude::*;
 use std::collections::HashMap;
 
 type RebuildFn = std::rc::Rc<dyn Fn(Option<chrono::NaiveDate>)>;
 type RebuildHandle = std::rc::Rc<std::cell::RefCell<Option<RebuildFn>>>;
 
 fn format_time(timestamp: i64) -> String {
-    let secs = if timestamp > 1_000_000_000_000 { timestamp / 1000 } else { timestamp };
+    let secs = if timestamp > 1_000_000_000_000 {
+        timestamp / 1000
+    } else {
+        timestamp
+    };
     chrono::DateTime::from_timestamp(secs, 0)
         .map(|dt| dt.format("%H:%M").to_string())
         .unwrap_or_default()
@@ -27,7 +30,11 @@ fn now_secs() -> i64 {
 }
 
 fn ts_to_date(ts: i64) -> chrono::NaiveDate {
-    let secs = if ts > 1_000_000_000_000 { ts / 1000 } else { ts };
+    let secs = if ts > 1_000_000_000_000 {
+        ts / 1000
+    } else {
+        ts
+    };
     chrono::DateTime::from_timestamp(secs, 0)
         .map(|dt| dt.date_naive())
         .unwrap_or_default()
@@ -47,8 +54,15 @@ fn generate_week_days(ws: chrono::NaiveDate) -> Vec<chrono::NaiveDate> {
     (0..7).map(|i| ws + chrono::Duration::days(i)).collect()
 }
 
-pub fn show_play_history_dialog(state: &SharedState, game_id: i64, variant_id: Option<i64>) -> adw::Dialog {
-    let game_name = state.borrow().games.iter()
+pub fn show_play_history_dialog(
+    state: &SharedState,
+    game_id: i64,
+    variant_id: Option<i64>,
+) -> adw::Dialog {
+    let game_name = state
+        .borrow()
+        .games
+        .iter()
         .find(|g| g.db_id == game_id && g.variant_id == variant_id)
         .map(|g| g.name.clone())
         .unwrap_or_default();
@@ -100,7 +114,12 @@ pub fn show_play_history_dialog(state: &SharedState, game_id: i64, variant_id: O
                     })
                 };
                 let weeks = compute_game_weeks(&sessions, &game_name);
-                box_.append(&build_weekly_chart(weeks, true, Some(on_delete), focus_week));
+                box_.append(&build_weekly_chart(
+                    weeks,
+                    true,
+                    Some(on_delete),
+                    focus_week,
+                ));
             }
         });
         *rebuild_handle.borrow_mut() = Some(rebuild);
@@ -118,7 +137,10 @@ pub fn show_play_history_dialog(state: &SharedState, game_id: i64, variant_id: O
     dialog.connect_closed(move |_| {
         let still_active = refresh_state.borrow().displayed_db_id == game_id;
         let game = if still_active {
-            refresh_state.borrow().games.iter()
+            refresh_state
+                .borrow()
+                .games
+                .iter()
                 .find(|g| g.db_id == game_id && g.variant_id == variant_id)
                 .cloned()
         } else {
@@ -153,10 +175,7 @@ fn delete_session_with_confirm(
     if ctrl {
         do_delete();
     } else {
-        let dialog = adw::AlertDialog::new(
-            Some(S::DELETE_SESSION),
-            Some(S::DELETE_SESSION_BODY),
-        );
+        let dialog = adw::AlertDialog::new(Some(S::DELETE_SESSION), Some(S::DELETE_SESSION_BODY));
         dialog.add_response("cancel", S::CANCEL);
         dialog.add_response("delete", S::DELETE);
         dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
@@ -171,7 +190,10 @@ fn delete_session_with_confirm(
     }
 }
 
-fn delete_session_from_db(state: &SharedState, session_id: i64) -> Result<Option<chrono::NaiveDate>, String> {
+fn delete_session_from_db(
+    state: &SharedState,
+    session_id: i64,
+) -> Result<Option<chrono::NaiveDate>, String> {
     let session = ira_db::delete_session(&state.borrow().db, session_id)?
         .ok_or_else(|| format!("session {} not found", session_id))?;
     let deleted_week = Some(week_start(ts_to_date(session.started_at)));
@@ -185,7 +207,10 @@ fn delete_session_from_db(state: &SharedState, session_id: i64) -> Result<Option
             if g.db_id == session.game_id && g.variant_id.is_none() {
                 g.playtime = (g.playtime - hours).max(0.0);
                 base_pt = g.playtime;
-            } else if g.db_id == session.game_id && g.variant_id == session.variant_id && session.variant_id.is_some() {
+            } else if g.db_id == session.game_id
+                && g.variant_id == session.variant_id
+                && session.variant_id.is_some()
+            {
                 g.playtime = (g.playtime - hours).max(0.0);
                 var_pt = Some((session.variant_id.unwrap(), g.playtime));
             }
@@ -201,10 +226,7 @@ fn delete_session_from_db(state: &SharedState, session_id: i64) -> Result<Option
     Ok(deleted_week)
 }
 
-fn compute_game_weeks(
-    sessions: &[ira_models::PlaySession],
-    game_name: &str,
-) -> Vec<WeekData> {
+fn compute_game_weeks(sessions: &[ira_models::PlaySession], game_name: &str) -> Vec<WeekData> {
     let mut by_day: HashMap<chrono::NaiveDate, Vec<&ira_models::PlaySession>> = HashMap::new();
     for s in sessions {
         let date = ts_to_date(s.started_at);
@@ -252,11 +274,20 @@ fn compute_game_weeks(
                 } else {
                     vec![]
                 };
-                DayData { date, total, segments, details }
+                DayData {
+                    date,
+                    total,
+                    segments,
+                    details,
+                }
             })
             .collect();
         let week_total = days.iter().map(|d| d.total).sum();
-        weeks.push(WeekData { week_start: ws, days, week_total });
+        weeks.push(WeekData {
+            week_start: ws,
+            days,
+            week_total,
+        });
     }
 
     weeks
@@ -281,8 +312,8 @@ pub fn show_daily_history_dialog(state: &SharedState) {
     let now = now_secs();
     let from = now - 84 * 86400;
 
-    let all_sessions = ira_db::get_sessions_range(&state.borrow().db, from, now)
-        .unwrap_or_default();
+    let all_sessions =
+        ira_db::get_sessions_range(&state.borrow().db, from, now).unwrap_or_default();
 
     if all_sessions.is_empty() {
         let empty_label = gtk4::Label::new(Some(S::NO_SESSIONS));
@@ -290,7 +321,10 @@ pub fn show_daily_history_dialog(state: &SharedState) {
         empty_label.set_opacity(0.6);
         box_.append(&empty_label);
     } else {
-        let game_names: HashMap<i64, String> = state.borrow().games.iter()
+        let game_names: HashMap<i64, String> = state
+            .borrow()
+            .games
+            .iter()
             .map(|g| (g.db_id, g.name.clone()))
             .collect();
 
@@ -310,10 +344,13 @@ fn compute_app_weeks(
     assignment: &GameColorAssignment,
     game_names: &HashMap<i64, String>,
 ) -> Vec<WeekData> {
-    let mut by_day: HashMap<chrono::NaiveDate, HashMap<i64, Vec<&ira_models::PlaySession>>> = HashMap::new();
+    let mut by_day: HashMap<chrono::NaiveDate, HashMap<i64, Vec<&ira_models::PlaySession>>> =
+        HashMap::new();
     for s in sessions {
         let date = ts_to_date(s.started_at);
-        by_day.entry(date).or_default()
+        by_day
+            .entry(date)
+            .or_default()
             .entry(s.game_id)
             .or_default()
             .push(s);
@@ -333,11 +370,20 @@ fn compute_app_weeks(
                 let day_games = by_day.get(&date);
                 let (segments, details) = build_day_data(day_games, assignment, game_names);
                 let total: f64 = segments.iter().map(|s| s.value).sum();
-                DayData { date, total, segments, details }
+                DayData {
+                    date,
+                    total,
+                    segments,
+                    details,
+                }
             })
             .collect();
         let week_total = days.iter().map(|d| d.total).sum();
-        weeks.push(WeekData { week_start: ws, days, week_total });
+        weeks.push(WeekData {
+            week_start: ws,
+            days,
+            week_total,
+        });
     }
 
     weeks
@@ -362,7 +408,8 @@ fn build_day_data(
                 let color_idx = assignment.color_map.get(&gid).copied();
                 let name = game_names.get(&gid).cloned().unwrap_or_default();
                 let hex = color_hex(color_idx.unwrap_or(0)).to_string();
-                let sub_sessions: Vec<DaySession> = sessions.iter()
+                let sub_sessions: Vec<DaySession> = sessions
+                    .iter()
                     .map(|s| DaySession {
                         session_id: s.id,
                         label: format_time(s.started_at),
@@ -407,7 +454,8 @@ fn build_day_data(
         other_details.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         for (gid, total, sessions) in other_details {
             let name = game_names.get(&gid).cloned().unwrap_or_default();
-            let sub_sessions: Vec<DaySession> = sessions.iter()
+            let sub_sessions: Vec<DaySession> = sessions
+                .iter()
                 .map(|s| DaySession {
                     session_id: s.id,
                     label: format_time(s.started_at),

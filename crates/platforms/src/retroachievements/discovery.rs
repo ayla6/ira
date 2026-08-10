@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use crate::consoles::{all_consoles, ConsoleDef};
+use crate::retroachievements::api::{RaClient, RaGameEntry};
 use ira_config::Config;
 use ira_models::{Game, GameDisc, GameKind, TrophySource};
-use crate::consoles::{CONSOLES, ConsoleDef};
-use crate::retroachievements::api::{RaClient, RaGameEntry};
 
-use super::discovery_helpers::{normalize_name, scan_roms, group_multi_disc_roms};
+use super::discovery_helpers::{group_multi_disc_roms, normalize_name, scan_roms};
 
 struct ActiveConsole {
     def: &'static ConsoleDef,
@@ -14,12 +14,16 @@ struct ActiveConsole {
 }
 
 fn active_consoles(cfg: &Config) -> Vec<ActiveConsole> {
-    CONSOLES.iter()
+    all_consoles()
         .filter_map(|def| {
+            if !def.uses_rom_folder() {
+                return None;
+            }
             let cc = cfg.console(def.id);
-            (cc.enabled && !cc.folder.is_empty()).then_some(ActiveConsole {
+            let folder = cfg.rom_folder(def.id);
+            (cc.enabled && !folder.as_os_str().is_empty()).then_some(ActiveConsole {
                 def,
-                folder: cc.folder.clone(),
+                folder: folder.to_string_lossy().into_owned(),
             })
         })
         .collect()
@@ -30,18 +34,26 @@ pub fn build_ra_games(
     save_dir: &str,
     cfg: &Config,
     load_game: impl Fn(&ira_models::GameEntry, &str) -> Result<ira_models::Game, String> + Sync,
+    progress: impl Fn(&str) + Sync,
 ) -> Vec<Game> {
     let consoles = active_consoles(cfg);
     let load_game = &load_game;
+    progress("Checking ROM library caches…");
 
     let needs_fetch = consoles.iter().any(|c| {
-        !crate::retroachievements::paths::console_games_path(save_dir, c.def.ra_console_id).is_file()
+        c.def.ra_console_id != 0
+            && !crate::retroachievements::paths::console_games_path(save_dir, c.def.ra_console_id)
+                .is_file()
     });
     if needs_fetch {
         if let Some(ra_client) = RaClient::from_config(cfg) {
-            for console in &consoles {
+            for console in consoles.iter().filter(|c| c.def.ra_console_id != 0) {
+                progress(&format!("Updating {} game list…", console.def.display_name));
                 if let Err(e) = ra_client.fetch_console_games(save_dir, console.def.ra_console_id) {
-                    eprintln!("RA: failed to fetch console games for {}: {}", console.def.id, e);
+                    eprintln!(
+                        "RA: failed to fetch console games for {}: {}",
+                        console.def.id, e
+                    );
                 }
             }
         }
@@ -51,9 +63,11 @@ pub fn build_ra_games(
         let mut handles = Vec::new();
         for console in &consoles {
             let db = db.clone();
+            let progress = &progress;
             handles.push(s.spawn(move || {
-                let _console_span = tracing::info_span!("ra_console", console = console.def.id).entered();
-                build_ra_games_for_console(&db, save_dir, console, load_game)
+                let _console_span =
+                    tracing::info_span!("ra_console", console = console.def.id).entered();
+                build_ra_games_for_console(&db, save_dir, console, load_game, progress)
             }));
         }
 
@@ -73,16 +87,27 @@ fn build_ra_games_for_console(
     save_dir: &str,
     console: &ActiveConsole,
     load_game: &dyn Fn(&ira_models::GameEntry, &str) -> Result<ira_models::Game, String>,
+    progress: &dyn Fn(&str),
 ) -> Vec<Game> {
     let mut games = Vec::new();
 
-    let roms = {
+    let scan_result = {
         let _s = tracing::info_span!("scan_roms").entered();
+        progress(&format!("Scanning {} ROMs…", console.def.display_name));
         scan_roms(&console.folder, console.def.extensions)
     };
+    let scan_succeeded = scan_result.is_some();
+    if !scan_succeeded {
+        eprintln!(
+            "RA: ROM folder is missing or unreadable for {}: {}",
+            console.def.id, console.folder
+        );
+    }
+    let roms = scan_result.unwrap_or_default();
 
     let to_relative = |abs_path: &std::path::Path| -> String {
-        abs_path.strip_prefix(&console.folder)
+        abs_path
+            .strip_prefix(&console.folder)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| abs_path.to_string_lossy().into_owned())
     };
@@ -91,7 +116,8 @@ fn build_ra_games_for_console(
         let _s = tracing::info_span!("db_find_retro").entered();
         ira_db::find_all_retro_by_platform(db, console.def.id).unwrap_or_default()
     };
-    let existing_by_path: HashMap<String, ira_models::GameEntry> = existing_entries.iter()
+    let existing_by_path: HashMap<String, ira_models::GameEntry> = existing_entries
+        .iter()
         .filter(|e| !e.rom_path.is_empty())
         .map(|e| (e.rom_path.clone(), e.clone()))
         .collect();
@@ -100,10 +126,7 @@ fn build_ra_games_for_console(
         ira_db::get_disc_paths_for_platform(db, console.def.id).unwrap_or_default()
     };
 
-    let known_paths: HashSet<String> = existing_by_path.keys()
-        .cloned()
-        .chain(disc_paths)
-        .collect();
+    let known_paths: HashSet<String> = existing_by_path.keys().cloned().chain(disc_paths).collect();
 
     let mut seen_paths: HashSet<String> = HashSet::new();
     let mut new_roms: Vec<(String, PathBuf)> = Vec::new();
@@ -116,14 +139,25 @@ fn build_ra_games_for_console(
     }
 
     let needs_ra_cache = !new_roms.is_empty()
-        || existing_by_path.values().any(|e| e.trophy_source == ira_models::TrophySource::Empty && !e.manual_unmatch);
-    let ra_games: Vec<RaGameEntry> = if needs_ra_cache {
+        || existing_by_path
+            .values()
+            .any(|e| e.trophy_source == ira_models::TrophySource::Empty && !e.manual_unmatch);
+    let ra_games: Vec<RaGameEntry> = if console.def.ra_console_id != 0 && needs_ra_cache {
         let _cs = tracing::info_span!("read_console_games_cache").entered();
-        match crate::retroachievements::read_console_games_cache(save_dir, console.def.ra_console_id) {
-            Some(g) => g.into_iter().filter(|g| !g.title.contains('~') && !g.title.contains("[Subset")).collect(),
+        match crate::retroachievements::read_console_games_cache(
+            save_dir,
+            console.def.ra_console_id,
+        ) {
+            Some(g) => g
+                .into_iter()
+                .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset"))
+                .collect(),
             None => {
                 if !new_roms.is_empty() {
-                    eprintln!("RA: no cached game list for {}, new ROMs won't be matched", console.def.id);
+                    eprintln!(
+                        "RA: no cached game list for {}, new ROMs won't be matched",
+                        console.def.id
+                    );
                 }
                 Vec::new()
             }
@@ -131,7 +165,8 @@ fn build_ra_games_for_console(
     } else {
         Vec::new()
     };
-    let ra_title_map: HashMap<String, u32> = ra_games.iter()
+    let ra_title_map: HashMap<String, u32> = ra_games
+        .iter()
         .map(|g| (normalize_name(&g.title), g.id))
         .collect();
 
@@ -151,12 +186,24 @@ fn build_ra_games_for_console(
                 let rom_norm = normalize_name(&rom_name);
                 if let Some(&ra_id) = ra_title_map.get(&rom_norm) {
                     let new_game_id = ra_id.to_string();
-                    if ira_db::find_by_game_id(db, &new_game_id, console.def.id).ok().flatten().is_none() {
-                        let ra_title = ra_games.iter()
+                    if ira_db::find_by_game_id(db, &new_game_id, console.def.id)
+                        .ok()
+                        .flatten()
+                        .is_none()
+                    {
+                        let ra_title = ra_games
+                            .iter()
                             .find(|g| g.id == ra_id)
                             .map(|g| g.title.clone())
                             .unwrap_or_else(|| rom_name.clone());
-                        if let Err(e) = ira_db::update_game_ids(db, entry.id, "", &new_game_id, ira_models::TrophySource::Ra, console.def.id) {
+                        if let Err(e) = ira_db::update_game_ids(
+                            db,
+                            entry.id,
+                            "",
+                            &new_game_id,
+                            ira_models::TrophySource::Ra,
+                            console.def.id,
+                        ) {
                             eprintln!("Failed to update game IDs for RA match: {}", e);
                         }
                         entry.game_id = new_game_id;
@@ -170,12 +217,20 @@ fn build_ra_games_for_console(
 
             let _gs = tracing::info_span!("load_game", app_id = &entry.steam_id).entered();
             let mut g = load_game(&entry, save_dir).unwrap_or_else(|_| Game {
-                app_id: if !entry.steam_id.is_empty() { entry.steam_id.clone() } else { entry.game_id.clone() },
+                app_id: if !entry.steam_id.is_empty() {
+                    entry.steam_id.clone()
+                } else {
+                    entry.game_id.clone()
+                },
                 kind: GameKind::Retro,
                 trophy_source: entry.trophy_source,
                 platform_id: entry.platform_id.clone(),
                 db_id: entry.id,
-                name: if entry.title.is_empty() { rom_path_str.clone() } else { entry.title.clone() },
+                name: if entry.title.is_empty() {
+                    rom_path_str.clone()
+                } else {
+                    entry.title.clone()
+                },
                 ..Default::default()
             });
             if g.name_lower.is_empty() {
@@ -197,7 +252,11 @@ fn build_ra_games_for_console(
 
             let matched_id = if !ra_title_map.is_empty() {
                 let rom_norm = normalize_name(rom_name);
-                if rom_norm.is_empty() { None } else { ra_title_map.get(&rom_norm).copied() }
+                if rom_norm.is_empty() {
+                    None
+                } else {
+                    ra_title_map.get(&rom_norm).copied()
+                }
             } else {
                 None
             };
@@ -205,21 +264,31 @@ fn build_ra_games_for_console(
             let serial = if matched_id.is_some() {
                 group.serial.clone()
             } else {
-                group.serial.clone().or_else(|| crate::rom_serial::read_serial(rom_path))
+                group
+                    .serial
+                    .clone()
+                    .or_else(|| crate::rom_serial::read_serial(rom_path))
             };
 
             let (app_id, title, trophy_source) = match matched_id {
                 Some(id) => {
-                    let t = ra_games.iter()
+                    let t = ra_games
+                        .iter()
                         .find(|g| g.id == id)
                         .map(|g| g.title.clone())
                         .unwrap_or_else(|| rom_name.clone());
                     (id.to_string(), t, TrophySource::Ra)
                 }
-                None => (serial.clone().unwrap_or_else(|| rom_name.clone()), rom_name.clone(), TrophySource::Empty),
+                None => (
+                    serial.clone().unwrap_or_else(|| rom_name.clone()),
+                    rom_name.clone(),
+                    TrophySource::Empty,
+                ),
             };
 
-            let existing_by_id = ira_db::find_by_game_id(db, &app_id, console.def.id).ok().flatten();
+            let existing_by_id = ira_db::find_by_game_id(db, &app_id, console.def.id)
+                .ok()
+                .flatten();
             let game = match existing_by_id {
                 Some(e) => {
                     if e.rom_path.is_empty() {
@@ -227,16 +296,19 @@ fn build_ra_games_for_console(
                             eprintln!("Failed to set ROM path: {}", e);
                         }
                     }
-                    let mut g = load_game(&e, save_dir)
-                        .unwrap_or_else(|_| Game {
-                            app_id: e.game_id.clone(),
-                            kind: GameKind::Retro,
-                            trophy_source: e.trophy_source,
-                            platform_id: e.platform_id.clone(),
-                            db_id: e.id,
-                            name: if e.title.is_empty() { title.clone() } else { e.title.clone() },
-                            ..Default::default()
-                        });
+                    let mut g = load_game(&e, save_dir).unwrap_or_else(|_| Game {
+                        app_id: e.game_id.clone(),
+                        kind: GameKind::Retro,
+                        trophy_source: e.trophy_source,
+                        platform_id: e.platform_id.clone(),
+                        db_id: e.id,
+                        name: if e.title.is_empty() {
+                            title.clone()
+                        } else {
+                            e.title.clone()
+                        },
+                        ..Default::default()
+                    });
                     if g.name_lower.is_empty() {
                         g.name_lower = g.name.to_lowercase();
                     }
@@ -245,7 +317,15 @@ fn build_ra_games_for_console(
                     g
                 }
                 None => {
-                    match ira_db::add_game(db, GameKind::Retro, trophy_source, "", &app_id, console.def.id, &title) {
+                    match ira_db::add_game(
+                        db,
+                        GameKind::Retro,
+                        trophy_source,
+                        "",
+                        &app_id,
+                        console.def.id,
+                        &title,
+                    ) {
                         Ok(id) => {
                             if let Err(e) = ira_db::set_rom_path(db, id, &rom_path_str) {
                                 eprintln!("Failed to set ROM path: {}", e);
@@ -279,13 +359,16 @@ fn build_ra_games_for_console(
                     let disc_num = disc_num.unwrap_or((i + 1) as i32);
                     let disc_path_str = to_relative(disc_path);
                     let label = format!("Disc {}", disc_num);
-                    if let Err(e) = ira_db::add_disc(db, &GameDisc {
-                        id: 0,
-                        game_id: game.db_id,
-                        disc_number: disc_num,
-                        rom_path: disc_path_str,
-                        label,
-                    }) {
+                    if let Err(e) = ira_db::add_disc(
+                        db,
+                        &GameDisc {
+                            id: 0,
+                            game_id: game.db_id,
+                            disc_number: disc_num,
+                            rom_path: disc_path_str,
+                            label,
+                        },
+                    ) {
                         eprintln!("Failed to add disc: {}", e);
                     }
                 }
@@ -297,13 +380,15 @@ fn build_ra_games_for_console(
 
     {
         let _s = tracing::info_span!("stale_check").entered();
-        for entry in &existing_entries {
-            if !entry.rom_path.is_empty() && !seen_paths.contains(&entry.rom_path) {
-                if let Err(e) = ira_db::set_rom_path(db, entry.id, "") {
-                    eprintln!("Failed to clear ROM path: {}", e);
-                }
-                if let Err(e) = ira_db::delete_discs(db, entry.id) {
-                    eprintln!("Failed to delete discs: {}", e);
+        if scan_succeeded {
+            for entry in &existing_entries {
+                if !entry.rom_path.is_empty() && !seen_paths.contains(&entry.rom_path) {
+                    if let Err(e) = ira_db::set_rom_path(db, entry.id, "") {
+                        eprintln!("Failed to clear ROM path: {}", e);
+                    }
+                    if let Err(e) = ira_db::delete_discs(db, entry.id) {
+                        eprintln!("Failed to delete discs: {}", e);
+                    }
                 }
             }
         }
@@ -321,7 +406,10 @@ mod tests {
 
     #[test]
     fn test_normalize_name_basic() {
-        assert_eq!(normalize_name("Final Fantasy VII (USA)"), "final fantasy vii");
+        assert_eq!(
+            normalize_name("Final Fantasy VII (USA)"),
+            "final fantasy vii"
+        );
     }
 
     #[test]
@@ -380,20 +468,38 @@ mod tests {
 
     #[test]
     fn test_strip_disc_pattern_paren() {
-        assert_eq!(strip_disc_pattern("Final Fantasy VII (Disc 1)"), Some(("Final Fantasy VII".to_string(), 1)));
-        assert_eq!(strip_disc_pattern("Final Fantasy VII (Disc 2)"), Some(("Final Fantasy VII".to_string(), 2)));
+        assert_eq!(
+            strip_disc_pattern("Final Fantasy VII (Disc 1)"),
+            Some(("Final Fantasy VII".to_string(), 1))
+        );
+        assert_eq!(
+            strip_disc_pattern("Final Fantasy VII (Disc 2)"),
+            Some(("Final Fantasy VII".to_string(), 2))
+        );
     }
 
     #[test]
     fn test_strip_disc_pattern_bracket() {
-        assert_eq!(strip_disc_pattern("Metal Gear Solid [Disc 1]"), Some(("Metal Gear Solid".to_string(), 1)));
-        assert_eq!(strip_disc_pattern("Game [CD 2]"), Some(("Game".to_string(), 2)));
+        assert_eq!(
+            strip_disc_pattern("Metal Gear Solid [Disc 1]"),
+            Some(("Metal Gear Solid".to_string(), 1))
+        );
+        assert_eq!(
+            strip_disc_pattern("Game [CD 2]"),
+            Some(("Game".to_string(), 2))
+        );
     }
 
     #[test]
     fn test_strip_disc_pattern_disk_variant() {
-        assert_eq!(strip_disc_pattern("Game (Disk 1)"), Some(("Game".to_string(), 1)));
-        assert_eq!(strip_disc_pattern("Game (Disk 3)"), Some(("Game".to_string(), 3)));
+        assert_eq!(
+            strip_disc_pattern("Game (Disk 1)"),
+            Some(("Game".to_string(), 1))
+        );
+        assert_eq!(
+            strip_disc_pattern("Game (Disk 3)"),
+            Some(("Game".to_string(), 3))
+        );
     }
 
     #[test]
@@ -413,9 +519,18 @@ mod tests {
     #[test]
     fn test_group_multi_disc_by_pattern() {
         let roms = vec![
-            ("Final Fantasy VII (Disc 1)".to_string(), PathBuf::from("/games/ff7_d1.bin")),
-            ("Final Fantasy VII (Disc 2)".to_string(), PathBuf::from("/games/ff7_d2.bin")),
-            ("Final Fantasy VII (Disc 3)".to_string(), PathBuf::from("/games/ff7_d3.bin")),
+            (
+                "Final Fantasy VII (Disc 1)".to_string(),
+                PathBuf::from("/games/ff7_d1.bin"),
+            ),
+            (
+                "Final Fantasy VII (Disc 2)".to_string(),
+                PathBuf::from("/games/ff7_d2.bin"),
+            ),
+            (
+                "Final Fantasy VII (Disc 3)".to_string(),
+                PathBuf::from("/games/ff7_d3.bin"),
+            ),
             ("Chrono Trigger".to_string(), PathBuf::from("/games/ct.bin")),
         ];
         let groups = group_multi_disc_roms(roms);
@@ -428,9 +543,7 @@ mod tests {
 
     #[test]
     fn test_group_single_rom() {
-        let roms = vec![
-            ("Game".to_string(), PathBuf::from("/games/game.bin")),
-        ];
+        let roms = vec![("Game".to_string(), PathBuf::from("/games/game.bin"))];
         let groups = group_multi_disc_roms(roms);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].roms.len(), 1);

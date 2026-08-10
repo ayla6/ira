@@ -1,5 +1,4 @@
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct PlaySession {
     pub id: i64,
     pub game_id: i64,
@@ -8,4 +7,3 @@ pub struct PlaySession {
     pub ended_at: i64,
     pub duration_seconds: i64,
 }
-

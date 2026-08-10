@@ -12,6 +12,6 @@ pub use cache::{clear_texture_cache, invalidate_texture};
 pub use pixbuf::pixbuf_for;
 pub use scaled::ScaledPaintable;
 pub use texture::{
-    cached_texture, new_image_from_file, set_image, set_picture_contain,
-    set_picture_natural, texture_for,
+    cached_texture, new_image_from_file, set_image, set_picture_contain, set_picture_natural,
+    texture_for,
 };

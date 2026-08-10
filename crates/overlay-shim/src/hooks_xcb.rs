@@ -112,7 +112,10 @@ unsafe fn maybe_consume_xcb_event(ev: *mut c_void) -> bool {
 
     static FIRST_EVENT: std::sync::Once = std::sync::Once::new();
     FIRST_EVENT.call_once(|| {
-        eprintln!("ira-overlay-shim: intercepting XCB events in pid {}", std::process::id());
+        eprintln!(
+            "ira-overlay-shim: intercepting XCB events in pid {}",
+            std::process::id()
+        );
     });
 
     let event_type = xcb_response_type(ev);
@@ -135,13 +138,21 @@ unsafe fn maybe_consume_xcb_event(ev: *mut c_void) -> bool {
         }
         if (mods & ss_mods) == ss_mods && keycode == ss_x11 {
             state::push_event(InputEventRaw {
-                event_type: 5, x: 0, y: 0, button: 0, keycode: 0,
+                event_type: 5,
+                x: 0,
+                y: 0,
+                button: 0,
+                keycode: 0,
             });
             return true;
         }
         if (mods & rec_mods) == rec_mods && keycode == rec_x11 {
             state::push_event(InputEventRaw {
-                event_type: 6, x: 0, y: 0, button: 0, keycode: 0,
+                event_type: 6,
+                x: 0,
+                y: 0,
+                button: 0,
+                keycode: 0,
             });
             return true;
         }
@@ -154,7 +165,11 @@ unsafe fn maybe_consume_xcb_event(ev: *mut c_void) -> bool {
                 let (x, y) = xcb_event_xy(ev);
                 state::set_mouse_pos(x as i32, y as i32);
                 state::push_event(InputEventRaw {
-                    event_type: 0, x: x as i32, y: y as i32, button: 0, keycode: 0,
+                    event_type: 0,
+                    x: x as i32,
+                    y: y as i32,
+                    button: 0,
+                    keycode: 0,
                 });
                 return true;
             }
@@ -164,12 +179,20 @@ unsafe fn maybe_consume_xcb_event(ev: *mut c_void) -> bool {
                 if button == XCB_BUTTON_INDEX_4 || button == XCB_BUTTON_INDEX_5 {
                     let delta = if button == XCB_BUTTON_INDEX_4 { -1 } else { 1 };
                     state::push_event(InputEventRaw {
-                        event_type: 7, x: 0, y: delta, button: button as u32, keycode: 0,
+                        event_type: 7,
+                        x: 0,
+                        y: delta,
+                        button: button as u32,
+                        keycode: 0,
                     });
                     return true;
                 }
                 state::push_event(InputEventRaw {
-                    event_type: 1, x: x as i32, y: y as i32, button: button as u32, keycode: 0,
+                    event_type: 1,
+                    x: x as i32,
+                    y: y as i32,
+                    button: button as u32,
+                    keycode: 0,
                 });
                 return true;
             }
@@ -180,21 +203,33 @@ unsafe fn maybe_consume_xcb_event(ev: *mut c_void) -> bool {
                     return true;
                 }
                 state::push_event(InputEventRaw {
-                    event_type: 2, x: x as i32, y: y as i32, button: button as u32, keycode: 0,
+                    event_type: 2,
+                    x: x as i32,
+                    y: y as i32,
+                    button: button as u32,
+                    keycode: 0,
                 });
                 return true;
             }
             XCB_KEY_PRESS => {
                 let keycode = xcb_detail(ev) as u32;
                 state::push_event(InputEventRaw {
-                    event_type: 3, x: 0, y: 0, button: 0, keycode,
+                    event_type: 3,
+                    x: 0,
+                    y: 0,
+                    button: 0,
+                    keycode,
                 });
                 return true;
             }
             XCB_KEY_RELEASE => {
                 let keycode = xcb_detail(ev) as u32;
                 state::push_event(InputEventRaw {
-                    event_type: 4, x: 0, y: 0, button: 0, keycode,
+                    event_type: 4,
+                    x: 0,
+                    y: 0,
+                    button: 0,
+                    keycode,
                 });
                 return true;
             }

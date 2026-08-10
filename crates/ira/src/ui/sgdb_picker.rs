@@ -1,15 +1,14 @@
-use gtk4::prelude::*;
+use super::css::*;
+use super::helpers::clear_children;
+use super::state::PendingImage;
 use adw::prelude::*;
-use ira_api::SteamDataClient;
 use ira_api::types::SgdbAsset;
+use ira_api::SteamDataClient;
 use ira_models::AssetType;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
-use super::helpers::clear_children;
-use super::css::*;
-use super::state::PendingImage;
 
 fn build_sgdb_asset_card(
     a: &SgdbAsset,
@@ -19,18 +18,23 @@ fn build_sgdb_asset_card(
     thumb_size: i32,
     all_buttons: Rc<RefCell<Vec<gtk4::Button>>>,
 ) -> (gtk4::Widget, gtk4::Widget) {
-
     let mut info = String::new();
     if a.width > 0 && a.height > 0 {
         info = format!("{}\u{d7}{}", a.width, a.height);
     }
     if !a.style.is_empty() {
-        if !info.is_empty() { info = format!("{} \u{b7} {}", info, a.style); }
-        else { info = a.style.clone(); }
+        if !info.is_empty() {
+            info = format!("{} \u{b7} {}", info, a.style);
+        } else {
+            info = a.style.clone();
+        }
     }
     if !a.author.is_empty() {
-        if !info.is_empty() { info = format!("{} \u{b7} by {}", info, a.author); }
-        else { info = format!("by {}", a.author); }
+        if !info.is_empty() {
+            info = format!("{} \u{b7} by {}", info, a.author);
+        } else {
+            info = format!("by {}", a.author);
+        }
     }
 
     let card = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
@@ -98,13 +102,20 @@ fn build_sgdb_asset_card(
         on_download();
     });
 
-    let thumb_url = if a.thumb.is_empty() { a.url.clone() } else { a.thumb.clone() };
+    let thumb_url = if a.thumb.is_empty() {
+        a.url.clone()
+    } else {
+        a.thumb.clone()
+    };
     let steam_thumb = steam.clone();
     let (tx_thumb, rx_thumb) = std::sync::mpsc::channel::<Option<Vec<u8>>>();
     let rx_thumb = std::cell::RefCell::new(rx_thumb);
     std::thread::spawn(move || {
         let _s = tracing::info_span!("thumbnail_download", url = %thumb_url).entered();
-        let bytes = steam_thumb.download_bytes(&thumb_url).ok().filter(|b| !b.is_empty());
+        let bytes = steam_thumb
+            .download_bytes(&thumb_url)
+            .ok()
+            .filter(|b| !b.is_empty());
         let _ = tx_thumb.send(bytes);
     });
     let tp_g = grid_pic.clone();
@@ -142,17 +153,32 @@ struct SgdbPickerCtx {
 
 fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
     let dest_dir = ctx.dest_dir.clone().unwrap_or_else(|| {
-        let data_subdir = if ctx.is_steam_id { "steam".to_string() } else { "steamgriddb".to_string() };
+        let data_subdir = if ctx.is_steam_id {
+            "steam".to_string()
+        } else {
+            "steamgriddb".to_string()
+        };
         format!("{}/data/{}/{}", ctx.save_dir, data_subdir, ctx.id)
     });
-    let Some(at) = AssetType::from_string(&ctx.asset) else { return Rc::new(|| {}) };
+    let Some(at) = AssetType::from_string(&ctx.asset) else {
+        return Rc::new(|| {});
+    };
     let file_name = match at {
         AssetType::Icon => {
-            let ext = if a.mime.contains("icon") || a.mime.contains("x-icon") { "ico" }
-            else if a.mime.contains("png") { "png" }
-            else if a.mime.contains("jpeg") || a.mime.contains("jpg") { "jpg" }
-            else if a.mime.contains("webp") { "webp" }
-            else { std::path::Path::new(&a.url).extension().and_then(|e| e.to_str()).unwrap_or("png") };
+            let ext = if a.mime.contains("icon") || a.mime.contains("x-icon") {
+                "ico"
+            } else if a.mime.contains("png") {
+                "png"
+            } else if a.mime.contains("jpeg") || a.mime.contains("jpg") {
+                "jpg"
+            } else if a.mime.contains("webp") {
+                "webp"
+            } else {
+                std::path::Path::new(&a.url)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("png")
+            };
             format!("{}.{}", at.file_base(), ext)
         }
         AssetType::Hero => format!("{}.jpg", at.file_base()),
@@ -196,7 +222,8 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
                 loop {
                     match rx.borrow_mut().try_recv() {
                         Ok((bytes, is_converted)) => {
-                            pc_c.borrow_mut().insert(asset_c.clone(), PendingImage::Bytes(bytes));
+                            pc_c.borrow_mut()
+                                .insert(asset_c.clone(), PendingImage::Bytes(bytes));
                             if !is_converted {
                                 on_done_c();
                                 picker_c.close();
@@ -211,7 +238,11 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
                         }
                     }
                 }
-                if done.get() { glib::ControlFlow::Break } else { glib::ControlFlow::Continue }
+                if done.get() {
+                    glib::ControlFlow::Break
+                } else {
+                    glib::ControlFlow::Continue
+                }
             });
         } else {
             let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
@@ -226,12 +257,19 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
                 let dest_path = std::path::Path::new(&dest_dir_c).join(&file_name_c);
                 let _ = std::fs::create_dir_all(&dest_dir_c);
                 let result = if steam.download_file(&url, &dest_path).is_ok() {
-                    let ext = dest_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                    let ext = dest_path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
                     if ext == "png" || ext == "ico" {
                         ira_parser::convert_to_lossless_webp(&dest_path);
                         let webp = dest_path.with_extension("webp");
-                        if webp.is_file() { webp.to_string_lossy().into_owned() }
-                        else { dest_path.to_string_lossy().into_owned() }
+                        if webp.is_file() {
+                            webp.to_string_lossy().into_owned()
+                        } else {
+                            dest_path.to_string_lossy().into_owned()
+                        }
                     } else {
                         dest_path.to_string_lossy().into_owned()
                     }
@@ -244,10 +282,15 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
                     ira_parser::ensure_small_image(
                         std::path::Path::new(&dest_dir_c),
                         asset_at.file_base(),
-                        sw, sh,
+                        sw,
+                        sh,
                     );
                 }
-                let _ = tx.send(if result.is_empty() { None } else { Some(result) });
+                let _ = tx.send(if result.is_empty() {
+                    None
+                } else {
+                    Some(result)
+                });
             });
             let on_done_c = on_done_dl.clone();
             let picker_c = picker_dl.clone();
@@ -278,7 +321,14 @@ fn append_assets(
     flow.set_max_children_per_line((900 / (thumb_size + 20)).clamp(1, 8) as u32);
     for a in &assets[start..] {
         let on_download = build_on_download(ctx, a);
-        let (grid_card, list_row) = build_sgdb_asset_card(a, &ctx.asset, &ctx.steam, on_download, thumb_size, all_buttons.clone());
+        let (grid_card, list_row) = build_sgdb_asset_card(
+            a,
+            &ctx.asset,
+            &ctx.steam,
+            on_download,
+            thumb_size,
+            all_buttons.clone(),
+        );
         flow.append(&grid_card);
         list_view.append(&list_row);
     }
@@ -321,7 +371,18 @@ pub(crate) struct ShowSgdbPickerParams<'a> {
 }
 
 pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
-    let ShowSgdbPickerParams { steam, id, asset, is_steam_id, dimensions, parent, on_done, pending_copies, save_dir, dest_dir } = params;
+    let ShowSgdbPickerParams {
+        steam,
+        id,
+        asset,
+        is_steam_id,
+        dimensions,
+        parent,
+        on_done,
+        pending_copies,
+        save_dir,
+        dest_dir,
+    } = params;
     let picker = adw::Window::new();
     picker.set_default_width(900);
     picker.set_default_height(700);
@@ -463,7 +524,15 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
             let thumb_size = zoom_level.get();
             let start = rendered_count.get();
             if start < assets.len() {
-                append_assets(&flow, &list_view, &assets, start, thumb_size, &ctx, &all_buttons);
+                append_assets(
+                    &flow,
+                    &list_view,
+                    &assets,
+                    start,
+                    thumb_size,
+                    &ctx,
+                    &all_buttons,
+                );
                 rendered_count.set(assets.len());
             }
         }) as Rc<dyn Fn()>
@@ -534,15 +603,21 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let picker_scroll = picker.clone();
 
     vadj.connect_value_changed(move |adj| {
-        if !has_more_scroll.get() || loading_more_scroll.get() { return; }
-        if !picker_scroll.is_visible() { return; }
+        if !has_more_scroll.get() || loading_more_scroll.get() {
+            return;
+        }
+        if !picker_scroll.is_visible() {
+            return;
+        }
 
         let value = adj.value();
         let upper = adj.upper();
         let page_size = adj.page_size();
         let distance_to_bottom = upper - value - page_size;
 
-        if distance_to_bottom > 800.0 { return; }
+        if distance_to_bottom > 800.0 {
+            return;
+        }
 
         loading_more_scroll.set(true);
         let next_page = current_page_scroll.get();
@@ -554,7 +629,8 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         let dims_m = dims_scroll.clone();
         std::thread::spawn(move || {
             let dims_refs: Vec<&str> = dims_m.iter().map(|s| s.as_str()).collect();
-            let results = steam_m.list_sgdb_assets(&id_m, asset_at_m, is_steam_id, &dims_refs, next_page);
+            let results =
+                steam_m.list_sgdb_assets(&id_m, asset_at_m, is_steam_id, &dims_refs, next_page);
             let _ = tx_more.send(results);
         });
 

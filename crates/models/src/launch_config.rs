@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GameLaunchConfig {
     pub exe: String,
     pub args: String,
@@ -39,7 +38,6 @@ pub struct GameLaunchConfig {
     #[serde(default)]
     pub overlay_font_family: Option<String>,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WineConfig {
@@ -101,7 +99,9 @@ pub struct WineConfig {
     pub _gpu: String,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 impl Default for WineConfig {
     fn default() -> Self {
@@ -157,35 +157,111 @@ impl WineConfig {
             version: self.version.clone(),
             custom_wine_path: self.custom_wine_path.clone(),
             arch: self.arch.clone(),
-            esync: if has("esync") { self.esync } else { default.esync },
-            fsync: if has("fsync") { self.fsync } else { default.fsync },
+            esync: if has("esync") {
+                self.esync
+            } else {
+                default.esync
+            },
+            fsync: if has("fsync") {
+                self.fsync
+            } else {
+                default.fsync
+            },
             dxvk: if has("dxvk") { self.dxvk } else { default.dxvk },
-            vkd3d: if has("vkd3d") { self.vkd3d } else { default.vkd3d },
-            d3d_extras: if has("d3d_extras") { self.d3d_extras } else { default.d3d_extras },
-            dxvk_nvapi: if has("dxvk_nvapi") { self.dxvk_nvapi } else { default.dxvk_nvapi },
+            vkd3d: if has("vkd3d") {
+                self.vkd3d
+            } else {
+                default.vkd3d
+            },
+            d3d_extras: if has("d3d_extras") {
+                self.d3d_extras
+            } else {
+                default.d3d_extras
+            },
+            dxvk_nvapi: if has("dxvk_nvapi") {
+                self.dxvk_nvapi
+            } else {
+                default.dxvk_nvapi
+            },
             fsr: if has("fsr") { self.fsr } else { default.fsr },
-            battleye: if has("battleye") { self.battleye } else { default.battleye },
+            battleye: if has("battleye") {
+                self.battleye
+            } else {
+                default.battleye
+            },
             eac: if has("eac") { self.eac } else { default.eac },
-            show_debug: if has("show_debug") { self.show_debug.clone() } else { default.show_debug.clone() },
-            dll_overrides: if has("dll_overrides") { self.dll_overrides.clone() } else { default.dll_overrides.clone() },
-            audio: if has("audio") { self.audio.clone() } else { default.audio.clone() },
-            graphics: if has("graphics") { self.graphics.clone() } else { default.graphics.clone() },
-            desktop_integration: if has("desktop_integration") { self.desktop_integration } else { default.desktop_integration },
-            show_crash_dialogs: if has("show_crash_dialogs") { self.show_crash_dialogs } else { default.show_crash_dialogs },
-            mouse_warp_override: if has("mouse_warp_override") { self.mouse_warp_override.clone() } else { default.mouse_warp_override.clone() },
+            show_debug: if has("show_debug") {
+                self.show_debug.clone()
+            } else {
+                default.show_debug.clone()
+            },
+            dll_overrides: if has("dll_overrides") {
+                self.dll_overrides.clone()
+            } else {
+                default.dll_overrides.clone()
+            },
+            audio: if has("audio") {
+                self.audio.clone()
+            } else {
+                default.audio.clone()
+            },
+            graphics: if has("graphics") {
+                self.graphics.clone()
+            } else {
+                default.graphics.clone()
+            },
+            desktop_integration: if has("desktop_integration") {
+                self.desktop_integration
+            } else {
+                default.desktop_integration
+            },
+            show_crash_dialogs: if has("show_crash_dialogs") {
+                self.show_crash_dialogs
+            } else {
+                default.show_crash_dialogs
+            },
+            mouse_warp_override: if has("mouse_warp_override") {
+                self.mouse_warp_override.clone()
+            } else {
+                default.mouse_warp_override.clone()
+            },
             _virtual_desktop: false,
             _virtual_desktop_res: String::new(),
-            dpi_enabled: if has("dpi_enabled") { self.dpi_enabled } else { default.dpi_enabled },
+            dpi_enabled: if has("dpi_enabled") {
+                self.dpi_enabled
+            } else {
+                default.dpi_enabled
+            },
             dpi: if has("dpi") { self.dpi } else { default.dpi },
             _gamemode: false,
             _mangohud: false,
             _gamescope: false,
             _gamescope_flags: String::new(),
-            dxvk_frame_rate: if has("dxvk_frame_rate") { self.dxvk_frame_rate } else { default.dxvk_frame_rate },
-            dxvk_hud: if has("dxvk_hud") { self.dxvk_hud } else { default.dxvk_hud },
-            proton_wow64: if has("proton_wow64") { self.proton_wow64 } else { default.proton_wow64 },
-            proton_ntsync: if has("proton_ntsync") { self.proton_ntsync } else { default.proton_ntsync },
-            proton_disable_lsteamclient: if has("proton_disable_lsteamclient") { self.proton_disable_lsteamclient } else { default.proton_disable_lsteamclient },
+            dxvk_frame_rate: if has("dxvk_frame_rate") {
+                self.dxvk_frame_rate
+            } else {
+                default.dxvk_frame_rate
+            },
+            dxvk_hud: if has("dxvk_hud") {
+                self.dxvk_hud
+            } else {
+                default.dxvk_hud
+            },
+            proton_wow64: if has("proton_wow64") {
+                self.proton_wow64
+            } else {
+                default.proton_wow64
+            },
+            proton_ntsync: if has("proton_ntsync") {
+                self.proton_ntsync
+            } else {
+                default.proton_ntsync
+            },
+            proton_disable_lsteamclient: if has("proton_disable_lsteamclient") {
+                self.proton_disable_lsteamclient
+            } else {
+                default.proton_disable_lsteamclient
+            },
             umu_enabled: self.umu_enabled,
             overridden_fields: self.overridden_fields.clone(),
             _gpu: String::new(),

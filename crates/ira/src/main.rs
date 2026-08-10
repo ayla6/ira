@@ -1,10 +1,10 @@
+use gtk4::prelude::*;
 use ira::activate::activate;
 use ira::ui::{restore_content, SharedState};
-use gtk4::prelude::*;
-#[cfg(feature = "trace")]
-use tracing_subscriber::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
+#[cfg(feature = "trace")]
+use tracing_subscriber::prelude::*;
 
 #[cfg(feature = "trace")]
 fn init_tracing() -> Option<tracing_chrome::FlushGuard> {
@@ -27,10 +27,7 @@ fn init_tracing() -> Option<()> {
 fn main() {
     let _flush_guard = init_tracing();
 
-    let app = adw::Application::new(
-        Some("com.github.ira"),
-        gio::ApplicationFlags::empty(),
-    );
+    let app = adw::Application::new(Some("com.github.ira"), gio::ApplicationFlags::empty());
 
     let state_holder: Rc<RefCell<Option<SharedState>>> = Rc::new(RefCell::new(None));
 
@@ -50,7 +47,10 @@ fn main() {
 
     app.run();
 
-    let db = state_holder.borrow().as_ref().map(|s| s.borrow().db.clone());
+    let db = state_holder
+        .borrow()
+        .as_ref()
+        .map(|s| s.borrow().db.clone());
     if let Some(db) = db {
         if let Err(e) = ira_db::checkpoint(&db) {
             eprintln!("Failed to checkpoint database on shutdown: {}", e);

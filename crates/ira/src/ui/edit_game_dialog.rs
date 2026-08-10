@@ -1,19 +1,19 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
+use super::css::*;
+use super::edit_game_launch::{build_launch_config_page, LaunchConfigWidgets};
+use super::edit_game_overlay::{build_overlay_page, OverlayWidgets};
+use super::edit_game_pages::{build_api_emulator_page, build_dlc_page};
+use super::edit_game_save::{save_game_settings, SaveGameSettingsParams};
+use super::edit_game_system::{build_system_page, SystemWidgets};
+use super::edit_game_variants::build_variants_page;
+use super::state::{PendingImage, SharedState};
+use super::wine_config_widget::{build_wine_config_pages, WineConfigWidgets};
+use crate::Game;
 use adw::prelude::*;
 use gtk4::prelude::IsA;
 use ira_models::{AppDetails, GameLaunchConfig, WineConfig, WineProfile};
-use super::state::{PendingImage, SharedState};
-use super::edit_game_launch::{build_launch_config_page, LaunchConfigWidgets};
-use super::edit_game_system::{build_system_page, SystemWidgets};
-use super::edit_game_overlay::{build_overlay_page, OverlayWidgets};
-use super::edit_game_pages::{build_api_emulator_page, build_dlc_page};
-use super::edit_game_variants::build_variants_page;
-use super::edit_game_save::{save_game_settings, SaveGameSettingsParams};
-use super::wine_config_widget::{build_wine_config_pages, WineConfigWidgets};
-use crate::Game;
-use super::css::*;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 struct LaunchWineAdvancedCtx {
     launch_config_widgets: Option<LaunchConfigWidgets>,
@@ -32,7 +32,17 @@ struct LaunchWineParams<'a> {
     app_default_wine: &'a WineConfig,
 }
 
-fn extract_game_and_config(state: &SharedState, db_id: i64) -> Option<(GameLaunchConfig, WineConfig, Option<i64>, WineConfig, Game, bool)> {
+fn extract_game_and_config(
+    state: &SharedState,
+    db_id: i64,
+) -> Option<(
+    GameLaunchConfig,
+    WineConfig,
+    Option<i64>,
+    WineConfig,
+    Game,
+    bool,
+)> {
     let (game, config, app_default_wine) = {
         let s = state.borrow();
         let game = s.games.iter().find(|g| g.db_id == db_id).cloned();
@@ -48,15 +58,35 @@ fn extract_game_and_config(state: &SharedState, db_id: i64) -> Option<(GameLaunc
     } else {
         saved_wine = saved_wine.merge_with_default(&app_default_wine);
     }
-    Some((saved_launch, saved_wine, saved_profile_id, app_default_wine, game, has_config))
+    Some((
+        saved_launch,
+        saved_wine,
+        saved_profile_id,
+        app_default_wine,
+        game,
+        has_config,
+    ))
 }
 
-fn create_dialog_window(parent: &impl IsA<gtk4::Window>, game: &Game) -> (adw::Window, gtk4::ListBox, gtk4::Stack, gtk4::Box) {
+fn create_dialog_window(
+    parent: &impl IsA<gtk4::Window>,
+    game: &Game,
+) -> (adw::Window, gtk4::ListBox, gtk4::Stack, gtk4::Box) {
     let layout = super::helpers::dialog_layout(parent);
     layout.window.set_deletable(false);
     layout.stack.set_hexpand(true);
-    layout.header.set_title_widget(Some(&gtk4::Label::new(Some(&format!("{} [{}]", game.name, game.db_id)))));
-    (layout.window, layout.sidebar, layout.stack, layout.content_area)
+    layout
+        .header
+        .set_title_widget(Some(&gtk4::Label::new(Some(&format!(
+            "{} [{}]",
+            game.name, game.db_id
+        )))));
+    (
+        layout.window,
+        layout.sidebar,
+        layout.stack,
+        layout.content_area,
+    )
 }
 
 fn build_launch_wine_advanced_pages(
@@ -72,7 +102,7 @@ fn build_launch_wine_advanced_pages(
     let has_config = params.has_config;
     let saved_profile_id = params.saved_profile_id;
     let app_default_wine = params.app_default_wine;
-    let show_launch_config = game.kind != ira_models::GameKind::Steam && game.kind != ira_models::GameKind::Ps4 && game.kind != ira_models::GameKind::Ps3 && game.kind != ira_models::GameKind::Retro;
+    let show_launch_config = game.kind.is_managed_pc() || game.kind == ira_models::GameKind::Other;
     let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
 
     let overlay_source_id = match game.kind {
@@ -80,16 +110,28 @@ fn build_launch_wine_advanced_pages(
         ira_models::GameKind::Retro => Some(game.platform_id.as_str()),
         ira_models::GameKind::Ps4 => Some("ps4"),
         ira_models::GameKind::Ps3 => Some("ps3"),
+        ira_models::GameKind::PsVita => Some("psvita"),
+        ira_models::GameKind::WiiU => Some("wiiu"),
         _ => None,
     };
-    let (overlay_default, gamemode_default, mangohud_default, gamescope_default, gamescope_w_default, gamescope_h_default, gamescope_fps_default, gamescope_upscaling_default, gpu_default) = {
+    let (
+        overlay_default,
+        gamemode_default,
+        mangohud_default,
+        gamescope_default,
+        gamescope_w_default,
+        gamescope_h_default,
+        gamescope_fps_default,
+        gamescope_upscaling_default,
+        gpu_default,
+    ) = {
         let s = state.borrow();
         let gs_default = s.cfg.default_system.gamescope;
         let gs = overlay_source_id
             .and_then(|id| s.cfg.overlay.source_gamescope.get(id).copied())
             .unwrap_or(gs_default);
-        let overlay_def = overlay_source_id
-            .map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id));
+        let overlay_def =
+            overlay_source_id.map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id));
         (
             overlay_def,
             s.cfg.default_system.gamemode,
@@ -111,7 +153,7 @@ fn build_launch_wine_advanced_pages(
             sidebar,
             stack,
             has_config,
-            saved_wine_enabled: saved_wine.enabled && game.kind == ira_models::GameKind::Wine,
+            saved_wine_enabled: saved_wine.enabled,
             saved_profile_id,
             profiles: &profiles,
             state,
@@ -122,34 +164,40 @@ fn build_launch_wine_advanced_pages(
     };
 
     // System page — shown for ALL games (Wine, emulator, native, etc.)
-    let system_widgets = Some(build_system_page(super::edit_game_system::SystemPageParams {
-        launch: saved_launch,
-        gpu_default: &gpu_default,
-        gamemode_default,
-        mangohud_default,
-        gamescope_default,
-        gamescope_w_default,
-        gamescope_h_default,
-        gamescope_fps_default,
-        gamescope_upscaling_default,
-        sidebar,
-        stack,
-    }));
+    let system_widgets = Some(build_system_page(
+        super::edit_game_system::SystemPageParams {
+            launch: saved_launch,
+            gpu_default: &gpu_default,
+            gamemode_default,
+            mangohud_default,
+            gamescope_default,
+            gamescope_w_default,
+            gamescope_h_default,
+            gamescope_fps_default,
+            gamescope_upscaling_default,
+            sidebar,
+            stack,
+        },
+    ));
 
     // Overlay page — shown for ALL games
-    let overlay_widgets = Some(build_overlay_page(super::edit_game_overlay::OverlayPageParams {
-        launch: saved_launch,
-        overlay_default,
-        sidebar,
-        stack,
-    }));
+    let overlay_widgets = Some(build_overlay_page(
+        super::edit_game_overlay::OverlayPageParams {
+            launch: saved_launch,
+            overlay_default,
+            sidebar,
+            stack,
+        },
+    ));
 
     // Wine pages — only for Wine games with wine enabled
-    let show_wine_tabs = game.kind == ira_models::GameKind::Wine && saved_wine.enabled;
+    let show_wine_tabs = game.kind.is_managed_pc();
     let wine_widgets_opt = if show_wine_tabs {
         let (wine_pages, ww) = build_wine_config_pages(saved_wine, Some(app_default_wine));
         for wp in &wine_pages {
-            sidebar.append(&super::settings_dialog::settings_sidebar_row(wp.icon, wp.label, wp.label));
+            sidebar.append(&super::settings_dialog::settings_sidebar_row(
+                wp.icon, wp.label, wp.label,
+            ));
             stack.add_named(&wp.page, Some(wp.label));
         }
         Some(ww)
@@ -208,31 +256,83 @@ fn build_dialog_contents(
     config: DialogConfig,
     db_id: i64,
 ) {
-    let DialogContent { game, win, sidebar, stack, content_area, app_details, save_dir, has_config } = content;
-    let DialogConfig { saved_launch, saved_wine, saved_profile_id, app_default_wine } = config;
-    let mut languages = app_details.as_ref().map(|d| d.languages.clone()).unwrap_or_default();
-    languages.sort_by(|a, b| ira_models::steam_language_name(a).cmp(ira_models::steam_language_name(b)));
+    let DialogContent {
+        game,
+        win,
+        sidebar,
+        stack,
+        content_area,
+        app_details,
+        save_dir,
+        has_config,
+    } = content;
+    let DialogConfig {
+        saved_launch,
+        saved_wine,
+        saved_profile_id,
+        app_default_wine,
+    } = config;
+    let mut languages = app_details
+        .as_ref()
+        .map(|d| d.languages.clone())
+        .unwrap_or_default();
+    languages
+        .sort_by(|a, b| ira_models::steam_language_name(a).cmp(ira_models::steam_language_name(b)));
     let pending_copies: Rc<RefCell<HashMap<String, PendingImage>>> = Default::default();
-    let (general_page, title_entry, sort_entry, pending_version, app_id_entry, language_row, pending_ra_core, pending_emulator, ra_container, game_folder_entry, migrate_btn) =
-        super::game_settings::build_game_general_page(&state, &game, &win, &languages, &pending_copies);
-    sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-system-symbolic", "General", "general"));
+    let (
+        general_page,
+        title_entry,
+        sort_entry,
+        pending_version,
+        app_id_entry,
+        language_row,
+        pending_ra_core,
+        pending_emulator,
+        ra_container,
+        game_folder_entry,
+        migrate_btn,
+        runtime_row,
+    ) = super::game_settings::build_game_general_page(
+        &state,
+        &game,
+        &win,
+        &languages,
+        &pending_copies,
+    );
+    sidebar.append(&super::settings_dialog::settings_sidebar_row(
+        "preferences-system-symbolic",
+        "General",
+        "general",
+    ));
     stack.add_named(&general_page, Some("general"));
 
     let lwa = build_launch_wine_advanced_pages(
-        &state, &game, &LaunchWineParams {
+        &state,
+        &game,
+        &LaunchWineParams {
             saved_launch: &saved_launch,
             saved_wine: &saved_wine,
             has_config,
             saved_profile_id,
             app_default_wine: &app_default_wine,
-        }, &win, &sidebar, &stack,
+        },
+        &win,
+        &sidebar,
+        &stack,
     );
 
     if !game.app_id.is_empty() {
         let images_page = super::image_manager::build_image_manager_content_with_drafts(
-            &state, &game, &win, Some(pending_copies.clone()),
+            &state,
+            &game,
+            &win,
+            Some(pending_copies.clone()),
         );
-        sidebar.append(&super::settings_dialog::settings_sidebar_row("image-x-generic-symbolic", "Images", "images"));
+        sidebar.append(&super::settings_dialog::settings_sidebar_row(
+            "image-x-generic-symbolic",
+            "Images",
+            "images",
+        ));
         stack.add_named(&images_page, Some("images"));
     }
 
@@ -248,8 +348,14 @@ fn build_dialog_contents(
         } else {
             None
         };
-        if let Some((logo_page, selected_pos, size_adj, _modified)) = super::game_logo::build_game_logo_page(&game, false, steam_reset) {
-            sidebar.append(&super::settings_dialog::settings_sidebar_row("preferences-desktop-wallpaper-symbolic", "Logo", "logo"));
+        if let Some((logo_page, selected_pos, size_adj, _modified)) =
+            super::game_logo::build_game_logo_page(&game, false, steam_reset)
+        {
+            sidebar.append(&super::settings_dialog::settings_sidebar_row(
+                "preferences-desktop-wallpaper-symbolic",
+                "Logo",
+                "logo",
+            ));
             stack.add_named(&logo_page, Some("logo"));
             Some((selected_pos, size_adj))
         } else {
@@ -279,7 +385,8 @@ fn build_dialog_contents(
         &stack,
     );
 
-    let var_widgets = build_variants_page(&state, db_id, game.kind, has_config, &sidebar, &stack, &win);
+    let var_widgets =
+        build_variants_page(&state, db_id, game.kind, has_config, &sidebar, &stack, &win);
 
     setup_sidebar_navigation(&sidebar, &stack);
 
@@ -300,7 +407,8 @@ fn build_dialog_contents(
         let save_dir_m = save_dir.clone();
         let btn_m = btn.clone();
         btn.connect_clicked(move |_| {
-            let Some(details) = crate::game_loader::read_app_details(&save_dir_m, &game_m.app_id) else {
+            let Some(details) = crate::game_loader::read_app_details(&save_dir_m, &game_m.app_id)
+            else {
                 btn_m.set_label("No save paths known");
                 return;
             };
@@ -311,12 +419,20 @@ fn build_dialog_contents(
             let (wine_prefix, is_wine) = {
                 let s = state_m.borrow();
                 let cfg = ira_db::get_game_config(&s.db, game_m.db_id)
-                    .ok().flatten()
+                    .ok()
+                    .flatten()
                     .map(|(_, w, _)| w)
                     .unwrap_or_default();
-                (ira_launcher::wine_launch::wine_prefix(&cfg), cfg.enabled)
+                (
+                    ira_launcher::wine_launch::wine_prefix(&cfg),
+                    game_m.kind == ira_models::GameKind::Wine && cfg.enabled,
+                )
             };
-            let pfx = if is_wine { Some(wine_prefix.as_str()) } else { None };
+            let pfx = if is_wine {
+                Some(wine_prefix.as_str())
+            } else {
+                None
+            };
             let count = ira_launcher::game_saves::setup_game_saves(
                 &details.ufs_savefiles,
                 &details.ufs_rootoverrides,
@@ -329,7 +445,8 @@ fn build_dialog_contents(
             } else {
                 btn_m.set_label("Already centralized");
             }
-            if let Err(e) = ira_db::set_saves_centralized(&state_m.borrow().db, game_m.db_id, true) {
+            if let Err(e) = ira_db::set_saves_centralized(&state_m.borrow().db, game_m.db_id, true)
+            {
                 eprintln!("Failed to cache saves centralized: {}", e);
             }
             btn_m.set_sensitive(false);
@@ -366,6 +483,7 @@ fn build_dialog_contents(
     let pending_emulator_s = pending_emulator.clone();
     let profiles_s = lwa.profiles.clone();
     let game_folder_entry_s = game_folder_entry.clone();
+    let runtime_row_s = runtime_row.clone();
 
     save_btn.connect_clicked(move |_| {
         save_btn_c.set_sensitive(false);
@@ -402,6 +520,7 @@ fn build_dialog_contents(
             profiles: profiles_s.clone(),
             saved_profile_id,
             game_folder_entry: game_folder_entry_s.clone(),
+            runtime_row: runtime_row_s.clone(),
             pending_emu_uninstall: pending_emu_uninstall.clone(),
         });
     });
@@ -430,7 +549,9 @@ fn build_dialog_contents(
 pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     let Some((saved_launch, saved_wine, saved_profile_id, app_default_wine, game, has_config)) =
         extract_game_and_config(state, db_id)
-    else { return };
+    else {
+        return;
+    };
 
     let parent = state.borrow().window.clone();
     let save_dir = state.borrow().save_dir.clone();
@@ -441,11 +562,20 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
     build_dialog_contents(
         state.clone(),
         DialogContent {
-            game, win, sidebar, stack, content_area,
-            app_details, save_dir, has_config,
+            game,
+            win,
+            sidebar,
+            stack,
+            content_area,
+            app_details,
+            save_dir,
+            has_config,
         },
         DialogConfig {
-            saved_launch, saved_wine, saved_profile_id, app_default_wine,
+            saved_launch,
+            saved_wine,
+            saved_profile_id,
+            app_default_wine,
         },
         db_id,
     );

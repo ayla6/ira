@@ -1,15 +1,14 @@
-use gtk4::prelude::*;
 use adw::prelude::*;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use super::state::SharedState;
-use super::image_manager::build_image_manager_content_with_drafts;
-use super::helpers::clear_children;
-use super::helpers::refresh_settings_images_page;
+use super::css::*;
 use super::game_display::display_game;
 use super::grid_view::show_grid_view;
-use super::css::*;
+use super::helpers::clear_children;
+use super::helpers::refresh_settings_images_page;
+use super::image_manager::build_image_manager_content_with_drafts;
+use super::state::SharedState;
 
 pub(super) fn handle_unified_sgdb_result(
     state: &SharedState,
@@ -22,7 +21,11 @@ pub(super) fn handle_unified_sgdb_result(
     // Only update if the action box still shows a searching state
     // (don't overwrite a Steam match result)
     let has_result = action_box.last_child().is_some_and(|c| {
-        c.downcast_ref::<gtk4::Label>().is_some_and(|l| l.text().starts_with("Matched") || l.text().starts_with("Not found") || l.text().starts_with("Enter"))
+        c.downcast_ref::<gtk4::Label>().is_some_and(|l| {
+            l.text().starts_with("Matched")
+                || l.text().starts_with("Not found")
+                || l.text().starts_with("Enter")
+        })
     });
     if has_result {
         // Steam result already shown — just add SGDB status beside it
@@ -36,14 +39,24 @@ pub(super) fn handle_unified_sgdb_result(
         if let Err(e) = ira_db::set_sgdb_id(&state.borrow().db, db_id, &sgdb_id) {
             eprintln!("Failed to set SGDB ID: {}", e);
         }
-        if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
+        if let Some(g) = state
+            .borrow_mut()
+            .games
+            .iter_mut()
+            .find(|g| g.db_id == db_id)
+        {
             g.sgdb_id = sgdb_id.clone();
         }
         let steam_dl = state.borrow().steam.clone();
         let sender = state.borrow().sender.clone();
         let sgdb_id_dl = sgdb_id.clone();
         let save_dir = state.borrow().save_dir.clone();
-        let game_for_dir = state.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
+        let game_for_dir = state
+            .borrow()
+            .games
+            .iter()
+            .find(|g| g.db_id == db_id)
+            .cloned();
         std::thread::spawn(move || {
             let _s = tracing::info_span!("handle_unified_sgdb_result", db_id = db_id, sgdb_id = %sgdb_id_dl).entered();
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -51,9 +64,16 @@ pub(super) fn handle_unified_sgdb_result(
                 Some(g) => ira_parser::game_data_dir(&save_dir, g),
                 None => ira_parser::sgdb_data_dir(&save_dir, &sgdb_id_dl),
             };
-            let (icon, hero, grid, logo, header) = steam_dl.ensure_sgdb_assets_in_dir(&dir, &sgdb_id_dl);
+            let (icon, hero, grid, logo, header) =
+                steam_dl.ensure_sgdb_assets_in_dir(&dir, &sgdb_id_dl);
             let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
-                db_id, sgdb_id: sgdb_id_dl, icon, hero, grid, logo, header,
+                db_id,
+                sgdb_id: sgdb_id_dl,
+                icon,
+                hero,
+                grid,
+                logo,
+                header,
             });
         });
 
@@ -174,7 +194,13 @@ pub(super) fn handle_unified_sgdb_result(
     }
 }
 
-pub fn show_sgdb_search_dialog(state: &SharedState, db_id: i64, game_name: &str, parent: &adw::Window, on_match: Option<Rc<dyn Fn()>>) {
+pub fn show_sgdb_search_dialog(
+    state: &SharedState,
+    db_id: i64,
+    game_name: &str,
+    parent: &adw::Window,
+    on_match: Option<Rc<dyn Fn()>>,
+) {
     let dialog = adw::Window::new();
     dialog.set_default_width(500);
     dialog.set_default_height(400);

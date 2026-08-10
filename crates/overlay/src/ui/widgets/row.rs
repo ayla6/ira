@@ -8,7 +8,11 @@ pub struct Row {
 
 impl Row {
     pub fn new(spacing: f32, children: Vec<Box<dyn Widget>>) -> Self {
-        Self { children, spacing, bounds: Rect::default() }
+        Self {
+            children,
+            spacing,
+            bounds: Rect::default(),
+        }
     }
 }
 
@@ -20,7 +24,9 @@ impl Widget for Row {
         for child in &self.children {
             let s = child.measure(ctx);
             height = height.max(s.height);
-            if !first { width += self.spacing; }
+            if !first {
+                width += self.spacing;
+            }
             width += s.width;
             first = false;
         }
@@ -32,7 +38,15 @@ impl Widget for Row {
         let mut x = bounds.x;
         for child in &mut self.children {
             let s = child.measure(ctx);
-            child.layout(ctx, Rect { x, y: bounds.y, width: s.width, height: bounds.height });
+            child.layout(
+                ctx,
+                Rect {
+                    x,
+                    y: bounds.y,
+                    width: s.width,
+                    height: bounds.height,
+                },
+            );
             x += s.width + self.spacing;
         }
     }

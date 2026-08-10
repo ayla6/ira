@@ -2,7 +2,13 @@ use crate::DbConn;
 use ira_models::PlaySession;
 use rusqlite::params;
 
-pub fn record_session(conn: &DbConn, game_id: i64, variant_id: Option<i64>, started_at: i64, ended_at: i64) -> Result<i64, String> {
+pub fn record_session(
+    conn: &DbConn,
+    game_id: i64,
+    variant_id: Option<i64>,
+    started_at: i64,
+    ended_at: i64,
+) -> Result<i64, String> {
     let duration = ended_at - started_at;
     let c = crate::lock_db(conn)?;
     c.execute(
@@ -24,7 +30,11 @@ fn play_session_from_row(row: &rusqlite::Row) -> rusqlite::Result<PlaySession> {
     })
 }
 
-pub fn get_sessions_for_game(conn: &DbConn, game_id: i64, variant_id: Option<i64>) -> Result<Vec<PlaySession>, String> {
+pub fn get_sessions_for_game(
+    conn: &DbConn,
+    game_id: i64,
+    variant_id: Option<i64>,
+) -> Result<Vec<PlaySession>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c
         .prepare("SELECT id, game_id, variant_id, started_at, ended_at, duration_seconds FROM play_sessions WHERE game_id = ?1 AND (variant_id IS ?2) ORDER BY started_at DESC")
@@ -32,7 +42,8 @@ pub fn get_sessions_for_game(conn: &DbConn, game_id: i64, variant_id: Option<i64
     let rows = stmt
         .query_map(params![game_id, variant_id], play_session_from_row)
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 fn day_start_end(date: &chrono::NaiveDate) -> (i64, i64) {
@@ -41,7 +52,10 @@ fn day_start_end(date: &chrono::NaiveDate) -> (i64, i64) {
     (start.and_utc().timestamp(), end.and_utc().timestamp())
 }
 
-pub fn get_sessions_for_date(conn: &DbConn, date: chrono::NaiveDate) -> Result<Vec<PlaySession>, String> {
+pub fn get_sessions_for_date(
+    conn: &DbConn,
+    date: chrono::NaiveDate,
+) -> Result<Vec<PlaySession>, String> {
     let (day_start, day_end) = day_start_end(&date);
     get_sessions_range(conn, day_start, day_end)
 }
@@ -54,10 +68,15 @@ pub fn get_sessions_range(conn: &DbConn, from: i64, to: i64) -> Result<Vec<PlayS
     let rows = stmt
         .query_map(params![from, to], play_session_from_row)
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
-pub fn get_total_playtime_for_game(conn: &DbConn, game_id: i64, variant_id: Option<i64>) -> Result<i64, String> {
+pub fn get_total_playtime_for_game(
+    conn: &DbConn,
+    game_id: i64,
+    variant_id: Option<i64>,
+) -> Result<i64, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c
         .prepare("SELECT COALESCE(SUM(duration_seconds), 0) FROM play_sessions WHERE game_id = ?1 AND (variant_id IS ?2)")
@@ -68,7 +87,11 @@ pub fn get_total_playtime_for_game(conn: &DbConn, game_id: i64, variant_id: Opti
     Ok(result)
 }
 
-pub fn get_playtime_by_day(conn: &DbConn, from: i64, to: i64) -> Result<Vec<(chrono::NaiveDate, i64)>, String> {
+pub fn get_playtime_by_day(
+    conn: &DbConn,
+    from: i64,
+    to: i64,
+) -> Result<Vec<(chrono::NaiveDate, i64)>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c
         .prepare("SELECT date(started_at, 'unixepoch') AS day, SUM(duration_seconds) FROM play_sessions WHERE started_at >= ?1 AND started_at < ?2 GROUP BY day ORDER BY day DESC")
@@ -82,13 +105,17 @@ pub fn get_playtime_by_day(conn: &DbConn, from: i64, to: i64) -> Result<Vec<(chr
             Ok((day, total))
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn delete_sessions_for_game(conn: &DbConn, game_id: i64) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute("DELETE FROM play_sessions WHERE game_id = ?1", params![game_id])
-        .map_err(|e| e.to_string())?;
+    c.execute(
+        "DELETE FROM play_sessions WHERE game_id = ?1",
+        params![game_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -108,16 +135,19 @@ pub fn delete_session(conn: &DbConn, session_id: i64) -> Result<Option<PlaySessi
             e => Err(e.to_string()),
         })?;
     if session.is_some() {
-        c.execute("DELETE FROM play_sessions WHERE id = ?1", params![session_id])
-            .map_err(|e| e.to_string())?;
+        c.execute(
+            "DELETE FROM play_sessions WHERE id = ?1",
+            params![session_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     Ok(session)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::init_db;
+    use super::*;
     use tempfile::TempDir;
 
     fn setup_db() -> (DbConn, TempDir) {
@@ -202,10 +232,18 @@ mod tests {
         let by_day = get_playtime_by_day(&conn, d1_start, d2_start + 86400).unwrap();
         assert_eq!(by_day.len(), 2);
 
-        let d1_total = by_day.iter().find(|(d, _)| *d == day1).map(|(_, t)| *t).unwrap();
+        let d1_total = by_day
+            .iter()
+            .find(|(d, _)| *d == day1)
+            .map(|(_, t)| *t)
+            .unwrap();
         assert_eq!(d1_total, 3600 + 3600);
 
-        let d2_total = by_day.iter().find(|(d, _)| *d == day2).map(|(_, t)| *t).unwrap();
+        let d2_total = by_day
+            .iter()
+            .find(|(d, _)| *d == day2)
+            .map(|(_, t)| *t)
+            .unwrap();
         assert_eq!(d2_total, 1800);
     }
 

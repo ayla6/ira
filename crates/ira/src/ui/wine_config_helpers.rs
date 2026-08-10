@@ -1,12 +1,15 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use adw::prelude::*;
 use super::css::*;
+use adw::prelude::*;
 
 pub(super) type OverrideList = Rc<RefCell<Vec<String>>>;
 
-pub(super) fn build_combo_row(title: &str, options: &[(&str, &str)]) -> (adw::ComboRow, gtk4::StringList) {
+pub(super) fn build_combo_row(
+    title: &str,
+    options: &[(&str, &str)],
+) -> (adw::ComboRow, gtk4::StringList) {
     let model = gtk4::StringList::new(&options.iter().map(|(l, _)| *l).collect::<Vec<_>>());
     let row = adw::ComboRow::new();
     row.set_title(title);
@@ -49,7 +52,12 @@ pub(super) fn make_revert_btn() -> gtk4::Button {
     btn
 }
 
-pub(super) fn track_switch(row: &adw::SwitchRow, field: &str, default_val: bool, overridden: &OverrideList) {
+pub(super) fn track_switch(
+    row: &adw::SwitchRow,
+    field: &str,
+    default_val: bool,
+    overridden: &OverrideList,
+) {
     let is_overridden = overridden.borrow().contains(&field.to_string());
     let revert_btn = make_revert_btn();
     revert_btn.set_visible(is_overridden);
@@ -62,7 +70,9 @@ pub(super) fn track_switch(row: &adw::SwitchRow, field: &str, default_val: bool,
     let btn = revert_btn.clone();
     let rev = reverting.clone();
     row.connect_active_notify(move |_| {
-        if *rev.borrow() { return; }
+        if *rev.borrow() {
+            return;
+        }
         if !ov.borrow().contains(&field_s) {
             ov.borrow_mut().push(field_s.clone());
         }
@@ -83,7 +93,13 @@ pub(super) fn track_switch(row: &adw::SwitchRow, field: &str, default_val: bool,
     });
 }
 
-pub(super) fn track_spin(spin: &gtk4::SpinButton, row: &adw::ActionRow, field: &str, default_val: i32, overridden: &OverrideList) {
+pub(super) fn track_spin(
+    spin: &gtk4::SpinButton,
+    row: &adw::ActionRow,
+    field: &str,
+    default_val: i32,
+    overridden: &OverrideList,
+) {
     let is_overridden = overridden.borrow().contains(&field.to_string());
     let revert_btn = make_revert_btn();
     revert_btn.set_visible(is_overridden);
@@ -96,7 +112,9 @@ pub(super) fn track_spin(spin: &gtk4::SpinButton, row: &adw::ActionRow, field: &
     let btn = revert_btn.clone();
     let rev = reverting.clone();
     spin.connect_value_changed(move |_| {
-        if *rev.borrow() { return; }
+        if *rev.borrow() {
+            return;
+        }
         if !ov.borrow().contains(&field_s) {
             ov.borrow_mut().push(field_s.clone());
         }

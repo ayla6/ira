@@ -1,27 +1,26 @@
+use crate::strings as S;
+use crate::AppSender;
+use crate::Game;
+use adw::prelude::*;
+use ira_api::SteamDataClient;
 use ira_config::Config;
 use ira_db::DbConn;
-use ira_api::SteamDataClient;
-use crate::strings as S;
-use ira_watcher::AchievementWatcher;
-use crate::AppSender;
 use ira_models::{GroupSelection, SortMode};
-use gtk4::prelude::*;
-use adw::prelude::*;
-use crate::Game;
+use ira_watcher::AchievementWatcher;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use super::state::{AppState, SharedState};
-use super::css::*;
-use super::sidebar::{rebuild_sidebar, rebuild_sidebar_and_show_grid, select_row_silently};
-use super::grid_view::show_grid_view;
-use super::message_helpers::switch_to_game;
-use super::settings_dialog::show_settings_dialog;
-use super::mass_match_dialog::show_mass_match_dialog;
 use super::add_game_method::show_add_game_method;
 use super::background::show_close_choice_dialog;
+use super::css::*;
+use super::grid_view::{show_grid_view, show_loading_view};
+use super::mass_match_dialog::show_mass_match_dialog;
+use super::message_helpers::switch_to_game;
+use super::settings_dialog::show_settings_dialog;
+use super::sidebar::{rebuild_sidebar, rebuild_sidebar_and_show_grid, select_row_silently};
+use super::state::{AppState, SharedState};
 
 pub struct AppContext {
     pub steam: Arc<SteamDataClient>,
@@ -45,7 +44,8 @@ pub fn build_ui(
             eprintln!("Failed to load groups: {}", e);
             Vec::new()
         });
-        let group_members: HashMap<i64, HashSet<i64>> = groups.iter()
+        let group_members: HashMap<i64, HashSet<i64>> = groups
+            .iter()
             .map(|g| {
                 let ids = ira_db::get_game_ids_in_group(&ctx.db, g.id).unwrap_or_default();
                 (g.id, ids.into_iter().collect())
@@ -55,8 +55,12 @@ pub fn build_ui(
     };
 
     let sidebar_store = gio::ListStore::new::<super::sidebar_item::SidebarItem>();
-    let sidebar_selection = super::game_selection_model::GameSelectionModel::new(Some(&sidebar_store));
-    let sidebar_view = gtk4::ListView::new(None::<super::game_selection_model::GameSelectionModel>, None::<gtk4::SignalListItemFactory>);
+    let sidebar_selection =
+        super::game_selection_model::GameSelectionModel::new(Some(&sidebar_store));
+    let sidebar_view = gtk4::ListView::new(
+        None::<super::game_selection_model::GameSelectionModel>,
+        None::<gtk4::SignalListItemFactory>,
+    );
     let state = Rc::new(RefCell::new(AppState {
         window: adw::ApplicationWindow::new(app),
         games,
@@ -67,6 +71,8 @@ pub fn build_ui(
         content_scroll: gtk4::ScrolledWindow::new(),
         content_box: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
         grid_header: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
+        loading_status: None,
+        loading_progress: None,
         grid_item_height: Cell::new(0),
         selected_id: String::new(),
         displayed_db_id: 0,
@@ -154,7 +160,8 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     sidebar_scroll.set_vexpand(true);
 
     let sidebar_store = gio::ListStore::new::<super::sidebar_item::SidebarItem>();
-    let sidebar_selection = super::game_selection_model::GameSelectionModel::new(Some(&sidebar_store));
+    let sidebar_selection =
+        super::game_selection_model::GameSelectionModel::new(Some(&sidebar_store));
     let factory = super::sidebar::build_factory(state);
     let sidebar_view = gtk4::ListView::new(Some(sidebar_selection.clone()), Some(factory));
     sidebar_view.add_css_class(CSS_NAVIGATION_SIDEBAR);
@@ -220,12 +227,22 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
 
     rebuild_sidebar(state);
 
-    if !state.borrow().content_unloaded {
+    let initial_loading = state.borrow().games.is_empty();
+    if !state.borrow().content_unloaded && initial_loading {
+        show_loading_view(state, "Preparing game library…", 0, 1);
+    } else if !state.borrow().content_unloaded {
         select_row_silently(state, Some(0));
         show_grid_view(state);
     }
 
-    connect_window_signals(state, &window, &sidebar_view, &sidebar_selection, &add_btn, &search_entry);
+    connect_window_signals(
+        state,
+        &window,
+        &sidebar_view,
+        &sidebar_selection,
+        &add_btn,
+        &search_entry,
+    );
 }
 
 fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
@@ -246,8 +263,10 @@ fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
     popup_settings_btn.set_size_request(-1, 36);
     popup_settings_btn.add_css_class(CSS_POPOVER_MENU_ROW);
     {
+        let popover_clone = popover.clone();
         let state_clone = state.clone();
         popup_settings_btn.connect_clicked(move |_| {
+            popover_clone.popdown();
             let (window, cfg, steam) = {
                 let s = state_clone.borrow();
                 (s.window.clone(), s.cfg.clone(), s.steam.clone())
@@ -281,7 +300,9 @@ fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
     history_btn.add_css_class(CSS_POPOVER_MENU_ROW);
 
     let state_clone_hist = state.clone();
-    history_btn.connect_clicked(move |_| super::play_history::show_daily_history_dialog(&state_clone_hist));
+    history_btn.connect_clicked(move |_| {
+        super::play_history::show_daily_history_dialog(&state_clone_hist)
+    });
 
     popover_box.append(&history_btn);
 
@@ -361,7 +382,10 @@ fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, 
                 if let Err(e) = state_clone.borrow().cfg.save() {
                     eprintln!("Failed to save config: {}", e);
                 }
-                state_clone.borrow().sort_label.set_text(mode_c.display_label());
+                state_clone
+                    .borrow()
+                    .sort_label
+                    .set_text(mode_c.display_label());
                 rebuild_sidebar_and_show_grid(&state_clone);
             }
         });
@@ -405,7 +429,10 @@ fn connect_window_signals(
         }
 
         let store = s.sidebar_store.clone();
-        let Some(item) = store.item(position).and_then(|o| o.downcast::<super::sidebar_item::SidebarItem>().ok()) else {
+        let Some(item) = store
+            .item(position)
+            .and_then(|o| o.downcast::<super::sidebar_item::SidebarItem>().ok())
+        else {
             return;
         };
         let kind = item.kind();
@@ -442,7 +469,10 @@ fn connect_window_signals(
     let state_clone = state.clone();
     sidebar_view.connect_activate(move |_view, position| {
         let store = state_clone.borrow().sidebar_store.clone();
-        let Some(item) = store.item(position).and_then(|o| o.downcast::<super::sidebar_item::SidebarItem>().ok()) else {
+        let Some(item) = store
+            .item(position)
+            .and_then(|o| o.downcast::<super::sidebar_item::SidebarItem>().ok())
+        else {
             return;
         };
         if item.kind() == super::sidebar_item::SidebarItemKind::Game {
@@ -450,11 +480,21 @@ fn connect_window_signals(
             let item_variant_id = item.variant_id();
             let s = state_clone.borrow();
             if s.games.iter().any(|g| g.db_id == db_id) {
-                let vid = item_variant_id.or_else(|| ira_db::get_default_variant(&s.db, db_id).ok().flatten());
+                let vid = item_variant_id
+                    .or_else(|| ira_db::get_default_variant(&s.db, db_id).ok().flatten());
                 drop(s);
-                if !state_clone.borrow().running_games.lock().unwrap().contains_key(&db_id) {
+                if !state_clone
+                    .borrow()
+                    .running_games
+                    .lock()
+                    .unwrap()
+                    .contains_key(&db_id)
+                {
                     let _ = super::play_button::launch_game(&state_clone, db_id, vid);
-                    let _ = state_clone.borrow().sender.send(crate::AppMessage::GameStarted(db_id, item_variant_id));
+                    let _ = state_clone
+                        .borrow()
+                        .sender
+                        .send(crate::AppMessage::GameStarted(db_id, item_variant_id));
                 }
             }
         }
@@ -488,7 +528,10 @@ fn connect_window_signals(
             show_close_choice_dialog(&state_clone);
             glib::Propagation::Stop
         } else {
-            let app = state_clone.borrow().window.application()
+            let app = state_clone
+                .borrow()
+                .window
+                .application()
                 .and_then(|a| a.downcast::<adw::Application>().ok());
             if let Some(app) = app {
                 app.quit();

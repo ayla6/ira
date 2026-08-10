@@ -15,8 +15,8 @@ pub fn parse_npbind(path: &Path) -> Result<Vec<String>, String> {
     }
 
     let num_entries = u64::from_be_bytes([
-        data[0x18], data[0x19], data[0x1a], data[0x1b],
-        data[0x1c], data[0x1d], data[0x1e], data[0x1f],
+        data[0x18], data[0x19], data[0x1a], data[0x1b], data[0x1c], data[0x1d], data[0x1e],
+        data[0x1f],
     ]) as usize;
     let mut offset = 0x80usize;
     let mut result = Vec::new();

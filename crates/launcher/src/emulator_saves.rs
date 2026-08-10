@@ -219,7 +219,10 @@ mod tests {
 
         create_roaming_symlink(&user_dir, &centralized, "NemirtingasGalaxyEmu");
 
-        let target = user_dir.join("AppData").join("Roaming").join("NemirtingasGalaxyEmu");
+        let target = user_dir
+            .join("AppData")
+            .join("Roaming")
+            .join("NemirtingasGalaxyEmu");
         assert!(target.is_symlink());
         assert_eq!(std::fs::read_link(&target).unwrap(), centralized);
     }
@@ -286,7 +289,10 @@ mod tests {
             std::fs::read_link(&gse).unwrap(),
             Path::new(save_dir).join("emulator_saves").join("gbe")
         );
-        assert_eq!(std::fs::read_link(&legacy).unwrap(), gse.read_link().unwrap());
+        assert_eq!(
+            std::fs::read_link(&legacy).unwrap(),
+            gse.read_link().unwrap()
+        );
     }
 
     #[test]
@@ -306,7 +312,10 @@ mod tests {
         setup_gbe_saves(prefix.to_str().unwrap(), save_dir);
 
         // Pre-existing symlink is left alone, pointing at the manual location
-        assert_eq!(std::fs::read_link(roaming.join("GSE Saves")).unwrap(), manual);
+        assert_eq!(
+            std::fs::read_link(roaming.join("GSE Saves")).unwrap(),
+            manual
+        );
     }
 
     #[test]

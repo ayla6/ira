@@ -1,8 +1,8 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 
 use super::detect::{find_subsequence, MAKESELF_FILESIZE_MARKER, MAKESELF_OFFSET_MARKER};
 
@@ -49,8 +49,7 @@ pub fn split_gog_installer(installer: &Path, out_dir: &Path) -> Result<PathBuf, 
 
     fs::create_dir_all(out_dir).map_err(|e| format!("create out dir: {e}"))?;
     let zip_path = out_dir.join("data.zip");
-    let mut zip_file =
-        fs::File::create(&zip_path).map_err(|e| format!("create data.zip: {e}"))?;
+    let mut zip_file = fs::File::create(&zip_path).map_err(|e| format!("create data.zip: {e}"))?;
     let mut buf = vec![0u8; 65536];
     loop {
         let read = reader
@@ -111,8 +110,7 @@ pub fn extract_data_zip(
     progress: impl Fn(usize, usize),
 ) -> Result<(), String> {
     let file = fs::File::open(zip_path).map_err(|e| format!("open data.zip: {e}"))?;
-    let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| format!("open zip archive: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("open zip archive: {e}"))?;
     let total = archive.len();
 
     fs::create_dir_all(dest).map_err(|e| format!("create dest: {e}"))?;
@@ -136,14 +134,12 @@ pub fn extract_data_zip(
         let out_path = dest.join(stripped);
 
         if entry.is_dir() {
-            fs::create_dir_all(&out_path)
-                .map_err(|e| format!("create dir {:?}: {e}", out_path))?;
+            fs::create_dir_all(&out_path).map_err(|e| format!("create dir {:?}: {e}", out_path))?;
             continue;
         }
 
         if let Some(parent) = out_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("create parent {:?}: {e}", parent))?;
+            fs::create_dir_all(parent).map_err(|e| format!("create parent {:?}: {e}", parent))?;
         }
 
         let mut out_file =
@@ -188,8 +184,7 @@ mod tests {
     fn make_test_zip(path: &Path, entries: &[(&str, &[u8], bool)]) {
         let file = fs::File::create(path).unwrap();
         let mut zip = zip::ZipWriter::new(file);
-        let opts =
-            SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         for (name, data, is_dir) in entries {
             if *is_dir {
                 zip.add_directory(*name, opts).unwrap();
@@ -203,7 +198,10 @@ mod tests {
 
     #[test]
     fn test_strip_gog_prefixes() {
-        assert_eq!(strip_gog_prefixes("data/noarch/game/start.sh"), "game/start.sh");
+        assert_eq!(
+            strip_gog_prefixes("data/noarch/game/start.sh"),
+            "game/start.sh"
+        );
         assert_eq!(strip_gog_prefixes("noarch/game/start.sh"), "game/start.sh");
         assert_eq!(strip_gog_prefixes("data/game/start.sh"), "game/start.sh");
         assert_eq!(strip_gog_prefixes("game/start.sh"), "game/start.sh");
@@ -324,8 +322,7 @@ echo done\n";
         {
             let cursor = std::io::Cursor::new(&mut data_zip_bytes);
             let mut zip = zip::ZipWriter::new(cursor);
-            let opts = SimpleFileOptions::default()
-                .compression_method(CompressionMethod::Stored);
+            let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
             zip.start_file("data/noarch/game/start.sh", opts).unwrap();
             zip.write_all(b"#!/bin/sh\n").unwrap();
             zip.finish().unwrap();

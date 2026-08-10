@@ -1,13 +1,15 @@
-use gtk4::prelude::*;
-use adw::prelude::*;
-use super::state::SharedState;
-use std::rc::Rc;
-use std::cell::RefCell;
 use super::css::*;
+use super::state::SharedState;
+use adw::prelude::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 type ListRef = Rc<RefCell<gtk4::ListBox>>;
 
-pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> (gtk4::ScrolledWindow, adw::EntryRow) {
+pub fn build_profiles_page(
+    state: &SharedState,
+    settings_win: &adw::Window,
+) -> (gtk4::ScrolledWindow, adw::EntryRow) {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let settings_group = adw::PreferencesGroup::new();
@@ -56,7 +58,18 @@ pub fn build_profiles_page(state: &SharedState, settings_win: &adw::Window) -> (
     let sw_add = settings_win_clone.clone();
     let list_rc_add = list_rc.clone();
     add_btn.connect_clicked(move |_| {
-        show_profile_dialog(&win_add, &db_add, None, &sc_add, &sw_add, None, ProfileDialogCallbacks { list_rc: Some(list_rc_add.clone()), on_saved: None });
+        show_profile_dialog(
+            &win_add,
+            &db_add,
+            None,
+            &sc_add,
+            &sw_add,
+            None,
+            ProfileDialogCallbacks {
+                list_rc: Some(list_rc_add.clone()),
+                on_saved: None,
+            },
+        );
     });
     group.set_header_suffix(Some(&add_btn));
 
@@ -85,7 +98,16 @@ fn repopulate_profiles(
     for p in &profiles {
         let row = adw::ActionRow::new();
         row.set_title(&p.name);
-        row.set_subtitle(&format!("{} — {}{}", p.wine_version, if p.prefix.is_empty() { "(no prefix)" } else { &p.prefix }, if p.umu_enabled { " — UMU" } else { "" }));
+        row.set_subtitle(&format!(
+            "{} — {}{}",
+            p.wine_version,
+            if p.prefix.is_empty() {
+                "(no prefix)"
+            } else {
+                &p.prefix
+            },
+            if p.umu_enabled { " — UMU" } else { "" }
+        ));
 
         let edit_btn = gtk4::Button::from_icon_name("document-edit-symbolic");
         edit_btn.add_css_class(CSS_FLAT);
@@ -98,7 +120,18 @@ fn repopulate_profiles(
         let sw_edit = settings_win.clone();
         let list_rc_edit = list_rc.clone();
         edit_btn.connect_clicked(move |_| {
-            show_profile_dialog(&win_edit, &db_edit, Some(p_edit.clone()), &sc_edit, &sw_edit, None, ProfileDialogCallbacks { list_rc: Some(list_rc_edit.clone()), on_saved: None });
+            show_profile_dialog(
+                &win_edit,
+                &db_edit,
+                Some(p_edit.clone()),
+                &sc_edit,
+                &sw_edit,
+                None,
+                ProfileDialogCallbacks {
+                    list_rc: Some(list_rc_edit.clone()),
+                    on_saved: None,
+                },
+            );
         });
         row.add_suffix(&edit_btn);
 
@@ -181,7 +214,9 @@ pub fn show_profile_dialog(
 
     let name_entry = adw::EntryRow::new();
     name_entry.set_title("Profile name");
-    if let Some(p) = existing.as_ref() { name_entry.set_text(&p.name); }
+    if let Some(p) = existing.as_ref() {
+        name_entry.set_text(&p.name);
+    }
     group.add(&name_entry);
 
     let version_model = {
@@ -304,14 +339,16 @@ pub fn show_profile_dialog(
     // Auto-enable and disable UMU toggle based on wine version selection
     let umu_row_for_version = umu_row.clone();
     let version_row_for_cb = version_row.clone();
-    version_row_for_cb.clone().connect_selected_notify(move |_| {
-        let idx = version_row_for_cb.selected() as usize;
-        if let Some((_, ver)) = ira_launcher::wine_launch::detect_wine_versions().get(idx) {
-            let is_proton = ver.to_lowercase().contains("proton");
-            umu_row_for_version.set_active(is_proton || umu_row_for_version.is_active());
-            umu_row_for_version.set_sensitive(!is_proton);
-        }
-    });
+    version_row_for_cb
+        .clone()
+        .connect_selected_notify(move |_| {
+            let idx = version_row_for_cb.selected() as usize;
+            if let Some((_, ver)) = ira_launcher::wine_launch::detect_wine_versions().get(idx) {
+                let is_proton = ver.to_lowercase().contains("proton");
+                umu_row_for_version.set_active(is_proton || umu_row_for_version.is_active());
+                umu_row_for_version.set_sensitive(!is_proton);
+            }
+        });
 
     // Set initial state based on selected version
     {
@@ -374,7 +411,10 @@ pub fn show_profile_dialog(
         name_c.remove_css_class(CSS_ERROR);
         prefix_c.remove_css_class(CSS_ERROR);
         let vidx = version_row_c.selected() as usize;
-        let wine_version = versions_c.get(vidx).map(|(_, v)| v.clone()).unwrap_or_else(|| "system".to_string());
+        let wine_version = versions_c
+            .get(vidx)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_else(|| "system".to_string());
         let arch = match arch_row_c.selected() {
             1 => "win32".to_string(),
             2 => "win64".to_string(),

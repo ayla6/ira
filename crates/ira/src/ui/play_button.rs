@@ -3,9 +3,9 @@ use gtk4::prelude::*;
 use std::cell::Cell;
 use std::rc::Rc;
 
+use super::css::*;
 use super::play_button_helpers;
 use super::state::SharedState;
-use super::css::*;
 
 const PLAY_BTN_HEIGHT: i32 = 48;
 const PLAY_BTN_H_MARGIN: i32 = 16;
@@ -31,7 +31,12 @@ fn build_play_btn_hbox() -> gtk4::Box {
     hbox
 }
 
-fn set_running_state(icon: &gtk4::Image, label: &gtk4::Label, btn: &impl IsA<gtk4::Widget>, running: bool) {
+fn set_running_state(
+    icon: &gtk4::Image,
+    label: &gtk4::Label,
+    btn: &impl IsA<gtk4::Widget>,
+    running: bool,
+) {
     if running {
         icon.set_icon_name(Some("window-close-symbolic"));
         label.set_text("Stop");
@@ -44,11 +49,21 @@ fn set_running_state(icon: &gtk4::Image, label: &gtk4::Label, btn: &impl IsA<gtk
 }
 
 fn is_game_running(state: &SharedState, db_id: i64) -> bool {
-    state.borrow().running_games.lock().map(|m| m.contains_key(&db_id)).unwrap_or(false)
+    state
+        .borrow()
+        .running_games
+        .lock()
+        .map(|m| m.contains_key(&db_id))
+        .unwrap_or(false)
 }
 
 pub fn stop_game(state: &SharedState, game_id: i64) {
-    let pid = state.borrow().running_games.lock().unwrap().remove(&game_id);
+    let pid = state
+        .borrow()
+        .running_games
+        .lock()
+        .unwrap()
+        .remove(&game_id);
     if let Some(pid) = pid {
         let (wine_exe, wine_prefix, env) = {
             let s = state.borrow();
@@ -58,10 +73,21 @@ pub fn stop_game(state: &SharedState, game_id: i64) {
             let app_default = s.cfg.default_wine_config.clone();
             let (exe, prefix, env_vars) = if let Some((_, mut wine, _)) = config {
                 wine = wine.merge_with_default(&app_default);
-                if wine.enabled {
-                    let exe = ira_launcher::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path).ok();
+                if game
+                    .map(|g| g.kind == ira_models::GameKind::Wine)
+                    .unwrap_or(false)
+                    && wine.enabled
+                {
+                    let exe = ira_launcher::wine_launch::find_wine_binary(
+                        &wine.version,
+                        &wine.custom_wine_path,
+                    )
+                    .ok();
                     let prefix = ira_launcher::wine_launch::wine_prefix(&wine);
-                    let env = ira_launcher::wine_launch::build_wine_env(&wine, exe.as_deref().unwrap_or(""));
+                    let env = ira_launcher::wine_launch::build_wine_env(
+                        &wine,
+                        exe.as_deref().unwrap_or(""),
+                    );
                     (exe, Some(prefix), env)
                 } else {
                     (None, None, Vec::new())
@@ -80,22 +106,50 @@ pub fn stop_game(state: &SharedState, game_id: i64) {
     }
 }
 
-pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -> Result<(), String> {
-    let (running_games, sender, game_info, global_shadps4_exe, global_rpcs3_exe, db, save_dir, app_default_wine, default_native_env_vars, cfg_clone, overlay_shm, overlay_global_enabled, overlay_font_family, gamescope_default, gamemode_default, mangohud_default, gamescope_w_default, gamescope_h_default, gamescope_fps_default, gamescope_upscaling_default, gpu_default) = {
+pub fn launch_game(
+    state: &SharedState,
+    game_id: i64,
+    variant_id: Option<i64>,
+) -> Result<(), String> {
+    let (
+        running_games,
+        sender,
+        game_info,
+        global_shadps4_exe,
+        global_rpcs3_exe,
+        global_vita3k_exe,
+        global_cemu_exe,
+        db,
+        save_dir,
+        app_default_wine,
+        default_native_env_vars,
+        cfg_clone,
+        overlay_shm,
+        overlay_global_enabled,
+        overlay_font_family,
+        gamescope_default,
+        gamemode_default,
+        mangohud_default,
+        gamescope_w_default,
+        gamescope_h_default,
+        gamescope_fps_default,
+        gamescope_upscaling_default,
+        gpu_default,
+    ) = {
         let s = state.borrow();
         let game = s.games.iter().find(|g| g.db_id == game_id);
         let overlay_shm = game.and_then(|g| crate::overlay::write_game_shm(g, &s.cfg.overlay));
-        let source_id = game.and_then(|g| {
-            match g.kind {
-                ira_models::GameKind::Steam => Some("steam"),
-                ira_models::GameKind::Retro => Some(g.platform_id.as_str()),
-                ira_models::GameKind::Ps4 => Some("ps4"),
-                ira_models::GameKind::Ps3 => Some("ps3"),
-                _ => None,
-            }
+        let source_id = game.and_then(|g| match g.kind {
+            ira_models::GameKind::Steam => Some("steam"),
+            ira_models::GameKind::Retro => Some(g.platform_id.as_str()),
+            ira_models::GameKind::Ps4 => Some("ps4"),
+            ira_models::GameKind::Ps3 => Some("ps3"),
+            ira_models::GameKind::PsVita => Some("psvita"),
+            ira_models::GameKind::WiiU => Some("wiiu"),
+            _ => None,
         });
-        let overlay_global_enabled = source_id
-            .map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id));
+        let overlay_global_enabled =
+            source_id.map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id));
         let gamemode_default = s.cfg.default_system.gamemode;
         let mangohud_default = s.cfg.default_system.mangohud;
         let gamescope_default = source_id
@@ -107,7 +161,20 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         let gamescope_upscaling_default = s.cfg.default_system.gamescope_upscaling.clone();
         let gpu_default = s.cfg.default_system.gpu.clone();
         let game_info = game
-            .map(|g| (g.kind, g.game_path.clone(), g.name.clone(), g.shadps4_version.clone(), g.db_id, g.app_id.clone(), g.platform_id.clone(), g.ra_core.clone(), g.emulator_override.clone(), g.trophy_source))
+            .map(|g| {
+                (
+                    g.kind,
+                    g.game_path.clone(),
+                    g.name.clone(),
+                    g.shadps4_version.clone(),
+                    g.db_id,
+                    g.app_id.clone(),
+                    g.platform_id.clone(),
+                    g.ra_core.clone(),
+                    g.emulator_override.clone(),
+                    g.trophy_source,
+                )
+            })
             .unwrap_or_default();
         (
             s.running_games.clone(),
@@ -115,6 +182,8 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
             game_info,
             s.cfg.shadps4_executable.clone(),
             s.cfg.rpcs3_executable.clone(),
+            s.cfg.vita3k_executable.clone(),
+            s.cfg.cemu_executable.clone(),
             s.db.clone(),
             s.save_dir.clone(),
             s.cfg.default_wine_config.clone(),
@@ -138,11 +207,23 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         return Ok(());
     }
 
-    let (kind, game_path, game_name, per_game_version, db_id, app_id, platform_id, per_game_ra_core, per_game_emu, trophy_source) = game_info;
+    let (
+        kind,
+        game_path,
+        game_name,
+        per_game_version,
+        db_id,
+        app_id,
+        platform_id,
+        per_game_ra_core,
+        per_game_emu,
+        trophy_source,
+    ) = game_info;
 
-    let (ufs_savefiles, ufs_rootoverrides) = crate::game_loader::read_app_details(&save_dir, &app_id)
-        .map(|d| (d.ufs_savefiles, d.ufs_rootoverrides))
-        .unwrap_or_default();
+    let (ufs_savefiles, ufs_rootoverrides) =
+        crate::game_loader::read_app_details(&save_dir, &app_id)
+            .map(|d| (d.ufs_savefiles, d.ufs_rootoverrides))
+            .unwrap_or_default();
 
     let started_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -150,7 +231,12 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
         .as_secs() as i64;
 
     let variant_info = variant_id
-        .and_then(|vid| ira_db::get_variants(&db, db_id).ok()?.into_iter().find(|v| v.id == vid))
+        .and_then(|vid| {
+            ira_db::get_variants(&db, db_id)
+                .ok()?
+                .into_iter()
+                .find(|v| v.id == vid)
+        })
         .map(|v| (v.show_as_entry, v.count_playtime));
     let (variant_show_as_entry, variant_count_playtime) = variant_info.unwrap_or((false, true));
 
@@ -182,18 +268,42 @@ pub fn launch_game(state: &SharedState, game_id: i64, variant_id: Option<i64>) -
     };
 
     if kind == ira_models::GameKind::Retro {
-        play_button_helpers::launch_retro(&ctx, &cfg_clone, &platform_id, &per_game_emu, &per_game_ra_core, &game_path)?;
+        play_button_helpers::launch_retro(
+            &ctx,
+            &cfg_clone,
+            &platform_id,
+            &per_game_emu,
+            &per_game_ra_core,
+            &game_path,
+        )?;
     } else if kind == ira_models::GameKind::Ps4 {
         play_button_helpers::launch_ps4(&ctx, &per_game_version, &global_shadps4_exe, &game_path)?;
     } else if kind == ira_models::GameKind::Ps3 {
         play_button_helpers::launch_ps3(&ctx, &per_game_emu, &global_rpcs3_exe, &game_path)?;
+    } else if kind == ira_models::GameKind::PsVita {
+        play_button_helpers::launch_vita3k(&ctx, &global_vita3k_exe, &game_path)?;
+    } else if kind == ira_models::GameKind::WiiU {
+        play_button_helpers::launch_cemu(&ctx, &global_cemu_exe, &game_path)?;
     } else if kind == ira_models::GameKind::Steam {
         play_button_helpers::launch_steam(&app_id)?;
     } else {
-        play_button_helpers::launch_other(&ctx, &app_default_wine, variant_id, variant_count_playtime, &default_native_env_vars, &app_id)?;
+        play_button_helpers::launch_other(
+            &ctx,
+            &app_default_wine,
+            variant_id,
+            variant_count_playtime,
+            &default_native_env_vars,
+            &app_id,
+        )?;
     }
 
-    play_button_helpers::update_last_played(state, &ctx, variant_id, variant_count_playtime, variant_show_as_entry);
+    play_button_helpers::update_last_played(
+        state,
+        &ctx,
+        variant_id,
+        variant_count_playtime,
+        variant_show_as_entry,
+    );
 
     Ok(())
 }
@@ -233,10 +343,12 @@ fn build_simple_play_button(
     btn.set_height_request(PLAY_BTN_HEIGHT);
 
     let hbox = build_play_btn_hbox();
-    let icon = hbox.first_child()
+    let icon = hbox
+        .first_child()
         .and_then(|c| c.downcast::<gtk4::Image>().ok())
         .unwrap();
-    let label = hbox.last_child()
+    let label = hbox
+        .last_child()
         .and_then(|c| c.downcast::<gtk4::Label>().ok())
         .unwrap();
 
@@ -284,10 +396,12 @@ fn build_disc_play_button(
     let split = adw::SplitButton::new();
 
     let hbox = build_play_btn_hbox();
-    let icon = hbox.first_child()
+    let icon = hbox
+        .first_child()
         .and_then(|c| c.downcast::<gtk4::Image>().ok())
         .unwrap();
-    let label = hbox.last_child()
+    let label = hbox
+        .last_child()
         .and_then(|c| c.downcast::<gtk4::Label>().ok())
         .unwrap();
 
@@ -303,7 +417,9 @@ fn build_disc_play_button(
         label.set_text("Stop");
     }
 
-    let default_did = ira_db::get_default_disc(&state.borrow().db, db_id).ok().flatten();
+    let default_did = ira_db::get_default_disc(&state.borrow().db, db_id)
+        .ok()
+        .flatten();
     let default_target = match default_did {
         Some(did) => format!("{}", did),
         None => "0".to_string(),
@@ -378,10 +494,12 @@ fn build_variant_play_button(
     let split = adw::SplitButton::new();
 
     let hbox = build_play_btn_hbox();
-    let icon = hbox.first_child()
+    let icon = hbox
+        .first_child()
         .and_then(|c| c.downcast::<gtk4::Image>().ok())
         .unwrap();
-    let label = hbox.last_child()
+    let label = hbox
+        .last_child()
         .and_then(|c| c.downcast::<gtk4::Label>().ok())
         .unwrap();
 
@@ -397,7 +515,11 @@ fn build_variant_play_button(
         label.set_text("Stop");
     }
 
-    let default_vid = variant_id.or_else(|| ira_db::get_default_variant(&state.borrow().db, db_id).ok().flatten());
+    let default_vid = variant_id.or_else(|| {
+        ira_db::get_default_variant(&state.borrow().db, db_id)
+            .ok()
+            .flatten()
+    });
     let default_target = match default_vid {
         Some(vid) => format!("{}", vid),
         None => "none".to_string(),
@@ -425,7 +547,10 @@ fn build_variant_play_button(
             if let Err(e) = ira_db::set_default_variant(&st_c.borrow().db, db_id, vid) {
                 eprintln!("Failed to set default variant: {e}");
             }
-            let _ = st_c.borrow().sender.send(crate::AppMessage::VariantSelected(db_id, vid));
+            let _ = st_c
+                .borrow()
+                .sender
+                .send(crate::AppMessage::VariantSelected(db_id, vid));
             current_variant_c.set(vid);
             action.change_state(param);
         }

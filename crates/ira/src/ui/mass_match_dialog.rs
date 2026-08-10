@@ -1,15 +1,14 @@
-use gtk4::prelude::*;
-use adw::prelude::*;
 use crate::Game;
+use adw::prelude::*;
 use std::cell::Cell;
 use std::rc::Rc;
 
-use super::state::SharedState;
-use super::helpers::clear_children;
-use super::steam_search_dialog::handle_steam_search_result;
-use super::sgdb_match_dialog::handle_unified_sgdb_result;
-use super::ra_match_dialog::show_ra_search_dialog;
 use super::css::*;
+use super::helpers::clear_children;
+use super::ra_match_dialog::show_ra_search_dialog;
+use super::sgdb_match_dialog::handle_unified_sgdb_result;
+use super::state::SharedState;
+use super::steam_search_dialog::handle_steam_search_result;
 
 pub fn normalize_title(s: &str) -> String {
     let lower = s.to_lowercase();
@@ -18,7 +17,16 @@ pub fn normalize_title(s: &str) -> String {
         .map(|c| if c.is_alphanumeric() { c } else { ' ' })
         .collect();
     let words: Vec<&str> = alnum.split_whitespace().collect();
-    let suffixes = ["the", "final", "cut", "edition", "complete", "definitive", "remastered", "hd"];
+    let suffixes = [
+        "the",
+        "final",
+        "cut",
+        "edition",
+        "complete",
+        "definitive",
+        "remastered",
+        "hd",
+    ];
     let mut end = words.len();
     while end > 0 && suffixes.contains(&words[end - 1]) {
         end -= 1;
@@ -29,11 +37,18 @@ pub fn normalize_title(s: &str) -> String {
 fn collect_unmatched_games(state: &SharedState) -> (Vec<Game>, Vec<(String, String, String)>) {
     let s = state.borrow();
     let games = s.games.clone();
-    let needs_matching: Vec<Game> = games.into_iter().filter(|g| {
-        (g.app_id.is_empty() && !g.manual_unmatch)
-        || (g.kind == ira_models::GameKind::Retro && g.trophy_source == ira_models::TrophySource::Empty && !g.manual_unmatch)
-        || (g.sgdb_id.is_empty() && !g.manual_unmatch && (g.app_id.is_empty() || g.kind == ira_models::GameKind::Retro))
-    }).collect();
+    let needs_matching: Vec<Game> = games
+        .into_iter()
+        .filter(|g| {
+            (g.app_id.is_empty() && !g.manual_unmatch)
+                || (g.kind == ira_models::GameKind::Retro
+                    && g.trophy_source == ira_models::TrophySource::Empty
+                    && !g.manual_unmatch)
+                || (g.sgdb_id.is_empty()
+                    && !g.manual_unmatch
+                    && (g.app_id.is_empty() || g.kind == ira_models::GameKind::Retro))
+        })
+        .collect();
     let save_dir = &s.save_dir;
     let data_dir = std::path::Path::new(save_dir).join("data").join("steam");
     let mut map: Vec<(String, String, String)> = Vec::new();
@@ -60,7 +75,9 @@ fn populate_match_list(
     let mut row_action_boxes: Vec<gtk4::Box> = Vec::new();
 
     for game in needs_matching.iter() {
-        let action_box = if game.kind == ira_models::GameKind::Retro && game.trophy_source == ira_models::TrophySource::Empty {
+        let action_box = if game.kind == ira_models::GameKind::Retro
+            && game.trophy_source == ira_models::TrophySource::Empty
+        {
             let ac = create_match_row(list, &game.name, "RA: not matched");
             let inner = ac.clone();
             let sc = state.clone();
@@ -78,12 +95,19 @@ fn populate_match_list(
             let inner_c = inner.clone();
             ra_btn.connect_clicked(move |_| {
                 let inner_update = inner_c.clone();
-                show_ra_search_dialog(&sc2, did2, &gn2, &pid2, &dlg2, Some(Rc::new(move || {
-                    clear_children(&inner_update);
-                    let label = gtk4::Label::new(Some("RA: matched"));
-                    label.add_css_class(CSS_SUCCESS_LABEL);
-                    inner_update.append(&label);
-                })));
+                show_ra_search_dialog(
+                    &sc2,
+                    did2,
+                    &gn2,
+                    &pid2,
+                    &dlg2,
+                    Some(Rc::new(move || {
+                        clear_children(&inner_update);
+                        let label = gtk4::Label::new(Some("RA: matched"));
+                        label.add_css_class(CSS_SUCCESS_LABEL);
+                        inner_update.append(&label);
+                    })),
+                );
             });
             inner.append(&ra_btn);
             ac
@@ -108,11 +132,14 @@ fn start_steam_batch_matching(
     row_action_boxes: &[gtk4::Box],
     dialog: &adw::Window,
 ) {
-    let steam_games: Vec<(String, i64, ira_models::GameKind)> = needs_matching.iter()
+    let steam_games: Vec<(String, i64, ira_models::GameKind)> = needs_matching
+        .iter()
         .filter(|g| g.app_id.is_empty() && !g.manual_unmatch)
         .map(|g| (g.name.clone(), g.db_id, g.kind))
         .collect();
-    let steam_row_indices: Vec<usize> = needs_matching.iter().enumerate()
+    let steam_row_indices: Vec<usize> = needs_matching
+        .iter()
+        .enumerate()
         .filter(|(_, g)| g.app_id.is_empty() && !g.manual_unmatch)
         .map(|(i, _)| i)
         .collect();
@@ -121,7 +148,8 @@ fn start_steam_batch_matching(
         return;
     }
 
-    let (steam_tx, steam_rx) = std::sync::mpsc::channel::<(usize, Option<(String, String)>, String, i64)>();
+    let (steam_tx, steam_rx) =
+        std::sync::mpsc::channel::<(usize, Option<(String, String)>, String, i64)>();
     let steam_rx = std::cell::RefCell::new(steam_rx);
     let steam_remaining = Cell::new(steam_games.len());
 
@@ -173,8 +201,13 @@ fn start_steam_batch_matching(
             if let Some(&row_idx) = steam_row_indices.get(idx) {
                 if row_idx < row_boxes.len() {
                     handle_steam_search_result(
-                        &state_rx, &row_boxes[row_idx], &steam_rx_steam,
-                        &game_name, db_id, matched, &parent_dialog,
+                        &state_rx,
+                        &row_boxes[row_idx],
+                        &steam_rx_steam,
+                        &game_name,
+                        db_id,
+                        matched,
+                        &parent_dialog,
                     );
                 }
             }
@@ -194,8 +227,14 @@ fn start_sgdb_batch_matching(
     row_action_boxes: &[gtk4::Box],
     dialog: &adw::Window,
 ) {
-    let sgdb_games: Vec<(String, i64, usize)> = needs_matching.iter().enumerate()
-        .filter(|(_, g)| g.sgdb_id.is_empty() && !g.manual_unmatch && (g.app_id.is_empty() || g.kind == ira_models::GameKind::Retro))
+    let sgdb_games: Vec<(String, i64, usize)> = needs_matching
+        .iter()
+        .enumerate()
+        .filter(|(_, g)| {
+            g.sgdb_id.is_empty()
+                && !g.manual_unmatch
+                && (g.app_id.is_empty() || g.kind == ira_models::GameKind::Retro)
+        })
         .map(|(row_idx, g)| (g.name.clone(), g.db_id, row_idx))
         .collect();
 
@@ -203,7 +242,8 @@ fn start_sgdb_batch_matching(
         return;
     }
 
-    let (sgdb_tx, sgdb_rx) = std::sync::mpsc::channel::<(usize, Option<(String, String)>, i64, String)>();
+    let (sgdb_tx, sgdb_rx) =
+        std::sync::mpsc::channel::<(usize, Option<(String, String)>, i64, String)>();
     let sgdb_rx = std::cell::RefCell::new(sgdb_rx);
     let sgdb_remaining = Cell::new(sgdb_games.len());
 
@@ -213,7 +253,9 @@ fn start_sgdb_batch_matching(
         std::thread::spawn(move || {
             for (i, (game_name, db_id, _row_idx)) in sgdb_games.iter().enumerate() {
                 let results = steam_sgdb.search_sgdb(game_name);
-                let matched = results.first().map(|(sid, name)| (sid.clone(), name.clone()));
+                let matched = results
+                    .first()
+                    .map(|(sid, name)| (sid.clone(), name.clone()));
                 let _ = sgdb_tx.send((i, matched, *db_id, game_name.clone()));
             }
         });
@@ -227,8 +269,12 @@ fn start_sgdb_batch_matching(
             if let Some(row_idx) = sgdb_games.get(idx).map(|(_, _, r)| *r) {
                 if row_idx < sgdb_row_boxes.len() {
                     handle_unified_sgdb_result(
-                        &state_sgdb, &sgdb_row_boxes[row_idx], db_id,
-                        &game_name, matched, &parent_dialog_sgdb,
+                        &state_sgdb,
+                        &sgdb_row_boxes[row_idx],
+                        db_id,
+                        &game_name,
+                        matched,
+                        &parent_dialog_sgdb,
                     );
                 }
             }
@@ -248,7 +294,10 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     let (needs_matching, title_map) = collect_unmatched_games(state);
 
     if needs_matching.is_empty() {
-        let d = adw::AlertDialog::new(Some("Nothing to match"), Some("Every game already has a trophy source and image assets linked."));
+        let d = adw::AlertDialog::new(
+            Some("Nothing to match"),
+            Some("Every game already has a trophy source and image assets linked."),
+        );
         d.add_response("ok", "OK");
         d.present(Some(&window));
         return;
@@ -300,7 +349,13 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     dialog.set_content(Some(&outer));
     dialog.present();
 
-    start_steam_batch_matching(state, &needs_matching, title_map, &row_action_boxes, &dialog);
+    start_steam_batch_matching(
+        state,
+        &needs_matching,
+        title_map,
+        &row_action_boxes,
+        &dialog,
+    );
     start_sgdb_batch_matching(state, &needs_matching, &row_action_boxes, &dialog);
 }
 

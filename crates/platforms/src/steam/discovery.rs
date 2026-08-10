@@ -1,7 +1,8 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use super::vdf::{self, VdfValue};
 use super::paths;
+use super::vdf::{self, VdfValue};
 
 /// A discovered Steam game.
 pub struct SteamGame {
@@ -75,7 +76,9 @@ fn parse_app_manifest(path: &Path) -> Option<SteamGame> {
         })
         .unwrap_or("")
         .to_string();
-    let installdir = vdf::get_str(&parsed, "installdir").unwrap_or("").to_string();
+    let installdir = vdf::get_str(&parsed, "installdir")
+        .unwrap_or("")
+        .to_string();
     let state_flags: u32 = vdf::get_str(&parsed, "StateFlags")
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
@@ -90,7 +93,11 @@ fn parse_app_manifest(path: &Path) -> Option<SteamGame> {
         .map(|p| p.join("common").join(&installdir))
         .unwrap_or_default();
 
-    Some(SteamGame { app_id, name, install_dir })
+    Some(SteamGame {
+        app_id,
+        name,
+        install_dir,
+    })
 }
 
 /// Discover all installed Steam games across all library folders.
@@ -118,11 +125,13 @@ pub fn discover_games() -> Vec<SteamGame> {
         }
     }
 
+    let all_manifests = deduplicate_by_app_id(all_manifests);
     if all_manifests.is_empty() {
         return games;
     }
 
-    let app_ids: Vec<u32> = all_manifests.iter()
+    let app_ids: Vec<u32> = all_manifests
+        .iter()
         .filter_map(|g| g.app_id.parse::<u32>().ok())
         .collect();
     let app_types = super::appinfo::get_app_types(&app_ids);
@@ -138,4 +147,42 @@ pub fn discover_games() -> Vec<SteamGame> {
         games.push(game);
     }
     games
+}
+
+fn deduplicate_by_app_id(games: Vec<SteamGame>) -> Vec<SteamGame> {
+    let mut seen = HashSet::new();
+    games
+        .into_iter()
+        .filter(|game| seen.insert(game.app_id.clone()))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{deduplicate_by_app_id, SteamGame};
+
+    #[test]
+    fn test_deduplicate_by_app_id_keeps_one_manifest() {
+        let games = deduplicate_by_app_id(vec![
+            SteamGame {
+                app_id: "123".to_string(),
+                name: "Game".to_string(),
+                install_dir: "/games/one".into(),
+            },
+            SteamGame {
+                app_id: "123".to_string(),
+                name: "Duplicate".to_string(),
+                install_dir: "/games/two".into(),
+            },
+            SteamGame {
+                app_id: "456".to_string(),
+                name: "Other".to_string(),
+                install_dir: "/games/other".into(),
+            },
+        ]);
+
+        assert_eq!(games.len(), 2);
+        assert_eq!(games[0].name, "Game");
+        assert_eq!(games[1].app_id, "456");
+    }
 }

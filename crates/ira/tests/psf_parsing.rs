@@ -7,7 +7,11 @@ use ira_platforms::ps4;
 #[test]
 fn test_parse_psf_invalid_magic() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
-    std::fs::write(tmp.path(), b"NOTPSF\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00").unwrap();
+    std::fs::write(
+        tmp.path(),
+        b"NOTPSF\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
+    )
+    .unwrap();
     let result = ps4::parse_psf(tmp.path());
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("bad PSF magic"));

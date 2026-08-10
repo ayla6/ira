@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GameVariant {
     pub id: i64,
     pub game_id: i64,
@@ -31,5 +30,6 @@ pub struct GameVariant {
     pub logo_size: i32,
 }
 
-fn default_true() -> bool { true }
-
+fn default_true() -> bool {
+    true
+}

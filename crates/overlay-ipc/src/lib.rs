@@ -10,10 +10,9 @@ pub use config::{
     OverlayPosition, OverlaySettings, RecordingFormat, RecordingQuality, VideoEncoder,
 };
 pub use hotkey::{
-    parse_hotkey, resolve_defaults, MOD_ALT, MOD_CTRL, MOD_SHIFT, MOD_SUPER,
-    X11_KEYCODE_OFFSET, DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
-    DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS,
-    DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+    parse_hotkey, resolve_defaults, DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+    DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS, DEFAULT_TOGGLE_KEYCODE,
+    DEFAULT_TOGGLE_MODS, MOD_ALT, MOD_CTRL, MOD_SHIFT, MOD_SUPER, X11_KEYCODE_OFFSET,
 };
 pub use protocol::{
     AchievementEntry, InputEventRaw, NotificationEntry, NotificationType, ShmHeader,

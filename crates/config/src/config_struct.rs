@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use ira_models::WineConfig;
 use ira_overlay_ipc::OverlaySettings;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::load::{config_path, xdg_dir};
 use crate::secrets;
@@ -26,13 +26,32 @@ fn default_save_dir() -> String {
         .to_string()
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+fn default_console_enabled() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConsoleConfig {
+    #[serde(default = "default_console_enabled")]
     pub enabled: bool,
+    /// Legacy-only field used while migrating old ROM paths.
+    #[serde(default, skip_serializing)]
     pub folder: String,
     pub executable: String,
     pub ra_core: String,
     pub fullscreen: bool,
+}
+
+impl Default for ConsoleConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            folder: String::new(),
+            executable: String::new(),
+            ra_core: String::new(),
+            fullscreen: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -86,6 +105,14 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub rpcs3_executable: String,
     #[serde(default)]
+    pub vita3k_enabled: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub vita3k_executable: String,
+    #[serde(default)]
+    pub cemu_enabled: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cemu_executable: String,
+    #[serde(default)]
     pub steam_enabled: bool,
 
     #[serde(default = "default_save_dir")]
@@ -98,6 +125,10 @@ pub struct Config {
     pub prefix_base_dir: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub default_game_folder: String,
+    /// Shared ROM root. Each console uses <roms_folder>/<console id>.
+    /// Empty means ROM discovery is disabled until a root is selected.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub roms_folder: String,
     #[serde(default)]
     pub default_native_env_vars: Vec<(String, String)>,
     #[serde(default)]
@@ -128,6 +159,9 @@ pub struct Config {
     pub ra_password: String,
     #[serde(default)]
     pub consoles: HashMap<String, ConsoleConfig>,
+    /// PRE-RELEASE: one-time initialization marker for ROM platform defaults.
+    #[serde(default)]
+    pub rom_platforms_initialized: bool,
     #[serde(default)]
     pub overlay: OverlaySettings,
 }
@@ -135,8 +169,14 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         let mut consoles = HashMap::new();
-        for def in ira_models::CONSOLES {
-            consoles.insert(def.id.to_string(), ConsoleConfig::default());
+        for def in ira_models::all_consoles() {
+            consoles.insert(
+                def.id.to_string(),
+                ConsoleConfig {
+                    enabled: def.uses_rom_folder(),
+                    ..Default::default()
+                },
+            );
         }
         Self {
             steam_api_key: String::new(),
@@ -149,6 +189,10 @@ impl Default for Config {
             shadps4_executable: String::new(),
             rpcs3_enabled: false,
             rpcs3_executable: String::new(),
+            vita3k_enabled: false,
+            vita3k_executable: String::new(),
+            cemu_enabled: false,
+            cemu_executable: String::new(),
             steam_enabled: false,
 
             save_dir: default_save_dir(),
@@ -156,6 +200,7 @@ impl Default for Config {
             default_system: SystemDefaults::default(),
             prefix_base_dir: String::new(),
             default_game_folder: String::new(),
+            roms_folder: String::new(),
             default_native_env_vars: Vec::new(),
             default_api_emu_version: String::new(),
             auto_emu_install: None,
@@ -168,6 +213,7 @@ impl Default for Config {
             ra_token: String::new(),
             ra_password: String::new(),
             consoles,
+            rom_platforms_initialized: true,
             overlay: OverlaySettings::default(),
         }
     }
@@ -183,9 +229,29 @@ impl Config {
     }
 
     pub fn any_console_enabled(&self) -> bool {
-        ira_models::CONSOLES
-            .iter()
+        ira_models::all_consoles()
+            .filter(|def| def.uses_rom_folder())
             .any(|def| self.console(def.id).enabled)
+    }
+
+    pub fn rom_folder(&self, platform_id: &str) -> std::path::PathBuf {
+        if self.roms_folder.trim().is_empty() {
+            std::path::PathBuf::new()
+        } else {
+            std::path::Path::new(self.roms_folder.trim()).join(platform_id)
+        }
+    }
+
+    pub fn ensure_rom_folders(&self) -> Result<(), String> {
+        if self.roms_folder.trim().is_empty() {
+            return Ok(());
+        }
+        let root = std::path::Path::new(self.roms_folder.trim());
+        std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
+        for console in ira_models::all_consoles().filter(|def| def.uses_rom_folder()) {
+            std::fs::create_dir_all(root.join(console.id)).map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -207,12 +273,17 @@ impl Config {
             shadps4_executable: self.shadps4_executable.clone(),
             rpcs3_enabled: self.rpcs3_enabled,
             rpcs3_executable: self.rpcs3_executable.clone(),
+            vita3k_enabled: self.vita3k_enabled,
+            vita3k_executable: self.vita3k_executable.clone(),
+            cemu_enabled: self.cemu_enabled,
+            cemu_executable: self.cemu_executable.clone(),
             steam_enabled: self.steam_enabled,
             save_dir: self.save_dir.clone(),
             default_wine_config: self.default_wine_config.clone(),
             default_system: self.default_system.clone(),
             prefix_base_dir: self.prefix_base_dir.clone(),
             default_game_folder: self.default_game_folder.clone(),
+            roms_folder: self.roms_folder.clone(),
             default_native_env_vars: self.default_native_env_vars.clone(),
             default_api_emu_version: self.default_api_emu_version.clone(),
             auto_emu_install: self.auto_emu_install,
@@ -223,6 +294,7 @@ impl Config {
             ra_enabled: self.ra_enabled,
             ra_username: self.ra_username.clone(),
             consoles: self.consoles.clone(),
+            rom_platforms_initialized: self.rom_platforms_initialized,
             overlay: self.overlay.clone(),
         };
         if steam_err.is_err() {
@@ -264,9 +336,9 @@ mod tests {
     #[test]
     fn test_config_default_has_consoles() {
         let cfg = Config::default();
-        for def in ira_models::CONSOLES {
+        for def in ira_models::all_consoles() {
             let cc = cfg.console(def.id);
-            assert!(!cc.enabled);
+            assert_eq!(cc.enabled, def.uses_rom_folder());
             assert_eq!(cc.folder, "");
             assert_eq!(cc.executable, "");
             assert_eq!(cc.ra_core, "");
@@ -275,19 +347,22 @@ mod tests {
     }
 
     #[test]
-    fn test_config_save_and_load_roundtrip() {
+    fn test_config_load_migrates_rom_platform_defaults() {
         let tmp = tempfile::TempDir::new().unwrap();
         let prev = std::env::var("XDG_CONFIG_HOME").ok();
         std::env::set_var("XDG_CONFIG_HOME", tmp.path());
 
-        let cfg = Config {
+        let mut cfg = Config {
             notifications_enabled: false,
             show_hidden_games: true,
             grid_cover_width: 300,
             sort_descending: true,
             save_dir: "/tmp/test_save_dir".to_string(),
+            roms_folder: "/tmp/roms".to_string(),
             ..Default::default()
         };
+        cfg.rom_platforms_initialized = false;
+        cfg.console_mut("n64").enabled = false;
         let json = serde_json::to_string_pretty(&cfg).unwrap();
         let path = crate::load::config_path();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -299,6 +374,9 @@ mod tests {
         assert_eq!(loaded.grid_cover_width, cfg.grid_cover_width);
         assert_eq!(loaded.sort_descending, cfg.sort_descending);
         assert_eq!(loaded.save_dir, cfg.save_dir);
+        assert_eq!(loaded.roms_folder, cfg.roms_folder);
+        assert!(loaded.rom_platforms_initialized);
+        assert!(loaded.console("n64").enabled);
 
         match prev {
             Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
@@ -309,10 +387,40 @@ mod tests {
     #[test]
     fn test_console_config_default() {
         let cc = ConsoleConfig::default();
-        assert!(!cc.enabled);
+        assert!(cc.enabled);
         assert_eq!(cc.folder, "");
         assert_eq!(cc.executable, "");
         assert_eq!(cc.ra_core, "");
         assert!(!cc.fullscreen);
+    }
+
+    #[test]
+    fn test_rom_folder_uses_shared_root_before_legacy_folder() {
+        let mut cfg = Config {
+            roms_folder: "/games/roms".to_string(),
+            ..Default::default()
+        };
+        cfg.console_mut("gba").folder = "/old/gba".to_string();
+        assert_eq!(
+            cfg.rom_folder("gba"),
+            std::path::PathBuf::from("/games/roms/gba")
+        );
+    }
+
+    #[test]
+    fn test_rom_folder_uses_virtualboy_console_id() {
+        let cfg = Config {
+            roms_folder: "/games/roms".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.rom_folder("virtualboy"),
+            std::path::PathBuf::from("/games/roms/virtualboy")
+        );
+    }
+
+    #[test]
+    fn test_rom_folder_is_empty_without_shared_root() {
+        assert!(Config::default().rom_folder("gba").as_os_str().is_empty());
     }
 }

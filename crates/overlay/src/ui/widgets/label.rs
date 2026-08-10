@@ -1,5 +1,5 @@
-use super::widget::{DrawCtx, Event, EventCtx, LayoutCtx, Rect, Size, Widget};
 use super::text;
+use super::widget::{DrawCtx, Event, EventCtx, LayoutCtx, Rect, Size, Widget};
 
 pub struct Label {
     text: String,
@@ -13,7 +13,13 @@ impl Label {
     pub fn new(text: impl Into<String>, font_size: f32, color: [u8; 4]) -> Self {
         let text_str = text.into();
         let measured = text::measure_text(&text_str, font_size);
-        Self { text: text_str, font_size, color, bounds: Rect::default(), measured }
+        Self {
+            text: text_str,
+            font_size,
+            color,
+            bounds: Rect::default(),
+            measured,
+        }
     }
 }
 
@@ -27,7 +33,13 @@ impl Widget for Label {
     }
 
     fn draw(&self, ctx: &mut DrawCtx) {
-        ctx.push_text(&self.text, self.bounds.x, self.bounds.y, self.font_size, self.color);
+        ctx.push_text(
+            &self.text,
+            self.bounds.x,
+            self.bounds.y,
+            self.font_size,
+            self.color,
+        );
     }
 
     fn handle_event(&mut self, _ctx: &EventCtx, _event: &Event) -> bool {

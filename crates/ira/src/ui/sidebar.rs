@@ -1,14 +1,14 @@
-use gtk4::prelude::*;
-use crate::Game;
-use ira_models::GroupSelection;
-use crate::strings as S;
-use super::state::SharedState;
 use super::context_menu::{show_game_context_menu, show_multi_game_context_menu};
+use super::css::*;
 use super::grid_view::show_grid_view;
 use super::helpers::clear_children;
 use super::sidebar_item::{SidebarItem, SidebarItemKind};
+use super::state::SharedState;
+use crate::strings as S;
+use crate::Game;
+use gtk4::prelude::*;
+use ira_models::GroupSelection;
 use std::collections::{HashMap, HashSet};
-use super::css::*;
 
 fn queue_icon_load(icon: gtk4::Image, path: String) {
     let _s = tracing::info_span!("queue_icon_load", path = %path).entered();
@@ -43,7 +43,10 @@ pub fn find_game_index(state: &SharedState, db_id: i64, variant_id: Option<i64>)
     let store = state.borrow().sidebar_store.clone();
     for i in 0..store.n_items() {
         if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()) {
-            if item.kind() == SidebarItemKind::Game && item.db_id() == db_id && item.variant_id() == variant_id {
+            if item.kind() == SidebarItemKind::Game
+                && item.db_id() == db_id
+                && item.variant_id() == variant_id
+            {
                 return Some(i);
             }
         }
@@ -55,13 +58,15 @@ pub fn update_sidebar_game(state: &SharedState, db_id: i64, name: &str, icon_pat
     let store = state.borrow().sidebar_store.clone();
     for i in 0..store.n_items() {
         if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()) {
-            if item.kind() == SidebarItemKind::Game && item.db_id() == db_id && item.variant_id().is_none() {
+            if item.kind() == SidebarItemKind::Game
+                && item.db_id() == db_id
+                && item.variant_id().is_none()
+            {
                 if item.name() == name && item.icon_path() == icon_path {
                     return;
                 }
-                let new_item = SidebarItem::new_game(
-                    db_id, name, icon_path, item.hidden(), item.playing(),
-                );
+                let new_item =
+                    SidebarItem::new_game(db_id, name, icon_path, item.hidden(), item.playing());
                 store.splice(i, 1, &[new_item]);
                 break;
             }
@@ -75,9 +80,17 @@ pub fn set_sidebar_playing(state: &SharedState, db_id: i64, playing: bool) {
     let saved_scroll = sidebar_scroll.vadjustment().value();
     for i in 0..store.n_items() {
         if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()) {
-            if item.kind() == SidebarItemKind::Game && item.db_id() == db_id && item.playing() != playing {
+            if item.kind() == SidebarItemKind::Game
+                && item.db_id() == db_id
+                && item.playing() != playing
+            {
                 let new_item = SidebarItem::new_game_variant(
-                    db_id, item.variant_id(), &item.name(), &item.icon_path(), item.hidden(), playing,
+                    db_id,
+                    item.variant_id(),
+                    &item.name(),
+                    &item.icon_path(),
+                    item.hidden(),
+                    playing,
                 );
                 store.splice(i, 1, &[new_item]);
             }
@@ -98,9 +111,13 @@ pub fn rebuild_sidebar(state: &SharedState) {
 
     let (searching, show_hidden, groups, collapsed, games, group_members, running_games) = {
         let s = state.borrow();
-        let group_members: HashMap<i64, Vec<i64>> = s.groups.iter()
+        let group_members: HashMap<i64, Vec<i64>> = s
+            .groups
+            .iter()
             .map(|g| {
-                let ids: Vec<i64> = s.group_members.get(&g.id)
+                let ids: Vec<i64> = s
+                    .group_members
+                    .get(&g.id)
                     .map(|set| set.iter().copied().collect())
                     .unwrap_or_default();
                 (g.id, ids)
@@ -123,18 +140,18 @@ pub fn rebuild_sidebar(state: &SharedState) {
     let mut items: Vec<SidebarItem> = Vec::new();
     items.push(SidebarItem::new_all_games());
 
-    let visible_games: Vec<&Game> = games.iter()
-        .filter(|g| !g.hidden || show_hidden)
-        .collect();
+    let visible_games: Vec<&Game> = games.iter().filter(|g| !g.hidden || show_hidden).collect();
 
-    let grouped_ids: HashSet<i64> = group_members.values()
+    let grouped_ids: HashSet<i64> = group_members
+        .values()
         .flat_map(|ids| ids.iter().copied())
         .collect();
 
     if !searching {
         for g in &groups {
             let member_ids = group_members.get(&g.id).cloned().unwrap_or_default();
-            let collection_games: Vec<&Game> = visible_games.iter()
+            let collection_games: Vec<&Game> = visible_games
+                .iter()
                 .filter(|game| member_ids.contains(&game.db_id))
                 .copied()
                 .collect();
@@ -145,20 +162,29 @@ pub fn rebuild_sidebar(state: &SharedState) {
 
             let is_collapsed = collapsed.contains(&g.id);
             items.push(SidebarItem::new_collection_header(
-                g.id, &g.name, collection_games.len(), is_collapsed,
+                g.id,
+                &g.name,
+                collection_games.len(),
+                is_collapsed,
             ));
 
             if !is_collapsed {
                 for game in &collection_games {
                     let is_running = running_games.lock().unwrap().contains_key(&game.db_id);
                     items.push(SidebarItem::new_game_variant(
-                        game.db_id, game.variant_id, &game.name, &game.icon_path, game.hidden, is_running,
+                        game.db_id,
+                        game.variant_id,
+                        &game.name,
+                        &game.icon_path,
+                        game.hidden,
+                        is_running,
                     ));
                 }
             }
         }
 
-        let uncategorized: Vec<&Game> = visible_games.iter()
+        let uncategorized: Vec<&Game> = visible_games
+            .iter()
             .filter(|g| !grouped_ids.contains(&g.db_id))
             .copied()
             .collect();
@@ -166,14 +192,20 @@ pub fn rebuild_sidebar(state: &SharedState) {
         if !uncategorized.is_empty() {
             let is_collapsed = collapsed.contains(&0);
             items.push(SidebarItem::new_uncategorized_header(
-                uncategorized.len(), is_collapsed,
+                uncategorized.len(),
+                is_collapsed,
             ));
 
             if !is_collapsed {
                 for game in &uncategorized {
                     let is_running = running_games.lock().unwrap().contains_key(&game.db_id);
                     items.push(SidebarItem::new_game_variant(
-                        game.db_id, game.variant_id, &game.name, &game.icon_path, game.hidden, is_running,
+                        game.db_id,
+                        game.variant_id,
+                        &game.name,
+                        &game.icon_path,
+                        game.hidden,
+                        is_running,
                     ));
                 }
             }
@@ -181,21 +213,35 @@ pub fn rebuild_sidebar(state: &SharedState) {
     } else {
         let (search, sort_mode, sort_descending) = {
             let s = state.borrow();
-            (s.search_query.to_lowercase(), s.cfg.sort_mode, s.cfg.sort_descending)
+            (
+                s.search_query.to_lowercase(),
+                s.cfg.sort_mode,
+                s.cfg.sort_descending,
+            )
         };
-        let mut filtered: Vec<&Game> = visible_games.iter()
+        let mut filtered: Vec<&Game> = visible_games
+            .iter()
             .filter(|g| g.name_lower.contains(&search))
             .copied()
             .collect();
         filtered.sort_by(|a, b| {
             let ord = sort_mode.compare(a, b);
-            if sort_descending { ord.reverse() } else { ord }
+            if sort_descending {
+                ord.reverse()
+            } else {
+                ord
+            }
         });
 
         for game in &filtered {
             let is_running = running_games.lock().unwrap().contains_key(&game.db_id);
             items.push(SidebarItem::new_game_variant(
-                game.db_id, game.variant_id, &game.name, &game.icon_path, game.hidden, is_running,
+                game.db_id,
+                game.variant_id,
+                &game.name,
+                &game.icon_path,
+                game.hidden,
+                is_running,
             ));
         }
     }
@@ -242,7 +288,10 @@ fn restore_selection(state: &SharedState) {
     if !selected_id.is_empty() {
         let db_id = ira_models::parse_db_id(&selected_id);
         if db_id > 0 {
-            let variant_id = selected_id.split("-v").nth(1).and_then(|s| s.parse::<i64>().ok());
+            let variant_id = selected_id
+                .split("-v")
+                .nth(1)
+                .and_then(|s| s.parse::<i64>().ok());
             if let Some(index) = find_game_index(state, db_id, variant_id) {
                 select_row_silently(state, Some(index));
                 return;
@@ -320,7 +369,11 @@ fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &S
     let group_id = item.group_id();
     let collapsed = item.collapsed();
 
-    let arrow_icon = if collapsed { "pan-end-symbolic" } else { "pan-down-symbolic" };
+    let arrow_icon = if collapsed {
+        "pan-end-symbolic"
+    } else {
+        "pan-down-symbolic"
+    };
     let arrow = gtk4::Image::from_icon_name(arrow_icon);
     arrow.set_pixel_size(14);
     arrow.set_valign(gtk4::Align::Center);
@@ -446,12 +499,16 @@ fn sidebar_bind_game(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {
                 None => db_id.to_string(),
             };
             if selected_ids.len() > 1 && selected_ids.contains(&item_grid_id) {
-                let db_ids: HashSet<i64> = selected_ids.iter()
+                let db_ids: HashSet<i64> = selected_ids
+                    .iter()
                     .map(|s| ira_models::parse_db_id(s))
                     .collect();
                 show_multi_game_context_menu(&sc, &db_ids, &r, x, y);
             } else {
-                let game = sc.borrow().games.iter()
+                let game = sc
+                    .borrow()
+                    .games
+                    .iter()
                     .find(|g| g.db_id == db_id && g.variant_id == variant_id)
                     .cloned();
                 if let Some(game) = game {
@@ -472,8 +529,7 @@ fn sidebar_bind_factory(
     let list_item = list_item_obj.downcast_ref::<gtk4::ListItem>().unwrap();
     let row = list_item.child().unwrap().downcast::<gtk4::Box>().unwrap();
 
-    let item = list_item.item().unwrap()
-        .downcast::<SidebarItem>().unwrap();
+    let item = list_item.item().unwrap().downcast::<SidebarItem>().unwrap();
 
     clear_children(&row);
 
@@ -497,7 +553,11 @@ fn sidebar_unbind_factory(_factory: &gtk4::SignalListItemFactory, list_item_obj:
         let row = child.downcast::<gtk4::Box>().unwrap();
         let controllers = row.observe_controllers();
         let to_remove: Vec<gtk4::EventController> = (0..controllers.n_items())
-            .filter_map(|i| controllers.item(i).and_then(|o| o.downcast::<gtk4::EventController>().ok()))
+            .filter_map(|i| {
+                controllers
+                    .item(i)
+                    .and_then(|o| o.downcast::<gtk4::EventController>().ok())
+            })
             .collect();
         for ctrl in to_remove {
             row.remove_controller(&ctrl);

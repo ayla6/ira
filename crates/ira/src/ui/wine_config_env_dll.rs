@@ -1,5 +1,5 @@
-use adw::prelude::*;
 use super::css::*;
+use adw::prelude::*;
 
 pub(super) fn collect_env_vars(box_: &gtk4::ListBox) -> Vec<(String, String)> {
     let mut result = Vec::new();
@@ -48,7 +48,13 @@ pub(super) fn build_dll_override_row(name: &str, value: &str) -> gtk4::ListBoxRo
     name_entry.set_hexpand(true);
     hbox.append(&name_entry);
 
-    let model = gtk4::StringList::new(&["native,builtin", "builtin,native", "native", "builtin", "disabled"]);
+    let model = gtk4::StringList::new(&[
+        "native,builtin",
+        "builtin,native",
+        "native",
+        "builtin",
+        "disabled",
+    ]);
     let value_combo = gtk4::DropDown::new(Some(model), None::<&gtk4::PropertyExpression>);
     {
         let idx = match value {
@@ -68,7 +74,10 @@ pub(super) fn build_dll_override_row(name: &str, value: &str) -> gtk4::ListBoxRo
     remove_btn.add_css_class(CSS_CIRCULAR);
     let row_clone = row.clone();
     remove_btn.connect_clicked(move |_| {
-        if let Some(list) = row_clone.parent().and_then(|p| p.downcast::<gtk4::ListBox>().ok()) {
+        if let Some(list) = row_clone
+            .parent()
+            .and_then(|p| p.downcast::<gtk4::ListBox>().ok())
+        {
             row_clone.unparent();
             list.remove(&row_clone);
         }
@@ -101,9 +110,16 @@ pub(super) fn collect_dll_overrides(box_: &gtk4::ListBox) -> Vec<(String, String
                         if let Some(combo) = value_combo.downcast_ref::<gtk4::DropDown>() {
                             let name = entry.text().to_string();
                             if !name.is_empty() {
-                                let labels = ["native,builtin", "builtin,native", "native", "builtin", "disabled"];
+                                let labels = [
+                                    "native,builtin",
+                                    "builtin,native",
+                                    "native",
+                                    "builtin",
+                                    "disabled",
+                                ];
                                 let idx = combo.selected() as usize;
-                                let value = labels.get(idx).unwrap_or(&"native,builtin").to_string();
+                                let value =
+                                    labels.get(idx).unwrap_or(&"native,builtin").to_string();
                                 result.push((name, value));
                             }
                         }

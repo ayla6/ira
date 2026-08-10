@@ -2,13 +2,13 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use adw::prelude::*;
-use ira_models::{AppDetails, GameLaunchConfig, WineConfig, WineProfile};
+use super::css::*;
 use super::helpers;
 use super::settings_dialog;
 use super::state::SharedState;
+use adw::prelude::*;
 use ira_db::DbConn;
-use super::css::*;
+use ira_models::{AppDetails, GameLaunchConfig, WineConfig, WineProfile};
 
 /// Converts a single Lutris game to a managed game by reading its Lutris config
 /// and saving a GameLaunchConfig + WineConfig to the database.
@@ -19,20 +19,34 @@ pub fn convert_lutris_to_managed(
     lutris_id: i64,
     game_name: &str,
 ) -> Result<(), String> {
-    let (_runner, _directory, config) = ira_platforms::lutris_config::read_lutris_game_config(lutris_id)?;
+    let (_runner, _directory, config) =
+        ira_platforms::lutris_config::read_lutris_game_config(lutris_id)?;
 
     let launch = GameLaunchConfig {
         exe: config.game.exe.clone(),
         args: config.game.args.clone(),
         working_dir: config.game.working_dir.clone(),
-        env_vars: config.system.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        env_vars: config
+            .system
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
         ..Default::default()
     };
     let wine = WineConfig {
         enabled: true,
         prefix: config.game.prefix.clone(),
-        version: if config.wine.version.is_empty() { "system".to_string() } else { config.wine.version.clone() },
-        arch: if config.game.arch.is_empty() { "auto".to_string() } else { config.game.arch.clone() },
+        version: if config.wine.version.is_empty() {
+            "system".to_string()
+        } else {
+            config.wine.version.clone()
+        },
+        arch: if config.game.arch.is_empty() {
+            "auto".to_string()
+        } else {
+            config.game.arch.clone()
+        },
         esync: config.wine.esync,
         fsync: config.wine.fsync,
         dxvk: config.wine.dxvk,
@@ -42,8 +56,17 @@ pub fn convert_lutris_to_managed(
         fsr: config.wine.fsr,
         battleye: config.wine.battleye,
         eac: config.wine.eac,
-        show_debug: if config.wine.show_debug.is_empty() { "-all".to_string() } else { config.wine.show_debug.clone() },
-        dll_overrides: config.wine.overrides.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        show_debug: if config.wine.show_debug.is_empty() {
+            "-all".to_string()
+        } else {
+            config.wine.show_debug.clone()
+        },
+        dll_overrides: config
+            .wine
+            .overrides
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
         ..Default::default()
     };
     let profile_id = {
@@ -80,7 +103,9 @@ pub(super) fn build_dlc_page(
             let dlc_group = adw::PreferencesGroup::new();
             dlc_group.set_title(&format!("DLCs  ·  {}", details.dlcs.len()));
 
-            let mut dlc_list: Vec<(String, ira_models::DlcInfo)> = details.dlcs.iter()
+            let mut dlc_list: Vec<(String, ira_models::DlcInfo)> = details
+                .dlcs
+                .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             dlc_list.sort_by_key(|(_, d)| d.app_id);
@@ -101,7 +126,11 @@ pub(super) fn build_dlc_page(
             dlc_scroll.set_vexpand(true);
             dlc_scroll.set_hexpand(true);
 
-            sidebar.append(&settings_dialog::settings_sidebar_row("package-x-generic-symbolic", "DLC", "dlc"));
+            sidebar.append(&settings_dialog::settings_sidebar_row(
+                "package-x-generic-symbolic",
+                "DLC",
+                "dlc",
+            ));
             stack.add_named(&dlc_scroll, Some("dlc"));
             switches
         } else {
@@ -158,14 +187,24 @@ pub(super) fn build_api_emulator_page(
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
 ) -> Option<Rc<RefCell<bool>>> {
-    let (emu_exe, emu_game_folder, emu_db_id, emu_trophy_source, emu_app_id, save_dir) =
-        (params.emu_exe, params.emu_game_folder, params.emu_db_id, params.emu_trophy_source, params.emu_app_id, params.save_dir);
-    if (emu_trophy_source != ira_models::TrophySource::Gse && emu_trophy_source != ira_models::TrophySource::Nge) || emu_exe.is_empty() {
+    let (emu_exe, emu_game_folder, emu_db_id, emu_trophy_source, emu_app_id, save_dir) = (
+        params.emu_exe,
+        params.emu_game_folder,
+        params.emu_db_id,
+        params.emu_trophy_source,
+        params.emu_app_id,
+        params.save_dir,
+    );
+    if (emu_trophy_source != ira_models::TrophySource::Gse
+        && emu_trophy_source != ira_models::TrophySource::Nge)
+        || emu_exe.is_empty()
+    {
         return None;
     }
 
     let db = state.borrow().db.clone();
-    let dll_folder = resolve_emu_dll_folder(&db, emu_db_id, emu_exe, emu_game_folder, emu_trophy_source);
+    let dll_folder =
+        resolve_emu_dll_folder(&db, emu_db_id, emu_exe, emu_game_folder, emu_trophy_source);
 
     let emu_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     emu_page.set_margin_start(12);
@@ -176,14 +215,21 @@ pub(super) fn build_api_emulator_page(
     status_group.set_title("Status");
 
     let status_row = adw::ActionRow::new();
-    let is_installed = dll_folder.as_deref().map(|d| {
-        if emu_trophy_source == ira_models::TrophySource::Gse {
-            ira_platforms::api_emulators::is_gse_installed(d)
-        } else {
-            ira_platforms::api_emulators::is_nge_installed(d)
-        }
-    }).unwrap_or(false);
-    status_row.set_title(if is_installed { "API emulator installed" } else { "API emulator not installed" });
+    let is_installed = dll_folder
+        .as_deref()
+        .map(|d| {
+            if emu_trophy_source == ira_models::TrophySource::Gse {
+                ira_platforms::api_emulators::is_gse_installed(d)
+            } else {
+                ira_platforms::api_emulators::is_nge_installed(d)
+            }
+        })
+        .unwrap_or(false);
+    status_row.set_title(if is_installed {
+        "API emulator installed"
+    } else {
+        "API emulator not installed"
+    });
     status_row.set_sensitive(false);
     status_group.add(&status_row);
 
@@ -231,18 +277,22 @@ pub(super) fn build_api_emulator_page(
         } else {
             ira_platforms::api_emulators::list_gog_versions(save_dir)
         };
-        let has_dlls = dll_folder.as_deref().map(|d| {
-            if emu_trophy_source == ira_models::TrophySource::Gse {
-                ira_platforms::api_emulators::has_original_steam_dlls(d)
-            } else {
-                ira_platforms::api_emulators::has_original_gog_dlls(d)
-            }
-        }).unwrap_or(false);
+        let has_dlls = dll_folder
+            .as_deref()
+            .map(|d| {
+                if emu_trophy_source == ira_models::TrophySource::Gse {
+                    ira_platforms::api_emulators::has_original_steam_dlls(d)
+                } else {
+                    ira_platforms::api_emulators::has_original_gog_dlls(d)
+                }
+            })
+            .unwrap_or(false);
 
         if !has_dlls {
             let missing_row = adw::ActionRow::new();
             missing_row.set_title("No original Steam/GOG DLLs detected in game folder");
-            missing_row.set_subtitle("Install the game first and make sure it has the original API DLLs");
+            missing_row
+                .set_subtitle("Install the game first and make sure it has the original API DLLs");
             missing_row.set_sensitive(false);
             action_group.add(&missing_row);
         }
@@ -284,23 +334,41 @@ pub(super) fn build_api_emulator_page(
         let langs_c = languages.to_vec();
         let ts_c = emu_trophy_source;
         install_btn.connect_clicked(move |_| {
-            let ver = version_row.as_ref().map(|vr| {
-                let idx = vr.selected() as usize;
-                if idx < versions.len() { versions[idx].clone() } else { String::new() }
-            }).unwrap_or_default();
+            let ver = version_row
+                .as_ref()
+                .map(|vr| {
+                    let idx = vr.selected() as usize;
+                    if idx < versions.len() {
+                        versions[idx].clone()
+                    } else {
+                        String::new()
+                    }
+                })
+                .unwrap_or_default();
             let result = if ts_c == ira_models::TrophySource::Gse {
                 ira_platforms::api_emulators::install_gse(
-                    &save_dir_c, &exe_c, &game_folder_c, &app_id_c, &langs_c, &ver,
+                    &save_dir_c,
+                    &exe_c,
+                    &game_folder_c,
+                    &app_id_c,
+                    &langs_c,
+                    &ver,
                 )
             } else {
                 ira_platforms::api_emulators::install_nge(
-                    &save_dir_c, &exe_c, &game_folder_c, &app_id_c, &ver,
+                    &save_dir_c,
+                    &exe_c,
+                    &game_folder_c,
+                    &app_id_c,
+                    &ver,
                 )
             };
             match result {
                 Ok(folder) => {
                     status_c.set_title("API emulator installed");
-                    if let Err(e) = ira_db::set_api_dll_folder(&db_c, db_id_c, &folder.to_string_lossy()) {
+                    if let Err(e) =
+                        ira_db::set_api_dll_folder(&db_c, db_id_c, &folder.to_string_lossy())
+                    {
                         eprintln!("Failed to cache API DLL folder: {}", e);
                     }
                 }
@@ -347,7 +415,11 @@ pub(super) fn build_api_emulator_page(
     emu_scroll.set_vexpand(true);
     emu_scroll.set_hexpand(true);
     sidebar.append(&settings_dialog::sidebar_separator());
-    sidebar.append(&settings_dialog::settings_sidebar_row("applications-engineering-symbolic", "API emulator", "api_emulator"));
+    sidebar.append(&settings_dialog::settings_sidebar_row(
+        "applications-engineering-symbolic",
+        "API emulator",
+        "api_emulator",
+    ));
     stack.add_named(&emu_scroll, Some("api_emulator"));
     Some(pending_uninstall)
 }

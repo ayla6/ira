@@ -1,11 +1,11 @@
-use gtk4::prelude::*;
-use crate::Game;
-use std::rc::Rc;
-use super::state::SharedState;
-use super::grid_view::queue_cover_load_priority;
-use super::message_helpers::switch_to_game;
 use super::context_menu::show_game_context_menu;
 use super::css::*;
+use super::grid_view::queue_cover_load_priority;
+use super::message_helpers::switch_to_game;
+use super::state::SharedState;
+use crate::Game;
+use gtk4::prelude::*;
+use std::rc::Rc;
 
 pub(super) fn build_recent_row(
     state: &SharedState,
@@ -50,7 +50,11 @@ pub(super) fn build_recent_row(
             (w, cover_height, false)
         };
         game_widths.push(w);
-        let path = if use_header { ira_parser::full_image_path(&game.header_path) } else { game.grid_path.clone() };
+        let path = if use_header {
+            ira_parser::full_image_path(&game.header_path)
+        } else {
+            game.grid_path.clone()
+        };
         let item = build_cover(state, game, &path, w, h);
         hbox.append(&item);
     }
@@ -70,7 +74,10 @@ pub(super) fn build_recent_row(
     let adj = scrolled.hadjustment();
 
     let step_widths = Rc::new(
-        game_widths.iter().map(|w| w + spacing).collect::<Vec<i32>>(),
+        game_widths
+            .iter()
+            .map(|w| w + spacing)
+            .collect::<Vec<i32>>(),
     );
     let max_scroll = {
         let total: i32 = step_widths.iter().sum();
@@ -146,7 +153,15 @@ pub(super) fn build_cover(
     pic.set_size_request(w, h);
     pic.add_css_class(CSS_GAME_COVER_PIC);
     if !image_path.is_empty() {
-        queue_cover_load_priority(pic.clone(), image_path.to_string(), (w, h), game.db_id, game.variant_id.unwrap_or(0), vbox.clone(), glib::Priority::DEFAULT);
+        queue_cover_load_priority(
+            pic.clone(),
+            image_path.to_string(),
+            (w, h),
+            game.db_id,
+            game.variant_id.unwrap_or(0),
+            vbox.clone(),
+            glib::Priority::DEFAULT,
+        );
     }
     overlay.set_child(Some(&pic));
 

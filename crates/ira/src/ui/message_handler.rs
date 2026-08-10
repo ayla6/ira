@@ -1,14 +1,17 @@
-use gtk4::prelude::*;
-use adw::prelude::*;
-use crate::AppMessage;
-use crate::GameEntry;
-use crate::strings as S;
-use super::state::SharedState;
-use super::sidebar::{rebuild_sidebar, set_sidebar_playing};
 use super::game_display::display_game;
 use super::game_item::GameItem;
+use super::grid_view::update_loading_view;
 use super::image_manager::build_image_manager_content_with_drafts;
-use super::message_helpers::{apply_game_update, insert_or_update_game, refresh_steam_playtimes_for, handle_games_loaded, switch_to_game};
+use super::message_helpers::{
+    apply_game_update, handle_games_loaded, insert_or_update_game, refresh_steam_playtimes_for,
+    switch_to_game,
+};
+use super::sidebar::{rebuild_sidebar, set_sidebar_playing};
+use super::state::SharedState;
+use crate::strings as S;
+use crate::AppMessage;
+use crate::GameEntry;
+use adw::prelude::*;
 
 pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
     match msg {
@@ -21,14 +24,44 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         AppMessage::AddGameError(e) => handle_add_game_error(state, e),
         AppMessage::GameStopped(db_id, _) => handle_game_stopped(state, db_id),
         AppMessage::GameStarted(db_id, _) => handle_game_started(state, db_id),
-        AppMessage::SessionRecorded { game_id, variant_id, duration_seconds, .. } => {
+        AppMessage::SessionRecorded {
+            game_id,
+            variant_id,
+            duration_seconds,
+            ..
+        } => {
             handle_session_recorded(state, game_id, variant_id, duration_seconds);
         }
         AppMessage::ShadPS4PlaytimeChanged => handle_shadps4_playtime_changed(state),
         AppMessage::Rpcs3PlaytimeChanged => handle_rpcs3_playtime_changed(state),
+        AppMessage::GamesLoadProgress {
+            status,
+            completed,
+            total,
+        } => update_loading_view(state, &status, completed, total),
+        AppMessage::ReloadGames => super::message_helpers::reload_games(state),
         AppMessage::GamesLoaded(games) => handle_games_loaded(state, games),
-        AppMessage::SgdbAssetsDownloaded { db_id, sgdb_id, icon, hero, grid, logo, header } => {
-            handle_sgdb_assets_downloaded(state, db_id, sgdb_id, SgdbAssetPaths { icon, hero, grid, logo, header });
+        AppMessage::SgdbAssetsDownloaded {
+            db_id,
+            sgdb_id,
+            icon,
+            hero,
+            grid,
+            logo,
+            header,
+        } => {
+            handle_sgdb_assets_downloaded(
+                state,
+                db_id,
+                sgdb_id,
+                SgdbAssetPaths {
+                    icon,
+                    hero,
+                    grid,
+                    logo,
+                    header,
+                },
+            );
         }
         AppMessage::VariantSelected(db_id, variant_id) => {
             handle_variant_selected(state, db_id, variant_id);
@@ -39,10 +72,7 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
 
 fn handle_add_game_error(state: &SharedState, e: String) {
     let window = state.borrow().window.clone();
-    let dialog = adw::AlertDialog::new(
-        Some(S::COULDNT_ADD_GAME),
-        Some(&e),
-    );
+    let dialog = adw::AlertDialog::new(Some(S::COULDNT_ADD_GAME), Some(&e));
     dialog.add_response("ok", S::OK);
     dialog.set_default_response(Some("ok"));
     dialog.set_close_response("ok");
@@ -58,7 +88,10 @@ fn handle_game_stopped(state: &SharedState, db_id: i64) {
     }
     let selected_id = state.borrow().selected_id.clone();
     if ira_models::parse_db_id(&selected_id) == db_id {
-        let game = state.borrow().games.iter()
+        let game = state
+            .borrow()
+            .games
+            .iter()
             .find(|g| g.grid_id() == selected_id)
             .cloned();
         if let Some(game) = game {
@@ -71,20 +104,32 @@ fn handle_game_started(state: &SharedState, db_id: i64) {
     set_sidebar_playing(state, db_id, true);
     let (watcher, game, save_dir) = {
         let s = state.borrow();
-        let game = s.games.iter()
+        let game = s
+            .games
+            .iter()
             .find(|g| g.db_id == db_id && g.variant_id.is_none())
             .cloned();
         (s.watcher.clone(), game, s.save_dir.clone())
     };
     if let (Some(watcher), Some(game)) = (watcher, game) {
         if let Some(watch_file) = crate::game_loader::achievement_watch_file(&game, &save_dir) {
-            let entry = GameEntry::for_reload(game.db_id, game.kind, game.trophy_source, &game.app_id, "", &game.platform_id);
+            let entry = GameEntry::for_reload(
+                game.db_id,
+                game.kind,
+                game.trophy_source,
+                &game.app_id,
+                "",
+                &game.platform_id,
+            );
             watcher.watch(&entry, &watch_file, &game.achievements);
         }
     }
     let selected_id = state.borrow().selected_id.clone();
     if ira_models::parse_db_id(&selected_id) == db_id {
-        let game = state.borrow().games.iter()
+        let game = state
+            .borrow()
+            .games
+            .iter()
             .find(|g| g.grid_id() == selected_id)
             .cloned();
         if let Some(game) = game {
@@ -93,7 +138,12 @@ fn handle_game_started(state: &SharedState, db_id: i64) {
     }
 }
 
-fn handle_session_recorded(state: &SharedState, game_id: i64, variant_id: Option<i64>, duration_seconds: i64) {
+fn handle_session_recorded(
+    state: &SharedState,
+    game_id: i64,
+    variant_id: Option<i64>,
+    duration_seconds: i64,
+) {
     let hours = (duration_seconds as f64) / 3600.0;
     let (db, new_base_playtime, new_variant_playtime) = {
         let mut s = state.borrow_mut();
@@ -126,9 +176,12 @@ fn handle_session_recorded(state: &SharedState, game_id: i64, variant_id: Option
 fn handle_shadps4_playtime_changed(state: &SharedState) {
     let (tx, rx) = std::sync::mpsc::channel();
     let rx = std::cell::RefCell::new(rx);
+    let executable = state.borrow().cfg.shadps4_executable.clone();
     std::thread::spawn(move || {
         let _s = tracing::info_span!("ps4_read_playtimes").entered();
-        let play_times = ira_platforms::ps4::read_play_times();
+        let play_times = ira_platforms::ps4::read_play_times_from_path(
+            &ira_platforms::ps4::play_time_path_for(&executable),
+        );
         let _ = tx.send(play_times);
     });
     let state = state.clone();
@@ -156,7 +209,10 @@ fn handle_shadps4_playtime_changed(state: &SharedState) {
                     rebuild_sidebar(&state);
                     if let Some(id) = updated_ids.first() {
                         if ira_models::parse_db_id(&selected_id) == *id {
-                            let game = state.borrow().games.iter()
+                            let game = state
+                                .borrow()
+                                .games
+                                .iter()
                                 .find(|g| g.grid_id() == selected_id)
                                 .cloned();
                             if let Some(game) = game {
@@ -176,10 +232,11 @@ fn handle_shadps4_playtime_changed(state: &SharedState) {
 fn handle_rpcs3_playtime_changed(state: &SharedState) {
     let (tx, rx) = std::sync::mpsc::channel();
     let rx = std::cell::RefCell::new(rx);
+    let executable = state.borrow().cfg.rpcs3_executable.clone();
     std::thread::spawn(move || {
         let _s = tracing::info_span!("ps3_read_persistent").entered();
         let persistent = ira_platforms::ps3::parse_persistent_settings(
-            &ira_platforms::ps3::persistent_settings_path(),
+            &ira_platforms::ps3::persistent_settings_path_for(&executable),
         );
         let _ = tx.send(persistent);
     });
@@ -193,7 +250,9 @@ fn handle_rpcs3_playtime_changed(state: &SharedState) {
                     for g in s.games.iter_mut() {
                         if g.kind == ira_models::GameKind::Ps3 {
                             let serial = &g.platform_id;
-                            let new_playtime = persistent.playtime_ms.get(serial)
+                            let new_playtime = persistent
+                                .playtime_ms
+                                .get(serial)
                                 .map(|ms| ira_platforms::ps3::ms_to_hours(*ms));
                             let new_last_played = persistent.last_played.get(serial).copied();
                             let changed = match new_playtime {
@@ -220,7 +279,10 @@ fn handle_rpcs3_playtime_changed(state: &SharedState) {
                     rebuild_sidebar(&state);
                     if let Some(id) = updated_ids.first() {
                         if ira_models::parse_db_id(&selected_id) == *id {
-                            let game = state.borrow().games.iter()
+                            let game = state
+                                .borrow()
+                                .games
+                                .iter()
                                 .find(|g| g.grid_id() == selected_id)
                                 .cloned();
                             if let Some(game) = game {
@@ -245,7 +307,12 @@ struct SgdbAssetPaths {
     header: String,
 }
 
-fn handle_sgdb_assets_downloaded(state: &SharedState, db_id: i64, sgdb_id: String, paths: SgdbAssetPaths) {
+fn handle_sgdb_assets_downloaded(
+    state: &SharedState,
+    db_id: i64,
+    sgdb_id: String,
+    paths: SgdbAssetPaths,
+) {
     let _span = tracing::info_span!("SgdbAssetsDownloaded", db_id).entered();
     {
         let db = state.borrow().db.clone();
@@ -257,11 +324,21 @@ fn handle_sgdb_assets_downloaded(state: &SharedState, db_id: i64, sgdb_id: Strin
         let mut s = state.borrow_mut();
         if let Some(g) = s.games.iter_mut().find(|g| g.db_id == db_id) {
             g.sgdb_id = sgdb_id;
-            if !paths.icon.is_empty() { g.icon_path = paths.icon; }
-            if !paths.hero.is_empty() { g.hero_image_path = paths.hero; }
-            if !paths.grid.is_empty() { g.grid_path = paths.grid; }
-            if !paths.logo.is_empty() { g.logo_path = paths.logo; }
-            if !paths.header.is_empty() { g.header_path = paths.header; }
+            if !paths.icon.is_empty() {
+                g.icon_path = paths.icon;
+            }
+            if !paths.hero.is_empty() {
+                g.hero_image_path = paths.hero;
+            }
+            if !paths.grid.is_empty() {
+                g.grid_path = paths.grid;
+            }
+            if !paths.logo.is_empty() {
+                g.logo_path = paths.logo;
+            }
+            if !paths.header.is_empty() {
+                g.header_path = paths.header;
+            }
             Some(g.clone())
         } else {
             None
@@ -269,7 +346,13 @@ fn handle_sgdb_assets_downloaded(state: &SharedState, db_id: i64, sgdb_id: Strin
     };
 
     if let Some(g) = &game_for_grid {
-        for path in [&g.icon_path, &g.hero_image_path, &g.grid_path, &g.header_path, &g.logo_path] {
+        for path in [
+            &g.icon_path,
+            &g.hero_image_path,
+            &g.grid_path,
+            &g.header_path,
+            &g.logo_path,
+        ] {
             if !path.is_empty() {
                 ira_images::invalidate_texture(path);
             }
@@ -280,7 +363,10 @@ fn handle_sgdb_assets_downloaded(state: &SharedState, db_id: i64, sgdb_id: Strin
         let store = state.borrow().grid_store.clone();
         for i in 0..store.n_items() {
             if let Some(item) = store.item(i).and_then(|o| o.downcast::<GameItem>().ok()) {
-                if item.game().is_some_and(|gi| gi.db_id == g.db_id && gi.variant_id.is_none()) {
+                if item
+                    .game()
+                    .is_some_and(|gi| gi.db_id == g.db_id && gi.variant_id.is_none())
+                {
                     store.splice(i, 1, &[GameItem::new(&g)]);
                     break;
                 }
@@ -293,7 +379,10 @@ fn handle_sgdb_assets_downloaded(state: &SharedState, db_id: i64, sgdb_id: Strin
     });
     let selected_id = state.borrow().selected_id.clone();
     if ira_models::parse_db_id(&selected_id) == db_id {
-        let game = state.borrow().games.iter()
+        let game = state
+            .borrow()
+            .games
+            .iter()
             .find(|g| g.grid_id() == selected_id)
             .cloned();
         if let Some(game) = game {
@@ -326,8 +415,12 @@ fn handle_variant_selected(state: &SharedState, db_id: i64, variant_id: Option<i
         (s.db.clone(), s.save_dir.clone(), s.sender.clone())
     };
     std::thread::spawn(move || {
-        let Some(entry) = ira_db::find_by_db_id(&db, db_id).ok().flatten() else { return };
-        let Ok(mut game) = crate::game_loader::load_game(&entry, &save_dir) else { return };
+        let Some(entry) = ira_db::find_by_db_id(&db, db_id).ok().flatten() else {
+            return;
+        };
+        let Ok(mut game) = crate::game_loader::load_game(&entry, &save_dir) else {
+            return;
+        };
         if let Some(vid) = variant_id {
             crate::game_loader::apply_variant_images_for(&db, &save_dir, &entry, &mut game, vid);
         }
@@ -342,13 +435,19 @@ fn handle_variants_changed(state: &SharedState, db_id: i64) {
     };
     {
         let mut s = state.borrow_mut();
-        s.games.retain(|g| g.db_id != db_id || g.variant_id.is_none());
+        s.games
+            .retain(|g| g.db_id != db_id || g.variant_id.is_none());
     }
     if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, db_id) {
         if let Ok(reloaded) = crate::game_loader::load_game_fast(&entry, &save_dir) {
-            let variant_entries = crate::game_loader::build_variant_entries(&db, &save_dir, &reloaded);
+            let variant_entries =
+                crate::game_loader::build_variant_entries(&db, &save_dir, &reloaded);
             let mut s = state.borrow_mut();
-            if let Some(idx) = s.games.iter().position(|g| g.db_id == db_id && g.variant_id.is_none()) {
+            if let Some(idx) = s
+                .games
+                .iter()
+                .position(|g| g.db_id == db_id && g.variant_id.is_none())
+            {
                 let old = &s.games[idx];
                 let mut merged = reloaded;
                 merged.game_path.clone_from(&old.game_path);
@@ -365,7 +464,11 @@ fn handle_variants_changed(state: &SharedState, db_id: i64) {
             let sort_descending = s.cfg.sort_descending;
             s.games.sort_by(|a, b| {
                 let ord = sort_mode.compare(a, b);
-                if sort_descending { ord.reverse() } else { ord }
+                if sort_descending {
+                    ord.reverse()
+                } else {
+                    ord
+                }
             });
         }
     }

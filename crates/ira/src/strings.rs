@@ -13,7 +13,8 @@ pub const RIGHT_CLICK_TO_MARK: &str = "Right-click to mark as already unlocked";
 pub const HIDDEN_ACHIEVEMENT: &str = "Hidden trophy";
 pub const CLICK_TO_REVEAL: &str = "Click to reveal spoiler";
 pub const CLOSE_VIEWER: &str = "Close Ira";
-pub const CLOSE_VIEWER_BODY: &str = "Keep the watcher running in the background, or quit completely?";
+pub const CLOSE_VIEWER_BODY: &str =
+    "Keep the watcher running in the background, or quit completely?";
 pub const EDIT_GAME_SETTINGS: &str = "Edit game settings";
 pub const REMOVE_GAME: &str = "Remove game";
 pub const HIDE_GAME: &str = "Hide game";
@@ -36,7 +37,8 @@ pub const LIVE_UPDATES: &str = "Live updates";
 pub const NOTIFY_ON_UNLOCKS: &str = "Notify on new unlocks";
 pub const NOTIFY_SUBTITLE: &str = "Show a desktop notification the moment a trophy unlocks";
 pub const CLOSE_TO_BG_TITLE: &str = "Close to background";
-pub const CLOSE_TO_BG_SUBTITLE: &str = "Closing the window keeps the watcher running silently in the background";
+pub const CLOSE_TO_BG_SUBTITLE: &str =
+    "Closing the window keeps the watcher running silently in the background";
 pub const MY_PROGRESS: &str = "My progress";
 pub const GLOBAL_STATS: &str = "Global stats";
 pub const GLOBAL_UNLOCK_RATES: &str = "Global unlock rates";

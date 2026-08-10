@@ -104,7 +104,11 @@ pub fn parse_tropusr_bytes(data: &[u8]) -> Result<HashMap<u32, (bool, i64)>, Str
             let timestamp2 = read_u64_be(data, off + 32).unwrap_or(0);
 
             let earned = trophy_state != 0;
-            let earned_time = if earned { tick_to_unix_seconds(timestamp2) } else { 0 };
+            let earned_time = if earned {
+                tick_to_unix_seconds(timestamp2)
+            } else {
+                0
+            };
 
             result.insert(trophy_id, (earned, earned_time));
         }

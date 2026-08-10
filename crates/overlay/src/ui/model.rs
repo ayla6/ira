@@ -84,7 +84,13 @@ pub fn build_ui() -> Option<Box<dyn Widget>> {
         })
         .collect();
 
-    Some(build_tree(&game_name, total, unlocked, playtime, &achievements))
+    Some(build_tree(
+        &game_name,
+        total,
+        unlocked,
+        playtime,
+        &achievements,
+    ))
 }
 
 fn build_tree(
@@ -98,7 +104,11 @@ fn build_tree(
 
     // Game name header
     children.push(Box::new(Label::new(
-        if game_name.is_empty() { "Ira Overlay" } else { game_name },
+        if game_name.is_empty() {
+            "Ira Overlay"
+        } else {
+            game_name
+        },
         20.0,
         [255, 255, 255, 255],
     )));
@@ -116,7 +126,11 @@ fn build_tree(
     } else {
         "No achievements".to_string()
     };
-    children.push(Box::new(Label::new(&completion_text, 13.0, [180, 180, 180, 255])));
+    children.push(Box::new(Label::new(
+        &completion_text,
+        13.0,
+        [180, 180, 180, 255],
+    )));
 
     // Playtime
     if playtime_secs > 0 {
@@ -126,7 +140,11 @@ fn build_tree(
         } else {
             format!("Playtime: {}m", playtime_secs / 60)
         };
-        children.push(Box::new(Label::new(&playtime_str, 12.0, [150, 150, 150, 255])));
+        children.push(Box::new(Label::new(
+            &playtime_str,
+            12.0,
+            [150, 150, 150, 255],
+        )));
     }
 
     // Achievement list (scrollable)
@@ -162,29 +180,42 @@ fn build_tree(
 
             let trophy = trophy_glyph(ach.trophy_type, ach.earned);
 
-            ach_children.push(Box::new(Column::new(2.0, vec![
-                Box::new(Row::new(4.0, vec![
-                    Box::new(Label::new(trophy, 14.0, name_color)),
-                    Box::new(Label::new(&name, 14.0, name_color)),
-                ])),
-                Box::new(Label::new(&desc, 12.0, desc_color)),
-            ])));
+            ach_children.push(Box::new(Column::new(
+                2.0,
+                vec![
+                    Box::new(Row::new(
+                        4.0,
+                        vec![
+                            Box::new(Label::new(trophy, 14.0, name_color)),
+                            Box::new(Label::new(&name, 14.0, name_color)),
+                        ],
+                    )),
+                    Box::new(Label::new(&desc, 12.0, desc_color)),
+                ],
+            )));
         }
         children.push(Box::new(ScrollView::new(ach_children, 350.0)));
     }
 
     // Capture controls
-    children.push(Box::new(Row::new(5.0, vec![
-        Box::new(Button::new("Screenshot", 14.0, || {
-            super::capture::request_screenshot();
-        })),
-        Box::new(Button::new("Record", 14.0, || {
-            super::capture::toggle_recording();
-        })),
-    ])));
+    children.push(Box::new(Row::new(
+        5.0,
+        vec![
+            Box::new(Button::new("Screenshot", 14.0, || {
+                super::capture::request_screenshot();
+            })),
+            Box::new(Button::new("Record", 14.0, || {
+                super::capture::toggle_recording();
+            })),
+        ],
+    )));
 
     // Hints
-    children.push(Box::new(Label::new("Shift+Tab to toggle | Scroll to browse", 11.0, [130, 130, 130, 255])));
+    children.push(Box::new(Label::new(
+        "Shift+Tab to toggle | Scroll to browse",
+        11.0,
+        [130, 130, 130, 255],
+    )));
 
     Box::new(Panel::new(
         Padding::all(10.0),
@@ -215,7 +246,7 @@ fn trophy_color(trophy_type: u8) -> [u8; 4] {
         b'g' => [255, 215, 0, 255],   // gold
         b's' => [192, 192, 192, 255], // silver
         b'b' => [205, 127, 50, 255],  // bronze
-        _ => [255, 255, 255, 255],     // default white
+        _ => [255, 255, 255, 255],    // default white
     }
 }
 

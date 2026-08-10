@@ -290,14 +290,20 @@ mod tests {
 
     #[test]
     fn test_source_enabled_follows_global_by_default() {
-        let s = OverlaySettings { enabled: true, ..Default::default() };
+        let s = OverlaySettings {
+            enabled: true,
+            ..Default::default()
+        };
         assert!(s.source_enabled("steam"));
         assert!(s.source_enabled("ps4"));
     }
 
     #[test]
     fn test_source_enabled_override() {
-        let mut s = OverlaySettings { enabled: true, ..Default::default() };
+        let mut s = OverlaySettings {
+            enabled: true,
+            ..Default::default()
+        };
         s.source_overrides.insert("ps3".to_string(), false);
         assert!(s.source_enabled("steam"));
         assert!(!s.source_enabled("ps3"));

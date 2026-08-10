@@ -1,4 +1,4 @@
-use crate::{DbConn, update_field};
+use crate::{update_field, DbConn};
 use rusqlite::params;
 
 pub fn set_game_hidden(conn: &DbConn, id: i64, hidden: bool) -> Result<(), String> {
@@ -19,7 +19,14 @@ pub fn set_sgdb_id(conn: &DbConn, id: i64, sgdb_id: &str) -> Result<(), String> 
     let c = crate::lock_db(conn)?;
     c.execute(
         "UPDATE games SET sgdb_id = ?1 WHERE id = ?2",
-        params![if sgdb_id.is_empty() { None } else { Some(sgdb_id) }, id],
+        params![
+            if sgdb_id.is_empty() {
+                None
+            } else {
+                Some(sgdb_id)
+            },
+            id
+        ],
     )
     .map_err(|e| e.to_string())?;
     Ok(())

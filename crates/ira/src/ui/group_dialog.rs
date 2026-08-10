@@ -1,12 +1,14 @@
-use gtk4::prelude::*;
-use adw::prelude::*;
-use crate::strings as S;
-use super::state::SharedState;
 use super::sidebar::rebuild_sidebar;
+use super::state::SharedState;
+use crate::strings as S;
+use adw::prelude::*;
 
 pub fn show_create_group_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
-    let dialog = adw::AlertDialog::new(Some("New collection"), Some("Enter a name for the collection:"));
+    let dialog = adw::AlertDialog::new(
+        Some("New collection"),
+        Some("Enter a name for the collection:"),
+    );
 
     let entry = gtk4::Entry::new();
     entry.set_placeholder_text(Some("Collection name"));
@@ -96,7 +98,10 @@ pub fn show_delete_group_dialog(state: &SharedState, group_id: i64, name: &str) 
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
         Some("Delete collection"),
-        Some(&format!("Delete \"{}\"? Games in this collection will not be removed.", name)),
+        Some(&format!(
+            "Delete \"{}\"? Games in this collection will not be removed.",
+            name
+        )),
     );
 
     dialog.add_response("cancel", S::CANCEL);

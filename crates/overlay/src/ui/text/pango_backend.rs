@@ -8,10 +8,10 @@ use std::ffi::CString;
 use std::sync::{Mutex, OnceLock};
 
 use cairo::{Context as CairoContext, Format, ImageSurface};
-use pango::{FontDescription, Layout};
 use pango::prelude::*;
-use pangocairo::prelude::*;
+use pango::{FontDescription, Layout};
 use pangocairo::functions::show_layout;
+use pangocairo::prelude::*;
 
 use crate::ui::atlas::{self, ATLAS_HEIGHT, ATLAS_WIDTH};
 use crate::ui::vertex::Vertex;
@@ -52,13 +52,16 @@ impl PangoState {
         cairo_map.set_resolution(96.0);
         let families = cairo_map.list_families();
         eprintln!("ira-overlay: {} font families available", families.len());
-        Self { font_map: cairo_map }
+        Self {
+            font_map: cairo_map,
+        }
     }
 
     fn create_layout(&self, text: &str, font_size: f32) -> Layout {
         let context = self.font_map.create_context();
         let layout = Layout::new(&context);
-        let family = std::env::var("IRA_OVERLAY_FONT_FAMILY").unwrap_or_else(|_| "Sans".to_string());
+        let family =
+            std::env::var("IRA_OVERLAY_FONT_FAMILY").unwrap_or_else(|_| "Sans".to_string());
         let mut desc = FontDescription::from_string(&family);
         desc.set_size((font_size as f64 * pango::SCALE as f64) as i32);
         layout.set_font_description(Some(&desc));
@@ -86,13 +89,20 @@ impl TextBackend for PangoBackend {
 
     fn measure(text: &str, font_size: f32) -> Size {
         let Some(st) = state() else {
-            return Size { width: 0.0, height: font_size * 1.2 * 4.0 / 3.0 };
+            return Size {
+                width: 0.0,
+                height: font_size * 1.2 * 4.0 / 3.0,
+            };
         };
         let layout = st.create_layout(text, font_size);
         let (w, h) = layout.pixel_size();
         Size {
             width: if w > 0 { w as f32 } else { 0.0 },
-            height: if h > 0 { h as f32 } else { font_size * 1.2 * 4.0 / 3.0 },
+            height: if h > 0 {
+                h as f32
+            } else {
+                font_size * 1.2 * 4.0 / 3.0
+            },
         }
     }
 
@@ -194,10 +204,26 @@ impl TextBackend for PangoBackend {
         let v1 = (slot.y + slot.h) as f32 / ah;
 
         let vertices = vec![
-            Vertex { pos: [x, y], uv: [u0, v0], color },
-            Vertex { pos: [x + w, y], uv: [u1, v0], color },
-            Vertex { pos: [x, y + h], uv: [u0, v1], color },
-            Vertex { pos: [x + w, y + h], uv: [u1, v1], color },
+            Vertex {
+                pos: [x, y],
+                uv: [u0, v0],
+                color,
+            },
+            Vertex {
+                pos: [x + w, y],
+                uv: [u1, v0],
+                color,
+            },
+            Vertex {
+                pos: [x, y + h],
+                uv: [u0, v1],
+                color,
+            },
+            Vertex {
+                pos: [x + w, y + h],
+                uv: [u1, v1],
+                color,
+            },
         ];
         let indices = vec![0u32, 1, 2, 1, 3, 2];
 

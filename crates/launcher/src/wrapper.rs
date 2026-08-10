@@ -1,21 +1,31 @@
-use ira_models::AppSender;
+use ira_db::{record_session, DbConn};
 use ira_models::AppMessage;
-use ira_db::{DbConn, record_session};
-use std::sync::{Arc, Mutex, OnceLock};
+use ira_models::AppSender;
 use std::collections::HashMap;
 use std::io::Read;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::os::unix::process::CommandExt;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 const PR_SET_CHILD_SUBREAPER: i32 = 36;
 
 const WINE_BG_PROCESSES: &[&str] = &[
-    "wineserver", "services.exe", "winedevice.exe", "plugplay.exe",
-    "explorer.exe", "wineconsole", "svchost.exe", "rpcss.exe",
-    "rundll32.exe", "mscorsvw.exe", "iexplore.exe", "winedbg.exe",
-    "tabtip.exe", "conhost.exe",
+    "wineserver",
+    "services.exe",
+    "winedevice.exe",
+    "plugplay.exe",
+    "explorer.exe",
+    "wineconsole",
+    "svchost.exe",
+    "rpcss.exe",
+    "rundll32.exe",
+    "mscorsvw.exe",
+    "iexplore.exe",
+    "winedbg.exe",
+    "tabtip.exe",
+    "conhost.exe",
 ];
 
 // ─── In-memory game log store ───
@@ -31,7 +41,9 @@ fn game_logs() -> &'static Mutex<HashMap<i64, GameLog>> {
 /// Returns the shared log buffer for a game. Creates a new empty buffer if none exists.
 pub fn get_game_log(game_id: i64) -> GameLog {
     let mut logs = game_logs().lock().unwrap();
-    logs.entry(game_id).or_insert_with(|| Arc::new(Mutex::new(Vec::new()))).clone()
+    logs.entry(game_id)
+        .or_insert_with(|| Arc::new(Mutex::new(Vec::new())))
+        .clone()
 }
 
 /// Clears the log buffer for a game (called at launch start).
@@ -45,7 +57,10 @@ pub fn clear_game_log(game_id: i64) {
 fn set_subreaper() {
     let ret = unsafe { libc::prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) };
     if ret != 0 {
-        eprintln!("Warning: failed to set child subreaper (prctl returned {})", ret);
+        eprintln!(
+            "Warning: failed to set child subreaper (prctl returned {})",
+            ret
+        );
     }
 }
 
@@ -76,7 +91,8 @@ pub fn spawn_game(
     cmd.stderr(Stdio::piped());
     cmd.process_group(0);
 
-    cmd.spawn().map_err(|e| format!("Failed to spawn game process: {}", e))
+    cmd.spawn()
+        .map_err(|e| format!("Failed to spawn game process: {}", e))
 }
 
 pub fn game_log_path(save_dir: &str, game_id: i64) -> String {
@@ -99,11 +115,7 @@ pub struct MonitorContext {
     pub command: Vec<String>,
 }
 
-pub fn monitor_process(
-    mut child: Child,
-    child_pid: i32,
-    ctx: MonitorContext,
-) {
+pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
     let game_id = ctx.game_id;
 
     // Clear previous log and get the shared buffer for this game.
@@ -114,7 +126,10 @@ pub fn monitor_process(
     // This runs in the monitor thread so it doesn't block the main thread.
     {
         let mut log = log_buf.lock().unwrap();
-        log.push(format!("Started initial process from {}", ctx.command.join(" ")));
+        log.push(format!(
+            "Started initial process from {}",
+            ctx.command.join(" ")
+        ));
         let mut sorted_env = ctx.env.clone();
         sorted_env.sort_by(|a, b| a.0.cmp(&b.0));
         for (k, v) in &sorted_env {
@@ -201,9 +216,18 @@ pub fn monitor_process(
     let duration = ended_at - ctx.started_at;
 
     if duration < 5 {
-        eprintln!("Game {} exited after {}s — possible crash, not recording session", ctx.game_id, duration);
+        eprintln!(
+            "Game {} exited after {}s — possible crash, not recording session",
+            ctx.game_id, duration
+        );
     } else if ctx.count_playtime {
-        if let Err(e) = record_session(&ctx.db, ctx.game_id, ctx.variant_id, ctx.started_at, ended_at) {
+        if let Err(e) = record_session(
+            &ctx.db,
+            ctx.game_id,
+            ctx.variant_id,
+            ctx.started_at,
+            ended_at,
+        ) {
             eprintln!("Failed to record play session: {}", e);
         }
         if let Err(e) = ctx.sender.send(AppMessage::SessionRecorded {
@@ -218,7 +242,10 @@ pub fn monitor_process(
     }
 
     ctx.running_games.lock().unwrap().remove(&ctx.game_id);
-    if let Err(e) = ctx.sender.send(AppMessage::GameStopped(ctx.game_id, ctx.variant_id)) {
+    if let Err(e) = ctx
+        .sender
+        .send(AppMessage::GameStopped(ctx.game_id, ctx.variant_id))
+    {
         eprintln!("Failed to send GameStopped message: {}", e);
     }
 
@@ -249,9 +276,7 @@ fn reap_zombies(pgid: i32) {
 /// wineserver -k has completed so there are no conflicting waitpid calls.
 fn reap_all() {
     loop {
-        let ret = unsafe {
-            libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG)
-        };
+        let ret = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
         if ret <= 0 {
             break;
         }
@@ -304,24 +329,39 @@ fn collect_descendants(pid: i32) -> Vec<i32> {
 fn is_wine_bg(pid: i32) -> bool {
     if let Some(name) = proc_name(pid) {
         let name_lower = name.to_lowercase();
-        let name_trunc = if name_lower.len() > 15 { &name_lower[..15] } else { &name_lower };
+        let name_trunc = if name_lower.len() > 15 {
+            &name_lower[..15]
+        } else {
+            &name_lower
+        };
         return WINE_BG_PROCESSES.iter().any(|bg| {
             let bg_lower = bg.to_lowercase();
-            let bg_trunc = if bg_lower.len() > 15 { &bg_lower[..15] } else { &bg_lower };
+            let bg_trunc = if bg_lower.len() > 15 {
+                &bg_lower[..15]
+            } else {
+                &bg_lower
+            };
             name_trunc == bg_trunc
         });
     }
     false
 }
 
-pub fn stop_game_with_wine(pid: i32, wine_exe: Option<&str>, wine_prefix: Option<&str>, env: &[(String, String)]) {
+pub fn stop_game_with_wine(
+    pid: i32,
+    wine_exe: Option<&str>,
+    wine_prefix: Option<&str>,
+    env: &[(String, String)],
+) {
     // Collect descendants BEFORE sending signals — the process tree may
     // change after the game exits (children get reparented).
     let descendants = collect_descendants(pid);
 
     // Step 1: SIGTERM just the game PID (not the whole group) so the
     // game can exit cleanly while wine infrastructure stays alive.
-    unsafe { libc::kill(pid, libc::SIGTERM); }
+    unsafe {
+        libc::kill(pid, libc::SIGTERM);
+    }
 
     let wine_exe = wine_exe.map(|s| s.to_string());
     let wine_prefix = wine_prefix.map(|s| s.to_string());
@@ -330,7 +370,9 @@ pub fn stop_game_with_wine(pid: i32, wine_exe: Option<&str>, wine_prefix: Option
         // Step 2: Wait for the game to exit (poll for up to 5 seconds).
         for _ in 0..50 {
             let alive = unsafe { libc::kill(pid, 0) } == 0;
-            if !alive { break; }
+            if !alive {
+                break;
+            }
             std::thread::sleep(Duration::from_millis(100));
         }
 
@@ -367,7 +409,9 @@ pub fn stop_game_with_wine(pid: i32, wine_exe: Option<&str>, wine_prefix: Option
                 } else {
                     eprintln!("stop: non-wine straggler SIGTERM pid {} ({})", d, name);
                 }
-                unsafe { libc::kill(*d, libc::SIGTERM); }
+                unsafe {
+                    libc::kill(*d, libc::SIGTERM);
+                }
             }
         }
 
@@ -377,16 +421,22 @@ pub fn stop_game_with_wine(pid: i32, wine_exe: Option<&str>, wine_prefix: Option
         // Step 7: Final fallback — SIGKILL the entire process group,
         // then SIGKILL any remaining stragglers that escaped the group.
         if pid > 0 {
-            unsafe { libc::kill(-pid, libc::SIGKILL); }
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
         }
         for d in &descendants {
             let alive = unsafe { libc::kill(*d, 0) } == 0;
             if alive {
                 eprintln!(
                     "stop: force killing pid {} ({}) wine_bg={}",
-                    d, proc_name(*d).unwrap_or_default(), is_wine_bg(*d)
+                    d,
+                    proc_name(*d).unwrap_or_default(),
+                    is_wine_bg(*d)
                 );
-                unsafe { libc::kill(*d, libc::SIGKILL); }
+                unsafe {
+                    libc::kill(*d, libc::SIGKILL);
+                }
             }
         }
 
@@ -394,7 +444,9 @@ pub fn stop_game_with_wine(pid: i32, wine_exe: Option<&str>, wine_prefix: Option
         let alive = unsafe { libc::kill(pid, 0) } == 0;
         if alive {
             eprintln!("stop: force killing game pid {}", pid);
-            unsafe { libc::kill(pid, libc::SIGKILL); }
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
         }
 
         // Step 8: Reap all zombies. Safe to use waitpid(-1) here because

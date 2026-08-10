@@ -1,18 +1,24 @@
-use gtk4::prelude::*;
 use crate::Game;
+use gtk4::prelude::*;
 
-use super::state::SharedState;
-use super::helpers::clear_children;
-use super::game_header::build_game_header;
 use super::achievement_view::build_achievements_view;
 use super::css::*;
+use super::game_header::build_game_header;
+use super::helpers::clear_children;
+use super::state::SharedState;
 pub fn display_game(game: &Game, state: &SharedState) {
     let _span = tracing::info_span!("display_game", db_id = game.db_id).entered();
     let (content_box, content_scroll, grid_header, is_same_game, gen) = {
         let s = state.borrow();
         let is_same = s.displayed_db_id == game.db_id;
         let gen = s.view_generation + 1;
-        (s.content_box.clone(), s.content_scroll.clone(), s.grid_header.clone(), is_same, gen)
+        (
+            s.content_box.clone(),
+            s.content_scroll.clone(),
+            s.grid_header.clone(),
+            is_same,
+            gen,
+        )
     };
     {
         let mut s = state.borrow_mut();
@@ -91,7 +97,13 @@ pub(crate) fn format_last_played(ts: i64) -> String {
         .unwrap_or_else(|| "Never".to_string())
 }
 
-pub(crate) fn logo_scaled_dims(hero_w: f64, hero_h: f64, src_w: f64, src_h: f64, logo_pct: i32) -> (f64, f64) {
+pub(crate) fn logo_scaled_dims(
+    hero_w: f64,
+    hero_h: f64,
+    src_w: f64,
+    src_h: f64,
+    logo_pct: i32,
+) -> (f64, f64) {
     let max_h = hero_h * (logo_pct as f64 / 100.0);
     let max_w = hero_w * (logo_pct as f64 / 200.0);
     let scale = (max_w / src_w).min(max_h / src_h);

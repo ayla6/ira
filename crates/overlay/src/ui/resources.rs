@@ -1,6 +1,6 @@
 use ash::vk;
 
-use crate::types::{DeviceFns, UI_VERT_SPV, UI_FRAG_SPV};
+use crate::types::{DeviceFns, UI_FRAG_SPV, UI_VERT_SPV};
 
 unsafe fn find_memory_type(
     fns: DeviceFns,
@@ -40,7 +40,9 @@ pub(crate) unsafe fn create_buffer(
     (fns.get_buffer_memory_requirements)(device, buffer, &mut reqs);
 
     let mem_type = find_memory_type(
-        fns, physical_device, reqs.memory_type_bits,
+        fns,
+        physical_device,
+        reqs.memory_type_bits,
         vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
     )?;
 
@@ -56,7 +58,15 @@ pub(crate) unsafe fn create_buffer(
     let _ = (fns.bind_buffer_memory)(device, buffer, memory, 0);
 
     let mut ptr = std::ptr::null_mut();
-    if (fns.map_memory)(device, memory, 0, reqs.size, vk::MemoryMapFlags::empty(), &mut ptr) != vk::Result::SUCCESS {
+    if (fns.map_memory)(
+        device,
+        memory,
+        0,
+        reqs.size,
+        vk::MemoryMapFlags::empty(),
+        &mut ptr,
+    ) != vk::Result::SUCCESS
+    {
         (fns.free_memory)(device, memory, std::ptr::null());
         (fns.destroy_buffer)(device, buffer, std::ptr::null());
         return None;
@@ -76,7 +86,11 @@ pub(crate) unsafe fn create_image(
     let info = vk::ImageCreateInfo::default()
         .image_type(vk::ImageType::TYPE_2D)
         .format(format)
-        .extent(vk::Extent3D { width: extent.width, height: extent.height, depth: 1 })
+        .extent(vk::Extent3D {
+            width: extent.width,
+            height: extent.height,
+            depth: 1,
+        })
         .mip_levels(1)
         .array_layers(1)
         .samples(vk::SampleCountFlags::TYPE_1)
@@ -93,7 +107,9 @@ pub(crate) unsafe fn create_image(
     (fns.get_image_memory_requirements)(device, image, &mut reqs);
 
     let mem_type = find_memory_type(
-        fns, physical_device, reqs.memory_type_bits,
+        fns,
+        physical_device,
+        reqs.memory_type_bits,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
 
@@ -116,10 +132,16 @@ pub(crate) unsafe fn create_atlas_texture(
     physical_device: vk::PhysicalDevice,
     cmd_pool: vk::CommandPool,
 ) -> Option<(vk::Image, vk::DeviceMemory, vk::ImageView)> {
-    let extent = vk::Extent2D { width: 2048, height: 2048 };
+    let extent = vk::Extent2D {
+        width: 2048,
+        height: 2048,
+    };
     let (image, image_memory) = create_image(
-        fns, device, physical_device,
-        vk::Format::R8G8B8A8_UNORM, extent,
+        fns,
+        device,
+        physical_device,
+        vk::Format::R8G8B8A8_UNORM,
+        extent,
         vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
     )?;
 
@@ -130,14 +152,16 @@ pub(crate) unsafe fn create_atlas_texture(
         .command_buffer_count(1);
     let _ = (fns.allocate_cmd_buffers)(device, &alloc_info, &mut cmd);
 
-    let begin_info = vk::CommandBufferBeginInfo::default()
-        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+    let begin_info =
+        vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
     let _ = (fns.begin_cmd_buffer)(cmd, &begin_info);
 
     let subresource = vk::ImageSubresourceRange {
         aspect_mask: vk::ImageAspectFlags::COLOR,
-        base_mip_level: 0, level_count: 1,
-        base_array_layer: 0, layer_count: 1,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0,
+        layer_count: 1,
     };
 
     let barrier = vk::ImageMemoryBarrier::default()
@@ -150,8 +174,16 @@ pub(crate) unsafe fn create_atlas_texture(
         .image(image)
         .subresource_range(subresource);
     (fns.cmd_pipeline_barrier)(
-        cmd, vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::FRAGMENT_SHADER,
-        vk::DependencyFlags::empty(), 0, std::ptr::null(), 0, std::ptr::null(), 1, &barrier,
+        cmd,
+        vk::PipelineStageFlags::TOP_OF_PIPE,
+        vk::PipelineStageFlags::FRAGMENT_SHADER,
+        vk::DependencyFlags::empty(),
+        0,
+        std::ptr::null(),
+        0,
+        std::ptr::null(),
+        1,
+        &barrier,
     );
 
     let _ = (fns.end_cmd_buffer)(cmd);
@@ -173,8 +205,10 @@ pub(crate) unsafe fn create_atlas_texture(
         .format(vk::Format::R8G8B8A8_UNORM)
         .subresource_range(vk::ImageSubresourceRange {
             aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0, level_count: 1,
-            base_array_layer: 0, layer_count: 1,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
         });
     let mut view = vk::ImageView::null();
     let _ = (fns.create_image_view)(device, &view_info, std::ptr::null(), &mut view);
@@ -200,16 +234,22 @@ pub(crate) unsafe fn create_sampler(fns: DeviceFns, device: vk::Device) -> vk::S
 pub(crate) unsafe fn create_descriptors(
     fns: DeviceFns,
     device: vk::Device,
-) -> Option<(vk::DescriptorSetLayout, vk::DescriptorPool, vk::DescriptorSet)> {
+) -> Option<(
+    vk::DescriptorSetLayout,
+    vk::DescriptorPool,
+    vk::DescriptorSet,
+)> {
     let binding = vk::DescriptorSetLayoutBinding::default()
         .binding(0)
         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
         .descriptor_count(1)
         .stage_flags(vk::ShaderStageFlags::FRAGMENT);
-    let layout_info = vk::DescriptorSetLayoutCreateInfo::default()
-        .bindings(std::slice::from_ref(&binding));
+    let layout_info =
+        vk::DescriptorSetLayoutCreateInfo::default().bindings(std::slice::from_ref(&binding));
     let mut set_layout = vk::DescriptorSetLayout::null();
-    if (fns.create_descriptor_set_layout)(device, &layout_info, std::ptr::null(), &mut set_layout) != vk::Result::SUCCESS {
+    if (fns.create_descriptor_set_layout)(device, &layout_info, std::ptr::null(), &mut set_layout)
+        != vk::Result::SUCCESS
+    {
         return None;
     }
 
@@ -220,7 +260,9 @@ pub(crate) unsafe fn create_descriptors(
         .max_sets(1)
         .pool_sizes(std::slice::from_ref(&pool_size));
     let mut pool = vk::DescriptorPool::null();
-    if (fns.create_descriptor_pool)(device, &pool_info, std::ptr::null(), &mut pool) != vk::Result::SUCCESS {
+    if (fns.create_descriptor_pool)(device, &pool_info, std::ptr::null(), &mut pool)
+        != vk::Result::SUCCESS
+    {
         (fns.destroy_descriptor_set_layout)(device, set_layout, std::ptr::null());
         return None;
     }
@@ -243,7 +285,12 @@ pub(crate) unsafe fn create_pipeline(
     device: vk::Device,
     render_pass: vk::RenderPass,
     set_layout: vk::DescriptorSetLayout,
-) -> (vk::PipelineLayout, vk::Pipeline, vk::ShaderModule, vk::ShaderModule) {
+) -> (
+    vk::PipelineLayout,
+    vk::Pipeline,
+    vk::ShaderModule,
+    vk::ShaderModule,
+) {
     let vert_code: Vec<u32> = {
         let (chunks, _) = UI_VERT_SPV.as_chunks::<4>();
         chunks.iter().map(|c| u32::from_le_bytes(*c)).collect()
@@ -262,20 +309,35 @@ pub(crate) unsafe fn create_pipeline(
 
     let stages = [
         vk::PipelineShaderStageCreateInfo::default()
-            .stage(vk::ShaderStageFlags::VERTEX).module(shader_vert).name(c"main"),
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .module(shader_vert)
+            .name(c"main"),
         vk::PipelineShaderStageCreateInfo::default()
-            .stage(vk::ShaderStageFlags::FRAGMENT).module(shader_frag).name(c"main"),
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .module(shader_frag)
+            .name(c"main"),
     ];
 
     let binding = vk::VertexInputBindingDescription::default()
-        .binding(0).stride(20).input_rate(vk::VertexInputRate::VERTEX);
+        .binding(0)
+        .stride(20)
+        .input_rate(vk::VertexInputRate::VERTEX);
     let attributes = [
         vk::VertexInputAttributeDescription::default()
-            .binding(0).location(0).format(vk::Format::R32G32_SFLOAT).offset(0),
+            .binding(0)
+            .location(0)
+            .format(vk::Format::R32G32_SFLOAT)
+            .offset(0),
         vk::VertexInputAttributeDescription::default()
-            .binding(0).location(1).format(vk::Format::R32G32_SFLOAT).offset(8),
+            .binding(0)
+            .location(1)
+            .format(vk::Format::R32G32_SFLOAT)
+            .offset(8),
         vk::VertexInputAttributeDescription::default()
-            .binding(0).location(2).format(vk::Format::R8G8B8A8_UNORM).offset(16),
+            .binding(0)
+            .location(2)
+            .format(vk::Format::R8G8B8A8_UNORM)
+            .offset(16),
     ];
     let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(std::slice::from_ref(&binding))
@@ -289,7 +351,9 @@ pub(crate) unsafe fn create_pipeline(
         .viewports(std::slice::from_ref(&viewport))
         .scissors(std::slice::from_ref(&scissor));
     let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
-        .polygon_mode(vk::PolygonMode::FILL).line_width(1.0).cull_mode(vk::CullModeFlags::NONE);
+        .polygon_mode(vk::PolygonMode::FILL)
+        .line_width(1.0)
+        .cull_mode(vk::CullModeFlags::NONE);
     let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
         .rasterization_samples(vk::SampleCountFlags::TYPE_1);
     let blend_attachment = vk::PipelineColorBlendAttachmentState::default()
@@ -308,12 +372,14 @@ pub(crate) unsafe fn create_pipeline(
 
     let push_constant = vk::PushConstantRange::default()
         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
-        .offset(0).size(24);
+        .offset(0)
+        .size(24);
     let layout_info = vk::PipelineLayoutCreateInfo::default()
         .set_layouts(std::slice::from_ref(&set_layout))
         .push_constant_ranges(std::slice::from_ref(&push_constant));
     let mut pipeline_layout = vk::PipelineLayout::null();
-    let _ = (fns.create_pipeline_layout)(device, &layout_info, std::ptr::null(), &mut pipeline_layout);
+    let _ =
+        (fns.create_pipeline_layout)(device, &layout_info, std::ptr::null(), &mut pipeline_layout);
 
     let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
         .stages(&stages)
@@ -328,7 +394,12 @@ pub(crate) unsafe fn create_pipeline(
         .render_pass(render_pass);
     let mut pipeline = vk::Pipeline::null();
     let _ = (fns.create_graphics_pipelines)(
-        device, vk::PipelineCache::null(), 1, &pipeline_info, std::ptr::null(), &mut pipeline,
+        device,
+        vk::PipelineCache::null(),
+        1,
+        &pipeline_info,
+        std::ptr::null(),
+        &mut pipeline,
     );
 
     (pipeline_layout, pipeline, shader_vert, shader_frag)
@@ -340,7 +411,13 @@ pub(crate) unsafe fn create_vertex_buffer(
     physical_device: vk::PhysicalDevice,
     size: vk::DeviceSize,
 ) -> Option<(vk::Buffer, vk::DeviceMemory, *mut std::ffi::c_void)> {
-    create_buffer(fns, device, physical_device, size, vk::BufferUsageFlags::VERTEX_BUFFER)
+    create_buffer(
+        fns,
+        device,
+        physical_device,
+        size,
+        vk::BufferUsageFlags::VERTEX_BUFFER,
+    )
 }
 
 pub(crate) unsafe fn create_index_buffer(
@@ -349,5 +426,11 @@ pub(crate) unsafe fn create_index_buffer(
     physical_device: vk::PhysicalDevice,
     size: vk::DeviceSize,
 ) -> Option<(vk::Buffer, vk::DeviceMemory, *mut std::ffi::c_void)> {
-    create_buffer(fns, device, physical_device, size, vk::BufferUsageFlags::INDEX_BUFFER)
+    create_buffer(
+        fns,
+        device,
+        physical_device,
+        size,
+        vk::BufferUsageFlags::INDEX_BUFFER,
+    )
 }

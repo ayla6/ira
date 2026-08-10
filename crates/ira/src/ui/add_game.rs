@@ -1,8 +1,13 @@
+use super::state::SharedState;
 use crate::strings as S;
 use adw::prelude::*;
-use super::state::SharedState;
 
-pub fn prompt_for_steam_id(state: &SharedState, title: &str, body: &str, on_add: impl Fn(&str) + 'static) {
+pub fn prompt_for_steam_id(
+    state: &SharedState,
+    title: &str,
+    body: &str,
+    on_add: impl Fn(&str) + 'static,
+) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(Some(title), Some(body));
 

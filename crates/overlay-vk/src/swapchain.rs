@@ -14,7 +14,10 @@ pub(crate) unsafe extern "system" fn create_swapchain(
 ) -> vk::Result {
     let (fns, physical_device) = {
         let map = DEVICES.lock().unwrap();
-        let Some(dd) = map.as_ref().and_then(|m| m.get(&(device.as_raw() as usize))) else {
+        let Some(dd) = map
+            .as_ref()
+            .and_then(|m| m.get(&(device.as_raw() as usize)))
+        else {
             return vk::Result::ERROR_INITIALIZATION_FAILED;
         };
         let Some(fns) = dd.fns else {
@@ -34,7 +37,10 @@ pub(crate) unsafe extern "system" fn create_swapchain(
         return result;
     }
 
-    eprintln!("ira-overlay: swapchain created {}x{}", ci.image_extent.width, ci.image_extent.height);
+    eprintln!(
+        "ira-overlay: swapchain created {}x{}",
+        ci.image_extent.width, ci.image_extent.height
+    );
 
     // Reset the present counter so the overlay "ready" delay restarts after
     // swapchain recreation. Games like shadPS4 create multiple swapchains
@@ -56,7 +62,8 @@ pub(crate) unsafe extern "system" fn create_swapchain(
     let render_pass = create_render_pass(fns, device, format);
     let (pipeline, pipeline_layout, shader_vert, shader_frag) =
         create_pipeline(fns, device, render_pass, extent);
-    let (framebuffers, image_views) = create_framebuffers(fns, device, render_pass, &images, extent, format);
+    let (framebuffers, image_views) =
+        create_framebuffers(fns, device, render_pass, &images, extent, format);
 
     let cmd_pool = {
         let pool_info = vk::CommandPoolCreateInfo::default()
@@ -88,24 +95,36 @@ pub(crate) unsafe extern "system" fn create_swapchain(
         fences.push(fence);
     }
 
-    let ui_renderer = ira_overlay::ui::UiRenderer::new(
-        fns, device, physical_device, cmd_pool, render_pass,
-    );
+    let ui_renderer =
+        ira_overlay::ui::UiRenderer::new(fns, device, physical_device, cmd_pool, render_pass);
 
     ira_overlay::ui::capture::init(fns, device, physical_device, extent, format);
 
-    SWAPCHAINS.lock().unwrap().get_or_insert_with(HashMap::new).insert(
-        sc.as_raw(),
-        SwapchainData {
-            device, fns,
-            images, extent,
-            render_pass, pipeline, pipeline_layout,
-            shader_vert, shader_frag,
-            framebuffers, image_views,
-            cmd_pool, cmd_buffers, semaphores, fences,
-            ui_renderer,
-        },
-    );
+    SWAPCHAINS
+        .lock()
+        .unwrap()
+        .get_or_insert_with(HashMap::new)
+        .insert(
+            sc.as_raw(),
+            SwapchainData {
+                device,
+                fns,
+                images,
+                extent,
+                render_pass,
+                pipeline,
+                pipeline_layout,
+                shader_vert,
+                shader_frag,
+                framebuffers,
+                image_views,
+                cmd_pool,
+                cmd_buffers,
+                semaphores,
+                fences,
+                ui_renderer,
+            },
+        );
 
     result
 }
@@ -115,7 +134,11 @@ pub(crate) unsafe extern "system" fn destroy_swapchain(
     swapchain: vk::SwapchainKHR,
     allocator: *const vk::AllocationCallbacks,
 ) {
-    let sc_data = SWAPCHAINS.lock().unwrap().as_mut().and_then(|m| m.remove(&(swapchain.as_raw())));
+    let sc_data = SWAPCHAINS
+        .lock()
+        .unwrap()
+        .as_mut()
+        .and_then(|m| m.remove(&(swapchain.as_raw())));
     if let Some(sc) = sc_data {
         let fns = sc.fns;
 
@@ -127,10 +150,18 @@ pub(crate) unsafe extern "system" fn destroy_swapchain(
             ui.destroy(fns);
         }
         (fns.destroy_swapchain)(device, swapchain, allocator);
-        for fb in &sc.framebuffers { (fns.destroy_framebuffer)(device, *fb, std::ptr::null()); }
-        for iv in &sc.image_views { (fns.destroy_image_view)(device, *iv, std::ptr::null()); }
-        for sem in &sc.semaphores { (fns.destroy_semaphore)(device, *sem, std::ptr::null()); }
-        for fence in &sc.fences { (fns.destroy_fence)(device, *fence, std::ptr::null()); }
+        for fb in &sc.framebuffers {
+            (fns.destroy_framebuffer)(device, *fb, std::ptr::null());
+        }
+        for iv in &sc.image_views {
+            (fns.destroy_image_view)(device, *iv, std::ptr::null());
+        }
+        for sem in &sc.semaphores {
+            (fns.destroy_semaphore)(device, *sem, std::ptr::null());
+        }
+        for fence in &sc.fences {
+            (fns.destroy_fence)(device, *fence, std::ptr::null());
+        }
         (fns.destroy_pipeline)(device, sc.pipeline, std::ptr::null());
         (fns.destroy_pipeline_layout)(device, sc.pipeline_layout, std::ptr::null());
         (fns.destroy_shader_module)(device, sc.shader_vert, std::ptr::null());
@@ -140,7 +171,9 @@ pub(crate) unsafe extern "system" fn destroy_swapchain(
     } else {
         let fns = {
             let map = DEVICES.lock().unwrap();
-            map.as_ref().and_then(|m| m.get(&(device.as_raw() as usize))).and_then(|d| d.fns)
+            map.as_ref()
+                .and_then(|m| m.get(&(device.as_raw() as usize)))
+                .and_then(|d| d.fns)
         };
         if let Some(fns) = fns {
             (fns.destroy_swapchain)(device, swapchain, allocator);
@@ -148,7 +181,11 @@ pub(crate) unsafe extern "system" fn destroy_swapchain(
     }
 }
 
-unsafe fn create_render_pass(fns: DeviceFns, device: vk::Device, format: vk::Format) -> vk::RenderPass {
+unsafe fn create_render_pass(
+    fns: DeviceFns,
+    device: vk::Device,
+    format: vk::Format,
+) -> vk::RenderPass {
     let attachment = vk::AttachmentDescription::default()
         .format(format)
         .samples(vk::SampleCountFlags::TYPE_1)
@@ -175,7 +212,9 @@ unsafe fn create_render_pass(fns: DeviceFns, device: vk::Device, format: vk::For
         .src_stage_mask(vk::PipelineStageFlags::TOP_OF_PIPE)
         .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
         .src_access_mask(vk::AccessFlags::NONE)
-        .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
+        .dst_access_mask(
+            vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+        );
 
     let rp_info = vk::RenderPassCreateInfo::default()
         .attachments(std::slice::from_ref(&attachment))
@@ -192,7 +231,12 @@ unsafe fn create_pipeline(
     device: vk::Device,
     render_pass: vk::RenderPass,
     extent: vk::Extent2D,
-) -> (vk::Pipeline, vk::PipelineLayout, vk::ShaderModule, vk::ShaderModule) {
+) -> (
+    vk::Pipeline,
+    vk::PipelineLayout,
+    vk::ShaderModule,
+    vk::ShaderModule,
+) {
     let vert_code: Vec<u32> = {
         let (chunks, _) = VERT_SPV.as_chunks::<4>();
         chunks.iter().map(|c| u32::from_le_bytes(*c)).collect()
@@ -224,12 +268,17 @@ unsafe fn create_pipeline(
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
 
     let viewport = vk::Viewport {
-        x: 0.0, y: 0.0,
+        x: 0.0,
+        y: 0.0,
         width: extent.width as f32,
         height: extent.height as f32,
-        min_depth: 0.0, max_depth: 1.0,
+        min_depth: 0.0,
+        max_depth: 1.0,
     };
-    let scissor = vk::Rect2D { offset: vk::Offset2D { x: 0, y: 0 }, extent };
+    let scissor = vk::Rect2D {
+        offset: vk::Offset2D { x: 0, y: 0 },
+        extent,
+    };
     let viewport_state = vk::PipelineViewportStateCreateInfo::default()
         .viewports(std::slice::from_ref(&viewport))
         .scissors(std::slice::from_ref(&scissor));
@@ -259,12 +308,12 @@ unsafe fn create_pipeline(
         .attachments(std::slice::from_ref(&blend_attachment));
 
     let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-    let dynamic = vk::PipelineDynamicStateCreateInfo::default()
-        .dynamic_states(&dynamic_states);
+    let dynamic = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
     let layout_info = vk::PipelineLayoutCreateInfo::default();
     let mut pipeline_layout = vk::PipelineLayout::null();
-    let _ = (fns.create_pipeline_layout)(device, &layout_info, std::ptr::null(), &mut pipeline_layout);
+    let _ =
+        (fns.create_pipeline_layout)(device, &layout_info, std::ptr::null(), &mut pipeline_layout);
 
     let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
         .stages(&stages)
@@ -280,9 +329,12 @@ unsafe fn create_pipeline(
 
     let mut pipeline = vk::Pipeline::null();
     let _ = (fns.create_graphics_pipelines)(
-        device, vk::PipelineCache::null(), 1,
+        device,
+        vk::PipelineCache::null(),
+        1,
         &pipeline_info as *const vk::GraphicsPipelineCreateInfo,
-        std::ptr::null(), &mut pipeline as *mut vk::Pipeline,
+        std::ptr::null(),
+        &mut pipeline as *mut vk::Pipeline,
     );
 
     (pipeline, pipeline_layout, shader_vert, shader_frag)
@@ -296,30 +348,35 @@ unsafe fn create_framebuffers(
     extent: vk::Extent2D,
     format: vk::Format,
 ) -> (Vec<vk::Framebuffer>, Vec<vk::ImageView>) {
-    let (fbs, ivs): (Vec<_>, Vec<_>) = images.iter().map(|image| {
-        let view_info = vk::ImageViewCreateInfo::default()
-            .image(*image)
-            .view_type(vk::ImageViewType::TYPE_2D)
-            .format(format)
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                base_mip_level: 0, level_count: 1,
-                base_array_layer: 0, layer_count: 1,
-            });
-        let mut image_view = vk::ImageView::null();
-        let _ = (fns.create_image_view)(device, &view_info, std::ptr::null(), &mut image_view);
+    let (fbs, ivs): (Vec<_>, Vec<_>) = images
+        .iter()
+        .map(|image| {
+            let view_info = vk::ImageViewCreateInfo::default()
+                .image(*image)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(format)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+            let mut image_view = vk::ImageView::null();
+            let _ = (fns.create_image_view)(device, &view_info, std::ptr::null(), &mut image_view);
 
-        let fb_info = vk::FramebufferCreateInfo::default()
-            .render_pass(render_pass)
-            .attachments(std::slice::from_ref(&image_view))
-            .width(extent.width)
-            .height(extent.height)
-            .layers(1);
-        let mut fb = vk::Framebuffer::null();
-        let _ = (fns.create_framebuffer)(device, &fb_info, std::ptr::null(), &mut fb);
+            let fb_info = vk::FramebufferCreateInfo::default()
+                .render_pass(render_pass)
+                .attachments(std::slice::from_ref(&image_view))
+                .width(extent.width)
+                .height(extent.height)
+                .layers(1);
+            let mut fb = vk::Framebuffer::null();
+            let _ = (fns.create_framebuffer)(device, &fb_info, std::ptr::null(), &mut fb);
 
-        (fb, image_view)
-    }).unzip();
+            (fb, image_view)
+        })
+        .unzip();
 
     (fbs, ivs)
 }

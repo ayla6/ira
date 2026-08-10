@@ -16,8 +16,8 @@
 
 use std::sync::atomic::Ordering;
 
-mod x11;
 mod vulkan;
+mod x11;
 
 use ira_overlay::ui;
 use ira_overlay_ipc::MappedShm;
@@ -48,7 +48,10 @@ fn main() {
     {
         let hdr = shm.header();
         if hdr.toggle_keysym != 0 {
-            x11::TOGGLE_KEYCODE.store(hdr.toggle_keysym + ira_overlay_ipc::X11_KEYCODE_OFFSET, Ordering::Relaxed);
+            x11::TOGGLE_KEYCODE.store(
+                hdr.toggle_keysym + ira_overlay_ipc::X11_KEYCODE_OFFSET,
+                Ordering::Relaxed,
+            );
             x11::TOGGLE_MODS.store(hdr.toggle_mods, Ordering::Relaxed);
         }
     }
@@ -74,7 +77,15 @@ fn main() {
     ui::text::init_fonts();
     ui::set_screen_size(vk.extent.width, vk.extent.height);
 
-    let ui_renderer = unsafe { ui::UiRenderer::new(vk.fns, vk.device, vk.physical_device, vk.cmd_pool, vk.render_pass) };
+    let ui_renderer = unsafe {
+        ui::UiRenderer::new(
+            vk.fns,
+            vk.device,
+            vk.physical_device,
+            vk.cmd_pool,
+            vk.render_pass,
+        )
+    };
     let ui_renderer = match ui_renderer {
         Some(r) => r,
         None => {
@@ -95,7 +106,9 @@ fn main() {
         if toggle_pressed {
             let current = shm.header().overlay_visible.load(Ordering::SeqCst);
             let new_val: u32 = if current != 0 { 0 } else { 1 };
-            shm.header().overlay_visible.store(new_val, Ordering::SeqCst);
+            shm.header()
+                .overlay_visible
+                .store(new_val, Ordering::SeqCst);
         }
 
         // Read visibility from SHM (written by shim or by ourselves above).

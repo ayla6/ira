@@ -14,12 +14,26 @@ pub fn ps3_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
     Path::new(save_dir).join("data").join("ps3").join(app_id)
 }
 
+pub fn vita_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
+    Path::new(save_dir).join("data").join("psvita").join(app_id)
+}
+
+pub fn wiiu_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
+    Path::new(save_dir).join("data").join("wiiu").join(app_id)
+}
+
 pub fn sgdb_data_dir(save_dir: &str, sgdb_id: &str) -> PathBuf {
-    Path::new(save_dir).join("data").join("steamgriddb").join(sgdb_id)
+    Path::new(save_dir)
+        .join("data")
+        .join("steamgriddb")
+        .join(sgdb_id)
 }
 
 pub fn retro_data_dir(save_dir: &str, db_id: i64) -> PathBuf {
-    Path::new(save_dir).join("data").join("retro").join(db_id.to_string())
+    Path::new(save_dir)
+        .join("data")
+        .join("retro")
+        .join(db_id.to_string())
 }
 
 /// Returns the data directory for a game based on its kind, trophy source,
@@ -32,6 +46,10 @@ pub fn game_data_dir(save_dir: &str, game: &ira_models::Game) -> PathBuf {
         ps4_data_dir(save_dir, &game.app_id)
     } else if game.kind == ira_models::GameKind::Ps3 {
         ps3_data_dir(save_dir, &game.app_id)
+    } else if game.kind == ira_models::GameKind::PsVita {
+        vita_data_dir(save_dir, &game.app_id)
+    } else if game.kind == ira_models::GameKind::WiiU {
+        wiiu_data_dir(save_dir, &game.app_id)
     } else if game.trophy_source.has_steam_enrichment() {
         data_dir(save_dir, &game.app_id)
     } else if !game.sgdb_id.is_empty() {
@@ -43,7 +61,11 @@ pub fn game_data_dir(save_dir: &str, game: &ira_models::Game) -> PathBuf {
 
 /// Same as `game_data_dir` but takes a `GameEntry` (DB row) instead of a `Game`.
 pub fn entry_data_dir(save_dir: &str, entry: &ira_models::GameEntry) -> PathBuf {
-    let app_id = if !entry.steam_id.is_empty() { &entry.steam_id } else { &entry.game_id };
+    let app_id = if !entry.steam_id.is_empty() {
+        &entry.steam_id
+    } else {
+        &entry.game_id
+    };
     let sgdb_id = entry.sgdb_id.as_deref().unwrap_or("");
     if entry.kind == ira_models::GameKind::Retro {
         retro_data_dir(save_dir, entry.id)
@@ -51,6 +73,10 @@ pub fn entry_data_dir(save_dir: &str, entry: &ira_models::GameEntry) -> PathBuf 
         ps4_data_dir(save_dir, app_id)
     } else if entry.kind == ira_models::GameKind::Ps3 {
         ps3_data_dir(save_dir, app_id)
+    } else if entry.kind == ira_models::GameKind::PsVita {
+        vita_data_dir(save_dir, app_id)
+    } else if entry.kind == ira_models::GameKind::WiiU {
+        wiiu_data_dir(save_dir, app_id)
     } else if entry.trophy_source.has_steam_enrichment() {
         data_dir(save_dir, app_id)
     } else if !sgdb_id.is_empty() {
@@ -95,9 +121,13 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     for ext in &["png", "jpeg", "ico"] {
         let _ = std::fs::remove_file(dir.join(format!("{}.{}", small_name, ext)));
     }
-    let Some(source) = find_image_file(dir, base_name) else { return };
+    let Some(source) = find_image_file(dir, base_name) else {
+        return;
+    };
 
-    let is_jpeg = source.extension().is_some_and(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg"));
+    let is_jpeg = source
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg"));
     let is_icon = base_name == "icon";
 
     let img = {
@@ -123,7 +153,14 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
         let (fw, fh) = data.dimensions();
         let dest = dir.join(format!("{}.webp", small_name));
         let encoded = {
-            let _s = tracing::info_span!("ensure_small_encode", base_name, w, h, mode = "lossless_no_resize").entered();
+            let _s = tracing::info_span!(
+                "ensure_small_encode",
+                base_name,
+                w,
+                h,
+                mode = "lossless_no_resize"
+            )
+            .entered();
             webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless()
         };
         let _ = std::fs::write(&dest, &*encoded);
@@ -136,7 +173,16 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     let new_w = new_w.max(1);
     let new_h = new_h.max(1);
     let resized = {
-        let _s = tracing::info_span!("ensure_small_resize", base_name, src_w = w, src_h = h, dst_w = new_w, dst_h = new_h, filter = "Lanczos3").entered();
+        let _s = tracing::info_span!(
+            "ensure_small_resize",
+            base_name,
+            src_w = w,
+            src_h = h,
+            dst_w = new_w,
+            dst_h = new_h,
+            filter = "Lanczos3"
+        )
+        .entered();
         img.resize(new_w, new_h, image::imageops::FilterType::Lanczos3)
     };
 
@@ -147,7 +193,14 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     let is_lossless = is_icon || !is_jpeg;
 
     let encoded = {
-        let _s = tracing::info_span!("ensure_small_encode", base_name, w = fw, h = fh, mode = if is_lossless { "lossless" } else { "lossy" }).entered();
+        let _s = tracing::info_span!(
+            "ensure_small_encode",
+            base_name,
+            w = fw,
+            h = fh,
+            mode = if is_lossless { "lossless" } else { "lossy" }
+        )
+        .entered();
         if is_lossless {
             webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless()
         } else {
@@ -200,7 +253,11 @@ pub fn convert_bytes_to_lossless_webp(data: &[u8]) -> Option<Vec<u8>> {
     let img = image::load_from_memory(data).ok()?;
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
-    Some(webp::Encoder::from_rgba(rgba.as_raw(), w, h).encode_lossless().to_vec())
+    Some(
+        webp::Encoder::from_rgba(rgba.as_raw(), w, h)
+            .encode_lossless()
+            .to_vec(),
+    )
 }
 
 /// Open an image file (PNG, ICO, etc.) and re-save as lossless WebP,
@@ -208,7 +265,11 @@ pub fn convert_bytes_to_lossless_webp(data: &[u8]) -> Option<Vec<u8>> {
 /// a JPEG (JPEGs are kept as-is to avoid generation loss).
 pub fn convert_to_lossless_webp(path: &Path) {
     let _s = tracing::info_span!("convert_to_lossless_webp", path = %path.display()).entered();
-    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("webp") || e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg")) {
+    if path.extension().is_some_and(|e| {
+        e.eq_ignore_ascii_case("webp")
+            || e.eq_ignore_ascii_case("jpg")
+            || e.eq_ignore_ascii_case("jpeg")
+    }) {
         return;
     }
     let base = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
@@ -256,10 +317,24 @@ pub fn achievements_dir(save_dir: &str, app_id: &str) -> PathBuf {
     data_dir(save_dir, app_id).join("achievements")
 }
 
-pub fn unlock_status_path(save_dir: &str, trophy_source: ira_models::TrophySource, app_id: &str, platform_id: &str) -> PathBuf {
+pub fn unlock_status_path(
+    save_dir: &str,
+    trophy_source: ira_models::TrophySource,
+    app_id: &str,
+    platform_id: &str,
+) -> PathBuf {
     match trophy_source {
-        ira_models::TrophySource::Nge => Path::new(save_dir).join("emulator_saves").join("nge").join(GALAXY_ID).join(platform_id).join("achievements.json"),
-        _ => Path::new(save_dir).join("emulator_saves").join("gbe").join(app_id).join("achievements.json"),
+        ira_models::TrophySource::Nge => Path::new(save_dir)
+            .join("emulator_saves")
+            .join("nge")
+            .join(GALAXY_ID)
+            .join(platform_id)
+            .join("achievements.json"),
+        _ => Path::new(save_dir)
+            .join("emulator_saves")
+            .join("gbe")
+            .join(app_id)
+            .join("achievements.json"),
     }
 }
 
@@ -297,7 +372,10 @@ mod tests {
         let encoded = webp::Encoder::from_rgba(img.as_raw(), 2, 2).encode_lossless();
         std::fs::write(&webp_path, &*encoded).unwrap();
         convert_to_lossless_webp(&webp_path);
-        assert!(webp_path.is_file(), "webp file should not be deleted when input is already webp");
+        assert!(
+            webp_path.is_file(),
+            "webp file should not be deleted when input is already webp"
+        );
     }
 
     #[test]
@@ -307,9 +385,15 @@ mod tests {
         let img = image::RgbaImage::new(2, 2);
         img.save(&png_path).unwrap();
         convert_to_lossless_webp(&png_path);
-        assert!(!png_path.is_file(), "png file should be removed after conversion");
+        assert!(
+            !png_path.is_file(),
+            "png file should be removed after conversion"
+        );
         let webp_out = tmp.path().join("icon.webp");
-        assert!(webp_out.is_file(), "webp file should exist after conversion");
+        assert!(
+            webp_out.is_file(),
+            "webp file should exist after conversion"
+        );
     }
 
     #[test]
@@ -317,11 +401,18 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let jpg_path = tmp.path().join("hero.jpg");
         let img = image::DynamicImage::new_rgb8(4, 4);
-        img.save_with_format(&jpg_path, image::ImageFormat::Jpeg).unwrap();
+        img.save_with_format(&jpg_path, image::ImageFormat::Jpeg)
+            .unwrap();
         convert_to_lossless_webp(&jpg_path);
-        assert!(jpg_path.is_file(), "jpg file should not be deleted or converted");
+        assert!(
+            jpg_path.is_file(),
+            "jpg file should not be deleted or converted"
+        );
         let webp_out = tmp.path().join("hero.webp");
-        assert!(!webp_out.is_file(), "webp file should not be created from jpg");
+        assert!(
+            !webp_out.is_file(),
+            "webp file should not be created from jpg"
+        );
     }
 
     #[test]
@@ -332,7 +423,10 @@ mod tests {
         let small_webp = tmp.path().join("header_small.webp");
         std::fs::write(&small_webp, [0u8]).unwrap();
         let result = full_image_path(small_webp.to_str().unwrap());
-        assert!(result.ends_with("header.jpg"), "should find header.jpg, got: {result}");
+        assert!(
+            result.ends_with("header.jpg"),
+            "should find header.jpg, got: {result}"
+        );
     }
 
     #[test]
@@ -362,7 +456,11 @@ mod tests {
     fn test_convert_bytes_to_lossless_webp_converts_png() {
         let img = image::RgbaImage::new(4, 4);
         let mut png_buf = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut png_buf), image::ImageFormat::Png).unwrap();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut png_buf),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
         let result = convert_bytes_to_lossless_webp(&png_buf);
         let result = result.expect("PNG should convert to WebP");
         let format = image::guess_format(&result).unwrap();
@@ -373,10 +471,18 @@ mod tests {
     fn test_convert_bytes_to_lossless_webp_skips_jpeg() {
         let img = image::DynamicImage::new_rgb8(4, 4);
         let mut jpg_buf = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut jpg_buf), image::ImageFormat::Jpeg).unwrap();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut jpg_buf),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
         let original = jpg_buf.clone();
         let result = convert_bytes_to_lossless_webp(&jpg_buf);
-        assert_eq!(result, Some(original), "JPEG bytes should be returned unchanged");
+        assert_eq!(
+            result,
+            Some(original),
+            "JPEG bytes should be returned unchanged"
+        );
     }
 
     #[test]
@@ -385,6 +491,22 @@ mod tests {
         let webp_bytes = webp::Encoder::from_rgba(raw.as_raw(), 2, 2).encode_lossless();
         let original = webp_bytes.to_vec();
         let result = convert_bytes_to_lossless_webp(&original);
-        assert_eq!(result, Some(original), "WebP bytes should be returned unchanged");
+        assert_eq!(
+            result,
+            Some(original),
+            "WebP bytes should be returned unchanged"
+        );
+    }
+
+    #[test]
+    fn test_special_console_data_dirs() {
+        assert_eq!(
+            vita_data_dir("/save", "PCSF00001"),
+            PathBuf::from("/save/data/psvita/PCSF00001")
+        );
+        assert_eq!(
+            wiiu_data_dir("/save", "0005000010101d00"),
+            PathBuf::from("/save/data/wiiu/0005000010101d00")
+        );
     }
 }

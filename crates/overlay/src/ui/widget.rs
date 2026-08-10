@@ -24,10 +24,20 @@ pub struct Padding {
 
 impl Padding {
     pub const fn all(v: f32) -> Self {
-        Self { left: v, top: v, right: v, bottom: v }
+        Self {
+            left: v,
+            top: v,
+            right: v,
+            bottom: v,
+        }
     }
     pub const fn horizontal(v: f32) -> Self {
-        Self { left: v, top: 0.0, right: v, bottom: 0.0 }
+        Self {
+            left: v,
+            top: 0.0,
+            right: v,
+            bottom: 0.0,
+        }
     }
 }
 
@@ -65,18 +75,49 @@ pub struct EventCtx {
 }
 
 impl DrawCtx<'_> {
-    pub fn push_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: [u8; 4], corner_radius: f32) {
+    pub fn push_rect(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        color: [u8; 4],
+        corner_radius: f32,
+    ) {
         let v_off = self.vertices.len() as i32;
         let i_off = self.indices.len() as u32;
-        self.vertices.push(Vertex { pos: [x, y], uv: [0.0, 0.0], color });
-        self.vertices.push(Vertex { pos: [x + w, y], uv: [1.0, 0.0], color });
-        self.vertices.push(Vertex { pos: [x, y + h], uv: [0.0, 1.0], color });
-        self.vertices.push(Vertex { pos: [x + w, y + h], uv: [1.0, 1.0], color });
+        self.vertices.push(Vertex {
+            pos: [x, y],
+            uv: [0.0, 0.0],
+            color,
+        });
+        self.vertices.push(Vertex {
+            pos: [x + w, y],
+            uv: [1.0, 0.0],
+            color,
+        });
+        self.vertices.push(Vertex {
+            pos: [x, y + h],
+            uv: [0.0, 1.0],
+            color,
+        });
+        self.vertices.push(Vertex {
+            pos: [x + w, y + h],
+            uv: [1.0, 1.0],
+            color,
+        });
         self.indices.extend_from_slice(&[0, 1, 2, 1, 3, 2]);
         self.draw_cmds.push(DrawCmd {
-            index_count: 6, index_offset: i_off, vertex_offset: v_off,
-            draw_mode: MODE_SHAPE, shape_size: [w, h], corner_radius,
-            clip_x: self.clip_x, clip_y: self.clip_y, clip_w: self.clip_w, clip_h: self.clip_h,
+            index_count: 6,
+            index_offset: i_off,
+            vertex_offset: v_off,
+            draw_mode: MODE_SHAPE,
+            shape_size: [w, h],
+            corner_radius,
+            clip_x: self.clip_x,
+            clip_y: self.clip_y,
+            clip_w: self.clip_w,
+            clip_h: self.clip_h,
         });
     }
 
@@ -89,9 +130,16 @@ impl DrawCtx<'_> {
         self.indices.extend(ti);
         if ti_count > 0 {
             self.draw_cmds.push(DrawCmd {
-                index_count: ti_count, index_offset: i_off, vertex_offset: v_off,
-                draw_mode: MODE_TEXT, shape_size: [0.0, 0.0], corner_radius: 0.0,
-                clip_x: self.clip_x, clip_y: self.clip_y, clip_w: self.clip_w, clip_h: self.clip_h,
+                index_count: ti_count,
+                index_offset: i_off,
+                vertex_offset: v_off,
+                draw_mode: MODE_TEXT,
+                shape_size: [0.0, 0.0],
+                corner_radius: 0.0,
+                clip_x: self.clip_x,
+                clip_y: self.clip_y,
+                clip_w: self.clip_w,
+                clip_h: self.clip_h,
             });
         }
     }

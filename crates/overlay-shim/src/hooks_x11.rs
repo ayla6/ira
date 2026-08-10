@@ -53,7 +53,8 @@ const EV_DETAIL: usize = 84;
 
 // --- Real function pointer resolution ---
 
-type XCheckIfEventFn = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void) -> i32;
+type XCheckIfEventFn =
+    unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void) -> i32;
 type XCheckWindowEventFn = unsafe extern "C" fn(*mut c_void, u64, i64, *mut c_void) -> i32;
 type XCheckTypedEventFn = unsafe extern "C" fn(*mut c_void, i32, *mut c_void) -> i32;
 type XCheckTypedWindowEventFn = unsafe extern "C" fn(*mut c_void, u64, i32, *mut c_void) -> i32;
@@ -152,7 +153,10 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
 
     static FIRST_EVENT: std::sync::Once = std::sync::Once::new();
     FIRST_EVENT.call_once(|| {
-        eprintln!("ira-overlay-shim: intercepting X11 events in pid {}", std::process::id());
+        eprintln!(
+            "ira-overlay-shim: intercepting X11 events in pid {}",
+            std::process::id()
+        );
     });
 
     let event_type = read_type(ev);
@@ -175,14 +179,20 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
         if (mods & ss_mods) == ss_mods && keycode == ss_x11 {
             state::push_event(InputEventRaw {
                 event_type: 5, // screenshot request
-                x: 0, y: 0, button: 0, keycode: 0,
+                x: 0,
+                y: 0,
+                button: 0,
+                keycode: 0,
             });
             return true;
         }
         if (mods & rec_mods) == rec_mods && keycode == rec_x11 {
             state::push_event(InputEventRaw {
                 event_type: 6, // recording toggle
-                x: 0, y: 0, button: 0, keycode: 0,
+                x: 0,
+                y: 0,
+                button: 0,
+                keycode: 0,
             });
             return true;
         }
@@ -195,7 +205,11 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
                 let (x, y) = read_xy(ev);
                 state::set_mouse_pos(x, y);
                 state::push_event(InputEventRaw {
-                    event_type: 0, x, y, button: 0, keycode: 0,
+                    event_type: 0,
+                    x,
+                    y,
+                    button: 0,
+                    keycode: 0,
                 });
                 return true;
             }
@@ -206,12 +220,20 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
                 if button == 4 || button == 5 {
                     let delta = if button == 4 { -1 } else { 1 };
                     state::push_event(InputEventRaw {
-                        event_type: 7, x: 0, y: delta, button, keycode: 0,
+                        event_type: 7,
+                        x: 0,
+                        y: delta,
+                        button,
+                        keycode: 0,
                     });
                     return true;
                 }
                 state::push_event(InputEventRaw {
-                    event_type: 1, x, y, button, keycode: 0,
+                    event_type: 1,
+                    x,
+                    y,
+                    button,
+                    keycode: 0,
                 });
                 return true;
             }
@@ -223,21 +245,33 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
                     return true;
                 }
                 state::push_event(InputEventRaw {
-                    event_type: 2, x, y, button, keycode: 0,
+                    event_type: 2,
+                    x,
+                    y,
+                    button,
+                    keycode: 0,
                 });
                 return true;
             }
             KEYPRESS => {
                 let keycode = read_detail(ev);
                 state::push_event(InputEventRaw {
-                    event_type: 3, x: 0, y: 0, button: 0, keycode,
+                    event_type: 3,
+                    x: 0,
+                    y: 0,
+                    button: 0,
+                    keycode,
                 });
                 return true;
             }
             KEYRELEASE => {
                 let keycode = read_detail(ev);
                 state::push_event(InputEventRaw {
-                    event_type: 4, x: 0, y: 0, button: 0, keycode,
+                    event_type: 4,
+                    x: 0,
+                    y: 0,
+                    button: 0,
+                    keycode,
                 });
                 return true;
             }
@@ -340,10 +374,7 @@ pub unsafe extern "C" fn XCheckMaskEvent(
 
 /// Blocking event wait. Loops internally to skip consumed events.
 #[no_mangle]
-pub unsafe extern "C" fn XNextEvent(
-    display: *mut c_void,
-    event_return: *mut c_void,
-) -> i32 {
+pub unsafe extern "C" fn XNextEvent(display: *mut c_void, event_return: *mut c_void) -> i32 {
     let Some(real_fn) = xnext_event() else {
         return 0;
     };

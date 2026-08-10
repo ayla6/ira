@@ -1,11 +1,7 @@
 use std::path::{Path, PathBuf};
 
 /// Migrate existing GBE saves to `<save_dir>/emulator_saves/gbe/<appid>/`.
-pub fn migrate_gbe_saves(
-    save_dir: &str,
-    app_id: &str,
-    wine_prefix: Option<&str>,
-) {
+pub fn migrate_gbe_saves(save_dir: &str, app_id: &str, wine_prefix: Option<&str>) {
     let centralized = centralized_gbe_path(save_dir);
     let _ = std::fs::create_dir_all(&centralized);
     let target = centralized.join(app_id);
@@ -29,10 +25,7 @@ pub fn migrate_gbe_saves(
 }
 
 /// Migrate existing NGE saves to `<save_dir>/emulator_saves/nge/`.
-pub fn migrate_nge_saves(
-    save_dir: &str,
-    wine_prefix: Option<&str>,
-) {
+pub fn migrate_nge_saves(save_dir: &str, wine_prefix: Option<&str>) {
     let centralized = centralized_nge_path(save_dir);
     let _ = std::fs::create_dir_all(&centralized);
 
@@ -72,7 +65,9 @@ fn centralized_nge_path(save_dir: &str) -> PathBuf {
 }
 
 fn xdg_save_base(folder_name: &str) -> Option<PathBuf> {
-    let xdg = std::env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty());
+    let xdg = std::env::var("XDG_DATA_HOME")
+        .ok()
+        .filter(|s| !s.is_empty());
     let home = std::env::var("HOME").unwrap_or_default();
     let base = match xdg {
         Some(x) => Path::new(&x).join(folder_name),
@@ -158,7 +153,11 @@ fn safe_migrate_dir_contents(source: &Path, target: &Path) -> usize {
         if src.is_dir() {
             let sub_count = safe_migrate_dir_contents(&src, &dst);
             count += sub_count;
-            if sub_count > 0 || std::fs::read_dir(&src).map(|mut e| e.next().is_none()).unwrap_or(true) {
+            if sub_count > 0
+                || std::fs::read_dir(&src)
+                    .map(|mut e| e.next().is_none())
+                    .unwrap_or(true)
+            {
                 let _ = std::fs::remove_dir(&src);
             }
         } else {

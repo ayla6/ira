@@ -209,9 +209,7 @@ extern "C" {
 // ─── Helper functions ───
 
 fn intern_atom(conn: *mut c_void, name: &CStr) -> u32 {
-    let cookie = unsafe {
-        xcb_intern_atom(conn, 0, name.to_bytes().len() as u16, name.as_ptr())
-    };
+    let cookie = unsafe { xcb_intern_atom(conn, 0, name.to_bytes().len() as u16, name.as_ptr()) };
     let reply = unsafe { xcb_intern_atom_reply(conn, cookie, std::ptr::null_mut()) };
     if reply.is_null() {
         return 0;
@@ -251,10 +249,9 @@ unsafe impl Send for X11State {}
 
 impl X11State {
     pub fn new() -> Result<Self, String> {
-        let display = std::env::var("DISPLAY")
-            .unwrap_or_else(|_| ":2".to_string());
-        let display_c = CString::new(display.as_str())
-            .map_err(|e| format!("invalid DISPLAY: {e}"))?;
+        let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":2".to_string());
+        let display_c =
+            CString::new(display.as_str()).map_err(|e| format!("invalid DISPLAY: {e}"))?;
 
         // Retry the connection until gamescope's XWayland is up and answering
         // requests. The overlay is spawned at the same time as the game, so
@@ -307,8 +304,10 @@ impl X11State {
                 screen.root_depth,
                 window,
                 screen.root,
-                0, 0,
-                width, height,
+                0,
+                0,
+                width,
+                height,
                 0, // border width
                 1, // XCB_WINDOW_CLASS_INPUT_OUTPUT
                 screen.root_visual,
@@ -352,18 +351,29 @@ impl X11State {
                 }
             }
             if std::time::Instant::now() > deadline {
-                return Err("timed out waiting for XWayland to realize the overlay window".to_string());
+                return Err(
+                    "timed out waiting for XWayland to realize the overlay window".to_string(),
+                );
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
         eprintln!("ira-overlay-standalone: XCB window {window} created ({width}x{height})");
 
-        Ok(X11State { conn, window, opacity_atom, external_overlay_atom })
+        Ok(X11State {
+            conn,
+            window,
+            opacity_atom,
+            external_overlay_atom,
+        })
     }
 
-    pub fn connection_ptr(&self) -> *mut c_void { self.conn }
-    pub fn window_id(&self) -> u32 { self.window }
+    pub fn connection_ptr(&self) -> *mut c_void {
+        self.conn
+    }
+    pub fn window_id(&self) -> u32 {
+        self.window
+    }
 
     pub fn set_visible(&self, visible: bool) {
         eprintln!("ira-overlay-standalone: set_visible({visible})");
@@ -401,16 +411,16 @@ impl X11State {
 
         loop {
             let event = unsafe { xcb_poll_for_event(self.conn) };
-            if event.is_null() { break; }
+            if event.is_null() {
+                break;
+            }
 
             let ev = unsafe { &*(event as *const u8) };
             let response_type = ev & 0x7f;
 
             if response_type == XCB_KEY_PRESS {
                 let detail = unsafe { *event.cast::<u8>().add(OFF_DETAIL) };
-                let state = unsafe {
-                    *event.cast::<u16>().add(OFF_STATE / 2)
-                };
+                let state = unsafe { *event.cast::<u16>().add(OFF_STATE / 2) };
                 eprintln!("ira-overlay-standalone: key event detail={detail} state={state}");
 
                 // Check toggle key

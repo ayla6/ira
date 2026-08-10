@@ -88,8 +88,12 @@ pub fn get_most_recent_user_id() -> Option<String> {
 
 /// Path to the librarycache directory for a given Steam user ID.
 pub fn librarycache_dir(steam_id: &str) -> Option<PathBuf> {
-    steam_install_dir()
-        .map(|d| d.join("userdata").join(steam_id).join("config").join("librarycache"))
+    steam_install_dir().map(|d| {
+        d.join("userdata")
+            .join(steam_id)
+            .join("config")
+            .join("librarycache")
+    })
 }
 
 /// Path to the achievement cache JSON for a specific app.
@@ -135,12 +139,19 @@ pub fn read_all_playtimes() -> HashMap<String, (f64, i64)> {
     }
 
     for steam_id in &user_ids {
-        let path = install.join("userdata").join(steam_id).join("config").join("localconfig.vdf");
+        let path = install
+            .join("userdata")
+            .join(steam_id)
+            .join("config")
+            .join("localconfig.vdf");
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
         let Some(parsed) = super::vdf::parse_vdf(&text) else {
-            eprintln!("[steam] read_all_playtimes: VDF parse failed for {}", path.display());
+            eprintln!(
+                "[steam] read_all_playtimes: VDF parse failed for {}",
+                path.display()
+            );
             continue;
         };
 
@@ -150,7 +161,10 @@ pub fn read_all_playtimes() -> HashMap<String, (f64, i64)> {
             .and_then(|s| super::vdf::get_value(s, "apps"));
 
         let Some(super::vdf::VdfValue::Obj(app_map)) = apps else {
-            eprintln!("[steam] read_all_playtimes: Software/Valve/Steam/apps not found for user {}", steam_id);
+            eprintln!(
+                "[steam] read_all_playtimes: Software/Valve/Steam/apps not found for user {}",
+                steam_id
+            );
             continue;
         };
 
@@ -174,7 +188,10 @@ pub fn read_all_playtimes() -> HashMap<String, (f64, i64)> {
     }
 
     if result.is_empty() {
-        eprintln!("[steam] read_all_playtimes: no playtimes found for any of {} user(s)", user_ids.len());
+        eprintln!(
+            "[steam] read_all_playtimes: no playtimes found for any of {} user(s)",
+            user_ids.len()
+        );
     }
 
     result

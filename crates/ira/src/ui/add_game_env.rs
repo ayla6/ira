@@ -1,4 +1,3 @@
-use gtk4::prelude::*;
 use adw::prelude::*;
 
 pub(super) fn build_env_page() -> (gtk4::Box, gtk4::ListBox, adw::EntryRow, adw::EntryRow) {

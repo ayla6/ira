@@ -66,7 +66,11 @@ pub struct UiRenderer {
 
 unsafe impl Send for UiRenderer {}
 unsafe impl Sync for UiRenderer {}
-impl Clone for UiRenderer { fn clone(&self) -> Self { *self } }
+impl Clone for UiRenderer {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
 impl Copy for UiRenderer {}
 
 impl UiRenderer {
@@ -90,7 +94,8 @@ impl UiRenderer {
             .image_view(atlas_view)
             .sampler(sampler);
         let write = vk::WriteDescriptorSet::default()
-            .dst_set(set).dst_binding(0)
+            .dst_set(set)
+            .dst_binding(0)
             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
             .image_info(std::slice::from_ref(&image_info));
         (fns.update_descriptor_sets)(device, 1, &write, 0, std::ptr::null());
@@ -99,11 +104,13 @@ impl UiRenderer {
             resources::create_pipeline(fns, device, render_pass, set_layout);
 
         let (vertex_buffer, vertex_memory, vertex_ptr) = resources::create_vertex_buffer(
-            fns, device, physical_device, (MAX_VERTICES * 20) as u64,
+            fns,
+            device,
+            physical_device,
+            (MAX_VERTICES * 20) as u64,
         )?;
-        let (index_buffer, index_memory, index_ptr) = resources::create_index_buffer(
-            fns, device, physical_device, (MAX_INDICES * 4) as u64,
-        )?;
+        let (index_buffer, index_memory, index_ptr) =
+            resources::create_index_buffer(fns, device, physical_device, (MAX_INDICES * 4) as u64)?;
 
         text::init_fonts();
         atlas::clear_cache();
@@ -111,12 +118,25 @@ impl UiRenderer {
         *UI_TREE.lock().unwrap() = model::build_ui().or_else(|| Some(build_fallback_ui()));
 
         Some(Self {
-            device, physical_device,
-            pipeline, pipeline_layout, set_layout, pool, set,
-            atlas_image, atlas_memory, atlas_view, sampler,
-            shader_vert, shader_frag,
-            vertex_buffer, vertex_memory, vertex_ptr,
-            index_buffer, index_memory, index_ptr,
+            device,
+            physical_device,
+            pipeline,
+            pipeline_layout,
+            set_layout,
+            pool,
+            set,
+            atlas_image,
+            atlas_memory,
+            atlas_view,
+            sampler,
+            shader_vert,
+            shader_frag,
+            vertex_buffer,
+            vertex_memory,
+            vertex_ptr,
+            index_buffer,
+            index_memory,
+            index_ptr,
         })
     }
 
@@ -126,12 +146,16 @@ impl UiRenderer {
     /// containing the copy is submitted.
     pub unsafe fn update_atlas(&self, fns: DeviceFns, cmd: vk::CommandBuffer, fence: vk::Fence) {
         let uploads = atlas::take_pending_uploads();
-        if uploads.is_empty() { return; }
+        if uploads.is_empty() {
+            return;
+        }
 
         let total_size: u64 = uploads.iter().map(|u| u.pixels.len() as u64).sum();
         let Some((staging_buf, staging_ptr, _capacity)) =
             atlas::prepare_staging(fns, self.device, self.physical_device, total_size)
-        else { return };
+        else {
+            return;
+        };
 
         let mut offset = 0u64;
         let mut regions = Vec::with_capacity(uploads.len());
@@ -141,21 +165,35 @@ impl UiRenderer {
                 staging_ptr.add(offset as usize),
                 u.pixels.len(),
             );
-            regions.push(vk::BufferImageCopy::default()
-                .buffer_offset(offset)
-                .image_subresource(vk::ImageSubresourceLayers {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    mip_level: 0, base_array_layer: 0, layer_count: 1,
-                })
-                .image_offset(vk::Offset3D { x: u.atlas_x as i32, y: u.atlas_y as i32, z: 0 })
-                .image_extent(vk::Extent3D { width: u.width, height: u.height, depth: 1 }));
+            regions.push(
+                vk::BufferImageCopy::default()
+                    .buffer_offset(offset)
+                    .image_subresource(vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: 0,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    })
+                    .image_offset(vk::Offset3D {
+                        x: u.atlas_x as i32,
+                        y: u.atlas_y as i32,
+                        z: 0,
+                    })
+                    .image_extent(vk::Extent3D {
+                        width: u.width,
+                        height: u.height,
+                        depth: 1,
+                    }),
+            );
             offset += u.pixels.len() as u64;
         }
 
         let subresource = vk::ImageSubresourceRange {
             aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0, level_count: 1,
-            base_array_layer: 0, layer_count: 1,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
         };
         let barrier_to_dst = vk::ImageMemoryBarrier::default()
             .old_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
@@ -164,16 +202,28 @@ impl UiRenderer {
             .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
             .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
             .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .image(self.atlas_image).subresource_range(subresource);
+            .image(self.atlas_image)
+            .subresource_range(subresource);
         (fns.cmd_pipeline_barrier)(
-            cmd, vk::PipelineStageFlags::FRAGMENT_SHADER, vk::PipelineStageFlags::TRANSFER,
-            vk::DependencyFlags::empty(), 0, std::ptr::null(), 0, std::ptr::null(), 1, &barrier_to_dst,
+            cmd,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::DependencyFlags::empty(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            1,
+            &barrier_to_dst,
         );
 
         (fns.cmd_copy_buffer_to_image)(
-            cmd, staging_buf, self.atlas_image,
+            cmd,
+            staging_buf,
+            self.atlas_image,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            regions.len() as u32, regions.as_ptr(),
+            regions.len() as u32,
+            regions.as_ptr(),
         );
 
         let barrier_to_read = vk::ImageMemoryBarrier::default()
@@ -183,10 +233,19 @@ impl UiRenderer {
             .dst_access_mask(vk::AccessFlags::SHADER_READ)
             .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
             .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-            .image(self.atlas_image).subresource_range(subresource);
+            .image(self.atlas_image)
+            .subresource_range(subresource);
         (fns.cmd_pipeline_barrier)(
-            cmd, vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::FRAGMENT_SHADER,
-            vk::DependencyFlags::empty(), 0, std::ptr::null(), 0, std::ptr::null(), 1, &barrier_to_read,
+            cmd,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+            vk::DependencyFlags::empty(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            1,
+            &barrier_to_read,
         );
 
         atlas::set_staging_fence(fence);
@@ -208,18 +267,26 @@ impl UiRenderer {
 
         // Periodically check for SHM changes (every ~1s at 60fps).
         let count = REBUILD_COUNTER.fetch_add(1, Ordering::Relaxed);
-        if count.is_multiple_of(60)
-            && model::check_shm_changed().unwrap_or(false)
-        {
+        if count.is_multiple_of(60) && model::check_shm_changed().unwrap_or(false) {
             UI_DIRTY.store(true, Ordering::Relaxed);
         }
 
         let mut tree_guard = UI_TREE.lock().unwrap();
-        let Some(tree) = tree_guard.as_mut() else { return };
+        let Some(tree) = tree_guard.as_mut() else {
+            return;
+        };
 
         let ctx = LayoutCtx;
         let measured = tree.measure(&ctx);
-        tree.layout(&ctx, Rect { x: 10.0, y: 10.0, width: measured.width, height: measured.height });
+        tree.layout(
+            &ctx,
+            Rect {
+                x: 10.0,
+                y: 10.0,
+                width: measured.width,
+                height: measured.height,
+            },
+        );
 
         let mut focus_bounds = Vec::new();
         tree.collect_focusable(&mut focus_bounds);
@@ -238,7 +305,9 @@ impl UiRenderer {
                     }
                 }
                 Event::Activate => {
-                    let event_ctx = EventCtx { focused_index: Some(focused) };
+                    let event_ctx = EventCtx {
+                        focused_index: Some(focused),
+                    };
                     tree.handle_event(&event_ctx, event);
                 }
                 Event::MouseMove { x, y } => {
@@ -256,13 +325,17 @@ impl UiRenderer {
                     let down_idx = MOUSE_DOWN_INDEX.swap(usize::MAX, Ordering::Relaxed);
                     if let Some(idx) = hit_test(&focus_bounds, *x, *y) {
                         if idx == down_idx {
-                            let event_ctx = EventCtx { focused_index: Some(idx) };
+                            let event_ctx = EventCtx {
+                                focused_index: Some(idx),
+                            };
                             tree.handle_event(&event_ctx, &Event::Activate);
                         }
                     }
                 }
                 Event::Scroll { .. } => {
-                    let event_ctx = EventCtx { focused_index: Some(focused) };
+                    let event_ctx = EventCtx {
+                        focused_index: Some(focused),
+                    };
                     tree.handle_event(&event_ctx, event);
                 }
             }
@@ -282,7 +355,10 @@ impl UiRenderer {
                 indices: &mut indices,
                 draw_cmds: &mut draw_cmds,
                 focused_index: Some(focused),
-                clip_x: 0.0, clip_y: 0.0, clip_w: screen_w, clip_h: screen_h,
+                clip_x: 0.0,
+                clip_y: 0.0,
+                clip_w: screen_w,
+                clip_h: screen_h,
             };
             tree.draw(&mut draw_ctx);
         }
@@ -300,19 +376,29 @@ impl UiRenderer {
     pub unsafe fn draw(&self, fns: DeviceFns, cmd: vk::CommandBuffer, extent: vk::Extent2D) {
         let frame = FRAME_DATA.lock().unwrap().take();
         let Some(frame) = frame else { return };
-        let FrameData { mut vertices, mut indices, draw_cmds } = frame;
+        let FrameData {
+            mut vertices,
+            mut indices,
+            draw_cmds,
+        } = frame;
 
         let v_bytes = vertices.len() * 20;
         let i_bytes = indices.len() * 4;
-        if v_bytes > MAX_VERTICES * 20 || i_bytes > MAX_INDICES * 4 { return; }
+        if v_bytes > MAX_VERTICES * 20 || i_bytes > MAX_INDICES * 4 {
+            return;
+        }
         if v_bytes > 0 {
             std::ptr::copy_nonoverlapping(
-                vertices.as_ptr() as *const u8, self.vertex_ptr as *mut u8, v_bytes,
+                vertices.as_ptr() as *const u8,
+                self.vertex_ptr as *mut u8,
+                v_bytes,
             );
         }
         if i_bytes > 0 {
             std::ptr::copy_nonoverlapping(
-                indices.as_ptr() as *const u8, self.index_ptr as *mut u8, i_bytes,
+                indices.as_ptr() as *const u8,
+                self.index_ptr as *mut u8,
+                i_bytes,
             );
         }
 
@@ -322,8 +408,14 @@ impl UiRenderer {
         (fns.cmd_bind_vertex_buffers)(cmd, 0, 1, vb.as_ptr(), offsets.as_ptr());
         (fns.cmd_bind_index_buffer)(cmd, self.index_buffer, 0, vk::IndexType::UINT32);
         (fns.cmd_bind_descriptor_sets)(
-            cmd, vk::PipelineBindPoint::GRAPHICS,
-            self.pipeline_layout, 0, 1, &self.set, 0, std::ptr::null(),
+            cmd,
+            vk::PipelineBindPoint::GRAPHICS,
+            self.pipeline_layout,
+            0,
+            1,
+            &self.set,
+            0,
+            std::ptr::null(),
         );
 
         let screen_w = extent.width as f32;
@@ -332,10 +424,12 @@ impl UiRenderer {
         // The pipeline uses dynamic viewport state; without an explicit
         // vkCmdSetViewport every draw is clipped to undefined state.
         let viewport = vk::Viewport {
-            x: 0.0, y: 0.0,
+            x: 0.0,
+            y: 0.0,
             width: screen_w,
             height: screen_h,
-            min_depth: 0.0, max_depth: 1.0,
+            min_depth: 0.0,
+            max_depth: 1.0,
         };
         (fns.cmd_set_viewport)(cmd, 0, 1, &viewport as *const vk::Viewport);
 
@@ -347,14 +441,21 @@ impl UiRenderer {
                 is_shape: dc.draw_mode,
             };
             (fns.cmd_push_constants)(
-                cmd, self.pipeline_layout,
+                cmd,
+                self.pipeline_layout,
                 vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                0, 24, &pc as *const PushConstants as *const std::ffi::c_void,
+                0,
+                24,
+                &pc as *const PushConstants as *const std::ffi::c_void,
             );
             let scissor = vk::Rect2D {
-                offset: vk::Offset2D { x: dc.clip_x.max(0.0) as i32, y: dc.clip_y.max(0.0) as i32 },
+                offset: vk::Offset2D {
+                    x: dc.clip_x.max(0.0) as i32,
+                    y: dc.clip_y.max(0.0) as i32,
+                },
                 extent: vk::Extent2D {
-                    width: dc.clip_w.max(0.0) as u32, height: dc.clip_h.max(0.0) as u32,
+                    width: dc.clip_w.max(0.0) as u32,
+                    height: dc.clip_h.max(0.0) as u32,
                 },
             };
             (fns.cmd_set_scissor)(cmd, 0, 1, &scissor as *const vk::Rect2D);
@@ -398,24 +499,38 @@ fn build_fallback_ui() -> Box<dyn Widget> {
         Padding::all(10.0),
         [30, 30, 30, 200],
         8.0,
-        Box::new(Column::new(5.0, vec![
-            Box::new(Label::new("Ira Overlay", 20.0, [255, 255, 255, 255])),
-            Box::new(Row::new(5.0, vec![
-                Box::new(Button::new("Screenshot", 14.0, || {
-                    crate::ui::capture::request_screenshot();
-                })),
-                Box::new(Button::new("Record", 14.0, || {
-                    crate::ui::capture::toggle_recording();
-                })),
-            ])),
-            Box::new(Label::new("Shift+Tab / Guide to toggle", 12.0, [180, 180, 180, 255])),
-            Box::new(Label::new("F12 screenshot | F11 record", 12.0, [180, 180, 180, 255])),
-        ])),
+        Box::new(Column::new(
+            5.0,
+            vec![
+                Box::new(Label::new("Ira Overlay", 20.0, [255, 255, 255, 255])),
+                Box::new(Row::new(
+                    5.0,
+                    vec![
+                        Box::new(Button::new("Screenshot", 14.0, || {
+                            crate::ui::capture::request_screenshot();
+                        })),
+                        Box::new(Button::new("Record", 14.0, || {
+                            crate::ui::capture::toggle_recording();
+                        })),
+                    ],
+                )),
+                Box::new(Label::new(
+                    "Shift+Tab / Guide to toggle",
+                    12.0,
+                    [180, 180, 180, 255],
+                )),
+                Box::new(Label::new(
+                    "F12 screenshot | F11 record",
+                    12.0,
+                    [180, 180, 180, 255],
+                )),
+            ],
+        )),
     ))
 }
 
 fn hit_test(bounds: &[Rect], x: f32, y: f32) -> Option<usize> {
-    bounds.iter().position(|r| {
-        x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height
-    })
+    bounds
+        .iter()
+        .position(|r| x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height)
 }

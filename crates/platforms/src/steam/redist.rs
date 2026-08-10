@@ -35,7 +35,9 @@ pub fn localize_redists(game_dir: &Path, packages: Vec<RedistPackage>) -> Vec<Re
     }
 
     let local_base = game_dir.join("_CommonRedist");
-    let game_dir_canonical = game_dir.canonicalize().unwrap_or_else(|_| game_dir.to_path_buf());
+    let game_dir_canonical = game_dir
+        .canonicalize()
+        .unwrap_or_else(|_| game_dir.to_path_buf());
 
     // Check if installers are already inside the game folder
     let already_local = packages.iter().all(|p| {
@@ -148,7 +150,9 @@ fn find_exe_installers(dir: &Path) -> Vec<PathBuf> {
     let mut exes = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -180,7 +184,11 @@ mod tests {
 
     fn steamapps_with_redists() -> TempDir {
         let tmp = TempDir::new().unwrap();
-        let base = tmp.path().join("common").join("Steamworks Shared").join("_CommonRedist");
+        let base = tmp
+            .path()
+            .join("common")
+            .join("Steamworks Shared")
+            .join("_CommonRedist");
         touch(&base.join("DirectX").join("Jun2010").join("DXSETUP.exe"));
         touch(&base.join("DotNet").join("3.5").join("dotnetfx35.exe"));
         touch(&base.join("vcredist").join("2012").join("vcredist_x64.exe"));
@@ -203,7 +211,10 @@ mod tests {
         let packages = detect_redists(tmp.path());
         let vcredist = packages.iter().find(|p| p.name == "vcredist").unwrap();
         assert_eq!(vcredist.installers.len(), 2);
-        assert!(vcredist.installers.iter().all(|p| p.extension().unwrap() == "exe"));
+        assert!(vcredist
+            .installers
+            .iter()
+            .all(|p| p.extension().unwrap() == "exe"));
     }
 
     #[test]
@@ -215,7 +226,11 @@ mod tests {
     #[test]
     fn test_detect_redists_skips_empty_packages() {
         let tmp = TempDir::new().unwrap();
-        let base = tmp.path().join("common").join("Steamworks Shared").join("_CommonRedist");
+        let base = tmp
+            .path()
+            .join("common")
+            .join("Steamworks Shared")
+            .join("_CommonRedist");
         std::fs::create_dir_all(base.join("Empty")).unwrap();
         touch(&base.join("DotNet").join("dotnetfx35.exe"));
         let packages = detect_redists(tmp.path());

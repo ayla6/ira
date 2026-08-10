@@ -9,6 +9,12 @@ pub struct ConsoleDef {
     pub fullscreen_flag: &'static str,
 }
 
+impl ConsoleDef {
+    pub fn uses_rom_folder(&self) -> bool {
+        !matches!(self.id, "ps3" | "ps4" | "psvita" | "wiiu")
+    }
+}
+
 pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "psx",
@@ -141,7 +147,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
         fullscreen_flag: "",
     },
     ConsoleDef {
-        id: "vb",
+        id: "virtualboy",
         display_name: "Virtual Boy",
         ra_console_id: 28,
         extensions: &["vb", "7z", "zip"],
@@ -272,8 +278,14 @@ pub const CONSOLES: &[ConsoleDef] = &[
     },
 ];
 
+pub fn all_consoles() -> impl Iterator<Item = &'static ConsoleDef> {
+    CONSOLES
+        .iter()
+        .chain(super::esde_consoles::ESDE_CONSOLES.iter())
+}
+
 pub fn find_console(id: &str) -> Option<&'static ConsoleDef> {
-    CONSOLES.iter().find(|c| c.id == id)
+    all_consoles().find(|c| c.id == id)
 }
 
 #[cfg(test)]
@@ -294,10 +306,36 @@ mod tests {
     }
 
     #[test]
+    fn test_find_console_virtualboy_uses_new_id() {
+        assert_eq!(
+            find_console("virtualboy").unwrap().display_name,
+            "Virtual Boy"
+        );
+        assert!(find_console("vb").is_none());
+    }
+
+    #[test]
+    fn test_find_console_includes_esde_system() {
+        assert_eq!(
+            find_console("3do").unwrap().display_name,
+            "3DO Interactive Multiplayer"
+        );
+    }
+
+    #[test]
+    fn test_special_platforms_do_not_use_rom_folders() {
+        assert!(!find_console("ps3").unwrap().uses_rom_folder());
+        assert!(!find_console("ps4").unwrap().uses_rom_folder());
+        assert!(!find_console("psvita").unwrap().uses_rom_folder());
+        assert!(!find_console("wiiu").unwrap().uses_rom_folder());
+        assert!(find_console("ps2").unwrap().uses_rom_folder());
+    }
+
+    #[test]
     fn test_all_consoles_have_unique_ids() {
-        let mut ids: Vec<_> = CONSOLES.iter().map(|c| c.id).collect();
+        let mut ids: Vec<_> = all_consoles().map(|c| c.id).collect();
         ids.sort();
         ids.dedup();
-        assert_eq!(ids.len(), CONSOLES.len(), "duplicate console IDs");
+        assert_eq!(ids.len(), all_consoles().count(), "duplicate console IDs");
     }
 }

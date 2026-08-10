@@ -34,7 +34,10 @@ impl Widget for ScrollView {
             let s = child.measure(_ctx);
             max_w = max_w.max(s.width);
         }
-        Size { width: max_w, height: self.viewport_height }
+        Size {
+            width: max_w,
+            height: self.viewport_height,
+        }
     }
 
     fn layout(&mut self, ctx: &LayoutCtx, bounds: Rect) {
@@ -46,7 +49,15 @@ impl Widget for ScrollView {
         self.child_ys.reserve(self.children.len());
         for child in &mut self.children {
             let size = child.measure(ctx);
-            child.layout(ctx, Rect { x: bounds.x, y, width: bounds.width, height: size.height });
+            child.layout(
+                ctx,
+                Rect {
+                    x: bounds.x,
+                    y,
+                    width: bounds.width,
+                    height: size.height,
+                },
+            );
             self.child_ys.push((y, y + size.height));
             y += size.height + self.gap;
             content_h += size.height + self.gap;

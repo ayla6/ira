@@ -52,10 +52,18 @@ impl Widget for Button {
 
     fn draw(&self, ctx: &mut DrawCtx) {
         let focused = self.focus_index.is_some() && ctx.focused_index == self.focus_index;
-        let color = if focused { self.bg_color_focused } else { self.bg_color };
+        let color = if focused {
+            self.bg_color_focused
+        } else {
+            self.bg_color
+        };
         ctx.push_rect(
-            self.bounds.x, self.bounds.y, self.bounds.width, self.bounds.height,
-            color, self.corner_radius,
+            self.bounds.x,
+            self.bounds.y,
+            self.bounds.width,
+            self.bounds.height,
+            color,
+            self.corner_radius,
         );
         self.label.draw(ctx);
     }

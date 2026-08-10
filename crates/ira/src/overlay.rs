@@ -7,9 +7,7 @@
 //! recreates it.
 
 use ira_models::Game;
-use ira_overlay_ipc::{
-    MappedShm, OverlaySettings, parse_hotkey, shm_path, MAX_ACHIEVEMENTS,
-};
+use ira_overlay_ipc::{parse_hotkey, shm_path, MappedShm, OverlaySettings, MAX_ACHIEVEMENTS};
 
 /// Creates the shared memory region and writes game data + achievements.
 /// Returns the SHM name (e.g. `/ira_overlay_123`) to pass as `IRA_OVERLAY_SHM`,

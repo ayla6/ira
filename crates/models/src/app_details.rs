@@ -49,4 +49,6 @@ pub struct UfsPathTransform {
     pub replace: String,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}

@@ -10,10 +10,15 @@ pub fn format_dll_overrides(overrides: &[(String, String)], desktop_integration:
             .split(',')
             .map(|token| {
                 let t = token.trim();
-                if t == "builtin" { "b" }
-                else if t == "native" { "n" }
-                else if t == "disabled" { "" }
-                else { t }
+                if t == "builtin" {
+                    "b"
+                } else if t == "native" {
+                    "n"
+                } else if t == "disabled" {
+                    ""
+                } else {
+                    t
+                }
             })
             .collect::<Vec<&str>>()
             .join(",");
@@ -43,9 +48,7 @@ mod tests {
 
     #[test]
     fn test_format_dll_overrides_basic() {
-        let overrides = vec![
-            ("d3d11".to_string(), "native,builtin".to_string()),
-        ];
+        let overrides = vec![("d3d11".to_string(), "native,builtin".to_string())];
         let result = format_dll_overrides(&overrides, false);
         assert_eq!(result, "d3d11=n,b;winemenubuilder=");
     }
@@ -63,27 +66,21 @@ mod tests {
 
     #[test]
     fn test_format_dll_overrides_disabled() {
-        let overrides = vec![
-            ("d3d11".to_string(), "disabled".to_string()),
-        ];
+        let overrides = vec![("d3d11".to_string(), "disabled".to_string())];
         let result = format_dll_overrides(&overrides, false);
         assert!(result.starts_with("d3d11=;"));
     }
 
     #[test]
     fn test_format_dll_overrides_native_only() {
-        let overrides = vec![
-            ("d3d11".to_string(), "native".to_string()),
-        ];
+        let overrides = vec![("d3d11".to_string(), "native".to_string())];
         let result = format_dll_overrides(&overrides, false);
         assert_eq!(result, "d3d11=n;winemenubuilder=");
     }
 
     #[test]
     fn test_format_dll_overrides_builtin_only() {
-        let overrides = vec![
-            ("d3d11".to_string(), "builtin".to_string()),
-        ];
+        let overrides = vec![("d3d11".to_string(), "builtin".to_string())];
         let result = format_dll_overrides(&overrides, false);
         assert_eq!(result, "d3d11=b;winemenubuilder=");
     }

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::ps4::{parse_psf, psf_get_title, psf_get_title_id};
 
-use super::paths::{games_dir, disc_dir};
+use super::paths::{disc_dir_for, games_dir_for, rpcs3_config_dir_for_executable};
 
 /// A discovered RPCS3 game.
 #[derive(Debug, Clone)]
@@ -15,6 +15,7 @@ pub struct Rpcs3Game {
     pub title: String,
     /// Path to the game's root folder (containing PARAM.SFO).
     pub game_path: PathBuf,
+    pub config_dir: PathBuf,
 }
 
 /// Scan a game folder for its PARAM.SFO, parse it, and find the NPWR ID from TROPDIR.
@@ -48,6 +49,7 @@ fn scan_game_folder(game_path: &Path) -> Option<Rpcs3Game> {
         npwr_id,
         title,
         game_path: game_path.to_path_buf(),
+        config_dir: PathBuf::new(),
     })
 }
 
@@ -76,24 +78,43 @@ fn find_npwr_id(tropdir: &Path) -> String {
 ///   dev_hdd0/game/   — PSN games (each subfolder has PARAM.SFO at root)
 ///   dev_hdd0/disc/   — disc games (each subfolder has PS3_GAME/PARAM.SFO)
 pub fn discover_games() -> Vec<Rpcs3Game> {
+    discover_games_for_executable("")
+}
+
+pub fn discover_games_for_executable(executable: &str) -> Vec<Rpcs3Game> {
     let mut games = Vec::new();
+    let config_dir = rpcs3_config_dir_for_executable(executable);
 
     // PSN games
-    let psn_dir = games_dir();
+    let psn_dir = games_dir_for(executable);
     if let Ok(entries) = std::fs::read_dir(&psn_dir) {
-        games.extend(entries.flatten()
-            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-            .filter_map(|e| scan_game_folder(&e.path())));
+        games.extend(
+            entries
+                .flatten()
+                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .filter_map(|e| scan_game_folder(&e.path()))
+                .map(|mut game| {
+                    game.config_dir = config_dir.clone();
+                    game
+                }),
+        );
     }
 
     // Disc games (folder structure: disc/<name>/PS3_GAME/PARAM.SFO)
-    let disc_dir = disc_dir();
+    let disc_dir = disc_dir_for(executable);
     if let Ok(entries) = std::fs::read_dir(&disc_dir) {
-        games.extend(entries.flatten()
-            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-            .map(|e| e.path().join("PS3_GAME"))
-            .filter(|p| p.join("PARAM.SFO").is_file())
-            .filter_map(|ref p| scan_game_folder(p)));
+        games.extend(
+            entries
+                .flatten()
+                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .map(|e| e.path().join("PS3_GAME"))
+                .filter(|p| p.join("PARAM.SFO").is_file())
+                .filter_map(|ref p| scan_game_folder(p))
+                .map(|mut game| {
+                    game.config_dir = config_dir.clone();
+                    game
+                }),
+        );
     }
 
     games

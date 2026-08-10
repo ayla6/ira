@@ -1,14 +1,17 @@
 use std::path::Path;
 
-use crate::SteamDataClient;
 use crate::types::{
     AppDetails, DlcInfo, GlobalAchievementsResponse, SteamCmdInfo, SteamCmdLaunch,
     SteamCmdLaunchInfo, SteamCmdResponse, SteamReviewSummary, SteamReviewsResponse,
 };
 use crate::util::{pick_lang, urlencode};
+use crate::SteamDataClient;
 
 impl SteamDataClient {
-    pub fn fetch_global_achievements(&self, app_id: &str) -> Option<std::collections::HashMap<String, f64>> {
+    pub fn fetch_global_achievements(
+        &self,
+        app_id: &str,
+    ) -> Option<std::collections::HashMap<String, f64>> {
         let cache_path = self.game_dir(app_id).join("global_achievements.json");
         if let Ok(data) = std::fs::read(&cache_path) {
             if let Ok(m) = serde_json::from_slice::<std::collections::HashMap<String, f64>>(&data) {
@@ -162,7 +165,8 @@ impl SteamDataClient {
                     }
                 }
             }
-            std::fs::create_dir_all(&img_dir).map_err(|e| format!("could not create achievements dir: {}", e))?;
+            std::fs::create_dir_all(&img_dir)
+                .map_err(|e| format!("could not create achievements dir: {}", e))?;
         }
 
         let mut jobs: Vec<IconJob> = Vec::new();
@@ -171,8 +175,16 @@ impl SteamDataClient {
         if let Some(nem_achs) = self.fetch_nemirtingas_achievements(app_id) {
             for a in nem_achs {
                 let hidden = if a.hidden { "1" } else { "0" };
-                let icon_base = Path::new(&a.icon).file_name().unwrap_or_default().to_string_lossy().into_owned();
-                let icon_gray_base = Path::new(&a.icon_gray).file_name().unwrap_or_default().to_string_lossy().into_owned();
+                let icon_base = Path::new(&a.icon)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                let icon_gray_base = Path::new(&a.icon_gray)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
                 out.push(serde_json::json!({
                     "name": a.name,
                     "displayName": pick_lang(&a.display_name),
@@ -195,12 +207,23 @@ impl SteamDataClient {
                 }
             }
         } else {
-            eprintln!("games-infos-datas unavailable for {}, falling back to Steam schema", app_id);
+            eprintln!(
+                "games-infos-datas unavailable for {}, falling back to Steam schema",
+                app_id
+            );
             let achs = self.fetch_steam_schema_achievements(app_id)?;
             for a in achs {
                 let hidden = if a.hidden != 0 { "1" } else { "0" };
-                let icon_base = Path::new(&a.icon).file_name().unwrap_or_default().to_string_lossy().into_owned();
-                let icon_gray_base = Path::new(&a.icon_gray).file_name().unwrap_or_default().to_string_lossy().into_owned();
+                let icon_base = Path::new(&a.icon)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                let icon_gray_base = Path::new(&a.icon_gray)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
                 out.push(serde_json::json!({
                     "name": a.name,
                     "displayName": a.display_name,
@@ -232,22 +255,24 @@ impl SteamDataClient {
                 continue;
             }
             match self.http.get(&j.url).send() {
-                Ok(r) if r.status().is_success() => {
-                    match r.bytes() {
-                        Ok(bytes) => {
-                            if let Err(e) = std::fs::write(&j.dest, &bytes) {
-                                eprintln!("  icon write failed {}: {}", j.url, e);
-                            }
+                Ok(r) if r.status().is_success() => match r.bytes() {
+                    Ok(bytes) => {
+                        if let Err(e) = std::fs::write(&j.dest, &bytes) {
+                            eprintln!("  icon write failed {}: {}", j.url, e);
                         }
-                        Err(e) => eprintln!("  icon read failed {}: {}", j.url, e),
                     }
-                }
+                    Err(e) => eprintln!("  icon read failed {}: {}", j.url, e),
+                },
                 Ok(r) => eprintln!("  icon download failed {}: HTTP {}", j.url, r.status()),
                 Err(e) => eprintln!("  icon download failed {}: {}", j.url, e),
             }
         }
 
-        eprintln!("Generated achievements for app {}: {} achievements", app_id, out.len());
+        eprintln!(
+            "Generated achievements for app {}: {} achievements",
+            app_id,
+            out.len()
+        );
         Ok(())
     }
 
@@ -258,7 +283,11 @@ impl SteamDataClient {
         let data = std::fs::read(&cached).ok()?;
         let raw: SteamCmdResponse = serde_json::from_slice(&data).ok()?;
         let entry = raw.data.get(app_id)?;
-        if entry.common.clienticon.is_empty() { None } else { Some(entry.common.clienticon.clone()) }
+        if entry.common.clienticon.is_empty() {
+            None
+        } else {
+            Some(entry.common.clienticon.clone())
+        }
     }
 
     pub fn cached_icon_hash(&self, app_id: &str) -> Option<String> {
@@ -266,7 +295,11 @@ impl SteamDataClient {
         let data = std::fs::read(&cached).ok()?;
         let raw: SteamCmdResponse = serde_json::from_slice(&data).ok()?;
         let entry = raw.data.get(app_id)?;
-        if entry.common.icon.is_empty() { None } else { Some(entry.common.icon.clone()) }
+        if entry.common.icon.is_empty() {
+            None
+        } else {
+            Some(entry.common.icon.clone())
+        }
     }
 
     pub fn ensure_steamcmd_cache(&self, app_id: &str) -> bool {
@@ -345,8 +378,17 @@ impl SteamDataClient {
             icon: entry.common.icon.clone(),
             oslist: entry.common.oslist.clone(),
             launches: sorted_launches(&entry.config.launch),
-            logo_position: convert_pinned_position(&entry.common.library_assets.logo_position.pinned_position),
-            logo_size: entry.common.library_assets.logo_position.width_pct.parse::<f64>().unwrap_or(0.0).round() as i32,
+            logo_position: convert_pinned_position(
+                &entry.common.library_assets.logo_position.pinned_position,
+            ),
+            logo_size: entry
+                .common
+                .library_assets
+                .logo_position
+                .width_pct
+                .parse::<f64>()
+                .unwrap_or(0.0)
+                .round() as i32,
         })
     }
 
@@ -371,48 +413,70 @@ fn convert_pinned_position(s: &str) -> String {
 /// Collect launch entries sorted by their numeric key (0, 1, 2, …) so that
 /// launch.0 — the default — comes first. `config.launch` is a JSON object
 /// whose keys are stringified indices, so HashMap iteration order is random.
-fn sorted_launches(launch: &std::collections::HashMap<String, SteamCmdLaunch>) -> Vec<SteamCmdLaunchInfo> {
-    let mut entries: Vec<(u32, &SteamCmdLaunch)> = launch.iter()
+fn sorted_launches(
+    launch: &std::collections::HashMap<String, SteamCmdLaunch>,
+) -> Vec<SteamCmdLaunchInfo> {
+    let mut entries: Vec<(u32, &SteamCmdLaunch)> = launch
+        .iter()
         .filter_map(|(k, v)| k.parse::<u32>().ok().map(|n| (n, v)))
         .collect();
     entries.sort_by_key(|(n, _)| *n);
-    entries.into_iter().map(|(_, l)| SteamCmdLaunchInfo {
-        executable: l.executable.clone(),
-        oslist: l.config.oslist.clone(),
-        description: l.description.clone(),
-    }).collect()
+    entries
+        .into_iter()
+        .map(|(_, l)| SteamCmdLaunchInfo {
+            executable: l.executable.clone(),
+            oslist: l.config.oslist.clone(),
+            description: l.description.clone(),
+        })
+        .collect()
 }
 
 fn extract_app_details(raw: &SteamCmdResponse, app_id: &str) -> Option<AppDetails> {
     let entry = raw.data.get(app_id)?;
-    let languages: Vec<String> = entry.common.supported_languages.keys()
-        .cloned()
-        .collect();
+    let languages: Vec<String> = entry.common.supported_languages.keys().cloned().collect();
 
     let mut dlcs = std::collections::HashMap::new();
     if !entry.extended.listofdlc.is_empty() {
-        let launch_names: std::collections::HashMap<&str, &str> = entry.config.launch.values()
+        let launch_names: std::collections::HashMap<&str, &str> = entry
+            .config
+            .launch
+            .values()
             .filter_map(|l| {
                 let dlc_id = l.config.ownsdlc.as_str();
-                if dlc_id.is_empty() { None } else { Some((dlc_id, l.description.as_str())) }
+                if dlc_id.is_empty() {
+                    None
+                } else {
+                    Some((dlc_id, l.description.as_str()))
+                }
             })
             .collect();
 
         for dlc_id_str in entry.extended.listofdlc.split(',') {
             let dlc_id_str = dlc_id_str.trim();
-            if dlc_id_str.is_empty() { continue; }
+            if dlc_id_str.is_empty() {
+                continue;
+            }
             let app_id_val: i64 = dlc_id_str.parse().unwrap_or(0);
-            let name = launch_names.get(dlc_id_str).map(|s| s.to_string()).unwrap_or_default();
-            dlcs.insert(dlc_id_str.to_string(), DlcInfo {
-                name,
-                app_id: app_id_val,
-                image_url: String::new(),
-                enabled: true,
-            });
+            let name = launch_names
+                .get(dlc_id_str)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            dlcs.insert(
+                dlc_id_str.to_string(),
+                DlcInfo {
+                    name,
+                    app_id: app_id_val,
+                    image_url: String::new(),
+                    enabled: true,
+                },
+            );
         }
     }
 
-    let ufs_savefiles: Vec<ira_models::UfsSaveFile> = entry.ufs.savefiles.values()
+    let ufs_savefiles: Vec<ira_models::UfsSaveFile> = entry
+        .ufs
+        .savefiles
+        .values()
         .map(|sf| ira_models::UfsSaveFile {
             path: sf.path.clone(),
             root: sf.root.clone(),
@@ -420,13 +484,18 @@ fn extract_app_details(raw: &SteamCmdResponse, app_id: &str) -> Option<AppDetail
         })
         .collect();
 
-    let ufs_rootoverrides: Vec<ira_models::UfsRootOverride> = entry.ufs.rootoverrides.values()
+    let ufs_rootoverrides: Vec<ira_models::UfsRootOverride> = entry
+        .ufs
+        .rootoverrides
+        .values()
         .map(|ro| ira_models::UfsRootOverride {
             os: ro.os.clone(),
             root: ro.root.clone(),
             useinstead: ro.useinstead.clone(),
             addpath: ro.addpath.clone(),
-            pathtransforms: ro.pathtransforms.values()
+            pathtransforms: ro
+                .pathtransforms
+                .values()
                 .map(|pt| ira_models::UfsPathTransform {
                     find: pt.find.clone(),
                     replace: pt.replace.clone(),

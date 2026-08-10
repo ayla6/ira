@@ -85,7 +85,11 @@ pub fn request_screenshot() {
 }
 
 pub fn is_screenshot_requested() -> bool {
-    STATE.lock().unwrap().as_ref().is_some_and(|s| s.screenshot_requested)
+    STATE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|s| s.screenshot_requested)
 }
 
 pub fn is_recording() -> bool {
@@ -99,28 +103,54 @@ pub fn toggle_recording() {
         let frames = FRAME_COUNT.swap(0, Ordering::Relaxed);
         if let Some(start) = RECORD_START.lock().unwrap().take() {
             let dur = start.elapsed();
-            eprintln!("ira-overlay: recording stopped, {} frames in {:.1}s ({:.0} fps avg)",
-                frames, dur.as_secs_f64(), frames as f64 / dur.as_secs_f64().max(0.001));
+            eprintln!(
+                "ira-overlay: recording stopped, {} frames in {:.1}s ({:.0} fps avg)",
+                frames,
+                dur.as_secs_f64(),
+                frames as f64 / dur.as_secs_f64().max(0.001)
+            );
         }
     } else {
         let (extent, has_state) = {
             let s = STATE.lock().unwrap();
             (s.as_ref().map(|s| s.extent), s.is_some())
         };
-        if !has_state { RECORDING.store(false, Ordering::Relaxed); return; }
-        let Some(extent) = extent else { RECORDING.store(false, Ordering::Relaxed); return; };
+        if !has_state {
+            RECORDING.store(false, Ordering::Relaxed);
+            return;
+        }
+        let Some(extent) = extent else {
+            RECORDING.store(false, Ordering::Relaxed);
+            return;
+        };
 
         let path = video_path();
         let size = format!("{}x{}", extent.width, extent.height);
         let mut cmd = Command::new("ffmpeg");
         cmd.args([
-            "-y", "-f", "rawvideo", "-pixel_format", "rgba",
-            "-video_size", &size, "-use_wallclock_as_timestamps", "1",
-            "-i", "-",
-            "-c:v", "libx264", "-crf", "18",
-            "-preset", "fast", "-pix_fmt", "yuv420p",
-            "-r", "60",
-            "-loglevel", "error",
+            "-y",
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgba",
+            "-video_size",
+            &size,
+            "-use_wallclock_as_timestamps",
+            "1",
+            "-i",
+            "-",
+            "-c:v",
+            "libx264",
+            "-crf",
+            "18",
+            "-preset",
+            "fast",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            "60",
+            "-loglevel",
+            "error",
         ]);
         cmd.arg(&path);
         cmd.stdin(Stdio::piped());
@@ -153,10 +183,18 @@ fn src_bpp(format: vk::Format) -> u64 {
     }
 }
 
-fn check_blit_support(fns: DeviceFns, physical_device: vk::PhysicalDevice, format: vk::Format) -> bool {
+fn check_blit_support(
+    fns: DeviceFns,
+    physical_device: vk::PhysicalDevice,
+    format: vk::Format,
+) -> bool {
     let mut props = vk::FormatProperties::default();
-    unsafe { (fns.get_format_props)(physical_device, format, &mut props); }
-    props.optimal_tiling_features.contains(vk::FormatFeatureFlags::BLIT_SRC)
+    unsafe {
+        (fns.get_format_props)(physical_device, format, &mut props);
+    }
+    props
+        .optimal_tiling_features
+        .contains(vk::FormatFeatureFlags::BLIT_SRC)
 }
 
 pub fn init(
@@ -174,7 +212,8 @@ pub fn init(
 
     let mut guard = STATE.lock().unwrap();
     if let Some(state) = guard.as_mut() {
-        if state.extent.width == extent.width && state.extent.height == extent.height
+        if state.extent.width == extent.width
+            && state.extent.height == extent.height
             && state.use_blit == use_blit
         {
             return;
@@ -197,16 +236,24 @@ pub fn init(
             let frames = FRAME_COUNT.swap(0, Ordering::Relaxed);
             if let Some(start) = RECORD_START.lock().unwrap().take() {
                 let dur = start.elapsed();
-                eprintln!("ira-overlay: recording stopped (resize), {} frames in {:.1}s ({:.0} fps avg)",
-                    frames, dur.as_secs_f64(), frames as f64 / dur.as_secs_f64().max(0.001));
+                eprintln!(
+                    "ira-overlay: recording stopped (resize), {} frames in {:.1}s ({:.0} fps avg)",
+                    frames,
+                    dur.as_secs_f64(),
+                    frames as f64 / dur.as_secs_f64().max(0.001)
+                );
             }
         }
 
         let staging = create_staging_buffers(fns, device, physical_device, buf_size);
-        if staging.is_empty() { return; }
+        if staging.is_empty() {
+            return;
+        }
         let intermediate = if use_blit {
             unsafe { create_intermediate_image(fns, device, physical_device, extent) }
-        } else { None };
+        } else {
+            None
+        };
 
         state.extent = extent;
         state.format = format;
@@ -219,10 +266,14 @@ pub fn init(
     drop(guard);
 
     let staging = create_staging_buffers(fns, device, physical_device, buf_size);
-    if staging.is_empty() { return; }
+    if staging.is_empty() {
+        return;
+    }
     let intermediate = if use_blit {
         unsafe { create_intermediate_image(fns, device, physical_device, extent) }
-    } else { None };
+    } else {
+        None
+    };
 
     let (ready_tx, ready_rx) = channel::<PendingFrame>();
     let (free_tx, free_rx) = channel::<StagingBuffer>();
@@ -241,11 +292,18 @@ pub fn init(
     });
 
     *STATE.lock().unwrap() = Some(State {
-        fns, device, extent, format, use_blit, staging_size: buf_size,
+        fns,
+        device,
+        extent,
+        format,
+        use_blit,
+        staging_size: buf_size,
         free: staging,
         pending: Vec::new(),
         intermediate,
-        ready_tx, encode_tx, free_rx,
+        ready_tx,
+        encode_tx,
+        free_rx,
         screenshot_requested: false,
         _readback_thread: readback_thread,
         _encode_thread: encode_thread,
@@ -259,8 +317,12 @@ pub fn destroy(_fns: DeviceFns, _device: vk::Device) {
         let frames = FRAME_COUNT.swap(0, Ordering::Relaxed);
         if let Some(start) = RECORD_START.lock().unwrap().take() {
             let dur = start.elapsed();
-            eprintln!("ira-overlay: recording stopped, {} frames in {:.1}s ({:.0} fps avg)",
-                frames, dur.as_secs_f64(), frames as f64 / dur.as_secs_f64().max(0.001));
+            eprintln!(
+                "ira-overlay: recording stopped, {} frames in {:.1}s ({:.0} fps avg)",
+                frames,
+                dur.as_secs_f64(),
+                frames as f64 / dur.as_secs_f64().max(0.001)
+            );
         }
     }
 
@@ -278,10 +340,20 @@ pub fn destroy(_fns: DeviceFns, _device: vk::Device) {
         deferred.push(s);
     }
     for s in &state.free {
-        deferred.push(StagingBuffer { buffer: s.buffer, memory: s.memory, ptr: s.ptr, size: s.size });
+        deferred.push(StagingBuffer {
+            buffer: s.buffer,
+            memory: s.memory,
+            ptr: s.ptr,
+            size: s.size,
+        });
     }
     for p in &state.pending {
-        deferred.push(StagingBuffer { buffer: p.buffer, memory: p.memory, ptr: p.ptr, size: p.size });
+        deferred.push(StagingBuffer {
+            buffer: p.buffer,
+            memory: p.memory,
+            ptr: p.ptr,
+            size: p.size,
+        });
     }
     drop(deferred);
 
@@ -334,7 +406,9 @@ pub unsafe fn capture(
     image_extent: vk::Extent2D,
 ) -> bool {
     let mut guard = STATE.lock().unwrap();
-    let Some(state) = guard.as_mut() else { return false };
+    let Some(state) = guard.as_mut() else {
+        return false;
+    };
 
     if image_extent.width != state.extent.width || image_extent.height != state.extent.height {
         return false;
@@ -345,7 +419,9 @@ pub unsafe fn capture(
         return false;
     }
 
-    let Some(staging) = state.free.pop() else { return false };
+    let Some(staging) = state.free.pop() else {
+        return false;
+    };
 
     if is_screenshot {
         state.screenshot_requested = false;
@@ -358,8 +434,10 @@ pub unsafe fn capture(
 
     let color_sub = vk::ImageSubresourceRange {
         aspect_mask: vk::ImageAspectFlags::COLOR,
-        base_mip_level: 0, level_count: 1,
-        base_array_layer: 0, layer_count: 1,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0,
+        layer_count: 1,
     };
 
     let src_barrier = vk::ImageMemoryBarrier::default()
@@ -373,7 +451,10 @@ pub unsafe fn capture(
         .subresource_range(color_sub);
 
     if use_blit {
-        let intermediate = state.intermediate.as_ref().expect("blit enabled but no intermediate");
+        let intermediate = state
+            .intermediate
+            .as_ref()
+            .expect("blit enabled but no intermediate");
         let dst_barrier = vk::ImageMemoryBarrier::default()
             .old_layout(vk::ImageLayout::UNDEFINED)
             .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
@@ -386,33 +467,56 @@ pub unsafe fn capture(
 
         let barriers = [src_barrier, dst_barrier];
         (fns.cmd_pipeline_barrier)(
-            cmd, vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::TRANSFER,
-            vk::DependencyFlags::empty(), 0, std::ptr::null(), 0, std::ptr::null(), 2, barriers.as_ptr(),
+            cmd,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::DependencyFlags::empty(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            2,
+            barriers.as_ptr(),
         );
 
         let blit_region = vk::ImageBlit::default()
             .src_subresource(vk::ImageSubresourceLayers {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
-                mip_level: 0, base_array_layer: 0, layer_count: 1,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
             })
             .src_offsets([
                 vk::Offset3D { x: 0, y: 0, z: 0 },
-                vk::Offset3D { x: extent.width as i32, y: extent.height as i32, z: 1 },
+                vk::Offset3D {
+                    x: extent.width as i32,
+                    y: extent.height as i32,
+                    z: 1,
+                },
             ])
             .dst_subresource(vk::ImageSubresourceLayers {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
-                mip_level: 0, base_array_layer: 0, layer_count: 1,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
             })
             .dst_offsets([
                 vk::Offset3D { x: 0, y: 0, z: 0 },
-                vk::Offset3D { x: extent.width as i32, y: extent.height as i32, z: 1 },
+                vk::Offset3D {
+                    x: extent.width as i32,
+                    y: extent.height as i32,
+                    z: 1,
+                },
             ]);
 
         (fns.cmd_blit_image)(
             cmd,
-            src_image, vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-            intermediate.image, vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            1, &blit_region,
+            src_image,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            intermediate.image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            1,
+            &blit_region,
             vk::Filter::LINEAR,
         );
 
@@ -427,8 +531,16 @@ pub unsafe fn capture(
             .subresource_range(color_sub);
 
         (fns.cmd_pipeline_barrier)(
-            cmd, vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::TRANSFER,
-            vk::DependencyFlags::empty(), 0, std::ptr::null(), 0, std::ptr::null(), 1, &post_blit,
+            cmd,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::DependencyFlags::empty(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            1,
+            &post_blit,
         );
 
         let copy_region = vk::BufferImageCopy::default()
@@ -437,21 +549,37 @@ pub unsafe fn capture(
             .buffer_image_height(extent.height)
             .image_subresource(vk::ImageSubresourceLayers {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
-                mip_level: 0, base_array_layer: 0, layer_count: 1,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
             })
             .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
-            .image_extent(vk::Extent3D { width: extent.width, height: extent.height, depth: 1 });
+            .image_extent(vk::Extent3D {
+                width: extent.width,
+                height: extent.height,
+                depth: 1,
+            });
 
         (fns.cmd_copy_image_to_buffer)(
             cmd,
-            intermediate.image, vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            intermediate.image,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
             staging.buffer,
-            1, &copy_region,
+            1,
+            &copy_region,
         );
     } else {
         (fns.cmd_pipeline_barrier)(
-            cmd, vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::TRANSFER,
-            vk::DependencyFlags::empty(), 0, std::ptr::null(), 0, std::ptr::null(), 1, &src_barrier,
+            cmd,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::DependencyFlags::empty(),
+            0,
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            1,
+            &src_barrier,
         );
 
         let copy_region = vk::BufferImageCopy::default()
@@ -460,16 +588,24 @@ pub unsafe fn capture(
             .buffer_image_height(extent.height)
             .image_subresource(vk::ImageSubresourceLayers {
                 aspect_mask: vk::ImageAspectFlags::COLOR,
-                mip_level: 0, base_array_layer: 0, layer_count: 1,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
             })
             .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
-            .image_extent(vk::Extent3D { width: extent.width, height: extent.height, depth: 1 });
+            .image_extent(vk::Extent3D {
+                width: extent.width,
+                height: extent.height,
+                depth: 1,
+            });
 
         (fns.cmd_copy_image_to_buffer)(
             cmd,
-            src_image, vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            src_image,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
             staging.buffer,
-            1, &copy_region,
+            1,
+            &copy_region,
         );
     }
 
@@ -482,7 +618,8 @@ pub unsafe fn capture(
         height: extent.height,
         use_blit,
         src_format,
-        fence, is_screenshot,
+        fence,
+        is_screenshot,
     });
 
     true
@@ -649,7 +786,12 @@ fn convert_10bpp(src: &[u8], w: usize, h: usize, row_pitch: usize, format: vk::F
             let b10 = (packed >> 20) & 0x3ff;
             let a2 = (packed >> 30) & 0x3;
             let (r, b) = if swap { (b10, r10) } else { (r10, b10) };
-            rgba.extend_from_slice(&[(r >> 2) as u8, (g10 >> 2) as u8, (b >> 2) as u8, (a2 << 6) as u8]);
+            rgba.extend_from_slice(&[
+                (r >> 2) as u8,
+                (g10 >> 2) as u8,
+                (b >> 2) as u8,
+                (a2 << 6) as u8,
+            ]);
         }
     }
     rgba
@@ -659,8 +801,12 @@ fn f16_to_f32(bits: u16) -> f32 {
     let sign = ((bits >> 15) & 1) as u32;
     let exp = ((bits >> 10) & 0x1f) as u32;
     let mant = (bits & 0x3ff) as u32;
-    if exp == 0 { return f32::from_bits(sign << 31); }
-    if exp == 31 { return f32::from_bits((sign << 31) | (0xff << 23) | (mant << 13)); }
+    if exp == 0 {
+        return f32::from_bits(sign << 31);
+    }
+    if exp == 31 {
+        return f32::from_bits((sign << 31) | (0xff << 23) | (mant << 13));
+    }
     f32::from_bits((sign << 31) | ((exp + 112) << 23) | (mant << 13))
 }
 
@@ -676,7 +822,11 @@ fn create_staging_buffers(
 ) -> Vec<StagingBuffer> {
     let mut buffers = Vec::with_capacity(NUM_STAGING);
     for _ in 0..NUM_STAGING {
-        let Some(staging) = (unsafe { create_one_staging_buffer(fns, device, physical_device, buf_size) }) else { break };
+        let Some(staging) =
+            (unsafe { create_one_staging_buffer(fns, device, physical_device, buf_size) })
+        else {
+            break;
+        };
         buffers.push(staging);
     }
     buffers
@@ -703,32 +853,38 @@ unsafe fn create_one_staging_buffer(
     let mut mem_props = vk::PhysicalDeviceMemoryProperties::default();
     (fns.get_mem_props)(physical_device, &mut mem_props);
 
-    let find_mem = |require: vk::MemoryPropertyFlags, avoid: vk::MemoryPropertyFlags| -> Option<u32> {
-        for i in 0..mem_props.memory_type_count as usize {
-            if (reqs.memory_type_bits & (1 << i)) != 0 {
-                let flags = mem_props.memory_types[i].property_flags;
-                if flags.contains(require) && !flags.intersects(avoid) {
-                    return Some(i as u32);
+    let find_mem =
+        |require: vk::MemoryPropertyFlags, avoid: vk::MemoryPropertyFlags| -> Option<u32> {
+            for i in 0..mem_props.memory_type_count as usize {
+                if (reqs.memory_type_bits & (1 << i)) != 0 {
+                    let flags = mem_props.memory_types[i].property_flags;
+                    if flags.contains(require) && !flags.intersects(avoid) {
+                        return Some(i as u32);
+                    }
                 }
             }
-        }
-        None
-    };
+            None
+        };
 
     let mem_type = find_mem(
         vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
-    ).or_else(|| find_mem(
-        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        vk::MemoryPropertyFlags::empty(),
-    ));
+    )
+    .or_else(|| {
+        find_mem(
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            vk::MemoryPropertyFlags::empty(),
+        )
+    });
     let mem_type = mem_type?;
 
     let alloc_info = vk::MemoryAllocateInfo::default()
         .allocation_size(reqs.size)
         .memory_type_index(mem_type);
     let mut memory = vk::DeviceMemory::null();
-    if (fns.allocate_memory)(device, &alloc_info, std::ptr::null(), &mut memory) != vk::Result::SUCCESS {
+    if (fns.allocate_memory)(device, &alloc_info, std::ptr::null(), &mut memory)
+        != vk::Result::SUCCESS
+    {
         (fns.destroy_buffer)(device, buffer, std::ptr::null());
         return None;
     }
@@ -739,13 +895,26 @@ unsafe fn create_one_staging_buffer(
     }
 
     let mut ptr = std::ptr::null_mut();
-    if (fns.map_memory)(device, memory, 0, reqs.size, vk::MemoryMapFlags::empty(), &mut ptr) != vk::Result::SUCCESS {
+    if (fns.map_memory)(
+        device,
+        memory,
+        0,
+        reqs.size,
+        vk::MemoryMapFlags::empty(),
+        &mut ptr,
+    ) != vk::Result::SUCCESS
+    {
         (fns.free_memory)(device, memory, std::ptr::null());
         (fns.destroy_buffer)(device, buffer, std::ptr::null());
         return None;
     }
 
-    Some(StagingBuffer { buffer, memory, ptr: ptr as *mut u8, size: reqs.size })
+    Some(StagingBuffer {
+        buffer,
+        memory,
+        ptr: ptr as *mut u8,
+        size: reqs.size,
+    })
 }
 
 unsafe fn create_intermediate_image(
@@ -757,7 +926,11 @@ unsafe fn create_intermediate_image(
     let info = vk::ImageCreateInfo::default()
         .image_type(vk::ImageType::TYPE_2D)
         .format(vk::Format::R8G8B8A8_UNORM)
-        .extent(vk::Extent3D { width: extent.width, height: extent.height, depth: 1 })
+        .extent(vk::Extent3D {
+            width: extent.width,
+            height: extent.height,
+            depth: 1,
+        })
         .mip_levels(1)
         .array_layers(1)
         .samples(vk::SampleCountFlags::TYPE_1)
@@ -780,19 +953,25 @@ unsafe fn create_intermediate_image(
     let mem_type = (0..mem_props.memory_type_count as usize)
         .find(|&i| {
             (reqs.memory_type_bits & (1 << i)) != 0
-                && mem_props.memory_types[i].property_flags.contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+                && mem_props.memory_types[i]
+                    .property_flags
+                    .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
         })
         .map(|i| i as u32)
-        .or_else(|| (0..mem_props.memory_type_count as usize)
-            .find(|&i| (reqs.memory_type_bits & (1 << i)) != 0)
-            .map(|i| i as u32));
+        .or_else(|| {
+            (0..mem_props.memory_type_count as usize)
+                .find(|&i| (reqs.memory_type_bits & (1 << i)) != 0)
+                .map(|i| i as u32)
+        });
     let mem_type = mem_type?;
 
     let alloc_info = vk::MemoryAllocateInfo::default()
         .allocation_size(reqs.size)
         .memory_type_index(mem_type);
     let mut memory = vk::DeviceMemory::null();
-    if (fns.allocate_memory)(device, &alloc_info, std::ptr::null(), &mut memory) != vk::Result::SUCCESS {
+    if (fns.allocate_memory)(device, &alloc_info, std::ptr::null(), &mut memory)
+        != vk::Result::SUCCESS
+    {
         (fns.destroy_image)(device, image, std::ptr::null());
         return None;
     }

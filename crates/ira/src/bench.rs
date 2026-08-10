@@ -17,7 +17,12 @@ fn vm_rss_kb() -> i64 {
 
 fn log(tag: &str) {
     let rss = vm_rss_kb();
-    eprintln!("[bench] {:<30} RSS={} KB ({:.1} MB)", tag, rss, rss as f64 / 1024.0);
+    eprintln!(
+        "[bench] {:<30} RSS={} KB ({:.1} MB)",
+        tag,
+        rss,
+        rss as f64 / 1024.0
+    );
 }
 
 pub fn run_bench(state: SharedState) {
@@ -56,7 +61,9 @@ pub fn run_bench(state: SharedState) {
                 phase = 3;
             }
             3 => {
-                unsafe { malloc_trim(0); }
+                unsafe {
+                    malloc_trim(0);
+                }
                 log("after malloc_trim(0)");
                 std::process::exit(0);
             }

@@ -1,14 +1,14 @@
-use gtk4::prelude::*;
+use super::state::SharedState;
 use adw::prelude::*;
 use gtk4::gdk::RGBA;
-use super::state::SharedState;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 pub fn show_log_dialog(state: &SharedState, db_id: i64) {
     let game_name = {
         let s = state.borrow();
-        s.games.iter()
+        s.games
+            .iter()
             .find(|g| g.db_id == db_id)
             .map(|g| g.name.clone())
             .unwrap_or_else(|| format!("Game {}", db_id))
@@ -127,7 +127,11 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
             }
             let len = st.matches.len();
             let next = if mods.contains(gtk4::gdk::ModifierType::SHIFT_MASK) {
-                if st.current == 0 { len - 1 } else { st.current - 1 }
+                if st.current == 0 {
+                    len - 1
+                } else {
+                    st.current - 1
+                }
             } else {
                 (st.current + 1) % len
             };
@@ -138,7 +142,12 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
         search_entry.add_controller(controller);
     }
 
-    let is_running = state.borrow().running_games.lock().unwrap().contains_key(&db_id);
+    let is_running = state
+        .borrow()
+        .running_games
+        .lock()
+        .unwrap()
+        .contains_key(&db_id);
     if is_running {
         let log = ira_launcher::wrapper::get_game_log(db_id);
         let buf_clone = buffer.clone();
@@ -153,8 +162,13 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
             let lines = log.lock().unwrap();
             if lines.len() > last_len {
                 let new_text = lines[last_len..].join("\n");
-                let current_text = buf_clone.text(&buf_clone.start_iter(), &buf_clone.end_iter(), false);
-                let separator = if current_text.is_empty() || current_text.ends_with('\n') { "" } else { "\n" };
+                let current_text =
+                    buf_clone.text(&buf_clone.start_iter(), &buf_clone.end_iter(), false);
+                let separator = if current_text.is_empty() || current_text.ends_with('\n') {
+                    ""
+                } else {
+                    "\n"
+                };
                 let insert_text = format!("{}{}", separator, new_text);
                 let mut end = buf_clone.end_iter();
                 buf_clone.insert(&mut end, &insert_text);
@@ -212,11 +226,9 @@ fn find_matches(buffer: &gtk4::TextBuffer, query: &str, st: &mut SearchState) {
     let mut matches = Vec::new();
     let limit = 5000;
     while matches.len() < limit {
-        let Some((match_start, match_end)) = iter.forward_search(
-            query,
-            gtk4::TextSearchFlags::CASE_INSENSITIVE,
-            None,
-        ) else {
+        let Some((match_start, match_end)) =
+            iter.forward_search(query, gtk4::TextSearchFlags::CASE_INSENSITIVE, None)
+        else {
             break;
         };
         buffer.apply_tag_by_name("search-highlight", &match_start, &match_end);

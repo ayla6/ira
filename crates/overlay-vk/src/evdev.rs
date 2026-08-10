@@ -28,13 +28,13 @@ const EV_ABS: u16 = 0x03;
 
 // Button codes
 const BTN_SOUTH: u16 = 0x130; // A / Cross  (== BTN_GAMEPAD)
-const BTN_TL: u16 = 0x136;    // L1 / LB
-const BTN_TR: u16 = 0x137;    // R1 / RB
+const BTN_TL: u16 = 0x136; // L1 / LB
+const BTN_TR: u16 = 0x137; // R1 / RB
 const BTN_DPAD_UP: u16 = 0x220;
 const BTN_DPAD_DOWN: u16 = 0x221;
 const BTN_DPAD_LEFT: u16 = 0x222;
 const BTN_DPAD_RIGHT: u16 = 0x223;
-const BTN_MODE: u16 = 0x13c;  // Guide / Home / PS
+const BTN_MODE: u16 = 0x13c; // Guide / Home / PS
 
 // Axis codes (for controllers that report D-pad as axes)
 const ABS_HAT0X: u16 = 0x10;
@@ -94,7 +94,11 @@ fn test_bit(buf: &[u8], bit: u32) -> bool {
 fn is_gamepad(fd: c_int) -> bool {
     let mut buf = [0u8; KEY_BUF_BYTES as usize];
     let ret = unsafe {
-        libc::ioctl(fd, eviocgbit(EV_KEY as u32, KEY_BUF_BYTES), buf.as_mut_ptr())
+        libc::ioctl(
+            fd,
+            eviocgbit(EV_KEY as u32, KEY_BUF_BYTES),
+            buf.as_mut_ptr(),
+        )
     };
     if ret < 0 {
         return false;
@@ -105,7 +109,9 @@ fn is_gamepad(fd: c_int) -> bool {
 /// Set up inotify watch on `/dev/input/` for instant hotplug detection.
 fn init_inotify() {
     let fd = unsafe { libc::inotify_init1(libc::O_NONBLOCK) };
-    if fd < 0 { return; }
+    if fd < 0 {
+        return;
+    }
 
     let path = CString::new("/dev/input").unwrap();
     let wd = unsafe { libc::inotify_add_watch(fd, path.as_ptr(), IN_CREATE | IN_DELETE) };
@@ -120,7 +126,9 @@ fn init_inotify() {
 /// Returns true if a device was added or removed since last check.
 fn check_hotplug() -> bool {
     let fd = INOTIFY_FD.load(Ordering::Relaxed);
-    if fd < 0 { return false; }
+    if fd < 0 {
+        return false;
+    }
     let mut buf = [0u8; 4096];
     let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut _, buf.len()) };
     n > 0
@@ -134,15 +142,23 @@ fn scan_devices() {
     }
     fds.clear();
 
-    let Ok(entries) = std::fs::read_dir("/dev/input") else { return };
+    let Ok(entries) = std::fs::read_dir("/dev/input") else {
+        return;
+    };
     for entry in entries.flatten() {
         let file_name = entry.file_name();
-        let Some(name) = file_name.to_str() else { continue };
-        if !name.starts_with("event") { continue; }
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if !name.starts_with("event") {
+            continue;
+        }
 
         let path = CString::new(format!("/dev/input/{name}")).unwrap();
         let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK) };
-        if fd < 0 { continue; }
+        if fd < 0 {
+            continue;
+        }
 
         if is_gamepad(fd) {
             eprintln!("ira-overlay: gamepad found at /dev/input/{name}");
@@ -151,7 +167,9 @@ fn scan_devices() {
             let drain_buf = [0u8; 24 * 64];
             loop {
                 let n = unsafe { libc::read(fd, drain_buf.as_ptr() as *mut _, drain_buf.len()) };
-                if n <= 0 { break; }
+                if n <= 0 {
+                    break;
+                }
             }
             fds.push(fd);
         } else {
@@ -175,7 +193,9 @@ pub fn init() {
 /// Poll all gamepad devices and dispatch events. Call every frame.
 /// Caller skips this when SDL hooks are active.
 pub fn poll() {
-    if !overlay_active() { return; }
+    if !overlay_active() {
+        return;
+    }
 
     // Instant hotplug detection via inotify
     if check_hotplug() {
@@ -192,19 +212,21 @@ pub fn poll() {
     }
 
     let fds = GAMEPAD_FDS.lock().unwrap();
-    if fds.is_empty() { return; }
+    if fds.is_empty() {
+        return;
+    }
 
     let mut buf = [0u8; 24 * MAX_EVENTS_PER_READ];
     for &fd in &*fds {
         loop {
             let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut _, buf.len()) };
-            if n <= 0 { break; }
+            if n <= 0 {
+                break;
+            }
 
             let count = (n as usize) / 24;
             for i in 0..count {
-                let ev = unsafe {
-                    &*(buf.as_ptr().add(i * 24) as *const InputEvent)
-                };
+                let ev = unsafe { &*(buf.as_ptr().add(i * 24) as *const InputEvent) };
                 handle_event(ev);
             }
         }
@@ -214,7 +236,9 @@ pub fn poll() {
 fn handle_event(ev: &InputEvent) {
     match ev.type_ {
         EV_KEY => {
-            if ev.value != KEY_PRESS { return; }
+            if ev.value != KEY_PRESS {
+                return;
+            }
             // Guide button always toggles, even when overlay is hidden.
             if ev.code == BTN_MODE {
                 if !crate::shim_bridge::ready_for_overlay() {
@@ -225,7 +249,9 @@ fn handle_event(ev: &InputEvent) {
                 return;
             }
             // Other buttons only when overlay is visible.
-            if !crate::shim_bridge::is_visible() { return; }
+            if !crate::shim_bridge::is_visible() {
+                return;
+            }
             let event = match ev.code {
                 BTN_SOUTH => Some(Event::Activate),
                 BTN_DPAD_UP => Some(Event::NavUp),
@@ -241,18 +267,28 @@ fn handle_event(ev: &InputEvent) {
             }
         }
         EV_ABS => {
-            if !crate::shim_bridge::is_visible() { return; }
+            if !crate::shim_bridge::is_visible() {
+                return;
+            }
             match ev.code {
                 ABS_HAT0X => {
                     let prev = HAT_X.swap(ev.value, Ordering::Relaxed);
                     if prev == 0 && ev.value != 0 {
-                        push_event(if ev.value < 0 { Event::NavLeft } else { Event::NavRight });
+                        push_event(if ev.value < 0 {
+                            Event::NavLeft
+                        } else {
+                            Event::NavRight
+                        });
                     }
                 }
                 ABS_HAT0Y => {
                     let prev = HAT_Y.swap(ev.value, Ordering::Relaxed);
                     if prev == 0 && ev.value != 0 {
-                        push_event(if ev.value < 0 { Event::NavUp } else { Event::NavDown });
+                        push_event(if ev.value < 0 {
+                            Event::NavUp
+                        } else {
+                            Event::NavDown
+                        });
                     }
                 }
                 _ => {}

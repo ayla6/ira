@@ -1,19 +1,39 @@
+use super::enrichment::enrich_game_async;
+use super::helpers::confirm_dialog;
+use super::state::SharedState;
+use crate::strings as S;
 use crate::AppMessage;
 use crate::Game;
 use crate::MergedAchievement;
 use ira_parser::set_achievement_earned;
-use super::state::SharedState;
-use super::enrichment::enrich_game_async;
-use super::helpers::confirm_dialog;
-use crate::strings as S;
 
-pub fn match_game_to_steam(state: &SharedState, db_id: i64, steam_app_id: String, game_name: String) {
+pub fn match_game_to_steam(
+    state: &SharedState,
+    db_id: i64,
+    steam_app_id: String,
+    game_name: String,
+) {
     let (steam, sender, db, save_dir, ra_username, ra_token, ra_password) = {
         let s = state.borrow();
-        (s.steam.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone(), s.cfg.ra_username.clone(), s.cfg.ra_token.clone(), s.cfg.ra_password.clone())
+        (
+            s.steam.clone(),
+            s.sender.clone(),
+            s.db.clone(),
+            s.save_dir.clone(),
+            s.cfg.ra_username.clone(),
+            s.cfg.ra_token.clone(),
+            s.cfg.ra_password.clone(),
+        )
     };
     std::thread::spawn(move || {
-        if let Err(e) = ira_db::update_game_ids(&db, db_id, &steam_app_id, &steam_app_id, ira_models::TrophySource::Gse, &steam_app_id) {
+        if let Err(e) = ira_db::update_game_ids(
+            &db,
+            db_id,
+            &steam_app_id,
+            &steam_app_id,
+            ira_models::TrophySource::Gse,
+            &steam_app_id,
+        ) {
             eprintln!("match_game_to_steam: update_game_ids failed: {}", e);
             return;
         }
@@ -24,34 +44,35 @@ pub fn match_game_to_steam(state: &SharedState, db_id: i64, steam_app_id: String
             eprintln!("match_game_to_steam: generate_steam_settings failed: {}", e);
         }
         match ira_db::find_by_db_id(&db, db_id) {
-            Ok(Some(entry)) => {
-                match crate::game_loader::load_game(&entry, &save_dir) {
-                    Ok(mut game) => {
-                        if game.name.is_empty() || game.name.starts_with("App ID:") {
-                            game.set_name(&game_name);
-                        }
-                        let name = game.name.clone();
-                        let _ = sender.send(AppMessage::NewGame(game));
-                        enrich_game_async(crate::ui::enrichment::EnrichGameParams {
-                            app_id: steam_app_id.clone(),
-                            trophy_source: ira_models::TrophySource::Gse,
-                            platform_id: steam_app_id.clone(),
-                            db_id: entry.id,
-                            title: name,
-                            steam,
-                            sender,
-                            save_dir,
-                            db,
-                            ra_username,
-                            ra_token,
-                            ra_password,
-                            game: None,
-                        });
+            Ok(Some(entry)) => match crate::game_loader::load_game(&entry, &save_dir) {
+                Ok(mut game) => {
+                    if game.name.is_empty() || game.name.starts_with("App ID:") {
+                        game.set_name(&game_name);
                     }
-                    Err(e) => eprintln!("match_game_to_steam: load_game failed: {}", e),
+                    let name = game.name.clone();
+                    let _ = sender.send(AppMessage::NewGame(game));
+                    enrich_game_async(crate::ui::enrichment::EnrichGameParams {
+                        app_id: steam_app_id.clone(),
+                        trophy_source: ira_models::TrophySource::Gse,
+                        platform_id: steam_app_id.clone(),
+                        db_id: entry.id,
+                        title: name,
+                        steam,
+                        sender,
+                        save_dir,
+                        db,
+                        ra_username,
+                        ra_token,
+                        ra_password,
+                        game: None,
+                    });
                 }
-            }
-            Ok(None) => eprintln!("match_game_to_steam: find_by_db_id returned None for db_id={}", db_id),
+                Err(e) => eprintln!("match_game_to_steam: load_game failed: {}", e),
+            },
+            Ok(None) => eprintln!(
+                "match_game_to_steam: find_by_db_id returned None for db_id={}",
+                db_id
+            ),
             Err(e) => eprintln!("match_game_to_steam: find_by_db_id error: {}", e),
         }
     });
@@ -60,7 +81,12 @@ pub fn match_game_to_steam(state: &SharedState, db_id: i64, steam_app_id: String
 pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
     let (steam, sender, db, save_dir) = {
         let s = state.borrow();
-        (s.steam.clone(), s.sender.clone(), s.db.clone(), s.save_dir.clone())
+        (
+            s.steam.clone(),
+            s.sender.clone(),
+            s.db.clone(),
+            s.save_dir.clone(),
+        )
     };
     std::thread::spawn(move || {
         if let Err(e) = ira_db::set_sgdb_id(&db, db_id, &sgdb_id) {
@@ -121,7 +147,14 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
     });
 }
 
-pub fn confirm_mark_unlocked(state: &SharedState, trophy_source: ira_models::TrophySource, app_id: &str, platform_id: &str, ach: &MergedAchievement, reload: impl Fn() + 'static) {
+pub fn confirm_mark_unlocked(
+    state: &SharedState,
+    trophy_source: ira_models::TrophySource,
+    app_id: &str,
+    platform_id: &str,
+    ach: &MergedAchievement,
+    reload: impl Fn() + 'static,
+) {
     let window = state.borrow().window.clone();
     let ach_name = ach.name.clone();
     let app_id = app_id.to_string();
@@ -138,7 +171,14 @@ pub fn confirm_mark_unlocked(state: &SharedState, trophy_source: ira_models::Tro
         S::MARK_AS_UNLOCKED,
         adw::ResponseAppearance::Destructive,
         move || {
-            if let Err(e) = set_achievement_earned(&save_dir, trophy_source, &app_id, &platform_id, &ach_name, true) {
+            if let Err(e) = set_achievement_earned(
+                &save_dir,
+                trophy_source,
+                &app_id,
+                &platform_id,
+                &ach_name,
+                true,
+            ) {
                 eprintln!("Failed to mark achievement as unlocked: {}", e);
                 return;
             }

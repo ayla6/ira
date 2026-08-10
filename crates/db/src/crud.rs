@@ -2,7 +2,15 @@ use crate::DbConn;
 use ira_models::{GameEntry, GameKind, TrophySource};
 use rusqlite::params;
 
-pub fn add_game(conn: &DbConn, kind: GameKind, trophy_source: TrophySource, steam_id: &str, game_id: &str, platform_id: &str, title: &str) -> Result<i64, String> {
+pub fn add_game(
+    conn: &DbConn,
+    kind: GameKind,
+    trophy_source: TrophySource,
+    steam_id: &str,
+    game_id: &str,
+    platform_id: &str,
+    title: &str,
+) -> Result<i64, String> {
     let c = crate::lock_db(conn)?;
     let kind = kind.as_str();
     let trophy_source = trophy_source.as_str();
@@ -24,12 +32,22 @@ pub fn add_game(conn: &DbConn, kind: GameKind, trophy_source: TrophySource, stea
 
 pub fn update_game_title(conn: &DbConn, id: i64, title: &str) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute("UPDATE games SET title = ?1 WHERE id = ?2", params![title, id])
-        .map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE games SET title = ?1 WHERE id = ?2",
+        params![title, id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-pub fn update_game_ids(conn: &DbConn, id: i64, steam_id: &str, game_id: &str, trophy_source: TrophySource, platform_id: &str) -> Result<(), String> {
+pub fn update_game_ids(
+    conn: &DbConn,
+    id: i64,
+    steam_id: &str,
+    game_id: &str,
+    trophy_source: TrophySource,
+    platform_id: &str,
+) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.execute(
         "UPDATE games SET steam_id = ?1, game_id = ?2, trophy_source = ?3, platform_id = ?4 WHERE id = ?5",
@@ -40,19 +58,41 @@ pub fn update_game_ids(conn: &DbConn, id: i64, steam_id: &str, game_id: &str, tr
 
 pub fn update_sort_title(conn: &DbConn, id: i64, sort_title: &str) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute("UPDATE games SET sort_title = ?1 WHERE id = ?2", params![sort_title, id])
-        .map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE games SET sort_title = ?1 WHERE id = ?2",
+        params![sort_title, id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub fn update_game_folder(conn: &DbConn, id: i64, game_folder: &str) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute("UPDATE games SET game_folder = ?1 WHERE id = ?2", params![game_folder, id])
-        .map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE games SET game_folder = ?1 WHERE id = ?2",
+        params![game_folder, id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-pub fn update_achievement_counts(conn: &DbConn, id: i64, earned: i64, total: i64, mtime: i64) -> Result<(), String> {
+pub fn update_game_kind(conn: &DbConn, id: i64, kind: GameKind) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute(
+        "UPDATE games SET kind = ?1 WHERE id = ?2",
+        params![kind.as_str(), id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn update_achievement_counts(
+    conn: &DbConn,
+    id: i64,
+    earned: i64,
+    total: i64,
+    mtime: i64,
+) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.execute(
         "UPDATE games SET cached_earned_count = ?1, cached_total_count = ?2, cached_achievement_mtime = ?3 WHERE id = ?4",
@@ -63,8 +103,11 @@ pub fn update_achievement_counts(conn: &DbConn, id: i64, earned: i64, total: i64
 
 pub fn set_manual_unmatch(conn: &DbConn, id: i64, value: bool) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute("UPDATE games SET manual_unmatch = ?1 WHERE id = ?2", params![value, id])
-        .map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE games SET manual_unmatch = ?1 WHERE id = ?2",
+        params![value, id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -72,40 +115,49 @@ pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c.prepare(&format!("SELECT {} FROM games ORDER BY CASE WHEN sort_title != '' THEN sort_title ELSE title END", crate::GAME_COLUMNS))
         .map_err(|e| e.to_string())?;
-    let entries = stmt.query_map([], |row| {
-        crate::game_entry_from_row(row)
-    }).map_err(|e| e.to_string())?;
+    let entries = stmt
+        .query_map([], crate::game_entry_from_row)
+        .map_err(|e| e.to_string())?;
 
-    entries.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    entries
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute("DELETE FROM games WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    c.execute("DELETE FROM games WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 /// Cache of the resolved API-emulator DLL folder (Steam/GOG), empty if unknown.
 pub fn set_api_dll_folder(conn: &DbConn, id: i64, folder: &str) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute("UPDATE games SET api_dll_folder = ?1 WHERE id = ?2", params![folder, id])
-        .map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE games SET api_dll_folder = ?1 WHERE id = ?2",
+        params![folder, id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 /// Cache of whether the game's UFS saves have been centralized.
 pub fn set_saves_centralized(conn: &DbConn, id: i64, centralized: bool) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute("UPDATE games SET saves_centralized = ?1 WHERE id = ?2", params![centralized as i64, id])
-        .map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE games SET saves_centralized = ?1 WHERE id = ?2",
+        params![centralized as i64, id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::find_by_db_id;
     use super::super::init_db;
+    use super::*;
     use tempfile::TempDir;
 
     fn setup_db() -> (DbConn, TempDir) {
@@ -119,7 +171,16 @@ mod tests {
     #[test]
     fn test_add_game_inserts_new_game() {
         let (conn, _tmp) = setup_db();
-        let id = add_game(&conn, GameKind::Steam, TrophySource::Gse, "12345", "", "", "Test Game").unwrap();
+        let id = add_game(
+            &conn,
+            GameKind::Steam,
+            TrophySource::Gse,
+            "12345",
+            "",
+            "",
+            "Test Game",
+        )
+        .unwrap();
         assert!(id > 0);
         let game = find_by_db_id(&conn, id).unwrap().unwrap();
         assert_eq!(game.title, "Test Game");
@@ -130,8 +191,26 @@ mod tests {
     #[test]
     fn test_add_game_conflict_updates_existing() {
         let (conn, _tmp) = setup_db();
-        let id1 = add_game(&conn, GameKind::Steam, TrophySource::Gse, "12345", "", "", "").unwrap();
-        let id2 = add_game(&conn, GameKind::Steam, TrophySource::Gse, "12345", "", "", "Updated Title").unwrap();
+        let id1 = add_game(
+            &conn,
+            GameKind::Steam,
+            TrophySource::Gse,
+            "12345",
+            "",
+            "",
+            "",
+        )
+        .unwrap();
+        let id2 = add_game(
+            &conn,
+            GameKind::Steam,
+            TrophySource::Gse,
+            "12345",
+            "",
+            "",
+            "Updated Title",
+        )
+        .unwrap();
         assert_eq!(id1, id2);
         let game = find_by_db_id(&conn, id1).unwrap().unwrap();
         assert_eq!(game.title, "Updated Title");
@@ -140,16 +219,70 @@ mod tests {
     #[test]
     fn test_update_game_title() {
         let (conn, _tmp) = setup_db();
-        let id = add_game(&conn, GameKind::Steam, TrophySource::Gse, "12345", "", "", "Test Game").unwrap();
+        let id = add_game(
+            &conn,
+            GameKind::Steam,
+            TrophySource::Gse,
+            "12345",
+            "",
+            "",
+            "Test Game",
+        )
+        .unwrap();
         update_game_title(&conn, id, "New Title").unwrap();
         let game = find_by_db_id(&conn, id).unwrap().unwrap();
         assert_eq!(game.title, "New Title");
     }
 
     #[test]
+    fn test_update_game_kind_preserves_game_metadata() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(
+            &conn,
+            GameKind::Wine,
+            TrophySource::Gse,
+            "12345",
+            "",
+            "",
+            "Test Game",
+        )
+        .unwrap();
+        update_game_folder(&conn, id, "/games/test").unwrap();
+        let launch = ira_models::GameLaunchConfig {
+            exe: "/games/test/game.exe".to_string(),
+            ..Default::default()
+        };
+        let wine = ira_models::WineConfig {
+            enabled: true,
+            prefix: "/games/test/prefix".to_string(),
+            ..Default::default()
+        };
+        crate::save_game_config(&conn, id, &launch, &wine, None).unwrap();
+        update_game_kind(&conn, id, GameKind::Linux).unwrap();
+        let game = find_by_db_id(&conn, id).unwrap().unwrap();
+        assert_eq!(game.kind, GameKind::Linux);
+        assert_eq!(game.steam_id, "12345");
+        assert_eq!(game.game_folder, "/games/test");
+        assert_eq!(game.title, "Test Game");
+        let (saved_launch, saved_wine, _) = crate::get_game_config(&conn, id).unwrap().unwrap();
+        assert_eq!(saved_launch.exe, launch.exe);
+        assert_eq!(saved_wine.prefix, wine.prefix);
+        assert!(saved_wine.enabled);
+    }
+
+    #[test]
     fn test_update_game_ids() {
         let (conn, _tmp) = setup_db();
-        let id = add_game(&conn, GameKind::Steam, TrophySource::Gse, "12345", "", "", "Test Game").unwrap();
+        let id = add_game(
+            &conn,
+            GameKind::Steam,
+            TrophySource::Gse,
+            "12345",
+            "",
+            "",
+            "Test Game",
+        )
+        .unwrap();
         update_game_ids(&conn, id, "67890", "game123", TrophySource::Ra, "ps4").unwrap();
         let game = find_by_db_id(&conn, id).unwrap().unwrap();
         assert_eq!(game.steam_id, "67890");
@@ -161,7 +294,16 @@ mod tests {
     #[test]
     fn test_delete_game_removes_entry() {
         let (conn, _tmp) = setup_db();
-        let id = add_game(&conn, GameKind::Steam, TrophySource::Gse, "12345", "", "", "Test Game").unwrap();
+        let id = add_game(
+            &conn,
+            GameKind::Steam,
+            TrophySource::Gse,
+            "12345",
+            "",
+            "",
+            "Test Game",
+        )
+        .unwrap();
         remove_game(&conn, id).unwrap();
         let game = find_by_db_id(&conn, id).unwrap();
         assert!(game.is_none());
@@ -170,16 +312,37 @@ mod tests {
     #[test]
     fn test_api_dll_folder_cache_defaults_empty() {
         let (conn, _tmp) = setup_db();
-        let id = add_game(&conn, GameKind::Wine, TrophySource::Gse, "", "g1", "g1", "Cached Game").unwrap();
+        let id = add_game(
+            &conn,
+            GameKind::Wine,
+            TrophySource::Gse,
+            "",
+            "g1",
+            "g1",
+            "Cached Game",
+        )
+        .unwrap();
         assert_eq!(super::super::get_api_dll_folder(&conn, id).unwrap(), "");
     }
 
     #[test]
     fn test_set_and_get_api_dll_folder() {
         let (conn, _tmp) = setup_db();
-        let id = add_game(&conn, GameKind::Wine, TrophySource::Gse, "", "g1", "g1", "Cached Game").unwrap();
+        let id = add_game(
+            &conn,
+            GameKind::Wine,
+            TrophySource::Gse,
+            "",
+            "g1",
+            "g1",
+            "Cached Game",
+        )
+        .unwrap();
         set_api_dll_folder(&conn, id, "/games/Game/bin/win64").unwrap();
-        assert_eq!(super::super::get_api_dll_folder(&conn, id).unwrap(), "/games/Game/bin/win64");
+        assert_eq!(
+            super::super::get_api_dll_folder(&conn, id).unwrap(),
+            "/games/Game/bin/win64"
+        );
         set_api_dll_folder(&conn, id, "").unwrap();
         assert_eq!(super::super::get_api_dll_folder(&conn, id).unwrap(), "");
     }
@@ -187,7 +350,16 @@ mod tests {
     #[test]
     fn test_set_and_get_saves_centralized() {
         let (conn, _tmp) = setup_db();
-        let id = add_game(&conn, GameKind::Wine, TrophySource::Gse, "", "g1", "g1", "Cached Game").unwrap();
+        let id = add_game(
+            &conn,
+            GameKind::Wine,
+            TrophySource::Gse,
+            "",
+            "g1",
+            "g1",
+            "Cached Game",
+        )
+        .unwrap();
         assert!(!super::super::get_saves_centralized(&conn, id).unwrap());
         set_saves_centralized(&conn, id, true).unwrap();
         assert!(super::super::get_saves_centralized(&conn, id).unwrap());

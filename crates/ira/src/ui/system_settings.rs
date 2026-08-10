@@ -40,7 +40,9 @@ pub(super) fn build_override_switch_row(
     let row_c = row.clone();
     let rev_c = reverting.clone();
     row.connect_active_notify(move |_| {
-        if *rev_c.borrow() { return; }
+        if *rev_c.borrow() {
+            return;
+        }
         *state_c.borrow_mut() = Some(row_c.is_active());
         btn_c.set_visible(true);
     });
@@ -137,9 +139,12 @@ pub(super) struct GamescopeWidgets {
 }
 
 fn make_spin_row(
-    title: &str, subtitle: &str,
-    default_val: u32, override_val: Option<u32>,
-    min: f64, max: f64,
+    title: &str,
+    subtitle: &str,
+    default_val: u32,
+    override_val: Option<u32>,
+    min: f64,
+    max: f64,
 ) -> (adw::ActionRow, gtk4::SpinButton, Rc<RefCell<Option<u32>>>) {
     let row = adw::ActionRow::new();
     row.set_title(title);
@@ -159,7 +164,9 @@ fn make_spin_row(
         let btn_c = revert_btn.clone();
         let rev_c = rev.clone();
         spin.connect_value_changed(move |s| {
-            if *rev_c.borrow() { return; }
+            if *rev_c.borrow() {
+                return;
+            }
             *state_c.borrow_mut() = Some(s.value() as u32);
             btn_c.set_visible(true);
         });
@@ -195,7 +202,10 @@ fn make_upscaling_row(
     let selected = if let Some(ov) = override_val {
         UPSCALE_VALUES.iter().position(|&v| v == ov).unwrap_or(0)
     } else {
-        UPSCALE_VALUES.iter().position(|&v| v == default_upscaling).unwrap_or(0)
+        UPSCALE_VALUES
+            .iter()
+            .position(|&v| v == default_upscaling)
+            .unwrap_or(0)
     } as u32;
     row.set_selected(selected);
 
@@ -209,7 +219,9 @@ fn make_upscaling_row(
         let btn_c = revert_btn.clone();
         let rev_c = rev.clone();
         row.connect_selected_item_notify(move |r| {
-            if *rev_c.borrow() { return; }
+            if *rev_c.borrow() {
+                return;
+            }
             let idx = r.selected() as usize;
             let v = UPSCALE_VALUES.get(idx).copied().unwrap_or("linear");
             *state_c.borrow_mut() = Some(v.to_string());
@@ -220,7 +232,10 @@ fn make_upscaling_row(
         let state_c = state.clone();
         let btn_c = revert_btn.clone();
         let rev_c = rev.clone();
-        let default_idx = UPSCALE_VALUES.iter().position(|&v| v == default_upscaling).unwrap_or(0) as u32;
+        let default_idx = UPSCALE_VALUES
+            .iter()
+            .position(|&v| v == default_upscaling)
+            .unwrap_or(0) as u32;
         let row_c = row.clone();
         revert_btn.connect_clicked(move |_| {
             *rev_c.borrow_mut() = true;
@@ -238,30 +253,41 @@ pub(super) fn add_gamescope_rows(
     defaults: &GamescopeDefaults,
     override_vals: Option<&GamescopeOverride>,
 ) -> GamescopeWidgets {
-    let flags_text = override_vals.map(|o| o.flags.as_str()).unwrap_or(&defaults.flags);
+    let flags_text = override_vals
+        .map(|o| o.flags.as_str())
+        .unwrap_or(&defaults.flags);
     let flags = adw::EntryRow::new();
     flags.set_title("Gamescope flags");
     flags.set_text(flags_text);
     expander.add_row(&flags);
 
     let (w_row, w_spin, w_state) = make_spin_row(
-        "Resolution width", "0 = auto",
-        defaults.w, override_vals.and_then(|o| o.w),
-        0.0, 16384.0,
+        "Resolution width",
+        "0 = auto",
+        defaults.w,
+        override_vals.and_then(|o| o.w),
+        0.0,
+        16384.0,
     );
     expander.add_row(&w_row);
 
     let (h_row, h_spin, h_state) = make_spin_row(
-        "Resolution height", "0 = auto",
-        defaults.h, override_vals.and_then(|o| o.h),
-        0.0, 16384.0,
+        "Resolution height",
+        "0 = auto",
+        defaults.h,
+        override_vals.and_then(|o| o.h),
+        0.0,
+        16384.0,
     );
     expander.add_row(&h_row);
 
     let (fps_row, fps_spin, fps_state) = make_spin_row(
-        "FPS limit", "0 = no limit",
-        defaults.fps, override_vals.and_then(|o| o.fps),
-        0.0, 360.0,
+        "FPS limit",
+        "0 = no limit",
+        defaults.fps,
+        override_vals.and_then(|o| o.fps),
+        0.0,
+        360.0,
     );
     expander.add_row(&fps_row);
 

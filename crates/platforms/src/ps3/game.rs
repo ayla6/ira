@@ -1,12 +1,15 @@
 use std::path::Path;
 
-use ira_models::{Game, MergedAchievement};
 use crate::ps4::parse_trop_xml;
+use ira_models::{Game, MergedAchievement};
 
 use super::discovery::Rpcs3Game;
-use super::paths::{trophy_conf_path, tropusr_path, trophy_icon_path, persistent_settings_path};
+use super::paths::{
+    persistent_settings_path_in, rpcs3_config_dir, trophy_conf_path_in, trophy_icon_path_in,
+    tropusr_path_in,
+};
+use super::persistent::{ms_to_hours, parse_persistent_settings};
 use super::tropusr::parse_tropusr;
-use super::persistent::{parse_persistent_settings, ms_to_hours};
 
 /// Metadata for an RPCS3 game, sourced from the DB entry.
 /// Mirrors `ShadPS4GameMeta` but drops the shadPS4 version selector
@@ -26,17 +29,12 @@ pub struct Rpcs3GameMeta {
 /// Trophy definitions come from TROPCONF.SFM (XML, same schema as PS4's TROP.XML).
 /// Unlock state comes from TROPUSR.DAT (binary TLV format).
 /// Playtime and last-played come from persistent_settings.dat (INI).
-pub fn load_rpcs3_game(
-    game: &Rpcs3Game,
-    db_id: i64,
-    meta: &Rpcs3GameMeta,
-    save_dir: &str,
-) -> Game {
+pub fn load_rpcs3_game(game: &Rpcs3Game, db_id: i64, meta: &Rpcs3GameMeta, save_dir: &str) -> Game {
     let npwr_id = &game.npwr_id;
     let serial = &game.serial;
 
     // Playtime + last-played from persistent_settings.dat.
-    let persistent = parse_persistent_settings(&persistent_settings_path());
+    let persistent = parse_persistent_settings(&persistent_settings_path_in(&game.config_dir));
     let playtime = persistent
         .playtime_ms
         .get(serial)
@@ -120,7 +118,7 @@ pub fn load_rpcs3_game(
     ira_parser::populate_image_paths(&image_dir, &mut out);
 
     // Build achievements from TROPCONF.SFM definitions + TROPUSR.DAT unlock state.
-    out.achievements = load_ps3_trophies(npwr_id);
+    out.achievements = load_ps3_trophies_in(npwr_id, &game.config_dir);
     out.total_count = out.achievements.len();
     out.earned_count = out.achievements.iter().filter(|a| a.earned).count();
 
@@ -130,12 +128,16 @@ pub fn load_rpcs3_game(
 /// Load PS3 trophy achievements from TROPCONF.SFM (definitions) + TROPUSR.DAT (unlock state).
 /// Returns an empty vector if the NPWR ID is empty or the files are missing.
 pub fn load_ps3_trophies(npwr_id: &str) -> Vec<MergedAchievement> {
+    load_ps3_trophies_in(npwr_id, &rpcs3_config_dir())
+}
+
+pub fn load_ps3_trophies_in(npwr_id: &str, config_dir: &Path) -> Vec<MergedAchievement> {
     if npwr_id.is_empty() {
         return Vec::new();
     }
 
-    let defs = parse_trop_xml(&trophy_conf_path(npwr_id));
-    let unlock_states = parse_tropusr(&tropusr_path(npwr_id)).unwrap_or_default();
+    let defs = parse_trop_xml(&trophy_conf_path_in(config_dir, npwr_id));
+    let unlock_states = parse_tropusr(&tropusr_path_in(config_dir, npwr_id)).unwrap_or_default();
 
     let mut achievements = Vec::new();
     for def in &defs {
@@ -147,7 +149,7 @@ pub fn load_ps3_trophies(npwr_id: &str) -> Vec<MergedAchievement> {
             .cloned()
             .unwrap_or((false, 0));
 
-        let icon_path = trophy_icon_path(npwr_id, trophy_num);
+        let icon_path = trophy_icon_path_in(config_dir, npwr_id, trophy_num);
         let icon_str = if icon_path.is_file() {
             icon_path.to_string_lossy().into_owned()
         } else {

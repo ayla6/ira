@@ -1,23 +1,30 @@
-use gtk4::prelude::*;
-use adw::prelude::*;
-use crate::Game;
-use crate::AppMessage;
-use crate::strings as S;
-use super::state::SharedState;
-use super::helpers::{open_folder, open_file_location};
 use super::edit_game_dialog::show_edit_game_dialog;
+use super::helpers::{open_file_location, open_folder};
+use super::state::SharedState;
+use crate::strings as S;
+use crate::AppMessage;
+use crate::Game;
+use adw::prelude::*;
 
 pub(super) fn setup_play_action(actions: &gio::SimpleActionGroup, state: SharedState, game: Game) {
     let play_action = gio::SimpleAction::new("play", None);
     play_action.connect_activate(move |_, _| {
         let db_id = game.db_id;
-        let is_running = state.borrow().running_games.lock().unwrap().contains_key(&db_id);
+        let is_running = state
+            .borrow()
+            .running_games
+            .lock()
+            .unwrap()
+            .contains_key(&db_id);
         if is_running {
             super::play_button::stop_game(&state, db_id);
         } else {
             match super::play_button::launch_game(&state, db_id, game.variant_id) {
                 Ok(()) => {
-                    let _ = state.borrow().sender.send(AppMessage::GameStarted(db_id, game.variant_id));
+                    let _ = state
+                        .borrow()
+                        .sender
+                        .send(AppMessage::GameStarted(db_id, game.variant_id));
                 }
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);
@@ -37,7 +44,12 @@ pub(super) fn setup_edit_action(actions: &gio::SimpleActionGroup, state: SharedS
     actions.add_action(&edit_action);
 }
 
-pub(super) fn setup_play_history_action(actions: &gio::SimpleActionGroup, state: SharedState, db_id: i64, variant_id: Option<i64>) {
+pub(super) fn setup_play_history_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    db_id: i64,
+    variant_id: Option<i64>,
+) {
     let play_hist_action = gio::SimpleAction::new("play_history", None);
     play_hist_action.connect_activate(move |_, _| {
         super::play_history::show_play_history_dialog(&state, db_id, variant_id);
@@ -45,7 +57,12 @@ pub(super) fn setup_play_history_action(actions: &gio::SimpleActionGroup, state:
     actions.add_action(&play_hist_action);
 }
 
-pub(super) fn setup_hide_action(actions: &gio::SimpleActionGroup, state: SharedState, db_id: i64, current_hidden: bool) {
+pub(super) fn setup_hide_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    db_id: i64,
+    current_hidden: bool,
+) {
     let hide_action = gio::SimpleAction::new("hide", None);
     hide_action.connect_activate(move |_, _| {
         let new_hidden = !current_hidden;
@@ -57,7 +74,12 @@ pub(super) fn setup_hide_action(actions: &gio::SimpleActionGroup, state: SharedS
                 }
             }
         }
-        if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
+        if let Some(g) = state
+            .borrow_mut()
+            .games
+            .iter_mut()
+            .find(|g| g.db_id == db_id)
+        {
             g.hidden = new_hidden;
         }
         super::sidebar::rebuild_sidebar(&state);
@@ -66,7 +88,11 @@ pub(super) fn setup_hide_action(actions: &gio::SimpleActionGroup, state: SharedS
     actions.add_action(&hide_action);
 }
 
-pub(super) fn setup_delete_game_action(actions: &gio::SimpleActionGroup, state: SharedState, game: Game) {
+pub(super) fn setup_delete_game_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    game: Game,
+) {
     let delete_game_action = gio::SimpleAction::new("delete_game", None);
     delete_game_action.connect_activate(move |_, _| {
         let window = state.borrow().window.clone();
@@ -113,7 +139,11 @@ pub(super) fn setup_delete_game_action(actions: &gio::SimpleActionGroup, state: 
     actions.add_action(&delete_game_action);
 }
 
-pub(super) fn setup_open_game_folder_action(actions: &gio::SimpleActionGroup, game_file: Option<String>, game_folder: Option<String>) {
+pub(super) fn setup_open_game_folder_action(
+    actions: &gio::SimpleActionGroup,
+    game_file: Option<String>,
+    game_folder: Option<String>,
+) {
     let open_game_folder = gio::SimpleAction::new("open_game_folder", None);
     open_game_folder.connect_activate(move |_, _| {
         if let Some(ref file) = game_file {
@@ -125,7 +155,10 @@ pub(super) fn setup_open_game_folder_action(actions: &gio::SimpleActionGroup, ga
     actions.add_action(&open_game_folder);
 }
 
-pub(super) fn setup_open_wine_prefix_action(actions: &gio::SimpleActionGroup, wine_prefix: Option<String>) {
+pub(super) fn setup_open_wine_prefix_action(
+    actions: &gio::SimpleActionGroup,
+    wine_prefix: Option<String>,
+) {
     if let Some(pfx) = wine_prefix {
         let open_wine_prefix = gio::SimpleAction::new("open_wine_prefix", None);
         open_wine_prefix.connect_activate(move |_, _| {
@@ -135,7 +168,11 @@ pub(super) fn setup_open_wine_prefix_action(actions: &gio::SimpleActionGroup, wi
     }
 }
 
-pub(super) fn setup_open_images_action(actions: &gio::SimpleActionGroup, state: SharedState, game: Game) {
+pub(super) fn setup_open_images_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    game: Game,
+) {
     let open_images = gio::SimpleAction::new("open_images", None);
     let save_dir = state.borrow().save_dir.clone();
     open_images.connect_activate(move |_, _| {
@@ -145,21 +182,31 @@ pub(super) fn setup_open_images_action(actions: &gio::SimpleActionGroup, state: 
     actions.add_action(&open_images);
 }
 
-pub(super) fn setup_open_save_location_action(actions: &gio::SimpleActionGroup, state: SharedState, game: Game) {
+pub(super) fn setup_open_save_location_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    game: Game,
+) {
     let open_save = gio::SimpleAction::new("open_save_location", None);
     let save_dir = state.borrow().save_dir.clone();
     open_save.connect_activate(move |_, _| {
         let path = match game.trophy_source {
             ira_models::TrophySource::Gse => format!("{}/emulator_saves/gbe", save_dir),
             ira_models::TrophySource::Nge => format!("{}/emulator_saves/nge", save_dir),
-            _ => ira_launcher::game_saves::centralized_save_dir(&save_dir, &game.app_id).to_string_lossy().into_owned(),
+            _ => ira_launcher::game_saves::centralized_save_dir(&save_dir, &game.app_id)
+                .to_string_lossy()
+                .into_owned(),
         };
         open_folder(&path);
     });
     actions.add_action(&open_save);
 }
 
-pub(super) fn setup_open_steam_status_action(actions: &gio::SimpleActionGroup, state: SharedState, game: Game) {
+pub(super) fn setup_open_steam_status_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    game: Game,
+) {
     let open_status = gio::SimpleAction::new("open_steam_status", None);
     let save_dir = state.borrow().save_dir.clone();
     open_status.connect_activate(move |_, _| {
@@ -169,17 +216,30 @@ pub(super) fn setup_open_steam_status_action(actions: &gio::SimpleActionGroup, s
     actions.add_action(&open_status);
 }
 
-pub(super) fn setup_open_gog_status_action(actions: &gio::SimpleActionGroup, state: SharedState, game: Game) {
+pub(super) fn setup_open_gog_status_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    game: Game,
+) {
     let open_gog = gio::SimpleAction::new("open_gog_status", None);
     let save_dir = state.borrow().save_dir.clone();
     open_gog.connect_activate(move |_, _| {
-        let path = format!("{}/emulator_saves/nge/{}/{}", save_dir, ira_parser::GALAXY_ID, game.platform_id);
+        let path = format!(
+            "{}/emulator_saves/nge/{}/{}",
+            save_dir,
+            ira_parser::GALAXY_ID,
+            game.platform_id
+        );
         open_folder(&path);
     });
     actions.add_action(&open_gog);
 }
 
-pub(super) fn setup_toggle_group_action(actions: &gio::SimpleActionGroup, state: SharedState, game: Game) {
+pub(super) fn setup_toggle_group_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    game: Game,
+) {
     let toggle_group = gio::SimpleAction::new("toggle_group", Some(&i64::static_variant_type()));
     toggle_group.connect_activate(move |_, param| {
         let group_id = param.and_then(|p| p.get::<i64>()).unwrap_or(0);
@@ -196,14 +256,23 @@ pub(super) fn setup_toggle_group_action(actions: &gio::SimpleActionGroup, state:
             if let Err(e) = ira_db::add_game_to_group(&db, game.db_id, group_id) {
                 eprintln!("Failed to add game to group: {}", e);
             }
-            state.borrow_mut().group_members.entry(group_id).or_default().insert(game.db_id);
+            state
+                .borrow_mut()
+                .group_members
+                .entry(group_id)
+                .or_default()
+                .insert(game.db_id);
         }
         super::sidebar::rebuild_sidebar(&state);
     });
     actions.add_action(&toggle_group);
 }
 
-pub(super) fn setup_new_collection_action(actions: &gio::SimpleActionGroup, state: SharedState, game: Game) {
+pub(super) fn setup_new_collection_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    game: Game,
+) {
     let new_collection = gio::SimpleAction::new("new_collection", None);
     new_collection.connect_activate(move |_, _| {
         let window = state.borrow().window.clone();
@@ -217,7 +286,11 @@ pub(super) fn setup_new_collection_action(actions: &gio::SimpleActionGroup, stat
     actions.add_action(&new_collection);
 }
 
-pub(super) fn setup_multi_toggle_group_action(actions: &gio::SimpleActionGroup, state: SharedState, ids: Vec<i64>) {
+pub(super) fn setup_multi_toggle_group_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    ids: Vec<i64>,
+) {
     let toggle_group = gio::SimpleAction::new("toggle_group", Some(&i64::static_variant_type()));
     toggle_group.connect_activate(move |_, param| {
         let group_id = param.and_then(|p| p.get::<i64>()).unwrap_or(0);
@@ -239,7 +312,12 @@ pub(super) fn setup_multi_toggle_group_action(actions: &gio::SimpleActionGroup, 
             } else if let Err(e) = ira_db::add_game_to_group(&db, db_id, group_id) {
                 eprintln!("Failed to add game to group: {}", e);
             } else {
-                state.borrow_mut().group_members.entry(group_id).or_default().insert(db_id);
+                state
+                    .borrow_mut()
+                    .group_members
+                    .entry(group_id)
+                    .or_default()
+                    .insert(db_id);
             }
         }
         super::sidebar::rebuild_sidebar(&state);
@@ -247,7 +325,11 @@ pub(super) fn setup_multi_toggle_group_action(actions: &gio::SimpleActionGroup, 
     actions.add_action(&toggle_group);
 }
 
-pub(super) fn setup_multi_new_collection_action(actions: &gio::SimpleActionGroup, state: SharedState, ids: Vec<i64>) {
+pub(super) fn setup_multi_new_collection_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    ids: Vec<i64>,
+) {
     let new_collection = gio::SimpleAction::new("new_collection", None);
     new_collection.connect_activate(move |_, _| {
         let window = state.borrow().window.clone();
@@ -264,7 +346,12 @@ pub(super) fn setup_multi_new_collection_action(actions: &gio::SimpleActionGroup
     actions.add_action(&new_collection);
 }
 
-pub(super) fn setup_multi_toggle_hide_action(actions: &gio::SimpleActionGroup, state: SharedState, ids: Vec<i64>, all_hidden: bool) {
+pub(super) fn setup_multi_toggle_hide_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    ids: Vec<i64>,
+    all_hidden: bool,
+) {
     let toggle_hide = gio::SimpleAction::new("toggle_hide", None);
     toggle_hide.connect_activate(move |_, _| {
         let new_hidden = !all_hidden;
@@ -293,7 +380,10 @@ pub(super) fn show_collection_name_dialog(
     state: SharedState,
     add_games: impl Fn(&ira_db::DbConn, i64) + 'static,
 ) {
-    let dialog = adw::AlertDialog::new(Some("New collection"), Some("Enter a name for the collection:"));
+    let dialog = adw::AlertDialog::new(
+        Some("New collection"),
+        Some("Enter a name for the collection:"),
+    );
     let entry = gtk4::Entry::new();
     entry.set_placeholder_text(Some("Collection name"));
     entry.set_margin_start(12);
@@ -323,7 +413,10 @@ pub(super) fn show_collection_name_dialog(
                 let groups = ira_db::get_all_groups(&db).unwrap_or_default();
                 let members = ira_db::get_game_ids_in_group(&db, group_id).unwrap_or_default();
                 state.borrow_mut().groups = groups;
-                state.borrow_mut().group_members.insert(group_id, members.into_iter().collect());
+                state
+                    .borrow_mut()
+                    .group_members
+                    .insert(group_id, members.into_iter().collect());
                 super::sidebar::rebuild_sidebar(&state);
             }
             Err(e) => {

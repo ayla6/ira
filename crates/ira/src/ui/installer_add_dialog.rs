@@ -9,8 +9,8 @@ use std::os::unix::fs::PermissionsExt;
 use adw::prelude::*;
 
 use ira_platforms::installer::{
-    extract_data_zip, extract_inno, game_platform, installer_type, is_gog_makeself,
-    is_inno_setup, is_linuxrulez, innoextract_available, split_gog_installer, GamePlatform,
+    extract_data_zip, extract_inno, game_platform, innoextract_available, installer_type,
+    is_gog_makeself, is_inno_setup, is_linuxrulez, split_gog_installer, GamePlatform,
     InstallerType,
 };
 
@@ -63,8 +63,7 @@ pub fn show_installer_add_dialog(state: &SharedState) {
         last_is_windows: false,
     }));
 
-    let default_game_folder =
-        PathBuf::from(&state.borrow().cfg.default_game_folder);
+    let default_game_folder = PathBuf::from(&state.borrow().cfg.default_game_folder);
     let ist = Rc::new(RefCell::new(InstallerState {
         installers: Vec::new(),
         current_index: 0,
@@ -89,7 +88,12 @@ pub fn show_installer_add_dialog(state: &SharedState) {
 fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>) {
     let (content, win, state, profiles) = {
         let w = wizard.borrow();
-        (w.content.clone(), w.win.clone(), w.state.clone(), w.profiles.clone())
+        (
+            w.content.clone(),
+            w.win.clone(),
+            w.state.clone(),
+            w.profiles.clone(),
+        )
     };
     clear_children(&content);
 
@@ -121,30 +125,33 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
         dialog.set_title("Select installer files");
         let ist_c2 = ist_c.clone();
         let list_c2 = list_c.clone();
-        dialog.open_multiple(Some(&win_c), None::<&gtk4::gio::Cancellable>, move |result| {
-            if let Ok(files) = result {
-                let mut ist = ist_c2.borrow_mut();
-                let mut added = false;
-                let mut idx = files.iter::<gtk4::gio::File>();
-                while let Some(Ok(file)) = idx.next() {
-                    if let Some(path) = file.path() {
-                        ist.installers.push(path);
-                        added = true;
+        dialog.open_multiple(
+            Some(&win_c),
+            None::<&gtk4::gio::Cancellable>,
+            move |result| {
+                if let Ok(files) = result {
+                    let mut ist = ist_c2.borrow_mut();
+                    let mut added = false;
+                    let mut idx = files.iter::<gtk4::gio::File>();
+                    while let Some(Ok(file)) = idx.next() {
+                        if let Some(path) = file.path() {
+                            ist.installers.push(path);
+                            added = true;
+                        }
+                    }
+                    drop(ist);
+                    if added {
+                        rebuild_installer_list(&list_c2, &ist_c2);
                     }
                 }
-                drop(ist);
-                if added {
-                    rebuild_installer_list(&list_c2, &ist_c2);
-                }
-            }
-        });
+            },
+        );
     });
     body.append(&add_btn);
 
     let wine_group = adw::PreferencesGroup::new();
     wine_group.set_title("Wine");
-    let profile_row =
-        build_wine_profile_picker(&profiles, None, None, &state, &win);
+    let profile_row = build_wine_profile_picker(&profiles, None, None, &state, &win);
     wine_group.add(&profile_row);
     let wow64_row = adw::SwitchRow::new();
     wow64_row.set_title("Use WOW64");
@@ -161,7 +168,9 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
     if default_folder.as_os_str().is_empty() {
         let row = adw::ActionRow::new();
         row.set_title("Set your PC games folder");
-        row.set_subtitle("Set a default games folder in Settings to enable auto-detection of installed games.");
+        row.set_subtitle(
+            "Set a default games folder in Settings to enable auto-detection of installed games.",
+        );
         guide_group.add(&row);
     } else {
         let row = adw::ActionRow::new();
@@ -332,7 +341,9 @@ fn run_installer(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>
         InstallerType::Linux => {
             if is_gog_makeself(&installer) {
                 run_silent_extraction(wizard, ist, index, ExtractionMethod::Gog);
-            } else if is_linuxrulez(&installer) && ira_platforms::ysi_installer::is_ysi_installer(&installer) {
+            } else if is_linuxrulez(&installer)
+                && ira_platforms::ysi_installer::is_ysi_installer(&installer)
+            {
                 run_silent_extraction(wizard, ist, index, ExtractionMethod::Ysi);
             } else {
                 run_terminal_interactive(wizard, ist, index);
@@ -383,7 +394,11 @@ fn run_silent_extraction(
                 let progress: ira_platforms::ysi_installer::ProgressFn =
                     Box::new(move |_extracted, _total| {});
                 let result = ira_platforms::ysi_installer::extract_ysi_installer(
-                    &installer, &dest, Some(progress), None, None,
+                    &installer,
+                    &dest,
+                    Some(progress),
+                    None,
+                    None,
                 );
                 result.map(|_| ())
             }
@@ -446,7 +461,12 @@ fn run_wine_interactive(
             gamescope: Some(true),
             ..Default::default()
         };
-        ira_launcher::env_builder::apply_performance(&mut cmd, &mut env.clone(), &launch_cfg, &wine);
+        ira_launcher::env_builder::apply_performance(
+            &mut cmd,
+            &mut env.clone(),
+            &launch_cfg,
+            &wine,
+        );
     }
 
     let mut command = std::process::Command::new(&cmd[0]);
@@ -484,7 +504,10 @@ fn run_terminal_interactive(
             eprintln!("Direct execution failed ({}), trying terminal fallback", e);
             let installer_str = installer.to_string_lossy().to_string();
             if !spawn_terminal_fallback(&installer_str) {
-                show_error(wizard, "Failed to start installer: no terminal emulator found");
+                show_error(
+                    wizard,
+                    "Failed to start installer: no terminal emulator found",
+                );
                 on_installer_complete(wizard, ist, index, false);
                 return;
             }
@@ -611,8 +634,10 @@ fn on_installer_complete(
 
     let wizard_c = wizard.clone();
     let ist_c = ist.clone();
-    alert.choose(Some(&win), None::<&gtk4::gio::Cancellable>, move |response| {
-        match response.as_str() {
+    alert.choose(
+        Some(&win),
+        None::<&gtk4::gio::Cancellable>,
+        move |response| match response.as_str() {
             "retry" => run_installer(&wizard_c, &ist_c, index),
             "skip" => {
                 if is_last {
@@ -627,8 +652,8 @@ fn on_installer_complete(
                 wizard_c.borrow().win.close();
             }
             _ => {}
-        }
-    });
+        },
+    );
 }
 
 fn start_post_install(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>) {
@@ -674,7 +699,12 @@ fn flatten_linuxrulez_if_needed(wizard: &Rc<RefCell<Wizard>>, folder: &Path) -> 
 
     // Rename original folder to <name>.lrz
     if let Err(e) = std::fs::rename(folder, &lrz_dir) {
-        eprintln!("Failed to rename {} to {:?}: {}", folder.display(), lrz_dir, e);
+        eprintln!(
+            "Failed to rename {} to {:?}: {}",
+            folder.display(),
+            lrz_dir,
+            e
+        );
         return folder.to_path_buf();
     }
 
@@ -722,13 +752,17 @@ fn flatten_linuxrulez_if_needed(wizard: &Rc<RefCell<Wizard>>, folder: &Path) -> 
     alert.set_close_response("keep");
 
     let lrz_dir_c = lrz_dir.clone();
-    alert.choose(Some(&win), None::<&gtk4::gio::Cancellable>, move |response| {
-        if response == "delete" {
-            if let Err(e) = std::fs::remove_dir_all(&lrz_dir_c) {
-                eprintln!("Failed to delete {:?}: {}", lrz_dir_c, e);
+    alert.choose(
+        Some(&win),
+        None::<&gtk4::gio::Cancellable>,
+        move |response| {
+            if response == "delete" {
+                if let Err(e) = std::fs::remove_dir_all(&lrz_dir_c) {
+                    eprintln!("Failed to delete {:?}: {}", lrz_dir_c, e);
+                }
             }
-        }
-    });
+        },
+    );
 
     clean_dir
 }
@@ -813,7 +847,11 @@ fn start_identify_from_install(
             Ok(ev) => {
                 let terminal = !matches!(ev, WizardEvent::Status(_));
                 handle_installer_identify_event(&wizard_c, &ist_c, ev);
-                if terminal { glib::ControlFlow::Break } else { glib::ControlFlow::Continue }
+                if terminal {
+                    glib::ControlFlow::Break
+                } else {
+                    glib::ControlFlow::Continue
+                }
             }
             Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,

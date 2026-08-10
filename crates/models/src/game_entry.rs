@@ -56,7 +56,14 @@ pub struct GameEntry {
 impl GameEntry {
     /// Build a minimal GameEntry for reloading a game from disk.
     /// Callers can override specific fields (e.g. `entry.title = ...`) as needed.
-    pub fn for_reload(db_id: i64, kind: GameKind, trophy_source: TrophySource, steam_id: &str, game_id: &str, platform_id: &str) -> Self {
+    pub fn for_reload(
+        db_id: i64,
+        kind: GameKind,
+        trophy_source: TrophySource,
+        steam_id: &str,
+        game_id: &str,
+        platform_id: &str,
+    ) -> Self {
         GameEntry {
             id: db_id,
             kind,
@@ -94,12 +101,20 @@ impl GameEntry {
             id: g.db_id,
             kind: g.kind,
             trophy_source: g.trophy_source,
-            steam_id: if g.app_id.is_empty() { String::new() } else { g.app_id.clone() },
+            steam_id: if g.app_id.is_empty() {
+                String::new()
+            } else {
+                g.app_id.clone()
+            },
             game_id: g.app_id.clone(),
             platform_id: g.platform_id.clone(),
             title: g.name.clone(),
             hidden: g.hidden,
-            sgdb_id: if g.sgdb_id.is_empty() { None } else { Some(g.sgdb_id.clone()) },
+            sgdb_id: if g.sgdb_id.is_empty() {
+                None
+            } else {
+                Some(g.sgdb_id.clone())
+            },
             logo_position: g.logo_position.clone(),
             logo_size: g.logo_size,
             manual_unmatch: g.manual_unmatch,
@@ -126,13 +141,14 @@ impl GameEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::asset_type::LogoPosition;
     use crate::game::Game;
     use crate::kind::{GameKind, TrophySource};
-    use crate::asset_type::LogoPosition;
 
     #[test]
     fn test_for_reload_sets_defaults() {
-        let entry = GameEntry::for_reload(42, GameKind::Steam, TrophySource::Gse, "sid", "gid", "pid");
+        let entry =
+            GameEntry::for_reload(42, GameKind::Steam, TrophySource::Gse, "sid", "gid", "pid");
 
         assert_eq!(entry.id, 42);
         assert_eq!(entry.kind, GameKind::Steam);

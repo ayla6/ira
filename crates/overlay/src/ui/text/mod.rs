@@ -23,10 +23,10 @@ use crate::ui::widget::Size;
 
 mod backend;
 
-#[cfg(feature = "pango")]
-mod pango_backend;
 #[cfg(feature = "cosmic-text")]
 mod cosmic_backend;
+#[cfg(feature = "pango")]
+mod pango_backend;
 
 use backend::TextBackend;
 
@@ -72,8 +72,7 @@ compile_error!("At least one of `pango` or `cosmic-text` features must be enable
 pub fn init_fonts() {
     #[cfg(all(feature = "pango", feature = "cosmic-text"))]
     {
-        let want_pango = std::env::var_os("IRA_OVERLAY_TEXT_BACKEND")
-            .is_some_and(|v| v == "pango");
+        let want_pango = std::env::var_os("IRA_OVERLAY_TEXT_BACKEND").is_some_and(|v| v == "pango");
         BACKEND_IDX.store(want_pango as usize, Ordering::Relaxed);
         pango_backend::PangoBackend::init();
         cosmic_backend::CosmicBackend::init();

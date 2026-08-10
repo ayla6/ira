@@ -11,8 +11,14 @@ fn steam_data_dirs() -> Vec<String> {
         format!("{}/.local/share/Steam", home),
         format!("{}/snap/steam/common/.local/share/Steam", home),
         format!("{}/.steam/steam", home),
-        format!("{}/.var/app/com.valvesoftware.Steam/.local/share/Steam", home),
-        format!("{}/.var/app/com.valvesoftware.Steam/.local/share/steam", home),
+        format!(
+            "{}/.var/app/com.valvesoftware.Steam/.local/share/Steam",
+            home
+        ),
+        format!(
+            "{}/.var/app/com.valvesoftware.Steam/.local/share/steam",
+            home
+        ),
         format!("{}/.var/app/com.valvesoftware.Steam/data/steam", home),
         format!("{}/.var/app/com.valvesoftware.Steam/data/Steam", home),
         "/usr/share/steam".to_string(),
@@ -55,8 +61,8 @@ pub(crate) fn is_proton_binary(wine_exe: &str) -> bool {
         None => return false,
     };
     let root_candidate = bin_dir
-        .parent()            // dist or files
-        .and_then(|p| p.parent());  // root
+        .parent() // dist or files
+        .and_then(|p| p.parent()); // root
     match root_candidate {
         Some(root) => root.join("proton").is_file(),
         None => false,
@@ -98,8 +104,11 @@ pub fn find_wine_binary(version: &str, custom_path: &str) -> Result<String, Stri
                     return Ok(c.to_string());
                 }
             }
-            which::which("wine").map(|p| p.to_string_lossy().to_string())
-                .map_err(|_| "System Wine not found. Install wine or set a custom Wine path.".to_string())
+            which::which("wine")
+                .map(|p| p.to_string_lossy().to_string())
+                .map_err(|_| {
+                    "System Wine not found. Install wine or set a custom Wine path.".to_string()
+                })
         }
         "custom" => {
             if custom_path.is_empty() {
@@ -112,24 +121,31 @@ pub fn find_wine_binary(version: &str, custom_path: &str) -> Result<String, Stri
         }
         "winehq-devel" => {
             let p = "/opt/wine-devel/bin/wine";
-            if std::path::Path::new(p).is_file() { Ok(p.to_string()) }
-            else { Err("WineHQ Devel not found at /opt/wine-devel/bin/wine".to_string()) }
+            if std::path::Path::new(p).is_file() {
+                Ok(p.to_string())
+            } else {
+                Err("WineHQ Devel not found at /opt/wine-devel/bin/wine".to_string())
+            }
         }
         "winehq-staging" => {
             let p = "/opt/wine-staging/bin/wine";
-            if std::path::Path::new(p).is_file() { Ok(p.to_string()) }
-            else { Err("WineHQ Staging not found at /opt/wine-staging/bin/wine".to_string()) }
+            if std::path::Path::new(p).is_file() {
+                Ok(p.to_string())
+            } else {
+                Err("WineHQ Staging not found at /opt/wine-staging/bin/wine".to_string())
+            }
         }
         "wine-development" => {
             let p = "/usr/lib/wine-development/wine";
-            if std::path::Path::new(p).is_file() { Ok(p.to_string()) }
-            else { Err("Wine Development not found at /usr/lib/wine-development/wine".to_string()) }
+            if std::path::Path::new(p).is_file() {
+                Ok(p.to_string())
+            } else {
+                Err("Wine Development not found at /usr/lib/wine-development/wine".to_string())
+            }
         }
-        "ge-proton" => {
-            which::which("umu-run")
-                .map(|p| p.to_string_lossy().to_string())
-                .map_err(|_| "umu-run not found in PATH. Install umu-launcher.".to_string())
-        }
+        "ge-proton" => which::which("umu-run")
+            .map(|p| p.to_string_lossy().to_string())
+            .map_err(|_| "umu-run not found in PATH. Install umu-launcher.".to_string()),
         _ => {
             if version.starts_with("wine-") {
                 let sys_path = format!("/usr/lib/{}/bin/wine", version);
@@ -145,10 +161,7 @@ pub fn find_wine_binary(version: &str, custom_path: &str) -> Result<String, Stri
             if std::path::Path::new(&lutris_path).is_file() {
                 return Ok(lutris_path);
             }
-            let our_path = format!(
-                "{}/runners/wine/{}/bin/wine",
-                home, version
-            );
+            let our_path = format!("{}/runners/wine/{}/bin/wine", home, version);
             if std::path::Path::new(&our_path).is_file() {
                 return Ok(our_path);
             }
@@ -160,7 +173,10 @@ pub fn find_wine_binary(version: &str, custom_path: &str) -> Result<String, Stri
                     }
                 }
             }
-            Err(format!("Wine version '{}' not found. Check Lutris runner dir or set a custom Wine path.", version))
+            Err(format!(
+                "Wine version '{}' not found. Check Lutris runner dir or set a custom Wine path.",
+                version
+            ))
         }
     }
 }
@@ -210,14 +226,19 @@ fn scan_proton_versions() -> Vec<(String, String)> {
 }
 
 pub fn detect_wine_versions() -> Vec<(String, String)> {
-    WINE_VERSIONS_CACHE.get_or_init(detect_wine_versions_uncached).clone()
+    WINE_VERSIONS_CACHE
+        .get_or_init(detect_wine_versions_uncached)
+        .clone()
 }
 
 fn detect_wine_versions_uncached() -> Vec<(String, String)> {
     let mut versions: Vec<(String, String)> = Vec::new();
 
     versions.push(("System Wine".to_string(), "system".to_string()));
-    versions.push(("Custom (select executable below)".to_string(), "custom".to_string()));
+    versions.push((
+        "Custom (select executable below)".to_string(),
+        "custom".to_string(),
+    ));
 
     for (label, vers) in &[
         ("WineHQ Devel", "winehq-devel"),
@@ -271,8 +292,12 @@ pub fn detect_arch(prefix: &str, _wine_exe: &str) -> String {
     if reg_path.is_file() {
         if let Ok(content) = std::fs::read_to_string(&reg_path) {
             for line in content.lines().take(5) {
-                if line.contains("win64") { return "win64".to_string(); }
-                if line.contains("win32") { return "win32".to_string(); }
+                if line.contains("win64") {
+                    return "win64".to_string();
+                }
+                if line.contains("win32") {
+                    return "win32".to_string();
+                }
             }
         }
     }
@@ -294,11 +319,15 @@ mod tests {
     fn test_detect_arch_win64() {
         let tmp = tempfile::TempDir::new().unwrap();
         let reg_path = tmp.path().join("system.reg");
-        std::fs::write(&reg_path, r#"[Software\Wine]
+        std::fs::write(
+            &reg_path,
+            r#"[Software\Wine]
 "Source"=-
 #"Win64"=-
 "Architecture"="win64"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         let result = detect_arch(tmp.path().to_string_lossy().as_ref(), "");
         assert_eq!(result, "win64");
     }

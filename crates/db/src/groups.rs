@@ -11,8 +11,11 @@ pub fn create_group(conn: &DbConn, name: &str) -> Result<i64, String> {
 
 pub fn rename_group(conn: &DbConn, id: i64, name: &str) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute("UPDATE groups SET name = ?1 WHERE id = ?2", params![name, id])
-        .map_err(|e| e.to_string())?;
+    c.execute(
+        "UPDATE groups SET name = ?1 WHERE id = ?2",
+        params![name, id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -40,7 +43,9 @@ pub fn get_all_groups(conn: &DbConn) -> Result<Vec<Group>, String> {
             })
         })
         .map_err(|e| e.to_string())?;
-    groups.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    groups
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn add_game_to_group(conn: &DbConn, game_id: i64, group_id: i64) -> Result<(), String> {
@@ -81,7 +86,9 @@ pub fn get_groups_for_game(conn: &DbConn, game_id: i64) -> Result<Vec<Group>, St
             })
         })
         .map_err(|e| e.to_string())?;
-    groups.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    groups
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn get_game_ids_in_group(conn: &DbConn, group_id: i64) -> Result<Vec<i64>, String> {
@@ -92,7 +99,8 @@ pub fn get_game_ids_in_group(conn: &DbConn, group_id: i64) -> Result<Vec<i64>, S
     let ids = stmt
         .query_map(params![group_id], |row| row.get(0))
         .map_err(|e| e.to_string())?;
-    ids.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    ids.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

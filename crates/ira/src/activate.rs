@@ -1,14 +1,14 @@
-use ira_api::SteamDataClient;
 use crate::bench::run_bench;
+use crate::game_list::start_game_list_load;
+use crate::ui::{build_ui, handle_app_message, SharedState};
+use gtk4::glib;
+use ira_api::SteamDataClient;
 use ira_config as config;
 use ira_db as db;
-use crate::game_list::build_game_list;
 use ira_models::{AppMessage, AppSender};
-use ira_platforms::ps4::ShadPS4Watcher;
 use ira_platforms::ps3::Rpcs3Watcher;
-use crate::ui::{build_ui, handle_app_message, SharedState};
+use ira_platforms::ps4::ShadPS4Watcher;
 use ira_watcher::AchievementWatcher;
-use gtk4::glib;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex};
@@ -41,6 +41,33 @@ unsafe extern "C" fn source_destroy(data: glib::ffi::gpointer) {
     let _ = Box::from_raw(data as *mut MainLoopData);
 }
 
+// PRE-RELEASE: remove this function and its call after the existing user's
+// database has been migrated to the global ROM root and virtualboy ID.
+fn migrate_pre_release_data(db: &db::DbConn, cfg: &config::Config) {
+    if let Err(e) = db::migrate_legacy_console_ids(db) {
+        eprintln!("Legacy console ID migration failed: {e}");
+    }
+
+    let _s = tracing::info_span!("migrate_rom_paths").entered();
+    let console_folders: HashMap<String, Vec<String>> = ira_models::all_consoles()
+        .map(|def| {
+            let cc = cfg.console(def.id);
+            let mut folders = Vec::new();
+            if !cc.folder.is_empty() {
+                folders.push(cc.folder.clone());
+            }
+            let effective = cfg.rom_folder(def.id).to_string_lossy().into_owned();
+            if !effective.is_empty() && !folders.contains(&effective) {
+                folders.push(effective);
+            }
+            (def.id.to_string(), folders)
+        })
+        .collect();
+    if let Err(e) = db::migrate_rom_paths_to_relative_from_folders(db, &console_folders) {
+        eprintln!("ROM path migration failed: {e}");
+    }
+}
+
 pub fn activate(app: &adw::Application) -> SharedState {
     let _span = tracing::info_span!("activate").entered();
 
@@ -49,20 +76,16 @@ pub fn activate(app: &adw::Application) -> SharedState {
         config::load_config()
     };
 
+    if let Err(e) = cfg.ensure_rom_folders() {
+        eprintln!("Failed to create ROM library folders: {e}");
+    }
+
     let db = {
         let _s = tracing::info_span!("init_db").entered();
         db::init_db(&format!("{}/ira.db", cfg.save_dir))
     };
 
-    {
-        let _s = tracing::info_span!("migrate_rom_paths").entered();
-        let console_folders: std::collections::HashMap<String, String> = cfg.consoles.iter()
-            .map(|(k, v)| (k.clone(), v.folder.clone()))
-            .collect();
-        if let Err(e) = db::migrate_rom_paths_to_relative(&db, &console_folders) {
-            eprintln!("ROM path migration failed: {e}");
-        }
-    }
+    migrate_pre_release_data(&db, &cfg);
 
     {
         let _s = tracing::info_span!("ensure_skeleton").entered();
@@ -79,31 +102,9 @@ pub fn activate(app: &adw::Application) -> SharedState {
     let (tx, rx) = mpsc::channel::<AppMessage>();
     let sender = AppSender::new(tx, write_fd);
 
-    let shadps4_enabled = cfg.shadps4_enabled;
-    let rpcs3_enabled = cfg.rpcs3_enabled;
-    let steam_enabled = cfg.steam_enabled;
     let save_dir = cfg.save_dir.clone();
-    let sort_mode = cfg.sort_mode;
-    let sort_descending = cfg.sort_descending;
 
-    {
-        let db = db.clone();
-        let sender = sender.clone();
-        let save_dir = save_dir.clone();
-        let ra_config = cfg.clone();
-        std::thread::spawn(move || {
-            let _span = tracing::info_span!("build_game_list_thread").entered();
-            let opts = crate::game_list::GameListOptions {
-                shadps4_enabled,
-                rpcs3_enabled,
-                steam_enabled,
-                sort_mode,
-                sort_descending,
-            };
-            let games = build_game_list(&db, &save_dir, &ra_config, &opts);
-            let _ = sender.send(AppMessage::GamesLoaded(games));
-        });
-    }
+    start_game_list_load(db.clone(), save_dir.clone(), cfg.clone(), sender.clone());
 
     let steam_api_key = cfg.steam_api_key.clone();
     let steam_griddb_api_key = cfg.steam_griddb_api_key.clone();
@@ -136,7 +137,12 @@ pub fn activate(app: &adw::Application) -> SharedState {
 
         state.borrow_mut().steam = steam.clone();
 
-        let watcher = match AchievementWatcher::new(cfg_for_watcher, sender.clone(), save_dir.clone(), Arc::new(crate::game_loader::load_game)) {
+        let watcher = match AchievementWatcher::new(
+            cfg_for_watcher,
+            sender.clone(),
+            save_dir.clone(),
+            Arc::new(crate::game_loader::load_game),
+        ) {
             Ok(w) => {
                 let game_names = w.game_names();
                 state.borrow_mut().game_names = game_names;
@@ -149,7 +155,8 @@ pub fn activate(app: &adw::Application) -> SharedState {
         };
         state.borrow_mut().watcher = watcher;
 
-        let shadps4_watcher = match ShadPS4Watcher::new(sender.clone()) {
+        let shadps4_executable = state.borrow().cfg.shadps4_executable.clone();
+        let shadps4_watcher = match ShadPS4Watcher::new(sender.clone(), &shadps4_executable) {
             Ok(w) => Some(w),
             Err(e) => {
                 eprintln!("shadPS4 playtime watching unavailable: {}", e);
@@ -158,7 +165,8 @@ pub fn activate(app: &adw::Application) -> SharedState {
         };
         state.borrow_mut().shadps4_watcher = shadps4_watcher;
 
-        let rpcs3_watcher = match Rpcs3Watcher::new(sender.clone()) {
+        let rpcs3_executable = state.borrow().cfg.rpcs3_executable.clone();
+        let rpcs3_watcher = match Rpcs3Watcher::new(sender.clone(), &rpcs3_executable) {
             Ok(w) => Some(w),
             Err(e) => {
                 eprintln!("RPCS3 playtime watching unavailable: {}", e);
@@ -197,14 +205,21 @@ pub fn activate(app: &adw::Application) -> SharedState {
         });
         let data_ptr = Box::into_raw(data) as *mut std::ffi::c_void;
         unsafe {
-        let source = g_unix_fd_source_new(read_fd, glib::ffi::G_IO_IN);
-        let func_ptr: unsafe extern "C" fn(i32, u32, glib::ffi::gpointer) -> glib::ffi::gboolean = source_trampoline;
-        glib::ffi::g_source_set_callback(
-            source as *mut glib::ffi::GSource,
-            std::mem::transmute::<unsafe extern "C" fn(i32, u32, glib::ffi::gpointer) -> glib::ffi::gboolean, glib::ffi::GSourceFunc>(func_ptr),
-            data_ptr,
-            Some(source_destroy),
-        );
+            let source = g_unix_fd_source_new(read_fd, glib::ffi::G_IO_IN);
+            let func_ptr: unsafe extern "C" fn(
+                i32,
+                u32,
+                glib::ffi::gpointer,
+            ) -> glib::ffi::gboolean = source_trampoline;
+            glib::ffi::g_source_set_callback(
+                source as *mut glib::ffi::GSource,
+                std::mem::transmute::<
+                    unsafe extern "C" fn(i32, u32, glib::ffi::gpointer) -> glib::ffi::gboolean,
+                    glib::ffi::GSourceFunc,
+                >(func_ptr),
+                data_ptr,
+                Some(source_destroy),
+            );
             glib::ffi::g_source_attach(source as *mut glib::ffi::GSource, std::ptr::null_mut());
             glib::ffi::g_source_unref(source as *mut glib::ffi::GSource);
         }

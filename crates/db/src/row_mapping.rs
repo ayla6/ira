@@ -37,6 +37,8 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameE
     })
 }
 
-pub(crate) fn lock_db(conn: &DbConn) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, String> {
+pub(crate) fn lock_db(
+    conn: &DbConn,
+) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, String> {
     conn.get().map_err(|e| e.to_string())
 }

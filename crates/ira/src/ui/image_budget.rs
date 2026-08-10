@@ -7,7 +7,10 @@ pub struct ImageLoadBudget {
 
 impl ImageLoadBudget {
     pub fn new(budget: usize) -> Self {
-        Self { remaining: budget, deferred: Vec::new() }
+        Self {
+            remaining: budget,
+            deferred: Vec::new(),
+        }
     }
 
     pub fn load(&mut self, img: &gtk4::Image, path: &str) {

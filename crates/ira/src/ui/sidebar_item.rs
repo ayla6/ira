@@ -1,5 +1,5 @@
-use std::cell::{Cell, RefCell};
 use glib::subclass::prelude::*;
+use std::cell::{Cell, RefCell};
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum SidebarItemKind {
@@ -79,7 +79,14 @@ impl SidebarItem {
         Self::new_game_variant(db_id, None, name, icon_path, hidden, playing)
     }
 
-    pub fn new_game_variant(db_id: i64, variant_id: Option<i64>, name: &str, icon_path: &str, hidden: bool, playing: bool) -> Self {
+    pub fn new_game_variant(
+        db_id: i64,
+        variant_id: Option<i64>,
+        name: &str,
+        icon_path: &str,
+        hidden: bool,
+        playing: bool,
+    ) -> Self {
         let obj: Self = glib::Object::new();
         let imp = obj.imp();
         *imp.kind.borrow_mut() = SidebarItemKind::Game;

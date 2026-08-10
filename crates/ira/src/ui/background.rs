@@ -1,21 +1,17 @@
-use gtk4::prelude::*;
-use adw::prelude::*;
-use crate::strings as S;
-use super::state::SharedState;
-use super::state::malloc_trim;
-use super::window::build_window;
-use super::sidebar::{select_row_silently, rebuild_sidebar, find_game_index};
-use super::grid_view::show_grid_view;
 use super::game_display::display_game;
-use super::message_helpers::clear_content;
+use super::grid_view::show_grid_view;
 use super::helpers::clear_children;
+use super::message_helpers::clear_content;
+use super::sidebar::{find_game_index, rebuild_sidebar, select_row_silently};
+use super::state::malloc_trim;
+use super::state::SharedState;
+use super::window::build_window;
+use crate::strings as S;
+use adw::prelude::*;
 
 pub fn show_close_choice_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
-    let dialog = adw::AlertDialog::new(
-        Some(S::CLOSE_VIEWER),
-        Some(S::CLOSE_VIEWER_BODY),
-    );
+    let dialog = adw::AlertDialog::new(Some(S::CLOSE_VIEWER), Some(S::CLOSE_VIEWER_BODY));
     dialog.add_response("cancel", S::CANCEL);
     dialog.add_response("background", S::HIDE_TO_BACKGROUND);
     dialog.add_response("quit", S::QUIT);
@@ -25,18 +21,19 @@ pub fn show_close_choice_dialog(state: &SharedState) {
     dialog.set_close_response("cancel");
 
     let state_clone = state.clone();
-    dialog.connect_response(None, move |_, resp| {
-        match resp {
-            "background" => hide_to_background(&state_clone),
-            "quit" => {
-                let app = state_clone.borrow().window.application()
-                    .expect("no application")
-                    .downcast::<adw::Application>()
-                    .expect("not an adw Application");
-                app.quit();
-            }
-            _ => {}
+    dialog.connect_response(None, move |_, resp| match resp {
+        "background" => hide_to_background(&state_clone),
+        "quit" => {
+            let app = state_clone
+                .borrow()
+                .window
+                .application()
+                .expect("no application")
+                .downcast::<adw::Application>()
+                .expect("not an adw Application");
+            app.quit();
         }
+        _ => {}
     });
     dialog.present(Some(&window));
 }
@@ -45,7 +42,10 @@ pub fn hide_to_background(state: &SharedState) {
     teardown_content(state);
     ira_images::clear_texture_cache();
 
-    let app = state.borrow().window.application()
+    let app = state
+        .borrow()
+        .window
+        .application()
         .expect("no application")
         .downcast::<adw::Application>()
         .expect("not an adw Application");
@@ -56,10 +56,14 @@ pub fn hide_to_background(state: &SharedState) {
     let win = state.borrow().window.clone();
     win.set_visible(false);
 
-    unsafe { malloc_trim(0); }
+    unsafe {
+        malloc_trim(0);
+    }
 
     glib::timeout_add_local(std::time::Duration::from_millis(300), || {
-        unsafe { malloc_trim(0); }
+        unsafe {
+            malloc_trim(0);
+        }
         glib::ControlFlow::Break
     });
 }
@@ -67,7 +71,11 @@ pub fn hide_to_background(state: &SharedState) {
 fn teardown_content(state: &SharedState) {
     let (content_box, grid_header, sidebar_store) = {
         let s = state.borrow();
-        (s.content_box.clone(), s.grid_header.clone(), s.sidebar_store.clone())
+        (
+            s.content_box.clone(),
+            s.grid_header.clone(),
+            s.sidebar_store.clone(),
+        )
     };
 
     clear_children(&content_box);
@@ -94,8 +102,16 @@ pub fn restore_content(state: &SharedState) {
     }
 
     let db_id = ira_models::parse_db_id(&selected_id);
-    let variant_id = selected_id.split("-v").nth(1).and_then(|s| s.parse::<i64>().ok());
-    let game = state.borrow().games.iter().find(|g| g.db_id == db_id && g.variant_id == variant_id).cloned();
+    let variant_id = selected_id
+        .split("-v")
+        .nth(1)
+        .and_then(|s| s.parse::<i64>().ok());
+    let game = state
+        .borrow()
+        .games
+        .iter()
+        .find(|g| g.db_id == db_id && g.variant_id == variant_id)
+        .cloned();
     if let Some(game) = game {
         display_game(&game, state);
 

@@ -1,11 +1,16 @@
+use super::css::*;
+use crate::Game;
 use gtk4::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::mpsc;
-use crate::Game;
-use super::css::*;
 
-pub(super) type LogoControls = (gtk4::Box, Rc<RefCell<String>>, gtk4::Adjustment, Rc<Cell<bool>>);
+pub(super) type LogoControls = (
+    gtk4::Box,
+    Rc<RefCell<String>>,
+    gtk4::Adjustment,
+    Rc<Cell<bool>>,
+);
 
 /// Info needed to show a "Reset to Steam" button on the logo page.
 pub(super) struct SteamLogoReset {
@@ -23,7 +28,11 @@ pub(super) fn build_game_logo_page(
     let logo_page = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
 
     let inherited = game.logo_position.is_empty();
-    let pos_str = if inherited { ira_models::LogoPosition::DEFAULT.to_string() } else { game.logo_position.clone() };
+    let pos_str = if inherited {
+        ira_models::LogoPosition::DEFAULT.to_string()
+    } else {
+        game.logo_position.clone()
+    };
     let selected_pos: Rc<RefCell<String>> = Rc::new(RefCell::new(pos_str));
     let modified: Rc<Cell<bool>> = Rc::new(Cell::new(false));
 
@@ -68,7 +77,9 @@ pub(super) fn build_game_logo_page(
             preview_draw.set_draw_func(move |_area, cr, area_w, area_h| {
                 let w = area_w as f64;
                 let h = area_h as f64;
-                if w <= 0.0 || h <= 0.0 { return; }
+                if w <= 0.0 || h <= 0.0 {
+                    return;
+                }
                 let pct = adj_for_draw.value() as i32;
                 let (lw, lh) = super::game_display::logo_scaled_dims(w, h, pb_w, pb_h, pct);
                 let pos = pos_for_draw.borrow().clone();

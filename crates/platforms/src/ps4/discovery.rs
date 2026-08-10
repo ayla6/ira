@@ -1,10 +1,14 @@
 use std::path::{Path, PathBuf};
 
-use crate::ps4::{parse_psf, psf_get_title, psf_get_title_id, parse_npbind, shadps4_user_dir};
+use crate::ps4::{parse_npbind, parse_psf, psf_get_title, psf_get_title_id, shadps4_user_dir_for};
 
 /// Read install_dirs from shadPS4 config.json
 pub fn read_install_dirs() -> Vec<PathBuf> {
-    let config_path = shadps4_user_dir().join("config.json");
+    read_install_dirs_for_executable("")
+}
+
+pub fn read_install_dirs_for_executable(executable: &str) -> Vec<PathBuf> {
+    let config_path = shadps4_user_dir_for(executable).join("config.json");
     let data = match std::fs::read_to_string(&config_path) {
         Ok(d) => d,
         Err(_) => return Vec::new(),
@@ -19,7 +23,11 @@ pub fn read_install_dirs() -> Vec<PathBuf> {
         .and_then(|d| d.as_array())
         .into_iter()
         .flat_map(|arr| arr.iter())
-        .filter(|dir| dir.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false))
+        .filter(|dir| {
+            dir.get("enabled")
+                .and_then(|e| e.as_bool())
+                .unwrap_or(false)
+        })
         .filter_map(|dir| dir.get("path").and_then(|p| p.as_str()).map(PathBuf::from))
         .collect()
 }
@@ -30,6 +38,7 @@ pub struct ShadPS4Game {
     pub npwr_id: String,
     pub title: String,
     pub game_path: PathBuf,
+    pub user_dir: PathBuf,
 }
 
 /// Recursively scan a directory for game folders (containing sce_sys/param.sfo).
@@ -68,7 +77,12 @@ pub fn scan_dir_for_test(path: &Path, results: &mut Vec<PathBuf>) {
 
 /// Discover all installed shadPS4 games.
 pub fn discover_games() -> Vec<ShadPS4Game> {
-    let install_dirs = read_install_dirs();
+    discover_games_for_executable("")
+}
+
+pub fn discover_games_for_executable(executable: &str) -> Vec<ShadPS4Game> {
+    let install_dirs = read_install_dirs_for_executable(executable);
+    let user_dir = shadps4_user_dir_for(executable);
     let mut game_dirs = Vec::new();
     for dir in &install_dirs {
         scan_dir(dir, &mut game_dirs, 0);
@@ -119,6 +133,7 @@ pub fn discover_games() -> Vec<ShadPS4Game> {
             npwr_id,
             title,
             game_path,
+            user_dir: user_dir.clone(),
         });
     }
 

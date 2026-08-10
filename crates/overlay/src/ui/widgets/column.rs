@@ -8,7 +8,11 @@ pub struct Column {
 
 impl Column {
     pub fn new(spacing: f32, children: Vec<Box<dyn Widget>>) -> Self {
-        Self { children, spacing, bounds: Rect::default() }
+        Self {
+            children,
+            spacing,
+            bounds: Rect::default(),
+        }
     }
 }
 
@@ -20,7 +24,9 @@ impl Widget for Column {
         for child in &self.children {
             let s = child.measure(ctx);
             width = width.max(s.width);
-            if !first { height += self.spacing; }
+            if !first {
+                height += self.spacing;
+            }
             height += s.height;
             first = false;
         }

@@ -187,7 +187,11 @@ mod tests {
     #[test]
     fn test_parse_persistent_settings_ignores_comments() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(tmp.path(), "; comment\n# another\n[Playtime]\nNPUB30698=100\n").unwrap();
+        std::fs::write(
+            tmp.path(),
+            "; comment\n# another\n[Playtime]\nNPUB30698=100\n",
+        )
+        .unwrap();
 
         let data = parse_persistent_settings(tmp.path());
         assert_eq!(data.playtime_ms.get("NPUB30698"), Some(&100));

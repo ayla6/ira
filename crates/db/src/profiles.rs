@@ -16,18 +16,21 @@ pub fn get_all_profiles(conn: &DbConn) -> Result<Vec<WineProfile>, String> {
     let mut stmt = c.prepare(
         "SELECT id, name, wine_version, custom_wine_path, prefix, arch, umu_enabled FROM wine_profiles ORDER BY name",
     ).map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], |row| {
-        Ok(WineProfile {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            wine_version: row.get(2)?,
-            custom_wine_path: row.get(3)?,
-            prefix: row.get(4)?,
-            arch: row.get(5)?,
-            umu_enabled: row.get(6)?,
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(WineProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                wine_version: row.get(2)?,
+                custom_wine_path: row.get(3)?,
+                prefix: row.get(4)?,
+                arch: row.get(5)?,
+                umu_enabled: row.get(6)?,
+            })
         })
-    }).map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn update_profile(conn: &DbConn, profile: &WineProfile) -> Result<(), String> {
@@ -51,17 +54,19 @@ pub fn get_profile(conn: &DbConn, id: i64) -> Result<Option<WineProfile>, String
     let mut stmt = c.prepare(
         "SELECT id, name, wine_version, custom_wine_path, prefix, arch, umu_enabled FROM wine_profiles WHERE id = ?1",
     ).map_err(|e| e.to_string())?;
-    let mut rows = stmt.query_map(params![id], |row| {
-        Ok(WineProfile {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            wine_version: row.get(2)?,
-            custom_wine_path: row.get(3)?,
-            prefix: row.get(4)?,
-            arch: row.get(5)?,
-            umu_enabled: row.get(6)?,
+    let mut rows = stmt
+        .query_map(params![id], |row| {
+            Ok(WineProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                wine_version: row.get(2)?,
+                custom_wine_path: row.get(3)?,
+                prefix: row.get(4)?,
+                arch: row.get(5)?,
+                umu_enabled: row.get(6)?,
+            })
         })
-    }).map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
     if let Some(row) = rows.next() {
         row.map_err(|e| e.to_string()).map(Some)
     } else {

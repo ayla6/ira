@@ -31,7 +31,11 @@ pub fn lutris_db_path() -> PathBuf {
         .map(|p| p.join("lutris").join("pga.db"))
         .unwrap_or_else(|| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            PathBuf::from(home).join(".local").join("share").join("lutris").join("pga.db")
+            PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join("lutris")
+                .join("pga.db")
         })
 }
 
@@ -54,7 +58,10 @@ pub fn load_lutris_games() -> Result<Vec<LutrisGame>, String> {
                 runner: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
                 service: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
                 service_id: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                installed: row.get::<_, Option<i64>>(6)?.map(|i| i != 0).unwrap_or(false),
+                installed: row
+                    .get::<_, Option<i64>>(6)?
+                    .map(|i| i != 0)
+                    .unwrap_or(false),
                 playtime: row.get::<_, Option<f64>>(7)?.unwrap_or(0.0),
                 lastplayed: row.get::<_, Option<i64>>(8)?.unwrap_or(0),
                 platform: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
@@ -72,8 +79,7 @@ pub fn load_lutris_games() -> Result<Vec<LutrisGame>, String> {
 /// Read just `(id, playtime, lastplayed)` for every game in pga.db.
 pub fn load_lutris_playtime() -> Result<Vec<(i64, f64, i64)>, String> {
     let path = lutris_db_path();
-    let conn = Connection::open(&path)
-        .map_err(|e| format!("open {}: {}", path.display(), e))?;
+    let conn = Connection::open(&path).map_err(|e| format!("open {}: {}", path.display(), e))?;
     let mut stmt = conn
         .prepare("SELECT id, playtime, lastplayed FROM games")
         .map_err(|e| e.to_string())?;

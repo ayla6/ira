@@ -27,7 +27,10 @@ fn vulkan_devices() -> &'static Vec<VulkanDevice> {
 /// `vendor:device` PCI ID plus its device UUID (dashes stripped, lowercase).
 /// Empty on failure so callers can fall back gracefully.
 fn vulkan_devices_uncached() -> Vec<VulkanDevice> {
-    let output = match std::process::Command::new("vulkaninfo").arg("--summary").output() {
+    let output = match std::process::Command::new("vulkaninfo")
+        .arg("--summary")
+        .output()
+    {
         Ok(o) if o.status.success() => o.stdout,
         _ => return Vec::new(),
     };
@@ -42,17 +45,25 @@ fn parse_vulkaninfo_summary(output: &str) -> Vec<VulkanDevice> {
         if line.starts_with("GPU") {
             if let Some((pci_id, uuid)) = current.take() {
                 if !pci_id.is_empty() && !uuid.is_empty() {
-                    devices.push(VulkanDevice { pci_id, device_uuid: uuid });
+                    devices.push(VulkanDevice {
+                        pci_id,
+                        device_uuid: uuid,
+                    });
                 }
             }
             current = Some((String::new(), String::new()));
             continue;
         }
-        let Some((key, value)) = line.split_once("= ") else { continue };
-        let Some((pci_id, uuid)) = current.as_mut() else { continue };
+        let Some((key, value)) = line.split_once("= ") else {
+            continue;
+        };
+        let Some((pci_id, uuid)) = current.as_mut() else {
+            continue;
+        };
         match key.trim() {
             "vendorID" | "deviceID" => {
-                let num = u64::from_str_radix(value.trim().trim_start_matches("0x"), 16).unwrap_or(0);
+                let num =
+                    u64::from_str_radix(value.trim().trim_start_matches("0x"), 16).unwrap_or(0);
                 if key.trim() == "vendorID" {
                     pci_id.push_str(&format!("{:04x}:", num));
                 } else {
@@ -65,7 +76,10 @@ fn parse_vulkaninfo_summary(output: &str) -> Vec<VulkanDevice> {
     }
     if let Some((pci_id, uuid)) = current.take() {
         if !pci_id.is_empty() && !uuid.is_empty() {
-            devices.push(VulkanDevice { pci_id, device_uuid: uuid });
+            devices.push(VulkanDevice {
+                pci_id,
+                device_uuid: uuid,
+            });
         }
     }
     devices
@@ -115,7 +129,8 @@ fn detect_gpus_uncached() -> Vec<GpuInfo> {
         Err(_) => return Vec::new(),
     };
 
-    let mut gpus: Vec<_> = entries.flatten()
+    let mut gpus: Vec<_> = entries
+        .flatten()
         .filter_map(|entry| {
             let name = entry.file_name();
             let name_str = name.to_str()?;
@@ -198,8 +213,14 @@ pub fn build_gpu_env(gpu_card: &str) -> Vec<(String, String)> {
     if gpu.is_nvidia {
         env.push(("DRI_PRIME".to_string(), "1".to_string()));
         env.push(("__NV_PRIME_RENDER_OFFLOAD".to_string(), "1".to_string()));
-        env.push(("__GLX_VENDOR_LIBRARY_NAME".to_string(), "nvidia".to_string()));
-        env.push(("__VK_LAYER_NV_optimus".to_string(), "NVIDIA_only".to_string()));
+        env.push((
+            "__GLX_VENDOR_LIBRARY_NAME".to_string(),
+            "nvidia".to_string(),
+        ));
+        env.push((
+            "__VK_LAYER_NV_optimus".to_string(),
+            "NVIDIA_only".to_string(),
+        ));
     } else {
         env.push(("DRI_PRIME".to_string(), gpu.pci_id.clone()));
     }
@@ -211,7 +232,11 @@ pub fn build_gpu_env(gpu_card: &str) -> Vec<(String, String)> {
     // Pin the selected GPU in DXVK by device UUID (matches Lutris). Required on
     // multi-GPU (Optimus) systems where pressure-vessel injects both drivers —
     // otherwise DXVK may pick the iGPU, which breaks GPU-sensitive games.
-    if let Some(uuid) = vulkan_devices().iter().find(|d| d.pci_id == gpu.pci_id).map(|d| d.device_uuid.clone()) {
+    if let Some(uuid) = vulkan_devices()
+        .iter()
+        .find(|d| d.pci_id == gpu.pci_id)
+        .map(|d| d.device_uuid.clone())
+    {
         env.push(("DXVK_FILTER_DEVICE_UUID".to_string(), uuid));
     }
     env

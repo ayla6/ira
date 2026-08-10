@@ -55,9 +55,9 @@ const LINUXRULEZ_MARKER: &[u8] = b"YAD Simple Installer";
 /// `offset=\`head -n ` markers that makeself embeds in its header.
 pub fn is_gog_makeself(path: &Path) -> bool {
     let mut buf = vec![0u8; 10_240];
-    let n = match std::fs::File::open(path).and_then(|mut f| {
-        std::io::Read::read(&mut f, &mut buf).or(Ok(0usize))
-    }) {
+    let n = match std::fs::File::open(path)
+        .and_then(|mut f| std::io::Read::read(&mut f, &mut buf).or(Ok(0usize)))
+    {
         Ok(n) => n,
         Err(_) => return false,
     };
@@ -78,9 +78,9 @@ const INNO_VERSION_STRING: &[u8] = b"Inno Setup Setup Data";
 /// GOG Galaxy-wrapped installers where the header may be embedded deeper).
 pub fn is_inno_setup(path: &Path) -> bool {
     let mut buf = vec![0u8; 65_536];
-    let n = match std::fs::File::open(path).and_then(|mut f| {
-        std::io::Read::read(&mut f, &mut buf).or(Ok(0usize))
-    }) {
+    let n = match std::fs::File::open(path)
+        .and_then(|mut f| std::io::Read::read(&mut f, &mut buf).or(Ok(0usize)))
+    {
         Ok(n) => n,
         Err(_) => return false,
     };
@@ -101,9 +101,9 @@ pub fn is_inno_setup(path: &Path) -> bool {
 /// installed game is a Windows game.
 pub fn is_linuxrulez(path: &Path) -> bool {
     let mut buf = vec![0u8; 10_240];
-    let n = match std::fs::File::open(path).and_then(|mut f| {
-        std::io::Read::read(&mut f, &mut buf).or(Ok(0usize))
-    }) {
+    let n = match std::fs::File::open(path)
+        .and_then(|mut f| std::io::Read::read(&mut f, &mut buf).or(Ok(0usize)))
+    {
         Ok(n) => n,
         Err(_) => return false,
     };
@@ -112,9 +112,7 @@ pub fn is_linuxrulez(path: &Path) -> bool {
 }
 
 pub(super) fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 #[cfg(test)]
@@ -171,10 +169,7 @@ mod tests {
 
     #[test]
     fn test_installer_type_linux_no_extension() {
-        assert_eq!(
-            installer_type(Path::new("installer")),
-            InstallerType::Linux
-        );
+        assert_eq!(installer_type(Path::new("installer")), InstallerType::Linux);
     }
 
     #[test]
@@ -224,8 +219,7 @@ offset=`head -n 519 \"$0\" | wc -c | tr -d \" \"\n\
         let mut buf = vec![0u8; 256];
         buf[0] = b'M';
         buf[1] = b'Z';
-        buf[INNO_MAGIC_OFFSET..INNO_MAGIC_OFFSET + INNO_MAGIC.len()]
-            .copy_from_slice(INNO_MAGIC);
+        buf[INNO_MAGIC_OFFSET..INNO_MAGIC_OFFSET + INNO_MAGIC.len()].copy_from_slice(INNO_MAGIC);
         let path = write_fixture(tmp.path(), "setup.exe", &buf);
         assert!(is_inno_setup(&path));
     }

@@ -1,11 +1,11 @@
 use std::rc::Rc;
 
-use adw::prelude::*;
-use ira_models::WineProfile;
 use super::css::CSS_FLAT;
 use super::helpers::string_list_from;
 use super::profile_dialog::{show_profile_dialog, ProfileDialogCallbacks};
 use super::state::SharedState;
+use adw::prelude::*;
+use ira_models::WineProfile;
 
 /// Build a wine profile `ComboRow` with an attached edit button.
 ///
@@ -77,9 +77,31 @@ pub fn build_wine_profile_picker(
         };
 
         if idx == 0 {
-            show_profile_dialog(&parent, &db, None, &state_c, &win_c, slug_arg, ProfileDialogCallbacks { list_rc: None, on_saved: Some(make_on_saved(true)) });
+            show_profile_dialog(
+                &parent,
+                &db,
+                None,
+                &state_c,
+                &win_c,
+                slug_arg,
+                ProfileDialogCallbacks {
+                    list_rc: None,
+                    on_saved: Some(make_on_saved(true)),
+                },
+            );
         } else if let Some(p) = profiles_c.get(idx - 1) {
-            show_profile_dialog(&parent, &db, Some(p.clone()), &state_c, &win_c, slug_arg, ProfileDialogCallbacks { list_rc: None, on_saved: Some(make_on_saved(false)) });
+            show_profile_dialog(
+                &parent,
+                &db,
+                Some(p.clone()),
+                &state_c,
+                &win_c,
+                slug_arg,
+                ProfileDialogCallbacks {
+                    list_rc: None,
+                    on_saved: Some(make_on_saved(false)),
+                },
+            );
         }
     });
     row.add_suffix(&edit_btn);

@@ -1,12 +1,19 @@
-use gtk4::prelude::*;
 use crate::Game;
+use gtk4::prelude::*;
 
-use super::state::SharedState;
-use super::play_button::play_button;
-use super::game_display::{format_last_played, format_playtime, logo_scaled_dims, logo_position_align};
 use super::css::*;
+use super::game_display::{
+    format_last_played, format_playtime, logo_position_align, logo_scaled_dims,
+};
+use super::play_button::play_button;
+use super::state::SharedState;
 
-pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState, content_width: i32) -> gtk4::Widget {
+pub(super) fn build_game_header(
+    game: &Game,
+    fraction: f64,
+    state: &SharedState,
+    content_width: i32,
+) -> gtk4::Widget {
     let _span = tracing::info_span!("build_game_header", db_id = game.db_id).entered();
     let title_row = build_header_title(game);
     let stats_row = build_header_stats(game, fraction, state);
@@ -28,7 +35,9 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
         let stats_wrapper = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
         stats_wrapper.append(&stats_row);
         let btn_group = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-        if let Some(ref wb) = wine_btn { btn_group.append(wb); }
+        if let Some(ref wb) = wine_btn {
+            btn_group.append(wb);
+        }
         btn_group.append(&settings_btn);
         stats_wrapper.append(&btn_group);
         header.append(&stats_wrapper);
@@ -49,7 +58,9 @@ pub(super) fn build_game_header(game: &Game, fraction: f64, state: &SharedState,
     stats_container.set_margin_bottom(12);
     stats_container.append(&stats_row);
     let btn_group = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
-    if let Some(ref wb) = wine_btn { btn_group.append(wb); }
+    if let Some(ref wb) = wine_btn {
+        btn_group.append(wb);
+    }
     btn_group.append(&settings_btn);
     stats_container.append(&btn_group);
 
@@ -75,7 +86,10 @@ fn build_header_stats(game: &Game, fraction: f64, state: &SharedState) -> gtk4::
     row.append(&play_button(state, game.db_id, game.variant_id));
     let history_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
     history_box.set_valign(gtk4::Align::Center);
-    history_box.append(&stat_label("Last played", &format_last_played(game.last_played)));
+    history_box.append(&stat_label(
+        "Last played",
+        &format_last_played(game.last_played),
+    ));
     let pt_box = stat_label("Play time", &format_playtime(game.playtime));
     history_box.append(&pt_box);
     history_box.add_css_class(CSS_CLICKABLE_STAT);
@@ -116,7 +130,7 @@ fn build_header_stats(game: &Game, fraction: f64, state: &SharedState) -> gtk4::
 }
 
 fn check_wine_enabled(game: &Game, state: &SharedState) -> bool {
-    if game.kind == ira_models::GameKind::Steam || game.kind == ira_models::GameKind::Ps4 || game.kind == ira_models::GameKind::Ps3 {
+    if game.kind != ira_models::GameKind::Wine {
         return false;
     }
     let s = state.borrow();
@@ -136,7 +150,11 @@ fn check_wine_enabled(game: &Game, state: &SharedState) -> bool {
     wine.enabled
 }
 
-fn build_wine_tools_button(state: &SharedState, db_id: i64, wine_enabled: bool) -> Option<gtk4::Widget> {
+fn build_wine_tools_button(
+    state: &SharedState,
+    db_id: i64,
+    wine_enabled: bool,
+) -> Option<gtk4::Widget> {
     if !wine_enabled {
         return None;
     }
@@ -187,18 +205,16 @@ fn add_wine_cmd_action(
         if let Some(exe) = wine_exe {
             let mut cmd = std::process::Command::new(&exe);
             cmd.arg(cmd_arg).env("WINEPREFIX", &prefix);
-            for (k, v) in &env { cmd.env(k, v); }
+            for (k, v) in &env {
+                cmd.env(k, v);
+            }
             let _ = cmd.spawn();
         }
     });
     actions.add_action(&action);
 }
 
-fn add_wine_winetricks_action(
-    actions: &gio::SimpleActionGroup,
-    state: &SharedState,
-    db_id: i64,
-) {
+fn add_wine_winetricks_action(actions: &gio::SimpleActionGroup, state: &SharedState, db_id: i64) {
     let st = state.clone();
     let action = gio::SimpleAction::new("winetricks", None);
     action.connect_activate(move |_, _| {
@@ -211,18 +227,16 @@ fn add_wine_winetricks_action(
                 let path = std::env::var("PATH").unwrap_or_default();
                 cmd.env("PATH", format!("{}:{}", dir.display(), path));
             }
-            for (k, v) in &env { cmd.env(k, v); }
+            for (k, v) in &env {
+                cmd.env(k, v);
+            }
             let _ = cmd.spawn();
         }
     });
     actions.add_action(&action);
 }
 
-fn add_wine_bash_action(
-    actions: &gio::SimpleActionGroup,
-    state: &SharedState,
-    db_id: i64,
-) {
+fn add_wine_bash_action(actions: &gio::SimpleActionGroup, state: &SharedState, db_id: i64) {
     let st = state.clone();
     let action = gio::SimpleAction::new("bash", None);
     action.connect_activate(move |_, _| {
@@ -240,11 +254,7 @@ fn add_wine_bash_action(
     actions.add_action(&action);
 }
 
-fn add_wine_run_exe_action(
-    actions: &gio::SimpleActionGroup,
-    state: &SharedState,
-    db_id: i64,
-) {
+fn add_wine_run_exe_action(actions: &gio::SimpleActionGroup, state: &SharedState, db_id: i64) {
     let st = state.clone();
     let action = gio::SimpleAction::new("run_exe", None);
     action.connect_activate(move |_, _| {
@@ -255,18 +265,24 @@ fn add_wine_run_exe_action(
         filter.add_pattern("*.exe");
         filter.add_pattern("*.msi");
         dialog.set_default_filter(Some(&filter));
-        dialog.open(None::<&adw::ApplicationWindow>, None::<&gio::Cancellable>, move |result| {
-            if let Ok(file) = result {
-                if let Some(path) = file.path() {
-                    if let Some(ref exe) = wine_exe {
-                        let mut cmd = std::process::Command::new(exe);
-                        cmd.arg(&path).env("WINEPREFIX", &prefix);
-                        for (k, v) in &env { cmd.env(k, v); }
-                        let _ = cmd.spawn();
+        dialog.open(
+            None::<&adw::ApplicationWindow>,
+            None::<&gio::Cancellable>,
+            move |result| {
+                if let Ok(file) = result {
+                    if let Some(path) = file.path() {
+                        if let Some(ref exe) = wine_exe {
+                            let mut cmd = std::process::Command::new(exe);
+                            cmd.arg(&path).env("WINEPREFIX", &prefix);
+                            for (k, v) in &env {
+                                cmd.env(k, v);
+                            }
+                            let _ = cmd.spawn();
+                        }
                     }
                 }
-            }
-        });
+            },
+        );
     });
     actions.add_action(&action);
 }
@@ -299,7 +315,13 @@ fn build_settings_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
     btn.upcast::<gtk4::Widget>()
 }
 
-fn build_hero_overlay(game: &Game, content_width: i32, hero_path: &str, has_hero: bool, has_logo: bool) -> gtk4::Overlay {
+fn build_hero_overlay(
+    game: &Game,
+    content_width: i32,
+    hero_path: &str,
+    has_hero: bool,
+    has_logo: bool,
+) -> gtk4::Overlay {
     let overlay = gtk4::Overlay::new();
     overlay.set_vexpand(false);
     overlay.set_hexpand(true);
@@ -418,7 +440,10 @@ fn stat_label(caption: &str, value: &str) -> gtk4::Box {
     vbox
 }
 
-fn get_wine_cmd_env(state: &SharedState, db_id: i64) -> (Option<String>, String, Vec<(String, String)>) {
+fn get_wine_cmd_env(
+    state: &SharedState,
+    db_id: i64,
+) -> (Option<String>, String, Vec<(String, String)>) {
     let s = state.borrow();
     let config = ira_db::get_game_config(&s.db, db_id).ok().flatten();
     let app_default = s.cfg.default_wine_config.clone();
@@ -434,7 +459,8 @@ fn get_wine_cmd_env(state: &SharedState, db_id: i64) -> (Option<String>, String,
     }
     wine = wine.merge_with_default(&app_default);
     let prefix = ira_launcher::wine_launch::wine_prefix(&wine);
-    let exe = ira_launcher::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path).ok();
+    let exe =
+        ira_launcher::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path).ok();
     let env = ira_launcher::wine_launch::build_wine_env(&wine, exe.as_deref().unwrap_or(""));
     (exe, prefix, env)
 }

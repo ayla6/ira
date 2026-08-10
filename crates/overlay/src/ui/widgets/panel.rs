@@ -15,7 +15,13 @@ impl Panel {
         corner_radius: f32,
         child: Box<dyn Widget>,
     ) -> Self {
-        Self { child, padding, bg_color, corner_radius, bounds: Rect::default() }
+        Self {
+            child,
+            padding,
+            bg_color,
+            corner_radius,
+            bounds: Rect::default(),
+        }
     }
 }
 
@@ -41,8 +47,12 @@ impl Widget for Panel {
 
     fn draw(&self, ctx: &mut DrawCtx) {
         ctx.push_rect(
-            self.bounds.x, self.bounds.y, self.bounds.width, self.bounds.height,
-            self.bg_color, self.corner_radius,
+            self.bounds.x,
+            self.bounds.y,
+            self.bounds.width,
+            self.bounds.height,
+            self.bg_color,
+            self.corner_radius,
         );
         self.child.draw(ctx);
     }

@@ -6,8 +6,8 @@ use std::sync::{Mutex, OnceLock};
 
 use ira_overlay_ipc::{InputEventRaw, MappedShm};
 use ira_overlay_ipc::{
-    DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS, DEFAULT_SCREENSHOT_KEYCODE,
-    DEFAULT_SCREENSHOT_MODS, DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+    DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS, DEFAULT_SCREENSHOT_KEYCODE,
+    DEFAULT_SCREENSHOT_MODS, DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
 };
 
 pub static OVERLAY_VISIBLE: AtomicBool = AtomicBool::new(false);
@@ -30,7 +30,11 @@ static OVERLAY_ACTIVE_INIT: AtomicBool = AtomicBool::new(false);
 pub fn overlay_active() -> bool {
     if !OVERLAY_ACTIVE_INIT.load(Ordering::Relaxed) {
         let active = std::env::var_os("IRA_OVERLAY_SHM").is_some();
-        eprintln!("ira-overlay-shim: overlay_active={} shm={:?}", active, std::env::var_os("IRA_OVERLAY_SHM"));
+        eprintln!(
+            "ira-overlay-shim: overlay_active={} shm={:?}",
+            active,
+            std::env::var_os("IRA_OVERLAY_SHM")
+        );
         OVERLAY_ACTIVE_CACHED.store(active, Ordering::Relaxed);
         OVERLAY_ACTIVE_INIT.store(true, Ordering::Relaxed);
         active
@@ -77,7 +81,9 @@ pub fn set_visible(v: bool) {
     OVERLAY_VISIBLE.store(v, Ordering::SeqCst);
     if let Some(shm) = shm() {
         if let Ok(shm) = shm.lock() {
-            shm.header().overlay_visible.store(if v { 1 } else { 0 }, Ordering::SeqCst);
+            shm.header()
+                .overlay_visible
+                .store(if v { 1 } else { 0 }, Ordering::SeqCst);
         }
     }
 }
@@ -131,25 +137,55 @@ fn now_ms() -> u32 {
 pub fn hotkeys() -> (u32, u32, u32, u32, u32, u32) {
     let Some(shm) = shm() else {
         return (
-            DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
-            DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS,
-            DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+            DEFAULT_TOGGLE_KEYCODE,
+            DEFAULT_TOGGLE_MODS,
+            DEFAULT_SCREENSHOT_KEYCODE,
+            DEFAULT_SCREENSHOT_MODS,
+            DEFAULT_RECORD_KEYCODE,
+            DEFAULT_RECORD_MODS,
         );
     };
     let Ok(shm) = shm.lock() else {
         return (
-            DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
-            DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS,
-            DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+            DEFAULT_TOGGLE_KEYCODE,
+            DEFAULT_TOGGLE_MODS,
+            DEFAULT_SCREENSHOT_KEYCODE,
+            DEFAULT_SCREENSHOT_MODS,
+            DEFAULT_RECORD_KEYCODE,
+            DEFAULT_RECORD_MODS,
         );
     };
     let hdr = shm.header();
-    let tog_kc = if hdr.toggle_keysym == 0 { DEFAULT_TOGGLE_KEYCODE } else { hdr.toggle_keysym };
-    let tog_mods = if hdr.toggle_keysym == 0 { DEFAULT_TOGGLE_MODS } else { hdr.toggle_mods };
-    let ss_kc = if hdr.screenshot_keysym == 0 { DEFAULT_SCREENSHOT_KEYCODE } else { hdr.screenshot_keysym };
-    let ss_mods = if hdr.screenshot_keysym == 0 { DEFAULT_SCREENSHOT_MODS } else { hdr.screenshot_mods };
-    let rec_kc = if hdr.record_keysym == 0 { DEFAULT_RECORD_KEYCODE } else { hdr.record_keysym };
-    let rec_mods = if hdr.record_keysym == 0 { DEFAULT_RECORD_MODS } else { hdr.record_mods };
+    let tog_kc = if hdr.toggle_keysym == 0 {
+        DEFAULT_TOGGLE_KEYCODE
+    } else {
+        hdr.toggle_keysym
+    };
+    let tog_mods = if hdr.toggle_keysym == 0 {
+        DEFAULT_TOGGLE_MODS
+    } else {
+        hdr.toggle_mods
+    };
+    let ss_kc = if hdr.screenshot_keysym == 0 {
+        DEFAULT_SCREENSHOT_KEYCODE
+    } else {
+        hdr.screenshot_keysym
+    };
+    let ss_mods = if hdr.screenshot_keysym == 0 {
+        DEFAULT_SCREENSHOT_MODS
+    } else {
+        hdr.screenshot_mods
+    };
+    let rec_kc = if hdr.record_keysym == 0 {
+        DEFAULT_RECORD_KEYCODE
+    } else {
+        hdr.record_keysym
+    };
+    let rec_mods = if hdr.record_keysym == 0 {
+        DEFAULT_RECORD_MODS
+    } else {
+        hdr.record_mods
+    };
     (tog_kc, tog_mods, ss_kc, ss_mods, rec_kc, rec_mods)
 }
 
@@ -160,8 +196,12 @@ pub fn is_visible() -> bool {
     // Also check SHM — the standalone overlay may have toggled visibility
     // directly (e.g., via its own keyboard handler) without going through
     // the shim's set_visible().
-    let Some(shm) = shm() else { return false; };
-    let Ok(shm) = shm.lock() else { return false; };
+    let Some(shm) = shm() else {
+        return false;
+    };
+    let Ok(shm) = shm.lock() else {
+        return false;
+    };
     shm.header().overlay_visible.load(Ordering::SeqCst) != 0
 }
 
@@ -197,7 +237,8 @@ pub fn has_sdl() -> bool {
         // searches all loaded libraries regardless of their path, which is
         // more reliable for AppImages that load SDL from non-standard paths.
         let sdl_init = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"SDL_Init".as_ptr()) };
-        let sdl_gamepad = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"SDL_GameControllerOpen".as_ptr()) };
+        let sdl_gamepad =
+            unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"SDL_GameControllerOpen".as_ptr()) };
         let sdl3_gamepad = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"SDL_OpenGamepad".as_ptr()) };
         let found = !sdl_init.is_null() || !sdl_gamepad.is_null() || !sdl3_gamepad.is_null();
         if found {

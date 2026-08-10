@@ -3,8 +3,8 @@ use gtk4::subclass::prelude::ObjectSubclassIsExt;
 
 mod imp {
     use crate::Game;
-    use std::cell::RefCell;
     use glib::subclass::prelude::*;
+    use std::cell::RefCell;
 
     #[derive(Default)]
     pub struct GameItem {

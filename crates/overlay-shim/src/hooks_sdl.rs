@@ -64,9 +64,16 @@ fn real_poll_event() -> Option<PollEventFn> {
                 let fn_ptr = libc::dlsym(libc::RTLD_DEFAULT, c"SDL_OpenGamepad".as_ptr());
                 !fn_ptr.is_null()
             };
-            let offset = if is_sdl3 { EV_BUTTON_OFFSET_SDL3 } else { EV_BUTTON_OFFSET_SDL2 };
+            let offset = if is_sdl3 {
+                EV_BUTTON_OFFSET_SDL3
+            } else {
+                EV_BUTTON_OFFSET_SDL2
+            };
             let _ = BUTTON_OFFSET.set(offset);
-            eprintln!("ira-overlay: SDL_PollEvent hooked (SDL3={}, button offset={})", is_sdl3, offset);
+            eprintln!(
+                "ira-overlay: SDL_PollEvent hooked (SDL3={}, button offset={})",
+                is_sdl3, offset
+            );
             Some(unsafe { std::mem::transmute::<*mut libc::c_void, PollEventFn>(p) })
         } else {
             None
@@ -90,29 +97,59 @@ fn handle_button(button: u8) {
     }
 
     // Other buttons only when overlay is visible.
-    if !state::is_visible() { return; }
+    if !state::is_visible() {
+        return;
+    }
 
     let event = match button {
         BTN_A => InputEventRaw {
-            event_type: 3, x: 0, y: 0, button: 0, keycode: KC_RETURN,
+            event_type: 3,
+            x: 0,
+            y: 0,
+            button: 0,
+            keycode: KC_RETURN,
         },
         BTN_DPAD_UP => InputEventRaw {
-            event_type: 3, x: 0, y: 0, button: 0, keycode: KC_UP,
+            event_type: 3,
+            x: 0,
+            y: 0,
+            button: 0,
+            keycode: KC_UP,
         },
         BTN_DPAD_DOWN => InputEventRaw {
-            event_type: 3, x: 0, y: 0, button: 0, keycode: KC_DOWN,
+            event_type: 3,
+            x: 0,
+            y: 0,
+            button: 0,
+            keycode: KC_DOWN,
         },
         BTN_DPAD_LEFT => InputEventRaw {
-            event_type: 3, x: 0, y: 0, button: 0, keycode: KC_LEFT,
+            event_type: 3,
+            x: 0,
+            y: 0,
+            button: 0,
+            keycode: KC_LEFT,
         },
         BTN_DPAD_RIGHT => InputEventRaw {
-            event_type: 3, x: 0, y: 0, button: 0, keycode: KC_RIGHT,
+            event_type: 3,
+            x: 0,
+            y: 0,
+            button: 0,
+            keycode: KC_RIGHT,
         },
         BTN_LEFTSHOULDER => InputEventRaw {
-            event_type: 7, x: 0, y: -1, button: 0, keycode: 0,
+            event_type: 7,
+            x: 0,
+            y: -1,
+            button: 0,
+            keycode: 0,
         },
         BTN_RIGHTSHOULDER => InputEventRaw {
-            event_type: 7, x: 0, y: 1, button: 0, keycode: 0,
+            event_type: 7,
+            x: 0,
+            y: 1,
+            button: 0,
+            keycode: 0,
         },
         _ => return,
     };
@@ -133,9 +170,13 @@ pub unsafe extern "C" fn SDL_PollEvent(event: *mut c_void) -> i32 {
     let mut consumed = 0;
     loop {
         let result = real_fn(event);
-        if result == 0 { return 0; }
+        if result == 0 {
+            return 0;
+        }
 
-        if !state::overlay_active() { return result; }
+        if !state::overlay_active() {
+            return result;
+        }
 
         let event_type = *(event as *const u32);
         if event_type == SDL_CONTROLLERBUTTONDOWN || event_type == SDL_JOYBUTTONDOWN {
@@ -143,7 +184,11 @@ pub unsafe extern "C" fn SDL_PollEvent(event: *mut c_void) -> i32 {
 
             // Log Guide button presses for diagnostics
             if button == BTN_GUIDE {
-                eprintln!("ira-overlay: Guide button pressed (event_type=0x{:x}, visible={})", event_type, state::is_visible());
+                eprintln!(
+                    "ira-overlay: Guide button pressed (event_type=0x{:x}, visible={})",
+                    event_type,
+                    state::is_visible()
+                );
             }
 
             handle_button(button);

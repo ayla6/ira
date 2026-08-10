@@ -21,8 +21,7 @@ impl DebouncedFileWatcher {
         let watch_dir = file_path.parent().ok_or("no parent directory")?;
 
         let (tx, rx) = std::sync::mpsc::channel();
-        let nw = RecommendedWatcher::new(tx, NotifyConfig::default())
-            .map_err(|e| e.to_string())?;
+        let nw = RecommendedWatcher::new(tx, NotifyConfig::default()).map_err(|e| e.to_string())?;
         let watcher = Arc::new(Mutex::new(nw));
 
         {
@@ -39,12 +38,13 @@ impl DebouncedFileWatcher {
             loop {
                 match rx.recv_timeout(Duration::from_millis(500)) {
                     Ok(Ok(event)) => {
-                        let is_target = event.paths.iter().any(|p| {
-                            p.file_name().and_then(|n| n.to_str()) == Some(&file_name)
-                        }) && matches!(
-                            event.kind,
-                            EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-                        );
+                        let is_target =
+                            event.paths.iter().any(|p| {
+                                p.file_name().and_then(|n| n.to_str()) == Some(&file_name)
+                            }) && matches!(
+                                event.kind,
+                                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                            );
                         if is_target {
                             last_event = std::time::Instant::now();
                             pending = true;

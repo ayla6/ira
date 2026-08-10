@@ -55,7 +55,10 @@ impl AtlasCache {
 static ATLAS_CACHE: OnceLock<Mutex<AtlasCache>> = OnceLock::new();
 
 pub(crate) fn lock_cache() -> std::sync::MutexGuard<'static, AtlasCache> {
-    ATLAS_CACHE.get_or_init(|| Mutex::new(AtlasCache::new())).lock().unwrap()
+    ATLAS_CACHE
+        .get_or_init(|| Mutex::new(AtlasCache::new()))
+        .lock()
+        .unwrap()
 }
 
 pub fn clear_cache() {
@@ -64,9 +67,22 @@ pub fn clear_cache() {
 
 /// Packs a glyph of the given dimensions into the atlas.
 /// Stores the glyph's bearing offsets for later positioning.
-pub fn pack_glyph(cache: &mut AtlasCache, w: u32, h: u32, offset_x: i32, offset_y: i32) -> AtlasSlot {
+pub fn pack_glyph(
+    cache: &mut AtlasCache,
+    w: u32,
+    h: u32,
+    offset_x: i32,
+    offset_y: i32,
+) -> AtlasSlot {
     if w == 0 || h == 0 {
-        return AtlasSlot { x: 0, y: 0, w: 0, h: 0, offset_x, offset_y };
+        return AtlasSlot {
+            x: 0,
+            y: 0,
+            w: 0,
+            h: 0,
+            offset_x,
+            offset_y,
+        };
     }
     let padded_w = w + 1;
     let padded_h = h + 1;
@@ -77,12 +93,22 @@ pub fn pack_glyph(cache: &mut AtlasCache, w: u32, h: u32, offset_x: i32, offset_
     }
     if cache.cursor_y + padded_h > ATLAS_HEIGHT {
         eprintln!("ira-overlay: glyph atlas full");
-        return AtlasSlot { x: 0, y: 0, w: 0, h: 0, offset_x, offset_y };
+        return AtlasSlot {
+            x: 0,
+            y: 0,
+            w: 0,
+            h: 0,
+            offset_x,
+            offset_y,
+        };
     }
     let slot = AtlasSlot {
         x: cache.cursor_x,
         y: cache.cursor_y,
-        w, h, offset_x, offset_y,
+        w,
+        h,
+        offset_x,
+        offset_y,
     };
     cache.cursor_x += padded_w;
     cache.row_height = cache.row_height.max(padded_h);

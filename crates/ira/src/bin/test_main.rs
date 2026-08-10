@@ -39,7 +39,12 @@ fn test_psf() {
                 Ok(psf) => {
                     let title = ps4::psf_get_title(&psf);
                     let serial = ps4::psf_get_title_id(&psf);
-                    println!("  {} -> title='{}' serial='{}'", game_dir.display(), title, serial);
+                    println!(
+                        "  {} -> title='{}' serial='{}'",
+                        game_dir.display(),
+                        title,
+                        serial
+                    );
                 }
                 Err(e) => println!("  {} -> ERROR: {}", game_dir.display(), e),
             }
@@ -83,7 +88,13 @@ fn test_trophies() {
         let unlocks = ps4::parse_user_trophies(&user_xml);
 
         let earned = unlocks.values().filter(|(e, _)| *e).count();
-        println!("  {} ({}): {}/{} earned", g.title, g.npwr_id, earned, defs.len());
+        println!(
+            "  {} ({}): {}/{} earned",
+            g.title,
+            g.npwr_id,
+            earned,
+            defs.len()
+        );
 
         for def in defs.iter().take(3) {
             let (earned, _ts) = unlocks.get(&def.id).cloned().unwrap_or((false, 0));

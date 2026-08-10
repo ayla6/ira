@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use ira_models::{UfsSaveFile, UfsRootOverride};
+use ira_models::{UfsRootOverride, UfsSaveFile};
 
 /// Safely migrate contents of `source` into `target` by copying each file,
 /// verifying the copy matches the original, and only then deleting the source.
@@ -21,7 +21,11 @@ pub(crate) fn safe_migrate_dir_contents(source: &Path, target: &Path) -> usize {
         if src.is_dir() {
             let sub_count = safe_migrate_dir_contents(&src, &dst);
             count += sub_count;
-            if sub_count > 0 || std::fs::read_dir(&src).map(|mut e| e.next().is_none()).unwrap_or(true) {
+            if sub_count > 0
+                || std::fs::read_dir(&src)
+                    .map(|mut e| e.next().is_none())
+                    .unwrap_or(true)
+            {
                 let _ = std::fs::remove_dir(&src);
             }
         } else {
@@ -136,7 +140,12 @@ pub fn saves_are_centralized(
         return false;
     }
     deduped.iter().all(|rp| {
-        if rp.default_path.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+        if rp
+            .default_path
+            .symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+        {
             return true;
         }
         if !rp.default_path.exists() {
@@ -204,14 +213,29 @@ fn resolve_wine_paths(
 
     let users = wine_user_dirs(prefix);
     if users.is_empty() {
-        let steamuser = Path::new(prefix).join("drive_c").join("users").join("steamuser");
+        let steamuser = Path::new(prefix)
+            .join("drive_c")
+            .join("users")
+            .join("steamuser");
         let _ = std::fs::create_dir_all(&steamuser);
-        return resolve_wine_paths_for_user(&steamuser, &base_rels, &parent_path, &symlink_name, centralized);
+        return resolve_wine_paths_for_user(
+            &steamuser,
+            &base_rels,
+            &parent_path,
+            &symlink_name,
+            centralized,
+        );
     }
 
     let mut result = Vec::new();
     for user_dir in users {
-        result.extend(resolve_wine_paths_for_user(&user_dir, &base_rels, &parent_path, &symlink_name, centralized));
+        result.extend(resolve_wine_paths_for_user(
+            &user_dir,
+            &base_rels,
+            &parent_path,
+            &symlink_name,
+            centralized,
+        ));
     }
     result
 }
@@ -256,7 +280,9 @@ fn resolve_linux_paths(
     rootoverrides: &[UfsRootOverride],
     centralized: &Path,
 ) -> Vec<ResolvedSavePath> {
-    let ro = rootoverrides.iter().find(|r| r.os == "Linux" && r.root == sf.root);
+    let ro = rootoverrides
+        .iter()
+        .find(|r| r.os == "Linux" && r.root == sf.root);
     let Some(ro) = ro else { return Vec::new() };
 
     let base = linux_root_base(&ro.useinstead);
@@ -292,21 +318,37 @@ fn linux_root_base(root: &str) -> Option<PathBuf> {
     match root {
         "LinuxHome" => {
             let home = std::env::var("HOME").unwrap_or_default();
-            if home.is_empty() { None } else { Some(PathBuf::from(home)) }
+            if home.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(home))
+            }
         }
         "LinuxXdgDataHome" => {
             if let Ok(x) = std::env::var("XDG_DATA_HOME") {
-                if !x.is_empty() { return Some(PathBuf::from(x)); }
+                if !x.is_empty() {
+                    return Some(PathBuf::from(x));
+                }
             }
             let home = std::env::var("HOME").unwrap_or_default();
-            if home.is_empty() { None } else { Some(PathBuf::from(format!("{}/.local/share", home))) }
+            if home.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(format!("{}/.local/share", home)))
+            }
         }
         "LinuxXdgConfigHome" => {
             if let Ok(x) = std::env::var("XDG_CONFIG_HOME") {
-                if !x.is_empty() { return Some(PathBuf::from(x)); }
+                if !x.is_empty() {
+                    return Some(PathBuf::from(x));
+                }
             }
             let home = std::env::var("HOME").unwrap_or_default();
-            if home.is_empty() { None } else { Some(PathBuf::from(format!("{}/.config", home))) }
+            if home.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(format!("{}/.config", home)))
+            }
         }
         _ => None,
     }
@@ -602,7 +644,9 @@ mod tests {
         }];
 
         let count = setup_game_saves(
-            &savefiles, &[], "123456",
+            &savefiles,
+            &[],
+            "123456",
             save_dir.to_str().unwrap(),
             Some(prefix.to_str().unwrap()),
         );
@@ -641,7 +685,9 @@ mod tests {
         std::env::set_var("HOME", home);
 
         let count = setup_game_saves(
-            &savefiles, &rootoverrides, "123456",
+            &savefiles,
+            &rootoverrides,
+            "123456",
             save_dir.to_str().unwrap(),
             None,
         );
@@ -664,7 +710,9 @@ mod tests {
         }];
 
         let count = setup_game_saves(
-            &savefiles, &[], "123456",
+            &savefiles,
+            &[],
+            "123456",
             save_dir.to_str().unwrap(),
             Some(prefix.to_str().unwrap()),
         );
@@ -681,8 +729,11 @@ mod tests {
             recursive: false,
         }];
         assert!(!saves_are_centralized(
-            &savefiles, &[], "123456",
-            tmp.path().to_str().unwrap(), None,
+            &savefiles,
+            &[],
+            "123456",
+            tmp.path().to_str().unwrap(),
+            None,
         ));
     }
 
@@ -705,7 +756,13 @@ mod tests {
         let count = setup_game_saves(&savefiles, &[], "123456", save_dir_str, Some(prefix_str));
         assert_eq!(count, 1);
 
-        assert!(saves_are_centralized(&savefiles, &[], "123456", save_dir_str, Some(prefix_str)));
+        assert!(saves_are_centralized(
+            &savefiles,
+            &[],
+            "123456",
+            save_dir_str,
+            Some(prefix_str)
+        ));
     }
 
     #[test]
@@ -718,7 +775,11 @@ mod tests {
 
         // Centralized dir exists with data too, but the default path is a
         // real directory (not a symlink) — not centralized yet.
-        let centralized = save_dir.join("saves").join("123456").join("default").join("Saves");
+        let centralized = save_dir
+            .join("saves")
+            .join("123456")
+            .join("default")
+            .join("Saves");
         std::fs::create_dir_all(&centralized).unwrap();
         std::fs::write(centralized.join("save.dat"), b"data").unwrap();
 
@@ -743,8 +804,11 @@ mod tests {
         std::env::set_var("HOME", home);
 
         assert!(!saves_are_centralized(
-            &savefiles, &rootoverrides, "123456",
-            save_dir.to_str().unwrap(), None,
+            &savefiles,
+            &rootoverrides,
+            "123456",
+            save_dir.to_str().unwrap(),
+            None,
         ));
     }
 
@@ -752,7 +816,11 @@ mod tests {
     fn test_saves_are_centralized_true_when_data_in_centralized_but_default_absent() {
         let tmp = tempfile::tempdir().unwrap();
         let save_dir = tmp.path().join("saves_dir");
-        let centralized = save_dir.join("saves").join("123456").join("Game").join("Saves");
+        let centralized = save_dir
+            .join("saves")
+            .join("123456")
+            .join("Game")
+            .join("Saves");
         std::fs::create_dir_all(&centralized).unwrap();
         std::fs::write(centralized.join("save.dat"), b"data").unwrap();
 
@@ -777,8 +845,11 @@ mod tests {
         std::env::set_var("HOME", home);
 
         assert!(saves_are_centralized(
-            &savefiles, &rootoverrides, "123456",
-            save_dir.to_str().unwrap(), None,
+            &savefiles,
+            &rootoverrides,
+            "123456",
+            save_dir.to_str().unwrap(),
+            None,
         ));
     }
 }

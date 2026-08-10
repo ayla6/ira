@@ -121,6 +121,8 @@ mod tests {
 
     #[test]
     fn test_parse_hidden_string_false() {
-        assert!(!parse_hidden(&serde_json::Value::String("false".to_string())));
+        assert!(!parse_hidden(&serde_json::Value::String(
+            "false".to_string()
+        )));
     }
 }

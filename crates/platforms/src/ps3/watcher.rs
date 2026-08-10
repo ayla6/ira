@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use ira_models::{AppMessage, AppSender};
 use crate::watcher_util::DebouncedFileWatcher;
+use ira_models::{AppMessage, AppSender};
 
-use super::paths::persistent_settings_path;
+use super::paths::persistent_settings_path_for;
 
 /// Watches persistent_settings.dat for changes (playtime/last-played updates).
 /// Uses inotify — zero CPU when idle.
@@ -12,8 +12,8 @@ pub struct Rpcs3Watcher {
 }
 
 impl Rpcs3Watcher {
-    pub fn new(sender: AppSender) -> Result<Self, String> {
-        let path = persistent_settings_path();
+    pub fn new(sender: AppSender, executable: &str) -> Result<Self, String> {
+        let path = persistent_settings_path_for(executable);
         let watcher = DebouncedFileWatcher::new(
             &path,
             "persistent_settings.dat",

@@ -1,16 +1,17 @@
 use std::collections::HashSet;
 
-use gtk4::prelude::*;
-use crate::Game;
-use crate::strings as S;
-use super::state::SharedState;
 use super::context_menu_actions::{
-    setup_play_action, setup_edit_action, setup_play_history_action,
-    setup_hide_action, setup_delete_game_action, setup_open_game_folder_action,
-    setup_open_wine_prefix_action, setup_open_images_action, setup_open_steam_status_action,
-    setup_open_gog_status_action, setup_open_save_location_action, setup_toggle_group_action, setup_new_collection_action,
-    setup_multi_toggle_group_action, setup_multi_new_collection_action, setup_multi_toggle_hide_action,
+    setup_delete_game_action, setup_edit_action, setup_hide_action,
+    setup_multi_new_collection_action, setup_multi_toggle_group_action,
+    setup_multi_toggle_hide_action, setup_new_collection_action, setup_open_game_folder_action,
+    setup_open_gog_status_action, setup_open_images_action, setup_open_save_location_action,
+    setup_open_steam_status_action, setup_open_wine_prefix_action, setup_play_action,
+    setup_play_history_action, setup_toggle_group_action,
 };
+use super::state::SharedState;
+use crate::strings as S;
+use crate::Game;
+use gtk4::prelude::*;
 
 fn setup_and_show_popover(
     menu: &gio::Menu,
@@ -98,7 +99,10 @@ pub fn show_game_context_menu(
         }
         wine = wine.merge_with_default(&app_default);
         let console_folder = if game.kind == ira_models::GameKind::Retro {
-            s.cfg.console(&game.platform_id).folder.clone()
+            s.cfg
+                .rom_folder(&game.platform_id)
+                .to_string_lossy()
+                .into_owned()
         } else {
             String::new()
         };
@@ -113,19 +117,32 @@ pub fn show_game_context_menu(
         let game_dir = if !launch.working_dir.is_empty() {
             Some(launch.working_dir)
         } else if !launch.exe.is_empty() {
-            std::path::Path::new(&launch.exe).parent().map(|p| p.to_string_lossy().to_string())
+            std::path::Path::new(&launch.exe)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
         } else if !resolved_game_path.is_empty() {
-            std::path::Path::new(&resolved_game_path).parent().map(|p| p.to_string_lossy().to_string())
+            std::path::Path::new(&resolved_game_path)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
         } else {
             None
         };
-        let game_file = if !resolved_game_path.is_empty() && game.kind != ira_models::GameKind::Steam {
-            Some(resolved_game_path)
-        } else {
-            None
-        };
+        let game_file =
+            if !resolved_game_path.is_empty() && game.kind != ira_models::GameKind::Steam {
+                Some(resolved_game_path)
+            } else {
+                None
+            };
         let show_wine = game.kind == ira_models::GameKind::Wine && wine.enabled;
-        (game_dir, game_file, if show_wine { Some(ira_launcher::wine_launch::wine_prefix(&wine)) } else { None })
+        (
+            game_dir,
+            game_file,
+            if show_wine {
+                Some(ira_launcher::wine_launch::wine_prefix(&wine))
+            } else {
+                None
+            },
+        )
     };
 
     if game_file.is_some() || game_folder.is_some() {
@@ -150,14 +167,23 @@ pub fn show_game_context_menu(
         let db = state.borrow().db.clone();
         ira_db::get_groups_for_game(&db, game.db_id).unwrap_or_default()
     };
-    let collections_menu = build_collections_submenu(&groups, |g| {
-        game_groups.iter().any(|gg| gg.id == g.id)
-    });
+    let collections_menu =
+        build_collections_submenu(&groups, |g| game_groups.iter().any(|gg| gg.id == g.id));
     menu.append_submenu(Some("Collections"), &collections_menu);
 
-    menu.append(Some(if current_hidden { S::UNHIDE_GAME } else { S::HIDE_GAME }), Some("game.hide"));
+    menu.append(
+        Some(if current_hidden {
+            S::UNHIDE_GAME
+        } else {
+            S::HIDE_GAME
+        }),
+        Some("game.hide"),
+    );
 
-    let is_deletable = matches!(game.kind, ira_models::GameKind::Wine | ira_models::GameKind::Linux);
+    let is_deletable = matches!(
+        game.kind,
+        ira_models::GameKind::Wine | ira_models::GameKind::Linux
+    );
     if is_deletable {
         let remove_section = gio::Menu::new();
         remove_section.append(Some(S::REMOVE_GAME), Some("game.delete_game"));
@@ -217,17 +243,26 @@ pub fn show_multi_game_context_menu(
 
     let collections_menu = build_collections_submenu(&groups, |g| {
         db_ids.iter().all(|&db_id| {
-            game_group_map.get(&db_id).is_some_and(|ids| ids.contains(&g.id))
+            game_group_map
+                .get(&db_id)
+                .is_some_and(|ids| ids.contains(&g.id))
         })
     });
     menu.append_submenu(Some("Collections"), &collections_menu);
 
     let all_hidden = db_ids.iter().all(|&db_id| {
-        state.borrow().games.iter()
+        state
+            .borrow()
+            .games
+            .iter()
             .find(|g| g.db_id == db_id)
             .is_some_and(|g| g.hidden)
     });
-    let hide_label = if all_hidden { S::UNHIDE_GAME } else { S::HIDE_GAME };
+    let hide_label = if all_hidden {
+        S::UNHIDE_GAME
+    } else {
+        S::HIDE_GAME
+    };
     let hide_section = gio::Menu::new();
     hide_section.append(Some(hide_label), Some("game.toggle_hide"));
     menu.append_section(None, &hide_section);

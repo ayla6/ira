@@ -14,6 +14,14 @@ pub enum AppMessage {
     Rpcs3PlaytimeChanged,
     /// Initial game list loaded in the background.
     GamesLoaded(Vec<Game>),
+    /// Background game-list discovery progress.
+    GamesLoadProgress {
+        status: String,
+        completed: usize,
+        total: usize,
+    },
+    /// Rebuild the game list after source settings change.
+    ReloadGames,
     /// SGDB assets downloaded for a game.
     SessionRecorded {
         game_id: i64,
@@ -47,7 +55,10 @@ pub struct AppSender {
 impl Clone for AppSender {
     fn clone(&self) -> Self {
         let new_fd = unsafe { libc::dup(self.fd) };
-        Self { tx: self.tx.clone(), fd: new_fd }
+        Self {
+            tx: self.tx.clone(),
+            fd: new_fd,
+        }
     }
 }
 
@@ -59,13 +70,17 @@ impl AppSender {
     pub fn send(&self, msg: AppMessage) -> Result<(), String> {
         self.tx.send(msg).map_err(|e| e.to_string())?;
         let byte = [1u8; 1];
-        unsafe { libc::write(self.fd, byte.as_ptr() as *const _, 1); }
+        unsafe {
+            libc::write(self.fd, byte.as_ptr() as *const _, 1);
+        }
         Ok(())
     }
 }
 
 impl Drop for AppSender {
     fn drop(&mut self) {
-        unsafe { libc::close(self.fd); }
+        unsafe {
+            libc::close(self.fd);
+        }
     }
 }

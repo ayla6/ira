@@ -5,22 +5,30 @@ fn major_axis_distance(direction: Event, current: Rect, candidate: Rect) -> Opti
         Event::NavDown => {
             if candidate.y >= current.y + current.height {
                 Some(candidate.y - (current.y + current.height))
-            } else { None }
+            } else {
+                None
+            }
         }
         Event::NavUp => {
             if candidate.y + candidate.height <= current.y {
                 Some(current.y - (candidate.y + candidate.height))
-            } else { None }
+            } else {
+                None
+            }
         }
         Event::NavRight => {
             if candidate.x >= current.x + current.width {
                 Some(candidate.x - (current.x + current.width))
-            } else { None }
+            } else {
+                None
+            }
         }
         Event::NavLeft => {
             if candidate.x + candidate.width <= current.x {
                 Some(current.x - (candidate.x + candidate.width))
-            } else { None }
+            } else {
+                None
+            }
         }
         _ => None,
     }

@@ -113,7 +113,11 @@ impl Game {
     }
 
     pub fn sort_key(&self) -> &str {
-        if self.sort_title.is_empty() { &self.name } else { &self.sort_title }
+        if self.sort_title.is_empty() {
+            &self.name
+        } else {
+            &self.sort_title
+        }
     }
 
     pub fn completion_pct(&self) -> f64 {
@@ -141,7 +145,11 @@ impl Game {
 
 /// Extract the db_id from a grid_id string ("123" or "123-v456").
 pub fn parse_db_id(grid_id: &str) -> i64 {
-    grid_id.split("-v").next().and_then(|s| s.parse().ok()).unwrap_or(0)
+    grid_id
+        .split("-v")
+        .next()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -193,5 +201,4 @@ mod tests {
         };
         assert_eq!(g.completion_pct(), 0.0);
     }
-
 }

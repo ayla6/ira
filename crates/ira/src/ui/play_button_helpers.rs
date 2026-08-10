@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use ira_config::Config;
-use ira_db::DbConn;
-use ira_models::{AppSender, WineConfig};
 use gio::prelude::ListModelExt;
 use glib::object::Cast;
 use gtk4::gdk::prelude::{DisplayExt, MonitorExt};
 use gtk4::gdk::{Display, Monitor};
+use ira_config::Config;
+use ira_db::DbConn;
+use ira_models::{AppSender, WineConfig};
 
 use super::state::SharedState;
 
@@ -15,11 +15,8 @@ fn detect_screen_resolution() -> (u32, u32) {
     Display::default()
         .and_then(|d| {
             let monitors = d.monitors();
-            (0..monitors.n_items()).find_map(|i| {
-                monitors
-                    .item(i)
-                    .and_then(|m| m.downcast::<Monitor>().ok())
-            })
+            (0..monitors.n_items())
+                .find_map(|i| monitors.item(i).and_then(|m| m.downcast::<Monitor>().ok()))
         })
         .map(|m| {
             let g = m.geometry();
@@ -55,7 +52,12 @@ pub(super) struct LaunchCtx<'a> {
     pub gpu_default: String,
 }
 
-fn spawn_and_monitor(ctx: &LaunchCtx, cmd: &[String], env: &[(String, String)], err_label: &str) -> Result<(), String> {
+fn spawn_and_monitor(
+    ctx: &LaunchCtx,
+    cmd: &[String],
+    env: &[(String, String)],
+    err_label: &str,
+) -> Result<(), String> {
     let log_path = ira_launcher::wrapper::game_log_path(ctx.save_dir, ctx.game_id);
     match ira_launcher::wrapper::spawn_game(cmd, env, None, Some(&log_path)) {
         Ok(child) => {
@@ -87,14 +89,15 @@ fn spawn_and_monitor(ctx: &LaunchCtx, cmd: &[String], env: &[(String, String)], 
 fn build_emulator_env_and_wrap(ctx: &LaunchCtx, cmd: &mut Vec<String>) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = std::env::vars()
         .filter(|(k, _)| {
-            !k.starts_with("CARGO_")
-            && !k.starts_with("RUSTUP_")
-            && !k.starts_with("RUST_")
+            !k.starts_with("CARGO_") && !k.starts_with("RUSTUP_") && !k.starts_with("RUST_")
         })
         .filter(|(k, v)| {
             if k == "LD_LIBRARY_PATH" {
-                let filtered: Vec<&str> = v.split(':')
-                    .filter(|p| !p.is_empty() && !p.contains("/.rustup/") && !p.contains("/target/"))
+                let filtered: Vec<&str> = v
+                    .split(':')
+                    .filter(|p| {
+                        !p.is_empty() && !p.contains("/.rustup/") && !p.contains("/target/")
+                    })
                     .collect();
                 !filtered.is_empty()
             } else {
@@ -103,8 +106,11 @@ fn build_emulator_env_and_wrap(ctx: &LaunchCtx, cmd: &mut Vec<String>) -> Vec<(S
         })
         .map(|(k, v)| {
             if k == "LD_LIBRARY_PATH" {
-                let filtered: Vec<&str> = v.split(':')
-                    .filter(|p| !p.is_empty() && !p.contains("/.rustup/") && !p.contains("/target/"))
+                let filtered: Vec<&str> = v
+                    .split(':')
+                    .filter(|p| {
+                        !p.is_empty() && !p.contains("/.rustup/") && !p.contains("/target/")
+                    })
                     .collect();
                 (k, filtered.join(":"))
             } else {
@@ -158,7 +164,10 @@ fn build_emulator_env_and_wrap(ctx: &LaunchCtx, cmd: &mut Vec<String>) -> Vec<(S
     // Determine overlay mode before applying performance wrappers.
     let will_use_gamescope = ira_launcher::env_builder::will_use_gamescope(&launch);
 
-    eprintln!("ira-overlay: overlay_enabled={} will_use_gamescope={} gamescope_cfg={:?}", overlay_enabled, will_use_gamescope, launch.gamescope);
+    eprintln!(
+        "ira-overlay: overlay_enabled={} will_use_gamescope={} gamescope_cfg={:?}",
+        overlay_enabled, will_use_gamescope, launch.gamescope
+    );
 
     if overlay_enabled {
         if will_use_gamescope {
@@ -195,9 +204,14 @@ fn build_emulator_env_and_wrap(ctx: &LaunchCtx, cmd: &mut Vec<String>) -> Vec<(S
 /// `LD_PRELOAD` is stripped — Flatpak blocks it for security. The overlay still
 /// works without the shim (Wayland keyboard + evdev gamepad provide input).
 fn inject_flatpak_overlay_env(cmd: &mut Vec<String>, env: &mut Vec<(String, String)>) {
-    if cmd.len() < 3 || cmd[0] != "flatpak" || cmd[1] != "run" {
+    let insert_pos = if cmd.len() >= 3 && cmd[0] == "flatpak" && cmd[1] == "run" {
+        2
+    } else if cmd.len() >= 5 && cmd[0] == "flatpak-spawn" && cmd[2] == "flatpak" && cmd[3] == "run"
+    {
+        4
+    } else {
         return;
-    }
+    };
 
     let overlay_keys = ["VK_LAYER_PATH", "VK_INSTANCE_LAYERS", "IRA_OVERLAY_SHM"];
     let mut env_flags: Vec<String> = Vec::new();
@@ -229,7 +243,6 @@ fn inject_flatpak_overlay_env(cmd: &mut Vec<String>, env: &mut Vec<(String, Stri
     }
 
     // Insert --env flags after "run" and before the flatpak ID
-    let insert_pos = 2;
     for (i, flag) in env_flags.into_iter().enumerate() {
         cmd.insert(insert_pos + i, flag);
     }
@@ -262,17 +275,29 @@ pub(super) fn launch_retro(
     let rom_path = {
         let discs = ira_db::get_discs(ctx.db, ctx.db_id).unwrap_or_default();
         let default_disc_id = ira_db::get_default_disc(ctx.db, ctx.db_id).ok().flatten();
-        let raw = discs.iter()
+        let raw = discs
+            .iter()
             .find(|d| Some(d.id) == default_disc_id)
             .map(|d| d.rom_path.clone())
             .unwrap_or_else(|| game_path.to_string());
         if raw.is_empty() || std::path::Path::new(&raw).is_absolute() {
             raw
         } else {
-            format!("{}/{}", cc.folder.trim_end_matches('/'), raw)
+            cfg.rom_folder(platform_id)
+                .join(raw)
+                .to_string_lossy()
+                .into_owned()
         }
     };
-    let mut cmd = ira_platforms::emulator_detect::build_launch_command(exe, &rom_path, core, cc.fullscreen, fullscreen_flag);
+    let rom_root = std::path::Path::new(&rom_path).parent();
+    let mut cmd = ira_platforms::emulator_detect::build_launch_command_with_filesystem(
+        exe,
+        &rom_path,
+        core,
+        cc.fullscreen,
+        fullscreen_flag,
+        rom_root,
+    );
     let env = build_emulator_env_and_wrap(ctx, &mut cmd);
     spawn_and_monitor(ctx, &cmd, &env, ctx.game_name)
 }
@@ -284,7 +309,12 @@ pub(super) fn launch_ps4(
     game_path: &str,
 ) -> Result<(), String> {
     let exe = ira_platforms::ps4::resolve_shadps4_executable(per_game_version, global_shadps4_exe);
-    let mut cmd = vec![exe, "-g".to_string(), game_path.to_string()];
+    let args = vec!["-g".to_string(), game_path.to_string()];
+    let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
+        &exe,
+        &args,
+        Some(std::path::Path::new(game_path)),
+    );
     let env = build_emulator_env_and_wrap(ctx, &mut cmd);
     spawn_and_monitor(ctx, &cmd, &env, "shadPS4")
 }
@@ -302,13 +332,62 @@ pub(super) fn launch_ps3(
     } else {
         "rpcs3"
     };
-    let mut cmd = vec![exe.to_string(), "--no-gui".to_string(), game_path.to_string()];
+    let args = vec!["--no-gui".to_string(), game_path.to_string()];
+    let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
+        exe,
+        &args,
+        Some(std::path::Path::new(game_path)),
+    );
     let env = build_emulator_env_and_wrap(ctx, &mut cmd);
     spawn_and_monitor(ctx, &cmd, &env, "RPCS3")
 }
 
+pub(super) fn launch_vita3k(
+    ctx: &LaunchCtx,
+    global_executable: &str,
+    game_path: &str,
+) -> Result<(), String> {
+    let exe = if global_executable.is_empty() {
+        "vita3k"
+    } else {
+        global_executable
+    };
+    let args = vec!["-r".to_string(), game_path.to_string()];
+    let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
+        exe,
+        &args,
+        Some(std::path::Path::new(game_path)),
+    );
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd);
+    spawn_and_monitor(ctx, &cmd, &env, "Vita3K")
+}
+
+pub(super) fn launch_cemu(
+    ctx: &LaunchCtx,
+    global_executable: &str,
+    game_path: &str,
+) -> Result<(), String> {
+    let exe = if global_executable.is_empty() {
+        "cemu"
+    } else {
+        global_executable
+    };
+    let args = vec!["-g".to_string(), game_path.to_string()];
+    let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
+        exe,
+        &args,
+        Some(std::path::Path::new(game_path)),
+    );
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd);
+    spawn_and_monitor(ctx, &cmd, &env, "Cemu")
+}
+
 pub(super) fn launch_steam(app_id: &str) -> Result<(), String> {
-    let cmd = vec!["steam".to_string(), "-applaunch".to_string(), app_id.to_string()];
+    let cmd = vec![
+        "steam".to_string(),
+        "-applaunch".to_string(),
+        app_id.to_string(),
+    ];
     match ira_launcher::wrapper::spawn_game(&cmd, &[], None, None) {
         Ok(_child) => {}
         Err(_) => {
@@ -439,12 +518,19 @@ pub(super) fn launch_other(
                 save_dir: ctx.save_dir.to_string(),
                 running_games: ctx.running_games.clone(),
                 overlay_enabled,
-                overlay_shm: if overlay_enabled { ctx.overlay_shm.clone() } else { None },
+                overlay_shm: if overlay_enabled {
+                    ctx.overlay_shm.clone()
+                } else {
+                    None
+                },
                 overlay_font_family: ctx.overlay_font_family.clone(),
             },
         )?;
     } else {
-        return Err(format!("No launch config saved for '{}'. Configure the game's launch settings first.", ctx.game_name));
+        return Err(format!(
+            "No launch config saved for '{}'. Configure the game's launch settings first.",
+            ctx.game_name
+        ));
     }
     Ok(())
 }
@@ -462,14 +548,24 @@ pub(super) fn update_last_played(
                 eprintln!("Failed to update variant last played: {}", e);
             }
         }
-        if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == ctx.game_id && g.variant_id == variant_id) {
+        if let Some(g) = state
+            .borrow_mut()
+            .games
+            .iter_mut()
+            .find(|g| g.db_id == ctx.game_id && g.variant_id == variant_id)
+        {
             g.last_played = ctx.started_at;
         }
     } else if variant_count_playtime {
         if let Err(e) = ira_db::set_last_played(ctx.db, ctx.db_id, ctx.started_at) {
             eprintln!("Failed to update last played: {}", e);
         }
-        if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == ctx.game_id && g.variant_id.is_none()) {
+        if let Some(g) = state
+            .borrow_mut()
+            .games
+            .iter_mut()
+            .find(|g| g.db_id == ctx.game_id && g.variant_id.is_none())
+        {
             g.last_played = ctx.started_at;
         }
     }

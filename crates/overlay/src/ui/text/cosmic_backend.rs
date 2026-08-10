@@ -46,7 +46,10 @@ impl CosmicState {
     fn new() -> Self {
         let mut font_system = FontSystem::new();
         let face_count = font_system.db().faces().count();
-        eprintln!("ira-overlay: cosmic-text initialized ({} font faces)", face_count);
+        eprintln!(
+            "ira-overlay: cosmic-text initialized ({} font faces)",
+            face_count
+        );
         let metrics = Metrics::new(16.0, 22.0);
         let buffer = Buffer::new(&mut font_system, metrics);
         Self {
@@ -71,9 +74,7 @@ pub struct CosmicBackend;
 
 fn convert_pixels(image: &SwashImage) -> Vec<u8> {
     match image.content {
-        SwashContent::Mask => {
-            image.data.iter().flat_map(|&m| [m, m, m, m]).collect()
-        }
+        SwashContent::Mask => image.data.iter().flat_map(|&m| [m, m, m, m]).collect(),
         SwashContent::Color => {
             let (chunks, _) = image.data.as_chunks::<4>();
             chunks
@@ -110,12 +111,21 @@ impl TextBackend for CosmicBackend {
     fn measure(text: &str, font_size: f32) -> Size {
         let mut st = match state() {
             Some(st) => st,
-            None => return Size { width: 0.0, height: font_size * 1.2 * 4.0 / 3.0 },
+            None => {
+                return Size {
+                    width: 0.0,
+                    height: font_size * 1.2 * 4.0 / 3.0,
+                }
+            }
         };
 
         let metrics = Metrics::pt(font_size, font_size * 1.2);
         let a = attrs();
-        let CosmicState { font_system, buffer, .. } = &mut *st;
+        let CosmicState {
+            font_system,
+            buffer,
+            ..
+        } = &mut *st;
         buffer.set_metrics_and_size(metrics, Some(f32::MAX), Some(f32::MAX));
         buffer.set_hinting(Hinting::Enabled);
         buffer.set_text(text, &a, Shaping::Advanced, None);
@@ -132,7 +142,10 @@ impl TextBackend for CosmicBackend {
         if total_h == 0.0 {
             total_h = font_size * 1.2 * 4.0 / 3.0;
         }
-        Size { width: max_w.round(), height: total_h.round() }
+        Size {
+            width: max_w.round(),
+            height: total_h.round(),
+        }
     }
 
     fn shape_text(
@@ -149,7 +162,11 @@ impl TextBackend for CosmicBackend {
 
         let metrics = Metrics::pt(font_size, font_size * 1.2);
         let a = attrs();
-        let CosmicState { font_system, swash_cache, buffer } = &mut *st;
+        let CosmicState {
+            font_system,
+            swash_cache,
+            buffer,
+        } = &mut *st;
         buffer.set_metrics_and_size(metrics, Some(4096.0), Some(4096.0));
         buffer.set_hinting(Hinting::Enabled);
         buffer.set_text(text, &a, Shaping::Advanced, None);
@@ -188,7 +205,9 @@ impl TextBackend for CosmicBackend {
                 s
             } else {
                 let image_opt = swash_cache.get_image(font_system, item.cache_key);
-                let Some(image) = image_opt.as_ref() else { continue };
+                let Some(image) = image_opt.as_ref() else {
+                    continue;
+                };
                 let s = atlas::pack_glyph(
                     &mut atlas_cache,
                     image.placement.width,
@@ -225,10 +244,26 @@ impl TextBackend for CosmicBackend {
             let v1 = (slot.y + slot.h) as f32 / ah;
 
             let i = vertices.len() as u32;
-            vertices.push(Vertex { pos: [gx, gy], uv: [u0, v0], color });
-            vertices.push(Vertex { pos: [gx + gw, gy], uv: [u1, v0], color });
-            vertices.push(Vertex { pos: [gx, gy + gh], uv: [u0, v1], color });
-            vertices.push(Vertex { pos: [gx + gw, gy + gh], uv: [u1, v1], color });
+            vertices.push(Vertex {
+                pos: [gx, gy],
+                uv: [u0, v0],
+                color,
+            });
+            vertices.push(Vertex {
+                pos: [gx + gw, gy],
+                uv: [u1, v0],
+                color,
+            });
+            vertices.push(Vertex {
+                pos: [gx, gy + gh],
+                uv: [u0, v1],
+                color,
+            });
+            vertices.push(Vertex {
+                pos: [gx + gw, gy + gh],
+                uv: [u1, v1],
+                color,
+            });
             indices.extend_from_slice(&[i, i + 1, i + 2, i + 1, i + 3, i + 2]);
         }
 

@@ -32,7 +32,10 @@ fn decode_infra() -> &'static DecodeInfra {
                 })
                 .expect("Failed to spawn decode thread");
         }
-        DecodeInfra { job_tx, result_rx: Mutex::new(result_rx) }
+        DecodeInfra {
+            job_tx,
+            result_rx: Mutex::new(result_rx),
+        }
     })
 }
 

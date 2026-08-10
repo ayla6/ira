@@ -1,6 +1,6 @@
 use ira_models::{AchievementStatus, AssetType, Game};
-use std::collections::HashMap;
 use serde::Deserialize;
+use std::collections::HashMap;
 
 #[derive(Deserialize)]
 struct AppDetailsName {
@@ -13,7 +13,11 @@ pub fn read_app_name(save_dir: &str, app_id: &str) -> Option<String> {
     let data = std::fs::read(&path).ok()?;
     let details: AppDetailsName = serde_json::from_slice(&data).ok()?;
     let name = details.name.trim().to_string();
-    if name.is_empty() { None } else { Some(name) }
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
 }
 
 pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
@@ -21,9 +25,11 @@ pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
     let _s = tracing::info_span!("populate_image_paths", db_id).entered();
 
     let mut files: std::collections::HashSet<String> = std::fs::read_dir(image_dir)
-        .map(|d| d.filter_map(|e| e.ok())
-            .filter_map(|e| e.file_name().to_str().map(String::from))
-            .collect())
+        .map(|d| {
+            d.filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().to_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
     for &at in AssetType::all() {
@@ -52,28 +58,47 @@ pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
         None
     };
 
-    if let Some(p) = find(&format!("{}_small", AssetType::Icon.file_base())).or_else(|| find(AssetType::Icon.file_base())) {
+    if let Some(p) = find(&format!("{}_small", AssetType::Icon.file_base()))
+        .or_else(|| find(AssetType::Icon.file_base()))
+    {
         game.icon_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = find(&format!("{}_small", AssetType::Grid.file_base())).or_else(|| find(AssetType::Grid.file_base())) {
+    if let Some(p) = find(&format!("{}_small", AssetType::Grid.file_base()))
+        .or_else(|| find(AssetType::Grid.file_base()))
+    {
         game.grid_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = find(&format!("{}_small", AssetType::Header.file_base())).or_else(|| find(AssetType::Header.file_base())) {
+    if let Some(p) = find(&format!("{}_small", AssetType::Header.file_base()))
+        .or_else(|| find(AssetType::Header.file_base()))
+    {
         game.header_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = find(&format!("{}_small", AssetType::Hero.file_base())).or_else(|| find(AssetType::Hero.file_base())) {
+    if let Some(p) = find(&format!("{}_small", AssetType::Hero.file_base()))
+        .or_else(|| find(AssetType::Hero.file_base()))
+    {
         game.hero_image_path = p.to_string_lossy().into_owned();
     }
-    if let Some(p) = find(&format!("{}_small", AssetType::Logo.file_base())).or_else(|| find(AssetType::Logo.file_base())) {
+    if let Some(p) = find(&format!("{}_small", AssetType::Logo.file_base()))
+        .or_else(|| find(AssetType::Logo.file_base()))
+    {
         game.logo_path = p.to_string_lossy().into_owned();
     }
 }
 
-pub fn set_achievement_earned(save_dir: &str, trophy_source: ira_models::TrophySource, app_id: &str, platform_id: &str, ach_name: &str, earned: bool) -> Result<(), String> {
-    let status_path = super::paths::unlock_status_path(save_dir, trophy_source, app_id, platform_id);
+pub fn set_achievement_earned(
+    save_dir: &str,
+    trophy_source: ira_models::TrophySource,
+    app_id: &str,
+    platform_id: &str,
+    ach_name: &str,
+    earned: bool,
+) -> Result<(), String> {
+    let status_path =
+        super::paths::unlock_status_path(save_dir, trophy_source, app_id, platform_id);
     let mut status_map: HashMap<String, AchievementStatus> = HashMap::new();
     if let Ok(data) = std::fs::read(&status_path) {
-        let _ = serde_json::from_slice::<HashMap<String, AchievementStatus>>(&data).map(|m| status_map = m);
+        let _ = serde_json::from_slice::<HashMap<String, AchievementStatus>>(&data)
+            .map(|m| status_map = m);
     }
     status_map.insert(
         ach_name.to_string(),

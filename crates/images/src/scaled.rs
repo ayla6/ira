@@ -50,18 +50,17 @@ mod paintable_imp {
         fn intrinsic_aspect_ratio(&self) -> f64 {
             let w = self.width.get() as f64;
             let h = self.height.get() as f64;
-            if h > 0.0 { w / h } else { 0.0 }
+            if h > 0.0 {
+                w / h
+            } else {
+                0.0
+            }
         }
 
         fn snapshot(&self, snapshot: &Snapshot, width: f64, height: f64) {
             if let Some(texture) = self.texture.borrow().as_ref() {
                 if let Some(snap) = snapshot.downcast_ref::<gtk4::Snapshot>() {
-                    let rect = gtk4::graphene::Rect::new(
-                        0.0,
-                        0.0,
-                        width as f32,
-                        height as f32,
-                    );
+                    let rect = gtk4::graphene::Rect::new(0.0, 0.0, width as f32, height as f32);
                     snap.append_texture(texture, &rect);
                 }
             }

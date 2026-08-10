@@ -1,11 +1,9 @@
-use ira_models::{GameLaunchConfig, WineConfig};
 use crate::wine_launch;
+use ira_models::{GameLaunchConfig, WineConfig};
 
 fn has_exec(name: &str) -> bool {
     std::env::var_os("PATH")
-        .and_then(|p| {
-            std::env::split_paths(&p).find(|d| d.join(name).is_file())
-        })
+        .and_then(|p| std::env::split_paths(&p).find(|d| d.join(name).is_file()))
         .is_some()
 }
 
@@ -60,8 +58,11 @@ fn overlay_paths() -> Option<(String, String)> {
         );
         match std::fs::write(&json_path, &json_content) {
             Ok(_) => {
-                eprintln!("ira-overlay: JSON manifest written to {} (library_path={})",
-                    json_path.display(), vk_abs.display());
+                eprintln!(
+                    "ira-overlay: JSON manifest written to {} (library_path={})",
+                    json_path.display(),
+                    vk_abs.display()
+                );
                 return Some((
                     tmp_dir.to_string_lossy().into(),
                     dev_shim.to_string_lossy().into(),
@@ -97,19 +98,18 @@ pub fn build_env(
     command: &mut Vec<String>,
 ) -> Vec<(String, String)> {
     let has_wine = wine.is_some_and(|w| w.enabled);
-    let is_proton = has_wine && (
-        crate::wine_detect::is_proton_version(&wine.unwrap().version)
-        || crate::wine_detect::is_proton_binary(wine_exe)
-    );
+    let is_proton = has_wine
+        && (crate::wine_detect::is_proton_version(&wine.unwrap().version)
+            || crate::wine_detect::is_proton_binary(wine_exe));
 
     let mut env: Vec<(String, String)> = std::env::vars()
         .filter(|(k, _)| {
             // Filter out build/dev environment variables that shouldn't reach the game
             k != "CARGO"
-            && !k.starts_with("CARGO_")
-            && k != "RUSTUP"
-            && !k.starts_with("RUSTUP_")
-            && !k.starts_with("RUST_")
+                && !k.starts_with("CARGO_")
+                && k != "RUSTUP"
+                && !k.starts_with("RUSTUP_")
+                && !k.starts_with("RUST_")
         })
         .filter(|(k, v)| {
             if k == "LD_LIBRARY_PATH" {
@@ -157,7 +157,10 @@ pub fn build_env(
     }
 
     if !launch.ld_preload.is_empty() {
-        let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
+        let existing = env
+            .iter()
+            .find(|(k, _)| k == "LD_PRELOAD")
+            .map(|(_, v)| v.clone());
         let merged = match existing {
             Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_preload, prev),
             _ => launch.ld_preload.clone(),
@@ -166,7 +169,10 @@ pub fn build_env(
         env.push(("LD_PRELOAD".to_string(), merged));
     }
     if !launch.ld_library_path.is_empty() {
-        let existing = env.iter().find(|(k, _)| k == "LD_LIBRARY_PATH").map(|(_, v)| v.clone());
+        let existing = env
+            .iter()
+            .find(|(k, _)| k == "LD_LIBRARY_PATH")
+            .map(|(_, v)| v.clone());
         let merged = match existing {
             Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_library_path, prev),
             _ => launch.ld_library_path.clone(),
@@ -278,7 +284,11 @@ pub fn apply_performance(
 /// Adds overlay env vars (VK_LAYER_PATH, VK_INSTANCE_LAYERS, LD_PRELOAD, IRA_OVERLAY_SHM,
 /// IRA_OVERLAY_FONT_FAMILY) to an existing env list. Call this after `build_env` when
 /// overlay is enabled. Does nothing if the overlay files are not found on disk.
-pub fn add_overlay_env(env: &mut Vec<(String, String)>, overlay_shm: Option<&str>, font_family: Option<&str>) {
+pub fn add_overlay_env(
+    env: &mut Vec<(String, String)>,
+    overlay_shm: Option<&str>,
+    font_family: Option<&str>,
+) {
     let Some((layer_dir, shim_path)) = overlay_paths() else {
         eprintln!("ira-overlay: enabled but files not found — skipping injection");
         return;
@@ -287,11 +297,17 @@ pub fn add_overlay_env(env: &mut Vec<(String, String)>, overlay_shm: Option<&str
     env.retain(|(k, _)| k != "VK_LAYER_PATH");
     env.push(("VK_LAYER_PATH".to_string(), layer_dir.clone()));
     env.retain(|(k, _)| k != "VK_INSTANCE_LAYERS");
-    env.push(("VK_INSTANCE_LAYERS".to_string(), "VK_LAYER_IRA_OVERLAY".to_string()));
+    env.push((
+        "VK_INSTANCE_LAYERS".to_string(),
+        "VK_LAYER_IRA_OVERLAY".to_string(),
+    ));
 
     eprintln!("ira-overlay: injecting VK layer (path={layer_dir}) + shim + SHM");
 
-    let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
+    let existing = env
+        .iter()
+        .find(|(k, _)| k == "LD_PRELOAD")
+        .map(|(_, v)| v.clone());
     let merged = match existing {
         Some(prev) if !prev.is_empty() => format!("{}:{}", shim_path, prev),
         _ => shim_path,
@@ -380,7 +396,10 @@ pub fn add_overlay_env_standalone(
     // the layer would hook the game's Vulkan calls and conflict.
     env.retain(|(k, _)| k != "VK_INSTANCE_LAYERS" && k != "VK_LAYER_PATH");
 
-    let existing = env.iter().find(|(k, _)| k == "LD_PRELOAD").map(|(_, v)| v.clone());
+    let existing = env
+        .iter()
+        .find(|(k, _)| k == "LD_PRELOAD")
+        .map(|(_, v)| v.clone());
     let merged = match existing {
         Some(prev) if !prev.is_empty() => format!("{}:{}", shim_path, prev),
         _ => shim_path,
@@ -434,10 +453,7 @@ pub fn wrap_with_standalone_overlay(command: &mut Vec<String>) {
     let quoted_bin = shlex::try_quote(&bin)
         .map(|c| c.into_owned())
         .unwrap_or(bin);
-    let sh_script = format!(
-        "ENABLE_GAMESCOPE_WSI=1 {} & exec \"$@\"",
-        quoted_bin
-    );
+    let sh_script = format!("ENABLE_GAMESCOPE_WSI=1 {} & exec \"$@\"", quoted_bin);
 
     command.push("/usr/bin/sh".to_string());
     command.push("-c".to_string());

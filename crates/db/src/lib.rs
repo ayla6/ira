@@ -21,10 +21,7 @@ pub use profiles::*;
 pub(crate) use row_mapping::{game_entry_from_row, lock_db, GAME_COLUMNS};
 pub use sessions::*;
 pub use settings::*;
-pub use setup::{
-    checkpoint, init_db, migrate_legacy_console_ids, migrate_rom_paths_to_relative,
-    migrate_rom_paths_to_relative_from_folders, update_field,
-};
+pub use setup::{checkpoint, init_db, update_field};
 pub use variants::*;
 
 pub type DbConn = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;

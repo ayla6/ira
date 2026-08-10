@@ -567,7 +567,6 @@ impl WineConfigWidgets {
             proton_disable_lsteamclient: self.proton_disable_lsteamclient.is_active(),
             umu_enabled: self.umu_enabled,
             overridden_fields: self.overridden.borrow().clone(),
-            ..Default::default()
         }
     }
 }

@@ -624,7 +624,6 @@ fn discovery_settings_changed(before: &Config, after: &Config) -> bool {
             let before_console = before.console(def.id);
             let after_console = after.console(def.id);
             before_console.enabled != after_console.enabled
-                || before_console.folder != after_console.folder
                 || before_console.executable != after_console.executable
                 || before_console.ra_core != after_console.ra_core
         })

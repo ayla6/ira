@@ -41,33 +41,6 @@ unsafe extern "C" fn source_destroy(data: glib::ffi::gpointer) {
     let _ = Box::from_raw(data as *mut MainLoopData);
 }
 
-// PRE-RELEASE: remove this function and its call after the existing user's
-// database has been migrated to the global ROM root and virtualboy ID.
-fn migrate_pre_release_data(db: &db::DbConn, cfg: &config::Config) {
-    if let Err(e) = db::migrate_legacy_console_ids(db) {
-        eprintln!("Legacy console ID migration failed: {e}");
-    }
-
-    let _s = tracing::info_span!("migrate_rom_paths").entered();
-    let console_folders: HashMap<String, Vec<String>> = ira_models::all_consoles()
-        .map(|def| {
-            let cc = cfg.console(def.id);
-            let mut folders = Vec::new();
-            if !cc.folder.is_empty() {
-                folders.push(cc.folder.clone());
-            }
-            let effective = cfg.rom_folder(def.id).to_string_lossy().into_owned();
-            if !effective.is_empty() && !folders.contains(&effective) {
-                folders.push(effective);
-            }
-            (def.id.to_string(), folders)
-        })
-        .collect();
-    if let Err(e) = db::migrate_rom_paths_to_relative_from_folders(db, &console_folders) {
-        eprintln!("ROM path migration failed: {e}");
-    }
-}
-
 pub fn activate(app: &adw::Application) -> SharedState {
     let _span = tracing::info_span!("activate").entered();
 
@@ -84,8 +57,6 @@ pub fn activate(app: &adw::Application) -> SharedState {
         let _s = tracing::info_span!("init_db").entered();
         db::init_db(&format!("{}/ira.db", cfg.save_dir))
     };
-
-    migrate_pre_release_data(&db, &cfg);
 
     {
         let _s = tracing::info_span!("ensure_skeleton").entered();

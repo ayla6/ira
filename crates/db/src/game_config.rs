@@ -23,7 +23,7 @@ pub fn get_game_config(
 
     match rows.next() {
         Some(Ok((launch_str, wine_str, profile_id))) => {
-            let mut launch: GameLaunchConfig = if launch_str.is_empty() {
+            let launch: GameLaunchConfig = if launch_str.is_empty() {
                 GameLaunchConfig::default()
             } else {
                 serde_json::from_str(&launch_str).map_err(|e| e.to_string())?
@@ -33,22 +33,6 @@ pub fn get_game_config(
             } else {
                 serde_json::from_str(&wine_str).map_err(|e| e.to_string())?
             };
-            // Lazy migration: if gamemode/mangohud/gamescope are still default in
-            // GameLaunchConfig but non-default in the old WineConfig JSON, copy them over.
-            // This handles DB rows saved before these fields were moved.
-            // PRE-RELEASE: remove after v0.X
-            if launch.gamemode != Some(true) && wine._gamemode {
-                launch.gamemode = Some(true);
-            }
-            if launch.mangohud != Some(true) && wine._mangohud {
-                launch.mangohud = Some(true);
-            }
-            if launch.gamescope.is_none() && wine._gamescope {
-                launch.gamescope = Some(true);
-            }
-            if launch.gamescope_flags.is_empty() && !wine._gamescope_flags.is_empty() {
-                launch.gamescope_flags = wine._gamescope_flags.clone();
-            }
             Ok(Some((launch, wine, profile_id)))
         }
         Some(Err(e)) => Err(e.to_string()),

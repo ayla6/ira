@@ -62,24 +62,8 @@ pub struct WineConfig {
     pub desktop_integration: bool,
     pub show_crash_dialogs: bool,
     pub mouse_warp_override: String,
-    // Virtual desktop removed — barely works on newer Wine versions.
-    // Kept for backward-compat deserialization of old DB rows.
-    #[serde(default)]
-    pub _virtual_desktop: bool,
-    #[serde(default)]
-    pub _virtual_desktop_res: String,
     pub dpi_enabled: bool,
     pub dpi: i32,
-    // gamemode/mangohud/gamescope moved to GameLaunchConfig.
-    // Kept here with #[serde(default)] for backward-compat deserialization of old DB rows.
-    #[serde(default)]
-    pub _gamemode: bool,
-    #[serde(default)]
-    pub _mangohud: bool,
-    #[serde(default)]
-    pub _gamescope: bool,
-    #[serde(default)]
-    pub _gamescope_flags: String,
     #[serde(default)]
     pub dxvk_frame_rate: i32,
     #[serde(default)]
@@ -94,9 +78,6 @@ pub struct WineConfig {
     pub umu_enabled: bool,
     #[serde(default)]
     pub overridden_fields: Vec<String>,
-    // GPU moved to GameLaunchConfig. Kept for backward-compat deserialization.
-    #[serde(default)]
-    pub _gpu: String,
 }
 
 fn default_true() -> bool {
@@ -127,14 +108,8 @@ impl Default for WineConfig {
             desktop_integration: false,
             show_crash_dialogs: false,
             mouse_warp_override: "enable".to_string(),
-            _virtual_desktop: false,
-            _virtual_desktop_res: String::new(),
             dpi_enabled: false,
             dpi: 96,
-            _gamemode: false,
-            _mangohud: false,
-            _gamescope: false,
-            _gamescope_flags: String::new(),
             dxvk_frame_rate: 0,
             dxvk_hud: false,
             proton_wow64: true,
@@ -142,7 +117,6 @@ impl Default for WineConfig {
             proton_disable_lsteamclient: true,
             umu_enabled: true,
             overridden_fields: Vec::new(),
-            _gpu: String::new(),
         }
     }
 }
@@ -225,18 +199,12 @@ impl WineConfig {
             } else {
                 default.mouse_warp_override.clone()
             },
-            _virtual_desktop: false,
-            _virtual_desktop_res: String::new(),
             dpi_enabled: if has("dpi_enabled") {
                 self.dpi_enabled
             } else {
                 default.dpi_enabled
             },
             dpi: if has("dpi") { self.dpi } else { default.dpi },
-            _gamemode: false,
-            _mangohud: false,
-            _gamescope: false,
-            _gamescope_flags: String::new(),
             dxvk_frame_rate: if has("dxvk_frame_rate") {
                 self.dxvk_frame_rate
             } else {
@@ -264,7 +232,6 @@ impl WineConfig {
             },
             umu_enabled: self.umu_enabled,
             overridden_fields: self.overridden_fields.clone(),
-            _gpu: String::new(),
         }
     }
 }

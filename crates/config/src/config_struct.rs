@@ -34,9 +34,6 @@ fn default_console_enabled() -> bool {
 pub struct ConsoleConfig {
     #[serde(default = "default_console_enabled")]
     pub enabled: bool,
-    /// Legacy-only field used while migrating old ROM paths.
-    #[serde(default, skip_serializing)]
-    pub folder: String,
     pub executable: String,
     pub ra_core: String,
     pub fullscreen: bool,
@@ -46,7 +43,6 @@ impl Default for ConsoleConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            folder: String::new(),
             executable: String::new(),
             ra_core: String::new(),
             fullscreen: false,
@@ -159,9 +155,6 @@ pub struct Config {
     pub ra_password: String,
     #[serde(default)]
     pub consoles: HashMap<String, ConsoleConfig>,
-    /// PRE-RELEASE: one-time initialization marker for ROM platform defaults.
-    #[serde(default)]
-    pub rom_platforms_initialized: bool,
     #[serde(default)]
     pub overlay: OverlaySettings,
 }
@@ -213,7 +206,6 @@ impl Default for Config {
             ra_token: String::new(),
             ra_password: String::new(),
             consoles,
-            rom_platforms_initialized: true,
             overlay: OverlaySettings::default(),
         }
     }
@@ -294,7 +286,6 @@ impl Config {
             ra_enabled: self.ra_enabled,
             ra_username: self.ra_username.clone(),
             consoles: self.consoles.clone(),
-            rom_platforms_initialized: self.rom_platforms_initialized,
             overlay: self.overlay.clone(),
         };
         if steam_err.is_err() {
@@ -322,7 +313,6 @@ impl Config {
 
 static EMPTY_CONSOLE: ConsoleConfig = ConsoleConfig {
     enabled: false,
-    folder: String::new(),
     executable: String::new(),
     ra_core: String::new(),
     fullscreen: false,
@@ -339,7 +329,6 @@ mod tests {
         for def in ira_models::all_consoles() {
             let cc = cfg.console(def.id);
             assert_eq!(cc.enabled, def.uses_rom_folder());
-            assert_eq!(cc.folder, "");
             assert_eq!(cc.executable, "");
             assert_eq!(cc.ra_core, "");
             assert!(!cc.fullscreen);
@@ -347,12 +336,12 @@ mod tests {
     }
 
     #[test]
-    fn test_config_load_migrates_rom_platform_defaults() {
+    fn test_config_save_and_load_roundtrip() {
         let tmp = tempfile::TempDir::new().unwrap();
         let prev = std::env::var("XDG_CONFIG_HOME").ok();
         std::env::set_var("XDG_CONFIG_HOME", tmp.path());
 
-        let mut cfg = Config {
+        let cfg = Config {
             notifications_enabled: false,
             show_hidden_games: true,
             grid_cover_width: 300,
@@ -361,8 +350,6 @@ mod tests {
             roms_folder: "/tmp/roms".to_string(),
             ..Default::default()
         };
-        cfg.rom_platforms_initialized = false;
-        cfg.console_mut("n64").enabled = false;
         let json = serde_json::to_string_pretty(&cfg).unwrap();
         let path = crate::load::config_path();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -375,8 +362,7 @@ mod tests {
         assert_eq!(loaded.sort_descending, cfg.sort_descending);
         assert_eq!(loaded.save_dir, cfg.save_dir);
         assert_eq!(loaded.roms_folder, cfg.roms_folder);
-        assert!(loaded.rom_platforms_initialized);
-        assert!(loaded.console("n64").enabled);
+        assert_eq!(loaded.console("n64").enabled, cfg.console("n64").enabled);
 
         match prev {
             Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
@@ -388,19 +374,17 @@ mod tests {
     fn test_console_config_default() {
         let cc = ConsoleConfig::default();
         assert!(cc.enabled);
-        assert_eq!(cc.folder, "");
         assert_eq!(cc.executable, "");
         assert_eq!(cc.ra_core, "");
         assert!(!cc.fullscreen);
     }
 
     #[test]
-    fn test_rom_folder_uses_shared_root_before_legacy_folder() {
-        let mut cfg = Config {
+    fn test_rom_folder_uses_shared_root() {
+        let cfg = Config {
             roms_folder: "/games/roms".to_string(),
             ..Default::default()
         };
-        cfg.console_mut("gba").folder = "/old/gba".to_string();
         assert_eq!(
             cfg.rom_folder("gba"),
             std::path::PathBuf::from("/games/roms/gba")

@@ -37,6 +37,7 @@ pub fn launch_game(
     let game_dir = if launch.working_dir.is_empty() {
         std::path::Path::new(&launch.exe)
             .parent()
+            .filter(|p| !p.as_os_str().is_empty())
             .map(|p| p.to_string_lossy().to_string())
     } else {
         Some(launch.working_dir.clone())
@@ -83,7 +84,8 @@ pub fn launch_game(
         // For Proton versions, the command uses umu-run, but WINE env var
         // must still point to the actual Proton wine binary (umu reads it).
         let mut cmd = if wine.umu_enabled || is_proton {
-            let mut c = vec!["umu-run".to_string()];
+            let umu = super::wine_detect::find_umu_binary()?;
+            let mut c = vec![umu];
             if !launch.exe.is_empty() {
                 c.push(launch.exe.clone());
             }
@@ -316,6 +318,12 @@ fn run_pre_launch(
                 snippet
             ))
         }
-        Err(e) => Err(format!("Failed to run pre-launch command: {}", e)),
+        Err(e) => Err(format!(
+            "Failed to run pre-launch command {cmd:?} with cwd {:?}: {} (kind={:?}, raw_os_error={:?})",
+            cwd,
+            e,
+            e.kind(),
+            e.raw_os_error()
+        )),
     }
 }

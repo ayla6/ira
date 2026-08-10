@@ -71,6 +71,9 @@ pub fn spawn_game(
     cwd: Option<&str>,
     _log_path: Option<&str>,
 ) -> Result<Child, String> {
+    if command.is_empty() {
+        return Err("Failed to spawn game process: empty command".to_string());
+    }
     set_subreaper();
 
     let mut cmd = Command::new(&command[0]);
@@ -91,8 +94,62 @@ pub fn spawn_game(
     cmd.stderr(Stdio::piped());
     cmd.process_group(0);
 
-    cmd.spawn()
-        .map_err(|e| format!("Failed to spawn game process: {}", e))
+    match cmd.spawn() {
+        Ok(child) => Ok(child),
+        Err(error) => {
+            let diagnostic = format_spawn_error(command, env, cwd, &error);
+            eprintln!("launch: {diagnostic}");
+            Err(diagnostic)
+        }
+    }
+}
+
+fn format_spawn_error(
+    command: &[String],
+    env: &[(String, String)],
+    cwd: Option<&str>,
+    error: &std::io::Error,
+) -> String {
+    let program = command.first().map(String::as_str).unwrap_or("");
+    let resolved_program = resolve_program(program, env);
+    let cwd_info = cwd
+        .map(|path| {
+            format!(
+                "{} (exists={}, directory={})",
+                path,
+                Path::new(path).exists(),
+                Path::new(path).is_dir()
+            )
+        })
+        .unwrap_or_else(|| "<inherit>".to_string());
+    let path = env_value(env, "PATH").unwrap_or_else(|| "<unset>".to_string());
+    let prefix = env_value(env, "WINEPREFIX").unwrap_or_else(|| "<unset>".to_string());
+    let wine = env_value(env, "WINE").unwrap_or_else(|| "<unset>".to_string());
+
+    format!(
+        "Failed to spawn game process: {error} (kind={:?}, raw_os_error={:?}); command={command:?}; program={program:?}; resolved_program={:?}; program_exists={}; cwd={cwd_info}; PATH={path:?}; WINE={wine:?}; WINEPREFIX={prefix:?}",
+        error.kind(),
+        error.raw_os_error(),
+        resolved_program.as_ref().map(|p| p.display().to_string()),
+        resolved_program.as_ref().is_some_and(|p| p.is_file()),
+    )
+}
+
+fn env_value(env: &[(String, String)], key: &str) -> Option<String> {
+    env.iter()
+        .find(|(name, _)| name == key)
+        .map(|(_, value)| value.clone())
+}
+
+fn resolve_program(program: &str, env: &[(String, String)]) -> Option<std::path::PathBuf> {
+    let path = Path::new(program);
+    if path.is_absolute() || program.contains('/') {
+        return Some(path.to_path_buf());
+    }
+    let search_path = env_value(env, "PATH").or_else(|| std::env::var("PATH").ok())?;
+    std::env::split_paths(&search_path)
+        .map(|dir| dir.join(program))
+        .find(|candidate| candidate.is_file())
 }
 
 pub fn game_log_path(save_dir: &str, game_id: i64) -> String {
@@ -474,4 +531,25 @@ fn find_wineserver(wine_exe: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_spawn_error;
+
+    #[test]
+    fn test_format_spawn_error_reports_missing_program_and_cwd() {
+        let error = std::io::Error::from_raw_os_error(2);
+        let message = format_spawn_error(
+            &["/missing/game".to_string()],
+            &[("PATH".to_string(), "/usr/bin".to_string())],
+            Some("/missing/cwd"),
+            &error,
+        );
+
+        assert!(message.contains("raw_os_error=Some(2)"));
+        assert!(message.contains("program_exists=false"));
+        assert!(message.contains("cwd=/missing/cwd (exists=false, directory=false)"));
+        assert!(message.contains("WINEPREFIX=\"<unset>\""));
+    }
 }

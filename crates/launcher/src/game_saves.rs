@@ -28,11 +28,9 @@ pub(crate) fn safe_migrate_dir_contents(source: &Path, target: &Path) -> usize {
             {
                 let _ = std::fs::remove_dir(&src);
             }
-        } else {
-            if safe_copy_and_verify(&src, &dst) {
-                let _ = std::fs::remove_file(&src);
-                count += 1;
-            }
+        } else if safe_copy_and_verify(&src, &dst) {
+            let _ = std::fs::remove_file(&src);
+            count += 1;
         }
     }
     count
@@ -140,6 +138,9 @@ pub fn saves_are_centralized(
         return false;
     }
     deduped.iter().all(|rp| {
+        if paths_resolve_to(&rp.default_path, &rp.centralized_path) {
+            return true;
+        }
         if rp
             .default_path
             .symlink_metadata()
@@ -407,9 +408,20 @@ fn deduplicate_paths(paths: Vec<ResolvedSavePath>) -> Vec<ResolvedSavePath> {
     result
 }
 
+fn paths_resolve_to(default_path: &Path, centralized_path: &Path) -> bool {
+    match (default_path.canonicalize(), centralized_path.canonicalize()) {
+        (Ok(default_path), Ok(centralized_path)) => default_path == centralized_path,
+        _ => false,
+    }
+}
+
 /// Create a symlink from `default_path` to `centralized_path`.
 /// Returns true if a symlink was created or migrated.
 fn create_save_symlink(default_path: &Path, centralized_path: &Path) -> bool {
+    if paths_resolve_to(default_path, centralized_path) {
+        return false;
+    }
+
     if let Some(parent) = centralized_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

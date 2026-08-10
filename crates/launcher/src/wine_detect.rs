@@ -143,9 +143,7 @@ pub fn find_wine_binary(version: &str, custom_path: &str) -> Result<String, Stri
                 Err("Wine Development not found at /usr/lib/wine-development/wine".to_string())
             }
         }
-        "ge-proton" => which::which("umu-run")
-            .map(|p| p.to_string_lossy().to_string())
-            .map_err(|_| "umu-run not found in PATH. Install umu-launcher.".to_string()),
+        "ge-proton" => find_umu_binary(),
         _ => {
             if version.starts_with("wine-") {
                 let sys_path = format!("/usr/lib/{}/bin/wine", version);
@@ -179,6 +177,19 @@ pub fn find_wine_binary(version: &str, custom_path: &str) -> Result<String, Stri
             ))
         }
     }
+}
+
+pub fn find_umu_binary() -> Result<String, String> {
+    for path in ["/usr/bin/umu-run", "/usr/local/bin/umu-run"] {
+        if std::path::Path::new(path).is_file() {
+            return Ok(path.to_string());
+        }
+    }
+    which::which("umu-run")
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|_| {
+            "umu-run not found. Install umu-launcher or disable UMU for this game.".to_string()
+        })
 }
 
 fn scan_proton_versions() -> Vec<(String, String)> {

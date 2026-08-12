@@ -48,9 +48,10 @@ pub fn read_shadps4_launch_options() -> Vec<crate::emulator_detect::DetectedEmul
             },
             launch_command: version.path.trim_matches('"').to_string(),
         })
+        .filter(|option| executable_available(&option.launch_command))
         .collect::<Vec<_>>();
     let native_options =
-        crate::emulator_detect::detect_emulator_choices(&["shadps4"], &[], "shadPS4");
+        crate::emulator_detect::detect_emulator_choices(&["shadps4", "shadPS4"], &[], "shadPS4");
     for detected in native_options {
         if !options
             .iter()
@@ -77,21 +78,19 @@ pub fn detect_shadps4_version_path() -> Option<String> {
             let trimmed = line.trim();
             if let Some(val) = trimmed.strip_prefix("versionSelected=") {
                 let path = val.trim_matches('"').to_string();
-                if !path.is_empty() {
+                if !path.is_empty() && executable_available(&path) {
                     return Some(path);
                 }
             }
         }
     }
 
-    // Fallback: pick the first release (type 0) from versions.json
+    // Fallback: pick the first installed version from versions.json.
     let versions = read_shadps4_versions();
     for v in &versions {
-        if v.version_type == 0 {
-            let p = v.path.trim_matches('"').to_string();
-            if !p.is_empty() {
-                return Some(p);
-            }
+        let p = v.path.trim_matches('"').to_string();
+        if !p.is_empty() && executable_available(&p) {
+            return Some(p);
         }
     }
     None
@@ -124,20 +123,46 @@ fn pick_shadps4_executable(
             continue;
         }
         if candidate.starts_with("flatpak:") {
-            return candidate.to_string();
+            if shadps4_executable_available(candidate) {
+                return candidate.to_string();
+            }
+            continue;
         }
         let is_known = versions.iter().any(|v| v.launch_command == candidate);
-        if is_known && Path::new(candidate).exists() {
+        if is_known && executable_available(candidate) {
             return candidate.to_string();
         }
     }
     if let Some(p) = detected {
         let p = p.trim_matches('"');
-        if !p.is_empty() && Path::new(p).exists() {
+        if !p.is_empty() && executable_available(p) {
             return p.to_string();
         }
     }
+    if let Some(candidate) = versions
+        .iter()
+        .map(|version| version.launch_command.as_str())
+        .find(|candidate| executable_available(candidate))
+    {
+        return candidate.to_string();
+    }
+    for name in ["shadps4", "shadPS4"] {
+        if let Ok(path) = which::which(name) {
+            return path.to_string_lossy().into_owned();
+        }
+    }
     "shadps4".to_string()
+}
+
+pub fn shadps4_executable_available(candidate: &str) -> bool {
+    candidate
+        .strip_prefix("flatpak:")
+        .map(crate::emulator_detect::is_flatpak_installed)
+        .unwrap_or_else(|| executable_available(candidate))
+}
+
+fn executable_available(candidate: &str) -> bool {
+    Path::new(candidate).is_file() || which::which(candidate).is_ok()
 }
 
 #[cfg(test)]
@@ -203,5 +228,12 @@ mod tests {
         let quoted = format!("\"{}\"", path.display());
         let exe = pick_shadps4_executable("", &quoted, &versions, None);
         assert_eq!(exe, path.to_str().unwrap());
+    }
+
+    #[test]
+    fn test_pick_skips_uninstalled_flatpak_pin() {
+        let versions = [version("/does/not/exist")];
+        let exe = pick_shadps4_executable("flatpak:invalid.ira.Test", "", &versions, None);
+        assert_eq!(exe, "shadps4");
     }
 }

@@ -330,6 +330,11 @@ pub(super) fn launch_ps4(
     game_path: &str,
 ) -> Result<(), String> {
     let exe = ira_platforms::ps4::resolve_shadps4_executable(per_game_version, global_shadps4_exe);
+    if !ira_platforms::ps4::shadps4_executable_available(&exe) {
+        return Err(format!(
+            "shadPS4 executable was not found: {exe}. Install shadPS4 or select an available version in Settings."
+        ));
+    }
     let args = vec!["-g".to_string(), game_path.to_string()];
     let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
         &exe,

@@ -54,14 +54,17 @@ pub(super) fn build_shadps4_settings_page(
     let emulators = ira_platforms::ps4::read_shadps4_launch_options();
     if !emulators.is_empty() {
         let emu_group = adw::PreferencesGroup::new();
-        emu_group.set_title("Emulator");
+        emu_group.set_title("shadPS4 build");
 
-        let dd =
-            build_emulator_dropdown(&cfg.shadps4_executable, true, "Follow launcher", &emulators);
+        let dd = build_emulator_dropdown(
+            &cfg.shadps4_executable,
+            true,
+            "Qt Launcher default",
+            &emulators,
+        );
 
         let version_row = adw::ActionRow::new();
-        version_row.set_title("Version");
-        version_row.set_subtitle("Which shadPS4 build to launch. \"Follow launcher\" uses the version selected in the shadPS4 Qt Launcher.");
+        version_row.set_title("Launch build");
         dd.set_valign(gtk4::Align::Center);
         version_row.add_suffix(&dd);
         emu_group.add(&version_row);

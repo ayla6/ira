@@ -494,7 +494,41 @@ fn wine_user_dirs(prefix: &str) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        ffi::OsString,
+        sync::{Mutex, MutexGuard},
+    };
+
     use super::*;
+
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    struct HomeGuard {
+        original: Option<OsString>,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl HomeGuard {
+        fn set(home: &Path) -> Self {
+            let lock = HOME_LOCK.lock().unwrap();
+            let original = std::env::var_os("HOME");
+            std::env::set_var("HOME", home);
+            Self {
+                original,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            if let Some(home) = &self.original {
+                std::env::set_var("HOME", home);
+            } else {
+                std::env::remove_var("HOME");
+            }
+        }
+    }
 
     #[test]
     fn test_split_at_variable_with_id() {
@@ -693,8 +727,7 @@ mod tests {
             }],
         }];
 
-        let home = tmp.path().to_str().unwrap();
-        std::env::set_var("HOME", home);
+        let _home = HomeGuard::set(tmp.path());
 
         let count = setup_game_saves(
             &savefiles,
@@ -812,8 +845,7 @@ mod tests {
             }],
         }];
 
-        let home = tmp.path().to_str().unwrap();
-        std::env::set_var("HOME", home);
+        let _home = HomeGuard::set(tmp.path());
 
         assert!(!saves_are_centralized(
             &savefiles,
@@ -853,8 +885,7 @@ mod tests {
             }],
         }];
 
-        let home = tmp.path().to_str().unwrap();
-        std::env::set_var("HOME", home);
+        let _home = HomeGuard::set(tmp.path());
 
         assert!(saves_are_centralized(
             &savefiles,

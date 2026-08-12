@@ -116,17 +116,17 @@ fn build_ra_games_for_console(
         let _s = tracing::info_span!("db_find_retro").entered();
         ira_db::find_all_retro_by_platform(db, console.def.id).unwrap_or_default()
     };
-    let existing_by_path: HashMap<String, ira_models::GameEntry> = existing_entries
-        .iter()
-        .filter(|e| !e.rom_path.is_empty())
-        .map(|e| (e.rom_path.clone(), e.clone()))
-        .collect();
     let disc_paths = {
         let _s = tracing::info_span!("db_disc_paths").entered();
         ira_db::get_disc_paths_for_platform(db, console.def.id).unwrap_or_default()
     };
 
-    let known_paths: HashSet<String> = existing_by_path.keys().cloned().chain(disc_paths).collect();
+    let known_paths: HashSet<String> = existing_entries
+        .iter()
+        .filter(|entry| !entry.rom_path.is_empty())
+        .map(|entry| entry.rom_path.clone())
+        .chain(disc_paths)
+        .collect();
 
     let mut seen_paths: HashSet<String> = HashSet::new();
     let mut new_roms: Vec<(String, PathBuf)> = Vec::new();
@@ -137,6 +137,27 @@ fn build_ra_games_for_console(
         }
         seen_paths.insert(relative);
     }
+
+    if scan_succeeded {
+        for entry in &existing_entries {
+            if !entry.rom_path.is_empty() && !seen_paths.contains(&entry.rom_path) {
+                if let Err(e) = ira_db::set_rom_path(db, entry.id, "") {
+                    eprintln!("Failed to clear stale ROM path: {}", e);
+                }
+                if let Err(e) = ira_db::delete_discs(db, entry.id) {
+                    eprintln!("Failed to delete stale discs: {}", e);
+                }
+            }
+        }
+    }
+
+    let existing_by_path: HashMap<String, ira_models::GameEntry> = existing_entries
+        .iter()
+        .filter(|e| {
+            !e.rom_path.is_empty() && rom_path_is_present(scan_succeeded, &seen_paths, &e.rom_path)
+        })
+        .map(|e| (e.rom_path.clone(), e.clone()))
+        .collect();
 
     let needs_ra_cache = !new_roms.is_empty()
         || existing_by_path
@@ -378,23 +399,11 @@ fn build_ra_games_for_console(
         }
     }
 
-    {
-        let _s = tracing::info_span!("stale_check").entered();
-        if scan_succeeded {
-            for entry in &existing_entries {
-                if !entry.rom_path.is_empty() && !seen_paths.contains(&entry.rom_path) {
-                    if let Err(e) = ira_db::set_rom_path(db, entry.id, "") {
-                        eprintln!("Failed to clear ROM path: {}", e);
-                    }
-                    if let Err(e) = ira_db::delete_discs(db, entry.id) {
-                        eprintln!("Failed to delete discs: {}", e);
-                    }
-                }
-            }
-        }
-    }
-
     games
+}
+
+fn rom_path_is_present(scan_succeeded: bool, seen_paths: &HashSet<String>, rom_path: &str) -> bool {
+    !scan_succeeded || seen_paths.contains(rom_path)
 }
 
 #[cfg(test)]
@@ -547,5 +556,13 @@ mod tests {
         let groups = group_multi_disc_roms(roms);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].roms.len(), 1);
+    }
+
+    #[test]
+    fn test_rom_path_is_present_after_successful_scan() {
+        let seen_paths = std::collections::HashSet::from(["game.iso".to_string()]);
+        assert!(super::rom_path_is_present(true, &seen_paths, "game.iso"));
+        assert!(!super::rom_path_is_present(true, &seen_paths, "moved.iso"));
+        assert!(super::rom_path_is_present(false, &seen_paths, "moved.iso"));
     }
 }

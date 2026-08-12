@@ -1,4 +1,4 @@
-use ira_models::WineConfig;
+use ira_models::{ControllerInputMode, WineConfig};
 use ira_overlay_ipc::OverlaySettings;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -15,6 +15,29 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ControllerInputModeCompat {
+    Mode(ControllerInputMode),
+    Legacy(bool),
+}
+
+fn deserialize_controller_input_mode<'de, D>(
+    deserializer: D,
+) -> Result<ControllerInputMode, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match ControllerInputModeCompat::deserialize(deserializer)? {
+        ControllerInputModeCompat::Mode(mode) => Ok(mode),
+        ControllerInputModeCompat::Legacy(enabled) => Ok(if enabled {
+            ControllerInputMode::VirtualXInput
+        } else {
+            ControllerInputMode::Disabled
+        }),
+    }
+}
+
 fn default_language_preferences() -> Vec<String> {
     vec!["english".to_string()]
 }
@@ -26,14 +49,27 @@ fn default_save_dir() -> String {
         .to_string()
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControllerInputConfig {
-    /// Enable the default XInput bridge when no per-game override is set.
-    #[serde(default)]
-    pub always_on: bool,
+    /// Controller bridge to use when no per-game override is set.
+    #[serde(
+        default,
+        alias = "always_on",
+        deserialize_with = "deserialize_controller_input_mode"
+    )]
+    pub mode: ControllerInputMode,
     /// Managed profile path to use when no per-game profile is selected.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub profile: String,
+}
+
+impl Default for ControllerInputConfig {
+    fn default() -> Self {
+        Self {
+            mode: ControllerInputMode::Disabled,
+            profile: String::new(),
+        }
+    }
 }
 
 fn default_console_enabled() -> bool {
@@ -357,6 +393,34 @@ mod tests {
     #[test]
     fn test_controller_key_uses_stable_usb_identity() {
         assert_eq!(Config::controller_key(0x2dc8, 0x6012), "2dc8:6012");
+    }
+
+    #[test]
+    fn test_controller_input_config_accepts_legacy_and_new_modes() {
+        let legacy: ControllerInputConfig =
+            serde_json::from_str(r#"{"always_on":true,"profile":"x"}"#).unwrap();
+        assert_eq!(legacy.mode, ControllerInputMode::VirtualXInput);
+        assert_eq!(legacy.profile, "x");
+
+        let disabled: ControllerInputConfig =
+            serde_json::from_str(r#"{"always_on":false}"#).unwrap();
+        assert_eq!(disabled.mode, ControllerInputMode::Disabled);
+
+        let direct: ControllerInputConfig =
+            serde_json::from_str(r#"{"mode":"virtual_direct_input"}"#).unwrap();
+        assert_eq!(direct.mode, ControllerInputMode::VirtualDirectInput);
+    }
+
+    #[test]
+    fn test_controller_input_config_serializes_new_fields_only() {
+        let cfg = ControllerInputConfig {
+            mode: ControllerInputMode::VirtualXInput,
+            profile: "x".to_string(),
+        };
+        let json = serde_json::to_value(cfg).unwrap();
+        assert_eq!(json["mode"], "virtual_x_input");
+        assert_eq!(json["profile"], "x");
+        assert!(json.get("always_on").is_none());
     }
 
     #[test]

@@ -4,9 +4,10 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use super::css::*;
-use super::input_profile_store::controller_default_path;
+use super::input_profile_store::{controller_default_path_for_backend, read_profile};
 use super::play_button_helpers;
 use super::state::SharedState;
+use ira_models::ControllerInputMode;
 
 const PLAY_BTN_HEIGHT: i32 = 48;
 const PLAY_BTN_H_MARGIN: i32 = 16;
@@ -76,19 +77,35 @@ fn active_controller_input(
     cfg: &ira_config::Config,
     save_dir: &str,
     controller_registry: &ira_input::ControllerRegistry,
-) -> (bool, Option<String>) {
+) -> (ControllerInputMode, Option<String>) {
     sorted_controller_snapshot(controller_registry.snapshot())
         .into_iter()
         .find_map(|device| {
             let key = ira_config::Config::controller_key(device.vendor, device.product);
             let defaults = cfg.controller_defaults.get(&key)?;
-            defaults.always_on.then(|| {
-                let path = controller_default_path(save_dir, &key);
-                let profile = path.is_file().then(|| path.to_string_lossy().into_owned());
-                (true, profile)
-            })
+            if defaults.mode == ControllerInputMode::Disabled {
+                return None;
+            }
+            let backend = match defaults.mode {
+                ControllerInputMode::VirtualDirectInput => {
+                    ira_input::VirtualGamepadBackend::DirectInput
+                }
+                ControllerInputMode::Disabled | ControllerInputMode::VirtualXInput => {
+                    ira_input::VirtualGamepadBackend::XInput
+                }
+            };
+            let configured = std::path::PathBuf::from(&defaults.profile);
+            let path = if configured.is_file()
+                && read_profile(&configured).is_ok_and(|profile| profile.backend == backend)
+            {
+                configured
+            } else {
+                controller_default_path_for_backend(save_dir, &key, backend)
+            };
+            let profile = path.is_file().then(|| path.to_string_lossy().into_owned());
+            Some((defaults.mode, profile))
         })
-        .unwrap_or((false, None))
+        .unwrap_or((ControllerInputMode::Disabled, None))
 }
 
 pub fn stop_game(state: &SharedState, game_id: i64) {
@@ -275,7 +292,7 @@ pub fn launch_game(
         })
         .map(|v| (v.show_as_entry, v.count_playtime));
     let (variant_show_as_entry, variant_count_playtime) = variant_info.unwrap_or((false, true));
-    let (controller_input_enabled, controller_input_profile) =
+    let (controller_input_mode, controller_input_profile) =
         active_controller_input(&cfg_clone, &save_dir, &controller_registry);
 
     let ctx = play_button_helpers::LaunchCtx {
@@ -303,7 +320,7 @@ pub fn launch_game(
         gamescope_fps_default,
         gamescope_upscaling_default,
         gpu_default,
-        controller_input_enabled,
+        controller_input_mode,
         controller_input_profile,
     };
 

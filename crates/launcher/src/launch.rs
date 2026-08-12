@@ -207,11 +207,8 @@ pub fn launch_game(
         (cmd, env)
     };
 
-    let input_enabled = launch.input_enabled.unwrap_or(false);
     let input_profile = launch.input_profile.as_deref();
-    if input_enabled {
-        super::env_builder::wrap_with_input(&mut command, input_profile)?;
-    }
+    super::env_builder::wrap_with_input_mode(&mut command, launch.input_mode, input_profile)?;
 
     // Set PWD to the game's working directory
     if let Some(ref dir) = game_dir {

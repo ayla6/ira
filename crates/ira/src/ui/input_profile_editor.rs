@@ -2,13 +2,13 @@ use super::css::{CSS_ERROR, CSS_FLAT, CSS_SUGGESTED_ACTION};
 use super::input_calibration_dialog::show_input_calibration_dialog;
 use super::input_profile_binding::{
     add_binding_row, add_empty_page_state, binding_from_row, binding_page_index,
-    binding_section_title, BindingRow, SectionGroups,
+    binding_section_title, BindingRow, BindingRowContext, SectionGroups,
 };
 use super::input_profile_store::{new_managed_profile_path, read_profile, write_profile};
 use adw::prelude::*;
 use ira_input::{
     AxisDirection, Binding, DeviceInfo, GamepadAxis, GamepadButton, GyroAxis, InputProfile,
-    InputSource, OutputAction,
+    InputSource, OutputAction, VirtualGamepadBackend,
 };
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -22,6 +22,22 @@ struct ProfileForm {
     calibration: Rc<RefCell<ira_input::GyroCalibration>>,
     compatible_game_ids: Vec<i64>,
     game_id: Option<i64>,
+    backend: Rc<RefCell<VirtualGamepadBackend>>,
+}
+
+#[derive(Clone)]
+struct BindingCollectionContext {
+    section_groups: SectionGroups,
+    rows: Rc<RefCell<Vec<BindingRow>>>,
+    device: Option<DeviceInfo>,
+    backend: Rc<RefCell<VirtualGamepadBackend>>,
+    mark_dirty: Rc<dyn Fn()>,
+}
+
+struct PageSetup {
+    page_boxes: Vec<gtk4::Box>,
+    section_groups: SectionGroups,
+    backend_dropdown: gtk4::DropDown,
 }
 
 pub(super) struct InputProfileEditorParams {
@@ -81,6 +97,7 @@ pub(super) fn show_input_profile_editor(
         .then(|| device.clone())
         .flatten();
     let original_profile = profile_with_game(profile.clone(), game_id);
+    let backend = Rc::new(RefCell::new(profile.backend));
 
     let rows = Rc::new(RefCell::new(Vec::<BindingRow>::new()));
     let current_path = Rc::new(RefCell::new(profile_path));
@@ -100,6 +117,7 @@ pub(super) fn show_input_profile_editor(
         let compatible_game_ids = compatible_game_ids.clone();
         let original_profile = original_profile.clone();
         let calibration = calibration.clone();
+        let backend = backend.clone();
         Rc::new(move || {
             let result = build_profile(
                 &name,
@@ -107,6 +125,7 @@ pub(super) fn show_input_profile_editor(
                 *calibration.borrow(),
                 &compatible_game_ids,
                 game_id,
+                *backend.borrow(),
             );
             save.set_sensitive(
                 result
@@ -116,32 +135,236 @@ pub(super) fn show_input_profile_editor(
         })
     };
 
+    let setup = setup_pages(
+        &layout,
+        &backend,
+        &rows,
+        &device,
+        &mark_dirty,
+        profile.bindings,
+    );
+    let page_boxes = setup.page_boxes;
+    let section_groups = setup.section_groups;
+    let backend_dropdown = setup.backend_dropdown;
+
+    add_calibration_group(
+        &page_boxes[4],
+        &calibration,
+        calibration_device,
+        &registry,
+        &mark_dirty,
+    );
+
+    let reset = reset_button(
+        &layout.window,
+        &page_boxes,
+        &section_groups,
+        &rows,
+        &device,
+        &backend,
+        &mark_dirty,
+    );
+    connect_backend_change(
+        &backend_dropdown,
+        &backend,
+        &page_boxes,
+        &section_groups,
+        &rows,
+        &device,
+        &mark_dirty,
+    );
+    layout.header.pack_end(&reset);
+
+    setup_sidebar(&layout);
+
+    let cancel = add_editor_footer(&layout, &save, &status, &profile_name);
+
+    let form = ProfileForm {
+        name: profile_name,
+        rows,
+        calibration,
+        compatible_game_ids,
+        game_id,
+        backend,
+    };
+    let on_saved: Rc<dyn Fn(PathBuf)> = Rc::new(on_saved);
+    let window_for_save = layout.window.clone();
+    connect_save(
+        &save,
+        &save_dir,
+        current_path,
+        form,
+        &status,
+        &window_for_save,
+        on_saved,
+    );
+    let window_for_cancel = layout.window.clone();
+    cancel.connect_clicked(move |_| window_for_cancel.close());
+    layout.window.present();
+}
+
+fn reset_button(
+    window: &adw::Window,
+    page_boxes: &[gtk4::Box],
+    section_groups: &SectionGroups,
+    rows: &Rc<RefCell<Vec<BindingRow>>>,
+    device: &Option<DeviceInfo>,
+    backend: &Rc<RefCell<VirtualGamepadBackend>>,
+    mark_dirty: &Rc<dyn Fn()>,
+) -> gtk4::Button {
+    let reset = gtk4::Button::new();
+    reset.add_css_class(CSS_FLAT);
+    reset.set_tooltip_text(Some(
+        "Replace the layout with the standard default bindings for this controller",
+    ));
+    let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    content.append(&gtk4::Image::from_icon_name("view-refresh-symbolic"));
+    content.append(&gtk4::Label::new(Some("Reset to defaults")));
+    reset.set_child(Some(&content));
+    let page_boxes = page_boxes.to_vec();
+    let section_groups = section_groups.clone();
+    let rows = rows.clone();
+    let device = device.clone();
+    let backend = backend.clone();
+    let mark_dirty = mark_dirty.clone();
+    let window = window.clone();
+    reset.connect_clicked(move |_| {
+        let dialog = adw::AlertDialog::new(
+            Some("Reset to defaults?"),
+            Some("Replace the current layout with the standard one-to-one default bindings for this controller."),
+        );
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("reset", "Reset");
+        dialog.set_response_appearance("reset", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+        let page_boxes = page_boxes.clone();
+        let section_groups = section_groups.clone();
+        let rows = rows.clone();
+        let device = device.clone();
+        let backend = backend.clone();
+        let mark_dirty = mark_dirty.clone();
+        dialog.connect_response(None, move |_, response| {
+            if response == "reset" {
+                reset_to_defaults(
+                    &page_boxes,
+                    &section_groups,
+                    &rows,
+                    device.as_ref(),
+                    &backend,
+                    &mark_dirty,
+                );
+            }
+        });
+        dialog.present(Some(&window));
+    });
+    reset
+}
+
+fn add_editor_footer(
+    layout: &super::helpers::DialogLayout,
+    save: &gtk4::Button,
+    status: &gtk4::Label,
+    profile_name: &str,
+) -> gtk4::Button {
+    let cancel = gtk4::Button::with_label("Cancel");
+    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    actions.set_halign(gtk4::Align::End);
+    actions.set_margin_start(16);
+    actions.set_margin_end(16);
+    actions.set_margin_top(8);
+    actions.set_margin_bottom(12);
+    actions.append(&cancel);
+    actions.append(save);
+    let title = if profile_name.trim().is_empty() {
+        "New controller layout".to_string()
+    } else {
+        profile_name.to_string()
+    };
+    layout
+        .header
+        .set_title_widget(Some(&gtk4::Label::new(Some(&title))));
+    layout.content_area.append(status);
+    layout.content_area.append(&actions);
+    cancel
+}
+
+fn setup_pages(
+    layout: &super::helpers::DialogLayout,
+    backend: &Rc<RefCell<VirtualGamepadBackend>>,
+    rows: &Rc<RefCell<Vec<BindingRow>>>,
+    device: &Option<DeviceInfo>,
+    mark_dirty: &Rc<dyn Fn()>,
+    bindings: Vec<Binding>,
+) -> PageSetup {
     let page_boxes = (0..5)
         .map(|_| gtk4::Box::new(gtk4::Orientation::Vertical, 10))
         .collect::<Vec<_>>();
-    let section_groups: SectionGroups = Rc::new(RefCell::new(
+    let section_groups = Rc::new(RefCell::new(
         (0..5)
             .map(|_| Vec::<(String, adw::PreferencesGroup)>::new())
             .collect(),
     ));
-    let stack = layout.stack.clone();
-    for (index, (page_id, title, icon)) in [
+    let backend_row = adw::ActionRow::new();
+    backend_row.set_title("Virtual gamepad backend");
+    let backend_dropdown = gtk4::DropDown::from_strings(&["XInput", "DirectInput"]);
+    backend_dropdown.set_selected((*backend.borrow() as u32).min(1));
+    backend_row.add_suffix(&backend_dropdown);
+    layout.content_area.append(&backend_row);
+    for (index, (page_id, title, icon)) in page_descriptors().into_iter().enumerate() {
+        let scroll = gtk4::ScrolledWindow::new();
+        scroll.set_vexpand(true);
+        scroll.set_child(Some(&page_boxes[index]));
+        let stack_page = layout.stack.add_titled(&scroll, Some(page_id), title);
+        stack_page.set_icon_name(icon);
+    }
+    let context = BindingCollectionContext {
+        section_groups: section_groups.clone(),
+        rows: rows.clone(),
+        device: device.clone(),
+        backend: backend.clone(),
+        mark_dirty: mark_dirty.clone(),
+    };
+    for (page, default_binding) in page_boxes.iter().zip(default_bindings()) {
+        let add_binding = gtk4::Button::from_icon_name("list-add-symbolic");
+        add_binding.add_css_class(CSS_FLAT);
+        add_binding.set_tooltip_text(Some("Add binding"));
+        connect_add_binding(&add_binding, default_binding, &context, page);
+        let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        actions.set_halign(gtk4::Align::End);
+        actions.set_valign(gtk4::Align::Center);
+        actions.set_margin_bottom(6);
+        actions.append(&add_binding);
+        page.append(&actions);
+    }
+    populate_bindings(
+        &page_boxes,
+        &section_groups,
+        rows,
+        bindings,
+        device.as_ref(),
+        backend,
+        mark_dirty,
+    );
+    PageSetup {
+        page_boxes,
+        section_groups,
+        backend_dropdown,
+    }
+}
+
+fn page_descriptors() -> [(&'static str, &'static str, &'static str); 5] {
+    [
         ("buttons", "Buttons", "input-gaming-symbolic"),
         ("dpad", "D-pad", "view-grid-symbolic"),
         ("triggers", "Triggers", "media-seek-forward-symbolic"),
         ("joysticks", "Joysticks", "input-gaming-symbolic"),
         ("gyro", "Gyro", "view-refresh-symbolic"),
     ]
-    .into_iter()
-    .enumerate()
-    {
-        let scroll = gtk4::ScrolledWindow::new();
-        scroll.set_vexpand(true);
-        scroll.set_child(Some(&page_boxes[index]));
-        let stack_page = stack.add_titled(&scroll, Some(page_id), title);
-        stack_page.set_icon_name(icon);
-    }
-    let page_default_bindings = [
+}
+
+fn default_bindings() -> [Binding; 5] {
+    [
         Binding::new(
             InputSource::Button(GamepadButton::A),
             OutputAction::GamepadButton(GamepadButton::A),
@@ -162,160 +385,62 @@ pub(super) fn show_input_profile_editor(
             InputSource::Gyro(GyroAxis::X),
             OutputAction::GamepadAxis(GamepadAxis::RightX),
         ),
-    ];
-    for (page, default_binding) in page_boxes.iter().zip(page_default_bindings) {
-        let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-        actions.set_halign(gtk4::Align::End);
-        actions.set_valign(gtk4::Align::Center);
-        actions.set_margin_bottom(6);
+    ]
+}
 
-        let advanced = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
-        let add_binding = gtk4::Button::from_icon_name("list-add-symbolic");
-        add_binding.add_css_class(CSS_FLAT);
-        add_binding.set_tooltip_text(Some("Add binding"));
-        connect_add_binding(
-            &add_binding,
-            page,
-            &section_groups,
-            &rows,
-            &device,
-            default_binding.clone(),
-            &mark_dirty,
-        );
-        advanced.append(&add_binding);
-        actions.append(&advanced);
-
-        page.append(&actions);
-    }
-    populate_bindings(
-        &page_boxes,
-        &section_groups,
-        &rows,
-        profile.bindings,
-        device.as_ref(),
-        &mark_dirty,
-    );
-
-    add_calibration_group(
-        &page_boxes[4],
-        &calibration,
-        calibration_device,
-        &registry,
-        &mark_dirty,
-    );
-
-    let window_for_reset = layout.window.clone();
-    let reset = gtk4::Button::new();
-    reset.add_css_class(CSS_FLAT);
-    reset.set_tooltip_text(Some(
-        "Replace the layout with the standard default bindings for this controller",
-    ));
-    let reset_content = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    reset_content.append(&gtk4::Image::from_icon_name("view-refresh-symbolic"));
-    reset_content.append(&gtk4::Label::new(Some("Reset to defaults")));
-    reset.set_child(Some(&reset_content));
-    {
-        let page_boxes = page_boxes.clone();
-        let section_groups = section_groups.clone();
-        let rows = rows.clone();
-        let device = device.clone();
-        let mark_dirty = mark_dirty.clone();
-        reset.connect_clicked(move |_| {
-            let dialog = adw::AlertDialog::new(
-                Some("Reset to defaults?"),
-                Some("Replace the current layout with the standard one-to-one default bindings for this controller."),
-            );
-            dialog.add_response("cancel", "Cancel");
-            dialog.add_response("reset", "Reset");
-            dialog.set_response_appearance("reset", adw::ResponseAppearance::Destructive);
-            dialog.set_default_response(Some("cancel"));
-            dialog.set_close_response("cancel");
-            let page_boxes = page_boxes.clone();
-            let section_groups = section_groups.clone();
-            let rows = rows.clone();
-            let device = device.clone();
-            let mark_dirty = mark_dirty.clone();
-            dialog.connect_response(None, move |_, response| {
-                if response == "reset" {
-                    reset_to_defaults(
-                        &page_boxes,
-                        &section_groups,
-                        &rows,
-                        device.as_ref(),
-                        &mark_dirty,
-                    );
-                }
-            });
-            dialog.present(Some(&window_for_reset));
-        });
-    }
-    layout.header.pack_end(&reset);
-
-    for (icon, title, page_id) in [
-        ("input-gaming-symbolic", "Buttons", "buttons"),
-        ("view-grid-symbolic", "D-pad", "dpad"),
-        ("media-seek-forward-symbolic", "Triggers", "triggers"),
-        ("input-gaming-symbolic", "Joysticks", "joysticks"),
-        ("view-refresh-symbolic", "Gyro", "gyro"),
-    ] {
+fn setup_sidebar(layout: &super::helpers::DialogLayout) {
+    for (icon, title, page_id) in page_descriptors() {
         layout
             .sidebar
             .append(&super::settings_dialog::settings_sidebar_row(
                 icon, title, page_id,
             ));
     }
-    let stack_for_selection = stack.clone();
+    let stack = layout.stack.clone();
     layout.sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
-            stack_for_selection.set_visible_child_name(&row.widget_name());
+            stack.set_visible_child_name(&row.widget_name());
         }
     });
     layout
         .sidebar
         .select_row(layout.sidebar.row_at_index(0).as_ref());
+}
 
-    let cancel = gtk4::Button::with_label("Cancel");
-    let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    actions.set_halign(gtk4::Align::End);
-    actions.set_margin_start(16);
-    actions.set_margin_end(16);
-    actions.set_margin_top(8);
-    actions.set_margin_bottom(12);
-    actions.append(&cancel);
-    actions.append(&save);
-
-    let title = if profile_name.trim().is_empty() {
-        "New controller layout".to_string()
-    } else {
-        profile_name.clone()
-    };
-    layout
-        .header
-        .set_title_widget(Some(&gtk4::Label::new(Some(&title))));
-    layout.content_area.append(&status);
-    layout.content_area.append(&actions);
-
-    let form = ProfileForm {
-        name: profile_name,
-        rows,
-        calibration,
-        compatible_game_ids,
-        game_id,
-    };
-    let on_saved: Rc<dyn Fn(PathBuf)> = Rc::new(on_saved);
-    let window_for_save = layout.window.clone();
-    connect_save(
-        &save,
-        &save_dir,
-        current_path,
-        form,
-        &status,
-        &window_for_save,
-        on_saved,
-    );
-    let window_for_cancel = layout.window.clone();
-    cancel.connect_clicked(move |_| window_for_cancel.close());
-    layout.window.present();
+fn connect_backend_change(
+    dropdown: &gtk4::DropDown,
+    backend: &Rc<RefCell<VirtualGamepadBackend>>,
+    page_boxes: &[gtk4::Box],
+    section_groups: &SectionGroups,
+    rows: &Rc<RefCell<Vec<BindingRow>>>,
+    device: &Option<DeviceInfo>,
+    mark_dirty: &Rc<dyn Fn()>,
+) {
+    let backend = backend.clone();
+    let page_boxes = page_boxes.to_vec();
+    let section_groups = section_groups.clone();
+    let rows = rows.clone();
+    let device = device.clone();
+    let mark_dirty = mark_dirty.clone();
+    dropdown.connect_selected_notify(move |dropdown| {
+        let selected = if dropdown.selected() == 1 {
+            VirtualGamepadBackend::DirectInput
+        } else {
+            VirtualGamepadBackend::XInput
+        };
+        if *backend.borrow() == selected {
+            return;
+        }
+        *backend.borrow_mut() = selected;
+        reset_to_defaults(
+            &page_boxes,
+            &section_groups,
+            &rows,
+            device.as_ref(),
+            &backend,
+            &mark_dirty,
+        );
+    });
 }
 
 fn section_group(
@@ -425,10 +550,7 @@ fn ensure_section_behavior(
     group: &adw::PreferencesGroup,
     title: &str,
     page: &gtk4::Box,
-    groups: &SectionGroups,
-    rows: &Rc<RefCell<Vec<BindingRow>>>,
-    device: Option<&DeviceInfo>,
-    mark_dirty: &Rc<dyn Fn()>,
+    context: &BindingCollectionContext,
 ) {
     if group.widget_name() == "section-behavior" {
         return;
@@ -449,24 +571,13 @@ fn ensure_section_behavior(
     row.add_suffix(&behavior);
     group.add(&row);
     let page = page.clone();
-    let groups = groups.clone();
-    let rows = rows.clone();
-    let device = device.cloned();
+    let context = context.clone();
     let title = title.to_string();
-    let mark_dirty = mark_dirty.clone();
     behavior.connect_selected_notify(move |dropdown| {
         if dropdown.selected() == 0 {
             return;
         }
-        replace_section_bindings(
-            &page,
-            &groups,
-            &rows,
-            &title,
-            dropdown.selected(),
-            device.as_ref(),
-            &mark_dirty,
-        );
+        replace_section_bindings(&page, &title, dropdown.selected(), &context);
     });
 }
 
@@ -488,9 +599,10 @@ fn section_behavior_bindings(
     title: &str,
     behavior: u32,
     device: Option<&DeviceInfo>,
+    backend: VirtualGamepadBackend,
 ) -> Vec<Binding> {
     match behavior {
-        1 => default_profile_bindings(device)
+        1 => default_profile_bindings(device, backend)
             .into_iter()
             .filter(|binding| binding_section_title(binding) == title)
             .collect(),
@@ -526,14 +638,12 @@ fn section_behavior_bindings(
 
 fn replace_section_bindings(
     page: &gtk4::Box,
-    groups: &SectionGroups,
-    rows: &Rc<RefCell<Vec<BindingRow>>>,
     title: &str,
     behavior: u32,
-    device: Option<&DeviceInfo>,
-    mark_dirty: &Rc<dyn Fn()>,
+    context: &BindingCollectionContext,
 ) {
-    let removed = rows
+    let removed = context
+        .rows
         .borrow()
         .iter()
         .filter(|row| {
@@ -541,7 +651,8 @@ fn replace_section_bindings(
         })
         .map(|row| row.container.clone())
         .collect::<Vec<_>>();
-    if let Some(group) = groups
+    if let Some(group) = context
+        .section_groups
         .borrow()
         .iter()
         .flatten()
@@ -551,21 +662,31 @@ fn replace_section_bindings(
         for container in &removed {
             group.remove(container);
         }
-        rows.borrow_mut()
+        context
+            .rows
+            .borrow_mut()
             .retain(|row| !removed.contains(&row.container));
-        for binding in section_behavior_bindings(title, behavior, device) {
+        for binding in section_behavior_bindings(
+            title,
+            behavior,
+            context.device.as_ref(),
+            *context.backend.borrow(),
+        ) {
             add_binding_row(
                 group.as_ref(),
-                page,
-                groups,
-                rows,
                 binding,
-                device,
-                mark_dirty,
+                &BindingRowContext {
+                    page: page.clone(),
+                    section_groups: context.section_groups.clone(),
+                    rows: context.rows.clone(),
+                    device: context.device.clone(),
+                    backend: *context.backend.borrow(),
+                    on_dirty: context.mark_dirty.clone(),
+                },
             );
         }
     }
-    mark_dirty();
+    (context.mark_dirty)();
 }
 
 fn clear_empty_page_state(page: &gtk4::Box) {
@@ -580,45 +701,49 @@ fn clear_empty_page_state(page: &gtk4::Box) {
 
 fn connect_add_binding(
     button: &gtk4::Button,
-    page: &gtk4::Box,
-    section_groups: &SectionGroups,
-    rows: &Rc<RefCell<Vec<BindingRow>>>,
-    device: &Option<DeviceInfo>,
     binding: Binding,
-    mark_dirty: &Rc<dyn Fn()>,
+    context: &BindingCollectionContext,
+    page: &gtk4::Box,
 ) {
     let page = page.clone();
-    let rows = rows.clone();
-    let device = device.clone();
-    let section_groups = section_groups.clone();
-    let mark_dirty = mark_dirty.clone();
+    let context = context.clone();
     button.connect_clicked(move |_| {
         clear_empty_page_state(&page);
         let group = section_group(
             &page,
-            &section_groups,
+            &context.section_groups,
             binding_page_index(&binding),
             "Custom",
         );
         add_binding_row(
             &group,
-            &page,
-            &section_groups,
-            &rows,
             binding.clone(),
-            device.as_ref(),
-            &mark_dirty,
+            &BindingRowContext {
+                page: page.clone(),
+                section_groups: context.section_groups.clone(),
+                rows: context.rows.clone(),
+                device: context.device.clone(),
+                backend: *context.backend.borrow(),
+                on_dirty: context.mark_dirty.clone(),
+            },
         );
-        mark_dirty();
+        (context.mark_dirty)();
     });
 }
 
-fn default_profile_bindings(device: Option<&DeviceInfo>) -> Vec<Binding> {
+fn default_profile_bindings(
+    device: Option<&DeviceInfo>,
+    backend: VirtualGamepadBackend,
+) -> Vec<Binding> {
     match device {
         Some(device) => {
-            InputProfile::default_gamepad_for_buttons(&device.supported_buttons).bindings
+            InputProfile::default_gamepad_for_backend_and_buttons(
+                backend,
+                &device.supported_buttons,
+            )
+            .bindings
         }
-        None => InputProfile::default_gamepad().bindings,
+        None => InputProfile::default_gamepad_for_backend(backend).bindings,
     }
 }
 
@@ -628,6 +753,7 @@ fn populate_bindings(
     rows: &Rc<RefCell<Vec<BindingRow>>>,
     bindings: Vec<Binding>,
     device: Option<&DeviceInfo>,
+    backend: &Rc<RefCell<VirtualGamepadBackend>>,
     mark_dirty: &Rc<dyn Fn()>,
 ) {
     let mut page_has_bindings = [false; 5];
@@ -644,23 +770,25 @@ fn populate_bindings(
         let title = binding_section_title(&binding);
         page_has_bindings[page_index] = true;
         let group = section_group(&page_boxes[page_index], section_groups, page_index, title);
-        ensure_section_behavior(
-            &group,
-            title,
-            &page_boxes[page_index],
-            section_groups,
-            rows,
-            device,
-            mark_dirty,
-        );
+        let context = BindingCollectionContext {
+            section_groups: section_groups.clone(),
+            rows: rows.clone(),
+            device: device.cloned(),
+            backend: backend.clone(),
+            mark_dirty: mark_dirty.clone(),
+        };
+        ensure_section_behavior(&group, title, &page_boxes[page_index], &context);
         add_binding_row(
             &group,
-            &page_boxes[page_index],
-            section_groups,
-            rows,
             binding,
-            device,
-            mark_dirty,
+            &BindingRowContext {
+                page: page_boxes[page_index].clone(),
+                section_groups: section_groups.clone(),
+                rows: rows.clone(),
+                device: device.cloned(),
+                backend: *backend.borrow(),
+                on_dirty: mark_dirty.clone(),
+            },
         );
     }
     for (page, has_bindings) in page_boxes.iter().zip(page_has_bindings) {
@@ -694,6 +822,7 @@ fn reset_to_defaults(
     section_groups: &SectionGroups,
     rows: &Rc<RefCell<Vec<BindingRow>>>,
     device: Option<&DeviceInfo>,
+    backend: &Rc<RefCell<VirtualGamepadBackend>>,
     mark_dirty: &Rc<dyn Fn()>,
 ) {
     clear_page_bindings(page_boxes, section_groups, rows);
@@ -701,8 +830,9 @@ fn reset_to_defaults(
         page_boxes,
         section_groups,
         rows,
-        default_profile_bindings(device),
+        default_profile_bindings(device, *backend.borrow()),
         device,
+        backend,
         mark_dirty,
     );
     mark_dirty();
@@ -811,6 +941,7 @@ fn connect_save(
             *form.calibration.borrow(),
             &form.compatible_game_ids,
             form.game_id,
+            *form.backend.borrow(),
         );
         save_result(
             result,
@@ -863,6 +994,7 @@ fn build_profile(
     calibration: ira_input::GyroCalibration,
     compatible_game_ids: &[i64],
     game_id: Option<i64>,
+    backend: VirtualGamepadBackend,
 ) -> Result<InputProfile, String> {
     let mut compatible_game_ids = compatible_game_ids.to_vec();
     if let Some(game_id) = game_id {
@@ -878,6 +1010,7 @@ fn build_profile(
             .collect::<Result<_, _>>()?,
         gyro_calibration: calibration,
         compatible_game_ids,
+        backend,
         ..InputProfile::default()
     };
     profile.validate()?;
@@ -907,13 +1040,13 @@ mod tests {
     };
     use ira_input::{
         AxisDirection, DeviceInfo, GamepadAxis, GamepadButton, GyroCalibration, InputSource,
-        OutputAction,
+        OutputAction, VirtualGamepadBackend,
     };
     use std::path::PathBuf;
 
     #[test]
     fn test_default_profile_bindings_without_device_omit_paddles() {
-        let bindings = default_profile_bindings(None);
+        let bindings = default_profile_bindings(None, VirtualGamepadBackend::XInput);
         assert!(!bindings.is_empty());
         assert!(!bindings.iter().any(
             |binding| matches!(binding.source, InputSource::Button(button) if button.is_paddle())
@@ -931,7 +1064,7 @@ mod tests {
             has_evdev_gyro: false,
             supported_buttons: vec![GamepadButton::A, GamepadButton::Paddle1],
         };
-        let bindings = default_profile_bindings(Some(&device));
+        let bindings = default_profile_bindings(Some(&device), VirtualGamepadBackend::XInput);
         assert!(bindings
             .iter()
             .any(|binding| binding.source == InputSource::Button(GamepadButton::A)));
@@ -977,7 +1110,8 @@ mod tests {
 
     #[test]
     fn test_stick_behavior_replaces_with_directional_bindings() {
-        let bindings = section_behavior_bindings("Left Stick", 3, None);
+        let bindings =
+            section_behavior_bindings("Left Stick", 3, None, VirtualGamepadBackend::XInput);
         assert_eq!(bindings.len(), 4);
         assert!(bindings.iter().all(|binding| matches!(
             binding.output,
@@ -988,7 +1122,8 @@ mod tests {
                     | GamepadButton::DpadRight
             )
         )));
-        let default = section_behavior_bindings("Left Stick", 2, None);
+        let default =
+            section_behavior_bindings("Left Stick", 2, None, VirtualGamepadBackend::XInput);
         assert_eq!(default.len(), 2);
         assert_ne!(default, bindings);
     }
@@ -1014,7 +1149,15 @@ mod tests {
             y: -2.0,
             z: 3.0,
         };
-        let profile = build_profile("Test", &[], calibration, &[], None).unwrap();
+        let profile = build_profile(
+            "Test",
+            &[],
+            calibration,
+            &[],
+            None,
+            VirtualGamepadBackend::XInput,
+        )
+        .unwrap();
         assert_eq!(profile.gyro_calibration, calibration);
     }
 

@@ -13,7 +13,7 @@ use adw::prelude::*;
 use ira_input::{
     Activation, AxisDirection, AxisTransform, Binding, ChordMode, ControllerFamily, DeviceInfo,
     GamepadAxis, GamepadButton, GyroAxis, GyroMode, InputCategory, InputSource, OutputAction,
-    RecenterMode,
+    RecenterMode, VirtualGamepadBackend,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -61,9 +61,20 @@ struct OutputChangeContext {
     gyro_mode_row: adw::ActionRow,
     row: adw::ExpanderRow,
     on_dirty: Rc<dyn Fn()>,
+    backend: VirtualGamepadBackend,
 }
 
 pub(super) type SectionGroups = Rc<RefCell<Vec<Vec<(String, adw::PreferencesGroup)>>>>;
+
+#[derive(Clone)]
+pub(super) struct BindingRowContext {
+    pub page: gtk4::Box,
+    pub section_groups: SectionGroups,
+    pub rows: Rc<RefCell<Vec<BindingRow>>>,
+    pub device: Option<DeviceInfo>,
+    pub backend: VirtualGamepadBackend,
+    pub on_dirty: Rc<dyn Fn()>,
+}
 
 pub(super) fn binding_page_index(binding: &Binding) -> usize {
     match binding.source.category() {
@@ -125,16 +136,18 @@ pub(super) fn binding_section_title(binding: &Binding) -> &'static str {
 
 pub(super) fn add_binding_row(
     group: &adw::PreferencesGroup,
-    page: &gtk4::Box,
-    section_groups: &SectionGroups,
-    rows: &Rc<RefCell<Vec<BindingRow>>>,
     binding: Binding,
-    device: Option<&DeviceInfo>,
-    on_dirty: &Rc<dyn Fn()>,
+    context: &BindingRowContext,
 ) {
     let page_index = binding_page_index(&binding);
-    let row = make_binding_row(binding, page_index, device, on_dirty);
-    connect_dirty(&row, on_dirty);
+    let row = make_binding_row(
+        binding,
+        page_index,
+        context.device.as_ref(),
+        context.backend,
+        &context.on_dirty,
+    );
+    connect_dirty(&row, &context.on_dirty);
     let remove = gtk4::Button::from_icon_name("user-trash-symbolic");
     remove.add_css_class(CSS_FLAT);
     remove.add_css_class(CSS_SQUARE_BUTTON);
@@ -142,10 +155,10 @@ pub(super) fn add_binding_row(
     remove.set_tooltip_text(Some("Remove binding"));
     let container = row.container.clone();
     let group_for_remove = group.clone();
-    let page_for_remove = page.clone();
-    let section_groups_for_remove = section_groups.clone();
-    let rows_for_remove = rows.clone();
-    let on_dirty_for_remove = on_dirty.clone();
+    let page_for_remove = context.page.clone();
+    let section_groups_for_remove = context.section_groups.clone();
+    let rows_for_remove = context.rows.clone();
+    let on_dirty_for_remove = context.on_dirty.clone();
     let page_index_for_remove = page_index;
     remove.connect_clicked(move |_| {
         group_for_remove.remove(&container);
@@ -171,7 +184,7 @@ pub(super) fn add_binding_row(
     });
     row.container.add_suffix(&remove);
     group.add(&row.container);
-    rows.borrow_mut().push(row);
+    context.rows.borrow_mut().push(row);
 }
 
 fn connect_dirty(row: &BindingRow, on_dirty: &Rc<dyn Fn()>) {
@@ -233,9 +246,11 @@ fn make_binding_row(
     binding: Binding,
     page_index: usize,
     device: Option<&DeviceInfo>,
+    backend: VirtualGamepadBackend,
     on_dirty: &Rc<dyn Fn()>,
 ) -> BindingRow {
-    let page_source_options = source_options_for_page(page_index, device, Some(binding.source));
+    let page_source_options =
+        source_options_for_page(page_index, device, backend, Some(binding.source));
     let binding_source_labels = page_source_options
         .iter()
         .map(|(_, label)| label.clone())
@@ -244,10 +259,13 @@ fn make_binding_row(
         &binding_source_labels,
         source_index_for(&page_source_options, binding.source),
     );
-    let output = combo_row(&output_labels(), output_index(&binding.output));
+    let output = combo_row(
+        &output_labels(backend),
+        output_index(&binding.output, backend),
+    );
     let current_output = Rc::new(RefCell::new(binding.output.clone()));
     let activation = combo_row(&activation_labels(), activation_index(&binding.activation));
-    let mut activator_options = source_options_for_device(device);
+    let mut activator_options = source_options_for_device(device, backend);
     for source in activation_sources(&binding.activation) {
         if !activator_options
             .iter()
@@ -384,6 +402,7 @@ fn make_binding_row(
             gyro_mode_row,
             row: container.clone(),
             on_dirty: on_dirty.clone(),
+            backend,
         },
     );
     BindingRow {
@@ -431,13 +450,13 @@ fn connect_source_changes(dropdown: &gtk4::DropDown, context: SourceChangeContex
 
 fn connect_output_changes(dropdown: &gtk4::DropDown, context: OutputChangeContext) {
     dropdown.connect_selected_notify(move |dropdown| {
-        let Some(option) = output_option(dropdown.selected()) else {
+        let Some(option) = output_option(dropdown.selected(), context.backend) else {
             return;
         };
         match option {
             OutputOption::Action(action) => *context.output.borrow_mut() = action,
             capture_option => {
-                dropdown.set_selected(output_index(&context.output.borrow()));
+                dropdown.set_selected(output_index(&context.output.borrow(), context.backend));
                 if let Some(parent) = dropdown.root().and_downcast::<gtk4::Window>() {
                     show_output_capture(capture_option, &parent, context.clone());
                 }
@@ -818,6 +837,7 @@ pub(super) fn binding_from_row(row: &BindingRow) -> Result<Binding, String> {
 fn source_options_for_page(
     page_index: usize,
     device: Option<&DeviceInfo>,
+    backend: VirtualGamepadBackend,
     current_source: Option<InputSource>,
 ) -> Vec<(InputSource, String)> {
     let category = match page_index {
@@ -828,7 +848,7 @@ fn source_options_for_page(
         4 => InputCategory::Gyro,
         _ => return Vec::new(),
     };
-    let mut options = source_options_for_device(device)
+    let mut options = source_options_for_device(device, backend)
         .into_iter()
         .filter(|(source, _)| source.category() == category)
         .collect::<Vec<_>>();

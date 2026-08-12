@@ -1,6 +1,6 @@
 use ira_input::{
     Activation, AxisDirection, DeviceInfo, GamepadAxis, GamepadButton, GyroAxis, GyroMode,
-    InputSource, MouseAxis, MouseButton, OutputAction, RecenterMode,
+    InputSource, MouseAxis, MouseButton, OutputAction, RecenterMode, VirtualGamepadBackend,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,13 +10,17 @@ pub(super) enum OutputOption {
     CaptureMouseButton,
 }
 
-pub(super) fn source_options_for_device(device: Option<&DeviceInfo>) -> Vec<(InputSource, String)> {
+pub(super) fn source_options_for_device(
+    device: Option<&DeviceInfo>,
+    backend: VirtualGamepadBackend,
+) -> Vec<(InputSource, String)> {
     let mut options = gamepad_buttons()
         .into_iter()
         .filter(|button| {
-            device.map_or(!button.is_paddle(), |device| {
-                device.supported_buttons.contains(button)
-            })
+            device.map_or(
+                backend == VirtualGamepadBackend::DirectInput || !button.is_paddle(),
+                |device| device.supported_buttons.contains(button),
+            )
         })
         .map(|button| {
             (
@@ -247,11 +251,25 @@ fn output_buttons() -> [GamepadButton; 17] {
     ]
 }
 
-pub(super) fn output_options() -> Vec<OutputOption> {
+pub(super) fn output_options(backend: VirtualGamepadBackend) -> Vec<OutputOption> {
     let mut options = output_buttons()
         .into_iter()
         .map(|button| OutputOption::Action(OutputAction::GamepadButton(button)))
         .collect::<Vec<_>>();
+    if backend == VirtualGamepadBackend::DirectInput {
+        options.extend((1..=8).map(|number| {
+            OutputOption::Action(OutputAction::GamepadButton(match number {
+                1 => GamepadButton::Paddle1,
+                2 => GamepadButton::Paddle2,
+                3 => GamepadButton::Paddle3,
+                4 => GamepadButton::Paddle4,
+                5 => GamepadButton::Paddle5,
+                6 => GamepadButton::Paddle6,
+                7 => GamepadButton::Paddle7,
+                _ => GamepadButton::Paddle8,
+            }))
+        }));
+    }
     options.extend(
         gamepad_axes()
             .into_iter()
@@ -269,19 +287,22 @@ pub(super) fn output_options() -> Vec<OutputOption> {
     options
 }
 
-pub(super) fn output_labels() -> Vec<String> {
-    output_options().iter().map(output_option_label).collect()
+pub(super) fn output_labels(backend: VirtualGamepadBackend) -> Vec<String> {
+    output_options(backend)
+        .iter()
+        .map(output_option_label)
+        .collect()
 }
 
-pub(super) fn output_index(output: &OutputAction) -> u32 {
-    output_options()
+pub(super) fn output_index(output: &OutputAction, backend: VirtualGamepadBackend) -> u32 {
+    output_options(backend)
         .iter()
         .position(|option| output_option_matches(option, output))
         .unwrap_or(0) as u32
 }
 
-pub(super) fn output_option(index: u32) -> Option<OutputOption> {
-    output_options().get(index as usize).cloned()
+pub(super) fn output_option(index: u32, backend: VirtualGamepadBackend) -> Option<OutputOption> {
+    output_options(backend).get(index as usize).cloned()
 }
 
 pub(super) fn output_display_label(output: &OutputAction) -> String {
@@ -329,13 +350,13 @@ mod tests {
     };
     use ira_input::{
         Activation, DeviceInfo, GamepadAxis, GamepadButton, GyroAxis, GyroMode, InputSource,
-        MouseButton, OutputAction,
+        MouseButton, OutputAction, VirtualGamepadBackend,
     };
     use std::path::PathBuf;
 
     #[test]
     fn test_source_options_without_device_omit_paddles() {
-        let options = source_options_for_device(None);
+        let options = source_options_for_device(None, VirtualGamepadBackend::XInput);
         assert!(options.contains(&(
             InputSource::Button(GamepadButton::A),
             "A Button".to_string()
@@ -356,7 +377,7 @@ mod tests {
             has_evdev_gyro: false,
             supported_buttons: vec![GamepadButton::A, GamepadButton::Paddle1],
         };
-        let options = source_options_for_device(Some(&device));
+        let options = source_options_for_device(Some(&device), VirtualGamepadBackend::DirectInput);
         assert!(options
             .iter()
             .any(|(source, _)| *source == InputSource::Button(GamepadButton::Paddle1)));
@@ -367,7 +388,7 @@ mod tests {
 
     #[test]
     fn test_source_options_show_raw_gyro_axes_with_semantics() {
-        let options = source_options_for_device(None);
+        let options = source_options_for_device(None, VirtualGamepadBackend::XInput);
         assert!(options.contains(&(InputSource::Gyro(GyroAxis::X), "Gyro X (Pitch)".to_string())));
         assert!(options.contains(&(InputSource::Gyro(GyroAxis::Y), "Gyro Y (Yaw)".to_string())));
         assert!(options.contains(&(InputSource::Gyro(GyroAxis::Z), "Gyro Z (Roll)".to_string())));
@@ -393,36 +414,46 @@ mod tests {
 
     #[test]
     fn test_output_options_include_supported_virtual_controls() {
-        let labels = output_labels();
+        let labels = output_labels(VirtualGamepadBackend::XInput);
         assert_eq!(labels.len(), 28);
         assert!(!labels.iter().any(|label| label.contains("Paddle")));
         assert!(labels.contains(&"Mouse X".to_string()));
         assert!(labels.contains(&"Keyboard key...".to_string()));
         assert_eq!(
-            output_option(output_index(&OutputAction::GamepadAxis(
-                GamepadAxis::RightX
-            ))),
+            output_option(
+                output_index(
+                    &OutputAction::GamepadAxis(GamepadAxis::RightX),
+                    VirtualGamepadBackend::XInput
+                ),
+                VirtualGamepadBackend::XInput
+            ),
             Some(OutputOption::Action(OutputAction::GamepadAxis(
                 GamepadAxis::RightX
             )))
         );
         assert_eq!(
-            output_option(output_index(&OutputAction::Keyboard { keycode: 30 })),
+            output_option(
+                output_index(
+                    &OutputAction::Keyboard { keycode: 30 },
+                    VirtualGamepadBackend::XInput
+                ),
+                VirtualGamepadBackend::XInput
+            ),
             Some(OutputOption::CaptureKeyboard)
         );
-        assert!(output_option(28).is_none());
+        assert!(output_option(28, VirtualGamepadBackend::XInput).is_none());
     }
 
     #[test]
     fn test_output_labels_are_concise() {
-        let labels = output_labels();
+        let labels = output_labels(VirtualGamepadBackend::XInput);
         assert!(labels.contains(&"A Button".to_string()));
         assert!(!labels.iter().any(|label| label.starts_with("Gamepad ")));
     }
 
     #[test]
     fn test_trigger_labels_distinguish_full_and_soft_bindings() {
-        let sources = source_options_for_device(None);
+        let sources = source_options_for_device(None, VirtualGamepadBackend::XInput);
         assert!(sources.contains(&(
             InputSource::Button(GamepadButton::LeftTrigger),
             "Left Trigger (full)".to_string()
@@ -432,7 +463,7 @@ mod tests {
             "Left Trigger (soft)".to_string()
         )));
 
-        let outputs = output_labels();
+        let outputs = output_labels(VirtualGamepadBackend::XInput);
         assert!(outputs.contains(&"Right Trigger (full)".to_string()));
         assert!(outputs.contains(&"Right Trigger (soft)".to_string()));
     }
@@ -465,7 +496,7 @@ mod tests {
                 GamepadButton::Paddle4,
             ],
         };
-        let labels = source_options_for_device(Some(&device));
+        let labels = source_options_for_device(Some(&device), VirtualGamepadBackend::DirectInput);
         let extended = labels
             .into_iter()
             .filter_map(|(source, label)| match source {

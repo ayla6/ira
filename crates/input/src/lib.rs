@@ -12,7 +12,7 @@ pub use physical::{discover_gamepads, ControllerFamily, DeviceInfo, PhysicalGame
 pub use profile::{
     Activation, AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton,
     GyroAxis, GyroCalibration, GyroMode, InputCategory, InputProfile, InputSource, MouseAxis,
-    MouseButton, OutputAction, RecenterMode, PROFILE_VERSION,
+    MouseButton, OutputAction, RecenterMode, VirtualGamepadBackend, PROFILE_VERSION,
 };
 pub use registry::ControllerRegistry;
 pub use sensor::{discover_sdl_gamepads, GyroSample, Sdl3SensorBackend, SdlGamepadInfo};

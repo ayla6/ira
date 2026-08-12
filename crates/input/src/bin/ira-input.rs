@@ -37,7 +37,6 @@ struct Arguments {
     profile: Option<PathBuf>,
     list: bool,
     probe_sensors: bool,
-    grab: bool,
     trace: bool,
     command: Vec<String>,
 }
@@ -128,7 +127,7 @@ fn main() {
         Err(error) => {
             eprintln!("ira-input: {error}");
             eprintln!(
-                "usage: ira-input --list | [--device PATH] [--profile PATH] [--no-grab] [--trace] -- COMMAND"
+                "usage: ira-input --list | [--device PATH] [--profile PATH] [--trace] -- COMMAND"
             );
             std::process::exit(2);
         }
@@ -156,7 +155,6 @@ fn parse_arguments() -> Result<Arguments, String> {
         profile: None,
         list: false,
         probe_sensors: false,
-        grab: true,
         trace: false,
         command: Vec::new(),
     };
@@ -183,11 +181,10 @@ fn parse_arguments() -> Result<Arguments, String> {
             }
             "--list" => arguments.list = true,
             "--probe-sensors" => arguments.probe_sensors = true,
-            "--no-grab" => arguments.grab = false,
             "--trace" => arguments.trace = true,
             "--help" | "-h" => {
                 println!(
-                    "usage: ira-input --list | [--device PATH] [--profile PATH] [--no-grab] [--trace] -- COMMAND"
+                    "usage: ira-input --list | [--device PATH] [--profile PATH] [--trace] -- COMMAND"
                 );
                 std::process::exit(0);
             }
@@ -273,13 +270,13 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             .next()
             .map(|device| device.path)
     }) else {
-        eprintln!("ira-input: no gamepad found; running target without input mapping");
+        eprintln!("ira-input: no gamepad found; running target without input virtualization");
         return run_target_without_input(&arguments.command);
     };
     let mut gamepad = match PhysicalGamepad::open(&device_path, false) {
         Ok(gamepad) => gamepad,
         Err(error) => {
-            eprintln!("ira-input: {error}; running target without input mapping");
+            eprintln!("ira-input: {error}; running target without input virtualization");
             return run_target_without_input(&arguments.command);
         }
     };
@@ -302,18 +299,34 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     );
     let mut keyboard = create_keyboard(mapper.profile().keyboard_keycodes())?;
     let mut mouse = create_mouse(mapper.profile().uses_mouse())?;
-    let mut virtual_gamepad = VirtualGamepad::create()
+    let mut virtual_gamepad = VirtualGamepad::create_for_backend(mapper.profile().backend)
         .map_err(|error| format!("failed to create virtual gamepad: {error}"))?;
     let mut sensor = open_sensor(gamepad.info());
-    if arguments.grab {
-        gamepad.grab()?;
+    if let Err(error) = gamepad.grab() {
+        eprintln!("ira-input: {error}; running target without input virtualization");
+        return run_target_without_input(&arguments.command);
     }
     let mut child = if arguments.command.is_empty() {
         None
     } else {
+        let mut target_args = arguments.command[1..].to_vec();
+        if mapper.profile().backend == ira_input::VirtualGamepadBackend::DirectInput {
+            inject_flatpak_env(
+                &arguments.command[0],
+                &mut target_args,
+                "SDL_GAMECONTROLLERCONFIG",
+                &VirtualGamepad::direct_input_sdl_mapping(),
+            );
+        }
         let mut command = std::process::Command::new(&arguments.command[0]);
-        command.args(&arguments.command[1..]);
+        command.args(target_args);
         command.env("SDL_JOYSTICK_HIDAPI", "0");
+        if mapper.profile().backend == ira_input::VirtualGamepadBackend::DirectInput {
+            command.env(
+                "SDL_GAMECONTROLLERCONFIG",
+                VirtualGamepad::direct_input_sdl_mapping(),
+            );
+        }
         if let Some(ignored_device) =
             ignored_device_for_target(gamepad.info().vendor, gamepad.info().product)
         {
@@ -360,10 +373,8 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                         gamepad.info().path.display()
                     );
                     sensor = open_sensor(gamepad.info());
-                    if arguments.grab {
-                        if let Err(error) = gamepad.grab() {
-                            eprintln!("ira-input: failed to re-grab controller: {error}");
-                        }
+                    if let Err(error) = gamepad.grab() {
+                        eprintln!("ira-input: failed to re-grab controller: {error}");
                     }
                 }
                 Ok(false) => {}
@@ -425,6 +436,24 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     }
 }
 
+fn inject_flatpak_env(program: &str, args: &mut Vec<String>, key: &str, value: &str) {
+    let program = std::path::Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str());
+    let is_flatpak = program == Some("flatpak");
+    let is_flatpak_spawn = program == Some("flatpak-spawn")
+        && args
+            .windows(2)
+            .any(|window| window == ["--host", "flatpak"]);
+    if !is_flatpak && !is_flatpak_spawn {
+        return;
+    }
+    let Some(run_index) = args.iter().position(|argument| argument == "run") else {
+        return;
+    };
+    args.insert(run_index + 1, format!("--env={key}={value}"));
+}
+
 fn ignored_device_for_target(vendor: u16, product: u16) -> Option<String> {
     if (vendor, product) == (VIRTUAL_XBOX_VENDOR, VIRTUAL_XBOX_PRODUCT) {
         None
@@ -445,16 +474,23 @@ fn run_target_without_input(command: &[String]) -> Result<i32, String> {
 }
 
 fn load_profile(path: Option<&Path>) -> Result<InputProfile, String> {
-    let Some(path) = path else {
-        return Ok(InputProfile::default_gamepad());
+    let profile = match path {
+        None => InputProfile::default_gamepad(),
+        Some(path) if path == Path::new("builtin:default_gamepad") => {
+            InputProfile::default_gamepad()
+        }
+        Some(path) => {
+            let contents = std::fs::read_to_string(path)
+                .map_err(|error| format!("failed to read profile {}: {error}", path.display()))?;
+            serde_json::from_str(&contents)
+                .map_err(|error| format!("failed to parse profile {}: {error}", path.display()))?
+        }
     };
-    if path == Path::new("builtin:default_gamepad") {
-        return Ok(InputProfile::default_gamepad());
-    }
-    let contents = std::fs::read_to_string(path)
-        .map_err(|error| format!("failed to read profile {}: {error}", path.display()))?;
-    serde_json::from_str(&contents)
-        .map_err(|error| format!("failed to parse profile {}: {error}", path.display()))
+    profile.validate().map_err(|error| match path {
+        Some(path) => format!("invalid profile {}: {error}", path.display()),
+        None => format!("invalid builtin profile: {error}"),
+    })?;
+    Ok(profile)
 }
 
 fn is_real_profile(path: &Path) -> bool {
@@ -668,6 +704,10 @@ fn reload_profile(
 ) -> Result<(), String> {
     let profile = load_profile(Some(path))?;
     let new_mapper = MappingEngine::new(profile)?;
+    let backend_changed = mapper.profile().backend != new_mapper.profile().backend;
+    if backend_changed {
+        return Err("virtual gamepad backend changes require restarting the game".to_string());
+    }
     let keycodes_changed =
         mapper.profile().keyboard_keycodes() != new_mapper.profile().keyboard_keycodes();
     let mouse_changed = mapper.profile().uses_mouse() != new_mapper.profile().uses_mouse();
@@ -824,12 +864,56 @@ fn now_us() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ira_input::VirtualGamepadBackend;
 
     #[test]
     fn test_is_real_profile_excludes_builtin() {
         assert!(!is_real_profile(Path::new("builtin:default_gamepad")));
         assert!(!is_real_profile(Path::new("builtin:anything")));
         assert!(is_real_profile(Path::new("/tmp/profile.json")));
+    }
+
+    #[test]
+    fn test_load_profile_preserves_backend_and_validates_bindings() {
+        let dir = temp_profile_dir("backend");
+        let path = dir.join("profile.json");
+        let mut profile =
+            InputProfile::default_gamepad_for_backend(VirtualGamepadBackend::DirectInput);
+        profile.bindings.clear();
+        std::fs::write(&path, serde_json::to_vec(&profile).unwrap()).unwrap();
+
+        let loaded = load_profile(Some(&path)).unwrap();
+        assert_eq!(loaded.backend, VirtualGamepadBackend::DirectInput);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_inject_flatpak_env_places_mapping_after_run() {
+        let mut args = vec!["run".to_string(), "net.shadps4.shadPS4".to_string()];
+        inject_flatpak_env("/usr/bin/flatpak", &mut args, "KEY", "value");
+        assert_eq!(args, ["run", "--env=KEY=value", "net.shadps4.shadPS4"]);
+
+        let mut native = vec!["--fullscreen".to_string()];
+        inject_flatpak_env("shadps4", &mut native, "KEY", "value");
+        assert_eq!(native, ["--fullscreen"]);
+
+        let mut nested = vec![
+            "--host".to_string(),
+            "flatpak".to_string(),
+            "run".to_string(),
+            "net.shadps4.shadPS4".to_string(),
+        ];
+        inject_flatpak_env("flatpak-spawn", &mut nested, "KEY", "value");
+        assert_eq!(
+            nested,
+            [
+                "--host",
+                "flatpak",
+                "run",
+                "--env=KEY=value",
+                "net.shadps4.shadPS4"
+            ]
+        );
     }
 
     #[test]

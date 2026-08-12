@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 
 pub const PROFILE_VERSION: u32 = 1;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VirtualGamepadBackend {
+    #[default]
+    XInput,
+    DirectInput,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GamepadButton {
@@ -190,7 +198,16 @@ impl OutputAction {
     }
 
     pub fn is_supported(&self) -> bool {
-        !matches!(self, Self::GamepadButton(button) if !button.is_xinput())
+        self.is_supported_by(VirtualGamepadBackend::XInput)
+    }
+
+    pub fn is_supported_by(&self, backend: VirtualGamepadBackend) -> bool {
+        match backend {
+            VirtualGamepadBackend::XInput => {
+                !matches!(self, Self::GamepadButton(button) if button.is_paddle())
+            }
+            VirtualGamepadBackend::DirectInput => true,
+        }
     }
 }
 
@@ -318,6 +335,8 @@ pub struct InputProfile {
     #[serde(default = "default_profile_name")]
     pub name: String,
     #[serde(default)]
+    pub backend: VirtualGamepadBackend,
+    #[serde(default)]
     pub bindings: Vec<Binding>,
     #[serde(default)]
     pub gyro_calibration: GyroCalibration,
@@ -332,6 +351,7 @@ impl Default for InputProfile {
         Self {
             version: PROFILE_VERSION,
             name: default_profile_name(),
+            backend: VirtualGamepadBackend::default(),
             bindings: Vec::new(),
             gyro_calibration: GyroCalibration::default(),
             compatible_game_ids: Vec::new(),
@@ -348,7 +368,7 @@ impl InputProfile {
             ));
         }
         for (index, binding) in self.bindings.iter().enumerate() {
-            if !binding.output.is_supported() {
+            if !binding.output.is_supported_by(self.backend) {
                 return Err(format!(
                     "binding {index}: output is not supported by Ira's virtual input devices"
                 ));
@@ -374,11 +394,70 @@ impl InputProfile {
     }
 
     pub fn default_gamepad() -> Self {
-        Self::default_gamepad_controls()
+        Self::default_gamepad_for_backend(VirtualGamepadBackend::XInput)
     }
 
     pub fn default_gamepad_for_buttons(supported_buttons: &[GamepadButton]) -> Self {
-        let mut profile = Self::default_gamepad_controls();
+        Self::default_gamepad_for_backend_and_buttons(
+            VirtualGamepadBackend::XInput,
+            supported_buttons,
+        )
+    }
+
+    pub fn default_gamepad_for_backend(backend: VirtualGamepadBackend) -> Self {
+        let buttons = [
+            GamepadButton::A,
+            GamepadButton::B,
+            GamepadButton::X,
+            GamepadButton::Y,
+            GamepadButton::LeftShoulder,
+            GamepadButton::RightShoulder,
+            GamepadButton::Back,
+            GamepadButton::Start,
+            GamepadButton::Guide,
+            GamepadButton::LeftStick,
+            GamepadButton::RightStick,
+            GamepadButton::DpadUp,
+            GamepadButton::DpadDown,
+            GamepadButton::DpadLeft,
+            GamepadButton::DpadRight,
+        ];
+        let supported_buttons = match backend {
+            VirtualGamepadBackend::XInput => &buttons[..],
+            VirtualGamepadBackend::DirectInput => &[
+                GamepadButton::A,
+                GamepadButton::B,
+                GamepadButton::X,
+                GamepadButton::Y,
+                GamepadButton::LeftShoulder,
+                GamepadButton::RightShoulder,
+                GamepadButton::Back,
+                GamepadButton::Start,
+                GamepadButton::Guide,
+                GamepadButton::LeftStick,
+                GamepadButton::RightStick,
+                GamepadButton::DpadUp,
+                GamepadButton::DpadDown,
+                GamepadButton::DpadLeft,
+                GamepadButton::DpadRight,
+                GamepadButton::Paddle1,
+                GamepadButton::Paddle2,
+                GamepadButton::Paddle3,
+                GamepadButton::Paddle4,
+                GamepadButton::Paddle5,
+                GamepadButton::Paddle6,
+                GamepadButton::Paddle7,
+                GamepadButton::Paddle8,
+            ][..],
+        };
+        Self::default_gamepad_for_backend_and_buttons(backend, supported_buttons)
+    }
+
+    pub fn default_gamepad_for_backend_and_buttons(
+        backend: VirtualGamepadBackend,
+        supported_buttons: &[GamepadButton],
+    ) -> Self {
+        let mut profile = Self::default_gamepad_controls(backend);
         profile.bindings.retain(|binding| {
             matches!(binding.source, InputSource::Axis(_) | InputSource::Gyro(_))
                 || matches!(
@@ -389,7 +468,7 @@ impl InputProfile {
         profile
     }
 
-    fn default_gamepad_controls() -> Self {
+    fn default_gamepad_controls(backend: VirtualGamepadBackend) -> Self {
         let buttons = [
             GamepadButton::A,
             GamepadButton::B,
@@ -415,7 +494,17 @@ impl InputProfile {
             GamepadAxis::LeftTrigger,
             GamepadAxis::RightTrigger,
         ];
-        let mut bindings = Vec::with_capacity(buttons.len() + axes.len());
+        let paddles = [
+            GamepadButton::Paddle1,
+            GamepadButton::Paddle2,
+            GamepadButton::Paddle3,
+            GamepadButton::Paddle4,
+            GamepadButton::Paddle5,
+            GamepadButton::Paddle6,
+            GamepadButton::Paddle7,
+            GamepadButton::Paddle8,
+        ];
+        let mut bindings = Vec::with_capacity(buttons.len() + axes.len() + paddles.len());
         bindings.extend(buttons.into_iter().map(|button| {
             Binding::new(
                 InputSource::Button(button),
@@ -426,8 +515,17 @@ impl InputProfile {
             .extend(axes.into_iter().map(|axis| {
                 Binding::new(InputSource::Axis(axis), OutputAction::GamepadAxis(axis))
             }));
+        if backend == VirtualGamepadBackend::DirectInput {
+            bindings.extend(paddles.into_iter().map(|button| {
+                Binding::new(
+                    InputSource::Button(button),
+                    OutputAction::GamepadButton(button),
+                )
+            }));
+        }
         Self {
             name: String::new(),
+            backend,
             bindings,
             ..Self::default()
         }
@@ -505,6 +603,7 @@ mod tests {
     #[test]
     fn test_default_gamepad_contains_standard_gamepad_controls() {
         let profile = InputProfile::default_gamepad();
+        assert_eq!(profile.backend, VirtualGamepadBackend::XInput);
         assert_eq!(profile.bindings.len(), 21);
         assert!(profile.bindings.iter().any(|binding| {
             binding.source == InputSource::Axis(GamepadAxis::LeftTrigger)
@@ -622,6 +721,68 @@ mod tests {
             ..InputProfile::default()
         };
         assert!(profile.validate().is_err());
+    }
+
+    #[test]
+    fn test_profile_accepts_paddle_output_for_direct_input() {
+        let profile = InputProfile {
+            backend: VirtualGamepadBackend::DirectInput,
+            bindings: vec![Binding::new(
+                InputSource::Button(GamepadButton::A),
+                OutputAction::GamepadButton(GamepadButton::Paddle1),
+            )],
+            ..InputProfile::default()
+        };
+        assert!(profile.validate().is_ok());
+    }
+
+    #[test]
+    fn test_profile_missing_backend_defaults_to_xinput() {
+        let profile: InputProfile = serde_json::from_str("{}").unwrap();
+        assert_eq!(profile.backend, VirtualGamepadBackend::XInput);
+    }
+
+    #[test]
+    fn test_profile_serde_roundtrip_preserves_backend() {
+        let profile = InputProfile {
+            backend: VirtualGamepadBackend::DirectInput,
+            ..InputProfile::default()
+        };
+        let encoded = serde_json::to_string(&profile).unwrap();
+        let decoded: InputProfile = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, profile);
+    }
+
+    #[test]
+    fn test_direct_input_defaults_include_identity_paddle_bindings() {
+        let profile = InputProfile::default_gamepad_for_backend(VirtualGamepadBackend::DirectInput);
+        assert_eq!(profile.bindings.len(), 29);
+        for button in [
+            GamepadButton::Paddle1,
+            GamepadButton::Paddle2,
+            GamepadButton::Paddle3,
+            GamepadButton::Paddle4,
+            GamepadButton::Paddle5,
+            GamepadButton::Paddle6,
+            GamepadButton::Paddle7,
+            GamepadButton::Paddle8,
+        ] {
+            assert!(profile.bindings.iter().any(|binding| {
+                binding.source == InputSource::Button(button)
+                    && binding.output == OutputAction::GamepadButton(button)
+            }));
+        }
+        assert!(profile.validate().is_ok());
+    }
+
+    #[test]
+    fn test_xinput_defaults_omit_paddle_bindings() {
+        let profile = InputProfile::default_gamepad_for_backend(VirtualGamepadBackend::XInput);
+        assert_eq!(profile.bindings.len(), 21);
+        assert!(!profile
+            .bindings
+            .iter()
+            .any(|binding| binding.output == OutputAction::GamepadButton(GamepadButton::Paddle1)));
     }
 
     #[test]

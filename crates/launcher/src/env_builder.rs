@@ -1,5 +1,5 @@
 use crate::wine_launch;
-use ira_models::{GameLaunchConfig, WineConfig};
+use ira_models::{ControllerInputMode, GameLaunchConfig, WineConfig};
 
 fn has_exec(name: &str) -> bool {
     std::env::var_os("PATH")
@@ -443,8 +443,48 @@ fn input_binary_path() -> Option<String> {
 pub fn wrap_with_input(command: &mut Vec<String>, profile: Option<&str>) -> Result<(), String> {
     let binary = input_binary_path()
         .ok_or_else(|| "input remapping enabled but ira-input was not found".to_string())?;
+    wrap_command_with_input(command, &binary, profile);
+    Ok(())
+}
+
+/// Wraps the command only when a virtual controller backend is selected.
+pub fn wrap_with_input_mode(
+    command: &mut Vec<String>,
+    mode: Option<ControllerInputMode>,
+    profile: Option<&str>,
+) -> Result<(), String> {
+    let binary = match mode {
+        Some(ControllerInputMode::VirtualXInput)
+        | Some(ControllerInputMode::VirtualDirectInput) => Some(input_binary_path()),
+        None | Some(ControllerInputMode::Disabled) => None,
+    };
+    if let Some(binary) = binary {
+        let binary = binary
+            .ok_or_else(|| "input remapping enabled but ira-input was not found".to_string())?;
+        wrap_command_with_input(command, &binary, profile);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn wrap_with_input_mode_for_binary(
+    command: &mut Vec<String>,
+    mode: Option<ControllerInputMode>,
+    profile: Option<&str>,
+    binary: &str,
+) {
+    match mode {
+        Some(ControllerInputMode::VirtualXInput)
+        | Some(ControllerInputMode::VirtualDirectInput) => {
+            wrap_command_with_input(command, binary, profile)
+        }
+        None | Some(ControllerInputMode::Disabled) => {}
+    }
+}
+
+fn wrap_command_with_input(command: &mut Vec<String>, binary: &str, profile: Option<&str>) {
     let game_command = std::mem::take(command);
-    let mut wrapped = vec![binary];
+    let mut wrapped = vec![binary.to_string()];
     if let Some(profile) = profile.filter(|profile| !profile.is_empty()) {
         wrapped.push("--profile".to_string());
         wrapped.push(profile.to_string());
@@ -452,7 +492,6 @@ pub fn wrap_with_input(command: &mut Vec<String>, profile: Option<&str>) -> Resu
     wrapped.push("--".to_string());
     wrapped.extend(game_command);
     *command = wrapped;
-    Ok(())
 }
 
 /// Wraps a gamescope command so the standalone overlay runs inside gamescope
@@ -511,6 +550,66 @@ pub fn will_use_gamescope(launch: &GameLaunchConfig) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn command() -> Vec<String> {
+        vec!["game".to_string(), "--fullscreen".to_string()]
+    }
+
+    #[test]
+    fn test_input_mode_disabled_does_not_wrap_command() {
+        let mut command = command();
+        wrap_with_input_mode_for_binary(
+            &mut command,
+            Some(ControllerInputMode::Disabled),
+            None,
+            "/bin/ira-input",
+        );
+        assert_eq!(command, vec!["game", "--fullscreen"]);
+    }
+
+    #[test]
+    fn test_input_mode_none_inherits_without_wrapping_command() {
+        let mut command = command();
+        wrap_with_input_mode_for_binary(&mut command, None, Some("profile"), "/bin/ira-input");
+        assert_eq!(command, vec!["game", "--fullscreen"]);
+    }
+
+    #[test]
+    fn test_input_mode_virtual_xinput_wraps_command() {
+        let mut command = command();
+        wrap_with_input_mode_for_binary(
+            &mut command,
+            Some(ControllerInputMode::VirtualXInput),
+            Some("profile"),
+            "/bin/ira-input",
+        );
+        assert_eq!(
+            command,
+            vec![
+                "/bin/ira-input",
+                "--profile",
+                "profile",
+                "--",
+                "game",
+                "--fullscreen"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_input_mode_virtual_direct_input_wraps_command() {
+        let mut command = command();
+        wrap_with_input_mode_for_binary(
+            &mut command,
+            Some(ControllerInputMode::VirtualDirectInput),
+            None,
+            "/bin/ira-input",
+        );
+        assert_eq!(
+            command,
+            vec!["/bin/ira-input", "--", "game", "--fullscreen"]
+        );
+    }
 
     #[test]
     fn test_filter_dev_paths_strips_cargo_rustup_target() {

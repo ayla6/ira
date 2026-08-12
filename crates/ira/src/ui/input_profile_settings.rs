@@ -1,8 +1,11 @@
 use super::css::CSS_FLAT;
-use super::input_profile_store::controller_default_path;
-use super::input_profile_store::{ensure_controller_default_profile, list_profiles, StoredProfile};
+use super::input_profile_store::controller_default_path_for_backend;
+use super::input_profile_store::{
+    copy_controller_default, ensure_controller_default_profile, list_profiles, StoredProfile,
+};
 use adw::prelude::*;
-use ira_config::Config;
+use ira_config::{Config, ControllerInputConfig};
+use ira_models::ControllerInputMode;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -26,14 +29,14 @@ pub(super) struct ControllerDefaultWidgets {
     pub key: String,
     pub device_name: String,
     pub supported_buttons: Vec<ira_input::GamepadButton>,
-    pub always_on: gtk4::Switch,
+    pub mode: adw::ComboRow,
     pub profile_path: Rc<RefCell<Option<std::path::PathBuf>>>,
     row: adw::ExpanderRow,
 }
 
 #[derive(Clone)]
 struct ControllerDefaultState {
-    always_on: bool,
+    config: ControllerInputConfig,
     profile_path: Option<std::path::PathBuf>,
 }
 
@@ -42,7 +45,7 @@ struct ControllerRowsParams {
     group: adw::PreferencesGroup,
     parent: adw::Window,
     save_dir: String,
-    configured_defaults: HashMap<String, bool>,
+    configured_defaults: HashMap<String, ControllerInputConfig>,
     widgets: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
     no_controllers_row: Rc<RefCell<Option<adw::ActionRow>>>,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
@@ -88,7 +91,7 @@ pub(super) fn build_input_settings_page(
     let configured_defaults = cfg
         .controller_defaults
         .iter()
-        .map(|(key, value)| (key.clone(), value.always_on))
+        .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<HashMap<_, _>>();
     let controller_rows_params = ControllerRowsParams {
         group: controller_group.clone(),
@@ -130,7 +133,15 @@ fn rebuild_controller_rows(params: &ControllerRowsParams, devices: &[ira_input::
             (
                 widget.key.clone(),
                 ControllerDefaultState {
-                    always_on: widget.always_on.is_active(),
+                    config: ControllerInputConfig {
+                        mode: mode_from_selection(widget.mode.selected()),
+                        profile: widget
+                            .profile_path
+                            .borrow()
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                    },
                     profile_path: widget.profile_path.borrow().clone(),
                 },
             )
@@ -140,13 +151,22 @@ fn rebuild_controller_rows(params: &ControllerRowsParams, devices: &[ira_input::
     let mut rebuilt = Vec::new();
     for device in devices {
         let key = ira_config::Config::controller_key(device.vendor, device.product);
-        let default_path = controller_default_path(&params.save_dir, &key);
+        let config = params
+            .configured_defaults
+            .get(&key)
+            .cloned()
+            .unwrap_or_default();
+        let configured =
+            (!config.profile.is_empty()).then(|| std::path::PathBuf::from(&config.profile));
+        let default_path = configured.filter(|path| path.is_file()).unwrap_or_else(|| {
+            controller_default_path_for_backend(
+                &params.save_dir,
+                &key,
+                backend_for_mode(config.mode),
+            )
+        });
         let default_state = ControllerDefaultState {
-            always_on: params
-                .configured_defaults
-                .get(&key)
-                .copied()
-                .unwrap_or(false),
+            config,
             profile_path: default_path.is_file().then_some(default_path),
         };
         let state = previous.get(&key).cloned().unwrap_or(default_state);
@@ -194,20 +214,91 @@ fn add_controller_row(
     let supported_buttons = device.supported_buttons.clone();
     let expander = adw::ExpanderRow::new();
     expander.set_title(&device_name);
-    expander.set_subtitle("Generic XInput layout");
-    let always_on = gtk4::Switch::new();
-    always_on.set_valign(gtk4::Align::Center);
-    always_on.set_active(state.always_on);
-    expander.add_suffix(&always_on);
-    expander.set_expanded(state.always_on);
-
+    update_controller_subtitle(&expander, state.config.mode);
     let profile_path = Rc::new(RefCell::new(state.profile_path));
+    let mode_model = gtk4::StringList::new(&["Disabled", "Virtual XInput", "Virtual DirectInput"]);
+    let mode = adw::ComboRow::new();
+    mode.set_title("Input mode");
+    mode.set_model(Some(&mode_model));
+    mode.set_selected(selection_for_mode(state.config.mode));
+    let expander_for_mode = expander.clone();
+    let profile_path_for_mode = profile_path.clone();
+    let save_dir_for_mode = save_dir.to_string();
+    let key_for_mode = key.clone();
+    mode.connect_selected_notify(move |row| {
+        let mode = mode_from_selection(row.selected());
+        update_controller_subtitle(&expander_for_mode, mode);
+        if mode != ControllerInputMode::Disabled {
+            let path = controller_default_path_for_backend(
+                &save_dir_for_mode,
+                &key_for_mode,
+                backend_for_mode(mode),
+            );
+            *profile_path_for_mode.borrow_mut() = path.is_file().then_some(path);
+        }
+    });
+    expander.add_suffix(&mode);
+    expander.set_expanded(state.config.mode != ControllerInputMode::Disabled);
+
     let action_row = adw::ActionRow::new();
     action_row.set_title("Controller mapping");
     action_row.set_subtitle("Edit paddle remaps and other controller-specific bindings");
     let edit = icon_button("document-edit-symbolic", "Edit controller mapping");
     action_row.add_suffix(&edit);
     expander.add_row(&action_row);
+
+    let copy_row = adw::ActionRow::new();
+    copy_row.set_title("Copy from controller");
+    let copy_model = gtk4::StringList::new(&["Select a configured controller"]);
+    let mut copy_keys = Vec::new();
+    // The key is the stable identity; names are intentionally not persisted here.
+    for source_key in configured_controller_keys(save_dir, &key) {
+        copy_model.append(&source_key);
+        copy_keys.push(source_key);
+    }
+    let copy_dropdown = adw::ComboRow::new();
+    copy_dropdown.set_model(Some(&copy_model));
+    copy_row.add_suffix(&copy_dropdown);
+    let copy_button = icon_button("edit-copy-symbolic", "Copy controller default");
+    copy_row.add_suffix(&copy_button);
+    expander.add_row(&copy_row);
+    let save_dir_for_copy = save_dir.to_string();
+    let target_key_for_copy = key.clone();
+    let target_name_for_copy = device_name.clone();
+    let buttons_for_copy = supported_buttons.clone();
+    let profile_path_for_copy = profile_path.clone();
+    let mode_for_copy = mode.clone();
+    copy_button.connect_clicked(move |_| {
+        let selected = copy_dropdown.selected();
+        let Some(source_key) = selected
+            .checked_sub(1)
+            .and_then(|index| copy_keys.get(index as usize))
+        else {
+            return;
+        };
+        match copy_controller_default(
+            &save_dir_for_copy,
+            source_key,
+            &target_key_for_copy,
+            &target_name_for_copy,
+            &buttons_for_copy,
+        ) {
+            Ok(path) => {
+                if let Ok(profile) = super::input_profile_store::read_profile(&path) {
+                    mode_for_copy.set_selected(selection_for_mode(match profile.backend {
+                        ira_input::VirtualGamepadBackend::XInput => {
+                            ControllerInputMode::VirtualXInput
+                        }
+                        ira_input::VirtualGamepadBackend::DirectInput => {
+                            ControllerInputMode::VirtualDirectInput
+                        }
+                    }));
+                }
+                *profile_path_for_copy.borrow_mut() = Some(path);
+            }
+            Err(error) => eprintln!("Failed to copy controller mapping: {error}"),
+        }
+    });
 
     let parent_for_edit = parent.clone();
     let save_dir_for_edit = save_dir.to_string();
@@ -217,12 +308,15 @@ fn add_controller_row(
     let supported_buttons_for_edit = supported_buttons.clone();
     let device_for_edit = device.clone();
     let registry_for_edit = registry.clone();
+    let mode_for_edit = mode.clone();
     edit.connect_clicked(move |_| {
+        let backend = backend_for_mode(mode_from_selection(mode_for_edit.selected()));
         let path = match ensure_controller_default_profile(
             &save_dir_for_edit,
             &key_for_edit,
             &device_name_for_edit,
             &supported_buttons_for_edit,
+            backend,
         ) {
             Ok(path) => {
                 *profile_path_for_edit.borrow_mut() = Some(path.clone());
@@ -252,10 +346,27 @@ fn add_controller_row(
         key,
         device_name,
         supported_buttons,
-        always_on,
+        mode,
         profile_path,
         row: expander,
     }
+}
+
+fn backend_for_mode(mode: ControllerInputMode) -> ira_input::VirtualGamepadBackend {
+    match mode {
+        ControllerInputMode::VirtualDirectInput => ira_input::VirtualGamepadBackend::DirectInput,
+        ControllerInputMode::Disabled | ControllerInputMode::VirtualXInput => {
+            ira_input::VirtualGamepadBackend::XInput
+        }
+    }
+}
+
+fn update_controller_subtitle(row: &adw::ExpanderRow, mode: ControllerInputMode) {
+    row.set_subtitle(match mode {
+        ControllerInputMode::Disabled => "Input virtualization disabled",
+        ControllerInputMode::VirtualXInput => "Virtual XInput layout",
+        ControllerInputMode::VirtualDirectInput => "Virtual DirectInput layout",
+    });
 }
 
 fn start_controller_registry_refresh(
@@ -263,7 +374,7 @@ fn start_controller_registry_refresh(
     group: &adw::PreferencesGroup,
     save_dir: &str,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
-    configured_defaults: HashMap<String, bool>,
+    configured_defaults: HashMap<String, ControllerInputConfig>,
     widgets: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
     no_controllers_row: Rc<RefCell<Option<adw::ActionRow>>>,
 ) {
@@ -304,6 +415,45 @@ fn start_controller_registry_refresh(
         }
         glib::ControlFlow::Continue
     });
+}
+
+fn configured_controller_keys(save_dir: &str, target_key: &str) -> Vec<String> {
+    std::fs::read_dir(
+        super::input_profile_store::controller_default_path(save_dir, "")
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(save_dir)),
+    )
+    .ok()
+    .into_iter()
+    .flatten()
+    .filter_map(Result::ok)
+    .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_file()))
+    .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("json"))
+    .filter_map(|entry| {
+        entry
+            .path()
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(str::to_owned)
+    })
+    .filter(|key| key != target_key)
+    .collect()
+}
+
+fn selection_for_mode(mode: ControllerInputMode) -> u32 {
+    match mode {
+        ControllerInputMode::Disabled => 0,
+        ControllerInputMode::VirtualXInput => 1,
+        ControllerInputMode::VirtualDirectInput => 2,
+    }
+}
+
+pub(super) fn mode_from_selection(selection: u32) -> ControllerInputMode {
+    match selection {
+        1 => ControllerInputMode::VirtualXInput,
+        2 => ControllerInputMode::VirtualDirectInput,
+        _ => ControllerInputMode::Disabled,
+    }
 }
 
 fn add_profile_row(
@@ -385,5 +535,26 @@ fn profile_label(stored: &StoredProfile) -> String {
             .to_string()
     } else {
         stored.profile.name.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mode_from_selection;
+    use ira_models::ControllerInputMode;
+
+    #[test]
+    fn test_mode_from_selection_defaults_to_disabled() {
+        assert_eq!(mode_from_selection(0), ControllerInputMode::Disabled);
+        assert_eq!(mode_from_selection(99), ControllerInputMode::Disabled);
+    }
+
+    #[test]
+    fn test_mode_from_selection_selects_virtual_backends() {
+        assert_eq!(mode_from_selection(1), ControllerInputMode::VirtualXInput);
+        assert_eq!(
+            mode_from_selection(2),
+            ControllerInputMode::VirtualDirectInput
+        );
     }
 }

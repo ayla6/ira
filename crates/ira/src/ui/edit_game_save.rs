@@ -144,7 +144,7 @@ fn build_launch_config_and_wine(
         s.ld_library_path_entry.text().to_string()
     });
     let overlay_enabled = ow.and_then(|s| *s.overlay_state.borrow());
-    let input_enabled = cw.and_then(|s| *s.input_state.borrow());
+    let input_mode = cw.and_then(|s| *s.input_mode.borrow());
     let input_profile = cw.and_then(|s| {
         s.input_profile_paths
             .borrow()
@@ -209,7 +209,7 @@ fn build_launch_config_and_wine(
         ld_library_path,
         pre_launch: lc.map_or(String::new(), |l| l.pre_launch_entry.text().to_string()),
         overlay_enabled,
-        input_enabled,
+        input_mode,
         input_profile,
         gamemode,
         mangohud,

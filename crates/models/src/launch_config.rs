@@ -1,4 +1,40 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerInputMode {
+    #[default]
+    Disabled,
+    VirtualXInput,
+    VirtualDirectInput,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ControllerInputModeCompat {
+    Mode(ControllerInputMode),
+    Legacy(bool),
+}
+
+fn deserialize_optional_controller_input_mode<'de, D>(
+    deserializer: D,
+) -> Result<Option<ControllerInputMode>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<ControllerInputModeCompat>::deserialize(deserializer).map(|mode| {
+        mode.map(|mode| match mode {
+            ControllerInputModeCompat::Mode(mode) => mode,
+            ControllerInputModeCompat::Legacy(enabled) => {
+                if enabled {
+                    ControllerInputMode::VirtualXInput
+                } else {
+                    ControllerInputMode::Disabled
+                }
+            }
+        })
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GameLaunchConfig {
@@ -12,8 +48,13 @@ pub struct GameLaunchConfig {
     pub pre_launch: String,
     #[serde(default)]
     pub overlay_enabled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_enabled: Option<bool>,
+    #[serde(
+        default,
+        alias = "input_enabled",
+        deserialize_with = "deserialize_optional_controller_input_mode",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub input_mode: Option<ControllerInputMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_profile: Option<String>,
     // System-level settings (moved from WineConfig — these apply to ALL games, not just Wine)
@@ -275,8 +316,41 @@ mod tests {
         let cfg = GameLaunchConfig::default();
         assert!(cfg.exe.is_empty());
         assert!(cfg.env_vars.is_empty());
+        assert!(cfg.input_mode.is_none());
         assert!(cfg.gamemode.is_none());
         assert!(cfg.mangohud.is_none());
+    }
+
+    #[test]
+    fn test_controller_input_mode_legacy_and_new_json() {
+        let legacy: GameLaunchConfig = serde_json::from_str(r#"{"exe":"","args":"","working_dir":"","env_vars":[],"ld_preload":"","ld_library_path":"","input_enabled":true}"#).unwrap();
+        assert_eq!(legacy.input_mode, Some(ControllerInputMode::VirtualXInput));
+
+        let disabled: GameLaunchConfig = serde_json::from_str(
+            r#"{"exe":"","args":"","working_dir":"","env_vars":[],"ld_preload":"","ld_library_path":"","input_enabled":false}"#,
+        )
+        .unwrap();
+        assert_eq!(disabled.input_mode, Some(ControllerInputMode::Disabled));
+
+        let direct: GameLaunchConfig = serde_json::from_str(
+            r#"{"exe":"","args":"","working_dir":"","env_vars":[],"ld_preload":"","ld_library_path":"","input_mode":"virtual_direct_input"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            direct.input_mode,
+            Some(ControllerInputMode::VirtualDirectInput)
+        );
+    }
+
+    #[test]
+    fn test_controller_input_mode_serializes_new_field_only() {
+        let cfg = GameLaunchConfig {
+            input_mode: Some(ControllerInputMode::VirtualDirectInput),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(cfg).unwrap();
+        assert_eq!(json["input_mode"], "virtual_direct_input");
+        assert!(json.get("input_enabled").is_none());
     }
 
     #[test]

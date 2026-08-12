@@ -28,7 +28,7 @@ pub use game::Game;
 pub use game_entry::GameEntry;
 pub use group::{Group, GroupSelection};
 pub use kind::*;
-pub use launch_config::{GameLaunchConfig, WineConfig, WineProfile};
+pub use launch_config::{ControllerInputMode, GameLaunchConfig, WineConfig, WineProfile};
 pub use message::{AppMessage, AppSender};
 pub use session::PlaySession;
 pub use sort_mode::SortMode;

@@ -7,8 +7,10 @@ use gtk4::gdk::prelude::{DisplayExt, MonitorExt};
 use gtk4::gdk::{Display, Monitor};
 use ira_config::Config;
 use ira_db::DbConn;
-use ira_models::{AppSender, WineConfig};
+use ira_input::{InputProfile, VirtualGamepadBackend};
+use ira_models::{AppSender, ControllerInputMode, WineConfig};
 
+use super::input_profile_store::{read_profile, write_profile};
 use super::state::SharedState;
 
 fn detect_screen_resolution() -> (u32, u32) {
@@ -50,8 +52,76 @@ pub(super) struct LaunchCtx<'a> {
     pub gamescope_fps_default: u32,
     pub gamescope_upscaling_default: String,
     pub gpu_default: String,
-    pub controller_input_enabled: bool,
+    pub controller_input_mode: ControllerInputMode,
     pub controller_input_profile: Option<String>,
+}
+
+fn input_backend(mode: ControllerInputMode) -> Option<VirtualGamepadBackend> {
+    match mode {
+        ControllerInputMode::Disabled => None,
+        ControllerInputMode::VirtualXInput => Some(VirtualGamepadBackend::XInput),
+        ControllerInputMode::VirtualDirectInput => Some(VirtualGamepadBackend::DirectInput),
+    }
+}
+
+fn resolved_input_mode(
+    game_kind: ira_models::GameKind,
+    game_override: Option<ControllerInputMode>,
+    controller_default: ControllerInputMode,
+) -> ControllerInputMode {
+    game_override.unwrap_or_else(|| {
+        if game_kind == ira_models::GameKind::Steam {
+            ControllerInputMode::Disabled
+        } else {
+            controller_default
+        }
+    })
+}
+
+fn resolve_input_profile(
+    ctx: &LaunchCtx,
+    mode: ControllerInputMode,
+    selected_profile: Option<&str>,
+    default_profile: Option<&str>,
+) -> Result<Option<String>, String> {
+    let Some(backend) = input_backend(mode) else {
+        return Ok(None);
+    };
+    let selected_profile = selected_profile.filter(|path| !path.is_empty());
+    let generated_path = || {
+        std::path::Path::new(ctx.save_dir)
+            .join("controller_defaults")
+            .join(match backend {
+                VirtualGamepadBackend::XInput => "resolved-xinput.json",
+                VirtualGamepadBackend::DirectInput => "resolved-directinput.json",
+            })
+    };
+    let mut profile_path = selected_profile
+        .map(std::path::PathBuf::from)
+        .or_else(|| default_profile.map(std::path::PathBuf::from))
+        .unwrap_or_else(generated_path);
+    if selected_profile.is_none()
+        && profile_path.is_file()
+        && read_profile(&profile_path).is_ok_and(|profile| profile.backend != backend)
+    {
+        profile_path = generated_path();
+    }
+
+    if !profile_path.is_file() {
+        let mut profile = InputProfile::default_gamepad_for_backend(backend);
+        profile.name = format!("Built-in {:?} profile", backend);
+        write_profile(&profile_path, &profile)?;
+    }
+    let profile = read_profile(&profile_path)?;
+    if profile.backend != backend {
+        return Err(format!(
+            "Controller profile '{}' uses {:?}, but the selected input mode requires {:?}",
+            profile_path.display(),
+            profile.backend,
+            backend
+        ));
+    }
+    Ok(Some(profile_path.to_string_lossy().into_owned()))
 }
 
 fn spawn_and_monitor(
@@ -198,13 +268,16 @@ fn build_emulator_env_and_wrap(
         ira_launcher::env_builder::wrap_with_standalone_overlay(cmd);
     }
 
-    let input_enabled = launch.input_enabled.unwrap_or(ctx.controller_input_enabled);
-    let input_profile = launch
-        .input_profile
-        .as_deref()
-        .or(ctx.controller_input_profile.as_deref());
-    if input_enabled {
-        ira_launcher::env_builder::wrap_with_input(cmd, input_profile)?;
+    let input_mode =
+        resolved_input_mode(ctx.game_kind, launch.input_mode, ctx.controller_input_mode);
+    let input_profile = resolve_input_profile(
+        ctx,
+        input_mode,
+        launch.input_profile.as_deref(),
+        ctx.controller_input_profile.as_deref(),
+    )?;
+    if input_profile.is_some() {
+        ira_launcher::env_builder::wrap_with_input(cmd, input_profile.as_deref())?;
         eprintln!(
             "ira-input: enabled for {}{}",
             ctx.game_name,
@@ -523,6 +596,16 @@ pub(super) fn launch_other(
         launch.env_vars = merged;
     }
 
+    let input_mode =
+        resolved_input_mode(ctx.game_kind, launch.input_mode, ctx.controller_input_mode);
+    launch.input_profile = resolve_input_profile(
+        ctx,
+        input_mode,
+        launch.input_profile.as_deref(),
+        ctx.controller_input_profile.as_deref(),
+    )?;
+    launch.input_mode = Some(input_mode);
+
     if !launch.exe.is_empty() {
         let overlay_enabled = launch.overlay_enabled.unwrap_or(ctx.overlay_global_enabled);
         let wine_opt = if wine.enabled { Some(&wine) } else { None };
@@ -594,5 +677,53 @@ pub(super) fn update_last_played(
         {
             g.last_played = ctx.started_at;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{input_backend, resolved_input_mode};
+    use ira_input::VirtualGamepadBackend;
+    use ira_models::ControllerInputMode;
+
+    #[test]
+    fn test_input_backend_resolves_modes() {
+        assert_eq!(input_backend(ControllerInputMode::Disabled), None);
+        assert_eq!(
+            input_backend(ControllerInputMode::VirtualXInput),
+            Some(VirtualGamepadBackend::XInput)
+        );
+        assert_eq!(
+            input_backend(ControllerInputMode::VirtualDirectInput),
+            Some(VirtualGamepadBackend::DirectInput)
+        );
+    }
+
+    #[test]
+    fn test_steam_inheritance_keeps_steam_input_authoritative() {
+        assert_eq!(
+            resolved_input_mode(
+                ira_models::GameKind::Steam,
+                None,
+                ControllerInputMode::VirtualXInput,
+            ),
+            ControllerInputMode::Disabled
+        );
+        assert_eq!(
+            resolved_input_mode(
+                ira_models::GameKind::Steam,
+                Some(ControllerInputMode::VirtualDirectInput),
+                ControllerInputMode::VirtualXInput,
+            ),
+            ControllerInputMode::VirtualDirectInput
+        );
+        assert_eq!(
+            resolved_input_mode(
+                ira_models::GameKind::Ps4,
+                None,
+                ControllerInputMode::VirtualXInput,
+            ),
+            ControllerInputMode::VirtualXInput
+        );
     }
 }

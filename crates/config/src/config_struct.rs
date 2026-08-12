@@ -26,6 +26,16 @@ fn default_save_dir() -> String {
         .to_string()
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ControllerInputConfig {
+    /// Enable the default XInput bridge when no per-game override is set.
+    #[serde(default)]
+    pub always_on: bool,
+    /// Managed profile path to use when no per-game profile is selected.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub profile: String,
+}
+
 fn default_console_enabled() -> bool {
     true
 }
@@ -157,6 +167,9 @@ pub struct Config {
     pub consoles: HashMap<String, ConsoleConfig>,
     #[serde(default)]
     pub overlay: OverlaySettings,
+    /// Controller defaults keyed by USB vendor/product, e.g. `2dc8:6012`.
+    #[serde(default)]
+    pub controller_defaults: HashMap<String, ControllerInputConfig>,
 }
 
 impl Default for Config {
@@ -207,6 +220,7 @@ impl Default for Config {
             ra_password: String::new(),
             consoles,
             overlay: OverlaySettings::default(),
+            controller_defaults: HashMap::new(),
         }
     }
 }
@@ -218,6 +232,10 @@ impl Config {
 
     pub fn console_mut(&mut self, platform_id: &str) -> &mut ConsoleConfig {
         self.consoles.entry(platform_id.to_string()).or_default()
+    }
+
+    pub fn controller_key(vendor: u16, product: u16) -> String {
+        format!("{vendor:04x}:{product:04x}")
     }
 
     pub fn any_console_enabled(&self) -> bool {
@@ -287,6 +305,7 @@ impl Config {
             ra_username: self.ra_username.clone(),
             consoles: self.consoles.clone(),
             overlay: self.overlay.clone(),
+            controller_defaults: self.controller_defaults.clone(),
         };
         if steam_err.is_err() {
             plaintext.steam_api_key = self.steam_api_key.clone();
@@ -333,6 +352,11 @@ mod tests {
             assert_eq!(cc.ra_core, "");
             assert!(!cc.fullscreen);
         }
+    }
+
+    #[test]
+    fn test_controller_key_uses_stable_usb_identity() {
+        assert_eq!(Config::controller_key(0x2dc8, 0x6012), "2dc8:6012");
     }
 
     #[test]

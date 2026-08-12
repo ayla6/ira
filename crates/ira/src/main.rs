@@ -1,5 +1,5 @@
 use gtk4::prelude::*;
-use ira::activate::activate;
+use ira::activate::{activate, remove_source};
 use ira::ui::{restore_content, SharedState};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -47,10 +47,12 @@ fn main() {
 
     app.run();
 
-    let db = state_holder
-        .borrow()
-        .as_ref()
-        .map(|s| s.borrow().db.clone());
+    if let Some(state) = state_holder.borrow().as_ref() {
+        remove_source(state);
+    }
+    let state = state_holder.borrow_mut().take();
+    let db = state.as_ref().map(|s| s.borrow().db.clone());
+    drop(state);
     if let Some(db) = db {
         if let Err(e) = ira_db::checkpoint(&db) {
             eprintln!("Failed to checkpoint database on shutdown: {}", e);

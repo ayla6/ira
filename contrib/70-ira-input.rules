@@ -1,0 +1,3 @@
+# Allow the active desktop user to read Ira's virtual input devices.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Ira Virtual Mouse", TAG+="uaccess", TAG+="seat"
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Ira Virtual Xbox Controller", TAG+="uaccess", TAG+="seat"

@@ -50,6 +50,8 @@ pub(super) struct LaunchCtx<'a> {
     pub gamescope_fps_default: u32,
     pub gamescope_upscaling_default: String,
     pub gpu_default: String,
+    pub controller_input_enabled: bool,
+    pub controller_input_profile: Option<String>,
 }
 
 fn spawn_and_monitor(
@@ -86,7 +88,10 @@ fn spawn_and_monitor(
 /// Build env vars for emulator launches, apply performance wrappers (gamemode/
 /// mangohud/gamescope), and set up overlay env (VK layer or standalone mode).
 /// Checks per-game overlay override first, then falls back to the global source setting.
-fn build_emulator_env_and_wrap(ctx: &LaunchCtx, cmd: &mut Vec<String>) -> Vec<(String, String)> {
+fn build_emulator_env_and_wrap(
+    ctx: &LaunchCtx,
+    cmd: &mut Vec<String>,
+) -> Result<Vec<(String, String)>, String> {
     let mut env: Vec<(String, String)> = std::env::vars()
         .filter(|(k, _)| {
             !k.starts_with("CARGO_") && !k.starts_with("RUSTUP_") && !k.starts_with("RUST_")
@@ -193,7 +198,23 @@ fn build_emulator_env_and_wrap(ctx: &LaunchCtx, cmd: &mut Vec<String>) -> Vec<(S
         ira_launcher::env_builder::wrap_with_standalone_overlay(cmd);
     }
 
-    env
+    let input_enabled = launch.input_enabled.unwrap_or(ctx.controller_input_enabled);
+    let input_profile = launch
+        .input_profile
+        .as_deref()
+        .or(ctx.controller_input_profile.as_deref());
+    if input_enabled {
+        ira_launcher::env_builder::wrap_with_input(cmd, input_profile)?;
+        eprintln!(
+            "ira-input: enabled for {}{}",
+            ctx.game_name,
+            input_profile
+                .map(|profile| format!(" using {profile}"))
+                .unwrap_or_default()
+        );
+    }
+
+    Ok(env)
 }
 
 /// If the command is a Flatpak invocation, inject overlay env vars as `--env` flags
@@ -298,7 +319,7 @@ pub(super) fn launch_retro(
         fullscreen_flag,
         rom_root,
     );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd);
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd)?;
     spawn_and_monitor(ctx, &cmd, &env, ctx.game_name)
 }
 
@@ -315,7 +336,7 @@ pub(super) fn launch_ps4(
         &args,
         Some(std::path::Path::new(game_path)),
     );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd);
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd)?;
     spawn_and_monitor(ctx, &cmd, &env, "shadPS4")
 }
 
@@ -338,7 +359,7 @@ pub(super) fn launch_ps3(
         &args,
         Some(std::path::Path::new(game_path)),
     );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd);
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd)?;
     spawn_and_monitor(ctx, &cmd, &env, "RPCS3")
 }
 
@@ -358,7 +379,7 @@ pub(super) fn launch_vita3k(
         &args,
         Some(std::path::Path::new(game_path)),
     );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd);
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd)?;
     spawn_and_monitor(ctx, &cmd, &env, "Vita3K")
 }
 
@@ -378,7 +399,7 @@ pub(super) fn launch_cemu(
         &args,
         Some(std::path::Path::new(game_path)),
     );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd);
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd)?;
     spawn_and_monitor(ctx, &cmd, &env, "Cemu")
 }
 

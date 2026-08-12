@@ -1,8 +1,10 @@
 use super::add_game_dialog::collect_env_vars;
+use super::edit_game_controller::ControllerWidgets;
 use super::edit_game_launch::LaunchConfigWidgets;
 use super::edit_game_overlay::OverlayWidgets;
 use super::edit_game_system::SystemWidgets;
 use super::edit_game_variants::VarW;
+use super::input_profile_store::add_game_compatibility;
 use super::state::{PendingImage, SharedState};
 use super::wine_config_env_dll::collect_dll_overrides;
 use super::wine_config_widget::WineConfigWidgets;
@@ -10,6 +12,7 @@ use adw::prelude::*;
 use ira_models::{AssetType, GameLaunchConfig, TrophySource, WineConfig};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::mpsc;
 
@@ -34,6 +37,7 @@ pub(super) struct SaveGameSettingsParams {
     pub saved_platform_id: String,
     pub system_widgets: Option<SystemWidgets>,
     pub overlay_widgets: Option<OverlayWidgets>,
+    pub controller_widgets: Option<ControllerWidgets>,
     pub title_entry: adw::EntryRow,
     pub sort_entry: adw::EntryRow,
     pub pending_version: Rc<RefCell<Option<String>>>,
@@ -133,12 +137,26 @@ fn build_launch_config_and_wine(
 ) -> (GameLaunchConfig, WineConfig, Option<i64>) {
     let sw = params.system_widgets.as_ref();
     let ow = params.overlay_widgets.as_ref();
+    let cw = params.controller_widgets.as_ref();
     let env_vars = sw.map_or(Vec::new(), |s| collect_env_vars(&s.env_vars_box));
     let ld_preload = sw.map_or(String::new(), |s| s.ld_preload_entry.text().to_string());
     let ld_library_path = sw.map_or(String::new(), |s| {
         s.ld_library_path_entry.text().to_string()
     });
     let overlay_enabled = ow.and_then(|s| *s.overlay_state.borrow());
+    let input_enabled = cw.and_then(|s| *s.input_state.borrow());
+    let input_profile = cw.and_then(|s| {
+        s.input_profile_paths
+            .borrow()
+            .get(s.input_profile_row.selected() as usize)
+            .and_then(Clone::clone)
+            .map(|path| path.to_string_lossy().into_owned())
+    });
+    if let Some(profile) = input_profile.as_deref() {
+        if let Err(error) = add_game_compatibility(Path::new(profile), params.db_id) {
+            eprintln!("Failed to associate controller profile with game: {error}");
+        }
+    }
     let gamemode = sw.and_then(|s| *s.gamemode_state.borrow());
     let mangohud = sw.and_then(|s| *s.mangohud_state.borrow());
     let gamescope = sw.and_then(|s| *s.gamescope_state.borrow());
@@ -191,6 +209,8 @@ fn build_launch_config_and_wine(
         ld_library_path,
         pre_launch: lc.map_or(String::new(), |l| l.pre_launch_entry.text().to_string()),
         overlay_enabled,
+        input_enabled,
+        input_profile,
         gamemode,
         mangohud,
         gamescope,

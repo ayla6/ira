@@ -1,4 +1,5 @@
 use super::css::*;
+use super::edit_game_controller::{build_controller_page, ControllerWidgets};
 use super::edit_game_launch::{build_launch_config_page, LaunchConfigWidgets};
 use super::edit_game_overlay::{build_overlay_page, OverlayWidgets};
 use super::edit_game_pages::{build_api_emulator_page, build_dlc_page};
@@ -19,6 +20,7 @@ struct LaunchWineAdvancedCtx {
     launch_config_widgets: Option<LaunchConfigWidgets>,
     system_widgets: Option<SystemWidgets>,
     overlay_widgets: Option<OverlayWidgets>,
+    controller_widgets: Option<ControllerWidgets>,
     show_wine_tabs: bool,
     wine_widgets_opt: Option<WineConfigWidgets>,
     profiles: Vec<WineProfile>,
@@ -104,6 +106,8 @@ fn build_launch_wine_advanced_pages(
     let app_default_wine = params.app_default_wine;
     let show_launch_config = game.kind.is_managed_pc() || game.kind == ira_models::GameKind::Other;
     let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
+    let save_dir = state.borrow().save_dir.clone();
+    let registry = state.borrow().controller_registry.clone();
 
     let overlay_source_id = match game.kind {
         ira_models::GameKind::Steam => Some("steam"),
@@ -189,6 +193,16 @@ fn build_launch_wine_advanced_pages(
             stack,
         },
     ));
+    let controller_widgets = Some(build_controller_page(
+        super::edit_game_controller::ControllerPageParams {
+            launch: saved_launch,
+            game,
+            save_dir: &save_dir,
+            sidebar,
+            stack,
+            registry,
+        },
+    ));
 
     // Wine pages — only for Wine games with wine enabled
     let show_wine_tabs = game.kind.is_managed_pc();
@@ -213,6 +227,7 @@ fn build_launch_wine_advanced_pages(
         launch_config_widgets,
         system_widgets,
         overlay_widgets,
+        controller_widgets,
         show_wine_tabs,
         wine_widgets_opt,
         profiles,
@@ -475,6 +490,7 @@ fn build_dialog_contents(
     let saved_platform_id_s = game.platform_id.clone();
     let system_widgets_s = lwa.system_widgets.clone();
     let overlay_widgets_s = lwa.overlay_widgets.clone();
+    let controller_widgets_s = lwa.controller_widgets.clone();
     let title_entry_s = title_entry.clone();
     let sort_entry_s = sort_entry.clone();
     let pending_version_s = pending_version.clone();
@@ -508,6 +524,7 @@ fn build_dialog_contents(
             saved_platform_id: saved_platform_id_s.clone(),
             system_widgets: system_widgets_s.clone(),
             overlay_widgets: overlay_widgets_s.clone(),
+            controller_widgets: controller_widgets_s.clone(),
             title_entry: title_entry_s.clone(),
             sort_entry: sort_entry_s.clone(),
             pending_version: pending_version_s.clone(),

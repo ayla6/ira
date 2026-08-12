@@ -66,7 +66,7 @@ pub fn launch_game(
         );
     }
 
-    let (command, mut env) = if wine.is_some_and(|w| w.enabled) {
+    let (mut command, mut env) = if wine.is_some_and(|w| w.enabled) {
         let wine = wine.unwrap();
         let wine_exe = super::wine_launch::find_wine_binary(&wine.version, &wine.custom_wine_path)?;
         if launch.exe.is_empty() {
@@ -206,6 +206,12 @@ pub fn launch_game(
         }
         (cmd, env)
     };
+
+    let input_enabled = launch.input_enabled.unwrap_or(false);
+    let input_profile = launch.input_profile.as_deref();
+    if input_enabled {
+        super::env_builder::wrap_with_input(&mut command, input_profile)?;
+    }
 
     // Set PWD to the game's working directory
     if let Some(ref dir) = game_dir {

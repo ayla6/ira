@@ -34,6 +34,12 @@ pub const CSS_SUGGESTED_ACTION: &str = "suggested-action";
 pub const CSS_TITLE_1: &str = "title-1";
 pub const CSS_LOCKED_TROPHY: &str = "locked-trophy";
 pub const CSS_SIDEBAR_SECTION_TITLE: &str = "sidebar-section-title";
+pub const CSS_BINDING_SECTION_HEADER: &str = "binding-section-header";
+pub const CSS_BINDING_SUFFIX: &str = "binding-suffix";
+pub const CSS_SOURCE_BADGE: &str = "source-badge";
+pub const CSS_SQUARE_BUTTON: &str = "square-button";
+pub const CSS_VIEWER_CARD: &str = "input-viewer-card";
+pub const CSS_VIEWER_CANVAS: &str = "input-viewer-canvas";
 
 pub const APP_CSS: &str = "
 .sidebar-row-title { min-width: 0; }
@@ -191,6 +197,53 @@ gridview.game-grid child:focus-within {
 
 .dim-label {
     opacity: 0.55;
+}
+
+.binding-suffix {
+    margin: 2px 0;
+}
+.binding-section-header {
+    min-height: 0;
+    padding: 8px 0 2px;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+.binding-section-header:hover,
+.binding-section-header:selected {
+    background: transparent;
+}
+.binding-section-header > box {
+    min-height: 0;
+}
+.binding-section-header label {
+    opacity: 0.65;
+    font-size: 0.85em;
+    font-weight: 700;
+}
+.square-button {
+    min-width: 32px;
+    min-height: 32px;
+    padding: 4px;
+}
+.source-badge {
+    padding: 2px 8px;
+    border-radius: 8px;
+    background-color: alpha(@theme_fg_color, 0.08);
+    font-weight: 600;
+}
+
+.input-viewer-card {
+    padding: 10px 14px;
+    border-radius: 12px;
+    background-color: alpha(@theme_fg_color, 0.06);
+}
+.input-viewer-canvas {
+    border-radius: 14px;
+    background-color: alpha(@theme_fg_color, 0.035);
+}
+.input-viewer-card > label:first-child {
+    font-weight: 700;
 }
 
 .variant-card {

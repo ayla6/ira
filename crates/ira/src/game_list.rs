@@ -666,11 +666,13 @@ mod tests {
 
     #[test]
     fn test_game_list_options_from_config_copies_source_settings() {
-        let mut cfg = Config::default();
-        cfg.steam_enabled = true;
-        cfg.shadps4_enabled = true;
-        cfg.shadps4_executable = "/tmp/shadps4".to_string();
-        cfg.sort_descending = true;
+        let cfg = Config {
+            steam_enabled: true,
+            shadps4_enabled: true,
+            shadps4_executable: "/tmp/shadps4".to_string(),
+            sort_descending: true,
+            ..Config::default()
+        };
 
         let options = GameListOptions::from_config(&cfg);
 

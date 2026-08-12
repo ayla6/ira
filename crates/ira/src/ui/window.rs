@@ -5,6 +5,7 @@ use adw::prelude::*;
 use ira_api::SteamDataClient;
 use ira_config::Config;
 use ira_db::DbConn;
+use ira_input::ControllerRegistry;
 use ira_models::{GroupSelection, SortMode};
 use ira_watcher::AchievementWatcher;
 use std::cell::{Cell, RefCell};
@@ -28,6 +29,7 @@ pub struct AppContext {
     pub db: DbConn,
     pub sender: AppSender,
     pub game_names: Arc<Mutex<HashMap<String, String>>>,
+    pub controller_registry: Arc<ControllerRegistry>,
 }
 
 pub fn build_ui(
@@ -62,6 +64,7 @@ pub fn build_ui(
         None::<gtk4::SignalListItemFactory>,
     );
     let state = Rc::new(RefCell::new(AppState {
+        source_id: Cell::new(None),
         window: adw::ApplicationWindow::new(app),
         games,
         sidebar_store,
@@ -84,6 +87,7 @@ pub fn build_ui(
         db: ctx.db,
         sender: ctx.sender,
         game_names: ctx.game_names,
+        controller_registry: ctx.controller_registry,
         content_unloaded: false,
         restoring: false,
         running_games: Arc::new(Mutex::new(HashMap::new())),

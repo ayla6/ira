@@ -4,6 +4,7 @@ use crate::Game;
 use ira_api::SteamDataClient;
 use ira_config::Config;
 use ira_db::DbConn;
+use ira_input::ControllerRegistry;
 use ira_models::{Group, GroupSelection};
 use ira_watcher::AchievementWatcher;
 use std::cell::{Cell, RefCell};
@@ -27,6 +28,7 @@ pub struct SettingsData {
 }
 
 pub struct AppState {
+    pub source_id: Cell<Option<u32>>,
     pub window: adw::ApplicationWindow,
     pub games: Vec<Game>,
     pub sidebar_store: gio::ListStore,
@@ -49,6 +51,7 @@ pub struct AppState {
     pub db: DbConn,
     pub sender: AppSender,
     pub game_names: Arc<Mutex<HashMap<String, String>>>,
+    pub controller_registry: Arc<ControllerRegistry>,
     pub content_unloaded: bool,
     pub restoring: bool,
     pub running_games: Arc<Mutex<HashMap<i64, i32>>>,

@@ -38,7 +38,20 @@ unsafe extern "C" fn source_trampoline(
 }
 
 unsafe extern "C" fn source_destroy(data: glib::ffi::gpointer) {
-    let _ = Box::from_raw(data as *mut MainLoopData);
+    let data = Box::from_raw(data as *mut MainLoopData);
+    libc::close(data.read_fd);
+}
+
+pub fn remove_source(state: &SharedState) {
+    let source_id = state.borrow().source_id.take();
+    let Some(source_id) = source_id else {
+        return;
+    };
+
+    let removed = unsafe { glib::ffi::g_source_remove(source_id) };
+    if removed == glib::ffi::GFALSE {
+        eprintln!("Failed to remove GLib application message source {source_id}");
+    }
 }
 
 pub fn activate(app: &adw::Application) -> SharedState {
@@ -72,6 +85,13 @@ pub fn activate(app: &adw::Application) -> SharedState {
 
     let (tx, rx) = mpsc::channel::<AppMessage>();
     let sender = AppSender::new(tx, write_fd);
+    let controller_registry = match ira_input::ControllerRegistry::start() {
+        Ok(registry) => registry,
+        Err(e) => {
+            eprintln!("Controller registry unavailable: {e}");
+            ira_input::ControllerRegistry::snapshot_only()
+        }
+    };
 
     let save_dir = cfg.save_dir.clone();
 
@@ -99,6 +119,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
                 db: db.clone(),
                 sender: sender.clone(),
                 game_names: Arc::new(Mutex::new(HashMap::new())),
+                controller_registry,
             },
         )
     };
@@ -191,7 +212,9 @@ pub fn activate(app: &adw::Application) -> SharedState {
                 data_ptr,
                 Some(source_destroy),
             );
-            glib::ffi::g_source_attach(source as *mut glib::ffi::GSource, std::ptr::null_mut());
+            let source_id =
+                glib::ffi::g_source_attach(source as *mut glib::ffi::GSource, std::ptr::null_mut());
+            state.borrow().source_id.set(Some(source_id));
             glib::ffi::g_source_unref(source as *mut glib::ffi::GSource);
         }
     }

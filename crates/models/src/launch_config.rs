@@ -12,6 +12,10 @@ pub struct GameLaunchConfig {
     pub pre_launch: String,
     #[serde(default)]
     pub overlay_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_profile: Option<String>,
     // System-level settings (moved from WineConfig — these apply to ALL games, not just Wine)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gamemode: Option<bool>,

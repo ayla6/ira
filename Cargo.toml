@@ -15,6 +15,7 @@ members = [
     "crates/overlay-shim",
     "crates/overlay-vk",
     "crates/overlay-standalone",
+    "crates/input",
 ]
 resolver = "2"
 

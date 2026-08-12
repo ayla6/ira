@@ -420,6 +420,41 @@ pub fn add_overlay_env_standalone(
     env.push(("IRA_OVERLAY_FONT_FAMILY".to_string(), font));
 }
 
+fn input_binary_path() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+    let candidates = [
+        exe_dir.join("ira-input"),
+        exe_dir.join("input").join("ira-input"),
+    ];
+    if let Some(path) = candidates.into_iter().find(|path| path.is_file()) {
+        return Some(path.to_string_lossy().into_owned());
+    }
+    std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+        .map(|dir| dir.join("ira-input"))
+        .find(|path| path.is_file())
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+/// Wraps a final game command with the host-side input broker.
+/// The broker stays outside Wine, Proton, umu, gamescope, and Flatpak.
+pub fn wrap_with_input(command: &mut Vec<String>, profile: Option<&str>) -> Result<(), String> {
+    let binary = input_binary_path()
+        .ok_or_else(|| "input remapping enabled but ira-input was not found".to_string())?;
+    let game_command = std::mem::take(command);
+    let mut wrapped = vec![binary];
+    if let Some(profile) = profile.filter(|profile| !profile.is_empty()) {
+        wrapped.push("--profile".to_string());
+        wrapped.push(profile.to_string());
+    }
+    wrapped.push("--".to_string());
+    wrapped.extend(game_command);
+    *command = wrapped;
+    Ok(())
+}
+
 /// Wraps a gamescope command so the standalone overlay runs inside gamescope
 /// alongside the game. The overlay inherits `DISPLAY` from gamescope's
 /// internal XWayland server, allowing it to create an X11 window via XCB.

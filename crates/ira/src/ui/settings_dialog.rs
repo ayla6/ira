@@ -1,5 +1,7 @@
 use super::css::*;
 use super::helpers::dialog_layout;
+use super::input_profile_settings::build_input_settings_page;
+use super::input_profile_store::ensure_controller_default_profile;
 use super::profile_dialog::build_profiles_page;
 use super::settings_console::{
     build_cemu_settings_page, build_console_settings_page, build_rpcs3_settings_page,
@@ -16,7 +18,7 @@ use super::wine_config_widget::build_wine_config_pages;
 use crate::strings as S;
 use adw::prelude::*;
 use ira_api::SteamDataClient;
-use ira_config::Config;
+use ira_config::{Config, ControllerInputConfig};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -79,6 +81,22 @@ pub fn show_settings_dialog(
         "overlay",
     ));
     stack.add_named(&overlay_page, Some("overlay"));
+
+    let registry = state.borrow().controller_registry.clone();
+    let (input_page, input_widgets) =
+        build_input_settings_page(&win, &cfg.save_dir, &cfg, registry);
+    let controller_default_widgets = input_widgets.controller_defaults.clone();
+    sidebar.append(&settings_sidebar_row(
+        "input-gaming-symbolic",
+        "Controller",
+        "input",
+    ));
+    let input_scroll = gtk4::ScrolledWindow::new();
+    input_scroll.set_hexpand(true);
+    input_scroll.set_vexpand(true);
+    input_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    input_scroll.set_child(Some(&input_page));
+    stack.add_named(&input_scroll, Some("input"));
 
     let (system_page, system_defaults_widgets) = build_system_defaults_page(&cfg);
     let system_scroll = gtk4::ScrolledWindow::new();
@@ -466,6 +484,39 @@ pub fn show_settings_dialog(
         s.cfg.ra_enabled = ra_enable_row.is_active();
         s.cfg.ra_username = ra_username_row.text().to_string();
         s.cfg.ra_password = ra_password_row.text().to_string();
+
+        let mut controller_defaults = s.cfg.controller_defaults.clone();
+        for widget in controller_default_widgets.borrow().iter() {
+            let mut profile = widget
+                .profile_path
+                .borrow()
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if widget.always_on.is_active() && profile.is_empty() {
+                match ensure_controller_default_profile(
+                    &s.cfg.save_dir,
+                    &widget.key,
+                    &widget.device_name,
+                    &widget.supported_buttons,
+                ) {
+                    Ok(path) => profile = path.to_string_lossy().into_owned(),
+                    Err(error) => eprintln!("Failed to create controller mapping: {error}"),
+                }
+            }
+            if widget.always_on.is_active() || !profile.is_empty() {
+                controller_defaults.insert(
+                    widget.key.clone(),
+                    ControllerInputConfig {
+                        always_on: widget.always_on.is_active(),
+                        profile,
+                    },
+                );
+            } else {
+                controller_defaults.remove(&widget.key);
+            }
+        }
+        s.cfg.controller_defaults = controller_defaults;
 
         s.cfg.overlay.enabled = overlay_widgets.enable_row.is_active();
         s.cfg.overlay.encoder = match overlay_widgets.encoder_row.selected() {

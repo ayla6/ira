@@ -86,6 +86,7 @@ pub fn show_settings_dialog(
     let (input_page, input_widgets) =
         build_input_settings_page(&win, &cfg.save_dir, &cfg, registry);
     let controller_default_widgets = input_widgets.controller_defaults.clone();
+    let console_profile_widgets = input_widgets.console_profiles;
     sidebar.append(&settings_sidebar_row(
         "input-gaming-symbolic",
         "Controller",
@@ -240,7 +241,7 @@ pub fn show_settings_dialog(
         .collect();
     let mut empty_platforms = Vec::new();
     for def in ira_models::all_consoles() {
-        if def.id == "ps2" {
+        if def.id == "psp" {
             let (ps3_page, ps3_en, ps3_exe) = build_rpcs3_settings_page(&cfg, &win);
 
             let (ps3_ov_row, ps3_ov_state) = build_override_switch_row(
@@ -329,6 +330,8 @@ pub fn show_settings_dialog(
             vita3k_enable_row = Some(vita_en);
             vita3k_exe_row = Some(vita_exe);
 
+        }
+        if def.id == "wii" {
             let (cemu_page, cemu_en, cemu_exe) = build_cemu_settings_page(&cfg, &win);
             let (cemu_ov_row, cemu_ov_state) = build_override_switch_row(
                 "In-game overlay",
@@ -625,6 +628,14 @@ pub fn show_settings_dialog(
                     cc.ra_core = String::new();
                 }
             }
+        }
+        for widget in &console_profile_widgets {
+            s.cfg.console_mut(&widget.console_id).controller_profile = widget
+                .profile_paths
+                .get(widget.profile_row.selected() as usize)
+                .and_then(|path| path.as_ref())
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default();
         }
         s.cfg.default_wine_config = wine_widgets.to_wine_config();
         s.cfg.prefix_base_dir = prefix_base_row.text().to_string();

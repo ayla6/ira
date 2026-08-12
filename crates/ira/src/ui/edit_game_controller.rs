@@ -3,7 +3,6 @@ use super::input_profile_store::{
 };
 use super::settings_dialog;
 use adw::prelude::*;
-use ira_input::VirtualGamepadBackend;
 use ira_models::{ControllerInputMode, Game, GameLaunchConfig};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -47,12 +46,8 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     input_group.add(&input_mode_row);
 
     let current_path = params.launch.input_profile.as_deref().map(PathBuf::from);
-    let (labels, paths, selected) = profile_choices(
-        params.save_dir,
-        params.game.db_id,
-        current_path,
-        initial_mode,
-    );
+    let (labels, paths, selected) =
+        profile_choices(params.save_dir, params.game.db_id, current_path);
     let input_profile_row = adw::ComboRow::new();
     input_profile_row.set_title("Current layout");
     let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
@@ -77,7 +72,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
             &mode_save_dir,
             mode_game_id,
             current.as_deref(),
-            mode,
             &last_real_for_mode,
         );
     });
@@ -118,7 +112,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     let game_name_for_edit = params.game.name.clone();
     let registry_for_edit = params.registry.clone();
     let last_real_for_edit = last_real.clone();
-    let input_mode_for_edit = input_mode.clone();
     edit_button.connect_clicked(move |_| {
         let Some(path) = selected_path(&profile_row_for_edit, &profile_paths_for_edit) else {
             return;
@@ -129,7 +122,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         else {
             return;
         };
-        let input_mode = input_mode_for_edit.clone();
         super::input_profile_editor::show_input_profile_editor(
             &window,
             super::input_profile_editor::InputProfileEditorParams {
@@ -152,7 +144,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
                         &save_dir,
                         game_id_for_edit,
                         Some(&saved),
-                        *input_mode.borrow(),
                         &last_real,
                     )
                 }
@@ -161,7 +152,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     });
 
     let last_real_for_new = last_real.clone();
-    let input_mode_for_new = input_mode.clone();
     let new_profile_cb: Rc<dyn Fn()> = {
         let stack = params.stack.clone();
         let row = input_profile_row.clone();
@@ -182,7 +172,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
             let save_dir = save_dir.clone();
             let callback_save_dir = save_dir.clone();
             let last_real = last_real_for_new.clone();
-            let input_mode = input_mode_for_new.clone();
             super::input_profile_editor::show_input_profile_editor(
                 &window,
                 super::input_profile_editor::InputProfileEditorParams {
@@ -200,7 +189,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
                         &callback_save_dir,
                         game_id,
                         Some(&saved),
-                        *input_mode.borrow(),
                         &last_real,
                     )
                 },
@@ -275,7 +263,6 @@ fn profile_choices(
     save_dir: &str,
     game_id: i64,
     current_path: Option<PathBuf>,
-    mode: Option<ControllerInputMode>,
 ) -> (Vec<String>, Vec<Option<PathBuf>>, u32) {
     let profiles = list_profiles(save_dir).unwrap_or_else(|error| {
         eprintln!("Failed to list controller profiles: {error}");
@@ -284,9 +271,7 @@ fn profile_choices(
     let mut labels = vec!["No profile".to_string()];
     let mut paths = vec![None];
     for stored in profiles {
-        if profile_matches_game(&stored.profile, game_id)
-            && mode_matches_backend(mode, stored.profile.backend)
-        {
+        if profile_matches_game(&stored.profile, game_id) {
             labels.push(profile_label(&stored));
             paths.push(Some(stored.path));
         }
@@ -302,11 +287,7 @@ fn profile_choices(
             current_path
                 .as_ref()
                 .filter(|path| path.is_file())
-                .filter(|path| {
-                    read_profile(path)
-                        .map(|profile| mode_matches_backend(mode, profile.backend))
-                        .unwrap_or(false)
-                })
+                .filter(|path| read_profile(path).is_ok())
                 .map(|path| {
                     labels.push(format!("{} (current)", path_label(path)));
                     paths.push(Some(path.clone()));
@@ -325,15 +306,10 @@ fn refresh_profile_choices(
     save_dir: &str,
     game_id: i64,
     selected_path: Option<&Path>,
-    mode: Option<ControllerInputMode>,
     last_real: &Rc<RefCell<u32>>,
 ) {
-    let (labels, profile_paths, selected) = profile_choices(
-        save_dir,
-        game_id,
-        selected_path.map(Path::to_path_buf),
-        mode,
-    );
+    let (labels, profile_paths, selected) =
+        profile_choices(save_dir, game_id, selected_path.map(Path::to_path_buf));
     let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
     *paths.borrow_mut() = profile_paths;
     row.set_model(Some(&gtk4::StringList::new(&refs)));
@@ -375,16 +351,6 @@ fn input_mode_from_index(index: u32) -> Option<ControllerInputMode> {
     }
 }
 
-fn mode_matches_backend(mode: Option<ControllerInputMode>, backend: VirtualGamepadBackend) -> bool {
-    match mode {
-        Some(ControllerInputMode::VirtualXInput) => backend == VirtualGamepadBackend::XInput,
-        Some(ControllerInputMode::VirtualDirectInput) => {
-            backend == VirtualGamepadBackend::DirectInput
-        }
-        _ => true,
-    }
-}
-
 fn icon_button(icon: &str, tooltip: &str) -> gtk4::Button {
     let button = gtk4::Button::from_icon_name(icon);
     button.add_css_class(super::css::CSS_FLAT);
@@ -395,8 +361,7 @@ fn icon_button(icon: &str, tooltip: &str) -> gtk4::Button {
 
 #[cfg(test)]
 mod tests {
-    use super::{input_mode_from_index, input_mode_index, mode_matches_backend};
-    use ira_input::VirtualGamepadBackend;
+    use super::{input_mode_from_index, input_mode_index};
     use ira_models::ControllerInputMode;
 
     #[test]
@@ -409,25 +374,5 @@ mod tests {
         ] {
             assert_eq!(input_mode_from_index(input_mode_index(mode)), mode);
         }
-    }
-
-    #[test]
-    fn test_mode_matches_backend_only_for_virtual_modes() {
-        assert!(mode_matches_backend(
-            None,
-            VirtualGamepadBackend::DirectInput
-        ));
-        assert!(mode_matches_backend(
-            Some(ControllerInputMode::Disabled),
-            VirtualGamepadBackend::DirectInput
-        ));
-        assert!(mode_matches_backend(
-            Some(ControllerInputMode::VirtualXInput),
-            VirtualGamepadBackend::XInput
-        ));
-        assert!(!mode_matches_backend(
-            Some(ControllerInputMode::VirtualXInput),
-            VirtualGamepadBackend::DirectInput
-        ));
     }
 }

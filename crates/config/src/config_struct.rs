@@ -83,6 +83,9 @@ pub struct ConsoleConfig {
     pub executable: String,
     pub ra_core: String,
     pub fullscreen: bool,
+    /// Shared layout used for this console before a game-specific layout.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub controller_profile: String,
 }
 
 impl Default for ConsoleConfig {
@@ -92,6 +95,7 @@ impl Default for ConsoleConfig {
             executable: String::new(),
             ra_core: String::new(),
             fullscreen: false,
+            controller_profile: String::new(),
         }
     }
 }
@@ -371,6 +375,7 @@ static EMPTY_CONSOLE: ConsoleConfig = ConsoleConfig {
     executable: String::new(),
     ra_core: String::new(),
     fullscreen: false,
+    controller_profile: String::new(),
 };
 
 #[cfg(test)]
@@ -465,6 +470,17 @@ mod tests {
         assert_eq!(cc.executable, "");
         assert_eq!(cc.ra_core, "");
         assert!(!cc.fullscreen);
+        assert!(cc.controller_profile.is_empty());
+    }
+
+    #[test]
+    fn test_console_config_accepts_controller_profile() {
+        let console: ConsoleConfig =
+            serde_json::from_str(
+                r#"{"enabled":true,"executable":"","ra_core":"","fullscreen":false,"controller_profile":"/layouts/ps1.json"}"#,
+            )
+            .unwrap();
+        assert_eq!(console.controller_profile, "/layouts/ps1.json");
     }
 
     #[test]

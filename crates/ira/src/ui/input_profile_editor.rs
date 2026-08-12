@@ -37,7 +37,7 @@ struct BindingCollectionContext {
 struct PageSetup {
     page_boxes: Vec<gtk4::Box>,
     section_groups: SectionGroups,
-    backend_dropdown: gtk4::DropDown,
+    backend_dropdown: adw::ComboRow,
 }
 
 pub(super) struct InputProfileEditorParams {
@@ -305,12 +305,11 @@ fn setup_pages(
             .map(|_| Vec::<(String, adw::PreferencesGroup)>::new())
             .collect(),
     ));
-    let backend_row = adw::ActionRow::new();
-    backend_row.set_title("Virtual gamepad backend");
-    let backend_dropdown = gtk4::DropDown::from_strings(&["XInput", "DirectInput"]);
+    let backend_dropdown = adw::ComboRow::new();
+    backend_dropdown.set_title("Virtual gamepad backend");
+    backend_dropdown.set_model(Some(&gtk4::StringList::new(&["XInput", "DirectInput"])));
     backend_dropdown.set_selected((*backend.borrow() as u32).min(1));
-    backend_row.add_suffix(&backend_dropdown);
-    layout.content_area.append(&backend_row);
+    layout.content_area.append(&backend_dropdown);
     for (index, (page_id, title, icon)) in page_descriptors().into_iter().enumerate() {
         let scroll = gtk4::ScrolledWindow::new();
         scroll.set_vexpand(true);
@@ -389,7 +388,7 @@ fn default_bindings() -> [Binding; 5] {
 }
 
 fn setup_sidebar(layout: &super::helpers::DialogLayout) {
-    for (icon, title, page_id) in page_descriptors() {
+    for (page_id, title, icon) in page_descriptors() {
         layout
             .sidebar
             .append(&super::settings_dialog::settings_sidebar_row(
@@ -408,7 +407,7 @@ fn setup_sidebar(layout: &super::helpers::DialogLayout) {
 }
 
 fn connect_backend_change(
-    dropdown: &gtk4::DropDown,
+    dropdown: &adw::ComboRow,
     backend: &Rc<RefCell<VirtualGamepadBackend>>,
     page_boxes: &[gtk4::Box],
     section_groups: &SectionGroups,

@@ -95,9 +95,7 @@ fn active_controller_input(
                 }
             };
             let configured = std::path::PathBuf::from(&defaults.profile);
-            let path = if configured.is_file()
-                && read_profile(&configured).is_ok_and(|profile| profile.backend == backend)
-            {
+            let path = if configured.is_file() && read_profile(&configured).is_ok() {
                 configured
             } else {
                 controller_default_path_for_backend(save_dir, &key, backend)
@@ -334,13 +332,39 @@ pub fn launch_game(
             &game_path,
         )?;
     } else if kind == ira_models::GameKind::Ps4 {
-        play_button_helpers::launch_ps4(&ctx, &per_game_version, &global_shadps4_exe, &game_path)?;
+        play_button_helpers::launch_ps4(
+            &ctx,
+            &per_game_version,
+            &global_shadps4_exe,
+            &game_path,
+            (!cfg_clone.console("ps4").controller_profile.is_empty())
+                .then_some(cfg_clone.console("ps4").controller_profile.as_str()),
+        )?;
     } else if kind == ira_models::GameKind::Ps3 {
-        play_button_helpers::launch_ps3(&ctx, &per_game_emu, &global_rpcs3_exe, &game_path)?;
+        play_button_helpers::launch_ps3(
+            &ctx,
+            &per_game_emu,
+            &global_rpcs3_exe,
+            &game_path,
+            (!cfg_clone.console("ps3").controller_profile.is_empty())
+                .then_some(cfg_clone.console("ps3").controller_profile.as_str()),
+        )?;
     } else if kind == ira_models::GameKind::PsVita {
-        play_button_helpers::launch_vita3k(&ctx, &global_vita3k_exe, &game_path)?;
+        play_button_helpers::launch_vita3k(
+            &ctx,
+            &global_vita3k_exe,
+            &game_path,
+            (!cfg_clone.console("psvita").controller_profile.is_empty())
+                .then_some(cfg_clone.console("psvita").controller_profile.as_str()),
+        )?;
     } else if kind == ira_models::GameKind::WiiU {
-        play_button_helpers::launch_cemu(&ctx, &global_cemu_exe, &game_path)?;
+        play_button_helpers::launch_cemu(
+            &ctx,
+            &global_cemu_exe,
+            &game_path,
+            (!cfg_clone.console("wiiu").controller_profile.is_empty())
+                .then_some(cfg_clone.console("wiiu").controller_profile.as_str()),
+        )?;
     } else if kind == ira_models::GameKind::Steam {
         play_button_helpers::launch_steam(&ctx, &app_id)?;
     } else {

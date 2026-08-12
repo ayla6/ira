@@ -22,6 +22,13 @@ fn settings_page_container() -> gtk4::Box {
 
 pub(super) struct InputPageWidgets {
     pub controller_defaults: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
+    pub console_profiles: Vec<ConsoleProfileWidgets>,
+}
+
+pub(super) struct ConsoleProfileWidgets {
+    pub console_id: String,
+    pub profile_row: adw::ComboRow,
+    pub profile_paths: Vec<Option<std::path::PathBuf>>,
 }
 
 #[derive(Clone)]
@@ -64,8 +71,14 @@ pub(super) fn build_input_settings_page(
     });
     let profiles_group = adw::PreferencesGroup::new();
     profiles_group.set_title("Profiles");
-    for stored in profiles {
-        add_profile_row(&profiles_group, parent, save_dir, stored, registry.clone());
+    for stored in &profiles {
+        add_profile_row(
+            &profiles_group,
+            parent,
+            save_dir,
+            stored.clone(),
+            registry.clone(),
+        );
     }
 
     let monitor_group = adw::PreferencesGroup::new();
@@ -112,7 +125,11 @@ pub(super) fn build_input_settings_page(
         controller_defaults.clone(),
         no_controllers_row,
     );
+    let console_group = adw::PreferencesGroup::new();
+    console_group.set_title("Console defaults");
+    let console_profiles = console_profile_rows(&console_group, cfg, &profiles);
     page.append(&controller_group);
+    page.append(&console_group);
     page.append(&monitor_group);
     page.append(&profiles_group);
 
@@ -120,8 +137,87 @@ pub(super) fn build_input_settings_page(
         page,
         InputPageWidgets {
             controller_defaults,
+            console_profiles,
         },
     )
+}
+
+fn console_profile_rows(
+    group: &adw::PreferencesGroup,
+    cfg: &Config,
+    profiles: &[StoredProfile],
+) -> Vec<ConsoleProfileWidgets> {
+    let mut consoles = ira_models::all_consoles()
+        .map(|console| (console.id.to_string(), console.display_name.to_string()))
+        .collect::<Vec<_>>();
+    consoles.extend([
+        ("ps3".to_string(), "PS3".to_string()),
+        ("ps4".to_string(), "PS4".to_string()),
+        ("psvita".to_string(), "PS Vita".to_string()),
+        ("wiiu".to_string(), "Wii U".to_string()),
+    ]);
+    consoles.sort_by_key(|(id, label)| console_sort_key(id, label));
+    consoles
+        .into_iter()
+        .map(|(console_id, label)| add_console_profile_row(group, cfg, profiles, console_id, label))
+        .collect()
+}
+
+fn console_sort_key(id: &str, label: &str) -> (u8, String) {
+    let family = match id {
+        "psx" | "ps2" | "ps3" | "ps4" | "psvita" | "psp" => 0,
+        "gb" | "gbc" | "gba" | "n64" | "n64dd" | "nds" | "gc" | "wii" | "wiiu" | "nes" | "snes"
+        | "virtualboy" => 1,
+        _ => 2,
+    };
+    let sequence = match id {
+        "psx" => "01",
+        "ps2" => "02",
+        "ps3" => "03",
+        "ps4" => "04",
+        "psvita" => "05",
+        "psp" => "06",
+        _ => label,
+    };
+    (family, sequence.to_string())
+}
+
+fn add_console_profile_row(
+    group: &adw::PreferencesGroup,
+    cfg: &Config,
+    profiles: &[StoredProfile],
+    console_id: String,
+    label: String,
+) -> ConsoleProfileWidgets {
+    let profile_row = adw::ComboRow::new();
+    profile_row.set_title(&label);
+    profile_row.set_subtitle("Use controller default");
+    let mut labels = vec!["Use controller default".to_string()];
+    let mut profile_paths = vec![None];
+    for profile in profiles
+        .iter()
+        .filter(|profile| profile.profile.compatible_game_ids.is_empty())
+    {
+        labels.push(profile_label(profile));
+        profile_paths.push(Some(profile.path.clone()));
+    }
+    let selected = profile_paths
+        .iter()
+        .position(|path| {
+            path.as_ref().is_some_and(|path| {
+                path == std::path::Path::new(&cfg.console(&console_id).controller_profile)
+            })
+        })
+        .unwrap_or(0);
+    let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
+    profile_row.set_model(Some(&gtk4::StringList::new(&refs)));
+    profile_row.set_selected(selected as u32);
+    group.add(&profile_row);
+    ConsoleProfileWidgets {
+        console_id,
+        profile_row,
+        profile_paths,
+    }
 }
 
 fn rebuild_controller_rows(params: &ControllerRowsParams, devices: &[ira_input::DeviceInfo]) {
@@ -237,18 +333,19 @@ fn add_controller_row(
             *profile_path_for_mode.borrow_mut() = path.is_file().then_some(path);
         }
     });
-    expander.add_suffix(&mode);
     expander.set_expanded(state.config.mode != ControllerInputMode::Disabled);
+    expander.add_row(&mode);
 
     let action_row = adw::ActionRow::new();
     action_row.set_title("Controller mapping");
-    action_row.set_subtitle("Edit paddle remaps and other controller-specific bindings");
+    action_row.set_subtitle("Edit controller-specific bindings");
     let edit = icon_button("document-edit-symbolic", "Edit controller mapping");
     action_row.add_suffix(&edit);
     expander.add_row(&action_row);
 
-    let copy_row = adw::ActionRow::new();
-    copy_row.set_title("Copy from controller");
+    let copy_row = adw::ComboRow::new();
+    copy_row.set_title("Copy mapping from");
+    copy_row.set_subtitle("Use another configured controller as the starting point");
     let copy_model = gtk4::StringList::new(&["Select a configured controller"]);
     let mut copy_keys = Vec::new();
     // The key is the stable identity; names are intentionally not persisted here.
@@ -256,11 +353,7 @@ fn add_controller_row(
         copy_model.append(&source_key);
         copy_keys.push(source_key);
     }
-    let copy_dropdown = adw::ComboRow::new();
-    copy_dropdown.set_model(Some(&copy_model));
-    copy_row.add_suffix(&copy_dropdown);
-    let copy_button = icon_button("edit-copy-symbolic", "Copy controller default");
-    copy_row.add_suffix(&copy_button);
+    copy_row.set_model(Some(&copy_model));
     expander.add_row(&copy_row);
     let save_dir_for_copy = save_dir.to_string();
     let target_key_for_copy = key.clone();
@@ -268,8 +361,8 @@ fn add_controller_row(
     let buttons_for_copy = supported_buttons.clone();
     let profile_path_for_copy = profile_path.clone();
     let mode_for_copy = mode.clone();
-    copy_button.connect_clicked(move |_| {
-        let selected = copy_dropdown.selected();
+    copy_row.connect_selected_notify(move |row| {
+        let selected = row.selected();
         let Some(source_key) = selected
             .checked_sub(1)
             .and_then(|index| copy_keys.get(index as usize))
@@ -295,6 +388,7 @@ fn add_controller_row(
                     }));
                 }
                 *profile_path_for_copy.borrow_mut() = Some(path);
+                row.set_selected(0);
             }
             Err(error) => eprintln!("Failed to copy controller mapping: {error}"),
         }

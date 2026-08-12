@@ -78,6 +78,21 @@ fn resolved_input_mode(
     })
 }
 
+fn console_input_mode(
+    game_override: Option<ControllerInputMode>,
+    controller_default: ControllerInputMode,
+    console_profile: Option<&str>,
+) -> ControllerInputMode {
+    if game_override == Some(ControllerInputMode::Disabled) {
+        ControllerInputMode::Disabled
+    } else if console_profile.is_some_and(|profile| !profile.is_empty()) {
+        // The selected profile owns its backend; this only enables the broker.
+        ControllerInputMode::VirtualXInput
+    } else {
+        game_override.unwrap_or(controller_default)
+    }
+}
+
 fn resolve_input_profile(
     ctx: &LaunchCtx,
     mode: ControllerInputMode,
@@ -96,31 +111,16 @@ fn resolve_input_profile(
                 VirtualGamepadBackend::DirectInput => "resolved-directinput.json",
             })
     };
-    let mut profile_path = selected_profile
+    let profile_path = selected_profile
         .map(std::path::PathBuf::from)
         .or_else(|| default_profile.map(std::path::PathBuf::from))
         .unwrap_or_else(generated_path);
-    if selected_profile.is_none()
-        && profile_path.is_file()
-        && read_profile(&profile_path).is_ok_and(|profile| profile.backend != backend)
-    {
-        profile_path = generated_path();
-    }
-
     if !profile_path.is_file() {
         let mut profile = InputProfile::default_gamepad_for_backend(backend);
         profile.name = format!("Built-in {:?} profile", backend);
         write_profile(&profile_path, &profile)?;
     }
-    let profile = read_profile(&profile_path)?;
-    if profile.backend != backend {
-        return Err(format!(
-            "Controller profile '{}' uses {:?}, but the selected input mode requires {:?}",
-            profile_path.display(),
-            profile.backend,
-            backend
-        ));
-    }
+    read_profile(&profile_path)?;
     Ok(Some(profile_path.to_string_lossy().into_owned()))
 }
 
@@ -161,6 +161,7 @@ fn spawn_and_monitor(
 fn build_emulator_env_and_wrap(
     ctx: &LaunchCtx,
     cmd: &mut Vec<String>,
+    console_profile: Option<&str>,
 ) -> Result<Vec<(String, String)>, String> {
     let mut env: Vec<(String, String)> = std::env::vars()
         .filter(|(k, _)| {
@@ -268,13 +269,16 @@ fn build_emulator_env_and_wrap(
         ira_launcher::env_builder::wrap_with_standalone_overlay(cmd);
     }
 
-    let input_mode =
-        resolved_input_mode(ctx.game_kind, launch.input_mode, ctx.controller_input_mode);
+    let input_mode = console_input_mode(
+        launch.input_mode,
+        ctx.controller_input_mode,
+        console_profile,
+    );
     let input_profile = resolve_input_profile(
         ctx,
         input_mode,
         launch.input_profile.as_deref(),
-        ctx.controller_input_profile.as_deref(),
+        console_profile.or(ctx.controller_input_profile.as_deref()),
     )?;
     if input_profile.is_some() {
         ira_launcher::env_builder::wrap_with_input(cmd, input_profile.as_deref())?;
@@ -392,7 +396,11 @@ pub(super) fn launch_retro(
         fullscreen_flag,
         rom_root,
     );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd)?;
+    let env = build_emulator_env_and_wrap(
+        ctx,
+        &mut cmd,
+        (!cc.controller_profile.is_empty()).then_some(cc.controller_profile.as_str()),
+    )?;
     spawn_and_monitor(ctx, &cmd, &env, ctx.game_name)
 }
 
@@ -401,6 +409,7 @@ pub(super) fn launch_ps4(
     per_game_version: &str,
     global_shadps4_exe: &str,
     game_path: &str,
+    console_profile: Option<&str>,
 ) -> Result<(), String> {
     let exe = ira_platforms::ps4::resolve_shadps4_executable(per_game_version, global_shadps4_exe);
     if !ira_platforms::ps4::shadps4_executable_available(&exe) {
@@ -414,7 +423,7 @@ pub(super) fn launch_ps4(
         &args,
         Some(std::path::Path::new(game_path)),
     );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd)?;
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd, console_profile)?;
     spawn_and_monitor(ctx, &cmd, &env, "shadPS4")
 }
 
@@ -423,6 +432,7 @@ pub(super) fn launch_ps3(
     per_game_emu: &str,
     global_rpcs3_exe: &str,
     game_path: &str,
+    console_profile: Option<&str>,
 ) -> Result<(), String> {
     let exe = if !per_game_emu.is_empty() {
         per_game_emu
@@ -437,7 +447,7 @@ pub(super) fn launch_ps3(
         &args,
         Some(std::path::Path::new(game_path)),
     );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd)?;
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd, console_profile)?;
     spawn_and_monitor(ctx, &cmd, &env, "RPCS3")
 }
 
@@ -445,6 +455,7 @@ pub(super) fn launch_vita3k(
     ctx: &LaunchCtx,
     global_executable: &str,
     game_path: &str,
+    console_profile: Option<&str>,
 ) -> Result<(), String> {
     let exe = if global_executable.is_empty() {
         "vita3k"
@@ -457,7 +468,7 @@ pub(super) fn launch_vita3k(
         &args,
         Some(std::path::Path::new(game_path)),
     );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd)?;
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd, console_profile)?;
     spawn_and_monitor(ctx, &cmd, &env, "Vita3K")
 }
 
@@ -465,6 +476,7 @@ pub(super) fn launch_cemu(
     ctx: &LaunchCtx,
     global_executable: &str,
     game_path: &str,
+    console_profile: Option<&str>,
 ) -> Result<(), String> {
     let exe = if global_executable.is_empty() {
         "cemu"
@@ -477,7 +489,7 @@ pub(super) fn launch_cemu(
         &args,
         Some(std::path::Path::new(game_path)),
     );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd)?;
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd, console_profile)?;
     spawn_and_monitor(ctx, &cmd, &env, "Cemu")
 }
 
@@ -714,7 +726,7 @@ pub(super) fn update_last_played(
 
 #[cfg(test)]
 mod tests {
-    use super::{input_backend, resolved_input_mode};
+    use super::{console_input_mode, input_backend, resolved_input_mode};
     use ira_input::VirtualGamepadBackend;
     use ira_models::ControllerInputMode;
 
@@ -728,6 +740,26 @@ mod tests {
         assert_eq!(
             input_backend(ControllerInputMode::VirtualDirectInput),
             Some(VirtualGamepadBackend::DirectInput)
+        );
+    }
+
+    #[test]
+    fn test_console_profile_enables_virtualization_unless_game_disables_it() {
+        assert_eq!(
+            console_input_mode(
+                None,
+                ControllerInputMode::Disabled,
+                Some("/layouts/ps1.json"),
+            ),
+            ControllerInputMode::VirtualXInput
+        );
+        assert_eq!(
+            console_input_mode(
+                Some(ControllerInputMode::Disabled),
+                ControllerInputMode::VirtualXInput,
+                Some("/layouts/ps1.json"),
+            ),
+            ControllerInputMode::Disabled
         );
     }
 

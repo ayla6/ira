@@ -181,6 +181,9 @@ pub fn discover_games() -> Vec<CemuGame> {
 }
 
 pub fn discover_games_for_executable(executable: &str) -> Vec<CemuGame> {
+    if executable.contains('/') && !Path::new(executable).is_file() {
+        return Vec::new();
+    }
     let mlc = mlc_path_for(executable);
     let mut roots = configured_game_paths_for(executable);
     roots.extend([

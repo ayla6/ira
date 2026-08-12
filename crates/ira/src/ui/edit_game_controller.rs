@@ -27,17 +27,12 @@ pub(super) struct ControllerPageParams<'a> {
 }
 
 pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerWidgets {
-    let steam_managed = params.game.kind == ira_models::GameKind::Steam;
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     page.set_margin_start(8);
     page.set_margin_end(8);
     page.set_margin_top(8);
     page.set_margin_bottom(8);
-    let initial_mode = if steam_managed {
-        None
-    } else {
-        params.launch.input_mode
-    };
+    let initial_mode = params.launch.input_mode;
     let input_mode = Rc::new(RefCell::new(initial_mode));
     let input_mode_row = adw::ComboRow::new();
     input_mode_row.set_title("Input remapping");
@@ -48,12 +43,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         "Virtual DirectInput",
     ])));
     input_mode_row.set_selected(input_mode_index(initial_mode));
-    if steam_managed {
-        input_mode_row.set_subtitle(
-            "Steam Input remains authoritative until Steam session supervision is available",
-        );
-        input_mode_row.set_sensitive(false);
-    }
     let input_group = adw::PreferencesGroup::new();
     input_group.add(&input_mode_row);
 
@@ -69,7 +58,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
     input_profile_row.set_model(Some(&gtk4::StringList::new(&refs)));
     input_profile_row.set_selected(selected);
-    input_profile_row.set_sensitive(!steam_managed);
     let input_profile_paths = Rc::new(RefCell::new(paths));
     let last_real = Rc::new(RefCell::new(selected));
 

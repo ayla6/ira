@@ -1,4 +1,6 @@
+use std::collections::HashSet;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -14,6 +16,70 @@ static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 const VIRTUAL_XBOX_VENDOR: u16 = 0x045e;
 const VIRTUAL_XBOX_PRODUCT: u16 = 0x028e;
 const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(16);
+const STEAM_START_TIMEOUT: Duration = Duration::from_secs(60);
+const STEAM_EXIT_GRACE: Duration = Duration::from_secs(2);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ProcessIdentity {
+    pid: i32,
+    start_time: u64,
+}
+
+struct SteamProcessSnapshot {
+    processes: HashSet<ProcessIdentity>,
+    complete: bool,
+}
+
+struct SteamSession {
+    app_id: String,
+    baseline: HashSet<ProcessIdentity>,
+    started_at: Instant,
+    seen: bool,
+    empty_since: Option<Instant>,
+    stop_sent: bool,
+}
+
+impl SteamSession {
+    fn new(app_id: &str) -> Self {
+        Self {
+            app_id: app_id.to_string(),
+            baseline: steam_processes(app_id).processes,
+            started_at: Instant::now(),
+            seen: false,
+            empty_since: None,
+            stop_sent: false,
+        }
+    }
+
+    fn request_stop(&mut self) {
+        if !self.stop_sent {
+            request_steam_stop(&self.app_id);
+            self.stop_sent = true;
+        }
+    }
+
+    fn poll(&mut self, launcher_exited: bool) -> bool {
+        let snapshot = steam_processes(&self.app_id);
+        if !snapshot.complete {
+            self.empty_since = None;
+            return false;
+        }
+        let active = snapshot
+            .processes
+            .difference(&self.baseline)
+            .next()
+            .is_some();
+        if active {
+            self.seen = true;
+            self.empty_since = None;
+            return false;
+        }
+        if self.seen {
+            return self.empty_since.get_or_insert_with(Instant::now).elapsed() >= STEAM_EXIT_GRACE;
+        }
+        self.stop_sent || (launcher_exited && self.started_at.elapsed() >= STEAM_START_TIMEOUT)
+    }
+}
 
 extern "C" fn handle_signal(_: libc::c_int) {
     STOP_REQUESTED.store(true, Ordering::Relaxed);
@@ -37,6 +103,7 @@ struct Arguments {
     profile: Option<PathBuf>,
     list: bool,
     probe_sensors: bool,
+    steam_app_id: Option<String>,
     trace: bool,
     command: Vec<String>,
 }
@@ -127,7 +194,7 @@ fn main() {
         Err(error) => {
             eprintln!("ira-input: {error}");
             eprintln!(
-                "usage: ira-input --list | [--device PATH] [--profile PATH] [--trace] -- COMMAND"
+                "usage: ira-input --list | [--device PATH] [--profile PATH] [--steam-app-id ID] [--trace] -- COMMAND"
             );
             std::process::exit(2);
         }
@@ -155,6 +222,7 @@ fn parse_arguments() -> Result<Arguments, String> {
         profile: None,
         list: false,
         probe_sensors: false,
+        steam_app_id: None,
         trace: false,
         command: Vec::new(),
     };
@@ -179,12 +247,19 @@ fn parse_arguments() -> Result<Arguments, String> {
                         .ok_or_else(|| "--profile requires a path".to_string())?,
                 ));
             }
+            "--steam-app-id" => {
+                arguments.steam_app_id = Some(
+                    values
+                        .next()
+                        .ok_or_else(|| "--steam-app-id requires an ID".to_string())?,
+                );
+            }
             "--list" => arguments.list = true,
             "--probe-sensors" => arguments.probe_sensors = true,
             "--trace" => arguments.trace = true,
             "--help" | "-h" => {
                 println!(
-                    "usage: ira-input --list | [--device PATH] [--profile PATH] [--trace] -- COMMAND"
+                    "usage: ira-input --list | [--device PATH] [--profile PATH] [--steam-app-id ID] [--trace] -- COMMAND"
                 );
                 std::process::exit(0);
             }
@@ -271,13 +346,13 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             .map(|device| device.path)
     }) else {
         eprintln!("ira-input: no gamepad found; running target without input virtualization");
-        return run_target_without_input(&arguments.command);
+        return run_target_without_input(&arguments.command, arguments.steam_app_id.as_deref());
     };
     let mut gamepad = match PhysicalGamepad::open(&device_path, false) {
         Ok(gamepad) => gamepad,
         Err(error) => {
             eprintln!("ira-input: {error}; running target without input virtualization");
-            return run_target_without_input(&arguments.command);
+            return run_target_without_input(&arguments.command, arguments.steam_app_id.as_deref());
         }
     };
     let profile = load_profile(arguments.profile.as_deref())?;
@@ -304,8 +379,10 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let mut sensor = open_sensor(gamepad.info());
     if let Err(error) = gamepad.grab() {
         eprintln!("ira-input: {error}; running target without input virtualization");
-        return run_target_without_input(&arguments.command);
+        return run_target_without_input(&arguments.command, arguments.steam_app_id.as_deref());
     }
+    let mut steam_session = arguments.steam_app_id.as_deref().map(SteamSession::new);
+    let mut launcher_exit_code = None;
     let mut child = if arguments.command.is_empty() {
         None
     } else {
@@ -351,16 +428,32 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     );
     loop {
         if STOP_REQUESTED.load(Ordering::Relaxed) {
-            stop_child(&mut child);
-            return Ok(130);
-        }
-        if let Some(child) = child.as_mut() {
-            if let Some(status) = child
-                .try_wait()
-                .map_err(|error| format!("failed waiting for target process: {error}"))?
-            {
-                return Ok(status.code().unwrap_or(1));
+            if let Some(session) = steam_session.as_mut() {
+                session.request_stop();
+            } else {
+                stop_child(&mut child);
+                return Ok(130);
             }
+        }
+        let child_status = child
+            .as_mut()
+            .map(|child| child.try_wait())
+            .transpose()
+            .map_err(|error| format!("failed waiting for target process: {error}"))?
+            .flatten();
+        if let Some(status) = child_status {
+            let code = status.code().unwrap_or(1);
+            child = None;
+            if arguments.steam_app_id.is_none() {
+                return Ok(code);
+            }
+            launcher_exit_code = Some(code);
+        }
+        if steam_session
+            .as_mut()
+            .is_some_and(|session| session.poll(launcher_exit_code.is_some()))
+        {
+            return Ok(launcher_exit_code.unwrap_or(0));
         }
         if !gamepad.is_connected() && last_reconnect_attempt.elapsed() >= Duration::from_millis(250)
         {
@@ -436,6 +529,89 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     }
 }
 
+fn steam_processes(app_id: &str) -> SteamProcessSnapshot {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return SteamProcessSnapshot {
+            processes: HashSet::new(),
+            complete: false,
+        };
+    };
+    let uid = unsafe { libc::geteuid() };
+    let mut processes = HashSet::new();
+    let mut complete = true;
+    for pid in entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<i32>().ok())
+        .filter(|pid| *pid != std::process::id() as i32)
+    {
+        let proc_path = format!("/proc/{pid}");
+        let Ok(metadata) = std::fs::metadata(&proc_path) else {
+            continue;
+        };
+        if metadata.uid() != uid {
+            continue;
+        }
+        let environment = match std::fs::read(format!("{proc_path}/environ")) {
+            Ok(environment) => environment,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => {
+                complete = false;
+                continue;
+            }
+        };
+        if !environment_has_steam_app(&environment, app_id) {
+            continue;
+        }
+        match process_start_time(pid) {
+            Some(start_time) => {
+                processes.insert(ProcessIdentity { pid, start_time });
+            }
+            None => complete = false,
+        }
+    }
+    SteamProcessSnapshot {
+        processes,
+        complete,
+    }
+}
+
+fn process_start_time(pid: i32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    parse_process_start_time(&stat)
+}
+
+fn parse_process_start_time(stat: &str) -> Option<u64> {
+    stat.rsplit_once(") ")?
+        .1
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()
+}
+
+fn environment_has_steam_app(environment: &[u8], app_id: &str) -> bool {
+    environment.split(|byte| *byte == 0).any(|variable| {
+        ["SteamAppId", "SteamGameId", "STEAM_COMPAT_APP_ID"]
+            .iter()
+            .any(|key| {
+                variable
+                    .strip_prefix(format!("{key}=").as_bytes())
+                    .is_some_and(|value| value == app_id.as_bytes())
+            })
+    })
+}
+
+fn request_steam_stop(app_id: &str) {
+    let uri = format!("steam://stop/{app_id}");
+    if std::process::Command::new("steam")
+        .arg(&uri)
+        .spawn()
+        .is_err()
+    {
+        let _ = std::process::Command::new("xdg-open").arg(uri).spawn();
+    }
+}
+
 fn inject_flatpak_env(program: &str, args: &mut Vec<String>, key: &str, value: &str) {
     let program = std::path::Path::new(program)
         .file_name()
@@ -462,15 +638,33 @@ fn ignored_device_for_target(vendor: u16, product: u16) -> Option<String> {
     }
 }
 
-fn run_target_without_input(command: &[String]) -> Result<i32, String> {
+fn run_target_without_input(command: &[String], steam_app_id: Option<&str>) -> Result<i32, String> {
     let Some((program, arguments)) = command.split_first() else {
         return Ok(0);
     };
+    let mut steam_session = steam_app_id.map(SteamSession::new);
     let status = std::process::Command::new(program)
         .args(arguments)
         .status()
         .map_err(|error| format!("failed to launch target process: {error}"))?;
-    Ok(status.code().unwrap_or(1))
+    let code = status.code().unwrap_or(1);
+    if steam_app_id.is_none() {
+        return Ok(code);
+    }
+    wait_for_steam_app(steam_session.as_mut().expect("Steam session must exist"));
+    Ok(code)
+}
+
+fn wait_for_steam_app(session: &mut SteamSession) {
+    loop {
+        if STOP_REQUESTED.load(Ordering::Relaxed) {
+            session.request_stop();
+        }
+        if session.poll(true) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn load_profile(path: Option<&Path>) -> Result<InputProfile, String> {
@@ -914,6 +1108,33 @@ mod tests {
                 "net.shadps4.shadPS4"
             ]
         );
+    }
+
+    #[test]
+    fn test_environment_has_steam_app_matches_supported_markers() {
+        assert!(environment_has_steam_app(
+            b"PATH=/bin\0SteamAppId=123\0",
+            "123"
+        ));
+        assert!(environment_has_steam_app(
+            b"STEAM_COMPAT_APP_ID=123\0",
+            "123"
+        ));
+        assert!(environment_has_steam_app(b"SteamGameId=123\0", "123"));
+    }
+
+    #[test]
+    fn test_environment_has_steam_app_rejects_partial_or_different_ids() {
+        assert!(!environment_has_steam_app(b"SteamAppId=1234\0", "123"));
+        assert!(!environment_has_steam_app(b"OtherSteamAppId=123\0", "123"));
+        assert!(!environment_has_steam_app(b"PATH=/bin\0", "123"));
+    }
+
+    #[test]
+    fn test_parse_process_start_time_handles_spaces_in_process_name() {
+        let stat = "42 (game with spaces) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 98765 20";
+        assert_eq!(parse_process_start_time(stat), Some(98765));
+        assert_eq!(parse_process_start_time("invalid"), None);
     }
 
     #[test]

@@ -481,12 +481,44 @@ pub(super) fn launch_cemu(
     spawn_and_monitor(ctx, &cmd, &env, "Cemu")
 }
 
-pub(super) fn launch_steam(app_id: &str) -> Result<(), String> {
-    let cmd = vec![
+pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<(), String> {
+    let mut cmd = vec![
         "steam".to_string(),
         "-applaunch".to_string(),
         app_id.to_string(),
     ];
+    let (launch, _, _) = ira_db::get_game_config(ctx.db, ctx.db_id)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let input_mode = resolved_input_mode(
+        ira_models::GameKind::Steam,
+        launch.input_mode,
+        ctx.controller_input_mode,
+    );
+    let input_profile = resolve_input_profile(
+        ctx,
+        input_mode,
+        launch.input_profile.as_deref(),
+        ctx.controller_input_profile.as_deref(),
+    )?;
+    if input_backend(input_mode).is_some() {
+        ira_launcher::env_builder::wrap_with_input_mode(
+            &mut cmd,
+            Some(input_mode),
+            input_profile.as_deref(),
+        )?;
+        let separator = cmd
+            .iter()
+            .position(|argument| argument == "--")
+            .expect("input wrapper must include a command separator");
+        cmd.splice(
+            separator..separator,
+            ["--steam-app-id".to_string(), app_id.to_string()],
+        );
+        let env = std::env::vars().collect::<Vec<_>>();
+        return spawn_and_monitor(ctx, &cmd, &env, "Steam game");
+    }
     match ira_launcher::wrapper::spawn_game(&cmd, &[], None, None) {
         Ok(_child) => {}
         Err(_) => {

@@ -342,7 +342,7 @@ pub fn launch_game(
     } else if kind == ira_models::GameKind::WiiU {
         play_button_helpers::launch_cemu(&ctx, &global_cemu_exe, &game_path)?;
     } else if kind == ira_models::GameKind::Steam {
-        play_button_helpers::launch_steam(&app_id)?;
+        play_button_helpers::launch_steam(&ctx, &app_id)?;
     } else {
         play_button_helpers::launch_other(
             &ctx,

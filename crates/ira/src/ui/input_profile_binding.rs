@@ -3,7 +3,11 @@ use super::css::{
 };
 use super::input_profile_options::{
     activation_index, activation_labels, activator_index, gyro_mode_index, gyro_mode_labels,
-    output_action, output_index, output_labels, recenter_index, source_options_for_device,
+    output_display_label, output_index, output_labels, output_option, recenter_index,
+    source_options_for_device, OutputOption,
+};
+use super::input_profile_output_capture::{
+    show_keyboard_output_capture, show_mouse_output_capture,
 };
 use adw::prelude::*;
 use ira_input::{
@@ -20,6 +24,7 @@ pub(super) struct BindingRow {
     pub activator_options: Vec<(InputSource, String)>,
     pub source: gtk4::DropDown,
     pub output: gtk4::DropDown,
+    pub output_action: Rc<RefCell<OutputAction>>,
     pub activation: gtk4::DropDown,
     pub activator: gtk4::DropDown,
     pub chord: adw::EntryRow,
@@ -29,6 +34,33 @@ pub(super) struct BindingRow {
     pub sensitivity: gtk4::SpinButton,
     pub exponent: gtk4::SpinButton,
     pub invert: gtk4::CheckButton,
+}
+
+#[derive(Clone)]
+struct SourceChangeContext {
+    source_options: Vec<(InputSource, String)>,
+    family: ControllerFamily,
+    fallback: gtk4::Label,
+    asset: gtk4::Image,
+    current_source: Rc<Cell<InputSource>>,
+    output: Rc<RefCell<OutputAction>>,
+    row: adw::ExpanderRow,
+    dead_zone_row: adw::ActionRow,
+    sensitivity_row: adw::ActionRow,
+    exponent_row: adw::ActionRow,
+    invert_row: adw::ActionRow,
+    recenter_row: adw::ActionRow,
+    gyro_mode_row: adw::ActionRow,
+}
+
+#[derive(Clone)]
+struct OutputChangeContext {
+    source: gtk4::DropDown,
+    source_options: Vec<(InputSource, String)>,
+    output: Rc<RefCell<OutputAction>>,
+    gyro_mode_row: adw::ActionRow,
+    row: adw::ExpanderRow,
+    on_dirty: Rc<dyn Fn()>,
 }
 
 pub(super) type SectionGroups = Rc<RefCell<Vec<Vec<(String, adw::PreferencesGroup)>>>>;
@@ -101,7 +133,7 @@ pub(super) fn add_binding_row(
     on_dirty: &Rc<dyn Fn()>,
 ) {
     let page_index = binding_page_index(&binding);
-    let row = make_binding_row(binding, page_index, device);
+    let row = make_binding_row(binding, page_index, device, on_dirty);
     connect_dirty(&row, on_dirty);
     let remove = gtk4::Button::from_icon_name("user-trash-symbolic");
     remove.add_css_class(CSS_FLAT);
@@ -201,6 +233,7 @@ fn make_binding_row(
     binding: Binding,
     page_index: usize,
     device: Option<&DeviceInfo>,
+    on_dirty: &Rc<dyn Fn()>,
 ) -> BindingRow {
     let page_source_options = source_options_for_page(page_index, device, Some(binding.source));
     let binding_source_labels = page_source_options
@@ -212,6 +245,7 @@ fn make_binding_row(
         source_index_for(&page_source_options, binding.source),
     );
     let output = combo_row(&output_labels(), output_index(&binding.output));
+    let current_output = Rc::new(RefCell::new(binding.output.clone()));
     let activation = combo_row(&activation_labels(), activation_index(&binding.activation));
     let mut activator_options = source_options_for_device(device);
     for source in activation_sources(&binding.activation) {
@@ -266,7 +300,7 @@ fn make_binding_row(
     invert.set_active(binding.transform.invert);
 
     let container = adw::ExpanderRow::new();
-    update_binding_summary(&source, &output, &container);
+    update_binding_summary(&source, &current_output.borrow(), &container);
 
     let family = device.map(DeviceInfo::family).unwrap_or_default();
     let current_source = Rc::new(Cell::new(binding.source));
@@ -323,55 +357,42 @@ fn make_binding_row(
             update_activation_controls(row, &activator, &activator_row, &chord);
         });
     }
-    let source_options_for_badge = page_source_options.clone();
-    let fallback_for_source = fallback.clone();
-    let asset_for_source = asset.clone();
-    let source_for_asset = current_source.clone();
-    let dead_zone_for_source = dead_zone_row.clone();
-    let sensitivity_for_source = sensitivity_row.clone();
-    let exponent_for_source = exponent_row.clone();
-    let invert_for_source = invert_row.clone();
-    let recenter_for_source = recenter_row.clone();
-    let gyro_mode_for_source = gyro_mode_row.clone();
-    let output_for_source = output.clone();
-    let row_for_source = container.clone();
-    source.connect_selected_notify(move |source| {
-        update_binding_summary(source, &output_for_source, &row_for_source);
-        if let Some((source, _)) = source_options_for_badge.get(source.selected() as usize) {
-            source_for_asset.set(*source);
-            fallback_for_source.set_text(&source_badge(*source, family));
-            set_source_asset(&asset_for_source, &fallback_for_source, *source, family);
-            let analog = is_analog_source(*source);
-            dead_zone_for_source.set_visible(analog);
-            sensitivity_for_source.set_visible(analog);
-            exponent_for_source.set_visible(analog);
-            invert_for_source.set_visible(analog);
-            recenter_for_source.set_visible(matches!(*source, InputSource::Gyro(_)));
-            let action = output_action(output_for_source.selected())
-                .unwrap_or(OutputAction::GamepadAxis(GamepadAxis::LeftX));
-            gyro_mode_for_source.set_visible(uses_gyro_stick_output(*source, &action));
-        }
-    });
-    let source_for_output = source.clone();
-    let source_options_for_output = page_source_options.clone();
-    let gyro_mode_for_output = gyro_mode_row.clone();
-    let row_for_output = container.clone();
-    output.connect_selected_notify(move |output| {
-        update_binding_summary(&source_for_output, output, &row_for_output);
-        let action = output_action(output.selected())
-            .unwrap_or(OutputAction::GamepadAxis(GamepadAxis::LeftX));
-        if let Some((source, _)) =
-            source_options_for_output.get(source_for_output.selected() as usize)
-        {
-            gyro_mode_for_output.set_visible(uses_gyro_stick_output(*source, &action));
-        }
-    });
+    connect_source_changes(
+        &source,
+        SourceChangeContext {
+            source_options: page_source_options.clone(),
+            family,
+            fallback,
+            asset,
+            current_source,
+            output: current_output.clone(),
+            row: container.clone(),
+            dead_zone_row,
+            sensitivity_row,
+            exponent_row,
+            invert_row,
+            recenter_row,
+            gyro_mode_row: gyro_mode_row.clone(),
+        },
+    );
+    connect_output_changes(
+        &output,
+        OutputChangeContext {
+            source: source.clone(),
+            source_options: page_source_options.clone(),
+            output: current_output.clone(),
+            gyro_mode_row,
+            row: container.clone(),
+            on_dirty: on_dirty.clone(),
+        },
+    );
     BindingRow {
         container,
         source_options: page_source_options,
         activator_options,
         source,
         output,
+        output_action: current_output,
         activation,
         activator,
         chord,
@@ -382,6 +403,82 @@ fn make_binding_row(
         exponent,
         invert,
     }
+}
+
+fn connect_source_changes(dropdown: &gtk4::DropDown, context: SourceChangeContext) {
+    dropdown.connect_selected_notify(move |dropdown| {
+        update_binding_summary(dropdown, &context.output.borrow(), &context.row);
+        if let Some((source, _)) = context.source_options.get(dropdown.selected() as usize) {
+            context.current_source.set(*source);
+            context
+                .fallback
+                .set_text(&source_badge(*source, context.family));
+            set_source_asset(&context.asset, &context.fallback, *source, context.family);
+            let analog = is_analog_source(*source);
+            context.dead_zone_row.set_visible(analog);
+            context.sensitivity_row.set_visible(analog);
+            context.exponent_row.set_visible(analog);
+            context.invert_row.set_visible(analog);
+            context
+                .recenter_row
+                .set_visible(matches!(*source, InputSource::Gyro(_)));
+            context
+                .gyro_mode_row
+                .set_visible(uses_gyro_stick_output(*source, &context.output.borrow()));
+        }
+    });
+}
+
+fn connect_output_changes(dropdown: &gtk4::DropDown, context: OutputChangeContext) {
+    dropdown.connect_selected_notify(move |dropdown| {
+        let Some(option) = output_option(dropdown.selected()) else {
+            return;
+        };
+        match option {
+            OutputOption::Action(action) => *context.output.borrow_mut() = action,
+            capture_option => {
+                dropdown.set_selected(output_index(&context.output.borrow()));
+                if let Some(parent) = dropdown.root().and_downcast::<gtk4::Window>() {
+                    show_output_capture(capture_option, &parent, context.clone());
+                }
+                return;
+            }
+        }
+        update_output_state(&context);
+    });
+}
+
+fn show_output_capture(option: OutputOption, parent: &gtk4::Window, context: OutputChangeContext) {
+    let complete: Rc<dyn Fn(OutputAction)> = Rc::new(move |action| {
+        *context.output.borrow_mut() = action;
+        update_output_state(&context);
+    });
+    match option {
+        OutputOption::CaptureKeyboard => {
+            show_keyboard_output_capture(parent, move |keycode| {
+                complete(OutputAction::Keyboard { keycode });
+            });
+        }
+        OutputOption::CaptureMouseButton => {
+            show_mouse_output_capture(parent, move |button| {
+                complete(OutputAction::MouseButton(button));
+            });
+        }
+        OutputOption::Action(_) => {}
+    }
+}
+
+fn update_output_state(context: &OutputChangeContext) {
+    update_binding_summary(&context.source, &context.output.borrow(), &context.row);
+    if let Some((source, _)) = context
+        .source_options
+        .get(context.source.selected() as usize)
+    {
+        context
+            .gyro_mode_row
+            .set_visible(uses_gyro_stick_output(*source, &context.output.borrow()));
+    }
+    (context.on_dirty)();
 }
 
 fn add_control_row<W: IsA<gtk4::Widget>>(
@@ -671,23 +768,14 @@ fn gyro_axis_label(axis: GyroAxis) -> &'static str {
     }
 }
 
-fn update_binding_summary(
-    source: &gtk4::DropDown,
-    output: &gtk4::DropDown,
-    row: &adw::ExpanderRow,
-) {
+fn update_binding_summary(source: &gtk4::DropDown, output: &OutputAction, row: &adw::ExpanderRow) {
     let source_text = source
         .model()
         .and_then(|model| model.item(source.selected()))
         .and_then(|item| item.downcast::<gtk4::StringObject>().ok())
         .map(|item| item.string().to_string())
         .unwrap_or_else(|| "Input".to_string());
-    let output_text = output
-        .model()
-        .and_then(|model| model.item(output.selected()))
-        .and_then(|item| item.downcast::<gtk4::StringObject>().ok())
-        .map(|item| item.string().to_string())
-        .unwrap_or_else(|| "Output".to_string());
+    let output_text = output_display_label(output);
     row.set_title(&source_text);
     if output_text == source_text {
         row.set_subtitle("");
@@ -702,7 +790,7 @@ pub(super) fn binding_from_row(row: &BindingRow) -> Result<Binding, String> {
         .get(row.source.selected() as usize)
         .map(|(source, _)| *source)
         .ok_or_else(|| "Invalid binding source".to_string())?;
-    let output = output_action(row.output.selected())?;
+    let output = row.output_action.borrow().clone();
     let activation = activation_from_row(row)?;
     Ok(Binding {
         source,

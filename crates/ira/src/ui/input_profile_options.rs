@@ -1,7 +1,14 @@
 use ira_input::{
     Activation, AxisDirection, DeviceInfo, GamepadAxis, GamepadButton, GyroAxis, GyroMode,
-    InputSource, OutputAction, RecenterMode,
+    InputSource, MouseAxis, MouseButton, OutputAction, RecenterMode,
 };
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum OutputOption {
+    Action(OutputAction),
+    CaptureKeyboard,
+    CaptureMouseButton,
+}
 
 pub(super) fn source_options_for_device(device: Option<&DeviceInfo>) -> Vec<(InputSource, String)> {
     let mut options = gamepad_buttons()
@@ -240,59 +247,89 @@ fn output_buttons() -> [GamepadButton; 17] {
     ]
 }
 
-pub(super) fn output_action(index: u32) -> Result<OutputAction, String> {
-    let buttons = output_buttons();
-    if let Some(button) = buttons.get(index as usize) {
-        return Ok(OutputAction::GamepadButton(*button));
-    }
-    let axis_index = index as usize - buttons.len();
-    let axes = gamepad_axes();
-    if let Some(axis) = axes.get(axis_index) {
-        return Ok(OutputAction::GamepadAxis(*axis));
-    }
-    Err("Invalid XInput binding output".to_string())
+pub(super) fn output_options() -> Vec<OutputOption> {
+    let mut options = output_buttons()
+        .into_iter()
+        .map(|button| OutputOption::Action(OutputAction::GamepadButton(button)))
+        .collect::<Vec<_>>();
+    options.extend(
+        gamepad_axes()
+            .into_iter()
+            .map(|axis| OutputOption::Action(OutputAction::GamepadAxis(axis))),
+    );
+    options.extend(
+        [MouseAxis::X, MouseAxis::Y, MouseAxis::Wheel]
+            .into_iter()
+            .map(|axis| OutputOption::Action(OutputAction::MouseAxis(axis))),
+    );
+    options.extend([
+        OutputOption::CaptureKeyboard,
+        OutputOption::CaptureMouseButton,
+    ]);
+    options
 }
 
 pub(super) fn output_labels() -> Vec<String> {
-    let mut labels = output_buttons()
-        .into_iter()
-        .map(button_label)
-        .collect::<Vec<_>>();
-    labels.extend(gamepad_axes().into_iter().map(axis_label));
-    labels
+    output_options().iter().map(output_option_label).collect()
 }
 
 pub(super) fn output_index(output: &OutputAction) -> u32 {
+    output_options()
+        .iter()
+        .position(|option| output_option_matches(option, output))
+        .unwrap_or(0) as u32
+}
+
+pub(super) fn output_option(index: u32) -> Option<OutputOption> {
+    output_options().get(index as usize).cloned()
+}
+
+pub(super) fn output_display_label(output: &OutputAction) -> String {
     match output {
-        OutputAction::GamepadButton(button) => output_buttons()
-            .iter()
-            .position(|candidate| candidate == button)
-            .unwrap_or(0) as u32,
-        OutputAction::GamepadAxis(axis) => output_buttons().len() as u32 + output_axis_index(*axis),
-        _ => 0,
+        OutputAction::GamepadButton(button) => button_label(*button),
+        OutputAction::GamepadAxis(axis) => axis_label(*axis),
+        OutputAction::Keyboard { keycode } => format!("Keyboard key {keycode}"),
+        OutputAction::MouseButton(button) => match button {
+            MouseButton::Left => "Mouse Left".to_string(),
+            MouseButton::Right => "Mouse Right".to_string(),
+            MouseButton::Middle => "Mouse Middle".to_string(),
+            MouseButton::Side => "Mouse Side".to_string(),
+            MouseButton::Extra => "Mouse Extra".to_string(),
+        },
+        OutputAction::MouseAxis(axis) => match axis {
+            MouseAxis::X => "Mouse X".to_string(),
+            MouseAxis::Y => "Mouse Y".to_string(),
+            MouseAxis::Wheel => "Mouse Wheel".to_string(),
+        },
+        OutputAction::RecenterGyro => "Recenter gyro".to_string(),
     }
 }
 
-fn output_axis_index(axis: GamepadAxis) -> u32 {
-    match axis {
-        GamepadAxis::LeftX => 0,
-        GamepadAxis::LeftY => 1,
-        GamepadAxis::RightX => 2,
-        GamepadAxis::RightY => 3,
-        GamepadAxis::LeftTrigger => 4,
-        GamepadAxis::RightTrigger => 5,
+fn output_option_matches(option: &OutputOption, output: &OutputAction) -> bool {
+    match option {
+        OutputOption::Action(action) => action == output,
+        OutputOption::CaptureKeyboard => matches!(output, OutputAction::Keyboard { .. }),
+        OutputOption::CaptureMouseButton => matches!(output, OutputAction::MouseButton(_)),
+    }
+}
+
+fn output_option_label(option: &OutputOption) -> String {
+    match option {
+        OutputOption::Action(action) => output_display_label(action),
+        OutputOption::CaptureKeyboard => "Keyboard key...".to_string(),
+        OutputOption::CaptureMouseButton => "Mouse button...".to_string(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        activator_index, gyro_mode_index, gyro_mode_labels, output_action, output_index,
-        output_labels, source_options_for_device,
+        activator_index, gyro_mode_index, gyro_mode_labels, output_display_label, output_index,
+        output_labels, output_option, source_options_for_device, OutputOption,
     };
     use ira_input::{
         Activation, DeviceInfo, GamepadAxis, GamepadButton, GyroAxis, GyroMode, InputSource,
-        OutputAction,
+        MouseButton, OutputAction,
     };
     use std::path::PathBuf;
 
@@ -355,20 +392,25 @@ mod tests {
     }
 
     #[test]
-    fn test_output_options_only_include_xinput_controls() {
+    fn test_output_options_include_supported_virtual_controls() {
         let labels = output_labels();
-        assert_eq!(labels.len(), 23);
+        assert_eq!(labels.len(), 28);
         assert!(!labels.iter().any(|label| label.contains("Paddle")));
-        assert!(!labels.iter().any(|label| label.contains("Mouse")));
-        assert!(!labels.iter().any(|label| label.contains("Keyboard")));
+        assert!(labels.contains(&"Mouse X".to_string()));
+        assert!(labels.contains(&"Keyboard key...".to_string()));
         assert_eq!(
-            output_action(output_index(&OutputAction::GamepadAxis(
+            output_option(output_index(&OutputAction::GamepadAxis(
+                GamepadAxis::RightX
+            ))),
+            Some(OutputOption::Action(OutputAction::GamepadAxis(
                 GamepadAxis::RightX
             )))
-            .unwrap(),
-            OutputAction::GamepadAxis(GamepadAxis::RightX)
         );
-        assert!(output_action(23).is_err());
+        assert_eq!(
+            output_option(output_index(&OutputAction::Keyboard { keycode: 30 })),
+            Some(OutputOption::CaptureKeyboard)
+        );
+        assert!(output_option(28).is_none());
     }
 
     #[test]
@@ -393,6 +435,18 @@ mod tests {
         let outputs = output_labels();
         assert!(outputs.contains(&"Right Trigger (full)".to_string()));
         assert!(outputs.contains(&"Right Trigger (soft)".to_string()));
+    }
+
+    #[test]
+    fn test_output_display_label_names_keyboard_and_mouse_actions() {
+        assert_eq!(
+            output_display_label(&OutputAction::Keyboard { keycode: 57 }),
+            "Keyboard key 57"
+        );
+        assert_eq!(
+            output_display_label(&OutputAction::MouseButton(MouseButton::Side)),
+            "Mouse Side"
+        );
     }
 
     #[test]

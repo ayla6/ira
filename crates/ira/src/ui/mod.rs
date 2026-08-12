@@ -37,6 +37,7 @@ mod input_profile_binding;
 mod input_profile_editor;
 mod input_profile_gamepad;
 mod input_profile_options;
+mod input_profile_output_capture;
 mod input_profile_settings;
 mod input_profile_store;
 mod input_profile_viewer;

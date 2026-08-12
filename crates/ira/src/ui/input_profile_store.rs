@@ -39,7 +39,7 @@ pub(super) fn ensure_controller_default_profile(
                 InputSource::Button(button) => supported_buttons.contains(&button),
                 _ => true,
             };
-            source_supported && binding.output.is_xinput_compatible()
+            source_supported && binding.output.is_supported()
         });
         profile.validate()?;
         if profile != original {
@@ -253,6 +253,37 @@ mod tests {
                 )
             )
         }));
+    }
+
+    #[test]
+    fn test_controller_default_preserves_keyboard_output() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = super::controller_default_path(tmp.path().to_str().unwrap(), "pad");
+        super::write_profile(
+            &path,
+            &InputProfile {
+                bindings: vec![Binding::new(
+                    InputSource::Button(GamepadButton::A),
+                    OutputAction::Keyboard { keycode: 57 },
+                )],
+                ..InputProfile::default()
+            },
+        )
+        .unwrap();
+
+        ensure_controller_default_profile(
+            tmp.path().to_str().unwrap(),
+            "pad",
+            "Pad",
+            &[GamepadButton::A],
+        )
+        .unwrap();
+
+        let saved = super::read_profile(&path).unwrap();
+        assert_eq!(
+            saved.bindings[0].output,
+            OutputAction::Keyboard { keycode: 57 }
+        );
     }
 
     #[test]

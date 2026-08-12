@@ -188,6 +188,10 @@ impl OutputAction {
             Self::Keyboard { .. } | Self::MouseButton(_) | Self::MouseAxis(_) => false,
         }
     }
+
+    pub fn is_supported(&self) -> bool {
+        !matches!(self, Self::GamepadButton(button) if !button.is_xinput())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -344,9 +348,9 @@ impl InputProfile {
             ));
         }
         for (index, binding) in self.bindings.iter().enumerate() {
-            if !binding.output.is_xinput_compatible() {
+            if !binding.output.is_supported() {
                 return Err(format!(
-                    "binding {index}: output is not supported by the virtual XInput device"
+                    "binding {index}: output is not supported by Ira's virtual input devices"
                 ));
             }
             binding
@@ -594,11 +598,26 @@ mod tests {
     }
 
     #[test]
-    fn test_profile_rejects_non_xinput_output() {
+    fn test_profile_accepts_keyboard_and_mouse_outputs() {
+        for output in [
+            OutputAction::Keyboard { keycode: 30 },
+            OutputAction::MouseButton(MouseButton::Left),
+            OutputAction::MouseAxis(MouseAxis::X),
+        ] {
+            let profile = InputProfile {
+                bindings: vec![Binding::new(InputSource::Button(GamepadButton::A), output)],
+                ..InputProfile::default()
+            };
+            assert!(profile.validate().is_ok());
+        }
+    }
+
+    #[test]
+    fn test_profile_rejects_paddle_output() {
         let profile = InputProfile {
             bindings: vec![Binding::new(
                 InputSource::Button(GamepadButton::A),
-                OutputAction::Keyboard { keycode: 30 },
+                OutputAction::GamepadButton(GamepadButton::Paddle1),
             )],
             ..InputProfile::default()
         };

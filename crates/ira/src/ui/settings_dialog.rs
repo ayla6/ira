@@ -273,6 +273,17 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
     let cancel_btn = gtk4::Button::with_label(S::CANCEL);
     let win_c = win.clone();
     cancel_btn.connect_clicked(move |_| win_c.close());
+    let win_c = win.clone();
+    let cancel_shortcut = gtk4::EventControllerKey::new();
+    cancel_shortcut.connect_key_pressed(move |_, key, _, _| {
+        if key == gtk4::gdk::Key::Escape {
+            win_c.close();
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+    win.add_controller(cancel_shortcut);
 
     let save_btn = gtk4::Button::with_label(S::SAVE);
     save_btn.add_css_class(CSS_SUGGESTED_ACTION);

@@ -302,7 +302,7 @@ fn add_executable_actions(
     browse_title: &str,
 ) {
     if let Some(emulator) = detected.first() {
-        let auto_detect = gtk4::Button::from_icon_name("view-refresh-symbolic");
+        let auto_detect = gtk4::Button::from_icon_name("system-search-symbolic");
         auto_detect.add_css_class(CSS_FLAT);
         auto_detect.add_css_class(CSS_SQUARE_BUTTON);
         auto_detect.set_tooltip_text(Some("Auto-detect emulator"));

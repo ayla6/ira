@@ -125,7 +125,7 @@ pub(super) fn register_settings_pages(
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
 ) {
-    register_scrolled_page(
+    register_page(
         sidebar,
         stack,
         &pages.general_page,
@@ -141,7 +141,7 @@ pub(super) fn register_settings_pages(
         "Overlay",
         "overlay",
     );
-    register_scrolled_page(
+    register_page(
         sidebar,
         stack,
         &pages.input_page,
@@ -149,7 +149,7 @@ pub(super) fn register_settings_pages(
         "Controller",
         "input",
     );
-    register_scrolled_page(
+    register_page(
         sidebar,
         stack,
         &pages.system_page,
@@ -191,7 +191,7 @@ pub(super) fn register_settings_pages(
         "migration",
     );
     sidebar.append(&super::settings_pages::sidebar_section_title("Wine"));
-    register_page(
+    register_existing_scrolled_page(
         sidebar,
         stack,
         &pages.profiles_page,
@@ -200,7 +200,7 @@ pub(super) fn register_settings_pages(
         "profiles",
     );
     for page in &pages.wine_pages {
-        register_page(
+        register_existing_scrolled_page(
             sidebar, stack, &page.page, page.icon, page.label, page.label,
         );
     }
@@ -226,7 +226,26 @@ pub(super) fn register_settings_pages(
 fn register_page(
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
-    page: &impl IsA<gtk4::Widget>,
+    page: &gtk4::Box,
+    icon: &str,
+    label: &str,
+    page_id: &str,
+) {
+    sidebar.append(&super::settings_pages::settings_sidebar_row(
+        icon, label, page_id,
+    ));
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_hexpand(true);
+    scroll.set_vexpand(true);
+    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroll.set_child(Some(page));
+    stack.add_named(&scroll, Some(page_id));
+}
+
+fn register_existing_scrolled_page(
+    sidebar: &gtk4::ListBox,
+    stack: &gtk4::Stack,
+    page: &gtk4::ScrolledWindow,
     icon: &str,
     label: &str,
     page_id: &str,
@@ -235,22 +254,6 @@ fn register_page(
         icon, label, page_id,
     ));
     stack.add_named(page, Some(page_id));
-}
-
-fn register_scrolled_page(
-    sidebar: &gtk4::ListBox,
-    stack: &gtk4::Stack,
-    page: &gtk4::Box,
-    icon: &str,
-    label: &str,
-    page_id: &str,
-) {
-    let scroll = gtk4::ScrolledWindow::new();
-    scroll.set_hexpand(true);
-    scroll.set_vexpand(true);
-    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    scroll.set_child(Some(page));
-    register_page(sidebar, stack, &scroll, icon, label, page_id);
 }
 
 fn build_pc_controller_profiles(

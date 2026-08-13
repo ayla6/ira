@@ -130,6 +130,8 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
         &css,
         gtk4::STYLE_PROVIDER_PRIORITY_USER,
     );
+    gtk4::IconTheme::for_display(&gtk4::gdk::Display::default().expect("no default display"))
+        .add_resource_path("/com/github/ira/icons");
 
     let split_view = adw::NavigationSplitView::new();
     split_view.set_sidebar_width_fraction(0.22);
@@ -539,6 +541,22 @@ fn connect_window_signals(
             glib::Propagation::Proceed
         }
     });
+
+    let state_clone = state.clone();
+    let preferences_shortcut = gtk4::EventControllerKey::new();
+    preferences_shortcut.connect_key_pressed(move |_, key, _, modifiers| {
+        if key == gdk4::Key::comma && modifiers.contains(gdk4::ModifierType::CONTROL_MASK) {
+            let (window, cfg, steam) = {
+                let state = state_clone.borrow();
+                (state.window.clone(), state.cfg.clone(), state.steam.clone())
+            };
+            show_settings_dialog(&window, cfg, steam, &state_clone);
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+    window.add_controller(preferences_shortcut);
 }
 
 fn connect_search_signals(

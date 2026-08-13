@@ -12,8 +12,9 @@ pub fn show_add_game_method(state: &SharedState) {
     let win = adw::Window::new();
     win.set_title(Some("Add game"));
     win.set_default_size(420, 260);
-    win.set_modal(false);
+    win.set_modal(true);
     win.set_transient_for(Some(&parent));
+    win.set_destroy_with_parent(true);
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header = adw::HeaderBar::new();
@@ -41,6 +42,7 @@ pub fn show_add_game_method(state: &SharedState) {
         show_add_game_dialog(&sc);
     });
     body.append(&manual_btn);
+    manual_btn.grab_focus();
 
     let auto_btn = gtk4::Button::with_label("Auto add game");
     auto_btn.set_tooltip_text(Some(

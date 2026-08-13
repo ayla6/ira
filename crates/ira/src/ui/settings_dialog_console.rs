@@ -160,8 +160,7 @@ pub(super) fn register_console_pages(
                 &mut result,
             );
             result.console_profile_widgets.push(profile);
-            sidebar.append(&settings_sidebar_row("games-symbolic", "PS3", "ps3"));
-            stack.add_named(&page, Some("ps3"));
+            register_console_page(sidebar, stack, &page, "PS3", "ps3");
             result.ps3_enable_row = Some(enable_row);
             result.ps3_exe_row = Some(exe_row);
 
@@ -176,8 +175,7 @@ pub(super) fn register_console_pages(
                 &mut result,
             );
             result.console_profile_widgets.push(profile);
-            sidebar.append(&settings_sidebar_row("games-symbolic", "PS4", "ps4"));
-            stack.add_named(&page, Some("ps4"));
+            register_console_page(sidebar, stack, &page, "PS4", "ps4");
             result.ps4_enable_row = Some(enable_row);
             result.ps4_version_dd = version_dd;
 
@@ -192,8 +190,7 @@ pub(super) fn register_console_pages(
                 &mut result,
             );
             result.console_profile_widgets.push(profile);
-            sidebar.append(&settings_sidebar_row("games-symbolic", "PS Vita", "psvita"));
-            stack.add_named(&page, Some("psvita"));
+            register_console_page(sidebar, stack, &page, "PS Vita", "psvita");
             result.vita3k_enable_row = Some(enable_row);
             result.vita3k_exe_row = Some(exe_row);
         }
@@ -209,8 +206,7 @@ pub(super) fn register_console_pages(
                 &mut result,
             );
             result.console_profile_widgets.push(profile);
-            sidebar.append(&settings_sidebar_row("games-symbolic", "Wii U", "wiiu"));
-            stack.add_named(&page, Some("wiiu"));
+            register_console_page(sidebar, stack, &page, "Wii U", "wiiu");
             result.cemu_enable_row = Some(enable_row);
             result.cemu_exe_row = Some(exe_row);
         }
@@ -238,7 +234,7 @@ pub(super) fn register_console_pages(
         } else {
             empty_platforms.push((def.display_name.to_string(), page_id.clone()));
         }
-        stack.add_named(&page, Some(&page_id));
+        wrap_console_page(stack, &page, &page_id);
         result.console_widgets.push((def.id, widgets));
     }
     if !empty_platforms.is_empty() {
@@ -248,6 +244,26 @@ pub(super) fn register_console_pages(
         }
     }
     result
+}
+
+fn register_console_page(
+    sidebar: &gtk4::ListBox,
+    stack: &gtk4::Stack,
+    page: &gtk4::Box,
+    label: &str,
+    page_id: &str,
+) {
+    sidebar.append(&settings_sidebar_row("games-symbolic", label, page_id));
+    wrap_console_page(stack, page, page_id);
+}
+
+fn wrap_console_page(stack: &gtk4::Stack, page: &gtk4::Box, page_id: &str) {
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_hexpand(true);
+    scroll.set_vexpand(true);
+    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroll.set_child(Some(page));
+    stack.add_named(&scroll, Some(page_id));
 }
 
 fn add_console_page_overrides(

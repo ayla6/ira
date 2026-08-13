@@ -22,7 +22,7 @@ pub struct DialogLayout {
 pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
     let win = adw::Window::new();
     win.set_default_size(720, 540);
-    win.set_modal(false);
+    win.set_modal(true);
     win.set_transient_for(Some(parent));
     win.set_destroy_with_parent(true);
 
@@ -57,6 +57,8 @@ pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
 
     let stack = gtk4::Stack::new();
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
+    stack.set_hexpand(true);
+    stack.set_vexpand(true);
     stack.set_margin_start(16);
     stack.set_margin_end(16);
     stack.set_margin_top(16);

@@ -29,8 +29,6 @@ fn main() {
 
     gio::resources_register_include!("ira.gresource")
         .expect("failed to register application resources");
-    gtk4::IconTheme::for_display(&gdk4::Display::default().expect("no default display"))
-        .add_resource_path("/com/github/ira/icons");
 
     let app = adw::Application::new(Some("com.github.ira"), gio::ApplicationFlags::empty());
 

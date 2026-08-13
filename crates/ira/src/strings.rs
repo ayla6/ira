@@ -1,5 +1,5 @@
 pub const APP_TITLE: &str = "Ira";
-pub const MENU: &str = "Menu";
+pub const MENU: &str = "Main Menu";
 pub const ADD_GAME: &str = "Add a game";
 pub const ALL_GAMES: &str = "All games";
 pub const SETTINGS: &str = "Settings";

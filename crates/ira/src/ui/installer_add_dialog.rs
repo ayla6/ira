@@ -39,8 +39,9 @@ pub fn show_installer_add_dialog(state: &SharedState) {
     let win = adw::Window::new();
     win.set_title(Some("Install from Installer"));
     win.set_default_size(520, 580);
-    win.set_modal(false);
+    win.set_modal(true);
     win.set_transient_for(Some(&parent));
+    win.set_destroy_with_parent(true);
 
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header = adw::HeaderBar::new();

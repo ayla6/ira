@@ -2,6 +2,7 @@ use super::css::*;
 use super::helpers::dialog_layout;
 use super::input_profile_settings::{
     add_console_profile_group, add_pc_profile_group, build_input_settings_page,
+    ConsoleProfileWidgets, ControllerDefaultWidgets,
 };
 use super::input_profile_store::ensure_controller_default_profile;
 use super::profile_dialog::build_profiles_page;
@@ -13,15 +14,18 @@ use super::settings_pages::{
     build_api_emulators_page, build_computer_games_page, build_general_settings_page,
     build_lutris_settings_page, build_overlay_settings_page, build_ra_settings_page,
     build_rom_settings_page, build_steam_settings_page, build_system_defaults_page,
+    OverlayPageWidgets, SystemDefaultsWidgets,
 };
 use super::state::SharedState;
 use super::system_settings::{build_override_switch_row, OverrideState};
-use super::wine_config_widget::build_wine_config_pages;
+use super::wine_config_widget::{build_wine_config_pages, WineConfigWidgets, WinePage};
 use crate::strings as S;
 use adw::prelude::*;
 use ira_api::SteamDataClient;
 use ira_config::{Config, ConsoleConfig, ControllerInputConfig};
+use std::cell::RefCell;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::Arc;
 
 pub(super) fn settings_page_container() -> gtk4::Box {
@@ -38,6 +42,84 @@ pub(super) use super::settings_pages::{
     settings_sidebar_row, sidebar_section_title, sidebar_separator,
 };
 
+struct ConsoleSettingsWidgets {
+    console_widgets: Vec<(&'static str, ConsolePageWidgets)>,
+    console_profile_widgets: Vec<ConsoleProfileWidgets>,
+    source_overlay_states: Vec<(String, OverrideState)>,
+    source_gamescope_states: Vec<(String, OverrideState)>,
+    ps4_enable_row: Option<adw::SwitchRow>,
+    ps4_version_dd: Option<adw::ComboRow>,
+    ps3_enable_row: Option<adw::SwitchRow>,
+    ps3_exe_row: Option<adw::EntryRow>,
+    vita3k_enable_row: Option<adw::SwitchRow>,
+    vita3k_exe_row: Option<adw::EntryRow>,
+    cemu_enable_row: Option<adw::SwitchRow>,
+    cemu_exe_row: Option<adw::EntryRow>,
+}
+
+struct SavedSettingsWidgets {
+    steam_entry: adw::PasswordEntryRow,
+    sgdb_entry: adw::PasswordEntryRow,
+    notif_row: adw::SwitchRow,
+    bg_row: adw::SwitchRow,
+    hidden_row: adw::SwitchRow,
+    saves_row: adw::SwitchRow,
+    steam_enable_row: adw::SwitchRow,
+    default_game_folder_row: adw::EntryRow,
+    roms_folder_row: adw::EntryRow,
+    lang_list: gtk4::ListBox,
+    ra_enable_row: adw::SwitchRow,
+    ra_username_row: adw::EntryRow,
+    ra_password_row: adw::EntryRow,
+    controller_default_widgets: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
+    overlay_widgets: OverlayPageWidgets,
+    system_defaults_widgets: SystemDefaultsWidgets,
+    console_pages: ConsoleSettingsWidgets,
+    wine_widgets: WineConfigWidgets,
+    linux_controller_profile: ConsoleProfileWidgets,
+    wine_controller_profile: ConsoleProfileWidgets,
+    prefix_base_row: adw::EntryRow,
+    emu_version_row: adw::ComboRow,
+    emu_version_model: gtk4::StringList,
+}
+
+struct SettingsPageWidgets {
+    general_page: gtk4::Box,
+    overlay_page: gtk4::Box,
+    input_page: gtk4::Box,
+    system_page: gtk4::Box,
+    computer_games_page: gtk4::Box,
+    steam_page: gtk4::Box,
+    emu_page: gtk4::Box,
+    lutris_page: gtk4::Box,
+    wine_pages: Vec<WinePage>,
+    profiles_page: gtk4::ScrolledWindow,
+    ra_page: gtk4::Box,
+    rom_page: gtk4::Box,
+    notif_row: adw::SwitchRow,
+    bg_row: adw::SwitchRow,
+    hidden_row: adw::SwitchRow,
+    steam_entry: adw::PasswordEntryRow,
+    sgdb_entry: adw::PasswordEntryRow,
+    lang_list: gtk4::ListBox,
+    saves_row: adw::SwitchRow,
+    controller_default_widgets: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
+    default_game_folder_row: adw::EntryRow,
+    steam_enable_row: adw::SwitchRow,
+    emu_version_row: adw::ComboRow,
+    emu_version_model: gtk4::StringList,
+    wine_widgets: WineConfigWidgets,
+    prefix_base_row: adw::EntryRow,
+    ra_enable_row: adw::SwitchRow,
+    ra_username_row: adw::EntryRow,
+    ra_password_row: adw::EntryRow,
+    roms_folder_row: adw::EntryRow,
+    overlay_widgets: OverlayPageWidgets,
+    system_defaults_widgets: SystemDefaultsWidgets,
+    linux_controller_profile: ConsoleProfileWidgets,
+    wine_controller_profile: ConsoleProfileWidgets,
+}
+
 pub fn show_settings_dialog(
     parent: &adw::ApplicationWindow,
     cfg: Config,
@@ -49,166 +131,94 @@ pub fn show_settings_dialog(
     layout.window.set_deletable(false);
     layout.sidebar_area.set_size_request(180, -1);
 
+    let loading = gtk4::Label::new(Some("Loading settings..."));
+    loading.set_margin_top(24);
+    loading.set_margin_bottom(24);
+    layout.stack.add_named(&loading, Some("loading"));
+    layout.stack.set_visible_child_name("loading");
+    layout.window.present();
+
+    let db = state.borrow().db.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _s = tracing::info_span!("load_settings_game_platforms").entered();
+        let result = ira_db::load_all_games(&db).map(|games| {
+            games
+                .into_iter()
+                .map(|game| game.platform_id)
+                .collect::<HashSet<_>>()
+        });
+        let _ = tx.send(result);
+    });
+
+    let rx = std::cell::RefCell::new(rx);
     let win = layout.window;
     let sidebar = layout.sidebar;
     let stack = layout.stack;
     let content_area = layout.content_area;
+    let state = state.clone();
+    glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+        match rx.borrow_mut().try_recv() {
+            Ok(Ok(platforms)) => {
+                finish_settings_dialog(
+                    win.clone(),
+                    sidebar.clone(),
+                    stack.clone(),
+                    content_area.clone(),
+                    cfg.clone(),
+                    steam.clone(),
+                    &state,
+                    platforms,
+                );
+                glib::ControlFlow::Break
+            }
+            Ok(Err(error)) => {
+                eprintln!("Failed to load ROM platforms for settings: {error}");
+                finish_settings_dialog(
+                    win.clone(),
+                    sidebar.clone(),
+                    stack.clone(),
+                    content_area.clone(),
+                    cfg.clone(),
+                    steam.clone(),
+                    &state,
+                    HashSet::new(),
+                );
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                eprintln!("Settings game-platform loader disconnected");
+                finish_settings_dialog(
+                    win.clone(),
+                    sidebar.clone(),
+                    stack.clone(),
+                    content_area.clone(),
+                    cfg.clone(),
+                    steam.clone(),
+                    &state,
+                    HashSet::new(),
+                );
+                glib::ControlFlow::Break
+            }
+        }
+    });
+}
 
-    let (
-        general_page,
-        notif_row,
-        bg_row,
-        hidden_row,
-        steam_entry,
-        sgdb_entry,
-        lang_list,
-        saves_row,
-    ) = build_general_settings_page(&cfg);
-    let general_scroll = gtk4::ScrolledWindow::new();
-    general_scroll.set_hexpand(true);
-    general_scroll.set_vexpand(true);
-    general_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    general_scroll.set_child(Some(&general_page));
-    sidebar.append(&settings_sidebar_row(
-        "preferences-system-symbolic",
-        "General",
-        "general",
-    ));
-    stack.add_named(&general_scroll, Some("general"));
-
-    let (overlay_page, overlay_widgets) = build_overlay_settings_page(&cfg);
-    sidebar.append(&settings_sidebar_row(
-        "view-grid-symbolic",
-        "Overlay",
-        "overlay",
-    ));
-    stack.add_named(&overlay_page, Some("overlay"));
-
-    let registry = state.borrow().controller_registry.clone();
-    let (input_page, input_widgets) =
-        build_input_settings_page(&win, &cfg.save_dir, &cfg, registry);
-    let controller_default_widgets = input_widgets.controller_defaults.clone();
-    sidebar.append(&settings_sidebar_row(
-        "input-gaming-symbolic",
-        "Controller",
-        "input",
-    ));
-    let input_scroll = gtk4::ScrolledWindow::new();
-    input_scroll.set_hexpand(true);
-    input_scroll.set_vexpand(true);
-    input_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    input_scroll.set_child(Some(&input_page));
-    stack.add_named(&input_scroll, Some("input"));
-
-    let (system_page, system_defaults_widgets) = build_system_defaults_page(&cfg);
-    let system_scroll = gtk4::ScrolledWindow::new();
-    system_scroll.set_hexpand(true);
-    system_scroll.set_vexpand(true);
-    system_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    system_scroll.set_child(Some(&system_page));
-    sidebar.append(&settings_sidebar_row(
-        "applications-science-symbolic",
-        "Game system",
-        "system",
-    ));
-    stack.add_named(&system_scroll, Some("system"));
-
-    sidebar.append(&sidebar_section_title("PC games"));
-    let (computer_games_page, default_game_folder_row) = build_computer_games_page(&win, &cfg);
-    let mut pc_controller_cfg = cfg.clone();
-    pc_controller_cfg.consoles.insert(
-        "linux".to_string(),
-        ConsoleConfig {
-            controller_mode: cfg.linux_controller_mode,
-            controller_profile: cfg.linux_controller_profile.clone(),
-            ..Default::default()
-        },
-    );
-    pc_controller_cfg.consoles.insert(
-        "wine".to_string(),
-        ConsoleConfig {
-            controller_mode: cfg.wine_controller_mode,
-            controller_profile: cfg.wine_controller_profile.clone(),
-            ..Default::default()
-        },
-    );
-    let linux_controller_profile = add_pc_profile_group(
-        &computer_games_page,
-        &pc_controller_cfg,
-        "linux",
-        "Linux controller",
-        &win,
-        state.borrow().controller_registry.clone(),
-    );
-    let wine_controller_profile = add_pc_profile_group(
-        &computer_games_page,
-        &pc_controller_cfg,
-        "wine",
-        "Wine controller",
-        &win,
-        state.borrow().controller_registry.clone(),
-    );
-    sidebar.append(&settings_sidebar_row(
-        "applications-games-symbolic",
-        "PC games",
-        "computer_games",
-    ));
-    stack.add_named(&computer_games_page, Some("computer_games"));
-
-    let (steam_page, steam_enable_row) = build_steam_settings_page(&cfg);
-    sidebar.append(&settings_sidebar_row(
-        "application-x-executable-symbolic",
-        "Steam",
-        "steam",
-    ));
-    stack.add_named(&steam_page, Some("steam"));
-
-    let (emu_page, emu_version_row, emu_version_model) = build_api_emulators_page(&cfg);
-    sidebar.append(&settings_sidebar_row(
-        "applications-engineering-symbolic",
-        "API emulators",
-        "api_emulators",
-    ));
-    stack.add_named(&emu_page, Some("api_emulators"));
-
-    let lutris_page = build_lutris_settings_page(state, &win);
-    sidebar.append(&settings_sidebar_row(
-        "system-software-install-symbolic",
-        "Lutris migration",
-        "migration",
-    ));
-    stack.add_named(&lutris_page, Some("migration"));
-
-    sidebar.append(&sidebar_section_title("Wine"));
-    let (wine_pages, wine_widgets) = build_wine_config_pages(&cfg.default_wine_config, None);
-    let (profiles_page, prefix_base_row) = build_profiles_page(state, &win);
-    sidebar.append(&settings_sidebar_row(
-        "system-users-symbolic",
-        "Profiles",
-        "profiles",
-    ));
-    stack.add_named(&profiles_page, Some("profiles"));
-    for wp in &wine_pages {
-        sidebar.append(&settings_sidebar_row(wp.icon, wp.label, wp.label));
-        stack.add_named(&wp.page, Some(wp.label));
-    }
-
-    sidebar.append(&sidebar_section_title("Emulation"));
-    let (ra_page, ra_enable_row, ra_username_row, ra_password_row) = build_ra_settings_page(&cfg);
-    sidebar.append(&settings_sidebar_row(
-        "applications-science-symbolic",
-        "RetroAchievements",
-        "ra",
-    ));
-    stack.add_named(&ra_page, Some("ra"));
-
-    let (rom_page, roms_folder_row) = build_rom_settings_page(&win, &cfg);
-    sidebar.append(&settings_sidebar_row(
-        "drive-harddisk-symbolic",
-        "ROM library",
-        "roms",
-    ));
-    stack.add_named(&rom_page, Some("roms"));
+fn finish_settings_dialog(
+    win: adw::Window,
+    sidebar: gtk4::ListBox,
+    stack: gtk4::Stack,
+    content_area: gtk4::Box,
+    cfg: Config,
+    steam: Arc<SteamDataClient>,
+    state: &SharedState,
+    rom_platforms_with_games: HashSet<String>,
+) {
+    let pages = build_settings_pages(&cfg, &win, state);
+    register_settings_pages(&pages, &sidebar, &stack);
+    let steam_page = pages.steam_page.clone();
+    let ra_page = pages.ra_page.clone();
 
     let mut source_overlay_states: Vec<(String, OverrideState)> = Vec::new();
     let mut source_gamescope_states: Vec<(String, OverrideState)> = Vec::new();
@@ -255,238 +265,41 @@ pub fn show_settings_dialog(
         source_gamescope_states.push(("ra".to_string(), gs_state));
     }
 
-    let mut console_widgets: Vec<(&'static str, ConsolePageWidgets)> = Vec::new();
-    let mut console_profile_widgets = Vec::new();
-    let mut ps4_enable_row: Option<adw::SwitchRow> = None;
-    let mut ps4_version_dd: Option<adw::ComboRow> = None;
-    let mut ps3_enable_row: Option<adw::SwitchRow> = None;
-    let mut ps3_exe_row: Option<adw::EntryRow> = None;
-    let mut vita3k_enable_row: Option<adw::SwitchRow> = None;
-    let mut vita3k_exe_row: Option<adw::EntryRow> = None;
-    let mut cemu_enable_row: Option<adw::SwitchRow> = None;
-    let mut cemu_exe_row: Option<adw::EntryRow> = None;
-    let db = state.borrow().db.clone();
-    let rom_platforms_with_games: HashSet<String> = ira_db::load_all_games(&db)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to load ROM platforms for settings: {e}");
-            Vec::new()
-        })
-        .into_iter()
-        .map(|game| game.platform_id)
-        .collect();
-    let mut empty_platforms = Vec::new();
-    for def in ira_models::all_consoles() {
-        if def.id == "psp" {
-            let (ps3_page, ps3_en, ps3_exe) = build_rpcs3_settings_page(&cfg, &win);
-
-            let (ps3_ov_row, ps3_ov_state) = build_override_switch_row(
-                "In-game overlay",
-                "Achievements, screenshots, and recording",
-                cfg.overlay.enabled,
-                cfg.overlay.source_overrides.get("ps3").copied(),
-            );
-            let (ps3_gs_row, ps3_gs_state) = build_override_switch_row(
-                "Gamescope",
-                "Valve Gamescope compositor",
-                cfg.default_system.gamescope,
-                cfg.overlay.source_gamescope.get("ps3").copied(),
-            );
-            let ps3_ov_group = adw::PreferencesGroup::new();
-            ps3_ov_group.add(&ps3_ov_row);
-            ps3_ov_group.add(&ps3_gs_row);
-            ps3_page.prepend(&ps3_ov_group);
-            console_profile_widgets.push(add_console_profile_group(
-                &ps3_page,
-                &win,
-                &cfg,
-                &cfg.save_dir,
-                "ps3",
-                "PS3",
-                state.borrow().controller_registry.clone(),
-            ));
-            source_overlay_states.push(("ps3".to_string(), ps3_ov_state));
-            source_gamescope_states.push(("ps3".to_string(), ps3_gs_state));
-
-            sidebar.append(&settings_sidebar_row(
-                "applications-games-symbolic",
-                "PS3",
-                "ps3",
-            ));
-            stack.add_named(&ps3_page, Some("ps3"));
-            ps3_enable_row = Some(ps3_en);
-            ps3_exe_row = Some(ps3_exe);
-
-            let (ps4_page, ps4_en, ps4_dd) = build_shadps4_settings_page(&cfg);
-
-            let (ps4_ov_row, ps4_ov_state) = build_override_switch_row(
-                "In-game overlay",
-                "Achievements, screenshots, and recording",
-                cfg.overlay.enabled,
-                cfg.overlay.source_overrides.get("ps4").copied(),
-            );
-            let (ps4_gs_row, ps4_gs_state) = build_override_switch_row(
-                "Gamescope",
-                "Valve Gamescope compositor",
-                cfg.default_system.gamescope,
-                cfg.overlay.source_gamescope.get("ps4").copied(),
-            );
-            let ps4_ov_group = adw::PreferencesGroup::new();
-            ps4_ov_group.add(&ps4_ov_row);
-            ps4_ov_group.add(&ps4_gs_row);
-            ps4_page.prepend(&ps4_ov_group);
-            console_profile_widgets.push(add_console_profile_group(
-                &ps4_page,
-                &win,
-                &cfg,
-                &cfg.save_dir,
-                "ps4",
-                "PS4",
-                state.borrow().controller_registry.clone(),
-            ));
-            source_overlay_states.push(("ps4".to_string(), ps4_ov_state));
-            source_gamescope_states.push(("ps4".to_string(), ps4_gs_state));
-
-            sidebar.append(&settings_sidebar_row(
-                "applications-games-symbolic",
-                "PS4",
-                "ps4",
-            ));
-            stack.add_named(&ps4_page, Some("ps4"));
-            ps4_enable_row = Some(ps4_en);
-            ps4_version_dd = ps4_dd;
-
-            let (vita_page, vita_en, vita_exe) = build_vita3k_settings_page(&cfg, &win);
-            let (vita_ov_row, vita_ov_state) = build_override_switch_row(
-                "In-game overlay",
-                "Achievements, screenshots, and recording",
-                cfg.overlay.enabled,
-                cfg.overlay.source_overrides.get("psvita").copied(),
-            );
-            let (vita_gs_row, vita_gs_state) = build_override_switch_row(
-                "Gamescope",
-                "Valve Gamescope compositor",
-                cfg.default_system.gamescope,
-                cfg.overlay.source_gamescope.get("psvita").copied(),
-            );
-            let vita_group = adw::PreferencesGroup::new();
-            vita_group.add(&vita_ov_row);
-            vita_group.add(&vita_gs_row);
-            vita_page.prepend(&vita_group);
-            console_profile_widgets.push(add_console_profile_group(
-                &vita_page,
-                &win,
-                &cfg,
-                &cfg.save_dir,
-                "psvita",
-                "PS Vita",
-                state.borrow().controller_registry.clone(),
-            ));
-            source_overlay_states.push(("psvita".to_string(), vita_ov_state));
-            source_gamescope_states.push(("psvita".to_string(), vita_gs_state));
-            sidebar.append(&settings_sidebar_row(
-                "applications-games-symbolic",
-                "PS Vita",
-                "psvita",
-            ));
-            stack.add_named(&vita_page, Some("psvita"));
-            vita3k_enable_row = Some(vita_en);
-            vita3k_exe_row = Some(vita_exe);
-        }
-        if def.id == "wii" {
-            let (cemu_page, cemu_en, cemu_exe) = build_cemu_settings_page(&cfg, &win);
-            let (cemu_ov_row, cemu_ov_state) = build_override_switch_row(
-                "In-game overlay",
-                "Achievements, screenshots, and recording",
-                cfg.overlay.enabled,
-                cfg.overlay.source_overrides.get("wiiu").copied(),
-            );
-            let (cemu_gs_row, cemu_gs_state) = build_override_switch_row(
-                "Gamescope",
-                "Valve Gamescope compositor",
-                cfg.default_system.gamescope,
-                cfg.overlay.source_gamescope.get("wiiu").copied(),
-            );
-            let cemu_group = adw::PreferencesGroup::new();
-            cemu_group.add(&cemu_ov_row);
-            cemu_group.add(&cemu_gs_row);
-            cemu_page.prepend(&cemu_group);
-            console_profile_widgets.push(add_console_profile_group(
-                &cemu_page,
-                &win,
-                &cfg,
-                &cfg.save_dir,
-                "wiiu",
-                "Wii U",
-                state.borrow().controller_registry.clone(),
-            ));
-            source_overlay_states.push(("wiiu".to_string(), cemu_ov_state));
-            source_gamescope_states.push(("wiiu".to_string(), cemu_gs_state));
-            sidebar.append(&settings_sidebar_row(
-                "applications-games-symbolic",
-                "Wii U",
-                "wiiu",
-            ));
-            stack.add_named(&cemu_page, Some("wiiu"));
-            cemu_enable_row = Some(cemu_en);
-            cemu_exe_row = Some(cemu_exe);
-        }
-        if !def.uses_rom_folder() {
-            continue;
-        }
-        let cc = cfg.console(def.id);
-        let (page, widgets) = build_console_settings_page(&win, def, cc);
-
-        let (overlay_row, overlay_state) = build_override_switch_row(
-            "In-game overlay",
-            "Achievements, screenshots, and recording",
-            cfg.overlay.enabled,
-            cfg.overlay.source_overrides.get(def.id).copied(),
-        );
-        let (gs_row, gs_state) = build_override_switch_row(
-            "Gamescope",
-            "Valve Gamescope compositor",
-            cfg.default_system.gamescope,
-            cfg.overlay.source_gamescope.get(def.id).copied(),
-        );
-        let overlay_group = adw::PreferencesGroup::new();
-        overlay_group.add(&overlay_row);
-        overlay_group.add(&gs_row);
-        page.prepend(&overlay_group);
-        console_profile_widgets.push(add_console_profile_group(
-            &page,
-            &win,
-            &cfg,
-            &cfg.save_dir,
-            def.id,
-            def.display_name,
-            state.borrow().controller_registry.clone(),
-        ));
-        source_overlay_states.push((def.id.to_string(), overlay_state));
-        source_gamescope_states.push((def.id.to_string(), gs_state));
-
-        let page_id = def.display_name.to_lowercase();
-        if rom_platforms_with_games.contains(def.id) {
-            sidebar.append(&settings_sidebar_row(
-                "applications-games-symbolic",
-                def.display_name,
-                &page_id,
-            ));
-        } else {
-            empty_platforms.push((def.display_name.to_string(), page_id.clone()));
-        }
-        stack.add_named(&page, Some(page_id.as_str()));
-        console_widgets.push((def.id, widgets));
-    }
-    if !empty_platforms.is_empty() {
-        sidebar.append(&sidebar_section_title("Empty platforms"));
-        for (label, page_id) in empty_platforms {
-            sidebar.append(&settings_sidebar_row(
-                "applications-games-symbolic",
-                &label,
-                &page_id,
-            ));
-        }
-    }
+    let mut console_pages = register_console_pages(
+        &cfg,
+        &win,
+        state,
+        &sidebar,
+        &stack,
+        rom_platforms_with_games,
+    );
+    source_overlay_states.append(&mut console_pages.source_overlay_states);
+    source_gamescope_states.append(&mut console_pages.source_gamescope_states);
+    let saved_widgets = SavedSettingsWidgets {
+        steam_entry: pages.steam_entry,
+        sgdb_entry: pages.sgdb_entry,
+        notif_row: pages.notif_row,
+        bg_row: pages.bg_row,
+        hidden_row: pages.hidden_row,
+        saves_row: pages.saves_row,
+        steam_enable_row: pages.steam_enable_row,
+        default_game_folder_row: pages.default_game_folder_row,
+        roms_folder_row: pages.roms_folder_row,
+        lang_list: pages.lang_list,
+        ra_enable_row: pages.ra_enable_row,
+        ra_username_row: pages.ra_username_row,
+        ra_password_row: pages.ra_password_row,
+        controller_default_widgets: pages.controller_default_widgets,
+        overlay_widgets: pages.overlay_widgets,
+        system_defaults_widgets: pages.system_defaults_widgets,
+        console_pages,
+        wine_widgets: pages.wine_widgets,
+        linux_controller_profile: pages.linux_controller_profile,
+        wine_controller_profile: pages.wine_controller_profile,
+        prefix_base_row: pages.prefix_base_row,
+        emu_version_row: pages.emu_version_row,
+        emu_version_model: pages.emu_version_model,
+    };
 
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
@@ -520,226 +333,7 @@ pub fn show_settings_dialog(
     save_btn.connect_clicked(move |_| {
         let mut s = state_clone.borrow_mut();
         let old_cfg = s.cfg.clone();
-        s.cfg.steam_api_key = steam_entry.text().to_string();
-        s.cfg.steam_griddb_api_key = sgdb_entry.text().to_string();
-        s.cfg.notifications_enabled = notif_row.is_active();
-        s.cfg.close_to_background = bg_row.is_active();
-        s.cfg.show_hidden_games = hidden_row.is_active();
-        s.cfg.centralize_game_saves = saves_row.is_active();
-        if let Some(row) = &ps4_enable_row {
-            s.cfg.shadps4_enabled = row.is_active();
-        }
-        if let Some(dd) = &ps4_version_dd {
-            let idx = dd.selected();
-            s.cfg.shadps4_executable = if idx == 0 {
-                String::new()
-            } else {
-                ira_platforms::ps4::read_shadps4_launch_options()
-                    .into_iter()
-                    .nth((idx - 1) as usize)
-                    .map(|v| v.launch_command)
-                    .unwrap_or_default()
-            };
-        }
-        if let Some(row) = &ps3_enable_row {
-            s.cfg.rpcs3_enabled = row.is_active();
-        }
-        if let Some(row) = &ps3_exe_row {
-            s.cfg.rpcs3_executable = row.text().to_string();
-        }
-        if let Some(row) = &vita3k_enable_row {
-            s.cfg.vita3k_enabled = row.is_active();
-        }
-        if let Some(row) = &vita3k_exe_row {
-            s.cfg.vita3k_executable = row.text().to_string();
-        }
-        if let Some(row) = &cemu_enable_row {
-            s.cfg.cemu_enabled = row.is_active();
-        }
-        if let Some(row) = &cemu_exe_row {
-            s.cfg.cemu_executable = row.text().to_string();
-        }
-        s.cfg.steam_enabled = steam_enable_row.is_active();
-        s.cfg.default_game_folder = default_game_folder_row.text().to_string();
-        s.cfg.roms_folder = roms_folder_row.text().to_string();
-        s.cfg.language_preferences = super::settings_pages::read_language_preferences(&lang_list);
-        s.cfg.ra_enabled = ra_enable_row.is_active();
-        s.cfg.ra_username = ra_username_row.text().to_string();
-        s.cfg.ra_password = ra_password_row.text().to_string();
-
-        let mut controller_defaults = s.cfg.controller_defaults.clone();
-        for widget in controller_default_widgets.borrow().iter() {
-            let mut profile = widget
-                .profile_path
-                .borrow()
-                .as_ref()
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let mode = super::input_profile_settings::mode_from_selection(widget.mode.selected());
-            if mode != ira_models::ControllerInputMode::Disabled && profile.is_empty() {
-                match ensure_controller_default_profile(
-                    &s.cfg.save_dir,
-                    &widget.key,
-                    &widget.device_name,
-                    &widget.supported_buttons,
-                    match mode {
-                        ira_models::ControllerInputMode::VirtualDirectInput => {
-                            ira_input::VirtualGamepadBackend::DirectInput
-                        }
-                        ira_models::ControllerInputMode::Disabled
-                        | ira_models::ControllerInputMode::VirtualXInput => {
-                            ira_input::VirtualGamepadBackend::XInput
-                        }
-                    },
-                ) {
-                    Ok(path) => profile = path.to_string_lossy().into_owned(),
-                    Err(error) => eprintln!("Failed to create controller mapping: {error}"),
-                }
-            }
-            if mode != ira_models::ControllerInputMode::Disabled || !profile.is_empty() {
-                controller_defaults
-                    .insert(widget.key.clone(), ControllerInputConfig { mode, profile });
-            } else {
-                controller_defaults.remove(&widget.key);
-            }
-        }
-        s.cfg.controller_defaults = controller_defaults;
-
-        s.cfg.overlay.enabled = overlay_widgets.enable_row.is_active();
-        s.cfg.overlay.encoder = match overlay_widgets.encoder_row.selected() {
-            1 => ira_overlay_ipc::VideoEncoder::Vaapi,
-            2 => ira_overlay_ipc::VideoEncoder::Nvenc,
-            3 => ira_overlay_ipc::VideoEncoder::Software,
-            _ => ira_overlay_ipc::VideoEncoder::Auto,
-        };
-        s.cfg.overlay.recording_quality =
-            ira_overlay_ipc::RecordingQuality::from_u32(overlay_widgets.quality_row.selected());
-        s.cfg.overlay.toggle_hotkey = overlay_widgets.toggle_hotkey.kb_value.borrow().clone();
-        s.cfg.overlay.screenshot_hotkey =
-            overlay_widgets.screenshot_hotkey.kb_value.borrow().clone();
-        s.cfg.overlay.record_hotkey = overlay_widgets.record_hotkey.kb_value.borrow().clone();
-        s.cfg.overlay.toggle_hotkey_gamepad =
-            overlay_widgets.toggle_hotkey.gp_value.borrow().clone();
-        s.cfg.overlay.screenshot_hotkey_gamepad =
-            overlay_widgets.screenshot_hotkey.gp_value.borrow().clone();
-        s.cfg.overlay.record_hotkey_gamepad =
-            overlay_widgets.record_hotkey.gp_value.borrow().clone();
-        if let Some(desc) = overlay_widgets.font_button.font_desc() {
-            let family_str: String = desc.family().map(|s| s.to_string()).unwrap_or_default();
-            if family_str.is_empty() {
-                s.cfg.overlay.font_family = None;
-            } else {
-                s.cfg.overlay.font_family = Some(family_str);
-            }
-        } else {
-            s.cfg.overlay.font_family = None;
-        }
-
-        s.cfg.default_system.gamemode = system_defaults_widgets.gamemode.is_active();
-        s.cfg.default_system.mangohud = system_defaults_widgets.mangohud.is_active();
-        s.cfg.default_system.gamescope = system_defaults_widgets.gamescope.is_active();
-        s.cfg.default_system.gamescope_flags =
-            system_defaults_widgets.gamescope_flags.text().to_string();
-        s.cfg.default_system.gamescope_w = system_defaults_widgets.gamescope_w.value() as u32;
-        s.cfg.default_system.gamescope_h = system_defaults_widgets.gamescope_h.value() as u32;
-        s.cfg.default_system.gamescope_fps = system_defaults_widgets.gamescope_fps.value() as u32;
-        s.cfg.default_system.gamescope_upscaling = {
-            let upscale_values = ["linear", "fsr", "nis", "integer", "nearest"];
-            let idx = system_defaults_widgets.gamescope_upscaling_row.selected() as usize;
-            upscale_values.get(idx).copied().unwrap_or("").to_string()
-        };
-        s.cfg.default_system.env_vars =
-            super::wine_config_env_dll::collect_env_vars(&system_defaults_widgets.env_vars_box);
-        s.cfg.default_system.ld_preload = system_defaults_widgets.ld_preload.text().to_string();
-        s.cfg.default_system.ld_library_path =
-            system_defaults_widgets.ld_library_path.text().to_string();
-        s.cfg.default_system.gpu = system_defaults_widgets
-            .gpu_row
-            .as_ref()
-            .map(|gr| {
-                let idx = gr.selected() as usize;
-                if idx == 0 {
-                    String::new()
-                } else {
-                    system_defaults_widgets
-                        .gpu_options
-                        .get(idx - 1)
-                        .cloned()
-                        .unwrap_or_default()
-                }
-            })
-            .unwrap_or_default();
-
-        for (source_id, state) in &source_overlay_states {
-            match *state.borrow() {
-                Some(v) => {
-                    s.cfg.overlay.source_overrides.insert(source_id.clone(), v);
-                }
-                None => {
-                    s.cfg.overlay.source_overrides.remove(source_id);
-                }
-            }
-        }
-        for (source_id, state) in &source_gamescope_states {
-            match *state.borrow() {
-                Some(v) => {
-                    s.cfg.overlay.source_gamescope.insert(source_id.clone(), v);
-                }
-                None => {
-                    s.cfg.overlay.source_gamescope.remove(source_id);
-                }
-            }
-        }
-
-        for (console_id, widgets) in &console_widgets {
-            let cc = s.cfg.console_mut(console_id);
-            cc.enabled = widgets.enable_row.is_active();
-            cc.executable = widgets.exe_row.text().to_string();
-            cc.fullscreen = widgets.fullscreen_row.is_active();
-            if let Some(ref core_path) = widgets.core_path_row {
-                cc.ra_core = ira_platforms::emulator_detect::resolve_ra_core_for_console(
-                    console_id,
-                    &core_path.text(),
-                )
-                .unwrap_or_default();
-            }
-        }
-        for widget in &console_profile_widgets {
-            let console = s.cfg.console_mut(&widget.console_id);
-            console.controller_mode = *widget.mode.borrow();
-            console.controller_profile = widget
-                .profile_path
-                .borrow()
-                .as_ref()
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_default();
-        }
-        s.cfg.default_wine_config = wine_widgets.to_wine_config();
-        s.cfg.linux_controller_profile = linux_controller_profile
-            .profile_path
-            .borrow()
-            .as_ref()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        s.cfg.linux_controller_mode = *linux_controller_profile.mode.borrow();
-        s.cfg.wine_controller_profile = wine_controller_profile
-            .profile_path
-            .borrow()
-            .as_ref()
-            .cloned()
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        s.cfg.wine_controller_mode = *wine_controller_profile.mode.borrow();
-        s.cfg.prefix_base_dir = prefix_base_row.text().to_string();
-
-        let idx = emu_version_row.selected();
-        let ver = emu_version_model
-            .string(idx)
-            .map(|s| s.to_string())
-            .unwrap_or_default();
-        if !ver.is_empty() && !ver.starts_with("(no versions") {
-            s.cfg.default_api_emu_version = ver.to_string();
-        }
+        apply_saved_settings(&mut s.cfg, &saved_widgets);
 
         steam_clone.update_keys(&s.cfg.steam_api_key, &s.cfg.steam_griddb_api_key);
 
@@ -764,9 +358,461 @@ pub fn show_settings_dialog(
     btn_row.append(&cancel_btn);
     btn_row.append(&save_btn);
     content_area.append(&btn_row);
-    win.present();
     if let Some(row) = sidebar.selected_row().filter(|row| row.parent().is_some()) {
         row.grab_focus();
+    }
+}
+
+fn apply_saved_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
+    apply_general_settings(cfg, widgets);
+    apply_emulator_settings(cfg, &widgets.console_pages);
+    apply_controller_defaults(cfg, &widgets.controller_default_widgets);
+    apply_overlay_settings(cfg, &widgets.overlay_widgets);
+    apply_system_defaults(cfg, &widgets.system_defaults_widgets);
+    apply_override_states(
+        cfg,
+        &widgets.console_pages.source_overlay_states,
+        &widgets.console_pages.source_gamescope_states,
+    );
+    apply_console_settings(cfg, &widgets.console_pages);
+    apply_profile_settings(cfg, widgets);
+    apply_api_emulator_version(cfg, widgets);
+}
+
+fn build_settings_pages(
+    cfg: &Config,
+    win: &adw::Window,
+    state: &SharedState,
+) -> SettingsPageWidgets {
+    let (
+        general_page,
+        notif_row,
+        bg_row,
+        hidden_row,
+        steam_entry,
+        sgdb_entry,
+        lang_list,
+        saves_row,
+    ) = build_general_settings_page(cfg);
+    let (overlay_page, overlay_widgets) = build_overlay_settings_page(cfg);
+    let registry = state.borrow().controller_registry.clone();
+    let (input_page, input_widgets) = build_input_settings_page(win, &cfg.save_dir, cfg, registry);
+    let controller_default_widgets = input_widgets.controller_defaults.clone();
+    let (system_page, system_defaults_widgets) = build_system_defaults_page(cfg);
+    let (computer_games_page, default_game_folder_row) = build_computer_games_page(win, cfg);
+    let (linux_controller_profile, wine_controller_profile) =
+        build_pc_controller_profiles(&computer_games_page, cfg, win, state);
+    let (steam_page, steam_enable_row) = build_steam_settings_page(cfg);
+    let (emu_page, emu_version_row, emu_version_model) = build_api_emulators_page(cfg);
+    let lutris_page = build_lutris_settings_page(state, win);
+    let (wine_pages, wine_widgets) = build_wine_config_pages(&cfg.default_wine_config, None);
+    let (profiles_page, prefix_base_row) = build_profiles_page(state, win);
+    let (ra_page, ra_enable_row, ra_username_row, ra_password_row) = build_ra_settings_page(cfg);
+    let (rom_page, roms_folder_row) = build_rom_settings_page(win, cfg);
+    SettingsPageWidgets {
+        general_page,
+        overlay_page,
+        input_page,
+        system_page,
+        computer_games_page,
+        steam_page,
+        emu_page,
+        lutris_page,
+        wine_pages,
+        profiles_page,
+        ra_page,
+        rom_page,
+        notif_row,
+        bg_row,
+        hidden_row,
+        steam_entry,
+        sgdb_entry,
+        lang_list,
+        saves_row,
+        controller_default_widgets,
+        default_game_folder_row,
+        steam_enable_row,
+        emu_version_row,
+        emu_version_model,
+        wine_widgets,
+        prefix_base_row,
+        ra_enable_row,
+        ra_username_row,
+        ra_password_row,
+        roms_folder_row,
+        overlay_widgets,
+        system_defaults_widgets,
+        linux_controller_profile,
+        wine_controller_profile,
+    }
+}
+
+fn register_settings_pages(
+    pages: &SettingsPageWidgets,
+    sidebar: &gtk4::ListBox,
+    stack: &gtk4::Stack,
+) {
+    register_scrolled_page(
+        sidebar,
+        stack,
+        &pages.general_page,
+        "preferences-system-symbolic",
+        "General",
+        "general",
+    );
+    register_page(
+        sidebar,
+        stack,
+        &pages.overlay_page,
+        "view-grid-symbolic",
+        "Overlay",
+        "overlay",
+    );
+    register_scrolled_page(
+        sidebar,
+        stack,
+        &pages.input_page,
+        "input-gaming-symbolic",
+        "Controller",
+        "input",
+    );
+    register_scrolled_page(
+        sidebar,
+        stack,
+        &pages.system_page,
+        "applications-science-symbolic",
+        "Game system",
+        "system",
+    );
+    sidebar.append(&sidebar_section_title("PC games"));
+    register_page(
+        sidebar,
+        stack,
+        &pages.computer_games_page,
+        "applications-games-symbolic",
+        "PC games",
+        "computer_games",
+    );
+    register_page(
+        sidebar,
+        stack,
+        &pages.steam_page,
+        "application-x-executable-symbolic",
+        "Steam",
+        "steam",
+    );
+    register_page(
+        sidebar,
+        stack,
+        &pages.emu_page,
+        "applications-engineering-symbolic",
+        "API emulators",
+        "api_emulators",
+    );
+    register_page(
+        sidebar,
+        stack,
+        &pages.lutris_page,
+        "system-software-install-symbolic",
+        "Lutris migration",
+        "migration",
+    );
+    sidebar.append(&sidebar_section_title("Wine"));
+    register_page(
+        sidebar,
+        stack,
+        &pages.profiles_page,
+        "system-users-symbolic",
+        "Profiles",
+        "profiles",
+    );
+    for page in &pages.wine_pages {
+        register_page(
+            sidebar, stack, &page.page, page.icon, page.label, page.label,
+        );
+    }
+    sidebar.append(&sidebar_section_title("Emulation"));
+    register_page(
+        sidebar,
+        stack,
+        &pages.ra_page,
+        "applications-science-symbolic",
+        "RetroAchievements",
+        "ra",
+    );
+    register_page(
+        sidebar,
+        stack,
+        &pages.rom_page,
+        "drive-harddisk-symbolic",
+        "ROM library",
+        "roms",
+    );
+}
+
+fn register_page(
+    sidebar: &gtk4::ListBox,
+    stack: &gtk4::Stack,
+    page: &impl IsA<gtk4::Widget>,
+    icon: &str,
+    label: &str,
+    page_id: &str,
+) {
+    sidebar.append(&settings_sidebar_row(icon, label, page_id));
+    stack.add_named(page, Some(page_id));
+}
+
+fn register_scrolled_page(
+    sidebar: &gtk4::ListBox,
+    stack: &gtk4::Stack,
+    page: &gtk4::Box,
+    icon: &str,
+    label: &str,
+    page_id: &str,
+) {
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_hexpand(true);
+    scroll.set_vexpand(true);
+    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroll.set_child(Some(page));
+    register_page(sidebar, stack, &scroll, icon, label, page_id);
+}
+
+fn apply_general_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
+    cfg.steam_api_key = widgets.steam_entry.text().to_string();
+    cfg.steam_griddb_api_key = widgets.sgdb_entry.text().to_string();
+    cfg.notifications_enabled = widgets.notif_row.is_active();
+    cfg.close_to_background = widgets.bg_row.is_active();
+    cfg.show_hidden_games = widgets.hidden_row.is_active();
+    cfg.centralize_game_saves = widgets.saves_row.is_active();
+    cfg.steam_enabled = widgets.steam_enable_row.is_active();
+    cfg.default_game_folder = widgets.default_game_folder_row.text().to_string();
+    cfg.roms_folder = widgets.roms_folder_row.text().to_string();
+    cfg.language_preferences = super::settings_pages::read_language_preferences(&widgets.lang_list);
+    cfg.ra_enabled = widgets.ra_enable_row.is_active();
+    cfg.ra_username = widgets.ra_username_row.text().to_string();
+    cfg.ra_password = widgets.ra_password_row.text().to_string();
+}
+
+fn apply_emulator_settings(cfg: &mut Config, pages: &ConsoleSettingsWidgets) {
+    if let Some(row) = &pages.ps4_enable_row {
+        cfg.shadps4_enabled = row.is_active();
+    }
+    if let Some(dd) = &pages.ps4_version_dd {
+        let idx = dd.selected();
+        cfg.shadps4_executable = if idx == 0 {
+            String::new()
+        } else {
+            ira_platforms::ps4::read_shadps4_launch_options()
+                .into_iter()
+                .nth((idx - 1) as usize)
+                .map(|v| v.launch_command)
+                .unwrap_or_default()
+        };
+    }
+    if let Some(row) = &pages.ps3_enable_row {
+        cfg.rpcs3_enabled = row.is_active();
+    }
+    if let Some(row) = &pages.ps3_exe_row {
+        cfg.rpcs3_executable = row.text().to_string();
+    }
+    if let Some(row) = &pages.vita3k_enable_row {
+        cfg.vita3k_enabled = row.is_active();
+    }
+    if let Some(row) = &pages.vita3k_exe_row {
+        cfg.vita3k_executable = row.text().to_string();
+    }
+    if let Some(row) = &pages.cemu_enable_row {
+        cfg.cemu_enabled = row.is_active();
+    }
+    if let Some(row) = &pages.cemu_exe_row {
+        cfg.cemu_executable = row.text().to_string();
+    }
+}
+
+fn apply_controller_defaults(
+    cfg: &mut Config,
+    widgets: &Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
+) {
+    let mut controller_defaults = cfg.controller_defaults.clone();
+    for widget in widgets.borrow().iter() {
+        let mut profile = widget
+            .profile_path
+            .borrow()
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mode = super::input_profile_settings::mode_from_selection(widget.mode.selected());
+        if mode != ira_models::ControllerInputMode::Disabled && profile.is_empty() {
+            match ensure_controller_default_profile(
+                &cfg.save_dir,
+                &widget.key,
+                &widget.device_name,
+                &widget.supported_buttons,
+                match mode {
+                    ira_models::ControllerInputMode::VirtualDirectInput => {
+                        ira_input::VirtualGamepadBackend::DirectInput
+                    }
+                    ira_models::ControllerInputMode::Disabled
+                    | ira_models::ControllerInputMode::VirtualXInput => {
+                        ira_input::VirtualGamepadBackend::XInput
+                    }
+                },
+            ) {
+                Ok(path) => profile = path.to_string_lossy().into_owned(),
+                Err(error) => eprintln!("Failed to create controller mapping: {error}"),
+            }
+        }
+        if mode != ira_models::ControllerInputMode::Disabled || !profile.is_empty() {
+            controller_defaults.insert(widget.key.clone(), ControllerInputConfig { mode, profile });
+        } else {
+            controller_defaults.remove(&widget.key);
+        }
+    }
+    cfg.controller_defaults = controller_defaults;
+}
+
+fn apply_overlay_settings(cfg: &mut Config, widgets: &OverlayPageWidgets) {
+    cfg.overlay.enabled = widgets.enable_row.is_active();
+    cfg.overlay.encoder = match widgets.encoder_row.selected() {
+        1 => ira_overlay_ipc::VideoEncoder::Vaapi,
+        2 => ira_overlay_ipc::VideoEncoder::Nvenc,
+        3 => ira_overlay_ipc::VideoEncoder::Software,
+        _ => ira_overlay_ipc::VideoEncoder::Auto,
+    };
+    cfg.overlay.recording_quality =
+        ira_overlay_ipc::RecordingQuality::from_u32(widgets.quality_row.selected());
+    cfg.overlay.toggle_hotkey = widgets.toggle_hotkey.kb_value.borrow().clone();
+    cfg.overlay.screenshot_hotkey = widgets.screenshot_hotkey.kb_value.borrow().clone();
+    cfg.overlay.record_hotkey = widgets.record_hotkey.kb_value.borrow().clone();
+    cfg.overlay.toggle_hotkey_gamepad = widgets.toggle_hotkey.gp_value.borrow().clone();
+    cfg.overlay.screenshot_hotkey_gamepad = widgets.screenshot_hotkey.gp_value.borrow().clone();
+    cfg.overlay.record_hotkey_gamepad = widgets.record_hotkey.gp_value.borrow().clone();
+    cfg.overlay.font_family = widgets
+        .font_button
+        .font_desc()
+        .and_then(|desc| desc.family().map(|family| family.to_string()))
+        .filter(|family| !family.is_empty());
+}
+
+fn apply_system_defaults(cfg: &mut Config, widgets: &SystemDefaultsWidgets) {
+    cfg.default_system.gamemode = widgets.gamemode.is_active();
+    cfg.default_system.mangohud = widgets.mangohud.is_active();
+    cfg.default_system.gamescope = widgets.gamescope.is_active();
+    cfg.default_system.gamescope_flags = widgets.gamescope_flags.text().to_string();
+    cfg.default_system.gamescope_w = widgets.gamescope_w.value() as u32;
+    cfg.default_system.gamescope_h = widgets.gamescope_h.value() as u32;
+    cfg.default_system.gamescope_fps = widgets.gamescope_fps.value() as u32;
+    cfg.default_system.gamescope_upscaling = {
+        let upscale_values = ["linear", "fsr", "nis", "integer", "nearest"];
+        let idx = widgets.gamescope_upscaling_row.selected() as usize;
+        upscale_values.get(idx).copied().unwrap_or("").to_string()
+    };
+    cfg.default_system.env_vars =
+        super::wine_config_env_dll::collect_env_vars(&widgets.env_vars_box);
+    cfg.default_system.ld_preload = widgets.ld_preload.text().to_string();
+    cfg.default_system.ld_library_path = widgets.ld_library_path.text().to_string();
+    cfg.default_system.gpu = widgets.gpu_row.borrow().as_ref().map_or_else(
+        || widgets.gpu_default.borrow().clone(),
+        |row| match row.selected() as usize {
+            0 => String::new(),
+            idx => widgets
+                .gpu_options
+                .borrow()
+                .get(idx - 1)
+                .cloned()
+                .unwrap_or_default(),
+        },
+    );
+}
+
+fn apply_override_states(
+    cfg: &mut Config,
+    overlay_states: &[(String, OverrideState)],
+    gamescope_states: &[(String, OverrideState)],
+) {
+    for (source_id, state) in overlay_states {
+        match *state.borrow() {
+            Some(value) => {
+                cfg.overlay
+                    .source_overrides
+                    .insert(source_id.clone(), value);
+            }
+            None => {
+                cfg.overlay.source_overrides.remove(source_id);
+            }
+        }
+    }
+    for (source_id, state) in gamescope_states {
+        match *state.borrow() {
+            Some(value) => {
+                cfg.overlay
+                    .source_gamescope
+                    .insert(source_id.clone(), value);
+            }
+            None => {
+                cfg.overlay.source_gamescope.remove(source_id);
+            }
+        }
+    }
+}
+
+fn apply_console_settings(cfg: &mut Config, pages: &ConsoleSettingsWidgets) {
+    for (console_id, widgets) in &pages.console_widgets {
+        let console = cfg.console_mut(console_id);
+        console.enabled = widgets.enable_row.is_active();
+        console.executable = widgets.exe_row.text().to_string();
+        console.fullscreen = widgets.fullscreen_row.is_active();
+        if let Some(ref core_path) = widgets.core_path_row {
+            console.ra_core = ira_platforms::emulator_detect::resolve_ra_core_for_console(
+                console_id,
+                &core_path.text(),
+            )
+            .unwrap_or_default();
+        }
+    }
+    for widget in &pages.console_profile_widgets {
+        let console = cfg.console_mut(&widget.console_id);
+        console.controller_mode = *widget.mode.borrow();
+        console.controller_profile = widget
+            .profile_path
+            .borrow()
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+    }
+}
+
+fn apply_profile_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
+    cfg.default_wine_config = widgets.wine_widgets.to_wine_config();
+    cfg.linux_controller_profile = widgets
+        .linux_controller_profile
+        .profile_path
+        .borrow()
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    cfg.linux_controller_mode = *widgets.linux_controller_profile.mode.borrow();
+    cfg.wine_controller_profile = widgets
+        .wine_controller_profile
+        .profile_path
+        .borrow()
+        .as_ref()
+        .cloned()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    cfg.wine_controller_mode = *widgets.wine_controller_profile.mode.borrow();
+    cfg.prefix_base_dir = widgets.prefix_base_row.text().to_string();
+}
+
+fn apply_api_emulator_version(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
+    let ver = widgets
+        .emu_version_model
+        .string(widgets.emu_version_row.selected())
+        .map(|value| value.to_string())
+        .unwrap_or_default();
+    if !ver.is_empty() && !ver.starts_with("(no versions") {
+        cfg.default_api_emu_version = ver;
     }
 }
 
@@ -788,4 +834,232 @@ fn discovery_settings_changed(before: &Config, after: &Config) -> bool {
                 || before_console.executable != after_console.executable
                 || before_console.ra_core != after_console.ra_core
         })
+}
+
+fn build_pc_controller_profiles(
+    page: &gtk4::Box,
+    cfg: &Config,
+    win: &adw::Window,
+    state: &SharedState,
+) -> (ConsoleProfileWidgets, ConsoleProfileWidgets) {
+    let mut pc_controller_cfg = cfg.clone();
+    pc_controller_cfg.consoles.insert(
+        "linux".to_string(),
+        ConsoleConfig {
+            controller_mode: cfg.linux_controller_mode,
+            controller_profile: cfg.linux_controller_profile.clone(),
+            ..Default::default()
+        },
+    );
+    pc_controller_cfg.consoles.insert(
+        "wine".to_string(),
+        ConsoleConfig {
+            controller_mode: cfg.wine_controller_mode,
+            controller_profile: cfg.wine_controller_profile.clone(),
+            ..Default::default()
+        },
+    );
+    let registry = state.borrow().controller_registry.clone();
+    let linux = add_pc_profile_group(
+        page,
+        &pc_controller_cfg,
+        "linux",
+        "Linux controller",
+        win,
+        registry.clone(),
+    );
+    let wine = add_pc_profile_group(
+        page,
+        &pc_controller_cfg,
+        "wine",
+        "Wine controller",
+        win,
+        registry,
+    );
+    (linux, wine)
+}
+
+fn register_console_pages(
+    cfg: &Config,
+    win: &adw::Window,
+    state: &SharedState,
+    sidebar: &gtk4::ListBox,
+    stack: &gtk4::Stack,
+    rom_platforms_with_games: HashSet<String>,
+) -> ConsoleSettingsWidgets {
+    let mut result = ConsoleSettingsWidgets {
+        console_widgets: Vec::new(),
+        console_profile_widgets: Vec::new(),
+        source_overlay_states: Vec::new(),
+        source_gamescope_states: Vec::new(),
+        ps4_enable_row: None,
+        ps4_version_dd: None,
+        ps3_enable_row: None,
+        ps3_exe_row: None,
+        vita3k_enable_row: None,
+        vita3k_exe_row: None,
+        cemu_enable_row: None,
+        cemu_exe_row: None,
+    };
+    let registry = {
+        let state = state.borrow();
+        state.controller_registry.clone()
+    };
+    let mut empty_platforms = Vec::new();
+
+    for def in ira_models::all_consoles() {
+        if def.id == "psp" {
+            let (page, enable_row, exe_row) = build_rpcs3_settings_page(cfg, win);
+            let profile = add_console_page_overrides(
+                &page,
+                cfg,
+                win,
+                "ps3",
+                "PS3",
+                registry.clone(),
+                &mut result,
+            );
+            result.console_profile_widgets.push(profile);
+            sidebar.append(&settings_sidebar_row(
+                "applications-games-symbolic",
+                "PS3",
+                "ps3",
+            ));
+            stack.add_named(&page, Some("ps3"));
+            result.ps3_enable_row = Some(enable_row);
+            result.ps3_exe_row = Some(exe_row);
+
+            let (page, enable_row, version_dd) = build_shadps4_settings_page(cfg);
+            let profile = add_console_page_overrides(
+                &page,
+                cfg,
+                win,
+                "ps4",
+                "PS4",
+                registry.clone(),
+                &mut result,
+            );
+            result.console_profile_widgets.push(profile);
+            sidebar.append(&settings_sidebar_row(
+                "applications-games-symbolic",
+                "PS4",
+                "ps4",
+            ));
+            stack.add_named(&page, Some("ps4"));
+            result.ps4_enable_row = Some(enable_row);
+            result.ps4_version_dd = version_dd;
+
+            let (page, enable_row, exe_row) = build_vita3k_settings_page(cfg, win);
+            let profile = add_console_page_overrides(
+                &page,
+                cfg,
+                win,
+                "psvita",
+                "PS Vita",
+                registry.clone(),
+                &mut result,
+            );
+            result.console_profile_widgets.push(profile);
+            sidebar.append(&settings_sidebar_row(
+                "applications-games-symbolic",
+                "PS Vita",
+                "psvita",
+            ));
+            stack.add_named(&page, Some("psvita"));
+            result.vita3k_enable_row = Some(enable_row);
+            result.vita3k_exe_row = Some(exe_row);
+        }
+        if def.id == "wii" {
+            let (page, enable_row, exe_row) = build_cemu_settings_page(cfg, win);
+            let profile = add_console_page_overrides(
+                &page,
+                cfg,
+                win,
+                "wiiu",
+                "Wii U",
+                registry.clone(),
+                &mut result,
+            );
+            result.console_profile_widgets.push(profile);
+            sidebar.append(&settings_sidebar_row(
+                "applications-games-symbolic",
+                "Wii U",
+                "wiiu",
+            ));
+            stack.add_named(&page, Some("wiiu"));
+            result.cemu_enable_row = Some(enable_row);
+            result.cemu_exe_row = Some(exe_row);
+        }
+        if !def.uses_rom_folder() {
+            continue;
+        }
+        let (page, widgets) = build_console_settings_page(win, def, cfg.console(def.id));
+        let profile = add_console_page_overrides(
+            &page,
+            cfg,
+            win,
+            def.id,
+            def.display_name,
+            registry.clone(),
+            &mut result,
+        );
+        result.console_profile_widgets.push(profile);
+        let page_id = def.display_name.to_lowercase();
+        if rom_platforms_with_games.contains(def.id) {
+            sidebar.append(&settings_sidebar_row(
+                "applications-games-symbolic",
+                def.display_name,
+                &page_id,
+            ));
+        } else {
+            empty_platforms.push((def.display_name.to_string(), page_id.clone()));
+        }
+        stack.add_named(&page, Some(&page_id));
+        result.console_widgets.push((def.id, widgets));
+    }
+    if !empty_platforms.is_empty() {
+        sidebar.append(&sidebar_section_title("Empty platforms"));
+        for (label, page_id) in empty_platforms {
+            sidebar.append(&settings_sidebar_row(
+                "applications-games-symbolic",
+                &label,
+                &page_id,
+            ));
+        }
+    }
+    result
+}
+
+fn add_console_page_overrides(
+    page: &gtk4::Box,
+    cfg: &Config,
+    win: &adw::Window,
+    console_id: &str,
+    label: &str,
+    registry: Arc<ira_input::ControllerRegistry>,
+    result: &mut ConsoleSettingsWidgets,
+) -> ConsoleProfileWidgets {
+    let (overlay_row, overlay_state) = build_override_switch_row(
+        "In-game overlay",
+        "Achievements, screenshots, and recording",
+        cfg.overlay.enabled,
+        cfg.overlay.source_overrides.get(console_id).copied(),
+    );
+    let (gamescope_row, gamescope_state) = build_override_switch_row(
+        "Gamescope",
+        "Valve Gamescope compositor",
+        cfg.default_system.gamescope,
+        cfg.overlay.source_gamescope.get(console_id).copied(),
+    );
+    let group = adw::PreferencesGroup::new();
+    group.add(&overlay_row);
+    group.add(&gamescope_row);
+    page.prepend(&group);
+    result
+        .source_overlay_states
+        .push((console_id.to_string(), overlay_state));
+    result
+        .source_gamescope_states
+        .push((console_id.to_string(), gamescope_state));
+    add_console_profile_group(page, win, cfg, &cfg.save_dir, console_id, label, registry)
 }

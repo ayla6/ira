@@ -130,48 +130,8 @@ pub(super) fn build_rpcs3_settings_page(
     };
     exe_row.set_text(&initial_exe);
 
-    if let Some(emu) = detected.first() {
-        let auto_btn = gtk4::Button::from_icon_name("view-refresh-symbolic");
-        auto_btn.add_css_class(CSS_FLAT);
-        auto_btn.add_css_class(CSS_SQUARE_BUTTON);
-        auto_btn.set_tooltip_text(Some("Auto-detect RPCS3"));
-        auto_btn.set_valign(gtk4::Align::Center);
-        let exe_row_c = exe_row.clone();
-        let path = emu.launch_command.clone();
-        auto_btn.connect_clicked(move |_| {
-            exe_row_c.set_text(&path);
-        });
-        auto_btn.set_visible(
-            !detected
-                .iter()
-                .any(|emu| emu.launch_command == exe_row.text().as_str()),
-        );
-        let auto_btn_for_changed = auto_btn.clone();
-        let detected_for_changed = detected.clone();
-        exe_row.connect_changed(move |entry| {
-            auto_btn_for_changed.set_visible(
-                !detected_for_changed
-                    .iter()
-                    .any(|emu| emu.launch_command == entry.text().as_str()),
-            );
-        });
-        exe_row.add_suffix(&auto_btn);
-    }
-
     add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-
-    let exe_browse = make_browse_icon_button(
-        Some(win),
-        "Select RPCS3 executable",
-        false,
-        Some(("Executable", &["application/x-executable"])),
-        entry_path_closure(&exe_row),
-        {
-            let row = exe_row.clone();
-            move |path| row.set_text(&path.to_string_lossy())
-        },
-    );
-    exe_row.add_suffix(&exe_browse);
+    add_executable_actions(&exe_row, win, &detected, "Select RPCS3 executable");
     emu_group.add(&exe_row);
     page.append(&emu_group);
 
@@ -221,18 +181,7 @@ pub(super) fn build_vita3k_settings_page(
     };
     exe_row.set_text(&initial_exe);
     add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-    let browse = make_browse_icon_button(
-        Some(win),
-        "Select Vita3K executable",
-        false,
-        Some(("Executable", &["application/x-executable"])),
-        entry_path_closure(&exe_row),
-        {
-            let row = exe_row.clone();
-            move |path| row.set_text(&path.to_string_lossy())
-        },
-    );
-    exe_row.add_suffix(&browse);
+    add_executable_actions(&exe_row, win, &detected, "Select Vita3K executable");
     emu_group.add(&exe_row);
     page.append(&emu_group);
 
@@ -286,18 +235,7 @@ pub(super) fn build_cemu_settings_page(
     };
     exe_row.set_text(&initial_exe);
     add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-    let browse = make_browse_icon_button(
-        Some(win),
-        "Select Cemu executable",
-        false,
-        Some(("Executable", &["application/x-executable"])),
-        entry_path_closure(&exe_row),
-        {
-            let row = exe_row.clone();
-            move |path| row.set_text(&path.to_string_lossy())
-        },
-    );
-    exe_row.add_suffix(&browse);
+    add_executable_actions(&exe_row, win, &detected, "Select Cemu executable");
     emu_group.add(&exe_row);
     page.append(&emu_group);
 
@@ -357,6 +295,55 @@ fn add_detected_emulator_dropdown(
     });
 }
 
+fn add_executable_actions(
+    row: &adw::EntryRow,
+    parent: &adw::Window,
+    detected: &[ira_platforms::emulator_detect::DetectedEmulator],
+    browse_title: &str,
+) {
+    if let Some(emulator) = detected.first() {
+        let auto_detect = gtk4::Button::from_icon_name("view-refresh-symbolic");
+        auto_detect.add_css_class(CSS_FLAT);
+        auto_detect.add_css_class(CSS_SQUARE_BUTTON);
+        auto_detect.set_tooltip_text(Some("Auto-detect emulator"));
+        auto_detect.set_valign(gtk4::Align::Center);
+        let row_for_detect = row.clone();
+        let path = emulator.launch_command.clone();
+        auto_detect.connect_clicked(move |_| row_for_detect.set_text(&path));
+        set_auto_detect_visible(&auto_detect, row, detected);
+        let auto_detect_for_changed = auto_detect.clone();
+        let detected_for_changed = detected.to_vec();
+        row.connect_changed(move |row| {
+            set_auto_detect_visible(&auto_detect_for_changed, row, &detected_for_changed);
+        });
+        row.add_suffix(&auto_detect);
+    }
+    let browse = make_browse_icon_button(
+        Some(parent),
+        browse_title,
+        false,
+        Some(("Executable", &["application/x-executable"])),
+        entry_path_closure(row),
+        {
+            let row = row.clone();
+            move |path| row.set_text(&path.to_string_lossy())
+        },
+    );
+    row.add_suffix(&browse);
+}
+
+fn set_auto_detect_visible(
+    button: &gtk4::Button,
+    row: &adw::EntryRow,
+    detected: &[ira_platforms::emulator_detect::DetectedEmulator],
+) {
+    button.set_visible(
+        !detected
+            .iter()
+            .any(|emulator| emulator.launch_command == row.text().as_str()),
+    );
+}
+
 pub(super) struct ConsolePageWidgets {
     pub(super) enable_row: adw::SwitchRow,
     pub(super) exe_row: adw::EntryRow,
@@ -402,34 +389,12 @@ pub(super) fn build_console_settings_page(
 
     add_detected_emulator_dropdown(&emu_group, &exe_row, &detected_emulators);
 
-    let auto_btn = gtk4::Button::from_icon_name("view-refresh-symbolic");
-    auto_btn.add_css_class(CSS_FLAT);
-    auto_btn.add_css_class(CSS_SQUARE_BUTTON);
-    auto_btn.set_tooltip_text(Some("Auto-detect emulator"));
-    auto_btn.set_valign(gtk4::Align::Center);
-    {
-        let exe_row_c = exe_row.clone();
-        let emus_clone = detected_emulators.clone();
-        auto_btn.connect_clicked(move |_| {
-            if let Some(e) = emus_clone.first() {
-                exe_row_c.set_text(&e.launch_command);
-            }
-        });
-    }
-
-    let exe_browse = make_browse_icon_button(
-        Some(win),
+    add_executable_actions(
+        &exe_row,
+        win,
+        &detected_emulators,
         "Select emulator executable",
-        false,
-        Some(("Executable", &["application/x-executable"])),
-        entry_path_closure(&exe_row),
-        {
-            let row = exe_row.clone();
-            move |path| row.set_text(&path.to_string_lossy())
-        },
     );
-    exe_row.add_suffix(&auto_btn);
-    exe_row.add_suffix(&exe_browse);
     emu_group.add(&exe_row);
 
     let mut core_path_row: Option<adw::EntryRow> = None;
@@ -516,18 +481,10 @@ pub(super) fn build_console_settings_page(
         core_path_row = Some(core_path);
     }
 
-    auto_btn.set_visible(
-        !detected_emulators
-            .iter()
-            .any(|e| e.launch_command == exe_row.text().as_str()),
-    );
-
     let core_row_c = core_row_opt;
     let core_selector_c = core_selector_opt;
     let core_path_row_c = core_path_row.clone();
     let custom_core_selected_c = custom_core_selected.clone();
-    let auto_btn_c = auto_btn.clone();
-    let emus_for_changed = detected_emulators.clone();
     exe_row.connect_changed(move |entry| {
         let text = entry.text().to_string();
         if let Some(ref cr) = core_row_c {
@@ -544,7 +501,6 @@ pub(super) fn build_console_settings_page(
                         .is_none_or(|selected| selected.get()),
             );
         }
-        auto_btn_c.set_visible(!emus_for_changed.iter().any(|e| e.launch_command == text));
     });
 
     let fullscreen_row = adw::SwitchRow::new();

@@ -4,6 +4,8 @@ use super::settings_dialog::settings_page_container;
 use crate::strings as S;
 use adw::prelude::*;
 use ira_config::Config;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 fn detect_system_font() -> Option<String> {
     let output = std::process::Command::new("fc-match")
@@ -169,8 +171,9 @@ pub(super) struct SystemDefaultsWidgets {
     pub gamescope_h: gtk4::SpinButton,
     pub gamescope_fps: gtk4::SpinButton,
     pub gamescope_upscaling_row: adw::ComboRow,
-    pub gpu_row: Option<adw::ComboRow>,
-    pub gpu_options: Vec<String>,
+    pub gpu_row: Rc<RefCell<Option<adw::ComboRow>>>,
+    pub gpu_options: Rc<RefCell<Vec<String>>>,
+    pub gpu_default: Rc<RefCell<String>>,
     pub env_vars_box: gtk4::ListBox,
     pub ld_preload: adw::EntryRow,
     pub ld_library_path: adw::EntryRow,
@@ -231,38 +234,20 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     let gamescope_upscaling_row = gs_widgets.upscaling;
     page.append(&perf_group);
 
-    // ─── GPU (only when multiple GPUs detected) ───
-    let gpus = ira_launcher::gpu::detect_gpus();
-    let gpu_options: Vec<String> = gpus.iter().map(|g| g.card.clone()).collect();
-    let gpu_row = if gpus.len() > 1 {
-        let group = adw::PreferencesGroup::new();
-        group.set_title("Graphics");
-
-        let model = gtk4::StringList::new(&[]);
-        model.append("Auto");
-        for g in &gpus {
-            model.append(&g.short_name());
-        }
-        let row = adw::ComboRow::new();
-        row.set_title("GPU");
-        row.set_subtitle("Graphics card to use for rendering by default");
-        row.set_model(Some(&model));
-        let idx = if s.gpu.is_empty() {
-            0
-        } else {
-            gpu_options
-                .iter()
-                .position(|c| c == &s.gpu)
-                .map(|i| i + 1)
-                .unwrap_or(0)
-        };
-        row.set_selected(idx as u32);
-        group.add(&row);
-        page.append(&group);
-        Some(row)
-    } else {
-        None
-    };
+    // GPU enumeration invokes filesystem reads and lspci; populate this optional
+    // section after the rest of the settings page has been constructed.
+    let gpu_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    page.append(&gpu_area);
+    let gpu_row = Rc::new(RefCell::new(None));
+    let gpu_options = Rc::new(RefCell::new(Vec::new()));
+    let gpu_default = Rc::new(RefCell::new(s.gpu.clone()));
+    start_gpu_detection(
+        &gpu_area,
+        &s.gpu,
+        gpu_row.clone(),
+        gpu_options.clone(),
+        gpu_default.clone(),
+    );
 
     let (env_group, env_vars_box) = super::system_settings::build_env_vars_group(&s.env_vars);
     page.append(&env_group);
@@ -284,11 +269,66 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
             gamescope_upscaling_row,
             gpu_row,
             gpu_options,
+            gpu_default,
             env_vars_box,
             ld_preload,
             ld_library_path,
         },
     )
+}
+
+fn start_gpu_detection(
+    area: &gtk4::Box,
+    current_gpu: &str,
+    gpu_row: Rc<RefCell<Option<adw::ComboRow>>>,
+    gpu_options: Rc<RefCell<Vec<String>>>,
+    gpu_default: Rc<RefCell<String>>,
+) {
+    let current_gpu = current_gpu.to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _s = tracing::info_span!("detect_settings_gpus").entered();
+        let _ = tx.send(ira_launcher::gpu::detect_gpus());
+    });
+
+    let rx = RefCell::new(rx);
+    let area = area.clone();
+    glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+        match rx.borrow_mut().try_recv() {
+            Ok(gpus) => {
+                if gpus.len() > 1 {
+                    let group = adw::PreferencesGroup::new();
+                    group.set_title("Graphics");
+
+                    let model = gtk4::StringList::new(&[]);
+                    model.append("Auto");
+                    for gpu in &gpus {
+                        model.append(&gpu.short_name());
+                    }
+                    let row = adw::ComboRow::new();
+                    row.set_title("GPU");
+                    row.set_subtitle("Graphics card to use for rendering by default");
+                    row.set_model(Some(&model));
+                    let options: Vec<String> = gpus.iter().map(|gpu| gpu.card.clone()).collect();
+                    let selected = options
+                        .iter()
+                        .position(|card| card == &current_gpu)
+                        .map(|index| index + 1)
+                        .unwrap_or(0);
+                    row.set_selected(selected as u32);
+                    group.add(&row);
+                    area.append(&group);
+                    *gpu_options.borrow_mut() = options;
+                    *gpu_row.borrow_mut() = Some(row);
+                } else {
+                    gpu_default.borrow_mut().clear();
+                }
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
 }
 
 pub(super) fn build_lutris_settings_page(
@@ -327,75 +367,100 @@ pub(super) fn build_lutris_settings_page(
     migrate_group.add(&migrate_row);
     page.append(&migrate_group);
 
-    let sc = state.clone();
+    let db = state.borrow().db.clone();
     let settings_win = settings_win.clone();
+    let migrate_btn_for_callback = migrate_btn.clone();
     migrate_btn.connect_clicked(move |_| {
-        let lutris_games = match ira_platforms::lutris::load_lutris_games() {
-            Ok(g) => g,
-            Err(e) => {
-                eprintln!("Failed to load Lutris games: {}", e);
-                return;
-            }
-        };
+        migrate_btn_for_callback.set_sensitive(false);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _s = tracing::info_span!("load_lutris_games").entered();
+            let _ = tx.send(ira_platforms::lutris::load_lutris_games());
+        });
 
-        if lutris_games.is_empty() {
-            return;
-        }
+        let migrate_btn = migrate_btn_for_callback.clone();
+        let settings_win = settings_win.clone();
+        let db = db.clone();
+        let rx = std::cell::RefCell::new(rx);
+        glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+            match rx.borrow_mut().try_recv() {
+                Ok(Ok(lutris_games)) => {
+                    migrate_btn.set_sensitive(true);
+                    if lutris_games.is_empty() {
+                        return glib::ControlFlow::Break;
+                    }
 
-        let alert = adw::AlertDialog::new(
-            Some("Import Lutris games"),
-            Some(&format!(
-                "Import {} Lutris game(s) as managed Wine games?",
-                lutris_games.len()
-            )),
-        );
-        alert.add_response("cancel", "Cancel");
-        alert.add_response("migrate", "Migrate");
-        alert.set_response_appearance("migrate", adw::ResponseAppearance::Suggested);
-        alert.set_default_response(Some("cancel"));
-        alert.set_close_response("cancel");
+                    let alert = adw::AlertDialog::new(
+                        Some("Import Lutris games"),
+                        Some(&format!(
+                            "Import {} Lutris game(s) as managed Wine games?",
+                            lutris_games.len()
+                        )),
+                    );
+                    alert.add_response("cancel", "Cancel");
+                    alert.add_response("migrate", "Migrate");
+                    alert.set_response_appearance("migrate", adw::ResponseAppearance::Suggested);
+                    alert.set_default_response(Some("cancel"));
+                    alert.set_close_response("cancel");
 
-        let db = sc.borrow().db.clone();
-        let lutris_games = std::rc::Rc::new(lutris_games);
-        alert.connect_response(None, move |_, response| {
-            if response == "migrate" {
-                let db = db.clone();
-                let lutris_games = (*lutris_games).clone();
-                std::thread::spawn(move || {
-                    let mut ok = 0;
-                    let mut errors = 0;
-                    for lg in &lutris_games {
-                        match ira_db::add_game(
-                            &db,
-                            ira_models::GameKind::Wine,
-                            ira_models::TrophySource::Empty,
-                            "",
-                            "",
-                            "",
-                            &lg.name,
-                        ) {
-                            Ok(db_id) => {
-                                match super::edit_game_pages::convert_lutris_to_managed(
-                                    &db, db_id, lg.id, &lg.name,
-                                ) {
-                                    Ok(()) => ok += 1,
-                                    Err(e) => {
-                                        errors += 1;
-                                        eprintln!("Failed to import '{}': {}", lg.name, e);
+                    let db = db.clone();
+                    let lutris_games = std::rc::Rc::new(lutris_games);
+                    alert.connect_response(None, move |_, response| {
+                        if response == "migrate" {
+                            let db = db.clone();
+                            let lutris_games = (*lutris_games).clone();
+                            std::thread::spawn(move || {
+                                let mut ok = 0;
+                                let mut errors = 0;
+                                for lg in &lutris_games {
+                                    match ira_db::add_game(
+                                        &db,
+                                        ira_models::GameKind::Wine,
+                                        ira_models::TrophySource::Empty,
+                                        "",
+                                        "",
+                                        "",
+                                        &lg.name,
+                                    ) {
+                                        Ok(db_id) => {
+                                            match super::edit_game_pages::convert_lutris_to_managed(
+                                                &db, db_id, lg.id, &lg.name,
+                                            ) {
+                                                Ok(()) => ok += 1,
+                                                Err(e) => {
+                                                    errors += 1;
+                                                    eprintln!(
+                                                        "Failed to import '{}': {}",
+                                                        lg.name, e
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            errors += 1;
+                                            eprintln!("Failed to add '{}': {}", lg.name, e);
+                                        }
                                     }
                                 }
-                            }
-                            Err(e) => {
-                                errors += 1;
-                                eprintln!("Failed to add '{}': {}", lg.name, e);
-                            }
+                                eprintln!("Imported {} game(s), {} failed", ok, errors);
+                            });
                         }
-                    }
-                    eprintln!("Imported {} game(s), {} failed", ok, errors);
-                });
+                    });
+                    alert.present(Some(&settings_win));
+                    glib::ControlFlow::Break
+                }
+                Ok(Err(e)) => {
+                    migrate_btn.set_sensitive(true);
+                    eprintln!("Failed to load Lutris games: {e}");
+                    glib::ControlFlow::Break
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    migrate_btn.set_sensitive(true);
+                    glib::ControlFlow::Break
+                }
             }
         });
-        alert.present(Some(&settings_win));
     });
 
     page

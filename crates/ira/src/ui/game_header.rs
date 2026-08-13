@@ -170,7 +170,7 @@ fn build_wine_tools_button(
     menu.append(Some("Run EXE inside Wine prefix"), Some("wine.run_exe"));
 
     let btn = gtk4::MenuButton::new();
-    btn.set_icon_name("wine-glass-symbolic");
+    btn.set_icon_name("wine-glass");
     btn.add_css_class(CSS_FLAT);
     btn.set_valign(gtk4::Align::Center);
     btn.set_tooltip_text(Some("Wine tools"));

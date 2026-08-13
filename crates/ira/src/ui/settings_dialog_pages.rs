@@ -196,7 +196,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.profiles_page,
-        "wine-glass-symbolic",
+        "wine-glass",
         T::PROFILES,
         "profiles",
     );

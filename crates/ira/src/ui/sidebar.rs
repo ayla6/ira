@@ -346,7 +346,7 @@ fn sidebar_setup_factory(_factory: &gtk4::SignalListItemFactory, list_item_obj: 
 
 fn sidebar_bind_all_games(state: &SharedState, row: &gtk4::Box) {
     row.add_css_class(CSS_SIDEBAR_ROW_PAD_GAME);
-    let icon = gtk4::Image::from_icon_name("games-symbolic");
+    let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
     icon.set_pixel_size(16);
     row.append(&icon);
     let label = gtk4::Label::new(Some(S::ALL_GAMES));

@@ -21,7 +21,7 @@ pub struct DialogLayout {
 
 pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
     let win = adw::Window::new();
-    win.set_default_size(960, 720);
+    win.set_default_size(800, 720);
     win.set_modal(true);
     win.set_transient_for(Some(parent));
     win.set_destroy_with_parent(true);

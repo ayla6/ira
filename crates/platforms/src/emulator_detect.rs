@@ -1,6 +1,8 @@
 use crate::emulator_systems;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone)]
 pub struct DetectedEmulator {
@@ -30,11 +32,25 @@ pub struct RaCore {
 }
 
 pub fn is_flatpak_installed(flatpak_id: &str) -> bool {
-    Command::new("flatpak")
-        .args(["info", flatpak_id])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    static FLATPAK_APPS: OnceLock<HashSet<String>> = OnceLock::new();
+    FLATPAK_APPS
+        .get_or_init(|| {
+            Command::new("flatpak")
+                .args(["list", "--app", "--columns=application"])
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .map(|output| {
+                    String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .map(str::trim)
+                        .filter(|app| !app.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .contains(flatpak_id)
 }
 
 fn which(name: &str) -> Option<String> {
@@ -171,6 +187,11 @@ fn core_display_name(filename: &str) -> String {
 }
 
 pub fn detect_ra_cores() -> Vec<RaCore> {
+    static RA_CORES: OnceLock<Vec<RaCore>> = OnceLock::new();
+    RA_CORES.get_or_init(load_ra_cores).clone()
+}
+
+fn load_ra_cores() -> Vec<RaCore> {
     let mut cores = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for dir in ra_core_dirs() {

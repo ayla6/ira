@@ -8,7 +8,9 @@ use super::state::SharedState;
 use super::system_settings::{build_override_switch_row, OverrideState};
 use adw::prelude::*;
 use ira_config::Config;
+use std::cell::RefCell;
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::Arc;
 
 pub(super) struct ConsoleSettingsWidgets {
@@ -25,6 +27,8 @@ pub(super) struct ConsoleSettingsWidgets {
     pub(super) cemu_enable_row: Option<adw::SwitchRow>,
     pub(super) cemu_exe_row: Option<adw::EntryRow>,
 }
+
+pub(super) type SharedConsoleSettingsWidgets = Rc<RefCell<ConsoleSettingsWidgets>>;
 
 pub(super) fn apply_emulator_settings(cfg: &mut Config, pages: &ConsoleSettingsWidgets) {
     if let Some(row) = &pages.ps4_enable_row {
@@ -126,8 +130,8 @@ pub(super) fn register_console_pages(
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
     rom_platforms_with_games: HashSet<String>,
-) -> ConsoleSettingsWidgets {
-    let mut result = ConsoleSettingsWidgets {
+) -> SharedConsoleSettingsWidgets {
+    let result = ConsoleSettingsWidgets {
         console_widgets: Vec::new(),
         console_profile_widgets: Vec::new(),
         source_overlay_states: Vec::new(),
@@ -149,81 +153,16 @@ pub(super) fn register_console_pages(
 
     for def in ira_models::all_consoles() {
         if def.id == "psp" {
-            let (page, enable_row, exe_row) = build_rpcs3_settings_page(cfg, win);
-            let profile = add_console_page_overrides(
-                &page,
-                cfg,
-                win,
-                "ps3",
-                "PS3",
-                registry.clone(),
-                &mut result,
-            );
-            result.console_profile_widgets.push(profile);
-            register_console_page(sidebar, stack, &page, "PS3", "ps3");
-            result.ps3_enable_row = Some(enable_row);
-            result.ps3_exe_row = Some(exe_row);
-
-            let (page, enable_row, version_dd) = build_shadps4_settings_page(cfg);
-            let profile = add_console_page_overrides(
-                &page,
-                cfg,
-                win,
-                "ps4",
-                "PS4",
-                registry.clone(),
-                &mut result,
-            );
-            result.console_profile_widgets.push(profile);
-            register_console_page(sidebar, stack, &page, "PS4", "ps4");
-            result.ps4_enable_row = Some(enable_row);
-            result.ps4_version_dd = version_dd;
-
-            let (page, enable_row, exe_row) = build_vita3k_settings_page(cfg, win);
-            let profile = add_console_page_overrides(
-                &page,
-                cfg,
-                win,
-                "psvita",
-                "PS Vita",
-                registry.clone(),
-                &mut result,
-            );
-            result.console_profile_widgets.push(profile);
-            register_console_page(sidebar, stack, &page, "PS Vita", "psvita");
-            result.vita3k_enable_row = Some(enable_row);
-            result.vita3k_exe_row = Some(exe_row);
+            register_lazy_console_page(sidebar, stack, "PS3", "ps3");
+            register_lazy_console_page(sidebar, stack, "PS4", "ps4");
+            register_lazy_console_page(sidebar, stack, "PS Vita", "psvita");
         }
         if def.id == "wii" {
-            let (page, enable_row, exe_row) = build_cemu_settings_page(cfg, win);
-            let profile = add_console_page_overrides(
-                &page,
-                cfg,
-                win,
-                "wiiu",
-                "Wii U",
-                registry.clone(),
-                &mut result,
-            );
-            result.console_profile_widgets.push(profile);
-            register_console_page(sidebar, stack, &page, "Wii U", "wiiu");
-            result.cemu_enable_row = Some(enable_row);
-            result.cemu_exe_row = Some(exe_row);
+            register_lazy_console_page(sidebar, stack, "Wii U", "wiiu");
         }
         if !def.uses_rom_folder() {
             continue;
         }
-        let (page, widgets) = build_console_settings_page(win, def, cfg.console(def.id));
-        let profile = add_console_page_overrides(
-            &page,
-            cfg,
-            win,
-            def.id,
-            def.display_name,
-            registry.clone(),
-            &mut result,
-        );
-        result.console_profile_widgets.push(profile);
         let page_id = def.display_name.to_lowercase();
         if rom_platforms_with_games.contains(def.id) {
             sidebar.append(&settings_sidebar_row(
@@ -234,8 +173,7 @@ pub(super) fn register_console_pages(
         } else {
             empty_platforms.push((def.display_name.to_string(), page_id.clone()));
         }
-        wrap_console_page(stack, &page, &page_id);
-        result.console_widgets.push((def.id, widgets));
+        add_console_loading_page(stack, &page_id);
     }
     if !empty_platforms.is_empty() {
         sidebar.append(&sidebar_section_title("Empty platforms"));
@@ -243,18 +181,180 @@ pub(super) fn register_console_pages(
             sidebar.append(&settings_sidebar_row("games-symbolic", &label, &page_id));
         }
     }
+    let result = Rc::new(RefCell::new(result));
+    connect_lazy_console_pages(&result, cfg, win, sidebar, stack, registry);
     result
 }
 
-fn register_console_page(
+fn register_lazy_console_page(
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
-    page: &gtk4::Box,
     label: &str,
     page_id: &str,
 ) {
     sidebar.append(&settings_sidebar_row("games-symbolic", label, page_id));
+    add_console_loading_page(stack, page_id);
+}
+
+fn add_console_loading_page(stack: &gtk4::Stack, page_id: &str) {
+    let loading = adw::StatusPage::new();
+    loading.set_title("Loading emulator settings");
+    let spinner = gtk4::Spinner::new();
+    spinner.start();
+    loading.set_child(Some(&spinner));
+    stack.add_named(&loading, Some(page_id));
+}
+
+fn connect_lazy_console_pages(
+    result: &SharedConsoleSettingsWidgets,
+    cfg: &Config,
+    win: &adw::Window,
+    sidebar: &gtk4::ListBox,
+    stack: &gtk4::Stack,
+    registry: Arc<ira_input::ControllerRegistry>,
+) {
+    let result = result.clone();
+    let cfg = cfg.clone();
+    let win = win.clone();
+    let stack = stack.clone();
+    sidebar.connect_row_selected(move |_, row| {
+        let Some(page_id) = row.map(|row| row.widget_name().to_string()) else {
+            return;
+        };
+        if load_special_console_page(&page_id, &cfg, &win, &stack, &registry, &result) {
+            return;
+        }
+        let Some(def) = ira_models::all_consoles()
+            .find(|def| def.uses_rom_folder() && def.display_name.to_lowercase() == page_id)
+        else {
+            return;
+        };
+        if result
+            .borrow()
+            .console_widgets
+            .iter()
+            .any(|(console_id, _)| *console_id == def.id)
+        {
+            return;
+        }
+
+        if let Some(loading) = stack.child_by_name(&page_id) {
+            stack.remove(&loading);
+        }
+        let (page, widgets) = build_console_settings_page(&win, def, cfg.console(def.id));
+        let profile = add_console_page_overrides(
+            &page,
+            &cfg,
+            &win,
+            def.id,
+            def.display_name,
+            registry.clone(),
+            &mut result.borrow_mut(),
+        );
+        let mut result = result.borrow_mut();
+        result.console_profile_widgets.push(profile);
+        result.console_widgets.push((def.id, widgets));
+        wrap_console_page(&stack, &page, &page_id);
+        stack.set_visible_child_name(&page_id);
+    });
+}
+
+fn load_special_console_page(
+    page_id: &str,
+    cfg: &Config,
+    win: &adw::Window,
+    stack: &gtk4::Stack,
+    registry: &Arc<ira_input::ControllerRegistry>,
+    result: &SharedConsoleSettingsWidgets,
+) -> bool {
+    match page_id {
+        "ps3" if result.borrow().ps3_enable_row.is_none() => {
+            let (page, enable_row, exe_row) = build_rpcs3_settings_page(cfg, win);
+            let mut result = result.borrow_mut();
+            let profile = add_console_page_overrides(
+                &page,
+                cfg,
+                win,
+                "ps3",
+                "PS3",
+                registry.clone(),
+                &mut result,
+            );
+            result.console_profile_widgets.push(profile);
+            result.ps3_enable_row = Some(enable_row);
+            result.ps3_exe_row = Some(exe_row);
+            drop(result);
+            replace_loading_page(stack, &page, page_id);
+            true
+        }
+        "ps4" if result.borrow().ps4_enable_row.is_none() => {
+            let (page, enable_row, version_dd) = build_shadps4_settings_page(cfg);
+            let mut result = result.borrow_mut();
+            let profile = add_console_page_overrides(
+                &page,
+                cfg,
+                win,
+                "ps4",
+                "PS4",
+                registry.clone(),
+                &mut result,
+            );
+            result.console_profile_widgets.push(profile);
+            result.ps4_enable_row = Some(enable_row);
+            result.ps4_version_dd = version_dd;
+            drop(result);
+            replace_loading_page(stack, &page, page_id);
+            true
+        }
+        "psvita" if result.borrow().vita3k_enable_row.is_none() => {
+            let (page, enable_row, exe_row) = build_vita3k_settings_page(cfg, win);
+            let mut result = result.borrow_mut();
+            let profile = add_console_page_overrides(
+                &page,
+                cfg,
+                win,
+                "psvita",
+                "PS Vita",
+                registry.clone(),
+                &mut result,
+            );
+            result.console_profile_widgets.push(profile);
+            result.vita3k_enable_row = Some(enable_row);
+            result.vita3k_exe_row = Some(exe_row);
+            drop(result);
+            replace_loading_page(stack, &page, page_id);
+            true
+        }
+        "wiiu" if result.borrow().cemu_enable_row.is_none() => {
+            let (page, enable_row, exe_row) = build_cemu_settings_page(cfg, win);
+            let mut result = result.borrow_mut();
+            let profile = add_console_page_overrides(
+                &page,
+                cfg,
+                win,
+                "wiiu",
+                "Wii U",
+                registry.clone(),
+                &mut result,
+            );
+            result.console_profile_widgets.push(profile);
+            result.cemu_enable_row = Some(enable_row);
+            result.cemu_exe_row = Some(exe_row);
+            drop(result);
+            replace_loading_page(stack, &page, page_id);
+            true
+        }
+        "ps3" | "ps4" | "psvita" | "wiiu" => true,
+        _ => false,
+    }
+}
+
+fn replace_loading_page(stack: &gtk4::Stack, page: &gtk4::Box, page_id: &str) {
+    if let Some(loading) = stack.child_by_name(page_id) {
+        stack.remove(&loading);
+    }
     wrap_console_page(stack, page, page_id);
+    stack.set_visible_child_name(page_id);
 }
 
 fn wrap_console_page(stack: &gtk4::Stack, page: &gtk4::Box, page_id: &str) {

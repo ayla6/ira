@@ -170,7 +170,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.steam_page,
-        "application-x-executable-symbolic",
+        "steam-train-symbolic",
         "Steam",
         "steam",
     );
@@ -195,7 +195,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.profiles_page,
-        "wine-glasses-symbolic",
+        "wine-glass-symbolic",
         "Profiles",
         "profiles",
     );

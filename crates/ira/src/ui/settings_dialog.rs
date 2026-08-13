@@ -4,7 +4,7 @@ use super::input_profile_settings::{ConsoleProfileWidgets, ControllerDefaultWidg
 use super::input_profile_store::ensure_controller_default_profile;
 use super::settings_dialog_console::{
     apply_console_settings, apply_emulator_settings, apply_override_states,
-    discovery_settings_changed, register_console_pages, ConsoleSettingsWidgets,
+    discovery_settings_changed, register_console_pages, SharedConsoleSettingsWidgets,
 };
 use super::settings_dialog_pages::{build_settings_pages, register_settings_pages};
 use super::settings_pages::{OverlayPageWidgets, SystemDefaultsWidgets};
@@ -49,7 +49,7 @@ struct SavedSettingsWidgets {
     controller_default_widgets: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
     overlay_widgets: OverlayPageWidgets,
     system_defaults_widgets: SystemDefaultsWidgets,
-    console_pages: ConsoleSettingsWidgets,
+    console_pages: SharedConsoleSettingsWidgets,
     wine_widgets: WineConfigWidgets,
     linux_controller_profile: ConsoleProfileWidgets,
     wine_controller_profile: ConsoleProfileWidgets,
@@ -78,6 +78,15 @@ pub fn show_settings_dialog(
     let layout = dialog_layout(parent);
     layout.window.set_deletable(false);
     layout.sidebar_area.set_size_request(180, -1);
+
+    let loading = adw::StatusPage::new();
+    loading.set_title("Loading Settings");
+    loading.set_description(Some("Checking installed emulators and controller profiles"));
+    let spinner = gtk4::Spinner::new();
+    spinner.start();
+    loading.set_child(Some(&spinner));
+    layout.stack.add_named(&loading, Some("loading"));
+    layout.stack.set_visible_child_name("loading");
     layout.window.present();
 
     let rom_platforms_with_games = {
@@ -98,7 +107,9 @@ pub fn show_settings_dialog(
         state: state.clone(),
         rom_platforms_with_games,
     };
-    glib::idle_add_local_once(move || finish_settings_dialog(params));
+    glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
+        finish_settings_dialog(params)
+    });
 }
 
 fn finish_settings_dialog(params: SettingsDialogParams) {
@@ -162,7 +173,7 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         source_gamescope_states.push(("ra".to_string(), gs_state));
     }
 
-    let mut console_pages = register_console_pages(
+    let console_pages = register_console_pages(
         &cfg,
         &win,
         &state,
@@ -170,8 +181,15 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         &stack,
         rom_platforms_with_games,
     );
-    source_overlay_states.append(&mut console_pages.source_overlay_states);
-    source_gamescope_states.append(&mut console_pages.source_gamescope_states);
+    {
+        let mut console_pages = console_pages.borrow_mut();
+        console_pages
+            .source_overlay_states
+            .append(&mut source_overlay_states);
+        console_pages
+            .source_gamescope_states
+            .append(&mut source_gamescope_states);
+    }
     let saved_widgets = SavedSettingsWidgets {
         steam_entry: pages.steam_entry,
         sgdb_entry: pages.sgdb_entry,
@@ -278,16 +296,17 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
 
 fn apply_saved_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
     apply_general_settings(cfg, widgets);
-    apply_emulator_settings(cfg, &widgets.console_pages);
+    let console_pages = widgets.console_pages.borrow();
+    apply_emulator_settings(cfg, &console_pages);
     apply_controller_defaults(cfg, &widgets.controller_default_widgets);
     apply_overlay_settings(cfg, &widgets.overlay_widgets);
     apply_system_defaults(cfg, &widgets.system_defaults_widgets);
     apply_override_states(
         cfg,
-        &widgets.console_pages.source_overlay_states,
-        &widgets.console_pages.source_gamescope_states,
+        &console_pages.source_overlay_states,
+        &console_pages.source_gamescope_states,
     );
-    apply_console_settings(cfg, &widgets.console_pages);
+    apply_console_settings(cfg, &console_pages);
     apply_profile_settings(cfg, widgets);
     apply_api_emulator_version(cfg, widgets);
 }

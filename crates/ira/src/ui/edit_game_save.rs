@@ -5,6 +5,7 @@ use super::edit_game_overlay::OverlayWidgets;
 use super::edit_game_system::SystemWidgets;
 use super::edit_game_variants::VarW;
 use super::input_profile_store::add_game_compatibility;
+use super::message_helpers::refresh_selected_base_game;
 use super::state::{PendingImage, SharedState};
 use super::wine_config_env_dll::collect_dll_overrides;
 use super::wine_config_widget::WineConfigWidgets;
@@ -731,38 +732,11 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
         }
 
         super::sidebar::rebuild_sidebar(&state_cb);
-        {
-            let store = state_cb.borrow().grid_store.clone();
-            let games = state_cb.borrow().games.clone();
-            for i in 0..store.n_items() {
-                if let Some(item) = store
-                    .item(i)
-                    .and_then(|o| o.downcast::<super::game_item::GameItem>().ok())
-                {
-                    if let Some(gi) = item.game() {
-                        if gi.db_id == db_id_cb {
-                            if let Some(g) = games.iter().find(|g| g.grid_id() == gi.grid_id()) {
-                                store.splice(i, 1, &[super::game_item::GameItem::new(g)]);
-                            }
-                        }
-                    }
-                }
-            }
+        let games = state_cb.borrow().games.clone();
+        for game in games.iter().filter(|g| g.db_id == db_id_cb) {
+            super::helpers::replace_grid_game(&state_cb, game);
         }
-        let selected = state_cb.borrow().selected_id.clone();
-        let game_after_save = if selected == db_id_cb.to_string() {
-            state_cb
-                .borrow()
-                .games
-                .iter()
-                .find(|g| g.db_id == db_id_cb && g.variant_id.is_none())
-                .cloned()
-        } else {
-            None
-        };
-        if let Some(g) = game_after_save {
-            super::game_display::display_game(&g, &state_cb);
-        }
+        refresh_selected_base_game(&state_cb, db_id_cb);
 
         super::edit_game_variants::save_variants(&db_cb, db_id_cb, &var_widgets_cb);
         let _ = state_cb
@@ -801,21 +775,7 @@ fn finish_save(params: &SaveGameSettingsParams, db: &ira_db::DbConn) {
     super::sidebar::rebuild_sidebar(&params.state);
     super::grid_view::refresh_grid_store(&params.state);
 
-    let selected = params.state.borrow().selected_id.clone();
-    let game_after_save = if selected == params.db_id.to_string() {
-        params
-            .state
-            .borrow()
-            .games
-            .iter()
-            .find(|g| g.db_id == params.db_id && g.variant_id.is_none())
-            .cloned()
-    } else {
-        None
-    };
-    if let Some(g) = game_after_save {
-        super::game_display::display_game(&g, &params.state);
-    }
+    refresh_selected_base_game(&params.state, params.db_id);
 
     super::edit_game_variants::save_variants(db, params.db_id, &params.var_widgets);
     let _ = params

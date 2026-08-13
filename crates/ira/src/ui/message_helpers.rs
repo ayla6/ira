@@ -1,15 +1,13 @@
 use super::enrichment::enrich_game_async;
 use super::game_display::display_game;
-use super::game_item::GameItem;
 use super::grid_view::{show_grid_view, show_loading_view};
-use super::helpers::{clear_children, merge_game_enrichment};
+use super::helpers::{clear_children, merge_game_enrichment, replace_grid_game};
 use super::sidebar::{
     find_game_index, rebuild_sidebar, rebuild_sidebar_and_show_grid, select_row_silently,
     update_sidebar_game,
 };
 use super::state::SharedState;
 use crate::Game;
-use gtk4::prelude::*;
 use std::collections::{HashMap, HashSet};
 pub(super) fn refresh_steam_playtimes_for(state: &SharedState, db_ids: &[i64]) {
     let id_set: HashSet<i64> = db_ids.iter().copied().collect();
@@ -77,16 +75,33 @@ fn apply_playtime_updates_db(state: &SharedState, updates: &HashMap<i64, (f64, i
     }
 
     if changed_db_ids.contains(&selected_db_id) {
-        let selected_id = state.borrow().selected_id.clone();
-        let game = state
-            .borrow()
-            .games
-            .iter()
-            .find(|g| g.grid_id() == selected_id)
-            .cloned();
-        if let Some(game) = game {
-            display_game(&game, state);
-        }
+        refresh_selected_game(state, selected_db_id);
+    }
+}
+
+pub(super) fn refresh_selected_game(state: &SharedState, db_id: i64) {
+    refresh_selected_game_if(state, |selected_id| {
+        ira_models::parse_db_id(selected_id) == db_id
+    });
+}
+
+pub(super) fn refresh_selected_base_game(state: &SharedState, db_id: i64) {
+    refresh_selected_game_if(state, |selected_id| selected_id == db_id.to_string());
+}
+
+fn refresh_selected_game_if(state: &SharedState, is_selected: impl FnOnce(&str) -> bool) {
+    let selected_id = state.borrow().selected_id.clone();
+    if !is_selected(&selected_id) {
+        return;
+    }
+    let game = state
+        .borrow()
+        .games
+        .iter()
+        .find(|g| g.grid_id() == selected_id)
+        .cloned();
+    if let Some(game) = game {
+        display_game(&game, state);
     }
 }
 
@@ -500,29 +515,10 @@ pub(super) fn apply_game_update(state: &SharedState, updated: Game) {
         display_game(&game, state);
     }
     if let Some(g) = game_for_grid {
-        let store = state.borrow().grid_store.clone();
-        for i in 0..store.n_items() {
-            if let Some(item) = store.item(i).and_then(|o| o.downcast::<GameItem>().ok()) {
-                if item
-                    .game()
-                    .is_some_and(|gi| gi.db_id == g.db_id && gi.variant_id.is_none())
-                {
-                    store.splice(i, 1, &[GameItem::new(&g)]);
-                    break;
-                }
-            }
-        }
+        replace_grid_game(state, &g);
     }
     for vg in variant_grid_updates {
-        let store = state.borrow().grid_store.clone();
-        for i in 0..store.n_items() {
-            if let Some(item) = store.item(i).and_then(|o| o.downcast::<GameItem>().ok()) {
-                if item.game().is_some_and(|gi| gi.grid_id() == vg.grid_id()) {
-                    store.splice(i, 1, &[GameItem::new(&vg)]);
-                    break;
-                }
-            }
-        }
+        replace_grid_game(state, &vg);
     }
 }
 

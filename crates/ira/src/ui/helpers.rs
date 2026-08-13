@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::css::*;
+use super::game_item::GameItem;
 use super::state::{PendingImage, SharedState};
 
 pub struct DialogLayout {
@@ -356,6 +357,22 @@ impl Clearable for gtk4::FlowBox {
 
 pub fn clear_children(w: &impl Clearable) {
     w.clear_all_children();
+}
+
+pub fn replace_grid_game(state: &SharedState, game: &Game) {
+    let store = state.borrow().grid_store.clone();
+    let grid_id = game.grid_id();
+    for i in 0..store.n_items() {
+        if let Some(item) = store.item(i).and_then(|o| o.downcast::<GameItem>().ok()) {
+            if item
+                .game()
+                .is_some_and(|current| current.grid_id() == grid_id)
+            {
+                store.splice(i, 1, &[GameItem::new(game)]);
+                break;
+            }
+        }
+    }
 }
 
 pub fn esc(s: &str) -> String {

@@ -1,10 +1,9 @@
-use super::game_display::display_game;
-use super::game_item::GameItem;
 use super::grid_view::update_loading_view;
+use super::helpers::replace_grid_game;
 use super::image_manager::build_image_manager_content_with_drafts;
 use super::message_helpers::{
-    apply_game_update, handle_games_loaded, insert_or_update_game, refresh_steam_playtimes_for,
-    switch_to_game,
+    apply_game_update, handle_games_loaded, insert_or_update_game, refresh_selected_game,
+    refresh_steam_playtimes_for, switch_to_game,
 };
 use super::sidebar::{rebuild_sidebar, set_sidebar_playing};
 use super::state::SharedState;
@@ -86,18 +85,7 @@ fn handle_game_stopped(state: &SharedState, db_id: i64) {
     if let Some(ref watcher) = state.borrow().watcher {
         watcher.unwatch(db_id);
     }
-    let selected_id = state.borrow().selected_id.clone();
-    if ira_models::parse_db_id(&selected_id) == db_id {
-        let game = state
-            .borrow()
-            .games
-            .iter()
-            .find(|g| g.grid_id() == selected_id)
-            .cloned();
-        if let Some(game) = game {
-            display_game(&game, state);
-        }
-    }
+    refresh_selected_game(state, db_id);
 }
 
 fn handle_game_started(state: &SharedState, db_id: i64) {
@@ -124,18 +112,7 @@ fn handle_game_started(state: &SharedState, db_id: i64) {
             watcher.watch(&entry, &watch_file, &game.achievements);
         }
     }
-    let selected_id = state.borrow().selected_id.clone();
-    if ira_models::parse_db_id(&selected_id) == db_id {
-        let game = state
-            .borrow()
-            .games
-            .iter()
-            .find(|g| g.grid_id() == selected_id)
-            .cloned();
-        if let Some(game) = game {
-            display_game(&game, state);
-        }
-    }
+    refresh_selected_game(state, db_id);
 }
 
 fn handle_session_recorded(
@@ -188,7 +165,7 @@ fn handle_shadps4_playtime_changed(state: &SharedState) {
     glib::source::idle_add_local_full(glib::Priority::LOW, move || {
         match rx.borrow_mut().try_recv() {
             Ok(play_times) => {
-                let (updated_ids, selected_id) = {
+                let updated_ids = {
                     let mut s = state.borrow_mut();
                     let mut updated_ids = Vec::new();
                     for g in s.games.iter_mut() {
@@ -203,22 +180,12 @@ fn handle_shadps4_playtime_changed(state: &SharedState) {
                             }
                         }
                     }
-                    (updated_ids, s.selected_id.clone())
+                    updated_ids
                 };
                 if !updated_ids.is_empty() {
                     rebuild_sidebar(&state);
                     if let Some(id) = updated_ids.first() {
-                        if ira_models::parse_db_id(&selected_id) == *id {
-                            let game = state
-                                .borrow()
-                                .games
-                                .iter()
-                                .find(|g| g.grid_id() == selected_id)
-                                .cloned();
-                            if let Some(game) = game {
-                                display_game(&game, &state);
-                            }
-                        }
+                        refresh_selected_game(&state, *id);
                     }
                 }
                 glib::ControlFlow::Break
@@ -244,7 +211,7 @@ fn handle_rpcs3_playtime_changed(state: &SharedState) {
     glib::source::idle_add_local_full(glib::Priority::LOW, move || {
         match rx.borrow_mut().try_recv() {
             Ok(persistent) => {
-                let (updated_ids, selected_id) = {
+                let updated_ids = {
                     let mut s = state.borrow_mut();
                     let mut updated_ids = Vec::new();
                     for g in s.games.iter_mut() {
@@ -273,22 +240,12 @@ fn handle_rpcs3_playtime_changed(state: &SharedState) {
                             }
                         }
                     }
-                    (updated_ids, s.selected_id.clone())
+                    updated_ids
                 };
                 if !updated_ids.is_empty() {
                     rebuild_sidebar(&state);
                     if let Some(id) = updated_ids.first() {
-                        if ira_models::parse_db_id(&selected_id) == *id {
-                            let game = state
-                                .borrow()
-                                .games
-                                .iter()
-                                .find(|g| g.grid_id() == selected_id)
-                                .cloned();
-                            if let Some(game) = game {
-                                display_game(&game, &state);
-                            }
-                        }
+                        refresh_selected_game(&state, *id);
                     }
                 }
                 glib::ControlFlow::Break
@@ -360,35 +317,15 @@ fn handle_sgdb_assets_downloaded(
     }
 
     if let Some(g) = game_for_grid {
-        let store = state.borrow().grid_store.clone();
-        for i in 0..store.n_items() {
-            if let Some(item) = store.item(i).and_then(|o| o.downcast::<GameItem>().ok()) {
-                if item
-                    .game()
-                    .is_some_and(|gi| gi.db_id == g.db_id && gi.variant_id.is_none())
-                {
-                    store.splice(i, 1, &[GameItem::new(&g)]);
-                    break;
-                }
-            }
+        if g.variant_id.is_none() {
+            replace_grid_game(state, &g);
         }
     }
 
     super::helpers::refresh_settings_images_page(state, db_id, |s, game, win, pc| {
         build_image_manager_content_with_drafts(s, game, win, pc).upcast()
     });
-    let selected_id = state.borrow().selected_id.clone();
-    if ira_models::parse_db_id(&selected_id) == db_id {
-        let game = state
-            .borrow()
-            .games
-            .iter()
-            .find(|g| g.grid_id() == selected_id)
-            .cloned();
-        if let Some(game) = game {
-            display_game(&game, state);
-        }
-    }
+    refresh_selected_game(state, db_id);
 }
 
 fn handle_variant_selected(state: &SharedState, db_id: i64, variant_id: Option<i64>) {

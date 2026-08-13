@@ -5,7 +5,7 @@ use gio::prelude::ListModelExt;
 use glib::object::Cast;
 use gtk4::gdk::prelude::{DisplayExt, MonitorExt};
 use gtk4::gdk::{Display, Monitor};
-use ira_config::Config;
+use ira_config::{Config, SystemDefaults};
 use ira_db::DbConn;
 use ira_input::{InputProfile, VirtualGamepadBackend};
 use ira_models::{AppSender, ControllerInputMode, WineConfig};
@@ -44,14 +44,7 @@ pub(super) struct LaunchCtx<'a> {
     pub overlay_shm: Option<String>,
     pub overlay_global_enabled: bool,
     pub overlay_font_family: Option<String>,
-    pub gamescope_default: bool,
-    pub gamemode_default: bool,
-    pub mangohud_default: bool,
-    pub gamescope_w_default: u32,
-    pub gamescope_h_default: u32,
-    pub gamescope_fps_default: u32,
-    pub gamescope_upscaling_default: String,
-    pub gpu_default: String,
+    pub system_defaults: SystemDefaults,
     pub controller_input_mode: ControllerInputMode,
     pub controller_input_profile: Option<String>,
 }
@@ -128,6 +121,52 @@ fn resolve_input_profile(
     }
     read_profile(&profile_path)?;
     Ok(Some(profile_path.to_string_lossy().into_owned()))
+}
+
+fn apply_system_defaults(launch: &mut ira_models::GameLaunchConfig, defaults: &SystemDefaults) {
+    if launch.gamemode.is_none() {
+        launch.gamemode = Some(defaults.gamemode);
+    }
+    if launch.mangohud.is_none() {
+        launch.mangohud = Some(defaults.mangohud);
+    }
+    if launch.gamescope.is_none() {
+        launch.gamescope = Some(defaults.gamescope);
+    }
+    if launch.gamescope_flags.is_empty() {
+        launch.gamescope_flags = defaults.gamescope_flags.clone();
+    }
+    if launch.gamescope_w.is_none() {
+        launch.gamescope_w = Some(defaults.gamescope_w);
+    }
+    if launch.gamescope_h.is_none() {
+        launch.gamescope_h = Some(defaults.gamescope_h);
+    }
+    if launch.gamescope_fps.is_none() {
+        launch.gamescope_fps = Some(defaults.gamescope_fps);
+    }
+    if launch.gamescope_upscaling.is_none() {
+        launch.gamescope_upscaling = Some(defaults.gamescope_upscaling.clone());
+    }
+    if launch.gpu.is_empty() {
+        launch.gpu = defaults.gpu.clone();
+    }
+    merge_env_vars(&mut launch.env_vars, &defaults.env_vars);
+    if launch.ld_preload.is_empty() {
+        launch.ld_preload = defaults.ld_preload.clone();
+    }
+    if launch.ld_library_path.is_empty() {
+        launch.ld_library_path = defaults.ld_library_path.clone();
+    }
+}
+
+fn merge_env_vars(target: &mut Vec<(String, String)>, defaults: &[(String, String)]) {
+    let mut merged = defaults.to_vec();
+    for (key, value) in target.drain(..) {
+        merged.retain(|(existing, _)| existing != &key);
+        merged.push((key, value));
+    }
+    *target = merged;
 }
 
 fn spawn_and_monitor(
@@ -208,21 +247,7 @@ fn build_emulator_env_and_wrap(
         .unwrap_or_default();
 
     let mut launch = launch;
-    if launch.gamemode.is_none() {
-        launch.gamemode = Some(ctx.gamemode_default);
-    }
-    if launch.mangohud.is_none() {
-        launch.mangohud = Some(ctx.mangohud_default);
-    }
-    if launch.gamescope.is_none() {
-        launch.gamescope = Some(ctx.gamescope_default);
-    }
-    if launch.gamescope_w.is_none() {
-        launch.gamescope_w = Some(ctx.gamescope_w_default);
-    }
-    if launch.gamescope_h.is_none() {
-        launch.gamescope_h = Some(ctx.gamescope_h_default);
-    }
+    apply_system_defaults(&mut launch, &ctx.system_defaults);
     if launch.gamescope_w == Some(0) || launch.gamescope_h == Some(0) {
         let (sw, sh) = detect_screen_resolution();
         if launch.gamescope_w == Some(0) {
@@ -231,15 +256,6 @@ fn build_emulator_env_and_wrap(
         if launch.gamescope_h == Some(0) {
             launch.gamescope_h = Some(sh);
         }
-    }
-    if launch.gamescope_fps.is_none() {
-        launch.gamescope_fps = Some(ctx.gamescope_fps_default);
-    }
-    if launch.gamescope_upscaling.is_none() {
-        launch.gamescope_upscaling = Some(ctx.gamescope_upscaling_default.clone());
-    }
-    if launch.gpu.is_empty() && !ctx.gpu_default.is_empty() {
-        launch.gpu = ctx.gpu_default.clone();
     }
 
     let overlay_enabled = launch.overlay_enabled.unwrap_or(ctx.overlay_global_enabled);
@@ -516,7 +532,7 @@ pub(super) fn launch_cemu(
     spawn_and_monitor(ctx, &cmd, &env, "Cemu")
 }
 
-pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<(), String> {
+pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<bool, String> {
     let mut cmd = vec![
         "steam".to_string(),
         "-applaunch".to_string(),
@@ -552,19 +568,22 @@ pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<(), String> 
             ["--steam-app-id".to_string(), app_id.to_string()],
         );
         let env = std::env::vars().collect::<Vec<_>>();
-        return spawn_and_monitor(ctx, &cmd, &env, "Steam game");
+        spawn_and_monitor(ctx, &cmd, &env, "Steam game")?;
+        return Ok(true);
     }
-    match ira_launcher::wrapper::spawn_game(&cmd, &[], None, None) {
+    let env = std::env::vars().collect::<Vec<_>>();
+    match ira_launcher::wrapper::spawn_game(&cmd, &env, None, None) {
         Ok(_child) => {}
         Err(_) => {
             let uri = format!("steam://run/{}", app_id);
             let cmd = vec!["xdg-open".to_string(), uri];
-            if let Err(e) = ira_launcher::wrapper::spawn_game(&cmd, &[], None, None) {
+            if let Err(e) = ira_launcher::wrapper::spawn_game(&cmd, &env, None, None) {
                 return Err(format!("Failed to launch Steam game: {}", e));
             }
         }
     }
-    Ok(())
+    // Steam detaches from the app launcher, so there is no child process we can track.
+    Ok(false)
 }
 
 pub(super) fn launch_other(
@@ -581,21 +600,7 @@ pub(super) fn launch_other(
         .flatten()
         .unwrap_or_default();
 
-    if launch.gamemode.is_none() {
-        launch.gamemode = Some(ctx.gamemode_default);
-    }
-    if launch.mangohud.is_none() {
-        launch.mangohud = Some(ctx.mangohud_default);
-    }
-    if launch.gamescope.is_none() {
-        launch.gamescope = Some(ctx.gamescope_default);
-    }
-    if launch.gamescope_w.is_none() {
-        launch.gamescope_w = Some(ctx.gamescope_w_default);
-    }
-    if launch.gamescope_h.is_none() {
-        launch.gamescope_h = Some(ctx.gamescope_h_default);
-    }
+    apply_system_defaults(&mut launch, &ctx.system_defaults);
     if launch.gamescope_w == Some(0) || launch.gamescope_h == Some(0) {
         let (sw, sh) = detect_screen_resolution();
         if launch.gamescope_w == Some(0) {
@@ -604,15 +609,6 @@ pub(super) fn launch_other(
         if launch.gamescope_h == Some(0) {
             launch.gamescope_h = Some(sh);
         }
-    }
-    if launch.gamescope_fps.is_none() {
-        launch.gamescope_fps = Some(ctx.gamescope_fps_default);
-    }
-    if launch.gamescope_upscaling.is_none() {
-        launch.gamescope_upscaling = Some(ctx.gamescope_upscaling_default.clone());
-    }
-    if launch.gpu.is_empty() && !ctx.gpu_default.is_empty() {
-        launch.gpu = ctx.gpu_default.clone();
     }
 
     if let Some(pid) = profile_id {
@@ -655,14 +651,8 @@ pub(super) fn launch_other(
         }
     }
 
-    if !default_native_env_vars.is_empty() {
-        let mut merged = default_native_env_vars.to_vec();
-        for (k, v) in &launch.env_vars {
-            merged.retain(|(ek, _)| ek != k);
-            merged.push((k.clone(), v.clone()));
-        }
-        launch.env_vars = merged;
-    }
+    merge_env_vars(&mut launch.env_vars, default_native_env_vars);
+    apply_system_defaults(&mut launch, &ctx.system_defaults);
 
     let (game_type_mode, game_type_profile) = match ctx.game_kind {
         ira_models::GameKind::Wine => pc_controller_profiles.wine,
@@ -759,7 +749,8 @@ pub(super) fn update_last_played(
 
 #[cfg(test)]
 mod tests {
-    use super::{console_input_mode, input_backend, resolved_input_mode};
+    use super::{apply_system_defaults, console_input_mode, input_backend, resolved_input_mode};
+    use ira_config::SystemDefaults;
     use ira_input::VirtualGamepadBackend;
     use ira_models::ControllerInputMode;
 
@@ -819,6 +810,32 @@ mod tests {
             )
         });
         assert_eq!(mode, ControllerInputMode::VirtualDirectInput);
+    }
+
+    #[test]
+    fn test_apply_system_defaults_preserves_game_overrides() {
+        let defaults = SystemDefaults {
+            gamescope: true,
+            gamescope_flags: "--adaptive-sync".to_string(),
+            env_vars: vec![("MESA_VK_DEVICE_SELECT".to_string(), "1002:744c".to_string())],
+            ld_preload: "libglobal.so".to_string(),
+            ..Default::default()
+        };
+        let mut launch = ira_models::GameLaunchConfig {
+            gamescope: Some(false),
+            env_vars: vec![("MESA_VK_DEVICE_SELECT".to_string(), "10de:2684".to_string())],
+            ..Default::default()
+        };
+
+        apply_system_defaults(&mut launch, &defaults);
+
+        assert_eq!(launch.gamescope, Some(false));
+        assert_eq!(launch.gamescope_flags, "--adaptive-sync");
+        assert_eq!(launch.ld_preload, "libglobal.so");
+        assert_eq!(
+            launch.env_vars,
+            vec![("MESA_VK_DEVICE_SELECT".to_string(), "10de:2684".to_string())]
+        );
     }
 
     #[test]

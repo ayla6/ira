@@ -159,7 +159,7 @@ pub fn launch_game(
     state: &SharedState,
     game_id: i64,
     variant_id: Option<i64>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let (
         running_games,
         sender,
@@ -176,19 +176,11 @@ pub fn launch_game(
         overlay_shm,
         overlay_global_enabled,
         overlay_font_family,
-        gamescope_default,
-        gamemode_default,
-        mangohud_default,
-        gamescope_w_default,
-        gamescope_h_default,
-        gamescope_fps_default,
-        gamescope_upscaling_default,
-        gpu_default,
+        system_defaults,
         controller_registry,
     ) = {
         let s = state.borrow();
         let game = s.games.iter().find(|g| g.db_id == game_id);
-        let overlay_shm = game.and_then(|g| crate::overlay::write_game_shm(g, &s.cfg.overlay));
         let source_id = game.and_then(|g| match g.kind {
             ira_models::GameKind::Steam => Some("steam"),
             ira_models::GameKind::Retro => Some(g.platform_id.as_str()),
@@ -200,16 +192,23 @@ pub fn launch_game(
         });
         let overlay_global_enabled =
             source_id.map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id));
-        let gamemode_default = s.cfg.default_system.gamemode;
-        let mangohud_default = s.cfg.default_system.mangohud;
-        let gamescope_default = source_id
+        let mut system_defaults = s.cfg.default_system.clone();
+        system_defaults.gamescope = source_id
             .and_then(|id| s.cfg.overlay.source_gamescope.get(id).copied())
-            .unwrap_or(s.cfg.default_system.gamescope);
-        let gamescope_w_default = s.cfg.default_system.gamescope_w;
-        let gamescope_h_default = s.cfg.default_system.gamescope_h;
-        let gamescope_fps_default = s.cfg.default_system.gamescope_fps;
-        let gamescope_upscaling_default = s.cfg.default_system.gamescope_upscaling.clone();
-        let gpu_default = s.cfg.default_system.gpu.clone();
+            .unwrap_or(system_defaults.gamescope);
+        let overlay_shm = game.and_then(|game| {
+            let launch = ira_db::get_game_config(&s.db, game.db_id)
+                .ok()
+                .flatten()
+                .map(|(launch, _, _)| launch)
+                .unwrap_or_default();
+            crate::overlay::write_game_shm(
+                game,
+                &s.cfg.overlay,
+                launch.overlay_encoder,
+                launch.overlay_recording_quality,
+            )
+        });
         let game_info = game
             .map(|g| {
                 (
@@ -242,20 +241,13 @@ pub fn launch_game(
             overlay_shm,
             overlay_global_enabled,
             s.cfg.overlay.font_family.clone(),
-            gamescope_default,
-            gamemode_default,
-            mangohud_default,
-            gamescope_w_default,
-            gamescope_h_default,
-            gamescope_fps_default,
-            gamescope_upscaling_default,
-            gpu_default,
+            system_defaults,
             s.controller_registry.clone(),
         )
     };
 
     if is_game_running(state, game_id) {
-        return Ok(());
+        return Ok(false);
     }
 
     let (
@@ -310,14 +302,7 @@ pub fn launch_game(
         overlay_shm,
         overlay_global_enabled,
         overlay_font_family,
-        gamescope_default,
-        gamemode_default,
-        mangohud_default,
-        gamescope_w_default,
-        gamescope_h_default,
-        gamescope_fps_default,
-        gamescope_upscaling_default,
-        gpu_default,
+        system_defaults,
         controller_input_mode,
         controller_input_profile,
     };
@@ -370,7 +355,7 @@ pub fn launch_game(
                 .then_some(cfg_clone.console("wiiu").controller_profile.as_str()),
         )?;
     } else if kind == ira_models::GameKind::Steam {
-        play_button_helpers::launch_steam(&ctx, &app_id)?;
+        return play_button_helpers::launch_steam(&ctx, &app_id);
     } else {
         play_button_helpers::launch_other(
             &ctx,
@@ -400,7 +385,7 @@ pub fn launch_game(
         variant_show_as_entry,
     );
 
-    Ok(())
+    Ok(true)
 }
 
 pub fn play_button(state: &SharedState, db_id: i64, variant_id: Option<i64>) -> gtk4::Widget {
@@ -467,9 +452,10 @@ fn build_simple_play_button(
             set_running_state(&icon_click, &label_click, btn, false);
         } else {
             match launch_game(&st, db_id, None) {
-                Ok(()) => {
+                Ok(true) => {
                     set_running_state(&icon_click, &label_click, btn, true);
                 }
+                Ok(false) => {}
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);
                     let _ = sender_c.send(AppMessage::AddGameError(e));
@@ -564,9 +550,10 @@ fn build_disc_play_button(
             set_running_state(&icon_click, &label_click, btn, false);
         } else {
             match launch_game(&st_launch, db_id, None) {
-                Ok(()) => {
+                Ok(true) => {
                     set_running_state(&icon_click, &label_click, btn, true);
                 }
+                Ok(false) => {}
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);
                     let _ = sender_c.send(AppMessage::AddGameError(e));
@@ -674,9 +661,10 @@ fn build_variant_play_button(
         } else {
             let vid = current_variant_launch.get();
             match launch_game(&st_launch, db_id, vid) {
-                Ok(()) => {
+                Ok(true) => {
                     set_running_state(&icon_click, &label_click, btn, true);
                 }
+                Ok(false) => {}
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);
                     let _ = sender_c.send(AppMessage::AddGameError(e));

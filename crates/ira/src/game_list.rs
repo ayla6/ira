@@ -65,6 +65,7 @@ pub struct GameListOptions {
     pub cemu_enabled: bool,
     pub cemu_executable: String,
     pub steam_enabled: bool,
+    pub ra_enabled: bool,
     pub sort_mode: SortMode,
     pub sort_descending: bool,
 }
@@ -81,6 +82,7 @@ impl GameListOptions {
             cemu_enabled: cfg.cemu_enabled,
             cemu_executable: cfg.cemu_executable.clone(),
             steam_enabled: cfg.steam_enabled,
+            ra_enabled: cfg.ra_enabled,
             sort_mode: cfg.sort_mode,
             sort_descending: cfg.sort_descending,
         }
@@ -117,7 +119,7 @@ pub fn build_game_list(
 ) -> Vec<Game> {
     let _span = tracing::info_span!("build_game_list").entered();
 
-    let ra_any_console = cfg.any_console_enabled();
+    let ra_any_console = options.ra_enabled && cfg.any_console_enabled();
     let db = db.clone();
     let save_dir = save_dir.to_string();
     let cfg = cfg.clone();
@@ -677,6 +679,7 @@ mod tests {
         let options = GameListOptions::from_config(&cfg);
 
         assert!(options.steam_enabled);
+        assert!(!options.ra_enabled);
         assert!(options.shadps4_enabled);
         assert_eq!(options.shadps4_executable, "/tmp/shadps4");
         assert!(options.sort_descending);

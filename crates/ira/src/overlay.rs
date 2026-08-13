@@ -7,12 +7,20 @@
 //! recreates it.
 
 use ira_models::Game;
-use ira_overlay_ipc::{parse_hotkey, shm_path, MappedShm, OverlaySettings, MAX_ACHIEVEMENTS};
+use ira_overlay_ipc::{
+    parse_hotkey, shm_path, MappedShm, OverlaySettings, RecordingQuality, VideoEncoder,
+    MAX_ACHIEVEMENTS,
+};
 
 /// Creates the shared memory region and writes game data + achievements.
 /// Returns the SHM name (e.g. `/ira_overlay_123`) to pass as `IRA_OVERLAY_SHM`,
 /// or `None` on failure.
-pub fn write_game_shm(game: &Game, settings: &OverlaySettings) -> Option<String> {
+pub fn write_game_shm(
+    game: &Game,
+    settings: &OverlaySettings,
+    encoder: Option<u32>,
+    recording_quality: Option<u32>,
+) -> Option<String> {
     let mut shm = MappedShm::create(game.db_id).ok()?;
     shm.init_header(game.db_id);
 
@@ -26,8 +34,14 @@ pub fn write_game_shm(game: &Game, settings: &OverlaySettings) -> Option<String>
         hdr.playtime_seconds = (game.playtime * 3600.0) as u64;
 
         hdr.overlay_position = settings.position.as_u32();
-        hdr.video_encoder = settings.encoder.as_u32();
-        hdr.recording_quality = settings.recording_quality.as_u32();
+        hdr.video_encoder = encoder
+            .map(VideoEncoder::from_u32)
+            .unwrap_or(settings.encoder)
+            .as_u32();
+        hdr.recording_quality = recording_quality
+            .map(RecordingQuality::from_u32)
+            .unwrap_or(settings.recording_quality)
+            .as_u32();
 
         // Write hotkey config as (evdev_keycode, modifier_mask).
         let (toggle_kc, toggle_mods) = parse_hotkey(&settings.toggle_hotkey);
@@ -79,4 +93,15 @@ fn write_str(dst: &mut [u8], src: &str) {
     let len = bytes.len().min(dst.len() - 1);
     dst[..len].copy_from_slice(&bytes[..len]);
     dst[len] = 0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_overlay_overrides_use_known_values() {
+        assert_eq!(VideoEncoder::from_u32(2), VideoEncoder::Nvenc);
+        assert_eq!(RecordingQuality::from_u32(2), RecordingQuality::High);
+    }
 }

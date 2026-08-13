@@ -6,8 +6,8 @@ use std::rc::Rc;
 use super::css::*;
 use super::wine_config_env_dll::{build_dll_override_row, collect_dll_overrides};
 use super::wine_config_helpers::{
-    build_combo_row, build_switch_row, make_section, page_with_content, track_spin, track_switch,
-    OverrideList,
+    build_combo_row, build_switch_row, make_section, page_with_content, track_spin, track_spin_row,
+    track_switch, OverrideList,
 };
 
 #[derive(Clone)]
@@ -34,7 +34,7 @@ pub struct WineConfigWidgets {
     pub mouse_warp_override: adw::ComboRow,
     pub dpi_enabled: adw::SwitchRow,
     pub dpi: gtk4::SpinButton,
-    pub dxvk_frame_rate: gtk4::SpinButton,
+    pub dxvk_frame_rate: adw::SpinRow,
     pub proton_wow64: adw::SwitchRow,
     pub proton_ntsync: adw::SwitchRow,
     pub proton_disable_lsteamclient: adw::SwitchRow,
@@ -54,7 +54,7 @@ struct PerfPageWidgets {
     esync: adw::SwitchRow,
     fsync: adw::SwitchRow,
     fsr: adw::SwitchRow,
-    dxvk_frame_rate: gtk4::SpinButton,
+    dxvk_frame_rate: adw::SpinRow,
     proton_wow64: adw::SwitchRow,
 }
 
@@ -129,15 +129,12 @@ fn build_wine_perf_page(
 
     let dxvk_frame_rate_adj =
         gtk4::Adjustment::new(wine.dxvk_frame_rate as f64, 0.0, 999.0, 1.0, 10.0, 0.0);
-    let dxvk_frame_rate = gtk4::SpinButton::new(Some(&dxvk_frame_rate_adj), 1.0, 0);
-    let dxvk_fr_row = adw::ActionRow::new();
+    let dxvk_fr_row = adw::SpinRow::new(Some(&dxvk_frame_rate_adj), 1.0, 0);
     dxvk_fr_row.set_title("DXVK frame rate limit");
     dxvk_fr_row.set_subtitle("Sets DXVK_FRAME_RATE (0 = unlimited)");
-    dxvk_frame_rate.set_valign(gtk4::Align::Center);
-    dxvk_fr_row.add_suffix(&dxvk_frame_rate);
+    dxvk_fr_row.set_value(wine.dxvk_frame_rate as f64);
     if let Some(dd) = dft {
-        track_spin(
-            &dxvk_frame_rate,
+        track_spin_row(
             &dxvk_fr_row,
             "dxvk_frame_rate",
             dd.dxvk_frame_rate,
@@ -170,7 +167,7 @@ fn build_wine_perf_page(
             esync,
             fsync,
             fsr,
-            dxvk_frame_rate,
+            dxvk_frame_rate: dxvk_fr_row,
             proton_wow64,
         },
     )

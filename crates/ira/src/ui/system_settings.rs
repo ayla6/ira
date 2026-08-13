@@ -128,9 +128,9 @@ pub(super) struct GamescopeOverride {
 
 pub(super) struct GamescopeWidgets {
     pub flags: adw::EntryRow,
-    pub w: gtk4::SpinButton,
-    pub h: gtk4::SpinButton,
-    pub fps: gtk4::SpinButton,
+    pub w: adw::SpinRow,
+    pub h: adw::SpinRow,
+    pub fps: adw::SpinRow,
     pub upscaling: adw::ComboRow,
     pub w_state: Rc<RefCell<Option<u32>>>,
     pub h_state: Rc<RefCell<Option<u32>>>,
@@ -145,14 +145,13 @@ fn make_spin_row(
     override_val: Option<u32>,
     min: f64,
     max: f64,
-) -> (adw::ActionRow, gtk4::SpinButton, Rc<RefCell<Option<u32>>>) {
-    let row = adw::ActionRow::new();
-    row.set_title(title);
-    row.set_subtitle(subtitle);
+) -> (adw::SpinRow, adw::SpinRow, Rc<RefCell<Option<u32>>>) {
     let val = override_val.unwrap_or(default_val);
     let adj = gtk4::Adjustment::new(val as f64, min, max, 1.0, 10.0, 0.0);
-    let spin = gtk4::SpinButton::new(Some(&adj), 1.0, 0);
-    spin.set_valign(gtk4::Align::Center);
+    let row = adw::SpinRow::new(Some(&adj), 1.0, 0);
+    row.set_title(title);
+    row.set_subtitle(subtitle);
+    row.set_value(val as f64);
 
     let state: Rc<RefCell<Option<u32>>> = Rc::new(RefCell::new(override_val));
     let revert_btn = make_revert_btn();
@@ -163,7 +162,7 @@ fn make_spin_row(
         let state_c = state.clone();
         let btn_c = revert_btn.clone();
         let rev_c = rev.clone();
-        spin.connect_value_changed(move |s| {
+        row.connect_value_notify(move |s| {
             if *rev_c.borrow() {
                 return;
             }
@@ -174,20 +173,19 @@ fn make_spin_row(
     {
         let state_c = state.clone();
         let btn_c = revert_btn.clone();
-        let spin_c = spin.clone();
+        let row_c = row.clone();
         let rev_c = rev.clone();
         let d = default_val as f64;
         revert_btn.connect_clicked(move |_| {
             *rev_c.borrow_mut() = true;
-            spin_c.set_value(d);
+            row_c.set_value(d);
             *rev_c.borrow_mut() = false;
             *state_c.borrow_mut() = None;
             btn_c.set_visible(false);
         });
     }
     row.add_suffix(&revert_btn);
-    row.add_suffix(&spin);
-    (row, spin, state)
+    (row.clone(), row, state)
 }
 
 fn make_upscaling_row(

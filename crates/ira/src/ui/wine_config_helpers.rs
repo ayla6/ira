@@ -93,9 +93,8 @@ pub(super) fn track_switch(
     });
 }
 
-pub(super) fn track_spin(
-    spin: &gtk4::SpinButton,
-    row: &adw::ActionRow,
+pub(super) fn track_spin_row(
+    row: &adw::SpinRow,
     field: &str,
     default_val: i32,
     overridden: &OverrideList,
@@ -111,7 +110,7 @@ pub(super) fn track_spin(
     let ov = overridden.clone();
     let btn = revert_btn.clone();
     let rev = reverting.clone();
-    spin.connect_value_changed(move |_| {
+    row.connect_value_notify(move |_| {
         if *rev.borrow() {
             return;
         }
@@ -123,14 +122,54 @@ pub(super) fn track_spin(
 
     let field_s2 = field.to_string();
     let ov2 = overridden.clone();
-    let spin2 = spin.clone();
+    let row2 = row.clone();
     let btn2 = revert_btn.clone();
     let rev2 = reverting.clone();
     revert_btn.connect_clicked(move |_| {
         *rev2.borrow_mut() = true;
-        spin2.set_value(default_val as f64);
+        row2.set_value(default_val as f64);
         *rev2.borrow_mut() = false;
         ov2.borrow_mut().retain(|f| f != &field_s2);
         btn2.set_visible(false);
+    });
+}
+
+pub(super) fn track_spin(
+    spin: &gtk4::SpinButton,
+    row: &adw::ActionRow,
+    field: &str,
+    default_val: i32,
+    overridden: &OverrideList,
+) {
+    let is_overridden = overridden.borrow().contains(&field.to_string());
+    let revert_btn = make_revert_btn();
+    revert_btn.set_visible(is_overridden);
+    row.add_suffix(&revert_btn);
+    let reverting = Rc::new(RefCell::new(false));
+    let field_s = field.to_string();
+    let overridden_for_changed = overridden.clone();
+    let button_for_changed = revert_btn.clone();
+    let reverting_for_changed = reverting.clone();
+    spin.connect_value_changed(move |_| {
+        if *reverting_for_changed.borrow() {
+            return;
+        }
+        if !overridden_for_changed.borrow().contains(&field_s) {
+            overridden_for_changed.borrow_mut().push(field_s.clone());
+        }
+        button_for_changed.set_visible(true);
+    });
+    let field_s = field.to_string();
+    let overridden_for_revert = overridden.clone();
+    let spin_for_revert = spin.clone();
+    let button_for_revert = revert_btn.clone();
+    revert_btn.connect_clicked(move |_| {
+        *reverting.borrow_mut() = true;
+        spin_for_revert.set_value(default_val as f64);
+        *reverting.borrow_mut() = false;
+        overridden_for_revert
+            .borrow_mut()
+            .retain(|value| value != &field_s);
+        button_for_revert.set_visible(false);
     });
 }

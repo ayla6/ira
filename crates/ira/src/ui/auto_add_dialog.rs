@@ -646,6 +646,17 @@ struct AddGameSetup {
     wine_config: WineConfig,
 }
 
+struct AddGameRecordParams<'a> {
+    db: &'a ira_db::DbConn,
+    steam: &'a std::sync::Arc<ira_api::SteamDataClient>,
+    save_dir: &'a str,
+    game: &'a IdentifiedGame,
+    name: &'a str,
+    app_id: &'a str,
+    profile_id: Option<i64>,
+    setup: &'a AddGameSetup,
+}
+
 pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams) {
     std::thread::spawn(move || {
         let AddParams {
@@ -662,9 +673,16 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
             language_preferences,
         } = params;
         let setup = build_add_game_setup(&game, &profiles, profile_id);
-        let db_id = match add_game_record(
-            &db, &steam, &save_dir, &game, &name, &app_id, profile_id, &setup,
-        ) {
+        let db_id = match add_game_record(AddGameRecordParams {
+            db: &db,
+            steam: &steam,
+            save_dir: &save_dir,
+            game: &game,
+            name: &name,
+            app_id: &app_id,
+            profile_id,
+            setup: &setup,
+        }) {
             Ok(id) => id,
             Err(e) => {
                 let _ = tx.send(WizardEvent::Failed(e));
@@ -757,16 +775,17 @@ fn build_add_game_setup(
     }
 }
 
-fn add_game_record(
-    db: &ira_db::DbConn,
-    steam: &std::sync::Arc<ira_api::SteamDataClient>,
-    save_dir: &str,
-    game: &IdentifiedGame,
-    name: &str,
-    app_id: &str,
-    profile_id: Option<i64>,
-    setup: &AddGameSetup,
-) -> Result<i64, String> {
+fn add_game_record(params: AddGameRecordParams<'_>) -> Result<i64, String> {
+    let AddGameRecordParams {
+        db,
+        steam,
+        save_dir,
+        game,
+        name,
+        app_id,
+        profile_id,
+        setup,
+    } = params;
     let game_folder = game.game_folder.to_string_lossy();
     let db_id = add_game_to_db(AddGameToDbParams {
         db,

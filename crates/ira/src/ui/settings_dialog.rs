@@ -58,6 +58,17 @@ struct SavedSettingsWidgets {
     emu_version_model: gtk4::StringList,
 }
 
+struct SettingsDialogParams {
+    win: adw::Window,
+    sidebar: gtk4::ListBox,
+    stack: gtk4::Stack,
+    content_area: gtk4::Box,
+    cfg: Config,
+    steam: Arc<SteamDataClient>,
+    state: SharedState,
+    rom_platforms_with_games: HashSet<String>,
+}
+
 pub fn show_settings_dialog(
     parent: &adw::ApplicationWindow,
     cfg: Config,
@@ -98,62 +109,63 @@ pub fn show_settings_dialog(
     glib::source::idle_add_local_full(glib::Priority::LOW, move || {
         match rx.borrow_mut().try_recv() {
             Ok(Ok(platforms)) => {
-                finish_settings_dialog(
-                    win.clone(),
-                    sidebar.clone(),
-                    stack.clone(),
-                    content_area.clone(),
-                    cfg.clone(),
-                    steam.clone(),
-                    &state,
-                    platforms,
-                );
+                finish_settings_dialog(SettingsDialogParams {
+                    win: win.clone(),
+                    sidebar: sidebar.clone(),
+                    stack: stack.clone(),
+                    content_area: content_area.clone(),
+                    cfg: cfg.clone(),
+                    steam: steam.clone(),
+                    state: state.clone(),
+                    rom_platforms_with_games: platforms,
+                });
                 glib::ControlFlow::Break
             }
             Ok(Err(error)) => {
                 eprintln!("Failed to load ROM platforms for settings: {error}");
-                finish_settings_dialog(
-                    win.clone(),
-                    sidebar.clone(),
-                    stack.clone(),
-                    content_area.clone(),
-                    cfg.clone(),
-                    steam.clone(),
-                    &state,
-                    HashSet::new(),
-                );
+                finish_settings_dialog(SettingsDialogParams {
+                    win: win.clone(),
+                    sidebar: sidebar.clone(),
+                    stack: stack.clone(),
+                    content_area: content_area.clone(),
+                    cfg: cfg.clone(),
+                    steam: steam.clone(),
+                    state: state.clone(),
+                    rom_platforms_with_games: HashSet::new(),
+                });
                 glib::ControlFlow::Break
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 eprintln!("Settings game-platform loader disconnected");
-                finish_settings_dialog(
-                    win.clone(),
-                    sidebar.clone(),
-                    stack.clone(),
-                    content_area.clone(),
-                    cfg.clone(),
-                    steam.clone(),
-                    &state,
-                    HashSet::new(),
-                );
+                finish_settings_dialog(SettingsDialogParams {
+                    win: win.clone(),
+                    sidebar: sidebar.clone(),
+                    stack: stack.clone(),
+                    content_area: content_area.clone(),
+                    cfg: cfg.clone(),
+                    steam: steam.clone(),
+                    state: state.clone(),
+                    rom_platforms_with_games: HashSet::new(),
+                });
                 glib::ControlFlow::Break
             }
         }
     });
 }
 
-fn finish_settings_dialog(
-    win: adw::Window,
-    sidebar: gtk4::ListBox,
-    stack: gtk4::Stack,
-    content_area: gtk4::Box,
-    cfg: Config,
-    steam: Arc<SteamDataClient>,
-    state: &SharedState,
-    rom_platforms_with_games: HashSet<String>,
-) {
-    let pages = build_settings_pages(&cfg, &win, state);
+fn finish_settings_dialog(params: SettingsDialogParams) {
+    let SettingsDialogParams {
+        win,
+        sidebar,
+        stack,
+        content_area,
+        cfg,
+        steam,
+        state,
+        rom_platforms_with_games,
+    } = params;
+    let pages = build_settings_pages(&cfg, &win, &state);
     register_settings_pages(&pages, &sidebar, &stack);
     let steam_page = pages.steam_page.clone();
     let ra_page = pages.ra_page.clone();
@@ -206,7 +218,7 @@ fn finish_settings_dialog(
     let mut console_pages = register_console_pages(
         &cfg,
         &win,
-        state,
+        &state,
         &sidebar,
         &stack,
         rom_platforms_with_games,

@@ -21,7 +21,7 @@ pub struct DialogLayout {
 
 pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
     let win = adw::Window::new();
-    win.set_default_size(720, 540);
+    win.set_default_size(960, 720);
     win.set_modal(true);
     win.set_transient_for(Some(parent));
     win.set_destroy_with_parent(true);
@@ -52,6 +52,7 @@ pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
     content_area.set_hexpand(true);
 
     let header = adw::HeaderBar::new();
+    header.set_show_title(false);
     header.add_css_class(CSS_SETTINGS_HEADER);
     content_area.append(&header);
 

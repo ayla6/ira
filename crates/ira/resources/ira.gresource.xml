@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
-  <gresource prefix="/com/github/ira/icons">
+  <gresource prefix="/com/github/ira">
     <file>icons/api-symbolic.svg</file>
     <file>icons/cogged-wheel-big-symbolic.svg</file>
     <file>icons/games-symbolic.svg</file>

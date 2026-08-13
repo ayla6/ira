@@ -76,81 +76,26 @@ pub fn show_settings_dialog(
     state: &SharedState,
 ) {
     let layout = dialog_layout(parent);
-    layout.window.set_default_size(640, 480);
     layout.window.set_deletable(false);
     layout.sidebar_area.set_size_request(180, -1);
 
-    let loading = gtk4::Label::new(Some("Loading settings..."));
-    loading.set_margin_top(24);
-    loading.set_margin_bottom(24);
-    layout.stack.add_named(&loading, Some("loading"));
-    layout.stack.set_visible_child_name("loading");
-    layout.window.present();
-
-    let db = state.borrow().db.clone();
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _s = tracing::info_span!("load_settings_game_platforms").entered();
-        let result = ira_db::load_all_games(&db).map(|games| {
-            games
-                .into_iter()
-                .map(|game| game.platform_id)
-                .collect::<HashSet<_>>()
-        });
-        let _ = tx.send(result);
-    });
-
-    let rx = std::cell::RefCell::new(rx);
-    let win = layout.window;
-    let sidebar = layout.sidebar;
-    let stack = layout.stack;
-    let content_area = layout.content_area;
-    let state = state.clone();
-    glib::source::idle_add_local_full(glib::Priority::LOW, move || {
-        match rx.borrow_mut().try_recv() {
-            Ok(Ok(platforms)) => {
-                finish_settings_dialog(SettingsDialogParams {
-                    win: win.clone(),
-                    sidebar: sidebar.clone(),
-                    stack: stack.clone(),
-                    content_area: content_area.clone(),
-                    cfg: cfg.clone(),
-                    steam: steam.clone(),
-                    state: state.clone(),
-                    rom_platforms_with_games: platforms,
-                });
-                glib::ControlFlow::Break
-            }
-            Ok(Err(error)) => {
-                eprintln!("Failed to load ROM platforms for settings: {error}");
-                finish_settings_dialog(SettingsDialogParams {
-                    win: win.clone(),
-                    sidebar: sidebar.clone(),
-                    stack: stack.clone(),
-                    content_area: content_area.clone(),
-                    cfg: cfg.clone(),
-                    steam: steam.clone(),
-                    state: state.clone(),
-                    rom_platforms_with_games: HashSet::new(),
-                });
-                glib::ControlFlow::Break
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                eprintln!("Settings game-platform loader disconnected");
-                finish_settings_dialog(SettingsDialogParams {
-                    win: win.clone(),
-                    sidebar: sidebar.clone(),
-                    stack: stack.clone(),
-                    content_area: content_area.clone(),
-                    cfg: cfg.clone(),
-                    steam: steam.clone(),
-                    state: state.clone(),
-                    rom_platforms_with_games: HashSet::new(),
-                });
-                glib::ControlFlow::Break
-            }
-        }
+    let rom_platforms_with_games = {
+        let state = state.borrow();
+        state
+            .games
+            .iter()
+            .map(|game| game.platform_id.clone())
+            .collect()
+    };
+    finish_settings_dialog(SettingsDialogParams {
+        win: layout.window,
+        sidebar: layout.sidebar,
+        stack: layout.stack,
+        content_area: layout.content_area,
+        cfg,
+        steam,
+        state: state.clone(),
+        rom_platforms_with_games,
     });
 }
 

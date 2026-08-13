@@ -7,26 +7,6 @@ use ira_config::Config;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-fn detect_system_font() -> Option<String> {
-    let output = std::process::Command::new("fc-match")
-        .args(["-f", "%{family}", "sans-serif"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let family = String::from_utf8_lossy(&output.stdout)
-        .split(',')
-        .next()?
-        .trim()
-        .to_string();
-    if family.is_empty() {
-        None
-    } else {
-        Some(family)
-    }
-}
-
 pub(super) fn settings_sidebar_row(icon: &str, label: &str, page_id: &str) -> gtk4::ListBoxRow {
     let row = gtk4::ListBoxRow::new();
     row.set_widget_name(page_id);
@@ -778,12 +758,12 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
     font_button.set_level(gtk4::FontLevel::Family);
     font_button.set_use_font(false);
 
-    let system_font = detect_system_font().unwrap_or_else(|| "Sans".to_string());
+    let system_font = "Sans";
     if let Some(ref family) = o.font_family {
         let desc = pango::FontDescription::from_string(family);
         font_button.set_font_desc(&desc);
     } else {
-        let desc = pango::FontDescription::from_string(&system_font);
+        let desc = pango::FontDescription::from_string(system_font);
         font_button.set_font_desc(&desc);
     }
 
@@ -803,7 +783,7 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
     // Store font_reset in the widgets so the save handler can access it
     font_reset.connect_clicked({
         let fb = font_button.clone();
-        let desc = pango::FontDescription::from_string(&system_font);
+        let desc = pango::FontDescription::from_string(system_font);
         move |_| {
             fb.set_font_desc(&desc);
         }

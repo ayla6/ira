@@ -1,6 +1,8 @@
 use super::css::*;
 use super::helpers::dialog_layout;
-use super::input_profile_settings::{add_console_profile_group, build_input_settings_page};
+use super::input_profile_settings::{
+    add_console_profile_group, add_pc_profile_group, build_input_settings_page,
+};
 use super::input_profile_store::ensure_controller_default_profile;
 use super::profile_dialog::build_profiles_page;
 use super::settings_console::{
@@ -18,7 +20,7 @@ use super::wine_config_widget::build_wine_config_pages;
 use crate::strings as S;
 use adw::prelude::*;
 use ira_api::SteamDataClient;
-use ira_config::{Config, ControllerInputConfig};
+use ira_config::{Config, ConsoleConfig, ControllerInputConfig};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -113,6 +115,39 @@ pub fn show_settings_dialog(
 
     sidebar.append(&sidebar_section_title("PC games"));
     let (computer_games_page, default_game_folder_row) = build_computer_games_page(&win, &cfg);
+    let mut pc_controller_cfg = cfg.clone();
+    pc_controller_cfg.consoles.insert(
+        "linux".to_string(),
+        ConsoleConfig {
+            controller_mode: cfg.linux_controller_mode,
+            controller_profile: cfg.linux_controller_profile.clone(),
+            ..Default::default()
+        },
+    );
+    pc_controller_cfg.consoles.insert(
+        "wine".to_string(),
+        ConsoleConfig {
+            controller_mode: cfg.wine_controller_mode,
+            controller_profile: cfg.wine_controller_profile.clone(),
+            ..Default::default()
+        },
+    );
+    let linux_controller_profile = add_pc_profile_group(
+        &computer_games_page,
+        &pc_controller_cfg,
+        "linux",
+        "Linux controller",
+        &win,
+        state.borrow().controller_registry.clone(),
+    );
+    let wine_controller_profile = add_pc_profile_group(
+        &computer_games_page,
+        &pc_controller_cfg,
+        "wine",
+        "Wine controller",
+        &win,
+        state.borrow().controller_registry.clone(),
+    );
     sidebar.append(&settings_sidebar_row(
         "applications-games-symbolic",
         "PC games",
@@ -223,7 +258,7 @@ pub fn show_settings_dialog(
     let mut console_widgets: Vec<(&'static str, ConsolePageWidgets)> = Vec::new();
     let mut console_profile_widgets = Vec::new();
     let mut ps4_enable_row: Option<adw::SwitchRow> = None;
-    let mut ps4_version_dd: Option<gtk4::DropDown> = None;
+    let mut ps4_version_dd: Option<adw::ComboRow> = None;
     let mut ps3_enable_row: Option<adw::SwitchRow> = None;
     let mut ps3_exe_row: Option<adw::EntryRow> = None;
     let mut vita3k_enable_row: Option<adw::SwitchRow> = None;
@@ -259,13 +294,15 @@ pub fn show_settings_dialog(
             let ps3_ov_group = adw::PreferencesGroup::new();
             ps3_ov_group.add(&ps3_ov_row);
             ps3_ov_group.add(&ps3_gs_row);
-            ps3_page.append(&ps3_ov_group);
+            ps3_page.prepend(&ps3_ov_group);
             console_profile_widgets.push(add_console_profile_group(
                 &ps3_page,
+                &win,
                 &cfg,
                 &cfg.save_dir,
                 "ps3",
                 "PS3",
+                state.borrow().controller_registry.clone(),
             ));
             source_overlay_states.push(("ps3".to_string(), ps3_ov_state));
             source_gamescope_states.push(("ps3".to_string(), ps3_gs_state));
@@ -296,13 +333,15 @@ pub fn show_settings_dialog(
             let ps4_ov_group = adw::PreferencesGroup::new();
             ps4_ov_group.add(&ps4_ov_row);
             ps4_ov_group.add(&ps4_gs_row);
-            ps4_page.append(&ps4_ov_group);
+            ps4_page.prepend(&ps4_ov_group);
             console_profile_widgets.push(add_console_profile_group(
                 &ps4_page,
+                &win,
                 &cfg,
                 &cfg.save_dir,
                 "ps4",
                 "PS4",
+                state.borrow().controller_registry.clone(),
             ));
             source_overlay_states.push(("ps4".to_string(), ps4_ov_state));
             source_gamescope_states.push(("ps4".to_string(), ps4_gs_state));
@@ -332,13 +371,15 @@ pub fn show_settings_dialog(
             let vita_group = adw::PreferencesGroup::new();
             vita_group.add(&vita_ov_row);
             vita_group.add(&vita_gs_row);
-            vita_page.append(&vita_group);
+            vita_page.prepend(&vita_group);
             console_profile_widgets.push(add_console_profile_group(
                 &vita_page,
+                &win,
                 &cfg,
                 &cfg.save_dir,
                 "psvita",
                 "PS Vita",
+                state.borrow().controller_registry.clone(),
             ));
             source_overlay_states.push(("psvita".to_string(), vita_ov_state));
             source_gamescope_states.push(("psvita".to_string(), vita_gs_state));
@@ -368,13 +409,15 @@ pub fn show_settings_dialog(
             let cemu_group = adw::PreferencesGroup::new();
             cemu_group.add(&cemu_ov_row);
             cemu_group.add(&cemu_gs_row);
-            cemu_page.append(&cemu_group);
+            cemu_page.prepend(&cemu_group);
             console_profile_widgets.push(add_console_profile_group(
                 &cemu_page,
+                &win,
                 &cfg,
                 &cfg.save_dir,
                 "wiiu",
                 "Wii U",
+                state.borrow().controller_registry.clone(),
             ));
             source_overlay_states.push(("wiiu".to_string(), cemu_ov_state));
             source_gamescope_states.push(("wiiu".to_string(), cemu_gs_state));
@@ -408,13 +451,15 @@ pub fn show_settings_dialog(
         let overlay_group = adw::PreferencesGroup::new();
         overlay_group.add(&overlay_row);
         overlay_group.add(&gs_row);
-        page.append(&overlay_group);
+        page.prepend(&overlay_group);
         console_profile_widgets.push(add_console_profile_group(
             &page,
+            &win,
             &cfg,
             &cfg.save_dir,
             def.id,
             def.display_name,
+            state.borrow().controller_registry.clone(),
         ));
         source_overlay_states.push((def.id.to_string(), overlay_state));
         source_gamescope_states.push((def.id.to_string(), gs_state));
@@ -651,27 +696,40 @@ pub fn show_settings_dialog(
             cc.enabled = widgets.enable_row.is_active();
             cc.executable = widgets.exe_row.text().to_string();
             cc.fullscreen = widgets.fullscreen_row.is_active();
-            if let Some(ref dd) = widgets.core_dropdown {
-                if dd.selected() > 0 {
-                    let cores =
-                        ira_platforms::emulator_detect::detect_ra_cores_for_console(console_id);
-                    if let Some(c) = cores.get((dd.selected() - 1) as usize) {
-                        cc.ra_core = c.path.clone();
-                    }
-                } else {
-                    cc.ra_core = String::new();
-                }
+            if let Some(ref core_path) = widgets.core_path_row {
+                cc.ra_core = ira_platforms::emulator_detect::resolve_ra_core_for_console(
+                    console_id,
+                    &core_path.text(),
+                )
+                .unwrap_or_default();
             }
         }
         for widget in &console_profile_widgets {
-            s.cfg.console_mut(&widget.console_id).controller_profile = widget
-                .profile_paths
-                .get(widget.profile_row.selected() as usize)
-                .and_then(|path| path.as_ref())
+            let console = s.cfg.console_mut(&widget.console_id);
+            console.controller_mode = *widget.mode.borrow();
+            console.controller_profile = widget
+                .profile_path
+                .borrow()
+                .as_ref()
                 .map(|path| path.to_string_lossy().into_owned())
                 .unwrap_or_default();
         }
         s.cfg.default_wine_config = wine_widgets.to_wine_config();
+        s.cfg.linux_controller_profile = linux_controller_profile
+            .profile_path
+            .borrow()
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        s.cfg.linux_controller_mode = *linux_controller_profile.mode.borrow();
+        s.cfg.wine_controller_profile = wine_controller_profile
+            .profile_path
+            .borrow()
+            .as_ref()
+            .cloned()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        s.cfg.wine_controller_mode = *wine_controller_profile.mode.borrow();
         s.cfg.prefix_base_dir = prefix_base_row.text().to_string();
 
         let idx = emu_version_row.selected();

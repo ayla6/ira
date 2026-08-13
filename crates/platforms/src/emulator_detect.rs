@@ -1,7 +1,6 @@
 use crate::emulator_systems;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::OnceLock;
 
 #[derive(Debug, Clone)]
 pub struct DetectedEmulator {
@@ -29,8 +28,6 @@ pub struct RaCore {
     pub display_name: String,
     pub path: String,
 }
-
-static RA_CORE_CACHE: OnceLock<Vec<RaCore>> = OnceLock::new();
 
 pub fn is_flatpak_installed(flatpak_id: &str) -> bool {
     Command::new("flatpak")
@@ -132,6 +129,10 @@ pub fn detect_ra_cores_for_console(console: &str) -> Vec<RaCore> {
         .collect()
 }
 
+pub fn supports_retroarch_cores(console: &str) -> bool {
+    emulator_systems::has_retroarch_cores(console)
+}
+
 fn core_id(path: &str) -> &str {
     std::path::Path::new(path)
         .file_name()
@@ -170,10 +171,6 @@ fn core_display_name(filename: &str) -> String {
 }
 
 pub fn detect_ra_cores() -> Vec<RaCore> {
-    RA_CORE_CACHE.get_or_init(detect_ra_cores_uncached).clone()
-}
-
-fn detect_ra_cores_uncached() -> Vec<RaCore> {
     let mut cores = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for dir in ra_core_dirs() {
@@ -195,6 +192,15 @@ fn detect_ra_cores_uncached() -> Vec<RaCore> {
     }
     cores.sort_by(|a, b| a.display_name.cmp(&b.display_name));
     cores
+}
+
+pub fn resolve_ra_core_for_console(console: &str, configured: &str) -> Option<String> {
+    if !configured.is_empty() && std::path::Path::new(configured).is_file() {
+        return Some(configured.to_string());
+    }
+    detect_ra_cores_for_console(console)
+        .first()
+        .map(|core| core.path.clone())
 }
 
 pub fn build_launch_command(
@@ -444,5 +450,20 @@ mod tests {
         );
         assert!(emulator_systems::core_names("gba").contains(&"mgba"));
         assert!(!emulator_systems::has_retroarch_cores("switch"));
+    }
+
+    #[test]
+    fn test_resolve_ra_core_preserves_existing_custom_core() {
+        let core = tempfile::NamedTempFile::new().unwrap();
+        let path = core.path().to_string_lossy();
+        assert_eq!(
+            resolve_ra_core_for_console("switch", &path),
+            Some(path.into_owned())
+        );
+    }
+
+    #[test]
+    fn test_resolve_ra_core_returns_none_without_supported_cores() {
+        assert_eq!(resolve_ra_core_for_console("switch", ""), None);
     }
 }

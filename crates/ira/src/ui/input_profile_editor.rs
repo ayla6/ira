@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 struct ProfileForm {
-    name: String,
+    name: Rc<RefCell<String>>,
     rows: Rc<RefCell<Vec<BindingRow>>>,
     calibration: Rc<RefCell<ira_input::GyroCalibration>>,
     compatible_game_ids: Vec<i64>,
@@ -89,7 +89,7 @@ pub(super) fn show_input_profile_editor(
     }
     let calibration = Rc::new(RefCell::new(profile.gyro_calibration));
     let compatible_game_ids = profile.compatible_game_ids.clone();
-    let profile_name = profile.name.clone();
+    let profile_name = Rc::new(RefCell::new(profile.name.clone()));
     let detected_devices = registry.snapshot();
     let device_was_explicit = device.is_some();
     let device = device.or_else(|| detected_devices.first().cloned());
@@ -120,7 +120,7 @@ pub(super) fn show_input_profile_editor(
         let backend = backend.clone();
         Rc::new(move || {
             let result = build_profile(
-                &name,
+                &name.borrow(),
                 &rows.borrow(),
                 *calibration.borrow(),
                 &compatible_game_ids,
@@ -177,7 +177,7 @@ pub(super) fn show_input_profile_editor(
 
     setup_sidebar(&layout);
 
-    let cancel = add_editor_footer(&layout, &save, &status, &profile_name);
+    let cancel = add_editor_footer(&layout, &save, &status, &profile_name, &mark_dirty);
 
     let form = ProfileForm {
         name: profile_name,
@@ -265,7 +265,8 @@ fn add_editor_footer(
     layout: &super::helpers::DialogLayout,
     save: &gtk4::Button,
     status: &gtk4::Label,
-    profile_name: &str,
+    profile_name: &Rc<RefCell<String>>,
+    mark_dirty: &Rc<dyn Fn()>,
 ) -> gtk4::Button {
     let cancel = gtk4::Button::with_label("Cancel");
     let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
@@ -276,14 +277,16 @@ fn add_editor_footer(
     actions.set_margin_bottom(12);
     actions.append(&cancel);
     actions.append(save);
-    let title = if profile_name.trim().is_empty() {
-        "New controller layout".to_string()
-    } else {
-        profile_name.to_string()
-    };
-    layout
-        .header
-        .set_title_widget(Some(&gtk4::Label::new(Some(&title))));
+    let name = adw::EntryRow::new();
+    name.set_title("Profile name");
+    name.set_text(&profile_name.borrow());
+    let profile_name_for_changed = profile_name.clone();
+    let mark_dirty_for_changed = mark_dirty.clone();
+    name.connect_changed(move |entry| {
+        *profile_name_for_changed.borrow_mut() = entry.text().to_string();
+        mark_dirty_for_changed();
+    });
+    layout.content_area.append(&name);
     layout.content_area.append(status);
     layout.content_area.append(&actions);
     cancel
@@ -940,7 +943,7 @@ fn connect_save(
     let button_for_save = button.clone();
     button.connect_clicked(move |_| {
         let result = build_profile(
-            &form.name,
+            &form.name.borrow(),
             &form.rows.borrow(),
             *form.calibration.borrow(),
             &form.compatible_game_ids,

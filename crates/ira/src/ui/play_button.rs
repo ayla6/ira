@@ -337,6 +337,7 @@ pub fn launch_game(
             &per_game_version,
             &global_shadps4_exe,
             &game_path,
+            cfg_clone.console("ps4").controller_mode,
             (!cfg_clone.console("ps4").controller_profile.is_empty())
                 .then_some(cfg_clone.console("ps4").controller_profile.as_str()),
         )?;
@@ -346,6 +347,7 @@ pub fn launch_game(
             &per_game_emu,
             &global_rpcs3_exe,
             &game_path,
+            cfg_clone.console("ps3").controller_mode,
             (!cfg_clone.console("ps3").controller_profile.is_empty())
                 .then_some(cfg_clone.console("ps3").controller_profile.as_str()),
         )?;
@@ -354,6 +356,7 @@ pub fn launch_game(
             &ctx,
             &global_vita3k_exe,
             &game_path,
+            cfg_clone.console("psvita").controller_mode,
             (!cfg_clone.console("psvita").controller_profile.is_empty())
                 .then_some(cfg_clone.console("psvita").controller_profile.as_str()),
         )?;
@@ -362,6 +365,7 @@ pub fn launch_game(
             &ctx,
             &global_cemu_exe,
             &game_path,
+            cfg_clone.console("wiiu").controller_mode,
             (!cfg_clone.console("wiiu").controller_profile.is_empty())
                 .then_some(cfg_clone.console("wiiu").controller_profile.as_str()),
         )?;
@@ -374,6 +378,16 @@ pub fn launch_game(
             variant_id,
             variant_count_playtime,
             &default_native_env_vars,
+            play_button_helpers::PcControllerProfiles {
+                linux: (
+                    cfg_clone.linux_controller_mode,
+                    cfg_clone.linux_controller_profile.as_str(),
+                ),
+                wine: (
+                    cfg_clone.wine_controller_mode,
+                    cfg_clone.wine_controller_profile.as_str(),
+                ),
+            },
             &app_id,
         )?;
     }

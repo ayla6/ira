@@ -178,6 +178,29 @@ pub fn make_browse_button(
     browse
 }
 
+pub fn make_browse_icon_button(
+    parent: Option<&adw::Window>,
+    title: &str,
+    select_folder: bool,
+    filter: Option<(&str, &[&str])>,
+    initial_path: impl Fn() -> Option<String> + 'static,
+    on_select: impl Fn(&std::path::Path) + 'static,
+) -> gtk4::Button {
+    let browse = make_browse_button(
+        parent,
+        title,
+        select_folder,
+        filter,
+        initial_path,
+        on_select,
+    );
+    browse.set_label("");
+    browse.set_icon_name("folder-open-symbolic");
+    browse.add_css_class(CSS_SQUARE_BUTTON);
+    browse.set_tooltip_text(Some(title));
+    browse
+}
+
 /// Merge enrichment results into the existing in-memory game.
 ///
 /// Starts from `existing` (which has the user's current edits) and applies only

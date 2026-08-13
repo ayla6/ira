@@ -1,8 +1,23 @@
-use super::input_monitor_dialog::{set_cairo_color, MonitorColors, MonitorValues};
+use super::input_monitor_dialog::MonitorValues;
 use adw::prelude::*;
 use ira_input::GamepadButton;
 use std::cell::RefCell;
 use std::rc::Rc;
+
+#[derive(Clone, Copy)]
+struct MonitorColors {
+    foreground: gtk4::gdk::RGBA,
+    accent: gtk4::gdk::RGBA,
+}
+
+fn set_cairo_color(cr: &gtk4::cairo::Context, color: gtk4::gdk::RGBA) {
+    cr.set_source_rgba(
+        color.red() as f64,
+        color.green() as f64,
+        color.blue() as f64,
+        color.alpha() as f64,
+    );
+}
 
 const DESIGN_WIDTH: f64 = 640.0;
 const DESIGN_HEIGHT: f64 = 410.0;

@@ -232,12 +232,8 @@ fn build_shadps4_version_section(page: &gtk4::Box, game: &Game) -> Rc<RefCell<Op
                 *pending_version_c.borrow_mut() = Some(path);
             });
 
-            let version_row = adw::ActionRow::new();
-            version_row.set_title("Version");
-            version_row.set_subtitle("Override the emulator version for this game");
-            version_dropdown.set_valign(gtk4::Align::Center);
-            version_row.add_suffix(&version_dropdown);
-            version_group.add(&version_row);
+            version_dropdown.set_subtitle("Override the emulator version for this game");
+            version_group.add(&version_dropdown);
             page.append(&version_group);
         }
     }
@@ -249,15 +245,17 @@ fn build_core_row(
     cores: &[ira_platforms::emulator_detect::RaCore],
     pending_ra_core: &Rc<RefCell<Option<String>>>,
     emu_group: &adw::PreferencesGroup,
-) -> Option<adw::ActionRow> {
+) -> Option<adw::ComboRow> {
     if cores.is_empty() {
         return None;
     }
 
     let mut core_names: Vec<String> = vec!["Follow global".to_string()];
     core_names.extend(cores.iter().map(|c| c.display_name.clone()));
-    let core_model = super::helpers::string_list_from(&core_names);
-    let core_dropdown = gtk4::DropDown::new(Some(core_model), None::<&gtk4::PropertyExpression>);
+    let core_dropdown = adw::ComboRow::new();
+    core_dropdown.set_title("RetroArch core");
+    core_dropdown.set_subtitle("Override the RetroArch core for this game");
+    core_dropdown.set_model(Some(&super::helpers::string_list_from(&core_names)));
 
     let mut selected_idx: u32 = 0;
     if !game.ra_core.is_empty() {
@@ -285,18 +283,12 @@ fn build_core_row(
         *pending_ra_core_c.borrow_mut() = Some(path);
     });
 
-    let cr = adw::ActionRow::new();
-    cr.set_title("RetroArch core");
-    cr.set_subtitle("Override the RetroArch core for this game");
-    core_dropdown.set_valign(gtk4::Align::Center);
-    cr.add_suffix(&core_dropdown);
-
     let is_ra = !game.emulator_override.is_empty()
         && ira_platforms::emulator_detect::is_retroarch(&game.emulator_override);
-    cr.set_visible(is_ra);
+    core_dropdown.set_visible(is_ra);
 
-    emu_group.add(&cr);
-    Some(cr)
+    emu_group.add(&core_dropdown);
+    Some(core_dropdown)
 }
 
 fn add_emulator_dropdown_section(
@@ -316,8 +308,10 @@ fn add_emulator_dropdown_section(
 
     let mut emu_names: Vec<String> = vec!["Follow global".to_string()];
     emu_names.extend(emulators.iter().map(|e| e.display_name.clone()));
-    let emu_model = super::helpers::string_list_from(&emu_names);
-    let emu_dropdown = gtk4::DropDown::new(Some(emu_model), None::<&gtk4::PropertyExpression>);
+    let emu_dropdown = adw::ComboRow::new();
+    emu_dropdown.set_title("Emulator");
+    emu_dropdown.set_subtitle("Override the emulator for this game");
+    emu_dropdown.set_model(Some(&super::helpers::string_list_from(&emu_names)));
 
     let mut selected_emu: u32 = 0;
     if !game.emulator_override.is_empty() {
@@ -330,12 +324,7 @@ fn add_emulator_dropdown_section(
     }
     emu_dropdown.set_selected(selected_emu);
 
-    let emu_row = adw::ActionRow::new();
-    emu_row.set_title("Emulator");
-    emu_row.set_subtitle("Override the emulator for this game");
-    emu_dropdown.set_valign(gtk4::Align::Center);
-    emu_row.add_suffix(&emu_dropdown);
-    emu_group.add(&emu_row);
+    emu_group.add(&emu_dropdown);
 
     let core_row = build_core_row(game, &cores, pending_ra_core, &emu_group);
 

@@ -1,3 +1,4 @@
+use super::css::CSS_SQUARE_BUTTON;
 use super::input_profile_store::{
     list_profiles, profile_matches_game, read_profile, StoredProfile,
 };
@@ -354,6 +355,7 @@ fn input_mode_from_index(index: u32) -> Option<ControllerInputMode> {
 fn icon_button(icon: &str, tooltip: &str) -> gtk4::Button {
     let button = gtk4::Button::from_icon_name(icon);
     button.add_css_class(super::css::CSS_FLAT);
+    button.add_css_class(CSS_SQUARE_BUTTON);
     button.set_tooltip_text(Some(tooltip));
     button.set_valign(gtk4::Align::Center);
     button

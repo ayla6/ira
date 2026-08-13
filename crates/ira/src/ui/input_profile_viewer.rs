@@ -16,6 +16,29 @@ pub(super) fn show_input_profile_viewer(
     path: &Path,
     registry: Arc<ira_input::ControllerRegistry>,
 ) {
+    let profile = match read_profile(path) {
+        Ok(profile) => profile,
+        Err(error) => {
+            show_input_viewer(parent, None, registry, Some(error));
+            return;
+        }
+    };
+    show_input_viewer(parent, Some(profile), registry, None);
+}
+
+pub(super) fn show_raw_input_viewer(
+    parent: &gtk4::Window,
+    registry: Arc<ira_input::ControllerRegistry>,
+) {
+    show_input_viewer(parent, None, registry, None);
+}
+
+fn show_input_viewer(
+    parent: &gtk4::Window,
+    profile: Option<ira_input::InputProfile>,
+    registry: Arc<ira_input::ControllerRegistry>,
+    load_error: Option<String>,
+) {
     let window = adw::Window::new();
     window.set_default_size(900, 760);
     window.set_transient_for(Some(parent));
@@ -28,20 +51,21 @@ pub(super) fn show_input_profile_viewer(
     content.set_margin_bottom(16);
 
     let stop = Arc::new(AtomicBool::new(false));
-    let mut title = "Live layout preview".to_string();
-    match read_profile(path) {
-        Ok(profile) => {
-            if !profile.name.trim().is_empty() {
-                title = profile.name.clone();
-            }
-            let receiver = start_monitor(stop.clone(), Some(profile), registry);
-            build_live_viewer(&window, &content, receiver);
-        }
-        Err(error) => {
+    let title = profile
+        .as_ref()
+        .filter(|profile| !profile.name.trim().is_empty())
+        .map(|profile| profile.name.clone())
+        .unwrap_or_else(|| "Live controller preview".to_string());
+    match load_error {
+        Some(error) => {
             let error_label = gtk4::Label::new(Some(&error));
             error_label.set_wrap(true);
             error_label.set_xalign(0.0);
             content.append(&error_label);
+        }
+        None => {
+            let receiver = start_monitor(stop.clone(), profile, registry);
+            build_live_viewer(&window, &content, receiver);
         }
     }
 
@@ -139,7 +163,7 @@ fn poll_viewer(
                         .collect::<Vec<_>>()
                         .join(", ");
                     status.set_text(&viewer_status(&update, &pressed));
-                    let outputs_text = update.active_outputs.join("  •  ");
+                    let outputs_text = update.active_outputs.join(" | ");
                     outputs.set_text(if outputs_text.is_empty() {
                         "No mapped output active"
                     } else {

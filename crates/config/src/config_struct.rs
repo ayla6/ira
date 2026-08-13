@@ -83,6 +83,9 @@ pub struct ConsoleConfig {
     pub executable: String,
     pub ra_core: String,
     pub fullscreen: bool,
+    /// Optional console-wide remapping override before controller defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub controller_mode: Option<ControllerInputMode>,
     /// Shared layout used for this console before a game-specific layout.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub controller_profile: String,
@@ -95,6 +98,7 @@ impl Default for ConsoleConfig {
             executable: String::new(),
             ra_core: String::new(),
             fullscreen: false,
+            controller_mode: None,
             controller_profile: String::new(),
         }
     }
@@ -177,6 +181,14 @@ pub struct Config {
     pub roms_folder: String,
     #[serde(default)]
     pub default_native_env_vars: Vec<(String, String)>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub linux_controller_profile: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linux_controller_mode: Option<ControllerInputMode>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub wine_controller_profile: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wine_controller_mode: Option<ControllerInputMode>,
     #[serde(default)]
     pub default_api_emu_version: String,
     /// Remembered auto-add emulator choice. `None` = ask every time,
@@ -248,6 +260,10 @@ impl Default for Config {
             default_game_folder: String::new(),
             roms_folder: String::new(),
             default_native_env_vars: Vec::new(),
+            linux_controller_profile: String::new(),
+            linux_controller_mode: None,
+            wine_controller_profile: String::new(),
+            wine_controller_mode: None,
             default_api_emu_version: String::new(),
             auto_emu_install: None,
             centralize_game_saves: true,
@@ -335,6 +351,10 @@ impl Config {
             default_game_folder: self.default_game_folder.clone(),
             roms_folder: self.roms_folder.clone(),
             default_native_env_vars: self.default_native_env_vars.clone(),
+            linux_controller_profile: self.linux_controller_profile.clone(),
+            linux_controller_mode: self.linux_controller_mode,
+            wine_controller_profile: self.wine_controller_profile.clone(),
+            wine_controller_mode: self.wine_controller_mode,
             default_api_emu_version: self.default_api_emu_version.clone(),
             auto_emu_install: self.auto_emu_install,
             centralize_game_saves: self.centralize_game_saves,
@@ -375,6 +395,7 @@ static EMPTY_CONSOLE: ConsoleConfig = ConsoleConfig {
     executable: String::new(),
     ra_core: String::new(),
     fullscreen: false,
+    controller_mode: None,
     controller_profile: String::new(),
 };
 
@@ -470,16 +491,25 @@ mod tests {
         assert_eq!(cc.executable, "");
         assert_eq!(cc.ra_core, "");
         assert!(!cc.fullscreen);
+        assert_eq!(cc.controller_mode, None);
         assert!(cc.controller_profile.is_empty());
+    }
+
+    #[test]
+    fn test_config_default_pc_controller_profiles_are_empty() {
+        let config = Config::default();
+        assert!(config.linux_controller_profile.is_empty());
+        assert!(config.wine_controller_profile.is_empty());
     }
 
     #[test]
     fn test_console_config_accepts_controller_profile() {
         let console: ConsoleConfig =
             serde_json::from_str(
-                r#"{"enabled":true,"executable":"","ra_core":"","fullscreen":false,"controller_profile":"/layouts/ps1.json"}"#,
+                r#"{"enabled":true,"executable":"","ra_core":"","fullscreen":false,"controller_mode":"disabled","controller_profile":"/layouts/ps1.json"}"#,
             )
             .unwrap();
+        assert_eq!(console.controller_mode, Some(ControllerInputMode::Disabled));
         assert_eq!(console.controller_profile, "/layouts/ps1.json");
     }
 

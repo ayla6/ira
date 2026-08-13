@@ -1,24 +1,26 @@
 use super::css::*;
-use super::helpers::{entry_path_closure, make_browse_button, string_list_from};
+use super::helpers::{entry_path_closure, make_browse_icon_button, string_list_from};
 use super::settings_dialog::settings_page_container;
 use adw::prelude::*;
 use ira_config::{Config, ConsoleConfig};
 use ira_models::ConsoleDef;
+use std::cell::Cell;
+use std::rc::Rc;
 
 pub(super) fn build_emulator_dropdown(
     current_path: &str,
     include_global: bool,
     follow_label: &str,
     emulators: &[ira_platforms::emulator_detect::DetectedEmulator],
-) -> gtk4::DropDown {
+) -> adw::ComboRow {
     let mut version_strings: Vec<String> = Vec::new();
     if include_global {
         version_strings.push(follow_label.to_string());
     }
     version_strings.extend(emulators.iter().map(|e| e.display_name.clone()));
-    let version_model = string_list_from(&version_strings);
-    let version_dropdown =
-        gtk4::DropDown::new(Some(version_model), None::<&gtk4::PropertyExpression>);
+    let version_dropdown = adw::ComboRow::new();
+    version_dropdown.set_title("Version");
+    version_dropdown.set_model(Some(&string_list_from(&version_strings)));
 
     let mut selected_idx: u32 = 0;
     if !current_path.is_empty() {
@@ -39,7 +41,7 @@ pub(super) fn build_emulator_dropdown(
 
 pub(super) fn build_shadps4_settings_page(
     cfg: &Config,
-) -> (gtk4::Box, adw::SwitchRow, Option<gtk4::DropDown>) {
+) -> (gtk4::Box, adw::SwitchRow, Option<adw::ComboRow>) {
     let page = settings_page_container();
 
     let ps4_enable_group = adw::PreferencesGroup::new();
@@ -50,11 +52,11 @@ pub(super) fn build_shadps4_settings_page(
     ps4_enable_group.add(&ps4_enable_row);
     page.append(&ps4_enable_group);
 
-    let mut version_dropdown: Option<gtk4::DropDown> = None;
+    let mut version_dropdown: Option<adw::ComboRow> = None;
     let emulators = ira_platforms::ps4::read_shadps4_launch_options();
     if !emulators.is_empty() {
         let emu_group = adw::PreferencesGroup::new();
-        emu_group.set_title("shadPS4 build");
+        emu_group.set_title("Emulator");
 
         let dd = build_emulator_dropdown(
             &cfg.shadps4_executable,
@@ -63,11 +65,7 @@ pub(super) fn build_shadps4_settings_page(
             &emulators,
         );
 
-        let version_row = adw::ActionRow::new();
-        version_row.set_title("Launch build");
-        dd.set_valign(gtk4::Align::Center);
-        version_row.add_suffix(&dd);
-        emu_group.add(&version_row);
+        emu_group.add(&dd);
         page.append(&emu_group);
 
         version_dropdown = Some(dd);
@@ -133,34 +131,36 @@ pub(super) fn build_rpcs3_settings_page(
     exe_row.set_text(&initial_exe);
 
     if let Some(emu) = detected.first() {
-        let auto_btn = gtk4::Button::with_label("Auto-detect");
+        let auto_btn = gtk4::Button::from_icon_name("view-refresh-symbolic");
         auto_btn.add_css_class(CSS_FLAT);
+        auto_btn.add_css_class(CSS_SQUARE_BUTTON);
+        auto_btn.set_tooltip_text(Some("Auto-detect RPCS3"));
         auto_btn.set_valign(gtk4::Align::Center);
         let exe_row_c = exe_row.clone();
         let path = emu.launch_command.clone();
         auto_btn.connect_clicked(move |_| {
             exe_row_c.set_text(&path);
         });
+        auto_btn.set_visible(
+            !detected
+                .iter()
+                .any(|emu| emu.launch_command == exe_row.text().as_str()),
+        );
+        let auto_btn_for_changed = auto_btn.clone();
+        let detected_for_changed = detected.clone();
+        exe_row.connect_changed(move |entry| {
+            auto_btn_for_changed.set_visible(
+                !detected_for_changed
+                    .iter()
+                    .any(|emu| emu.launch_command == entry.text().as_str()),
+            );
+        });
         exe_row.add_suffix(&auto_btn);
     }
 
-    if !detected.is_empty() {
-        let dropdown = build_emulator_dropdown(&initial_exe, false, "", &detected);
-        let row = adw::ActionRow::new();
-        row.set_title("Detected emulators");
-        dropdown.set_valign(gtk4::Align::Center);
-        row.add_suffix(&dropdown);
-        emu_group.add(&row);
-        let exe_row_c = exe_row.clone();
-        let detected_c = detected.clone();
-        dropdown.connect_selected_notify(move |dd| {
-            if let Some(emu) = detected_c.get(dd.selected() as usize) {
-                exe_row_c.set_text(&emu.launch_command);
-            }
-        });
-    }
+    add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
 
-    let exe_browse = make_browse_button(
+    let exe_browse = make_browse_icon_button(
         Some(win),
         "Select RPCS3 executable",
         false,
@@ -221,7 +221,7 @@ pub(super) fn build_vita3k_settings_page(
     };
     exe_row.set_text(&initial_exe);
     add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-    let browse = make_browse_button(
+    let browse = make_browse_icon_button(
         Some(win),
         "Select Vita3K executable",
         false,
@@ -286,7 +286,7 @@ pub(super) fn build_cemu_settings_page(
     };
     exe_row.set_text(&initial_exe);
     add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-    let browse = make_browse_button(
+    let browse = make_browse_icon_button(
         Some(win),
         "Select Cemu executable",
         false,
@@ -334,12 +334,20 @@ fn add_detected_emulator_dropdown(
         return;
     }
     let current = exe_row.text();
-    let dropdown = build_emulator_dropdown(current.as_str(), false, "", detected);
-    let row = adw::ActionRow::new();
-    row.set_title("Detected emulators");
-    dropdown.set_valign(gtk4::Align::Center);
-    row.add_suffix(&dropdown);
-    group.add(&row);
+    let labels = detected
+        .iter()
+        .map(|emulator| emulator.display_name.as_str())
+        .collect::<Vec<_>>();
+    let dropdown = adw::ComboRow::new();
+    dropdown.set_title("Emulator");
+    dropdown.set_model(Some(&gtk4::StringList::new(&labels)));
+    dropdown.set_selected(
+        detected
+            .iter()
+            .position(|emulator| emulator.launch_command == current)
+            .unwrap_or(0) as u32,
+    );
+    group.add(&dropdown);
     let exe_row = exe_row.clone();
     let detected = detected.to_vec();
     dropdown.connect_selected_notify(move |dropdown| {
@@ -352,7 +360,7 @@ fn add_detected_emulator_dropdown(
 pub(super) struct ConsolePageWidgets {
     pub(super) enable_row: adw::SwitchRow,
     pub(super) exe_row: adw::EntryRow,
-    pub(super) core_dropdown: Option<gtk4::DropDown>,
+    pub(super) core_path_row: Option<adw::EntryRow>,
     pub(super) fullscreen_row: adw::SwitchRow,
 }
 
@@ -392,28 +400,12 @@ pub(super) fn build_console_settings_page(
     };
     exe_row.set_text(&initial_exe);
 
-    if !detected_emulators.is_empty() {
-        let current_exe = exe_row.text().to_string();
-        let emu_dropdown = build_emulator_dropdown(&current_exe, false, "", &detected_emulators);
+    add_detected_emulator_dropdown(&emu_group, &exe_row, &detected_emulators);
 
-        let exe_row_c = exe_row.clone();
-        let emus_clone = detected_emulators.clone();
-        emu_dropdown.connect_selected_notify(move |dd| {
-            let idx = dd.selected() as usize;
-            if let Some(e) = emus_clone.get(idx) {
-                exe_row_c.set_text(&e.launch_command);
-            }
-        });
-
-        let emu_select_row = adw::ActionRow::new();
-        emu_select_row.set_title("Detected emulators");
-        emu_dropdown.set_valign(gtk4::Align::Center);
-        emu_select_row.add_suffix(&emu_dropdown);
-        emu_group.add(&emu_select_row);
-    }
-
-    let auto_btn = gtk4::Button::with_label("Auto-detect");
+    let auto_btn = gtk4::Button::from_icon_name("view-refresh-symbolic");
     auto_btn.add_css_class(CSS_FLAT);
+    auto_btn.add_css_class(CSS_SQUARE_BUTTON);
+    auto_btn.set_tooltip_text(Some("Auto-detect emulator"));
     auto_btn.set_valign(gtk4::Align::Center);
     {
         let exe_row_c = exe_row.clone();
@@ -425,7 +417,7 @@ pub(super) fn build_console_settings_page(
         });
     }
 
-    let exe_browse = make_browse_button(
+    let exe_browse = make_browse_icon_button(
         Some(win),
         "Select emulator executable",
         false,
@@ -440,39 +432,88 @@ pub(super) fn build_console_settings_page(
     exe_row.add_suffix(&exe_browse);
     emu_group.add(&exe_row);
 
-    let cores = ira_platforms::emulator_detect::detect_ra_cores_for_console(def.id);
-    let mut core_dropdown: Option<gtk4::DropDown> = None;
+    let mut core_path_row: Option<adw::EntryRow> = None;
     let mut core_row_opt: Option<adw::ActionRow> = None;
+    let mut core_selector_opt: Option<adw::ComboRow> = None;
+    let mut custom_core_selected: Option<Rc<Cell<bool>>> = None;
 
-    if !cores.is_empty() {
-        let mut core_names: Vec<String> = vec!["None (auto-detect)".to_string()];
-        core_names.extend(cores.iter().map(|c| c.display_name.clone()));
-        let core_model = string_list_from(&core_names);
-        let dropdown = gtk4::DropDown::new(Some(core_model), None::<&gtk4::PropertyExpression>);
-
-        let mut selected_idx: u32 = 0;
-        if !cc.ra_core.is_empty() {
-            for (i, c) in cores.iter().enumerate() {
-                if c.path == cc.ra_core {
-                    selected_idx = (i + 1) as u32;
-                    break;
-                }
-            }
-        }
-        dropdown.set_selected(selected_idx);
-
-        let core_row = adw::ActionRow::new();
-        core_row.set_title("RetroArch core");
-        core_row.set_subtitle("Select a core for this console");
-        dropdown.set_valign(gtk4::Align::Center);
-        core_row.add_suffix(&dropdown);
-        core_row.set_visible(ira_platforms::emulator_detect::is_retroarch(
+    if ira_platforms::emulator_detect::supports_retroarch_cores(def.id) {
+        let cores = ira_platforms::emulator_detect::detect_ra_cores_for_console(def.id);
+        let configured_core = (!cc.ra_core.is_empty()
+            && std::path::Path::new(&cc.ra_core).is_file())
+        .then(|| cc.ra_core.clone());
+        let selected_core = configured_core
+            .clone()
+            .or_else(|| cores.first().map(|core| core.path.clone()));
+        let core_path = adw::EntryRow::new();
+        core_path.set_title("Custom core file");
+        core_path.set_text(selected_core.as_deref().unwrap_or_default());
+        let browse = make_browse_icon_button(
+            Some(win),
+            "Select RetroArch core",
+            false,
+            None,
+            entry_path_closure(&core_path),
+            {
+                let row = core_path.clone();
+                move |path| row.set_text(&path.to_string_lossy())
+            },
+        );
+        core_path.add_suffix(&browse);
+        core_path.set_visible(ira_platforms::emulator_detect::is_retroarch(
             exe_row.text().as_ref(),
         ));
-        emu_group.add(&core_row);
 
-        core_row_opt = Some(core_row);
-        core_dropdown = Some(dropdown);
+        let is_retroarch = ira_platforms::emulator_detect::is_retroarch(exe_row.text().as_ref());
+        if cores.is_empty() {
+            let core_row = adw::ActionRow::new();
+            core_row.set_title("RetroArch core");
+            core_row.set_subtitle(
+                "No compatible cores installed. Install one with RetroArch's Core Downloader.",
+            );
+            core_row.set_sensitive(false);
+            core_row.set_visible(is_retroarch);
+            core_path.set_visible(is_retroarch);
+            emu_group.add(&core_row);
+            core_row_opt = Some(core_row);
+        } else {
+            let core_names = cores
+                .iter()
+                .map(|core| core.display_name.clone())
+                .collect::<Vec<_>>();
+            let mut core_names = core_names;
+            core_names.push("Custom core file...".to_string());
+            let dropdown = adw::ComboRow::new();
+            dropdown.set_title("RetroArch core");
+            dropdown.set_subtitle("Select a core for this console");
+            dropdown.set_model(Some(&string_list_from(&core_names)));
+            let selected_idx = selected_core
+                .as_ref()
+                .and_then(|path| cores.iter().position(|core| &core.path == path))
+                .unwrap_or(cores.len());
+            dropdown.set_selected(selected_idx as u32);
+            dropdown.set_visible(is_retroarch);
+            let custom_selected = Rc::new(Cell::new(selected_idx == cores.len()));
+            core_path.set_visible(is_retroarch && custom_selected.get());
+            let core_path_for_selection = core_path.clone();
+            let cores_for_selection = cores.clone();
+            let custom_selected_for_selection = custom_selected.clone();
+            dropdown.connect_selected_notify(move |dropdown| {
+                if let Some(core) = cores_for_selection.get(dropdown.selected() as usize) {
+                    core_path_for_selection.set_text(&core.path);
+                    core_path_for_selection.set_visible(false);
+                    custom_selected_for_selection.set(false);
+                } else {
+                    core_path_for_selection.set_visible(true);
+                    custom_selected_for_selection.set(true);
+                }
+            });
+            custom_core_selected = Some(custom_selected);
+            emu_group.add(&dropdown);
+            core_selector_opt = Some(dropdown);
+        }
+        emu_group.add(&core_path);
+        core_path_row = Some(core_path);
     }
 
     auto_btn.set_visible(
@@ -482,12 +523,26 @@ pub(super) fn build_console_settings_page(
     );
 
     let core_row_c = core_row_opt;
+    let core_selector_c = core_selector_opt;
+    let core_path_row_c = core_path_row.clone();
+    let custom_core_selected_c = custom_core_selected.clone();
     let auto_btn_c = auto_btn.clone();
     let emus_for_changed = detected_emulators.clone();
     exe_row.connect_changed(move |entry| {
         let text = entry.text().to_string();
         if let Some(ref cr) = core_row_c {
             cr.set_visible(ira_platforms::emulator_detect::is_retroarch(&text));
+        }
+        if let Some(ref selector) = core_selector_c {
+            selector.set_visible(ira_platforms::emulator_detect::is_retroarch(&text));
+        }
+        if let Some(ref core_path) = core_path_row_c {
+            core_path.set_visible(
+                ira_platforms::emulator_detect::is_retroarch(&text)
+                    && custom_core_selected_c
+                        .as_ref()
+                        .is_none_or(|selected| selected.get()),
+            );
         }
         auto_btn_c.set_visible(!emus_for_changed.iter().any(|e| e.launch_command == text));
     });
@@ -504,7 +559,7 @@ pub(super) fn build_console_settings_page(
         ConsolePageWidgets {
             enable_row,
             exe_row,
-            core_dropdown,
+            core_path_row,
             fullscreen_row,
         },
     )

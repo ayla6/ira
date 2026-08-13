@@ -64,47 +64,32 @@ pub(super) fn ensure_controller_default_profile(
     Ok(path)
 }
 
-pub(super) fn copy_controller_default(
-    save_dir: &str,
-    source_key: &str,
-    target_key: &str,
-    target_name: &str,
-    supported_buttons: &[GamepadButton],
-) -> Result<PathBuf, String> {
-    let source_path = controller_default_path(save_dir, source_key);
-    let mut profile = read_profile_data(&source_path)?;
-    let target_path = controller_default_path_for_backend(save_dir, target_key, profile.backend);
-
-    profile.bindings.retain(|binding| {
-        !matches!(
-            binding.source,
-            InputSource::Button(button) if !supported_buttons.contains(&button)
-        )
-    });
-    profile.name = target_name.to_string();
-    profile.validate()?;
-    write_profile(&target_path, &profile)?;
-    Ok(target_path)
-}
-
 pub(super) fn list_profiles(save_dir: &str) -> Result<Vec<StoredProfile>, String> {
-    let directory = profile_directory(save_dir);
-    let entries = match std::fs::read_dir(&directory) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(format!("Could not read controller profiles: {error}")),
-    };
     let mut profiles = Vec::new();
-    for entry in entries {
-        let entry =
-            entry.map_err(|error| format!("Could not read controller profile entry: {error}"))?;
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
-        }
-        match read_profile(&path) {
-            Ok(profile) => profiles.push(StoredProfile { path, profile }),
-            Err(error) => eprintln!("Skipping invalid controller profile {:?}: {error}", path),
+    for directory in [
+        profile_directory(save_dir),
+        Path::new(save_dir).join(CONTROLLER_DEFAULT_DIRECTORY),
+    ] {
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("Could not read controller profiles: {error}")),
+        };
+        for entry in entries {
+            let entry = entry
+                .map_err(|error| format!("Could not read controller profile entry: {error}"))?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json")
+                || path
+                    .file_stem()
+                    .is_some_and(|stem| stem.to_string_lossy().starts_with("resolved-"))
+            {
+                continue;
+            }
+            match read_profile(&path) {
+                Ok(profile) => profiles.push(StoredProfile { path, profile }),
+                Err(error) => eprintln!("Skipping invalid controller profile {:?}: {error}", path),
+            }
         }
     }
     profiles.sort_by_cached_key(|profile| profile.profile.name.to_lowercase());
@@ -186,8 +171,8 @@ fn profile_slug(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        add_game_compatibility, copy_controller_default, ensure_controller_default_profile,
-        managed_profile_path, new_managed_profile_path, profile_matches_game,
+        add_game_compatibility, ensure_controller_default_profile, managed_profile_path,
+        new_managed_profile_path, profile_matches_game,
     };
     use ira_input::{
         Binding, GamepadButton, GyroCalibration, InputProfile, InputSource, OutputAction,
@@ -355,115 +340,6 @@ mod tests {
         assert_eq!(
             super::read_profile(&path).unwrap().gyro_calibration,
             calibration
-        );
-    }
-
-    #[test]
-    fn test_copy_controller_default_creates_independent_target_with_filtered_sources() {
-        let tmp = tempfile::tempdir().unwrap();
-        let save_dir = tmp.path().to_str().unwrap();
-        let source = super::controller_default_path(save_dir, "source");
-        let profile = InputProfile {
-            name: "Source".to_string(),
-            compatible_game_ids: vec![42],
-            gyro_calibration: GyroCalibration {
-                x: 0.1,
-                y: 0.2,
-                z: 0.3,
-            },
-            bindings: vec![
-                Binding::new(
-                    InputSource::Button(GamepadButton::A),
-                    OutputAction::Keyboard { keycode: 30 },
-                ),
-                Binding::new(
-                    InputSource::Button(GamepadButton::Paddle1),
-                    OutputAction::GamepadButton(GamepadButton::B),
-                ),
-            ],
-            ..InputProfile::default()
-        };
-        super::write_profile(&source, &profile).unwrap();
-
-        let target =
-            copy_controller_default(save_dir, "source", "target", "Target", &[GamepadButton::A])
-                .unwrap();
-        let copied = super::read_profile(&target).unwrap();
-        assert_eq!(copied.name, "Target");
-        assert_eq!(copied.compatible_game_ids, vec![42]);
-        assert_eq!(copied.gyro_calibration, profile.gyro_calibration);
-        assert_eq!(copied.bindings.len(), 1);
-        assert_eq!(
-            copied.bindings[0].output,
-            OutputAction::Keyboard { keycode: 30 }
-        );
-
-        assert_eq!(super::read_profile(&source).unwrap(), profile);
-        assert_ne!(source, target);
-        assert_ne!(
-            std::fs::read(&source).unwrap(),
-            std::fs::read(&target).unwrap()
-        );
-    }
-
-    #[test]
-    fn test_copy_controller_default_validates_target_profile() {
-        let tmp = tempfile::tempdir().unwrap();
-        let save_dir = tmp.path().to_str().unwrap();
-        let source = super::controller_default_path(save_dir, "source");
-        let mut profile = InputProfile::default();
-        profile.bindings.push(Binding {
-            source: InputSource::Button(GamepadButton::A),
-            output: OutputAction::GamepadButton(GamepadButton::B),
-            transform: ira_input::AxisTransform {
-                dead_zone: 1.0,
-                ..ira_input::AxisTransform::default()
-            },
-            ..Binding::new(
-                InputSource::Button(GamepadButton::A),
-                OutputAction::GamepadButton(GamepadButton::B),
-            )
-        });
-        super::write_profile(&source, &profile).unwrap();
-
-        let error =
-            copy_controller_default(save_dir, "source", "target", "Target", &[GamepadButton::A])
-                .unwrap_err();
-        assert!(error.contains("dead_zone"));
-        assert!(!super::controller_default_path(save_dir, "target").exists());
-    }
-
-    #[test]
-    fn test_copy_controller_default_preserves_direct_input_paddle_output() {
-        let tmp = tempfile::tempdir().unwrap();
-        let save_dir = tmp.path().to_str().unwrap();
-        let source = super::controller_default_path(save_dir, "source");
-        super::write_profile(
-            &source,
-            &InputProfile {
-                backend: VirtualGamepadBackend::DirectInput,
-                bindings: vec![Binding::new(
-                    InputSource::Button(GamepadButton::A),
-                    OutputAction::GamepadButton(GamepadButton::Paddle1),
-                )],
-                ..InputProfile::default()
-            },
-        )
-        .unwrap();
-
-        let target = copy_controller_default(
-            save_dir,
-            "source",
-            "target",
-            "DirectInput target",
-            &[GamepadButton::A],
-        )
-        .unwrap();
-        let copied = super::read_profile(&target).unwrap();
-        assert_eq!(copied.backend, VirtualGamepadBackend::DirectInput);
-        assert_eq!(
-            copied.bindings[0].output,
-            OutputAction::GamepadButton(GamepadButton::Paddle1)
         );
     }
 }

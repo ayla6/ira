@@ -1,8 +1,6 @@
-use super::css::CSS_FLAT;
+use super::css::{CSS_FLAT, CSS_SQUARE_BUTTON};
 use super::input_profile_store::controller_default_path_for_backend;
-use super::input_profile_store::{
-    copy_controller_default, ensure_controller_default_profile, list_profiles, StoredProfile,
-};
+use super::input_profile_store::{ensure_controller_default_profile, list_profiles, StoredProfile};
 use adw::prelude::*;
 use ira_config::{Config, ControllerInputConfig};
 use ira_models::ControllerInputMode;
@@ -10,6 +8,10 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
+
+const REMAPPING_TITLE: &str = "Input remapping";
+const LAYOUT_TITLE: &str = "Layout";
+const INHERIT_LAYOUT: &str = "Inherit";
 
 fn settings_page_container() -> gtk4::Box {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
@@ -26,8 +28,31 @@ pub(super) struct InputPageWidgets {
 
 pub(super) struct ConsoleProfileWidgets {
     pub console_id: String,
-    pub profile_row: adw::ComboRow,
-    pub profile_paths: Vec<Option<std::path::PathBuf>>,
+    pub mode: Rc<RefCell<Option<ControllerInputMode>>>,
+    pub profile_path: Rc<RefCell<Option<std::path::PathBuf>>>,
+}
+
+pub(super) fn add_pc_profile_group(
+    page: &gtk4::Box,
+    cfg: &Config,
+    config_id: &str,
+    label: &str,
+    parent: &adw::Window,
+    registry: std::sync::Arc<ira_input::ControllerRegistry>,
+) -> ConsoleProfileWidgets {
+    let group = adw::PreferencesGroup::new();
+    group.set_title(label);
+    let widget = add_console_remapping_rows(
+        &group,
+        cfg,
+        config_id.to_string(),
+        label.to_string(),
+        parent,
+        &cfg.save_dir,
+        registry,
+    );
+    page.append(&group);
+    widget
 }
 
 #[derive(Clone)]
@@ -64,37 +89,16 @@ pub(super) fn build_input_settings_page(
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
 ) -> (gtk4::Box, InputPageWidgets) {
     let page = settings_page_container();
-    let profiles = list_profiles(save_dir).unwrap_or_else(|error| {
-        eprintln!("Failed to list controller profiles: {error}");
-        Vec::new()
-    });
     let profiles_group = adw::PreferencesGroup::new();
     profiles_group.set_title("Profiles");
-    for stored in &profiles {
-        add_profile_row(
-            &profiles_group,
-            parent,
-            save_dir,
-            stored.clone(),
-            registry.clone(),
-        );
-    }
-
-    let monitor_group = adw::PreferencesGroup::new();
-    monitor_group.set_title("Tools");
-    let monitor_row = adw::ActionRow::new();
-    monitor_row.set_title("Input monitor");
-    let monitor_button = icon_button("input-gaming-symbolic", "Monitor input");
-    monitor_row.add_suffix(&monitor_button);
-    let parent_for_monitor = parent.clone();
-    let registry_for_monitor = registry.clone();
-    monitor_button.connect_clicked(move |_| {
-        super::input_monitor_dialog::show_input_monitor_dialog(
-            parent_for_monitor.upcast_ref(),
-            registry_for_monitor.clone(),
-        );
-    });
-    monitor_group.add(&monitor_row);
+    let profile_rows = Rc::new(RefCell::new(Vec::new()));
+    rebuild_profile_rows(
+        &profiles_group,
+        parent,
+        save_dir,
+        registry.clone(),
+        &profile_rows,
+    );
 
     let controller_group = adw::PreferencesGroup::new();
     controller_group.set_title("Controller defaults");
@@ -125,7 +129,6 @@ pub(super) fn build_input_settings_page(
         no_controllers_row,
     );
     page.append(&controller_group);
-    page.append(&monitor_group);
     page.append(&profiles_group);
 
     (
@@ -138,63 +141,260 @@ pub(super) fn build_input_settings_page(
 
 pub(super) fn add_console_profile_group(
     page: &gtk4::Box,
+    parent: &adw::Window,
     cfg: &Config,
     save_dir: &str,
     console_id: &str,
     label: &str,
+    registry: std::sync::Arc<ira_input::ControllerRegistry>,
 ) -> ConsoleProfileWidgets {
     let group = adw::PreferencesGroup::new();
     group.set_title("Controller");
-    let profiles = list_profiles(save_dir).unwrap_or_else(|error| {
-        eprintln!("Failed to list controller profiles: {error}");
-        Vec::new()
-    });
-    let widget = add_console_profile_row(
+    let widget = add_console_remapping_rows(
         &group,
         cfg,
-        &profiles,
         console_id.to_string(),
         label.to_string(),
+        parent,
+        save_dir,
+        registry,
     );
     page.append(&group);
     widget
 }
 
-fn add_console_profile_row(
+fn add_console_remapping_rows(
     group: &adw::PreferencesGroup,
     cfg: &Config,
-    profiles: &[StoredProfile],
     console_id: String,
     label: String,
+    parent: &adw::Window,
+    save_dir: &str,
+    registry: std::sync::Arc<ira_input::ControllerRegistry>,
 ) -> ConsoleProfileWidgets {
+    let mode = Rc::new(RefCell::new(cfg.console(&console_id).controller_mode));
+    let mode_row = adw::ComboRow::new();
+    mode_row.set_title(REMAPPING_TITLE);
+    mode_row.set_model(Some(&gtk4::StringList::new(&[
+        "Inherit",
+        "Disabled",
+        "Virtual XInput",
+        "Virtual DirectInput",
+    ])));
+    mode_row.set_selected(input_mode_index(*mode.borrow()));
+    let mode_for_selection = mode.clone();
+    mode_row.connect_selected_notify(move |row| {
+        *mode_for_selection.borrow_mut() = input_mode_from_index(row.selected());
+    });
+    group.add(&mode_row);
+
     let profile_row = adw::ComboRow::new();
-    profile_row.set_title("Default layout");
-    profile_row.set_subtitle(&format!("Use controller default for {label}"));
-    let mut labels = vec!["Use controller default".to_string()];
-    let mut profile_paths = vec![None];
-    for profile in profiles
-        .iter()
-        .filter(|profile| profile.profile.compatible_game_ids.is_empty())
-    {
-        labels.push(profile_label(profile));
-        profile_paths.push(Some(profile.path.clone()));
-    }
-    let selected = profile_paths
-        .iter()
-        .position(|path| {
-            path.as_ref().is_some_and(|path| {
-                path == std::path::Path::new(&cfg.console(&console_id).controller_profile)
-            })
-        })
-        .unwrap_or(0);
-    let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
-    profile_row.set_model(Some(&gtk4::StringList::new(&refs)));
-    profile_row.set_selected(selected as u32);
+    profile_row.set_title(LAYOUT_TITLE);
+    let current_path = (!cfg.console(&console_id).controller_profile.is_empty())
+        .then(|| std::path::PathBuf::from(&cfg.console(&console_id).controller_profile));
+    let (labels, profile_paths, selected) = console_profile_choices(save_dir, current_path);
+    profile_row.set_model(Some(&gtk4::StringList::new(
+        &labels.iter().map(String::as_str).collect::<Vec<_>>(),
+    )));
+    profile_row.set_selected(selected);
+    let profile_paths = Rc::new(RefCell::new(profile_paths));
+    let profile_path = Rc::new(RefCell::new(selected_console_path(
+        &profile_row,
+        &profile_paths,
+    )));
+    let last_real = Rc::new(RefCell::new(selected));
+    let profile_paths_for_selection = profile_paths.clone();
+    let profile_path_for_selection = profile_path.clone();
+    profile_row.connect_selected_notify(move |row| {
+        *profile_path_for_selection.borrow_mut() = profile_paths_for_selection
+            .borrow()
+            .get(row.selected() as usize)
+            .cloned()
+            .flatten();
+    });
+    let monitor = icon_button("input-gaming-symbolic", "Monitor this layout");
+    let edit = icon_button("document-edit-symbolic", "Edit layout");
+    monitor.set_sensitive(true);
+    edit.set_sensitive(selected != 0);
+    profile_row.add_suffix(&edit);
+    profile_row.add_suffix(&monitor);
     group.add(&profile_row);
+    let parent = parent.clone();
+    let save_dir = save_dir.to_string();
+    let label_for_edit = label.clone();
+    let profile_row_for_edit = profile_row.clone();
+    let profile_paths_for_edit = profile_paths.clone();
+    let profile_path_for_edit = profile_path.clone();
+    let last_real_for_edit = last_real.clone();
+    let parent_for_edit = parent.clone();
+    let registry_for_edit = registry.clone();
+    let save_dir_for_edit = save_dir.clone();
+    edit.connect_clicked(move |_| {
+        let Some(path) = profile_path_for_edit.borrow().clone() else {
+            return;
+        };
+        let row = profile_row_for_edit.clone();
+        let paths = profile_paths_for_edit.clone();
+        let save_dir = save_dir_for_edit.clone();
+        let last_real = last_real_for_edit.clone();
+        super::input_profile_editor::show_input_profile_editor(
+            parent_for_edit.upcast_ref(),
+            super::input_profile_editor::InputProfileEditorParams {
+                save_dir: save_dir.clone(),
+                profile_path: Some(path),
+                game_id: None,
+                layout_name: Some(label_for_edit.clone()),
+                registry: registry_for_edit.clone(),
+                device: None,
+            },
+            move |saved| {
+                refresh_console_profile_choices(&row, &paths, &save_dir, Some(&saved), &last_real)
+            },
+        );
+    });
+    let parent_for_monitor = parent.clone();
+    let registry_for_monitor = registry.clone();
+    monitor.connect_clicked(move |_| {
+        super::input_profile_viewer::show_raw_input_viewer(
+            parent_for_monitor.upcast_ref(),
+            registry_for_monitor.clone(),
+        );
+    });
+    let paths_for_notify = profile_paths.clone();
+    let last_real_for_notify = last_real.clone();
+    profile_row.connect_selected_notify({
+        let edit = edit.clone();
+        let monitor = monitor.clone();
+        let parent = parent.clone();
+        let save_dir = save_dir.clone();
+        let label = label.clone();
+        let registry = registry.clone();
+        move |row| {
+            let sentinel = paths_for_notify.borrow().len().saturating_sub(1) as u32;
+            if row.selected() == sentinel {
+                let row_for_revert = row.clone();
+                let previous = *last_real_for_notify.borrow();
+                let paths = paths_for_notify.clone();
+                let last_real = last_real_for_notify.clone();
+                let parent = parent.clone();
+                let save_dir = save_dir.clone();
+                let label = label.clone();
+                let registry = registry.clone();
+                glib::idle_add_local(move || {
+                    row_for_revert.set_selected(previous);
+                    let row_for_saved = row_for_revert.clone();
+                    let paths_for_saved = paths.clone();
+                    let save_dir_for_saved = save_dir.clone();
+                    let last_real_for_saved = last_real.clone();
+                    super::input_profile_editor::show_input_profile_editor(
+                        parent.upcast_ref(),
+                        super::input_profile_editor::InputProfileEditorParams {
+                            save_dir: save_dir.clone(),
+                            profile_path: None,
+                            game_id: None,
+                            layout_name: Some(label.clone()),
+                            registry: registry.clone(),
+                            device: None,
+                        },
+                        move |saved| {
+                            refresh_console_profile_choices(
+                                &row_for_saved,
+                                &paths_for_saved,
+                                &save_dir_for_saved,
+                                Some(&saved),
+                                &last_real_for_saved,
+                            )
+                        },
+                    );
+                    glib::ControlFlow::Break
+                });
+                return;
+            }
+            *last_real_for_notify.borrow_mut() = row.selected();
+            let has_profile = selected_console_path(row, &paths_for_notify).is_some();
+            edit.set_sensitive(has_profile);
+            monitor.set_sensitive(true);
+        }
+    });
     ConsoleProfileWidgets {
         console_id,
-        profile_row,
-        profile_paths,
+        mode,
+        profile_path,
+    }
+}
+
+fn console_profile_choices(
+    save_dir: &str,
+    current_path: Option<std::path::PathBuf>,
+) -> (Vec<String>, Vec<Option<std::path::PathBuf>>, u32) {
+    let profiles = list_profiles(save_dir).unwrap_or_else(|error| {
+        eprintln!("Failed to list controller profiles: {error}");
+        Vec::new()
+    });
+    let mut labels = vec![INHERIT_LAYOUT.to_string()];
+    let mut paths = vec![None];
+    for profile in profiles
+        .into_iter()
+        .filter(|profile| profile.profile.compatible_game_ids.is_empty())
+    {
+        labels.push(profile_label(&profile));
+        paths.push(Some(profile.path));
+    }
+    let selected = current_path
+        .as_ref()
+        .and_then(|path| {
+            paths
+                .iter()
+                .position(|candidate| candidate.as_ref() == Some(path))
+        })
+        .unwrap_or(0);
+    labels.push("Create new profile...".to_string());
+    paths.push(None);
+    (labels, paths, selected as u32)
+}
+
+fn selected_console_path(
+    row: &adw::ComboRow,
+    paths: &Rc<RefCell<Vec<Option<std::path::PathBuf>>>>,
+) -> Option<std::path::PathBuf> {
+    paths
+        .borrow()
+        .get(row.selected() as usize)
+        .and_then(Clone::clone)
+}
+
+fn refresh_console_profile_choices(
+    row: &adw::ComboRow,
+    paths: &Rc<RefCell<Vec<Option<std::path::PathBuf>>>>,
+    save_dir: &str,
+    selected_path: Option<&std::path::Path>,
+    last_real: &Rc<RefCell<u32>>,
+) {
+    let (labels, updated_paths, selected) =
+        console_profile_choices(save_dir, selected_path.map(std::path::Path::to_path_buf));
+    *paths.borrow_mut() = updated_paths;
+    row.set_model(Some(&gtk4::StringList::new(
+        &labels.iter().map(String::as_str).collect::<Vec<_>>(),
+    )));
+    row.set_selected(selected);
+    *last_real.borrow_mut() = selected;
+}
+
+fn input_mode_index(mode: Option<ControllerInputMode>) -> u32 {
+    match mode {
+        None => 0,
+        Some(ControllerInputMode::Disabled) => 1,
+        Some(ControllerInputMode::VirtualXInput) => 2,
+        Some(ControllerInputMode::VirtualDirectInput) => 3,
+    }
+}
+
+fn input_mode_from_index(index: u32) -> Option<ControllerInputMode> {
+    match index {
+        1 => Some(ControllerInputMode::Disabled),
+        2 => Some(ControllerInputMode::VirtualXInput),
+        3 => Some(ControllerInputMode::VirtualDirectInput),
+        _ => None,
     }
 }
 
@@ -322,57 +522,6 @@ fn add_controller_row(
     action_row.add_suffix(&edit);
     expander.add_row(&action_row);
 
-    let copy_row = adw::ComboRow::new();
-    copy_row.set_title("Copy mapping from");
-    copy_row.set_subtitle("Use another configured controller as the starting point");
-    let copy_model = gtk4::StringList::new(&["Select a configured controller"]);
-    let mut copy_keys = Vec::new();
-    // The key is the stable identity; names are intentionally not persisted here.
-    for source_key in configured_controller_keys(save_dir, &key) {
-        copy_model.append(&source_key);
-        copy_keys.push(source_key);
-    }
-    copy_row.set_model(Some(&copy_model));
-    expander.add_row(&copy_row);
-    let save_dir_for_copy = save_dir.to_string();
-    let target_key_for_copy = key.clone();
-    let target_name_for_copy = device_name.clone();
-    let buttons_for_copy = supported_buttons.clone();
-    let profile_path_for_copy = profile_path.clone();
-    let mode_for_copy = mode.clone();
-    copy_row.connect_selected_notify(move |row| {
-        let selected = row.selected();
-        let Some(source_key) = selected
-            .checked_sub(1)
-            .and_then(|index| copy_keys.get(index as usize))
-        else {
-            return;
-        };
-        match copy_controller_default(
-            &save_dir_for_copy,
-            source_key,
-            &target_key_for_copy,
-            &target_name_for_copy,
-            &buttons_for_copy,
-        ) {
-            Ok(path) => {
-                if let Ok(profile) = super::input_profile_store::read_profile(&path) {
-                    mode_for_copy.set_selected(selection_for_mode(match profile.backend {
-                        ira_input::VirtualGamepadBackend::XInput => {
-                            ControllerInputMode::VirtualXInput
-                        }
-                        ira_input::VirtualGamepadBackend::DirectInput => {
-                            ControllerInputMode::VirtualDirectInput
-                        }
-                    }));
-                }
-                *profile_path_for_copy.borrow_mut() = Some(path);
-                row.set_selected(0);
-            }
-            Err(error) => eprintln!("Failed to copy controller mapping: {error}"),
-        }
-    });
-
     let parent_for_edit = parent.clone();
     let save_dir_for_edit = save_dir.to_string();
     let profile_path_for_edit = profile_path.clone();
@@ -499,29 +648,6 @@ fn start_controller_registry_refresh(
     });
 }
 
-fn configured_controller_keys(save_dir: &str, target_key: &str) -> Vec<String> {
-    std::fs::read_dir(
-        super::input_profile_store::controller_default_path(save_dir, "")
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new(save_dir)),
-    )
-    .ok()
-    .into_iter()
-    .flatten()
-    .filter_map(Result::ok)
-    .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_file()))
-    .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("json"))
-    .filter_map(|entry| {
-        entry
-            .path()
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .map(str::to_owned)
-    })
-    .filter(|key| key != target_key)
-    .collect()
-}
-
 fn selection_for_mode(mode: ControllerInputMode) -> u32 {
     match mode {
         ControllerInputMode::Disabled => 0,
@@ -538,24 +664,100 @@ pub(super) fn mode_from_selection(selection: u32) -> ControllerInputMode {
     }
 }
 
+fn rebuild_profile_rows(
+    group: &adw::PreferencesGroup,
+    parent: &adw::Window,
+    save_dir: &str,
+    registry: std::sync::Arc<ira_input::ControllerRegistry>,
+    rows: &Rc<RefCell<Vec<gtk4::Widget>>>,
+) {
+    for row in rows.borrow_mut().drain(..) {
+        group.remove(&row);
+    }
+    for stored in list_profiles(save_dir).unwrap_or_else(|error| {
+        eprintln!("Failed to list controller profiles: {error}");
+        Vec::new()
+    }) {
+        rows.borrow_mut().push(
+            add_profile_row(group, parent, save_dir, stored, registry.clone(), rows).upcast(),
+        );
+    }
+    let new_profile = icon_button("list-add-symbolic", "Create profile");
+    let group_for_new = group.clone();
+    let parent_for_new = parent.clone();
+    let save_dir_for_new = save_dir.to_string();
+    let registry_for_new = registry.clone();
+    let rows_for_new = rows.clone();
+    new_profile.connect_clicked(move |_| {
+        let group = group_for_new.clone();
+        let parent = parent_for_new.clone();
+        let parent_for_saved = parent.clone();
+        let save_dir = save_dir_for_new.clone();
+        let registry = registry_for_new.clone();
+        let rows_for_saved = rows_for_new.clone();
+        super::input_profile_editor::show_input_profile_editor(
+            parent.upcast_ref(),
+            super::input_profile_editor::InputProfileEditorParams {
+                save_dir: save_dir.clone(),
+                profile_path: None,
+                game_id: None,
+                layout_name: None,
+                registry: registry.clone(),
+                device: None,
+            },
+            move |_| {
+                rebuild_profile_rows(
+                    &group,
+                    &parent_for_saved,
+                    &save_dir,
+                    registry.clone(),
+                    &rows_for_saved,
+                )
+            },
+        );
+    });
+    let preview = icon_button("input-gaming-symbolic", "View raw controller input");
+    let preview_row = adw::ActionRow::new();
+    preview_row.set_title("Controller preview");
+    preview_row.add_suffix(&preview);
+    let parent_for_preview = parent.clone();
+    let registry_for_preview = registry.clone();
+    preview.connect_clicked(move |_| {
+        super::input_profile_viewer::show_raw_input_viewer(
+            parent_for_preview.upcast_ref(),
+            registry_for_preview.clone(),
+        );
+    });
+    group.add(&preview_row);
+    group.set_header_suffix(Some(&new_profile));
+    rows.borrow_mut()
+        .extend([preview_row.upcast::<gtk4::Widget>()]);
+}
+
 fn add_profile_row(
     group: &adw::PreferencesGroup,
     parent: &adw::Window,
     save_dir: &str,
     stored: StoredProfile,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
-) {
+    rows: &Rc<RefCell<Vec<gtk4::Widget>>>,
+) -> adw::ActionRow {
     let row = adw::ActionRow::new();
     row.set_title(&profile_label(&stored));
+    let preview = icon_button("input-gaming-symbolic", "Preview layout output");
     let edit = icon_button("document-edit-symbolic", "Edit profile");
     let delete = icon_button("user-trash-symbolic", "Delete profile");
+    row.add_suffix(&preview);
     row.add_suffix(&edit);
     row.add_suffix(&delete);
     let parent_for_edit = parent.clone();
     let save_dir_for_edit = save_dir.to_string();
     let registry_for_edit = registry.clone();
     let path_for_edit = stored.path.clone();
+    let group_for_edit = group.clone();
+    let rows_for_edit = rows.clone();
     edit.connect_clicked(move |_| {
+        let rows_for_saved = rows_for_edit.clone();
         super::input_profile_editor::show_input_profile_editor(
             parent_for_edit.upcast_ref(),
             super::input_profile_editor::InputProfileEditorParams {
@@ -566,13 +768,38 @@ fn add_profile_row(
                 registry: registry_for_edit.clone(),
                 device: None,
             },
-            |_| {},
+            {
+                let group = group_for_edit.clone();
+                let parent = parent_for_edit.clone();
+                let save_dir = save_dir_for_edit.clone();
+                let registry = registry_for_edit.clone();
+                move |_| {
+                    rebuild_profile_rows(
+                        &group,
+                        &parent,
+                        &save_dir,
+                        registry.clone(),
+                        &rows_for_saved,
+                    )
+                }
+            },
+        );
+    });
+    let parent_for_preview = parent.clone();
+    let path_for_preview = stored.path.clone();
+    let registry_for_preview = registry.clone();
+    preview.connect_clicked(move |_| {
+        super::input_profile_viewer::show_input_profile_viewer(
+            parent_for_preview.upcast_ref(),
+            &path_for_preview,
+            registry_for_preview.clone(),
         );
     });
     let parent_for_delete = parent.clone();
     let path_for_delete = stored.path.clone();
-    let row_for_delete = row.clone();
     let group_for_delete = group.clone();
+    let save_dir_for_delete = save_dir.to_string();
+    let rows_for_delete = rows.clone();
     delete.connect_clicked(move |_| {
         let alert = adw::AlertDialog::new(
             Some("Delete layout"),
@@ -584,25 +811,30 @@ fn add_profile_row(
         alert.set_default_response(Some("cancel"));
         alert.set_close_response("cancel");
         let path = path_for_delete.clone();
-        let row = row_for_delete.clone();
         let group = group_for_delete.clone();
+        let parent = parent_for_delete.clone();
+        let save_dir = save_dir_for_delete.clone();
+        let registry = registry.clone();
+        let rows = rows_for_delete.clone();
         alert.connect_response(None, move |_, response| {
             if response == "delete" {
                 if let Err(error) = std::fs::remove_file(&path) {
                     eprintln!("Failed to delete controller layout: {error}");
                 } else {
-                    group.remove(&row);
+                    rebuild_profile_rows(&group, &parent, &save_dir, registry.clone(), &rows);
                 }
             }
         });
         alert.present(Some(&parent_for_delete));
     });
     group.add(&row);
+    row
 }
 
 fn icon_button(icon: &str, tooltip: &str) -> gtk4::Button {
     let button = gtk4::Button::from_icon_name(icon);
     button.add_css_class(CSS_FLAT);
+    button.add_css_class(CSS_SQUARE_BUTTON);
     button.set_tooltip_text(Some(tooltip));
     button
 }
@@ -622,7 +854,7 @@ fn profile_label(stored: &StoredProfile) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::mode_from_selection;
+    use super::{input_mode_from_index, mode_from_selection};
     use ira_models::ControllerInputMode;
 
     #[test]
@@ -637,6 +869,15 @@ mod tests {
         assert_eq!(
             mode_from_selection(2),
             ControllerInputMode::VirtualDirectInput
+        );
+    }
+
+    #[test]
+    fn test_input_mode_from_index_preserves_inheritance() {
+        assert_eq!(input_mode_from_index(0), None);
+        assert_eq!(
+            input_mode_from_index(1),
+            Some(ControllerInputMode::Disabled)
         );
     }
 }

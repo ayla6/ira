@@ -46,6 +46,8 @@ mod input_profile_store;
 mod input_profile_viewer;
 mod settings_console;
 mod settings_dialog;
+mod settings_dialog_console;
+mod settings_dialog_pages;
 mod settings_pages;
 mod sgdb_picker;
 mod steam_search;

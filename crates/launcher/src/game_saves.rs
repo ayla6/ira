@@ -77,23 +77,41 @@ pub fn setup_game_saves(
     save_dir: &str,
     wine_prefix: Option<&str>,
 ) -> usize {
+    match setup_game_saves_checked(savefiles, rootoverrides, app_id, save_dir, wine_prefix) {
+        Ok(count) => count,
+        Err(error) => {
+            eprintln!("Failed to centralize game saves: {error}");
+            0
+        }
+    }
+}
+
+/// Set up centralized saves and report filesystem failures to interactive callers.
+pub fn setup_game_saves_checked(
+    savefiles: &[UfsSaveFile],
+    rootoverrides: &[UfsRootOverride],
+    app_id: &str,
+    save_dir: &str,
+    wine_prefix: Option<&str>,
+) -> Result<usize, String> {
     if savefiles.is_empty() {
-        return 0;
+        return Ok(0);
     }
 
     let centralized = centralized_base(save_dir, app_id);
-    let _ = std::fs::create_dir_all(&centralized);
+    std::fs::create_dir_all(&centralized)
+        .map_err(|error| format!("failed to create {}: {error}", centralized.display()))?;
 
     let resolved = resolve_save_paths(savefiles, rootoverrides, &centralized, wine_prefix);
     let deduped = deduplicate_paths(resolved);
 
     let mut count = 0;
     for rp in deduped {
-        if create_save_symlink(&rp.default_path, &rp.centralized_path) {
+        if create_save_symlink_checked(&rp.default_path, &rp.centralized_path)? {
             count += 1;
         }
     }
-    count
+    Ok(count)
 }
 
 /// True when `dir` contains at least one file or non-empty subdirectory.
@@ -417,19 +435,24 @@ fn paths_resolve_to(default_path: &Path, centralized_path: &Path) -> bool {
 
 /// Create a symlink from `default_path` to `centralized_path`.
 /// Returns true if a symlink was created or migrated.
-fn create_save_symlink(default_path: &Path, centralized_path: &Path) -> bool {
+fn create_save_symlink_checked(
+    default_path: &Path,
+    centralized_path: &Path,
+) -> Result<bool, String> {
     if paths_resolve_to(default_path, centralized_path) {
-        return false;
+        return Ok(false);
     }
 
     if let Some(parent) = centralized_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     }
-    let _ = std::fs::create_dir_all(centralized_path);
+    std::fs::create_dir_all(centralized_path)
+        .map_err(|error| format!("failed to create {}: {error}", centralized_path.display()))?;
 
     if let Ok(meta) = std::fs::symlink_metadata(default_path) {
         if meta.file_type().is_symlink() {
-            return false;
+            return Ok(false);
         }
         // Real directory — migrate contents safely
         eprintln!(
@@ -438,21 +461,34 @@ fn create_save_symlink(default_path: &Path, centralized_path: &Path) -> bool {
             centralized_path.display()
         );
         safe_migrate_dir_contents(default_path, centralized_path);
-        let _ = std::fs::remove_dir(default_path);
+        if std::fs::read_dir(default_path)
+            .map_err(|error| format!("failed to inspect {}: {error}", default_path.display()))?
+            .next()
+            .is_some()
+        {
+            return Err(format!(
+                "could not migrate all save data from {}",
+                default_path.display()
+            ));
+        }
+        std::fs::remove_dir(default_path)
+            .map_err(|error| format!("failed to remove {}: {error}", default_path.display()))?;
     }
 
     if let Some(parent) = default_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     }
 
     #[cfg(unix)]
     {
-        let _ = std::os::unix::fs::symlink(centralized_path, default_path);
-        true
+        std::os::unix::fs::symlink(centralized_path, default_path)
+            .map_err(|error| format!("failed to link {}: {error}", default_path.display()))?;
+        Ok(true)
     }
     #[cfg(not(unix))]
     {
-        false
+        Ok(false)
     }
 }
 
@@ -626,7 +662,7 @@ mod tests {
         let centralized = tmp.path().join("centralized");
         let default = tmp.path().join("default").join("Saves");
 
-        let result = create_save_symlink(&default, &centralized);
+        let result = create_save_symlink_checked(&default, &centralized).unwrap();
 
         assert!(result);
         assert!(default.is_symlink());
@@ -642,7 +678,7 @@ mod tests {
         std::fs::create_dir_all(&default).unwrap();
         std::fs::write(default.join("save.dat"), b"data").unwrap();
 
-        let result = create_save_symlink(&default, &centralized);
+        let result = create_save_symlink_checked(&default, &centralized).unwrap();
 
         assert!(result);
         assert!(default.is_symlink());
@@ -662,7 +698,7 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(&other, &default).unwrap();
 
-        let result = create_save_symlink(&default, &centralized);
+        let result = create_save_symlink_checked(&default, &centralized).unwrap();
 
         assert!(!result);
         #[cfg(unix)]

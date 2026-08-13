@@ -448,13 +448,20 @@ fn build_dialog_contents(
             } else {
                 None
             };
-            let count = ira_launcher::game_saves::setup_game_saves(
+            let count = match ira_launcher::game_saves::setup_game_saves_checked(
                 &details.ufs_savefiles,
                 &details.ufs_rootoverrides,
                 &game_m.app_id,
                 &save_dir_m,
                 pfx,
-            );
+            ) {
+                Ok(count) => count,
+                Err(error) => {
+                    btn_m.set_label("Save migration failed");
+                    eprintln!("Failed to centralize saves: {error}");
+                    return;
+                }
+            };
             if count > 0 {
                 btn_m.set_label(&format!("Migrated {} save folder(s)", count));
             } else {

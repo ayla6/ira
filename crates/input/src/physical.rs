@@ -246,11 +246,17 @@ impl PhysicalGamepad {
         self.device.is_some()
     }
 
-    /// Blocks until the kernel has another evdev event or housekeeping is due.
-    /// This avoids imposing a display-rate polling limit on high-rate controllers.
-    pub fn wait_for_event(&self, timeout: Duration) -> Result<(), String> {
+    /// Blocks until the kernel has another evdev event or scheduled work is due.
+    pub fn wait_for_event(&self, timeout: Option<Duration>) -> Result<(), String> {
         let Some(device) = self.device.as_ref() else {
-            std::thread::sleep(timeout);
+            let result = unsafe { libc::poll(std::ptr::null_mut(), 0, poll_timeout_ms(timeout)) };
+            if result < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+                return Err(format!(
+                    "failed waiting to reconnect {}: {}",
+                    self.info.path.display(),
+                    std::io::Error::last_os_error()
+                ));
+            }
             return Ok(());
         };
         let timeout_ms = poll_timeout_ms(timeout);
@@ -438,8 +444,14 @@ impl PhysicalGamepad {
     }
 }
 
-fn poll_timeout_ms(timeout: Duration) -> libc::c_int {
-    timeout.as_millis().min(libc::c_int::MAX as u128) as libc::c_int
+fn poll_timeout_ms(timeout: Option<Duration>) -> libc::c_int {
+    let Some(timeout) = timeout else {
+        return -1;
+    };
+    timeout
+        .as_nanos()
+        .div_ceil(1_000_000)
+        .min(libc::c_int::MAX as u128) as libc::c_int
 }
 
 fn device_gone(error: &std::io::Error) -> bool {
@@ -685,8 +697,11 @@ mod tests {
 
     #[test]
     fn test_poll_timeout_ms_preserves_short_deadlines() {
-        assert_eq!(poll_timeout_ms(Duration::from_millis(4)), 4);
-        assert_eq!(poll_timeout_ms(Duration::MAX), libc::c_int::MAX);
+        assert_eq!(poll_timeout_ms(None), -1);
+        assert_eq!(poll_timeout_ms(Some(Duration::ZERO)), 0);
+        assert_eq!(poll_timeout_ms(Some(Duration::from_nanos(1))), 1);
+        assert_eq!(poll_timeout_ms(Some(Duration::from_millis(4))), 4);
+        assert_eq!(poll_timeout_ms(Some(Duration::MAX)), libc::c_int::MAX);
     }
 
     #[test]

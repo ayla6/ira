@@ -15,9 +15,11 @@ static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 const VIRTUAL_XBOX_VENDOR: u16 = 0x045e;
 const VIRTUAL_XBOX_PRODUCT: u16 = 0x028e;
-// Physical input wakes the loop through evdev poll(2). This timeout only schedules
-// non-evdev work such as gyro sampling, controller reconnects, and profile reloads.
-const HOUSEKEEPING_INTERVAL: Duration = Duration::from_millis(4);
+const SENSOR_SAMPLE_INTERVAL: Duration = Duration::from_millis(4);
+const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const PROFILE_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const STEAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const RECONNECT_INTERVAL: Duration = Duration::from_millis(250);
 const STEAM_START_TIMEOUT: Duration = Duration::from_secs(60);
 const STEAM_EXIT_GRACE: Duration = Duration::from_secs(2);
 
@@ -39,6 +41,51 @@ struct SteamSession {
     seen: bool,
     empty_since: Option<Instant>,
     stop_sent: bool,
+}
+
+struct LoopSchedule {
+    sensor: Instant,
+    process: Instant,
+    profile: Instant,
+    steam: Instant,
+    reconnect: Instant,
+}
+
+impl LoopSchedule {
+    fn new() -> Self {
+        let now = Instant::now();
+        Self {
+            sensor: now,
+            process: now,
+            profile: now,
+            steam: now,
+            reconnect: now,
+        }
+    }
+
+    fn timeout(
+        &self,
+        sensor_active: bool,
+        child_active: bool,
+        profile_active: bool,
+        steam_active: bool,
+        disconnected: bool,
+    ) -> Option<Duration> {
+        [
+            sensor_active.then(|| remaining(self.sensor, SENSOR_SAMPLE_INTERVAL)),
+            child_active.then(|| remaining(self.process, PROCESS_POLL_INTERVAL)),
+            profile_active.then(|| remaining(self.profile, PROFILE_POLL_INTERVAL)),
+            steam_active.then(|| remaining(self.steam, STEAM_POLL_INTERVAL)),
+            disconnected.then(|| remaining(self.reconnect, RECONNECT_INTERVAL)),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+}
+
+fn remaining(last_run: Instant, interval: Duration) -> Duration {
+    interval.saturating_sub(last_run.elapsed())
 }
 
 impl SteamSession {
@@ -417,7 +464,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                 .map_err(|error| format!("failed to launch target process: {error}"))?,
         )
     };
-    let mut last_reconnect_attempt = Instant::now();
+    let mut schedule = LoopSchedule::new();
     eprintln!(
         "ira-input: mapping {} through {}",
         gamepad.info().name,
@@ -429,80 +476,30 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         gamepad.info().product
     );
     loop {
-        if STOP_REQUESTED.load(Ordering::Relaxed) {
-            if let Some(session) = steam_session.as_mut() {
-                session.request_stop();
-            } else {
-                stop_child(&mut child);
-                return Ok(130);
-            }
-        }
-        let child_status = child
-            .as_mut()
-            .map(|child| child.try_wait())
-            .transpose()
-            .map_err(|error| format!("failed waiting for target process: {error}"))?
-            .flatten();
-        if let Some(status) = child_status {
-            let code = status.code().unwrap_or(1);
-            child = None;
-            if arguments.steam_app_id.is_none() {
-                return Ok(code);
-            }
-            launcher_exit_code = Some(code);
-        }
-        if steam_session
-            .as_mut()
-            .is_some_and(|session| session.poll(launcher_exit_code.is_some()))
-        {
-            return Ok(launcher_exit_code.unwrap_or(0));
-        }
-        if !gamepad.is_connected() && last_reconnect_attempt.elapsed() >= Duration::from_millis(250)
-        {
-            last_reconnect_attempt = Instant::now();
-            sensor = None;
-            match gamepad.try_reconnect() {
-                Ok(true) => {
-                    eprintln!(
-                        "ira-input: reconnected controller through {}",
-                        gamepad.info().path.display()
-                    );
-                    sensor = open_sensor(gamepad.info());
-                    if let Err(error) = gamepad.grab() {
-                        eprintln!("ira-input: failed to re-grab controller: {error}");
-                    }
-                }
-                Ok(false) => {}
-                Err(error) => eprintln!("ira-input: controller reconnect failed: {error}"),
-            }
-        }
-        if let Some(monitor) = profile_monitor.as_mut() {
-            if monitor.changed() {
-                if let Err(error) = reload_profile(
-                    &mut mapper,
-                    &mut virtual_gamepad,
-                    &mut keyboard,
-                    &mut mouse,
-                    monitor.path(),
-                    &mut trace,
-                ) {
-                    eprintln!(
-                        "ira-input: profile reload failed for {}: {error}",
-                        monitor.path().display()
-                    );
-                }
-            }
-        }
         let was_connected = gamepad.is_connected();
-        let result = process_inputs(
+        let sample_sensor = sensor.is_some() && schedule.sensor.elapsed() >= SENSOR_SAMPLE_INTERVAL;
+        if sample_sensor {
+            schedule.sensor = Instant::now();
+        }
+        let result = process_physical_inputs(
             &mut gamepad,
-            &mut sensor,
             &mut mapper,
             &mut virtual_gamepad,
             keyboard.as_mut(),
             mouse.as_mut(),
             &mut trace,
-        );
+        )
+        .and_then(|()| {
+            process_sensor_inputs(
+                &mut sensor,
+                &mut mapper,
+                &mut virtual_gamepad,
+                keyboard.as_mut(),
+                mouse.as_mut(),
+                &mut trace,
+                sample_sensor,
+            )
+        });
         trace.flush();
         if let Err(error) = result {
             if let Err(reset_error) = emit_outputs(
@@ -519,6 +516,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         }
         if was_connected && !gamepad.is_connected() {
             sensor = None;
+            schedule.reconnect = Instant::now();
             emit_outputs(
                 mapper.reset(),
                 &mut virtual_gamepad,
@@ -527,7 +525,89 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                 &mut trace,
             )?;
         }
-        gamepad.wait_for_event(HOUSEKEEPING_INTERVAL)?;
+        if STOP_REQUESTED.load(Ordering::Relaxed) {
+            if let Some(session) = steam_session.as_mut() {
+                session.request_stop();
+            }
+            stop_child(&mut child);
+            return Ok(130);
+        }
+        let child_status = if child.is_some() && schedule.process.elapsed() >= PROCESS_POLL_INTERVAL
+        {
+            schedule.process = Instant::now();
+            child
+                .as_mut()
+                .map(|child| child.try_wait())
+                .transpose()
+                .map_err(|error| format!("failed waiting for target process: {error}"))?
+                .flatten()
+        } else {
+            None
+        };
+        if let Some(status) = child_status {
+            let code = status.code().unwrap_or(1);
+            child = None;
+            if arguments.steam_app_id.is_none() {
+                return Ok(code);
+            }
+            launcher_exit_code = Some(code);
+        }
+        if steam_session.is_some() && schedule.steam.elapsed() >= STEAM_POLL_INTERVAL {
+            schedule.steam = Instant::now();
+            if steam_session
+                .as_mut()
+                .is_some_and(|session| session.poll(launcher_exit_code.is_some()))
+            {
+                return Ok(launcher_exit_code.unwrap_or(0));
+            }
+        }
+        if !gamepad.is_connected() && schedule.reconnect.elapsed() >= RECONNECT_INTERVAL {
+            schedule.reconnect = Instant::now();
+            sensor = None;
+            match gamepad.try_reconnect() {
+                Ok(true) => {
+                    eprintln!(
+                        "ira-input: reconnected controller through {}",
+                        gamepad.info().path.display()
+                    );
+                    sensor = open_sensor(gamepad.info());
+                    schedule.sensor = Instant::now();
+                    if let Err(error) = gamepad.grab() {
+                        eprintln!("ira-input: failed to re-grab controller: {error}");
+                    }
+                }
+                Ok(false) => {}
+                Err(error) => eprintln!("ira-input: controller reconnect failed: {error}"),
+            }
+        }
+        if profile_monitor.is_some() && schedule.profile.elapsed() >= PROFILE_POLL_INTERVAL {
+            schedule.profile = Instant::now();
+            if let Some(monitor) = profile_monitor.as_mut() {
+                if monitor.changed() {
+                    if let Err(error) = reload_profile(
+                        &mut mapper,
+                        &mut virtual_gamepad,
+                        &mut keyboard,
+                        &mut mouse,
+                        monitor.path(),
+                        &mut trace,
+                    ) {
+                        eprintln!(
+                            "ira-input: profile reload failed for {}: {error}",
+                            monitor.path().display()
+                        );
+                    }
+                }
+            }
+        }
+        let timeout = schedule.timeout(
+            sensor.is_some(),
+            child.is_some(),
+            profile_monitor.is_some(),
+            steam_session.is_some(),
+            !gamepad.is_connected(),
+        );
+        gamepad.wait_for_event(timeout)?;
     }
 }
 
@@ -956,9 +1036,8 @@ fn open_sensor(device: &ira_input::DeviceInfo) -> Option<Sdl3SensorBackend> {
     }
 }
 
-fn process_inputs(
+fn process_physical_inputs(
     gamepad: &mut PhysicalGamepad,
-    sensor: &mut Option<Sdl3SensorBackend>,
     mapper: &mut MappingEngine,
     virtual_gamepad: &mut VirtualGamepad,
     mut keyboard: Option<&mut VirtualKeyboard>,
@@ -975,7 +1054,21 @@ fn process_inputs(
             trace,
         )?;
     }
-    let sensor_result = sensor.as_mut().map(|sensor| sensor.read(now_us()));
+    Ok(())
+}
+
+fn process_sensor_inputs(
+    sensor: &mut Option<Sdl3SensorBackend>,
+    mapper: &mut MappingEngine,
+    virtual_gamepad: &mut VirtualGamepad,
+    mut keyboard: Option<&mut VirtualKeyboard>,
+    mut mouse: Option<&mut VirtualMouse>,
+    trace: &mut TraceState,
+    sample: bool,
+) -> Result<(), String> {
+    let sensor_result = sample
+        .then(|| sensor.as_mut().map(|sensor| sensor.read(now_us())))
+        .flatten();
     match sensor_result {
         Some(Ok(Some(sample))) => {
             for event in sample.input_events() {
@@ -1149,6 +1242,21 @@ mod tests {
             ignored_device_for_target(0x2dc8, 0x3106),
             Some("0x2dc8/0x3106".to_string())
         );
+    }
+
+    #[test]
+    fn test_loop_schedule_blocks_without_periodic_work() {
+        let schedule = LoopSchedule::new();
+        assert_eq!(schedule.timeout(false, false, false, false, false), None);
+    }
+
+    #[test]
+    fn test_loop_schedule_uses_earliest_active_deadline() {
+        let schedule = LoopSchedule::new();
+        let timeout = schedule
+            .timeout(true, true, true, true, true)
+            .expect("active work must have a deadline");
+        assert!(timeout <= SENSOR_SAMPLE_INTERVAL);
     }
 
     fn make_event(mask: u32, name: &str) -> Vec<u8> {

@@ -8,7 +8,9 @@ mod virtual_keyboard;
 mod virtual_mouse;
 
 pub use mapping::{InputEvent, MappingEngine, OutputEvent};
-pub use physical::{discover_gamepads, ControllerFamily, DeviceInfo, PhysicalGamepad};
+pub use physical::{
+    discover_gamepads, ControllerFamily, DeviceInfo, PhysicalGamepad, ReportedInputMode,
+};
 pub use profile::{
     Activation, AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton,
     GyroAxis, GyroCalibration, GyroMode, InputCategory, InputProfile, InputSource, MouseAxis,

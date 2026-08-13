@@ -145,7 +145,7 @@ fn poll_viewer(
                     } else {
                         &outputs_text
                     });
-                    *values.borrow_mut() = update;
+                    *values.borrow_mut() = preview_values(&update);
                     drawing.queue_draw();
                 }
                 Err(error) => {
@@ -169,13 +169,35 @@ fn viewer_status(update: &MonitorValues, pressed: &str) -> String {
             "Waiting for controller".to_string()
         };
     }
+    let label = controller_label(update);
     if !pressed.is_empty() {
-        return format!("Mapped virtual output | Pressed: {pressed}");
+        return format!("Mapped virtual output | {label} | Pressed: {pressed}");
     }
     if update.gyro_available {
-        "Monitoring mapped virtual output".to_string()
+        format!("Monitoring mapped virtual output | {label}")
     } else {
-        "Monitoring mapped virtual output | Gyro unavailable".to_string()
+        format!("Monitoring mapped virtual output | {label} | Gyro unavailable")
+    }
+}
+
+fn controller_label(update: &MonitorValues) -> &str {
+    if update.controller_label.is_empty() {
+        "controller"
+    } else {
+        &update.controller_label
+    }
+}
+
+fn preview_values(update: &MonitorValues) -> MonitorValues {
+    let has_virtual_output = !update.output_buttons.is_empty()
+        || update.output_axes.iter().any(|axis| axis.abs() > 0.015);
+    if has_virtual_output {
+        return update.clone();
+    }
+    MonitorValues {
+        output_axes: update.axes,
+        output_buttons: update.buttons.clone(),
+        ..update.clone()
     }
 }
 
@@ -187,5 +209,33 @@ fn configure_status_label(label: &gtk4::Label, dim: bool) {
     label.set_height_request(24);
     if dim {
         label.add_css_class(CSS_DIM_LABEL);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{preview_values, viewer_status};
+    use ira_input::GamepadButton;
+
+    #[test]
+    fn test_preview_values_uses_physical_state_without_virtual_output() {
+        let update = super::MonitorValues {
+            axes: [0.5, 0.0, 0.0, 0.0, 0.0, 0.0],
+            buttons: vec![GamepadButton::A],
+            ..Default::default()
+        };
+        let preview = preview_values(&update);
+        assert_eq!(preview.output_axes[0], 0.5);
+        assert_eq!(preview.output_buttons, vec![GamepadButton::A]);
+    }
+
+    #[test]
+    fn test_viewer_status_describes_detected_physical_controller() {
+        let update = super::MonitorValues {
+            controller_connected: true,
+            controller_label: "Pad | Linux reports DirectInput-compatible".to_string(),
+            ..Default::default()
+        };
+        assert!(viewer_status(&update, "").contains("DirectInput-compatible"));
     }
 }

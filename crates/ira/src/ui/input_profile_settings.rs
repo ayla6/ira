@@ -288,7 +288,7 @@ fn add_controller_row(
     let supported_buttons = device.supported_buttons.clone();
     let expander = adw::ExpanderRow::new();
     expander.set_title(&device_name);
-    update_controller_subtitle(&expander, state.config.mode);
+    update_controller_subtitle(&expander, &device, state.config.mode);
     let profile_path = Rc::new(RefCell::new(state.profile_path));
     let mode_model = gtk4::StringList::new(&["Disabled", "Virtual XInput", "Virtual DirectInput"]);
     let mode = adw::ComboRow::new();
@@ -296,12 +296,13 @@ fn add_controller_row(
     mode.set_model(Some(&mode_model));
     mode.set_selected(selection_for_mode(state.config.mode));
     let expander_for_mode = expander.clone();
+    let device_for_mode = device.clone();
     let profile_path_for_mode = profile_path.clone();
     let save_dir_for_mode = save_dir.to_string();
     let key_for_mode = key.clone();
     mode.connect_selected_notify(move |row| {
         let mode = mode_from_selection(row.selected());
-        update_controller_subtitle(&expander_for_mode, mode);
+        update_controller_subtitle(&expander_for_mode, &device_for_mode, mode);
         if mode != ControllerInputMode::Disabled {
             let path = controller_default_path_for_backend(
                 &save_dir_for_mode,
@@ -433,12 +434,21 @@ fn backend_for_mode(mode: ControllerInputMode) -> ira_input::VirtualGamepadBacke
     }
 }
 
-fn update_controller_subtitle(row: &adw::ExpanderRow, mode: ControllerInputMode) {
-    row.set_subtitle(match mode {
+fn update_controller_subtitle(
+    row: &adw::ExpanderRow,
+    device: &ira_input::DeviceInfo,
+    mode: ControllerInputMode,
+) {
+    let virtualization = match mode {
         ControllerInputMode::Disabled => "Input virtualization disabled",
         ControllerInputMode::VirtualXInput => "Virtual XInput layout",
         ControllerInputMode::VirtualDirectInput => "Virtual DirectInput layout",
-    });
+    };
+    row.set_subtitle(&format!(
+        "{} | Linux reports {}",
+        virtualization,
+        device.reported_input_mode().label()
+    ));
 }
 
 fn start_controller_registry_refresh(

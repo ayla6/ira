@@ -112,8 +112,8 @@ pub(super) fn button_label(button: GamepadButton) -> String {
         GamepadButton::Y => "Y Button".to_string(),
         GamepadButton::LeftShoulder => "Left Bumper".to_string(),
         GamepadButton::RightShoulder => "Right Bumper".to_string(),
-        GamepadButton::LeftTrigger => "Left Trigger (full)".to_string(),
-        GamepadButton::RightTrigger => "Right Trigger (full)".to_string(),
+        GamepadButton::LeftTrigger => "Left Trigger Button".to_string(),
+        GamepadButton::RightTrigger => "Right Trigger Button".to_string(),
         GamepadButton::Back => "Select".to_string(),
         GamepadButton::Start => "Start".to_string(),
         GamepadButton::Guide => "Guide".to_string(),
@@ -140,8 +140,8 @@ pub(super) fn axis_label(axis: GamepadAxis) -> String {
         GamepadAxis::LeftY => "Left Stick Y".to_string(),
         GamepadAxis::RightX => "Right Stick X".to_string(),
         GamepadAxis::RightY => "Right Stick Y".to_string(),
-        GamepadAxis::LeftTrigger => "Left Trigger (soft)".to_string(),
-        GamepadAxis::RightTrigger => "Right Trigger (soft)".to_string(),
+        GamepadAxis::LeftTrigger => "Left Trigger".to_string(),
+        GamepadAxis::RightTrigger => "Right Trigger".to_string(),
     }
 }
 
@@ -452,20 +452,20 @@ mod tests {
     }
 
     #[test]
-    fn test_trigger_labels_distinguish_full_and_soft_bindings() {
+    fn test_trigger_labels_distinguish_axis_and_button_bindings() {
         let sources = source_options_for_device(None, VirtualGamepadBackend::XInput);
         assert!(sources.contains(&(
             InputSource::Button(GamepadButton::LeftTrigger),
-            "Left Trigger (full)".to_string()
+            "Left Trigger Button".to_string()
         )));
         assert!(sources.contains(&(
             InputSource::Axis(GamepadAxis::LeftTrigger),
-            "Left Trigger (soft)".to_string()
+            "Left Trigger".to_string()
         )));
 
         let outputs = output_labels(VirtualGamepadBackend::XInput);
-        assert!(outputs.contains(&"Right Trigger (full)".to_string()));
-        assert!(outputs.contains(&"Right Trigger (soft)".to_string()));
+        assert!(outputs.contains(&"Right Trigger Button".to_string()));
+        assert!(outputs.contains(&"Right Trigger".to_string()));
     }
 
     #[test]

@@ -25,6 +25,7 @@ pub(super) struct MonitorValues {
     pub gyro_available: bool,
     pub controller_connected: bool,
     pub controller_disconnected: bool,
+    pub controller_label: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -229,6 +230,7 @@ fn reconcile_device(
         return true;
     };
     *selected_identity = Some(device_identity(&device));
+    values.controller_label = device_label(&device);
     match ira_input::PhysicalGamepad::open(&device.path, false) {
         Ok(opened) => {
             *sensor = match Sdl3SensorBackend::open(&device) {
@@ -246,6 +248,16 @@ fn reconcile_device(
         Err(error) => eprintln!("failed to open controller: {error}"),
     }
     true
+}
+
+fn device_label(device: &DeviceInfo) -> String {
+    format!(
+        "{} | Linux reports {} ({:04x}:{:04x})",
+        device.name,
+        device.reported_input_mode().label(),
+        device.vendor,
+        device.product,
+    )
 }
 
 fn device_identity(device: &DeviceInfo) -> DeviceIdentity {
@@ -453,6 +465,11 @@ fn poll_monitor(
                         .map(|button| button_label(*button))
                         .collect::<Vec<_>>()
                         .join(", ");
+                    let controller_label = if update.controller_label.is_empty() {
+                        "controller"
+                    } else {
+                        &update.controller_label
+                    };
                     let text = if !update.controller_connected {
                         if update.controller_disconnected {
                             "Controller disconnected".to_string()
@@ -461,12 +478,12 @@ fn poll_monitor(
                         }
                     } else if pressed.is_empty() {
                         if update.gyro_available {
-                            "Monitoring controller".to_string()
+                            format!("Monitoring {controller_label}")
                         } else {
-                            "Monitoring controller | Gyro unavailable".to_string()
+                            format!("Monitoring {controller_label} | Gyro unavailable")
                         }
                     } else {
-                        format!("Monitoring controller | Pressed: {pressed}")
+                        format!("Monitoring {controller_label} | Pressed: {pressed}")
                     };
                     status.set_text(&text);
                     *values.borrow_mut() = update;

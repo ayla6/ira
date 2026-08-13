@@ -34,6 +34,27 @@ pub enum ControllerFamily {
     Steam,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportedInputMode {
+    XInput,
+    DirectInput,
+    PlayStation,
+    Switch,
+    Generic,
+}
+
+impl ReportedInputMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::XInput => "XInput-compatible",
+            Self::DirectInput => "DirectInput-compatible",
+            Self::PlayStation => "PlayStation controller",
+            Self::Switch => "Switch controller",
+            Self::Generic => "Generic gamepad",
+        }
+    }
+}
+
 impl DeviceInfo {
     pub fn family(&self) -> ControllerFamily {
         let name = self.name.to_ascii_lowercase();
@@ -58,6 +79,28 @@ impl DeviceInfo {
             ControllerFamily::Steam
         } else {
             ControllerFamily::Generic
+        }
+    }
+
+    /// Linux does not expose a controller's physical mode switch directly.
+    /// This is the input layout identified from the device it currently reports.
+    pub fn reported_input_mode(&self) -> ReportedInputMode {
+        let name = self.name.to_ascii_lowercase();
+        if name.contains("dinput") || name.contains("directinput") {
+            ReportedInputMode::DirectInput
+        } else if self.vendor == 0x045e
+            || name.contains("xinput")
+            || name.contains("x-input")
+            || name.contains("xbox")
+            || is_ultimate_2(self.vendor, self.product)
+        {
+            ReportedInputMode::XInput
+        } else {
+            match self.family() {
+                ControllerFamily::PlayStation => ReportedInputMode::PlayStation,
+                ControllerFamily::Nintendo => ReportedInputMode::Switch,
+                _ => ReportedInputMode::Generic,
+            }
         }
     }
 }
@@ -494,6 +537,7 @@ mod tests {
     use super::{
         device_gone, is_ira_virtual_device, is_ultimate_2, map_button, map_button_for_device,
         normalize_signed, normalize_trigger, same_device, ControllerFamily, DeviceInfo,
+        ReportedInputMode, EIGHTBITDO_VENDOR, ULTIMATE_2_PRODUCT,
     };
     use crate::GamepadButton;
     use std::path::PathBuf;
@@ -579,6 +623,34 @@ mod tests {
             supported_buttons: Vec::new(),
         };
         assert_eq!(device.family(), ControllerFamily::EightBitDo);
+    }
+
+    #[test]
+    fn test_reported_input_mode_prefers_explicit_direct_input_name() {
+        let device = DeviceInfo {
+            path: PathBuf::from("/dev/input/event0"),
+            name: "8BitDo Controller (DInput)".to_string(),
+            vendor: EIGHTBITDO_VENDOR,
+            product: ULTIMATE_2_PRODUCT,
+            version: 0,
+            has_evdev_gyro: false,
+            supported_buttons: Vec::new(),
+        };
+        assert_eq!(device.reported_input_mode(), ReportedInputMode::DirectInput);
+    }
+
+    #[test]
+    fn test_reported_input_mode_identifies_ultimate_2_xinput_layout() {
+        let device = DeviceInfo {
+            path: PathBuf::from("/dev/input/event0"),
+            name: "8BitDo Ultimate 2 Wireless Controller for PC".to_string(),
+            vendor: EIGHTBITDO_VENDOR,
+            product: ULTIMATE_2_PRODUCT,
+            version: 0,
+            has_evdev_gyro: false,
+            supported_buttons: Vec::new(),
+        };
+        assert_eq!(device.reported_input_mode(), ReportedInputMode::XInput);
     }
 
     #[test]

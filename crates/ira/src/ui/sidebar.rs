@@ -5,7 +5,6 @@ use super::grid_view::show_grid_view;
 use super::helpers::clear_children;
 use super::sidebar_item::{SidebarItem, SidebarItemKind};
 use super::state::SharedState;
-use crate::strings as S;
 use crate::Game;
 use gtk4::prelude::*;
 use ira_models::GroupSelection;
@@ -349,14 +348,14 @@ fn sidebar_bind_all_games(state: &SharedState, row: &gtk4::Box) {
     let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
     icon.set_pixel_size(16);
     row.append(&icon);
-    let label = gtk4::Label::new(Some(S::ALL_GAMES));
+    let label = gtk4::Label::new(Some(&crate::tr!("All games")));
     label.set_xalign(0.0);
     label.set_hexpand(true);
     row.append(&label);
 
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.add_css_class(CSS_FLAT);
-    add_btn.set_tooltip_text(Some(S::ADD_COLLECTION));
+    add_btn.set_tooltip_text(Some(&crate::tr!("Add collection")));
     add_btn.set_valign(gtk4::Align::Center);
     let sc = state.clone();
     add_btn.connect_clicked(move |_| {
@@ -395,7 +394,7 @@ fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &S
     row.append(&arrow);
 
     let header_name = if item.kind() == SidebarItemKind::UncategorizedHeader {
-        "Uncategorized".to_string()
+        crate::tr!("Uncategorized")
     } else {
         item.name()
     };
@@ -418,8 +417,8 @@ fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &S
         right_click.connect_pressed(move |_, _, x, y| {
             if let Some(r) = row_weak.upgrade() {
                 let menu = gio::Menu::new();
-                menu.append(Some("Rename"), Some("grp.rename"));
-                menu.append(Some("Delete"), Some("grp.delete"));
+                menu.append(Some(&crate::tr!("Rename")), Some("grp.rename"));
+                menu.append(Some(&crate::tr!("Delete")), Some("grp.delete"));
 
                 let popover = gtk4::PopoverMenu::from_model(Some(&menu));
                 popover.set_halign(gtk4::Align::Start);

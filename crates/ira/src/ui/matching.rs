@@ -1,7 +1,6 @@
 use super::enrichment::enrich_game_async;
 use super::helpers::confirm_dialog;
 use super::state::SharedState;
-use crate::strings as S;
 use crate::AppMessage;
 use crate::Game;
 use crate::MergedAchievement;
@@ -162,13 +161,13 @@ pub fn confirm_mark_unlocked(
     let save_dir = state.borrow().save_dir.clone();
     confirm_dialog(
         &window,
-        S::MARK_UNLOCKED,
+        &crate::tr!("Mark as already unlocked?"),
         &format!(
             "This will mark \u{201C}{}\u{201D} as earned without a real unlock time. \
              Use this only if you already unlocked it previously (e.g. before using this tool).",
             ach.display_name
         ),
-        S::MARK_AS_UNLOCKED,
+        &crate::tr!("Mark as unlocked"),
         adw::ResponseAppearance::Destructive,
         move || {
             if let Err(e) = set_achievement_earned(

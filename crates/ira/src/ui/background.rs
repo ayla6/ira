@@ -6,15 +6,19 @@ use super::sidebar::{find_game_index, rebuild_sidebar, select_row_silently};
 use super::state::malloc_trim;
 use super::state::SharedState;
 use super::window::build_window;
-use crate::strings as S;
 use adw::prelude::*;
 
 pub fn show_close_choice_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
-    let dialog = adw::AlertDialog::new(Some(S::CLOSE_VIEWER), Some(S::CLOSE_VIEWER_BODY));
-    dialog.add_response("cancel", S::CANCEL);
-    dialog.add_response("background", S::HIDE_TO_BACKGROUND);
-    dialog.add_response("quit", S::QUIT);
+    let dialog = adw::AlertDialog::new(
+        Some(&crate::tr!("Close Ira")),
+        Some(&crate::tr!(
+            "Keep the watcher running in the background, or quit completely?"
+        )),
+    );
+    dialog.add_response("cancel", &crate::tr!("Cancel"));
+    dialog.add_response("background", &crate::tr!("Hide to background"));
+    dialog.add_response("quit", &crate::tr!("Quit"));
     dialog.set_response_appearance("background", adw::ResponseAppearance::Suggested);
     dialog.set_response_appearance("quit", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("background"));

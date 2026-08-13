@@ -73,7 +73,7 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
         platform_id: entry.platform_id.to_string(),
         db_id: entry.id,
         name: if entry.title.is_empty() {
-            format!("App ID: {}", app_id)
+            crate::tr!("App ID: {}").replacen("{}", app_id, 1)
         } else {
             entry.title.clone()
         },
@@ -304,7 +304,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
             game.achievements.push(MergedAchievement {
                 name: name.clone(),
                 display_name: name.clone(),
-                description: "No description available.".into(),
+                description: crate::tr!("No description available."),
                 hidden: false,
                 earned: status.earned,
                 earned_time: status.earned_time,
@@ -394,7 +394,11 @@ pub fn build_variant_entries(db: &DbConn, save_dir: &str, game: &Game) -> Vec<Ga
         .map(|v| {
             let mut entry = game.clone();
             entry.variant_id = Some(v.id);
-            entry.set_name(format!("{} - {}", game.name, v.name));
+            entry.set_name(
+                crate::tr!("{} - {}")
+                    .replacen("{}", &game.name, 1)
+                    .replacen("{}", &v.name, 1),
+            );
             entry.playtime = v.playtime;
             entry.last_played = v.last_played;
             if !v.logo_position.is_empty() {

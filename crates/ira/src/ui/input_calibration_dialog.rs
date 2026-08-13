@@ -36,15 +36,15 @@ pub(super) fn show_input_calibration_dialog(
     window.set_transient_for(Some(parent));
     window.set_modal(true);
 
-    let status = gtk4::Label::new(Some(
-        "Place the controller flat on a stable surface. Keep it still during calibration.",
-    ));
+    let status = gtk4::Label::new(Some(&crate::tr!(
+        "Place the controller flat on a stable surface. Keep it still during calibration."
+    )));
     status.set_wrap(true);
     status.set_xalign(0.0);
     let progress = gtk4::ProgressBar::new();
     progress.set_show_text(true);
-    progress.set_text(Some("Ready"));
-    let start = gtk4::Button::with_label("Start calibration");
+    progress.set_text(Some(&crate::tr!("Ready")));
+    let start = gtk4::Button::with_label(&crate::tr!("Start calibration"));
     start.add_css_class(CSS_SUGGESTED_ACTION);
     let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     actions.set_halign(gtk4::Align::End);
@@ -59,7 +59,7 @@ pub(super) fn show_input_calibration_dialog(
     content.append(&actions);
     let toolbar = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&gtk4::Label::new(Some("Calibrate Gyro"))));
+    header.set_title_widget(Some(&gtk4::Label::new(Some(&crate::tr!("Calibrate Gyro")))));
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&content));
     window.set_content(Some(&toolbar));
@@ -100,13 +100,13 @@ fn connect_start(
             return;
         }
         widgets.start.set_sensitive(false);
-        widgets.start.set_label("Calibrating...");
+        widgets.start.set_label(&crate::tr!("Calibrating..."));
         widgets.status.remove_css_class(CSS_ERROR);
         widgets
             .status
-            .set_text("Get ready... calibration starts in 1 second.");
+            .set_text(&crate::tr!("Get ready... calibration starts in 1 second."));
         widgets.progress.set_fraction(0.0);
-        widgets.progress.set_text(Some("Preparing"));
+        widgets.progress.set_text(Some(&crate::tr!("Preparing")));
         let (sender, receiver) = mpsc::channel();
         let worker_cancelled = cancelled.clone();
         let registry = registry.clone();
@@ -152,34 +152,37 @@ fn poll_updates(
         match latest {
             Some(Update::Countdown(seconds)) => {
                 progress.set_fraction(0.0);
-                progress.set_text(Some("Preparing"));
-                status.set_text(&format!(
-                    "Release the controller. Calibration starts in {seconds}..."
-                ));
+                progress.set_text(Some(&crate::tr!("Preparing")));
+                status.set_text(
+                    &crate::tr!("Release the controller. Calibration starts in {seconds}...")
+                        .replace("{seconds}", &seconds.to_string()),
+                );
                 glib::ControlFlow::Continue
             }
             Some(Update::Progress(value)) => {
                 progress.set_fraction(value);
-                progress.set_text(Some("Calibrating"));
-                status.set_text("Keep the controller still while samples are collected...");
+                progress.set_text(Some(&crate::tr!("Calibrating")));
+                status.set_text(&crate::tr!(
+                    "Keep the controller still while samples are collected..."
+                ));
                 glib::ControlFlow::Continue
             }
             Some(Update::Complete(result)) => {
                 match &result {
                     Ok(value) => {
                         progress.set_fraction(1.0);
-                        progress.set_text(Some("Complete"));
+                        progress.set_text(Some(&crate::tr!("Complete")));
                         status.set_text(&format_calibration(*value));
-                        start.set_label("Done");
+                        start.set_label(&crate::tr!("Done"));
                         completed.set(true);
                         if let Some(callback) = callback.borrow_mut().take() {
                             callback(Ok(*value));
                         }
                     }
                     Err(error) => {
-                        progress.set_text(Some("Failed"));
+                        progress.set_text(Some(&crate::tr!("Failed")));
                         set_error(&status, error);
-                        start.set_label("Retry");
+                        start.set_label(&crate::tr!("Retry"));
                     }
                 }
                 start.set_sensitive(true);

@@ -1,4 +1,3 @@
-use crate::strings as S;
 use crate::AppSender;
 use crate::Game;
 use adw::prelude::*;
@@ -119,7 +118,7 @@ pub fn build_ui(
 
 pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     let window = adw::ApplicationWindow::new(app);
-    window.set_title(Some(S::APP_TITLE));
+    window.set_title(Some(&crate::tr!("Ira")));
     window.set_default_size(1200, 720);
     window.set_size_request(900, 650);
 
@@ -146,14 +145,14 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     sidebar_header.add_css_class("flat");
 
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_btn.set_tooltip_text(Some(S::ADD_GAME));
+    add_btn.set_tooltip_text(Some(&crate::tr!("Add a game")));
     add_btn.add_css_class(CSS_FLAT);
     sidebar_header.pack_start(&add_btn);
 
     let popover = build_menu_popover(state);
     let menu_btn = gtk4::MenuButton::new();
     menu_btn.set_icon_name("open-menu-symbolic");
-    menu_btn.set_tooltip_text(Some(S::MENU));
+    menu_btn.set_tooltip_text(Some(&crate::tr!("Main Menu")));
     menu_btn.add_css_class(CSS_FLAT);
     menu_btn.set_popover(Some(&popover));
     sidebar_header.pack_end(&menu_btn);
@@ -186,7 +185,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     content_header.add_css_class("app-content-header");
 
     let search_entry = gtk4::SearchEntry::new();
-    search_entry.set_placeholder_text(Some(S::SEARCH_GAMES));
+    search_entry.set_placeholder_text(Some(&crate::tr!("Search games…")));
     search_entry.set_hexpand(true);
     let title_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     title_box.set_hexpand(true);
@@ -195,7 +194,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
 
     let (_sort_popover, sort_btn, sort_label) = build_sort_popover(state);
     sort_btn.set_icon_name("view-sort-descending-symbolic");
-    sort_btn.set_tooltip_text(Some(S::SORT_BY));
+    sort_btn.set_tooltip_text(Some(&crate::tr!("Sort by")));
     sort_btn.add_css_class(CSS_FLAT);
     content_header.pack_end(&sort_btn);
 
@@ -235,7 +234,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
 
     let initial_loading = state.borrow().games.is_empty();
     if !state.borrow().content_unloaded && initial_loading {
-        show_loading_view(state, "Preparing game library…", 0, 1);
+        show_loading_view(state, &crate::tr!("Preparing game library…"), 0, 1);
     } else if !state.borrow().content_unloaded {
         select_row_silently(state, Some(0));
         show_grid_view(state);
@@ -255,7 +254,7 @@ fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
     popover_box.set_margin_bottom(8);
 
     let popup_settings_btn = gtk4::Button::new();
-    let popup_settings_label = gtk4::Label::new(Some(S::SETTINGS));
+    let popup_settings_label = gtk4::Label::new(Some(&crate::tr!("Settings")));
     popup_settings_label.set_xalign(0.0);
     popup_settings_btn.set_child(Some(&popup_settings_label));
     popup_settings_btn.add_css_class(CSS_FLAT);
@@ -277,7 +276,7 @@ fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
     popover_box.append(&popup_settings_btn);
 
     let match_btn = gtk4::Button::new();
-    let match_label = gtk4::Label::new(Some("Match unmatched games"));
+    let match_label = gtk4::Label::new(Some(&crate::tr!("Match unmatched games")));
     match_label.set_xalign(0.0);
     match_btn.set_child(Some(&match_label));
     match_btn.add_css_class(CSS_FLAT);
@@ -291,7 +290,7 @@ fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
     popover_box.append(&match_btn);
 
     let history_btn = gtk4::Button::new();
-    let history_label = gtk4::Label::new(Some(S::PLAY_HISTORY));
+    let history_label = gtk4::Label::new(Some(&crate::tr!("Play history")));
     history_label.set_xalign(0.0);
     history_btn.set_child(Some(&history_label));
     history_btn.add_css_class(CSS_FLAT);
@@ -315,7 +314,7 @@ fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
     hidden_row.set_hexpand(true);
     hidden_row.set_size_request(-1, 36);
     hidden_row.add_css_class(CSS_POPOVER_MENU_ROW);
-    let hidden_label = gtk4::Label::new(Some(S::SHOW_HIDDEN_GAMES));
+    let hidden_label = gtk4::Label::new(Some(&crate::tr!("Show hidden games")));
     hidden_label.set_xalign(0.0);
     hidden_label.set_hexpand(true);
     let hidden_switch = gtk4::Switch::new();

@@ -3,7 +3,6 @@ use super::system_settings::{
     build_env_vars_group, build_ld_paths_group, build_override_switch_row, OverrideState,
 };
 use super::wine_config_helpers::make_revert_btn;
-use crate::strings::settings as T;
 use adw::prelude::*;
 use ira_models::GameLaunchConfig;
 use std::cell::RefCell;
@@ -45,19 +44,19 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
 
     // ─── Performance ───
     let perf_group = adw::PreferencesGroup::new();
-    perf_group.set_title(T::PERFORMANCE);
+    perf_group.set_title(&crate::tr!("Performance"));
 
     let (gamemode_row, gamemode_state) = build_override_switch_row(
-        T::GAMEMODE,
-        T::GAMEMODE_DESCRIPTION,
+        &crate::tr!("Gamemode"),
+        &crate::tr!("Feral Interactive GameMode"),
         params.gamemode_default,
         params.launch.gamemode,
     );
     perf_group.add(&gamemode_row);
 
     let (mangohud_row, mangohud_state) = build_override_switch_row(
-        T::MANGOHUD,
-        T::MANGOHUD_DESCRIPTION,
+        &crate::tr!("MangoHud"),
+        &crate::tr!("Performance overlay"),
         params.mangohud_default,
         params.launch.mangohud,
     );
@@ -65,8 +64,8 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
 
     let gs_resolved = params.launch.gamescope.unwrap_or(params.gamescope_default);
     let gamescope_row = adw::ExpanderRow::new();
-    gamescope_row.set_title(T::GAMESCOPE);
-    gamescope_row.set_subtitle(T::GAMESCOPE_DESCRIPTION);
+    gamescope_row.set_title(&crate::tr!("Gamescope"));
+    gamescope_row.set_subtitle(&crate::tr!("Valve Gamescope compositor"));
     gamescope_row.set_expanded(gs_resolved);
 
     let gs_switch = gtk4::Switch::new();
@@ -139,16 +138,16 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     let gpu_options: Vec<String> = gpus.iter().map(|g| g.card.clone()).collect();
     let gpu_row = if gpus.len() > 1 {
         let group = adw::PreferencesGroup::new();
-        group.set_title("Graphics");
+        group.set_title(&crate::tr!("Graphics"));
 
         let model = gtk4::StringList::new(&[]);
-        model.append("Auto");
+        model.append(&crate::tr!("Auto"));
         for g in &gpus {
             model.append(&g.short_name());
         }
         let row = adw::ComboRow::new();
-        row.set_title("GPU");
-        row.set_subtitle("Graphics card to use for rendering");
+        row.set_title(&crate::tr!("GPU"));
+        row.set_subtitle(&crate::tr!("Graphics card to use for rendering"));
         row.set_model(Some(&model));
         let idx = if params.launch.gpu.is_empty() {
             // If app-level default is set, select it; otherwise "Auto"

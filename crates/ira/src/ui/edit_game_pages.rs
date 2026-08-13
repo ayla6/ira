@@ -101,7 +101,11 @@ pub(super) fn build_dlc_page(
         if !details.dlcs.is_empty() {
             let dlc_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
             let dlc_group = adw::PreferencesGroup::new();
-            dlc_group.set_title(&format!("DLCs  ·  {}", details.dlcs.len()));
+            dlc_group.set_title(&crate::tr!("DLCs  ·  {}").replacen(
+                "{}",
+                &details.dlcs.len().to_string(),
+                1,
+            ));
 
             let mut dlc_list: Vec<(String, ira_models::DlcInfo)> = details
                 .dlcs
@@ -114,7 +118,11 @@ pub(super) fn build_dlc_page(
             for (_, dlc) in &dlc_list {
                 let row = adw::SwitchRow::new();
                 row.set_title(&helpers::esc(&dlc.name));
-                row.set_subtitle(&format!("App ID: {}", dlc.app_id));
+                row.set_subtitle(&crate::tr!("App ID: {}").replacen(
+                    "{}",
+                    &dlc.app_id.to_string(),
+                    1,
+                ));
                 row.set_active(dlc.enabled);
                 dlc_group.add(&row);
                 switches.push(row);
@@ -128,7 +136,7 @@ pub(super) fn build_dlc_page(
 
             sidebar.append(&settings_dialog::settings_sidebar_row(
                 "package-x-generic-symbolic",
-                "DLC",
+                &crate::tr!("DLC"),
                 "dlc",
             ));
             stack.add_named(&dlc_scroll, Some("dlc"));
@@ -212,7 +220,7 @@ pub(super) fn build_api_emulator_page(
     emu_page.set_margin_top(12);
     emu_page.set_margin_bottom(12);
     let status_group = adw::PreferencesGroup::new();
-    status_group.set_title("Status");
+    status_group.set_title(&crate::tr!("Status"));
 
     let status_row = adw::ActionRow::new();
     let is_installed = dll_folder
@@ -225,23 +233,24 @@ pub(super) fn build_api_emulator_page(
             }
         })
         .unwrap_or(false);
-    status_row.set_title(if is_installed {
-        "API emulator installed"
+    let status_title = if is_installed {
+        crate::tr!("API emulator installed")
     } else {
-        "API emulator not installed"
-    });
+        crate::tr!("API emulator not installed")
+    };
+    status_row.set_title(&status_title);
     status_row.set_sensitive(false);
     status_group.add(&status_row);
 
     emu_page.append(&status_group);
 
     let action_group = adw::PreferencesGroup::new();
-    action_group.set_title("Actions");
+    action_group.set_title(&crate::tr!("Actions"));
 
     let pending_uninstall: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
 
     if is_installed {
-        let uninstall_btn = gtk4::Button::with_label("Uninstall API emulator");
+        let uninstall_btn = gtk4::Button::with_label(&crate::tr!("Uninstall API emulator"));
         uninstall_btn.add_css_class(CSS_DESTRUCTIVE_ACTION);
         uninstall_btn.set_valign(gtk4::Align::Center);
         let status_c = status_row.clone();
@@ -249,11 +258,11 @@ pub(super) fn build_api_emulator_page(
         let win_c = state.borrow().window.clone();
         uninstall_btn.connect_clicked(move |_| {
             let alert = adw::AlertDialog::new(
-                Some("Uninstall API emulator?"),
-                Some("This will restore the original Steam/GOG DLLs. The change will be applied when you save."),
+                Some(&crate::tr!("Uninstall API emulator?")),
+                Some(&crate::tr!("This will restore the original Steam/GOG DLLs. The change will be applied when you save.")),
             );
-            alert.add_response("cancel", "Cancel");
-            alert.add_response("uninstall", "Uninstall");
+            alert.add_response("cancel", &crate::tr!("Cancel"));
+            alert.add_response("uninstall", &crate::tr!("Uninstall"));
             alert.set_response_appearance("uninstall", adw::ResponseAppearance::Destructive);
             alert.set_default_response(Some("cancel"));
             alert.set_close_response("cancel");
@@ -262,13 +271,13 @@ pub(super) fn build_api_emulator_page(
             alert.choose(Some(&win_c), None::<&gio::Cancellable>, move |response| {
                 if response == "uninstall" {
                     *pu_c.borrow_mut() = true;
-                    status_c.set_title("API emulator will be uninstalled on save");
+                    status_c.set_title(&crate::tr!("API emulator will be uninstalled on save"));
                 }
             });
         });
         let uninstall_row = adw::ActionRow::new();
-        uninstall_row.set_title("Remove emulator");
-        uninstall_row.set_subtitle("Restores original API DLLs (applies on save)");
+        uninstall_row.set_title(&crate::tr!("Remove emulator"));
+        uninstall_row.set_subtitle(&crate::tr!("Restores original API DLLs (applies on save)"));
         uninstall_row.add_suffix(&uninstall_btn);
         action_group.add(&uninstall_row);
     } else {
@@ -290,17 +299,20 @@ pub(super) fn build_api_emulator_page(
 
         if !has_dlls {
             let missing_row = adw::ActionRow::new();
-            missing_row.set_title("No original Steam/GOG DLLs detected in game folder");
-            missing_row
-                .set_subtitle("Install the game first and make sure it has the original API DLLs");
+            missing_row.set_title(&crate::tr!(
+                "No original Steam/GOG DLLs detected in game folder"
+            ));
+            missing_row.set_subtitle(&crate::tr!(
+                "Install the game first and make sure it has the original API DLLs"
+            ));
             missing_row.set_sensitive(false);
             action_group.add(&missing_row);
         }
 
         let version_row = if !versions.is_empty() {
             let vr = adw::ComboRow::new();
-            vr.set_title("Emulator version");
-            vr.set_subtitle("Version directory to use for installation");
+            vr.set_title(&crate::tr!("Emulator version"));
+            vr.set_subtitle(&crate::tr!("Version directory to use for installation"));
             let model = helpers::string_list_from(&versions);
             vr.set_model(Some(&model));
             let default_ver = &state.borrow().cfg.default_api_emu_version;
@@ -313,14 +325,14 @@ pub(super) fn build_api_emulator_page(
             Some(vr)
         } else {
             let no_ver_row = adw::ActionRow::new();
-            no_ver_row.set_title("No emulator versions available");
-            no_ver_row.set_subtitle("Place version directories in api_emulators/");
+            no_ver_row.set_title(&crate::tr!("No emulator versions available"));
+            no_ver_row.set_subtitle(&crate::tr!("Place version directories in api_emulators/"));
             no_ver_row.set_sensitive(false);
             action_group.add(&no_ver_row);
             None
         };
 
-        let install_btn = gtk4::Button::with_label("Install API emulator");
+        let install_btn = gtk4::Button::with_label(&crate::tr!("Install API emulator"));
         install_btn.add_css_class(CSS_SUGGESTED_ACTION);
         install_btn.set_sensitive(has_dlls);
         install_btn.set_valign(gtk4::Align::Center);
@@ -365,7 +377,7 @@ pub(super) fn build_api_emulator_page(
             };
             match result {
                 Ok(folder) => {
-                    status_c.set_title("API emulator installed");
+                    status_c.set_title(&crate::tr!("API emulator installed"));
                     if let Err(e) =
                         ira_db::set_api_dll_folder(&db_c, db_id_c, &folder.to_string_lossy())
                     {
@@ -376,14 +388,14 @@ pub(super) fn build_api_emulator_page(
             }
         });
         let install_row = adw::ActionRow::new();
-        install_row.set_title("Install emulator");
-        install_row.set_subtitle("Patches the game to use the API emulator");
+        install_row.set_title(&crate::tr!("Install emulator"));
+        install_row.set_subtitle(&crate::tr!("Patches the game to use the API emulator"));
         install_row.add_suffix(&install_btn);
         action_group.add(&install_row);
     }
 
     if emu_trophy_source == ira_models::TrophySource::Gse && is_installed {
-        let gen_btn = gtk4::Button::with_label("Generate steam_interfaces.txt");
+        let gen_btn = gtk4::Button::with_label(&crate::tr!("Generate steam_interfaces.txt"));
         gen_btn.add_css_class(CSS_FLAT);
         gen_btn.set_valign(gtk4::Align::Center);
         let exe_c = emu_exe.to_string();
@@ -402,8 +414,10 @@ pub(super) fn build_api_emulator_page(
             }
         });
         let gen_row = adw::ActionRow::new();
-        gen_row.set_title("Generate steam_interfaces.txt");
-        gen_row.set_subtitle("Run the generate_interfaces tool from steam_settings");
+        gen_row.set_title(&crate::tr!("Generate steam_interfaces.txt"));
+        gen_row.set_subtitle(&crate::tr!(
+            "Run the generate_interfaces tool from steam_settings"
+        ));
         gen_row.add_suffix(&gen_btn);
         action_group.add(&gen_row);
     }
@@ -417,7 +431,7 @@ pub(super) fn build_api_emulator_page(
     sidebar.append(&settings_dialog::sidebar_separator());
     sidebar.append(&settings_dialog::settings_sidebar_row(
         "applications-engineering-symbolic",
-        "API emulator",
+        &crate::tr!("API emulator"),
         "api_emulator",
     ));
     stack.add_named(&emu_scroll, Some("api_emulator"));

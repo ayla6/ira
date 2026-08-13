@@ -71,7 +71,7 @@ pub(super) struct Wizard {
 pub fn show_auto_add_dialog(state: &SharedState) {
     let parent = state.borrow().window.clone();
     let win = adw::Window::new();
-    win.set_title(Some("Auto add game"));
+    win.set_title(Some(&crate::tr!("Auto add game")));
     win.set_default_size(480, 420);
     win.set_modal(true);
     win.set_transient_for(Some(&parent));
@@ -114,11 +114,13 @@ fn show_pick_page(wizard: &Rc<RefCell<Wizard>>) {
     clear_children(&content);
 
     let status = adw::StatusPage::new();
-    status.set_title("Auto add game");
-    status.set_description(Some("Pick the game's install folder. Ira will identify it, download assets and set everything up."));
+    status.set_title(&crate::tr!("Auto add game"));
+    status.set_description(Some(&crate::tr!(
+        "Pick the game's install folder. Ira will identify it, download assets and set everything up."
+    )));
     status.set_icon_name(Some("folder-open-symbolic"));
 
-    let pick_btn = gtk4::Button::with_label("Pick game folder…");
+    let pick_btn = gtk4::Button::with_label(&crate::tr!("Pick game folder…"));
     pick_btn.add_css_class(CSS_SUGGESTED_ACTION);
     pick_btn.set_halign(gtk4::Align::Center);
 
@@ -133,7 +135,7 @@ fn show_pick_page(wizard: &Rc<RefCell<Wizard>>) {
 fn pick_folder_and_start(win: &adw::Window, state: &SharedState, wizard: &Rc<RefCell<Wizard>>) {
     let default_folder = state.borrow().cfg.default_game_folder.clone();
     let dialog = gtk4::FileDialog::new();
-    dialog.set_title("Select game folder");
+    dialog.set_title(&crate::tr!("Select game folder"));
     super::helpers::set_initial_folder(&dialog, &default_folder);
     let state_c = state.clone();
     let win_c = win.clone();
@@ -171,11 +173,13 @@ fn on_folder_picked(
     let dest = Path::new(&default_game_folder).join(basename);
     let picked = path.to_path_buf();
     let alert = adw::AlertDialog::new(
-        Some("Move to games folder?"),
-        Some("This folder is outside your PC games folder. Move it there now?"),
+        Some(&crate::tr!("Move to games folder?")),
+        Some(&crate::tr!(
+            "This folder is outside your PC games folder. Move it there now?"
+        )),
     );
-    alert.add_response("no", "No");
-    alert.add_response("yes", "Yes");
+    alert.add_response("no", &crate::tr!("No"));
+    alert.add_response("yes", &crate::tr!("Yes"));
     alert.set_response_appearance("yes", adw::ResponseAppearance::Suggested);
     alert.set_default_response(Some("yes"));
     alert.set_close_response("no");
@@ -206,7 +210,7 @@ pub(super) fn start_identify(
         (s.db.clone(), s.steam.clone())
     };
 
-    set_status(wizard, "Identifying game…");
+    set_status(wizard, &crate::tr!("Identifying game…"));
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
     let rx = Rc::new(RefCell::new(rx));
@@ -242,7 +246,7 @@ pub(super) fn poll_events(
 /// via the Steam search fallback.
 pub(super) fn continue_identify(folder: PathBuf, app_id: String, wizard: &Rc<RefCell<Wizard>>) {
     let steam = wizard.borrow().state.borrow().steam.clone();
-    set_status(wizard, "Identifying game…");
+    set_status(wizard, &crate::tr!("Identifying game…"));
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
     let rx = Rc::new(RefCell::new(rx));
@@ -336,7 +340,7 @@ fn resolve_final_folder(
     let Some(dest) = move_to else {
         return Some(path.to_path_buf());
     };
-    let _ = tx.send(WizardEvent::Status("Moving folder…".to_string()));
+    let _ = tx.send(WizardEvent::Status(crate::tr!("Moving folder…")));
     match move_dir(path, &dest) {
         Ok(()) => Some(dest),
         Err(e) => {
@@ -366,7 +370,7 @@ pub(super) fn handle_identify_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEven
         WizardEvent::AlreadyExists => {
             show_error(
                 wizard,
-                "This folder is already in your library. Pick another one.",
+                &crate::tr!("This folder is already in your library. Pick another one."),
             );
             show_pick_page(wizard);
         }
@@ -396,12 +400,14 @@ fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf) {
     };
     clear_children(&content);
 
-    let title = gtk4::Label::new(Some("Couldn't identify this game."));
+    let title = gtk4::Label::new(Some(&crate::tr!("Couldn't identify this game.")));
     title.add_css_class(CSS_TITLE_1);
     title.set_halign(gtk4::Align::Center);
     content.append(&title);
 
-    let hint = gtk4::Label::new(Some("Search Steam for the game, or set it up manually."));
+    let hint = gtk4::Label::new(Some(&crate::tr!(
+        "Search Steam for the game, or set it up manually."
+    )));
     hint.add_css_class(CSS_DIM_LABEL);
     hint.set_halign(gtk4::Align::Center);
     content.append(&hint);
@@ -412,7 +418,7 @@ fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf) {
         .unwrap_or("game")
         .to_string();
 
-    let search_btn = gtk4::Button::with_label("Search Steam…");
+    let search_btn = gtk4::Button::with_label(&crate::tr!("Search Steam…"));
     search_btn.add_css_class(CSS_SUGGESTED_ACTION);
     search_btn.set_halign(gtk4::Align::Center);
     let state_c = state.clone();
@@ -425,7 +431,7 @@ fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf) {
         show_search_results_dialog(SearchResultsDialogParams {
             state: &state_c,
             steam: steam_c.clone(),
-            source_name: "Steam",
+            source_name: &crate::tr!("Steam"),
             game_name: &name_c,
             db_id: 0,
             source: SearchSource::Steam,
@@ -442,7 +448,7 @@ fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf) {
     });
     content.append(&search_btn);
 
-    let manual_btn = gtk4::Button::with_label("Set up manually");
+    let manual_btn = gtk4::Button::with_label(&crate::tr!("Set up manually"));
     manual_btn.set_halign(gtk4::Align::Center);
     let wizard_c = wizard.clone();
     let folder_c = folder.clone();
@@ -492,15 +498,15 @@ pub(super) fn show_identified_form(
 
     let is_windows = game.is_windows;
     let group = adw::PreferencesGroup::new();
-    group.set_title("Confirm game");
+    group.set_title(&crate::tr!("Confirm game"));
 
     let name_entry = adw::EntryRow::new();
-    name_entry.set_title("Name");
+    name_entry.set_title(&crate::tr!("Name"));
     name_entry.set_text(&game.name);
     group.add(&name_entry);
 
     let appid_row = adw::EntryRow::new();
-    appid_row.set_title("Steam app ID");
+    appid_row.set_title(&crate::tr!("Steam app ID"));
     appid_row.set_text(&game.app_id);
     appid_row.set_sensitive(false);
     group.add(&appid_row);
@@ -515,16 +521,17 @@ pub(super) fn show_identified_form(
 
     body.append(&group);
 
-    let info_label = gtk4::Label::new(Some(if is_windows {
-        "Detected: Windows game — a Wine profile is recommended."
+    let info_text = if is_windows {
+        crate::tr!("Detected: Windows game — a Wine profile is recommended.")
     } else {
-        "Detected: Linux native game."
-    }));
+        crate::tr!("Detected: Linux native game.")
+    };
+    let info_label = gtk4::Label::new(Some(&info_text));
     info_label.set_halign(gtk4::Align::Start);
     info_label.add_css_class(CSS_DIM_LABEL);
     body.append(&info_label);
 
-    let add_btn = gtk4::Button::with_label("Add game");
+    let add_btn = gtk4::Button::with_label(&crate::tr!("Add game"));
     add_btn.add_css_class(CSS_SUGGESTED_ACTION);
     add_btn.set_halign(gtk4::Align::Center);
 
@@ -588,7 +595,7 @@ pub(super) fn start_add(
             s.cfg.language_preferences.clone(),
         )
     };
-    set_status(&wizard, "Adding game and downloading assets…");
+    set_status(&wizard, &crate::tr!("Adding game and downloading assets…"));
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
     let rx = Rc::new(RefCell::new(rx));
@@ -1039,17 +1046,17 @@ fn prompt_install_emulator(
     };
     let (title, body) = match emu_kind {
         EmuKind::Nge => (
-            "Install Nemirtingas Galaxy emulator?",
-            "GOG Galaxy DLLs were found in this game. Install the Nemirtingas Galaxy Emulator to enable achievements? (Steam DLLs, if any, will be left untouched.)",
+            crate::tr!("Install Nemirtingas Galaxy emulator?"),
+            crate::tr!("GOG Galaxy DLLs were found in this game. Install the Nemirtingas Galaxy Emulator to enable achievements? (Steam DLLs, if any, will be left untouched.)"),
         ),
         EmuKind::Gse => (
-            "Install Goldberg emulator?",
-            "Steam API DLLs were found in this game. Install the Goldberg Steam Emulator to enable achievements?",
+            crate::tr!("Install Goldberg emulator?"),
+            crate::tr!("Steam API DLLs were found in this game. Install the Goldberg Steam Emulator to enable achievements?"),
         ),
     };
 
     let dialog = adw::Window::new();
-    dialog.set_title(Some(title));
+    dialog.set_title(Some(&title));
     dialog.set_default_size(380, 240);
     dialog.set_modal(true);
     dialog.set_transient_for(Some(&win));
@@ -1066,21 +1073,21 @@ fn prompt_install_emulator(
     header.add_css_class(CSS_FLAT);
     outer.append(&header);
 
-    let msg = gtk4::Label::new(Some(body));
+    let msg = gtk4::Label::new(Some(&body));
     msg.set_wrap(true);
     msg.set_halign(gtk4::Align::Start);
     outer.append(&msg);
 
     let remember = adw::SwitchRow::new();
-    remember.set_title("Don't ask me again");
+    remember.set_title(&crate::tr!("Don't ask me again"));
     let group = adw::PreferencesGroup::new();
     group.add(&remember);
     outer.append(&group);
 
     let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     btn_row.set_halign(gtk4::Align::End);
-    let no_btn = gtk4::Button::with_label("No");
-    let yes_btn = gtk4::Button::with_label("Yes");
+    let no_btn = gtk4::Button::with_label(&crate::tr!("No"));
+    let yes_btn = gtk4::Button::with_label(&crate::tr!("Yes"));
     yes_btn.add_css_class(CSS_SUGGESTED_ACTION);
     btn_row.append(&no_btn);
     btn_row.append(&yes_btn);
@@ -1156,10 +1163,10 @@ fn start_install(
 ) {
     let save_dir = wizard.borrow().state.borrow().save_dir.clone();
     let status = match emu_kind {
-        EmuKind::Nge => "Installing Nemirtingas Galaxy emulator…",
-        EmuKind::Gse => "Installing Goldberg emulator…",
+        EmuKind::Nge => crate::tr!("Installing Nemirtingas Galaxy emulator…"),
+        EmuKind::Gse => crate::tr!("Installing Goldberg emulator…"),
     };
-    set_status(&wizard, status);
+    set_status(&wizard, &status);
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
     let tx_c = tx.clone();
@@ -1232,14 +1239,21 @@ pub(super) fn prompt_redists(
         let w = wizard.borrow();
         (w.win.clone(), w.state.clone())
     };
-    let body =
-        format!(
-        "Steamworks redistributables were found:\n{}\n\nInstall the selected ones now via Wine?",
-        packages.iter().map(|p| format!("- {}", p.name)).collect::<Vec<_>>().join("\n")
+    let body = crate::tr!(
+        "Steamworks redistributables were found:\n{}\n\nInstall the selected ones now via Wine?"
+    )
+    .replacen(
+        "{}",
+        &packages
+            .iter()
+            .map(|p| format!("- {}", p.name))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        1,
     );
-    let alert = adw::AlertDialog::new(Some("Install redistributables?"), Some(&body));
-    alert.add_response("skip", "Skip");
-    alert.add_response("install", "Install");
+    let alert = adw::AlertDialog::new(Some(&crate::tr!("Install redistributables?")), Some(&body));
+    alert.add_response("skip", &crate::tr!("Skip"));
+    alert.add_response("install", &crate::tr!("Install"));
     alert.set_response_appearance("install", adw::ResponseAppearance::Suggested);
     alert.set_default_response(Some("install"));
     alert.set_close_response("skip");
@@ -1269,7 +1283,10 @@ pub(super) fn start_redist_install(
         let s = w.state.borrow();
         (s.db.clone(), s.save_dir.clone(), w.last_folder.clone())
     };
-    set_status(&wizard, "Installing redistributables via Wine…");
+    set_status(
+        &wizard,
+        &crate::tr!("Installing redistributables via Wine…"),
+    );
 
     // Copy _CommonRedist into the game folder so redists persist across
     // prefix changes. Installer paths are remapped to the local copy.
@@ -1362,7 +1379,7 @@ pub(super) fn set_status(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
     let content = wizard.borrow().content.clone();
     clear_children(&content);
     let status = adw::StatusPage::new();
-    status.set_title("Auto add game");
+    status.set_title(&crate::tr!("Auto add game"));
     status.set_description(Some(msg));
     status.set_icon_name(Some("folder-open-symbolic"));
     let spinner = gtk4::Spinner::new();
@@ -1373,8 +1390,8 @@ pub(super) fn set_status(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
 
 pub(super) fn show_error(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
     let win = wizard.borrow().win.clone();
-    let alert = adw::AlertDialog::new(Some("Auto-add failed"), Some(msg));
-    alert.add_response("ok", "OK");
+    let alert = adw::AlertDialog::new(Some(&crate::tr!("Auto-add failed")), Some(msg));
+    alert.add_response("ok", &crate::tr!("OK"));
     alert.set_default_response(Some("ok"));
     alert.set_close_response("ok");
     alert.present(Some(&win));

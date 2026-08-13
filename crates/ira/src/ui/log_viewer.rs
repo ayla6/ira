@@ -15,7 +15,7 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
     };
 
     let window = adw::Window::new();
-    window.set_title(Some(&format!("{} — Log", game_name)));
+    window.set_title(Some(&crate::tr!("{} — Log").replacen("{}", &game_name, 1)));
     window.set_default_size(700, 500);
     window.set_transient_for(Some(&state.borrow().window));
     window.set_destroy_with_parent(true);
@@ -23,11 +23,11 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
     let header = adw::HeaderBar::new();
 
     let search_entry = gtk4::SearchEntry::new();
-    search_entry.set_placeholder_text(Some("Search log…"));
+    search_entry.set_placeholder_text(Some(&crate::tr!("Search log…")));
     search_entry.set_width_chars(28);
     header.pack_start(&search_entry);
 
-    let title_label = gtk4::Label::new(Some(&format!("{} — Log", game_name)));
+    let title_label = gtk4::Label::new(Some(&crate::tr!("{} — Log").replacen("{}", &game_name, 1)));
     title_label.add_css_class("heading");
     header.set_title_widget(Some(&title_label));
 

@@ -25,7 +25,7 @@ fn build_play_btn_hbox() -> gtk4::Box {
     icon.set_pixel_size(PLAY_BTN_ICON_SIZE);
     hbox.append(&icon);
 
-    let label = gtk4::Label::new(Some("Play"));
+    let label = gtk4::Label::new(Some(&crate::tr!("Play")));
     label.add_css_class(CSS_PLAY_BTN_LABEL);
     label.set_width_chars(PLAY_BTN_LABEL_WIDTH);
     hbox.append(&label);
@@ -41,11 +41,11 @@ fn set_running_state(
 ) {
     if running {
         icon.set_icon_name(Some("window-close-symbolic"));
-        label.set_text("Stop");
+        label.set_text(&crate::tr!("Stop"));
         btn.remove_css_class(CSS_SUGGESTED_ACTION);
     } else {
         icon.set_icon_name(Some("media-playback-start-symbolic"));
-        label.set_text("Play");
+        label.set_text(&crate::tr!("Play"));
         btn.add_css_class(CSS_SUGGESTED_ACTION);
     }
 }
@@ -438,7 +438,7 @@ fn build_simple_play_button(
         btn.add_css_class(CSS_SUGGESTED_ACTION);
     } else {
         icon.set_icon_name(Some("window-close-symbolic"));
-        label.set_text("Stop");
+        label.set_text(&crate::tr!("Stop"));
     }
 
     let icon_click = icon.clone();
@@ -489,13 +489,13 @@ fn build_disc_play_button(
     split.set_child(Some(&hbox));
     split.set_height_request(PLAY_BTN_HEIGHT);
     split.set_valign(gtk4::Align::Center);
-    split.set_dropdown_tooltip("Select disc");
+    split.set_dropdown_tooltip(&crate::tr!("Select disc"));
 
     if !is_running {
         split.add_css_class(CSS_SUGGESTED_ACTION);
     } else {
         icon.set_icon_name(Some("window-close-symbolic"));
-        label.set_text("Stop");
+        label.set_text(&crate::tr!("Stop"));
     }
 
     let default_did = ira_db::get_default_disc(&state.borrow().db, db_id)
@@ -529,7 +529,7 @@ fn build_disc_play_button(
     let menu = gio::Menu::new();
     for disc in discs {
         let name = if disc.label.is_empty() {
-            format!("Disc {}", disc.disc_number)
+            crate::tr!("Disc {}").replacen("{}", &disc.disc_number.to_string(), 1)
         } else {
             disc.label.clone()
         };
@@ -588,13 +588,13 @@ fn build_variant_play_button(
     split.set_child(Some(&hbox));
     split.set_height_request(PLAY_BTN_HEIGHT);
     split.set_valign(gtk4::Align::Center);
-    split.set_dropdown_tooltip("Select variant");
+    split.set_dropdown_tooltip(&crate::tr!("Select variant"));
 
     if !is_running {
         split.add_css_class(CSS_SUGGESTED_ACTION);
     } else {
         icon.set_icon_name(Some("window-close-symbolic"));
-        label.set_text("Stop");
+        label.set_text(&crate::tr!("Stop"));
     }
 
     let default_vid = variant_id.or_else(|| {
@@ -640,7 +640,7 @@ fn build_variant_play_button(
     actions.add_action(&action);
 
     let menu = gio::Menu::new();
-    menu.append(Some("Base game"), Some("play.variant::none"));
+    menu.append(Some(&crate::tr!("Base game")), Some("play.variant::none"));
     for var in variants {
         menu.append(Some(&var.name), Some(&format!("play.variant::{}", var.id)));
     }

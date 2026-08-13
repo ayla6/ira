@@ -24,10 +24,10 @@ pub fn show_add_game_dialog(state: &SharedState) {
     };
 
     let layout = super::helpers::dialog_layout(&window);
-    layout.window.set_title(Some("Add game"));
+    layout.window.set_title(Some(&crate::tr!("Add game")));
     layout
         .header
-        .set_title_widget(Some(&gtk4::Label::new(Some("Add game"))));
+        .set_title_widget(Some(&gtk4::Label::new(Some(&crate::tr!("Add game")))));
     layout.stack.set_vexpand(true);
 
     let win = layout.window;
@@ -74,9 +74,9 @@ pub fn show_add_game_dialog(state: &SharedState) {
 
     let mut wine_sidebar_rows: Vec<gtk4::ListBoxRow> = Vec::new();
     for wp in &wine_pages {
-        let row = super::settings_dialog::settings_sidebar_row(wp.icon, wp.label, wp.label);
+        let row = super::settings_dialog::settings_sidebar_row(wp.icon, &wp.label, wp.page_id);
         sidebar.append(&row);
-        stack.add_named(&wp.page, Some(wp.label));
+        stack.add_named(&wp.page, Some(wp.page_id));
         wine_sidebar_rows.push(row);
     }
 
@@ -94,9 +94,9 @@ pub fn show_add_game_dialog(state: &SharedState) {
     stack.add_named(&env_page, Some("env"));
 
     let detect_group = adw::PreferencesGroup::new();
-    detect_group.set_title("Quick detect");
+    detect_group.set_title(&crate::tr!("Quick detect"));
     let detect_row = adw::ActionRow::new();
-    detect_row.set_title("Select game folder to auto-detect");
+    detect_row.set_title(&crate::tr!("Select game folder to auto-detect"));
     detect_row.add_suffix(&detect_btn);
     detect_group.add(&detect_row);
     general_page.append(&detect_group);
@@ -189,8 +189,8 @@ fn build_dialog_button_row(content_area: &gtk4::Box) -> (gtk4::Button, gtk4::But
     btn_row.set_margin_top(8);
     btn_row.set_margin_bottom(12);
 
-    let cancel_btn = gtk4::Button::with_label("Cancel");
-    let add_btn = gtk4::Button::with_label("Add game");
+    let cancel_btn = gtk4::Button::with_label(&crate::tr!("Cancel"));
+    let add_btn = gtk4::Button::with_label(&crate::tr!("Add game"));
     add_btn.add_css_class(CSS_SUGGESTED_ACTION);
 
     btn_row.append(&cancel_btn);
@@ -463,13 +463,13 @@ pub(super) fn build_env_var_row(key: &str, value: &str) -> gtk4::ListBoxRow {
     hbox.set_margin_bottom(4);
 
     let key_entry = gtk4::Entry::new();
-    key_entry.set_placeholder_text(Some("Variable name (e.g. FOO)"));
+    key_entry.set_placeholder_text(Some(&crate::tr!("Variable name (e.g. FOO)")));
     key_entry.set_text(key);
     key_entry.set_hexpand(true);
     hbox.append(&key_entry);
 
     let val_entry = gtk4::Entry::new();
-    val_entry.set_placeholder_text(Some("Value"));
+    val_entry.set_placeholder_text(Some(&crate::tr!("Value")));
     val_entry.set_text(value);
     val_entry.set_hexpand(true);
     hbox.append(&val_entry);

@@ -20,13 +20,13 @@ pub fn build_wine_profile_picker(
     state: &SharedState,
     win: &adw::Window,
 ) -> adw::ComboRow {
-    let labels: Vec<String> = std::iter::once("New prefix".to_string())
+    let labels: Vec<String> = std::iter::once(crate::tr!("New prefix"))
         .chain(profiles.iter().map(|p| p.name.clone()))
         .collect();
     let model = string_list_from(&labels);
     let row = adw::ComboRow::new();
-    row.set_title("Wine profile");
-    row.set_subtitle("Links wine version + prefix together");
+    row.set_title(&crate::tr!("Wine profile"));
+    row.set_subtitle(&crate::tr!("Links wine version + prefix together"));
     row.set_model(Some(&model));
 
     if let Some(pid) = saved_profile_id {
@@ -40,7 +40,7 @@ pub fn build_wine_profile_picker(
 
     let edit_btn = gtk4::Button::new();
     edit_btn.set_icon_name("document-edit-symbolic");
-    edit_btn.set_tooltip_text(Some("Edit profile"));
+    edit_btn.set_tooltip_text(Some(&crate::tr!("Edit profile")));
     edit_btn.set_valign(gtk4::Align::Center);
     edit_btn.add_css_class(CSS_FLAT);
 
@@ -60,7 +60,7 @@ pub fn build_wine_profile_picker(
             let state_c2 = state_c.clone();
             Rc::new(move |new_id: i64| {
                 let profiles = ira_db::get_all_profiles(&state_c2.borrow().db).unwrap_or_default();
-                let labels: Vec<String> = std::iter::once("New prefix".to_string())
+                let labels: Vec<String> = std::iter::once(crate::tr!("New prefix"))
                     .chain(profiles.iter().map(|p| p.name.clone()))
                     .collect();
                 let model = string_list_from(&labels);

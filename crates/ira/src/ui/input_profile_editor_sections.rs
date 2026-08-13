@@ -34,7 +34,8 @@ pub(super) fn section_group(
         return group;
     }
     let group = adw::PreferencesGroup::new();
-    group.set_title(title);
+    let display_title = super::input_profile_binding::section_title_label(title);
+    group.set_title(&display_title);
     if title == "Custom" {
         // Keep Custom immediately before the fixed add-binding controls.
         page.insert_child_after(&group, page.first_child().as_ref());
@@ -68,8 +69,10 @@ pub(super) fn ensure_section_behavior(
     );
     behavior.set_selected(0);
     let row = adw::ActionRow::new();
-    row.set_title("Behavior");
-    row.set_subtitle("Apply this behavior to every binding in this section");
+    row.set_title(&crate::tr!("Behavior"));
+    row.set_subtitle(&crate::tr!(
+        "Apply this behavior to every binding in this section"
+    ));
     behavior.set_valign(gtk4::Align::Center);
     row.add_suffix(&behavior);
     group.add(&row);
@@ -86,14 +89,17 @@ pub(super) fn ensure_section_behavior(
 
 fn behavior_choices(title: &str) -> Vec<String> {
     if matches!(title, "Left Stick" | "Right Stick") {
-        vec!["Custom", "Default", "Stick", "Directional Pad"]
-            .into_iter()
-            .map(str::to_string)
-            .collect()
+        [
+            crate::tr!("Custom"),
+            crate::tr!("Default"),
+            crate::tr!("Stick"),
+            crate::tr!("Directional Pad"),
+        ]
+        .into_iter()
+        .collect()
     } else {
-        vec!["Custom", "Default"]
+        [crate::tr!("Custom"), crate::tr!("Default")]
             .into_iter()
-            .map(str::to_string)
             .collect()
     }
 }

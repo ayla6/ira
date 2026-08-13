@@ -68,10 +68,10 @@ pub(super) fn build_env_vars_group(
     vars: &[(String, String)],
 ) -> (adw::PreferencesGroup, gtk4::ListBox) {
     let group = adw::PreferencesGroup::new();
-    group.set_title("Environment variables");
+    group.set_title(&crate::tr!("Environment variables"));
 
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_btn.set_tooltip_text(Some("Add variable"));
+    add_btn.set_tooltip_text(Some(&crate::tr!("Add variable")));
     add_btn.set_valign(gtk4::Align::Center);
     add_btn.add_css_class("flat");
     group.set_header_suffix(Some(&add_btn));
@@ -98,12 +98,12 @@ pub(super) fn build_ld_paths_group(
     let group = adw::PreferencesGroup::new();
 
     let ld_preload_entry = adw::EntryRow::new();
-    ld_preload_entry.set_title("LD_PRELOAD");
+    ld_preload_entry.set_title(&crate::tr!("LD_PRELOAD"));
     ld_preload_entry.set_text(ld_preload);
     group.add(&ld_preload_entry);
 
     let ld_library_path_entry = adw::EntryRow::new();
-    ld_library_path_entry.set_title("LD_LIBRARY_PATH");
+    ld_library_path_entry.set_title(&crate::tr!("LD_LIBRARY_PATH"));
     ld_library_path_entry.set_text(ld_library_path);
     group.add(&ld_library_path_entry);
 
@@ -192,9 +192,17 @@ fn make_upscaling_row(
     default_upscaling: &str,
     override_val: Option<&str>,
 ) -> (adw::ComboRow, Rc<RefCell<Option<String>>>) {
-    let model = gtk4::StringList::new(&["Linear", "FSR", "NIS", "Integer", "Nearest"]);
+    let strings = [
+        crate::tr!("Linear"),
+        crate::tr!("FSR"),
+        crate::tr!("NIS"),
+        crate::tr!("Integer"),
+        crate::tr!("Nearest"),
+    ];
+    let refs: Vec<&str> = strings.iter().map(String::as_str).collect();
+    let model = gtk4::StringList::new(&refs);
     let row = adw::ComboRow::new();
-    row.set_title("Upscaling method");
+    row.set_title(&crate::tr!("Upscaling method"));
     row.set_model(Some(&model));
 
     let selected = if let Some(ov) = override_val {
@@ -255,13 +263,13 @@ pub(super) fn add_gamescope_rows(
         .map(|o| o.flags.as_str())
         .unwrap_or(&defaults.flags);
     let flags = adw::EntryRow::new();
-    flags.set_title("Gamescope flags");
+    flags.set_title(&crate::tr!("Gamescope flags"));
     flags.set_text(flags_text);
     expander.add_row(&flags);
 
     let (w_row, w_spin, w_state) = make_spin_row(
-        "Resolution width",
-        "0 = auto",
+        &crate::tr!("Resolution width"),
+        &crate::tr!("0 = auto"),
         defaults.w,
         override_vals.and_then(|o| o.w),
         0.0,
@@ -270,8 +278,8 @@ pub(super) fn add_gamescope_rows(
     expander.add_row(&w_row);
 
     let (h_row, h_spin, h_state) = make_spin_row(
-        "Resolution height",
-        "0 = auto",
+        &crate::tr!("Resolution height"),
+        &crate::tr!("0 = auto"),
         defaults.h,
         override_vals.and_then(|o| o.h),
         0.0,
@@ -280,8 +288,8 @@ pub(super) fn add_gamescope_rows(
     expander.add_row(&h_row);
 
     let (fps_row, fps_spin, fps_state) = make_spin_row(
-        "FPS limit",
-        "0 = no limit",
+        &crate::tr!("FPS limit"),
+        &crate::tr!("0 = no limit"),
         defaults.fps,
         override_vals.and_then(|o| o.fps),
         0.0,

@@ -77,11 +77,15 @@ pub(super) fn handle_unified_sgdb_result(
             });
         });
 
-        let label = gtk4::Label::new(Some(&format!("SGDB: {}", matched_name)));
+        let label = gtk4::Label::new(Some(&crate::tr!("SGDB: {}").replacen(
+            "{}",
+            &matched_name,
+            1,
+        )));
         label.add_css_class(CSS_SUCCESS_LABEL);
         action_box.append(&label);
 
-        let undo_btn = gtk4::Button::with_label("Undo SGDB");
+        let undo_btn = gtk4::Button::with_label(&crate::tr!("Undo SGDB"));
         let sc = state.clone();
         let action_box_c = action_box.clone();
         let parent_c = parent_dialog.clone();
@@ -142,10 +146,10 @@ pub(super) fn handle_unified_sgdb_result(
             }
             // Update the mass match row to show unmatched state with manual search
             clear_children(&action_box_c);
-            let label = gtk4::Label::new(Some("SGDB: unmatched"));
+            let label = gtk4::Label::new(Some(&crate::tr!("SGDB: unmatched")));
             label.add_css_class(CSS_DIM_LABEL);
             action_box_c.append(&label);
-            let sgdb_btn = gtk4::Button::with_label("Search SGDB…");
+            let sgdb_btn = gtk4::Button::with_label(&crate::tr!("Search SGDB…"));
             let sc2 = sc.clone();
             let gn = game_name_c.clone();
             let dlg = parent_c.clone();
@@ -156,7 +160,9 @@ pub(super) fn handle_unified_sgdb_result(
                     let name = gn.clone();
                     move || {
                         clear_children(&ab);
-                        let label = gtk4::Label::new(Some(&format!("Matched to SGDB: {}", name)));
+                        let label = gtk4::Label::new(Some(
+                            &crate::tr!("Matched to SGDB: {}").replacen("{}", &name, 1),
+                        ));
                         label.add_css_class(CSS_SUCCESS_LABEL);
                         ab.append(&label);
                     }
@@ -167,11 +173,11 @@ pub(super) fn handle_unified_sgdb_result(
         });
         action_box.append(&undo_btn);
     } else {
-        let label = gtk4::Label::new(Some("SGDB: not found"));
+        let label = gtk4::Label::new(Some(&crate::tr!("SGDB: not found")));
         label.add_css_class(CSS_DIM_LABEL);
         action_box.append(&label);
 
-        let sgdb_btn = gtk4::Button::with_label("Search SGDB…");
+        let sgdb_btn = gtk4::Button::with_label(&crate::tr!("Search SGDB…"));
         let sc = state.clone();
         let gn = game_name.to_string();
         let did = db_id;
@@ -183,7 +189,9 @@ pub(super) fn handle_unified_sgdb_result(
                 let name = gn.clone();
                 move || {
                     clear_children(&ab);
-                    let label = gtk4::Label::new(Some(&format!("Matched to SGDB: {}", name)));
+                    let label = gtk4::Label::new(Some(
+                        &crate::tr!("Matched to SGDB: {}").replacen("{}", &name, 1),
+                    ));
                     label.add_css_class(CSS_SUCCESS_LABEL);
                     ab.append(&label);
                 }
@@ -209,7 +217,9 @@ pub fn show_sgdb_search_dialog(
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&gtk4::Label::new(Some("Match to SteamGridDB"))));
+    header.set_title_widget(Some(&gtk4::Label::new(Some(&crate::tr!(
+        "Match to SteamGridDB"
+    )))));
     outer.append(&header);
 
     let search_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
@@ -218,10 +228,10 @@ pub fn show_sgdb_search_dialog(
     search_box.set_margin_top(8);
 
     let entry = gtk4::Entry::new();
-    entry.set_placeholder_text(Some("Game name…"));
+    entry.set_placeholder_text(Some(&crate::tr!("Game name…")));
     entry.set_text(game_name);
     entry.set_hexpand(true);
-    let search_btn = gtk4::Button::with_label("Search");
+    let search_btn = gtk4::Button::with_label(&crate::tr!("Search"));
     search_btn.add_css_class(CSS_SUGGESTED_ACTION);
     search_box.append(&entry);
     search_box.append(&search_btn);
@@ -269,15 +279,15 @@ pub fn show_sgdb_search_dialog(
                 clear_children(&list_c2);
                 if results.is_empty() {
                     let row = adw::ActionRow::new();
-                    row.set_title("No results found");
+                    row.set_title(&crate::tr!("No results found"));
                     row.set_sensitive(false);
                     list_c2.append(&row);
                 } else {
                     for (sgdb_id, name) in &results {
                         let row = adw::ActionRow::new();
                         row.set_title(&super::helpers::esc(name));
-                        row.set_subtitle(&format!("SGDB ID: {}", sgdb_id));
-                        let match_btn = gtk4::Button::with_label("Match");
+                        row.set_subtitle(&crate::tr!("SGDB ID: {}").replacen("{}", sgdb_id, 1));
+                        let match_btn = gtk4::Button::with_label(&crate::tr!("Match"));
                         match_btn.add_css_class(CSS_SUGGESTED_ACTION);
                         match_btn.set_valign(gtk4::Align::Center);
                         let sgdb_id_c = sgdb_id.clone();

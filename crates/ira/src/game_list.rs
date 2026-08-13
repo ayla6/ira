@@ -133,7 +133,7 @@ pub fn build_game_list(
         + usize::from(options.cemu_enabled)
         + usize::from(ra_any_console);
     let reporter = ProgressReporter::new(progress, total_sources);
-    reporter.status("Preparing game library…");
+    reporter.status(crate::tr!("Preparing game library…"));
 
     std::thread::scope(|s| {
         let steam_discovery = if options.steam_enabled {
@@ -141,13 +141,13 @@ pub fn build_game_list(
             let reporter = reporter.clone();
             Some(s.spawn(move || {
                 let _s = tracing::info_span!("steam_discover").entered();
-                reporter.status("Scanning Steam games…");
+                reporter.status(crate::tr!("Scanning Steam games…"));
                 let steam_games = steam::discover_games();
                 if !steam_games.is_empty() {
                     cleanup_steam_entries(&db, &steam_games);
                 }
                 let steam_playtimes = steam::read_all_playtimes();
-                reporter.finish("Loaded Steam games");
+                reporter.finish(crate::tr!("Loaded Steam games"));
                 (steam_games, steam_playtimes)
             }))
         } else {
@@ -159,9 +159,9 @@ pub fn build_game_list(
         let native_reporter = reporter.clone();
         let native_handle = s.spawn(move || {
             let _s = tracing::info_span!("load_games_from_db").entered();
-            native_reporter.status("Loading saved games…");
+            native_reporter.status(crate::tr!("Loading saved games…"));
             let games = game_loader::load_games(&db_native, &save_dir_native);
-            native_reporter.finish("Loaded saved games");
+            native_reporter.finish(crate::tr!("Loaded saved games"));
             games
         });
 
@@ -171,10 +171,10 @@ pub fn build_game_list(
             let reporter = reporter.clone();
             Some(s.spawn(move || {
                 let _s = tracing::info_span!("build_shadps4_games").entered();
-                reporter.status("Scanning shadPS4 games…");
+                reporter.status(crate::tr!("Scanning shadPS4 games…"));
                 let games =
                     build_shadps4_games(&db_ps4, &save_dir_ps4, &options.shadps4_executable);
-                reporter.finish("Loaded shadPS4 games");
+                reporter.finish(crate::tr!("Loaded shadPS4 games"));
                 games
             }))
         } else {
@@ -187,9 +187,9 @@ pub fn build_game_list(
             let reporter = reporter.clone();
             Some(s.spawn(move || {
                 let _s = tracing::info_span!("build_rpcs3_games").entered();
-                reporter.status("Scanning RPCS3 games…");
+                reporter.status(crate::tr!("Scanning RPCS3 games…"));
                 let games = build_rpcs3_games(&db_ps3, &save_dir_ps3, &options.rpcs3_executable);
-                reporter.finish("Loaded RPCS3 games");
+                reporter.finish(crate::tr!("Loaded RPCS3 games"));
                 games
             }))
         } else {
@@ -202,10 +202,10 @@ pub fn build_game_list(
             let reporter = reporter.clone();
             Some(s.spawn(move || {
                 let _s = tracing::info_span!("build_vita3k_games").entered();
-                reporter.status("Scanning Vita3K games…");
+                reporter.status(crate::tr!("Scanning Vita3K games…"));
                 let games =
                     build_vita3k_games(&db_vita, &save_dir_vita, &options.vita3k_executable);
-                reporter.finish("Loaded Vita3K games");
+                reporter.finish(crate::tr!("Loaded Vita3K games"));
                 games
             }))
         } else {
@@ -218,9 +218,9 @@ pub fn build_game_list(
             let reporter = reporter.clone();
             Some(s.spawn(move || {
                 let _s = tracing::info_span!("build_cemu_games").entered();
-                reporter.status("Scanning Cemu games…");
+                reporter.status(crate::tr!("Scanning Cemu games…"));
                 let games = build_cemu_games(&db_cemu, &save_dir_cemu, &options.cemu_executable);
-                reporter.finish("Loaded Cemu games");
+                reporter.finish(crate::tr!("Loaded Cemu games"));
                 games
             }))
         } else {
@@ -234,7 +234,7 @@ pub fn build_game_list(
             let reporter = reporter.clone();
             Some(s.spawn(move || {
                 let _s = tracing::info_span!("build_ra_games").entered();
-                reporter.status("Scanning ROM library…");
+                reporter.status(crate::tr!("Scanning ROM library…"));
                 let status_reporter = reporter.clone();
                 let games = retroachievements::build_ra_games(
                     &db_ra,
@@ -243,7 +243,7 @@ pub fn build_game_list(
                     game_loader::load_game_fast,
                     move |status| status_reporter.status(status),
                 );
-                reporter.finish("Loaded ROM library");
+                reporter.finish(crate::tr!("Loaded ROM library"));
                 games
             }))
         } else {
@@ -655,9 +655,9 @@ mod tests {
         });
         let reporter = ProgressReporter::new(callback, 2);
 
-        reporter.status("Scanning ROMs");
-        reporter.finish("Loaded N64");
-        reporter.finish("Loaded NDS");
+        reporter.status(crate::tr!("Scanning ROMs"));
+        reporter.finish(crate::tr!("Loaded N64"));
+        reporter.finish(crate::tr!("Loaded NDS"));
 
         let updates = updates.lock().unwrap();
         assert_eq!(updates[0].completed, 0);

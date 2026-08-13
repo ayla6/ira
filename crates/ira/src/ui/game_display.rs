@@ -50,7 +50,9 @@ pub fn display_game(game: &Game, state: &SharedState) {
         box_.set_margin_top(32);
         box_.set_margin_bottom(32);
         box_.set_halign(gtk4::Align::Center);
-        let label = gtk4::Label::new(Some("This game isn't linked to a trophy source yet.\nUse \"Match unmatched games\" in the menu to find a match."));
+        let label = gtk4::Label::new(Some(&crate::tr!(
+            "This game isn't linked to a trophy source yet.\nUse \"Match unmatched games\" in the menu to find a match."
+        )));
         label.add_css_class(CSS_DIM_LABEL);
         label.set_wrap(true);
         label.set_justify(gtk4::Justification::Center);
@@ -90,11 +92,11 @@ pub fn format_playtime(hours: f64) -> String {
 
 pub(crate) fn format_last_played(ts: i64) -> String {
     if ts == 0 {
-        return "Never".to_string();
+        return crate::tr!("Never");
     }
     chrono::DateTime::from_timestamp(ts, 0)
         .map(|dt| dt.format("%b %-d").to_string())
-        .unwrap_or_else(|| "Never".to_string())
+        .unwrap_or_else(|| crate::tr!("Never"))
 }
 
 pub(crate) fn logo_scaled_dims(

@@ -1,7 +1,6 @@
 use super::css::*;
 use super::helpers::{entry_path_closure, make_browse_icon_button, string_list_from};
 use super::settings_dialog::settings_page_container;
-use crate::strings::settings as T;
 use adw::prelude::*;
 use ira_config::{Config, ConsoleConfig};
 use ira_models::ConsoleDef;
@@ -20,7 +19,7 @@ pub(super) fn build_emulator_dropdown(
     }
     version_strings.extend(emulators.iter().map(|e| e.display_name.clone()));
     let version_dropdown = adw::ComboRow::new();
-    version_dropdown.set_title(T::VERSION);
+    version_dropdown.set_title(&crate::tr!("Version"));
     version_dropdown.set_model(Some(&string_list_from(&version_strings)));
 
     let mut selected_idx: u32 = 0;
@@ -47,8 +46,10 @@ pub(super) fn build_shadps4_settings_page(
 
     let ps4_enable_group = adw::PreferencesGroup::new();
     let ps4_enable_row = adw::SwitchRow::new();
-    ps4_enable_row.set_title("Enable PS4 integration");
-    ps4_enable_row.set_subtitle("Scan shadPS4 install directories for PS4 games");
+    ps4_enable_row.set_title(&crate::tr!("Enable PS4 integration"));
+    ps4_enable_row.set_subtitle(&crate::tr!(
+        "Scan shadPS4 install directories for PS4 games"
+    ));
     ps4_enable_row.set_active(cfg.shadps4_enabled);
     ps4_enable_group.add(&ps4_enable_row);
     page.append(&ps4_enable_group);
@@ -57,12 +58,12 @@ pub(super) fn build_shadps4_settings_page(
     let emulators = ira_platforms::ps4::read_shadps4_launch_options();
     if !emulators.is_empty() {
         let emu_group = adw::PreferencesGroup::new();
-        emu_group.set_title(T::EMULATOR);
+        emu_group.set_title(&crate::tr!("Emulator"));
 
         let dd = build_emulator_dropdown(
             &cfg.shadps4_executable,
             true,
-            "Qt Launcher default",
+            &crate::tr!("Qt Launcher default"),
             &emulators,
         );
 
@@ -73,13 +74,13 @@ pub(super) fn build_shadps4_settings_page(
     }
 
     let ps4_dirs_group = adw::PreferencesGroup::new();
-    ps4_dirs_group.set_title(T::INSTALL_DIRECTORIES);
-    ps4_dirs_group.set_description(Some("Managed by shadPS4"));
+    ps4_dirs_group.set_title(&crate::tr!("Install directories"));
+    ps4_dirs_group.set_description(Some(&crate::tr!("Managed by shadPS4")));
     let install_dirs =
         ira_platforms::ps4::read_install_dirs_for_executable(&cfg.shadps4_executable);
     if install_dirs.is_empty() {
         let empty_row = adw::ActionRow::new();
-        empty_row.set_title("No install directories configured");
+        empty_row.set_title(&crate::tr!("No install directories configured"));
         empty_row.set_sensitive(false);
         ps4_dirs_group.add(&empty_row);
     } else {
@@ -103,14 +104,14 @@ pub(super) fn build_rpcs3_settings_page(
 
     let enable_group = adw::PreferencesGroup::new();
     let enable_row = adw::SwitchRow::new();
-    enable_row.set_title("Enable PS3 integration");
-    enable_row.set_subtitle("Scan RPCS3's dev_hdd0 for installed PS3 games");
+    enable_row.set_title(&crate::tr!("Enable PS3 integration"));
+    enable_row.set_subtitle(&crate::tr!("Scan RPCS3's dev_hdd0 for installed PS3 games"));
     enable_row.set_active(cfg.rpcs3_enabled);
     enable_group.add(&enable_row);
     page.append(&enable_group);
 
     let emu_group = adw::PreferencesGroup::new();
-    emu_group.set_title(T::EMULATOR);
+    emu_group.set_title(&crate::tr!("Emulator"));
 
     let detected = ira_platforms::emulator_detect::detect_emulator_choices(
         &["rpcs3", "rpcs3-emu"],
@@ -119,7 +120,7 @@ pub(super) fn build_rpcs3_settings_page(
     );
 
     let exe_row = adw::EntryRow::new();
-    exe_row.set_title("RPCS3 executable path");
+    exe_row.set_title(&crate::tr!("RPCS3 executable path"));
 
     let initial_exe = if cfg.rpcs3_executable.is_empty() {
         detected
@@ -132,13 +133,18 @@ pub(super) fn build_rpcs3_settings_page(
     exe_row.set_text(&initial_exe);
 
     add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-    add_executable_actions(&exe_row, win, &detected, "Select RPCS3 executable");
+    add_executable_actions(
+        &exe_row,
+        win,
+        &detected,
+        &crate::tr!("Select RPCS3 executable"),
+    );
     emu_group.add(&exe_row);
     page.append(&emu_group);
 
     let dirs_group = adw::PreferencesGroup::new();
-    dirs_group.set_title(T::INSTALL_DIRECTORIES);
-    dirs_group.set_description(Some("Managed by RPCS3 (dev_hdd0/game)"));
+    dirs_group.set_title(&crate::tr!("Install directories"));
+    dirs_group.set_description(Some(&crate::tr!("Managed by RPCS3 (dev_hdd0/game)")));
     let games_dir = ira_platforms::ps3::games_dir_for(&initial_exe);
     let dir_row = adw::ActionRow::new();
     dir_row.set_title(&games_dir.display().to_string());
@@ -157,21 +163,23 @@ pub(super) fn build_vita3k_settings_page(
 
     let enable_group = adw::PreferencesGroup::new();
     let enable_row = adw::SwitchRow::new();
-    enable_row.set_title("Enable PS Vita integration");
-    enable_row.set_subtitle("Scan Vita3K's installed applications for PS Vita games");
+    enable_row.set_title(&crate::tr!("Enable PS Vita integration"));
+    enable_row.set_subtitle(&crate::tr!(
+        "Scan Vita3K's installed applications for PS Vita games"
+    ));
     enable_row.set_active(cfg.vita3k_enabled);
     enable_group.add(&enable_row);
     page.append(&enable_group);
 
     let emu_group = adw::PreferencesGroup::new();
-    emu_group.set_title(T::EMULATOR);
+    emu_group.set_title(&crate::tr!("Emulator"));
     let detected = ira_platforms::emulator_detect::detect_emulator_choices(
         &["vita3k", "Vita3K"],
         &[],
         "Vita3K",
     );
     let exe_row = adw::EntryRow::new();
-    exe_row.set_title("Vita3K executable path");
+    exe_row.set_title(&crate::tr!("Vita3K executable path"));
     let initial_exe = if cfg.vita3k_executable.is_empty() {
         detected
             .first()
@@ -182,13 +190,20 @@ pub(super) fn build_vita3k_settings_page(
     };
     exe_row.set_text(&initial_exe);
     add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-    add_executable_actions(&exe_row, win, &detected, "Select Vita3K executable");
+    add_executable_actions(
+        &exe_row,
+        win,
+        &detected,
+        &crate::tr!("Select Vita3K executable"),
+    );
     emu_group.add(&exe_row);
     page.append(&emu_group);
 
     let dirs_group = adw::PreferencesGroup::new();
-    dirs_group.set_title(T::INSTALL_DIRECTORY);
-    dirs_group.set_description(Some("Vita3K stores installed applications below ux0/app"));
+    dirs_group.set_title(&crate::tr!("Install directory"));
+    dirs_group.set_description(Some(&crate::tr!(
+        "Vita3K stores installed applications below ux0/app"
+    )));
     let dir_row = adw::ActionRow::new();
     dir_row.set_title(
         &ira_platforms::vita3k::vita_fs_path_for(&initial_exe)
@@ -211,21 +226,23 @@ pub(super) fn build_cemu_settings_page(
 
     let enable_group = adw::PreferencesGroup::new();
     let enable_row = adw::SwitchRow::new();
-    enable_row.set_title("Enable Wii U integration");
-    enable_row.set_subtitle("Scan Cemu's configured game paths and installed titles");
+    enable_row.set_title(&crate::tr!("Enable Wii U integration"));
+    enable_row.set_subtitle(&crate::tr!(
+        "Scan Cemu's configured game paths and installed titles"
+    ));
     enable_row.set_active(cfg.cemu_enabled);
     enable_group.add(&enable_row);
     page.append(&enable_group);
 
     let emu_group = adw::PreferencesGroup::new();
-    emu_group.set_title(T::EMULATOR);
+    emu_group.set_title(&crate::tr!("Emulator"));
     let detected = ira_platforms::emulator_detect::detect_emulator_choices(
         &["cemu", "Cemu"],
         &[(ira_platforms::cemu::CEMU_FLATPAK_ID, "Cemu")],
         "Cemu",
     );
     let exe_row = adw::EntryRow::new();
-    exe_row.set_title("Cemu executable path");
+    exe_row.set_title(&crate::tr!("Cemu executable path"));
     let initial_exe = if cfg.cemu_executable.is_empty() {
         detected
             .first()
@@ -236,26 +253,31 @@ pub(super) fn build_cemu_settings_page(
     };
     exe_row.set_text(&initial_exe);
     add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-    add_executable_actions(&exe_row, win, &detected, "Select Cemu executable");
+    add_executable_actions(
+        &exe_row,
+        win,
+        &detected,
+        &crate::tr!("Select Cemu executable"),
+    );
     emu_group.add(&exe_row);
     page.append(&emu_group);
 
     let dirs_group = adw::PreferencesGroup::new();
-    dirs_group.set_title(T::INSTALL_DIRECTORIES);
-    dirs_group.set_description(Some("Managed by Cemu"));
+    dirs_group.set_title(&crate::tr!("Install directories"));
+    dirs_group.set_description(Some(&crate::tr!("Managed by Cemu")));
     let mlc_row = adw::ActionRow::new();
     mlc_row.set_title(
         &ira_platforms::cemu::mlc_path_for(&initial_exe)
             .display()
             .to_string(),
     );
-    mlc_row.set_subtitle("MLC path");
+    mlc_row.set_subtitle(&crate::tr!("MLC path"));
     mlc_row.set_sensitive(false);
     dirs_group.add(&mlc_row);
     for path in ira_platforms::cemu::configured_game_paths_for(&initial_exe) {
         let row = adw::ActionRow::new();
         row.set_title(&path.display().to_string());
-        row.set_subtitle("Configured game path");
+        row.set_subtitle(&crate::tr!("Configured game path"));
         row.set_sensitive(false);
         dirs_group.add(&row);
     }
@@ -278,7 +300,7 @@ fn add_detected_emulator_dropdown(
         .map(|emulator| emulator.display_name.as_str())
         .collect::<Vec<_>>();
     let dropdown = adw::ComboRow::new();
-    dropdown.set_title(T::EMULATOR);
+    dropdown.set_title(&crate::tr!("Emulator"));
     dropdown.set_model(Some(&gtk4::StringList::new(&labels)));
     dropdown.set_selected(
         detected
@@ -306,7 +328,7 @@ fn add_executable_actions(
         let auto_detect = gtk4::Button::from_icon_name("system-search-symbolic");
         auto_detect.add_css_class(CSS_FLAT);
         auto_detect.add_css_class(CSS_SQUARE_BUTTON);
-        auto_detect.set_tooltip_text(Some("Auto-detect emulator"));
+        auto_detect.set_tooltip_text(Some(&crate::tr!("Auto-detect emulator")));
         auto_detect.set_valign(gtk4::Align::Center);
         let row_for_detect = row.clone();
         let path = emulator.launch_command.clone();
@@ -362,21 +384,24 @@ pub(super) fn build_console_settings_page(
     let enable_group = adw::PreferencesGroup::new();
     let enable_row = adw::SwitchRow::new();
     let display_name = gtk4::glib::markup_escape_text(def.display_name);
-    enable_row.set_title(&format!("Enable {display_name} ROM discovery"));
-    enable_row.set_subtitle(&format!(
-        "Scan for {display_name} ROM files in the configured folder"
-    ));
+    enable_row.set_title(
+        &crate::tr!("Enable {display_name} ROM discovery").replace("{display_name}", &display_name),
+    );
+    enable_row.set_subtitle(
+        &crate::tr!("Scan for {display_name} ROM files in the configured folder")
+            .replace("{display_name}", &display_name),
+    );
     enable_row.set_active(cc.enabled);
     enable_group.add(&enable_row);
     page.append(&enable_group);
 
     let emu_group = adw::PreferencesGroup::new();
-    emu_group.set_title(T::EMULATOR);
+    emu_group.set_title(&crate::tr!("Emulator"));
 
     let detected_emulators = ira_platforms::emulator_detect::detect_emulators(def.id);
 
     let exe_row = adw::EntryRow::new();
-    exe_row.set_title("Emulator executable");
+    exe_row.set_title(&crate::tr!("Emulator executable"));
 
     let initial_exe = if cc.executable.is_empty() {
         detected_emulators
@@ -394,7 +419,7 @@ pub(super) fn build_console_settings_page(
         &exe_row,
         win,
         &detected_emulators,
-        "Select emulator executable",
+        &crate::tr!("Select emulator executable"),
     );
     emu_group.add(&exe_row);
 
@@ -412,11 +437,11 @@ pub(super) fn build_console_settings_page(
             .clone()
             .or_else(|| cores.first().map(|core| core.path.clone()));
         let core_path = adw::EntryRow::new();
-        core_path.set_title("Custom core file");
+        core_path.set_title(&crate::tr!("Custom core file"));
         core_path.set_text(selected_core.as_deref().unwrap_or_default());
         let browse = make_browse_icon_button(
             Some(win),
-            "Select RetroArch core",
+            &crate::tr!("Select RetroArch core"),
             false,
             None,
             entry_path_closure(&core_path),
@@ -433,10 +458,10 @@ pub(super) fn build_console_settings_page(
         let is_retroarch = ira_platforms::emulator_detect::is_retroarch(exe_row.text().as_ref());
         if cores.is_empty() {
             let core_row = adw::ActionRow::new();
-            core_row.set_title("RetroArch core");
-            core_row.set_subtitle(
-                "No compatible cores installed. Install one with RetroArch's Core Downloader.",
-            );
+            core_row.set_title(&crate::tr!("RetroArch core"));
+            core_row.set_subtitle(&crate::tr!(
+                "No compatible cores installed. Install one with RetroArch's Core Downloader."
+            ));
             core_row.set_sensitive(false);
             core_row.set_visible(is_retroarch);
             core_path.set_visible(is_retroarch);
@@ -448,10 +473,10 @@ pub(super) fn build_console_settings_page(
                 .map(|core| core.display_name.clone())
                 .collect::<Vec<_>>();
             let mut core_names = core_names;
-            core_names.push("Custom core file...".to_string());
+            core_names.push(crate::tr!("Custom core file..."));
             let dropdown = adw::ComboRow::new();
-            dropdown.set_title("RetroArch core");
-            dropdown.set_subtitle("Select a core for this console");
+            dropdown.set_title(&crate::tr!("RetroArch core"));
+            dropdown.set_subtitle(&crate::tr!("Select a core for this console"));
             dropdown.set_model(Some(&string_list_from(&core_names)));
             let selected_idx = selected_core
                 .as_ref()
@@ -505,8 +530,8 @@ pub(super) fn build_console_settings_page(
     });
 
     let fullscreen_row = adw::SwitchRow::new();
-    fullscreen_row.set_title("Start games in fullscreen");
-    fullscreen_row.set_subtitle("Launch the emulator in fullscreen mode");
+    fullscreen_row.set_title(&crate::tr!("Start games in fullscreen"));
+    fullscreen_row.set_subtitle(&crate::tr!("Launch the emulator in fullscreen mode"));
     fullscreen_row.set_active(cc.fullscreen);
     emu_group.add(&fullscreen_row);
 

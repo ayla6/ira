@@ -395,16 +395,16 @@ fn build_nav() -> (
     b.set_margin_top(4);
     let pw = gtk4::Button::from_icon_name("go-first-symbolic");
     pw.add_css_class(CSS_CIRCULAR);
-    pw.set_tooltip_text(Some("Previous week"));
+    pw.set_tooltip_text(Some(&crate::tr!("Previous week")));
     let pd = gtk4::Button::from_icon_name("go-previous-symbolic");
     pd.add_css_class(CSS_CIRCULAR);
-    pd.set_tooltip_text(Some("Previous day"));
+    pd.set_tooltip_text(Some(&crate::tr!("Previous day")));
     let nd = gtk4::Button::from_icon_name("go-next-symbolic");
     nd.add_css_class(CSS_CIRCULAR);
-    nd.set_tooltip_text(Some("Next day"));
+    nd.set_tooltip_text(Some(&crate::tr!("Next day")));
     let nw = gtk4::Button::from_icon_name("go-last-symbolic");
     nw.add_css_class(CSS_CIRCULAR);
-    nw.set_tooltip_text(Some("Next week"));
+    nw.set_tooltip_text(Some(&crate::tr!("Next week")));
     b.append(&pw);
     b.append(&pd);
     b.append(&nd);
@@ -463,7 +463,7 @@ fn update_sidebar(s: &State, day: &DayData) {
     clear_children(&s.sidebar_list);
     if day.details.is_empty() {
         let r = adw::ActionRow::new();
-        r.set_title("No sessions");
+        r.set_title(&crate::tr!("No sessions"));
         r.add_css_class(CSS_DIM_LABEL);
         s.sidebar_list.append(&r);
         return;
@@ -520,7 +520,9 @@ fn make_delete_button(
     btn.add_css_class(CSS_FLAT);
     btn.add_css_class(CSS_SESSION_DELETE);
     btn.set_valign(gtk4::Align::Center);
-    btn.set_tooltip_text(Some("Delete session (hold Ctrl to skip confirmation)"));
+    btn.set_tooltip_text(Some(&crate::tr!(
+        "Delete session (hold Ctrl to skip confirmation)"
+    )));
     let on_delete = on_delete.clone();
     let ctrl_held = ctrl_held.clone();
     btn.connect_clicked(move |_| {

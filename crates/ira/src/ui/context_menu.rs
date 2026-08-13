@@ -9,7 +9,6 @@ use super::context_menu_actions::{
     setup_play_history_action, setup_toggle_group_action,
 };
 use super::state::SharedState;
-use crate::strings as S;
 use crate::Game;
 use gtk4::prelude::*;
 
@@ -54,7 +53,10 @@ fn build_collections_submenu(
     if !groups.is_empty() {
         collections_menu.append_section(None, &gio::Menu::new());
     }
-    collections_menu.append(Some("Add to new collection…"), Some("game.new_collection"));
+    collections_menu.append(
+        Some(&crate::tr!("Add to new collection…")),
+        Some("game.new_collection"),
+    );
     collections_menu
 }
 
@@ -76,11 +78,14 @@ pub fn show_game_context_menu(
 
     let menu = gio::Menu::new();
 
-    let play_item = gio::MenuItem::new(Some("Play"), Some("game.play"));
+    let play_item = gio::MenuItem::new(Some(&crate::tr!("Play")), Some("game.play"));
     menu.prepend_item(&play_item);
 
-    menu.append(Some(S::EDIT_GAME_SETTINGS), Some("game.edit"));
-    menu.append(Some(S::VIEW_PLAY_HISTORY), Some("game.play_history"));
+    menu.append(Some(&crate::tr!("Edit game settings")), Some("game.edit"));
+    menu.append(
+        Some(&crate::tr!("View play history")),
+        Some("game.play_history"),
+    );
 
     let folders_menu = gio::Menu::new();
 
@@ -146,20 +151,35 @@ pub fn show_game_context_menu(
     };
 
     if game_file.is_some() || game_folder.is_some() {
-        folders_menu.append(Some("Game location"), Some("game.open_game_folder"));
+        folders_menu.append(
+            Some(&crate::tr!("Game location")),
+            Some("game.open_game_folder"),
+        );
     }
     if wine_prefix.is_some() {
-        folders_menu.append(Some("Wine prefix"), Some("game.open_wine_prefix"));
+        folders_menu.append(
+            Some(&crate::tr!("Wine prefix")),
+            Some("game.open_wine_prefix"),
+        );
     }
-    folders_menu.append(Some("Data location"), Some("game.open_images"));
-    folders_menu.append(Some("Save location"), Some("game.open_save_location"));
+    folders_menu.append(Some(&crate::tr!("Data location")), Some("game.open_images"));
+    folders_menu.append(
+        Some(&crate::tr!("Save location")),
+        Some("game.open_save_location"),
+    );
     if game.trophy_source == ira_models::TrophySource::Gse {
-        folders_menu.append(Some("Achievement status"), Some("game.open_steam_status"));
+        folders_menu.append(
+            Some(&crate::tr!("Achievement status")),
+            Some("game.open_steam_status"),
+        );
     } else if game.trophy_source == ira_models::TrophySource::Nge {
-        folders_menu.append(Some("Achievement status"), Some("game.open_gog_status"));
+        folders_menu.append(
+            Some(&crate::tr!("Achievement status")),
+            Some("game.open_gog_status"),
+        );
     }
     if folders_menu.n_items() > 0 {
-        menu.append_submenu(Some("Open folder"), &folders_menu);
+        menu.append_submenu(Some(&crate::tr!("Open folder")), &folders_menu);
     }
 
     let groups = state.borrow().groups.clone();
@@ -169,16 +189,14 @@ pub fn show_game_context_menu(
     };
     let collections_menu =
         build_collections_submenu(&groups, |g| game_groups.iter().any(|gg| gg.id == g.id));
-    menu.append_submenu(Some("Collections"), &collections_menu);
+    menu.append_submenu(Some(&crate::tr!("Collections")), &collections_menu);
 
-    menu.append(
-        Some(if current_hidden {
-            S::UNHIDE_GAME
-        } else {
-            S::HIDE_GAME
-        }),
-        Some("game.hide"),
-    );
+    let hide_label = if current_hidden {
+        crate::tr!("Unhide game")
+    } else {
+        crate::tr!("Hide game")
+    };
+    menu.append(Some(&hide_label), Some("game.hide"));
 
     let is_deletable = matches!(
         game.kind,
@@ -186,7 +204,7 @@ pub fn show_game_context_menu(
     );
     if is_deletable {
         let remove_section = gio::Menu::new();
-        remove_section.append(Some(S::REMOVE_GAME), Some("game.delete_game"));
+        remove_section.append(Some(&crate::tr!("Remove game")), Some("game.delete_game"));
         menu.append_section(None, &remove_section);
     }
 
@@ -248,7 +266,7 @@ pub fn show_multi_game_context_menu(
                 .is_some_and(|ids| ids.contains(&g.id))
         })
     });
-    menu.append_submenu(Some("Collections"), &collections_menu);
+    menu.append_submenu(Some(&crate::tr!("Collections")), &collections_menu);
 
     let all_hidden = db_ids.iter().all(|&db_id| {
         state
@@ -259,12 +277,12 @@ pub fn show_multi_game_context_menu(
             .is_some_and(|g| g.hidden)
     });
     let hide_label = if all_hidden {
-        S::UNHIDE_GAME
+        crate::tr!("Unhide game")
     } else {
-        S::HIDE_GAME
+        crate::tr!("Hide game")
     };
     let hide_section = gio::Menu::new();
-    hide_section.append(Some(hide_label), Some("game.toggle_hide"));
+    hide_section.append(Some(&hide_label), Some("game.toggle_hide"));
     menu.append_section(None, &hide_section);
 
     let ids: Vec<i64> = db_ids.iter().copied().collect();

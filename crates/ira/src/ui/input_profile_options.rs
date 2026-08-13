@@ -50,9 +50,9 @@ pub(super) fn source_options_for_device(
 fn button_label_for_device(button: GamepadButton, device: Option<&DeviceInfo>) -> String {
     if device.is_some_and(|device| device.family() == ira_input::ControllerFamily::EightBitDo) {
         match button {
-            GamepadButton::Back => return "Minus".to_string(),
-            GamepadButton::Start => return "Plus".to_string(),
-            GamepadButton::Guide => return "Home".to_string(),
+            GamepadButton::Back => return crate::tr!("Minus"),
+            GamepadButton::Start => return crate::tr!("Plus"),
+            GamepadButton::Guide => return crate::tr!("Home"),
             GamepadButton::Paddle1 => return "R4".to_string(),
             GamepadButton::Paddle2 => return "L4".to_string(),
             GamepadButton::Paddle3 => return "PR".to_string(),
@@ -106,42 +106,42 @@ fn gamepad_axes() -> [GamepadAxis; 6] {
 
 pub(super) fn button_label(button: GamepadButton) -> String {
     match button {
-        GamepadButton::A => "A Button".to_string(),
-        GamepadButton::B => "B Button".to_string(),
-        GamepadButton::X => "X Button".to_string(),
-        GamepadButton::Y => "Y Button".to_string(),
-        GamepadButton::LeftShoulder => "Left Bumper".to_string(),
-        GamepadButton::RightShoulder => "Right Bumper".to_string(),
-        GamepadButton::LeftTrigger => "Left Trigger Button".to_string(),
-        GamepadButton::RightTrigger => "Right Trigger Button".to_string(),
-        GamepadButton::Back => "Select".to_string(),
-        GamepadButton::Start => "Start".to_string(),
-        GamepadButton::Guide => "Guide".to_string(),
-        GamepadButton::LeftStick => "Left Stick Click".to_string(),
-        GamepadButton::RightStick => "Right Stick Click".to_string(),
-        GamepadButton::DpadUp => "D-pad Up".to_string(),
-        GamepadButton::DpadDown => "D-pad Down".to_string(),
-        GamepadButton::DpadLeft => "D-pad Left".to_string(),
-        GamepadButton::DpadRight => "D-pad Right".to_string(),
-        GamepadButton::Paddle1 => "Paddle 1".to_string(),
-        GamepadButton::Paddle2 => "Paddle 2".to_string(),
-        GamepadButton::Paddle3 => "Paddle 3".to_string(),
-        GamepadButton::Paddle4 => "Paddle 4".to_string(),
-        GamepadButton::Paddle5 => "Paddle 5".to_string(),
-        GamepadButton::Paddle6 => "Paddle 6".to_string(),
-        GamepadButton::Paddle7 => "Paddle 7".to_string(),
-        GamepadButton::Paddle8 => "Paddle 8".to_string(),
+        GamepadButton::A => crate::tr!("A Button"),
+        GamepadButton::B => crate::tr!("B Button"),
+        GamepadButton::X => crate::tr!("X Button"),
+        GamepadButton::Y => crate::tr!("Y Button"),
+        GamepadButton::LeftShoulder => crate::tr!("Left Bumper"),
+        GamepadButton::RightShoulder => crate::tr!("Right Bumper"),
+        GamepadButton::LeftTrigger => crate::tr!("Left Trigger Button"),
+        GamepadButton::RightTrigger => crate::tr!("Right Trigger Button"),
+        GamepadButton::Back => crate::tr!("Select"),
+        GamepadButton::Start => crate::tr!("Start"),
+        GamepadButton::Guide => crate::tr!("Guide"),
+        GamepadButton::LeftStick => crate::tr!("Left Stick Click"),
+        GamepadButton::RightStick => crate::tr!("Right Stick Click"),
+        GamepadButton::DpadUp => crate::tr!("D-pad Up"),
+        GamepadButton::DpadDown => crate::tr!("D-pad Down"),
+        GamepadButton::DpadLeft => crate::tr!("D-pad Left"),
+        GamepadButton::DpadRight => crate::tr!("D-pad Right"),
+        GamepadButton::Paddle1 => crate::tr!("Paddle 1"),
+        GamepadButton::Paddle2 => crate::tr!("Paddle 2"),
+        GamepadButton::Paddle3 => crate::tr!("Paddle 3"),
+        GamepadButton::Paddle4 => crate::tr!("Paddle 4"),
+        GamepadButton::Paddle5 => crate::tr!("Paddle 5"),
+        GamepadButton::Paddle6 => crate::tr!("Paddle 6"),
+        GamepadButton::Paddle7 => crate::tr!("Paddle 7"),
+        GamepadButton::Paddle8 => crate::tr!("Paddle 8"),
     }
 }
 
 pub(super) fn axis_label(axis: GamepadAxis) -> String {
     match axis {
-        GamepadAxis::LeftX => "Left Stick X".to_string(),
-        GamepadAxis::LeftY => "Left Stick Y".to_string(),
-        GamepadAxis::RightX => "Right Stick X".to_string(),
-        GamepadAxis::RightY => "Right Stick Y".to_string(),
-        GamepadAxis::LeftTrigger => "Left Trigger".to_string(),
-        GamepadAxis::RightTrigger => "Right Trigger".to_string(),
+        GamepadAxis::LeftX => crate::tr!("Left Stick X"),
+        GamepadAxis::LeftY => crate::tr!("Left Stick Y"),
+        GamepadAxis::RightX => crate::tr!("Right Stick X"),
+        GamepadAxis::RightY => crate::tr!("Right Stick Y"),
+        GamepadAxis::LeftTrigger => crate::tr!("Left Trigger"),
+        GamepadAxis::RightTrigger => crate::tr!("Right Trigger"),
     }
 }
 
@@ -164,7 +164,9 @@ fn axis_directions() -> Vec<(InputSource, String)> {
                     };
                     (
                         InputSource::AxisDirection { axis, direction },
-                        format!("{} ({sign})", axis_label(axis)),
+                        crate::tr!("{} ({})")
+                            .replacen("{}", &axis_label(axis), 1)
+                            .replacen("{}", sign, 1),
                     )
                 })
         })
@@ -190,10 +192,15 @@ pub(super) fn activator_index(activation: &Activation, options: &[(InputSource, 
 }
 
 pub(super) fn activation_labels() -> Vec<String> {
-    ["Always", "Hold", "Toggle", "Disable while held", "Chord"]
-        .into_iter()
-        .map(str::to_string)
-        .collect()
+    [
+        crate::tr!("Always"),
+        crate::tr!("Hold"),
+        crate::tr!("Toggle"),
+        crate::tr!("Disable while held"),
+        crate::tr!("Chord"),
+    ]
+    .into_iter()
+    .collect()
 }
 
 pub(super) fn activation_index(activation: &Activation) -> u32 {
@@ -216,9 +223,8 @@ pub(super) fn recenter_index(recenter: RecenterMode) -> u32 {
 }
 
 pub(super) fn gyro_mode_labels() -> Vec<String> {
-    ["Rate", "Joystick position"]
+    [crate::tr!("Rate"), crate::tr!("Joystick position")]
         .into_iter()
-        .map(str::to_string)
         .collect()
 }
 
@@ -309,20 +315,22 @@ pub(super) fn output_display_label(output: &OutputAction) -> String {
     match output {
         OutputAction::GamepadButton(button) => button_label(*button),
         OutputAction::GamepadAxis(axis) => axis_label(*axis),
-        OutputAction::Keyboard { keycode } => format!("Keyboard key {keycode}"),
+        OutputAction::Keyboard { keycode } => {
+            crate::tr!("Keyboard key {}").replacen("{}", &keycode.to_string(), 1)
+        }
         OutputAction::MouseButton(button) => match button {
-            MouseButton::Left => "Mouse Left".to_string(),
-            MouseButton::Right => "Mouse Right".to_string(),
-            MouseButton::Middle => "Mouse Middle".to_string(),
-            MouseButton::Side => "Mouse Side".to_string(),
-            MouseButton::Extra => "Mouse Extra".to_string(),
+            MouseButton::Left => crate::tr!("Mouse Left"),
+            MouseButton::Right => crate::tr!("Mouse Right"),
+            MouseButton::Middle => crate::tr!("Mouse Middle"),
+            MouseButton::Side => crate::tr!("Mouse Side"),
+            MouseButton::Extra => crate::tr!("Mouse Extra"),
         },
         OutputAction::MouseAxis(axis) => match axis {
-            MouseAxis::X => "Mouse X".to_string(),
-            MouseAxis::Y => "Mouse Y".to_string(),
-            MouseAxis::Wheel => "Mouse Wheel".to_string(),
+            MouseAxis::X => crate::tr!("Mouse X"),
+            MouseAxis::Y => crate::tr!("Mouse Y"),
+            MouseAxis::Wheel => crate::tr!("Mouse Wheel"),
         },
-        OutputAction::RecenterGyro => "Recenter gyro".to_string(),
+        OutputAction::RecenterGyro => crate::tr!("Recenter gyro"),
     }
 }
 
@@ -337,8 +345,8 @@ fn output_option_matches(option: &OutputOption, output: &OutputAction) -> bool {
 fn output_option_label(option: &OutputOption) -> String {
     match option {
         OutputOption::Action(action) => output_display_label(action),
-        OutputOption::CaptureKeyboard => "Keyboard key...".to_string(),
-        OutputOption::CaptureMouseButton => "Mouse button...".to_string(),
+        OutputOption::CaptureKeyboard => crate::tr!("Keyboard key..."),
+        OutputOption::CaptureMouseButton => crate::tr!("Mouse button..."),
     }
 }
 

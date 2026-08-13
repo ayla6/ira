@@ -165,7 +165,7 @@ pub(super) fn reload_games(state: &SharedState) {
         )
     };
     rebuild_sidebar(state);
-    show_loading_view(state, "Preparing game library…", 0, 1);
+    show_loading_view(state, &crate::tr!("Preparing game library…"), 0, 1);
     crate::game_list::start_game_list_load(db, save_dir, cfg, sender);
 }
 

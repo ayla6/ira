@@ -43,7 +43,7 @@ pub(super) fn build_dll_override_row(name: &str, value: &str) -> gtk4::ListBoxRo
     hbox.set_margin_bottom(4);
 
     let name_entry = gtk4::Entry::new();
-    name_entry.set_placeholder_text(Some("DLL name (e.g. d3d11)"));
+    name_entry.set_placeholder_text(Some(&crate::tr!("DLL name (e.g. d3d11)")));
     name_entry.set_text(name);
     name_entry.set_hexpand(true);
     hbox.append(&name_entry);

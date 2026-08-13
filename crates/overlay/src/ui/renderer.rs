@@ -502,25 +502,29 @@ fn build_fallback_ui() -> Box<dyn Widget> {
         Box::new(Column::new(
             5.0,
             vec![
-                Box::new(Label::new("Ira Overlay", 20.0, [255, 255, 255, 255])),
+                Box::new(Label::new(
+                    crate::tr!("Ira Overlay"),
+                    20.0,
+                    [255, 255, 255, 255],
+                )),
                 Box::new(Row::new(
                     5.0,
                     vec![
-                        Box::new(Button::new("Screenshot", 14.0, || {
+                        Box::new(Button::new(crate::tr!("Screenshot"), 14.0, || {
                             crate::ui::capture::request_screenshot();
                         })),
-                        Box::new(Button::new("Record", 14.0, || {
+                        Box::new(Button::new(crate::tr!("Record"), 14.0, || {
                             crate::ui::capture::toggle_recording();
                         })),
                     ],
                 )),
                 Box::new(Label::new(
-                    "Shift+Tab / Guide to toggle",
+                    crate::tr!("Shift+Tab / Guide to toggle"),
                     12.0,
                     [180, 180, 180, 255],
                 )),
                 Box::new(Label::new(
-                    "F12 screenshot | F11 record",
+                    crate::tr!("F12 screenshot | F11 record"),
                     12.0,
                     [180, 180, 180, 255],
                 )),

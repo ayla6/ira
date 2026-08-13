@@ -25,25 +25,27 @@ pub(super) fn build_general_page(
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let info_group = adw::PreferencesGroup::new();
-    info_group.set_title("Game info");
+    info_group.set_title(&crate::tr!("Game info"));
 
     let name_entry = adw::EntryRow::new();
-    name_entry.set_title("Name");
+    name_entry.set_title(&crate::tr!("Name"));
     info_group.add(&name_entry);
 
-    let kind_model = gtk4::StringList::new(&["Native Linux", "Wine (Windows)"]);
+    let kind_strings = [crate::tr!("Native Linux"), crate::tr!("Wine (Windows)")];
+    let kind_refs: Vec<&str> = kind_strings.iter().map(String::as_str).collect();
+    let kind_model = gtk4::StringList::new(&kind_refs);
     let kind_row = adw::ComboRow::new();
-    kind_row.set_title("Kind");
+    kind_row.set_title(&crate::tr!("Kind"));
     kind_row.set_model(Some(&kind_model));
     kind_row.set_selected(1);
     info_group.add(&kind_row);
 
     let folder_entry = adw::EntryRow::new();
-    folder_entry.set_title("Game folder");
+    folder_entry.set_title(&crate::tr!("Game folder"));
 
     let folder_browse = super::helpers::make_browse_button(
         Some(win),
-        "Select game folder",
+        &crate::tr!("Select game folder"),
         true,
         None,
         super::helpers::entry_path_closure(&folder_entry),
@@ -56,14 +58,14 @@ pub(super) fn build_general_page(
     info_group.add(&folder_entry);
 
     let exe_entry = adw::EntryRow::new();
-    exe_entry.set_title("Executable");
+    exe_entry.set_title(&crate::tr!("Executable"));
 
     let exe_browse = super::helpers::make_browse_button(
         Some(win),
-        "Select executable",
+        &crate::tr!("Select executable"),
         false,
         Some((
-            "Executable",
+            &crate::tr!("Executable"),
             &["application/x-executable", "application/x-msdos-program"],
         )),
         super::helpers::entry_path_closure(&exe_entry),
@@ -76,15 +78,15 @@ pub(super) fn build_general_page(
     info_group.add(&exe_entry);
 
     let args_entry = adw::EntryRow::new();
-    args_entry.set_title("Arguments");
+    args_entry.set_title(&crate::tr!("Arguments"));
     info_group.add(&args_entry);
 
     let wd_entry = adw::EntryRow::new();
-    wd_entry.set_title("Working directory");
+    wd_entry.set_title(&crate::tr!("Working directory"));
 
     let wd_browse = super::helpers::make_browse_button(
         Some(win),
-        "Select working directory",
+        &crate::tr!("Select working directory"),
         true,
         None,
         super::helpers::entry_path_closure(&wd_entry),
@@ -103,12 +105,12 @@ pub(super) fn build_general_page(
     page.append(&info_group);
 
     let ids_group = adw::PreferencesGroup::new();
-    ids_group.set_title("Service IDs");
+    ids_group.set_title(&crate::tr!("Service IDs"));
     let steam_id_entry = adw::EntryRow::new();
-    steam_id_entry.set_title("Steam app ID");
+    steam_id_entry.set_title(&crate::tr!("Steam app ID"));
     let steam_search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
     steam_search_btn.set_valign(gtk4::Align::Center);
-    steam_search_btn.set_tooltip_text(Some("Search Steam store"));
+    steam_search_btn.set_tooltip_text(Some(&crate::tr!("Search Steam store")));
     steam_search_btn.add_css_class(CSS_FLAT);
     {
         let sc = state.clone();
@@ -123,7 +125,7 @@ pub(super) fn build_general_page(
                 &search_text,
                 &win_c,
                 &row_c,
-                "Select",
+                &crate::tr!("Select"),
                 on_select,
             );
         });
@@ -131,10 +133,10 @@ pub(super) fn build_general_page(
     steam_id_entry.add_suffix(&steam_search_btn);
     ids_group.add(&steam_id_entry);
     let gog_id_entry = adw::EntryRow::new();
-    gog_id_entry.set_title("GOG product ID");
+    gog_id_entry.set_title(&crate::tr!("GOG product ID"));
     let gog_browse_btn = super::helpers::make_browse_button(
         Some(win),
-        "Select game folder",
+        &crate::tr!("Select game folder"),
         true,
         None,
         super::helpers::entry_path_closure(&gog_id_entry),
@@ -157,8 +159,13 @@ pub(super) fn build_general_page(
     ids_group.add(&gog_id_entry);
     page.append(&ids_group);
 
-    let detect_btn =
-        super::helpers::make_browse_button(Some(win), "Select game folder", true, None, || None, {
+    let detect_btn = super::helpers::make_browse_button(
+        Some(win),
+        &crate::tr!("Select game folder"),
+        true,
+        None,
+        || None,
+        {
             let n = name_entry.clone();
             let exe = exe_entry.clone();
             let sid = steam_id_entry.clone();
@@ -213,7 +220,8 @@ pub(super) fn build_general_page(
                     });
                 }
             }
-        });
+        },
+    );
 
     (
         page,

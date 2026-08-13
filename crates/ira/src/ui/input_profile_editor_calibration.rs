@@ -13,10 +13,10 @@ pub(super) fn add_calibration_group(
     mark_dirty: &Rc<dyn Fn()>,
 ) {
     let group = adw::PreferencesGroup::new();
-    group.set_title("Calibration");
+    group.set_title(&crate::tr!("Calibration"));
     let summary = adw::ActionRow::new();
-    summary.set_title("Profile gyro calibration");
-    summary.set_subtitle("These bias values belong to this profile");
+    summary.set_title(&crate::tr!("Profile gyro calibration"));
+    summary.set_subtitle(&crate::tr!("These bias values belong to this profile"));
     let values = gtk4::Label::new(None);
     values.set_xalign(1.0);
     values.add_css_class("dim-label");
@@ -25,10 +25,10 @@ pub(super) fn add_calibration_group(
     group.add(&summary);
 
     let actions = adw::ActionRow::new();
-    actions.set_title("Calibrate while controller is flat and still");
-    let calibrate = gtk4::Button::with_label("Calibrate");
+    actions.set_title(&crate::tr!("Calibrate while controller is flat and still"));
+    let calibrate = gtk4::Button::with_label(&crate::tr!("Calibrate"));
     calibrate.set_valign(gtk4::Align::Center);
-    let reset = gtk4::Button::with_label("Reset");
+    let reset = gtk4::Button::with_label(&crate::tr!("Reset"));
     reset.set_valign(gtk4::Align::Center);
     actions.add_suffix(&reset);
     actions.add_suffix(&calibrate);
@@ -46,7 +46,9 @@ pub(super) fn add_calibration_group(
 
     if device.is_none() {
         calibrate.set_sensitive(false);
-        actions.set_subtitle("Calibration requires one connected gyro-capable controller");
+        actions.set_subtitle(&crate::tr!(
+            "Calibration requires one connected gyro-capable controller"
+        ));
     }
     let Some(device) = device else { return };
     let calibration_for_dialog = calibration.clone();

@@ -35,13 +35,15 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     let initial_mode = params.launch.input_mode;
     let input_mode = Rc::new(RefCell::new(initial_mode));
     let input_mode_row = adw::ComboRow::new();
-    input_mode_row.set_title("Input remapping");
-    input_mode_row.set_model(Some(&gtk4::StringList::new(&[
-        "Inherit",
-        "Disabled",
-        "Virtual XInput",
-        "Virtual DirectInput",
-    ])));
+    input_mode_row.set_title(&crate::tr!("Input remapping"));
+    let mode_strings = [
+        crate::tr!("Inherit"),
+        crate::tr!("Disabled"),
+        crate::tr!("Virtual XInput"),
+        crate::tr!("Virtual DirectInput"),
+    ];
+    let mode_refs = mode_strings.iter().map(String::as_str).collect::<Vec<_>>();
+    input_mode_row.set_model(Some(&gtk4::StringList::new(&mode_refs)));
     input_mode_row.set_selected(input_mode_index(initial_mode));
     let input_group = adw::PreferencesGroup::new();
     input_group.add(&input_mode_row);
@@ -50,7 +52,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     let (labels, paths, selected) =
         profile_choices(params.save_dir, params.game.db_id, current_path);
     let input_profile_row = adw::ComboRow::new();
-    input_profile_row.set_title("Current layout");
+    input_profile_row.set_title(&crate::tr!("Current layout"));
     let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
     input_profile_row.set_model(Some(&gtk4::StringList::new(&refs)));
     input_profile_row.set_selected(selected);
@@ -77,8 +79,8 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         );
     });
 
-    let monitor_button = icon_button("input-gaming-symbolic", "Monitor this layout");
-    let edit_button = icon_button("document-edit-symbolic", "Edit profile");
+    let monitor_button = icon_button("input-gaming-symbolic", &crate::tr!("Monitor this layout"));
+    let edit_button = icon_button("document-edit-symbolic", &crate::tr!("Edit profile"));
     monitor_button.set_sensitive(selected != 0);
     edit_button.set_sensitive(selected != 0);
     input_profile_row.add_suffix(&edit_button);
@@ -269,7 +271,7 @@ fn profile_choices(
         eprintln!("Failed to list controller profiles: {error}");
         Vec::new()
     });
-    let mut labels = vec!["No profile".to_string()];
+    let mut labels = vec![crate::tr!("No profile")];
     let mut paths = vec![None];
     for stored in profiles {
         if profile_matches_game(&stored.profile, game_id) {
@@ -290,13 +292,13 @@ fn profile_choices(
                 .filter(|path| path.is_file())
                 .filter(|path| read_profile(path).is_ok())
                 .map(|path| {
-                    labels.push(format!("{} (current)", path_label(path)));
+                    labels.push(crate::tr!("{} (current)").replacen("{}", &path_label(path), 1));
                     paths.push(Some(path.clone()));
                     paths.len() - 1
                 })
         })
         .unwrap_or(0);
-    labels.push("Create new profile…".to_string());
+    labels.push(crate::tr!("Create new profile…"));
     paths.push(None);
     (labels, paths, selected as u32)
 }

@@ -45,7 +45,8 @@ pub struct WineConfigWidgets {
 
 pub struct WinePage {
     pub icon: &'static str,
-    pub label: &'static str,
+    pub page_id: &'static str,
+    pub label: String,
     pub page: gtk4::ScrolledWindow,
 }
 
@@ -87,11 +88,11 @@ fn build_wine_perf_page(
     overridden: &OverrideList,
 ) -> (WinePage, PerfPageWidgets) {
     let perf_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    let perf_group = make_section("Performance");
+    let perf_group = make_section(&crate::tr!("Performance"));
 
     let proton_ntsync = build_switch_row(
-        "NTSync",
-        "Use the ntsync kernel driver for synchronization (PROTON_USE_NTSYNC)",
+        &crate::tr!("NTSync"),
+        &crate::tr!("Use the ntsync kernel driver for synchronization (PROTON_USE_NTSYNC)"),
         wine.proton_ntsync,
     );
     if let Some(dd) = dft {
@@ -104,8 +105,8 @@ fn build_wine_perf_page(
     }
     perf_group.add(&proton_ntsync);
     let esync = build_switch_row(
-        "Esync",
-        "Eventfd synchronization (requires fd limit check)",
+        &crate::tr!("Esync"),
+        &crate::tr!("Eventfd synchronization (requires fd limit check)"),
         wine.esync,
     );
     if let Some(dd) = dft {
@@ -113,15 +114,19 @@ fn build_wine_perf_page(
     }
     perf_group.add(&esync);
     let fsync = build_switch_row(
-        "Fsync",
-        "Fast synchronization (kernel support required)",
+        &crate::tr!("Fsync"),
+        &crate::tr!("Fast synchronization (kernel support required)"),
         wine.fsync,
     );
     if let Some(dd) = dft {
         track_switch(&fsync, "fsync", dd.fsync, overridden);
     }
     perf_group.add(&fsync);
-    let fsr = build_switch_row("FSR", "AMD FidelityFX Super Resolution", wine.fsr);
+    let fsr = build_switch_row(
+        &crate::tr!("FSR"),
+        &crate::tr!("AMD FidelityFX Super Resolution"),
+        wine.fsr,
+    );
     if let Some(dd) = dft {
         track_switch(&fsr, "fsr", dd.fsr, overridden);
     }
@@ -130,8 +135,8 @@ fn build_wine_perf_page(
     let dxvk_frame_rate_adj =
         gtk4::Adjustment::new(wine.dxvk_frame_rate as f64, 0.0, 999.0, 1.0, 10.0, 0.0);
     let dxvk_fr_row = adw::SpinRow::new(Some(&dxvk_frame_rate_adj), 1.0, 0);
-    dxvk_fr_row.set_title("DXVK frame rate limit");
-    dxvk_fr_row.set_subtitle("Sets DXVK_FRAME_RATE (0 = unlimited)");
+    dxvk_fr_row.set_title(&crate::tr!("DXVK frame rate limit"));
+    dxvk_fr_row.set_subtitle(&crate::tr!("Sets DXVK_FRAME_RATE (0 = unlimited)"));
     dxvk_fr_row.set_value(wine.dxvk_frame_rate as f64);
     if let Some(dd) = dft {
         track_spin_row(
@@ -144,8 +149,8 @@ fn build_wine_perf_page(
     perf_group.add(&dxvk_fr_row);
 
     let proton_wow64 = build_switch_row(
-        "WoW64",
-        "Run 32-bit Windows apps via WoW64 thunking (PROTON_USE_WOW64)",
+        &crate::tr!("WoW64"),
+        &crate::tr!("Run 32-bit Windows apps via WoW64 thunking (PROTON_USE_WOW64)"),
         wine.proton_wow64,
     );
     if let Some(dd) = dft {
@@ -156,7 +161,8 @@ fn build_wine_perf_page(
     perf_page.append(&perf_group);
     let page = WinePage {
         icon: "power-profile-performance-symbolic",
-        label: "Performance",
+        page_id: "performance",
+        label: crate::tr!("Performance"),
         page: page_with_content(perf_page),
     };
 
@@ -179,21 +185,29 @@ fn build_wine_gfx_page(
     overridden: &OverrideList,
 ) -> (WinePage, GfxPageWidgets) {
     let gfx_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    let gfx_group = make_section("Graphics");
+    let gfx_group = make_section(&crate::tr!("Graphics"));
 
-    let dxvk = build_switch_row("DXVK", "DirectX 9/10/11 to Vulkan translation", wine.dxvk);
+    let dxvk = build_switch_row(
+        &crate::tr!("DXVK"),
+        &crate::tr!("DirectX 9/10/11 to Vulkan translation"),
+        wine.dxvk,
+    );
     if let Some(dd) = dft {
         track_switch(&dxvk, "dxvk", dd.dxvk, overridden);
     }
     gfx_group.add(&dxvk);
-    let vkd3d = build_switch_row("VKD3D", "DirectX 12 to Vulkan translation", wine.vkd3d);
+    let vkd3d = build_switch_row(
+        &crate::tr!("VKD3D"),
+        &crate::tr!("DirectX 12 to Vulkan translation"),
+        wine.vkd3d,
+    );
     if let Some(dd) = dft {
         track_switch(&vkd3d, "vkd3d", dd.vkd3d, overridden);
     }
     gfx_group.add(&vkd3d);
     let d3d_extras = build_switch_row(
-        "D3D Extras",
-        "Additional Direct3D components",
+        &crate::tr!("D3D Extras"),
+        &crate::tr!("Additional Direct3D components"),
         wine.d3d_extras,
     );
     if let Some(dd) = dft {
@@ -201,8 +215,8 @@ fn build_wine_gfx_page(
     }
     gfx_group.add(&d3d_extras);
     let dxvk_nvapi = build_switch_row(
-        "DXVK-NVAPI / DLSS",
-        "NVIDIA DLSS support via DXVK",
+        &crate::tr!("DXVK-NVAPI / DLSS"),
+        &crate::tr!("NVIDIA DLSS support via DXVK"),
         wine.dxvk_nvapi,
     );
     if let Some(dd) = dft {
@@ -211,8 +225,8 @@ fn build_wine_gfx_page(
     gfx_group.add(&dxvk_nvapi);
 
     let dxvk_hud = build_switch_row(
-        "DXVK HUD",
-        "Show shader compilation, FPS, and frame timing",
+        &crate::tr!("DXVK HUD"),
+        &crate::tr!("Show shader compilation, FPS, and frame timing"),
         wine.dxvk_hud,
     );
     if let Some(dd) = dft {
@@ -221,8 +235,8 @@ fn build_wine_gfx_page(
     gfx_group.add(&dxvk_hud);
 
     let wayland = build_switch_row(
-        "Enable Wayland",
-        "Use Wayland for display instead of X11",
+        &crate::tr!("Enable Wayland"),
+        &crate::tr!("Use Wayland for display instead of X11"),
         wine.graphics == "wayland",
     );
     if let Some(dd) = dft {
@@ -230,11 +244,11 @@ fn build_wine_gfx_page(
     }
     gfx_group.add(&wayland);
     let (mouse_warp_override, _warp_model) = build_combo_row(
-        "Mouse warp override",
+        &crate::tr!("Mouse warp override"),
         &[
-            ("Enable", "enable"),
-            ("Disable", "disable"),
-            ("Force", "force"),
+            (&crate::tr!("Enable"), "enable"),
+            (&crate::tr!("Disable"), "disable"),
+            (&crate::tr!("Force"), "force"),
         ],
     );
     {
@@ -247,8 +261,8 @@ fn build_wine_gfx_page(
     }
     gfx_group.add(&mouse_warp_override);
     let dpi_enabled = build_switch_row(
-        "Enable DPI scaling",
-        "Override DPI settings",
+        &crate::tr!("Enable DPI scaling"),
+        &crate::tr!("Override DPI settings"),
         wine.dpi_enabled,
     );
     if let Some(dd) = dft {
@@ -258,7 +272,7 @@ fn build_wine_gfx_page(
     let dpi_adj = gtk4::Adjustment::new(wine.dpi as f64, 96.0, 384.0, 1.0, 10.0, 0.0);
     let dpi = gtk4::SpinButton::new(Some(&dpi_adj), 1.0, 0);
     let dpi_row = adw::ActionRow::new();
-    dpi_row.set_title("DPI");
+    dpi_row.set_title(&crate::tr!("DPI"));
     dpi_row.add_suffix(&dpi);
     if let Some(dd) = dft {
         track_spin(&dpi, &dpi_row, "dpi", dd.dpi, overridden);
@@ -266,12 +280,12 @@ fn build_wine_gfx_page(
     dpi_row.set_visible(wine.dpi_enabled);
     gfx_group.add(&dpi_row);
     let (audio, _audio_model) = build_combo_row(
-        "Audio driver",
+        &crate::tr!("Audio driver"),
         &[
-            ("Auto", "auto"),
-            ("ALSA", "alsa"),
-            ("PulseAudio", "pulse"),
-            ("OSS", "oss"),
+            (&crate::tr!("Auto"), "auto"),
+            (&crate::tr!("ALSA"), "alsa"),
+            (&crate::tr!("PulseAudio"), "pulse"),
+            (&crate::tr!("OSS"), "oss"),
         ],
     );
     {
@@ -287,7 +301,8 @@ fn build_wine_gfx_page(
     gfx_page.append(&gfx_group);
     let page = WinePage {
         icon: "video-display-symbolic",
-        label: "Graphics",
+        page_id: "graphics",
+        label: crate::tr!("Graphics"),
         page: page_with_content(gfx_page),
     };
 
@@ -322,10 +337,10 @@ fn build_wine_adv_page(
 ) -> (WinePage, AdvPageWidgets) {
     let adv_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
-    let ac_group = make_section("Anti-Cheat");
+    let ac_group = make_section(&crate::tr!("Anti-Cheat"));
     let battleye = build_switch_row(
-        "BattlEye",
-        "Enable BattlEye anti-cheat support",
+        &crate::tr!("BattlEye"),
+        &crate::tr!("Enable BattlEye anti-cheat support"),
         wine.battleye,
     );
     if let Some(dd) = dft {
@@ -333,8 +348,8 @@ fn build_wine_adv_page(
     }
     ac_group.add(&battleye);
     let eac = build_switch_row(
-        "Easy Anti-Cheat",
-        "Enable Easy Anti-Cheat support",
+        &crate::tr!("Easy Anti-Cheat"),
+        &crate::tr!("Enable Easy Anti-Cheat support"),
         wine.eac,
     );
     if let Some(dd) = dft {
@@ -342,8 +357,8 @@ fn build_wine_adv_page(
     }
     ac_group.add(&eac);
     let desktop_integration = build_switch_row(
-        "Integrate system files",
-        "Integrate desktop environment",
+        &crate::tr!("Integrate system files"),
+        &crate::tr!("Integrate desktop environment"),
         wine.desktop_integration,
     );
     if let Some(dd) = dft {
@@ -357,14 +372,14 @@ fn build_wine_adv_page(
     ac_group.add(&desktop_integration);
     adv_page.append(&ac_group);
 
-    let dbg_group = make_section("Debugging");
+    let dbg_group = make_section(&crate::tr!("Debugging"));
     let (show_debug, _dbg_model) = build_combo_row(
-        "Output debugging info",
+        &crate::tr!("Output debugging info"),
         &[
-            ("Disabled (-all)", "-all"),
-            ("Enabled", ""),
-            ("Show FPS", "+fps"),
-            ("Full (+all)", "+all"),
+            (&crate::tr!("Disabled (-all)"), "-all"),
+            (&crate::tr!("Enabled"), ""),
+            (&crate::tr!("Show FPS"), "+fps"),
+            (&crate::tr!("Full (+all)"), "+all"),
         ],
     );
     {
@@ -378,8 +393,8 @@ fn build_wine_adv_page(
     }
     dbg_group.add(&show_debug);
     let show_crash_dialogs = build_switch_row(
-        "Show crash dialogs",
-        "Display Wine crash dialogs when programs crash",
+        &crate::tr!("Show crash dialogs"),
+        &crate::tr!("Display Wine crash dialogs when programs crash"),
         wine.show_crash_dialogs,
     );
     if let Some(dd) = dft {
@@ -393,10 +408,10 @@ fn build_wine_adv_page(
     dbg_group.add(&show_crash_dialogs);
     adv_page.append(&dbg_group);
 
-    let compat_group = make_section("Steam");
+    let compat_group = make_section(&crate::tr!("Steam"));
     let proton_disable_lsteamclient = build_switch_row(
-        "Disable LSteamClient",
-        "Avoid loading the Steam client library (PROTON_DISABLE_LSTEAMCLIENT)",
+        &crate::tr!("Disable LSteamClient"),
+        &crate::tr!("Avoid loading the Steam client library (PROTON_DISABLE_LSTEAMCLIENT)"),
         wine.proton_disable_lsteamclient,
     );
     if let Some(dd) = dft {
@@ -410,7 +425,7 @@ fn build_wine_adv_page(
     compat_group.add(&proton_disable_lsteamclient);
     adv_page.append(&compat_group);
 
-    let dll_group = make_section("DLL overrides");
+    let dll_group = make_section(&crate::tr!("DLL overrides"));
 
     let dll_overrides_box = gtk4::ListBox::new();
     dll_overrides_box.add_css_class(CSS_BOXED_LIST);
@@ -420,7 +435,7 @@ fn build_wine_adv_page(
     }
 
     let add_dll_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_dll_btn.set_tooltip_text(Some("Add override"));
+    add_dll_btn.set_tooltip_text(Some(&crate::tr!("Add override")));
     add_dll_btn.set_valign(gtk4::Align::Center);
     add_dll_btn.add_css_class(CSS_FLAT);
     let box_clone = dll_overrides_box.clone();
@@ -434,7 +449,8 @@ fn build_wine_adv_page(
 
     let page = WinePage {
         icon: "preferences-other-symbolic",
-        label: "Advanced",
+        page_id: "advanced",
+        label: crate::tr!("Advanced"),
         page: page_with_content(adv_page),
     };
 

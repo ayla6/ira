@@ -48,7 +48,7 @@ pub(super) fn make_revert_btn() -> gtk4::Button {
     let btn = gtk4::Button::from_icon_name("edit-undo-symbolic");
     btn.add_css_class(CSS_FLAT);
     btn.set_valign(gtk4::Align::Center);
-    btn.set_tooltip_text(Some("Revert to app default"));
+    btn.set_tooltip_text(Some(&crate::tr!("Revert to app default")));
     btn
 }
 

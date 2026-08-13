@@ -23,6 +23,8 @@ use ira_overlay::ui;
 use ira_overlay_ipc::MappedShm;
 
 fn main() {
+    ira_overlay::i18n::init();
+
     if std::env::var_os("IRA_OVERLAY_TEXT_BACKEND").is_none() {
         std::env::set_var("IRA_OVERLAY_TEXT_BACKEND", "pango");
     }

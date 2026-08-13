@@ -62,6 +62,23 @@ pub(crate) fn binding_section_title(binding: &Binding) -> &'static str {
     }
 }
 
+pub(crate) fn section_title_label(title: &str) -> String {
+    match title {
+        "Triggers" => crate::tr!("Triggers"),
+        "Face Buttons" => crate::tr!("Face Buttons"),
+        "Bumpers" => crate::tr!("Bumpers"),
+        "Menu Buttons" => crate::tr!("Menu Buttons"),
+        "Stick Clicks" => crate::tr!("Stick Clicks"),
+        "D-pad" => crate::tr!("D-pad"),
+        "Extended Buttons" => crate::tr!("Extended Buttons"),
+        "Left Stick" => crate::tr!("Left Stick"),
+        "Right Stick" => crate::tr!("Right Stick"),
+        "Gyro" => crate::tr!("Gyro"),
+        "Custom" => crate::tr!("Custom"),
+        _ => title.to_string(),
+    }
+}
+
 pub(super) fn section_source_options(
     page_index: usize,
     device: Option<&DeviceInfo>,

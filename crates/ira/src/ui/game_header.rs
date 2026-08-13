@@ -93,7 +93,7 @@ fn build_header_stats(game: &Game, fraction: f64, state: &SharedState) -> gtk4::
     let pt_box = stat_label("Play time", &format_playtime(game.playtime));
     history_box.append(&pt_box);
     history_box.add_css_class(CSS_CLICKABLE_STAT);
-    history_box.set_tooltip_text(Some("View play history"));
+    history_box.set_tooltip_text(Some(&crate::tr!("View play history")));
     let sc = state.clone();
     let db_id = game.db_id;
     let variant_id = game.variant_id;
@@ -106,7 +106,7 @@ fn build_header_stats(game: &Game, fraction: f64, state: &SharedState) -> gtk4::
     if game.total_count > 0 {
         let tbox = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
         tbox.set_valign(gtk4::Align::Center);
-        let cap = gtk4::Label::new(Some("Trophies"));
+        let cap = gtk4::Label::new(Some(&crate::tr!("Trophies")));
         cap.set_xalign(0.0);
         cap.add_css_class(CSS_DIM_LABEL);
         cap.add_css_class(CSS_CAPTION);
@@ -160,20 +160,29 @@ fn build_wine_tools_button(
     }
 
     let menu = gio::Menu::new();
-    menu.append(Some("Winetricks"), Some("wine.winetricks"));
-    menu.append(Some("Wine task manager"), Some("wine.taskmgr"));
-    menu.append(Some("Wine control panel"), Some("wine.control"));
-    menu.append(Some("Wine registry"), Some("wine.regedit"));
-    menu.append(Some("Wine configuration"), Some("wine.winecfg"));
-    menu.append(Some("Open Wine console"), Some("wine.console"));
-    menu.append(Some("Open Bash terminal"), Some("wine.bash"));
-    menu.append(Some("Run EXE inside Wine prefix"), Some("wine.run_exe"));
+    menu.append(Some(&crate::tr!("Winetricks")), Some("wine.winetricks"));
+    menu.append(Some(&crate::tr!("Wine task manager")), Some("wine.taskmgr"));
+    menu.append(
+        Some(&crate::tr!("Wine control panel")),
+        Some("wine.control"),
+    );
+    menu.append(Some(&crate::tr!("Wine registry")), Some("wine.regedit"));
+    menu.append(
+        Some(&crate::tr!("Wine configuration")),
+        Some("wine.winecfg"),
+    );
+    menu.append(Some(&crate::tr!("Open Wine console")), Some("wine.console"));
+    menu.append(Some(&crate::tr!("Open Bash terminal")), Some("wine.bash"));
+    menu.append(
+        Some(&crate::tr!("Run EXE inside Wine prefix")),
+        Some("wine.run_exe"),
+    );
 
     let btn = gtk4::MenuButton::new();
     btn.set_icon_name("wine-glass");
     btn.add_css_class(CSS_FLAT);
     btn.set_valign(gtk4::Align::Center);
-    btn.set_tooltip_text(Some("Wine tools"));
+    btn.set_tooltip_text(Some(&crate::tr!("Wine tools")));
     btn.set_menu_model(Some(&menu));
 
     let actions = gio::SimpleActionGroup::new();
@@ -260,7 +269,7 @@ fn add_wine_run_exe_action(actions: &gio::SimpleActionGroup, state: &SharedState
     action.connect_activate(move |_, _| {
         let (wine_exe, prefix, env) = get_wine_cmd_env(&st, db_id);
         let dialog = gtk4::FileDialog::new();
-        dialog.set_title("Select EXE to run in Wine prefix");
+        dialog.set_title(&crate::tr!("Select EXE to run in Wine prefix"));
         let filter = gtk4::FileFilter::new();
         filter.add_pattern("*.exe");
         filter.add_pattern("*.msi");
@@ -289,13 +298,13 @@ fn add_wine_run_exe_action(actions: &gio::SimpleActionGroup, state: &SharedState
 
 fn build_settings_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
     let menu = gio::Menu::new();
-    menu.append(Some("View log"), Some("game.view_log"));
+    menu.append(Some(&crate::tr!("View log")), Some("game.view_log"));
 
     let btn = adw::SplitButton::new();
     btn.set_icon_name("cogged-wheel-big-symbolic");
     btn.add_css_class(CSS_FLAT);
     btn.set_valign(gtk4::Align::Center);
-    btn.set_tooltip_text(Some("Settings"));
+    btn.set_tooltip_text(Some(&crate::tr!("Settings")));
     btn.set_menu_model(Some(&menu));
 
     let st = state.clone();

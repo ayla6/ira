@@ -8,7 +8,7 @@ use super::super::input_profile_options::{
 use super::assets::{set_source_asset, source_badge};
 use super::categories::{
     activation_sources, chord_text_for_options, is_analog_source, section_source_options,
-    source_index_for, uses_gyro_stick_output,
+    section_title_label, source_index_for, uses_gyro_stick_output,
 };
 use super::signals::{
     connect_dirty, connect_output_changes, connect_source_changes, update_activation_controls,
@@ -40,7 +40,7 @@ pub(crate) fn add_binding_row(
     remove.add_css_class(CSS_FLAT);
     remove.add_css_class(CSS_SQUARE_BUTTON);
     remove.set_valign(gtk4::Align::Center);
-    remove.set_tooltip_text(Some("Remove binding"));
+    remove.set_tooltip_text(Some(&crate::tr!("Remove binding")));
     connect_remove(&remove, group, &row, context, page_index);
     row.container.add_suffix(&remove);
     group.add(&row.container);
@@ -87,7 +87,7 @@ pub(crate) fn add_empty_page_state(page: &gtk4::Box) {
     empty.set_valign(gtk4::Align::Start);
     empty.set_margin_top(36);
     let icon = gtk4::Image::from_icon_name("input-gaming-symbolic");
-    let label = gtk4::Label::new(Some("No bindings"));
+    let label = gtk4::Label::new(Some(&crate::tr!("No bindings")));
     label.add_css_class("dim-label");
     empty.append(&icon);
     empty.append(&label);
@@ -231,18 +231,18 @@ fn build_controls(
         activator_index(&binding.activation, &activator_options),
     );
     let chord = adw::EntryRow::new();
-    chord.set_title("Chord sources");
+    chord.set_title(&crate::tr!("Chord sources"));
     chord.set_text(&chord_text_for_options(
         &binding.activation,
         &activator_options,
     ));
-    chord.set_tooltip_text(Some("Comma-separated input sources"));
+    chord.set_tooltip_text(Some(&crate::tr!("Comma-separated input sources")));
     let recenter = combo_row(
         &[
-            "Never".to_string(),
-            "On enable".to_string(),
-            "On disable".to_string(),
-            "On enable and disable".to_string(),
+            crate::tr!("Never"),
+            crate::tr!("On enable"),
+            crate::tr!("On disable"),
+            crate::tr!("On enable and disable"),
         ],
         recenter_index(binding.recenter),
     );
@@ -250,7 +250,7 @@ fn build_controls(
     let dead_zone = spin_button(0.0, 0.99, 0.01, 2, binding.transform.dead_zone);
     let sensitivity = spin_button(0.0, 1000.0, 0.1, 2, binding.transform.sensitivity);
     let exponent = spin_button(0.1, 5.0, 0.1, 2, binding.transform.exponent);
-    let invert = gtk4::CheckButton::with_label("Invert");
+    let invert = gtk4::CheckButton::with_label(&crate::tr!("Invert"));
     invert.set_active(binding.transform.invert);
     RowControls {
         source_options,
@@ -342,7 +342,20 @@ fn add_control_row<W: IsA<gtk4::Widget>>(
     control: &W,
 ) -> adw::ActionRow {
     let row = adw::ActionRow::new();
-    row.set_title(title);
+    let display_title = match title {
+        "Source" => crate::tr!("Source"),
+        "Output" => crate::tr!("Output"),
+        "Activation" => crate::tr!("Activation"),
+        "Activator" => crate::tr!("Activator"),
+        "Recenter" => crate::tr!("Recenter"),
+        "Gyro output" => crate::tr!("Gyro output"),
+        "Dead zone" => crate::tr!("Dead zone"),
+        "Sensitivity" => crate::tr!("Sensitivity"),
+        "Exponent" => crate::tr!("Exponent"),
+        "Invert" => crate::tr!("Invert"),
+        _ => title.to_string(),
+    };
+    row.set_title(&display_title);
     control.add_css_class(CSS_BINDING_SUFFIX);
     control.set_valign(gtk4::Align::Center);
     row.add_suffix(control);
@@ -358,7 +371,7 @@ fn add_section_header(container: &adw::ExpanderRow, title: &str) {
     let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     let before = gtk4::Separator::new(gtk4::Orientation::Horizontal);
     before.set_hexpand(true);
-    let label = gtk4::Label::new(Some(title));
+    let label = gtk4::Label::new(Some(&section_title_label(title)));
     let after = gtk4::Separator::new(gtk4::Orientation::Horizontal);
     after.set_hexpand(true);
     content.append(&before);

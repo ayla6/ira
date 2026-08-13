@@ -13,14 +13,16 @@ pub fn build_profiles_page(
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let settings_group = adw::PreferencesGroup::new();
-    settings_group.set_title("Prefix settings");
+    settings_group.set_title(&crate::tr!("Prefix settings"));
 
     let prefix_base_row = adw::EntryRow::new();
-    prefix_base_row.set_title("Prefix base directory (new prefixes created as {base}/{game-slug})");
+    prefix_base_row.set_title(&crate::tr!(
+        "Prefix base directory (new prefixes created as {base}/{game-slug})"
+    ));
     prefix_base_row.set_text(&state.borrow().cfg.prefix_base_dir);
     let prefix_browse = super::helpers::make_browse_button(
         Some(settings_win),
-        "Select prefix base directory",
+        &crate::tr!("Select prefix base directory"),
         true,
         None,
         super::helpers::entry_path_closure(&prefix_base_row),
@@ -34,7 +36,7 @@ pub fn build_profiles_page(
     page.append(&settings_group);
 
     let group = adw::PreferencesGroup::new();
-    group.set_title("Wine profiles");
+    group.set_title(&crate::tr!("Wine profiles"));
 
     let list = gtk4::ListBox::new();
     list.add_css_class(CSS_BOXED_LIST);
@@ -49,7 +51,7 @@ pub fn build_profiles_page(
     repopulate_profiles(&list_rc, &db, &window, &state_clone, &settings_win_clone);
 
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_btn.set_tooltip_text(Some("Create profile"));
+    add_btn.set_tooltip_text(Some(&crate::tr!("Create profile")));
     add_btn.set_valign(gtk4::Align::Center);
     add_btn.add_css_class(CSS_FLAT);
     let win_add = window.clone();
@@ -146,11 +148,11 @@ fn repopulate_profiles(
         let row_for_del = row.clone();
         del_btn.connect_clicked(move |_| {
             let alert = adw::AlertDialog::new(
-                Some("Delete profile"),
-                Some("Are you sure you want to delete this profile? Games using it will keep their settings but lose the profile link."),
+                Some(&crate::tr!("Delete profile")),
+                Some(&crate::tr!("Are you sure you want to delete this profile? Games using it will keep their settings but lose the profile link.")),
             );
-            alert.add_response("cancel", "Cancel");
-            alert.add_response("delete", "Delete");
+             alert.add_response("cancel", &crate::tr!("Cancel"));
+             alert.add_response("delete", &crate::tr!("Delete"));
             alert.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
             alert.set_default_response(Some("cancel"));
             alert.set_close_response("cancel");
@@ -207,13 +209,13 @@ pub fn show_profile_dialog(
 
     let group = adw::PreferencesGroup::new();
     if existing.is_some() {
-        group.set_title("Edit profile");
+        group.set_title(&crate::tr!("Edit profile"));
     } else {
-        group.set_title("Create profile");
+        group.set_title(&crate::tr!("Create profile"));
     }
 
     let name_entry = adw::EntryRow::new();
-    name_entry.set_title("Profile name");
+    name_entry.set_title(&crate::tr!("Profile name"));
     if let Some(p) = existing.as_ref() {
         name_entry.set_text(&p.name);
     }
@@ -225,7 +227,7 @@ pub fn show_profile_dialog(
         gtk4::StringList::new(&labels)
     };
     let version_row = adw::ComboRow::new();
-    version_row.set_title("Wine version");
+    version_row.set_title(&crate::tr!("Wine version"));
     version_row.set_model(Some(&version_model));
     let versions = ira_launcher::wine_launch::detect_wine_versions();
     if let Some(p) = existing.as_ref() {
@@ -238,7 +240,7 @@ pub fn show_profile_dialog(
     group.add(&version_row);
 
     let prefix_entry = adw::EntryRow::new();
-    prefix_entry.set_title("Wine prefix path");
+    prefix_entry.set_title(&crate::tr!("Wine prefix path"));
 
     // Track whether the user has manually modified the prefix field.
     // When false, the prefix auto-updates from the profile name.
@@ -279,7 +281,7 @@ pub fn show_profile_dialog(
 
     let prefix_browse = super::helpers::make_browse_button(
         Some(&win),
-        "Select wine prefix",
+        &crate::tr!("Select wine prefix"),
         true,
         None,
         super::helpers::entry_path_closure(&prefix_entry),
@@ -298,7 +300,7 @@ pub fn show_profile_dialog(
     let prefix_reset = gtk4::Button::from_icon_name("edit-undo-symbolic");
     prefix_reset.add_css_class(CSS_FLAT);
     prefix_reset.set_valign(gtk4::Align::Center);
-    prefix_reset.set_tooltip_text(Some("Reset to auto-generated path"));
+    prefix_reset.set_tooltip_text(Some(&crate::tr!("Reset to auto-generated path")));
     let prefix_entry_for_reset = prefix_entry.clone();
     let name_entry_for_reset = name_entry.clone();
     let me_for_reset = prefix_manually_edited.clone();
@@ -317,9 +319,15 @@ pub fn show_profile_dialog(
 
     group.add(&prefix_entry);
 
-    let arch_model = gtk4::StringList::new(&["Auto", "32-bit (win32)", "64-bit (win64)"]);
+    let arch_strings = [
+        crate::tr!("Auto"),
+        crate::tr!("32-bit (win32)"),
+        crate::tr!("64-bit (win64)"),
+    ];
+    let arch_refs: Vec<&str> = arch_strings.iter().map(String::as_str).collect();
+    let arch_model = gtk4::StringList::new(&arch_refs);
     let arch_row = adw::ComboRow::new();
-    arch_row.set_title("Architecture");
+    arch_row.set_title(&crate::tr!("Architecture"));
     arch_row.set_model(Some(&arch_model));
     if let Some(p) = existing.as_ref() {
         let idx = match p.arch.as_str() {
@@ -332,8 +340,10 @@ pub fn show_profile_dialog(
     group.add(&arch_row);
 
     let umu_row = adw::SwitchRow::new();
-    umu_row.set_title("UMU launcher");
-    umu_row.set_subtitle("Launch via umu-run (required for Proton versions)");
+    umu_row.set_title(&crate::tr!("UMU launcher"));
+    umu_row.set_subtitle(&crate::tr!(
+        "Launch via umu-run (required for Proton versions)"
+    ));
     umu_row.set_active(existing.as_ref().is_none_or(|p| p.umu_enabled));
 
     // Auto-enable and disable UMU toggle based on wine version selection
@@ -369,11 +379,11 @@ pub fn show_profile_dialog(
     let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     btn_row.set_halign(gtk4::Align::End);
 
-    let cancel_btn = gtk4::Button::with_label("Cancel");
+    let cancel_btn = gtk4::Button::with_label(&crate::tr!("Cancel"));
     let win_c = win.clone();
     cancel_btn.connect_clicked(move |_| win_c.close());
 
-    let save_btn = gtk4::Button::with_label("Save");
+    let save_btn = gtk4::Button::with_label(&crate::tr!("Save"));
     save_btn.add_css_class(CSS_SUGGESTED_ACTION);
 
     btn_row.append(&cancel_btn);

@@ -10,8 +10,8 @@ pub(super) fn show_keyboard_output_capture(
 ) {
     let (dialog, status, content) = capture_dialog(
         parent,
-        "Capture keyboard output",
-        "Press one key to assign it. Escape cancels.",
+        &crate::tr!("Capture keyboard output"),
+        &crate::tr!("Press one key to assign it. Escape cancels."),
     );
     let on_capture: Rc<dyn Fn(u16)> = Rc::new(on_capture);
     let key = gtk4::EventControllerKey::new();
@@ -25,7 +25,7 @@ pub(super) fn show_keyboard_output_capture(
             return gtk4::glib::Propagation::Stop;
         }
         let Some(keycode) = evdev_keycode(hardware_keycode) else {
-            status.set_text("That key is not supported.");
+            status.set_text(&crate::tr!("That key is not supported."));
             return gtk4::glib::Propagation::Stop;
         };
         on_capture(keycode);
@@ -42,8 +42,8 @@ pub(super) fn show_mouse_output_capture(
 ) {
     let (dialog, status, content) = capture_dialog(
         parent,
-        "Capture mouse output",
-        "Click one mouse button to assign it. Escape cancels.",
+        &crate::tr!("Capture mouse output"),
+        &crate::tr!("Click one mouse button to assign it. Escape cancels."),
     );
     let on_capture: Rc<dyn Fn(MouseButton)> = Rc::new(on_capture);
     let click = gtk4::GestureClick::new();
@@ -51,7 +51,7 @@ pub(super) fn show_mouse_output_capture(
     let dialog_for_click = dialog.clone();
     click.connect_pressed(move |gesture, _, _, _| {
         let Some(button) = mouse_button_from_gdk(gesture.current_button()) else {
-            status.set_text("Use Left, Right, Middle, Side, or Extra.");
+            status.set_text(&crate::tr!("Use Left, Right, Middle, Side, or Extra."));
             return;
         };
         on_capture(button);
@@ -102,7 +102,7 @@ fn capture_dialog(
     dialog.set_default_size(360, 160);
 
     let header = adw::HeaderBar::new();
-    let cancel = gtk4::Button::with_label("Cancel");
+    let cancel = gtk4::Button::with_label(&crate::tr!("Cancel"));
     let dialog_for_cancel = dialog.clone();
     cancel.connect_clicked(move |_| dialog_for_cancel.close());
     header.pack_end(&cancel);
@@ -116,7 +116,7 @@ fn capture_dialog(
     let instruction = gtk4::Label::new(Some(instruction));
     instruction.set_wrap(true);
     instruction.set_xalign(0.0);
-    let status = gtk4::Label::new(Some("Waiting for input..."));
+    let status = gtk4::Label::new(Some(&crate::tr!("Waiting for input...")));
     status.add_css_class("title-3");
     status.set_xalign(0.0);
     content.append(&instruction);

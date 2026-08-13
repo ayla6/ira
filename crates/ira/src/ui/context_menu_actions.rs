@@ -1,7 +1,6 @@
 use super::edit_game_dialog::show_edit_game_dialog;
 use super::helpers::{open_file_location, open_folder};
 use super::state::SharedState;
-use crate::strings as S;
 use crate::AppMessage;
 use crate::Game;
 use adw::prelude::*;
@@ -98,11 +97,11 @@ pub(super) fn setup_delete_game_action(
     delete_game_action.connect_activate(move |_, _| {
         let window = state.borrow().window.clone();
         let dialog = adw::AlertDialog::new(
-            Some(S::REMOVE_GAME_QUESTION),
-            Some(&format!("Remove \"{}\"?", game.name)),
+            Some(&crate::tr!("Remove game?")),
+            Some(&crate::tr!("Remove \"{}\"?").replacen("{}", &game.name, 1)),
         );
-        dialog.add_response("cancel", S::CANCEL);
-        dialog.add_response("delete", "Remove");
+        dialog.add_response("cancel", &crate::tr!("Cancel"));
+        dialog.add_response("delete", &crate::tr!("Remove"));
         dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         dialog.set_close_response("cancel");
@@ -382,18 +381,18 @@ pub(super) fn show_collection_name_dialog(
     add_games: impl Fn(&ira_db::DbConn, i64) + 'static,
 ) {
     let dialog = adw::AlertDialog::new(
-        Some("New collection"),
-        Some("Enter a name for the collection:"),
+        Some(&crate::tr!("New collection")),
+        Some(&crate::tr!("Enter a name for the collection:")),
     );
     let entry = gtk4::Entry::new();
-    entry.set_placeholder_text(Some("Collection name"));
+    entry.set_placeholder_text(Some(&crate::tr!("Collection name")));
     entry.set_margin_start(12);
     entry.set_margin_end(12);
     entry.set_margin_top(8);
     entry.set_margin_bottom(8);
     dialog.set_extra_child(Some(&entry));
-    dialog.add_response("cancel", S::CANCEL);
-    dialog.add_response("create", "Create");
+    dialog.add_response("cancel", &crate::tr!("Cancel"));
+    dialog.add_response("create", &crate::tr!("Create"));
     dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("create"));
     dialog.set_close_response("cancel");

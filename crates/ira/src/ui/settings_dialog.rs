@@ -11,8 +11,6 @@ use super::settings_pages::{OverlayPageWidgets, SystemDefaultsWidgets};
 use super::state::SharedState;
 use super::system_settings::{build_override_switch_row, OverrideState};
 use super::wine_config_widget::WineConfigWidgets;
-use crate::strings as S;
-use crate::strings::settings as T;
 use adw::prelude::*;
 use ira_api::SteamDataClient;
 use ira_config::{Config, ControllerInputConfig};
@@ -81,8 +79,10 @@ pub fn show_settings_dialog(
     layout.sidebar_area.set_size_request(180, -1);
 
     let loading = adw::StatusPage::new();
-    loading.set_title(T::LOADING);
-    loading.set_description(Some(T::LOADING_DESCRIPTION));
+    loading.set_title(&crate::tr!("Loading Settings"));
+    loading.set_description(Some(&crate::tr!(
+        "Checking installed emulators and controller profiles"
+    )));
     let spinner = gtk4::Spinner::new();
     spinner.start();
     loading.set_child(Some(&spinner));
@@ -134,14 +134,14 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
 
     {
         let (overlay_row, state) = build_override_switch_row(
-            T::IN_GAME_OVERLAY,
-            T::OVERLAY_DESCRIPTION,
+            &crate::tr!("In-game overlay"),
+            &crate::tr!("Achievements, screenshots, and recording"),
             cfg.overlay.enabled,
             cfg.overlay.source_overrides.get("steam").copied(),
         );
         let (gs_row, gs_state) = build_override_switch_row(
-            T::GAMESCOPE,
-            T::GAMESCOPE_DESCRIPTION,
+            &crate::tr!("Gamescope"),
+            &crate::tr!("Valve Gamescope compositor"),
             cfg.default_system.gamescope,
             cfg.overlay.source_gamescope.get("steam").copied(),
         );
@@ -155,14 +155,14 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
 
     {
         let (overlay_row, state) = build_override_switch_row(
-            T::IN_GAME_OVERLAY,
-            T::OVERLAY_DESCRIPTION,
+            &crate::tr!("In-game overlay"),
+            &crate::tr!("Achievements, screenshots, and recording"),
             cfg.overlay.enabled,
             cfg.overlay.source_overrides.get("ra").copied(),
         );
         let (gs_row, gs_state) = build_override_switch_row(
-            T::GAMESCOPE,
-            T::GAMESCOPE_DESCRIPTION,
+            &crate::tr!("Gamescope"),
+            &crate::tr!("Valve Gamescope compositor"),
             cfg.default_system.gamescope,
             cfg.overlay.source_gamescope.get("ra").copied(),
         );
@@ -236,7 +236,7 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
     btn_row.set_margin_top(8);
     btn_row.set_margin_bottom(12);
 
-    let cancel_btn = gtk4::Button::with_label(S::CANCEL);
+    let cancel_btn = gtk4::Button::with_label(&crate::tr!("Cancel"));
     let win_c = win.clone();
     cancel_btn.connect_clicked(move |_| win_c.close());
     let win_c = win.clone();
@@ -251,7 +251,7 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
     });
     win.add_controller(cancel_shortcut);
 
-    let save_btn = gtk4::Button::with_label(S::SAVE);
+    let save_btn = gtk4::Button::with_label(&crate::tr!("Save"));
     save_btn.add_css_class(CSS_SUGGESTED_ACTION);
 
     let state_clone = state.clone();

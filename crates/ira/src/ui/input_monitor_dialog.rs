@@ -360,12 +360,22 @@ fn input_source_label(source: InputSource) -> String {
 
 fn output_label(output: &OutputAction) -> String {
     match output {
-        OutputAction::GamepadButton(button) => format!("Gamepad {}", button_label(*button)),
-        OutputAction::GamepadAxis(axis) => format!("Gamepad {}", axis_label(*axis)),
-        OutputAction::Keyboard { keycode } => format!("Keyboard key {keycode}"),
-        OutputAction::MouseButton(button) => format!("Mouse {button:?}"),
-        OutputAction::MouseAxis(axis) => format!("Mouse {axis:?}"),
-        OutputAction::RecenterGyro => "Recenter gyro".to_string(),
+        OutputAction::GamepadButton(button) => {
+            crate::tr!("Gamepad {}").replacen("{}", &button_label(*button), 1)
+        }
+        OutputAction::GamepadAxis(axis) => {
+            crate::tr!("Gamepad {}").replacen("{}", &axis_label(*axis), 1)
+        }
+        OutputAction::Keyboard { keycode } => {
+            crate::tr!("Keyboard key {keycode}").replace("{keycode}", &keycode.to_string())
+        }
+        OutputAction::MouseButton(button) => {
+            crate::tr!("Mouse {button:?}").replace("{button:?}", &format!("{button:?}"))
+        }
+        OutputAction::MouseAxis(axis) => {
+            crate::tr!("Mouse {axis:?}").replace("{axis:?}", &format!("{axis:?}"))
+        }
+        OutputAction::RecenterGyro => crate::tr!("Recenter gyro"),
     }
 }
 

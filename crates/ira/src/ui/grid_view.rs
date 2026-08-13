@@ -1,4 +1,3 @@
-use crate::strings as S;
 use crate::Game;
 use gtk4::prelude::*;
 use ira_models::{GroupSelection, SortMode};
@@ -156,18 +155,18 @@ fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
     }
 
     let heading_text = if searching {
-        format!("Search: \"{}\"", state.borrow().search_query)
+        crate::tr!("Search: \"{}\"").replacen("{}", &state.borrow().search_query, 1)
     } else {
         match &selected_group {
-            GroupSelection::AllGames => S::ALL_GAMES.to_string(),
-            GroupSelection::Uncategorized => "Uncategorized".to_string(),
+            GroupSelection::AllGames => crate::tr!("All games"),
+            GroupSelection::Uncategorized => crate::tr!("Uncategorized"),
             GroupSelection::Collection(id) => state
                 .borrow()
                 .groups
                 .iter()
                 .find(|g| g.id == *id)
                 .map(|g| g.name.clone())
-                .unwrap_or_else(|| S::ALL_GAMES.to_string()),
+                .unwrap_or_else(|| crate::tr!("All games")),
         }
     };
 
@@ -517,7 +516,7 @@ pub fn show_loading_view(state: &SharedState, status: &str, completed: usize, to
     icon.set_halign(gtk4::Align::Center);
     content.append(&icon);
 
-    let title = gtk4::Label::new(Some("Loading game library"));
+    let title = gtk4::Label::new(Some(&crate::tr!("Loading game library")));
     title.add_css_class(CSS_SECTION_TITLE);
     title.set_halign(gtk4::Align::Center);
     content.append(&title);
@@ -543,8 +542,10 @@ pub fn show_loading_view(state: &SharedState, status: &str, completed: usize, to
 fn show_empty_search_view(content_scroll: &gtk4::ScrolledWindow) {
     let status = adw::StatusPage::new();
     status.set_icon_name(Some("system-search-symbolic"));
-    status.set_title(S::NO_GAMES_FOUND);
-    status.set_description(Some(S::NO_GAMES_FOUND_DESCRIPTION));
+    status.set_title(&crate::tr!("No games found"));
+    status.set_description(Some(&crate::tr!(
+        "Try a different title, platform, or sort title"
+    )));
     content_scroll.set_child(Some(&status));
 }
 
@@ -571,7 +572,9 @@ fn progress_fraction(completed: usize, total: usize) -> f64 {
 }
 
 fn progress_text(completed: usize, total: usize) -> String {
-    format!("{completed} of {total} sources")
+    crate::tr!("{completed} of {total} sources")
+        .replace("{completed}", &completed.to_string())
+        .replace("{total}", &total.to_string())
 }
 
 pub fn refresh_grid_store(state: &SharedState) {

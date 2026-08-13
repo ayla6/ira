@@ -161,7 +161,7 @@ pub(super) fn build_game_logo_page(
     let header_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     header_row.set_halign(gtk4::Align::Fill);
     header_row.set_margin_start(12);
-    let pos_label = gtk4::Label::new(Some("Logo position"));
+    let pos_label = gtk4::Label::new(Some(&crate::tr!("Logo position")));
     pos_label.set_halign(gtk4::Align::Start);
     pos_label.set_hexpand(true);
     pos_label.add_css_class(CSS_HEADING);
@@ -170,7 +170,7 @@ pub(super) fn build_game_logo_page(
     if show_reset && !inherited {
         let reset_btn = gtk4::Button::from_icon_name("edit-undo-symbolic");
         reset_btn.add_css_class(CSS_FLAT);
-        reset_btn.set_tooltip_text(Some("Reset to base game"));
+        reset_btn.set_tooltip_text(Some(&crate::tr!("Reset to base game")));
         let selected_pos_reset = selected_pos.clone();
         let size_adj_reset = size_adj.clone();
         let btns_reset = btns.clone();
@@ -199,7 +199,7 @@ pub(super) fn build_game_logo_page(
     if let Some(info) = steam_reset {
         let steam_reset_btn = gtk4::Button::from_icon_name("view-refresh-symbolic");
         steam_reset_btn.add_css_class(CSS_FLAT);
-        steam_reset_btn.set_tooltip_text(Some("Reset"));
+        steam_reset_btn.set_tooltip_text(Some(&crate::tr!("Reset")));
         let selected_pos_r = selected_pos.clone();
         let size_adj_r = size_adj.clone();
         let btns_r = btns.clone();

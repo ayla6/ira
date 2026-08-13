@@ -43,17 +43,17 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
     );
 
     let lc_group = adw::PreferencesGroup::new();
-    lc_group.set_title("Executable");
+    lc_group.set_title(&crate::tr!("Executable"));
 
     let exe_entry = adw::EntryRow::new();
-    exe_entry.set_title("Executable path");
+    exe_entry.set_title(&crate::tr!("Executable path"));
     exe_entry.set_text(&params.launch.exe);
 
     let exe_browse = helpers::make_browse_button(
         Some(params.win),
-        "Select executable",
+        &crate::tr!("Select executable"),
         false,
-        Some(("Executable", &["application/x-executable"])),
+        Some((&crate::tr!("Executable"), &["application/x-executable"])),
         helpers::entry_path_closure(&exe_entry),
         {
             let entry = exe_entry.clone();
@@ -64,17 +64,17 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
     lc_group.add(&exe_entry);
 
     let args_entry = adw::EntryRow::new();
-    args_entry.set_title("Arguments");
+    args_entry.set_title(&crate::tr!("Arguments"));
     args_entry.set_text(&params.launch.args);
     lc_group.add(&args_entry);
 
     let wd_entry = adw::EntryRow::new();
-    wd_entry.set_title("Working directory");
+    wd_entry.set_title(&crate::tr!("Working directory"));
     wd_entry.set_text(&params.launch.working_dir);
 
     let wd_browse = helpers::make_browse_button(
         Some(params.win),
-        "Select working directory",
+        &crate::tr!("Select working directory"),
         true,
         None,
         helpers::entry_path_closure(&wd_entry),
@@ -87,11 +87,11 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
     lc_group.add(&wd_entry);
 
     let pre_launch_entry = adw::EntryRow::new();
-    pre_launch_entry.set_title("Run before game");
+    pre_launch_entry.set_title(&crate::tr!("Run before game"));
     pre_launch_entry.set_text(&params.launch.pre_launch);
-    pre_launch_entry.set_tooltip_text(Some(
-        "Shell command to run before launching the game. If it fails, the game will not launch.",
-    ));
+    pre_launch_entry.set_tooltip_text(Some(&crate::tr!(
+        "Shell command to run before launching the game. If it fails, the game will not launch."
+    )));
     lc_group.add(&pre_launch_entry);
 
     page.append(&lc_group);
@@ -100,7 +100,7 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
         .sidebar
         .append(&settings_dialog::settings_sidebar_row(
             "preferences-other-symbolic",
-            "Launch config",
+            &crate::tr!("Launch config"),
             "launch",
         ));
     params.stack.add_named(&page, Some("launch"));

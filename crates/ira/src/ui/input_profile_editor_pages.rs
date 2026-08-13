@@ -37,15 +37,17 @@ pub(super) fn setup_pages(
             .collect(),
     ));
     let backend_dropdown = adw::ComboRow::new();
-    backend_dropdown.set_title("Virtual gamepad backend");
-    backend_dropdown.set_model(Some(&gtk4::StringList::new(&["XInput", "DirectInput"])));
+    backend_dropdown.set_title(&crate::tr!("Virtual gamepad backend"));
+    let backend_strings = [crate::tr!("XInput"), crate::tr!("DirectInput")];
+    let backend_refs: Vec<&str> = backend_strings.iter().map(String::as_str).collect();
+    backend_dropdown.set_model(Some(&gtk4::StringList::new(&backend_refs)));
     backend_dropdown.set_selected((*backend.borrow() as u32).min(1));
     layout.content_area.append(&backend_dropdown);
     for (index, (page_id, title, icon)) in page_descriptors().into_iter().enumerate() {
         let scroll = gtk4::ScrolledWindow::new();
         scroll.set_vexpand(true);
         scroll.set_child(Some(&page_boxes[index]));
-        let stack_page = layout.stack.add_titled(&scroll, Some(page_id), title);
+        let stack_page = layout.stack.add_titled(&scroll, Some(page_id), &title);
         stack_page.set_icon_name(icon);
     }
     let context = BindingCollectionContext {
@@ -58,7 +60,7 @@ pub(super) fn setup_pages(
     for (page, default_binding) in page_boxes.iter().zip(default_bindings()) {
         let add_binding = gtk4::Button::from_icon_name("list-add-symbolic");
         add_binding.add_css_class(super::css::CSS_FLAT);
-        add_binding.set_tooltip_text(Some("Add binding"));
+        add_binding.set_tooltip_text(Some(&crate::tr!("Add binding")));
         connect_add_binding(&add_binding, default_binding, &context, page);
         let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
         actions.set_halign(gtk4::Align::End);
@@ -83,13 +85,21 @@ pub(super) fn setup_pages(
     }
 }
 
-fn page_descriptors() -> [(&'static str, &'static str, &'static str); 5] {
-    [
-        ("buttons", "Buttons", "input-gaming-symbolic"),
-        ("dpad", "D-pad", "view-grid-symbolic"),
-        ("triggers", "Triggers", "media-seek-forward-symbolic"),
-        ("joysticks", "Joysticks", "input-gaming-symbolic"),
-        ("gyro", "Gyro", "view-refresh-symbolic"),
+fn page_descriptors() -> Vec<(&'static str, String, &'static str)> {
+    vec![
+        ("buttons", crate::tr!("Buttons"), "input-gaming-symbolic"),
+        ("dpad", crate::tr!("D-pad"), "view-grid-symbolic"),
+        (
+            "triggers",
+            crate::tr!("Triggers"),
+            "media-seek-forward-symbolic",
+        ),
+        (
+            "joysticks",
+            crate::tr!("Joysticks"),
+            "input-gaming-symbolic",
+        ),
+        ("gyro", crate::tr!("Gyro"), "view-refresh-symbolic"),
     ]
 }
 
@@ -123,7 +133,7 @@ pub(super) fn setup_sidebar(layout: &super::helpers::DialogLayout) {
         layout
             .sidebar
             .append(&super::settings_dialog::settings_sidebar_row(
-                icon, title, page_id,
+                icon, &title, page_id,
             ));
     }
     let stack = layout.stack.clone();

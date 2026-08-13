@@ -18,7 +18,7 @@ pub(super) fn show_steam_id_search_popup(
     dialog.set_default_height(400);
     dialog.set_modal(true);
     dialog.set_transient_for(Some(parent));
-    dialog.set_title(Some("Search Steam store"));
+    dialog.set_title(Some(&crate::tr!("Search Steam store")));
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header = adw::HeaderBar::new();
@@ -29,10 +29,10 @@ pub(super) fn show_steam_id_search_popup(
     search_box.set_margin_end(12);
     search_box.set_margin_top(8);
     let entry = gtk4::Entry::new();
-    entry.set_placeholder_text(Some("Game name…"));
+    entry.set_placeholder_text(Some(&crate::tr!("Game name…")));
     entry.set_text(game_name);
     entry.set_hexpand(true);
-    let search_btn = gtk4::Button::with_label("Search");
+    let search_btn = gtk4::Button::with_label(&crate::tr!("Search"));
     search_btn.add_css_class(CSS_SUGGESTED_ACTION);
     search_box.append(&entry);
     search_box.append(&search_btn);
@@ -51,7 +51,7 @@ pub(super) fn show_steam_id_search_popup(
     scrolled.set_child(Some(&list));
     outer.append(&scrolled);
 
-    let close_btn = gtk4::Button::with_label("Close");
+    let close_btn = gtk4::Button::with_label(&crate::tr!("Close"));
     close_btn.set_halign(gtk4::Align::End);
     close_btn.set_margin_start(12);
     close_btn.set_margin_end(12);
@@ -96,14 +96,14 @@ pub(super) fn show_steam_id_search_popup(
                 clear_children(&list_c2);
                 if results.is_empty() {
                     let row = adw::ActionRow::new();
-                    row.set_title("No results found");
+                    row.set_title(&crate::tr!("No results found"));
                     row.set_sensitive(false);
                     list_c2.append(&row);
                 } else {
                     for (app_id, name) in &results {
                         let row = adw::ActionRow::new();
                         row.set_title(name);
-                        row.set_subtitle(&format!("App ID: {}", app_id));
+                        row.set_subtitle(&crate::tr!("App ID: {}").replacen("{}", app_id, 1));
                         let match_btn = gtk4::Button::with_label(&btn_label);
                         match_btn.add_css_class(CSS_SUGGESTED_ACTION);
                         match_btn.set_valign(gtk4::Align::Center);

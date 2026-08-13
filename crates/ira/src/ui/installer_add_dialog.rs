@@ -37,7 +37,7 @@ struct InstallerState {
 pub fn show_installer_add_dialog(state: &SharedState) {
     let parent = state.borrow().window.clone();
     let win = adw::Window::new();
-    win.set_title(Some("Install from Installer"));
+    win.set_title(Some(&crate::tr!("Install from Installer")));
     win.set_default_size(520, 580);
     win.set_modal(true);
     win.set_transient_for(Some(&parent));
@@ -109,21 +109,21 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
     content.append(&scrolled);
 
     let installer_group = adw::PreferencesGroup::new();
-    installer_group.set_title("Installers");
+    installer_group.set_title(&crate::tr!("Installers"));
     let list = gtk4::ListBox::new();
     list.add_css_class(CSS_BOXED_LIST);
     list.set_selection_mode(gtk4::SelectionMode::None);
     installer_group.add(&list);
     body.append(&installer_group);
 
-    let add_btn = gtk4::Button::with_label("Add installer…");
+    let add_btn = gtk4::Button::with_label(&crate::tr!("Add installer…"));
     add_btn.set_margin_top(8);
     let ist_c = ist.clone();
     let list_c = list.clone();
     let win_c = win.clone();
     add_btn.connect_clicked(move |_| {
         let dialog = gtk4::FileDialog::new();
-        dialog.set_title("Select installer files");
+        dialog.set_title(&crate::tr!("Select installer files"));
         let ist_c2 = ist_c.clone();
         let list_c2 = list_c.clone();
         dialog.open_multiple(
@@ -151,16 +151,18 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
     body.append(&add_btn);
 
     let wine_group = adw::PreferencesGroup::new();
-    wine_group.set_title("Wine");
+    wine_group.set_title(&crate::tr!("Wine"));
     let profile_row = build_wine_profile_picker(&profiles, None, None, &state, &win);
     wine_group.add(&profile_row);
     let wow64_row = adw::SwitchRow::new();
-    wow64_row.set_title("Use WOW64");
-    wow64_row.set_subtitle("Some installers don't work with it (Proton only)");
+    wow64_row.set_title(&crate::tr!("Use WOW64"));
+    wow64_row.set_subtitle(&crate::tr!(
+        "Some installers don't work with it (Proton only)"
+    ));
     wine_group.add(&wow64_row);
     let gamescope_row = adw::SwitchRow::new();
-    gamescope_row.set_title("Run under gamescope");
-    gamescope_row.set_subtitle("Useful for installers with flaky windows");
+    gamescope_row.set_title(&crate::tr!("Run under gamescope"));
+    gamescope_row.set_subtitle(&crate::tr!("Useful for installers with flaky windows"));
     wine_group.add(&gamescope_row);
     body.append(&wine_group);
 
@@ -168,14 +170,14 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
     let default_folder = ist.borrow().default_game_folder.clone();
     if default_folder.as_os_str().is_empty() {
         let row = adw::ActionRow::new();
-        row.set_title("Set your PC games folder");
-        row.set_subtitle(
-            "Set a default games folder in Settings to enable auto-detection of installed games.",
-        );
+        row.set_title(&crate::tr!("Set your PC games folder"));
+        row.set_subtitle(&crate::tr!(
+            "Set a default games folder in Settings to enable auto-detection of installed games."
+        ));
         guide_group.add(&row);
     } else {
         let row = adw::ActionRow::new();
-        row.set_title("Install to this folder");
+        row.set_title(&crate::tr!("Install to this folder"));
         row.set_subtitle(&default_folder.to_string_lossy());
         let open_btn = gtk4::Button::new();
         open_btn.set_icon_name("folder-open-symbolic");
@@ -190,7 +192,7 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
     }
     body.append(&guide_group);
 
-    let start_btn = gtk4::Button::with_label("Start installation");
+    let start_btn = gtk4::Button::with_label(&crate::tr!("Start installation"));
     start_btn.add_css_class(CSS_SUGGESTED_ACTION);
     start_btn.set_size_request(-1, 44);
 
@@ -239,8 +241,10 @@ fn rebuild_installer_list(list: &gtk4::ListBox, ist: &Rc<RefCell<InstallerState>
     let installers = ist.borrow().installers.clone();
     if installers.is_empty() {
         let row = adw::ActionRow::new();
-        row.set_title("No installers added yet");
-        row.set_subtitle("Click \"Add installer…\" to select installer files");
+        row.set_title(&crate::tr!("No installers added yet"));
+        row.set_subtitle(&crate::tr!(
+            "Click \"Add installer…\" to select installer files"
+        ));
         list.append(&row);
         return;
     }
@@ -326,10 +330,11 @@ fn run_installer(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>
         .and_then(|n| n.to_str())
         .unwrap_or("installer")
         .to_string();
-    set_status(
-        wizard,
-        &format!("Running installer {}/{}: {}", index + 1, total, name),
-    );
+    let status = crate::tr!("Running installer {}/{}: {}")
+        .replacen("{}", &(index + 1).to_string(), 1)
+        .replacen("{}", &total.to_string(), 1)
+        .replacen("{}", &name, 1);
+    set_status(wizard, &status);
 
     match itype {
         InstallerType::Windows => {
@@ -476,7 +481,10 @@ fn run_wine_interactive(
         command.env(k, v);
     }
     if let Err(e) = command.spawn() {
-        show_error(wizard, &format!("Failed to start installer: {e}"));
+        show_error(
+            wizard,
+            &crate::tr!("Failed to start installer: {e}").replace("{e}", &e.to_string()),
+        );
         on_installer_complete(wizard, ist, index, false);
         return;
     }
@@ -565,11 +573,16 @@ fn show_interactive_done_page(
 
     let status = adw::StatusPage::new();
     let total = ist.borrow().installers.len();
-    status.set_title(&format!("Running installer {}/{}", index + 1, total));
-    status.set_description(Some("Click Done when the installer has finished."));
+    let title = crate::tr!("Running installer {}/{}")
+        .replacen("{}", &(index + 1).to_string(), 1)
+        .replacen("{}", &total.to_string(), 1);
+    status.set_title(&title);
+    status.set_description(Some(&crate::tr!(
+        "Click Done when the installer has finished."
+    )));
     status.set_icon_name(Some("system-software-install-symbolic"));
 
-    let done_btn = gtk4::Button::with_label("Done");
+    let done_btn = gtk4::Button::with_label(&crate::tr!("Done"));
     done_btn.add_css_class(CSS_SUGGESTED_ACTION);
     done_btn.set_halign(gtk4::Align::Center);
 
@@ -599,38 +612,36 @@ fn on_installer_complete(
 
     let title = if success {
         if is_last {
-            "Installation complete"
+            crate::tr!("Installation complete")
         } else {
-            "Installer finished"
+            crate::tr!("Installer finished")
         }
     } else {
-        "Installer failed"
+        crate::tr!("Installer failed")
     };
-    let body = format!(
-        "{} ({} of {})\n\nWhat do you want to do?",
-        installer_name,
-        index + 1,
-        total
-    );
+    let body = crate::tr!("{} ({} of {})\n\nWhat do you want to do?")
+        .replacen("{}", &installer_name, 1)
+        .replacen("{}", &(index + 1).to_string(), 1)
+        .replacen("{}", &total.to_string(), 1);
 
-    let alert = adw::AlertDialog::new(Some(title), Some(&body));
+    let alert = adw::AlertDialog::new(Some(&title), Some(&body));
     if !success {
-        alert.add_response("retry", "Retry");
+        alert.add_response("retry", &crate::tr!("Retry"));
         alert.set_response_appearance("retry", adw::ResponseAppearance::Suggested);
-        alert.add_response("skip", "Skip");
+        alert.add_response("skip", &crate::tr!("Skip"));
     }
     if !is_last {
-        alert.add_response("next", "Next");
+        alert.add_response("next", &crate::tr!("Next"));
         if success {
             alert.set_response_appearance("next", adw::ResponseAppearance::Suggested);
         }
     } else {
-        alert.add_response("done", "Continue");
+        alert.add_response("done", &crate::tr!("Continue"));
         if success {
             alert.set_response_appearance("done", adw::ResponseAppearance::Suggested);
         }
     }
-    alert.add_response("cancel", "Cancel");
+    alert.add_response("cancel", &crate::tr!("Cancel"));
     alert.set_close_response("cancel");
 
     let wizard_c = wizard.clone();
@@ -741,13 +752,12 @@ fn flatten_linuxrulez_if_needed(wizard: &Rc<RefCell<Wizard>>, folder: &Path) -> 
         .unwrap_or("folder")
         .to_string();
     let alert = adw::AlertDialog::new(
-        Some("Clean up installer files?"),
-        Some(&format!(
-            "Game files were moved to a clean folder.\n\nDelete the leftover \"{lrz_name}\" folder (contains umu wrapper, desktop shortcuts, etc.)?"
-        )),
+        Some(&crate::tr!("Clean up installer files?")),
+        Some(&crate::tr!("Game files were moved to a clean folder.\n\nDelete the leftover \"{lrz_name}\" folder (contains umu wrapper, desktop shortcuts, etc.)?")
+            .replace("{lrz_name}", &lrz_name)),
     );
-    alert.add_response("keep", "Keep");
-    alert.add_response("delete", "Delete");
+    alert.add_response("keep", &crate::tr!("Keep"));
+    alert.add_response("delete", &crate::tr!("Delete"));
     alert.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
     alert.set_default_response(Some("delete"));
     alert.set_close_response("keep");
@@ -772,7 +782,7 @@ fn pick_install_folder(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerS
     let win = wizard.borrow().win.clone();
     let default_folder = ist.borrow().default_game_folder.clone();
     let dialog = gtk4::FileDialog::new();
-    dialog.set_title("Select installed game folder");
+    dialog.set_title(&crate::tr!("Select installed game folder"));
     super::helpers::set_initial_folder(&dialog, &default_folder.to_string_lossy());
     let wizard_c = wizard.clone();
     let ist_c = ist.clone();
@@ -795,8 +805,10 @@ fn pick_from_multiple(
     clear_children(&content);
 
     let status = adw::StatusPage::new();
-    status.set_title("Multiple folders detected");
-    status.set_description(Some("Select the folder where the game was installed."));
+    status.set_title(&crate::tr!("Multiple folders detected"));
+    status.set_description(Some(&crate::tr!(
+        "Select the folder where the game was installed."
+    )));
     content.append(&status);
 
     let list = gtk4::ListBox::new();
@@ -835,7 +847,7 @@ fn start_identify_from_install(
         let s = w.state.borrow();
         (s.db.clone(), s.steam.clone())
     };
-    set_status(wizard, "Identifying game…");
+    set_status(wizard, &crate::tr!("Identifying game…"));
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
     let rx = Rc::new(RefCell::new(rx));

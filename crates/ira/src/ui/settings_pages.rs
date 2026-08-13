@@ -1,8 +1,6 @@
 use super::css::*;
 use super::helpers::string_list_from;
 use super::settings_dialog::settings_page_container;
-use crate::strings as S;
-use crate::strings::settings as T;
 use adw::prelude::*;
 use ira_config::Config;
 use std::cell::RefCell;
@@ -73,54 +71,62 @@ pub(super) fn build_general_settings_page(
     let page = settings_page_container();
 
     let notif_group = adw::PreferencesGroup::new();
-    notif_group.set_title(S::LIVE_UPDATES);
+    notif_group.set_title(&crate::tr!("Live updates"));
 
     let notif_row = adw::SwitchRow::new();
-    notif_row.set_title(S::NOTIFY_ON_UNLOCKS);
-    notif_row.set_subtitle(S::NOTIFY_SUBTITLE);
+    notif_row.set_title(&crate::tr!("Notify on new unlocks"));
+    notif_row.set_subtitle(&crate::tr!(
+        "Show a desktop notification the moment a trophy unlocks"
+    ));
     notif_row.set_active(cfg.notifications_enabled);
     notif_group.add(&notif_row);
 
     let bg_row = adw::SwitchRow::new();
-    bg_row.set_title(S::CLOSE_TO_BG_TITLE);
-    bg_row.set_subtitle(S::CLOSE_TO_BG_SUBTITLE);
+    bg_row.set_title(&crate::tr!("Close to background"));
+    bg_row.set_subtitle(&crate::tr!(
+        "Closing the window keeps the watcher running silently in the background"
+    ));
     bg_row.set_active(cfg.close_to_background);
     notif_group.add(&bg_row);
     page.append(&notif_group);
 
     let hidden_group = adw::PreferencesGroup::new();
     let hidden_row = adw::SwitchRow::new();
-    hidden_row.set_title(S::SHOW_HIDDEN_GAMES);
+    hidden_row.set_title(&crate::tr!("Show hidden games"));
     hidden_row.set_active(cfg.show_hidden_games);
     hidden_group.add(&hidden_row);
 
     let saves_row = adw::SwitchRow::new();
-    saves_row.set_title(T::CENTRALIZE_SAVES);
-    saves_row.set_subtitle(T::CENTRALIZE_SAVES_DESCRIPTION);
+    saves_row.set_title(&crate::tr!("Centralize game saves"));
+    saves_row.set_subtitle(&crate::tr!(
+        "Symlink save data to a central location so it persists across Wine prefix resets"
+    ));
     saves_row.set_active(cfg.centralize_game_saves);
     hidden_group.add(&saves_row);
     page.append(&hidden_group);
 
     let key_group = adw::PreferencesGroup::new();
-    key_group.set_title(S::API_KEYS);
+    key_group.set_title(&crate::tr!("API keys"));
 
     let steam_entry = adw::PasswordEntryRow::new();
-    steam_entry.set_title(S::STEAM_WEB_API_KEY);
+    steam_entry.set_title(&crate::tr!("Steam web API key"));
     steam_entry.set_text(&cfg.steam_api_key);
     key_group.add(&steam_entry);
 
     let sgdb_entry = adw::PasswordEntryRow::new();
-    sgdb_entry.set_title(S::STEAMGRIDDB_KEY);
+    sgdb_entry.set_title(&crate::tr!("SteamGridDB API key"));
     sgdb_entry.set_text(&cfg.steam_griddb_api_key);
     key_group.add(&sgdb_entry);
     page.append(&key_group);
 
     let lang_list = build_language_preferences_list(&cfg.language_preferences);
     let lang_section = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
-    let lang_title = gtk4::Label::new(Some(T::LANGUAGE_PREFERENCES));
+    let lang_title = gtk4::Label::new(Some(&crate::tr!("Language preferences")));
     lang_title.set_halign(gtk4::Align::Start);
     lang_title.add_css_class("heading");
-    let lang_desc = gtk4::Label::new(Some(T::LANGUAGE_PREFERENCES_DESCRIPTION));
+    let lang_desc = gtk4::Label::new(Some(&crate::tr!(
+        "When a game is added, the first supported language from this list is used for the emulator config"
+    )));
     lang_desc.set_halign(gtk4::Align::Start);
     lang_desc.set_wrap(true);
     lang_desc.add_css_class("dim-label");
@@ -163,23 +169,23 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     let s = &cfg.default_system;
 
     let perf_group = adw::PreferencesGroup::new();
-    perf_group.set_title(T::PERFORMANCE);
+    perf_group.set_title(&crate::tr!("Performance"));
 
     let gamemode = adw::SwitchRow::new();
-    gamemode.set_title(T::GAMEMODE);
-    gamemode.set_subtitle(T::GAMEMODE_DESCRIPTION);
+    gamemode.set_title(&crate::tr!("Gamemode"));
+    gamemode.set_subtitle(&crate::tr!("Feral Interactive GameMode"));
     gamemode.set_active(s.gamemode);
     perf_group.add(&gamemode);
 
     let mangohud = adw::SwitchRow::new();
-    mangohud.set_title(T::MANGOHUD);
-    mangohud.set_subtitle(T::MANGOHUD_DESCRIPTION);
+    mangohud.set_title(&crate::tr!("MangoHud"));
+    mangohud.set_subtitle(&crate::tr!("Performance overlay"));
     mangohud.set_active(s.mangohud);
     perf_group.add(&mangohud);
 
     let gamescope = adw::ExpanderRow::new();
-    gamescope.set_title(T::GAMESCOPE);
-    gamescope.set_subtitle(T::GAMESCOPE_DESCRIPTION);
+    gamescope.set_title(&crate::tr!("Gamescope"));
+    gamescope.set_subtitle(&crate::tr!("Valve Gamescope compositor"));
     let gs_switch = gtk4::Switch::new();
     gs_switch.set_active(s.gamescope);
     gs_switch.set_valign(gtk4::Align::Center);
@@ -277,16 +283,16 @@ fn start_gpu_detection(
             Ok(gpus) => {
                 if gpus.len() > 1 {
                     let group = adw::PreferencesGroup::new();
-                    group.set_title(T::GRAPHICS);
+                    group.set_title(&crate::tr!("Graphics"));
 
                     let model = gtk4::StringList::new(&[]);
-                    model.append("Auto");
+                    model.append(&crate::tr!("Auto"));
                     for gpu in &gpus {
                         model.append(&gpu.short_name());
                     }
                     let row = adw::ComboRow::new();
-                    row.set_title(T::GPU);
-                    row.set_subtitle(T::GPU_DESCRIPTION);
+                    row.set_title(&crate::tr!("GPU"));
+                    row.set_subtitle(&crate::tr!("Graphics card to use for rendering by default"));
                     row.set_model(Some(&model));
                     let options: Vec<String> = gpus.iter().map(|gpu| gpu.card.clone()).collect();
                     let selected = options
@@ -317,27 +323,29 @@ pub(super) fn build_lutris_settings_page(
     let page = settings_page_container();
 
     let info_group = adw::PreferencesGroup::new();
-    info_group.set_title(T::LUTRIS_INSTALLATION);
+    info_group.set_title(&crate::tr!("Lutris installation"));
 
     let lutris_dir = std::path::Path::new(&std::env::var("HOME").unwrap_or_default())
         .join(".local/share/lutris");
     let dir_row = adw::ActionRow::new();
-    dir_row.set_title(T::LUTRIS_DATA_DIRECTORY);
+    dir_row.set_title(&crate::tr!("Lutris data directory"));
     if lutris_dir.is_dir() {
         dir_row.set_subtitle(&lutris_dir.display().to_string());
     } else {
-        dir_row.set_subtitle(T::LUTRIS_NOT_FOUND);
+        dir_row.set_subtitle(&crate::tr!("Lutris not found"));
         dir_row.set_sensitive(false);
     }
     info_group.add(&dir_row);
     page.append(&info_group);
 
     let migrate_group = adw::PreferencesGroup::new();
-    migrate_group.set_title(T::MIGRATION);
+    migrate_group.set_title(&crate::tr!("Migration"));
     let migrate_row = adw::ActionRow::new();
-    migrate_row.set_title(T::IMPORT_LUTRIS_GAMES);
-    migrate_row.set_subtitle(T::IMPORT_LUTRIS_DESCRIPTION);
-    let migrate_btn = gtk4::Button::with_label(T::IMPORT_ALL);
+    migrate_row.set_title(&crate::tr!("Import Lutris games"));
+    migrate_row.set_subtitle(&crate::tr!(
+        "Reads each Lutris game's config and creates a game entry with wine settings"
+    ));
+    let migrate_btn = gtk4::Button::with_label(&crate::tr!("Import all"));
     migrate_btn.add_css_class(CSS_SUGGESTED_ACTION);
     migrate_btn.set_valign(gtk4::Align::Center);
     migrate_row.add_suffix(&migrate_btn);
@@ -368,14 +376,14 @@ pub(super) fn build_lutris_settings_page(
                     }
 
                     let alert = adw::AlertDialog::new(
-                        Some(T::IMPORT_LUTRIS_GAMES),
-                        Some(&format!(
-                            "Import {} Lutris game(s) as managed Wine games?",
-                            lutris_games.len()
-                        )),
+                        Some(&crate::tr!("Import Lutris games")),
+                        Some(
+                            &crate::tr!("Import {} Lutris game(s) as managed Wine games?")
+                                .replacen("{}", &lutris_games.len().to_string(), 1),
+                        ),
                     );
-                    alert.add_response("cancel", S::CANCEL);
-                    alert.add_response("migrate", T::MIGRATE);
+                    alert.add_response("cancel", &crate::tr!("Cancel"));
+                    alert.add_response("migrate", &crate::tr!("Migrate"));
                     alert.set_response_appearance("migrate", adw::ResponseAppearance::Suggested);
                     alert.set_default_response(Some("cancel"));
                     alert.set_close_response("cancel");
@@ -448,22 +456,24 @@ pub(super) fn build_steam_settings_page(cfg: &Config) -> (gtk4::Box, adw::Switch
 
     let enable_group = adw::PreferencesGroup::new();
     let enable_row = adw::SwitchRow::new();
-    enable_row.set_title(T::ENABLE_STEAM);
-    enable_row.set_subtitle(T::ENABLE_STEAM_DESCRIPTION);
+    enable_row.set_title(&crate::tr!("Enable Steam integration"));
+    enable_row.set_subtitle(&crate::tr!(
+        "Scan your Steam library for installed games and achievements"
+    ));
     enable_row.set_active(cfg.steam_enabled);
     enable_group.add(&enable_row);
     page.append(&enable_group);
 
     let info_group = adw::PreferencesGroup::new();
-    info_group.set_title(T::STEAM_INSTALLATION);
+    info_group.set_title(&crate::tr!("Steam installation"));
 
     let steam_dir = ira_platforms::steam::steam_install_dir();
     let dir_row = adw::ActionRow::new();
-    dir_row.set_title(T::STEAM_DIRECTORY);
+    dir_row.set_title(&crate::tr!("Steam directory"));
     match &steam_dir {
         Some(path) => dir_row.set_subtitle(&path.display().to_string()),
         None => {
-            dir_row.set_subtitle(T::STEAM_NOT_FOUND);
+            dir_row.set_subtitle(&crate::tr!("Steam not found"));
             dir_row.set_sensitive(false);
         }
     }
@@ -471,9 +481,9 @@ pub(super) fn build_steam_settings_page(cfg: &Config) -> (gtk4::Box, adw::Switch
 
     let user_ids = ira_platforms::steam::get_steam_user_ids();
     let user_row = adw::ActionRow::new();
-    user_row.set_title(T::STEAM_USER_IDS);
+    user_row.set_title(&crate::tr!("Steam user IDs"));
     if user_ids.is_empty() {
-        user_row.set_subtitle(T::NONE_FOUND);
+        user_row.set_subtitle(&crate::tr!("None found"));
         user_row.set_sensitive(false);
     } else {
         user_row.set_subtitle(&user_ids.join(", "));
@@ -491,15 +501,15 @@ pub(super) fn build_computer_games_page(
     let page = settings_page_container();
 
     let group = adw::PreferencesGroup::new();
-    group.set_title(T::DEFAULT_GAME_FOLDER);
+    group.set_title(&crate::tr!("Default game folder"));
 
     let folder_row = adw::EntryRow::new();
-    folder_row.set_title(T::GAME_FOLDER);
+    folder_row.set_title(&crate::tr!("Game folder"));
     folder_row.set_text(&cfg.default_game_folder);
 
     let folder_browse = super::helpers::make_browse_button(
         Some(win),
-        T::SELECT_DEFAULT_GAME_FOLDER,
+        &crate::tr!("Select default game folder"),
         true,
         None,
         super::helpers::entry_path_closure(&folder_row),
@@ -521,29 +531,32 @@ pub(super) fn build_rom_settings_page(
 ) -> (gtk4::Box, adw::EntryRow) {
     let page = settings_page_container();
     let rom_group = adw::PreferencesGroup::new();
-    rom_group.set_title(T::ROM_LIBRARY);
+    rom_group.set_title(&crate::tr!("ROM library"));
     let missing_systems: Vec<&str> = ira_models::all_consoles()
         .filter(|def| def.uses_rom_folder())
         .filter(|def| cfg.console(def.id).enabled && !cfg.rom_folder(def.id).is_dir())
         .map(|def| def.id)
         .collect();
     if !cfg.roms_folder.is_empty() && !std::path::Path::new(&cfg.roms_folder).is_dir() {
-        rom_group.set_description(Some("The ROM root is missing. Choose a new location; game metadata and relative paths will be kept."));
-    } else if !missing_systems.is_empty() {
-        rom_group.set_description(Some(&format!(
-            "Missing system folders: {}. Choose another base folder if these games were moved; metadata is retained.",
-            missing_systems.join(", ")
+        rom_group.set_description(Some(&crate::tr!(
+            "The ROM root is missing. Choose a new location; game metadata and relative paths will be kept."
         )));
+    } else if !missing_systems.is_empty() {
+        rom_group.set_description(Some(&crate::tr!(
+            "Missing system folders: {}. Choose another base folder if these games were moved; metadata is retained."
+        ).replacen("{}", &missing_systems.join(", "), 1)));
     } else {
-        rom_group.set_description(Some(T::ROM_FOLDER_DESCRIPTION));
+        rom_group.set_description(Some(&crate::tr!(
+            "ROMs are stored in one folder with a subfolder for each system, such as gba, psx, and ps2."
+        )));
     }
 
     let roms_folder_row = adw::EntryRow::new();
-    roms_folder_row.set_title(T::BASE_ROM_FOLDER);
+    roms_folder_row.set_title(&crate::tr!("Base ROM folder"));
     roms_folder_row.set_text(&cfg.roms_folder);
     let roms_browse = super::helpers::make_browse_button(
         Some(win),
-        T::SELECT_BASE_ROM_FOLDER,
+        &crate::tr!("Select base ROM folder"),
         true,
         None,
         super::helpers::entry_path_closure(&roms_folder_row),
@@ -566,22 +579,24 @@ pub(super) fn build_ra_settings_page(
 
     let enable_group = adw::PreferencesGroup::new();
     let enable_row = adw::SwitchRow::new();
-    enable_row.set_title(T::ENABLE_RETROACHIEVEMENTS);
-    enable_row.set_subtitle(T::ENABLE_RETROACHIEVEMENTS_DESCRIPTION);
+    enable_row.set_title(&crate::tr!("Enable RetroAchievements"));
+    enable_row.set_subtitle(&crate::tr!(
+        "Fetch achievements for matched retro games from retroachievements.org"
+    ));
     enable_row.set_active(cfg.ra_enabled);
     enable_group.add(&enable_row);
     page.append(&enable_group);
 
     let creds_group = adw::PreferencesGroup::new();
-    creds_group.set_title(T::ACCOUNT);
+    creds_group.set_title(&crate::tr!("Account"));
 
     let username_row = adw::EntryRow::new();
-    username_row.set_title(T::USERNAME);
+    username_row.set_title(&crate::tr!("Username"));
     username_row.set_text(&cfg.ra_username);
     creds_group.add(&username_row);
 
     let password_row = adw::PasswordEntryRow::new();
-    password_row.set_title(T::PASSWORD);
+    password_row.set_title(&crate::tr!("Password"));
     password_row.set_text(&cfg.ra_password);
     creds_group.add(&password_row);
     page.append(&creds_group);
@@ -598,15 +613,17 @@ pub(super) fn build_api_emulators_page(
     let _ = std::fs::create_dir_all(&emu_dir);
 
     let group = adw::PreferencesGroup::new();
-    group.set_title(T::API_EMULATOR_FILES);
-    group.set_description(Some(T::API_EMULATOR_FILES_DESCRIPTION));
+    group.set_title(&crate::tr!("API emulator files"));
+    group.set_description(Some(&crate::tr!(
+        "Drop emulator files into the structure below"
+    )));
 
     let dir_row = adw::ActionRow::new();
-    dir_row.set_title(T::DIRECTORY);
+    dir_row.set_title(&crate::tr!("Directory"));
     dir_row.set_subtitle(&emu_dir.to_string_lossy());
     dir_row.set_sensitive(false);
 
-    let open_btn = gtk4::Button::with_label(T::OPEN);
+    let open_btn = gtk4::Button::with_label(&crate::tr!("Open"));
     open_btn.add_css_class(CSS_FLAT);
     open_btn.set_valign(gtk4::Align::Center);
     {
@@ -620,8 +637,10 @@ pub(super) fn build_api_emulators_page(
     page.append(&group);
 
     let version_group = adw::PreferencesGroup::new();
-    version_group.set_title(T::DEFAULT_VERSION);
-    version_group.set_description(Some(T::DEFAULT_VERSION_DESCRIPTION));
+    version_group.set_title(&crate::tr!("Default version"));
+    version_group.set_description(Some(&crate::tr!(
+        "Version to use when installing API emulators on games"
+    )));
 
     let gse_versions = ira_platforms::api_emulators::list_gse_versions(&cfg.save_dir);
     let gog_versions = ira_platforms::api_emulators::list_gog_versions(&cfg.save_dir);
@@ -634,14 +653,17 @@ pub(super) fn build_api_emulators_page(
     all_versions.dedup();
 
     let version_model = if all_versions.is_empty() {
-        let strings = vec![T::NO_VERSIONS_INSTALLED];
-        gtk4::StringList::new(&strings)
+        let strings = [crate::tr!("(no versions installed)")];
+        let refs: Vec<&str> = strings.iter().map(String::as_str).collect();
+        gtk4::StringList::new(&refs)
     } else {
         string_list_from(&all_versions)
     };
     let version_row = adw::ComboRow::new();
-    version_row.set_title(T::EMULATOR_VERSION);
-    version_row.set_subtitle(T::EMULATOR_VERSION_DESCRIPTION);
+    version_row.set_title(&crate::tr!("Emulator version"));
+    version_row.set_subtitle(&crate::tr!(
+        "Default version directory to use when installing"
+    ));
     version_row.set_model(Some(&version_model));
     if !cfg.default_api_emu_version.is_empty() {
         if let Some(idx) = all_versions
@@ -675,47 +697,57 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
 
     let enable_group = adw::PreferencesGroup::new();
     let enable_row = adw::SwitchRow::new();
-    enable_row.set_title(T::ENABLE_OVERLAY);
-    enable_row.set_subtitle(T::ENABLE_OVERLAY_DESCRIPTION);
+    enable_row.set_title(&crate::tr!("Enable in-game overlay"));
+    enable_row.set_subtitle(&crate::tr!(
+        "Shows achievements, screenshots, and recording during gameplay (Vulkan games only)"
+    ));
     enable_row.set_active(o.enabled);
     enable_group.add(&enable_row);
     page.append(&enable_group);
 
     let recording_group = adw::PreferencesGroup::new();
-    recording_group.set_title(T::RECORDING);
+    recording_group.set_title(&crate::tr!("Recording"));
 
-    let encoder_model = gtk4::StringList::new(&[
-        "Auto",
-        "VAAPI (AMD/Intel)",
-        "NVENC (NVIDIA)",
-        "Software (CPU)",
-    ]);
+    let encoder_strings = [
+        crate::tr!("Auto"),
+        crate::tr!("VAAPI (AMD/Intel)"),
+        crate::tr!("NVENC (NVIDIA)"),
+        crate::tr!("Software (CPU)"),
+    ];
+    let encoder_refs: Vec<&str> = encoder_strings.iter().map(String::as_str).collect();
+    let encoder_model = gtk4::StringList::new(&encoder_refs);
     let encoder_row = adw::ComboRow::new();
-    encoder_row.set_title(T::VIDEO_ENCODER);
-    encoder_row.set_subtitle(T::VIDEO_ENCODER_DESCRIPTION);
+    encoder_row.set_title(&crate::tr!("Video encoder"));
+    encoder_row.set_subtitle(&crate::tr!(
+        "Auto detects the best available encoder. Use Software if your GPU lacks hardware encoding."
+    ));
     encoder_row.set_model(Some(&encoder_model));
     encoder_row.set_selected(o.encoder as u32);
     recording_group.add(&encoder_row);
 
-    let quality_model = gtk4::StringList::new(&[
-        "Low (720p 30fps)",
-        "Medium (1080p 30fps)",
-        "High (1080p 60fps)",
-    ]);
+    let quality_strings = [
+        crate::tr!("Low (720p 30fps)"),
+        crate::tr!("Medium (1080p 30fps)"),
+        crate::tr!("High (1080p 60fps)"),
+    ];
+    let quality_refs: Vec<&str> = quality_strings.iter().map(String::as_str).collect();
+    let quality_model = gtk4::StringList::new(&quality_refs);
     let quality_row = adw::ComboRow::new();
-    quality_row.set_title(T::RECORDING_QUALITY);
+    quality_row.set_title(&crate::tr!("Recording quality"));
     quality_row.set_model(Some(&quality_model));
     quality_row.set_selected(o.recording_quality.as_u32());
     recording_group.add(&quality_row);
     page.append(&recording_group);
 
     let hotkeys_group = adw::PreferencesGroup::new();
-    hotkeys_group.set_title(T::HOTKEYS);
-    hotkeys_group.set_description(Some(T::HOTKEYS_DESCRIPTION));
+    hotkeys_group.set_title(&crate::tr!("Hotkeys"));
+    hotkeys_group.set_description(Some(&crate::tr!(
+        "Keyboard and gamepad bindings. Click to set."
+    )));
 
     let toggle_hotkey = super::hotkey_widget::build_hotkey_row(
         &hotkeys_group,
-        "Toggle overlay",
+        &crate::tr!("Toggle overlay"),
         &o.toggle_hotkey,
         &o.toggle_hotkey_gamepad,
         "Shift+Tab",
@@ -723,7 +755,7 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
     );
     let screenshot_hotkey = super::hotkey_widget::build_hotkey_row(
         &hotkeys_group,
-        "Screenshot",
+        &crate::tr!("Screenshot"),
         &o.screenshot_hotkey,
         &o.screenshot_hotkey_gamepad,
         "F12",
@@ -731,7 +763,7 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
     );
     let record_hotkey = super::hotkey_widget::build_hotkey_row(
         &hotkeys_group,
-        "Toggle recording",
+        &crate::tr!("Toggle recording"),
         &o.record_hotkey,
         &o.record_hotkey_gamepad,
         "F11",
@@ -740,10 +772,10 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
     page.append(&hotkeys_group);
 
     let font_group = adw::PreferencesGroup::new();
-    font_group.set_title("Appearance");
+    font_group.set_title(&crate::tr!("Appearance"));
 
     let font_dialog = gtk4::FontDialog::new();
-    font_dialog.set_title("Select overlay font");
+    font_dialog.set_title(&crate::tr!("Select overlay font"));
 
     let font_button = gtk4::FontDialogButton::new(Some(font_dialog));
     font_button.set_valign(gtk4::Align::Center);
@@ -761,12 +793,12 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
 
     let font_reset = gtk4::Button::from_icon_name("edit-undo-symbolic");
     font_reset.set_valign(gtk4::Align::Center);
-    font_reset.set_tooltip_text(Some("Reset to system default"));
+    font_reset.set_tooltip_text(Some(&crate::tr!("Reset to system default")));
     font_reset.add_css_class("flat");
     font_reset.set_visible(o.font_family.is_some());
 
     let font_row = adw::ActionRow::new();
-    font_row.set_title("Font family");
+    font_row.set_title(&crate::tr!("Font family"));
     font_row.add_suffix(&font_button);
     font_row.add_suffix(&font_reset);
     font_group.add(&font_row);
@@ -901,7 +933,7 @@ fn add_add_language_row(list: &gtk4::ListBox) {
     let dropdown = gtk4::DropDown::from_strings(&initial_refs);
     dropdown.set_hexpand(true);
 
-    let add_btn = gtk4::Button::with_label("Add");
+    let add_btn = gtk4::Button::with_label(&crate::tr!("Add"));
     add_btn.add_css_class(CSS_SUGGESTED_ACTION);
     add_btn.set_valign(gtk4::Align::Center);
 

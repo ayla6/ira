@@ -64,7 +64,11 @@ impl Widget for Stepper {
         self.label.draw(ctx);
 
         let value = &self.options[self.selected];
-        let display = if focused { format!("< {value} >") } else { value.clone() };
+        let display = if focused {
+            crate::tr!("< {} >").replace("{}", value)
+        } else {
+            value.clone()
+        };
         let value_w = text::measure_text(&display, self.font_size).width;
         let value_x = self.bounds.x + self.bounds.width - value_w - 12.0;
         let value_y = self.bounds.y + (self.bounds.height - self.font_size) / 2.0;

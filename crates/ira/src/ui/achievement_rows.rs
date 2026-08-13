@@ -1,7 +1,6 @@
 use super::css::*;
 use super::image_budget::ImageLoadBudget;
 use super::state::SharedState;
-use crate::strings as S;
 use crate::MergedAchievement;
 use adw::prelude::*;
 
@@ -22,7 +21,7 @@ pub fn build_global_tab(
     });
 
     let global_group = adw::PreferencesGroup::new();
-    global_group.set_title(S::GLOBAL_UNLOCK_RATES);
+    global_group.set_title(&crate::tr!("Global unlock rates"));
     global_group.set_margin_bottom(24);
 
     let mut budget = ImageLoadBudget::new(FIRST_BATCH);
@@ -144,10 +143,10 @@ pub fn create_achievement_row(
                         .to_string()
                         .replace("  ", " ")
                 })
-                .unwrap_or_else(|| "Unknown".to_string());
+                .unwrap_or_else(|| crate::tr!("Unknown"));
             time_label.set_text(&t);
         } else {
-            time_label.set_text("Marked manually");
+            time_label.set_text(&crate::tr!("Marked manually"));
         }
         content.append(&time_label);
     }
@@ -161,7 +160,7 @@ pub fn create_achievement_row(
             on_mark();
         });
         row.add_controller(click);
-        row.set_tooltip_text(Some(S::RIGHT_CLICK_TO_MARK));
+        row.set_tooltip_text(Some(&crate::tr!("Right-click to mark as already unlocked")));
     }
 
     row
@@ -245,10 +244,10 @@ pub fn create_global_stats_row(
         let vbox_spoiler = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
         vbox_spoiler.set_valign(gtk4::Align::Start);
         vbox_spoiler.set_hexpand(true);
-        let title_spoiler = gtk4::Label::new(Some(S::HIDDEN_ACHIEVEMENT));
+        let title_spoiler = gtk4::Label::new(Some(&crate::tr!("Hidden trophy")));
         title_spoiler.set_xalign(0.0);
         vbox_spoiler.append(&title_spoiler);
-        let desc_spoiler = gtk4::Label::new(Some(S::CLICK_TO_REVEAL));
+        let desc_spoiler = gtk4::Label::new(Some(&crate::tr!("Click to reveal spoiler")));
         desc_spoiler.set_xalign(0.0);
         desc_spoiler.add_css_class(CSS_DIM_LABEL);
         desc_spoiler.add_css_class(CSS_CAPTION);

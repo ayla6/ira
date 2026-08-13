@@ -17,7 +17,7 @@ pub(super) fn build_recent_row(
     let title_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     title_row.set_hexpand(true);
 
-    let title = gtk4::Label::new(Some("Recently played"));
+    let title = gtk4::Label::new(Some(&crate::tr!("Recently played")));
     title.set_xalign(0.0);
     title.set_hexpand(true);
     title.add_css_class(CSS_SECTION_TITLE);

@@ -1,6 +1,5 @@
 use super::settings_dialog;
 use super::system_settings::{build_override_switch_row, OverrideState};
-use crate::strings::settings as T;
 use adw::prelude::*;
 use ira_models::GameLaunchConfig;
 
@@ -22,8 +21,8 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let (overlay_row, overlay_state) = build_override_switch_row(
-        T::IN_GAME_OVERLAY,
-        T::OVERLAY_DESCRIPTION,
+        &crate::tr!("In-game overlay"),
+        &crate::tr!("Achievements, screenshots, and recording"),
         params.overlay_default,
         params.launch.overlay_enabled,
     );
@@ -32,29 +31,29 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
     page.append(&overlay_group);
 
     let overlay_cfg_group = adw::PreferencesGroup::new();
-    overlay_cfg_group.set_title(T::OVERLAY);
+    overlay_cfg_group.set_title(&crate::tr!("Overlay"));
 
     let encoder_model = gtk4::StringList::new(&[
-        "Default",
-        "Auto",
-        "VAAPI (AMD/Intel)",
-        "NVENC (NVIDIA)",
-        "Software (CPU)",
+        &crate::tr!("Default"),
+        &crate::tr!("Auto"),
+        &crate::tr!("VAAPI (AMD/Intel)"),
+        &crate::tr!("NVENC (NVIDIA)"),
+        &crate::tr!("Software (CPU)"),
     ]);
     let encoder_row = adw::ComboRow::new();
-    encoder_row.set_title("Video encoder");
+    encoder_row.set_title(&crate::tr!("Video encoder"));
     encoder_row.set_model(Some(&encoder_model));
     encoder_row.set_selected(params.launch.overlay_encoder.map(|v| v + 1).unwrap_or(0));
     overlay_cfg_group.add(&encoder_row);
 
     let quality_model = gtk4::StringList::new(&[
-        "Default",
-        "Low (720p 30fps)",
-        "Medium (1080p 30fps)",
-        "High (1080p 60fps)",
+        &crate::tr!("Default"),
+        &crate::tr!("Low (720p 30fps)"),
+        &crate::tr!("Medium (1080p 30fps)"),
+        &crate::tr!("High (1080p 60fps)"),
     ]);
     let quality_row = adw::ComboRow::new();
-    quality_row.set_title("Recording quality");
+    quality_row.set_title(&crate::tr!("Recording quality"));
     quality_row.set_model(Some(&quality_model));
     quality_row.set_selected(
         params
@@ -75,7 +74,7 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
         .sidebar
         .append(&settings_dialog::settings_sidebar_row(
             "layers-symbolic",
-            T::OVERLAY,
+            &crate::tr!("Overlay"),
             "overlay",
         ));
     params.stack.add_named(&scroll, Some("overlay"));

@@ -1,5 +1,4 @@
 use super::state::SharedState;
-use crate::strings as S;
 use adw::prelude::*;
 
 pub fn prompt_for_steam_id(
@@ -20,8 +19,8 @@ pub fn prompt_for_steam_id(
     entry.set_margin_end(8);
     dialog.set_extra_child(Some(&entry));
 
-    dialog.add_response("cancel", S::CANCEL);
-    dialog.add_response("add", S::ADD_GAME_BTN);
+    dialog.add_response("cancel", &crate::tr!("Cancel"));
+    dialog.add_response("add", &crate::tr!("Add game"));
     dialog.set_response_appearance("add", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("add"));
     dialog.set_close_response("cancel");

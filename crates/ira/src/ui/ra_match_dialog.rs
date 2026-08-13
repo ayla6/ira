@@ -27,7 +27,9 @@ pub fn show_ra_search_dialog(
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&gtk4::Label::new(Some("Match to RetroAchievements"))));
+    header.set_title_widget(Some(&gtk4::Label::new(Some(&crate::tr!(
+        "Match to RetroAchievements"
+    )))));
     outer.append(&header);
 
     let search_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
@@ -36,10 +38,10 @@ pub fn show_ra_search_dialog(
     search_box.set_margin_top(8);
 
     let entry = gtk4::Entry::new();
-    entry.set_placeholder_text(Some("Game name…"));
+    entry.set_placeholder_text(Some(&crate::tr!("Game name…")));
     entry.set_text(game_name);
     entry.set_hexpand(true);
-    let search_btn = gtk4::Button::with_label("Search");
+    let search_btn = gtk4::Button::with_label(&crate::tr!("Search"));
     search_btn.add_css_class(CSS_SUGGESTED_ACTION);
     search_box.append(&entry);
     search_box.append(&search_btn);
@@ -75,7 +77,7 @@ pub fn show_ra_search_dialog(
         clear_children(&list_c);
         if results.is_empty() {
             let row = adw::ActionRow::new();
-            row.set_title("No results found");
+            row.set_title(&crate::tr!("No results found"));
             row.set_sensitive(false);
             list_c.append(&row);
         } else {
@@ -86,7 +88,7 @@ pub fn show_ra_search_dialog(
                     "RA ID: {} · {} achievements",
                     game.id, game.num_achievements
                 ));
-                let match_btn = gtk4::Button::with_label("Match");
+                let match_btn = gtk4::Button::with_label(&crate::tr!("Match"));
                 match_btn.add_css_class(CSS_SUGGESTED_ACTION);
                 match_btn.set_valign(gtk4::Align::Center);
                 let sc = state_c.clone();

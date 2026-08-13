@@ -56,7 +56,7 @@ fn build_sgdb_asset_card(
     ilbl.add_css_class(CSS_DIM_LABEL);
     card.append(&ilbl);
 
-    let gdl = gtk4::Button::with_label("Download");
+    let gdl = gtk4::Button::with_label(&crate::tr!("Download"));
     gdl.add_css_class(CSS_SUGGESTED_ACTION);
     gdl.set_hexpand(true);
     card.append(&gdl);
@@ -77,7 +77,7 @@ fn build_sgdb_asset_card(
     rlbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     row.append(&rlbl);
 
-    let ldl = gtk4::Button::with_label("Download");
+    let ldl = gtk4::Button::with_label(&crate::tr!("Download"));
     ldl.add_css_class(CSS_SUGGESTED_ACTION);
     row.append(&ldl);
 
@@ -89,7 +89,7 @@ fn build_sgdb_asset_card(
     gdl.connect_clicked(move |_| {
         for b in buttons_g.borrow().iter() {
             b.set_sensitive(false);
-            b.set_label("Downloading\u{2026}");
+            b.set_label(&crate::tr!("Downloading\u{2026}"));
         }
         cb_g();
     });
@@ -97,7 +97,7 @@ fn build_sgdb_asset_card(
     ldl.connect_clicked(move |_| {
         for b in buttons_l.borrow().iter() {
             b.set_sensitive(false);
-            b.set_label("Downloading\u{2026}");
+            b.set_label(&crate::tr!("Downloading\u{2026}"));
         }
         on_download();
     });
@@ -347,10 +347,12 @@ fn full_rebuild(
     all_buttons.borrow_mut().clear();
 
     if assets.is_empty() {
-        let none = gtk4::Label::new(Some("No images found on SteamGridDB"));
+        let none = gtk4::Label::new(Some(&crate::tr!("No images found on SteamGridDB")));
         none.add_css_class(CSS_DIM_LABEL);
         flow.append(&none);
-        list_view.append(&gtk4::Label::new(Some("No images found on SteamGridDB")));
+        list_view.append(&gtk4::Label::new(Some(&crate::tr!(
+            "No images found on SteamGridDB"
+        ))));
         return;
     }
 
@@ -392,16 +394,17 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header_bar = adw::HeaderBar::new();
-    header_bar.set_title_widget(Some(&gtk4::Label::new(Some(&format!("Pick {}", asset)))));
+    let title = crate::tr!("Pick {}").replacen("{}", asset, 1);
+    header_bar.set_title_widget(Some(&gtk4::Label::new(Some(&title))));
 
     let toggle_btn = gtk4::ToggleButton::new();
     toggle_btn.set_icon_name("view-list-symbolic");
-    toggle_btn.set_tooltip_text(Some("Switch to list view"));
+    toggle_btn.set_tooltip_text(Some(&crate::tr!("Switch to list view")));
     toggle_btn.add_css_class(CSS_FLAT);
 
     let zoom_adj = gtk4::Adjustment::new(300.0, 100.0, 500.0, 50.0, 100.0, 0.0);
     let zoom_scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, Some(&zoom_adj));
-    zoom_scale.set_tooltip_text(Some("Zoom"));
+    zoom_scale.set_tooltip_text(Some(&crate::tr!("Zoom")));
     zoom_scale.set_width_request(120);
     zoom_scale.set_draw_value(false);
     zoom_scale.add_css_class(CSS_FLAT);
@@ -439,17 +442,17 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     stack.add_named(&list_view, Some("list"));
     stack.set_visible_child_name("grid");
 
-    let loading_label = gtk4::Label::new(Some("Loading\u{2026}"));
+    let loading_label = gtk4::Label::new(Some(&crate::tr!("Loading\u{2026}")));
     loading_label.add_css_class(CSS_DIM_LABEL);
     flow.append(&loading_label);
-    let loading_label2 = gtk4::Label::new(Some("Loading\u{2026}"));
+    let loading_label2 = gtk4::Label::new(Some(&crate::tr!("Loading\u{2026}")));
     loading_label2.add_css_class(CSS_DIM_LABEL);
     list_view.append(&loading_label2);
 
     scrolled.set_child(Some(&stack));
     outer.append(&scrolled);
 
-    let close_btn = gtk4::Button::with_label("Close");
+    let close_btn = gtk4::Button::with_label(&crate::tr!("Close"));
     close_btn.set_halign(gtk4::Align::End);
     close_btn.set_margin_start(12);
     close_btn.set_margin_end(12);
@@ -544,11 +547,11 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         if btn.is_active() {
             stack_toggle.set_visible_child_name("list");
             btn.set_icon_name("view-grid-symbolic");
-            btn.set_tooltip_text(Some("Switch to grid view"));
+            btn.set_tooltip_text(Some(&crate::tr!("Switch to grid view")));
         } else {
             stack_toggle.set_visible_child_name("grid");
             btn.set_icon_name("view-list-symbolic");
-            btn.set_tooltip_text(Some("Switch to list view"));
+            btn.set_tooltip_text(Some(&crate::tr!("Switch to list view")));
         }
     });
 

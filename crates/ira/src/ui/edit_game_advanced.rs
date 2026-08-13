@@ -26,14 +26,14 @@ pub(super) fn build_advanced_page(
 
     if let Some(ww) = ww_opt {
         let ac_group = adw::PreferencesGroup::new();
-        ac_group.set_title("Anti-Cheat");
+        ac_group.set_title(&crate::tr!("Anti-Cheat"));
         ac_group.add(&ww.battleye);
         ac_group.add(&ww.eac);
         ac_group.add(&ww.desktop_integration);
         page.append(&ac_group);
 
         let dbg_group = adw::PreferencesGroup::new();
-        dbg_group.set_title("Debugging");
+        dbg_group.set_title(&crate::tr!("Debugging"));
         dbg_group.add(&ww.show_debug);
         dbg_group.add(&ww.show_crash_dialogs);
         page.append(&dbg_group);
@@ -41,9 +41,9 @@ pub(super) fn build_advanced_page(
 
     // Environment Variables section
     let env_group = adw::PreferencesGroup::new();
-    env_group.set_title("Environment variables");
+    env_group.set_title(&crate::tr!("Environment variables"));
     let add_env_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_env_btn.set_tooltip_text(Some("Add variable"));
+    add_env_btn.set_tooltip_text(Some(&crate::tr!("Add variable")));
     add_env_btn.set_valign(gtk4::Align::Center);
     add_env_btn.add_css_class(CSS_FLAT);
     env_group.set_header_suffix(Some(&add_env_btn));
@@ -71,9 +71,9 @@ pub(super) fn build_advanced_page(
     // DLL Overrides section (wine only)
     let dll_overrides_box = if let Some(data) = wine_dll_data {
         let dll_group = adw::PreferencesGroup::new();
-        dll_group.set_title("DLL overrides");
+        dll_group.set_title(&crate::tr!("DLL overrides"));
         let add_dll_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-        add_dll_btn.set_tooltip_text(Some("Add override"));
+        add_dll_btn.set_tooltip_text(Some(&crate::tr!("Add override")));
         add_dll_btn.set_valign(gtk4::Align::Center);
         add_dll_btn.add_css_class(CSS_FLAT);
         dll_group.set_header_suffix(Some(&add_dll_btn));
@@ -99,11 +99,11 @@ pub(super) fn build_advanced_page(
     // LD_PRELOAD and LD_LIBRARY_PATH (flat, no expander)
     let ld_group = adw::PreferencesGroup::new();
     let ld_preload_entry = adw::EntryRow::new();
-    ld_preload_entry.set_title("LD_PRELOAD");
+    ld_preload_entry.set_title(&crate::tr!("LD_PRELOAD"));
     ld_preload_entry.set_text(&launch.ld_preload);
     ld_group.add(&ld_preload_entry);
     let ld_library_path_entry = adw::EntryRow::new();
-    ld_library_path_entry.set_title("LD_LIBRARY_PATH");
+    ld_library_path_entry.set_title(&crate::tr!("LD_LIBRARY_PATH"));
     ld_library_path_entry.set_text(&launch.ld_library_path);
     ld_group.add(&ld_library_path_entry);
     page.append(&ld_group);

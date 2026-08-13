@@ -9,10 +9,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
-const REMAPPING_TITLE: &str = "Input remapping";
-const LAYOUT_TITLE: &str = "Layout";
-const INHERIT_LAYOUT: &str = "Inherit";
-
 fn settings_page_container() -> gtk4::Box {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
     page.set_margin_start(12);
@@ -90,7 +86,7 @@ pub(super) fn build_input_settings_page(
 ) -> (gtk4::Box, InputPageWidgets) {
     let page = settings_page_container();
     let profiles_group = adw::PreferencesGroup::new();
-    profiles_group.set_title("Profiles");
+    profiles_group.set_title(&crate::tr!("Profiles"));
     let profile_rows = Rc::new(RefCell::new(Vec::new()));
     rebuild_profile_rows(
         &profiles_group,
@@ -101,7 +97,7 @@ pub(super) fn build_input_settings_page(
     );
 
     let controller_group = adw::PreferencesGroup::new();
-    controller_group.set_title("Controller defaults");
+    controller_group.set_title(&crate::tr!("Controller defaults"));
     let controller_defaults = Rc::new(RefCell::new(Vec::new()));
     let no_controllers_row = Rc::new(RefCell::new(None));
     let configured_defaults = cfg
@@ -149,7 +145,7 @@ pub(super) fn add_console_profile_group(
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
 ) -> ConsoleProfileWidgets {
     let group = adw::PreferencesGroup::new();
-    group.set_title("Controller");
+    group.set_title(&crate::tr!("Controller"));
     let widget = add_console_remapping_rows(
         &group,
         cfg,
@@ -174,13 +170,15 @@ fn add_console_remapping_rows(
 ) -> ConsoleProfileWidgets {
     let mode = Rc::new(RefCell::new(cfg.console(&console_id).controller_mode));
     let mode_row = adw::ComboRow::new();
-    mode_row.set_title(REMAPPING_TITLE);
-    mode_row.set_model(Some(&gtk4::StringList::new(&[
-        "Inherit",
-        "Disabled",
-        "Virtual XInput",
-        "Virtual DirectInput",
-    ])));
+    mode_row.set_title(&crate::tr!("Input remapping"));
+    let mode_strings = [
+        crate::tr!("Inherit"),
+        crate::tr!("Disabled"),
+        crate::tr!("Virtual XInput"),
+        crate::tr!("Virtual DirectInput"),
+    ];
+    let mode_refs: Vec<&str> = mode_strings.iter().map(String::as_str).collect();
+    mode_row.set_model(Some(&gtk4::StringList::new(&mode_refs)));
     mode_row.set_selected(input_mode_index(*mode.borrow()));
     let mode_for_selection = mode.clone();
     mode_row.connect_selected_notify(move |row| {
@@ -189,7 +187,7 @@ fn add_console_remapping_rows(
     group.add(&mode_row);
 
     let profile_row = adw::ComboRow::new();
-    profile_row.set_title(LAYOUT_TITLE);
+    profile_row.set_title(&crate::tr!("Layout"));
     let current_path = (!cfg.console(&console_id).controller_profile.is_empty())
         .then(|| std::path::PathBuf::from(&cfg.console(&console_id).controller_profile));
     let (labels, profile_paths, selected) = console_profile_choices(save_dir, current_path);
@@ -212,8 +210,8 @@ fn add_console_remapping_rows(
             .cloned()
             .flatten();
     });
-    let monitor = icon_button("input-gaming-symbolic", "Monitor this layout");
-    let edit = icon_button("document-edit-symbolic", "Edit layout");
+    let monitor = icon_button("input-gaming-symbolic", &crate::tr!("Monitor this layout"));
+    let edit = icon_button("document-edit-symbolic", &crate::tr!("Edit layout"));
     monitor.set_sensitive(true);
     edit.set_sensitive(selected != 0);
     profile_row.add_suffix(&edit);
@@ -331,7 +329,7 @@ fn console_profile_choices(
         eprintln!("Failed to list controller profiles: {error}");
         Vec::new()
     });
-    let mut labels = vec![INHERIT_LAYOUT.to_string()];
+    let mut labels = vec![crate::tr!("Inherit")];
     let mut paths = vec![None];
     for profile in profiles
         .into_iter()
@@ -348,7 +346,7 @@ fn console_profile_choices(
                 .position(|candidate| candidate.as_ref() == Some(path))
         })
         .unwrap_or(0);
-    labels.push("Create new profile...".to_string());
+    labels.push(crate::tr!("Create new profile..."));
     paths.push(None);
     (labels, paths, selected as u32)
 }
@@ -455,7 +453,7 @@ fn rebuild_controller_rows(params: &ControllerRowsParams, devices: &[ira_input::
     }
     if rebuilt.is_empty() {
         let row = adw::ActionRow::new();
-        row.set_title("No controllers detected");
+        row.set_title(&crate::tr!("No controllers detected"));
         params.group.add(&row);
         *params.no_controllers_row.borrow_mut() = Some(row);
     }
@@ -490,9 +488,15 @@ fn add_controller_row(
     expander.set_title(&device_name);
     update_controller_subtitle(&expander, &device, state.config.mode);
     let profile_path = Rc::new(RefCell::new(state.profile_path));
-    let mode_model = gtk4::StringList::new(&["Disabled", "Virtual XInput", "Virtual DirectInput"]);
+    let mode_strings = [
+        crate::tr!("Disabled"),
+        crate::tr!("Virtual XInput"),
+        crate::tr!("Virtual DirectInput"),
+    ];
+    let mode_refs: Vec<&str> = mode_strings.iter().map(String::as_str).collect();
+    let mode_model = gtk4::StringList::new(&mode_refs);
     let mode = adw::ComboRow::new();
-    mode.set_title("Input mode");
+    mode.set_title(&crate::tr!("Input mode"));
     mode.set_model(Some(&mode_model));
     mode.set_selected(selection_for_mode(state.config.mode));
     let expander_for_mode = expander.clone();
@@ -516,9 +520,12 @@ fn add_controller_row(
     expander.add_row(&mode);
 
     let action_row = adw::ActionRow::new();
-    action_row.set_title("Controller mapping");
-    action_row.set_subtitle("Edit controller-specific bindings");
-    let edit = icon_button("document-edit-symbolic", "Edit controller mapping");
+    action_row.set_title(&crate::tr!("Controller mapping"));
+    action_row.set_subtitle(&crate::tr!("Edit controller-specific bindings"));
+    let edit = icon_button(
+        "document-edit-symbolic",
+        &crate::tr!("Edit controller mapping"),
+    );
     action_row.add_suffix(&edit);
     expander.add_row(&action_row);
 
@@ -589,9 +596,9 @@ fn update_controller_subtitle(
     mode: ControllerInputMode,
 ) {
     let virtualization = match mode {
-        ControllerInputMode::Disabled => "Input virtualization disabled",
-        ControllerInputMode::VirtualXInput => "Virtual XInput layout",
-        ControllerInputMode::VirtualDirectInput => "Virtual DirectInput layout",
+        ControllerInputMode::Disabled => crate::tr!("Input virtualization disabled"),
+        ControllerInputMode::VirtualXInput => crate::tr!("Virtual XInput layout"),
+        ControllerInputMode::VirtualDirectInput => crate::tr!("Virtual DirectInput layout"),
     };
     row.set_subtitle(&format!(
         "{} | Linux reports {}",
@@ -682,7 +689,7 @@ fn rebuild_profile_rows(
             add_profile_row(group, parent, save_dir, stored, registry.clone(), rows).upcast(),
         );
     }
-    let new_profile = icon_button("list-add-symbolic", "Create profile");
+    let new_profile = icon_button("list-add-symbolic", &crate::tr!("Create profile"));
     let group_for_new = group.clone();
     let parent_for_new = parent.clone();
     let save_dir_for_new = save_dir.to_string();
@@ -716,9 +723,12 @@ fn rebuild_profile_rows(
             },
         );
     });
-    let preview = icon_button("input-gaming-symbolic", "View raw controller input");
+    let preview = icon_button(
+        "input-gaming-symbolic",
+        &crate::tr!("View raw controller input"),
+    );
     let preview_row = adw::ActionRow::new();
-    preview_row.set_title("Controller preview");
+    preview_row.set_title(&crate::tr!("Controller preview"));
     preview_row.add_suffix(&preview);
     let parent_for_preview = parent.clone();
     let registry_for_preview = registry.clone();
@@ -744,9 +754,12 @@ fn add_profile_row(
 ) -> adw::ActionRow {
     let row = adw::ActionRow::new();
     row.set_title(&profile_label(&stored));
-    let preview = icon_button("input-gaming-symbolic", "Preview layout output");
-    let edit = icon_button("document-edit-symbolic", "Edit profile");
-    let delete = icon_button("user-trash-symbolic", "Delete profile");
+    let preview = icon_button(
+        "input-gaming-symbolic",
+        &crate::tr!("Preview layout output"),
+    );
+    let edit = icon_button("document-edit-symbolic", &crate::tr!("Edit profile"));
+    let delete = icon_button("user-trash-symbolic", &crate::tr!("Delete profile"));
     row.add_suffix(&preview);
     row.add_suffix(&edit);
     row.add_suffix(&delete);
@@ -802,11 +815,11 @@ fn add_profile_row(
     let rows_for_delete = rows.clone();
     delete.connect_clicked(move |_| {
         let alert = adw::AlertDialog::new(
-            Some("Delete layout"),
-            Some("This removes the game layout from Ira."),
+            Some(&crate::tr!("Delete layout")),
+            Some(&crate::tr!("This removes the game layout from Ira.")),
         );
-        alert.add_response("cancel", "Cancel");
-        alert.add_response("delete", "Delete");
+        alert.add_response("cancel", &crate::tr!("Cancel"));
+        alert.add_response("delete", &crate::tr!("Delete"));
         alert.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
         alert.set_default_response(Some("cancel"));
         alert.set_close_response("cancel");

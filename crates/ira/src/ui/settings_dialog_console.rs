@@ -6,7 +6,6 @@ use super::settings_console::{
 use super::settings_pages::{settings_sidebar_row, sidebar_section_title};
 use super::state::SharedState;
 use super::system_settings::{build_override_switch_row, OverrideState};
-use crate::strings::settings as T;
 use adw::prelude::*;
 use ira_config::Config;
 use std::cell::RefCell;
@@ -154,12 +153,12 @@ pub(super) fn register_console_pages(
 
     for def in ira_models::all_consoles() {
         if def.id == "psp" {
-            register_lazy_console_page(sidebar, stack, "PS3", "ps3");
-            register_lazy_console_page(sidebar, stack, "PS4", "ps4");
-            register_lazy_console_page(sidebar, stack, "PS Vita", "psvita");
+            register_lazy_console_page(sidebar, stack, &crate::tr!("PS3"), "ps3");
+            register_lazy_console_page(sidebar, stack, &crate::tr!("PS4"), "ps4");
+            register_lazy_console_page(sidebar, stack, &crate::tr!("PS Vita"), "psvita");
         }
         if def.id == "wii" {
-            register_lazy_console_page(sidebar, stack, "Wii U", "wiiu");
+            register_lazy_console_page(sidebar, stack, &crate::tr!("Wii U"), "wiiu");
         }
         if !def.uses_rom_folder() {
             continue;
@@ -177,7 +176,7 @@ pub(super) fn register_console_pages(
         add_console_loading_page(stack, &page_id);
     }
     if !empty_platforms.is_empty() {
-        sidebar.append(&sidebar_section_title(T::EMPTY_PLATFORMS));
+        sidebar.append(&sidebar_section_title(&crate::tr!("Empty platforms")));
         for (label, page_id) in empty_platforms {
             sidebar.append(&settings_sidebar_row("games-symbolic", &label, &page_id));
         }
@@ -199,7 +198,7 @@ fn register_lazy_console_page(
 
 fn add_console_loading_page(stack: &gtk4::Stack, page_id: &str) {
     let loading = adw::StatusPage::new();
-    loading.set_title(T::LOADING_EMULATOR);
+    loading.set_title(&crate::tr!("Loading emulator settings"));
     let spinner = gtk4::Spinner::new();
     spinner.start();
     loading.set_child(Some(&spinner));
@@ -282,7 +281,7 @@ fn load_special_console_page(
         cfg,
         win,
         console_id,
-        label,
+        &label,
         registry.clone(),
         &mut result,
     );
@@ -304,13 +303,13 @@ fn build_special_console_page(
     page_id: &str,
     cfg: &Config,
     win: &adw::Window,
-) -> Option<(&'static str, &'static str, gtk4::Box, SpecialConsoleWidgets)> {
+) -> Option<(&'static str, String, gtk4::Box, SpecialConsoleWidgets)> {
     match page_id {
         "ps3" => {
             let (page, enable_row, exe_row) = build_rpcs3_settings_page(cfg, win);
             Some((
                 "ps3",
-                "PS3",
+                crate::tr!("PS3"),
                 page,
                 SpecialConsoleWidgets::Ps3(enable_row, exe_row),
             ))
@@ -319,7 +318,7 @@ fn build_special_console_page(
             let (page, enable_row, version_dd) = build_shadps4_settings_page(cfg);
             Some((
                 "ps4",
-                "PS4",
+                crate::tr!("PS4"),
                 page,
                 SpecialConsoleWidgets::Ps4(enable_row, version_dd),
             ))
@@ -328,7 +327,7 @@ fn build_special_console_page(
             let (page, enable_row, exe_row) = build_vita3k_settings_page(cfg, win);
             Some((
                 "psvita",
-                "PS Vita",
+                crate::tr!("PS Vita"),
                 page,
                 SpecialConsoleWidgets::Vita3k(enable_row, exe_row),
             ))
@@ -337,7 +336,7 @@ fn build_special_console_page(
             let (page, enable_row, exe_row) = build_cemu_settings_page(cfg, win);
             Some((
                 "wiiu",
-                "Wii U",
+                crate::tr!("Wii U"),
                 page,
                 SpecialConsoleWidgets::Cemu(enable_row, exe_row),
             ))
@@ -407,14 +406,14 @@ fn add_console_page_overrides(
     result: &mut ConsoleSettingsWidgets,
 ) -> ConsoleProfileWidgets {
     let (overlay_row, overlay_state) = build_override_switch_row(
-        T::IN_GAME_OVERLAY,
-        T::OVERLAY_DESCRIPTION,
+        &crate::tr!("In-game overlay"),
+        &crate::tr!("Achievements, screenshots, and recording"),
         cfg.overlay.enabled,
         cfg.overlay.source_overrides.get(console_id).copied(),
     );
     let (gamescope_row, gamescope_state) = build_override_switch_row(
-        T::GAMESCOPE,
-        T::GAMESCOPE_DESCRIPTION,
+        &crate::tr!("Gamescope"),
+        &crate::tr!("Valve Gamescope compositor"),
         cfg.default_system.gamescope,
         cfg.overlay.source_gamescope.get(console_id).copied(),
     );

@@ -1,5 +1,4 @@
 use crate::game_loader::load_game;
-use crate::strings as S;
 use crate::Game;
 use crate::GameEntry;
 use crate::MergedAchievement;
@@ -95,7 +94,11 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
 
     if !earned.is_empty() {
         let earned_group = adw::PreferencesGroup::new();
-        earned_group.set_title(&format!("Earned  ·  {}", earned.len()));
+        earned_group.set_title(&crate::tr!("Earned  ·  {}").replacen(
+            "{}",
+            &earned.len().to_string(),
+            1,
+        ));
         progress_vbox.append(&earned_group);
 
         let first_n = FIRST_BATCH.min(earned.len());
@@ -130,7 +133,11 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
     }
     if !locked.is_empty() || !hidden.is_empty() {
         let locked_group = adw::PreferencesGroup::new();
-        locked_group.set_title(&format!("Locked  ·  {}", locked.len() + hidden.len()));
+        locked_group.set_title(&crate::tr!("Locked  ·  {}").replacen(
+            "{}",
+            &(locked.len() + hidden.len()).to_string(),
+            1,
+        ));
         progress_vbox.append(&locked_group);
 
         let first_n = FIRST_BATCH.min(locked.len());
@@ -160,7 +167,11 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
 
         let hidden_expander: Option<adw::ExpanderRow> = if !hidden.is_empty() {
             let expander = adw::ExpanderRow::new();
-            expander.set_title(&format!("… and {} hidden trophies", hidden.len()));
+            expander.set_title(&crate::tr!("… and {} hidden trophies").replacen(
+                "{}",
+                &hidden.len().to_string(),
+                1,
+            ));
 
             for ach in hidden.iter() {
                 let ach_row = adw::ActionRow::new();
@@ -270,7 +281,8 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
     }
     budget.flush(state, gen);
 
-    let progress_page = view_stack.add_titled(&progress_vbox, Some("progress"), S::MY_PROGRESS);
+    let progress_page =
+        view_stack.add_titled(&progress_vbox, Some("progress"), &crate::tr!("My progress"));
     progress_page.set_icon_name(Some("user-home-symbolic"));
 
     if !is_ps4 {
@@ -301,7 +313,8 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
             }
         });
 
-        let global_page = view_stack.add_titled(&global_vbox, Some("global"), S::GLOBAL_STATS);
+        let global_page =
+            view_stack.add_titled(&global_vbox, Some("global"), &crate::tr!("Global stats"));
         global_page.set_icon_name(Some("globe-symbolic"));
     }
 

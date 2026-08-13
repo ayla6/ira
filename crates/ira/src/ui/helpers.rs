@@ -1,4 +1,3 @@
-use crate::strings as S;
 use crate::Game;
 use adw::prelude::{AdwDialogExt, AdwWindowExt, AlertDialogExt};
 use gtk4::prelude::*;
@@ -138,7 +137,7 @@ pub fn make_browse_button(
     initial_path: impl Fn() -> Option<String> + 'static,
     on_select: impl Fn(&std::path::Path) + 'static,
 ) -> gtk4::Button {
-    let browse = gtk4::Button::with_label("Browse…");
+    let browse = gtk4::Button::with_label(&crate::tr!("Browse…"));
     browse.add_css_class(CSS_FLAT);
     browse.set_valign(gtk4::Align::Center);
     let parent = parent.cloned();
@@ -317,7 +316,7 @@ pub fn confirm_dialog(
     on_confirm: impl Fn() + 'static,
 ) {
     let dialog = adw::AlertDialog::new(Some(title), Some(body));
-    dialog.add_response("cancel", S::CANCEL);
+    dialog.add_response("cancel", &crate::tr!("Cancel"));
     dialog.add_response("confirm", confirm_label);
     dialog.set_response_appearance("confirm", appearance);
     dialog.set_default_response(Some("cancel"));

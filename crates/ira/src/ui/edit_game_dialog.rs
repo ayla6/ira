@@ -210,9 +210,9 @@ fn build_launch_wine_advanced_pages(
         let (wine_pages, ww) = build_wine_config_pages(saved_wine, Some(app_default_wine));
         for wp in &wine_pages {
             sidebar.append(&super::settings_dialog::settings_sidebar_row(
-                wp.icon, wp.label, wp.label,
+                wp.icon, &wp.label, wp.page_id,
             ));
-            stack.add_named(&wp.page, Some(wp.label));
+            stack.add_named(&wp.page, Some(wp.page_id));
         }
         Some(ww)
     } else {
@@ -345,7 +345,7 @@ fn build_dialog_contents(
         );
         sidebar.append(&super::settings_dialog::settings_sidebar_row(
             "image-x-generic-symbolic",
-            "Images",
+            &crate::tr!("Images"),
             "images",
         ));
         stack.add_named(&images_page, Some("images"));
@@ -412,7 +412,7 @@ fn build_dialog_contents(
     btn_row.set_margin_top(8);
     btn_row.set_margin_bottom(12);
 
-    let cancel_btn = gtk4::Button::with_label("Cancel");
+    let cancel_btn = gtk4::Button::with_label(&crate::tr!("Cancel"));
     let win_c = win.clone();
     cancel_btn.connect_clicked(move |_| win_c.close());
 
@@ -424,11 +424,11 @@ fn build_dialog_contents(
         btn.connect_clicked(move |_| {
             let Some(details) = crate::game_loader::read_app_details(&save_dir_m, &game_m.app_id)
             else {
-                btn_m.set_label("No save paths known");
+                btn_m.set_label(&crate::tr!("No save paths known"));
                 return;
             };
             if details.ufs_savefiles.is_empty() {
-                btn_m.set_label("No save paths known");
+                btn_m.set_label(&crate::tr!("No save paths known"));
                 return;
             }
             let (wine_prefix, is_wine) = {
@@ -457,15 +457,19 @@ fn build_dialog_contents(
             ) {
                 Ok(count) => count,
                 Err(error) => {
-                    btn_m.set_label("Save migration failed");
+                    btn_m.set_label(&crate::tr!("Save migration failed"));
                     eprintln!("Failed to centralize saves: {error}");
                     return;
                 }
             };
             if count > 0 {
-                btn_m.set_label(&format!("Migrated {} save folder(s)", count));
+                btn_m.set_label(&crate::tr!("Migrated {} save folder(s)").replacen(
+                    "{}",
+                    &count.to_string(),
+                    1,
+                ));
             } else {
-                btn_m.set_label("Already centralized");
+                btn_m.set_label(&crate::tr!("Already centralized"));
             }
             if let Err(e) = ira_db::set_saves_centralized(&state_m.borrow().db, game_m.db_id, true)
             {
@@ -475,7 +479,7 @@ fn build_dialog_contents(
         });
     }
 
-    let save_btn = gtk4::Button::with_label("Save");
+    let save_btn = gtk4::Button::with_label(&crate::tr!("Save"));
     save_btn.add_css_class(CSS_SUGGESTED_ACTION);
 
     let save_btn_c = save_btn.clone();

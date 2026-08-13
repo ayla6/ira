@@ -10,7 +10,7 @@ use adw::prelude::*;
 pub fn show_add_game_method(state: &SharedState) {
     let parent = state.borrow().window.clone();
     let win = adw::Window::new();
-    win.set_title(Some("Add game"));
+    win.set_title(Some(&crate::tr!("Add game")));
     win.set_default_size(420, 260);
     win.set_modal(true);
     win.set_transient_for(Some(&parent));
@@ -28,11 +28,11 @@ pub fn show_add_game_method(state: &SharedState) {
     body.set_margin_bottom(24);
     body.set_valign(gtk4::Align::Center);
 
-    let title = gtk4::Label::new(Some("How do you want to add this game?"));
+    let title = gtk4::Label::new(Some(&crate::tr!("How do you want to add this game?")));
     title.add_css_class("title");
     body.append(&title);
 
-    let manual_btn = gtk4::Button::with_label("Manual add");
+    let manual_btn = gtk4::Button::with_label(&crate::tr!("Manual add"));
     manual_btn.add_css_class(CSS_SUGGESTED_ACTION);
     manual_btn.set_size_request(-1, 44);
     let sc = state.clone();
@@ -44,10 +44,10 @@ pub fn show_add_game_method(state: &SharedState) {
     body.append(&manual_btn);
     manual_btn.grab_focus();
 
-    let auto_btn = gtk4::Button::with_label("Auto add game");
-    auto_btn.set_tooltip_text(Some(
-        "Pick a folder and let Ira identify the game, download assets and set up everything",
-    ));
+    let auto_btn = gtk4::Button::with_label(&crate::tr!("Auto add game"));
+    auto_btn.set_tooltip_text(Some(&crate::tr!(
+        "Pick a folder and let Ira identify the game, download assets and set up everything"
+    )));
     auto_btn.set_size_request(-1, 44);
     let sc2 = state.clone();
     let win_c2 = win.clone();
@@ -57,10 +57,10 @@ pub fn show_add_game_method(state: &SharedState) {
     });
     body.append(&auto_btn);
 
-    let installer_btn = gtk4::Button::with_label("Install from installer");
-    installer_btn.set_tooltip_text(Some(
-        "Run installer files (exe, sh, GOG) and let Ira detect the installed game",
-    ));
+    let installer_btn = gtk4::Button::with_label(&crate::tr!("Install from installer"));
+    installer_btn.set_tooltip_text(Some(&crate::tr!(
+        "Run installer files (exe, sh, GOG) and let Ira detect the installed game"
+    )));
     installer_btn.set_size_request(-1, 44);
     let sc3 = state.clone();
     let win_c3 = win.clone();

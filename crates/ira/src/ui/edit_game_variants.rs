@@ -67,7 +67,7 @@ fn build_variant_name_entry_buttons(
     main_win: adw::Window,
 ) {
     let up_btn = gtk4::Button::from_icon_name("go-up-symbolic");
-    up_btn.set_tooltip_text(Some("Move up"));
+    up_btn.set_tooltip_text(Some(&crate::tr!("Move up")));
     up_btn.set_valign(gtk4::Align::Center);
     let group_up = group.clone();
     let vw_up = var_widgets.clone();
@@ -78,7 +78,7 @@ fn build_variant_name_entry_buttons(
     name_entry.add_suffix(&up_btn);
 
     let down_btn = gtk4::Button::from_icon_name("go-down-symbolic");
-    down_btn.set_tooltip_text(Some("Move down"));
+    down_btn.set_tooltip_text(Some(&crate::tr!("Move down")));
     down_btn.set_valign(gtk4::Align::Center);
     let group_down = group.clone();
     let vw_down = var_widgets.clone();
@@ -89,7 +89,7 @@ fn build_variant_name_entry_buttons(
     name_entry.add_suffix(&down_btn);
 
     let del_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
-    del_btn.set_tooltip_text(Some("Delete variant"));
+    del_btn.set_tooltip_text(Some(&crate::tr!("Delete variant")));
     del_btn.set_valign(gtk4::Align::Center);
     del_btn.add_css_class(CSS_ERROR);
     let container_c = container.clone();
@@ -98,14 +98,17 @@ fn build_variant_name_entry_buttons(
     del_btn.connect_clicked(move |_| {
         let variant_name = name_entry_c.text().to_string();
         let dialog = adw::AlertDialog::new(
-            Some("Delete variant?"),
-            Some(&format!(
-                "\"{}\" will be removed. Save to apply changes.",
-                variant_name
-            )),
+            Some(&crate::tr!("Delete variant?")),
+            Some(
+                &crate::tr!("\"{}\" will be removed. Save to apply changes.").replacen(
+                    "{}",
+                    &variant_name,
+                    1,
+                ),
+            ),
         );
-        dialog.add_response("cancel", "Cancel");
-        dialog.add_response("delete", "Delete");
+        dialog.add_response("cancel", &crate::tr!("Cancel"));
+        dialog.add_response("delete", &crate::tr!("Delete"));
         dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         dialog.set_close_response("cancel");
@@ -198,12 +201,13 @@ fn build_variant_images_and_logo_section(
                 super::game_logo::build_game_logo_page(&var_game, true, None)
             {
                 let logo_expander = adw::ExpanderRow::new();
-                logo_expander.set_title("Logo position");
-                logo_expander.set_subtitle(if v.logo_position.is_empty() {
-                    "Inherited from base game"
+                logo_expander.set_title(&crate::tr!("Logo position"));
+                let subtitle = if v.logo_position.is_empty() {
+                    crate::tr!("Inherited from base game")
                 } else {
-                    ""
-                });
+                    String::new()
+                };
+                logo_expander.set_subtitle(&subtitle);
                 logo_expander.set_enable_expansion(true);
                 logo_expander.set_visible(custom_images_row.is_active());
                 let logo_row = adw::ActionRow::new();
@@ -238,7 +242,7 @@ fn build_variant_card(
     let group = adw::PreferencesGroup::new();
 
     let name_entry = adw::EntryRow::new();
-    name_entry.set_title("Variant name");
+    name_entry.set_title(&crate::tr!("Variant name"));
     name_entry.set_text(&v.name);
 
     let main_win = win.clone();
@@ -247,13 +251,13 @@ fn build_variant_card(
     group.add(&name_entry);
 
     let exe_entry = adw::EntryRow::new();
-    exe_entry.set_title("Executable");
+    exe_entry.set_title(&crate::tr!("Executable"));
     exe_entry.set_text(&v.exe);
     let browse = helpers::make_browse_button(
         None,
-        "Select variant executable",
+        &crate::tr!("Select variant executable"),
         false,
-        Some(("Executable", &["application/x-executable"])),
+        Some((&crate::tr!("Executable"), &["application/x-executable"])),
         helpers::entry_path_closure(&exe_entry),
         {
             let entry = exe_entry.clone();
@@ -264,16 +268,16 @@ fn build_variant_card(
     group.add(&exe_entry);
 
     let args_entry = adw::EntryRow::new();
-    args_entry.set_title("Arguments");
+    args_entry.set_title(&crate::tr!("Arguments"));
     args_entry.set_text(&v.args);
     group.add(&args_entry);
 
     let wd_entry = adw::EntryRow::new();
-    wd_entry.set_title("Working directory");
+    wd_entry.set_title(&crate::tr!("Working directory"));
     wd_entry.set_text(&v.working_dir);
     let wd_browse = helpers::make_browse_button(
         None,
-        "Select working directory",
+        &crate::tr!("Select working directory"),
         true,
         None,
         helpers::entry_path_closure(&wd_entry),
@@ -286,22 +290,22 @@ fn build_variant_card(
     group.add(&wd_entry);
 
     let pre_launch_entry = adw::EntryRow::new();
-    pre_launch_entry.set_title("Run before game");
+    pre_launch_entry.set_title(&crate::tr!("Run before game"));
     pre_launch_entry.set_text(&v.pre_launch);
-    pre_launch_entry.set_tooltip_text(Some(
-        "Shell command to run before launching. If it fails, the game will not launch.",
-    ));
+    pre_launch_entry.set_tooltip_text(Some(&crate::tr!(
+        "Shell command to run before launching. If it fails, the game will not launch."
+    )));
     group.add(&pre_launch_entry);
 
     let custom_images_row = adw::SwitchRow::new();
-    custom_images_row.set_title("Custom images");
-    custom_images_row.set_subtitle("Use custom hero and logo for this variant");
+    custom_images_row.set_title(&crate::tr!("Custom images"));
+    custom_images_row.set_subtitle(&crate::tr!("Use custom hero and logo for this variant"));
     custom_images_row.set_active(v.custom_images || v.show_as_entry);
     group.add(&custom_images_row);
 
     let show_as_entry_row = adw::SwitchRow::new();
-    show_as_entry_row.set_title("Show as separate entry");
-    show_as_entry_row.set_subtitle("Appears in the grid as its own game entry");
+    show_as_entry_row.set_title(&crate::tr!("Show as separate entry"));
+    show_as_entry_row.set_subtitle(&crate::tr!("Appears in the grid as its own game entry"));
     show_as_entry_row.set_active(v.show_as_entry);
     group.add(&show_as_entry_row);
 
@@ -322,16 +326,18 @@ fn build_variant_card(
     }
 
     let count_playtime_row = adw::SwitchRow::new();
-    count_playtime_row.set_title("Count playtime");
-    count_playtime_row.set_subtitle("Track playtime for this variant (disable for modding tools)");
+    count_playtime_row.set_title(&crate::tr!("Count playtime"));
+    count_playtime_row.set_subtitle(&crate::tr!(
+        "Track playtime for this variant (disable for modding tools)"
+    ));
     count_playtime_row.set_active(v.count_playtime);
     group.add(&count_playtime_row);
 
     let images_expander = adw::ExpanderRow::new();
-    images_expander.set_title("Manage images");
+    images_expander.set_title(&crate::tr!("Manage images"));
     images_expander.set_enable_expansion(custom_images_row.is_active() && v.id > 0);
     if v.id == 0 {
-        images_expander.set_subtitle("Save the variant first");
+        images_expander.set_subtitle(&crate::tr!("Save the variant first"));
     }
     group.add(&images_expander);
 
@@ -384,12 +390,12 @@ pub(super) fn build_variants_page(
     let header = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     header.set_margin_start(12);
     header.set_margin_end(12);
-    let title = gtk4::Label::new(Some("Variants"));
+    let title = gtk4::Label::new(Some(&crate::tr!("Variants")));
     title.set_halign(gtk4::Align::Start);
     title.set_hexpand(true);
     title.add_css_class(CSS_HEADING);
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_btn.set_tooltip_text(Some("Add variant"));
+    add_btn.set_tooltip_text(Some(&crate::tr!("Add variant")));
     add_btn.set_valign(gtk4::Align::Center);
     add_btn.add_css_class(CSS_FLAT);
     header.append(&title);

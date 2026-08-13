@@ -10,7 +10,6 @@ use super::settings_pages::{
 };
 use super::state::SharedState;
 use super::wine_config_widget::{build_wine_config_pages, WineConfigWidgets, WinePage};
-use crate::strings::settings as T;
 use adw::prelude::*;
 use ira_config::Config;
 use std::cell::RefCell;
@@ -131,7 +130,7 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.general_page,
         "cogged-wheel-big-symbolic",
-        T::GENERAL,
+        &crate::tr!("General"),
         "general",
     );
     register_page(
@@ -139,7 +138,7 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.overlay_page,
         "layers-symbolic",
-        T::OVERLAY,
+        &crate::tr!("Overlay"),
         "overlay",
     );
     register_page(
@@ -147,7 +146,7 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.input_page,
         "games-symbolic",
-        T::CONTROLLER,
+        &crate::tr!("Controller"),
         "input",
     );
     register_page(
@@ -155,16 +154,18 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.system_page,
         "cogged-wheel-big-symbolic",
-        T::GAME_SYSTEM,
+        &crate::tr!("Game system"),
         "system",
     );
-    sidebar.append(&super::settings_pages::sidebar_section_title(T::PC_GAMES));
+    sidebar.append(&super::settings_pages::sidebar_section_title(&crate::tr!(
+        "PC games"
+    )));
     register_page(
         sidebar,
         stack,
         &pages.computer_games_page,
         "games-symbolic",
-        T::PC_GAMES,
+        &crate::tr!("PC games"),
         "computer_games",
     );
     register_page(
@@ -172,7 +173,7 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.steam_page,
         "steam-train-symbolic",
-        T::STEAM,
+        &crate::tr!("Steam"),
         "steam",
     );
     register_page(
@@ -180,7 +181,7 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.emu_page,
         "api-symbolic",
-        T::API_EMULATORS,
+        &crate::tr!("API emulators"),
         "api_emulators",
     );
     register_page(
@@ -188,30 +189,39 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.lutris_page,
         "system-software-install-symbolic",
-        T::LUTRIS_MIGRATION,
+        &crate::tr!("Lutris migration"),
         "migration",
     );
-    sidebar.append(&super::settings_pages::sidebar_section_title(T::WINE));
+    sidebar.append(&super::settings_pages::sidebar_section_title(&crate::tr!(
+        "Wine"
+    )));
     register_existing_scrolled_page(
         sidebar,
         stack,
         &pages.profiles_page,
         "wine-glass",
-        T::PROFILES,
+        &crate::tr!("Profiles"),
         "profiles",
     );
     for page in &pages.wine_pages {
         register_existing_scrolled_page(
-            sidebar, stack, &page.page, page.icon, page.label, page.label,
+            sidebar,
+            stack,
+            &page.page,
+            page.icon,
+            &page.label,
+            page.page_id,
         );
     }
-    sidebar.append(&super::settings_pages::sidebar_section_title(T::EMULATION));
+    sidebar.append(&super::settings_pages::sidebar_section_title(&crate::tr!(
+        "Emulation"
+    )));
     register_page(
         sidebar,
         stack,
         &pages.ra_page,
         "trophy-symbolic",
-        T::RETROACHIEVEMENTS,
+        &crate::tr!("RetroAchievements"),
         "ra",
     );
     register_page(
@@ -219,7 +229,7 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.rom_page,
         "library-symbolic",
-        T::ROM_LIBRARY,
+        &crate::tr!("ROM library"),
         "roms",
     );
 }
@@ -285,7 +295,7 @@ fn build_pc_controller_profiles(
         page,
         &pc_controller_cfg,
         "linux",
-        "Linux controller",
+        &crate::tr!("Linux controller"),
         win,
         registry.clone(),
     );
@@ -293,7 +303,7 @@ fn build_pc_controller_profiles(
         page,
         &pc_controller_cfg,
         "wine",
-        "Wine controller",
+        &crate::tr!("Wine controller"),
         win,
         registry,
     );

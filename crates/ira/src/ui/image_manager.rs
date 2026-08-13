@@ -62,7 +62,7 @@ pub fn build_image_manager_content_with_drafts(
         btn_box.set_margin_top(24);
 
         if game.sgdb_id.is_empty() && !is_steam {
-            let match_btn = gtk4::Button::with_label("Match to SteamGridDB…");
+            let match_btn = gtk4::Button::with_label(&crate::tr!("Match to SteamGridDB…"));
             match_btn.add_css_class(CSS_SUGGESTED_ACTION);
             let sc = state.clone();
             let gn = game.name.clone();
@@ -75,10 +75,14 @@ pub fn build_image_manager_content_with_drafts(
         }
 
         if !game.sgdb_id.is_empty() {
-            let label = gtk4::Label::new(Some(&format!("Matched (SGDB ID: {})", game.sgdb_id)));
+            let label = gtk4::Label::new(Some(&crate::tr!("Matched (SGDB ID: {})").replacen(
+                "{}",
+                &game.sgdb_id,
+                1,
+            )));
             label.add_css_class(CSS_SUCCESS_LABEL);
             btn_box.append(&label);
-            let unmatch_btn = gtk4::Button::with_label("Unmatch SGDB");
+            let unmatch_btn = gtk4::Button::with_label(&crate::tr!("Unmatch SGDB"));
             unmatch_btn.add_css_class(CSS_DESTRUCTIVE_ACTION);
             let pending_pc = pending_copies.clone();
             let sc = state.clone();
@@ -181,7 +185,7 @@ fn build_steam_non_icon_button(
     if !is_steam || AssetType::from_string(asset_type) == Some(AssetType::Icon) {
         return None;
     }
-    let btn = gtk4::Button::with_label("Steam");
+    let btn = gtk4::Button::with_label(&crate::tr!("Steam"));
     let steam = state.borrow().steam.clone();
     let id_c = id.to_string();
     let asset_c = asset_type.to_string();
@@ -189,7 +193,7 @@ fn build_steam_non_icon_button(
     let btn_clone = btn.clone();
     btn.connect_clicked(move |_| {
         btn_clone.set_sensitive(false);
-        btn_clone.set_label("Downloading…");
+        btn_clone.set_label(&crate::tr!("Downloading…"));
         let steam = steam.clone();
         let id_c = id_c.clone();
         let asset_c = asset_c.clone();
@@ -208,7 +212,7 @@ fn build_steam_non_icon_button(
             if rx.borrow_mut().try_recv().is_ok() {
                 if let Some(btn) = btn_weak.upgrade() {
                     btn.set_sensitive(true);
-                    btn.set_label("Steam");
+                    btn.set_label(&crate::tr!("Steam"));
                 }
                 refresh();
                 glib::ControlFlow::Break
@@ -232,7 +236,7 @@ fn build_steam_icon_button(
     if !is_steam || AssetType::from_string(asset_type) != Some(AssetType::Icon) {
         return None;
     }
-    let btn = gtk4::Button::with_label("Steam");
+    let btn = gtk4::Button::with_label(&crate::tr!("Steam"));
     let steam = state.borrow().steam.clone();
     let id_c = id.to_string();
     let save_dir_c = save_dir.to_string();
@@ -240,7 +244,7 @@ fn build_steam_icon_button(
     let btn_clone = btn.clone();
     btn.connect_clicked(move |_| {
         btn_clone.set_sensitive(false);
-        btn_clone.set_label("Downloading…");
+        btn_clone.set_label(&crate::tr!("Downloading…"));
         let steam = steam.clone();
         let id_c = id_c.clone();
         let save_dir_c = save_dir_c.clone();
@@ -283,7 +287,7 @@ fn build_steam_icon_button(
             if rx.borrow_mut().try_recv().is_ok() {
                 if let Some(btn) = btn_weak.upgrade() {
                     btn.set_sensitive(true);
-                    btn.set_label("Steam");
+                    btn.set_label(&crate::tr!("Steam"));
                 }
                 refresh();
                 glib::ControlFlow::Break
@@ -321,7 +325,7 @@ fn build_sgdb_picker_button(
     if sgdb_id_for_picker.is_empty() {
         return None;
     }
-    let btn = gtk4::Button::with_label("SGDB…");
+    let btn = gtk4::Button::with_label(&crate::tr!("SGDB…"));
     let steam = ctx.state.borrow().steam.clone();
     let asset_c = ctx.asset_type.to_string();
     let parent = ctx.parent_win.clone();
@@ -361,11 +365,11 @@ fn build_reset_icon_button(
         return None;
     }
     let label = match game.kind {
-        ira_models::GameKind::Ps4 => "PS4",
-        ira_models::GameKind::Ps3 => "PS3",
-        _ => "Use icon",
+        ira_models::GameKind::Ps4 => crate::tr!("PS4"),
+        ira_models::GameKind::Ps3 => crate::tr!("PS3"),
+        _ => crate::tr!("Use icon"),
     };
-    let reset_btn = gtk4::Button::with_label(label);
+    let reset_btn = gtk4::Button::with_label(&label);
     let gc = game.clone();
     let refresh = Rc::clone(refresh_images);
     let pending_copies_reset = pending_copies.clone();
@@ -433,7 +437,7 @@ fn build_ra_icon_button(
     {
         return None;
     }
-    let btn = gtk4::Button::with_label("RA icon");
+    let btn = gtk4::Button::with_label(&crate::tr!("RA icon"));
     let db_id = game.db_id;
     let app_id = game.app_id.clone();
     let save_dir = state.borrow().save_dir.clone();
@@ -446,7 +450,7 @@ fn build_ra_icon_button(
     let btn_clone = btn.clone();
     btn.connect_clicked(move |_| {
         btn_clone.set_sensitive(false);
-        btn_clone.set_label("Downloading…");
+        btn_clone.set_label(&crate::tr!("Downloading…"));
         let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
         let rx = std::cell::RefCell::new(rx);
         let ra_username = ra_username.clone();
@@ -484,7 +488,7 @@ fn build_ra_icon_button(
             if let Ok(result) = rx.borrow_mut().try_recv() {
                 if let Some(btn) = btn_weak.upgrade() {
                     btn.set_sensitive(true);
-                    btn.set_label("RA icon");
+                    btn.set_label(&crate::tr!("RA icon"));
                 }
                 if let Some(path) = result {
                     if let Some(ref pc) = pc {
@@ -557,10 +561,10 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
 
     let browse_btn = make_browse_button(
         Some(parent_win),
-        "Select image",
+        &crate::tr!("Select image"),
         false,
         Some((
-            "Images",
+            &crate::tr!("Images"),
             &["image/png", "image/jpeg", "image/webp", "image/x-icon"],
         )),
         || None,
@@ -691,10 +695,10 @@ fn build_dir_buttons(
 
     let browse_btn = make_browse_button(
         Some(parent_win),
-        "Select image",
+        &crate::tr!("Select image"),
         false,
         Some((
-            "Images",
+            &crate::tr!("Images"),
             &["image/png", "image/jpeg", "image/webp", "image/x-icon"],
         )),
         || None,
@@ -741,7 +745,7 @@ fn build_dir_buttons(
         entry.game_id.clone()
     };
     if !sgdb_id_for_picker.is_empty() {
-        let btn = gtk4::Button::with_label("SGDB");
+        let btn = gtk4::Button::with_label(&crate::tr!("SGDB"));
         btn.add_css_class(CSS_FLAT);
         let steam = ctx.state.borrow().steam.clone();
         let asset_c = ctx.asset_type.to_string();
@@ -775,7 +779,7 @@ fn build_dir_buttons(
         btns.append(&btn);
     }
 
-    let reset_btn = gtk4::Button::with_label("Reset");
+    let reset_btn = gtk4::Button::with_label(&crate::tr!("Reset"));
     reset_btn.add_css_class(CSS_FLAT);
     {
         let target_dir = target_dir.to_path_buf();

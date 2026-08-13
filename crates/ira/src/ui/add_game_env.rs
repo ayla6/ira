@@ -7,15 +7,15 @@ pub(super) fn build_env_page() -> (gtk4::Box, gtk4::ListBox, adw::EntryRow, adw:
     page.append(&env_group);
 
     let expander = adw::ExpanderRow::new();
-    expander.set_title("Advanced");
+    expander.set_title(&crate::tr!("Advanced"));
     expander.set_expanded(false);
 
     let ld_preload_entry = adw::EntryRow::new();
-    ld_preload_entry.set_title("LD_PRELOAD");
+    ld_preload_entry.set_title(&crate::tr!("LD_PRELOAD"));
     expander.add_row(&ld_preload_entry);
 
     let ld_library_entry = adw::EntryRow::new();
-    ld_library_entry.set_title("LD_LIBRARY_PATH");
+    ld_library_entry.set_title(&crate::tr!("LD_LIBRARY_PATH"));
     expander.add_row(&ld_library_entry);
 
     let ld_group = adw::PreferencesGroup::new();

@@ -7,7 +7,6 @@ use super::message_helpers::{
 };
 use super::sidebar::{rebuild_sidebar, set_sidebar_playing};
 use super::state::SharedState;
-use crate::strings as S;
 use crate::AppMessage;
 use crate::GameEntry;
 use adw::prelude::*;
@@ -71,8 +70,8 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
 
 fn handle_add_game_error(state: &SharedState, e: String) {
     let window = state.borrow().window.clone();
-    let dialog = adw::AlertDialog::new(Some(S::COULDNT_ADD_GAME), Some(&e));
-    dialog.add_response("ok", S::OK);
+    let dialog = adw::AlertDialog::new(Some(&crate::tr!("Couldn't add game")), Some(&e));
+    dialog.add_response("ok", &crate::tr!("OK"));
     dialog.set_default_response(Some("ok"));
     dialog.set_close_response("ok");
     dialog.present(Some(&window));

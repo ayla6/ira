@@ -59,7 +59,7 @@ pub fn build_hotkey_row(
     // Reset keyboard to default (only visible when not default)
     let kb_reset = gtk4::Button::from_icon_name("edit-undo-symbolic");
     kb_reset.set_valign(gtk4::Align::Center);
-    kb_reset.set_tooltip_text(Some("Reset to default"));
+    kb_reset.set_tooltip_text(Some(&crate::tr!("Reset to default")));
     kb_reset.add_css_class("flat");
     kb_reset.set_visible(keyboard != default_kb);
 
@@ -73,7 +73,7 @@ pub fn build_hotkey_row(
     // Reset gamepad to default
     let gp_reset = gtk4::Button::from_icon_name("edit-undo-symbolic");
     gp_reset.set_valign(gtk4::Align::Center);
-    gp_reset.set_tooltip_text(Some("Reset to default"));
+    gp_reset.set_tooltip_text(Some(&crate::tr!("Reset to default")));
     gp_reset.add_css_class("flat");
     gp_reset.set_visible(gamepad != default_gp);
 
@@ -91,11 +91,21 @@ pub fn build_hotkey_row(
 }
 
 fn update_kb_label(btn: &gtk4::Button, value: &str) {
-    btn.set_label(if value.is_empty() { "Not set" } else { value });
+    let label = if value.is_empty() {
+        crate::tr!("Not set")
+    } else {
+        value.to_string()
+    };
+    btn.set_label(&label);
 }
 
 fn update_gp_label(btn: &gtk4::Button, value: &str) {
-    btn.set_label(if value.is_empty() { "Not set" } else { value });
+    let label = if value.is_empty() {
+        crate::tr!("Not set")
+    } else {
+        value.to_string()
+    };
+    btn.set_label(&label);
 }
 
 fn setup_keyboard(
@@ -156,7 +166,7 @@ fn setup_keyboard(
         } else {
             *capturing_c.borrow_mut() = true;
             btn_c.set_label("…");
-            btn_c.set_tooltip_text(Some("Press key — Esc to cancel"));
+            btn_c.set_tooltip_text(Some(&crate::tr!("Press key — Esc to cancel")));
             reset_c.set_visible(false);
         }
     });
@@ -209,7 +219,9 @@ fn setup_gamepad(
             *capturing_c.borrow_mut() = true;
             pressed_c.borrow_mut().clear();
             btn_c.set_label("…");
-            btn_c.set_tooltip_text(Some("Press gamepad button — right-click to cancel"));
+            btn_c.set_tooltip_text(Some(&crate::tr!(
+                "Press gamepad button — right-click to cancel"
+            )));
             reset_c.set_visible(false);
 
             let btn_cc = btn_c.clone();

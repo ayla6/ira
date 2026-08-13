@@ -45,11 +45,15 @@ pub(super) fn handle_steam_search_result(
     if let Some((sid, matched_name)) = matched {
         match_game_to_steam(state, db_id, sid.clone(), game_name.to_string());
 
-        let label = gtk4::Label::new(Some(&format!("Matched: {} ({})", matched_name, sid)));
+        let label = gtk4::Label::new(Some(
+            &crate::tr!("Matched: {} ({})")
+                .replacen("{}", &matched_name, 1)
+                .replacen("{}", &sid, 1),
+        ));
         label.add_css_class(CSS_SUCCESS_LABEL);
         action_box.append(&label);
     } else {
-        let label = gtk4::Label::new(Some("Not found"));
+        let label = gtk4::Label::new(Some(&crate::tr!("Not found")));
         label.add_css_class(CSS_DIM_LABEL);
         action_box.append(&label);
 
@@ -57,16 +61,18 @@ pub(super) fn handle_steam_search_result(
         let on_match: MatchCallback = Rc::new(move |sid, name| {
             clear_children(&ab);
             let text = if name.is_empty() {
-                format!("Matched: {}", sid)
+                crate::tr!("Matched: {}").replacen("{}", sid, 1)
             } else {
-                format!("Matched: {} ({})", name, sid)
+                crate::tr!("Matched: {} ({})")
+                    .replacen("{}", name, 1)
+                    .replacen("{}", sid, 1)
             };
             let l = gtk4::Label::new(Some(&text));
             l.add_css_class(CSS_SUCCESS_LABEL);
             ab.append(&l);
         });
 
-        let id_btn = gtk4::Button::with_label("Enter ID");
+        let id_btn = gtk4::Button::with_label(&crate::tr!("Enter ID"));
         let sc = state.clone();
         let name = game_name.to_string();
         let cb = on_match.clone();
@@ -75,15 +81,16 @@ pub(super) fn handle_steam_search_result(
             let sc2 = sc.clone();
             let name2 = name.clone();
             let cb2 = cb.clone();
-            let body = format!("Enter the Steam app ID for \u{201C}{}\u{201D}:", name);
-            prompt_for_steam_id(&sc, "Match to Steam", &body, move |app_id| {
+            let body = crate::tr!("Enter the Steam app ID for \u{201C}{}\u{201D}:")
+                .replacen("{}", &name, 1);
+            prompt_for_steam_id(&sc, &crate::tr!("Match to Steam"), &body, move |app_id| {
                 match_game_to_steam(&sc2, did, app_id.to_string(), name2.clone());
                 cb2(app_id, "");
             });
         });
         action_box.append(&id_btn);
 
-        let steam_btn = gtk4::Button::with_label("Search Steam");
+        let steam_btn = gtk4::Button::with_label(&crate::tr!("Search Steam"));
         let sc2 = state.clone();
         let name2 = game_name.to_string();
         let steam2 = steam.clone();
@@ -93,7 +100,7 @@ pub(super) fn handle_steam_search_result(
             show_search_results_dialog(SearchResultsDialogParams {
                 state: &sc2,
                 steam: steam2.clone(),
-                source_name: "Steam",
+                source_name: &crate::tr!("Steam"),
                 game_name: &name2,
                 db_id,
                 source: SearchSource::Steam,
@@ -104,7 +111,7 @@ pub(super) fn handle_steam_search_result(
         });
         action_box.append(&steam_btn);
 
-        let sgdb_btn = gtk4::Button::with_label("Search SGDB");
+        let sgdb_btn = gtk4::Button::with_label(&crate::tr!("Search SGDB"));
         let sc3 = state.clone();
         let name3 = game_name.to_string();
         let steam3 = steam.clone();
@@ -114,7 +121,7 @@ pub(super) fn handle_steam_search_result(
             show_search_results_dialog(SearchResultsDialogParams {
                 state: &sc3,
                 steam: steam3.clone(),
-                source_name: "SteamGridDB",
+                source_name: &crate::tr!("SteamGridDB"),
                 game_name: &name3,
                 db_id,
                 source: SearchSource::Sgdb,
@@ -150,7 +157,11 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
     let header_bar = adw::HeaderBar::new();
-    let title_label = gtk4::Label::new(Some(&format!("Search {}", source_name)));
+    let title_label = gtk4::Label::new(Some(&crate::tr!("Search {}").replacen(
+        "{}",
+        source_name,
+        1,
+    )));
     header_bar.set_title_widget(Some(&title_label));
     outer.append(&header_bar);
 
@@ -170,14 +181,14 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
     results_list.set_margin_end(12);
     results_list.set_margin_bottom(8);
 
-    let placeholder = gtk4::Label::new(Some("Searching..."));
+    let placeholder = gtk4::Label::new(Some(&crate::tr!("Searching...")));
     placeholder.add_css_class(CSS_DIM_LABEL);
     results_list.append(&placeholder);
 
     scrolled.set_child(Some(&results_list));
     outer.append(&scrolled);
 
-    let close_btn = gtk4::Button::with_label("Close");
+    let close_btn = gtk4::Button::with_label(&crate::tr!("Close"));
     close_btn.set_halign(gtk4::Align::End);
     close_btn.set_margin_start(12);
     close_btn.set_margin_end(12);
@@ -202,7 +213,7 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
         }
 
         clear_children(&results_clone);
-        let searching = gtk4::Label::new(Some("Searching..."));
+        let searching = gtk4::Label::new(Some(&crate::tr!("Searching...")));
         searching.add_css_class(CSS_DIM_LABEL);
         results_clone.append(&searching);
 
@@ -234,7 +245,7 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
                 clear_children(&results);
 
                 if search_results.is_empty() {
-                    let none = gtk4::Label::new(Some("No results found"));
+                    let none = gtk4::Label::new(Some(&crate::tr!("No results found")));
                     none.add_css_class(CSS_DIM_LABEL);
                     results.append(&none);
                     return glib::ControlFlow::Break;
@@ -251,7 +262,7 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
                     label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
                     row.append(&label);
 
-                    let match_btn = gtk4::Button::with_label("Match");
+                    let match_btn = gtk4::Button::with_label(&crate::tr!("Match"));
                     match_btn.add_css_class(CSS_SUGGESTED_ACTION);
                     let sc2 = sc.clone();
                     let name2 = name.clone();

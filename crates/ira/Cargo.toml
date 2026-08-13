@@ -30,6 +30,7 @@ opticaldiscs = "0.10"
 tracing-subscriber = { version = "0.3", optional = true }
 tracing-chrome = { version = "0.7", optional = true }
 ira-input = { version = "0.1.0", path = "../input" }
+gettext-rs = { version = "0.7", features = ["gettext-system"] }
 [dev-dependencies]
 tempfile = "3"
 

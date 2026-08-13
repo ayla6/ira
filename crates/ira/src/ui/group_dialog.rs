@@ -1,25 +1,24 @@
 use super::sidebar::rebuild_sidebar;
 use super::state::SharedState;
-use crate::strings as S;
 use adw::prelude::*;
 
 pub fn show_create_group_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
-        Some("New collection"),
-        Some("Enter a name for the collection:"),
+        Some(&crate::tr!("New collection")),
+        Some(&crate::tr!("Enter a name for the collection:")),
     );
 
     let entry = gtk4::Entry::new();
-    entry.set_placeholder_text(Some("Collection name"));
+    entry.set_placeholder_text(Some(&crate::tr!("Collection name")));
     entry.set_margin_start(12);
     entry.set_margin_end(12);
     entry.set_margin_top(8);
     entry.set_margin_bottom(8);
     dialog.set_extra_child(Some(&entry));
 
-    dialog.add_response("cancel", S::CANCEL);
-    dialog.add_response("create", "Create");
+    dialog.add_response("cancel", &crate::tr!("Cancel"));
+    dialog.add_response("create", &crate::tr!("Create"));
     dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("create"));
     dialog.set_close_response("cancel");
@@ -52,7 +51,10 @@ pub fn show_create_group_dialog(state: &SharedState) {
 
 pub fn show_rename_group_dialog(state: &SharedState, group_id: i64, current_name: &str) {
     let window = state.borrow().window.clone();
-    let dialog = adw::AlertDialog::new(Some("Rename collection"), Some("Enter a new name:"));
+    let dialog = adw::AlertDialog::new(
+        Some(&crate::tr!("Rename collection")),
+        Some(&crate::tr!("Enter a new name:")),
+    );
 
     let entry = gtk4::Entry::new();
     entry.set_text(current_name);
@@ -62,8 +64,8 @@ pub fn show_rename_group_dialog(state: &SharedState, group_id: i64, current_name
     entry.set_margin_bottom(8);
     dialog.set_extra_child(Some(&entry));
 
-    dialog.add_response("cancel", S::CANCEL);
-    dialog.add_response("rename", "Rename");
+    dialog.add_response("cancel", &crate::tr!("Cancel"));
+    dialog.add_response("rename", &crate::tr!("Rename"));
     dialog.set_response_appearance("rename", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("rename"));
     dialog.set_close_response("cancel");
@@ -104,8 +106,8 @@ pub fn show_delete_group_dialog(state: &SharedState, group_id: i64, name: &str) 
         )),
     );
 
-    dialog.add_response("cancel", S::CANCEL);
-    dialog.add_response("delete", "Delete");
+    dialog.add_response("cancel", &crate::tr!("Cancel"));
+    dialog.add_response("delete", &crate::tr!("Delete"));
     dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
     dialog.set_default_response(Some("cancel"));
     dialog.set_close_response("cancel");

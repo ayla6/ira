@@ -4,7 +4,6 @@ use super::play_history_chart::{
     DaySession, GameColorAssignment, WeekData,
 };
 use super::state::SharedState;
-use crate::strings as S;
 use adw::prelude::*;
 use std::collections::HashMap;
 
@@ -68,7 +67,7 @@ pub fn show_play_history_dialog(
         .unwrap_or_default();
 
     let dialog = adw::Dialog::new();
-    dialog.set_title(&format!("{} {}", S::SESSION_HISTORY_FOR, game_name));
+    dialog.set_title(&format!("{} {}", crate::tr!("Play history for"), game_name));
     dialog.set_content_width(820);
     dialog.set_content_height(500);
 
@@ -97,7 +96,8 @@ pub fn show_play_history_dialog(
                 .unwrap_or_default();
             clear_children(&box_);
             if sessions.is_empty() {
-                let empty_label = gtk4::Label::new(Some(S::NO_SESSIONS));
+                let empty_label =
+                    gtk4::Label::new(Some(&crate::tr!("No play sessions recorded yet")));
                 empty_label.set_xalign(0.0);
                 empty_label.set_opacity(0.6);
                 box_.append(&empty_label);
@@ -175,9 +175,14 @@ fn delete_session_with_confirm(
     if ctrl {
         do_delete();
     } else {
-        let dialog = adw::AlertDialog::new(Some(S::DELETE_SESSION), Some(S::DELETE_SESSION_BODY));
-        dialog.add_response("cancel", S::CANCEL);
-        dialog.add_response("delete", S::DELETE);
+        let dialog = adw::AlertDialog::new(
+            Some(&crate::tr!("Delete session")),
+            Some(&crate::tr!(
+                "Delete this play session and subtract its playtime?"
+            )),
+        );
+        dialog.add_response("cancel", &crate::tr!("Cancel"));
+        dialog.add_response("delete", &crate::tr!("Delete"));
         dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         dialog.set_close_response("cancel");
@@ -295,7 +300,7 @@ fn compute_game_weeks(sessions: &[ira_models::PlaySession], game_name: &str) -> 
 
 pub fn show_daily_history_dialog(state: &SharedState) {
     let dialog = adw::Dialog::new();
-    dialog.set_title(S::DAILY_HISTORY);
+    dialog.set_title(&crate::tr!("Daily play history"));
     dialog.set_content_width(920);
     dialog.set_content_height(500);
 
@@ -316,7 +321,7 @@ pub fn show_daily_history_dialog(state: &SharedState) {
         ira_db::get_sessions_range(&state.borrow().db, from, now).unwrap_or_default();
 
     if all_sessions.is_empty() {
-        let empty_label = gtk4::Label::new(Some(S::NO_SESSIONS));
+        let empty_label = gtk4::Label::new(Some(&crate::tr!("No play sessions recorded yet")));
         empty_label.set_xalign(0.0);
         empty_label.set_opacity(0.6);
         box_.append(&empty_label);
@@ -448,7 +453,7 @@ fn build_day_data(
         segments.push(BarSegment {
             value: other_total,
             color_index: None,
-            label: "Other".to_string(),
+            label: crate::tr!("Other"),
         });
         // Sort by playtime descending
         other_details.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));

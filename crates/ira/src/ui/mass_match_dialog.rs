@@ -78,14 +78,14 @@ fn populate_match_list(
         let action_box = if game.kind == ira_models::GameKind::Retro
             && game.trophy_source == ira_models::TrophySource::Empty
         {
-            let ac = create_match_row(list, &game.name, "RA: not matched");
+            let ac = create_match_row(list, &game.name, &crate::tr!("RA: not matched"));
             let inner = ac.clone();
             let sc = state.clone();
             let gn = game.name.clone();
             let pid = game.platform_id.clone();
             let did = game.db_id;
             let dlg = dialog.clone();
-            let ra_btn = gtk4::Button::with_label("Search RA…");
+            let ra_btn = gtk4::Button::with_label(&crate::tr!("Search RA…"));
             ra_btn.add_css_class(CSS_SUGGESTED_ACTION);
             let sc2 = sc.clone();
             let gn2 = gn.clone();
@@ -103,7 +103,7 @@ fn populate_match_list(
                     &dlg2,
                     Some(Rc::new(move || {
                         clear_children(&inner_update);
-                        let label = gtk4::Label::new(Some("RA: matched"));
+                        let label = gtk4::Label::new(Some(&crate::tr!("RA: matched")));
                         label.add_css_class(CSS_SUCCESS_LABEL);
                         inner_update.append(&label);
                     })),
@@ -113,11 +113,11 @@ fn populate_match_list(
             ac
         } else {
             let searching_text = if game.app_id.is_empty() && !game.manual_unmatch {
-                "Searching Steam..."
+                crate::tr!("Searching Steam...")
             } else {
-                "Searching SGDB..."
+                crate::tr!("Searching SGDB...")
             };
-            create_match_row(list, &game.name, searching_text)
+            create_match_row(list, &game.name, &searching_text)
         };
         row_action_boxes.push(action_box);
     }
@@ -295,10 +295,12 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 
     if needs_matching.is_empty() {
         let d = adw::AlertDialog::new(
-            Some("Nothing to match"),
-            Some("Every game already has a trophy source and image assets linked."),
+            Some(&crate::tr!("Nothing to match")),
+            Some(&crate::tr!(
+                "Every game already has a trophy source and image assets linked."
+            )),
         );
-        d.add_response("ok", "OK");
+        d.add_response("ok", &crate::tr!("OK"));
         d.present(Some(&window));
         return;
     }
@@ -312,10 +314,16 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
     let header_bar = adw::HeaderBar::new();
-    header_bar.set_title_widget(Some(&gtk4::Label::new(Some("Match unmatched games"))));
+    header_bar.set_title_widget(Some(&gtk4::Label::new(Some(&crate::tr!(
+        "Match unmatched games"
+    )))));
     outer.append(&header_bar);
 
-    let header = gtk4::Label::new(Some(&format!("{} game(s) to match", needs_matching.len())));
+    let header = gtk4::Label::new(Some(&crate::tr!("{} game(s) to match").replacen(
+        "{}",
+        &needs_matching.len().to_string(),
+        1,
+    )));
     header.set_margin_top(16);
     header.set_margin_bottom(8);
     header.set_margin_start(16);
@@ -336,7 +344,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     scrolled.set_child(Some(&list));
     outer.append(&scrolled);
 
-    let close_btn = gtk4::Button::with_label("Close");
+    let close_btn = gtk4::Button::with_label(&crate::tr!("Close"));
     close_btn.set_halign(gtk4::Align::End);
     close_btn.set_margin_top(8);
     close_btn.set_margin_bottom(12);

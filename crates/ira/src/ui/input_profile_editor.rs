@@ -89,7 +89,7 @@ pub(super) fn show_input_profile_editor(
     if initial_error {
         status.add_css_class(CSS_ERROR);
     }
-    let save = gtk4::Button::with_label("Save");
+    let save = gtk4::Button::with_label(&crate::tr!("Save"));
     save.add_css_class(CSS_SUGGESTED_ACTION);
     save.set_sensitive(false);
     let mark_dirty: Rc<dyn Fn()> = {
@@ -196,12 +196,12 @@ fn reset_button(
 ) -> gtk4::Button {
     let reset = gtk4::Button::new();
     reset.add_css_class(CSS_FLAT);
-    reset.set_tooltip_text(Some(
-        "Replace the layout with the standard default bindings for this controller",
-    ));
+    reset.set_tooltip_text(Some(&crate::tr!(
+        "Replace the layout with the standard default bindings for this controller"
+    )));
     let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     content.append(&gtk4::Image::from_icon_name("view-refresh-symbolic"));
-    content.append(&gtk4::Label::new(Some("Reset to defaults")));
+    content.append(&gtk4::Label::new(Some(&crate::tr!("Reset to defaults"))));
     reset.set_child(Some(&content));
     let page_boxes = page_boxes.to_vec();
     let section_groups = section_groups.clone();
@@ -212,11 +212,11 @@ fn reset_button(
     let window = window.clone();
     reset.connect_clicked(move |_| {
         let dialog = adw::AlertDialog::new(
-            Some("Reset to defaults?"),
-            Some("Replace the current layout with the standard one-to-one default bindings for this controller."),
+            Some(&crate::tr!("Reset to defaults?")),
+            Some(&crate::tr!("Replace the current layout with the standard one-to-one default bindings for this controller.")),
         );
-        dialog.add_response("cancel", "Cancel");
-        dialog.add_response("reset", "Reset");
+        dialog.add_response("cancel", &crate::tr!("Cancel"));
+        dialog.add_response("reset", &crate::tr!("Reset"));
         dialog.set_response_appearance("reset", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         dialog.set_close_response("cancel");
@@ -250,7 +250,7 @@ fn add_editor_footer(
     profile_name: &Rc<RefCell<String>>,
     mark_dirty: &Rc<dyn Fn()>,
 ) -> gtk4::Button {
-    let cancel = gtk4::Button::with_label("Cancel");
+    let cancel = gtk4::Button::with_label(&crate::tr!("Cancel"));
     let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     actions.set_halign(gtk4::Align::End);
     actions.set_margin_start(16);
@@ -260,7 +260,7 @@ fn add_editor_footer(
     actions.append(&cancel);
     actions.append(save);
     let name = adw::EntryRow::new();
-    name.set_title("Profile name");
+    name.set_title(&crate::tr!("Profile name"));
     name.set_text(&profile_name.borrow());
     let profile_name_for_changed = profile_name.clone();
     let mark_dirty_for_changed = mark_dirty.clone();

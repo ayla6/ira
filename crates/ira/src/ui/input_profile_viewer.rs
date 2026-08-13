@@ -55,7 +55,7 @@ fn show_input_viewer(
         .as_ref()
         .filter(|profile| !profile.name.trim().is_empty())
         .map(|profile| profile.name.clone())
-        .unwrap_or_else(|| "Live controller preview".to_string());
+        .unwrap_or_else(|| crate::tr!("Live controller preview"));
     match load_error {
         Some(error) => {
             let error_label = gtk4::Label::new(Some(&error));
@@ -69,7 +69,7 @@ fn show_input_viewer(
         }
     }
 
-    let close = gtk4::Button::with_label("Close");
+    let close = gtk4::Button::with_label(&crate::tr!("Close"));
     close.add_css_class(CSS_FLAT);
     let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     actions.set_halign(gtk4::Align::End);
@@ -111,13 +111,13 @@ fn build_live_viewer(
     canvas.set_hexpand(true);
     canvas.set_vexpand(true);
 
-    let status = gtk4::Label::new(Some("Starting controller monitor..."));
+    let status = gtk4::Label::new(Some(&crate::tr!("Starting controller monitor...")));
     configure_status_label(&status, true);
-    let status_card = viewer_card("Status", &status);
+    let status_card = viewer_card(&crate::tr!("Status"), &status);
 
-    let outputs = gtk4::Label::new(Some("No mapped output active"));
+    let outputs = gtk4::Label::new(Some(&crate::tr!("No mapped output active")));
     configure_status_label(&outputs, false);
-    let outputs_card = viewer_card("Active mappings", &outputs);
+    let outputs_card = viewer_card(&crate::tr!("Active mappings"), &outputs);
 
     content.append(&status_card);
     content.append(&canvas);
@@ -164,11 +164,12 @@ fn poll_viewer(
                         .join(", ");
                     status.set_text(&viewer_status(&update, &pressed));
                     let outputs_text = update.active_outputs.join(" | ");
-                    outputs.set_text(if outputs_text.is_empty() {
-                        "No mapped output active"
+                    let outputs_label = if outputs_text.is_empty() {
+                        crate::tr!("No mapped output active")
                     } else {
-                        &outputs_text
-                    });
+                        outputs_text
+                    };
+                    outputs.set_text(&outputs_label);
                     *values.borrow_mut() = preview_values(&update);
                     drawing.queue_draw();
                 }
@@ -188,27 +189,30 @@ fn poll_viewer(
 fn viewer_status(update: &MonitorValues, pressed: &str) -> String {
     if !update.controller_connected {
         return if update.controller_disconnected {
-            "Controller disconnected".to_string()
+            crate::tr!("Controller disconnected")
         } else {
-            "Waiting for controller".to_string()
+            crate::tr!("Waiting for controller")
         };
     }
     let label = controller_label(update);
     if !pressed.is_empty() {
-        return format!("Mapped virtual output | {label} | Pressed: {pressed}");
+        return crate::tr!("Mapped virtual output | {label} | Pressed: {pressed}")
+            .replace("{label}", &label)
+            .replace("{pressed}", pressed);
     }
     if update.gyro_available {
-        format!("Monitoring mapped virtual output | {label}")
+        crate::tr!("Monitoring mapped virtual output | {label}").replace("{label}", &label)
     } else {
-        format!("Monitoring mapped virtual output | {label} | Gyro unavailable")
+        crate::tr!("Monitoring mapped virtual output | {label} | Gyro unavailable")
+            .replace("{label}", &label)
     }
 }
 
-fn controller_label(update: &MonitorValues) -> &str {
+fn controller_label(update: &MonitorValues) -> String {
     if update.controller_label.is_empty() {
-        "controller"
+        crate::tr!("controller")
     } else {
-        &update.controller_label
+        update.controller_label.clone()
     }
 }
 

@@ -26,6 +26,7 @@ fn init_tracing() -> Option<()> {
 
 fn main() {
     let _flush_guard = init_tracing();
+    ira::i18n::init();
 
     gio::resources_register_include!("ira.gresource")
         .expect("failed to register application resources");

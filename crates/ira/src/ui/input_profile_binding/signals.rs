@@ -144,7 +144,7 @@ pub(super) fn update_binding_summary(
     if output_text == source_text {
         row.set_subtitle("");
     } else {
-        row.set_subtitle(&format!("→ {output_text}"));
+        row.set_subtitle(&crate::tr!("→ {output_text}").replace("{output_text}", &output_text));
     }
 }
 

@@ -102,16 +102,14 @@ fn build_tree(
 ) -> Box<dyn Widget> {
     let mut children: Vec<Box<dyn Widget>> = Vec::new();
 
+    let game_name = if game_name.is_empty() {
+        crate::tr!("Ira Overlay")
+    } else {
+        game_name.to_string()
+    };
+
     // Game name header
-    children.push(Box::new(Label::new(
-        if game_name.is_empty() {
-            "Ira Overlay"
-        } else {
-            game_name
-        },
-        20.0,
-        [255, 255, 255, 255],
-    )));
+    children.push(Box::new(Label::new(game_name, 20.0, [255, 255, 255, 255])));
 
     // Progress bar + completion text
     let progress = if total > 0 {
@@ -122,9 +120,12 @@ fn build_tree(
     children.push(Box::new(ProgressBar::new(progress, 320.0)));
 
     let completion_text = if total > 0 {
-        format!("{}/{} ({}%)", unlocked, total, (progress * 100.0) as u32)
+        crate::tr!("{}/{} ({}%)")
+            .replacen("{}", &unlocked.to_string(), 1)
+            .replacen("{}", &total.to_string(), 1)
+            .replacen("{}", &format!("{}", (progress * 100.0) as u32), 1)
     } else {
-        "No achievements".to_string()
+        crate::tr!("No achievements")
     };
     children.push(Box::new(Label::new(
         &completion_text,
@@ -136,9 +137,9 @@ fn build_tree(
     if playtime_secs > 0 {
         let hours = playtime_secs as f64 / 3600.0;
         let playtime_str = if hours >= 1.0 {
-            format!("Playtime: {:.1}h", hours)
+            crate::tr!("Playtime: {:.1}h").replace("{:.1}", &format!("{hours:.1}"))
         } else {
-            format!("Playtime: {}m", playtime_secs / 60)
+            crate::tr!("Playtime: {}m").replace("{}", &(playtime_secs / 60).to_string())
         };
         children.push(Box::new(Label::new(
             &playtime_str,
@@ -164,7 +165,7 @@ fn build_tree(
                 }
                 ach.description.clone()
             } else {
-                "Hidden achievement".to_string()
+                crate::tr!("Hidden achievement")
             };
 
             let name_color = if ach.earned {
@@ -201,10 +202,10 @@ fn build_tree(
     children.push(Box::new(Row::new(
         5.0,
         vec![
-            Box::new(Button::new("Screenshot", 14.0, || {
+            Box::new(Button::new(crate::tr!("Screenshot"), 14.0, || {
                 super::capture::request_screenshot();
             })),
-            Box::new(Button::new("Record", 14.0, || {
+            Box::new(Button::new(crate::tr!("Record"), 14.0, || {
                 super::capture::toggle_recording();
             })),
         ],
@@ -212,7 +213,7 @@ fn build_tree(
 
     // Hints
     children.push(Box::new(Label::new(
-        "Shift+Tab to toggle | Scroll to browse",
+        crate::tr!("Shift+Tab to toggle | Scroll to browse"),
         11.0,
         [130, 130, 130, 255],
     )));

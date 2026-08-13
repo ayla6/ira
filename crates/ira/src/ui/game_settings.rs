@@ -4,7 +4,6 @@ use super::matching::match_game_to_steam;
 use super::ra_match_dialog::show_ra_search_dialog;
 use super::settings_console::build_emulator_dropdown;
 use super::state::{PendingImage, SharedState};
-use crate::strings as S;
 use crate::Game;
 use adw::prelude::*;
 use std::cell::RefCell;
@@ -35,20 +34,20 @@ fn build_ra_section(
     pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>,
 ) -> adw::PreferencesGroup {
     let ra_group = adw::PreferencesGroup::new();
-    ra_group.set_title("RetroAchievements");
+    ra_group.set_title(&crate::tr!("RetroAchievements"));
 
     if game.trophy_source == ira_models::TrophySource::Ra && !game.app_id.is_empty() {
         let status_row = adw::ActionRow::new();
-        status_row.set_title("Linked to RetroAchievements");
-        status_row.set_subtitle(&format!("Game ID: {}", game.app_id));
+        status_row.set_title(&crate::tr!("Linked to RetroAchievements"));
+        status_row.set_subtitle(&crate::tr!("Game ID: {}").replacen("{}", &game.app_id, 1));
         let pending_key = format!("__ra_unmatch_{}", game.db_id);
         let is_pending_unmatch = pending_copies.borrow().contains_key(&pending_key);
         if is_pending_unmatch {
-            status_row.set_subtitle("Will be unmatched on Save\u{2026}");
+            status_row.set_subtitle(&crate::tr!("Will be unmatched on Save\u{2026}"));
         }
         ra_group.add(&status_row);
 
-        let unmatch_btn = gtk4::Button::with_label("Unmatch");
+        let unmatch_btn = gtk4::Button::with_label(&crate::tr!("Unmatch"));
         unmatch_btn.add_css_class(CSS_DESTRUCTIVE_ACTION);
         unmatch_btn.set_valign(gtk4::Align::Center);
         if is_pending_unmatch {
@@ -79,7 +78,7 @@ fn build_ra_section(
         });
         status_row.add_suffix(&unmatch_btn);
     } else if game.trophy_source == ira_models::TrophySource::Empty {
-        let match_btn = gtk4::Button::with_label("Match\u{2026}");
+        let match_btn = gtk4::Button::with_label(&crate::tr!("Match\u{2026}"));
         match_btn.add_css_class(CSS_SUGGESTED_ACTION);
         match_btn.set_valign(gtk4::Align::Center);
         let sc = state.clone();
@@ -130,12 +129,12 @@ fn build_title_and_sort_inputs(
     game: &Game,
 ) -> (adw::EntryRow, adw::EntryRow) {
     let title_entry = adw::EntryRow::new();
-    title_entry.set_title(S::GAME_TITLE);
+    title_entry.set_title(&crate::tr!("Game title"));
     title_entry.set_text(&game.name);
     group.add(&title_entry);
 
     let sort_entry = adw::EntryRow::new();
-    sort_entry.set_title("Sort title");
+    sort_entry.set_title(&crate::tr!("Sort title"));
     sort_entry.set_text(&game.sort_title);
     group.add(&sort_entry);
 
@@ -147,7 +146,7 @@ fn add_game_path_if_needed(group: &adw::PreferencesGroup, game: &Game) {
         return;
     }
     let path_row = adw::ActionRow::new();
-    path_row.set_title("Game file");
+    path_row.set_title(&crate::tr!("Game file"));
     let escaped = glib::markup_escape_text(&game.game_path).to_string();
     path_row.set_subtitle(&escaped);
     path_row.set_sensitive(false);
@@ -163,7 +162,7 @@ fn build_game_folder_row(
         return None;
     }
     let row = adw::EntryRow::new();
-    row.set_title("Install directory");
+    row.set_title(&crate::tr!("Install directory"));
     row.set_text(&game.game_folder);
     let browse = super::helpers::make_browse_button(
         Some(win),
@@ -186,10 +185,10 @@ fn build_runtime_row(parent: &adw::PreferencesGroup, game: &Game) -> Option<adw:
         return None;
     }
     let row = adw::ComboRow::new();
-    row.set_title("Runtime");
-    row.set_subtitle("Choose native Linux or Windows through Wine");
+    row.set_title(&crate::tr!("Runtime"));
+    row.set_subtitle(&crate::tr!("Choose native Linux or Windows through Wine"));
     let runtime_model =
-        super::helpers::string_list_from(&["Wine (Windows)".to_string(), "Linux".to_string()]);
+        super::helpers::string_list_from(&[crate::tr!("Wine (Windows)"), crate::tr!("Linux")]);
     row.set_model(Some(&runtime_model));
     row.set_selected(if game.kind == ira_models::GameKind::Linux {
         1
@@ -206,7 +205,7 @@ fn build_shadps4_version_section(page: &gtk4::Box, game: &Game) -> Rc<RefCell<Op
         let shadps4_versions = ira_platforms::ps4::read_shadps4_launch_options();
         if !shadps4_versions.is_empty() {
             let version_group = adw::PreferencesGroup::new();
-            version_group.set_title("shadPS4 Version");
+            version_group.set_title(&crate::tr!("shadPS4 Version"));
 
             let version_dropdown = build_emulator_dropdown(
                 &game.shadps4_version,
@@ -232,7 +231,8 @@ fn build_shadps4_version_section(page: &gtk4::Box, game: &Game) -> Rc<RefCell<Op
                 *pending_version_c.borrow_mut() = Some(path);
             });
 
-            version_dropdown.set_subtitle("Override the emulator version for this game");
+            version_dropdown
+                .set_subtitle(&crate::tr!("Override the emulator version for this game"));
             version_group.add(&version_dropdown);
             page.append(&version_group);
         }
@@ -250,11 +250,11 @@ fn build_core_row(
         return None;
     }
 
-    let mut core_names: Vec<String> = vec!["Follow global".to_string()];
+    let mut core_names: Vec<String> = vec![crate::tr!("Follow global")];
     core_names.extend(cores.iter().map(|c| c.display_name.clone()));
     let core_dropdown = adw::ComboRow::new();
-    core_dropdown.set_title("RetroArch core");
-    core_dropdown.set_subtitle("Override the RetroArch core for this game");
+    core_dropdown.set_title(&crate::tr!("RetroArch core"));
+    core_dropdown.set_subtitle(&crate::tr!("Override the RetroArch core for this game"));
     core_dropdown.set_model(Some(&super::helpers::string_list_from(&core_names)));
 
     let mut selected_idx: u32 = 0;
@@ -304,13 +304,13 @@ fn add_emulator_dropdown_section(
     }
 
     let emu_group = adw::PreferencesGroup::new();
-    emu_group.set_title("Emulator");
+    emu_group.set_title(&crate::tr!("Emulator"));
 
-    let mut emu_names: Vec<String> = vec!["Follow global".to_string()];
+    let mut emu_names: Vec<String> = vec![crate::tr!("Follow global")];
     emu_names.extend(emulators.iter().map(|e| e.display_name.clone()));
     let emu_dropdown = adw::ComboRow::new();
-    emu_dropdown.set_title("Emulator");
-    emu_dropdown.set_subtitle("Override the emulator for this game");
+    emu_dropdown.set_title(&crate::tr!("Emulator"));
+    emu_dropdown.set_subtitle(&crate::tr!("Override the emulator for this game"));
     emu_dropdown.set_model(Some(&super::helpers::string_list_from(&emu_names)));
 
     let mut selected_emu: u32 = 0;
@@ -410,22 +410,22 @@ fn build_service_ids_section(
 
     if game.kind.is_trophy_console() {
         let row = adw::ActionRow::new();
-        row.set_title("NPWR code");
+        row.set_title(&crate::tr!("NPWR code"));
         row.set_subtitle(&game.app_id);
         row.set_sensitive(false);
         parent.add(&row);
         let serial_row = adw::ActionRow::new();
-        serial_row.set_title("Game serial");
+        serial_row.set_title(&crate::tr!("Game serial"));
         serial_row.set_subtitle(&game.platform_id);
         serial_row.set_sensitive(false);
         parent.add(&serial_row);
     } else if game.trophy_source == ira_models::TrophySource::Gse {
         let row = adw::EntryRow::new();
-        row.set_title("Steam app ID");
+        row.set_title(&crate::tr!("Steam app ID"));
         row.set_text(&game.app_id);
         let search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
         search_btn.set_valign(gtk4::Align::Center);
-        search_btn.set_tooltip_text(Some("Search Steam store"));
+        search_btn.set_tooltip_text(Some(&crate::tr!("Search Steam store")));
         search_btn.add_css_class(CSS_FLAT);
         let sc = state.clone();
         let game_name = game.name.clone();
@@ -450,7 +450,7 @@ fn build_service_ids_section(
         app_id_entry = Some(row);
     } else if game.trophy_source == ira_models::TrophySource::Nge {
         let row = adw::EntryRow::new();
-        row.set_title("GOG product ID");
+        row.set_title(&crate::tr!("GOG product ID"));
         row.set_text(&game.app_id);
         parent.add(&row);
         app_id_entry = Some(row);
@@ -478,8 +478,10 @@ fn build_language_section(
         .collect();
     let model = super::helpers::string_list_from(&display_names);
     let row = adw::ComboRow::new();
-    row.set_title("Game language");
-    row.set_subtitle("Language reported to the game by the API emulator");
+    row.set_title(&crate::tr!("Game language"));
+    row.set_subtitle(&crate::tr!(
+        "Language reported to the game by the API emulator"
+    ));
     row.set_model(Some(&model));
 
     let save_dir = state.borrow().save_dir.clone();
@@ -568,10 +570,12 @@ fn build_save_migration_section(
     }
 
     let row = adw::ActionRow::new();
-    row.set_title("Centralize save data");
-    row.set_subtitle("Move saves to a persistent location and create symlinks");
+    row.set_title(&crate::tr!("Centralize save data"));
+    row.set_subtitle(&crate::tr!(
+        "Move saves to a persistent location and create symlinks"
+    ));
 
-    let btn = gtk4::Button::with_label("Migrate");
+    let btn = gtk4::Button::with_label(&crate::tr!("Migrate"));
     btn.add_css_class(CSS_SUGGESTED_ACTION);
     btn.set_valign(gtk4::Align::Center);
     row.add_suffix(&btn);
@@ -590,7 +594,7 @@ pub(super) fn build_game_general_page(
     let general_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let identity_group = adw::PreferencesGroup::new();
-    identity_group.set_title("Identity");
+    identity_group.set_title(&crate::tr!("Identity"));
     let (title_entry, sort_entry) = build_title_and_sort_inputs(&identity_group, game);
     add_game_path_if_needed(&identity_group, game);
     let runtime_row = build_runtime_row(&identity_group, game);
@@ -602,7 +606,7 @@ pub(super) fn build_game_general_page(
         build_retro_emulator_and_ra(&general_page, state, game, win, pending_copies);
 
     let service_group = adw::PreferencesGroup::new();
-    service_group.set_title("Service");
+    service_group.set_title(&crate::tr!("Service"));
     let app_id_entry = build_service_ids_section(&service_group, game, state, win);
     let language_row = build_language_section(&service_group, state, game, languages);
     let migrate_btn = build_save_migration_section(&service_group, state, game);

@@ -78,6 +78,7 @@ pub fn show_settings_dialog(
     let layout = dialog_layout(parent);
     layout.window.set_deletable(false);
     layout.sidebar_area.set_size_request(180, -1);
+    layout.window.present();
 
     let rom_platforms_with_games = {
         let state = state.borrow();
@@ -87,7 +88,7 @@ pub fn show_settings_dialog(
             .map(|game| game.platform_id.clone())
             .collect()
     };
-    finish_settings_dialog(SettingsDialogParams {
+    let params = SettingsDialogParams {
         win: layout.window,
         sidebar: layout.sidebar,
         stack: layout.stack,
@@ -96,7 +97,8 @@ pub fn show_settings_dialog(
         steam,
         state: state.clone(),
         rom_platforms_with_games,
-    });
+    };
+    glib::idle_add_local_once(move || finish_settings_dialog(params));
 }
 
 fn finish_settings_dialog(params: SettingsDialogParams) {

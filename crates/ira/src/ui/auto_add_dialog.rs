@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc;
@@ -1033,6 +1033,8 @@ fn prompt_install_emulator(
     dialog.set_default_size(380, 240);
     dialog.set_modal(true);
     dialog.set_transient_for(Some(&win));
+    dialog.set_destroy_with_parent(true);
+    dialog.set_transient_for(Some(&win));
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     outer.set_margin_start(20);
@@ -1067,10 +1069,13 @@ fn prompt_install_emulator(
     dialog.set_content(Some(&outer));
     dialog.present();
 
+    let resolved = Rc::new(Cell::new(false));
     let wizard_c = wizard.clone();
     let remember_c = remember.clone();
     let dialog_c = dialog.clone();
+    let resolved_for_yes = resolved.clone();
     yes_btn.connect_clicked(move |_| {
+        resolved_for_yes.set(true);
         persist_remember(&wizard_c, remember_c.is_active(), true);
         let version = wizard_c
             .borrow()
@@ -1093,10 +1098,19 @@ fn prompt_install_emulator(
     let wizard_c2 = wizard.clone();
     let remember_c2 = remember.clone();
     let dialog_c2 = dialog.clone();
+    let resolved_for_no = resolved.clone();
     no_btn.connect_clicked(move |_| {
+        resolved_for_no.set(true);
         persist_remember(&wizard_c2, remember_c2.is_active(), false);
         dialog_c2.close();
         finalize(&wizard_c2, db_id);
+    });
+    let wizard_for_close = wizard.clone();
+    dialog.connect_close_request(move |_| {
+        if !resolved.get() {
+            finalize(&wizard_for_close, db_id);
+        }
+        glib::Propagation::Proceed
     });
     let _ = default_version;
 }

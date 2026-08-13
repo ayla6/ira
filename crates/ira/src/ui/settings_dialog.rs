@@ -287,6 +287,11 @@ fn finish_settings_dialog(
         if let Err(e) = cfg.save() {
             eprintln!("Failed to save config: {}", e);
         }
+        if old_cfg.shadps4_executable != cfg.shadps4_executable
+            || old_cfg.rpcs3_executable != cfg.rpcs3_executable
+        {
+            crate::activate::refresh_playtime_watchers(&state_clone);
+        }
         if reload_games {
             let _ = sender.send(crate::AppMessage::ReloadGames);
         }

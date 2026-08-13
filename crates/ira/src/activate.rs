@@ -147,25 +147,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
         };
         state.borrow_mut().watcher = watcher;
 
-        let shadps4_executable = state.borrow().cfg.shadps4_executable.clone();
-        let shadps4_watcher = match ShadPS4Watcher::new(sender.clone(), &shadps4_executable) {
-            Ok(w) => Some(w),
-            Err(e) => {
-                eprintln!("shadPS4 playtime watching unavailable: {}", e);
-                None
-            }
-        };
-        state.borrow_mut().shadps4_watcher = shadps4_watcher;
-
-        let rpcs3_executable = state.borrow().cfg.rpcs3_executable.clone();
-        let rpcs3_watcher = match Rpcs3Watcher::new(sender.clone(), &rpcs3_executable) {
-            Ok(w) => Some(w),
-            Err(e) => {
-                eprintln!("RPCS3 playtime watching unavailable: {}", e);
-                None
-            }
-        };
-        state.borrow_mut().rpcs3_watcher = rpcs3_watcher;
+        refresh_playtime_watchers(&state);
     }
 
     // Warm steamcmd.net cache for any game with a steam_id in the background
@@ -224,4 +206,30 @@ pub fn activate(app: &adw::Application) -> SharedState {
     }
 
     state
+}
+
+pub(crate) fn refresh_playtime_watchers(state: &SharedState) {
+    let (sender, shadps4_executable, rpcs3_executable) = {
+        let state = state.borrow();
+        (
+            state.sender.clone(),
+            state.cfg.shadps4_executable.clone(),
+            state.cfg.rpcs3_executable.clone(),
+        )
+    };
+    let shadps4_watcher = ShadPS4Watcher::new(sender.clone(), &shadps4_executable)
+        .map(Some)
+        .unwrap_or_else(|error| {
+            eprintln!("shadPS4 playtime watching unavailable: {error}");
+            None
+        });
+    let rpcs3_watcher = Rpcs3Watcher::new(sender, &rpcs3_executable)
+        .map(Some)
+        .unwrap_or_else(|error| {
+            eprintln!("RPCS3 playtime watching unavailable: {error}");
+            None
+        });
+    let mut state = state.borrow_mut();
+    state.shadps4_watcher = shadps4_watcher;
+    state.rpcs3_watcher = rpcs3_watcher;
 }

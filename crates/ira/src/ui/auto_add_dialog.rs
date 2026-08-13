@@ -15,7 +15,7 @@ use super::steam_search_dialog::{
     show_search_results_dialog, SearchResultsDialogParams, SearchSource,
 };
 use super::wine_profile_picker::{build_wine_profile_picker, selected_profile_id};
-use crate::AppMessage;
+use crate::{AppMessage, AppSender, Game};
 
 /// Which API emulator to install (GOG checked first — a GOG game may ship Steam
 /// DLLs that must stay default, so only the Galaxy ones get patched).
@@ -640,6 +640,12 @@ pub(super) struct AddParams {
     pub language_preferences: Vec<String>,
 }
 
+struct AddGameSetup {
+    kind: GameKind,
+    launch_config: GameLaunchConfig,
+    wine_config: WineConfig,
+}
+
 pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams) {
     std::thread::spawn(move || {
         let AddParams {
@@ -655,46 +661,10 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
             skip_emu_prompt,
             language_preferences,
         } = params;
-        let kind = if game.is_windows {
-            GameKind::Wine
-        } else {
-            GameKind::Linux
-        };
-        let exe_path = if game.exe.is_empty() {
-            String::new()
-        } else {
-            game.game_folder
-                .join(&game.exe)
-                .to_string_lossy()
-                .into_owned()
-        };
-        let launch_config = GameLaunchConfig {
-            exe: exe_path,
-            working_dir: game.game_folder.to_string_lossy().into_owned(),
-            ..Default::default()
-        };
-        let wine_config = if game.is_windows {
-            resolve_wine_config(&profiles, profile_id)
-        } else {
-            WineConfig::default()
-        };
-
-        let result = add_game_to_db(AddGameToDbParams {
-            db: &db,
-            name: &name,
-            kind,
-            trophy_source: TrophySource::Gse,
-            app_id: &app_id,
-            platform_id: &app_id,
-            game_folder: &game.game_folder.to_string_lossy(),
-            launch_config: &launch_config,
-            wine_config: &wine_config,
-            profile_id,
-            steam: &steam,
-            save_dir: &save_dir,
-        });
-
-        let db_id = match result {
+        let setup = build_add_game_setup(&game, &profiles, profile_id);
+        let db_id = match add_game_record(
+            &db, &steam, &save_dir, &game, &name, &app_id, profile_id, &setup,
+        ) {
             Ok(id) => id,
             Err(e) => {
                 let _ = tx.send(WizardEvent::Failed(e));
@@ -702,175 +672,288 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
             }
         };
 
-        if !game.logo_position.is_empty() {
-            let _ = ira_db::set_logo_settings(&db, db_id, &game.logo_position, game.logo_size);
-        }
-
-        for (i, variant_exe) in game.variants.iter().enumerate() {
-            let exe_path = game
-                .game_folder
-                .join(variant_exe)
-                .to_string_lossy()
-                .into_owned();
-            let variant = GameVariant {
-                game_id: db_id,
-                name: format!("Launch {}", i + 2),
-                exe: exe_path,
-                working_dir: game.game_folder.to_string_lossy().into_owned(),
-                show_as_entry: false,
-                ..Default::default()
-            };
-            if let Err(e) = ira_db::add_variant(&db, &variant) {
-                eprintln!("Failed to add variant: {}", e);
-            }
-        }
-
-        let entry = match ira_db::find_by_db_id(&db, db_id).ok().flatten() {
-            Some(e) => e,
-            None => {
-                let _ = tx.send(WizardEvent::Failed(
-                    "Failed to reload game after add.".to_string(),
-                ));
-                return;
-            }
-        };
-        let mut game_obj = match crate::game_loader::load_game(&entry, &save_dir) {
+        let game_obj = match load_and_publish_game(
+            &db,
+            &save_dir,
+            &sender,
+            db_id,
+            &name,
+            &setup.launch_config,
+        ) {
             Ok(g) => g,
             Err(e) => {
                 let _ = tx.send(WizardEvent::Failed(e));
                 return;
             }
         };
-        game_obj.set_name(&name);
-        game_obj.game_path = launch_config.exe.clone();
-        let _ = ira_db::update_game_title(&db, game_obj.db_id, &name);
-        let _ = sender.send(AppMessage::NewGame(game_obj.clone()));
 
         let save_dir_for_lang = save_dir.clone();
         let db_for_cache = db.clone();
-        crate::ui::enrichment::enrich_game_blocking(crate::ui::enrichment::EnrichGameParams {
-            app_id: game_obj.app_id.clone(),
-            trophy_source: game_obj.trophy_source,
-            platform_id: game_obj.platform_id.clone(),
-            db_id: game_obj.db_id,
-            title: name.clone(),
-            steam,
-            sender,
-            db,
-            save_dir,
-            game: None,
-            ra_username: String::new(),
-            ra_token: String::new(),
-            ra_password: String::new(),
-        });
-
-        // After enrichment, pick a default language from the user's preferences.
-        let game_exe = game.game_folder.join(&game.exe);
-        let game_exe_str = game_exe.to_string_lossy().to_string();
-        if !language_preferences.is_empty() {
-            let appdetails_path =
-                ira_parser::data_dir(&save_dir_for_lang, &app_id).join("appdetails.json");
-            if let Ok(content) = std::fs::read_to_string(&appdetails_path) {
-                if let Ok(details) = serde_json::from_str::<ira_models::AppDetails>(&content) {
-                    let chosen = language_preferences
-                        .iter()
-                        .find(|pref| details.languages.iter().any(|l| l == *pref))
-                        .or_else(|| details.languages.iter().find(|l| **l == "english"))
-                        .or_else(|| details.languages.first());
-                    if let Some(lang) = chosen {
-                        ira_platforms::api_emulators::write_language_configs(
-                            game_obj.trophy_source,
-                            &game_exe_str,
-                            &save_dir_for_lang,
-                            &app_id,
-                            lang,
-                        );
-                    }
-                }
-            }
-        }
+        enrich_added_game(db, steam, sender, save_dir, &game_obj, name.clone());
+        apply_language_preference(
+            &game,
+            &game_obj,
+            &save_dir_for_lang,
+            &app_id,
+            &language_preferences,
+        );
 
         if skip_emu_prompt {
             let _ = tx.send(WizardEvent::Added(db_id));
             return;
         }
 
-        let game_folder_str = game.game_folder.to_string_lossy().into_owned();
-
-        // Centralize any steam_settings/ or ngalaxye_settings/ found in
-        // subdirectories to the game root, with symlinks from DLL dirs.
-        if let Err(e) = ira_platforms::api_emulators::centralize_steam_settings(&game_folder_str) {
-            eprintln!("Failed to centralize steam_settings: {}", e);
-        }
-        if let Err(e) = ira_platforms::api_emulators::centralize_galaxy_settings(&game_folder_str) {
-            eprintln!("Failed to centralize ngalaxye_settings: {}", e);
-        }
-
-        // One-time migration of existing emulator saves to centralized path.
-        // Check both GBE and NGE default locations since the auto-add flow
-        // may detect GOG DLLs even though trophy_source is Gse.
-        let wine_prefix = if game.is_windows {
-            Some(ira_launcher::wine_launch::wine_prefix(&wine_config))
-        } else {
-            None
-        };
-        ira_platforms::emulator_save_migration::migrate_gbe_saves(
+        migrate_game_saves(
+            &db_for_cache,
             &save_dir_for_lang,
             &app_id,
-            wine_prefix.as_deref(),
-        );
-        ira_platforms::emulator_save_migration::migrate_nge_saves(
-            &save_dir_for_lang,
-            wine_prefix.as_deref(),
+            db_id,
+            &game,
+            &setup.wine_config,
         );
 
-        // Centralize game saves if UFS data is available
-        if let Some(details) = crate::game_loader::read_app_details(&save_dir_for_lang, &app_id) {
-            if !details.ufs_savefiles.is_empty() {
-                let count = ira_launcher::game_saves::setup_game_saves(
-                    &details.ufs_savefiles,
-                    &details.ufs_rootoverrides,
-                    &app_id,
-                    &save_dir_for_lang,
-                    wine_prefix.as_deref(),
-                );
-                if count > 0 {
-                    if let Err(e) = ira_db::set_saves_centralized(&db_for_cache, db_id, true) {
-                        eprintln!("Failed to cache saves centralized: {}", e);
-                    }
-                }
-            }
-        }
-
-        let needs_nge = ira_platforms::api_emulators::find_gog_dlls_recursive(&game_folder_str)
-            .iter()
-            .any(|d| !ira_platforms::api_emulators::has_gog_emulator_backups(d));
-        let needs_gse = !needs_nge
-            && ira_platforms::api_emulators::find_steam_dlls_recursive(&game_folder_str)
-                .iter()
-                .any(|d| {
-                    !ira_platforms::api_emulators::has_steam_emulator_backups(d)
-                        && !d.join("steam_settings").is_dir()
-                });
-
-        if needs_nge {
+        if let Some(emu_kind) = emulator_needed(&game.game_folder.to_string_lossy()) {
             let _ = tx.send(WizardEvent::EmulatorPrompt {
                 db_id,
                 game_folder: game.game_folder.clone(),
                 app_id: app_id.clone(),
-                emu_kind: EmuKind::Nge,
-            });
-        } else if needs_gse {
-            let _ = tx.send(WizardEvent::EmulatorPrompt {
-                db_id,
-                game_folder: game.game_folder.clone(),
-                app_id: app_id.clone(),
-                emu_kind: EmuKind::Gse,
+                emu_kind,
             });
         } else {
             let _ = tx.send(WizardEvent::Added(db_id));
         }
     });
+}
+
+fn build_add_game_setup(
+    game: &IdentifiedGame,
+    profiles: &[WineProfile],
+    profile_id: Option<i64>,
+) -> AddGameSetup {
+    let exe_path = if game.exe.is_empty() {
+        String::new()
+    } else {
+        game.game_folder
+            .join(&game.exe)
+            .to_string_lossy()
+            .into_owned()
+    };
+    AddGameSetup {
+        kind: if game.is_windows {
+            GameKind::Wine
+        } else {
+            GameKind::Linux
+        },
+        launch_config: GameLaunchConfig {
+            exe: exe_path,
+            working_dir: game.game_folder.to_string_lossy().into_owned(),
+            ..Default::default()
+        },
+        wine_config: if game.is_windows {
+            resolve_wine_config(profiles, profile_id)
+        } else {
+            WineConfig::default()
+        },
+    }
+}
+
+fn add_game_record(
+    db: &ira_db::DbConn,
+    steam: &std::sync::Arc<ira_api::SteamDataClient>,
+    save_dir: &str,
+    game: &IdentifiedGame,
+    name: &str,
+    app_id: &str,
+    profile_id: Option<i64>,
+    setup: &AddGameSetup,
+) -> Result<i64, String> {
+    let game_folder = game.game_folder.to_string_lossy();
+    let db_id = add_game_to_db(AddGameToDbParams {
+        db,
+        name,
+        kind: setup.kind,
+        trophy_source: TrophySource::Gse,
+        app_id,
+        platform_id: app_id,
+        game_folder: &game_folder,
+        launch_config: &setup.launch_config,
+        wine_config: &setup.wine_config,
+        profile_id,
+        steam,
+        save_dir,
+    })?;
+
+    if !game.logo_position.is_empty() {
+        let _ = ira_db::set_logo_settings(db, db_id, &game.logo_position, game.logo_size);
+    }
+    add_game_variants(db, db_id, game);
+    Ok(db_id)
+}
+
+fn add_game_variants(db: &ira_db::DbConn, db_id: i64, game: &IdentifiedGame) {
+    let working_dir = game.game_folder.to_string_lossy().into_owned();
+    for (i, variant_exe) in game.variants.iter().enumerate() {
+        let variant = GameVariant {
+            game_id: db_id,
+            name: format!("Launch {}", i + 2),
+            exe: game
+                .game_folder
+                .join(variant_exe)
+                .to_string_lossy()
+                .into_owned(),
+            working_dir: working_dir.clone(),
+            show_as_entry: false,
+            ..Default::default()
+        };
+        if let Err(e) = ira_db::add_variant(db, &variant) {
+            eprintln!("Failed to add variant: {}", e);
+        }
+    }
+}
+
+fn load_and_publish_game(
+    db: &ira_db::DbConn,
+    save_dir: &str,
+    sender: &AppSender,
+    db_id: i64,
+    name: &str,
+    launch_config: &GameLaunchConfig,
+) -> Result<Game, String> {
+    let entry = ira_db::find_by_db_id(db, db_id)
+        .ok()
+        .flatten()
+        .ok_or_else(|| "Failed to reload game after add.".to_string())?;
+    let mut game = crate::game_loader::load_game(&entry, save_dir)?;
+    game.set_name(name);
+    game.game_path = launch_config.exe.clone();
+    let _ = ira_db::update_game_title(db, game.db_id, name);
+    let _ = sender.send(AppMessage::NewGame(game.clone()));
+    Ok(game)
+}
+
+fn enrich_added_game(
+    db: ira_db::DbConn,
+    steam: std::sync::Arc<ira_api::SteamDataClient>,
+    sender: AppSender,
+    save_dir: String,
+    game: &Game,
+    title: String,
+) {
+    crate::ui::enrichment::enrich_game_blocking(crate::ui::enrichment::EnrichGameParams {
+        app_id: game.app_id.clone(),
+        trophy_source: game.trophy_source,
+        platform_id: game.platform_id.clone(),
+        db_id: game.db_id,
+        title,
+        steam,
+        sender,
+        save_dir,
+        db,
+        game: None,
+        ra_username: String::new(),
+        ra_token: String::new(),
+        ra_password: String::new(),
+    });
+}
+
+fn apply_language_preference(
+    identified: &IdentifiedGame,
+    game: &Game,
+    save_dir: &str,
+    app_id: &str,
+    language_preferences: &[String],
+) {
+    if language_preferences.is_empty() {
+        return;
+    }
+    let game_exe = identified.game_folder.join(&identified.exe);
+    let game_exe_str = game_exe.to_string_lossy().to_string();
+    let appdetails_path = ira_parser::data_dir(save_dir, app_id).join("appdetails.json");
+    if let Ok(content) = std::fs::read_to_string(appdetails_path) {
+        if let Ok(details) = serde_json::from_str::<ira_models::AppDetails>(&content) {
+            let chosen = language_preferences
+                .iter()
+                .find(|pref| details.languages.iter().any(|language| language == *pref))
+                .or_else(|| {
+                    details
+                        .languages
+                        .iter()
+                        .find(|language| **language == "english")
+                })
+                .or_else(|| details.languages.first());
+            if let Some(lang) = chosen {
+                ira_platforms::api_emulators::write_language_configs(
+                    game.trophy_source,
+                    &game_exe_str,
+                    save_dir,
+                    app_id,
+                    lang,
+                );
+            }
+        }
+    }
+}
+
+fn migrate_game_saves(
+    db: &ira_db::DbConn,
+    save_dir: &str,
+    app_id: &str,
+    db_id: i64,
+    game: &IdentifiedGame,
+    wine_config: &WineConfig,
+) {
+    let game_folder = game.game_folder.to_string_lossy();
+    if let Err(e) = ira_platforms::api_emulators::centralize_steam_settings(&game_folder) {
+        eprintln!("Failed to centralize steam_settings: {}", e);
+    }
+    if let Err(e) = ira_platforms::api_emulators::centralize_galaxy_settings(&game_folder) {
+        eprintln!("Failed to centralize ngalaxye_settings: {}", e);
+    }
+
+    let wine_prefix = if game.is_windows {
+        Some(ira_launcher::wine_launch::wine_prefix(wine_config))
+    } else {
+        None
+    };
+    ira_platforms::emulator_save_migration::migrate_gbe_saves(
+        save_dir,
+        app_id,
+        wine_prefix.as_deref(),
+    );
+    ira_platforms::emulator_save_migration::migrate_nge_saves(save_dir, wine_prefix.as_deref());
+
+    if let Some(details) = crate::game_loader::read_app_details(save_dir, app_id) {
+        if !details.ufs_savefiles.is_empty() {
+            let count = ira_launcher::game_saves::setup_game_saves(
+                &details.ufs_savefiles,
+                &details.ufs_rootoverrides,
+                app_id,
+                save_dir,
+                wine_prefix.as_deref(),
+            );
+            if count > 0 {
+                if let Err(e) = ira_db::set_saves_centralized(db, db_id, true) {
+                    eprintln!("Failed to cache saves centralized: {}", e);
+                }
+            }
+        }
+    }
+}
+
+fn emulator_needed(game_folder: &str) -> Option<EmuKind> {
+    let needs_nge = ira_platforms::api_emulators::find_gog_dlls_recursive(game_folder)
+        .iter()
+        .any(|dir| !ira_platforms::api_emulators::has_gog_emulator_backups(dir));
+    if needs_nge {
+        return Some(EmuKind::Nge);
+    }
+    let needs_gse = ira_platforms::api_emulators::find_steam_dlls_recursive(game_folder)
+        .iter()
+        .any(|dir| {
+            !ira_platforms::api_emulators::has_steam_emulator_backups(dir)
+                && !dir.join("steam_settings").is_dir()
+        });
+    needs_gse.then_some(EmuKind::Gse)
 }
 
 pub(super) fn handle_add_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {

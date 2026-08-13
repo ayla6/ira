@@ -150,6 +150,7 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
         .contains_key(&db_id);
     if is_running {
         let log = ira_launcher::wrapper::get_game_log(db_id);
+        let window_weak = window.downgrade();
         let buf_clone = buffer.clone();
         let tv_clone = text_view.clone();
         let mark_clone = mark.clone();
@@ -159,6 +160,9 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
             lines.len()
         };
         glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+            if window_weak.upgrade().is_none() {
+                return glib::ControlFlow::Break;
+            }
             let lines = log.lock().unwrap();
             if lines.len() > last_len {
                 let new_text = lines[last_len..].join("\n");

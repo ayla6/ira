@@ -144,6 +144,7 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
     dialog.set_default_width(450);
     dialog.set_default_height(400);
     dialog.set_transient_for(Some(parent));
+    dialog.set_destroy_with_parent(true);
     dialog.set_modal(true);
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -223,8 +224,12 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
         let name = name_clone.clone();
         let cb = on_match_clone.clone();
         let dlg = dialog_clone.clone();
+        let dialog_weak = dialog_clone.downgrade();
         let match_db = match_in_db;
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            if dialog_weak.upgrade().is_none() {
+                return glib::ControlFlow::Break;
+            }
             if let Ok(search_results) = rx.borrow_mut().try_recv() {
                 clear_children(&results);
 

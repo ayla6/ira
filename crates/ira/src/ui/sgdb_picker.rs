@@ -387,6 +387,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     picker.set_default_width(900);
     picker.set_default_height(700);
     picker.set_transient_for(Some(parent));
+    picker.set_destroy_with_parent(true);
     picker.set_modal(true);
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -560,7 +561,11 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let is_initial_load_t = is_initial_load.clone();
     let loading_label = loading_label.clone();
     let loading_label2 = loading_label2.clone();
+    let picker_weak = picker.downgrade();
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        if picker_weak.upgrade().is_none() {
+            return glib::ControlFlow::Break;
+        }
         if let Ok((new_assets, more)) = rx.borrow_mut().try_recv() {
             if is_initial_load_t.get() {
                 *assets_store_t.borrow_mut() = new_assets;
@@ -639,7 +644,12 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         let has_more_m = has_more_scroll.clone();
         let loading_more_m = loading_more_scroll.clone();
         let assets_store_m = assets_store_scroll.clone();
+        let picker_weak = picker_scroll.downgrade();
         glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            if picker_weak.upgrade().is_none() {
+                loading_more_m.set(false);
+                return glib::ControlFlow::Break;
+            }
             if let Ok((new_assets, more)) = rx_more.borrow_mut().try_recv() {
                 if !new_assets.is_empty() {
                     assets_store_m.borrow_mut().extend(new_assets);

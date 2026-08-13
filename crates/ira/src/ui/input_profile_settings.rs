@@ -22,7 +22,6 @@ fn settings_page_container() -> gtk4::Box {
 
 pub(super) struct InputPageWidgets {
     pub controller_defaults: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
-    pub console_profiles: Vec<ConsoleProfileWidgets>,
 }
 
 pub(super) struct ConsoleProfileWidgets {
@@ -125,11 +124,7 @@ pub(super) fn build_input_settings_page(
         controller_defaults.clone(),
         no_controllers_row,
     );
-    let console_group = adw::PreferencesGroup::new();
-    console_group.set_title("Console defaults");
-    let console_profiles = console_profile_rows(&console_group, cfg, &profiles);
     page.append(&controller_group);
-    page.append(&console_group);
     page.append(&monitor_group);
     page.append(&profiles_group);
 
@@ -137,49 +132,32 @@ pub(super) fn build_input_settings_page(
         page,
         InputPageWidgets {
             controller_defaults,
-            console_profiles,
         },
     )
 }
 
-fn console_profile_rows(
-    group: &adw::PreferencesGroup,
+pub(super) fn add_console_profile_group(
+    page: &gtk4::Box,
     cfg: &Config,
-    profiles: &[StoredProfile],
-) -> Vec<ConsoleProfileWidgets> {
-    let mut consoles = ira_models::all_consoles()
-        .map(|console| (console.id.to_string(), console.display_name.to_string()))
-        .collect::<Vec<_>>();
-    consoles.extend([
-        ("ps3".to_string(), "PS3".to_string()),
-        ("ps4".to_string(), "PS4".to_string()),
-        ("psvita".to_string(), "PS Vita".to_string()),
-        ("wiiu".to_string(), "Wii U".to_string()),
-    ]);
-    consoles.sort_by_key(|(id, label)| console_sort_key(id, label));
-    consoles
-        .into_iter()
-        .map(|(console_id, label)| add_console_profile_row(group, cfg, profiles, console_id, label))
-        .collect()
-}
-
-fn console_sort_key(id: &str, label: &str) -> (u8, String) {
-    let family = match id {
-        "psx" | "ps2" | "ps3" | "ps4" | "psvita" | "psp" => 0,
-        "gb" | "gbc" | "gba" | "n64" | "n64dd" | "nds" | "gc" | "wii" | "wiiu" | "nes" | "snes"
-        | "virtualboy" => 1,
-        _ => 2,
-    };
-    let sequence = match id {
-        "psx" => "01",
-        "ps2" => "02",
-        "ps3" => "03",
-        "ps4" => "04",
-        "psvita" => "05",
-        "psp" => "06",
-        _ => label,
-    };
-    (family, sequence.to_string())
+    save_dir: &str,
+    console_id: &str,
+    label: &str,
+) -> ConsoleProfileWidgets {
+    let group = adw::PreferencesGroup::new();
+    group.set_title("Controller");
+    let profiles = list_profiles(save_dir).unwrap_or_else(|error| {
+        eprintln!("Failed to list controller profiles: {error}");
+        Vec::new()
+    });
+    let widget = add_console_profile_row(
+        &group,
+        cfg,
+        &profiles,
+        console_id.to_string(),
+        label.to_string(),
+    );
+    page.append(&group);
+    widget
 }
 
 fn add_console_profile_row(
@@ -190,8 +168,8 @@ fn add_console_profile_row(
     label: String,
 ) -> ConsoleProfileWidgets {
     let profile_row = adw::ComboRow::new();
-    profile_row.set_title(&label);
-    profile_row.set_subtitle("Use controller default");
+    profile_row.set_title("Default layout");
+    profile_row.set_subtitle(&format!("Use controller default for {label}"));
     let mut labels = vec!["Use controller default".to_string()];
     let mut profile_paths = vec![None];
     for profile in profiles

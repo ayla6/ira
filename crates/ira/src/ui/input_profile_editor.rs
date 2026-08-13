@@ -458,7 +458,12 @@ fn section_group(
     }
     let group = adw::PreferencesGroup::new();
     group.set_title(title);
-    page.append(&group);
+    if title == "Custom" {
+        // Keep Custom immediately before the fixed add-binding controls.
+        page.insert_child_after(&group, page.first_child().as_ref());
+    } else {
+        page.append(&group);
+    }
     groups
         .borrow_mut()
         .get_mut(page_index)
@@ -858,7 +863,7 @@ fn section_order(title: &str) -> usize {
         "Left Stick" => 0,
         "Right Stick" => 1,
         "Gyro" => 0,
-        "Custom" => usize::MAX,
+        "Custom" => 0,
         _ => usize::MAX,
     }
 }
@@ -1128,8 +1133,8 @@ mod tests {
     }
 
     #[test]
-    fn test_custom_section_sorts_after_standard_sections() {
-        assert!(section_order("Custom") > section_order("Stick Clicks"));
+    fn test_custom_section_sorts_before_standard_sections() {
+        assert!(section_order("Custom") < section_order("Stick Clicks"));
     }
 
     #[test]

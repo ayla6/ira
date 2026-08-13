@@ -1,6 +1,6 @@
 use super::css::*;
 use super::helpers::dialog_layout;
-use super::input_profile_settings::build_input_settings_page;
+use super::input_profile_settings::{add_console_profile_group, build_input_settings_page};
 use super::input_profile_store::ensure_controller_default_profile;
 use super::profile_dialog::build_profiles_page;
 use super::settings_console::{
@@ -86,7 +86,6 @@ pub fn show_settings_dialog(
     let (input_page, input_widgets) =
         build_input_settings_page(&win, &cfg.save_dir, &cfg, registry);
     let controller_default_widgets = input_widgets.controller_defaults.clone();
-    let console_profile_widgets = input_widgets.console_profiles;
     sidebar.append(&settings_sidebar_row(
         "input-gaming-symbolic",
         "Controller",
@@ -222,6 +221,7 @@ pub fn show_settings_dialog(
     }
 
     let mut console_widgets: Vec<(&'static str, ConsolePageWidgets)> = Vec::new();
+    let mut console_profile_widgets = Vec::new();
     let mut ps4_enable_row: Option<adw::SwitchRow> = None;
     let mut ps4_version_dd: Option<gtk4::DropDown> = None;
     let mut ps3_enable_row: Option<adw::SwitchRow> = None;
@@ -260,6 +260,13 @@ pub fn show_settings_dialog(
             ps3_ov_group.add(&ps3_ov_row);
             ps3_ov_group.add(&ps3_gs_row);
             ps3_page.append(&ps3_ov_group);
+            console_profile_widgets.push(add_console_profile_group(
+                &ps3_page,
+                &cfg,
+                &cfg.save_dir,
+                "ps3",
+                "PS3",
+            ));
             source_overlay_states.push(("ps3".to_string(), ps3_ov_state));
             source_gamescope_states.push(("ps3".to_string(), ps3_gs_state));
 
@@ -290,6 +297,13 @@ pub fn show_settings_dialog(
             ps4_ov_group.add(&ps4_ov_row);
             ps4_ov_group.add(&ps4_gs_row);
             ps4_page.append(&ps4_ov_group);
+            console_profile_widgets.push(add_console_profile_group(
+                &ps4_page,
+                &cfg,
+                &cfg.save_dir,
+                "ps4",
+                "PS4",
+            ));
             source_overlay_states.push(("ps4".to_string(), ps4_ov_state));
             source_gamescope_states.push(("ps4".to_string(), ps4_gs_state));
 
@@ -319,6 +333,13 @@ pub fn show_settings_dialog(
             vita_group.add(&vita_ov_row);
             vita_group.add(&vita_gs_row);
             vita_page.append(&vita_group);
+            console_profile_widgets.push(add_console_profile_group(
+                &vita_page,
+                &cfg,
+                &cfg.save_dir,
+                "psvita",
+                "PS Vita",
+            ));
             source_overlay_states.push(("psvita".to_string(), vita_ov_state));
             source_gamescope_states.push(("psvita".to_string(), vita_gs_state));
             sidebar.append(&settings_sidebar_row(
@@ -329,7 +350,6 @@ pub fn show_settings_dialog(
             stack.add_named(&vita_page, Some("psvita"));
             vita3k_enable_row = Some(vita_en);
             vita3k_exe_row = Some(vita_exe);
-
         }
         if def.id == "wii" {
             let (cemu_page, cemu_en, cemu_exe) = build_cemu_settings_page(&cfg, &win);
@@ -349,6 +369,13 @@ pub fn show_settings_dialog(
             cemu_group.add(&cemu_ov_row);
             cemu_group.add(&cemu_gs_row);
             cemu_page.append(&cemu_group);
+            console_profile_widgets.push(add_console_profile_group(
+                &cemu_page,
+                &cfg,
+                &cfg.save_dir,
+                "wiiu",
+                "Wii U",
+            ));
             source_overlay_states.push(("wiiu".to_string(), cemu_ov_state));
             source_gamescope_states.push(("wiiu".to_string(), cemu_gs_state));
             sidebar.append(&settings_sidebar_row(
@@ -382,6 +409,13 @@ pub fn show_settings_dialog(
         overlay_group.add(&overlay_row);
         overlay_group.add(&gs_row);
         page.append(&overlay_group);
+        console_profile_widgets.push(add_console_profile_group(
+            &page,
+            &cfg,
+            &cfg.save_dir,
+            def.id,
+            def.display_name,
+        ));
         source_overlay_states.push((def.id.to_string(), overlay_state));
         source_gamescope_states.push((def.id.to_string(), gs_state));
 
@@ -673,7 +707,9 @@ pub fn show_settings_dialog(
     btn_row.append(&save_btn);
     content_area.append(&btn_row);
     win.present();
-    sidebar.grab_focus();
+    if let Some(row) = sidebar.selected_row().filter(|row| row.parent().is_some()) {
+        row.grab_focus();
+    }
 }
 
 fn discovery_settings_changed(before: &Config, after: &Config) -> bool {

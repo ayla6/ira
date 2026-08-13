@@ -9,38 +9,17 @@ emulator platforms (Goldberg Steam Emulator, Nemirtingas GOG Emulator, shadPS4) 
 It has many sources of games, having its own Lutris like system of adding games, pulling games from Lutris itself, and also console emulators.
 SteamGridDB provides image assets.
 
-## Reference sources
-
-The `references/` directory (gitignored) contains source code for related
-projects and libraries. Use these when you need to understand how something
-works or find patterns to adapt:
-
-- `gtk/` — GTK4 C source code. When a GTK widget or selection model doesn't
-  do what you need, read the C source here, understand how it works, and
-  create a custom subclass that fits. gtk4-rs exposes `*Impl` traits
-  (e.g. `SelectionModelImpl`, `ListModelImpl`) that let you implement
-  GObject interfaces from Rust. See `game_selection_model.rs` for an
-  example: a custom `SelectionModel` cloned from `GtkSingleSelection` that
-  selects all items with the same `db_id`.
-- `libadwaita/` — libadwaita C source.
-- `lutris/` — Lutris source (game import, playtime, paths).
-- `pcsx2/`, `ppsspp/`, `duckstation/` — emulator sources (memory card,
-  save data, achievement formats).
-- `shadps4-qtlauncher/` — shadPS4 launcher (PS4 trophy parsing).
-- `retro-achievements-docs/`, `retro-achievements-rcheevos/` — RetroAchievements
-  API docs and C library.
-- `steam-rom-manager/` — Steam grid asset management in relation to ROMs.
-- NEVER grep references without having a specific project you specifically want to see. It's extremely slow and probably won't have what you want.
-
 ## Build & test commands
 
+Run all Cargo commands inside the `rust-dev` distrobox. From the repository
+root, use `distrobox enter rust-dev -- <command>`:
+
 ```
-cargo build                         # Build the main binary
-cargo build --bin ira-test          # Build the test binary
-cargo test                          # Run all tests (all crates)
-cargo test -p ira-db                # Run tests for a specific crate
-cargo clippy --all-targets -- -D warnings   # Zero clippy warnings
-cargo build 2>&1 | grep warning     # Check for warnings (should be zero)
+distrobox enter rust-dev -- cargo build                         # Build the main binary
+distrobox enter rust-dev -- cargo build --bin ira-test          # Build the test binary
+distrobox enter rust-dev -- cargo test                          # Run all tests (all crates)
+distrobox enter rust-dev -- cargo test -p ira-db                # Run tests for a specific crate
+distrobox enter rust-dev -- cargo clippy --all-targets -- -D warnings   # Zero clippy warnings
 ```
 
 **Always run `cargo build` and `cargo test` before committing.** Zero warnings is the baseline.
@@ -70,21 +49,22 @@ There's No need to constantly check for it, just don't add new ones.
 
 ## Architecture: Cargo workspace
 
-The project is a Cargo workspace with 10 crates under `crates/`. Dependencies
-flow **upward only** — a crate may depend on crates below it, never above or
-sideways in a way that creates a cycle. The compiler enforces this.
+The project is a Cargo workspace with 19 crates under `crates/`. Dependencies
+flow upward only: a crate may depend on lower layers, never on a consumer that
+would create a cycle. The compiler enforces this.
 
 ```
-Level 0 (leaf):    ira-models       — pure types, only serde/std/chrono
-Level 1:            ira-db           — depends on ira-models
-                   ira-parser       — depends on ira-models
-                   ira-config       — depends on ira-models
-Level 2:            ira-api          — depends on ira-models, ira-parser
-                   ira-platforms    — depends on ira-models, ira-db, ira-parser, ira-api, ira-config
-                   ira-images       — depends on ira-models (GTK only)
-Level 3:            ira-watcher      — depends on ira-models, ira-config, ira-parser
-Level 4:            ira-launcher     — depends on ira-models, ira-db
-Level 5:            ira (main app)   — depends on everything above
+Leaf:              ira-models, ira-overlay-ipc, ira-input
+Foundation:        ira-db, ira-parser
+                    ira-config (models, overlay-ipc)
+                    ira-overlay (overlay-ipc)
+Integration:       ira-api (models, parser)
+                    ira-platforms (models, db, parser, api, config)
+                    ira-images (models, parser; GTK)
+                    ira-watcher (models, config, parser)
+                    ira-launcher (models, db, overlay-ipc)
+Overlay outputs:   ira-overlay-vk, ira-overlay-shim, ira-overlay-standalone
+Application:       ira (main GTK/libadwaita app)
 ```
 
 The main `ira` crate contains: `ui/`, `activate.rs`, `game_list.rs`,

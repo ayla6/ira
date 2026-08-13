@@ -1,28 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "lsp": true,
-  "permission": {
-    "read": {
-      "*": "ask",
-      "**/*.go": "allow"
-    },
-    "glob": { "*": "allow" },
-    "grep": { "*": "allow" },
-    "list": { "*": "allow" },
-    "edit": {
-      "*": "ask",
-      "**/*.go": "allow"
-    },
-    "bash": {
-      "*": "ask",
-      "go *": "allow",
-      "git status": "allow",
-      "git diff*": "allow",
-      "git log*": "allow"
-    },
-    "external_directory": {
-      "*": "ask",
-      "/home/ayla/.go/**": "allow"
-    }
+  "skills": {
+    "paths": [".opencode/skills"]
   }
 }

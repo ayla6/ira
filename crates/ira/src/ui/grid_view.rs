@@ -482,6 +482,11 @@ pub fn show_grid_view(state: &SharedState) {
     let sort_mode = state.borrow().cfg.sort_mode;
     let games = filtered_games(state);
 
+    if games.is_empty() && !state.borrow().search_query.is_empty() {
+        show_empty_search_view(&content_scroll);
+        return;
+    }
+
     build_grid_view(
         state,
         &games,
@@ -507,7 +512,7 @@ pub fn show_loading_view(state: &SharedState, status: &str, completed: usize, to
     content.set_margin_bottom(32);
     content.set_width_request(420);
 
-    let icon = gtk4::Image::from_icon_name("drive-harddisk-symbolic");
+    let icon = gtk4::Image::from_icon_name("library-symbolic");
     icon.set_pixel_size(48);
     icon.set_halign(gtk4::Align::Center);
     content.append(&icon);
@@ -533,6 +538,14 @@ pub fn show_loading_view(state: &SharedState, status: &str, completed: usize, to
     let mut s = state.borrow_mut();
     s.loading_status = Some(status_label);
     s.loading_progress = Some(progress);
+}
+
+fn show_empty_search_view(content_scroll: &gtk4::ScrolledWindow) {
+    let status = adw::StatusPage::new();
+    status.set_icon_name(Some("system-search-symbolic"));
+    status.set_title(S::NO_GAMES_FOUND);
+    status.set_description(Some(S::NO_GAMES_FOUND_DESCRIPTION));
+    content_scroll.set_child(Some(&status));
 }
 
 pub fn update_loading_view(state: &SharedState, status: &str, completed: usize, total: usize) {

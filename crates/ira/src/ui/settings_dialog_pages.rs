@@ -129,7 +129,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.general_page,
-        "preferences-system-symbolic",
+        "cogged-wheel-big-symbolic",
         "General",
         "general",
     );
@@ -137,7 +137,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.overlay_page,
-        "view-grid-symbolic",
+        "layers-symbolic",
         "Overlay",
         "overlay",
     );
@@ -145,7 +145,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.input_page,
-        "input-gaming-symbolic",
+        "games-symbolic",
         "Controller",
         "input",
     );
@@ -153,7 +153,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.system_page,
-        "applications-science-symbolic",
+        "cogged-wheel-big-symbolic",
         "Game system",
         "system",
     );
@@ -162,7 +162,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.computer_games_page,
-        "applications-games-symbolic",
+        "games-symbolic",
         "PC games",
         "computer_games",
     );
@@ -178,7 +178,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.emu_page,
-        "applications-engineering-symbolic",
+        "api-symbolic",
         "API emulators",
         "api_emulators",
     );
@@ -195,7 +195,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.profiles_page,
-        "system-users-symbolic",
+        "wine-glasses-symbolic",
         "Profiles",
         "profiles",
     );
@@ -209,7 +209,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.ra_page,
-        "applications-science-symbolic",
+        "trophy-symbolic",
         "RetroAchievements",
         "ra",
     );
@@ -217,7 +217,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.rom_page,
-        "drive-harddisk-symbolic",
+        "library-symbolic",
         "ROM library",
         "roms",
     );

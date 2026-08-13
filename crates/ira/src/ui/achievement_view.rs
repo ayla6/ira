@@ -168,7 +168,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                 ach_row.set_subtitle(&super::helpers::esc(&ach.description));
                 ach_row.set_activatable(true);
 
-                let img = gtk4::Image::from_icon_name("changes-prevent-symbolic");
+                let img = gtk4::Image::from_icon_name("padlock-closed-symbolic");
                 img.set_pixel_size(24);
                 img.set_valign(gtk4::Align::Center);
                 if ach.earned {
@@ -302,7 +302,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
         });
 
         let global_page = view_stack.add_titled(&global_vbox, Some("global"), S::GLOBAL_STATS);
-        global_page.set_icon_name(Some("dialog-information-symbolic"));
+        global_page.set_icon_name(Some("globe-symbolic"));
     }
 
     view_stack.set_vhomogeneous(false);

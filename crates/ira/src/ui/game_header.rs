@@ -170,7 +170,7 @@ fn build_wine_tools_button(
     menu.append(Some("Run EXE inside Wine prefix"), Some("wine.run_exe"));
 
     let btn = gtk4::MenuButton::new();
-    btn.set_icon_name("applications-engineering-symbolic");
+    btn.set_icon_name("wine-glasses-symbolic");
     btn.add_css_class(CSS_FLAT);
     btn.set_valign(gtk4::Align::Center);
     btn.set_tooltip_text(Some("Wine tools"));
@@ -292,7 +292,7 @@ fn build_settings_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
     menu.append(Some("View log"), Some("game.view_log"));
 
     let btn = adw::SplitButton::new();
-    btn.set_icon_name("preferences-system-symbolic");
+    btn.set_icon_name("cogged-wheel-big-symbolic");
     btn.add_css_class(CSS_FLAT);
     btn.set_valign(gtk4::Align::Center);
     btn.set_tooltip_text(Some("Settings"));

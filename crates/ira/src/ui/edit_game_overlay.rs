@@ -73,7 +73,7 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
     params
         .sidebar
         .append(&settings_dialog::settings_sidebar_row(
-            "view-grid-symbolic",
+            "layers-symbolic",
             "Overlay",
             "overlay",
         ));

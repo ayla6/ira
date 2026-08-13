@@ -190,7 +190,7 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     params
         .sidebar
         .append(&settings_dialog::settings_sidebar_row(
-            "applications-science-symbolic",
+            "cogged-wheel-big-symbolic",
             "System",
             "system",
         ));

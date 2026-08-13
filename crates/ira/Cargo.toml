@@ -50,3 +50,6 @@ workspace = true
 
 [features]
 trace = ["dep:tracing-subscriber", "dep:tracing-chrome"]
+
+[build-dependencies]
+glib-build-tools = "0.22.8"

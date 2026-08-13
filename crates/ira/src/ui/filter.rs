@@ -3,6 +3,13 @@ use crate::Game;
 use ira_models::GroupSelection;
 use std::collections::HashSet;
 
+pub fn matches_search(game: &Game, query: &str) -> bool {
+    query.is_empty()
+        || game.name_lower.contains(query)
+        || (!game.sort_title.is_empty() && game.sort_title.to_lowercase().contains(query))
+        || game.platform_id.to_lowercase().contains(query)
+}
+
 pub fn filtered_games(state: &SharedState) -> Vec<Game> {
     let _span = tracing::info_span!("filtered_games").entered();
     let (sort_mode, sort_descending, search, show_hidden, selected_group, games, group_members) = {
@@ -31,7 +38,7 @@ pub fn filtered_games(state: &SharedState) -> Vec<Game> {
         .filter(|g| !g.hidden || show_hidden)
         .filter(|g| {
             if !search.is_empty() {
-                g.name_lower.contains(&search)
+                matches_search(g, &search)
             } else {
                 match &selected_group {
                     GroupSelection::AllGames => true,
@@ -52,4 +59,23 @@ pub fn filtered_games(state: &SharedState) -> Vec<Game> {
         }
     });
     games
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_matches_search_matches_name_sort_title_and_platform() {
+        let game = Game {
+            name_lower: "the elder scrolls v skyrim".to_string(),
+            sort_title: "Skyrim".to_string(),
+            platform_id: "ps3".to_string(),
+            ..Default::default()
+        };
+
+        assert!(matches_search(&game, "elder"));
+        assert!(matches_search(&game, "skyrim"));
+        assert!(matches_search(&game, "ps3"));
+    }
 }

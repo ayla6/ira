@@ -160,11 +160,7 @@ pub(super) fn register_console_pages(
                 &mut result,
             );
             result.console_profile_widgets.push(profile);
-            sidebar.append(&settings_sidebar_row(
-                "applications-games-symbolic",
-                "PS3",
-                "ps3",
-            ));
+            sidebar.append(&settings_sidebar_row("games-symbolic", "PS3", "ps3"));
             stack.add_named(&page, Some("ps3"));
             result.ps3_enable_row = Some(enable_row);
             result.ps3_exe_row = Some(exe_row);
@@ -180,11 +176,7 @@ pub(super) fn register_console_pages(
                 &mut result,
             );
             result.console_profile_widgets.push(profile);
-            sidebar.append(&settings_sidebar_row(
-                "applications-games-symbolic",
-                "PS4",
-                "ps4",
-            ));
+            sidebar.append(&settings_sidebar_row("games-symbolic", "PS4", "ps4"));
             stack.add_named(&page, Some("ps4"));
             result.ps4_enable_row = Some(enable_row);
             result.ps4_version_dd = version_dd;
@@ -200,11 +192,7 @@ pub(super) fn register_console_pages(
                 &mut result,
             );
             result.console_profile_widgets.push(profile);
-            sidebar.append(&settings_sidebar_row(
-                "applications-games-symbolic",
-                "PS Vita",
-                "psvita",
-            ));
+            sidebar.append(&settings_sidebar_row("games-symbolic", "PS Vita", "psvita"));
             stack.add_named(&page, Some("psvita"));
             result.vita3k_enable_row = Some(enable_row);
             result.vita3k_exe_row = Some(exe_row);
@@ -221,11 +209,7 @@ pub(super) fn register_console_pages(
                 &mut result,
             );
             result.console_profile_widgets.push(profile);
-            sidebar.append(&settings_sidebar_row(
-                "applications-games-symbolic",
-                "Wii U",
-                "wiiu",
-            ));
+            sidebar.append(&settings_sidebar_row("games-symbolic", "Wii U", "wiiu"));
             stack.add_named(&page, Some("wiiu"));
             result.cemu_enable_row = Some(enable_row);
             result.cemu_exe_row = Some(exe_row);
@@ -247,7 +231,7 @@ pub(super) fn register_console_pages(
         let page_id = def.display_name.to_lowercase();
         if rom_platforms_with_games.contains(def.id) {
             sidebar.append(&settings_sidebar_row(
-                "applications-games-symbolic",
+                "games-symbolic",
                 def.display_name,
                 &page_id,
             ));
@@ -260,11 +244,7 @@ pub(super) fn register_console_pages(
     if !empty_platforms.is_empty() {
         sidebar.append(&sidebar_section_title("Empty platforms"));
         for (label, page_id) in empty_platforms {
-            sidebar.append(&settings_sidebar_row(
-                "applications-games-symbolic",
-                &label,
-                &page_id,
-            ));
+            sidebar.append(&settings_sidebar_row("games-symbolic", &label, &page_id));
         }
     }
     result

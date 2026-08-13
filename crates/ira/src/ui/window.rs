@@ -143,6 +143,12 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     sidebar_header.set_show_title(false);
     sidebar_header.add_css_class("flat");
 
+    let search_btn = gtk4::ToggleButton::new();
+    search_btn.set_icon_name("system-search-symbolic");
+    search_btn.set_tooltip_text(Some("Search Games"));
+    search_btn.add_css_class(CSS_FLAT);
+    sidebar_header.pack_start(&search_btn);
+
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.set_tooltip_text(Some(S::ADD_GAME));
     add_btn.add_css_class(CSS_FLAT);
@@ -183,14 +189,6 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     content_header.add_css_class("flat");
     content_header.add_css_class("app-content-header");
 
-    let search_entry = gtk4::SearchEntry::new();
-    search_entry.set_placeholder_text(Some(S::SEARCH_GAMES));
-    search_entry.set_hexpand(true);
-    let title_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    title_box.set_hexpand(true);
-    title_box.append(&search_entry);
-    content_header.set_title_widget(Some(&title_box));
-
     let (_sort_popover, sort_btn, sort_label) = build_sort_popover(state);
     sort_btn.set_icon_name("view-sort-descending-symbolic");
     sort_btn.set_tooltip_text(Some(S::SORT_BY));
@@ -199,6 +197,15 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
 
     content_toolbar.add_top_bar(&content_header);
 
+    let search_entry = gtk4::SearchEntry::new();
+    search_entry.set_placeholder_text(Some(S::SEARCH_GAMES));
+    search_entry.set_hexpand(true);
+    let search_bar = gtk4::SearchBar::new();
+    search_bar.set_show_close_button(true);
+    search_bar.set_child(Some(&search_entry));
+    search_bar.connect_entry(&search_entry);
+    search_bar.set_key_capture_widget(Some(&window));
+
     let grid_header = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let content_scroll = gtk4::ScrolledWindow::new();
     content_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
@@ -206,6 +213,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     let content_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
     let content_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content_area.append(&search_bar);
     content_area.append(&grid_header);
     content_area.append(&content_scroll);
     content_toolbar.set_content(Some(&content_area));
@@ -239,14 +247,8 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
         show_grid_view(state);
     }
 
-    connect_window_signals(
-        state,
-        &window,
-        &sidebar_view,
-        &sidebar_selection,
-        &add_btn,
-        &search_entry,
-    );
+    connect_window_signals(state, &window, &sidebar_view, &sidebar_selection, &add_btn);
+    connect_search_signals(state, &window, &search_btn, &search_bar, &search_entry);
 }
 
 fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
@@ -412,7 +414,6 @@ fn connect_window_signals(
     sidebar_view: &gtk4::ListView,
     sidebar_selection: &super::game_selection_model::GameSelectionModel,
     add_btn: &gtk4::Button,
-    search_entry: &gtk4::SearchEntry,
 ) {
     let state_clone = state.clone();
     sidebar_selection.connect_selection_changed(move |model, _position, _n_items| {
@@ -516,22 +517,6 @@ fn connect_window_signals(
     });
 
     let state_clone = state.clone();
-    let search_gen: Rc<Cell<u32>> = Rc::new(Cell::new(0));
-    search_entry.connect_search_changed(move |entry| {
-        let text = entry.text().to_string();
-        state_clone.borrow_mut().search_query = text;
-        let gen = search_gen.get() + 1;
-        search_gen.set(gen);
-        let gen_cell = search_gen.clone();
-        let s = state_clone.clone();
-        glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
-            if gen_cell.get() == gen {
-                rebuild_sidebar_and_show_grid(&s);
-            }
-        });
-    });
-
-    let state_clone = state.clone();
     add_btn.connect_clicked(move |_| {
         show_add_game_method(&state_clone);
     });
@@ -554,4 +539,61 @@ fn connect_window_signals(
             glib::Propagation::Proceed
         }
     });
+}
+
+fn connect_search_signals(
+    state: &SharedState,
+    window: &adw::ApplicationWindow,
+    search_btn: &gtk4::ToggleButton,
+    search_bar: &gtk4::SearchBar,
+    search_entry: &gtk4::SearchEntry,
+) {
+    let state_clone = state.clone();
+    let search_gen: Rc<Cell<u32>> = Rc::new(Cell::new(0));
+    search_entry.connect_search_changed(move |entry| {
+        state_clone.borrow_mut().search_query = entry.text().trim().to_lowercase();
+        let gen = search_gen.get() + 1;
+        search_gen.set(gen);
+        let gen_cell = search_gen.clone();
+        let state = state_clone.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
+            if gen_cell.get() == gen {
+                rebuild_sidebar_and_show_grid(&state);
+            }
+        });
+    });
+
+    let search_bar_clone = search_bar.clone();
+    let search_entry_clone = search_entry.clone();
+    search_btn.connect_toggled(move |button| {
+        search_bar_clone.set_search_mode(button.is_active());
+        if button.is_active() {
+            search_entry_clone.grab_focus();
+        } else {
+            search_entry_clone.set_text("");
+        }
+    });
+
+    let search_btn_clone = search_btn.clone();
+    let search_entry_clone = search_entry.clone();
+    search_bar.connect_notify_local(Some("search-mode-enabled"), move |bar, _| {
+        search_btn_clone.set_active(bar.is_search_mode());
+        if !bar.is_search_mode() {
+            search_entry_clone.set_text("");
+        }
+    });
+
+    let search_bar_clone = search_bar.clone();
+    let search_entry_clone = search_entry.clone();
+    let search_shortcut = gtk4::EventControllerKey::new();
+    search_shortcut.connect_key_pressed(move |_, key, _, modifiers| {
+        if key == gdk4::Key::F && modifiers.contains(gdk4::ModifierType::CONTROL_MASK) {
+            search_bar_clone.set_search_mode(true);
+            search_entry_clone.grab_focus();
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+    window.add_controller(search_shortcut);
 }

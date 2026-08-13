@@ -76,14 +76,14 @@ pub fn add_global_row(
 }
 
 fn achievement_icon(ach: &MergedAchievement, budget: &mut ImageLoadBudget) -> gtk4::Image {
-    let img = gtk4::Image::from_icon_name("changes-prevent-symbolic");
+    let img = gtk4::Image::from_icon_name("padlock-closed-symbolic");
     img.set_pixel_size(48);
     img.set_valign(gtk4::Align::Start);
     if ach.earned {
         if !ach.icon_path.is_empty() {
             budget.load(&img, &ach.icon_path);
         } else {
-            img.set_icon_name(Some("starred-symbolic"));
+            img.set_icon_name(Some("star-symbolic"));
         }
     } else if !ach.icon_gray_path.is_empty() {
         budget.load(&img, &ach.icon_gray_path);
@@ -225,7 +225,7 @@ pub fn create_global_stats_row(
     let pct_str = format!("{:.1}%", ach.global_percent);
 
     let reveal = if is_hidden_spoiler {
-        let spoiler_img = gtk4::Image::from_icon_name("changes-prevent-symbolic");
+        let spoiler_img = gtk4::Image::from_icon_name("padlock-closed-symbolic");
         spoiler_img.set_pixel_size(48);
         spoiler_img.set_valign(gtk4::Align::Start);
         if !ach.icon_gray_path.is_empty() {
@@ -262,7 +262,7 @@ pub fn create_global_stats_row(
 
         content_stack.add_named(&spoiler_content, Some("spoiler"));
 
-        let real_img = gtk4::Image::from_icon_name("changes-prevent-symbolic");
+        let real_img = gtk4::Image::from_icon_name("padlock-closed-symbolic");
         real_img.set_pixel_size(48);
         real_img.set_valign(gtk4::Align::Start);
         if !ach.icon_gray_path.is_empty() {

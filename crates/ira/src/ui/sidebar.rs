@@ -1,5 +1,6 @@
 use super::context_menu::{show_game_context_menu, show_multi_game_context_menu};
 use super::css::*;
+use super::filter::matches_search;
 use super::grid_view::show_grid_view;
 use super::helpers::clear_children;
 use super::sidebar_item::{SidebarItem, SidebarItemKind};
@@ -221,7 +222,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
         };
         let mut filtered: Vec<&Game> = visible_games
             .iter()
-            .filter(|g| g.name_lower.contains(&search))
+            .filter(|g| matches_search(g, &search))
             .copied()
             .collect();
         filtered.sort_by(|a, b| {
@@ -345,7 +346,7 @@ fn sidebar_setup_factory(_factory: &gtk4::SignalListItemFactory, list_item_obj: 
 
 fn sidebar_bind_all_games(state: &SharedState, row: &gtk4::Box) {
     row.add_css_class(CSS_SIDEBAR_ROW_PAD_GAME);
-    let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
+    let icon = gtk4::Image::from_icon_name("games-symbolic");
     icon.set_pixel_size(16);
     row.append(&icon);
     let label = gtk4::Label::new(Some(S::ALL_GAMES));
@@ -460,7 +461,7 @@ fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &S
 
 fn sidebar_bind_game(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {
     row.add_css_class(CSS_SIDEBAR_ROW_PAD_GAME);
-    let icon = gtk4::Image::from_icon_name("application-x-executable");
+    let icon = gtk4::Image::from_icon_name("games-symbolic");
     icon.set_pixel_size(24);
     if !item.icon_path().is_empty() {
         queue_icon_load(icon.clone(), item.icon_path());

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/com/github/ira/icons">
+    <file>icons/api-symbolic.svg</file>
+    <file>icons/cogged-wheel-big-symbolic.svg</file>
+    <file>icons/games-symbolic.svg</file>
+    <file>icons/globe-symbolic.svg</file>
+    <file>icons/layers-symbolic.svg</file>
+    <file>icons/library-symbolic.svg</file>
+    <file>icons/padlock-closed-symbolic.svg</file>
+    <file>icons/star-symbolic.svg</file>
+    <file>icons/trophy-symbolic.svg</file>
+    <file>icons/wine-glasses-symbolic.svg</file>
+  </gresource>
+</gresources>

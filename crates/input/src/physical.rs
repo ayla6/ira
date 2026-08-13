@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use std::time::UNIX_EPOCH;
 
 use evdev::{AbsoluteAxisCode, Device, EventSummary, KeyCode};
@@ -245,6 +246,30 @@ impl PhysicalGamepad {
         self.device.is_some()
     }
 
+    /// Blocks until the kernel has another evdev event or housekeeping is due.
+    /// This avoids imposing a display-rate polling limit on high-rate controllers.
+    pub fn wait_for_event(&self, timeout: Duration) -> Result<(), String> {
+        let Some(device) = self.device.as_ref() else {
+            std::thread::sleep(timeout);
+            return Ok(());
+        };
+        let timeout_ms = poll_timeout_ms(timeout);
+        let mut descriptor = libc::pollfd {
+            fd: device.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let result = unsafe { libc::poll(&mut descriptor, 1, timeout_ms) };
+        if result < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            return Err(format!(
+                "failed waiting for {}: {}",
+                self.info.path.display(),
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(())
+    }
+
     pub fn try_reconnect(&mut self) -> Result<bool, String> {
         if self.device.is_some() {
             return Ok(false);
@@ -413,6 +438,10 @@ impl PhysicalGamepad {
     }
 }
 
+fn poll_timeout_ms(timeout: Duration) -> libc::c_int {
+    timeout.as_millis().min(libc::c_int::MAX as u128) as libc::c_int
+}
+
 fn device_gone(error: &std::io::Error) -> bool {
     matches!(
         error.raw_os_error(),
@@ -536,11 +565,12 @@ fn is_ira_virtual_device(name: &str) -> bool {
 mod tests {
     use super::{
         device_gone, is_ira_virtual_device, is_ultimate_2, map_button, map_button_for_device,
-        normalize_signed, normalize_trigger, same_device, ControllerFamily, DeviceInfo,
-        ReportedInputMode, EIGHTBITDO_VENDOR, ULTIMATE_2_PRODUCT,
+        normalize_signed, normalize_trigger, poll_timeout_ms, same_device, ControllerFamily,
+        DeviceInfo, ReportedInputMode, EIGHTBITDO_VENDOR, ULTIMATE_2_PRODUCT,
     };
     use crate::GamepadButton;
     use std::path::PathBuf;
+    use std::time::Duration;
 
     #[test]
     fn test_map_extra_grip_buttons() {
@@ -651,6 +681,12 @@ mod tests {
             supported_buttons: Vec::new(),
         };
         assert_eq!(device.reported_input_mode(), ReportedInputMode::XInput);
+    }
+
+    #[test]
+    fn test_poll_timeout_ms_preserves_short_deadlines() {
+        assert_eq!(poll_timeout_ms(Duration::from_millis(4)), 4);
+        assert_eq!(poll_timeout_ms(Duration::MAX), libc::c_int::MAX);
     }
 
     #[test]

@@ -15,7 +15,9 @@ static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 const VIRTUAL_XBOX_VENDOR: u16 = 0x045e;
 const VIRTUAL_XBOX_PRODUCT: u16 = 0x028e;
-const INPUT_POLL_INTERVAL: Duration = Duration::from_millis(16);
+// Physical input wakes the loop through evdev poll(2). This timeout only schedules
+// non-evdev work such as gyro sampling, controller reconnects, and profile reloads.
+const HOUSEKEEPING_INTERVAL: Duration = Duration::from_millis(4);
 const STEAM_START_TIMEOUT: Duration = Duration::from_secs(60);
 const STEAM_EXIT_GRACE: Duration = Duration::from_secs(2);
 
@@ -525,7 +527,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                 &mut trace,
             )?;
         }
-        thread::sleep(INPUT_POLL_INTERVAL);
+        gamepad.wait_for_event(HOUSEKEEPING_INTERVAL)?;
     }
 }
 

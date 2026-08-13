@@ -3,6 +3,7 @@ use super::system_settings::{
     build_env_vars_group, build_ld_paths_group, build_override_switch_row, OverrideState,
 };
 use super::wine_config_helpers::make_revert_btn;
+use crate::strings::settings as T;
 use adw::prelude::*;
 use ira_models::GameLaunchConfig;
 use std::cell::RefCell;
@@ -44,19 +45,19 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
 
     // ─── Performance ───
     let perf_group = adw::PreferencesGroup::new();
-    perf_group.set_title("Performance");
+    perf_group.set_title(T::PERFORMANCE);
 
     let (gamemode_row, gamemode_state) = build_override_switch_row(
-        "Gamemode",
-        "Feral Interactive GameMode",
+        T::GAMEMODE,
+        T::GAMEMODE_DESCRIPTION,
         params.gamemode_default,
         params.launch.gamemode,
     );
     perf_group.add(&gamemode_row);
 
     let (mangohud_row, mangohud_state) = build_override_switch_row(
-        "MangoHud",
-        "Performance overlay",
+        T::MANGOHUD,
+        T::MANGOHUD_DESCRIPTION,
         params.mangohud_default,
         params.launch.mangohud,
     );
@@ -64,8 +65,8 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
 
     let gs_resolved = params.launch.gamescope.unwrap_or(params.gamescope_default);
     let gamescope_row = adw::ExpanderRow::new();
-    gamescope_row.set_title("Gamescope");
-    gamescope_row.set_subtitle("Valve Gamescope compositor");
+    gamescope_row.set_title(T::GAMESCOPE);
+    gamescope_row.set_subtitle(T::GAMESCOPE_DESCRIPTION);
     gamescope_row.set_expanded(gs_resolved);
 
     let gs_switch = gtk4::Switch::new();

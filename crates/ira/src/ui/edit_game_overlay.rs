@@ -1,5 +1,6 @@
 use super::settings_dialog;
 use super::system_settings::{build_override_switch_row, OverrideState};
+use crate::strings::settings as T;
 use adw::prelude::*;
 use ira_models::GameLaunchConfig;
 
@@ -21,8 +22,8 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let (overlay_row, overlay_state) = build_override_switch_row(
-        "In-game overlay",
-        "Achievements, screenshots, and recording",
+        T::IN_GAME_OVERLAY,
+        T::OVERLAY_DESCRIPTION,
         params.overlay_default,
         params.launch.overlay_enabled,
     );
@@ -31,7 +32,7 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
     page.append(&overlay_group);
 
     let overlay_cfg_group = adw::PreferencesGroup::new();
-    overlay_cfg_group.set_title("Overlay");
+    overlay_cfg_group.set_title(T::OVERLAY);
 
     let encoder_model = gtk4::StringList::new(&[
         "Default",
@@ -74,7 +75,7 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
         .sidebar
         .append(&settings_dialog::settings_sidebar_row(
             "layers-symbolic",
-            "Overlay",
+            T::OVERLAY,
             "overlay",
         ));
     params.stack.add_named(&scroll, Some("overlay"));

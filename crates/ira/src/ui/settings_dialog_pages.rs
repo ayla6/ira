@@ -10,6 +10,7 @@ use super::settings_pages::{
 };
 use super::state::SharedState;
 use super::wine_config_widget::{build_wine_config_pages, WineConfigWidgets, WinePage};
+use crate::strings::settings as T;
 use adw::prelude::*;
 use ira_config::Config;
 use std::cell::RefCell;
@@ -130,7 +131,7 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.general_page,
         "cogged-wheel-big-symbolic",
-        "General",
+        T::GENERAL,
         "general",
     );
     register_page(
@@ -138,7 +139,7 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.overlay_page,
         "layers-symbolic",
-        "Overlay",
+        T::OVERLAY,
         "overlay",
     );
     register_page(
@@ -146,7 +147,7 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.input_page,
         "games-symbolic",
-        "Controller",
+        T::CONTROLLER,
         "input",
     );
     register_page(
@@ -154,16 +155,16 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.system_page,
         "cogged-wheel-big-symbolic",
-        "Game system",
+        T::GAME_SYSTEM,
         "system",
     );
-    sidebar.append(&super::settings_pages::sidebar_section_title("PC games"));
+    sidebar.append(&super::settings_pages::sidebar_section_title(T::PC_GAMES));
     register_page(
         sidebar,
         stack,
         &pages.computer_games_page,
         "games-symbolic",
-        "PC games",
+        T::PC_GAMES,
         "computer_games",
     );
     register_page(
@@ -171,7 +172,7 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.steam_page,
         "steam-train-symbolic",
-        "Steam",
+        T::STEAM,
         "steam",
     );
     register_page(
@@ -179,7 +180,7 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.emu_page,
         "api-symbolic",
-        "API emulators",
+        T::API_EMULATORS,
         "api_emulators",
     );
     register_page(
@@ -187,16 +188,16 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.lutris_page,
         "system-software-install-symbolic",
-        "Lutris migration",
+        T::LUTRIS_MIGRATION,
         "migration",
     );
-    sidebar.append(&super::settings_pages::sidebar_section_title("Wine"));
+    sidebar.append(&super::settings_pages::sidebar_section_title(T::WINE));
     register_existing_scrolled_page(
         sidebar,
         stack,
         &pages.profiles_page,
         "wine-glass-symbolic",
-        "Profiles",
+        T::PROFILES,
         "profiles",
     );
     for page in &pages.wine_pages {
@@ -204,13 +205,13 @@ pub(super) fn register_settings_pages(
             sidebar, stack, &page.page, page.icon, page.label, page.label,
         );
     }
-    sidebar.append(&super::settings_pages::sidebar_section_title("Emulation"));
+    sidebar.append(&super::settings_pages::sidebar_section_title(T::EMULATION));
     register_page(
         sidebar,
         stack,
         &pages.ra_page,
         "trophy-symbolic",
-        "RetroAchievements",
+        T::RETROACHIEVEMENTS,
         "ra",
     );
     register_page(
@@ -218,7 +219,7 @@ pub(super) fn register_settings_pages(
         stack,
         &pages.rom_page,
         "library-symbolic",
-        "ROM library",
+        T::ROM_LIBRARY,
         "roms",
     );
 }

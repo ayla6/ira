@@ -1,3 +1,5 @@
+pub mod settings;
+
 pub const APP_TITLE: &str = "Ira";
 pub const MENU: &str = "Main Menu";
 pub const ADD_GAME: &str = "Add a game";

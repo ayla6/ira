@@ -12,6 +12,7 @@ use super::state::SharedState;
 use super::system_settings::{build_override_switch_row, OverrideState};
 use super::wine_config_widget::WineConfigWidgets;
 use crate::strings as S;
+use crate::strings::settings as T;
 use adw::prelude::*;
 use ira_api::SteamDataClient;
 use ira_config::{Config, ControllerInputConfig};
@@ -80,8 +81,8 @@ pub fn show_settings_dialog(
     layout.sidebar_area.set_size_request(180, -1);
 
     let loading = adw::StatusPage::new();
-    loading.set_title("Loading Settings");
-    loading.set_description(Some("Checking installed emulators and controller profiles"));
+    loading.set_title(T::LOADING);
+    loading.set_description(Some(T::LOADING_DESCRIPTION));
     let spinner = gtk4::Spinner::new();
     spinner.start();
     loading.set_child(Some(&spinner));
@@ -133,14 +134,14 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
 
     {
         let (overlay_row, state) = build_override_switch_row(
-            "In-game overlay",
-            "Achievements, screenshots, and recording",
+            T::IN_GAME_OVERLAY,
+            T::OVERLAY_DESCRIPTION,
             cfg.overlay.enabled,
             cfg.overlay.source_overrides.get("steam").copied(),
         );
         let (gs_row, gs_state) = build_override_switch_row(
-            "Gamescope",
-            "Valve Gamescope compositor",
+            T::GAMESCOPE,
+            T::GAMESCOPE_DESCRIPTION,
             cfg.default_system.gamescope,
             cfg.overlay.source_gamescope.get("steam").copied(),
         );
@@ -154,14 +155,14 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
 
     {
         let (overlay_row, state) = build_override_switch_row(
-            "In-game overlay",
-            "Achievements, screenshots, and recording",
+            T::IN_GAME_OVERLAY,
+            T::OVERLAY_DESCRIPTION,
             cfg.overlay.enabled,
             cfg.overlay.source_overrides.get("ra").copied(),
         );
         let (gs_row, gs_state) = build_override_switch_row(
-            "Gamescope",
-            "Valve Gamescope compositor",
+            T::GAMESCOPE,
+            T::GAMESCOPE_DESCRIPTION,
             cfg.default_system.gamescope,
             cfg.overlay.source_gamescope.get("ra").copied(),
         );

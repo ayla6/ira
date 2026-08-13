@@ -1,6 +1,7 @@
 use super::css::*;
 use super::helpers::{entry_path_closure, make_browse_icon_button, string_list_from};
 use super::settings_dialog::settings_page_container;
+use crate::strings::settings as T;
 use adw::prelude::*;
 use ira_config::{Config, ConsoleConfig};
 use ira_models::ConsoleDef;
@@ -19,7 +20,7 @@ pub(super) fn build_emulator_dropdown(
     }
     version_strings.extend(emulators.iter().map(|e| e.display_name.clone()));
     let version_dropdown = adw::ComboRow::new();
-    version_dropdown.set_title("Version");
+    version_dropdown.set_title(T::VERSION);
     version_dropdown.set_model(Some(&string_list_from(&version_strings)));
 
     let mut selected_idx: u32 = 0;
@@ -56,7 +57,7 @@ pub(super) fn build_shadps4_settings_page(
     let emulators = ira_platforms::ps4::read_shadps4_launch_options();
     if !emulators.is_empty() {
         let emu_group = adw::PreferencesGroup::new();
-        emu_group.set_title("Emulator");
+        emu_group.set_title(T::EMULATOR);
 
         let dd = build_emulator_dropdown(
             &cfg.shadps4_executable,
@@ -72,7 +73,7 @@ pub(super) fn build_shadps4_settings_page(
     }
 
     let ps4_dirs_group = adw::PreferencesGroup::new();
-    ps4_dirs_group.set_title("Install directories");
+    ps4_dirs_group.set_title(T::INSTALL_DIRECTORIES);
     ps4_dirs_group.set_description(Some("Managed by shadPS4"));
     let install_dirs =
         ira_platforms::ps4::read_install_dirs_for_executable(&cfg.shadps4_executable);
@@ -109,7 +110,7 @@ pub(super) fn build_rpcs3_settings_page(
     page.append(&enable_group);
 
     let emu_group = adw::PreferencesGroup::new();
-    emu_group.set_title("Emulator");
+    emu_group.set_title(T::EMULATOR);
 
     let detected = ira_platforms::emulator_detect::detect_emulator_choices(
         &["rpcs3", "rpcs3-emu"],
@@ -136,7 +137,7 @@ pub(super) fn build_rpcs3_settings_page(
     page.append(&emu_group);
 
     let dirs_group = adw::PreferencesGroup::new();
-    dirs_group.set_title("Install directories");
+    dirs_group.set_title(T::INSTALL_DIRECTORIES);
     dirs_group.set_description(Some("Managed by RPCS3 (dev_hdd0/game)"));
     let games_dir = ira_platforms::ps3::games_dir_for(&initial_exe);
     let dir_row = adw::ActionRow::new();
@@ -163,7 +164,7 @@ pub(super) fn build_vita3k_settings_page(
     page.append(&enable_group);
 
     let emu_group = adw::PreferencesGroup::new();
-    emu_group.set_title("Emulator");
+    emu_group.set_title(T::EMULATOR);
     let detected = ira_platforms::emulator_detect::detect_emulator_choices(
         &["vita3k", "Vita3K"],
         &[],
@@ -186,7 +187,7 @@ pub(super) fn build_vita3k_settings_page(
     page.append(&emu_group);
 
     let dirs_group = adw::PreferencesGroup::new();
-    dirs_group.set_title("Install directory");
+    dirs_group.set_title(T::INSTALL_DIRECTORY);
     dirs_group.set_description(Some("Vita3K stores installed applications below ux0/app"));
     let dir_row = adw::ActionRow::new();
     dir_row.set_title(
@@ -217,7 +218,7 @@ pub(super) fn build_cemu_settings_page(
     page.append(&enable_group);
 
     let emu_group = adw::PreferencesGroup::new();
-    emu_group.set_title("Emulator");
+    emu_group.set_title(T::EMULATOR);
     let detected = ira_platforms::emulator_detect::detect_emulator_choices(
         &["cemu", "Cemu"],
         &[(ira_platforms::cemu::CEMU_FLATPAK_ID, "Cemu")],
@@ -240,7 +241,7 @@ pub(super) fn build_cemu_settings_page(
     page.append(&emu_group);
 
     let dirs_group = adw::PreferencesGroup::new();
-    dirs_group.set_title("Install directories");
+    dirs_group.set_title(T::INSTALL_DIRECTORIES);
     dirs_group.set_description(Some("Managed by Cemu"));
     let mlc_row = adw::ActionRow::new();
     mlc_row.set_title(
@@ -277,7 +278,7 @@ fn add_detected_emulator_dropdown(
         .map(|emulator| emulator.display_name.as_str())
         .collect::<Vec<_>>();
     let dropdown = adw::ComboRow::new();
-    dropdown.set_title("Emulator");
+    dropdown.set_title(T::EMULATOR);
     dropdown.set_model(Some(&gtk4::StringList::new(&labels)));
     dropdown.set_selected(
         detected
@@ -370,7 +371,7 @@ pub(super) fn build_console_settings_page(
     page.append(&enable_group);
 
     let emu_group = adw::PreferencesGroup::new();
-    emu_group.set_title("Emulator");
+    emu_group.set_title(T::EMULATOR);
 
     let detected_emulators = ira_platforms::emulator_detect::detect_emulators(def.id);
 

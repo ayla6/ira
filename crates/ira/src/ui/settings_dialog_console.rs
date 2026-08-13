@@ -6,6 +6,7 @@ use super::settings_console::{
 use super::settings_pages::{settings_sidebar_row, sidebar_section_title};
 use super::state::SharedState;
 use super::system_settings::{build_override_switch_row, OverrideState};
+use crate::strings::settings as T;
 use adw::prelude::*;
 use ira_config::Config;
 use std::cell::RefCell;
@@ -176,7 +177,7 @@ pub(super) fn register_console_pages(
         add_console_loading_page(stack, &page_id);
     }
     if !empty_platforms.is_empty() {
-        sidebar.append(&sidebar_section_title("Empty platforms"));
+        sidebar.append(&sidebar_section_title(T::EMPTY_PLATFORMS));
         for (label, page_id) in empty_platforms {
             sidebar.append(&settings_sidebar_row("games-symbolic", &label, &page_id));
         }
@@ -198,7 +199,7 @@ fn register_lazy_console_page(
 
 fn add_console_loading_page(stack: &gtk4::Stack, page_id: &str) {
     let loading = adw::StatusPage::new();
-    loading.set_title("Loading emulator settings");
+    loading.set_title(T::LOADING_EMULATOR);
     let spinner = gtk4::Spinner::new();
     spinner.start();
     loading.set_child(Some(&spinner));
@@ -267,85 +268,115 @@ fn load_special_console_page(
     registry: &Arc<ira_input::ControllerRegistry>,
     result: &SharedConsoleSettingsWidgets,
 ) -> bool {
+    if special_console_loaded(&result.borrow(), page_id) {
+        return true;
+    }
+    let Some((console_id, label, page, widgets)) = build_special_console_page(page_id, cfg, win)
+    else {
+        return false;
+    };
+
+    let mut result = result.borrow_mut();
+    let profile = add_console_page_overrides(
+        &page,
+        cfg,
+        win,
+        console_id,
+        label,
+        registry.clone(),
+        &mut result,
+    );
+    result.console_profile_widgets.push(profile);
+    store_special_console_widgets(&mut result, widgets);
+    drop(result);
+    replace_loading_page(stack, &page, console_id);
+    true
+}
+
+enum SpecialConsoleWidgets {
+    Ps3(adw::SwitchRow, adw::EntryRow),
+    Ps4(adw::SwitchRow, Option<adw::ComboRow>),
+    Vita3k(adw::SwitchRow, adw::EntryRow),
+    Cemu(adw::SwitchRow, adw::EntryRow),
+}
+
+fn build_special_console_page(
+    page_id: &str,
+    cfg: &Config,
+    win: &adw::Window,
+) -> Option<(&'static str, &'static str, gtk4::Box, SpecialConsoleWidgets)> {
     match page_id {
-        "ps3" if result.borrow().ps3_enable_row.is_none() => {
+        "ps3" => {
             let (page, enable_row, exe_row) = build_rpcs3_settings_page(cfg, win);
-            let mut result = result.borrow_mut();
-            let profile = add_console_page_overrides(
-                &page,
-                cfg,
-                win,
+            Some((
                 "ps3",
                 "PS3",
-                registry.clone(),
-                &mut result,
-            );
-            result.console_profile_widgets.push(profile);
-            result.ps3_enable_row = Some(enable_row);
-            result.ps3_exe_row = Some(exe_row);
-            drop(result);
-            replace_loading_page(stack, &page, page_id);
-            true
+                page,
+                SpecialConsoleWidgets::Ps3(enable_row, exe_row),
+            ))
         }
-        "ps4" if result.borrow().ps4_enable_row.is_none() => {
+        "ps4" => {
             let (page, enable_row, version_dd) = build_shadps4_settings_page(cfg);
-            let mut result = result.borrow_mut();
-            let profile = add_console_page_overrides(
-                &page,
-                cfg,
-                win,
+            Some((
                 "ps4",
                 "PS4",
-                registry.clone(),
-                &mut result,
-            );
-            result.console_profile_widgets.push(profile);
-            result.ps4_enable_row = Some(enable_row);
-            result.ps4_version_dd = version_dd;
-            drop(result);
-            replace_loading_page(stack, &page, page_id);
-            true
+                page,
+                SpecialConsoleWidgets::Ps4(enable_row, version_dd),
+            ))
         }
-        "psvita" if result.borrow().vita3k_enable_row.is_none() => {
+        "psvita" => {
             let (page, enable_row, exe_row) = build_vita3k_settings_page(cfg, win);
-            let mut result = result.borrow_mut();
-            let profile = add_console_page_overrides(
-                &page,
-                cfg,
-                win,
+            Some((
                 "psvita",
                 "PS Vita",
-                registry.clone(),
-                &mut result,
-            );
-            result.console_profile_widgets.push(profile);
-            result.vita3k_enable_row = Some(enable_row);
-            result.vita3k_exe_row = Some(exe_row);
-            drop(result);
-            replace_loading_page(stack, &page, page_id);
-            true
+                page,
+                SpecialConsoleWidgets::Vita3k(enable_row, exe_row),
+            ))
         }
-        "wiiu" if result.borrow().cemu_enable_row.is_none() => {
+        "wiiu" => {
             let (page, enable_row, exe_row) = build_cemu_settings_page(cfg, win);
-            let mut result = result.borrow_mut();
-            let profile = add_console_page_overrides(
-                &page,
-                cfg,
-                win,
+            Some((
                 "wiiu",
                 "Wii U",
-                registry.clone(),
-                &mut result,
-            );
-            result.console_profile_widgets.push(profile);
-            result.cemu_enable_row = Some(enable_row);
-            result.cemu_exe_row = Some(exe_row);
-            drop(result);
-            replace_loading_page(stack, &page, page_id);
-            true
+                page,
+                SpecialConsoleWidgets::Cemu(enable_row, exe_row),
+            ))
         }
-        "ps3" | "ps4" | "psvita" | "wiiu" => true,
+        _ => None,
+    }
+}
+
+fn special_console_loaded(widgets: &ConsoleSettingsWidgets, console_id: &str) -> bool {
+    match console_id {
+        "ps3" => widgets.ps3_enable_row.is_some(),
+        "ps4" => widgets.ps4_enable_row.is_some(),
+        "psvita" => widgets.vita3k_enable_row.is_some(),
+        "wiiu" => widgets.cemu_enable_row.is_some(),
         _ => false,
+    }
+}
+
+fn store_special_console_widgets(
+    settings: &mut ConsoleSettingsWidgets,
+    widgets: SpecialConsoleWidgets,
+) {
+    match widgets {
+        SpecialConsoleWidgets::Ps3(enable_row, exe_row) => {
+            settings.ps3_enable_row = Some(enable_row);
+            settings.ps3_exe_row = Some(exe_row);
+        }
+        SpecialConsoleWidgets::Ps4(enable_row, version_dd) => {
+            settings.ps4_enable_row = Some(enable_row);
+            settings.ps4_version_dd = version_dd;
+        }
+        SpecialConsoleWidgets::Vita3k(enable_row, exe_row) => {
+            settings.vita3k_enable_row = Some(enable_row);
+            settings.vita3k_exe_row = Some(exe_row);
+        }
+        SpecialConsoleWidgets::Cemu(enable_row, exe_row) => {
+            settings.cemu_enable_row = Some(enable_row);
+            settings.cemu_exe_row = Some(exe_row);
+        }
     }
 }
 
@@ -376,14 +407,14 @@ fn add_console_page_overrides(
     result: &mut ConsoleSettingsWidgets,
 ) -> ConsoleProfileWidgets {
     let (overlay_row, overlay_state) = build_override_switch_row(
-        "In-game overlay",
-        "Achievements, screenshots, and recording",
+        T::IN_GAME_OVERLAY,
+        T::OVERLAY_DESCRIPTION,
         cfg.overlay.enabled,
         cfg.overlay.source_overrides.get(console_id).copied(),
     );
     let (gamescope_row, gamescope_state) = build_override_switch_row(
-        "Gamescope",
-        "Valve Gamescope compositor",
+        T::GAMESCOPE,
+        T::GAMESCOPE_DESCRIPTION,
         cfg.default_system.gamescope,
         cfg.overlay.source_gamescope.get(console_id).copied(),
     );

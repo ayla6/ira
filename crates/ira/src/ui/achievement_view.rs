@@ -179,18 +179,16 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                 ach_row.set_subtitle(&super::helpers::esc(&ach.description));
                 ach_row.set_activatable(true);
 
-                let img = gtk4::Image::from_icon_name("padlock-closed-symbolic");
+                let img = gtk4::Image::from_icon_name("trophy-symbolic");
                 img.set_pixel_size(24);
                 img.set_valign(gtk4::Align::Center);
-                if ach.earned {
-                    if !ach.icon_path.is_empty() {
-                        ira_images::set_image_async(&img, &ach.icon_path);
-                    }
-                } else if !ach.icon_gray_path.is_empty() {
-                    ira_images::set_image_async(&img, &ach.icon_gray_path);
-                    if ach.trophy_type != '\0' {
-                        img.add_css_class(super::css::CSS_LOCKED_TROPHY);
-                    }
+                let icon_path = if ach.icon_path.is_empty() {
+                    &ach.icon_gray_path
+                } else {
+                    &ach.icon_path
+                };
+                if !icon_path.is_empty() {
+                    ira_images::set_image_async(&img, icon_path);
                 }
                 ach_row.add_prefix(&img);
 

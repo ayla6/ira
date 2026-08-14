@@ -78,6 +78,8 @@ pub fn build_ui(
         grid_item_height: Cell::new(0),
         selected_id: String::new(),
         displayed_db_id: 0,
+        displayed_variant_id: None,
+        displayed_content_dirty: false,
         cfg: cfg.clone(),
         steam: ctx.steam.clone(),
         watcher: ctx.watcher.clone(),

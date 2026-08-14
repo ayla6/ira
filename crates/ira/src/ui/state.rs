@@ -43,6 +43,8 @@ pub struct AppState {
     pub grid_item_height: Cell<i32>,
     pub selected_id: String,
     pub displayed_db_id: i64,
+    pub displayed_variant_id: Option<i64>,
+    pub displayed_content_dirty: bool,
     pub cfg: Config,
     pub steam: Arc<SteamDataClient>,
     pub watcher: Option<AchievementWatcher>,

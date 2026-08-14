@@ -443,6 +443,7 @@ pub fn show_grid_view(state: &SharedState) {
         let mut s = state.borrow_mut();
         s.selected_id.clear();
         s.view_generation += 1;
+        s.displayed_content_dirty = true;
         s.loading_status = None;
         s.loading_progress = None;
     }

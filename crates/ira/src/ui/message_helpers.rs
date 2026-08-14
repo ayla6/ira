@@ -1,5 +1,5 @@
 use super::enrichment::enrich_game_async;
-use super::game_display::display_game;
+use super::game_display::{display_game, display_game_cached};
 use super::grid_view::{show_grid_view, show_loading_view};
 use super::helpers::{clear_children, merge_game_enrichment, replace_grid_game};
 use super::sidebar::{
@@ -455,6 +455,9 @@ pub(super) fn apply_game_update(state: &SharedState, updated: Game) {
         let sidebar_update = (updated.db_id, updated.name.clone(), icon_path);
 
         let needs_rebuild = s.selected_id == updated.grid_id() && !s.content_unloaded;
+        if s.displayed_db_id == updated.db_id && !needs_rebuild {
+            s.displayed_content_dirty = true;
+        }
         let counts_changed = updated.earned_count != old_earned || updated.total_count != old_total;
         let visual_changed = updated.grid_path != old_grid_path
             || updated.header_path != old_header_path
@@ -539,6 +542,9 @@ pub(super) fn insert_or_update_game(state: &SharedState, game: Game) {
             let mut g = game;
             g.hidden = s.games[i].hidden;
             g.manual_unmatch = s.games[i].manual_unmatch;
+            if s.displayed_db_id == g.db_id {
+                s.displayed_content_dirty = true;
+            }
             s.games[i] = g;
             (s.games[i].db_id, true)
         } else {
@@ -601,7 +607,7 @@ pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) 
         .find(|g| g.db_id == db_id && g.variant_id == variant_id)
         .cloned();
     if let Some(game) = game {
-        display_game(&game, state);
+        display_game_cached(&game, state);
 
         if game.achievements.is_empty()
             && !game.app_id.is_empty()

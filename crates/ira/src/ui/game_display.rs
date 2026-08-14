@@ -23,6 +23,8 @@ pub fn display_game(game: &Game, state: &SharedState) {
     {
         let mut s = state.borrow_mut();
         s.displayed_db_id = game.db_id;
+        s.displayed_variant_id = game.variant_id;
+        s.displayed_content_dirty = false;
         s.view_generation = gen;
     }
 
@@ -83,6 +85,30 @@ pub fn display_game(game: &Game, state: &SharedState) {
     clamp.set_child(Some(&game_vbox));
 
     content_box.append(&clamp);
+}
+
+pub fn display_game_cached(game: &Game, state: &SharedState) {
+    let (content_scroll, content_box, reuse) = {
+        let s = state.borrow();
+        (
+            s.content_scroll.clone(),
+            s.content_box.clone(),
+            !s.content_unloaded
+                && s.displayed_db_id == game.db_id
+                && s.displayed_variant_id == game.variant_id
+                && !s.displayed_content_dirty
+                && content_has_children(&s.content_box),
+        )
+    };
+    if reuse {
+        content_scroll.set_child(Some(&content_box));
+    } else {
+        display_game(game, state);
+    }
+}
+
+fn content_has_children(content_box: &gtk4::Box) -> bool {
+    content_box.first_child().is_some()
 }
 
 pub fn format_playtime(hours: f64) -> String {

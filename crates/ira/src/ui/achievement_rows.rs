@@ -75,20 +75,16 @@ pub fn add_global_row(
 }
 
 fn achievement_icon(ach: &MergedAchievement, budget: &mut ImageLoadBudget) -> gtk4::Image {
-    let img = gtk4::Image::from_icon_name("padlock-closed-symbolic");
+    let img = gtk4::Image::from_icon_name("trophy-symbolic");
     img.set_pixel_size(48);
     img.set_valign(gtk4::Align::Start);
-    if ach.earned {
-        if !ach.icon_path.is_empty() {
-            budget.load(&img, &ach.icon_path);
-        } else {
-            img.set_icon_name(Some("star-symbolic"));
-        }
-    } else if !ach.icon_gray_path.is_empty() {
-        budget.load(&img, &ach.icon_gray_path);
-        if ach.trophy_type != '\0' {
-            img.add_css_class(CSS_LOCKED_TROPHY);
-        }
+    let icon_path = if ach.icon_path.is_empty() {
+        &ach.icon_gray_path
+    } else {
+        &ach.icon_path
+    };
+    if !icon_path.is_empty() {
+        budget.load(&img, icon_path);
     }
     img
 }
@@ -224,15 +220,7 @@ pub fn create_global_stats_row(
     let pct_str = format!("{:.1}%", ach.global_percent);
 
     let reveal = if is_hidden_spoiler {
-        let spoiler_img = gtk4::Image::from_icon_name("padlock-closed-symbolic");
-        spoiler_img.set_pixel_size(48);
-        spoiler_img.set_valign(gtk4::Align::Start);
-        if !ach.icon_gray_path.is_empty() {
-            budget.load(&spoiler_img, &ach.icon_gray_path);
-            if ach.trophy_type != '\0' {
-                spoiler_img.add_css_class(CSS_LOCKED_TROPHY);
-            }
-        }
+        let spoiler_img = achievement_icon(ach, budget);
 
         let spoiler_content = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
         spoiler_content.set_margin_top(8);
@@ -261,15 +249,7 @@ pub fn create_global_stats_row(
 
         content_stack.add_named(&spoiler_content, Some("spoiler"));
 
-        let real_img = gtk4::Image::from_icon_name("padlock-closed-symbolic");
-        real_img.set_pixel_size(48);
-        real_img.set_valign(gtk4::Align::Start);
-        if !ach.icon_gray_path.is_empty() {
-            budget.load(&real_img, &ach.icon_gray_path);
-            if ach.trophy_type != '\0' {
-                real_img.add_css_class(CSS_LOCKED_TROPHY);
-            }
-        }
+        let real_img = achievement_icon(ach, budget);
 
         let real_content = make_content(real_img, &ach.display_name, &ach.description);
         content_stack.add_named(&real_content, Some("real"));

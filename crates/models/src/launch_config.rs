@@ -7,6 +7,7 @@ pub enum ControllerInputMode {
     Disabled,
     VirtualXInput,
     VirtualDirectInput,
+    VirtualSwitchPro,
 }
 
 #[derive(Deserialize)]
@@ -339,6 +340,14 @@ mod tests {
         assert_eq!(
             direct.input_mode,
             Some(ControllerInputMode::VirtualDirectInput)
+        );
+        let switch_pro: GameLaunchConfig = serde_json::from_str(
+            r#"{"exe":"","args":"","working_dir":"","env_vars":[],"ld_preload":"","ld_library_path":"","input_mode":"virtual_switch_pro"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            switch_pro.input_mode,
+            Some(ControllerInputMode::VirtualSwitchPro)
         );
     }
 

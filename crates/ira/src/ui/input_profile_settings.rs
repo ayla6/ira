@@ -176,6 +176,7 @@ fn add_console_remapping_rows(
         crate::tr!("Disabled"),
         crate::tr!("Virtual XInput"),
         crate::tr!("Virtual DirectInput"),
+        crate::tr!("Nintendo Switch Pro Controller"),
     ];
     let mode_refs: Vec<&str> = mode_strings.iter().map(String::as_str).collect();
     mode_row.set_model(Some(&gtk4::StringList::new(&mode_refs)));
@@ -384,6 +385,7 @@ fn input_mode_index(mode: Option<ControllerInputMode>) -> u32 {
         Some(ControllerInputMode::Disabled) => 1,
         Some(ControllerInputMode::VirtualXInput) => 2,
         Some(ControllerInputMode::VirtualDirectInput) => 3,
+        Some(ControllerInputMode::VirtualSwitchPro) => 4,
     }
 }
 
@@ -392,6 +394,7 @@ fn input_mode_from_index(index: u32) -> Option<ControllerInputMode> {
         1 => Some(ControllerInputMode::Disabled),
         2 => Some(ControllerInputMode::VirtualXInput),
         3 => Some(ControllerInputMode::VirtualDirectInput),
+        4 => Some(ControllerInputMode::VirtualSwitchPro),
         _ => None,
     }
 }
@@ -492,6 +495,7 @@ fn add_controller_row(
         crate::tr!("Disabled"),
         crate::tr!("Virtual XInput"),
         crate::tr!("Virtual DirectInput"),
+        crate::tr!("Nintendo Switch Pro Controller"),
     ];
     let mode_refs: Vec<&str> = mode_strings.iter().map(String::as_str).collect();
     let mode_model = gtk4::StringList::new(&mode_refs);
@@ -584,6 +588,7 @@ fn add_controller_row(
 fn backend_for_mode(mode: ControllerInputMode) -> ira_input::VirtualGamepadBackend {
     match mode {
         ControllerInputMode::VirtualDirectInput => ira_input::VirtualGamepadBackend::DirectInput,
+        ControllerInputMode::VirtualSwitchPro => ira_input::VirtualGamepadBackend::SwitchPro,
         ControllerInputMode::Disabled | ControllerInputMode::VirtualXInput => {
             ira_input::VirtualGamepadBackend::XInput
         }
@@ -599,6 +604,9 @@ fn update_controller_subtitle(
         ControllerInputMode::Disabled => crate::tr!("Input virtualization disabled"),
         ControllerInputMode::VirtualXInput => crate::tr!("Virtual XInput layout"),
         ControllerInputMode::VirtualDirectInput => crate::tr!("Virtual DirectInput layout"),
+        ControllerInputMode::VirtualSwitchPro => {
+            crate::tr!("Nintendo Switch Pro Controller layout")
+        }
     };
     row.set_subtitle(&format!(
         "{} | Linux reports {}",
@@ -660,6 +668,7 @@ fn selection_for_mode(mode: ControllerInputMode) -> u32 {
         ControllerInputMode::Disabled => 0,
         ControllerInputMode::VirtualXInput => 1,
         ControllerInputMode::VirtualDirectInput => 2,
+        ControllerInputMode::VirtualSwitchPro => 3,
     }
 }
 
@@ -667,6 +676,7 @@ pub(super) fn mode_from_selection(selection: u32) -> ControllerInputMode {
     match selection {
         1 => ControllerInputMode::VirtualXInput,
         2 => ControllerInputMode::VirtualDirectInput,
+        3 => ControllerInputMode::VirtualSwitchPro,
         _ => ControllerInputMode::Disabled,
     }
 }
@@ -882,6 +892,10 @@ mod tests {
         assert_eq!(
             mode_from_selection(2),
             ControllerInputMode::VirtualDirectInput
+        );
+        assert_eq!(
+            mode_from_selection(3),
+            ControllerInputMode::VirtualSwitchPro
         );
     }
 

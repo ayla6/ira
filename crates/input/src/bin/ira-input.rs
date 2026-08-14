@@ -8,13 +8,16 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ira_input::{
     discover_gamepads, discover_sdl_gamepads, InputEvent, InputProfile, InputSource, MappingEngine,
-    OutputEvent, PhysicalGamepad, Sdl3SensorBackend, VirtualGamepad, VirtualKeyboard, VirtualMouse,
+    OutputEvent, PhysicalGamepad, Sdl3SensorBackend, VirtualGamepad, VirtualGamepadBackend,
+    VirtualKeyboard, VirtualMouse,
 };
 
 static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 const VIRTUAL_XBOX_VENDOR: u16 = 0x045e;
 const VIRTUAL_XBOX_PRODUCT: u16 = 0x028e;
+const SWITCH_PRO_VENDOR: u16 = 0x057e;
+const SWITCH_PRO_PRODUCT: u16 = 0x2009;
 const SENSOR_SAMPLE_INTERVAL: Duration = Duration::from_millis(4);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const PROFILE_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -436,26 +439,24 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         None
     } else {
         let mut target_args = arguments.command[1..].to_vec();
-        if mapper.profile().backend == ira_input::VirtualGamepadBackend::DirectInput {
-            inject_flatpak_env(
-                &arguments.command[0],
-                &mut target_args,
-                "SDL_GAMECONTROLLERCONFIG",
-                &VirtualGamepad::direct_input_sdl_mapping(),
-            );
-        }
+        inject_flatpak_target_env(
+            &arguments.command[0],
+            &mut target_args,
+            mapper.profile().backend,
+            gamepad.info().vendor,
+            gamepad.info().product,
+        );
         let mut command = std::process::Command::new(&arguments.command[0]);
         command.args(target_args);
         command.env("SDL_JOYSTICK_HIDAPI", "0");
-        if mapper.profile().backend == ira_input::VirtualGamepadBackend::DirectInput {
-            command.env(
-                "SDL_GAMECONTROLLERCONFIG",
-                VirtualGamepad::direct_input_sdl_mapping(),
-            );
+        if let Some(mapping) = sdl_mapping_for_backend(mapper.profile().backend) {
+            command.env("SDL_GAMECONTROLLERCONFIG", mapping);
         }
-        if let Some(ignored_device) =
-            ignored_device_for_target(gamepad.info().vendor, gamepad.info().product)
-        {
+        if let Some(ignored_device) = ignored_device_for_target(
+            gamepad.info().vendor,
+            gamepad.info().product,
+            mapper.profile().backend,
+        ) {
             command.env("SDL_GAMECONTROLLER_IGNORE_DEVICES", ignored_device);
         }
         Some(
@@ -712,8 +713,45 @@ fn inject_flatpak_env(program: &str, args: &mut Vec<String>, key: &str, value: &
     args.insert(run_index + 1, format!("--env={key}={value}"));
 }
 
-fn ignored_device_for_target(vendor: u16, product: u16) -> Option<String> {
-    if (vendor, product) == (VIRTUAL_XBOX_VENDOR, VIRTUAL_XBOX_PRODUCT) {
+fn inject_flatpak_target_env(
+    program: &str,
+    args: &mut Vec<String>,
+    backend: VirtualGamepadBackend,
+    vendor: u16,
+    product: u16,
+) {
+    inject_flatpak_env(program, args, "SDL_JOYSTICK_HIDAPI", "0");
+    if let Some(mapping) = sdl_mapping_for_backend(backend) {
+        inject_flatpak_env(program, args, "SDL_GAMECONTROLLERCONFIG", &mapping);
+    }
+    if let Some(ignored_device) = ignored_device_for_target(vendor, product, backend) {
+        inject_flatpak_env(
+            program,
+            args,
+            "SDL_GAMECONTROLLER_IGNORE_DEVICES",
+            &ignored_device,
+        );
+    }
+}
+
+fn sdl_mapping_for_backend(backend: VirtualGamepadBackend) -> Option<String> {
+    match backend {
+        VirtualGamepadBackend::XInput => None,
+        VirtualGamepadBackend::DirectInput => Some(VirtualGamepad::direct_input_sdl_mapping()),
+        VirtualGamepadBackend::SwitchPro => Some(VirtualGamepad::switch_pro_sdl_mapping()),
+    }
+}
+
+fn ignored_device_for_target(
+    vendor: u16,
+    product: u16,
+    backend: VirtualGamepadBackend,
+) -> Option<String> {
+    if ((vendor, product) == (VIRTUAL_XBOX_VENDOR, VIRTUAL_XBOX_PRODUCT)
+        && backend == VirtualGamepadBackend::XInput)
+        || ((vendor, product) == (SWITCH_PRO_VENDOR, SWITCH_PRO_PRODUCT)
+            && backend == VirtualGamepadBackend::SwitchPro)
+    {
         None
     } else {
         Some(format!("0x{vendor:04x}/0x{product:04x}"))
@@ -1235,13 +1273,57 @@ mod tests {
     #[test]
     fn test_ignored_device_for_target_preserves_virtual_xbox() {
         assert_eq!(
-            ignored_device_for_target(VIRTUAL_XBOX_VENDOR, VIRTUAL_XBOX_PRODUCT),
+            ignored_device_for_target(
+                VIRTUAL_XBOX_VENDOR,
+                VIRTUAL_XBOX_PRODUCT,
+                VirtualGamepadBackend::XInput,
+            ),
             None
         );
         assert_eq!(
-            ignored_device_for_target(0x2dc8, 0x3106),
+            ignored_device_for_target(0x2dc8, 0x3106, VirtualGamepadBackend::XInput),
             Some("0x2dc8/0x3106".to_string())
         );
+    }
+
+    #[test]
+    fn test_ignored_device_for_target_preserves_switch_pro_identity() {
+        assert_eq!(
+            ignored_device_for_target(
+                SWITCH_PRO_VENDOR,
+                SWITCH_PRO_PRODUCT,
+                VirtualGamepadBackend::SwitchPro,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn test_inject_flatpak_target_env_configures_switch_pro_isolation() {
+        let mut args = vec!["run".to_string(), "com.example.Game".to_string()];
+        inject_flatpak_target_env(
+            "/usr/bin/flatpak",
+            &mut args,
+            VirtualGamepadBackend::SwitchPro,
+            SWITCH_PRO_VENDOR,
+            SWITCH_PRO_PRODUCT,
+        );
+
+        assert!(args.contains(&"--env=SDL_JOYSTICK_HIDAPI=0".to_string()));
+        assert!(args.iter().any(|argument| {
+            argument.starts_with("--env=SDL_GAMECONTROLLERCONFIG=030000007e0500000920000011810000,")
+        }));
+        assert!(!args
+            .iter()
+            .any(|argument| argument.starts_with("--env=SDL_GAMECONTROLLER_IGNORE_DEVICES=")));
+    }
+
+    #[test]
+    fn test_sdl_mapping_is_configured_for_switch_pro_backend() {
+        assert!(sdl_mapping_for_backend(VirtualGamepadBackend::SwitchPro)
+            .unwrap()
+            .starts_with("030000007e0500000920000011810000,"));
+        assert!(sdl_mapping_for_backend(VirtualGamepadBackend::XInput).is_none());
     }
 
     #[test]

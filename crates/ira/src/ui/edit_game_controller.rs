@@ -41,6 +41,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         crate::tr!("Disabled"),
         crate::tr!("Virtual XInput"),
         crate::tr!("Virtual DirectInput"),
+        crate::tr!("Nintendo Switch Pro Controller"),
     ];
     let mode_refs = mode_strings.iter().map(String::as_str).collect::<Vec<_>>();
     input_mode_row.set_model(Some(&gtk4::StringList::new(&mode_refs)));
@@ -341,6 +342,7 @@ fn input_mode_index(mode: Option<ControllerInputMode>) -> u32 {
         Some(ControllerInputMode::Disabled) => 1,
         Some(ControllerInputMode::VirtualXInput) => 2,
         Some(ControllerInputMode::VirtualDirectInput) => 3,
+        Some(ControllerInputMode::VirtualSwitchPro) => 4,
     }
 }
 
@@ -350,6 +352,7 @@ fn input_mode_from_index(index: u32) -> Option<ControllerInputMode> {
         1 => Some(ControllerInputMode::Disabled),
         2 => Some(ControllerInputMode::VirtualXInput),
         3 => Some(ControllerInputMode::VirtualDirectInput),
+        4 => Some(ControllerInputMode::VirtualSwitchPro),
         _ => None,
     }
 }
@@ -375,6 +378,7 @@ mod tests {
             Some(ControllerInputMode::Disabled),
             Some(ControllerInputMode::VirtualXInput),
             Some(ControllerInputMode::VirtualDirectInput),
+            Some(ControllerInputMode::VirtualSwitchPro),
         ] {
             assert_eq!(input_mode_from_index(input_mode_index(mode)), mode);
         }

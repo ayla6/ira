@@ -59,6 +59,7 @@ fn input_backend(mode: ControllerInputMode) -> Option<VirtualGamepadBackend> {
         ControllerInputMode::Disabled => None,
         ControllerInputMode::VirtualXInput => Some(VirtualGamepadBackend::XInput),
         ControllerInputMode::VirtualDirectInput => Some(VirtualGamepadBackend::DirectInput),
+        ControllerInputMode::VirtualSwitchPro => Some(VirtualGamepadBackend::SwitchPro),
     }
 }
 
@@ -108,6 +109,7 @@ fn resolve_input_profile(
             .join(match backend {
                 VirtualGamepadBackend::XInput => "resolved-xinput.json",
                 VirtualGamepadBackend::DirectInput => "resolved-directinput.json",
+                VirtualGamepadBackend::SwitchPro => "resolved-switch-pro.json",
             })
     };
     let profile_path = selected_profile
@@ -764,6 +766,10 @@ mod tests {
         assert_eq!(
             input_backend(ControllerInputMode::VirtualDirectInput),
             Some(VirtualGamepadBackend::DirectInput)
+        );
+        assert_eq!(
+            input_backend(ControllerInputMode::VirtualSwitchPro),
+            Some(VirtualGamepadBackend::SwitchPro)
         );
     }
 

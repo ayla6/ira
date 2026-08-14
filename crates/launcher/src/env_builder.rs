@@ -455,7 +455,8 @@ pub fn wrap_with_input_mode(
 ) -> Result<(), String> {
     let binary = match mode {
         Some(ControllerInputMode::VirtualXInput)
-        | Some(ControllerInputMode::VirtualDirectInput) => Some(input_binary_path()),
+        | Some(ControllerInputMode::VirtualDirectInput)
+        | Some(ControllerInputMode::VirtualSwitchPro) => Some(input_binary_path()),
         None | Some(ControllerInputMode::Disabled) => None,
     };
     if let Some(binary) = binary {
@@ -475,7 +476,8 @@ fn wrap_with_input_mode_for_binary(
 ) {
     match mode {
         Some(ControllerInputMode::VirtualXInput)
-        | Some(ControllerInputMode::VirtualDirectInput) => {
+        | Some(ControllerInputMode::VirtualDirectInput)
+        | Some(ControllerInputMode::VirtualSwitchPro) => {
             wrap_command_with_input(command, binary, profile)
         }
         None | Some(ControllerInputMode::Disabled) => {}
@@ -602,6 +604,21 @@ mod tests {
         wrap_with_input_mode_for_binary(
             &mut command,
             Some(ControllerInputMode::VirtualDirectInput),
+            None,
+            "/bin/ira-input",
+        );
+        assert_eq!(
+            command,
+            vec!["/bin/ira-input", "--", "game", "--fullscreen"]
+        );
+    }
+
+    #[test]
+    fn test_input_mode_virtual_switch_pro_wraps_command() {
+        let mut command = command();
+        wrap_with_input_mode_for_binary(
+            &mut command,
+            Some(ControllerInputMode::VirtualSwitchPro),
             None,
             "/bin/ira-input",
         );

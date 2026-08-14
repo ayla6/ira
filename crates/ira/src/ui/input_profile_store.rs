@@ -30,6 +30,9 @@ pub(super) fn controller_default_path_for_backend(
         VirtualGamepadBackend::DirectInput => Path::new(save_dir)
             .join(CONTROLLER_DEFAULT_DIRECTORY)
             .join(format!("{key}-directinput.json")),
+        VirtualGamepadBackend::SwitchPro => Path::new(save_dir)
+            .join(CONTROLLER_DEFAULT_DIRECTORY)
+            .join(format!("{key}-switch-pro.json")),
     }
 }
 

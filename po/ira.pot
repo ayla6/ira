@@ -1114,6 +1114,12 @@ msgstr ""
 msgid "Virtual DirectInput"
 msgstr ""
 
+#: crates/ira/src/ui/edit_game_controller.rs:44
+#: crates/ira/src/ui/input_profile_settings.rs:179
+#: crates/ira/src/ui/input_profile_settings.rs:498
+msgid "Nintendo Switch Pro Controller"
+msgstr ""
+
 #: crates/ira/src/ui/edit_game_controller.rs:55
 msgid "Current layout"
 msgstr ""
@@ -2222,6 +2228,10 @@ msgstr ""
 msgid "Virtual DirectInput layout"
 msgstr ""
 
+#: crates/ira/src/ui/input_profile_settings.rs:607
+msgid "Nintendo Switch Pro Controller layout"
+msgstr ""
+
 #: crates/ira/src/ui/input_profile_settings.rs:728
 msgid "View raw controller input"
 msgstr ""
@@ -2899,6 +2909,10 @@ msgstr ""
 
 #: crates/ira/src/ui/input_profile_editor_pages.rs:41
 msgid "DirectInput"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_pages.rs:44
+msgid "Nintendo Switch Pro"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_editor_pages.rs:63

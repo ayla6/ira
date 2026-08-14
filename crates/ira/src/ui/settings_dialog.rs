@@ -359,6 +359,9 @@ fn apply_controller_defaults(
                     ira_models::ControllerInputMode::VirtualDirectInput => {
                         ira_input::VirtualGamepadBackend::DirectInput
                     }
+                    ira_models::ControllerInputMode::VirtualSwitchPro => {
+                        ira_input::VirtualGamepadBackend::SwitchPro
+                    }
                     ira_models::ControllerInputMode::Disabled
                     | ira_models::ControllerInputMode::VirtualXInput => {
                         ira_input::VirtualGamepadBackend::XInput

@@ -8,6 +8,7 @@ pub enum VirtualGamepadBackend {
     #[default]
     XInput,
     DirectInput,
+    SwitchPro,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -207,6 +208,13 @@ impl OutputAction {
                 !matches!(self, Self::GamepadButton(button) if button.is_paddle())
             }
             VirtualGamepadBackend::DirectInput => true,
+            VirtualGamepadBackend::SwitchPro => {
+                !matches!(self, Self::GamepadButton(button) if button.is_paddle())
+                    && !matches!(
+                        self,
+                        Self::GamepadAxis(GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger)
+                    )
+            }
         }
     }
 }
@@ -405,7 +413,7 @@ impl InputProfile {
     }
 
     pub fn default_gamepad_for_backend(backend: VirtualGamepadBackend) -> Self {
-        let buttons = [
+        let mut buttons = vec![
             GamepadButton::A,
             GamepadButton::B,
             GamepadButton::X,
@@ -422,24 +430,11 @@ impl InputProfile {
             GamepadButton::DpadLeft,
             GamepadButton::DpadRight,
         ];
-        let supported_buttons = match backend {
-            VirtualGamepadBackend::XInput => &buttons[..],
-            VirtualGamepadBackend::DirectInput => &[
-                GamepadButton::A,
-                GamepadButton::B,
-                GamepadButton::X,
-                GamepadButton::Y,
-                GamepadButton::LeftShoulder,
-                GamepadButton::RightShoulder,
-                GamepadButton::Back,
-                GamepadButton::Start,
-                GamepadButton::Guide,
-                GamepadButton::LeftStick,
-                GamepadButton::RightStick,
-                GamepadButton::DpadUp,
-                GamepadButton::DpadDown,
-                GamepadButton::DpadLeft,
-                GamepadButton::DpadRight,
+        if backend == VirtualGamepadBackend::SwitchPro {
+            buttons.extend([GamepadButton::LeftTrigger, GamepadButton::RightTrigger]);
+        }
+        if backend == VirtualGamepadBackend::DirectInput {
+            buttons.extend([
                 GamepadButton::Paddle1,
                 GamepadButton::Paddle2,
                 GamepadButton::Paddle3,
@@ -448,9 +443,9 @@ impl InputProfile {
                 GamepadButton::Paddle6,
                 GamepadButton::Paddle7,
                 GamepadButton::Paddle8,
-            ][..],
-        };
-        Self::default_gamepad_for_backend_and_buttons(backend, supported_buttons)
+            ]);
+        }
+        Self::default_gamepad_for_backend_and_buttons(backend, &buttons)
     }
 
     pub fn default_gamepad_for_backend_and_buttons(
@@ -469,7 +464,7 @@ impl InputProfile {
     }
 
     fn default_gamepad_controls(backend: VirtualGamepadBackend) -> Self {
-        let buttons = [
+        let mut buttons = vec![
             GamepadButton::A,
             GamepadButton::B,
             GamepadButton::X,
@@ -486,14 +481,18 @@ impl InputProfile {
             GamepadButton::DpadLeft,
             GamepadButton::DpadRight,
         ];
-        let axes = [
+        if backend == VirtualGamepadBackend::SwitchPro {
+            buttons.extend([GamepadButton::LeftTrigger, GamepadButton::RightTrigger]);
+        }
+        let mut axes = vec![
             GamepadAxis::LeftX,
             GamepadAxis::LeftY,
             GamepadAxis::RightX,
             GamepadAxis::RightY,
-            GamepadAxis::LeftTrigger,
-            GamepadAxis::RightTrigger,
         ];
+        if backend != VirtualGamepadBackend::SwitchPro {
+            axes.extend([GamepadAxis::LeftTrigger, GamepadAxis::RightTrigger]);
+        }
         let paddles = [
             GamepadButton::Paddle1,
             GamepadButton::Paddle2,
@@ -773,6 +772,38 @@ mod tests {
             }));
         }
         assert!(profile.validate().is_ok());
+    }
+
+    #[test]
+    fn test_switch_pro_defaults_use_digital_triggers() {
+        let profile = InputProfile::default_gamepad_for_backend(VirtualGamepadBackend::SwitchPro);
+        assert_eq!(profile.bindings.len(), 21);
+        for button in [GamepadButton::LeftTrigger, GamepadButton::RightTrigger] {
+            assert!(profile.bindings.iter().any(|binding| {
+                binding.source == InputSource::Button(button)
+                    && binding.output == OutputAction::GamepadButton(button)
+            }));
+        }
+        assert!(!profile.bindings.iter().any(|binding| {
+            matches!(
+                binding.output,
+                OutputAction::GamepadAxis(GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger)
+            )
+        }));
+        assert!(profile.validate().is_ok());
+    }
+
+    #[test]
+    fn test_switch_pro_rejects_analog_trigger_outputs() {
+        let profile = InputProfile {
+            backend: VirtualGamepadBackend::SwitchPro,
+            bindings: vec![Binding::new(
+                InputSource::Axis(GamepadAxis::LeftX),
+                OutputAction::GamepadAxis(GamepadAxis::LeftTrigger),
+            )],
+            ..InputProfile::default()
+        };
+        assert!(profile.validate().is_err());
     }
 
     #[test]

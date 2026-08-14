@@ -18,10 +18,16 @@ const DIRECT_INPUT_PRODUCT: u16 = 0x0001;
 const DIRECT_INPUT_VERSION: u16 = 0x0001;
 const DIRECT_INPUT_NAME: &str = "Ira Virtual DirectInput Controller";
 const DIRECT_INPUT_SDL_BINDINGS: &str = "a:b0,b:b1,x:b3,y:b2,leftshoulder:b4,rightshoulder:b5,lefttrigger:a2,righttrigger:a5,back:b8,start:b9,guide:b10,leftstick:b11,rightstick:b12,dpup:b13,dpdown:b14,dpleft:b15,dpright:b16,leftx:a0,lefty:a1,rightx:a3,righty:a4,paddle1:b17,paddle2:b18,paddle3:b19,paddle4:b20";
+const SWITCH_PRO_VENDOR: u16 = 0x057e;
+const SWITCH_PRO_PRODUCT: u16 = 0x2009;
+const SWITCH_PRO_VERSION: u16 = 0x8111;
+const SWITCH_PRO_NAME: &str = "Ira Virtual Nintendo Switch Pro Controller";
+const SWITCH_PRO_SDL_BINDINGS: &str = "a:b0,b:b1,back:b9,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b11,leftshoulder:b5,leftstick:b12,lefttrigger:b7,leftx:a0,lefty:a1,misc1:b4,rightshoulder:b6,rightstick:b13,righttrigger:b8,rightx:a2,righty:a3,start:b10,x:b3,y:b2,platform:Linux";
 
 pub struct VirtualGamepad {
     device: VirtualDevice,
     backend: VirtualGamepadBackend,
+    switch_pro_dpad: [bool; 4],
 }
 
 impl VirtualGamepad {
@@ -35,15 +41,24 @@ impl VirtualGamepad {
             .name(device_name(backend))
             .input_id(device_id(backend))
             .with_keys(&buttons)?;
-        for setup in axis_setups() {
+        for setup in axis_setups(backend) {
             builder = builder.with_absolute_axis(&setup)?;
         }
         let mut device = builder.build()?;
         device.enumerate_dev_nodes_blocking()?;
-        Ok(Self { device, backend })
+        Ok(Self {
+            device,
+            backend,
+            switch_pro_dpad: [false; 4],
+        })
     }
 
     pub fn emit(&mut self, event: &OutputEvent) -> io::Result<()> {
+        if let OutputEvent::GamepadButton { button, pressed } = event {
+            if let Some(input) = self.switch_pro_dpad_event(*button, *pressed) {
+                return self.device.emit(&[input]);
+            }
+        }
         let input = match event {
             OutputEvent::GamepadButton { button, pressed } => {
                 let Some(code) = button_code(self.backend, *button) else {
@@ -52,7 +67,7 @@ impl VirtualGamepad {
                 InputEvent::new(EventType::KEY.0, code.0, i32::from(*pressed))
             }
             OutputEvent::GamepadAxis { axis, value } => {
-                let Some(code) = axis_code(*axis) else {
+                let Some(code) = axis_code(self.backend, *axis) else {
                     return Ok(());
                 };
                 InputEvent::new(EventType::ABSOLUTE.0, code.0, axis_value(*axis, *value))
@@ -76,6 +91,52 @@ impl VirtualGamepad {
             DIRECT_INPUT_NAME,
             DIRECT_INPUT_SDL_BINDINGS
         )
+    }
+
+    pub fn switch_pro_sdl_mapping() -> String {
+        format!(
+            "030000007e0500000920000011810000,Nintendo Switch Pro Controller,{}",
+            SWITCH_PRO_SDL_BINDINGS
+        )
+    }
+
+    fn switch_pro_dpad_event(
+        &mut self,
+        button: GamepadButton,
+        pressed: bool,
+    ) -> Option<InputEvent> {
+        if self.backend != VirtualGamepadBackend::SwitchPro {
+            return None;
+        }
+        let index = match button {
+            GamepadButton::DpadUp => 0,
+            GamepadButton::DpadDown => 1,
+            GamepadButton::DpadLeft => 2,
+            GamepadButton::DpadRight => 3,
+            _ => return None,
+        };
+        self.switch_pro_dpad[index] = pressed;
+        let horizontal = matches!(button, GamepadButton::DpadLeft | GamepadButton::DpadRight);
+        let value = switch_pro_hat_value(self.switch_pro_dpad, horizontal);
+        let code = match button {
+            GamepadButton::DpadUp | GamepadButton::DpadDown => AbsoluteAxisCode::ABS_HAT0Y,
+            GamepadButton::DpadLeft | GamepadButton::DpadRight => AbsoluteAxisCode::ABS_HAT0X,
+            _ => unreachable!(),
+        };
+        Some(InputEvent::new(EventType::ABSOLUTE.0, code.0, value))
+    }
+}
+
+fn switch_pro_hat_value(state: [bool; 4], horizontal: bool) -> i32 {
+    let (negative, positive) = if horizontal {
+        (state[2], state[3])
+    } else {
+        (state[0], state[1])
+    };
+    match (negative, positive) {
+        (true, false) => -1,
+        (false, true) => 1,
+        _ => 0,
     }
 }
 
@@ -125,13 +186,21 @@ fn gamepad_buttons(backend: VirtualGamepadBackend) -> AttributeSet<KeyCode> {
         KeyCode::BTN_MODE,
         KeyCode::BTN_THUMBL,
         KeyCode::BTN_THUMBR,
-        KeyCode::BTN_DPAD_UP,
-        KeyCode::BTN_DPAD_DOWN,
-        KeyCode::BTN_DPAD_LEFT,
-        KeyCode::BTN_DPAD_RIGHT,
     ]
     .into_iter()
     .collect();
+    if backend == VirtualGamepadBackend::SwitchPro {
+        buttons.insert(KeyCode::BTN_Z);
+    } else {
+        for code in [
+            KeyCode::BTN_DPAD_UP,
+            KeyCode::BTN_DPAD_DOWN,
+            KeyCode::BTN_DPAD_LEFT,
+            KeyCode::BTN_DPAD_RIGHT,
+        ] {
+            buttons.insert(code);
+        }
+    }
     if backend == VirtualGamepadBackend::DirectInput {
         for code in [
             KeyCode::BTN_TRIGGER_HAPPY1,
@@ -153,6 +222,7 @@ fn device_name(backend: VirtualGamepadBackend) -> &'static str {
     match backend {
         VirtualGamepadBackend::XInput => "Ira Virtual Xbox Controller",
         VirtualGamepadBackend::DirectInput => DIRECT_INPUT_NAME,
+        VirtualGamepadBackend::SwitchPro => SWITCH_PRO_NAME,
     }
 }
 
@@ -170,18 +240,34 @@ fn device_id(backend: VirtualGamepadBackend) -> InputId {
             DIRECT_INPUT_PRODUCT,
             DIRECT_INPUT_VERSION,
         ),
+        VirtualGamepadBackend::SwitchPro => InputId::new(
+            BusType::BUS_USB,
+            SWITCH_PRO_VENDOR,
+            SWITCH_PRO_PRODUCT,
+            SWITCH_PRO_VERSION,
+        ),
     }
 }
 
-fn axis_setups() -> [UinputAbsSetup; 6] {
-    [
+fn axis_setups(backend: VirtualGamepadBackend) -> Vec<UinputAbsSetup> {
+    let mut setups = vec![
         axis_setup(AbsoluteAxisCode::ABS_X, -32768, 32767),
         axis_setup(AbsoluteAxisCode::ABS_Y, -32768, 32767),
         axis_setup(AbsoluteAxisCode::ABS_RX, -32768, 32767),
         axis_setup(AbsoluteAxisCode::ABS_RY, -32768, 32767),
-        axis_setup(AbsoluteAxisCode::ABS_Z, 0, 255),
-        axis_setup(AbsoluteAxisCode::ABS_RZ, 0, 255),
-    ]
+    ];
+    if backend == VirtualGamepadBackend::SwitchPro {
+        setups.extend([
+            axis_setup(AbsoluteAxisCode::ABS_HAT0X, -1, 1),
+            axis_setup(AbsoluteAxisCode::ABS_HAT0Y, -1, 1),
+        ]);
+    } else {
+        setups.extend([
+            axis_setup(AbsoluteAxisCode::ABS_Z, 0, 255),
+            axis_setup(AbsoluteAxisCode::ABS_RZ, 0, 255),
+        ]);
+    }
+    setups
 }
 
 fn axis_setup(code: AbsoluteAxisCode, minimum: i32, maximum: i32) -> UinputAbsSetup {
@@ -190,9 +276,13 @@ fn axis_setup(code: AbsoluteAxisCode, minimum: i32, maximum: i32) -> UinputAbsSe
 
 fn button_code(backend: VirtualGamepadBackend, button: GamepadButton) -> Option<KeyCode> {
     Some(match button {
+        GamepadButton::A if backend == VirtualGamepadBackend::SwitchPro => KeyCode::BTN_EAST,
         GamepadButton::A => KeyCode::BTN_SOUTH,
+        GamepadButton::B if backend == VirtualGamepadBackend::SwitchPro => KeyCode::BTN_SOUTH,
         GamepadButton::B => KeyCode::BTN_EAST,
+        GamepadButton::X if backend == VirtualGamepadBackend::SwitchPro => KeyCode::BTN_NORTH,
         GamepadButton::X => KeyCode::BTN_WEST,
+        GamepadButton::Y if backend == VirtualGamepadBackend::SwitchPro => KeyCode::BTN_WEST,
         GamepadButton::Y => KeyCode::BTN_NORTH,
         GamepadButton::LeftShoulder => KeyCode::BTN_TL,
         GamepadButton::RightShoulder => KeyCode::BTN_TR,
@@ -203,10 +293,18 @@ fn button_code(backend: VirtualGamepadBackend, button: GamepadButton) -> Option<
         GamepadButton::Guide => KeyCode::BTN_MODE,
         GamepadButton::LeftStick => KeyCode::BTN_THUMBL,
         GamepadButton::RightStick => KeyCode::BTN_THUMBR,
-        GamepadButton::DpadUp => KeyCode::BTN_DPAD_UP,
-        GamepadButton::DpadDown => KeyCode::BTN_DPAD_DOWN,
-        GamepadButton::DpadLeft => KeyCode::BTN_DPAD_LEFT,
-        GamepadButton::DpadRight => KeyCode::BTN_DPAD_RIGHT,
+        GamepadButton::DpadUp if backend != VirtualGamepadBackend::SwitchPro => {
+            KeyCode::BTN_DPAD_UP
+        }
+        GamepadButton::DpadDown if backend != VirtualGamepadBackend::SwitchPro => {
+            KeyCode::BTN_DPAD_DOWN
+        }
+        GamepadButton::DpadLeft if backend != VirtualGamepadBackend::SwitchPro => {
+            KeyCode::BTN_DPAD_LEFT
+        }
+        GamepadButton::DpadRight if backend != VirtualGamepadBackend::SwitchPro => {
+            KeyCode::BTN_DPAD_RIGHT
+        }
         GamepadButton::Paddle1 if backend == VirtualGamepadBackend::DirectInput => {
             KeyCode::BTN_TRIGGER_HAPPY1
         }
@@ -235,14 +333,19 @@ fn button_code(backend: VirtualGamepadBackend, button: GamepadButton) -> Option<
     })
 }
 
-fn axis_code(axis: GamepadAxis) -> Option<AbsoluteAxisCode> {
+fn axis_code(backend: VirtualGamepadBackend, axis: GamepadAxis) -> Option<AbsoluteAxisCode> {
     Some(match axis {
         GamepadAxis::LeftX => AbsoluteAxisCode::ABS_X,
         GamepadAxis::LeftY => AbsoluteAxisCode::ABS_Y,
         GamepadAxis::RightX => AbsoluteAxisCode::ABS_RX,
         GamepadAxis::RightY => AbsoluteAxisCode::ABS_RY,
-        GamepadAxis::LeftTrigger => AbsoluteAxisCode::ABS_Z,
-        GamepadAxis::RightTrigger => AbsoluteAxisCode::ABS_RZ,
+        GamepadAxis::LeftTrigger if backend != VirtualGamepadBackend::SwitchPro => {
+            AbsoluteAxisCode::ABS_Z
+        }
+        GamepadAxis::RightTrigger if backend != VirtualGamepadBackend::SwitchPro => {
+            AbsoluteAxisCode::ABS_RZ
+        }
+        _ => return None,
     })
 }
 
@@ -260,10 +363,10 @@ fn axis_value(axis: GamepadAxis, value: f32) -> i32 {
 mod tests {
     use super::{
         axis_code, axis_value, button_code, device_id, device_name, gamepad_buttons,
-        VirtualGamepad, DIRECT_INPUT_NAME, DIRECT_INPUT_PRODUCT, DIRECT_INPUT_VENDOR,
-        DIRECT_INPUT_VERSION,
+        switch_pro_hat_value, VirtualGamepad, DIRECT_INPUT_NAME, DIRECT_INPUT_PRODUCT,
+        DIRECT_INPUT_VENDOR, DIRECT_INPUT_VERSION,
     };
-    use crate::VirtualGamepadBackend::{DirectInput, XInput};
+    use crate::VirtualGamepadBackend::{DirectInput, SwitchPro, XInput};
     use crate::{GamepadAxis, GamepadButton};
     use evdev::{InputId, KeyCode};
 
@@ -278,6 +381,30 @@ mod tests {
             Some(KeyCode::BTN_NORTH)
         );
         assert_eq!(button_code(XInput, GamepadButton::Paddle1), None);
+    }
+
+    #[test]
+    fn test_switch_pro_uses_nintendo_button_positions() {
+        assert_eq!(
+            button_code(SwitchPro, GamepadButton::A),
+            Some(KeyCode::BTN_EAST)
+        );
+        assert_eq!(
+            button_code(SwitchPro, GamepadButton::B),
+            Some(KeyCode::BTN_SOUTH)
+        );
+        assert_eq!(
+            button_code(SwitchPro, GamepadButton::X),
+            Some(KeyCode::BTN_NORTH)
+        );
+        assert_eq!(
+            button_code(SwitchPro, GamepadButton::Y),
+            Some(KeyCode::BTN_WEST)
+        );
+        assert_eq!(button_code(SwitchPro, GamepadButton::DpadUp), None);
+        assert_eq!(button_code(SwitchPro, GamepadButton::Paddle1), None);
+        assert!(gamepad_buttons(SwitchPro).contains(KeyCode::BTN_Z));
+        assert!(!gamepad_buttons(SwitchPro).contains(KeyCode::BTN_DPAD_UP));
     }
 
     #[test]
@@ -307,6 +434,33 @@ mod tests {
             device_id(XInput),
             InputId::new(evdev::BusType::BUS_USB, 0x045e, 0x028e, 0x0114)
         );
+        assert_eq!(
+            device_id(SwitchPro),
+            InputId::new(evdev::BusType::BUS_USB, 0x057e, 0x2009, 0x8111)
+        );
+        assert_eq!(
+            device_name(SwitchPro),
+            "Ira Virtual Nintendo Switch Pro Controller"
+        );
+    }
+
+    #[test]
+    fn test_switch_pro_uses_hat_dpad_and_no_analog_triggers() {
+        assert_eq!(
+            axis_code(SwitchPro, GamepadAxis::LeftX),
+            Some(evdev::AbsoluteAxisCode::ABS_X)
+        );
+        assert_eq!(axis_code(SwitchPro, GamepadAxis::LeftTrigger), None);
+        assert!(VirtualGamepad::switch_pro_sdl_mapping()
+            .starts_with("030000007e0500000920000011810000,Nintendo Switch Pro Controller"));
+    }
+
+    #[test]
+    fn test_switch_pro_hat_values_handle_opposite_directions() {
+        assert_eq!(switch_pro_hat_value([true, false, false, false], false), -1);
+        assert_eq!(switch_pro_hat_value([false, true, false, false], false), 1);
+        assert_eq!(switch_pro_hat_value([false, false, true, false], true), -1);
+        assert_eq!(switch_pro_hat_value([false, false, true, true], true), 0);
     }
 
     #[test]
@@ -344,7 +498,7 @@ mod tests {
             (GamepadAxis::RightTrigger, evdev::AbsoluteAxisCode::ABS_RZ),
         ];
         for (axis, code) in axes {
-            assert_eq!(axis_code(axis), Some(code));
+            assert_eq!(axis_code(DirectInput, axis), Some(code));
         }
     }
 }

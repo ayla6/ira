@@ -90,6 +90,9 @@ fn active_controller_input(
                 ControllerInputMode::VirtualDirectInput => {
                     ira_input::VirtualGamepadBackend::DirectInput
                 }
+                ControllerInputMode::VirtualSwitchPro => {
+                    ira_input::VirtualGamepadBackend::SwitchPro
+                }
                 ControllerInputMode::Disabled | ControllerInputMode::VirtualXInput => {
                     ira_input::VirtualGamepadBackend::XInput
                 }

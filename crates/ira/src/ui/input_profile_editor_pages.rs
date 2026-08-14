@@ -38,10 +38,18 @@ pub(super) fn setup_pages(
     ));
     let backend_dropdown = adw::ComboRow::new();
     backend_dropdown.set_title(&crate::tr!("Virtual gamepad backend"));
-    let backend_strings = [crate::tr!("XInput"), crate::tr!("DirectInput")];
+    let backend_strings = [
+        crate::tr!("XInput"),
+        crate::tr!("DirectInput"),
+        crate::tr!("Nintendo Switch Pro"),
+    ];
     let backend_refs: Vec<&str> = backend_strings.iter().map(String::as_str).collect();
     backend_dropdown.set_model(Some(&gtk4::StringList::new(&backend_refs)));
-    backend_dropdown.set_selected((*backend.borrow() as u32).min(1));
+    backend_dropdown.set_selected(match *backend.borrow() {
+        VirtualGamepadBackend::XInput => 0,
+        VirtualGamepadBackend::DirectInput => 1,
+        VirtualGamepadBackend::SwitchPro => 2,
+    });
     layout.content_area.append(&backend_dropdown);
     for (index, (page_id, title, icon)) in page_descriptors().into_iter().enumerate() {
         let scroll = gtk4::ScrolledWindow::new();
@@ -163,10 +171,10 @@ pub(super) fn connect_backend_change(
     let device = device.clone();
     let mark_dirty = mark_dirty.clone();
     dropdown.connect_selected_notify(move |dropdown| {
-        let selected = if dropdown.selected() == 1 {
-            VirtualGamepadBackend::DirectInput
-        } else {
-            VirtualGamepadBackend::XInput
+        let selected = match dropdown.selected() {
+            1 => VirtualGamepadBackend::DirectInput,
+            2 => VirtualGamepadBackend::SwitchPro,
+            _ => VirtualGamepadBackend::XInput,
         };
         if *backend.borrow() == selected {
             return;

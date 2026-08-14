@@ -279,6 +279,10 @@ pub(super) fn output_options(backend: VirtualGamepadBackend) -> Vec<OutputOption
     options.extend(
         gamepad_axes()
             .into_iter()
+            .filter(|axis| {
+                backend != VirtualGamepadBackend::SwitchPro
+                    || !matches!(axis, GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger)
+            })
             .map(|axis| OutputOption::Action(OutputAction::GamepadAxis(axis))),
     );
     options.extend(
@@ -474,6 +478,15 @@ mod tests {
         let outputs = output_labels(VirtualGamepadBackend::XInput);
         assert!(outputs.contains(&"Right Trigger Button".to_string()));
         assert!(outputs.contains(&"Right Trigger".to_string()));
+    }
+
+    #[test]
+    fn test_switch_pro_output_uses_digital_triggers() {
+        let outputs = output_labels(VirtualGamepadBackend::SwitchPro);
+        assert!(outputs.contains(&"Left Trigger Button".to_string()));
+        assert!(outputs.contains(&"Right Trigger Button".to_string()));
+        assert!(!outputs.contains(&"Left Trigger".to_string()));
+        assert!(!outputs.contains(&"Right Trigger".to_string()));
     }
 
     #[test]

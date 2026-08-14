@@ -6,6 +6,10 @@ edition = "2021"
 [[bin]]
 name = "ira-overlay-standalone"
 
+[[bin]]
+name = "ira-overlay-test"
+path = "src/test_main.rs"
+
 [dependencies]
 ira-overlay = { path = "../overlay" }
 ira-overlay-ipc = { path = "../overlay-ipc" }

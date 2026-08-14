@@ -116,12 +116,15 @@ pub fn launch_game(
 
         if ctx.overlay_enabled {
             if super::env_builder::uses_gamescope(&cmd) {
+                let game_env = super::env_builder::take_gamescope_game_env(&mut env);
                 super::env_builder::add_overlay_env_standalone(
                     &mut env,
                     ctx.overlay_shm.as_deref(),
                     ctx.overlay_font_family.as_deref(),
                 );
-                super::env_builder::wrap_with_standalone_overlay(&mut cmd);
+                if !super::env_builder::wrap_with_standalone_overlay(&mut cmd, &game_env) {
+                    super::env_builder::restore_gamescope_game_env(&mut env, game_env);
+                }
             } else {
                 super::env_builder::add_overlay_env(
                     &mut env,
@@ -190,12 +193,15 @@ pub fn launch_game(
 
         if ctx.overlay_enabled {
             if super::env_builder::uses_gamescope(&cmd) {
+                let game_env = super::env_builder::take_gamescope_game_env(&mut env);
                 super::env_builder::add_overlay_env_standalone(
                     &mut env,
                     ctx.overlay_shm.as_deref(),
                     ctx.overlay_font_family.as_deref(),
                 );
-                super::env_builder::wrap_with_standalone_overlay(&mut cmd);
+                if !super::env_builder::wrap_with_standalone_overlay(&mut cmd, &game_env) {
+                    super::env_builder::restore_gamescope_game_env(&mut env, game_env);
+                }
             } else {
                 super::env_builder::add_overlay_env(
                     &mut env,

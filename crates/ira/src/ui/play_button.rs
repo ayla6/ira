@@ -149,12 +149,7 @@ pub fn stop_game(state: &SharedState, game_id: i64) {
             };
             (exe, prefix, env_vars)
         };
-        ira_launcher::wrapper::stop_game_with_wine(
-            pid,
-            wine_exe.as_deref(),
-            wine_prefix.as_deref(),
-            &env,
-        );
+        ira_launcher::wrapper::stop_game(pid, wine_exe.as_deref(), wine_prefix.as_deref(), &env);
     }
 }
 

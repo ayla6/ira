@@ -110,6 +110,7 @@ pub fn build_env(
                 && k != "RUSTUP"
                 && !k.starts_with("RUSTUP_")
                 && !k.starts_with("RUST_")
+                && k != "OUT_DIR"
         })
         .filter(|(k, v)| {
             if k == "LD_LIBRARY_PATH" {
@@ -149,8 +150,24 @@ pub fn build_env(
         }
     }
 
-    // User-configured env vars and LD_* overrides apply to ALL games (Wine too)
-    // and are applied last, matching Lutris's "Apply user overrides at the end".
+    apply_launch_overrides(&mut env, launch);
+
+    let shader_dir = format!("{}/shader_cache/{}", save_dir, game_id);
+    let _ = std::fs::create_dir_all(&shader_dir);
+    env.push(("__GL_SHADER_DISK_CACHE".to_string(), "1".to_string()));
+    env.push(("__GL_SHADER_DISK_CACHE_PATH".to_string(), shader_dir));
+
+    let default_wine = WineConfig::default();
+    let wine_cfg = wine.unwrap_or(&default_wine);
+    apply_performance(command, &mut env, launch, wine_cfg);
+
+    env
+}
+
+/// Applies per-game environment, loader paths, and GPU selection to an
+/// already-constructed launch environment. Emulator launches use this shared
+/// path too; they do not go through `build_env`.
+pub fn apply_launch_overrides(env: &mut Vec<(String, String)>, launch: &GameLaunchConfig) {
     for (k, v) in &launch.env_vars {
         env.retain(|(ek, _)| ek != k);
         env.push((k.clone(), v.clone()));
@@ -181,24 +198,47 @@ pub fn build_env(
         env.push(("LD_LIBRARY_PATH".to_string(), merged));
     }
 
-    let shader_dir = format!("{}/shader_cache/{}", save_dir, game_id);
-    let _ = std::fs::create_dir_all(&shader_dir);
-    env.push(("__GL_SHADER_DISK_CACHE".to_string(), "1".to_string()));
-    env.push(("__GL_SHADER_DISK_CACHE_PATH".to_string(), shader_dir));
-
-    // GPU selection — applies to all games, not just Wine.
     if !launch.gpu.is_empty() {
         for (k, v) in crate::gpu::build_gpu_env(&launch.gpu) {
             env.retain(|(ek, _)| ek != &k);
             env.push((k, v));
         }
     }
+}
 
-    let default_wine = WineConfig::default();
-    let wine_cfg = wine.unwrap_or(&default_wine);
-    apply_performance(command, &mut env, launch, wine_cfg);
+/// Removes variables that must apply only to the game inside Gamescope.
+pub fn take_gamescope_game_env(env: &mut Vec<(String, String)>) -> Vec<(String, String)> {
+    const GAME_KEYS: [&str; 9] = [
+        "DRI_PRIME",
+        "__NV_PRIME_RENDER_OFFLOAD",
+        "__GLX_VENDOR_LIBRARY_NAME",
+        "__VK_LAYER_NV_optimus",
+        "VK_ICD_FILENAMES",
+        "VK_DRIVER_FILES",
+        "DXVK_FILTER_DEVICE_UUID",
+        "DXVK_FILTER_DEVICE_NAME",
+        "LD_PRELOAD",
+    ];
+    let mut overrides = Vec::new();
+    for key in GAME_KEYS {
+        if let Some((_, value)) = env.iter().find(|(existing, _)| existing == key) {
+            overrides.push((key.to_string(), value.clone()));
+        }
+        env.retain(|(existing, _)| existing != key);
+    }
+    overrides
+}
 
-    env
+/// Restores game-only variables when Gamescope is not wrapped with the
+/// standalone overlay after all.
+pub fn restore_gamescope_game_env(
+    env: &mut Vec<(String, String)>,
+    game_env: Vec<(String, String)>,
+) {
+    for (key, value) in game_env {
+        env.retain(|(existing, _)| existing != &key);
+        env.push((key, value));
+    }
 }
 
 /// Wraps the command with gamemode/mangohud/gamescope if configured.
@@ -370,42 +410,20 @@ fn standalone_binary_path() -> Option<String> {
     None
 }
 
-/// Returns the shim path only (without the VK layer dir), for standalone mode.
-fn shim_path_only() -> Option<String> {
-    let (_, shim_path) = overlay_paths()?;
-    Some(shim_path)
-}
-
-/// Adds overlay env vars for standalone mode — injects the shim (LD_PRELOAD)
-/// and IRA_OVERLAY_SHM but NOT the Vulkan layer. The standalone overlay process
-/// has its own Vulkan instance and reads from SHM directly.
+/// Adds environment used by the standalone overlay. Unlike direct mode, this
+/// does not inject a Vulkan layer or preload library into the game.
 pub fn add_overlay_env_standalone(
     env: &mut Vec<(String, String)>,
     overlay_shm: Option<&str>,
     font_family: Option<&str>,
 ) {
-    let Some(shim_path) = shim_path_only() else {
-        eprintln!("ira-overlay: shim not found — skipping standalone injection");
-        return;
-    };
-    eprintln!("ira-overlay: injecting standalone overlay (shim + SHM, no VK layer)");
+    eprintln!("ira-overlay: preparing standalone overlay (SHM, no game injection)");
 
     // In standalone mode, the VK layer must NOT be loaded — the standalone
     // overlay process has its own Vulkan instance. If VK_INSTANCE_LAYERS is
     // set (e.g. from a previous non-standalone launch in the same session),
     // the layer would hook the game's Vulkan calls and conflict.
     env.retain(|(k, _)| k != "VK_INSTANCE_LAYERS" && k != "VK_LAYER_PATH");
-
-    let existing = env
-        .iter()
-        .find(|(k, _)| k == "LD_PRELOAD")
-        .map(|(_, v)| v.clone());
-    let merged = match existing {
-        Some(prev) if !prev.is_empty() => format!("{}:{}", shim_path, prev),
-        _ => shim_path,
-    };
-    env.retain(|(k, _)| k != "LD_PRELOAD");
-    env.push(("LD_PRELOAD".to_string(), merged));
 
     if let Some(shm) = overlay_shm {
         env.retain(|(k, _)| k != "IRA_OVERLAY_SHM");
@@ -509,10 +527,13 @@ fn wrap_command_with_input(command: &mut Vec<String>, binary: &str, profile: Opt
 ///
 /// Transforms: `gamescope -- wine ...`
 /// Into:       `gamescope -- sh -c 'ENABLE_GAMESCOPE_WSI=1 ira-overlay-standalone & exec "$@"' -- wine ...`
-pub fn wrap_with_standalone_overlay(command: &mut Vec<String>) {
+pub fn wrap_with_standalone_overlay(
+    command: &mut Vec<String>,
+    game_env: &[(String, String)],
+) -> bool {
     let Some(bin) = standalone_binary_path() else {
         eprintln!("ira-overlay: standalone binary not found, skipping");
-        return;
+        return false;
     };
 
     // Find the `--` separator in the gamescope command.
@@ -520,7 +541,7 @@ pub fn wrap_with_standalone_overlay(command: &mut Vec<String>) {
     let sep_pos = command.iter().position(|a| a == "--");
     let Some(sep) = sep_pos else {
         eprintln!("ira-overlay: no `--` in gamescope command, skipping standalone wrap");
-        return;
+        return false;
     };
 
     let game_cmd: Vec<String> = command.split_off(sep + 1);
@@ -529,13 +550,25 @@ pub fn wrap_with_standalone_overlay(command: &mut Vec<String>) {
     let quoted_bin = shlex::try_quote(&bin)
         .map(|c| c.into_owned())
         .unwrap_or(bin);
-    let sh_script = format!("ENABLE_GAMESCOPE_WSI=1 {} & exec \"$@\"", quoted_bin);
+    let game_env = game_env
+        .iter()
+        .map(|(key, value)| {
+            let quoted = shlex::try_quote(value)
+                .map(|c| c.into_owned())
+                .unwrap_or_else(|_| value.clone());
+            format!("{key}={quoted} ")
+        })
+        .collect::<String>();
+    let sh_script = format!(
+        "cleanup() {{ status=$?; trap - EXIT INT TERM HUP; if [ -n \"${{overlay_pid:-}}\" ]; then kill \"$overlay_pid\" 2>/dev/null; wait \"$overlay_pid\" 2>/dev/null; fi; exit \"$status\"; }}; trap cleanup EXIT; trap 'exit 143' INT TERM HUP; ENABLE_GAMESCOPE_WSI=1 {quoted_bin} & overlay_pid=$!; {game_env}\"$@\""
+    );
 
     command.push("/usr/bin/sh".to_string());
     command.push("-c".to_string());
     command.push(sh_script);
     command.push("--".to_string());
     command.extend(game_cmd);
+    true
 }
 
 /// Returns `true` if the command starts with `gamescope`.
@@ -641,5 +674,73 @@ mod tests {
         assert!(filter_dev_paths("").is_empty());
         assert!(filter_dev_paths("/home/ayla/.cargo/bin").is_empty());
         assert!(filter_dev_paths(":/home/ayla/.rustup/bin/:").is_empty());
+    }
+
+    #[test]
+    fn test_apply_launch_overrides_merges_user_environment() {
+        let launch = GameLaunchConfig {
+            env_vars: vec![("GAME_MODE".to_string(), "test".to_string())],
+            ld_preload: "/configured/preload.so".to_string(),
+            ld_library_path: "/configured/lib".to_string(),
+            ..Default::default()
+        };
+        let mut env = vec![
+            ("GAME_MODE".to_string(), "old".to_string()),
+            ("LD_PRELOAD".to_string(), "/existing/preload.so".to_string()),
+            ("LD_LIBRARY_PATH".to_string(), "/existing/lib".to_string()),
+        ];
+
+        apply_launch_overrides(&mut env, &launch);
+
+        assert!(env.contains(&("GAME_MODE".to_string(), "test".to_string())));
+        assert!(env.contains(&(
+            "LD_PRELOAD".to_string(),
+            "/configured/preload.so:/existing/preload.so".to_string()
+        )));
+        assert!(env.contains(&(
+            "LD_LIBRARY_PATH".to_string(),
+            "/configured/lib:/existing/lib".to_string()
+        )));
+    }
+
+    #[test]
+    fn test_take_gamescope_game_env_extracts_game_only_values() {
+        let mut env = vec![
+            ("PATH".to_string(), "/usr/bin".to_string()),
+            ("DRI_PRIME".to_string(), "1".to_string()),
+            ("LD_PRELOAD".to_string(), "/game/helper.so".to_string()),
+        ];
+
+        let game_env = take_gamescope_game_env(&mut env);
+
+        assert_eq!(env, [("PATH".to_string(), "/usr/bin".to_string())]);
+        assert!(game_env.contains(&("DRI_PRIME".to_string(), "1".to_string())));
+        assert!(game_env.contains(&("LD_PRELOAD".to_string(), "/game/helper.so".to_string())));
+    }
+
+    #[test]
+    fn test_restore_gamescope_game_env_restores_game_only_values() {
+        let mut env = vec![("PATH".to_string(), "/usr/bin".to_string())];
+        let game_env = vec![
+            ("DRI_PRIME".to_string(), "1".to_string()),
+            ("LD_PRELOAD".to_string(), "/game/helper.so".to_string()),
+        ];
+
+        restore_gamescope_game_env(&mut env, game_env);
+
+        assert!(env.contains(&("DRI_PRIME".to_string(), "1".to_string())));
+        assert!(env.contains(&("LD_PRELOAD".to_string(), "/game/helper.so".to_string())));
+    }
+
+    #[test]
+    fn test_standalone_overlay_does_not_inject_game_libraries() {
+        let mut env = Vec::new();
+
+        add_overlay_env_standalone(&mut env, Some("/ira_overlay_1"), Some("Sans"));
+
+        assert!(!env.iter().any(|(key, _)| key == "LD_PRELOAD"));
+        assert!(!env.iter().any(|(key, _)| key == "VK_INSTANCE_LAYERS"));
+        assert!(!env.iter().any(|(key, _)| key == "VK_LAYER_PATH"));
+        assert!(env.contains(&("IRA_OVERLAY_SHM".to_string(), "/ira_overlay_1".to_string())));
     }
 }

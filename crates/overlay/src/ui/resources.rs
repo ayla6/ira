@@ -359,6 +359,8 @@ pub(crate) unsafe fn create_pipeline(
     let blend_attachment = vk::PipelineColorBlendAttachmentState::default()
         .color_write_mask(vk::ColorComponentFlags::RGBA)
         .blend_enable(true)
+        // The fragment shader produces premultiplied alpha for gamescope's
+        // external overlay surface.
         .src_color_blend_factor(vk::BlendFactor::ONE)
         .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
         .color_blend_op(vk::BlendOp::ADD)

@@ -255,12 +255,20 @@ pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
 
     loop {
         std::thread::sleep(Duration::from_secs(2));
-        reap_zombies(child_pid);
-
         match child.try_wait() {
-            Ok(Some(_status)) => break,
+            Ok(Some(status)) => {
+                let message = format!("Initial process exited with status {status}");
+                eprintln!("launch: {message}");
+                log_buf.lock().unwrap().push(message);
+                break;
+            }
             Ok(None) => {}
-            Err(_) => break,
+            Err(error) => {
+                let message = format!("Failed to read initial process status: {error}");
+                eprintln!("launch: {message}");
+                log_buf.lock().unwrap().push(message);
+                break;
+            }
         }
     }
 
@@ -329,7 +337,7 @@ fn reap_zombies(pgid: i32) {
 }
 
 /// Reap ALL children of the calling process, regardless of process group.
-/// Used after stop_game_with_wine finishes killing — by that point
+/// Used after the Wine branch of stop_game finishes killing — by that point
 /// wineserver -k has completed so there are no conflicting waitpid calls.
 fn reap_all() {
     loop {
@@ -404,12 +412,37 @@ fn is_wine_bg(pid: i32) -> bool {
     false
 }
 
-pub fn stop_game_with_wine(
+/// Stop a native game process group without running the Wine cleanup sequence.
+/// Gamescope and its emulator children share the launcher's process group, so
+/// terminating the group also stops the standalone overlay promptly.
+fn stop_native_process_group(pid: i32) {
+    let descendants = collect_descendants(pid);
+    unsafe {
+        libc::kill(-pid, libc::SIGTERM);
+    }
+
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(750));
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+            for child in descendants {
+                libc::kill(child, libc::SIGKILL);
+            }
+        }
+    });
+}
+
+pub fn stop_game(
     pid: i32,
     wine_exe: Option<&str>,
     wine_prefix: Option<&str>,
     env: &[(String, String)],
 ) {
+    if wine_exe.is_none() && wine_prefix.is_none() {
+        stop_native_process_group(pid);
+        return;
+    }
+
     // Collect descendants BEFORE sending signals — the process tree may
     // change after the game exits (children get reparented).
     let descendants = collect_descendants(pid);

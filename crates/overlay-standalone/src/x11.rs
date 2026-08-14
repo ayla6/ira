@@ -18,9 +18,8 @@
 //!     reroll picks the overlay up; toggling the external-overlay property
 //!     later re-triggers that reroll (see `set_visible`).
 //!
-//! When visible, the keyboard is grabbed (`xcb_grab_keyboard`) so all key
-//! events go to the overlay. The toggle hotkey is detected by the overlay
-//! itself (not the shim) while the keyboard is grabbed.
+//! A passive root-window grab receives the toggle chord while hidden. When
+//! visible, the keyboard is grabbed so navigation events go to the overlay.
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
@@ -203,6 +202,15 @@ extern "C" {
         pointer_mode: c_int,
         keyboard_mode: c_int,
     ) -> u32;
+    fn xcb_grab_key(
+        c: *mut c_void,
+        owner_events: u8,
+        grab_window: u32,
+        modifiers: u16,
+        key: u8,
+        pointer_mode: u8,
+        keyboard_mode: u8,
+    ) -> u32;
     fn xcb_ungrab_keyboard(c: *mut c_void, time: u32) -> u32;
 }
 
@@ -330,6 +338,15 @@ impl X11State {
         // Map the window once — it stays mapped forever.
         // Visibility is controlled via the opacity property.
         unsafe {
+            xcb_grab_key(
+                conn,
+                1,
+                screen.root,
+                TOGGLE_MODS.load(Ordering::Relaxed) as u16,
+                TOGGLE_KEYCODE.load(Ordering::Relaxed) as u8,
+                XCB_GRAB_MODE_ASYNC as u8,
+                XCB_GRAB_MODE_ASYNC as u8,
+            );
             xcb_map_window(conn, window);
             xcb_flush(conn);
         }
@@ -421,8 +438,6 @@ impl X11State {
             if response_type == XCB_KEY_PRESS {
                 let detail = unsafe { *event.cast::<u8>().add(OFF_DETAIL) };
                 let state = unsafe { *event.cast::<u16>().add(OFF_STATE / 2) };
-                eprintln!("ira-overlay-standalone: key event detail={detail} state={state}");
-
                 // Check toggle key
                 let tog_kc = TOGGLE_KEYCODE.load(Ordering::Relaxed) as u8;
                 let tog_mods = TOGGLE_MODS.load(Ordering::Relaxed) as u16;

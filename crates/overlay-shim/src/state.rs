@@ -11,6 +11,7 @@ use ira_overlay_ipc::{
 };
 
 pub static OVERLAY_VISIBLE: AtomicBool = AtomicBool::new(false);
+static VISIBILITY_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static HAS_SDL: AtomicBool = AtomicBool::new(false);
 static SDL_CHECKED: AtomicBool = AtomicBool::new(false);
 static PRESENT_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -78,6 +79,7 @@ fn shm() -> Option<&'static Mutex<MappedShm>> {
 
 pub fn set_visible(v: bool) {
     eprintln!("ira-overlay-shim: set_visible({v})");
+    VISIBILITY_INITIALIZED.store(true, Ordering::Release);
     OVERLAY_VISIBLE.store(v, Ordering::SeqCst);
     if let Some(shm) = shm() {
         if let Ok(shm) = shm.lock() {
@@ -92,6 +94,7 @@ pub fn set_visible(v: bool) {
 /// Includes a 300ms cross-process debounce to prevent multiple child processes
 /// (game + zenity dialogs, etc.) from toggling simultaneously on the same key event.
 pub fn toggle_visible() {
+    VISIBILITY_INITIALIZED.store(true, Ordering::Release);
     if let Some(shm) = shm() {
         if let Ok(shm) = shm.lock() {
             let now = now_ms();
@@ -123,6 +126,21 @@ pub fn toggle_visible() {
     // Fallback: local toggle (no SHM available).
     let v = !OVERLAY_VISIBLE.load(Ordering::SeqCst);
     OVERLAY_VISIBLE.store(v, Ordering::SeqCst);
+}
+
+fn initialize_visibility() {
+    if VISIBILITY_INITIALIZED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let requested = std::env::var_os("IRA_OVERLAY_START_VISIBLE")
+        .is_some_and(|value| value == "1" || value == "true");
+    if requested {
+        set_visible(true);
+    }
+}
+
+pub fn initialize() {
+    initialize_visibility();
 }
 
 fn now_ms() -> u32 {

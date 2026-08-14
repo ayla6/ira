@@ -65,7 +65,6 @@ fn main() {
             return;
         }
     };
-
     eprintln!("ira-overlay-standalone: starting Vulkan init...");
     let mut vk = match vulkan::VulkanState::new(x11_state.connection_ptr(), x11_state.window_id()) {
         Ok(v) => v,
@@ -97,7 +96,9 @@ fn main() {
     };
     eprintln!("ira-overlay-standalone: UI renderer initialized");
 
-    let mut prev_visible = false;
+    let initial_visible = shm.header().overlay_visible.load(Ordering::SeqCst) != 0;
+    x11_state.set_visible(initial_visible);
+    let mut prev_visible = initial_visible;
 
     loop {
         // Poll XCB events (keyboard input when visible via keyboard grab).
@@ -106,11 +107,7 @@ fn main() {
         let toggle_pressed = x11_state.poll_events();
 
         if toggle_pressed {
-            let current = shm.header().overlay_visible.load(Ordering::SeqCst);
-            let new_val: u32 = if current != 0 { 0 } else { 1 };
-            shm.header()
-                .overlay_visible
-                .store(new_val, Ordering::SeqCst);
+            toggle_visibility(&shm);
         }
 
         // Read visibility from SHM (written by shim or by ourselves above).
@@ -138,4 +135,29 @@ fn main() {
             }
         }
     }
+}
+
+fn toggle_visibility(shm: &MappedShm) {
+    let now = now_ms();
+    let header = shm.header();
+    let last = header.last_toggle_ms.load(Ordering::SeqCst);
+    if now.wrapping_sub(last) < 300 {
+        return;
+    }
+    let current = header.overlay_visible.load(Ordering::SeqCst);
+    let new_value = u32::from(current == 0);
+    if header
+        .overlay_visible
+        .compare_exchange(current, new_value, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        header.last_toggle_ms.store(now, Ordering::SeqCst);
+    }
+}
+
+fn now_ms() -> u32 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u32)
+        .unwrap_or(0)
 }

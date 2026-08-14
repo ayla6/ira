@@ -162,6 +162,17 @@ fn apply_system_defaults(launch: &mut ira_models::GameLaunchConfig, defaults: &S
     }
 }
 
+fn apply_emulator_gpu_policy(
+    launch: &mut ira_models::GameLaunchConfig,
+    game_kind: ira_models::GameKind,
+) {
+    if game_kind == ira_models::GameKind::Ps4 {
+        // shadPS4 selects by Vulkan device index. Restricting the ICD list here
+        // changes that index space and can make its saved gpuId invalid.
+        launch.gpu.clear();
+    }
+}
+
 fn merge_env_vars(target: &mut Vec<(String, String)>, defaults: &[(String, String)]) {
     let mut merged = defaults.to_vec();
     for (key, value) in target.drain(..) {
@@ -213,7 +224,12 @@ fn build_emulator_env_and_wrap(
 ) -> Result<Vec<(String, String)>, String> {
     let mut env: Vec<(String, String)> = std::env::vars()
         .filter(|(k, _)| {
-            !k.starts_with("CARGO_") && !k.starts_with("RUSTUP_") && !k.starts_with("RUST_")
+            k != "CARGO"
+                && !k.starts_with("CARGO_")
+                && k != "RUSTUP"
+                && !k.starts_with("RUSTUP_")
+                && !k.starts_with("RUST_")
+                && k != "OUT_DIR"
         })
         .filter(|(k, v)| {
             if k == "LD_LIBRARY_PATH" {
@@ -250,6 +266,7 @@ fn build_emulator_env_and_wrap(
 
     let mut launch = launch;
     apply_system_defaults(&mut launch, &ctx.system_defaults);
+    apply_emulator_gpu_policy(&mut launch, ctx.game_kind);
     if launch.gamescope_w == Some(0) || launch.gamescope_h == Some(0) {
         let (sw, sh) = detect_screen_resolution();
         if launch.gamescope_w == Some(0) {
@@ -259,6 +276,8 @@ fn build_emulator_env_and_wrap(
             launch.gamescope_h = Some(sh);
         }
     }
+
+    ira_launcher::env_builder::apply_launch_overrides(&mut env, &launch);
 
     let overlay_enabled = launch.overlay_enabled.unwrap_or(ctx.overlay_global_enabled);
 
@@ -270,6 +289,11 @@ fn build_emulator_env_and_wrap(
         overlay_enabled, will_use_gamescope, launch.gamescope
     );
 
+    let game_env = if overlay_enabled && will_use_gamescope {
+        ira_launcher::env_builder::take_gamescope_game_env(&mut env)
+    } else {
+        Vec::new()
+    };
     if overlay_enabled {
         if will_use_gamescope {
             ira_launcher::env_builder::add_overlay_env_standalone(
@@ -290,8 +314,11 @@ fn build_emulator_env_and_wrap(
 
     ira_launcher::env_builder::apply_performance(cmd, &mut env, &launch, &wine);
 
-    if overlay_enabled && ira_launcher::env_builder::uses_gamescope(cmd) {
-        ira_launcher::env_builder::wrap_with_standalone_overlay(cmd);
+    if overlay_enabled
+        && ira_launcher::env_builder::uses_gamescope(cmd)
+        && !ira_launcher::env_builder::wrap_with_standalone_overlay(cmd, &game_env)
+    {
+        ira_launcher::env_builder::restore_gamescope_game_env(&mut env, game_env);
     }
 
     let input_mode = console_input_mode(
@@ -751,7 +778,10 @@ pub(super) fn update_last_played(
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_system_defaults, console_input_mode, input_backend, resolved_input_mode};
+    use super::{
+        apply_emulator_gpu_policy, apply_system_defaults, console_input_mode, input_backend,
+        resolved_input_mode,
+    };
     use ira_config::SystemDefaults;
     use ira_input::VirtualGamepadBackend;
     use ira_models::ControllerInputMode;
@@ -842,6 +872,21 @@ mod tests {
             launch.env_vars,
             vec![("MESA_VK_DEVICE_SELECT".to_string(), "10de:2684".to_string())]
         );
+    }
+
+    #[test]
+    fn test_apply_emulator_gpu_policy_leaves_shadps4_device_index_stable() {
+        let mut ps4 = ira_models::GameLaunchConfig {
+            gpu: "card1".to_string(),
+            ..Default::default()
+        };
+        let mut ps3 = ps4.clone();
+
+        apply_emulator_gpu_policy(&mut ps4, ira_models::GameKind::Ps4);
+        apply_emulator_gpu_policy(&mut ps3, ira_models::GameKind::Ps3);
+
+        assert!(ps4.gpu.is_empty());
+        assert_eq!(ps3.gpu, "card1");
     }
 
     #[test]

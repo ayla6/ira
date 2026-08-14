@@ -220,7 +220,7 @@ fn build_tree(
 
     Box::new(Panel::new(
         Padding::all(10.0),
-        [30, 30, 30, 210],
+        [30, 30, 30, 160],
         8.0,
         Box::new(Column::new(6.0, children)),
     ))

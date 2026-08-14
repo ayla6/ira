@@ -35,6 +35,7 @@ pub extern "C" fn ira_overlay_set_visible(visible: c_int) {
 /// Returns 1 if the overlay is visible, 0 otherwise.
 #[no_mangle]
 pub extern "C" fn ira_overlay_is_visible() -> c_int {
+    state::initialize();
     if state::is_visible() {
         1
     } else {

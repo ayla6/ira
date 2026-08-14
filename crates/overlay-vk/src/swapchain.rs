@@ -189,13 +189,14 @@ unsafe fn create_render_pass(
     let attachment = vk::AttachmentDescription::default()
         .format(format)
         .samples(vk::SampleCountFlags::TYPE_1)
-        // Clear to transparent each frame so areas without UI stay invisible
-        // when gamescope composites us as an external overlay.
-        .load_op(vk::AttachmentLoadOp::CLEAR)
+        // The injected layer renders into the game's existing swapchain image.
+        // Clearing here would replace the game with transparent black before
+        // the overlay is drawn.
+        .load_op(vk::AttachmentLoadOp::LOAD)
         .store_op(vk::AttachmentStoreOp::STORE)
         .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
         .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-        .initial_layout(vk::ImageLayout::UNDEFINED)
+        .initial_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
         .final_layout(vk::ImageLayout::PRESENT_SRC_KHR);
 
     let color_ref = vk::AttachmentReference::default()

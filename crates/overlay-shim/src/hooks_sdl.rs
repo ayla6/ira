@@ -13,15 +13,18 @@
 //! (SDL hooks can consume events; evdev can't).
 
 use std::ffi::c_void;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::OnceLock;
 
-use ira_overlay_ipc::InputEventRaw;
+use ira_overlay_ipc::{gamepad_button_mask_from_evdev, InputEventRaw};
 
 use crate::state;
 
 // SDL2 event types (same values in SDL3)
 const SDL_CONTROLLERBUTTONDOWN: u32 = 0x651;
+const SDL_CONTROLLERBUTTONUP: u32 = 0x652;
 const SDL_JOYBUTTONDOWN: u32 = 0x603;
+const SDL_JOYBUTTONUP: u32 = 0x604;
 
 // SDL2 controller button codes (same in SDL3)
 const BTN_A: u8 = 0;
@@ -52,6 +55,8 @@ type PollEventFn = unsafe extern "C" fn(*mut c_void) -> i32;
 
 static REAL_SDL_POLL_EVENT: OnceLock<Option<PollEventFn>> = OnceLock::new();
 static BUTTON_OFFSET: OnceLock<usize> = OnceLock::new();
+static PRESSED_BUTTONS: AtomicU32 = AtomicU32::new(0);
+static TOGGLE_PENDING: AtomicBool = AtomicBool::new(false);
 
 fn real_poll_event() -> Option<PollEventFn> {
     *REAL_SDL_POLL_EVENT.get_or_init(|| {
@@ -87,12 +92,23 @@ fn read_button(event: *const c_void) -> u8 {
 }
 
 fn handle_button(button: u8) -> bool {
-    // Guide button always toggles overlay.
-    if button == BTN_GUIDE {
-        if !state::ready_for_overlay() {
-            return false;
-        }
-        state::set_visible(!state::is_visible());
+    let Some(mask) = button_mask(button) else {
+        return false;
+    };
+    let held = PRESSED_BUTTONS.fetch_or(mask, Ordering::Relaxed) | mask;
+    let (toggle, screenshot, record) = state::gamepad_hotkeys();
+    if held == screenshot {
+        TOGGLE_PENDING.store(false, Ordering::Relaxed);
+        state::push_event(capture_event(5));
+        return true;
+    }
+    if held == record {
+        TOGGLE_PENDING.store(false, Ordering::Relaxed);
+        state::push_event(capture_event(6));
+        return true;
+    }
+    if held == toggle {
+        TOGGLE_PENDING.store(true, Ordering::Relaxed);
         return true;
     }
 
@@ -157,6 +173,40 @@ fn handle_button(button: u8) -> bool {
     true
 }
 
+fn handle_button_release(button: u8) -> bool {
+    let Some(mask) = button_mask(button) else {
+        return false;
+    };
+    let held = PRESSED_BUTTONS.fetch_and(!mask, Ordering::Relaxed) & !mask;
+    if TOGGLE_PENDING.swap(false, Ordering::Relaxed) && held == 0 && state::ready_for_overlay() {
+        state::set_visible(!state::is_visible());
+        return true;
+    }
+    false
+}
+
+fn button_mask(button: u8) -> Option<u32> {
+    let evdev = match button {
+        BTN_A => 0x130,
+        BTN_GUIDE => 0x13c,
+        BTN_LEFTSHOULDER => 0x136,
+        BTN_RIGHTSHOULDER => 0x137,
+        BTN_DPAD_UP => 0x220,
+        BTN_DPAD_DOWN => 0x221,
+        BTN_DPAD_LEFT => 0x222,
+        BTN_DPAD_RIGHT => 0x223,
+        _ => return None,
+    };
+    gamepad_button_mask_from_evdev(evdev)
+}
+
+fn capture_event(event_type: u32) -> InputEventRaw {
+    InputEventRaw {
+        event_type,
+        ..Default::default()
+    }
+}
+
 fn should_consume_gamepad_event(was_visible: bool, handled: bool) -> bool {
     was_visible || handled
 }
@@ -186,20 +236,17 @@ pub unsafe extern "C" fn SDL_PollEvent(event: *mut c_void) -> i32 {
         let event_type = *(event as *const u32);
         if event_type == SDL_CONTROLLERBUTTONDOWN || event_type == SDL_JOYBUTTONDOWN {
             let button = read_button(event);
-
-            // Log Guide button presses for diagnostics
-            if button == BTN_GUIDE {
-                eprintln!(
-                    "ira-overlay: Guide button pressed (event_type=0x{:x}, visible={})",
-                    event_type,
-                    state::is_visible()
-                );
-            }
-
             let was_visible = state::is_visible();
             let handled = handle_button(button);
 
             // Also consume a handled Guide press after it closes the overlay.
+            if should_consume_gamepad_event(was_visible, handled) && consumed < 64 {
+                consumed += 1;
+                continue;
+            }
+        } else if event_type == SDL_CONTROLLERBUTTONUP || event_type == SDL_JOYBUTTONUP {
+            let was_visible = state::is_visible();
+            let handled = handle_button_release(read_button(event));
             if should_consume_gamepad_event(was_visible, handled) && consumed < 64 {
                 consumed += 1;
                 continue;

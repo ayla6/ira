@@ -6,8 +6,9 @@ use std::sync::{Mutex, OnceLock};
 
 use ira_overlay_ipc::{InputEventRaw, MappedShm};
 use ira_overlay_ipc::{
-    DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS, DEFAULT_SCREENSHOT_KEYCODE,
-    DEFAULT_SCREENSHOT_MODS, DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
+    DEFAULT_RECORD_GAMEPAD_HOTKEY, DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+    DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY, DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS,
+    DEFAULT_TOGGLE_GAMEPAD_HOTKEY, DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
 };
 
 pub static OVERLAY_VISIBLE: AtomicBool = AtomicBool::new(false);
@@ -204,6 +205,29 @@ pub fn hotkeys() -> (u32, u32, u32, u32, u32, u32) {
         hdr.record_mods
     };
     (tog_kc, tog_mods, ss_kc, ss_mods, rec_kc, rec_mods)
+}
+
+pub fn gamepad_hotkeys() -> (u32, u32, u32) {
+    let Some(shm) = shm() else {
+        return (
+            DEFAULT_TOGGLE_GAMEPAD_HOTKEY,
+            DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY,
+            DEFAULT_RECORD_GAMEPAD_HOTKEY,
+        );
+    };
+    let Ok(shm) = shm.lock() else {
+        return (
+            DEFAULT_TOGGLE_GAMEPAD_HOTKEY,
+            DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY,
+            DEFAULT_RECORD_GAMEPAD_HOTKEY,
+        );
+    };
+    let header = shm.header();
+    (
+        header.toggle_gamepad,
+        header.screenshot_gamepad,
+        header.record_gamepad,
+    )
 }
 
 pub fn is_visible() -> bool {

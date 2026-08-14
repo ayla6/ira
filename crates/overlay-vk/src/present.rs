@@ -24,16 +24,14 @@ pub unsafe extern "system" fn queue_present(
         return chain_present(queue, present_info);
     }
 
+    // Capture hotkeys must be drained while the panel is hidden too.
+    crate::shim_bridge::poll_and_forward();
     let overlay_visible = crate::shim_bridge::is_visible();
     let screenshot_requested = ira_overlay::ui::capture::is_screenshot_requested()
         || ira_overlay::ui::capture::is_recording();
 
     if !overlay_visible && !screenshot_requested {
         return chain_present(queue, present_info);
-    }
-
-    if overlay_visible {
-        crate::shim_bridge::poll_and_forward();
     }
 
     if present_info.swapchain_count == 0 {

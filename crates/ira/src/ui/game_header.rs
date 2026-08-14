@@ -179,7 +179,7 @@ fn build_wine_tools_button(
     );
 
     let btn = gtk4::MenuButton::new();
-    btn.set_icon_name("wine-glass");
+    btn.set_icon_name("wine-glass-symbolic");
     btn.add_css_class(CSS_FLAT);
     btn.set_valign(gtk4::Align::Center);
     btn.set_tooltip_text(Some(&crate::tr!("Wine tools")));
@@ -338,9 +338,14 @@ fn build_hero_overlay(
 
     let hero = gtk4::Picture::new();
     if !hero_path.is_empty() {
-        if let Some(t) = ira_images::texture_for(hero_path) {
-            hero.set_paintable(Some(&t));
-        }
+        ira_images::load_texture_async(hero_path, {
+            let hero = hero.downgrade();
+            move |texture| {
+                if let (Some(hero), Some(texture)) = (hero.upgrade(), texture) {
+                    hero.set_paintable(Some(&texture));
+                }
+            }
+        });
     }
     hero.set_halign(gtk4::Align::Fill);
     hero.set_valign(gtk4::Align::Fill);

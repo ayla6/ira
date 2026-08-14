@@ -8,13 +8,13 @@ pub fn pixbuf_for(path: &str) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
     }
     PIXBUF_CACHE.with(|cell| {
         let mut cache = cell.borrow_mut();
+        if let Some(pb) = cache.get(path) {
+            return Some(pb.clone());
+        }
         if cache.len() >= PIXBUF_CACHE_MAX {
             if let Some(key) = cache.keys().next().cloned() {
                 cache.remove(&key);
             }
-        }
-        if let Some(pb) = cache.get(path) {
-            return Some(pb.clone());
         }
         match gtk4::gdk_pixbuf::Pixbuf::from_file(path) {
             Ok(pb) => {

@@ -131,6 +131,105 @@ pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// Merge duplicate game rows into `canonical_id` while keeping their related data.
+pub fn merge_duplicate_games(
+    conn: &DbConn,
+    canonical_id: i64,
+    duplicate_ids: &[i64],
+) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
+
+    for &duplicate_id in duplicate_ids {
+        if duplicate_id == canonical_id {
+            continue;
+        }
+        tx.execute(
+            "UPDATE games
+             SET title = CASE WHEN title = '' THEN (SELECT title FROM games WHERE id = ?2) ELSE title END,
+                  sort_title = CASE WHEN sort_title = '' THEN (SELECT sort_title FROM games WHERE id = ?2) ELSE sort_title END,
+                  hidden = MAX(hidden, (SELECT hidden FROM games WHERE id = ?2)),
+                  logo_position = CASE WHEN logo_position = 'bottom-left' THEN (SELECT logo_position FROM games WHERE id = ?2) ELSE logo_position END,
+                  logo_size = CASE WHEN logo_size = 50 THEN (SELECT logo_size FROM games WHERE id = ?2) ELSE logo_size END,
+                  playtime = playtime + (SELECT playtime FROM games WHERE id = ?2),
+                  last_played = MAX(last_played, (SELECT last_played FROM games WHERE id = ?2))
+             WHERE id = ?1",
+            params![canonical_id, duplicate_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT OR IGNORE INTO game_groups (game_id, group_id)
+             SELECT ?1, group_id FROM game_groups WHERE game_id = ?2",
+            params![canonical_id, duplicate_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "DELETE FROM game_groups WHERE game_id = ?1",
+            params![duplicate_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE game_variants SET game_id = ?1 WHERE game_id = ?2",
+            params![canonical_id, duplicate_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE play_sessions SET game_id = ?1 WHERE game_id = ?2",
+            params![canonical_id, duplicate_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE game_discs SET game_id = ?1 WHERE game_id = ?2",
+            params![canonical_id, duplicate_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE game_configs SET game_id = ?1
+             WHERE game_id = ?2 AND NOT EXISTS (
+                 SELECT 1 FROM game_configs WHERE game_id = ?1
+             )",
+            params![canonical_id, duplicate_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "DELETE FROM game_configs WHERE game_id = ?1",
+            params![duplicate_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE game_default_variant SET game_id = ?1
+             WHERE game_id = ?2 AND NOT EXISTS (
+                 SELECT 1 FROM game_default_variant WHERE game_id = ?1
+             )",
+            params![canonical_id, duplicate_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "DELETE FROM game_default_variant WHERE game_id = ?1",
+            params![duplicate_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE game_default_disc SET game_id = ?1
+             WHERE game_id = ?2 AND NOT EXISTS (
+                 SELECT 1 FROM game_default_disc WHERE game_id = ?1
+             )",
+            params![canonical_id, duplicate_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "DELETE FROM game_default_disc WHERE game_id = ?1",
+            params![duplicate_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM games WHERE id = ?1", params![duplicate_id])
+            .map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Cache of the resolved API-emulator DLL folder (Steam/GOG), empty if unknown.
 pub fn set_api_dll_folder(conn: &DbConn, id: i64, folder: &str) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
@@ -157,7 +256,12 @@ pub fn set_saves_centralized(conn: &DbConn, id: i64, centralized: bool) -> Resul
 mod tests {
     use super::super::find_by_db_id;
     use super::super::init_db;
+    use super::super::{
+        add_disc, add_game_to_group, create_group, get_all_groups, get_discs,
+        get_sessions_for_game, record_session, update_field,
+    };
     use super::*;
+    use ira_models::{GameDisc, GameKind, TrophySource};
     use tempfile::TempDir;
 
     fn setup_db() -> (DbConn, TempDir) {
@@ -214,6 +318,57 @@ mod tests {
         assert_eq!(id1, id2);
         let game = find_by_db_id(&conn, id1).unwrap().unwrap();
         assert_eq!(game.title, "Updated Title");
+    }
+
+    #[test]
+    fn test_merge_duplicate_games_preserves_related_data() {
+        let (conn, _tmp) = setup_db();
+        let canonical = add_game(
+            &conn,
+            GameKind::Retro,
+            TrophySource::Empty,
+            "",
+            "canonical",
+            "saturn",
+            "Canonical",
+        )
+        .unwrap();
+        let duplicate = add_game(
+            &conn,
+            GameKind::Retro,
+            TrophySource::Empty,
+            "",
+            "duplicate",
+            "saturn",
+            "Duplicate",
+        )
+        .unwrap();
+        let group = create_group(&conn, "Favorites").unwrap();
+        add_game_to_group(&conn, duplicate, group).unwrap();
+        update_field(&conn, duplicate, "playtime", &0.1_f64).unwrap();
+        record_session(&conn, duplicate, None, 1000, 1301).unwrap();
+        add_disc(
+            &conn,
+            &GameDisc {
+                id: 0,
+                game_id: duplicate,
+                disc_number: 2,
+                rom_path: "disc2.chd".to_string(),
+                label: "Disc 2".to_string(),
+            },
+        )
+        .unwrap();
+
+        merge_duplicate_games(&conn, canonical, &[duplicate]).unwrap();
+
+        assert!(find_by_db_id(&conn, duplicate).unwrap().is_none());
+        assert_eq!(get_discs(&conn, canonical).unwrap().len(), 1);
+        assert_eq!(get_all_groups(&conn).unwrap()[0].id, group);
+        assert_eq!(
+            get_sessions_for_game(&conn, canonical, None).unwrap().len(),
+            1
+        );
+        assert!((find_by_db_id(&conn, canonical).unwrap().unwrap().playtime - 0.1).abs() < 0.001);
     }
 
     #[test]

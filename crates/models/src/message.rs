@@ -20,7 +20,7 @@ pub enum AppMessage {
         completed: usize,
         total: usize,
     },
-    /// Rebuild the game list after source settings change.
+    /// Rebuild the game list after a source-settings change or manual rescan.
     ReloadGames,
     /// SGDB assets downloaded for a game.
     SessionRecorded {

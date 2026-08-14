@@ -213,4 +213,35 @@ mod tests {
             0
         );
     }
+
+    #[test]
+    fn test_group_multi_disc_ignores_release_tags() {
+        let roms = vec![
+            (
+                "Devil Summoner - Soul Hackers (Japan) (Disc 1)".to_string(),
+                PathBuf::from("/games/disc1.chd"),
+            ),
+            (
+                "Devil Summoner - Soul Hackers (Japan) (Disc 2)".to_string(),
+                PathBuf::from("/games/disc2.chd"),
+            ),
+            (
+                "Devil Summoner - Soul Hackers (Extra Dungeon) (Japan) (3M) (Disc 3)".to_string(),
+                PathBuf::from("/games/disc3.chd"),
+            ),
+        ];
+
+        let groups = group_multi_disc_roms(roms);
+
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].roms.len(), 3);
+        assert_eq!(
+            groups[0]
+                .roms
+                .iter()
+                .map(|(_, _, disc)| *disc)
+                .collect::<Vec<_>>(),
+            vec![Some(1), Some(2), Some(3)]
+        );
+    }
 }

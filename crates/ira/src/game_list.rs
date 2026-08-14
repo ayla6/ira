@@ -14,6 +14,8 @@ use ira_platforms::vita3k::discover_games_for_executable as discover_vita3k_game
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+const ROM_MIGRATION_THRESHOLD_SECONDS: i64 = 5 * 60;
+
 #[derive(Clone, Debug)]
 pub struct GameListProgress {
     pub status: String,
@@ -65,6 +67,12 @@ pub struct GameListOptions {
     pub cemu_enabled: bool,
     pub cemu_executable: String,
     pub steam_enabled: bool,
+    pub auto_reload_steam: bool,
+    pub auto_reload_roms: bool,
+    pub auto_reload_shadps4: bool,
+    pub auto_reload_rpcs3: bool,
+    pub auto_reload_vita3k: bool,
+    pub auto_reload_cemu: bool,
     pub ra_enabled: bool,
     pub sort_mode: SortMode,
     pub sort_descending: bool,
@@ -82,11 +90,34 @@ impl GameListOptions {
             cemu_enabled: cfg.cemu_enabled,
             cemu_executable: cfg.cemu_executable.clone(),
             steam_enabled: cfg.steam_enabled,
+            auto_reload_steam: cfg.auto_reload_steam,
+            auto_reload_roms: cfg.auto_reload_roms,
+            auto_reload_shadps4: cfg.auto_reload_shadps4,
+            auto_reload_rpcs3: cfg.auto_reload_rpcs3,
+            auto_reload_vita3k: cfg.auto_reload_vita3k,
+            auto_reload_cemu: cfg.auto_reload_cemu,
             ra_enabled: cfg.ra_enabled,
             sort_mode: cfg.sort_mode,
             sort_descending: cfg.sort_descending,
         }
     }
+
+    fn for_startup(cfg: &Config) -> Self {
+        let mut options = Self::from_config(cfg);
+        options.steam_enabled &= options.auto_reload_steam;
+        options.shadps4_enabled &= options.auto_reload_shadps4;
+        options.rpcs3_enabled &= options.auto_reload_rpcs3;
+        options.vita3k_enabled &= options.auto_reload_vita3k;
+        options.cemu_enabled &= options.auto_reload_cemu;
+        options.ra_enabled &= options.auto_reload_roms;
+        options
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GameListLoadMode {
+    Startup,
+    FullScan,
 }
 
 pub fn start_game_list_load(
@@ -95,7 +126,29 @@ pub fn start_game_list_load(
     cfg: Config,
     sender: ira_models::AppSender,
 ) {
-    let options = GameListOptions::from_config(&cfg);
+    start_game_list_load_with_mode(db, save_dir, cfg, sender, GameListLoadMode::FullScan);
+}
+
+pub fn start_saved_game_load(
+    db: db::DbConn,
+    save_dir: String,
+    cfg: Config,
+    sender: ira_models::AppSender,
+) {
+    start_game_list_load_with_mode(db, save_dir, cfg, sender, GameListLoadMode::Startup);
+}
+
+fn start_game_list_load_with_mode(
+    db: db::DbConn,
+    save_dir: String,
+    cfg: Config,
+    sender: ira_models::AppSender,
+    mode: GameListLoadMode,
+) {
+    let options = match mode {
+        GameListLoadMode::Startup => GameListOptions::for_startup(&cfg),
+        GameListLoadMode::FullScan => GameListOptions::from_config(&cfg),
+    };
     std::thread::spawn(move || {
         let progress_sender = sender.clone();
         let progress: Arc<dyn Fn(GameListProgress) + Send + Sync> = Arc::new(move |update| {
@@ -105,7 +158,7 @@ pub fn start_game_list_load(
                 total: update.total,
             });
         });
-        let games = build_game_list(&db, &save_dir, &cfg, &options, progress);
+        let games = build_game_list_with_mode(&db, &save_dir, &cfg, &options, progress, mode);
         let _ = sender.send(ira_models::AppMessage::GamesLoaded(games));
     });
 }
@@ -117,9 +170,29 @@ pub fn build_game_list(
     options: &GameListOptions,
     progress: Arc<dyn Fn(GameListProgress) + Send + Sync>,
 ) -> Vec<Game> {
+    build_game_list_with_mode(
+        db,
+        save_dir,
+        cfg,
+        options,
+        progress,
+        GameListLoadMode::FullScan,
+    )
+}
+
+fn build_game_list_with_mode(
+    db: &db::DbConn,
+    save_dir: &str,
+    cfg: &Config,
+    options: &GameListOptions,
+    progress: Arc<dyn Fn(GameListProgress) + Send + Sync>,
+    mode: GameListLoadMode,
+) -> Vec<Game> {
     let _span = tracing::info_span!("build_game_list").entered();
 
+    cleanup_stale_rom_entries(db, cfg);
     let ra_any_console = options.ra_enabled && cfg.any_console_enabled();
+    let merge_discovered_games = mode == GameListLoadMode::Startup;
     let db = db.clone();
     let save_dir = save_dir.to_string();
     let cfg = cfg.clone();
@@ -160,7 +233,11 @@ pub fn build_game_list(
         let native_handle = s.spawn(move || {
             let _s = tracing::info_span!("load_games_from_db").entered();
             native_reporter.status(crate::tr!("Loading saved games…"));
-            let games = game_loader::load_games(&db_native, &save_dir_native);
+            let games = if merge_discovered_games {
+                game_loader::load_saved_games(&db_native, &save_dir_native)
+            } else {
+                game_loader::load_games(&db_native, &save_dir_native)
+            };
             native_reporter.finish(crate::tr!("Loaded saved games"));
             games
         });
@@ -275,32 +352,32 @@ pub fn build_game_list(
 
         if let Some(h) = ps4_handle {
             match h.join() {
-                Ok(g) => games.extend(g),
+                Ok(g) => append_source_games(&mut games, g, merge_discovered_games),
                 Err(_) => eprintln!("PS4 games thread panicked"),
             }
         }
         if let Some(h) = ps3_handle {
             match h.join() {
-                Ok(g) => games.extend(g),
+                Ok(g) => append_source_games(&mut games, g, merge_discovered_games),
                 Err(_) => eprintln!("PS3 games thread panicked"),
             }
         }
         if let Some(h) = vita3k_handle {
             match h.join() {
-                Ok(g) => games.extend(g),
+                Ok(g) => append_source_games(&mut games, g, merge_discovered_games),
                 Err(_) => eprintln!("Vita3K games thread panicked"),
             }
         }
         if let Some(h) = cemu_handle {
             match h.join() {
-                Ok(g) => games.extend(g),
+                Ok(g) => append_source_games(&mut games, g, merge_discovered_games),
                 Err(_) => eprintln!("Cemu games thread panicked"),
             }
         }
-        games.extend(steam_games);
+        append_source_games(&mut games, steam_games, merge_discovered_games);
         if let Some(h) = ra_handle {
             match h.join() {
-                Ok(g) => games.extend(g),
+                Ok(g) => append_source_games(&mut games, g, merge_discovered_games),
                 Err(_) => eprintln!("RA games thread panicked"),
             }
         }
@@ -316,6 +393,113 @@ pub fn build_game_list(
 
         games
     })
+}
+
+fn append_source_games(games: &mut Vec<Game>, discovered: Vec<Game>, merge: bool) {
+    for game in discovered {
+        if merge {
+            if let Some(existing) = games.iter_mut().find(|existing| {
+                existing.db_id == game.db_id && existing.variant_id == game.variant_id
+            }) {
+                *existing = game;
+                continue;
+            }
+        }
+        games.push(game);
+    }
+}
+
+fn cleanup_stale_rom_entries(db: &db::DbConn, cfg: &Config) {
+    let entries = match db::load_all_games(db) {
+        Ok(entries) => entries,
+        Err(error) => {
+            eprintln!("Failed to load games for ROM cleanup: {error}");
+            return;
+        }
+    };
+
+    for entry in entries
+        .iter()
+        .filter(|entry| entry.kind == GameKind::Retro)
+        .filter(|entry| !rom_entry_has_file(db, cfg, entry))
+    {
+        if migration_playtime_seconds(db, entry) > ROM_MIGRATION_THRESHOLD_SECONDS {
+            if !entry.rom_path.is_empty() {
+                if let Err(error) = db::set_rom_path(db, entry.id, "") {
+                    eprintln!("Failed to clear stale ROM path {}: {error}", entry.id);
+                }
+            }
+            if let Err(error) = db::delete_discs(db, entry.id) {
+                eprintln!("Failed to clear stale ROM discs {}: {error}", entry.id);
+            }
+        } else if let Err(error) = db::remove_game(db, entry.id) {
+            eprintln!("Failed to remove stale ROM entry {}: {error}", entry.id);
+        }
+    }
+}
+
+fn migration_playtime_seconds(db: &db::DbConn, entry: &GameEntry) -> i64 {
+    let cached_seconds = (entry.playtime.max(0.0) * 3600.0).round() as i64;
+    let sessions_seconds = match db::get_sessions_for_game(db, entry.id, None) {
+        Ok(sessions) => sessions
+            .into_iter()
+            .map(|session| session.duration_seconds.max(0))
+            .sum(),
+        Err(error) => {
+            eprintln!(
+                "Failed to read play history for ROM entry {}: {error}",
+                entry.id
+            );
+            return cached_seconds.max(ROM_MIGRATION_THRESHOLD_SECONDS + 1);
+        }
+    };
+
+    cached_seconds.max(sessions_seconds)
+}
+
+fn rom_entry_has_file(db: &db::DbConn, cfg: &Config, entry: &GameEntry) -> bool {
+    let paths = if entry.rom_path.is_empty() {
+        match db::get_discs(db, entry.id) {
+            Ok(discs) => discs.into_iter().map(|disc| disc.rom_path).collect(),
+            Err(error) => {
+                eprintln!("Failed to load discs for ROM entry {}: {error}", entry.id);
+                return true;
+            }
+        }
+    } else {
+        vec![entry.rom_path.clone()]
+    };
+
+    if paths.is_empty() {
+        return false;
+    }
+
+    let mut checked_path = false;
+    for path in paths {
+        let Some(path) = resolve_rom_path(cfg, &entry.platform_id, &path) else {
+            continue;
+        };
+        checked_path = true;
+        if path.is_file() {
+            return true;
+        }
+    }
+
+    !checked_path
+}
+
+fn resolve_rom_path(cfg: &Config, platform_id: &str, path: &str) -> Option<std::path::PathBuf> {
+    let path = std::path::Path::new(path);
+    if path.is_absolute() {
+        return Some(path.to_path_buf());
+    }
+
+    let root = cfg.rom_folder(platform_id);
+    if root.is_dir() {
+        Some(root.join(path))
+    } else {
+        None
+    }
 }
 
 /// Fields from a DB entry needed to build console game metadata.
@@ -683,5 +867,175 @@ mod tests {
         assert!(options.shadps4_enabled);
         assert_eq!(options.shadps4_executable, "/tmp/shadps4");
         assert!(options.sort_descending);
+    }
+
+    #[test]
+    fn test_game_list_options_for_startup_applies_each_reload_setting() {
+        let cfg = Config {
+            steam_enabled: true,
+            shadps4_enabled: true,
+            rpcs3_enabled: true,
+            vita3k_enabled: true,
+            cemu_enabled: true,
+            ra_enabled: true,
+            auto_reload_steam: false,
+            auto_reload_roms: false,
+            auto_reload_shadps4: true,
+            auto_reload_rpcs3: false,
+            auto_reload_vita3k: true,
+            auto_reload_cemu: false,
+            ..Config::default()
+        };
+
+        let options = GameListOptions::for_startup(&cfg);
+
+        assert!(!options.steam_enabled);
+        assert!(!options.ra_enabled);
+        assert!(options.shadps4_enabled);
+        assert!(!options.rpcs3_enabled);
+        assert!(options.vita3k_enabled);
+        assert!(!options.cemu_enabled);
+    }
+
+    #[test]
+    fn test_append_source_games_replaces_saved_base_and_keeps_variants() {
+        let mut games = vec![
+            Game {
+                db_id: 1,
+                name: "Saved game".to_string(),
+                ..Default::default()
+            },
+            Game {
+                db_id: 1,
+                variant_id: Some(2),
+                name: "Saved variant".to_string(),
+                ..Default::default()
+            },
+        ];
+        let discovered = vec![
+            Game {
+                db_id: 1,
+                name: "Refreshed game".to_string(),
+                ..Default::default()
+            },
+            Game {
+                db_id: 3,
+                name: "New game".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        append_source_games(&mut games, discovered, true);
+
+        assert_eq!(games.len(), 3);
+        assert_eq!(games[0].name, "Refreshed game");
+        assert_eq!(games[1].name, "Saved variant");
+        assert_eq!(games[2].name, "New game");
+    }
+
+    #[test]
+    fn test_cleanup_stale_rom_entries_removes_missing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
+        let game_id = db::add_game(
+            &db,
+            GameKind::Retro,
+            ira_models::TrophySource::Empty,
+            "",
+            "stale-game",
+            "saturn",
+            "Stale game",
+        )
+        .unwrap();
+        db::set_rom_path(&db, game_id, "missing.rom").unwrap();
+        let rom_root = tmp.path().join("roms/saturn");
+        std::fs::create_dir_all(&rom_root).unwrap();
+        let cfg = Config {
+            roms_folder: tmp.path().join("roms").to_string_lossy().into_owned(),
+            ..Config::default()
+        };
+
+        cleanup_stale_rom_entries(&db, &cfg);
+
+        assert!(db::find_by_db_id(&db, game_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_cleanup_stale_rom_entries_preserves_play_history_for_migration() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
+        let game_id = db::add_game(
+            &db,
+            GameKind::Retro,
+            ira_models::TrophySource::Empty,
+            "",
+            "stale-game",
+            "saturn",
+            "Stale game",
+        )
+        .unwrap();
+        db::set_rom_path(&db, game_id, "missing.rom").unwrap();
+        db::record_session(&db, game_id, None, 1000, 1301).unwrap();
+        let rom_root = tmp.path().join("roms/saturn");
+        std::fs::create_dir_all(&rom_root).unwrap();
+        let cfg = Config {
+            roms_folder: tmp.path().join("roms").to_string_lossy().into_owned(),
+            ..Config::default()
+        };
+
+        cleanup_stale_rom_entries(&db, &cfg);
+
+        let entry = db::find_by_db_id(&db, game_id).unwrap().unwrap();
+        assert!(entry.rom_path.is_empty());
+        assert_eq!(
+            db::get_sessions_for_game(&db, game_id, None).unwrap().len(),
+            1
+        );
+        assert!(game_loader::load_saved_games(&db, &cfg.save_dir).is_empty());
+    }
+
+    #[test]
+    fn test_build_game_list_startup_loads_saved_games() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
+        let game_id = db::add_game(
+            &db,
+            GameKind::Retro,
+            ira_models::TrophySource::Empty,
+            "",
+            "saved-game",
+            "saturn",
+            "Saved game",
+        )
+        .unwrap();
+        db::set_rom_path(&db, game_id, "saved.rom").unwrap();
+        let rom_root = tmp.path().join("roms/saturn");
+        std::fs::create_dir_all(&rom_root).unwrap();
+        std::fs::write(rom_root.join("saved.rom"), b"rom").unwrap();
+
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let updates_clone = updates.clone();
+        let progress: Arc<dyn Fn(GameListProgress) + Send + Sync> = Arc::new(move |update| {
+            updates_clone.lock().unwrap().push(update);
+        });
+        let cfg = Config {
+            save_dir: tmp.path().to_string_lossy().into_owned(),
+            roms_folder: tmp.path().join("roms").to_string_lossy().into_owned(),
+            ..Config::default()
+        };
+        let options = GameListOptions::from_config(&cfg);
+
+        let games = build_game_list_with_mode(
+            &db,
+            &cfg.save_dir,
+            &cfg,
+            &options,
+            progress,
+            GameListLoadMode::Startup,
+        );
+
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].name, "Saved game");
+        assert_eq!(updates.lock().unwrap().last().unwrap().completed, 1);
     }
 }

@@ -51,7 +51,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
     ) = build_general_page(&win, &profiles, state);
     sidebar.append(&super::settings_dialog::settings_sidebar_row(
         "preferences-system-symbolic",
-        "General",
+        &crate::tr!("General"),
         "general",
     ));
     stack.add_named(&general_page, Some("general"));
@@ -88,7 +88,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
     let (env_page, env_vars_box, ld_preload_entry, ld_library_entry) = build_env_page();
     sidebar.append(&super::settings_dialog::settings_sidebar_row(
         "preferences-other-symbolic",
-        "Environment",
+        &crate::tr!("Environment"),
         "env",
     ));
     stack.add_named(&env_page, Some("env"));

@@ -8,7 +8,7 @@ use super::state::SharedState;
 use crate::Game;
 use gtk4::prelude::*;
 use ira_models::GroupSelection;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 fn queue_icon_load(icon: gtk4::Image, path: String) {
     let _s = tracing::info_span!("queue_icon_load", path = %path).entered();
@@ -111,26 +111,17 @@ pub fn rebuild_sidebar(state: &SharedState) {
 
     let (searching, show_hidden, groups, collapsed, games, group_members, running_games) = {
         let s = state.borrow();
-        let group_members: HashMap<i64, Vec<i64>> = s
-            .groups
-            .iter()
-            .map(|g| {
-                let ids: Vec<i64> = s
-                    .group_members
-                    .get(&g.id)
-                    .map(|set| set.iter().copied().collect())
-                    .unwrap_or_default();
-                (g.id, ids)
-            })
-            .collect();
         (
             !s.search_query.is_empty(),
             s.cfg.show_hidden_games,
             s.groups.clone(),
             s.collapsed_collections.clone(),
             s.games.clone(),
-            group_members,
-            s.running_games.clone(),
+            s.group_members.clone(),
+            s.running_games
+                .lock()
+                .map(|games| games.keys().copied().collect::<HashSet<_>>())
+                .unwrap_or_default(),
         )
     };
 
@@ -149,14 +140,14 @@ pub fn rebuild_sidebar(state: &SharedState) {
 
     if !searching {
         for g in &groups {
-            let member_ids = group_members.get(&g.id).cloned().unwrap_or_default();
+            let member_ids = group_members.get(&g.id);
             let collection_games: Vec<&Game> = visible_games
                 .iter()
-                .filter(|game| member_ids.contains(&game.db_id))
+                .filter(|game| member_ids.is_some_and(|ids| ids.contains(&game.db_id)))
                 .copied()
                 .collect();
 
-            if collection_games.is_empty() && !member_ids.is_empty() {
+            if collection_games.is_empty() && member_ids.is_some_and(|ids| !ids.is_empty()) {
                 continue;
             }
 
@@ -170,7 +161,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
 
             if !is_collapsed {
                 for game in &collection_games {
-                    let is_running = running_games.lock().unwrap().contains_key(&game.db_id);
+                    let is_running = running_games.contains(&game.db_id);
                     items.push(SidebarItem::new_game_variant(
                         game.db_id,
                         game.variant_id,
@@ -198,7 +189,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
 
             if !is_collapsed {
                 for game in &uncategorized {
-                    let is_running = running_games.lock().unwrap().contains_key(&game.db_id);
+                    let is_running = running_games.contains(&game.db_id);
                     items.push(SidebarItem::new_game_variant(
                         game.db_id,
                         game.variant_id,
@@ -234,7 +225,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
         });
 
         for game in &filtered {
-            let is_running = running_games.lock().unwrap().contains_key(&game.db_id);
+            let is_running = running_games.contains(&game.db_id);
             items.push(SidebarItem::new_game_variant(
                 game.db_id,
                 game.variant_id,

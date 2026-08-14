@@ -1,5 +1,5 @@
 use crate::bench::run_bench;
-use crate::game_list::start_game_list_load;
+use crate::game_list::start_saved_game_load;
 use crate::ui::{build_ui, handle_app_message, SharedState};
 use gtk4::glib;
 use ira_api::SteamDataClient;
@@ -95,7 +95,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
 
     let save_dir = cfg.save_dir.clone();
 
-    start_game_list_load(db.clone(), save_dir.clone(), cfg.clone(), sender.clone());
+    start_saved_game_load(db.clone(), save_dir.clone(), cfg.clone(), sender.clone());
 
     let steam_api_key = cfg.steam_api_key.clone();
     let steam_griddb_api_key = cfg.steam_griddb_api_key.clone();

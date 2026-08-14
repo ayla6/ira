@@ -147,10 +147,27 @@ fn add_game_path_if_needed(group: &adw::PreferencesGroup, game: &Game) {
     }
     let path_row = adw::ActionRow::new();
     path_row.set_title(&crate::tr!("Game file"));
-    let escaped = glib::markup_escape_text(&game.game_path).to_string();
+    let display_path = game_file_path_for_display(game);
+    let escaped = glib::markup_escape_text(&display_path).to_string();
     path_row.set_subtitle(&escaped);
     path_row.set_sensitive(false);
     group.add(&path_row);
+}
+
+fn game_file_path_for_display(game: &Game) -> String {
+    if game.kind == ira_models::GameKind::Retro && !game.platform_id.is_empty() {
+        let path = std::path::Path::new(&game.game_path);
+        if !path.is_absolute()
+            && path
+                .components()
+                .next()
+                .and_then(|component| component.as_os_str().to_str())
+                != Some(game.platform_id.as_str())
+        {
+            return format!("{}/{}", game.platform_id, game.game_path);
+        }
+    }
+    game.game_path.clone()
 }
 
 fn build_game_folder_row(
@@ -628,4 +645,37 @@ pub(super) fn build_game_general_page(
         migrate_btn,
         runtime_row,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::game_file_path_for_display;
+    use crate::Game;
+
+    #[test]
+    fn test_game_file_path_for_display_prefixes_retro_console() {
+        let game = Game {
+            kind: ira_models::GameKind::Retro,
+            platform_id: "saturn".to_string(),
+            game_path: "Soul Hackers/disc1.chd".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            game_file_path_for_display(&game),
+            "saturn/Soul Hackers/disc1.chd"
+        );
+    }
+
+    #[test]
+    fn test_game_file_path_for_display_keeps_absolute_path() {
+        let game = Game {
+            kind: ira_models::GameKind::Retro,
+            platform_id: "saturn".to_string(),
+            game_path: "/roms/saturn/disc1.chd".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(game_file_path_for_display(&game), "/roms/saturn/disc1.chd");
+    }
 }

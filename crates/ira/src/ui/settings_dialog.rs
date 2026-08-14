@@ -7,7 +7,7 @@ use super::settings_dialog_console::{
     discovery_settings_changed, register_console_pages, SharedConsoleSettingsWidgets,
 };
 use super::settings_dialog_pages::{build_settings_pages, register_settings_pages};
-use super::settings_pages::{OverlayPageWidgets, SystemDefaultsWidgets};
+use super::settings_pages::{AutoReloadWidgets, OverlayPageWidgets, SystemDefaultsWidgets};
 use super::state::SharedState;
 use super::system_settings::{build_override_switch_row, OverrideState};
 use super::wine_config_widget::WineConfigWidgets;
@@ -38,6 +38,7 @@ struct SavedSettingsWidgets {
     bg_row: adw::SwitchRow,
     hidden_row: adw::SwitchRow,
     saves_row: adw::SwitchRow,
+    auto_reload_widgets: AutoReloadWidgets,
     steam_enable_row: adw::SwitchRow,
     default_game_folder_row: adw::EntryRow,
     roms_folder_row: adw::EntryRow,
@@ -198,6 +199,7 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         bg_row: pages.bg_row,
         hidden_row: pages.hidden_row,
         saves_row: pages.saves_row,
+        auto_reload_widgets: pages.auto_reload_widgets,
         steam_enable_row: pages.steam_enable_row,
         default_game_folder_row: pages.default_game_folder_row,
         roms_folder_row: pages.roms_folder_row,
@@ -319,6 +321,12 @@ fn apply_general_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
     cfg.close_to_background = widgets.bg_row.is_active();
     cfg.show_hidden_games = widgets.hidden_row.is_active();
     cfg.centralize_game_saves = widgets.saves_row.is_active();
+    cfg.auto_reload_steam = widgets.auto_reload_widgets.steam.is_active();
+    cfg.auto_reload_roms = widgets.auto_reload_widgets.roms.is_active();
+    cfg.auto_reload_shadps4 = widgets.auto_reload_widgets.shadps4.is_active();
+    cfg.auto_reload_rpcs3 = widgets.auto_reload_widgets.rpcs3.is_active();
+    cfg.auto_reload_vita3k = widgets.auto_reload_widgets.vita3k.is_active();
+    cfg.auto_reload_cemu = widgets.auto_reload_widgets.cemu.is_active();
     cfg.steam_enabled = widgets.steam_enable_row.is_active();
     cfg.default_game_folder = widgets.default_game_folder_row.text().to_string();
     cfg.roms_folder = widgets.roms_folder_row.text().to_string();

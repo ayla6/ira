@@ -391,7 +391,7 @@ mod imp {
                             if let Some(game_item) = item.downcast_ref::<GameItem>() {
                                 if let Some(game) = game_item.game() {
                                     if let Some(ref bind) = bind {
-                                        bind(&widget, &game);
+                                        bind(&widget, game.as_ref());
                                     }
                                 }
                             }
@@ -417,7 +417,7 @@ mod imp {
                             if let Some(game_item) = item.downcast_ref::<GameItem>() {
                                 if let Some(game) = game_item.game() {
                                     if let Some(ref bind) = bind {
-                                        bind(widget, &game);
+                                        bind(widget, game.as_ref());
                                     }
                                 }
                             }
@@ -435,7 +435,7 @@ mod imp {
                             if let Some(game_item) = item.downcast_ref::<GameItem>() {
                                 if let Some(game) = game_item.game() {
                                     if let Some(ref bind) = bind {
-                                        bind(widget, &game);
+                                        bind(widget, game.as_ref());
                                     }
                                 }
                             }

@@ -56,6 +56,15 @@ pub(super) fn sidebar_section_title(title: &str) -> gtk4::ListBoxRow {
     row
 }
 
+pub(super) struct AutoReloadWidgets {
+    pub steam: adw::SwitchRow,
+    pub roms: adw::SwitchRow,
+    pub shadps4: adw::SwitchRow,
+    pub rpcs3: adw::SwitchRow,
+    pub vita3k: adw::SwitchRow,
+    pub cemu: adw::SwitchRow,
+}
+
 pub(super) fn build_general_settings_page(
     cfg: &Config,
 ) -> (
@@ -67,6 +76,7 @@ pub(super) fn build_general_settings_page(
     adw::PasswordEntryRow,
     gtk4::ListBox,
     adw::SwitchRow,
+    AutoReloadWidgets,
 ) {
     let page = settings_page_container();
 
@@ -104,6 +114,53 @@ pub(super) fn build_general_settings_page(
     saves_row.set_active(cfg.centralize_game_saves);
     hidden_group.add(&saves_row);
     page.append(&hidden_group);
+
+    let reload_group = adw::PreferencesGroup::new();
+    reload_group.set_title(&crate::tr!("Automatic library reloads"));
+    reload_group.set_description(Some(&crate::tr!(
+        "Choose which sources are scanned when Ira starts. Manual rescans always check every enabled source."
+    )));
+    let auto_reload_steam = auto_reload_row(
+        &crate::tr!("Steam"),
+        &crate::tr!("Scan installed Steam games when Ira starts"),
+        cfg.auto_reload_steam,
+    );
+    let auto_reload_roms = auto_reload_row(
+        &crate::tr!("ROM library"),
+        &crate::tr!("Scan ROM folders and refresh RetroAchievements games when Ira starts"),
+        cfg.auto_reload_roms,
+    );
+    let auto_reload_shadps4 = auto_reload_row(
+        &crate::tr!("shadPS4"),
+        &crate::tr!("Scan shadPS4 games when Ira starts"),
+        cfg.auto_reload_shadps4,
+    );
+    let auto_reload_rpcs3 = auto_reload_row(
+        &crate::tr!("RPCS3"),
+        &crate::tr!("Scan RPCS3 games when Ira starts"),
+        cfg.auto_reload_rpcs3,
+    );
+    let auto_reload_vita3k = auto_reload_row(
+        &crate::tr!("Vita3K"),
+        &crate::tr!("Scan Vita3K games when Ira starts"),
+        cfg.auto_reload_vita3k,
+    );
+    let auto_reload_cemu = auto_reload_row(
+        &crate::tr!("Cemu"),
+        &crate::tr!("Scan Cemu games when Ira starts"),
+        cfg.auto_reload_cemu,
+    );
+    for row in [
+        &auto_reload_steam,
+        &auto_reload_roms,
+        &auto_reload_shadps4,
+        &auto_reload_rpcs3,
+        &auto_reload_vita3k,
+        &auto_reload_cemu,
+    ] {
+        reload_group.add(row);
+    }
+    page.append(&reload_group);
 
     let key_group = adw::PreferencesGroup::new();
     key_group.set_title(&crate::tr!("API keys"));
@@ -144,7 +201,23 @@ pub(super) fn build_general_settings_page(
         sgdb_entry,
         lang_list,
         saves_row,
+        AutoReloadWidgets {
+            steam: auto_reload_steam,
+            roms: auto_reload_roms,
+            shadps4: auto_reload_shadps4,
+            rpcs3: auto_reload_rpcs3,
+            vita3k: auto_reload_vita3k,
+            cemu: auto_reload_cemu,
+        },
     )
+}
+
+fn auto_reload_row(title: &str, subtitle: &str, active: bool) -> adw::SwitchRow {
+    let row = adw::SwitchRow::new();
+    row.set_title(title);
+    row.set_subtitle(subtitle);
+    row.set_active(active);
+    row
 }
 
 pub(super) struct SystemDefaultsWidgets {
@@ -859,14 +932,17 @@ fn add_language_row(list: &gtk4::ListBox, code: &str) {
     let up_btn = gtk4::Button::from_icon_name("go-up-symbolic");
     up_btn.add_css_class(CSS_FLAT);
     up_btn.set_valign(gtk4::Align::Center);
+    up_btn.set_tooltip_text(Some(&crate::tr!("Move up")));
 
     let down_btn = gtk4::Button::from_icon_name("go-down-symbolic");
     down_btn.add_css_class(CSS_FLAT);
     down_btn.set_valign(gtk4::Align::Center);
+    down_btn.set_tooltip_text(Some(&crate::tr!("Move down")));
 
     let remove_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
     remove_btn.add_css_class(CSS_FLAT);
     remove_btn.set_valign(gtk4::Align::Center);
+    remove_btn.set_tooltip_text(Some(&crate::tr!("Remove language")));
 
     hbox.append(&name);
     hbox.append(&up_btn);

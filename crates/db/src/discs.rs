@@ -9,20 +9,33 @@ pub fn get_disc_paths_for_platform(
     conn: &DbConn,
     platform_id: &str,
 ) -> Result<std::collections::HashSet<String>, String> {
+    Ok(get_disc_owners_for_platform(conn, platform_id)?
+        .into_keys()
+        .collect())
+}
+
+/// Returns each known disc path and the game row it belongs to.
+pub fn get_disc_owners_for_platform(
+    conn: &DbConn,
+    platform_id: &str,
+) -> Result<std::collections::HashMap<String, i64>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c
         .prepare(
-            "SELECT gd.rom_path FROM game_discs gd
+            "SELECT gd.rom_path, gd.game_id FROM game_discs gd
          JOIN games g ON gd.game_id = g.id
          WHERE g.kind = 'retro' AND g.platform_id = ?1",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params![platform_id], |row| row.get::<_, String>(0))
+        .query_map(params![platform_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
         .map_err(|e| e.to_string())?;
-    let mut result = std::collections::HashSet::new();
+    let mut result = std::collections::HashMap::new();
     for row in rows {
-        result.insert(row.map_err(|e| e.to_string())?);
+        let (path, game_id) = row.map_err(|e| e.to_string())?;
+        result.insert(path, game_id);
     }
     Ok(result)
 }

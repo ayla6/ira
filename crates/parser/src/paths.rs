@@ -294,7 +294,7 @@ pub fn convert_to_lossless_webp(path: &Path) {
 }
 
 pub fn url_extension(url: &str) -> &str {
-    let path = Path::new(url);
+    let path = Path::new(url.split(['?', '#']).next().unwrap_or(url));
     path.extension().and_then(|e| e.to_str()).unwrap_or("png")
 }
 
@@ -361,7 +361,12 @@ mod tests {
     fn test_url_extension_complex_url() {
         let url = "https://example.com/path/icon.png?w=200&h=200";
         let ext = url_extension(url);
-        assert!(ext.contains("png"));
+        assert_eq!(ext, "png");
+    }
+
+    #[test]
+    fn test_url_extension_fragment() {
+        assert_eq!(url_extension("image.webp#preview"), "webp");
     }
 
     #[test]

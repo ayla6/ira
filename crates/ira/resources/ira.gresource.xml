@@ -10,7 +10,7 @@
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/padlock-closed-symbolic.svg">icons/padlock-closed-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/star-symbolic.svg">icons/star-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/trophy-symbolic.svg">icons/trophy-symbolic.svg</file>
-    <file preprocess="xml-stripblanks" alias="icons/16x16/actions/wine-glass.svg">icons/wine-glass.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/16x16/actions/wine-glass-symbolic.svg">icons/wine-glass-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/steam-train-symbolic.svg">icons/steam-train-symbolic.svg</file>
   </gresource>
 </gresources>

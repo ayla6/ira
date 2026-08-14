@@ -1,14 +1,16 @@
 use crate::Game;
 use gtk4::subclass::prelude::ObjectSubclassIsExt;
+use std::rc::Rc;
 
 mod imp {
     use crate::Game;
     use glib::subclass::prelude::*;
     use std::cell::RefCell;
+    use std::rc::Rc;
 
     #[derive(Default)]
     pub struct GameItem {
-        pub game: RefCell<Option<Game>>,
+        pub game: RefCell<Option<Rc<Game>>>,
     }
 
     #[glib::object_subclass]
@@ -28,11 +30,11 @@ glib::wrapper! {
 impl GameItem {
     pub fn new(game: &Game) -> Self {
         let obj = glib::Object::new::<Self>();
-        obj.imp().game.replace(Some(game.clone()));
+        obj.imp().game.replace(Some(Rc::new(game.clone())));
         obj
     }
 
-    pub fn game(&self) -> Option<Game> {
+    pub fn game(&self) -> Option<Rc<Game>> {
         self.imp().game.borrow().clone()
     }
 }

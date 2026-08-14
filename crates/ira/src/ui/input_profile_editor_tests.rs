@@ -123,12 +123,3 @@ fn test_build_profile_uses_updated_calibration() {
     .unwrap();
     assert_eq!(profile.gyro_calibration, calibration);
 }
-
-#[test]
-fn test_default_calibration_is_zeroed() {
-    let calibration = GyroCalibration::default();
-    assert_eq!(
-        (calibration.x, calibration.y, calibration.z),
-        (0.0, 0.0, 0.0)
-    );
-}

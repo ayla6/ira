@@ -305,6 +305,25 @@ fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
 
     popover_box.append(&history_btn);
 
+    let rescan_btn = gtk4::Button::new();
+    let rescan_label = gtk4::Label::new(Some(&crate::tr!("Rescan game library")));
+    rescan_label.set_xalign(0.0);
+    rescan_btn.set_child(Some(&rescan_label));
+    rescan_btn.add_css_class(CSS_FLAT);
+    rescan_btn.set_halign(gtk4::Align::Fill);
+    rescan_btn.set_size_request(-1, 36);
+    rescan_btn.add_css_class(CSS_POPOVER_MENU_ROW);
+    let popover_clone = popover.clone();
+    let state_clone = state.clone();
+    rescan_btn.connect_clicked(move |_| {
+        popover_clone.popdown();
+        let _ = state_clone
+            .borrow()
+            .sender
+            .send(crate::AppMessage::ReloadGames);
+    });
+    popover_box.append(&rescan_btn);
+
     let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
     sep.set_margin_top(4);
     sep.set_margin_bottom(4);

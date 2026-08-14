@@ -58,6 +58,36 @@ pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
     games
 }
 
+/// Load every saved game from the database without probing external sources.
+/// Use this during startup; explicit rescans can refresh source-specific data.
+pub fn load_saved_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
+    let _span = tracing::info_span!("load_saved_games").entered();
+    let entries = match ira_db::load_all_games(conn) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("Failed to load saved games from DB: {}", e);
+            return Vec::new();
+        }
+    };
+
+    let mut games = Vec::new();
+    for entry in entries {
+        if entry.kind == ira_models::GameKind::Retro && entry.rom_path.is_empty() {
+            continue;
+        }
+        match load_game_fast(&entry, save_dir) {
+            Ok(game) => {
+                let variant_entries = build_variant_entries(conn, save_dir, &game);
+                games.push(game);
+                games.extend(variant_entries);
+            }
+            Err(e) => eprintln!("Skipping saved game {}: {}", entry.id, e),
+        }
+    }
+    games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
+    games
+}
+
 fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
     let app_id = if !entry.steam_id.is_empty() {
         &entry.steam_id

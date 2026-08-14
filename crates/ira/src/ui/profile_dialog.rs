@@ -115,6 +115,7 @@ fn repopulate_profiles(
         edit_btn.add_css_class(CSS_FLAT);
         edit_btn.set_valign(gtk4::Align::Center);
         edit_btn.set_vexpand(false);
+        edit_btn.set_tooltip_text(Some(&crate::tr!("Edit profile")));
         let p_edit = p.clone();
         let win_edit = window.clone();
         let db_edit = db.clone();
@@ -141,6 +142,7 @@ fn repopulate_profiles(
         del_btn.add_css_class(CSS_FLAT);
         del_btn.set_valign(gtk4::Align::Center);
         del_btn.set_vexpand(false);
+        del_btn.set_tooltip_text(Some(&crate::tr!("Delete profile")));
         let p_id = p.id;
         let db_del = db.clone();
         let sw_del = settings_win.clone();
@@ -221,15 +223,14 @@ pub fn show_profile_dialog(
     }
     group.add(&name_entry);
 
+    let versions = ira_launcher::wine_launch::detect_wine_versions();
     let version_model = {
-        let versions = ira_launcher::wine_launch::detect_wine_versions();
         let labels: Vec<&str> = versions.iter().map(|(l, _)| l.as_str()).collect();
         gtk4::StringList::new(&labels)
     };
     let version_row = adw::ComboRow::new();
     version_row.set_title(&crate::tr!("Wine version"));
     version_row.set_model(Some(&version_model));
-    let versions = ira_launcher::wine_launch::detect_wine_versions();
     if let Some(p) = existing.as_ref() {
         if let Some(idx) = versions.iter().position(|(_, v)| v == &p.wine_version) {
             version_row.set_selected(idx as u32);
@@ -349,11 +350,12 @@ pub fn show_profile_dialog(
     // Auto-enable and disable UMU toggle based on wine version selection
     let umu_row_for_version = umu_row.clone();
     let version_row_for_cb = version_row.clone();
+    let versions_for_cb = versions.clone();
     version_row_for_cb
         .clone()
         .connect_selected_notify(move |_| {
             let idx = version_row_for_cb.selected() as usize;
-            if let Some((_, ver)) = ira_launcher::wine_launch::detect_wine_versions().get(idx) {
+            if let Some((_, ver)) = versions_for_cb.get(idx) {
                 let is_proton = ver.to_lowercase().contains("proton");
                 umu_row_for_version.set_active(is_proton || umu_row_for_version.is_active());
                 umu_row_for_version.set_sensitive(!is_proton);

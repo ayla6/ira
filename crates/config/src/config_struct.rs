@@ -164,6 +164,18 @@ pub struct Config {
     pub cemu_executable: String,
     #[serde(default)]
     pub steam_enabled: bool,
+    #[serde(default = "default_true")]
+    pub auto_reload_steam: bool,
+    #[serde(default)]
+    pub auto_reload_roms: bool,
+    #[serde(default = "default_true")]
+    pub auto_reload_shadps4: bool,
+    #[serde(default = "default_true")]
+    pub auto_reload_rpcs3: bool,
+    #[serde(default = "default_true")]
+    pub auto_reload_vita3k: bool,
+    #[serde(default = "default_true")]
+    pub auto_reload_cemu: bool,
 
     #[serde(default = "default_save_dir")]
     pub save_dir: String,
@@ -252,6 +264,12 @@ impl Default for Config {
             cemu_enabled: false,
             cemu_executable: String::new(),
             steam_enabled: false,
+            auto_reload_steam: true,
+            auto_reload_roms: false,
+            auto_reload_shadps4: true,
+            auto_reload_rpcs3: true,
+            auto_reload_vita3k: true,
+            auto_reload_cemu: true,
 
             save_dir: default_save_dir(),
             default_wine_config: WineConfig::default(),
@@ -344,6 +362,12 @@ impl Config {
             cemu_enabled: self.cemu_enabled,
             cemu_executable: self.cemu_executable.clone(),
             steam_enabled: self.steam_enabled,
+            auto_reload_steam: self.auto_reload_steam,
+            auto_reload_roms: self.auto_reload_roms,
+            auto_reload_shadps4: self.auto_reload_shadps4,
+            auto_reload_rpcs3: self.auto_reload_rpcs3,
+            auto_reload_vita3k: self.auto_reload_vita3k,
+            auto_reload_cemu: self.auto_reload_cemu,
             save_dir: self.save_dir.clone(),
             default_wine_config: self.default_wine_config.clone(),
             default_system: self.default_system.clone(),
@@ -414,6 +438,18 @@ mod tests {
             assert_eq!(cc.ra_core, "");
             assert!(!cc.fullscreen);
         }
+    }
+
+    #[test]
+    fn test_config_default_auto_reload_sources() {
+        let cfg = Config::default();
+
+        assert!(cfg.auto_reload_steam);
+        assert!(!cfg.auto_reload_roms);
+        assert!(cfg.auto_reload_shadps4);
+        assert!(cfg.auto_reload_rpcs3);
+        assert!(cfg.auto_reload_vita3k);
+        assert!(cfg.auto_reload_cemu);
     }
 
     #[test]

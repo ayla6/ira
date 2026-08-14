@@ -120,6 +120,15 @@ fn build_ra_games_for_console(
         let _s = tracing::info_span!("db_disc_paths").entered();
         ira_db::get_disc_paths_for_platform(db, console.def.id).unwrap_or_default()
     };
+    let disc_owners = ira_db::get_disc_owners_for_platform(db, console.def.id).unwrap_or_default();
+
+    let all_groups = group_multi_disc_roms(roms);
+    let grouped_paths: HashSet<String> = all_groups
+        .iter()
+        .filter(|group| group.roms.len() > 1)
+        .flat_map(|group| group.roms.iter())
+        .map(|(_, path, _)| to_relative(path))
+        .collect();
 
     let known_paths: HashSet<String> = existing_entries
         .iter()
@@ -130,12 +139,14 @@ fn build_ra_games_for_console(
 
     let mut seen_paths: HashSet<String> = HashSet::new();
     let mut new_roms: Vec<(String, PathBuf)> = Vec::new();
-    for (name, path) in roms {
-        let relative = to_relative(&path);
-        if !known_paths.contains(&relative) {
-            new_roms.push((name, path));
+    for group in &all_groups {
+        for (name, path, _) in &group.roms {
+            let relative = to_relative(path);
+            if grouped_paths.contains(&relative) || !known_paths.contains(&relative) {
+                new_roms.push((name.clone(), path.clone()));
+            }
+            seen_paths.insert(relative);
         }
-        seen_paths.insert(relative);
     }
 
     if scan_succeeded {
@@ -194,6 +205,9 @@ fn build_ra_games_for_console(
     {
         let _s = tracing::info_span!("load_known_games", count = existing_by_path.len()).entered();
         for (rom_path_str, entry) in &existing_by_path {
+            if grouped_paths.contains(rom_path_str) {
+                continue;
+            }
             let mut entry = entry.clone();
 
             if entry.trophy_source == ira_models::TrophySource::Empty
@@ -307,12 +321,50 @@ fn build_ra_games_for_console(
                 ),
             };
 
-            let existing_by_id = ira_db::find_by_game_id(db, &app_id, console.def.id)
+            let mut candidate_ids: Vec<i64> = group
+                .roms
+                .iter()
+                .filter_map(|(_, path, _)| {
+                    let path = to_relative(path);
+                    existing_by_path
+                        .get(&path)
+                        .map(|entry| entry.id)
+                        .or_else(|| disc_owners.get(&path).copied())
+                })
+                .collect();
+            candidate_ids.sort_unstable();
+            candidate_ids.dedup();
+
+            let id_from_key = ira_db::find_by_game_id(db, &app_id, console.def.id)
                 .ok()
-                .flatten();
+                .flatten()
+                .map(|entry| entry.id);
+            if let Some(id) = id_from_key {
+                candidate_ids.push(id);
+                candidate_ids.sort_unstable();
+                candidate_ids.dedup();
+            }
+
+            let canonical_id = id_from_key.or_else(|| candidate_ids.first().copied());
+            if let Some(canonical_id) = canonical_id {
+                let duplicate_ids: Vec<i64> = candidate_ids
+                    .iter()
+                    .copied()
+                    .filter(|id| *id != canonical_id)
+                    .collect();
+                if !duplicate_ids.is_empty() {
+                    if let Err(e) = ira_db::merge_duplicate_games(db, canonical_id, &duplicate_ids)
+                    {
+                        eprintln!("Failed to merge duplicate retro games: {e}");
+                    }
+                }
+            }
+
+            let existing_by_id =
+                canonical_id.and_then(|id| ira_db::find_by_db_id(db, id).ok().flatten());
             let game = match existing_by_id {
                 Some(e) => {
-                    if e.rom_path.is_empty() {
+                    if e.rom_path.is_empty() || group.roms.len() > 1 {
                         if let Err(e) = ira_db::set_rom_path(db, e.id, &rom_path_str) {
                             eprintln!("Failed to set ROM path: {}", e);
                         }

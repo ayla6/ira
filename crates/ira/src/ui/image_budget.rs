@@ -19,7 +19,7 @@ impl ImageLoadBudget {
         }
         if self.remaining > 0 {
             self.remaining -= 1;
-            ira_images::set_image(img, path);
+            ira_images::set_image_async(img, path);
         } else {
             self.deferred.push((img.clone(), path.to_string()));
         }
@@ -38,7 +38,7 @@ impl ImageLoadBudget {
             }
             let end = (i + 12).min(reqs.len());
             for (img, path) in &reqs[i..end] {
-                ira_images::set_image(img, path);
+                ira_images::set_image_async(img, path);
             }
             i = end;
             if i >= reqs.len() {

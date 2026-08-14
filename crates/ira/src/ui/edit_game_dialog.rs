@@ -79,10 +79,7 @@ fn create_dialog_window(
     layout.stack.set_hexpand(true);
     layout
         .header
-        .set_title_widget(Some(&gtk4::Label::new(Some(&format!(
-            "{} [{}]",
-            game.name, game.db_id
-        )))));
+        .set_title_widget(Some(&gtk4::Label::new(Some(&game.name))));
     (
         layout.window,
         layout.sidebar,

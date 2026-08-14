@@ -6,7 +6,7 @@ use super::settings_pages::{
     build_api_emulators_page, build_computer_games_page, build_general_settings_page,
     build_lutris_settings_page, build_overlay_settings_page, build_ra_settings_page,
     build_rom_settings_page, build_steam_settings_page, build_system_defaults_page,
-    OverlayPageWidgets, SystemDefaultsWidgets,
+    AutoReloadWidgets, OverlayPageWidgets, SystemDefaultsWidgets,
 };
 use super::state::SharedState;
 use super::wine_config_widget::{build_wine_config_pages, WineConfigWidgets, WinePage};
@@ -35,6 +35,7 @@ pub(super) struct SettingsPageWidgets {
     pub(super) sgdb_entry: adw::PasswordEntryRow,
     pub(super) lang_list: gtk4::ListBox,
     pub(super) saves_row: adw::SwitchRow,
+    pub(super) auto_reload_widgets: AutoReloadWidgets,
     pub(super) controller_default_widgets: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
     pub(super) default_game_folder_row: adw::EntryRow,
     pub(super) steam_enable_row: adw::SwitchRow,
@@ -66,6 +67,7 @@ pub(super) fn build_settings_pages(
         sgdb_entry,
         lang_list,
         saves_row,
+        auto_reload_widgets,
     ) = build_general_settings_page(cfg);
     let (overlay_page, overlay_widgets) = build_overlay_settings_page(cfg);
     let registry = state.borrow().controller_registry.clone();
@@ -102,6 +104,7 @@ pub(super) fn build_settings_pages(
         sgdb_entry,
         lang_list,
         saves_row,
+        auto_reload_widgets,
         controller_default_widgets,
         default_game_folder_row,
         steam_enable_row,
@@ -199,7 +202,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.profiles_page,
-        "wine-glass",
+        "wine-glass-symbolic",
         &crate::tr!("Profiles"),
         "profiles",
     );

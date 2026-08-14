@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use ira_overlay::ui::{push_event, Event};
+use ira_overlay_ipc::gamepad_button_mask_from_evdev;
 
 // evdev event types
 const EV_KEY: u16 = 0x01;
@@ -34,7 +35,6 @@ const BTN_DPAD_UP: u16 = 0x220;
 const BTN_DPAD_DOWN: u16 = 0x221;
 const BTN_DPAD_LEFT: u16 = 0x222;
 const BTN_DPAD_RIGHT: u16 = 0x223;
-const BTN_MODE: u16 = 0x13c; // Guide / Home / PS
 
 // Axis codes (for controllers that report D-pad as axes)
 const ABS_HAT0X: u16 = 0x10;
@@ -67,6 +67,8 @@ static INOTIFY_FD: AtomicI32 = AtomicI32::new(-1);
 static RESCAN_TIMER: AtomicU32 = AtomicU32::new(0);
 static HAT_X: AtomicI32 = AtomicI32::new(0);
 static HAT_Y: AtomicI32 = AtomicI32::new(0);
+static PRESSED_BUTTONS: AtomicU32 = AtomicU32::new(0);
+static TOGGLE_PENDING: AtomicBool = AtomicBool::new(false);
 
 /// Frames to wait after inotify fires before re-scanning.
 /// The device node exists immediately but isn't fully initialized —
@@ -236,17 +238,36 @@ pub fn poll() {
 fn handle_event(ev: &InputEvent) {
     match ev.type_ {
         EV_KEY => {
+            let Some(button) = gamepad_button_mask_from_evdev(ev.code) else {
+                return;
+            };
+            if ev.value == 0 {
+                let held = PRESSED_BUTTONS.fetch_and(!button, Ordering::Relaxed) & !button;
+                if TOGGLE_PENDING.swap(false, Ordering::Relaxed) && held == 0 {
+                    toggle_overlay();
+                }
+                return;
+            }
             if ev.value != KEY_PRESS {
                 return;
             }
-            // Guide button always toggles, even when overlay is hidden.
-            if ev.code == BTN_MODE {
-                if !crate::shim_bridge::ready_for_overlay() {
+            let held = PRESSED_BUTTONS.fetch_or(button, Ordering::Relaxed) | button;
+            match hotkey_action(held) {
+                HotkeyAction::Screenshot => {
+                    TOGGLE_PENDING.store(false, Ordering::Relaxed);
+                    ira_overlay::ui::capture::request_screenshot();
                     return;
                 }
-                let visible = crate::shim_bridge::is_visible();
-                crate::shim_bridge::set_visible(!visible);
-                return;
+                HotkeyAction::Record => {
+                    TOGGLE_PENDING.store(false, Ordering::Relaxed);
+                    ira_overlay::ui::capture::toggle_recording();
+                    return;
+                }
+                HotkeyAction::Toggle => {
+                    TOGGLE_PENDING.store(true, Ordering::Relaxed);
+                    return;
+                }
+                HotkeyAction::None => {}
             }
             // Other buttons only when overlay is visible.
             if !crate::shim_bridge::is_visible() {
@@ -295,5 +316,58 @@ fn handle_event(ev: &InputEvent) {
             }
         }
         _ => {}
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum HotkeyAction {
+    None,
+    Toggle,
+    Screenshot,
+    Record,
+}
+
+fn hotkey_action(held: u32) -> HotkeyAction {
+    let (toggle, screenshot, record) = crate::shim_bridge::gamepad_hotkeys();
+    hotkey_action_for(held, toggle, screenshot, record)
+}
+
+fn hotkey_action_for(held: u32, toggle: u32, screenshot: u32, record: u32) -> HotkeyAction {
+    if held == screenshot {
+        HotkeyAction::Screenshot
+    } else if held == record {
+        HotkeyAction::Record
+    } else if held == toggle {
+        HotkeyAction::Toggle
+    } else {
+        HotkeyAction::None
+    }
+}
+
+fn toggle_overlay() {
+    if crate::shim_bridge::ready_for_overlay() {
+        crate::shim_bridge::set_visible(!crate::shim_bridge::is_visible());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{hotkey_action_for, HotkeyAction};
+    use ira_overlay_ipc::{
+        DEFAULT_RECORD_GAMEPAD_HOTKEY, DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY,
+        DEFAULT_TOGGLE_GAMEPAD_HOTKEY,
+    };
+
+    #[test]
+    fn test_hotkey_action_prefers_guide_chord_over_toggle() {
+        assert_eq!(
+            hotkey_action_for(
+                DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY,
+                DEFAULT_TOGGLE_GAMEPAD_HOTKEY,
+                DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY,
+                DEFAULT_RECORD_GAMEPAD_HOTKEY,
+            ),
+            HotkeyAction::Screenshot
+        );
     }
 }

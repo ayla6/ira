@@ -7,6 +7,83 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub const GAMEPAD_A: u32 = 1 << 0;
+pub const GAMEPAD_B: u32 = 1 << 1;
+pub const GAMEPAD_X: u32 = 1 << 2;
+pub const GAMEPAD_Y: u32 = 1 << 3;
+pub const GAMEPAD_L1: u32 = 1 << 4;
+pub const GAMEPAD_R1: u32 = 1 << 5;
+pub const GAMEPAD_L2: u32 = 1 << 6;
+pub const GAMEPAD_R2: u32 = 1 << 7;
+pub const GAMEPAD_SELECT: u32 = 1 << 8;
+pub const GAMEPAD_START: u32 = 1 << 9;
+pub const GAMEPAD_GUIDE: u32 = 1 << 10;
+pub const GAMEPAD_L3: u32 = 1 << 11;
+pub const GAMEPAD_R3: u32 = 1 << 12;
+pub const GAMEPAD_DPAD_UP: u32 = 1 << 13;
+pub const GAMEPAD_DPAD_DOWN: u32 = 1 << 14;
+pub const GAMEPAD_DPAD_LEFT: u32 = 1 << 15;
+pub const GAMEPAD_DPAD_RIGHT: u32 = 1 << 16;
+
+pub const DEFAULT_TOGGLE_GAMEPAD_HOTKEY: u32 = GAMEPAD_GUIDE;
+pub const DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY: u32 = GAMEPAD_GUIDE | GAMEPAD_DPAD_DOWN;
+pub const DEFAULT_RECORD_GAMEPAD_HOTKEY: u32 = GAMEPAD_GUIDE | GAMEPAD_DPAD_UP;
+
+pub fn parse_gamepad_hotkey(hotkey: &str) -> Option<u32> {
+    hotkey
+        .split('+')
+        .map(str::trim)
+        .map(gamepad_button_mask_from_name)
+        .try_fold(0, |mask, button| button.map(|button| mask | button))
+        .filter(|mask| *mask != 0)
+}
+
+pub fn gamepad_button_mask_from_evdev(code: u16) -> Option<u32> {
+    match code {
+        0x130 => Some(GAMEPAD_A),
+        0x131 => Some(GAMEPAD_B),
+        0x132 => Some(GAMEPAD_X),
+        0x133 => Some(GAMEPAD_Y),
+        0x136 => Some(GAMEPAD_L1),
+        0x137 => Some(GAMEPAD_R1),
+        0x138 => Some(GAMEPAD_L2),
+        0x139 => Some(GAMEPAD_R2),
+        0x13a => Some(GAMEPAD_SELECT),
+        0x13b => Some(GAMEPAD_START),
+        0x13c => Some(GAMEPAD_GUIDE),
+        0x13d => Some(GAMEPAD_L3),
+        0x13e => Some(GAMEPAD_R3),
+        0x220 => Some(GAMEPAD_DPAD_UP),
+        0x221 => Some(GAMEPAD_DPAD_DOWN),
+        0x222 => Some(GAMEPAD_DPAD_LEFT),
+        0x223 => Some(GAMEPAD_DPAD_RIGHT),
+        _ => None,
+    }
+}
+
+fn gamepad_button_mask_from_name(name: &str) -> Option<u32> {
+    match name {
+        "A" => Some(GAMEPAD_A),
+        "B" => Some(GAMEPAD_B),
+        "X" => Some(GAMEPAD_X),
+        "Y" => Some(GAMEPAD_Y),
+        "L1" => Some(GAMEPAD_L1),
+        "R1" => Some(GAMEPAD_R1),
+        "L2" => Some(GAMEPAD_L2),
+        "R2" => Some(GAMEPAD_R2),
+        "Select" => Some(GAMEPAD_SELECT),
+        "Start" => Some(GAMEPAD_START),
+        "Guide" => Some(GAMEPAD_GUIDE),
+        "L3" => Some(GAMEPAD_L3),
+        "R3" => Some(GAMEPAD_R3),
+        "DpadUp" => Some(GAMEPAD_DPAD_UP),
+        "DpadDown" => Some(GAMEPAD_DPAD_DOWN),
+        "DpadLeft" => Some(GAMEPAD_DPAD_LEFT),
+        "DpadRight" => Some(GAMEPAD_DPAD_RIGHT),
+        _ => None,
+    }
+}
+
 /// Video encoder backend selection.
 /// Auto probes VAAPI → NVENC → Software at recording start.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,6 +211,32 @@ pub enum RecordingFormat {
     Webm,
 }
 
+impl RecordingFormat {
+    pub fn as_u32(self) -> u32 {
+        match self {
+            Self::Mp4 => 0,
+            Self::Mkv => 1,
+            Self::Webm => 2,
+        }
+    }
+
+    pub fn from_u32(value: u32) -> Self {
+        match value {
+            1 => Self::Mkv,
+            2 => Self::Webm,
+            _ => Self::Mp4,
+        }
+    }
+
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Mp4 => "mp4",
+            Self::Mkv => "mkv",
+            Self::Webm => "webm",
+        }
+    }
+}
+
 /// Global overlay settings, stored in the Ira config file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OverlaySettings {
@@ -254,6 +357,16 @@ mod tests {
         assert_eq!(VideoEncoder::Vaapi.ffmpeg_codec(), "h264_vaapi");
         assert_eq!(VideoEncoder::Nvenc.ffmpeg_codec(), "h264_nvenc");
         assert_eq!(VideoEncoder::Software.ffmpeg_codec(), "libx264");
+    }
+
+    #[test]
+    fn test_parse_gamepad_hotkey_encodes_chords() {
+        assert_eq!(parse_gamepad_hotkey("Guide"), Some(GAMEPAD_GUIDE));
+        assert_eq!(
+            parse_gamepad_hotkey("Guide+DpadDown"),
+            Some(GAMEPAD_GUIDE | GAMEPAD_DPAD_DOWN)
+        );
+        assert_eq!(parse_gamepad_hotkey("Guide+Unknown"), None);
     }
 
     #[test]

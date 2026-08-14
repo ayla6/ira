@@ -13,7 +13,6 @@ use ira_overlay_ipc::{
 pub static OVERLAY_VISIBLE: AtomicBool = AtomicBool::new(false);
 static VISIBILITY_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static HAS_SDL: AtomicBool = AtomicBool::new(false);
-static SDL_CHECKED: AtomicBool = AtomicBool::new(false);
 static PRESENT_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 const MIN_PRESENTS: u64 = 60;
@@ -241,31 +240,9 @@ pub fn set_has_sdl(v: bool) {
     HAS_SDL.store(v, Ordering::SeqCst);
 }
 
-/// Returns true if SDL is loaded. On first call, detects SDL by checking
-/// if SDL functions are available via dlsym(RTLD_DEFAULT, ...).
-/// This catches games that use SDL without calling SDL_PollEvent (e.g. shadPS4
-/// uses SDL_GameControllerGetButton directly), which would otherwise cause
-/// evdev to poll and conflict with SDL's gamepad handling.
+/// Returns true once the SDL event hook has received an event. Merely loading
+/// SDL is insufficient because direct-state games never call `SDL_PollEvent`.
 pub fn has_sdl() -> bool {
-    if HAS_SDL.load(Ordering::SeqCst) {
-        return true;
-    }
-    if !SDL_CHECKED.swap(true, Ordering::SeqCst) {
-        // Use dlsym instead of dlopen(RTLD_NOLOAD) — dlsym(RTLD_DEFAULT, ...)
-        // searches all loaded libraries regardless of their path, which is
-        // more reliable for AppImages that load SDL from non-standard paths.
-        let sdl_init = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"SDL_Init".as_ptr()) };
-        let sdl_gamepad =
-            unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"SDL_GameControllerOpen".as_ptr()) };
-        let sdl3_gamepad = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"SDL_OpenGamepad".as_ptr()) };
-        let found = !sdl_init.is_null() || !sdl_gamepad.is_null() || !sdl3_gamepad.is_null();
-        if found {
-            eprintln!("ira-overlay: SDL detected via dlsym, disabling evdev");
-            HAS_SDL.store(true, Ordering::SeqCst);
-        } else {
-            eprintln!("ira-overlay: SDL not detected (dlsym found nothing)");
-        }
-    }
     HAS_SDL.load(Ordering::SeqCst)
 }
 

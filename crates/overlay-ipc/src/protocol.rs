@@ -15,7 +15,7 @@
 use std::sync::atomic::AtomicU32;
 
 pub const SHM_MAGIC: u32 = 0x4952414F;
-pub const SHM_VERSION: u32 = 1;
+pub const SHM_VERSION: u32 = 2;
 pub const MAX_ACHIEVEMENTS: usize = 1024;
 pub const MAX_NOTIFICATIONS: usize = 16;
 
@@ -45,6 +45,8 @@ pub struct ShmHeader {
     pub video_encoder: u32,
     /// Recording quality (value of RecordingQuality as u32).
     pub recording_quality: u32,
+    /// Output container format (value of RecordingFormat as u32).
+    pub recording_format: u32,
     /// Evdev keycode for toggle hotkey (0 = use default Shift+Tab).
     pub toggle_keysym: u32,
     /// Modifier mask for toggle hotkey (Shift=0x01, Ctrl=0x04, Alt=0x08, Super=0x40).
@@ -57,6 +59,12 @@ pub struct ShmHeader {
     pub record_keysym: u32,
     /// Modifier mask for record hotkey.
     pub record_mods: u32,
+    /// Bitmask of gamepad buttons for toggling the overlay.
+    pub toggle_gamepad: u32,
+    /// Bitmask of gamepad buttons for taking a screenshot.
+    pub screenshot_gamepad: u32,
+    /// Bitmask of gamepad buttons for toggling recording.
+    pub record_gamepad: u32,
     /// Cross-process visibility flag for the standalone overlay.
     /// Written by the shim (on hotkey), read by the standalone overlay.
     pub overlay_visible: AtomicU32,
@@ -64,7 +72,7 @@ pub struct ShmHeader {
     /// Used for cross-process debounce — prevents multiple child processes
     /// from toggling simultaneously on the same key event.
     pub last_toggle_ms: AtomicU32,
-    pub padding: [u8; 44],
+    pub padding: [u8; 28],
 }
 
 /// One achievement entry in the shared memory array.

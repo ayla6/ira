@@ -8,8 +8,9 @@
 
 use ira_models::Game;
 use ira_overlay_ipc::{
-    parse_hotkey, shm_path, MappedShm, OverlaySettings, RecordingQuality, VideoEncoder,
-    MAX_ACHIEVEMENTS,
+    parse_gamepad_hotkey, parse_hotkey, shm_path, MappedShm, OverlaySettings, RecordingQuality,
+    VideoEncoder, DEFAULT_RECORD_GAMEPAD_HOTKEY, DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY,
+    DEFAULT_TOGGLE_GAMEPAD_HOTKEY, MAX_ACHIEVEMENTS,
 };
 
 /// Creates the shared memory region and writes game data + achievements.
@@ -42,6 +43,7 @@ pub fn write_game_shm(
             .map(RecordingQuality::from_u32)
             .unwrap_or(settings.recording_quality)
             .as_u32();
+        hdr.recording_format = settings.recording_format.as_u32();
 
         // Write hotkey config as (evdev_keycode, modifier_mask).
         let (toggle_kc, toggle_mods) = parse_hotkey(&settings.toggle_hotkey);
@@ -53,6 +55,12 @@ pub fn write_game_shm(
         hdr.screenshot_mods = screenshot_mods;
         hdr.record_keysym = record_kc;
         hdr.record_mods = record_mods;
+        hdr.toggle_gamepad = parse_gamepad_hotkey(&settings.toggle_hotkey_gamepad)
+            .unwrap_or(DEFAULT_TOGGLE_GAMEPAD_HOTKEY);
+        hdr.screenshot_gamepad = parse_gamepad_hotkey(&settings.screenshot_hotkey_gamepad)
+            .unwrap_or(DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY);
+        hdr.record_gamepad = parse_gamepad_hotkey(&settings.record_hotkey_gamepad)
+            .unwrap_or(DEFAULT_RECORD_GAMEPAD_HOTKEY);
     }
 
     let achievements = shm.achievements_mut();

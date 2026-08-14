@@ -7,7 +7,9 @@ mod protocol;
 mod shm;
 
 pub use config::{
-    OverlayPosition, OverlaySettings, RecordingFormat, RecordingQuality, VideoEncoder,
+    gamepad_button_mask_from_evdev, parse_gamepad_hotkey, OverlayPosition, OverlaySettings,
+    RecordingFormat, RecordingQuality, VideoEncoder, DEFAULT_RECORD_GAMEPAD_HOTKEY,
+    DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY, DEFAULT_TOGGLE_GAMEPAD_HOTKEY,
 };
 pub use hotkey::{
     parse_hotkey, resolve_defaults, DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,

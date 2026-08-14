@@ -14,8 +14,9 @@ use std::sync::{Mutex, OnceLock};
 use ira_overlay::ui::{capture, push_event, Event};
 use ira_overlay_ipc::InputEventRaw;
 use ira_overlay_ipc::{
-    MappedShm, DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS, DEFAULT_SCREENSHOT_KEYCODE,
-    DEFAULT_SCREENSHOT_MODS, DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
+    MappedShm, DEFAULT_RECORD_GAMEPAD_HOTKEY, DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
+    DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY, DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS,
+    DEFAULT_TOGGLE_GAMEPAD_HOTKEY, DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
 };
 
 type PollEventsFn = unsafe extern "C" fn(*mut InputEventRaw, usize) -> usize;
@@ -187,6 +188,22 @@ pub fn hotkeys() -> (u32, u32, u32, u32, u32, u32) {
         hdr.record_mods
     };
     (tog_kc, tog_mods, ss_kc, ss_mods, rec_kc, rec_mods)
+}
+
+pub fn gamepad_hotkeys() -> (u32, u32, u32) {
+    let Some(shm) = shm().and_then(|mapping| mapping.lock().ok()) else {
+        return (
+            DEFAULT_TOGGLE_GAMEPAD_HOTKEY,
+            DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY,
+            DEFAULT_RECORD_GAMEPAD_HOTKEY,
+        );
+    };
+    let header = shm.header();
+    (
+        header.toggle_gamepad,
+        header.screenshot_gamepad,
+        header.record_gamepad,
+    )
 }
 
 /// Polls input events from the shim and forwards them to the overlay UI.

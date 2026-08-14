@@ -86,19 +86,19 @@ fn read_button(event: *const c_void) -> u8 {
     unsafe { *(event as *const u8).add(offset) }
 }
 
-fn handle_button(button: u8) {
+fn handle_button(button: u8) -> bool {
     // Guide button always toggles overlay.
     if button == BTN_GUIDE {
         if !state::ready_for_overlay() {
-            return;
+            return false;
         }
         state::set_visible(!state::is_visible());
-        return;
+        return true;
     }
 
     // Other buttons only when overlay is visible.
     if !state::is_visible() {
-        return;
+        return false;
     }
 
     let event = match button {
@@ -151,9 +151,14 @@ fn handle_button(button: u8) {
             button: 0,
             keycode: 0,
         },
-        _ => return,
+        _ => return false,
     };
     state::push_event(event);
+    true
+}
+
+fn should_consume_gamepad_event(was_visible: bool, handled: bool) -> bool {
+    was_visible || handled
 }
 
 /// LD_PRELOAD hook for `SDL_PollEvent`.
@@ -191,16 +196,26 @@ pub unsafe extern "C" fn SDL_PollEvent(event: *mut c_void) -> i32 {
                 );
             }
 
-            handle_button(button);
+            let was_visible = state::is_visible();
+            let handled = handle_button(button);
 
-            // Consume gamepad events when overlay is visible so the game
-            // doesn't see them. Loop to fetch the next event.
-            if state::is_visible() && consumed < 64 {
+            // Also consume a handled Guide press after it closes the overlay.
+            if should_consume_gamepad_event(was_visible, handled) && consumed < 64 {
                 consumed += 1;
                 continue;
             }
         }
 
         return result;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_consume_gamepad_event;
+
+    #[test]
+    fn test_should_consume_gamepad_event_after_guide_hides_overlay() {
+        assert!(should_consume_gamepad_event(false, true));
     }
 }

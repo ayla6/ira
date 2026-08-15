@@ -17,12 +17,12 @@ const DIRECT_INPUT_VENDOR: u16 = 0x4952;
 const DIRECT_INPUT_PRODUCT: u16 = 0x0001;
 const DIRECT_INPUT_VERSION: u16 = 0x0001;
 const DIRECT_INPUT_NAME: &str = "Ira Virtual DirectInput Controller";
-const DIRECT_INPUT_SDL_BINDINGS: &str = "a:b0,b:b1,x:b3,y:b2,leftshoulder:b4,rightshoulder:b5,lefttrigger:a2,righttrigger:a5,back:b8,start:b9,guide:b10,leftstick:b11,rightstick:b12,dpup:b13,dpdown:b14,dpleft:b15,dpright:b16,leftx:a0,lefty:a1,rightx:a3,righty:a4,paddle1:b17,paddle2:b18,paddle3:b19,paddle4:b20";
+const DIRECT_INPUT_SDL_BINDINGS: &str = "a:b0,b:b1,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,lefttrigger:a2,righttrigger:a5,back:b8,start:b9,guide:b10,leftstick:b11,rightstick:b12,dpup:b13,dpdown:b14,dpleft:b15,dpright:b16,leftx:a0,lefty:a1,rightx:a3,righty:a4,paddle1:b17,paddle2:b18,paddle3:b19,paddle4:b20";
 const SWITCH_PRO_VENDOR: u16 = 0x057e;
 const SWITCH_PRO_PRODUCT: u16 = 0x2009;
 const SWITCH_PRO_VERSION: u16 = 0x8111;
 const SWITCH_PRO_NAME: &str = "Ira Virtual Nintendo Switch Pro Controller";
-const SWITCH_PRO_SDL_BINDINGS: &str = "a:b0,b:b1,back:b9,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b11,leftshoulder:b5,leftstick:b12,lefttrigger:b7,leftx:a0,lefty:a1,misc1:b4,rightshoulder:b6,rightstick:b13,righttrigger:b8,rightx:a2,righty:a3,start:b10,x:b3,y:b2,platform:Linux";
+const SWITCH_PRO_SDL_BINDINGS: &str = "a:b0,b:b1,back:b9,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b11,leftshoulder:b5,leftstick:b12,lefttrigger:b7,leftx:a0,lefty:a1,misc1:b4,rightshoulder:b6,rightstick:b13,righttrigger:b8,rightx:a2,righty:a3,start:b10,x:b2,y:b3,platform:Linux";
 
 pub struct VirtualGamepad {
     device: VirtualDevice,
@@ -280,10 +280,8 @@ fn button_code(backend: VirtualGamepadBackend, button: GamepadButton) -> Option<
         GamepadButton::A => KeyCode::BTN_SOUTH,
         GamepadButton::B if backend == VirtualGamepadBackend::SwitchPro => KeyCode::BTN_SOUTH,
         GamepadButton::B => KeyCode::BTN_EAST,
-        GamepadButton::X if backend == VirtualGamepadBackend::SwitchPro => KeyCode::BTN_NORTH,
-        GamepadButton::X => KeyCode::BTN_WEST,
-        GamepadButton::Y if backend == VirtualGamepadBackend::SwitchPro => KeyCode::BTN_WEST,
-        GamepadButton::Y => KeyCode::BTN_NORTH,
+        GamepadButton::X => KeyCode::BTN_NORTH,
+        GamepadButton::Y => KeyCode::BTN_WEST,
         GamepadButton::LeftShoulder => KeyCode::BTN_TL,
         GamepadButton::RightShoulder => KeyCode::BTN_TR,
         GamepadButton::LeftTrigger => KeyCode::BTN_TL2,
@@ -374,11 +372,11 @@ mod tests {
     fn test_button_code_uses_virtual_xbox_positions() {
         assert_eq!(
             button_code(XInput, GamepadButton::X),
-            Some(KeyCode::BTN_WEST)
+            Some(KeyCode::BTN_NORTH)
         );
         assert_eq!(
             button_code(XInput, GamepadButton::Y),
-            Some(KeyCode::BTN_NORTH)
+            Some(KeyCode::BTN_WEST)
         );
         assert_eq!(button_code(XInput, GamepadButton::Paddle1), None);
     }

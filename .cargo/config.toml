@@ -1,0 +1,4 @@
+[build]
+# Distrobox exposes this checkout under /run/host while host Cargo sees its
+# normal path. Relative dep-info keeps artifacts reusable from either path.
+dep-info-basedir = "."

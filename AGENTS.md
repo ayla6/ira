@@ -243,6 +243,17 @@ fn test_load_status_map_goldberg_format() {
 }
 ```
 
+## Searching through the project
+
+Never search the workspace root (`.`). Every `Glob`, `Grep`, `rg`, or delegated
+search must name the narrowest relevant source directory, such as
+`crates/launcher/src` or `crates/overlay-vk/src`.
+
+Never search `references/`, `target/`, generated artifacts, or vendored source
+unless the task explicitly concerns that directory. Before delegating an
+exploration task, state the allowed search paths in its prompt; the agent must
+not search outside them.
+
 ## Commits
 
 ### Commit message format

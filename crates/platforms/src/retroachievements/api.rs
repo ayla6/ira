@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -11,75 +10,35 @@ use ira_config::Config;
 pub use super::api_types::read_console_games_cache;
 pub use super::api_types::{
     build_ra_achievements, enrich_ra_game, load_ra_achievements_from_cache,
-    redownload_missing_ra_badges, RaAchievementDef, RaGameData, RaGameEntry,
+    redownload_missing_ra_badges, RaAchievementDef, RaGameData, RaGameEntry, RaUnlockInfo,
 };
-use super::api_types::{ConsoleGamesResponse, GameDataResponse, LoginResponse, UnlocksResponse};
+use super::api_types::WebGameProgress;
 
-const RA_BASE_URL: &str = "https://retroachievements.org/dorequest.php";
+const RA_WEB_GAME_LIST: &str = "https://retroachievements.org/API/API_GetGameList.php";
+const RA_WEB_GAME_PROGRESS: &str =
+    "https://retroachievements.org/API/API_GetGameInfoAndUserProgress.php";
 const RA_BADGE_URL: &str = "https://media.retroachievements.org/Badge";
-const UNLOCKS_CACHE_SECS: u64 = 3600;
+const CACHE_SECS: u64 = 3600;
 const RA_RATE_LIMIT_MS: u64 = 500;
-const RA_MAX_AUTH_FAILURES: u32 = 3;
-
-static RA_AUTH_BROKEN: AtomicBool = AtomicBool::new(false);
-static RA_AUTH_FAILURES: AtomicU32 = AtomicU32::new(0);
-static RA_CACHED_TOKEN: Mutex<Option<String>> = Mutex::new(None);
 
 pub struct RaClient {
     http: reqwest::blocking::Client,
     username: String,
-    token: String,
+    api_key: String,
     last_request: Mutex<std::time::Instant>,
 }
 
 impl RaClient {
-    pub fn new(username: &str, token: &str, password: &str) -> Self {
-        let mut client = RaClient {
+    pub fn new(username: &str, web_api_key: &str) -> Self {
+        RaClient {
             http: reqwest::blocking::Client::builder()
                 .timeout(Duration::from_secs(20))
                 .build()
                 .expect("failed to build RA HTTP client"),
             username: username.to_string(),
-            token: token.to_string(),
+            api_key: web_api_key.to_string(),
             last_request: Mutex::new(std::time::Instant::now() - Duration::from_secs(1)),
-        };
-
-        {
-            let cached = RA_CACHED_TOKEN.lock().unwrap();
-            if let Some(ref t) = *cached {
-                client.token = t.clone();
-                return client;
-            }
         }
-
-        if !password.is_empty() {
-            match client.login_with_password(password) {
-                Ok(fresh_token) => {
-                    eprintln!(
-                        "RA: login successful, got fresh token (len {})",
-                        fresh_token.len()
-                    );
-                    client.token = fresh_token.clone();
-                    *RA_CACHED_TOKEN.lock().unwrap() = Some(fresh_token);
-                }
-                Err(e) => {
-                    eprintln!("RA: login failed: {}", e);
-                }
-            }
-        }
-
-        client
-    }
-
-    fn login_with_password(&self, password: &str) -> Result<String, String> {
-        let params = [("r", "login2"), ("u", &self.username), ("p", password)];
-        let text = self.get_raw(&params)?;
-        let resp: LoginResponse =
-            serde_json::from_str(&text).map_err(|e| format!("parse login response: {}", e))?;
-        if resp.token.is_empty() {
-            return Err("login returned empty token".to_string());
-        }
-        Ok(resp.token)
     }
 
     pub fn from_config(cfg: &Config) -> Option<Self> {
@@ -87,21 +46,11 @@ impl RaClient {
             eprintln!("RA: username is empty, skipping");
             return None;
         }
-        if cfg.ra_password.is_empty() && cfg.ra_token.is_empty() {
-            eprintln!("RA: no password or token set, skipping");
+        if cfg.ra_web_api_key.is_empty() {
+            eprintln!("RA: Web API key is empty, skipping");
             return None;
         }
-        eprintln!(
-            "RA: creating client for user '{}' (password_len={}, token_len={})",
-            cfg.ra_username,
-            cfg.ra_password.len(),
-            cfg.ra_token.len()
-        );
-        Some(Self::new(&cfg.ra_username, &cfg.ra_token, &cfg.ra_password))
-    }
-
-    pub fn auth_is_broken() -> bool {
-        RA_AUTH_BROKEN.load(Ordering::Relaxed)
+        Some(Self::new(&cfg.ra_username, &cfg.ra_web_api_key))
     }
 
     fn rate_limit(&self) {
@@ -113,64 +62,36 @@ impl RaClient {
         *last = std::time::Instant::now();
     }
 
-    fn get_raw(&self, params: &[(&str, &str)]) -> Result<String, String> {
+    fn get_web(&self, url: reqwest::Url) -> Result<String, String> {
         self.rate_limit();
-        let url =
-            reqwest::Url::parse_with_params(RA_BASE_URL, params).map_err(|e| e.to_string())?;
         let resp = self
             .http
             .get(url.clone())
             .send()
-            .map_err(|e| e.to_string())?;
-
+            .map_err(|e| format!("RA web api request: {}", e))?;
         let status = resp.status();
         if !status.is_success() {
-            return Err(format!("HTTP {} for {}", status, url));
+            return Err(format!("RA web api HTTP {} for {}", status, url));
         }
-        resp.text().map_err(|e| e.to_string())
+        resp.text().map_err(|e| format!("RA web api body: {}", e))
     }
 
-    fn get(&self, params: &[(&str, &str)]) -> Result<String, String> {
-        if RA_AUTH_BROKEN.load(Ordering::Relaxed) {
-            return Err("RA auth broken — too many 401 errors, stopping".to_string());
-        }
+    fn cached_ok(cache: &std::path::Path) -> bool {
+        cache.is_file()
+            && std::fs::metadata(cache)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .map(|age| age < Duration::from_secs(CACHE_SECS))
+                .unwrap_or(false)
+    }
 
-        self.rate_limit();
-        let url =
-            reqwest::Url::parse_with_params(RA_BASE_URL, params).map_err(|e| e.to_string())?;
-        let resp = self
-            .http
-            .get(url.clone())
-            .send()
-            .map_err(|e| e.to_string())?;
-
-        let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            let failures = RA_AUTH_FAILURES.fetch_add(1, Ordering::Relaxed) + 1;
-            eprintln!(
-                "RA: 401 Unauthorized (failure {}/{}) for {}",
-                failures, RA_MAX_AUTH_FAILURES, url
-            );
-            if failures >= RA_MAX_AUTH_FAILURES {
-                RA_AUTH_BROKEN.store(true, Ordering::Relaxed);
-                eprintln!(
-                    "RA: auth marked as broken after {} failures — stopping all RA API calls",
-                    failures
-                );
-            }
-            return Err(format!("HTTP {}", status));
-        }
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            eprintln!("RA: 429 rate limited, backing off");
-            std::thread::sleep(Duration::from_secs(5));
-            return Err(format!("HTTP {}", status));
-        }
-        if !status.is_success() {
-            return Err(format!("HTTP {} for {}", status, url));
-        }
-
-        RA_AUTH_FAILURES.store(0, Ordering::Relaxed);
-        resp.text().map_err(|e| e.to_string())
+    /// True when a fresh, parseable console game-list cache exists — no
+    /// refetch needed. Detects missing, stale, and legacy-format caches so
+    /// the game list self-heals after the dorequest → Web API migration.
+    pub(crate) fn console_cache_is_current(save_dir: &str, console_id: u32) -> bool {
+        let cache = paths::console_games_path(save_dir, console_id);
+        RaClient::cached_ok(&cache) && read_console_games_cache(save_dir, console_id).is_some()
     }
 
     pub fn fetch_console_games(
@@ -179,32 +100,37 @@ impl RaClient {
         console_id: u32,
     ) -> Result<Vec<RaGameEntry>, String> {
         let cache = paths::console_games_path(save_dir, console_id);
-        if cache.is_file() {
+        if Self::cached_ok(&cache) {
             if let Ok(data) = std::fs::read(&cache) {
-                if let Ok(resp) = serde_json::from_slice::<ConsoleGamesResponse>(&data) {
-                    return Ok(resp.response);
+                if let Ok(resp) = serde_json::from_slice::<Vec<RaGameEntry>>(&data) {
+                    return Ok(resp);
                 }
             }
         }
 
-        let params = [("r", "systemgames"), ("s", &console_id.to_string())];
-        let text = self.get(&params)?;
-        let resp: ConsoleGamesResponse =
-            serde_json::from_str(&text).map_err(|e| format!("parse console games: {}", e))?;
+        let console = console_id.to_string();
+        let only_achievements = "1".to_string();
+        let url = reqwest::Url::parse_with_params(
+            RA_WEB_GAME_LIST,
+            &[("i", &console), ("y", &self.api_key), ("f", &only_achievements)],
+        )
+        .map_err(|e| format!("game list url: {}", e))?;
+        let text = self.get_web(url)?;
+        let resp: Vec<RaGameEntry> = serde_json::from_str(&text)
+            .map_err(|e| format!("parse game list: {}", e))?;
 
         let _ = std::fs::create_dir_all(cache.parent().unwrap_or(Path::new(".")));
         let _ = std::fs::write(&cache, &text);
 
-        Ok(resp.response)
+        Ok(resp)
     }
 
     pub fn search_ra_games(save_dir: &str, console_id: u32, query: &str) -> Vec<RaGameEntry> {
         let cache = paths::console_games_path(save_dir, console_id);
         if let Ok(data) = std::fs::read(&cache) {
-            if let Ok(resp) = serde_json::from_slice::<ConsoleGamesResponse>(&data) {
+            if let Ok(resp) = serde_json::from_slice::<Vec<RaGameEntry>>(&data) {
                 let q = query.to_lowercase();
                 return resp
-                    .response
                     .into_iter()
                     .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset"))
                     .filter(|g| g.title.to_lowercase().contains(&q))
@@ -214,68 +140,36 @@ impl RaClient {
         Vec::new()
     }
 
-    pub fn fetch_game_data(&self, save_dir: &str, game_id: &str) -> Result<RaGameData, String> {
-        let cache = paths::game_data_path(save_dir, game_id);
-        if cache.is_file() {
+    pub fn fetch_web_game_progress(
+        &self,
+        save_dir: &str,
+        game_id: &str,
+    ) -> Result<(RaGameData, std::collections::HashMap<u32, RaUnlockInfo>), String> {
+        let cache = paths::web_progress_path(save_dir, game_id);
+
+        if Self::cached_ok(&cache) {
             if let Ok(data) = std::fs::read(&cache) {
-                if let Ok(resp) = serde_json::from_slice::<GameDataResponse>(&data) {
-                    return Ok(resp.patch_data);
+                if let Ok(resp) = serde_json::from_slice::<WebGameProgress>(&data) {
+                    return Ok(super::api_types::web_progress_to_data(&resp));
                 }
             }
         }
 
-        let params = [
-            ("r", "patch"),
-            ("u", &self.username),
-            ("t", &self.token),
-            ("g", game_id),
-        ];
-        let text = self.get(&params)?;
-        let resp: GameDataResponse =
-            serde_json::from_str(&text).map_err(|e| format!("parse game data: {}", e))?;
+        let url =
+            reqwest::Url::parse_with_params(RA_WEB_GAME_PROGRESS, &[
+                ("g", game_id),
+                ("u", &self.username),
+                ("y", &self.api_key),
+            ])
+            .map_err(|e| format!("web api url: {}", e))?;
+        let text = self.get_web(url)?;
+        let progress: WebGameProgress = serde_json::from_str(&text)
+            .map_err(|e| format!("parse web progress: {}", e))?;
 
         let _ = std::fs::create_dir_all(cache.parent().unwrap_or(Path::new(".")));
         let _ = std::fs::write(&cache, &text);
 
-        Ok(resp.patch_data)
-    }
-
-    pub fn fetch_user_unlocks(&self, save_dir: &str, game_id: &str) -> Result<Vec<u32>, String> {
-        let cache = paths::unlocks_path(save_dir, game_id);
-
-        if cache.is_file() {
-            if let Ok(meta) = std::fs::metadata(&cache) {
-                if let Ok(modified) = meta.modified() {
-                    if modified
-                        .elapsed()
-                        .unwrap_or(Duration::from_secs(UNLOCKS_CACHE_SECS + 1))
-                        < Duration::from_secs(UNLOCKS_CACHE_SECS)
-                    {
-                        if let Ok(data) = std::fs::read(&cache) {
-                            if let Ok(resp) = serde_json::from_slice::<UnlocksResponse>(&data) {
-                                return Ok(resp.user_unlocks);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        let params = [
-            ("r", "unlocks"),
-            ("u", &self.username),
-            ("t", &self.token),
-            ("g", game_id),
-            ("h", "1"),
-        ];
-        let text = self.get(&params)?;
-        let resp: UnlocksResponse =
-            serde_json::from_str(&text).map_err(|e| format!("parse unlocks: {}", e))?;
-
-        let _ = std::fs::create_dir_all(cache.parent().unwrap_or(Path::new(".")));
-        let _ = std::fs::write(&cache, &text);
-
-        Ok(resp.user_unlocks)
+        Ok(super::api_types::web_progress_to_data(&progress))
     }
 
     pub fn download_badge(
@@ -346,5 +240,71 @@ impl RaClient {
             Err(e) => eprintln!("RA icon download error: {}", e),
         }
         String::new()
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use std::time::Duration;
+
+    use super::RaClient;
+    use crate::retroachievements::paths;
+
+    fn write_cache(save_dir: &str, console_id: u32, contents: &str) {
+        let path = paths::console_games_path(save_dir, console_id);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, contents).unwrap();
+    }
+
+    #[test]
+    fn test_new_format_cache_is_current() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_cache(
+            tmp.path().to_str().unwrap(),
+            3,
+            r#"[{"ID":1,"Title":"Game","ImageIcon":"","ImageUrl":"","NumAchievements":0,"Points":0}]"#,
+        );
+        assert!(RaClient::console_cache_is_current(tmp.path().to_str().unwrap(), 3));
+    }
+
+    #[test]
+    fn test_legacy_format_cache_is_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Pre-migration dorequest `systemgames` wrapper — the whole reason the
+        // `needs_fetch` predicate must not just check `is_file()`.
+        write_cache(
+            tmp.path().to_str().unwrap(),
+            3,
+            r#"{"Success":true,"Error":"","Response":[{"ID":1,"Title":"Game"}]}"#,
+        );
+        assert!(!RaClient::console_cache_is_current(tmp.path().to_str().unwrap(), 3));
+    }
+
+    #[test]
+    fn test_missing_cache_is_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(!RaClient::console_cache_is_current(tmp.path().to_str().unwrap(), 3));
+    }
+
+    #[test]
+    fn test_garbage_cache_is_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_cache(tmp.path().to_str().unwrap(), 3, "not json");
+        assert!(!RaClient::console_cache_is_current(tmp.path().to_str().unwrap(), 3));
+    }
+
+    #[test]
+    fn test_old_cache_is_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = paths::console_games_path(tmp.path().to_str().unwrap(), 3);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "[]").unwrap();
+        let old = std::time::SystemTime::now() - Duration::from_secs(60 * 60 * 24);
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap();
+        f.set_modified(old).unwrap();
+        assert!(!RaClient::console_cache_is_current(tmp.path().to_str().unwrap(), 3));
     }
 }

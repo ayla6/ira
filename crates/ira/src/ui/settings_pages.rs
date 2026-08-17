@@ -665,19 +665,27 @@ pub(super) fn build_ra_settings_page(
 
     let creds_group = adw::PreferencesGroup::new();
     creds_group.set_title(&crate::tr!("Account"));
+    creds_group.set_description(Some(&crate::tr!(
+        "A Web API key is required: it fetches hardcore unlocks and real earned dates. Get it from retroachievements.org → Settings → Keys."
+    )));
 
     let username_row = adw::EntryRow::new();
     username_row.set_title(&crate::tr!("Username"));
     username_row.set_text(&cfg.ra_username);
     creds_group.add(&username_row);
 
-    let password_row = adw::PasswordEntryRow::new();
-    password_row.set_title(&crate::tr!("Password"));
-    password_row.set_text(&cfg.ra_password);
-    creds_group.add(&password_row);
+    let web_api_row = adw::PasswordEntryRow::new();
+    web_api_row.set_title(&crate::tr!("Web API key"));
+    web_api_row.set_text(&cfg.ra_web_api_key);
+    creds_group.add(&web_api_row);
     page.append(&creds_group);
 
-    (page, enable_row, username_row, password_row.upcast())
+    (
+        page,
+        enable_row,
+        username_row,
+        web_api_row.upcast(),
+    )
 }
 
 pub(super) fn build_api_emulators_page(

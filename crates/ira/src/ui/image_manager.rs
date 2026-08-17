@@ -442,8 +442,7 @@ fn build_ra_icon_button(
     let app_id = game.app_id.clone();
     let save_dir = state.borrow().save_dir.clone();
     let ra_username = state.borrow().cfg.ra_username.clone();
-    let ra_token = state.borrow().cfg.ra_token.clone();
-    let ra_password = state.borrow().cfg.ra_password.clone();
+    let ra_web_api_key = state.borrow().cfg.ra_web_api_key.clone();
     let refresh = Rc::clone(refresh_images);
     let pending_copies_ra = pending_copies.clone();
     let asset_ra = asset_type.to_string();
@@ -454,28 +453,24 @@ fn build_ra_icon_button(
         let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
         let rx = std::cell::RefCell::new(rx);
         let ra_username = ra_username.clone();
-        let ra_token = ra_token.clone();
-        let ra_password = ra_password.clone();
+        let ra_web_api_key = ra_web_api_key.clone();
         let app_id = app_id.clone();
         let save_dir = save_dir.clone();
         let db_id = db_id;
         std::thread::spawn(move || {
             let _s = tracing::info_span!("ra_icon_download", db_id).entered();
-            if ira_platforms::retroachievements::RaClient::auth_is_broken() {
-                let _ = tx.send(None);
-                return;
-            }
-            let client = ira_platforms::retroachievements::RaClient::new(
-                &ra_username,
-                &ra_token,
-                &ra_password,
-            );
-            match client.fetch_game_data(&save_dir, &app_id) {
-                Ok(game_data) if !game_data.image_icon.is_empty() => {
-                    let icon = client.download_game_icon(&save_dir, db_id, &game_data.image_icon);
+            let client =
+                ira_platforms::retroachievements::RaClient::new(&ra_username, &ra_web_api_key);
+            let image_icon = match client.fetch_web_game_progress(&save_dir, &app_id) {
+                Ok((game_data, _)) => Some(game_data.image_icon),
+                _ => None,
+            };
+            match image_icon.filter(|icon| !icon.is_empty()) {
+                Some(icon) => {
+                    let icon = client.download_game_icon(&save_dir, db_id, &icon);
                     let _ = tx.send(if icon.is_empty() { None } else { Some(icon) });
                 }
-                _ => {
+                None => {
                     let _ = tx.send(None);
                 }
             }

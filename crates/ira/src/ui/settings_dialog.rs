@@ -45,7 +45,7 @@ struct SavedSettingsWidgets {
     lang_list: gtk4::ListBox,
     ra_enable_row: adw::SwitchRow,
     ra_username_row: adw::EntryRow,
-    ra_password_row: adw::EntryRow,
+    ra_web_api_key_row: adw::EntryRow,
     controller_default_widgets: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
     overlay_widgets: OverlayPageWidgets,
     system_defaults_widgets: SystemDefaultsWidgets,
@@ -206,7 +206,7 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         lang_list: pages.lang_list,
         ra_enable_row: pages.ra_enable_row,
         ra_username_row: pages.ra_username_row,
-        ra_password_row: pages.ra_password_row,
+        ra_web_api_key_row: pages.ra_web_api_key_row,
         controller_default_widgets: pages.controller_default_widgets,
         overlay_widgets: pages.overlay_widgets,
         system_defaults_widgets: pages.system_defaults_widgets,
@@ -333,7 +333,7 @@ fn apply_general_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
     cfg.language_preferences = super::settings_pages::read_language_preferences(&widgets.lang_list);
     cfg.ra_enabled = widgets.ra_enable_row.is_active();
     cfg.ra_username = widgets.ra_username_row.text().to_string();
-    cfg.ra_password = widgets.ra_password_row.text().to_string();
+    cfg.ra_web_api_key = widgets.ra_web_api_key_row.text().to_string();
 }
 
 fn apply_controller_defaults(

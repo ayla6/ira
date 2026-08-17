@@ -224,9 +224,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_username: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub ra_token: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub ra_password: String,
+    pub ra_web_api_key: String,
     #[serde(default)]
     pub consoles: HashMap<String, ConsoleConfig>,
     #[serde(default)]
@@ -290,8 +288,7 @@ impl Default for Config {
             sort_descending: false,
             ra_enabled: false,
             ra_username: String::new(),
-            ra_token: String::new(),
-            ra_password: String::new(),
+            ra_web_api_key: String::new(),
             consoles,
             overlay: OverlaySettings::default(),
             controller_defaults: HashMap::new(),
@@ -341,14 +338,16 @@ impl Config {
     pub fn save(&self) -> Result<(), String> {
         let steam_err = secrets::set_secret("steam", &self.steam_api_key);
         let sgdb_err = secrets::set_secret("steamgriddb", &self.steam_griddb_api_key);
-        let ra_err = secrets::set_secret("ra_token", &self.ra_token);
-        let ra_pw_err = secrets::set_secret("ra_password", &self.ra_password);
+        let ra_web_err = secrets::set_secret("ra_web_api_key", &self.ra_web_api_key);
+        // Pre-migration login/token keys are gone; clear any leftover keyring
+        // entries so the accounts page reflects the Web API key only.
+        let _ = secrets::set_secret("ra_token", "");
+        let _ = secrets::set_secret("ra_password", "");
 
         let mut plaintext = Config {
             steam_api_key: String::new(),
             steam_griddb_api_key: String::new(),
-            ra_token: String::new(),
-            ra_password: String::new(),
+            ra_web_api_key: String::new(),
             notifications_enabled: self.notifications_enabled,
             close_to_background: self.close_to_background,
             show_hidden_games: self.show_hidden_games,
@@ -397,11 +396,8 @@ impl Config {
         if sgdb_err.is_err() {
             plaintext.steam_griddb_api_key = self.steam_griddb_api_key.clone();
         }
-        if ra_err.is_err() {
-            plaintext.ra_token = self.ra_token.clone();
-        }
-        if ra_pw_err.is_err() {
-            plaintext.ra_password = self.ra_password.clone();
+        if ra_web_err.is_err() {
+            plaintext.ra_web_api_key = self.ra_web_api_key.clone();
         }
 
         let path = config_path();

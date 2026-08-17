@@ -22,8 +22,7 @@ pub struct EnrichGameParams {
     pub save_dir: String,
     pub db: DbConn,
     pub ra_username: String,
-    pub ra_token: String,
-    pub ra_password: String,
+    pub ra_web_api_key: String,
     /// If provided, use this game instead of calling load_game (skips achievement loading).
     /// Pass Some for background enrichment, None for on-demand loading.
     pub game: Option<Game>,
@@ -47,8 +46,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
         save_dir,
         db,
         ra_username,
-        ra_token,
-        ra_password,
+        ra_web_api_key,
         game,
     } = params;
     let _s = tracing::info_span!("enrich_game", app_id = %app_id, db_id = db_id).entered();
@@ -63,8 +61,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
             save_dir: &save_dir,
             sender: &sender,
             ra_username: &ra_username,
-            ra_token: &ra_token,
-            ra_password: &ra_password,
+            ra_web_api_key: &ra_web_api_key,
             db: &db,
         });
         return;
@@ -289,8 +286,7 @@ struct EnrichRaParams<'a> {
     save_dir: &'a str,
     sender: &'a AppSender,
     ra_username: &'a str,
-    ra_token: &'a str,
-    ra_password: &'a str,
+    ra_web_api_key: &'a str,
     db: &'a DbConn,
 }
 
@@ -304,22 +300,16 @@ fn enrich_ra(params: EnrichRaParams) {
         save_dir,
         sender,
         ra_username,
-        ra_token,
-        ra_password,
+        ra_web_api_key,
         db,
     } = params;
     let _s = tracing::info_span!("enrich_ra", app_id = %app_id, db_id = db_id).entered();
-    if ira_platforms::retroachievements::RaClient::auth_is_broken() {
-        return;
-    }
-
-    if ra_username.is_empty() || (ra_token.is_empty() && ra_password.is_empty()) {
+    if ra_username.is_empty() || ra_web_api_key.is_empty() {
         eprintln!(
-            "RA: skipping enrichment for {} — username_len={} token_len={} password_len={}",
+            "RA: skipping enrichment for {} — username_len={} web_api_key_len={}",
             app_id,
             ra_username.len(),
-            ra_token.len(),
-            ra_password.len()
+            ra_web_api_key.len()
         );
         return;
     }
@@ -352,8 +342,7 @@ fn enrich_ra(params: EnrichRaParams) {
         &mut game,
         save_dir,
         ra_username,
-        ra_token,
-        ra_password,
+        ra_web_api_key,
     );
 
     let _ = sender.send(AppMessage::EnrichedGame(game));

@@ -174,8 +174,8 @@ pub fn load_game_fast(entry: &GameEntry, save_dir: &str) -> Result<Game, String>
     Ok(game)
 }
 
-/// Returns the max mtime of RA achievement files (game.json + unlocks.json).
-/// Returns 0 if neither file exists. Used to skip background reloading
+/// Returns the mtime of the RA `web_progress.json` cache.
+/// Returns 0 if the file doesn't exist. Used to skip background reloading
 /// when achievement files haven't changed since the last cache write.
 pub fn ra_achievement_mtime(save_dir: &str, game_id: &str) -> i64 {
     let ra_dir = std::path::Path::new(save_dir)
@@ -190,7 +190,7 @@ pub fn ra_achievement_mtime(save_dir: &str, game_id: &str) -> i64 {
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0)
     };
-    mtime(ra_dir.join("game.json")).max(mtime(ra_dir.join("unlocks.json")))
+    mtime(ra_dir.join("web_progress.json"))
 }
 
 pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {

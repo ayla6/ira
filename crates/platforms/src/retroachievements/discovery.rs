@@ -42,8 +42,10 @@ pub fn build_ra_games(
 
     let needs_fetch = consoles.iter().any(|c| {
         c.def.ra_console_id != 0
-            && !crate::retroachievements::paths::console_games_path(save_dir, c.def.ra_console_id)
-                .is_file()
+            && !crate::retroachievements::api::RaClient::console_cache_is_current(
+                save_dir,
+                c.def.ra_console_id,
+            )
     });
     if needs_fetch {
         if let Some(ra_client) = RaClient::from_config(cfg) {

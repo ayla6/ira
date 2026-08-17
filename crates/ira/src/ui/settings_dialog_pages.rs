@@ -45,7 +45,7 @@ pub(super) struct SettingsPageWidgets {
     pub(super) prefix_base_row: adw::EntryRow,
     pub(super) ra_enable_row: adw::SwitchRow,
     pub(super) ra_username_row: adw::EntryRow,
-    pub(super) ra_password_row: adw::EntryRow,
+    pub(super) ra_web_api_key_row: adw::EntryRow,
     pub(super) roms_folder_row: adw::EntryRow,
     pub(super) overlay_widgets: OverlayPageWidgets,
     pub(super) system_defaults_widgets: SystemDefaultsWidgets,
@@ -83,7 +83,8 @@ pub(super) fn build_settings_pages(
     let (wine_pages, wine_widgets) =
         build_wine_config_pages(&cfg.default_wine_config, None, &cfg.save_dir);
     let (profiles_page, prefix_base_row) = build_profiles_page(state, win);
-    let (ra_page, ra_enable_row, ra_username_row, ra_password_row) = build_ra_settings_page(cfg);
+    let (ra_page, ra_enable_row, ra_username_row, ra_web_api_key_row) =
+        build_ra_settings_page(cfg);
     let (rom_page, roms_folder_row) = build_rom_settings_page(win, cfg);
     SettingsPageWidgets {
         general_page,
@@ -115,7 +116,7 @@ pub(super) fn build_settings_pages(
         prefix_base_row,
         ra_enable_row,
         ra_username_row,
-        ra_password_row,
+        ra_web_api_key_row,
         roms_folder_row,
         overlay_widgets,
         system_defaults_widgets,

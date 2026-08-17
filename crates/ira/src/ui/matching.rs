@@ -12,7 +12,7 @@ pub fn match_game_to_steam(
     steam_app_id: String,
     game_name: String,
 ) {
-    let (steam, sender, db, save_dir, ra_username, ra_token, ra_password) = {
+    let (steam, sender, db, save_dir, ra_username, ra_web_api_key) = {
         let s = state.borrow();
         (
             s.steam.clone(),
@@ -20,8 +20,7 @@ pub fn match_game_to_steam(
             s.db.clone(),
             s.save_dir.clone(),
             s.cfg.ra_username.clone(),
-            s.cfg.ra_token.clone(),
-            s.cfg.ra_password.clone(),
+            s.cfg.ra_web_api_key.clone(),
         )
     };
     std::thread::spawn(move || {
@@ -61,8 +60,7 @@ pub fn match_game_to_steam(
                         save_dir,
                         db,
                         ra_username,
-                        ra_token,
-                        ra_password,
+                        ra_web_api_key,
                         game: None,
                     });
                 }

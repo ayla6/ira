@@ -878,8 +878,7 @@ fn enrich_added_game(
         db,
         game: None,
         ra_username: String::new(),
-        ra_token: String::new(),
-        ra_password: String::new(),
+        ra_web_api_key: String::new(),
     });
 }
 

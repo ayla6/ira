@@ -9,7 +9,7 @@ use adw::prelude::*;
 use ira_models::{GameLaunchConfig, WineConfig, WineProfile};
 
 pub fn show_add_game_dialog(state: &SharedState) {
-    let (window, db, sender, steam, save_dir, ra_username, ra_token, ra_password) = {
+    let (window, db, sender, steam, save_dir, ra_username, ra_web_api_key) = {
         let s = state.borrow();
         (
             s.window.clone(),
@@ -18,8 +18,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
             s.steam.clone(),
             s.save_dir.clone(),
             s.cfg.ra_username.clone(),
-            s.cfg.ra_token.clone(),
-            s.cfg.ra_password.clone(),
+            s.cfg.ra_web_api_key.clone(),
         )
     };
 
@@ -134,8 +133,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
             steam: &steam,
             save_dir: &save_dir,
             ra_username: &ra_username,
-            ra_token: &ra_token,
-            ra_password: &ra_password,
+            ra_web_api_key: &ra_web_api_key,
             profiles: &profiles,
             win: &win,
             state,
@@ -219,8 +217,7 @@ struct AddGameWidgets<'a> {
     steam: &'a std::sync::Arc<ira_api::SteamDataClient>,
     save_dir: &'a str,
     ra_username: &'a str,
-    ra_token: &'a str,
-    ra_password: &'a str,
+    ra_web_api_key: &'a str,
     profiles: &'a [WineProfile],
     win: &'a adw::Window,
     state: &'a SharedState,
@@ -246,8 +243,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
         steam,
         save_dir,
         ra_username,
-        ra_token,
-        ra_password,
+        ra_web_api_key,
         profiles,
         win,
         state,
@@ -271,8 +267,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
     let steam = steam.clone();
     let save_dir = save_dir.to_string();
     let ra_username = ra_username.to_string();
-    let ra_token = ra_token.to_string();
-    let ra_password = ra_password.to_string();
+    let ra_web_api_key = ra_web_api_key.to_string();
     let profiles = profiles.to_vec();
     let win = win.clone();
     let state_c = state.clone();
@@ -359,8 +354,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
         let steam_c = steam.clone();
         let save_dir_c = save_dir.clone();
         let ra_username_c = ra_username.clone();
-        let ra_token_c = ra_token.clone();
-        let ra_password_c = ra_password.clone();
+        let ra_web_api_key_c = ra_web_api_key.clone();
 
         std::thread::spawn(move || {
             match add_game_to_db(AddGameToDbParams {
@@ -432,8 +426,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
                                     save_dir: save_dir_c,
                                     db: db_c,
                                     ra_username: ra_username_c,
-                                    ra_token: ra_token_c,
-                                    ra_password: ra_password_c,
+                                    ra_web_api_key: ra_web_api_key_c,
                                     game: None,
                                 },
                             );

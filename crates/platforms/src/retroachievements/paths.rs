@@ -12,12 +12,8 @@ pub fn game_dir(save_dir: &str, game_id: &str) -> PathBuf {
     ra_data_dir(save_dir).join(game_id)
 }
 
-pub fn game_data_path(save_dir: &str, game_id: &str) -> PathBuf {
-    game_dir(save_dir, game_id).join("game.json")
-}
-
-pub fn unlocks_path(save_dir: &str, game_id: &str) -> PathBuf {
-    game_dir(save_dir, game_id).join("unlocks.json")
+pub fn web_progress_path(save_dir: &str, game_id: &str) -> PathBuf {
+    game_dir(save_dir, game_id).join("web_progress.json")
 }
 
 pub fn achievements_dir(save_dir: &str, game_id: &str) -> PathBuf {

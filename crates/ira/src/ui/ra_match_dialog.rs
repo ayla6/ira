@@ -125,12 +125,11 @@ pub fn show_ra_search_dialog(
                             sd.pending_copies.borrow_mut().remove(&key);
                         }
                     }
-                    let (ra_username, ra_token, ra_password, steam, sender, save_dir, db) = {
+                    let (ra_username, ra_web_api_key, steam, sender, save_dir, db) = {
                         let s = sc.borrow();
                         (
                             s.cfg.ra_username.clone(),
-                            s.cfg.ra_token.clone(),
-                            s.cfg.ra_password.clone(),
+                            s.cfg.ra_web_api_key.clone(),
                             s.steam.clone(),
                             s.sender.clone(),
                             s.save_dir.clone(),
@@ -150,8 +149,7 @@ pub fn show_ra_search_dialog(
                             save_dir,
                             db,
                             ra_username,
-                            ra_token,
-                            ra_password,
+                            ra_web_api_key,
                             game: None,
                         });
                     }

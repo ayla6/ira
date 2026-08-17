@@ -369,6 +369,18 @@ pub fn add_overlay_env(
     env.push(("IRA_OVERLAY_FONT_FAMILY".to_string(), font));
 }
 
+/// Injects overlay components into a game running inside Gamescope while
+/// leaving UI rendering to the standalone overlay process.
+pub fn add_overlay_env_without_ui(
+    env: &mut Vec<(String, String)>,
+    overlay_shm: Option<&str>,
+    font_family: Option<&str>,
+) {
+    add_overlay_env(env, overlay_shm, font_family);
+    env.retain(|(key, _)| key != "IRA_OVERLAY_DISABLE_UI");
+    env.push(("IRA_OVERLAY_DISABLE_UI".to_string(), "1".to_string()));
+}
+
 /// Queries fontconfig (`fc-match`) for the system's default sans-serif font family.
 fn detect_system_font() -> Option<String> {
     let output = std::process::Command::new("fc-match")
@@ -742,5 +754,17 @@ mod tests {
         assert!(!env.iter().any(|(key, _)| key == "VK_INSTANCE_LAYERS"));
         assert!(!env.iter().any(|(key, _)| key == "VK_LAYER_PATH"));
         assert!(env.contains(&("IRA_OVERLAY_SHM".to_string(), "/ira_overlay_1".to_string())));
+    }
+
+    #[test]
+    fn test_overlay_without_ui_marks_game_environment() {
+        let mut env = vec![("IRA_OVERLAY_DISABLE_UI".to_string(), "0".to_string())];
+
+        add_overlay_env_without_ui(&mut env, Some("/ira_overlay_1"), Some("Sans"));
+
+        assert_eq!(
+            env.iter().find(|(key, _)| key == "IRA_OVERLAY_DISABLE_UI"),
+            Some(&("IRA_OVERLAY_DISABLE_UI".to_string(), "1".to_string()))
+        );
     }
 }

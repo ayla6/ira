@@ -117,12 +117,18 @@ pub fn launch_game(
         if ctx.overlay_enabled {
             if super::env_builder::uses_gamescope(&cmd) {
                 let game_env = super::env_builder::take_gamescope_game_env(&mut env);
+                let mut capture_env = game_env.clone();
+                super::env_builder::add_overlay_env_without_ui(
+                    &mut capture_env,
+                    ctx.overlay_shm.as_deref(),
+                    ctx.overlay_font_family.as_deref(),
+                );
                 super::env_builder::add_overlay_env_standalone(
                     &mut env,
                     ctx.overlay_shm.as_deref(),
                     ctx.overlay_font_family.as_deref(),
                 );
-                if !super::env_builder::wrap_with_standalone_overlay(&mut cmd, &game_env) {
+                if !super::env_builder::wrap_with_standalone_overlay(&mut cmd, &capture_env) {
                     super::env_builder::restore_gamescope_game_env(&mut env, game_env);
                 }
             } else {
@@ -194,12 +200,18 @@ pub fn launch_game(
         if ctx.overlay_enabled {
             if super::env_builder::uses_gamescope(&cmd) {
                 let game_env = super::env_builder::take_gamescope_game_env(&mut env);
+                let mut capture_env = game_env.clone();
+                super::env_builder::add_overlay_env_without_ui(
+                    &mut capture_env,
+                    ctx.overlay_shm.as_deref(),
+                    ctx.overlay_font_family.as_deref(),
+                );
                 super::env_builder::add_overlay_env_standalone(
                     &mut env,
                     ctx.overlay_shm.as_deref(),
                     ctx.overlay_font_family.as_deref(),
                 );
-                if !super::env_builder::wrap_with_standalone_overlay(&mut cmd, &game_env) {
+                if !super::env_builder::wrap_with_standalone_overlay(&mut cmd, &capture_env) {
                     super::env_builder::restore_gamescope_game_env(&mut env, game_env);
                 }
             } else {

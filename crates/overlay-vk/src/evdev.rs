@@ -264,13 +264,16 @@ fn handle_event(ev: &InputEvent) {
                     return;
                 }
                 HotkeyAction::Toggle => {
+                    if injected_ui_disabled() {
+                        return;
+                    }
                     TOGGLE_PENDING.store(true, Ordering::Relaxed);
                     return;
                 }
                 HotkeyAction::None => {}
             }
             // Other buttons only when overlay is visible.
-            if !crate::shim_bridge::is_visible() {
+            if injected_ui_disabled() || !crate::shim_bridge::is_visible() {
                 return;
             }
             let event = match ev.code {
@@ -288,7 +291,7 @@ fn handle_event(ev: &InputEvent) {
             }
         }
         EV_ABS => {
-            if !crate::shim_bridge::is_visible() {
+            if injected_ui_disabled() || !crate::shim_bridge::is_visible() {
                 return;
             }
             match ev.code {
@@ -348,6 +351,10 @@ fn toggle_overlay() {
     if crate::shim_bridge::ready_for_overlay() {
         crate::shim_bridge::set_visible(!crate::shim_bridge::is_visible());
     }
+}
+
+fn injected_ui_disabled() -> bool {
+    std::env::var_os("IRA_OVERLAY_DISABLE_UI").is_some()
 }
 
 #[cfg(test)]

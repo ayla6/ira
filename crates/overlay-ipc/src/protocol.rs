@@ -15,7 +15,7 @@
 use std::sync::atomic::AtomicU32;
 
 pub const SHM_MAGIC: u32 = 0x4952414F;
-pub const SHM_VERSION: u32 = 2;
+pub const SHM_VERSION: u32 = 3;
 pub const MAX_ACHIEVEMENTS: usize = 1024;
 pub const MAX_NOTIFICATIONS: usize = 16;
 
@@ -72,7 +72,13 @@ pub struct ShmHeader {
     /// Used for cross-process debounce — prevents multiple child processes
     /// from toggling simultaneously on the same key event.
     pub last_toggle_ms: AtomicU32,
-    pub padding: [u8; 28],
+    /// Whether the background DASH replay buffer is enabled.
+    pub replay_buffer_enabled: u32,
+    /// Replay retention duration in seconds.
+    pub replay_buffer_seconds: u32,
+    /// Set by the injected Vulkan layer after direct swapchain capture is ready.
+    pub direct_capture_ready: AtomicU32,
+    pub padding: [u8; 16],
 }
 
 /// One achievement entry in the shared memory array.

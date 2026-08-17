@@ -1,13 +1,19 @@
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ash::vk;
+use ira_overlay_ipc::MappedShm;
 
 use crate::types::DeviceFns;
+
+use super::capture_ffmpeg::{
+    prepare_replay_directory, recording_args, recording_settings, replay_args,
+    replay_manifest_path, resolve_encoder, screenshot_path, video_path,
+};
 
 const NUM_STAGING: usize = 4;
 
@@ -73,6 +79,7 @@ static DEFERRED_BUFFERS: Mutex<Vec<StagingBuffer>> = Mutex::new(Vec::new());
 static DEFERRED_IMAGES: Mutex<Vec<IntermediateImage>> = Mutex::new(Vec::new());
 static RECORDING: AtomicBool = AtomicBool::new(false);
 static FFMPEG_PIPE: Mutex<Option<std::process::ChildStdin>> = Mutex::new(None);
+static REPLAY_FFMPEG_PIPE: Mutex<Option<ChildStdin>> = Mutex::new(None);
 static FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
 static RECORD_START: Mutex<Option<Instant>> = Mutex::new(None);
 
@@ -94,6 +101,20 @@ pub fn is_screenshot_requested() -> bool {
 
 pub fn is_recording() -> bool {
     RECORDING.load(Ordering::Relaxed)
+}
+
+pub fn is_capture_active() -> bool {
+    is_screenshot_requested() || is_recording() || replay_buffer_active()
+}
+
+fn mark_direct_capture_ready() {
+    let Ok(path) = std::env::var("IRA_OVERLAY_SHM") else {
+        return;
+    };
+    match MappedShm::open_rw(&path) {
+        Ok(shm) => shm.header().direct_capture_ready.store(1, Ordering::SeqCst),
+        Err(error) => eprintln!("ira-overlay: failed to mark direct capture ready: {error}"),
+    }
 }
 
 pub fn toggle_recording() {
@@ -124,35 +145,18 @@ pub fn toggle_recording() {
             return;
         };
 
-        let path = video_path();
-        let size = format!("{}x{}", extent.width, extent.height);
+        let settings = recording_settings();
+        let encoder = resolve_encoder(settings.encoder, settings.format);
+        let path = video_path(settings.format);
         let mut cmd = Command::new("ffmpeg");
-        cmd.args([
-            "-y",
-            "-f",
-            "rawvideo",
-            "-pixel_format",
-            "rgba",
-            "-video_size",
-            &size,
-            "-use_wallclock_as_timestamps",
-            "1",
-            "-i",
-            "-",
-            "-c:v",
-            "libx264",
-            "-crf",
-            "18",
-            "-preset",
-            "fast",
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            "60",
-            "-loglevel",
-            "error",
-        ]);
-        cmd.arg(&path);
+        cmd.args(recording_args(
+            extent.width,
+            extent.height,
+            encoder,
+            settings.quality,
+            settings.format,
+            &path,
+        ));
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::null());
         cmd.stderr(Stdio::null());
@@ -216,6 +220,7 @@ pub fn init(
             && state.extent.height == extent.height
             && state.use_blit == use_blit
         {
+            mark_direct_capture_ready();
             return;
         }
         let mut deferred = DEFERRED_BUFFERS.lock().unwrap();
@@ -244,6 +249,7 @@ pub fn init(
                 );
             }
         }
+        stop_replay_buffer();
 
         let staging = create_staging_buffers(fns, device, physical_device, buf_size);
         if staging.is_empty() {
@@ -261,6 +267,9 @@ pub fn init(
         state.staging_size = buf_size;
         state.free = staging;
         state.intermediate = intermediate;
+        drop(guard);
+        mark_direct_capture_ready();
+        start_replay_buffer(extent);
         return;
     }
     drop(guard);
@@ -309,6 +318,8 @@ pub fn init(
         _encode_thread: encode_thread,
         shutdown,
     });
+    mark_direct_capture_ready();
+    start_replay_buffer(extent);
 }
 
 pub fn destroy(_fns: DeviceFns, _device: vk::Device) {
@@ -325,6 +336,7 @@ pub fn destroy(_fns: DeviceFns, _device: vk::Device) {
             );
         }
     }
+    stop_replay_buffer();
 
     let state = STATE.lock().unwrap().take();
     let Some(state) = state else { return };
@@ -415,7 +427,7 @@ pub unsafe fn capture(
     }
 
     let is_screenshot = state.screenshot_requested;
-    if !is_screenshot && !RECORDING.load(Ordering::Relaxed) {
+    if !is_screenshot && !RECORDING.load(Ordering::Relaxed) && !replay_buffer_active() {
         return false;
     }
 
@@ -687,22 +699,88 @@ fn encode_thread(encode_rx: Receiver<EncodeFrame>, shutdown: Arc<AtomicBool>) {
     while !shutdown.load(Ordering::Relaxed) {
         match encode_rx.recv_timeout(Duration::from_millis(10)) {
             Ok(frame) => {
+                if RECORDING.load(Ordering::Relaxed)
+                    && write_frame_to_pipe(&FFMPEG_PIPE, &frame.rgba, "recording")
+                {
+                    FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
+                }
+                if replay_buffer_active() {
+                    let _ = write_frame_to_pipe(&REPLAY_FFMPEG_PIPE, &frame.rgba, "replay buffer");
+                }
                 if frame.is_screenshot {
                     encode_webp(frame.rgba, frame.width, frame.height);
-                } else if RECORDING.load(Ordering::Relaxed) {
-                    let pipe = FFMPEG_PIPE.lock().unwrap().take();
-                    if let Some(mut pipe) = pipe {
-                        let _ = pipe.write_all(&frame.rgba);
-                        FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
-                        if RECORDING.load(Ordering::Relaxed) {
-                            *FFMPEG_PIPE.lock().unwrap() = Some(pipe);
-                        }
-                    }
                 }
             }
             Err(_) => continue,
         }
     }
+}
+
+fn replay_buffer_active() -> bool {
+    REPLAY_FFMPEG_PIPE.lock().unwrap().is_some()
+}
+
+fn write_frame_to_pipe(pipe: &Mutex<Option<ChildStdin>>, rgba: &[u8], description: &str) -> bool {
+    let Some(mut stdin) = pipe.lock().unwrap().take() else {
+        return false;
+    };
+    if let Err(error) = stdin.write_all(rgba) {
+        eprintln!("ira-overlay: failed to send frame to {description}: {error}");
+        return false;
+    }
+    *pipe.lock().unwrap() = Some(stdin);
+    true
+}
+
+fn start_replay_buffer(extent: vk::Extent2D) {
+    let settings = recording_settings();
+    if !settings.replay_buffer_enabled {
+        stop_replay_buffer();
+        return;
+    }
+    if replay_buffer_active() {
+        return;
+    }
+    if let Err(error) = prepare_replay_directory() {
+        eprintln!("ira-overlay: failed to prepare replay buffer: {error}");
+        return;
+    }
+    let encoder = resolve_encoder(settings.encoder, ira_overlay_ipc::RecordingFormat::Mp4);
+    let output = replay_manifest_path();
+    let mut command = Command::new("ffmpeg");
+    command
+        .args(replay_args(
+            extent.width,
+            extent.height,
+            encoder,
+            settings.quality,
+            settings.replay_buffer_seconds,
+            &output,
+        ))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    match command.spawn() {
+        Ok(mut child) => match child.stdin.take() {
+            Some(stdin) => {
+                *REPLAY_FFMPEG_PIPE.lock().unwrap() = Some(stdin);
+                eprintln!("ira-overlay: replay buffer writing to {}", output.display());
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+            }
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                eprintln!("ira-overlay: replay buffer ffmpeg has no stdin");
+            }
+        },
+        Err(error) => eprintln!("ira-overlay: failed to start replay buffer: {error}"),
+    }
+}
+
+fn stop_replay_buffer() {
+    REPLAY_FFMPEG_PIPE.lock().unwrap().take();
 }
 
 unsafe fn read_pixels(frame: &PendingFrame) -> Vec<u8> {
@@ -994,35 +1072,4 @@ fn encode_webp(mut rgba: Vec<u8>, width: u32, height: u32) {
     let path = screenshot_path();
     eprintln!("ira-overlay: saving screenshot to {:?}", path);
     let _ = std::fs::write(&path, &*webp_data);
-}
-
-fn screenshot_path() -> std::path::PathBuf {
-    let base = data_dir();
-    let dir = base.join("ira").join("screenshots");
-    let _ = std::fs::create_dir_all(&dir);
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    dir.join(format!("screenshot_{secs}.webp"))
-}
-
-fn video_path() -> std::path::PathBuf {
-    let base = data_dir();
-    let dir = base.join("ira").join("videos");
-    let _ = std::fs::create_dir_all(&dir);
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    dir.join(format!("video_{secs}.mp4"))
-}
-
-fn data_dir() -> std::path::PathBuf {
-    std::env::var("XDG_DATA_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            std::path::PathBuf::from(home).join(".local/share")
-        })
 }

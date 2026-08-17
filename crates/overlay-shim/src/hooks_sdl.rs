@@ -108,12 +108,15 @@ fn handle_button(button: u8) -> bool {
         return true;
     }
     if held == toggle {
+        if state::injected_ui_disabled() {
+            return false;
+        }
         TOGGLE_PENDING.store(true, Ordering::Relaxed);
         return true;
     }
 
     // Other buttons only when overlay is visible.
-    if !state::is_visible() {
+    if state::injected_ui_disabled() || !state::is_visible() {
         return false;
     }
 
@@ -178,7 +181,11 @@ fn handle_button_release(button: u8) -> bool {
         return false;
     };
     let held = PRESSED_BUTTONS.fetch_and(!mask, Ordering::Relaxed) & !mask;
-    if TOGGLE_PENDING.swap(false, Ordering::Relaxed) && held == 0 && state::ready_for_overlay() {
+    if !state::injected_ui_disabled()
+        && TOGGLE_PENDING.swap(false, Ordering::Relaxed)
+        && held == 0
+        && state::ready_for_overlay()
+    {
         state::set_visible(!state::is_visible());
         return true;
     }
@@ -207,8 +214,8 @@ fn capture_event(event_type: u32) -> InputEventRaw {
     }
 }
 
-fn should_consume_gamepad_event(was_visible: bool, handled: bool) -> bool {
-    was_visible || handled
+fn should_consume_gamepad_event(was_visible: bool, handled: bool, ui_disabled: bool) -> bool {
+    handled || (was_visible && !ui_disabled)
 }
 
 /// LD_PRELOAD hook for `SDL_PollEvent`.
@@ -240,14 +247,18 @@ pub unsafe extern "C" fn SDL_PollEvent(event: *mut c_void) -> i32 {
             let handled = handle_button(button);
 
             // Also consume a handled Guide press after it closes the overlay.
-            if should_consume_gamepad_event(was_visible, handled) && consumed < 64 {
+            if should_consume_gamepad_event(was_visible, handled, state::injected_ui_disabled())
+                && consumed < 64
+            {
                 consumed += 1;
                 continue;
             }
         } else if event_type == SDL_CONTROLLERBUTTONUP || event_type == SDL_JOYBUTTONUP {
             let was_visible = state::is_visible();
             let handled = handle_button_release(read_button(event));
-            if should_consume_gamepad_event(was_visible, handled) && consumed < 64 {
+            if should_consume_gamepad_event(was_visible, handled, state::injected_ui_disabled())
+                && consumed < 64
+            {
                 consumed += 1;
                 continue;
             }
@@ -263,6 +274,11 @@ mod tests {
 
     #[test]
     fn test_should_consume_gamepad_event_after_guide_hides_overlay() {
-        assert!(should_consume_gamepad_event(false, true));
+        assert!(should_consume_gamepad_event(false, true, true));
+    }
+
+    #[test]
+    fn test_should_not_consume_visible_ui_event_when_injected_ui_disabled() {
+        assert!(!should_consume_gamepad_event(true, false, true));
     }
 }

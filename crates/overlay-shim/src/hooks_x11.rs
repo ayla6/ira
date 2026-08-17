@@ -172,7 +172,7 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
         let ss_x11 = ss_kc + X11_KEYCODE_OFFSET;
         let rec_x11 = rec_kc + X11_KEYCODE_OFFSET;
 
-        if (mods & tog_mods) == tog_mods && keycode == tog_x11 {
+        if !state::injected_ui_disabled() && (mods & tog_mods) == tog_mods && keycode == tog_x11 {
             state::toggle_visible();
             return true;
         }
@@ -199,7 +199,7 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
     }
 
     // When overlay is visible, consume all mouse and keyboard events.
-    if state::is_visible() {
+    if !state::injected_ui_disabled() && state::is_visible() {
         match event_type {
             MOTIONNOTIFY => {
                 let (x, y) = read_xy(ev);

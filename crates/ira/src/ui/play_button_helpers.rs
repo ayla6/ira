@@ -294,8 +294,14 @@ fn build_emulator_env_and_wrap(
     } else {
         Vec::new()
     };
+    let mut capture_env = game_env.clone();
     if overlay_enabled {
         if will_use_gamescope {
+            ira_launcher::env_builder::add_overlay_env_without_ui(
+                &mut capture_env,
+                ctx.overlay_shm.as_deref(),
+                ctx.overlay_font_family.as_deref(),
+            );
             ira_launcher::env_builder::add_overlay_env_standalone(
                 &mut env,
                 ctx.overlay_shm.as_deref(),
@@ -316,7 +322,7 @@ fn build_emulator_env_and_wrap(
 
     if overlay_enabled
         && ira_launcher::env_builder::uses_gamescope(cmd)
-        && !ira_launcher::env_builder::wrap_with_standalone_overlay(cmd, &game_env)
+        && !ira_launcher::env_builder::wrap_with_standalone_overlay(cmd, &capture_env)
     {
         ira_launcher::env_builder::restore_gamescope_game_env(&mut env, game_env);
     }

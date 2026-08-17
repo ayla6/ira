@@ -16,11 +16,20 @@
 
 use std::sync::atomic::Ordering;
 
+mod capture;
+mod capture_frame;
+mod capture_types;
+mod capture_writer;
+mod ffmpeg;
+mod gamepad;
 mod vulkan;
 mod x11;
 
 use ira_overlay::ui;
-use ira_overlay_ipc::MappedShm;
+use ira_overlay_ipc::{
+    MappedShm, DEFAULT_RECORD_GAMEPAD_HOTKEY, DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY,
+    DEFAULT_TOGGLE_GAMEPAD_HOTKEY,
+};
 
 fn main() {
     ira_overlay::i18n::init();
@@ -45,6 +54,15 @@ fn main() {
         }
     };
     eprintln!("ira-overlay-standalone: connected to SHM '{shm_path}'");
+
+    let capture_settings = capture::RecordingSettings::from_shm(&shm);
+    let capture = match capture::CaptureController::new(capture_settings) {
+        Ok(capture) => capture,
+        Err(error) => {
+            eprintln!("ira-overlay-standalone: capture initialization failed: {error}");
+            return;
+        }
+    };
 
     // Read hotkey config from SHM (written by Ira app before launch).
     {
@@ -99,6 +117,8 @@ fn main() {
     let initial_visible = shm.header().overlay_visible.load(Ordering::SeqCst) != 0;
     x11_state.set_visible(initial_visible);
     let mut prev_visible = initial_visible;
+    let mut direct_capture_ready = false;
+    let mut gamepad = gamepad::GamepadInput::new();
 
     loop {
         // Poll XCB events (keyboard input when visible via keyboard grab).
@@ -108,6 +128,30 @@ fn main() {
 
         if toggle_pressed {
             toggle_visibility(&shm);
+        }
+
+        let ready = shm.header().direct_capture_ready.load(Ordering::SeqCst) != 0;
+        if ready != direct_capture_ready {
+            capture.set_direct_capture_ready(ready);
+            direct_capture_ready = ready;
+        }
+
+        let (toggle_gamepad, screenshot_gamepad, record_gamepad, overlay_visible) = {
+            let header = shm.header();
+            (
+                nonzero_or(header.toggle_gamepad, DEFAULT_TOGGLE_GAMEPAD_HOTKEY),
+                nonzero_or(header.screenshot_gamepad, DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY),
+                nonzero_or(header.record_gamepad, DEFAULT_RECORD_GAMEPAD_HOTKEY),
+                header.overlay_visible.load(Ordering::SeqCst) != 0,
+            )
+        };
+        for event in gamepad.poll(
+            toggle_gamepad,
+            screenshot_gamepad,
+            record_gamepad,
+            overlay_visible,
+        ) {
+            handle_gamepad_event(&shm, &capture, event);
         }
 
         // Read visibility from SHM (written by shim or by ourselves above).
@@ -155,9 +199,32 @@ fn toggle_visibility(shm: &MappedShm) {
     }
 }
 
+fn handle_gamepad_event(
+    shm: &MappedShm,
+    capture: &capture::CaptureController,
+    event: gamepad::GamepadEvent,
+) {
+    match event {
+        gamepad::GamepadEvent::Toggle => toggle_visibility(shm),
+        gamepad::GamepadEvent::Ui(event) => ui::push_event(event),
+        gamepad::GamepadEvent::Screenshot => capture.request_screenshot(),
+        gamepad::GamepadEvent::Record => {
+            capture.toggle_recording(capture::RecordingSettings::from_shm(shm));
+        }
+    }
+}
+
 fn now_ms() -> u32 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u32)
         .unwrap_or(0)
+}
+
+fn nonzero_or(value: u32, default: u32) -> u32 {
+    if value == 0 {
+        default
+    } else {
+        value
+    }
 }

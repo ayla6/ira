@@ -8,9 +8,9 @@
 
 use ira_models::Game;
 use ira_overlay_ipc::{
-    parse_gamepad_hotkey, parse_hotkey, shm_path, MappedShm, OverlaySettings, RecordingQuality,
-    VideoEncoder, DEFAULT_RECORD_GAMEPAD_HOTKEY, DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY,
-    DEFAULT_TOGGLE_GAMEPAD_HOTKEY, MAX_ACHIEVEMENTS,
+    clamp_replay_buffer_seconds, parse_gamepad_hotkey, parse_hotkey, shm_path, MappedShm,
+    OverlaySettings, RecordingQuality, VideoEncoder, DEFAULT_RECORD_GAMEPAD_HOTKEY,
+    DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY, DEFAULT_TOGGLE_GAMEPAD_HOTKEY, MAX_ACHIEVEMENTS,
 };
 
 /// Creates the shared memory region and writes game data + achievements.
@@ -44,6 +44,8 @@ pub fn write_game_shm(
             .unwrap_or(settings.recording_quality)
             .as_u32();
         hdr.recording_format = settings.recording_format.as_u32();
+        hdr.replay_buffer_enabled = u32::from(settings.replay_buffer_enabled);
+        hdr.replay_buffer_seconds = clamp_replay_buffer_seconds(settings.replay_buffer_seconds);
 
         // Write hotkey config as (evdev_keycode, modifier_mask).
         let (toggle_kc, toggle_mods) = parse_hotkey(&settings.toggle_hotkey);
@@ -106,10 +108,32 @@ fn write_str(dst: &mut [u8], src: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::CString;
 
     #[test]
     fn test_overlay_overrides_use_known_values() {
         assert_eq!(VideoEncoder::from_u32(2), VideoEncoder::Nvenc);
         assert_eq!(RecordingQuality::from_u32(2), RecordingQuality::High);
+    }
+
+    #[test]
+    fn test_write_game_shm_passes_replay_setting() {
+        let db_id = 4_242_424_242;
+        let game = Game {
+            db_id,
+            ..Default::default()
+        };
+        let settings = OverlaySettings {
+            replay_buffer_enabled: true,
+            replay_buffer_seconds: 10 * 60,
+            ..Default::default()
+        };
+        let path = write_game_shm(&game, &settings, None, None).unwrap();
+        let shm = MappedShm::open(&path).unwrap();
+        assert_eq!(shm.header().replay_buffer_enabled, 1);
+        assert_eq!(shm.header().replay_buffer_seconds, 10 * 60);
+
+        let c_path = CString::new(path).unwrap();
+        unsafe { libc::shm_unlink(c_path.as_ptr()) };
     }
 }

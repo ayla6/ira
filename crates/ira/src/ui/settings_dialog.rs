@@ -383,6 +383,10 @@ fn apply_controller_defaults(
 
 fn apply_overlay_settings(cfg: &mut Config, widgets: &OverlayPageWidgets) {
     cfg.overlay.enabled = widgets.enable_row.is_active();
+    cfg.overlay.replay_buffer_enabled = widgets.replay_buffer_row.is_active();
+    cfg.overlay.replay_buffer_seconds = ira_overlay_ipc::clamp_replay_buffer_seconds(
+        (widgets.replay_duration_row.value().round() as u32).saturating_mul(60),
+    );
     cfg.overlay.encoder = match widgets.encoder_row.selected() {
         1 => ira_overlay_ipc::VideoEncoder::Vaapi,
         2 => ira_overlay_ipc::VideoEncoder::Nvenc,

@@ -88,6 +88,7 @@ pub struct SwapchainData {
     pub cmd_buffers: Vec<vk::CommandBuffer>,
     pub semaphores: Vec<vk::Semaphore>,
     pub fences: Vec<vk::Fence>,
+    pub ui_enabled: bool,
     pub ui_renderer: Option<UiRenderer>,
 }
 

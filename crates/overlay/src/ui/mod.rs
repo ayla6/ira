@@ -1,5 +1,6 @@
 mod atlas;
 pub mod capture;
+mod capture_ffmpeg;
 mod focus;
 mod model;
 mod renderer;

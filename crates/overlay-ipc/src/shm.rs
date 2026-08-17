@@ -218,6 +218,10 @@ mod tests {
         assert_eq!(reader.header().game_db_id, db_id);
         assert_eq!(reader.header().total_achievements, 5);
         assert_eq!(reader.header().unlocked_achievements, 2);
+        assert_eq!(
+            reader.header().direct_capture_ready.load(Ordering::SeqCst),
+            0
+        );
 
         // Clean up.
         let c_path = CString::new(path).unwrap();

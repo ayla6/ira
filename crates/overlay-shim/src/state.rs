@@ -27,6 +27,7 @@ static INPUT_QUEUE: Mutex<Vec<InputEventRaw>> = Mutex::new(Vec::new());
 /// Cached after first call — env vars don't change at runtime.
 static OVERLAY_ACTIVE_CACHED: AtomicBool = AtomicBool::new(false);
 static OVERLAY_ACTIVE_INIT: AtomicBool = AtomicBool::new(false);
+static INJECTED_UI_DISABLED: OnceLock<bool> = OnceLock::new();
 
 pub fn overlay_active() -> bool {
     if !OVERLAY_ACTIVE_INIT.load(Ordering::Relaxed) {
@@ -42,6 +43,12 @@ pub fn overlay_active() -> bool {
     } else {
         OVERLAY_ACTIVE_CACHED.load(Ordering::Relaxed)
     }
+}
+
+/// The game can keep injected helpers active while the standalone Gamescope
+/// overlay owns all UI rendering and navigation.
+pub fn injected_ui_disabled() -> bool {
+    *INJECTED_UI_DISABLED.get_or_init(|| std::env::var_os("IRA_OVERLAY_DISABLE_UI").is_some())
 }
 
 pub fn push_event(event: InputEventRaw) {

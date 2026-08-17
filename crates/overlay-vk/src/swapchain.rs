@@ -95,8 +95,12 @@ pub(crate) unsafe extern "system" fn create_swapchain(
         fences.push(fence);
     }
 
-    let ui_renderer =
-        ira_overlay::ui::UiRenderer::new(fns, device, physical_device, cmd_pool, render_pass);
+    let ui_enabled = std::env::var_os("IRA_OVERLAY_DISABLE_UI").is_none();
+    let ui_renderer = if ui_enabled {
+        ira_overlay::ui::UiRenderer::new(fns, device, physical_device, cmd_pool, render_pass)
+    } else {
+        None
+    };
 
     ira_overlay::ui::capture::init(fns, device, physical_device, extent, format);
 
@@ -122,6 +126,7 @@ pub(crate) unsafe extern "system" fn create_swapchain(
                 cmd_buffers,
                 semaphores,
                 fences,
+                ui_enabled,
                 ui_renderer,
             },
         );

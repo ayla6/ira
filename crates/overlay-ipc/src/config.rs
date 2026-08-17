@@ -251,6 +251,12 @@ pub struct OverlaySettings {
     pub recording_quality: RecordingQuality,
     #[serde(default)]
     pub recording_format: RecordingFormat,
+    /// Keeps a rolling DASH buffer in the background while the overlay is active.
+    #[serde(default)]
+    pub replay_buffer_enabled: bool,
+    /// Replay retention duration in seconds.
+    #[serde(default = "default_replay_buffer_seconds")]
+    pub replay_buffer_seconds: u32,
     /// Human-readable hotkey strings (e.g. "Shift+Tab", "F12", "F11").
     /// Converted to X11 keysyms when writing the ShmHeader.
     #[serde(default = "default_toggle_hotkey")]
@@ -286,6 +292,10 @@ fn default_record_hotkey() -> String {
     "F11".to_string()
 }
 
+fn default_replay_buffer_seconds() -> u32 {
+    crate::replay::DEFAULT_REPLAY_BUFFER_SECONDS
+}
+
 impl OverlaySettings {
     /// Resolves the overlay enabled state for a given source.
     /// Returns the per-source override if present, otherwise the global setting.
@@ -312,6 +322,8 @@ impl Default for OverlaySettings {
             encoder: VideoEncoder::default(),
             recording_quality: RecordingQuality::default(),
             recording_format: RecordingFormat::default(),
+            replay_buffer_enabled: false,
+            replay_buffer_seconds: default_replay_buffer_seconds(),
             toggle_hotkey: default_toggle_hotkey(),
             screenshot_hotkey: default_screenshot_hotkey(),
             record_hotkey: default_record_hotkey(),
@@ -327,6 +339,8 @@ impl Default for OverlaySettings {
 
 #[cfg(test)]
 mod tests {
+    use crate::replay::DEFAULT_REPLAY_BUFFER_SECONDS;
+
     use super::*;
 
     #[test]
@@ -337,6 +351,8 @@ mod tests {
         assert_eq!(s.encoder, VideoEncoder::Auto);
         assert_eq!(s.recording_quality, RecordingQuality::Medium);
         assert_eq!(s.recording_format, RecordingFormat::Mp4);
+        assert!(!s.replay_buffer_enabled);
+        assert_eq!(s.replay_buffer_seconds, DEFAULT_REPLAY_BUFFER_SECONDS);
         assert_eq!(s.toggle_hotkey, "Shift+Tab");
     }
 
@@ -383,12 +399,14 @@ mod tests {
         let s = OverlaySettings {
             enabled: true,
             encoder: VideoEncoder::Vaapi,
+            replay_buffer_seconds: 10 * 60,
             ..Default::default()
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: OverlaySettings = serde_json::from_str(&json).unwrap();
         assert!(back.enabled);
         assert_eq!(back.encoder, VideoEncoder::Vaapi);
+        assert_eq!(back.replay_buffer_seconds, 10 * 60);
     }
 
     #[test]
@@ -399,6 +417,8 @@ mod tests {
         assert_eq!(s.toggle_hotkey, "Shift+Tab");
         assert_eq!(s.screenshot_hotkey, "F12");
         assert_eq!(s.record_hotkey, "F11");
+        assert!(!s.replay_buffer_enabled);
+        assert_eq!(s.replay_buffer_seconds, DEFAULT_REPLAY_BUFFER_SECONDS);
     }
 
     #[test]

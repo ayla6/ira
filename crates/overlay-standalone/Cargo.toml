@@ -15,6 +15,9 @@ ira-overlay = { path = "../overlay" }
 ira-overlay-ipc = { path = "../overlay-ipc" }
 ash = "0.38"
 libc = "0.2"
+ashpd = { version = "0.13.13", features = ["screencast", "tokio"] }
+pipewire = "0.10.0"
+tokio = { version = "1", features = ["rt", "time"] }
 
 [lints]
 workspace = true

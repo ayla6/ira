@@ -3,6 +3,9 @@ use super::helpers::string_list_from;
 use super::settings_dialog::settings_page_container;
 use adw::prelude::*;
 use ira_config::Config;
+use ira_overlay_ipc::{
+    clamp_replay_buffer_seconds, MAX_REPLAY_BUFFER_SECONDS, MIN_REPLAY_BUFFER_SECONDS,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -756,6 +759,8 @@ pub(super) fn build_api_emulators_page(
 
 pub(super) struct OverlayPageWidgets {
     pub enable_row: adw::SwitchRow,
+    pub replay_buffer_row: adw::SwitchRow,
+    pub replay_duration_row: adw::SpinRow,
     pub encoder_row: adw::ComboRow,
     pub quality_row: adw::ComboRow,
     pub toggle_hotkey: super::hotkey_widget::HotkeyWidgets,
@@ -810,6 +815,37 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
     quality_row.set_model(Some(&quality_model));
     quality_row.set_selected(o.recording_quality.as_u32());
     recording_group.add(&quality_row);
+
+    let replay_buffer_row = adw::SwitchRow::new();
+    replay_buffer_row.set_title(&crate::tr!("Enable replay buffer"));
+    replay_buffer_row.set_subtitle(&crate::tr!(
+        "Keeps recent gameplay available as a rolling DASH session"
+    ));
+    replay_buffer_row.set_active(o.replay_buffer_enabled);
+    recording_group.add(&replay_buffer_row);
+
+    let replay_minutes = clamp_replay_buffer_seconds(o.replay_buffer_seconds).div_ceil(60);
+    let replay_duration_adjustment = gtk4::Adjustment::new(
+        replay_minutes as f64,
+        (MIN_REPLAY_BUFFER_SECONDS / 60) as f64,
+        (MAX_REPLAY_BUFFER_SECONDS / 60) as f64,
+        1.0,
+        5.0,
+        0.0,
+    );
+    let replay_duration_row = adw::SpinRow::new(Some(&replay_duration_adjustment), 1.0, 0);
+    replay_duration_row.set_title(&crate::tr!("Replay buffer duration"));
+    replay_duration_row.set_subtitle(&crate::tr!(
+        "Minutes of gameplay retained for instant replay"
+    ));
+    replay_duration_row.set_sensitive(o.replay_buffer_enabled);
+    recording_group.add(&replay_duration_row);
+    {
+        let replay_duration_row = replay_duration_row.clone();
+        replay_buffer_row.connect_active_notify(move |row| {
+            replay_duration_row.set_sensitive(row.is_active());
+        });
+    }
     page.append(&recording_group);
 
     let hotkeys_group = adw::PreferencesGroup::new();
@@ -890,6 +926,8 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
         page,
         OverlayPageWidgets {
             enable_row,
+            replay_buffer_row,
+            replay_duration_row,
             encoder_row,
             quality_row,
             toggle_hotkey,

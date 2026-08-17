@@ -27,10 +27,9 @@ pub unsafe extern "system" fn queue_present(
     // Capture hotkeys must be drained while the panel is hidden too.
     crate::shim_bridge::poll_and_forward();
     let overlay_visible = crate::shim_bridge::is_visible();
-    let screenshot_requested = ira_overlay::ui::capture::is_screenshot_requested()
-        || ira_overlay::ui::capture::is_recording();
+    let capture_active = ira_overlay::ui::capture::is_capture_active();
 
-    if !overlay_visible && !screenshot_requested {
+    if !overlay_visible && !capture_active {
         return chain_present(queue, present_info);
     }
 
@@ -51,6 +50,11 @@ pub unsafe extern "system" fn queue_present(
     let Some(sc) = sc_data else {
         return chain_present(queue, present_info);
     };
+
+    let render_ui = overlay_visible && sc.ui_enabled;
+    if !render_ui && !capture_active {
+        return chain_present(queue, present_info);
+    }
 
     let idx = image_index as usize;
     if idx >= sc.cmd_buffers.len() {
@@ -82,7 +86,7 @@ pub unsafe extern "system" fn queue_present(
         vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
     let _ = (sc.fns.begin_cmd_buffer)(cmd, &begin_info);
 
-    if overlay_visible {
+    if render_ui {
         if let Some(ui) = sc.ui_renderer {
             ui.prepare(sc.extent);
             ui.update_atlas(sc.fns, cmd, fence);
@@ -105,7 +109,7 @@ pub unsafe extern "system" fn queue_present(
         vk::ImageLayout::PRESENT_SRC_KHR
     };
 
-    if overlay_visible {
+    if render_ui {
         let (src_stage, src_access) = if captured {
             (
                 vk::PipelineStageFlags::TRANSFER,

@@ -391,22 +391,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     STOP_REQUESTED.store(false, Ordering::Relaxed);
     install_signal_handlers();
     let mut trace = TraceState::new(arguments.trace);
-    let Some(device_path) = arguments.device.or_else(|| {
-        discover_gamepads()
-            .into_iter()
-            .next()
-            .map(|device| device.path)
-    }) else {
-        eprintln!("ira-input: no gamepad found; running target without input virtualization");
-        return run_target_without_input(&arguments.command, arguments.steam_app_id.as_deref());
-    };
-    let mut gamepad = match PhysicalGamepad::open(&device_path, false) {
-        Ok(gamepad) => gamepad,
-        Err(error) => {
-            eprintln!("ira-input: {error}; running target without input virtualization");
-            return run_target_without_input(&arguments.command, arguments.steam_app_id.as_deref());
-        }
-    };
+    let mut gamepad = open_initial_gamepad(arguments.device.as_deref());
     let profile = load_profile(arguments.profile.as_deref())?;
     let mut mapper = MappingEngine::new(profile)?;
     let mut profile_monitor = arguments
@@ -428,10 +413,11 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let mut mouse = create_mouse(mapper.profile().uses_mouse())?;
     let mut virtual_gamepad = VirtualGamepad::create_for_backend(mapper.profile().backend)
         .map_err(|error| format!("failed to create virtual gamepad: {error}"))?;
-    let mut sensor = open_sensor(gamepad.info());
-    if let Err(error) = gamepad.grab() {
-        eprintln!("ira-input: {error}; running target without input virtualization");
-        return run_target_without_input(&arguments.command, arguments.steam_app_id.as_deref());
+    let mut sensor = gamepad.as_ref().and_then(|gamepad| open_sensor(gamepad.info()));
+    if let Some(gamepad) = gamepad.as_mut() {
+        if let Err(error) = gamepad.grab() {
+            eprintln!("ira-input: {error}; continuing without exclusive grab");
+        }
     }
     let mut steam_session = arguments.steam_app_id.as_deref().map(SteamSession::new);
     let mut launcher_exit_code = None;
@@ -443,8 +429,8 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             &arguments.command[0],
             &mut target_args,
             mapper.profile().backend,
-            gamepad.info().vendor,
-            gamepad.info().product,
+            gamepad.as_ref().map(|gamepad| gamepad.info().vendor),
+            gamepad.as_ref().map(|gamepad| gamepad.info().product),
         );
         let mut command = std::process::Command::new(&arguments.command[0]);
         command.args(target_args);
@@ -452,12 +438,14 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         if let Some(mapping) = sdl_mapping_for_backend(mapper.profile().backend) {
             command.env("SDL_GAMECONTROLLERCONFIG", mapping);
         }
-        if let Some(ignored_device) = ignored_device_for_target(
-            gamepad.info().vendor,
-            gamepad.info().product,
-            mapper.profile().backend,
-        ) {
-            command.env("SDL_GAMECONTROLLER_IGNORE_DEVICES", ignored_device);
+        if let Some(gamepad) = gamepad.as_ref() {
+            if let Some(ignored_device) = ignored_device_for_target(
+                gamepad.info().vendor,
+                gamepad.info().product,
+                mapper.profile().backend,
+            ) {
+                command.env("SDL_GAMECONTROLLER_IGNORE_DEVICES", ignored_device);
+            }
         }
         Some(
             command
@@ -466,18 +454,22 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         )
     };
     let mut schedule = LoopSchedule::new();
-    eprintln!(
-        "ira-input: mapping {} through {}",
-        gamepad.info().name,
-        device_path.display()
-    );
-    eprintln!(
-        "ira-input: physical SDL device excluded ({:04x}:{:04x})",
-        gamepad.info().vendor,
-        gamepad.info().product
-    );
+    if let Some(gamepad) = gamepad.as_ref() {
+        eprintln!(
+            "ira-input: mapping {} through {}",
+            gamepad.info().name,
+            gamepad.info().path.display()
+        );
+        eprintln!(
+            "ira-input: physical SDL device excluded ({:04x}:{:04x})",
+            gamepad.info().vendor,
+            gamepad.info().product
+        );
+    } else {
+        eprintln!("ira-input: no controller found; waiting for one to be plugged in");
+    }
     loop {
-        let was_connected = gamepad.is_connected();
+        let was_connected = gamepad.as_ref().is_some_and(|gamepad| gamepad.is_connected());
         let sample_sensor = sensor.is_some() && schedule.sensor.elapsed() >= SENSOR_SAMPLE_INTERVAL;
         if sample_sensor {
             schedule.sensor = Instant::now();
@@ -515,7 +507,8 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             stop_child(&mut child);
             return Err(error);
         }
-        if was_connected && !gamepad.is_connected() {
+        let connected = gamepad.as_ref().is_some_and(|gamepad| gamepad.is_connected());
+        if was_connected && !connected {
             sensor = None;
             schedule.reconnect = Instant::now();
             emit_outputs(
@@ -562,19 +555,23 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                 return Ok(launcher_exit_code.unwrap_or(0));
             }
         }
-        if !gamepad.is_connected() && schedule.reconnect.elapsed() >= RECONNECT_INTERVAL {
+        if !connected && schedule.reconnect.elapsed() >= RECONNECT_INTERVAL {
             schedule.reconnect = Instant::now();
             sensor = None;
-            match gamepad.try_reconnect() {
+            match reconnect_gamepad(&mut gamepad) {
                 Ok(true) => {
-                    eprintln!(
-                        "ira-input: reconnected controller through {}",
-                        gamepad.info().path.display()
-                    );
-                    sensor = open_sensor(gamepad.info());
+                    if let Some(gamepad) = gamepad.as_ref() {
+                        eprintln!(
+                            "ira-input: controller connected through {}",
+                            gamepad.info().path.display()
+                        );
+                        sensor = open_sensor(gamepad.info());
+                    }
                     schedule.sensor = Instant::now();
-                    if let Err(error) = gamepad.grab() {
-                        eprintln!("ira-input: failed to re-grab controller: {error}");
+                    if let Some(gamepad) = gamepad.as_mut() {
+                        if let Err(error) = gamepad.grab() {
+                            eprintln!("ira-input: failed to grab controller: {error}");
+                        }
                     }
                 }
                 Ok(false) => {}
@@ -606,10 +603,81 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             child.is_some(),
             profile_monitor.is_some(),
             steam_session.is_some(),
-            !gamepad.is_connected(),
+            !connected,
         );
-        gamepad.wait_for_event(timeout)?;
+        wait_for_inputs(&gamepad, timeout)?;
     }
+}
+
+/// Open the initially detected controller. Returns `None` (no error) when no
+/// controller is plugged in yet — the session keeps running and picks one up
+/// the moment it appears.
+fn open_initial_gamepad(device: Option<&Path>) -> Option<PhysicalGamepad> {
+    if let Some(path) = device {
+        return match PhysicalGamepad::open(path, false) {
+            Ok(gamepad) => Some(gamepad),
+            Err(error) => {
+                eprintln!("ira-input: {error}");
+                None
+            }
+        };
+    }
+    let info = discover_gamepads().into_iter().next()?;
+    match PhysicalGamepad::open(&info.path, false) {
+        Ok(gamepad) => Some(gamepad),
+        Err(error) => {
+            eprintln!("ira-input: failed to open {}: {error}", info.path.display());
+            None
+        }
+    }
+}
+
+/// Reconnect the previously-used controller, or detect a brand-new one when
+/// none was present at launch. Returns true when a controller is now open.
+fn reconnect_gamepad(gamepad: &mut Option<PhysicalGamepad>) -> Result<bool, String> {
+    if let Some(existing) = gamepad.as_mut() {
+        return existing.try_reconnect();
+    }
+    let Some(info) = discover_gamepads().into_iter().next() else {
+        return Ok(false);
+    };
+    match PhysicalGamepad::open(&info.path, false) {
+        Ok(opened) => {
+            *gamepad = Some(opened);
+            Ok(true)
+        }
+        Err(error) => {
+            eprintln!("ira-input: failed to open {}: {error}", info.path.display());
+            Ok(false)
+        }
+    }
+}
+
+/// Block until the kernel has an input event or scheduled work is due. When no
+/// controller is present, waits on the scheduled timeout instead.
+fn wait_for_inputs(
+    gamepad: &Option<PhysicalGamepad>,
+    timeout: Option<Duration>,
+) -> Result<(), String> {
+    if let Some(gamepad) = gamepad {
+        return gamepad.wait_for_event(timeout);
+    }
+    let timeout_ms = timeout
+        .map(|timeout| {
+            timeout
+                .as_nanos()
+                .div_ceil(1_000_000)
+                .min(libc::c_int::MAX as u128) as libc::c_int
+        })
+        .unwrap_or(-1);
+    let result = unsafe { libc::poll(std::ptr::null_mut(), 0, timeout_ms) };
+    if result < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+        return Err(format!(
+            "failed waiting for controller: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
 }
 
 fn steam_processes(app_id: &str) -> SteamProcessSnapshot {
@@ -717,20 +785,22 @@ fn inject_flatpak_target_env(
     program: &str,
     args: &mut Vec<String>,
     backend: VirtualGamepadBackend,
-    vendor: u16,
-    product: u16,
+    vendor: Option<u16>,
+    product: Option<u16>,
 ) {
     inject_flatpak_env(program, args, "SDL_JOYSTICK_HIDAPI", "0");
     if let Some(mapping) = sdl_mapping_for_backend(backend) {
         inject_flatpak_env(program, args, "SDL_GAMECONTROLLERCONFIG", &mapping);
     }
-    if let Some(ignored_device) = ignored_device_for_target(vendor, product, backend) {
-        inject_flatpak_env(
-            program,
-            args,
-            "SDL_GAMECONTROLLER_IGNORE_DEVICES",
-            &ignored_device,
-        );
+    if let (Some(vendor), Some(product)) = (vendor, product) {
+        if let Some(ignored_device) = ignored_device_for_target(vendor, product, backend) {
+            inject_flatpak_env(
+                program,
+                args,
+                "SDL_GAMECONTROLLER_IGNORE_DEVICES",
+                &ignored_device,
+            );
+        }
     }
 }
 
@@ -755,35 +825,6 @@ fn ignored_device_for_target(
         None
     } else {
         Some(format!("0x{vendor:04x}/0x{product:04x}"))
-    }
-}
-
-fn run_target_without_input(command: &[String], steam_app_id: Option<&str>) -> Result<i32, String> {
-    let Some((program, arguments)) = command.split_first() else {
-        return Ok(0);
-    };
-    let mut steam_session = steam_app_id.map(SteamSession::new);
-    let status = std::process::Command::new(program)
-        .args(arguments)
-        .status()
-        .map_err(|error| format!("failed to launch target process: {error}"))?;
-    let code = status.code().unwrap_or(1);
-    if steam_app_id.is_none() {
-        return Ok(code);
-    }
-    wait_for_steam_app(steam_session.as_mut().expect("Steam session must exist"));
-    Ok(code)
-}
-
-fn wait_for_steam_app(session: &mut SteamSession) {
-    loop {
-        if STOP_REQUESTED.load(Ordering::Relaxed) {
-            session.request_stop();
-        }
-        if session.poll(true) {
-            return;
-        }
-        thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -1075,13 +1116,16 @@ fn open_sensor(device: &ira_input::DeviceInfo) -> Option<Sdl3SensorBackend> {
 }
 
 fn process_physical_inputs(
-    gamepad: &mut PhysicalGamepad,
+    gamepad: &mut Option<PhysicalGamepad>,
     mapper: &mut MappingEngine,
     virtual_gamepad: &mut VirtualGamepad,
     mut keyboard: Option<&mut VirtualKeyboard>,
     mut mouse: Option<&mut VirtualMouse>,
     trace: &mut TraceState,
 ) -> Result<(), String> {
+    let Some(gamepad) = gamepad.as_mut() else {
+        return Ok(());
+    };
     for event in gamepad.fetch_events()? {
         emit_mapped(
             mapper,
@@ -1305,8 +1349,8 @@ mod tests {
             "/usr/bin/flatpak",
             &mut args,
             VirtualGamepadBackend::SwitchPro,
-            SWITCH_PRO_VENDOR,
-            SWITCH_PRO_PRODUCT,
+            Some(SWITCH_PRO_VENDOR),
+            Some(SWITCH_PRO_PRODUCT),
         );
 
         assert!(args.contains(&"--env=SDL_JOYSTICK_HIDAPI=0".to_string()));

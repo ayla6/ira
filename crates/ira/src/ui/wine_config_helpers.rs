@@ -134,6 +134,47 @@ pub(super) fn track_spin_row(
     });
 }
 
+pub(super) fn track_combo(
+    row: &adw::ComboRow,
+    field: &str,
+    default_selected: u32,
+    overridden: &OverrideList,
+) {
+    let is_overridden = overridden.borrow().contains(&field.to_string());
+    let revert_btn = make_revert_btn();
+    revert_btn.set_visible(is_overridden);
+    row.add_suffix(&revert_btn);
+
+    let reverting = Rc::new(RefCell::new(false));
+
+    let field_s = field.to_string();
+    let ov = overridden.clone();
+    let btn = revert_btn.clone();
+    let rev = reverting.clone();
+    row.connect_selected_notify(move |_| {
+        if *rev.borrow() {
+            return;
+        }
+        if !ov.borrow().contains(&field_s) {
+            ov.borrow_mut().push(field_s.clone());
+        }
+        btn.set_visible(true);
+    });
+
+    let field_s2 = field.to_string();
+    let ov2 = overridden.clone();
+    let row2 = row.clone();
+    let btn2 = revert_btn.clone();
+    let rev2 = reverting.clone();
+    revert_btn.connect_clicked(move |_| {
+        *rev2.borrow_mut() = true;
+        row2.set_selected(default_selected);
+        *rev2.borrow_mut() = false;
+        ov2.borrow_mut().retain(|f| f != &field_s2);
+        btn2.set_visible(false);
+    });
+}
+
 pub(super) fn track_spin(
     spin: &gtk4::SpinButton,
     row: &adw::ActionRow,

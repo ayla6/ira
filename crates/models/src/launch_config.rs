@@ -122,6 +122,10 @@ pub struct WineConfig {
     pub proton_disable_lsteamclient: bool,
     #[serde(default)]
     pub umu_enabled: bool,
+    /// Denuvo API emulator `.so` filename under `api_emulators/denuvo/`.
+    /// Empty means nothing is preloaded.
+    #[serde(default)]
+    pub denuvo_api: String,
     #[serde(default)]
     pub overridden_fields: Vec<String>,
 }
@@ -162,6 +166,7 @@ impl Default for WineConfig {
             proton_ntsync: true,
             proton_disable_lsteamclient: true,
             umu_enabled: true,
+            denuvo_api: String::new(),
             overridden_fields: Vec::new(),
         }
     }
@@ -277,6 +282,11 @@ impl WineConfig {
                 default.proton_disable_lsteamclient
             },
             umu_enabled: self.umu_enabled,
+            denuvo_api: if has("denuvo_api") {
+                self.denuvo_api.clone()
+            } else {
+                default.denuvo_api.clone()
+            },
             overridden_fields: self.overridden_fields.clone(),
         }
     }
@@ -409,6 +419,24 @@ mod tests {
         assert!(!merged.esync);
         assert!(merged.fsync);
         assert!(merged.proton_ntsync);
+    }
+
+    #[test]
+    fn test_merge_with_default_denuvo_api() {
+        let default = WineConfig {
+            denuvo_api: "denuvo.so".to_string(),
+            ..Default::default()
+        };
+        let no_override = WineConfig::default().merge_with_default(&default);
+        assert_eq!(no_override.denuvo_api, "denuvo.so");
+
+        let per_game = WineConfig {
+            denuvo_api: String::new(),
+            overridden_fields: vec!["denuvo_api".to_string()],
+            ..Default::default()
+        };
+        let cleared = per_game.merge_with_default(&default);
+        assert_eq!(cleared.denuvo_api, "");
     }
 
     #[test]

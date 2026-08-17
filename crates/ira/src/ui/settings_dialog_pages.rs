@@ -80,7 +80,8 @@ pub(super) fn build_settings_pages(
     let (steam_page, steam_enable_row) = build_steam_settings_page(cfg);
     let (emu_page, emu_version_row, emu_version_model) = build_api_emulators_page(cfg);
     let lutris_page = build_lutris_settings_page(state, win);
-    let (wine_pages, wine_widgets) = build_wine_config_pages(&cfg.default_wine_config, None);
+    let (wine_pages, wine_widgets) =
+        build_wine_config_pages(&cfg.default_wine_config, None, &cfg.save_dir);
     let (profiles_page, prefix_base_row) = build_profiles_page(state, win);
     let (ra_page, ra_enable_row, ra_username_row, ra_password_row) = build_ra_settings_page(cfg);
     let (rom_page, roms_folder_row) = build_rom_settings_page(win, cfg);

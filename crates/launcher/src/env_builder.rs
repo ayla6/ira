@@ -152,6 +152,33 @@ pub fn build_env(
 
     apply_launch_overrides(&mut env, launch);
 
+    if let Some(w) = wine {
+        if w.enabled && !w.denuvo_api.is_empty() {
+            let denuvo_so = format!(
+                "{}/api_emulators/denuvo/{}",
+                save_dir,
+                w.denuvo_api.trim_start_matches('/')
+            );
+            if std::path::Path::new(&denuvo_so).is_file() {
+                let existing = env
+                    .iter()
+                    .find(|(k, _)| k == "LD_PRELOAD")
+                    .map(|(_, v)| v.clone());
+                let merged = match existing {
+                    Some(prev) if !prev.is_empty() => format!("{}:{}", denuvo_so, prev),
+                    _ => denuvo_so,
+                };
+                env.retain(|(k, _)| k != "LD_PRELOAD");
+                env.push(("LD_PRELOAD".to_string(), merged));
+            } else {
+                eprintln!(
+                    "Denuvo emulator not found: {} (denuvo_api='{}')",
+                    denuvo_so, w.denuvo_api
+                );
+            }
+        }
+    }
+
     let shader_dir = format!("{}/shader_cache/{}", save_dir, game_id);
     let _ = std::fs::create_dir_all(&shader_dir);
     env.push(("__GL_SHADER_DISK_CACHE".to_string(), "1".to_string()));

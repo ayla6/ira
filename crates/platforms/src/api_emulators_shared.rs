@@ -34,6 +34,33 @@ pub fn api_emulators_dir(save_dir: &str) -> PathBuf {
     Path::new(save_dir).join("api_emulators")
 }
 
+/// List Denuvo API emulator `.so` files directly under `api_emulators/denuvo/`.
+/// Returns sorted filenames; empty when the directory is missing/empty.
+pub fn list_denuvo_versions(save_dir: &str) -> Vec<String> {
+    let root = api_emulators_dir(save_dir).join("denuvo");
+    let mut versions = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            if entry
+                .file_type()
+                .map(|t| t.is_file())
+                .unwrap_or(false)
+                && entry
+                    .path()
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    == Some("so")
+            {
+                if let Some(name) = entry.file_name().to_str() {
+                    versions.push(name.to_string());
+                }
+            }
+        }
+    }
+    versions.sort();
+    versions
+}
+
 pub(crate) fn detect_arch(game_exe: &str) -> &'static str {
     if game_exe.ends_with(".exe") || game_exe.ends_with(".bat") {
         let is64 = game_exe.contains("64")
@@ -272,5 +299,27 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let found = find_dll_dirs_recursive(tmp.path(), &["steam_api64.dll"]);
         assert!(found.is_empty());
+    }
+
+    #[test]
+    fn test_list_denuvo_versions_lists_only_so_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path();
+        let root = api_emulators_dir(&save_dir.to_string_lossy()).join("denuvo");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("denuvo-1.so"), b"x").unwrap();
+        std::fs::write(root.join("denuvo-2.so"), b"x").unwrap();
+        std::fs::write(root.join("walton.dll"), b"x").unwrap();
+        std::fs::write(root.join("notes.txt"), b"x").unwrap();
+
+        let versions = list_denuvo_versions(&save_dir.to_string_lossy());
+        assert_eq!(versions, vec!["denuvo-1.so".to_string(), "denuvo-2.so".to_string()]);
+    }
+
+    #[test]
+    fn test_list_denuvo_versions_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let versions = list_denuvo_versions(&tmp.path().to_string_lossy());
+        assert!(versions.is_empty());
     }
 }

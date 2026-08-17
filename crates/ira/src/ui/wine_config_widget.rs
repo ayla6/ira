@@ -6,8 +6,8 @@ use std::rc::Rc;
 use super::css::*;
 use super::wine_config_env_dll::{build_dll_override_row, collect_dll_overrides};
 use super::wine_config_helpers::{
-    build_combo_row, build_switch_row, make_section, page_with_content, track_spin, track_spin_row,
-    track_switch, OverrideList,
+    build_combo_row, build_switch_row, make_section, page_with_content, track_combo, track_spin,
+    track_spin_row, track_switch, OverrideList,
 };
 
 #[derive(Clone)]
@@ -39,6 +39,8 @@ pub struct WineConfigWidgets {
     pub proton_ntsync: adw::SwitchRow,
     pub proton_disable_lsteamclient: adw::SwitchRow,
     pub dll_overrides_box: gtk4::ListBox,
+    pub denuvo_combo: adw::ComboRow,
+    pub denuvo_versions: Vec<String>,
     pub overridden: OverrideList,
     pub umu_enabled: bool,
 }
@@ -80,6 +82,8 @@ struct AdvPageWidgets {
     show_crash_dialogs: adw::SwitchRow,
     proton_disable_lsteamclient: adw::SwitchRow,
     dll_overrides_box: gtk4::ListBox,
+    denuvo_combo: adw::ComboRow,
+    denuvo_versions: Vec<String>,
 }
 
 fn build_wine_perf_page(
@@ -334,6 +338,7 @@ fn build_wine_adv_page(
     wine: &WineConfig,
     dft: Option<&WineConfig>,
     overridden: &OverrideList,
+    save_dir: &str,
 ) -> (WinePage, AdvPageWidgets) {
     let adv_page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
@@ -372,6 +377,50 @@ fn build_wine_adv_page(
     ac_group.add(&desktop_integration);
     adv_page.append(&ac_group);
 
+    let emu_group = make_section(&crate::tr!("API Emulators"));
+    let proton_disable_lsteamclient = build_switch_row(
+        &crate::tr!("Disable LSteamClient"),
+        &crate::tr!("Avoid loading the Steam client library (PROTON_DISABLE_LSTEAMCLIENT)"),
+        wine.proton_disable_lsteamclient,
+    );
+    if let Some(dd) = dft {
+        track_switch(
+            &proton_disable_lsteamclient,
+            "proton_disable_lsteamclient",
+            dd.proton_disable_lsteamclient,
+            overridden,
+        );
+    }
+    emu_group.add(&proton_disable_lsteamclient);
+    let denuvo_versions = ira_platforms::api_emulators::list_denuvo_versions(save_dir);
+    let mut denuvo_labels: Vec<String> = vec![crate::tr!("None")];
+    denuvo_labels.extend(denuvo_versions.iter().cloned());
+    let denuvo_model =
+        gtk4::StringList::new(&denuvo_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+    let denuvo_combo = adw::ComboRow::new();
+    denuvo_combo.set_title(&crate::tr!("Denuvo API emulator"));
+    denuvo_combo
+        .set_subtitle(&crate::tr!("Select a Denuvo API emulator to preload on launch"));
+    denuvo_combo.set_model(Some(&denuvo_model));
+    {
+        let idx = denuvo_versions
+            .iter()
+            .position(|v| *v == wine.denuvo_api)
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        denuvo_combo.set_selected(idx as u32);
+    }
+    if let Some(dd) = dft {
+        let default_idx = denuvo_versions
+            .iter()
+            .position(|v| *v == dd.denuvo_api)
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        track_combo(&denuvo_combo, "denuvo_api", default_idx as u32, overridden);
+    }
+    emu_group.add(&denuvo_combo);
+    adv_page.append(&emu_group);
+
     let dbg_group = make_section(&crate::tr!("Debugging"));
     let (show_debug, _dbg_model) = build_combo_row(
         &crate::tr!("Output debugging info"),
@@ -408,23 +457,6 @@ fn build_wine_adv_page(
     dbg_group.add(&show_crash_dialogs);
     adv_page.append(&dbg_group);
 
-    let compat_group = make_section(&crate::tr!("Steam"));
-    let proton_disable_lsteamclient = build_switch_row(
-        &crate::tr!("Disable LSteamClient"),
-        &crate::tr!("Avoid loading the Steam client library (PROTON_DISABLE_LSTEAMCLIENT)"),
-        wine.proton_disable_lsteamclient,
-    );
-    if let Some(dd) = dft {
-        track_switch(
-            &proton_disable_lsteamclient,
-            "proton_disable_lsteamclient",
-            dd.proton_disable_lsteamclient,
-            overridden,
-        );
-    }
-    compat_group.add(&proton_disable_lsteamclient);
-    adv_page.append(&compat_group);
-
     let dll_group = make_section(&crate::tr!("DLL overrides"));
 
     let dll_overrides_box = gtk4::ListBox::new();
@@ -454,7 +486,7 @@ fn build_wine_adv_page(
         page: page_with_content(adv_page),
     };
 
-    (
+(
         page,
         AdvPageWidgets {
             battleye,
@@ -464,6 +496,8 @@ fn build_wine_adv_page(
             show_crash_dialogs,
             proton_disable_lsteamclient,
             dll_overrides_box,
+            denuvo_combo,
+            denuvo_versions,
         },
     )
 }
@@ -471,6 +505,7 @@ fn build_wine_adv_page(
 pub fn build_wine_config_pages(
     wine: &WineConfig,
     app_default: Option<&WineConfig>,
+    save_dir: &str,
 ) -> (Vec<WinePage>, WineConfigWidgets) {
     let mut pages = Vec::new();
     let overridden: OverrideList = Rc::new(RefCell::new(wine.overridden_fields.clone()));
@@ -480,7 +515,8 @@ pub fn build_wine_config_pages(
     pages.push(perf_page);
     let (gfx_page, gfx_w) = build_wine_gfx_page(wine, dft, &overridden);
     pages.push(gfx_page);
-    let (adv_page, adv_w) = build_wine_adv_page(wine, dft, &overridden);
+    let (adv_page, adv_w) = build_wine_adv_page(wine, dft, &overridden, save_dir);
+    let denuvo_versions = adv_w.denuvo_versions.clone();
     pages.push(adv_page);
 
     let widgets = WineConfigWidgets {
@@ -511,6 +547,8 @@ pub fn build_wine_config_pages(
         proton_ntsync: perf_w.proton_ntsync,
         proton_disable_lsteamclient: adv_w.proton_disable_lsteamclient,
         dll_overrides_box: adv_w.dll_overrides_box,
+        denuvo_combo: adv_w.denuvo_combo,
+        denuvo_versions,
         overridden,
         umu_enabled: wine.umu_enabled,
     };
@@ -579,6 +617,17 @@ impl WineConfigWidgets {
             proton_ntsync: self.proton_ntsync.is_active(),
             proton_disable_lsteamclient: self.proton_disable_lsteamclient.is_active(),
             umu_enabled: self.umu_enabled,
+            denuvo_api: {
+                let idx = self.denuvo_combo.selected() as usize;
+                if idx > 0 {
+                    self.denuvo_versions
+                        .get(idx - 1)
+                        .cloned()
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                }
+            },
             overridden_fields: self.overridden.borrow().clone(),
         }
     }

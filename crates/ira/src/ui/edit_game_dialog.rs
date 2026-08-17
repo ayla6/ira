@@ -204,7 +204,7 @@ fn build_launch_wine_advanced_pages(
     // Wine pages — only for Wine games with wine enabled
     let show_wine_tabs = game.kind.is_managed_pc();
     let wine_widgets_opt = if show_wine_tabs {
-        let (wine_pages, ww) = build_wine_config_pages(saved_wine, Some(app_default_wine));
+        let (wine_pages, ww) = build_wine_config_pages(saved_wine, Some(app_default_wine), &save_dir);
         for wp in &wine_pages {
             sidebar.append(&super::settings_dialog::settings_sidebar_row(
                 wp.icon, &wp.label, wp.page_id,

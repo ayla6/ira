@@ -66,7 +66,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
                 ..dft.clone()
             }
         };
-        super::wine_config_widget::build_wine_config_pages(&cfg, Some(&dft))
+        super::wine_config_widget::build_wine_config_pages(&cfg, Some(&dft), &save_dir)
     };
 
     let sep1 = super::settings_dialog::sidebar_separator();

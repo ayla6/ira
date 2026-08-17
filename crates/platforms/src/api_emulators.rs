@@ -6,6 +6,7 @@ pub use crate::api_emulators_gog::{
 };
 pub use crate::api_emulators_shared::{
     api_emulators_dir, ensure_skeleton, find_dll_dirs_recursive, has_emulator_backups,
+    list_denuvo_versions,
 };
 pub use crate::api_emulators_steam::{
     centralize_steam_settings, find_steam_dll_folder, find_steam_dlls_recursive,

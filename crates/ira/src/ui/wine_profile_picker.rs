@@ -99,7 +99,7 @@ pub fn build_wine_profile_picker(
                 slug_arg,
                 ProfileDialogCallbacks {
                     list_rc: None,
-                    on_saved: Some(make_on_saved(false)),
+                    on_saved: Some(make_on_saved(true)),
                 },
             );
         }

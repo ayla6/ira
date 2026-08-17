@@ -74,17 +74,31 @@ pub fn add_global_row(
     }
 }
 
+/// Selects the icon file to show for an achievement plus whether a grayscale
+/// filter is needed. Locked achievements prefer the gray icon; when a distinct
+/// gray file isn't available (consoles reuse the colored image as their "gray"
+/// icon, and some sources ship no gray badge at all) the colored icon is shown
+/// under a grayscale filter so locked trophies never look unlocked.
+pub(super) fn icon_for_status(ach: &MergedAchievement) -> (&str, bool) {
+    if ach.earned {
+        return (&ach.icon_path, false);
+    }
+    if !ach.icon_gray_path.is_empty() {
+        return (&ach.icon_gray_path, ach.icon_gray_path == ach.icon_path);
+    }
+    (&ach.icon_path, !ach.icon_path.is_empty())
+}
+
 fn achievement_icon(ach: &MergedAchievement, budget: &mut ImageLoadBudget) -> gtk4::Image {
     let img = gtk4::Image::from_icon_name("trophy-symbolic");
     img.set_pixel_size(48);
     img.set_valign(gtk4::Align::Start);
-    let icon_path = if ach.icon_path.is_empty() {
-        &ach.icon_gray_path
-    } else {
-        &ach.icon_path
-    };
+    let (icon_path, grayscale) = icon_for_status(ach);
     if !icon_path.is_empty() {
         budget.load(&img, icon_path);
+    }
+    if grayscale {
+        img.add_css_class(CSS_LOCKED_TROPHY);
     }
     img
 }

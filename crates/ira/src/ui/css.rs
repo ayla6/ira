@@ -32,6 +32,7 @@ pub const CSS_SIDEBAR_SEPARATOR_ROW: &str = "sidebar-separator-row";
 pub const CSS_SUCCESS_LABEL: &str = "success-label";
 pub const CSS_SUGGESTED_ACTION: &str = "suggested-action";
 pub const CSS_TITLE_1: &str = "title-1";
+pub const CSS_LOCKED_TROPHY: &str = "locked-trophy";
 pub const CSS_SIDEBAR_SECTION_TITLE: &str = "sidebar-section-title";
 pub const CSS_BINDING_SECTION_HEADER: &str = "binding-section-header";
 pub const CSS_BINDING_SUFFIX: &str = "binding-suffix";
@@ -262,6 +263,7 @@ gridview.game-grid child:focus-within {
 
 .clickable-stat { transition: 100ms ease; border-radius: 6px; padding: 6px 10px; margin: -6px -10px; }
 .clickable-stat:hover { background-color: alpha(@theme_fg_color, 0.07); }
+.locked-trophy { filter: grayscale(100%); }
 .hero-fallback-bg { background: shade(@theme_bg_color, 0.5); }
 .hero-title-overlay { color: white; font-size: 1.4em; font-weight: 700; text-shadow: 0 2px 8px rgba(0,0,0,0.8); }
 

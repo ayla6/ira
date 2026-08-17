@@ -184,22 +184,26 @@ pub(super) fn setup_open_images_action(
 
 pub(super) fn setup_open_save_location_action(
     actions: &gio::SimpleActionGroup,
-    state: SharedState,
-    game: Game,
+    path: String,
 ) {
     let open_save = gio::SimpleAction::new("open_save_location", None);
-    let save_dir = state.borrow().save_dir.clone();
     open_save.connect_activate(move |_, _| {
-        let path = match game.trophy_source {
-            ira_models::TrophySource::Gse => format!("{}/emulator_saves/gbe", save_dir),
-            ira_models::TrophySource::Nge => format!("{}/emulator_saves/nge", save_dir),
-            _ => ira_launcher::game_saves::centralized_save_dir(&save_dir, &game.app_id)
-                .to_string_lossy()
-                .into_owned(),
-        };
         open_folder(&path);
     });
     actions.add_action(&open_save);
+}
+
+/// The game's centralized save folder (`saves/<app_id>`), or `None` when the
+/// game has no centralized save data yet. Emulator save folders (Gse/Nge) are
+/// intentionally not covered here — their per-game folders are reachable via
+/// the "Achievement status" menu items instead.
+pub(super) fn centralized_save_path(save_dir: &str, game: &Game) -> Option<String> {
+    let dir = ira_launcher::game_saves::centralized_save_dir(save_dir, &game.app_id);
+    if dir.is_dir() && ira_launcher::game_saves::dir_has_save_data(&dir) {
+        Some(dir.to_string_lossy().into_owned())
+    } else {
+        None
+    }
 }
 
 pub(super) fn setup_open_steam_status_action(

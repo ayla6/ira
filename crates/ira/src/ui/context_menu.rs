@@ -163,10 +163,14 @@ pub fn show_game_context_menu(
         );
     }
     folders_menu.append(Some(&crate::tr!("Data location")), Some("game.open_images"));
-    folders_menu.append(
-        Some(&crate::tr!("Save location")),
-        Some("game.open_save_location"),
-    );
+    let save_dir = state.borrow().save_dir.clone();
+    let save_location = super::context_menu_actions::centralized_save_path(&save_dir, game);
+    if save_location.is_some() {
+        folders_menu.append(
+            Some(&crate::tr!("Save location")),
+            Some("game.open_save_location"),
+        );
+    }
     if game.trophy_source == ira_models::TrophySource::Gse {
         folders_menu.append(
             Some(&crate::tr!("Achievement status")),
@@ -222,7 +226,9 @@ pub fn show_game_context_menu(
     }
     setup_open_wine_prefix_action(&actions, wine_prefix.clone());
     setup_open_images_action(&actions, state.clone(), game.clone());
-    setup_open_save_location_action(&actions, state.clone(), game.clone());
+    if let Some(save_location) = save_location.clone() {
+        setup_open_save_location_action(&actions, save_location);
+    }
     if game.trophy_source == ira_models::TrophySource::Gse {
         setup_open_steam_status_action(&actions, state.clone(), game.clone());
     }

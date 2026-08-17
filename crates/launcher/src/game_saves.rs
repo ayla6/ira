@@ -115,7 +115,7 @@ pub fn setup_game_saves_checked(
 }
 
 /// True when `dir` contains at least one file or non-empty subdirectory.
-fn has_save_data(dir: &Path) -> bool {
+pub fn dir_has_save_data(dir: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return false;
     };
@@ -124,7 +124,7 @@ fn has_save_data(dir: &Path) -> bool {
         if path.is_file() {
             return true;
         }
-        if path.is_dir() && has_save_data(&path) {
+        if path.is_dir() && dir_has_save_data(&path) {
             return true;
         }
     }
@@ -168,7 +168,7 @@ pub fn saves_are_centralized(
             return true;
         }
         if !rp.default_path.exists() {
-            return has_save_data(&rp.centralized_path);
+            return dir_has_save_data(&rp.centralized_path);
         }
         false
     })

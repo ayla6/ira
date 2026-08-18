@@ -119,6 +119,7 @@ fn show_pick_page(wizard: &Rc<RefCell<Wizard>>) {
         "Pick the game's install folder. Ira will identify it, download assets and set everything up."
     )));
     status.set_icon_name(Some("folder-open-symbolic"));
+    status.add_css_class(CSS_STATUS_NO_SCROLL);
 
     let pick_btn = gtk4::Button::with_label(&crate::tr!("Pick game folder…"));
     pick_btn.add_css_class(CSS_SUGGESTED_ACTION);
@@ -520,16 +521,6 @@ pub(super) fn show_identified_form(
     };
 
     body.append(&group);
-
-    let info_text = if is_windows {
-        crate::tr!("Detected: Windows game — a Wine profile is recommended.")
-    } else {
-        crate::tr!("Detected: Linux native game.")
-    };
-    let info_label = gtk4::Label::new(Some(&info_text));
-    info_label.set_halign(gtk4::Align::Start);
-    info_label.add_css_class(CSS_DIM_LABEL);
-    body.append(&info_label);
 
     let add_btn = gtk4::Button::with_label(&crate::tr!("Add game"));
     add_btn.add_css_class(CSS_SUGGESTED_ACTION);
@@ -1381,6 +1372,7 @@ pub(super) fn set_status(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
     status.set_title(&crate::tr!("Auto add game"));
     status.set_description(Some(msg));
     status.set_icon_name(Some("folder-open-symbolic"));
+    status.add_css_class(CSS_STATUS_NO_SCROLL);
     let spinner = gtk4::Spinner::new();
     spinner.start();
     status.set_child(Some(&spinner));

@@ -39,6 +39,7 @@ pub const CSS_BINDING_SUFFIX: &str = "binding-suffix";
 pub const CSS_SOURCE_BADGE: &str = "source-badge";
 pub const CSS_SQUARE_BUTTON: &str = "square-button";
 pub const CSS_VIEWER_CARD: &str = "input-viewer-card";
+pub const CSS_STATUS_NO_SCROLL: &str = "status-no-scroll";
 pub const CSS_VIEWER_CANVAS: &str = "input-viewer-canvas";
 
 pub const APP_CSS: &str = "
@@ -147,6 +148,14 @@ gridview.game-grid child:focus-within {
 }
 
 .recent-scroll scrollbar {
+    min-width: 0;
+    min-height: 0;
+    opacity: 0;
+    background: transparent;
+    border: none;
+}
+
+.status-no-scroll scrollbar {
     min-width: 0;
     min-height: 0;
     opacity: 0;

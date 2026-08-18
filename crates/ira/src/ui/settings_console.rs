@@ -1,5 +1,5 @@
 use super::css::*;
-use super::helpers::{entry_path_closure, make_browse_icon_button, string_list_from};
+use super::helpers::{entry_path_closure, esc, make_browse_icon_button, string_list_from};
 use super::settings_dialog::settings_page_container;
 use adw::prelude::*;
 use ira_config::{Config, ConsoleConfig};
@@ -86,7 +86,7 @@ pub(super) fn build_shadps4_settings_page(
     } else {
         for dir in &install_dirs {
             let dir_row = adw::ActionRow::new();
-            dir_row.set_title(&dir.display().to_string());
+            dir_row.set_title(&esc(&dir.display().to_string()));
             dir_row.set_sensitive(false);
             ps4_dirs_group.add(&dir_row);
         }
@@ -147,7 +147,7 @@ pub(super) fn build_rpcs3_settings_page(
     dirs_group.set_description(Some(&crate::tr!("Managed by RPCS3 (dev_hdd0/game)")));
     let games_dir = ira_platforms::ps3::games_dir_for(&initial_exe);
     let dir_row = adw::ActionRow::new();
-    dir_row.set_title(&games_dir.display().to_string());
+    dir_row.set_title(&esc(&games_dir.display().to_string()));
     dir_row.set_sensitive(false);
     dirs_group.add(&dir_row);
     page.append(&dirs_group);
@@ -205,12 +205,12 @@ pub(super) fn build_vita3k_settings_page(
         "Vita3K stores installed applications below ux0/app"
     )));
     let dir_row = adw::ActionRow::new();
-    dir_row.set_title(
+    dir_row.set_title(&esc(
         &ira_platforms::vita3k::vita_fs_path_for(&initial_exe)
             .join("ux0/app")
             .display()
             .to_string(),
-    );
+    ));
     dir_row.set_sensitive(false);
     dirs_group.add(&dir_row);
     page.append(&dirs_group);
@@ -267,16 +267,16 @@ pub(super) fn build_cemu_settings_page(
     dirs_group.set_description(Some(&crate::tr!("Managed by Cemu")));
     let mlc_row = adw::ActionRow::new();
     mlc_row.set_title(
-        &ira_platforms::cemu::mlc_path_for(&initial_exe)
+        &esc(&ira_platforms::cemu::mlc_path_for(&initial_exe)
             .display()
-            .to_string(),
+            .to_string()),
     );
     mlc_row.set_subtitle(&crate::tr!("MLC path"));
     mlc_row.set_sensitive(false);
     dirs_group.add(&mlc_row);
     for path in ira_platforms::cemu::configured_game_paths_for(&initial_exe) {
         let row = adw::ActionRow::new();
-        row.set_title(&path.display().to_string());
+        row.set_title(&esc(&path.display().to_string()));
         row.set_subtitle(&crate::tr!("Configured game path"));
         row.set_sensitive(false);
         dirs_group.add(&row);

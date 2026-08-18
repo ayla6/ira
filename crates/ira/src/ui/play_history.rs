@@ -5,7 +5,9 @@ use super::play_history_chart::{
 };
 use super::state::SharedState;
 use adw::prelude::*;
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 type RebuildFn = std::rc::Rc<dyn Fn(Option<chrono::NaiveDate>)>;
 type RebuildHandle = std::rc::Rc<std::cell::RefCell<Option<RebuildFn>>>;
@@ -71,6 +73,26 @@ pub fn show_play_history_dialog(
     dialog.set_content_width(820);
     dialog.set_content_height(500);
 
+    let ctrl_held = Rc::new(Cell::new(false));
+    {
+        let kc = gtk4::EventControllerKey::new();
+        kc.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        let kp = ctrl_held.clone();
+        let kr = ctrl_held.clone();
+        kc.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk4::gdk::Key::Control_L || key == gtk4::gdk::Key::Control_R {
+                kp.set(true);
+            }
+            glib::Propagation::Proceed
+        });
+        kc.connect_key_released(move |_, key, _, _| {
+            if key == gtk4::gdk::Key::Control_L || key == gtk4::gdk::Key::Control_R {
+                kr.set(false);
+            }
+        });
+        dialog.add_controller(kc);
+    }
+
     let toolbar_view = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
     toolbar_view.add_top_bar(&header);
@@ -119,6 +141,7 @@ pub fn show_play_history_dialog(
                     true,
                     Some(on_delete),
                     focus_week,
+                    ctrl_held.clone(),
                 ));
             }
         });
@@ -336,7 +359,7 @@ pub fn show_daily_history_dialog(state: &SharedState) {
         let assignment = assign_game_colors(&all_sessions);
         let weeks = compute_app_weeks(&all_sessions, &assignment, &game_names);
 
-        box_.append(&build_weekly_chart(weeks, false, None, None));
+        box_.append(&build_weekly_chart(weeks, false, None, None, Rc::new(Cell::new(false))));
     }
 
     toolbar_view.set_content(Some(&box_));

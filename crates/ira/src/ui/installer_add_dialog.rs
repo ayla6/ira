@@ -18,6 +18,7 @@ use super::auto_add_dialog::{
     clear_children, resolve_wine_config, set_status, show_error, show_identified_form,
     spawn_identify_thread, IdentifiedGame, Wizard, WizardEvent,
 };
+use super::helpers::esc;
 use super::css::*;
 use super::state::SharedState;
 use super::wine_profile_picker::{build_wine_profile_picker, selected_profile_id};
@@ -254,7 +255,7 @@ fn rebuild_installer_list(list: &gtk4::ListBox, ist: &Rc<RefCell<InstallerState>
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
-        row.set_title(name);
+        row.set_title(&esc(name));
 
         let itype = installer_type(path);
         let badge = if itype == InstallerType::Linux && is_gog_makeself(path) {
@@ -817,7 +818,7 @@ fn pick_from_multiple(
 
     for (idx, dir) in dirs.iter().enumerate() {
         let row = adw::ActionRow::new();
-        row.set_title(dir);
+        row.set_title(&esc(dir));
         row.set_activatable(true);
         list.append(&row);
         let _ = idx;

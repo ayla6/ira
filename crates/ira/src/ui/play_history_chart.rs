@@ -1,6 +1,6 @@
 use super::bar_chart::BarChart;
 use super::css::*;
-use super::helpers::{clear_children, format_duration};
+use super::helpers::{clear_children, esc, format_duration};
 use adw::prelude::*;
 use chrono::Datelike;
 use std::cell::{Cell, RefCell};
@@ -121,9 +121,14 @@ pub(super) fn build_weekly_chart(
     is_single_game: bool,
     on_delete: Option<DeleteSessionFn>,
     focus_week: Option<chrono::NaiveDate>,
+    ctrl_held: Rc<Cell<bool>>,
 ) -> gtk4::Widget {
     let container = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     container.set_focusable(true);
+    let focus_target = container.clone();
+    container.connect_map(move |_| {
+        focus_target.grab_focus();
+    });
 
     let week_label = gtk4::Label::new(Some(""));
     week_label.set_halign(gtk4::Align::Start);
@@ -209,7 +214,7 @@ pub(super) fn build_weekly_chart(
         prev_d: pd.clone(),
         next_d: nd.clone(),
         on_delete,
-        ctrl_held: Rc::new(Cell::new(false)),
+        ctrl_held,
     }));
 
     {
@@ -471,7 +476,7 @@ fn update_sidebar(s: &State, day: &DayData) {
     for d in &day.details {
         if d.sessions.is_empty() {
             let r = adw::ActionRow::new();
-            r.set_title(&d.label);
+            r.set_title(&esc(&d.label));
             let v = gtk4::Label::new(Some(&d.value));
             v.add_css_class(CSS_DIM_LABEL);
             r.add_suffix(&v);
@@ -486,7 +491,7 @@ fn update_sidebar(s: &State, day: &DayData) {
             s.sidebar_list.append(&r);
         } else {
             let ex = adw::ExpanderRow::new();
-            ex.set_title(&d.label);
+            ex.set_title(&esc(&d.label));
             let v = gtk4::Label::new(Some(&d.value));
             v.add_css_class(CSS_DIM_LABEL);
             ex.add_suffix(&v);

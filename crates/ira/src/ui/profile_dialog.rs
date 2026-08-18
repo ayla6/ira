@@ -1,4 +1,5 @@
 use super::css::*;
+use super::helpers::esc;
 use super::state::SharedState;
 use adw::prelude::*;
 use std::cell::RefCell;
@@ -99,8 +100,8 @@ fn repopulate_profiles(
     let profiles = ira_db::get_all_profiles(db).unwrap_or_default();
     for p in &profiles {
         let row = adw::ActionRow::new();
-        row.set_title(&p.name);
-        row.set_subtitle(&format!(
+        row.set_title(&esc(&p.name));
+        row.set_subtitle(&esc(&format!(
             "{} — {}{}",
             p.wine_version,
             if p.prefix.is_empty() {
@@ -109,7 +110,7 @@ fn repopulate_profiles(
                 &p.prefix
             },
             if p.umu_enabled { " — UMU" } else { "" }
-        ));
+        )));
 
         let edit_btn = gtk4::Button::from_icon_name("document-edit-symbolic");
         edit_btn.add_css_class(CSS_FLAT);

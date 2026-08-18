@@ -1,4 +1,5 @@
 use super::css::{CSS_FLAT, CSS_SQUARE_BUTTON};
+use super::helpers::esc;
 use super::input_profile_store::controller_default_path_for_backend;
 use super::input_profile_store::{ensure_controller_default_profile, list_profiles, StoredProfile};
 use adw::prelude::*;
@@ -488,7 +489,7 @@ fn add_controller_row(
     let device_name = device.name.clone();
     let supported_buttons = device.supported_buttons.clone();
     let expander = adw::ExpanderRow::new();
-    expander.set_title(&device_name);
+    expander.set_title(&esc(&device_name));
     update_controller_subtitle(&expander, &device, state.config.mode);
     let profile_path = Rc::new(RefCell::new(state.profile_path));
     let mode_strings = [
@@ -763,7 +764,7 @@ fn add_profile_row(
     rows: &Rc<RefCell<Vec<gtk4::Widget>>>,
 ) -> adw::ActionRow {
     let row = adw::ActionRow::new();
-    row.set_title(&profile_label(&stored));
+    row.set_title(&esc(&profile_label(&stored)));
     let preview = icon_button(
         "input-gaming-symbolic",
         &crate::tr!("Preview layout output"),

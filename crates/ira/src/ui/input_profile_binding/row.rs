@@ -1,6 +1,7 @@
 use super::super::css::{
     CSS_BINDING_SECTION_HEADER, CSS_BINDING_SUFFIX, CSS_FLAT, CSS_SOURCE_BADGE, CSS_SQUARE_BUTTON,
 };
+use super::super::helpers::esc;
 use super::super::input_profile_options::{
     activation_index, activation_labels, activator_index, gyro_mode_index, gyro_mode_labels,
     output_index, output_labels, recenter_index, source_options_for_device,
@@ -355,7 +356,7 @@ fn add_control_row<W: IsA<gtk4::Widget>>(
         "Invert" => crate::tr!("Invert"),
         _ => title.to_string(),
     };
-    row.set_title(&display_title);
+    row.set_title(&esc(&display_title));
     control.add_css_class(CSS_BINDING_SUFFIX);
     control.set_valign(gtk4::Align::Center);
     row.add_suffix(control);

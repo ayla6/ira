@@ -1,5 +1,5 @@
 use super::css::*;
-use super::helpers::clear_children;
+use super::helpers::{clear_children, esc};
 use super::state::SharedState;
 use adw::prelude::*;
 use std::rc::Rc;
@@ -102,7 +102,7 @@ pub(super) fn show_steam_id_search_popup(
                 } else {
                     for (app_id, name) in &results {
                         let row = adw::ActionRow::new();
-                        row.set_title(name);
+                        row.set_title(&esc(name));
                         row.set_subtitle(&crate::tr!("App ID: {}").replacen("{}", app_id, 1));
                         let match_btn = gtk4::Button::with_label(&btn_label);
                         match_btn.add_css_class(CSS_SUGGESTED_ACTION);

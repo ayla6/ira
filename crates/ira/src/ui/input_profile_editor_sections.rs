@@ -35,7 +35,7 @@ pub(super) fn section_group(
     }
     let group = adw::PreferencesGroup::new();
     let display_title = super::input_profile_binding::section_title_label(title);
-    group.set_title(&display_title);
+    group.set_title(&super::helpers::esc(&display_title));
     if title == "Custom" {
         // Keep Custom immediately before the fixed add-binding controls.
         page.insert_child_after(&group, page.first_child().as_ref());

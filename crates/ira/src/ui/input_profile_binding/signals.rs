@@ -1,3 +1,4 @@
+use super::super::helpers::esc;
 use super::super::input_profile_options::{
     output_display_label, output_index, output_option, OutputOption,
 };
@@ -140,11 +141,11 @@ pub(super) fn update_binding_summary(
         .map(|item| item.string().to_string())
         .unwrap_or_else(|| "Input".to_string());
     let output_text = output_display_label(output);
-    row.set_title(&source_text);
+    row.set_title(&esc(&source_text));
     if output_text == source_text {
         row.set_subtitle("");
     } else {
-        row.set_subtitle(&crate::tr!("→ {output_text}").replace("{output_text}", &output_text));
+        row.set_subtitle(&crate::tr!("→ {output_text}").replace("{output_text}", &esc(&output_text)));
     }
 }
 

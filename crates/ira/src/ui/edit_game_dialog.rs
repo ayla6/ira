@@ -390,6 +390,7 @@ fn build_dialog_contents(
             emu_trophy_source: game.trophy_source,
             emu_app_id: &game.app_id,
             save_dir: &emu_save_dir,
+            win: &win,
         },
         &state,
         &languages,

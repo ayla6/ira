@@ -156,6 +156,7 @@ pub(super) struct ApiEmuPageParams<'a> {
     pub emu_trophy_source: ira_models::TrophySource,
     pub emu_app_id: &'a str,
     pub save_dir: &'a str,
+    pub win: &'a adw::Window,
 }
 
 /// Resolve the game's API-emulator DLL folder, preferring the per-game DB
@@ -195,13 +196,14 @@ pub(super) fn build_api_emulator_page(
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
 ) -> Option<Rc<RefCell<bool>>> {
-    let (emu_exe, emu_game_folder, emu_db_id, emu_trophy_source, emu_app_id, save_dir) = (
+    let (emu_exe, emu_game_folder, emu_db_id, emu_trophy_source, emu_app_id, save_dir, win) = (
         params.emu_exe,
         params.emu_game_folder,
         params.emu_db_id,
         params.emu_trophy_source,
         params.emu_app_id,
         params.save_dir,
+        params.win,
     );
     if (emu_trophy_source != ira_models::TrophySource::Gse
         && emu_trophy_source != ira_models::TrophySource::Nge)
@@ -255,7 +257,7 @@ pub(super) fn build_api_emulator_page(
         uninstall_btn.set_valign(gtk4::Align::Center);
         let status_c = status_row.clone();
         let pu_c = pending_uninstall.clone();
-        let win_c = state.borrow().window.clone();
+        let win_c = win.clone();
         uninstall_btn.connect_clicked(move |_| {
             let alert = adw::AlertDialog::new(
                 Some(&crate::tr!("Uninstall API emulator?")),

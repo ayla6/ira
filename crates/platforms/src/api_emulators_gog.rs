@@ -314,7 +314,7 @@ pub fn install_nge_from_folder(
     let dirs = find_gog_dlls_recursive(game_folder);
     let dll_folder = dirs
         .iter()
-        .find(|d| !has_gog_emulator_backups(d))
+        .find(|d| !is_nge_installed(d))
         .ok_or_else(|| "No unpatched GOG Galaxy DLLs found in game folder".to_string())?;
 
     let is64 = dll_folder.join("Galaxy64.dll").exists() || dll_folder.join("galaxy64.dll").exists();
@@ -362,6 +362,25 @@ pub fn uninstall_nge(game_exe: &str, game_folder: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the NGE emulator is currently installed in `dll_folder`, i.e. the
+/// original Galaxy DLLs have been backed up and replaced with emulator builds.
+/// The `ngalaxye_settings` dir is not used as evidence — a centralized root
+/// `ngalaxye_settings` with symlinks exists for any game.
 pub fn is_nge_installed(dll_folder: &Path) -> bool {
-    dll_folder.join("ngalaxye_settings").is_dir()
+    crate::api_emulators_shared::has_emulator_backups(dll_folder, NGE_VERSION_FILES)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_nge_installed_requires_backups() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::create_dir_all(dir.join("ngalaxye_settings")).unwrap();
+        assert!(!is_nge_installed(dir));
+        std::fs::write(dir.join("Galaxy64.dll.bak"), b"x").unwrap();
+        assert!(is_nge_installed(dir));
+    }
 }

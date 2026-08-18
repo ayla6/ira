@@ -352,7 +352,9 @@ pub fn install_gse(
 /// Recursively search `game_folder` for the directory containing Steam DLLs and
 /// install the Goldberg emulator there. Used by the auto-add flow which only
 /// knows the install folder, not the exe. Skips directories that already have
-/// emulator backups (already patched).
+/// emulator backups (already patched). `steam_settings` is not treated as
+/// evidence of an install — a centralized root `steam_settings` with symlinks
+/// exists for every game.
 pub fn install_gse_from_folder(
     save_dir: &str,
     game_folder: &str,
@@ -363,10 +365,8 @@ pub fn install_gse_from_folder(
     let dirs = find_steam_dlls_recursive(game_folder);
     let dll_folder = dirs
         .iter()
-        .find(|d| !has_steam_emulator_backups(d) && !d.join("steam_settings").is_dir())
-        .ok_or_else(|| {
-            "Steam DLLs already have an emulator (backups or steam_settings found)".to_string()
-        })?;
+        .find(|d| !has_steam_emulator_backups(d))
+        .ok_or_else(|| "Steam DLLs already have an emulator (backups found)".to_string())?;
 
     let is_win =
         dll_folder.join("steam_api.dll").exists() || dll_folder.join("steam_api64.dll").exists();
@@ -577,8 +577,12 @@ pub fn uninstall_gse(game_exe: &str, game_folder: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the GSE emulator is currently installed in `dll_folder`, i.e. the
+/// original API DLLs have been backed up and replaced with emulator builds.
+/// The `steam_settings` dir is not used as evidence — a centralized root
+/// `steam_settings` with symlinks exists for any game.
 pub fn is_gse_installed(dll_folder: &Path) -> bool {
-    dll_folder.join("steam_settings").is_dir()
+    has_steam_emulator_backups(dll_folder)
 }
 
 #[cfg(test)]
@@ -667,5 +671,15 @@ mod tests {
 
         let output_path = tmp.path().join("steam_interfaces.txt");
         assert!(generate_steam_interfaces(&dll_path, &output_path).is_err());
+    }
+
+    #[test]
+    fn test_is_gse_installed_requires_backups() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::create_dir_all(dir.join("steam_settings")).unwrap();
+        assert!(!is_gse_installed(dir));
+        std::fs::write(dir.join("steam_api64.dll.bak"), b"x").unwrap();
+        assert!(is_gse_installed(dir));
     }
 }

@@ -247,9 +247,14 @@ impl BarChart {
 
         let motion = gtk4::EventControllerMotion::new();
         {
-            let obj_clone = obj.clone();
+            // The widget owns this controller, so capture only a weak ref to
+            // avoid a widget <-> controller reference cycle.
+            let obj = obj.downgrade();
             motion.connect_motion(move |_, x, _| {
-                let width = obj_clone.width();
+                let Some(obj) = obj.upgrade() else {
+                    return;
+                };
+                let width = obj.width();
                 let chart_w = (width - Y_AXIS_W).max(1);
                 let bar_w = chart_w / 7;
                 let idx = if bar_w > 0 {
@@ -258,18 +263,20 @@ impl BarChart {
                     0
                 };
                 let idx = idx.min(6);
-                let imp = obj_clone.imp();
+                let imp = obj.imp();
                 if imp.hovered.get() != Some(idx) {
                     imp.hovered.set(Some(idx));
-                    obj_clone.queue_draw();
+                    obj.queue_draw();
                 }
             });
         }
         {
-            let obj_clone = obj.clone();
+            let obj = obj.downgrade();
             motion.connect_leave(move |_| {
-                if obj_clone.imp().hovered.replace(None).is_some() {
-                    obj_clone.queue_draw();
+                if let Some(obj) = obj.upgrade() {
+                    if obj.imp().hovered.replace(None).is_some() {
+                        obj.queue_draw();
+                    }
                 }
             });
         }

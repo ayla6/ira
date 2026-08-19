@@ -158,11 +158,13 @@ mod imp {
                 "vadjustment" => {
                     let adj = value.get::<Option<gtk4::Adjustment>>().unwrap();
                     if let Some(ref new_adj) = adj {
-                        let obj = self.obj().clone();
+                        let obj = self.obj().downgrade();
                         let freeze = self.freeze.clone();
                         new_adj.connect_value_changed(move |_| {
                             if !freeze.get() {
-                                obj.queue_allocate();
+                                if let Some(obj) = obj.upgrade() {
+                                    obj.queue_allocate();
+                                }
                             }
                         });
                     }
@@ -532,22 +534,24 @@ impl VirtualGrid {
         imp.n_items.set(n_items);
         *imp.model.borrow_mut() = Some(model.clone());
 
-        let obj = self.clone();
+        let obj = self.downgrade();
         let handler = model.connect_items_changed(move |_, _, removed, added| {
-            let imp = obj.imp();
-            let new_n = imp
-                .model
-                .borrow()
-                .as_ref()
-                .map(|m| m.n_items())
-                .unwrap_or(0);
-            imp.n_items.set(new_n);
-            if removed != added {
-                clear_visible(imp);
-            } else {
-                imp.dirty.set(true);
+            if let Some(obj) = obj.upgrade() {
+                let imp = obj.imp();
+                let new_n = imp
+                    .model
+                    .borrow()
+                    .as_ref()
+                    .map(|m| m.n_items())
+                    .unwrap_or(0);
+                imp.n_items.set(new_n);
+                if removed != added {
+                    clear_visible(imp);
+                } else {
+                    imp.dirty.set(true);
+                }
+                obj.queue_allocate();
             }
-            obj.queue_allocate();
         });
         *imp.model_handler.borrow_mut() = Some(handler);
 

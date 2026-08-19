@@ -101,10 +101,8 @@ impl RaClient {
     ) -> Result<Vec<RaGameEntry>, String> {
         let cache = paths::console_games_path(save_dir, console_id);
         if Self::cached_ok(&cache) {
-            if let Ok(data) = std::fs::read(&cache) {
-                if let Ok(resp) = serde_json::from_slice::<Vec<RaGameEntry>>(&data) {
-                    return Ok(resp);
-                }
+            if let Some(games) = read_console_games_cache(save_dir, console_id) {
+                return Ok(games);
             }
         }
 
@@ -125,19 +123,29 @@ impl RaClient {
         Ok(resp)
     }
 
-    pub fn search_ra_games(save_dir: &str, console_id: u32, query: &str) -> Vec<RaGameEntry> {
-        let cache = paths::console_games_path(save_dir, console_id);
-        if let Ok(data) = std::fs::read(&cache) {
-            if let Ok(resp) = serde_json::from_slice::<Vec<RaGameEntry>>(&data) {
-                let q = query.to_lowercase();
-                return resp
-                    .into_iter()
-                    .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset"))
-                    .filter(|g| g.title.to_lowercase().contains(&q))
-                    .collect();
+    /// Search the console's full game list (fetched on demand from the Web API
+    /// when no fresh cache exists) for titles matching `query`. Returns games
+    /// that have achievements, excluding Subset/hack variants.
+    pub fn search_ra_games(&self, save_dir: &str, console_id: u32, query: &str) -> Vec<RaGameEntry> {
+        let games = match self.fetch_console_games(save_dir, console_id) {
+            Ok(games) => games,
+            Err(e) => {
+                eprintln!("RA search: failed to load console game list: {}", e);
+                match read_console_games_cache(save_dir, console_id) {
+                    Some(games) => games,
+                    None => return Vec::new(),
+                }
+            }
+        };
+        let mut results = filter_ra_games(games.clone(), query);
+        if let Ok(id) = query.parse::<u32>() {
+            if let Some(game) = games.into_iter().find(|g| g.id == id) {
+                if !results.iter().any(|g| g.id == id) {
+                    results.insert(0, game);
+                }
             }
         }
-        Vec::new()
+        results
     }
 
     pub fn fetch_web_game_progress(
@@ -243,6 +251,15 @@ impl RaClient {
     }
 }
 
+fn filter_ra_games(games: Vec<RaGameEntry>, q: &str) -> Vec<RaGameEntry> {
+    let q = q.to_lowercase();
+    games
+        .into_iter()
+        .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset"))
+        .filter(|g| g.title.to_lowercase().contains(&q))
+        .collect()
+}
+
 #[cfg(test)]
 mod cache_tests {
     use std::time::Duration;
@@ -291,6 +308,77 @@ mod cache_tests {
         let tmp = tempfile::tempdir().unwrap();
         write_cache(tmp.path().to_str().unwrap(), 3, "not json");
         assert!(!RaClient::console_cache_is_current(tmp.path().to_str().unwrap(), 3));
+    }
+
+    #[test]
+    fn test_filter_ra_games_matches_substring_and_skips_subsets() {
+        use super::{filter_ra_games, RaGameEntry};
+        let entry = |id: u32, title: &str| RaGameEntry {
+            id,
+            title: title.to_string(),
+            image_icon: String::new(),
+            image_url: String::new(),
+            num_achievements: 1,
+            points: 1,
+        };
+        let games = vec![
+            entry(1, "Super Mario World"),
+            entry(2, "Super Mario World [Subset - Anything]"),
+            entry(3, "~Hack~ Super Mario"),
+            entry(4, "Kirby's Dream Land"),
+        ];
+        let result = filter_ra_games(games, "mario");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, 1);
+    }
+
+    #[test]
+    fn test_filter_ra_games_empty_query_matches_all() {
+        use super::{filter_ra_games, RaGameEntry};
+        let games = vec![RaGameEntry {
+            id: 1,
+            title: "Mario".to_string(),
+            image_icon: String::new(),
+            image_url: String::new(),
+            num_achievements: 1,
+            points: 1,
+        }];
+        let result = filter_ra_games(games, "");
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_search_ra_games_numeric_id_prepends_exact_match() {
+        let client = RaClient::new("user", "key");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_str().unwrap();
+        write_cache(
+            dir,
+            3,
+            r#"[
+                {"ID":1,"Title":"Super Mario World","ImageIcon":"","ImageUrl":"","NumAchievements":1,"Points":1},
+                {"ID":5678,"Title":"Mario Kart 64","ImageIcon":"","ImageUrl":"","NumAchievements":1,"Points":1},
+                {"ID":9000,"Title":"~Hack~ Super Mario","ImageIcon":"","ImageUrl":"","NumAchievements":1,"Points":1}
+            ]"#,
+        );
+        let results = client.search_ra_games(dir, 3, "5678");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, 5678);
+        assert_eq!(results[0].title, "Mario Kart 64");
+    }
+
+    #[test]
+    fn test_search_ra_games_numeric_id_no_match_returns_empty() {
+        let client = RaClient::new("user", "key");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_str().unwrap();
+        write_cache(
+            dir,
+            3,
+            r#"[{"ID":1,"Title":"Super Mario World","ImageIcon":"","ImageUrl":"","NumAchievements":1,"Points":1}]"#,
+        );
+        let results = client.search_ra_games(dir, 3, "9999");
+        assert!(results.is_empty());
     }
 
     #[test]

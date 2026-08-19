@@ -177,6 +177,17 @@ pub struct Sdl3SensorBackend {
     source: SensorSource,
 }
 
+fn select_gyro_id<F>(gyro_ids: &[i32], matches: F) -> Option<i32>
+where
+    F: Fn(i32) -> bool,
+{
+    gyro_ids
+        .iter()
+        .find(|&&id| matches(id))
+        .copied()
+        .or_else(|| (gyro_ids.len() == 1).then(|| gyro_ids[0]))
+}
+
 impl Sdl3SensorBackend {
     pub fn open(device: &DeviceInfo) -> Result<Option<Self>, String> {
         let Some((handle, api)) = load_sdl()? else {
@@ -207,11 +218,7 @@ impl Sdl3SensorBackend {
             .into_iter()
             .filter(|id| unsafe { (api.get_sensor_type_for_id)(*id) } == SDL_SENSOR_GYRO)
             .collect::<Vec<_>>();
-        let sensor_id = gyro_ids
-            .iter()
-            .find(|id| sensor_matches_device(&api, **id, device))
-            .copied()
-            .or_else(|| (gyro_ids.len() == 1).then_some(gyro_ids[0]));
+        let sensor_id = select_gyro_id(&gyro_ids, |id| sensor_matches_device(&api, id, device));
         if let Some(sensor_id) = sensor_id {
             let sensor = unsafe { (api.open_sensor)(sensor_id) };
             if !sensor.is_null() {
@@ -409,7 +416,7 @@ fn c_string(pointer: *const c_char) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{names_match, GyroCalibration, GyroSample};
+    use super::{names_match, select_gyro_id, GyroCalibration, GyroSample};
 
     #[test]
     fn test_sensor_name_matches_dinput_device_name() {
@@ -418,6 +425,22 @@ mod tests {
             "8BitDo 8BitDo Ultimate 2 Wireless Controller for PC",
         ));
         assert!(!names_match("Laptop motion sensor", "8BitDo controller"));
+    }
+
+    #[test]
+    fn test_select_gyro_id_empty_without_match_returns_none() {
+        assert_eq!(select_gyro_id(&[], |_| true), None);
+    }
+
+    #[test]
+    fn test_select_gyro_id_prefers_matching_device() {
+        let ids = [1, 2, 3];
+        assert_eq!(select_gyro_id(&ids, |id| id == 2), Some(2));
+    }
+
+    #[test]
+    fn test_select_gyro_id_falls_back_to_only_sensor() {
+        assert_eq!(select_gyro_id(&[5], |_| false), Some(5));
     }
 
     #[test]

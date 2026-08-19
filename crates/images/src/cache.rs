@@ -7,15 +7,18 @@ use tracing::info_span;
 pub(crate) type PendingCallback = Box<dyn FnOnce(Option<Texture>)>;
 pub(crate) type PendingMap = HashMap<String, Vec<PendingCallback>>;
 pub(crate) type DecodeResult = (String, Option<(Vec<u8>, u32, u32)>);
+pub(crate) type PendingPixbufCallback = Box<dyn FnOnce(Option<gtk4::gdk_pixbuf::Pixbuf>)>;
+pub(crate) type PendingPixbufMap = HashMap<String, Vec<PendingPixbufCallback>>;
 
 pub(crate) const PIXBUF_CACHE_MAX: usize = 10;
-pub(crate) const DECODE_POOL_SIZE: usize = 2;
+pub(crate) const DECODE_POOL_SIZE: usize = 4;
 
 thread_local! {
     pub(crate) static TEXTURE_CACHE: RefCell<TextureCache> = RefCell::new(TextureCache::new());
     pub(crate) static PENDING_LOADS: RefCell<PendingMap> = RefCell::new(HashMap::new());
     pub(crate) static PIXBUF_CACHE: RefCell<HashMap<String, gtk4::gdk_pixbuf::Pixbuf>> =
         RefCell::new(HashMap::new());
+    pub(crate) static PENDING_PIXBUFS: RefCell<PendingPixbufMap> = RefCell::new(HashMap::new());
 }
 
 pub(crate) struct TextureCache {
@@ -126,6 +129,7 @@ pub fn clear_texture_cache() {
     TEXTURE_CACHE.with(|cell| cell.borrow_mut().clear());
     PIXBUF_CACHE.with(|cell| cell.borrow_mut().clear());
     PENDING_LOADS.with(|cell| cell.borrow_mut().clear());
+    PENDING_PIXBUFS.with(|cell| cell.borrow_mut().clear());
 }
 
 pub fn invalidate_texture(path: &str) {
@@ -133,4 +137,5 @@ pub fn invalidate_texture(path: &str) {
     TEXTURE_CACHE.with(|cell| cell.borrow_mut().remove(path));
     PIXBUF_CACHE.with(|cell| cell.borrow_mut().remove(path));
     PENDING_LOADS.with(|cell| cell.borrow_mut().remove(path));
+    PENDING_PIXBUFS.with(|cell| cell.borrow_mut().remove(path));
 }

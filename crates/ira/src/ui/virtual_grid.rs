@@ -499,6 +499,20 @@ impl VirtualGrid {
         (item_w, item_h)
     }
 
+    /// The grid's minimum edge/column spacing (`sp`) for a given cover width,
+    /// derived the same way as `compute_grid_layout`. The grid pads columns
+    /// wider to fill the viewport; the recent row mirrors this base spacing.
+    pub(crate) fn grid_spacing_for_item_w(item_w: i32) -> i32 {
+        let step_idx = STEP_SIZES
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, &w)| w <= item_w)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        8 + step_idx as i32 * 4
+    }
+
     pub fn item_size_cell(&self) -> Rc<Cell<(i32, i32)>> {
         self.imp().item_size.clone()
     }
@@ -583,5 +597,23 @@ fn clear_visible(imp: &imp::VirtualGrid) {
         }
         widget.set_child_visible(false);
         pool.push(widget);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_grid_spacing_for_item_w() {
+        assert_eq!(VirtualGrid::grid_spacing_for_item_w(80), 8);
+        assert_eq!(VirtualGrid::grid_spacing_for_item_w(110), 8);
+        assert_eq!(VirtualGrid::grid_spacing_for_item_w(125), 8);
+        assert_eq!(VirtualGrid::grid_spacing_for_item_w(150), 12);
+        assert_eq!(VirtualGrid::grid_spacing_for_item_w(200), 16);
+        assert_eq!(VirtualGrid::grid_spacing_for_item_w(250), 20);
+        assert_eq!(VirtualGrid::grid_spacing_for_item_w(300), 24);
+        assert_eq!(VirtualGrid::grid_spacing_for_item_w(350), 28);
+        assert_eq!(VirtualGrid::grid_spacing_for_item_w(400), 28);
     }
 }

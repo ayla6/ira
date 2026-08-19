@@ -19,8 +19,8 @@ pub const CSS_NAVIGATION_SIDEBAR: &str = "navigation-sidebar";
 pub const CSS_PLAY_BTN_LABEL: &str = "play-btn-label";
 pub const CSS_PLAYING_GAME: &str = "playing-game";
 pub const CSS_POPOVER_MENU_ROW: &str = "popover-menu-row";
-pub const CSS_RECENT_SCROLL: &str = "recent-scroll";
 pub const CSS_SECTION_TITLE: &str = "section-title";
+pub const CSS_RECENT_SCROLL: &str = "recent-scroll";
 pub const CSS_SESSION_DELETE: &str = "session-delete";
 pub const CSS_SELECTED: &str = "selected";
 pub const CSS_SETTINGS_HEADER: &str = "settings-header";
@@ -147,14 +147,7 @@ gridview.game-grid child:focus-within {
     font-size: 1.25em;
 }
 
-.recent-scroll scrollbar {
-    min-width: 0;
-    min-height: 0;
-    opacity: 0;
-    background: transparent;
-    border: none;
-}
-
+.recent-scroll scrollbar,
 .status-no-scroll scrollbar {
     min-width: 0;
     min-height: 0;

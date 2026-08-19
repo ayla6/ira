@@ -2,7 +2,9 @@ use super::context_menu::show_game_context_menu;
 use super::css::*;
 use super::grid_view::queue_cover_load_priority;
 use super::message_helpers::switch_to_game;
+use super::recent_carousel::RecentRow;
 use super::state::SharedState;
+use super::virtual_grid::VirtualGrid;
 use crate::Game;
 use gtk4::prelude::*;
 use std::rc::Rc;
@@ -20,6 +22,7 @@ pub(super) fn build_recent_row(
     let title = gtk4::Label::new(Some(&crate::tr!("Recently played")));
     title.set_xalign(0.0);
     title.set_hexpand(true);
+    title.set_margin_start(16);
     title.add_css_class(CSS_SECTION_TITLE);
     title_row.append(&title);
 
@@ -33,14 +36,15 @@ pub(super) fn build_recent_row(
     right_btn.set_tooltip_text(Some(&crate::tr!("Next games")));
 
     let btn_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+    btn_box.set_margin_end(16);
     btn_box.append(&left_btn);
     btn_box.append(&right_btn);
     title_row.append(&btn_box);
 
     vbox.append(&title_row);
 
-    let spacing = 12;
-    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, spacing);
+    let spacing = VirtualGrid::grid_spacing_for_item_w((cover_height as f64 * 2.0 / 3.0) as i32);
+    let row = RecentRow::new(spacing, cover_height);
 
     let mut game_widths: Vec<i32> = Vec::with_capacity(recent.len());
     for (i, game) in recent.iter().enumerate() {
@@ -58,74 +62,51 @@ pub(super) fn build_recent_row(
             game.grid_path.clone()
         };
         let item = build_cover(state, game, &path, w, h);
-        hbox.append(&item);
+        row.append_cover(&item);
     }
 
+    // The row is a GtkScrollable, so the scrolled window uses it directly
+    // instead of wrapping it in a clipping viewport: hover shadows and the
+    // hover scale escape the covers like they do in the grid, while wheel,
+    // touchpad and scrollbar interactions stay fully native.
     let scrolled = gtk4::ScrolledWindow::new();
     scrolled.set_policy(gtk4::PolicyType::Automatic, gtk4::PolicyType::Never);
     scrolled.set_hexpand(true);
     scrolled.set_vexpand(false);
     scrolled.set_valign(gtk4::Align::Start);
-    scrolled.set_margin_top(4);
-    scrolled.set_margin_bottom(4);
+    scrolled.set_kinetic_scrolling(true);
+    scrolled.set_overlay_scrolling(true);
     scrolled.add_css_class(CSS_RECENT_SCROLL);
-    scrolled.set_child(Some(&hbox));
+    scrolled.set_child(Some(&row));
 
     vbox.append(&scrolled);
 
+    let mut step_sizes = vec![spacing];
+    step_sizes.extend(game_widths.iter().map(|w| w + spacing));
+    let steps = Rc::new(step_sizes);
+
     let adj = scrolled.hadjustment();
-
-    let step_widths = Rc::new(
-        game_widths
-            .iter()
-            .map(|w| w + spacing)
-            .collect::<Vec<i32>>(),
-    );
-    let max_scroll = {
-        let total: i32 = step_widths.iter().sum();
-        total - spacing
-    };
-
-    let sw = step_widths.clone();
-    let ms = max_scroll;
-    let adj_clone = adj.clone();
-    right_btn.connect_clicked(move |_| {
-        let cur = adj_clone.value() as i32;
-        let mut target = cur;
-        for sw_i in sw.iter() {
-            if target < cur + sw_i {
-                target = cur + sw_i;
-                break;
-            }
-            target += sw_i;
-        }
-        adj_clone.set_value(target.min(ms) as f64);
-    });
-
-    let sw = step_widths.clone();
-    let adj_clone = adj.clone();
-    left_btn.connect_clicked(move |_| {
-        let cur = adj_clone.value() as i32;
-        let mut target = 0;
-        let mut running = 0;
-        for sw_i in sw.iter() {
-            let next = running + sw_i;
-            if next >= cur {
-                target = running;
-                break;
-            }
-            running = next;
-        }
-        adj_clone.set_value(target.max(0) as f64);
-    });
 
     let left_btn2 = left_btn.clone();
     let right_btn2 = right_btn.clone();
-    let max_scroll2 = max_scroll;
-    adj.connect_value_changed(move |adj| {
-        let v = adj.value() as i32;
-        left_btn2.set_sensitive(v > 0);
-        right_btn2.set_sensitive(v < max_scroll2);
+    let adj_vc = adj.clone();
+    adj.connect_changed(move |_| update_scroll_buttons(&adj_vc, &left_btn2, &right_btn2));
+    let left_btn2 = left_btn.clone();
+    let right_btn2 = right_btn.clone();
+    let adj_vc = adj.clone();
+    adj.connect_value_changed(move |_| update_scroll_buttons(&adj_vc, &left_btn2, &right_btn2));
+
+    let adj_click = adj.clone();
+    let steps2 = steps.clone();
+    right_btn.connect_clicked(move |_| {
+        let max = adj_click.upper() - adj_click.page_size();
+        adj_click.set_value(step_target_right(adj_click.value(), &steps2, max));
+    });
+
+    let adj_click = adj.clone();
+    let steps2 = steps.clone();
+    left_btn.connect_clicked(move |_| {
+        adj_click.set_value(step_target_left(adj_click.value(), &steps2));
     });
 
     vbox.upcast()
@@ -141,8 +122,6 @@ pub(super) fn build_cover(
     let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     vbox.set_valign(gtk4::Align::Start);
     vbox.set_halign(gtk4::Align::Center);
-    vbox.set_margin_top(8);
-    vbox.set_margin_bottom(8);
     vbox.add_css_class(CSS_COVER_ITEM);
     vbox.set_size_request(w, h);
     vbox.set_overflow(gtk4::Overflow::Visible);
@@ -205,4 +184,59 @@ pub(super) fn build_cover(
     vbox.add_controller(right_click);
 
     vbox.upcast()
+}
+
+fn update_scroll_buttons(adj: &gtk4::Adjustment, left: &gtk4::Button, right: &gtk4::Button) {
+    let v = adj.value();
+    left.set_sensitive(v > 0.5);
+    let max = adj.upper() - adj.page_size();
+    right.set_sensitive(v < max - 0.5);
+}
+
+fn step_target_right(cur: f64, steps: &[i32], max: f64) -> f64 {
+    let mut boundary = 0;
+    for step in steps {
+        boundary += step;
+        if (boundary as f64) > cur {
+            return ((boundary as f64).min(max)).max(0.0);
+        }
+    }
+    max
+}
+
+fn step_target_left(cur: f64, steps: &[i32]) -> f64 {
+    let mut previous = 0;
+    for step in steps {
+        let boundary = previous + step;
+        if (boundary as f64) >= cur {
+            return previous as f64;
+        }
+        previous = boundary;
+    }
+    previous as f64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_step_target_right_boundaries() {
+        let steps = &[220, 133, 133];
+        assert_eq!(step_target_right(0.0, steps, 1000.0), 220.0);
+        assert_eq!(step_target_right(220.0, steps, 1000.0), 353.0);
+        assert_eq!(step_target_right(221.0, steps, 1000.0), 353.0);
+        assert_eq!(step_target_right(2000.0, steps, 500.0), 500.0);
+    }
+
+    #[test]
+    fn test_step_target_left_boundaries() {
+        let steps = &[220, 133, 133];
+        assert_eq!(step_target_left(0.0, steps), 0.0);
+        assert_eq!(step_target_left(219.0, steps), 0.0);
+        assert_eq!(step_target_left(220.0, steps), 0.0);
+        assert_eq!(step_target_left(221.0, steps), 220.0);
+        assert_eq!(step_target_left(353.0, steps), 220.0);
+        assert_eq!(step_target_left(400.0, steps), 353.0);
+    }
 }

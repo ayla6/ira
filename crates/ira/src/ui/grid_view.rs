@@ -129,8 +129,6 @@ fn badge_text(game: &Game, mode: SortMode) -> Option<String> {
 
 fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
     let header_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    header_box.set_margin_start(16);
-    header_box.set_margin_end(16);
     header_box.set_margin_top(16);
 
     let searching = !state.borrow().search_query.is_empty();
@@ -173,6 +171,8 @@ fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
     let heading = gtk4::Label::new(Some(&heading_text));
     heading.set_xalign(0.0);
     heading.add_css_class(CSS_SECTION_TITLE);
+    heading.set_margin_start(16);
+    heading.set_margin_end(16);
     let show_hidden = state.borrow().cfg.show_hidden_games;
     heading.set_margin_top(
         if show_recent

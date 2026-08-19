@@ -18,6 +18,7 @@ mod message_helpers;
 mod play_button;
 mod play_button_helpers;
 mod ra_match_dialog;
+mod recent_carousel;
 mod recent_row;
 mod sgdb_match_dialog;
 mod sidebar;

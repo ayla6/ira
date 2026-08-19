@@ -353,7 +353,11 @@ pub fn launch_game(
                 .then_some(cfg_clone.console("wiiu").controller_profile.as_str()),
         )?;
     } else if kind == ira_models::GameKind::Steam {
-        return play_button_helpers::launch_steam(&ctx, &app_id);
+        let result = play_button_helpers::launch_steam(&ctx, &app_id);
+        if result == Ok(true) {
+            let _ = sender.send(crate::AppMessage::GameStarted(db_id, variant_id));
+        }
+        return result;
     } else {
         play_button_helpers::launch_other(
             &ctx,
@@ -382,6 +386,11 @@ pub fn launch_game(
         variant_count_playtime,
         variant_show_as_entry,
     );
+
+    // The sidebar playing style is driven by GameStarted, and launch_game is
+    // the single launch path (sidebar click, context menu and play buttons),
+    // so report the start here to keep every entry point in sync.
+    let _ = sender.send(crate::AppMessage::GameStarted(db_id, variant_id));
 
     Ok(true)
 }

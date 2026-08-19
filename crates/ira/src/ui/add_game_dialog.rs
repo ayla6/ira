@@ -49,7 +49,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
         gog_id_entry,
     ) = build_general_page(&win, &profiles, state);
     sidebar.append(&super::settings_dialog::settings_sidebar_row(
-        "preferences-system-symbolic",
+        "emblem-system-symbolic",
         &crate::tr!("General"),
         "general",
     ));

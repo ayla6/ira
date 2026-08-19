@@ -43,6 +43,8 @@ pub(super) struct SettingsPageWidgets {
     pub(super) emu_version_model: gtk4::StringList,
     pub(super) wine_widgets: WineConfigWidgets,
     pub(super) prefix_base_row: adw::EntryRow,
+    pub(super) default_version_row: adw::ComboRow,
+    pub(super) default_version_values: Vec<(String, String)>,
     pub(super) ra_enable_row: adw::SwitchRow,
     pub(super) ra_username_row: adw::EntryRow,
     pub(super) ra_web_api_key_row: adw::EntryRow,
@@ -82,7 +84,8 @@ pub(super) fn build_settings_pages(
     let lutris_page = build_lutris_settings_page(state, win);
     let (wine_pages, wine_widgets) =
         build_wine_config_pages(&cfg.default_wine_config, None, &cfg.save_dir);
-    let (profiles_page, prefix_base_row) = build_profiles_page(state, win);
+    let (profiles_page, prefix_base_row, default_version_row, default_version_values) =
+        build_profiles_page(state, win);
     let (ra_page, ra_enable_row, ra_username_row, ra_web_api_key_row) =
         build_ra_settings_page(cfg);
     let (rom_page, roms_folder_row) = build_rom_settings_page(win, cfg);
@@ -114,6 +117,8 @@ pub(super) fn build_settings_pages(
         emu_version_model,
         wine_widgets,
         prefix_base_row,
+        default_version_row,
+        default_version_values,
         ra_enable_row,
         ra_username_row,
         ra_web_api_key_row,
@@ -134,7 +139,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.general_page,
-        "cogged-wheel-big-symbolic",
+        "emblem-system-symbolic",
         &crate::tr!("General"),
         "general",
     );
@@ -158,7 +163,7 @@ pub(super) fn register_settings_pages(
         sidebar,
         stack,
         &pages.system_page,
-        "cogged-wheel-big-symbolic",
+        "emblem-system-symbolic",
         &crate::tr!("Game system"),
         "system",
     );

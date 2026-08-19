@@ -10,11 +10,14 @@ type ListRef = Rc<RefCell<gtk4::ListBox>>;
 pub fn build_profiles_page(
     state: &SharedState,
     settings_win: &adw::Window,
-) -> (gtk4::ScrolledWindow, adw::EntryRow) {
+) -> (gtk4::ScrolledWindow, adw::EntryRow, adw::ComboRow, Vec<(String, String)>) {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let settings_group = adw::PreferencesGroup::new();
     settings_group.set_title(&crate::tr!("Prefix settings"));
+
+    let (default_version_row, default_version_values) = build_default_version_row(state);
+    settings_group.add(&default_version_row);
 
     let prefix_base_row = adw::EntryRow::new();
     prefix_base_row.set_title(&crate::tr!(
@@ -84,7 +87,34 @@ pub fn build_profiles_page(
     sw.set_hexpand(true);
     sw.set_vexpand(true);
     sw.set_child(Some(&page));
-    (sw, prefix_base_row)
+    (sw, prefix_base_row, default_version_row, default_version_values)
+}
+
+fn detect_wine_versions_with(extra: &str) -> Vec<(String, String)> {
+    let mut versions = ira_launcher::wine_launch::detect_wine_versions();
+    if !extra.is_empty() && !versions.iter().any(|(_, v)| *v == extra) {
+        versions.push((extra.to_string(), extra.to_string()));
+    }
+    versions
+}
+
+fn build_default_version_row(state: &SharedState) -> (adw::ComboRow, Vec<(String, String)>) {
+    let current = state.borrow().cfg.default_wine_config.version.clone();
+    let versions = detect_wine_versions_with(&current);
+    let model = {
+        let labels: Vec<&str> = versions.iter().map(|(l, _)| l.as_str()).collect();
+        gtk4::StringList::new(&labels)
+    };
+    let row = adw::ComboRow::new();
+    row.set_title(&crate::tr!("Default wine version"));
+    row.set_subtitle(&crate::tr!("Wine build used for new prefixes"));
+    row.set_model(Some(&model));
+    let idx = versions
+        .iter()
+        .position(|(_, v)| *v == current)
+        .unwrap_or(0);
+    row.set_selected(idx as u32);
+    (row, versions)
 }
 
 fn repopulate_profiles(
@@ -224,7 +254,11 @@ pub fn show_profile_dialog(
     }
     group.add(&name_entry);
 
-    let versions = ira_launcher::wine_launch::detect_wine_versions();
+    let version_extra = existing
+        .as_ref()
+        .map(|p| p.wine_version.clone())
+        .unwrap_or_else(|| state.borrow().cfg.default_wine_config.version.clone());
+    let versions = detect_wine_versions_with(&version_extra);
     let version_model = {
         let labels: Vec<&str> = versions.iter().map(|(l, _)| l.as_str()).collect();
         gtk4::StringList::new(&labels)
@@ -237,7 +271,12 @@ pub fn show_profile_dialog(
             version_row.set_selected(idx as u32);
         }
     } else {
-        version_row.set_selected(0);
+        let default_version = version_extra;
+        let idx = versions
+            .iter()
+            .position(|(_, v)| *v == default_version)
+            .unwrap_or(0);
+        version_row.set_selected(idx as u32);
     }
     group.add(&version_row);
 

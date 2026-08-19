@@ -1,5 +1,8 @@
 use crate::Game;
+use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use super::css::*;
 use super::game_display::{
@@ -7,6 +10,10 @@ use super::game_display::{
 };
 use super::play_button::play_button;
 use super::state::SharedState;
+
+/// Hero assets are 1920×620; the header height is derived from that exact
+/// aspect ratio so the picture never crops a few pixels off the top/bottom.
+const HERO_ASPECT_RATIO: f64 = 1920.0 / 620.0;
 
 pub(super) fn build_game_header(
     game: &Game,
@@ -269,7 +276,7 @@ fn add_wine_run_exe_action(actions: &gio::SimpleActionGroup, state: &SharedState
     action.connect_activate(move |_, _| {
         let (wine_exe, prefix, env) = get_wine_cmd_env(&st, db_id);
         let dialog = gtk4::FileDialog::new();
-        dialog.set_title(&crate::tr!("Select EXE to run in Wine prefix"));
+        dialog.set_title(&crate::tr!("Select executable"));
         let filter = gtk4::FileFilter::new();
         filter.add_pattern("*.exe");
         filter.add_pattern("*.msi");
@@ -301,7 +308,7 @@ fn build_settings_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
     menu.append(Some(&crate::tr!("View log")), Some("game.view_log"));
 
     let btn = adw::SplitButton::new();
-    btn.set_icon_name("cogged-wheel-big-symbolic");
+    btn.set_icon_name("emblem-system-symbolic");
     btn.add_css_class(CSS_FLAT);
     btn.set_valign(gtk4::Align::Center);
     btn.set_tooltip_text(Some(&crate::tr!("Settings")));
@@ -334,11 +341,20 @@ fn build_hero_overlay(
     let overlay = gtk4::Overlay::new();
     overlay.set_vexpand(false);
     overlay.set_hexpand(true);
-    overlay.set_height_request(((content_width as f64) / 3.1).max(150.0) as i32);
+    overlay.set_height_request(((content_width as f64) / HERO_ASPECT_RATIO).max(150.0) as i32);
+
+    // The main child is a plain empty box: the overlay's size is read from
+    // its main child only, and overlay layers opt out of measurement by
+    // default. Keeping the hero as an overlay layer means its texture's pixel
+    // height can never stretch the header — the height_request is the single
+    // source of the header height, so it's identical for every game.
+    let base = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    base.set_hexpand(true);
+    overlay.set_child(Some(&base));
 
     let hero = gtk4::Picture::new();
     if !hero_path.is_empty() {
-        ira_images::load_texture_async(hero_path, {
+        ira_images::load_texture_async_with_priority(hero_path, glib::Priority::HIGH, {
             let hero = hero.downgrade();
             move |texture| {
                 if let (Some(hero), Some(texture)) = (hero.upgrade(), texture) {
@@ -350,60 +366,76 @@ fn build_hero_overlay(
     hero.set_halign(gtk4::Align::Fill);
     hero.set_valign(gtk4::Align::Fill);
     hero.set_hexpand(true);
+    hero.set_vexpand(true);
     hero.set_content_fit(gtk4::ContentFit::Cover);
     if !has_hero {
         hero.add_css_class("hero-fallback-bg");
     }
-    overlay.set_child(Some(&hero));
+    overlay.add_overlay(&hero);
 
     if has_logo && !game.logo_path.is_empty() {
         let logo_pct = game.logo_size.clamp(5, 100);
         let logo_pos = game.logo_position.clone();
 
-        if let Some(pixbuf) = ira_images::pixbuf_for(&game.logo_path) {
+        let logo_area = gtk4::DrawingArea::new();
+        logo_area.set_halign(gtk4::Align::Fill);
+        logo_area.set_valign(gtk4::Align::Fill);
+        logo_area.set_hexpand(true);
+        logo_area.set_vexpand(true);
+
+        let pixbuf_cell: Rc<RefCell<Option<Pixbuf>>> = Rc::new(RefCell::new(None));
+        {
+            let pixbuf_cell = pixbuf_cell.clone();
+            let logo_weak = logo_area.downgrade();
+            ira_images::pixbuf_for_async(game.logo_path.clone(), move |pixbuf| {
+                if let Some(pb) = pixbuf {
+                    *pixbuf_cell.borrow_mut() = Some(pb);
+                    if let Some(area) = logo_weak.upgrade() {
+                        area.queue_draw();
+                    }
+                }
+            });
+        }
+
+        logo_area.set_draw_func(move |_area, cr, area_w, area_h| {
+            let Some(ref pixbuf) = *pixbuf_cell.borrow() else {
+                return;
+            };
             let pb_w = pixbuf.width() as f64;
             let pb_h = pixbuf.height() as f64;
 
-            let logo_area = gtk4::DrawingArea::new();
-            logo_area.set_halign(gtk4::Align::Fill);
-            logo_area.set_valign(gtk4::Align::Fill);
-            logo_area.set_hexpand(true);
-            logo_area.set_vexpand(true);
+            let w = area_w as f64;
+            let h = area_h as f64;
+            if w <= 0.0 || h <= 0.0 {
+                return;
+            }
 
-            logo_area.set_draw_func(move |_area, cr, area_w, area_h| {
-                let w = area_w as f64;
-                let h = area_h as f64;
-                if w <= 0.0 || h <= 0.0 {
-                    return;
-                }
+            let (lw, lh) = logo_scaled_dims(w, h, pb_w, pb_h, logo_pct);
 
-                let (lw, lh) = logo_scaled_dims(w, h, pb_w, pb_h, logo_pct);
+            let (halign, valign) = logo_position_align(&logo_pos);
 
-                let (halign, valign) = logo_position_align(&logo_pos);
+            let x = match halign {
+                gtk4::Align::Start => 24.0,
+                gtk4::Align::Center => (w - lw) / 2.0,
+                gtk4::Align::End => w - lw - 24.0,
+                _ => 24.0,
+            };
+            let y = match valign {
+                gtk4::Align::Start => 24.0,
+                gtk4::Align::Center => (h - lh) / 2.0,
+                gtk4::Align::End => h - lh - 24.0,
+                _ => h - lh - 24.0,
+            };
 
-                let x = match halign {
-                    gtk4::Align::Start => 24.0,
-                    gtk4::Align::Center => (w - lw) / 2.0,
-                    gtk4::Align::End => w - lw - 24.0,
-                    _ => 24.0,
-                };
-                let y = match valign {
-                    gtk4::Align::Start => 24.0,
-                    gtk4::Align::Center => (h - lh) / 2.0,
-                    gtk4::Align::End => h - lh - 24.0,
-                    _ => h - lh - 24.0,
-                };
+            let _ = cr.save();
+            cr.translate(x, y);
+            cr.scale(lw / pb_w, lh / pb_h);
+            cr.set_source_pixbuf(pixbuf, 0.0, 0.0);
+            let _ = cr.paint();
+            let _ = cr.restore();
+        });
 
-                let _ = cr.save();
-                cr.translate(x, y);
-                cr.scale(lw / pb_w, lh / pb_h);
-                cr.set_source_pixbuf(&pixbuf, 0.0, 0.0);
-                let _ = cr.paint();
-                let _ = cr.restore();
-            });
-
-            overlay.add_overlay(&logo_area);
-        }
+        overlay.add_overlay(&logo_area);
     } else if !has_logo {
         let title_label = gtk4::Label::new(Some(&game.name));
         title_label.set_xalign(0.0);
@@ -425,7 +457,7 @@ fn build_hero_overlay(
         size_monitor.set_draw_func(move |_area, _cr, w, _h| {
             if w > 0 {
                 if let Some(overlay) = overlay_weak.upgrade() {
-                    let target = ((w as f64) / 3.1).max(150.0) as i32;
+                    let target = ((w as f64) / HERO_ASPECT_RATIO).max(150.0) as i32;
                     if overlay.height_request() != target {
                         overlay.set_height_request(target);
                     }

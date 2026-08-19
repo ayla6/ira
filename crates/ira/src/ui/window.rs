@@ -510,13 +510,7 @@ fn connect_window_signals(
                     .contains_key(&db_id)
                 {
                     match super::play_button::launch_game(&state_clone, db_id, vid) {
-                        Ok(true) => {
-                            let _ = state_clone
-                                .borrow()
-                                .sender
-                                .send(crate::AppMessage::GameStarted(db_id, item_variant_id));
-                        }
-                        Ok(false) => {}
+                        Ok(_) => {}
                         Err(error) => {
                             eprintln!("Failed to launch game: {error}");
                             let _ = state_clone

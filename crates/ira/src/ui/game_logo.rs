@@ -67,43 +67,57 @@ pub(super) fn build_game_logo_page(
     preview_draw.set_vexpand(true);
 
     if !game.logo_path.is_empty() {
-        if let Some(ref pixbuf) = ira_images::pixbuf_for(&game.logo_path) {
-            let pb_w = pixbuf.width() as f64;
-            let pb_h = pixbuf.height() as f64;
-            let pixbuf_clone = pixbuf.clone();
-            let pos_for_draw = selected_pos.clone();
-            let adj_for_draw = size_adj.clone();
-
-            preview_draw.set_draw_func(move |_area, cr, area_w, area_h| {
-                let w = area_w as f64;
-                let h = area_h as f64;
-                if w <= 0.0 || h <= 0.0 {
-                    return;
+        let pixbuf_cell: Rc<RefCell<Option<gtk4::gdk_pixbuf::Pixbuf>>> =
+            Rc::new(RefCell::new(None));
+        {
+            let pixbuf_cell = pixbuf_cell.clone();
+            let preview_weak = preview_draw.downgrade();
+            ira_images::pixbuf_for_async(game.logo_path.clone(), move |pixbuf| {
+                if let Some(pb) = pixbuf {
+                    *pixbuf_cell.borrow_mut() = Some(pb);
+                    if let Some(area) = preview_weak.upgrade() {
+                        area.queue_draw();
+                    }
                 }
-                let pct = adj_for_draw.value() as i32;
-                let (lw, lh) = super::game_display::logo_scaled_dims(w, h, pb_w, pb_h, pct);
-                let pos = pos_for_draw.borrow().clone();
-                let (halign, valign) = super::game_display::logo_position_align(&pos);
-                let x = match halign {
-                    gtk4::Align::Start => 12.0,
-                    gtk4::Align::Center => (w - lw) / 2.0,
-                    gtk4::Align::End => w - lw - 12.0,
-                    _ => 12.0,
-                };
-                let y = match valign {
-                    gtk4::Align::Start => 12.0,
-                    gtk4::Align::Center => (h - lh) / 2.0,
-                    gtk4::Align::End => h - lh - 12.0,
-                    _ => h - 12.0,
-                };
-                let _ = cr.save();
-                cr.translate(x, y);
-                cr.scale(lw / pb_w, lh / pb_h);
-                cr.set_source_pixbuf(&pixbuf_clone, 0.0, 0.0);
-                let _ = cr.paint();
-                let _ = cr.restore();
             });
         }
+        let pos_for_draw = selected_pos.clone();
+        let adj_for_draw = size_adj.clone();
+
+        preview_draw.set_draw_func(move |_area, cr, area_w, area_h| {
+            let Some(ref pixbuf) = *pixbuf_cell.borrow() else {
+                return;
+            };
+            let pb_w = pixbuf.width() as f64;
+            let pb_h = pixbuf.height() as f64;
+            let w = area_w as f64;
+            let h = area_h as f64;
+            if w <= 0.0 || h <= 0.0 {
+                return;
+            }
+            let pct = adj_for_draw.value() as i32;
+            let (lw, lh) = super::game_display::logo_scaled_dims(w, h, pb_w, pb_h, pct);
+            let pos = pos_for_draw.borrow().clone();
+            let (halign, valign) = super::game_display::logo_position_align(&pos);
+            let x = match halign {
+                gtk4::Align::Start => 12.0,
+                gtk4::Align::Center => (w - lw) / 2.0,
+                gtk4::Align::End => w - lw - 12.0,
+                _ => 12.0,
+            };
+            let y = match valign {
+                gtk4::Align::Start => 12.0,
+                gtk4::Align::Center => (h - lh) / 2.0,
+                gtk4::Align::End => h - lh - 12.0,
+                _ => h - 12.0,
+            };
+            let _ = cr.save();
+            cr.translate(x, y);
+            cr.scale(lw / pb_w, lh / pb_h);
+            cr.set_source_pixbuf(pixbuf, 0.0, 0.0);
+            let _ = cr.paint();
+            let _ = cr.restore();
+        });
     }
 
     preview_overlay.add_overlay(&preview_draw);

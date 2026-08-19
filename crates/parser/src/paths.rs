@@ -100,18 +100,20 @@ pub fn find_image_file(dir: &Path, base_name: &str) -> Option<PathBuf> {
 ///
 /// Format conversion matrix:
 ///
-/// | Source  | Already ≤ max dims? | Action                          |
-/// |---------|---------------------|---------------------------------|
-/// | JPEG    | Yes                 | Copy to `_small.jpg`            |
-/// | JPEG    | No                  | Resize → lossy WebP at 90%      |
-/// | PNG/ICO | Yes                 | Lossless WebP (no resize)       |
-/// | PNG/ICO | No                  | Resize → lossless WebP          |
-/// | Icon    | Any                 | Always lossless WebP            |
+/// | Source     | Case                     | Action                          |
+/// |------------|--------------------------|---------------------------------|
+/// | JPEG       | Already ≤ max dims       | Copy to `_small.jpg`            |
+/// | Icon       | Any                      | Always lossless WebP            |
+/// | any        | Mild resize (ratio > .5) | Resize → lossless WebP          |
+/// | any        | ≥2× downscale            | Resize → smaller of lossless / lossy (95%) WebP |
 ///
 /// Icons are always lossless regardless of source format.
 /// JPEGs that are already the right size are copied as-is (no re-encode).
-/// JPEGs that need resizing are re-encoded as lossy WebP (resize requires re-encode anyway).
-/// PNGs/ICOs are always converted to lossless WebP (good compression, no loss).
+/// Sources that need resizing stay lossless when the downscale is mild. For a
+/// ≥2× downscale the downsample already removed high-frequency detail, so both
+/// a lossless and a lossy (95%) WebP are encoded and the smaller one is kept:
+/// photos almost always pick the lossy file, while PNG/lossless-WebP sources
+/// (flat graphics, logos) keep the lossless one, which is often smaller there.
 pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     let _s = tracing::info_span!("ensure_small_image", base_name, max_w, max_h).entered();
     if find_image_file(dir, &format!("{}_small", base_name)).is_some() {
@@ -190,24 +192,38 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     let (fw, fh) = data.dimensions();
     let dest = dir.join(format!("{}.webp", small_name));
 
-    let is_lossless = is_icon || !is_jpeg;
-
-    let encoded = {
-        let _s = tracing::info_span!(
-            "ensure_small_encode",
-            base_name,
-            w = fw,
-            h = fh,
-            mode = if is_lossless { "lossless" } else { "lossy" }
-        )
-        .entered();
-        if is_lossless {
+    // Icons are always lossless (flat graphics, scaled up in the UI) and mild
+    // resizes stay lossless. For a ≥2× downscale the downsample already
+    // removed high-frequency detail, so encode BOTH a lossless and a lossy
+    // (95%) WebP and keep whichever is smaller: photos almost always pick the
+    // lossy file, while PNG/lossless-WebP sources (flat graphics, logos) keep
+    // the lossless one, since lossless is often smaller there.
+    if is_icon || ratio > 0.5 {
+        let encoded = {
+            let _s = tracing::info_span!(
+                "ensure_small_encode",
+                base_name,
+                w = fw,
+                h = fh,
+                mode = "lossless"
+            )
+            .entered();
             webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless()
+        };
+        let _ = std::fs::write(&dest, &*encoded);
+    } else {
+        let lossless = webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless();
+        let lossy = webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode(95.0);
+        let mode = if lossless.len() <= lossy.len() { "lossless" } else { "lossy" };
+        let _s = tracing::info_span!("ensure_small_encode", base_name, w = fw, h = fh, mode)
+            .entered();
+        let chosen = if lossless.len() <= lossy.len() {
+            lossless
         } else {
-            webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode(90.0)
-        }
-    };
-    let _ = std::fs::write(&dest, &*encoded);
+            lossy
+        };
+        let _ = std::fs::write(&dest, &*chosen);
+    }
 }
 
 /// Remove all image files with the given base_name (e.g. "icon", "hero", "vertical")
@@ -512,6 +528,83 @@ mod tests {
         assert_eq!(
             wiiu_data_dir("/save", "0005000010101d00"),
             PathBuf::from("/save/data/wiiu/0005000010101d00")
+        );
+    }
+
+    fn webp_is_lossless(data: &[u8]) -> bool {
+        data.len() > 16 && data.starts_with(b"RIFF") && &data[12..16] == b"VP8L"
+    }
+
+    fn write_webp_source(dir: &std::path::Path, name: &str, w: u32, h: u32) {
+        let pixels = vec![0u8; (w * h * 4) as usize];
+        let encoded = webp::Encoder::from_rgba(&pixels, w, h).encode_lossless();
+        std::fs::write(dir.join(name), &*encoded).unwrap();
+    }
+
+    #[test]
+    fn test_ensure_small_image_2x_downscale_picks_smaller_of_both_encodings() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_webp_source(tmp.path(), "hero.webp", 1920, 620);
+        ensure_small_image(tmp.path(), "hero", 960, 310);
+        let small = std::fs::read(tmp.path().join("hero_small.webp")).unwrap();
+
+        let solid = vec![0u8; (960 * 310 * 4) as usize];
+        let lossless = webp::Encoder::from_rgba(&solid, 960, 310).encode_lossless();
+        let lossy = webp::Encoder::from_rgba(&solid, 960, 310).encode(95.0);
+        let expected = if lossless.len() <= lossy.len() {
+            lossless
+        } else {
+            lossy
+        };
+        assert_eq!(
+            small,
+            expected.as_ref().to_vec(),
+            "≥2× downscale should keep the smaller of the lossless/lossy encodings"
+        );
+    }
+
+    #[test]
+    fn test_ensure_small_image_2x_downscale_noise_picks_lossy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (w, h) = (1920u32, 620u32);
+        let mut state: u32 = 7;
+        let pixels: Vec<u8> = (0..(w * h * 4) as usize)
+            .map(|_| {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                (state >> 24) as u8
+            })
+            .collect();
+        let encoded = webp::Encoder::from_rgba(&pixels, w, h).encode_lossless();
+        std::fs::write(tmp.path().join("hero.webp"), &*encoded).unwrap();
+        ensure_small_image(tmp.path(), "hero", 960, 310);
+        let small = std::fs::read(tmp.path().join("hero_small.webp")).unwrap();
+        assert!(
+            !webp_is_lossless(&small),
+            "noisy ≥2× downscale should pick the smaller lossy WebP"
+        );
+    }
+
+    #[test]
+    fn test_ensure_small_image_mild_resize_stays_lossless() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_webp_source(tmp.path(), "hero.webp", 1920, 620);
+        ensure_small_image(tmp.path(), "hero", 1600, 517);
+        let small = std::fs::read(tmp.path().join("hero_small.webp")).unwrap();
+        assert!(
+            webp_is_lossless(&small),
+            "mild resize should stay lossless WebP"
+        );
+    }
+
+    #[test]
+    fn test_ensure_small_image_already_small_stays_lossless() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_webp_source(tmp.path(), "hero.webp", 1920, 620);
+        ensure_small_image(tmp.path(), "hero", 1920, 620);
+        let small = std::fs::read(tmp.path().join("hero_small.webp")).unwrap();
+        assert!(
+            webp_is_lossless(&small),
+            "already-small source should stay lossless WebP"
         );
     }
 }

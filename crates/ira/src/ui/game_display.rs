@@ -125,6 +125,8 @@ pub(crate) fn format_last_played(ts: i64) -> String {
         .unwrap_or_else(|| crate::tr!("Never"))
 }
 
+/// Scale a logo to fit inside a box that is `logo_pct`% of the hero width and
+/// height, preserving aspect ratio. Returns the rendered size (min 32px).
 pub(crate) fn logo_scaled_dims(
     hero_w: f64,
     hero_h: f64,
@@ -132,8 +134,9 @@ pub(crate) fn logo_scaled_dims(
     src_h: f64,
     logo_pct: i32,
 ) -> (f64, f64) {
-    let max_h = hero_h * (logo_pct as f64 / 100.0);
-    let max_w = hero_w * (logo_pct as f64 / 200.0);
+    let pct = logo_pct as f64 / 100.0;
+    let max_h = hero_h * pct;
+    let max_w = hero_w * pct;
     let scale = (max_w / src_w).min(max_h / src_h);
     let w = (src_w * scale).max(32.0);
     let h = (src_h * scale).max(32.0);
@@ -151,5 +154,31 @@ pub(crate) fn logo_position_align(pos: &str) -> (gtk4::Align, gtk4::Align) {
         ira_models::LogoPosition::TopCenter => (gtk4::Align::Center, gtk4::Align::Start),
         ira_models::LogoPosition::TopRight => (gtk4::Align::End, gtk4::Align::Start),
         _ => (gtk4::Align::Start, gtk4::Align::End),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_logo_scaled_dims_wide_logo_at_half_percent() {
+        // 3.1:1 hero, 3.4:1 logo, pct=50 → width binds, logo is 50% of hero width.
+        let (lw, _lh) = logo_scaled_dims(1920.0, 620.0, 1024.0, 300.0, 50);
+        assert!((lw - 960.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_logo_scaled_dims_tall_logo_bounded_by_height() {
+        // Square logo on a wide hero → height binds, logo is 50% of hero height.
+        let (_lw, lh) = logo_scaled_dims(1920.0, 620.0, 300.0, 300.0, 50);
+        assert!((lh - 310.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_logo_scaled_dims_never_below_min_size() {
+        let (lw, lh) = logo_scaled_dims(1920.0, 620.0, 2000.0, 40.0, 5);
+        assert!(lw >= 32.0);
+        assert!(lh >= 32.0);
     }
 }

@@ -137,7 +137,7 @@ pub(super) fn build_rpcs3_settings_page(
         &exe_row,
         win,
         &detected,
-        &crate::tr!("Select RPCS3 executable"),
+        &crate::tr!("Select executable"),
     );
     emu_group.add(&exe_row);
     page.append(&emu_group);
@@ -194,7 +194,7 @@ pub(super) fn build_vita3k_settings_page(
         &exe_row,
         win,
         &detected,
-        &crate::tr!("Select Vita3K executable"),
+        &crate::tr!("Select executable"),
     );
     emu_group.add(&exe_row);
     page.append(&emu_group);
@@ -257,7 +257,7 @@ pub(super) fn build_cemu_settings_page(
         &exe_row,
         win,
         &detected,
-        &crate::tr!("Select Cemu executable"),
+        &crate::tr!("Select executable"),
     );
     emu_group.add(&exe_row);
     page.append(&emu_group);
@@ -419,7 +419,7 @@ pub(super) fn build_console_settings_page(
         &exe_row,
         win,
         &detected_emulators,
-        &crate::tr!("Select emulator executable"),
+        &crate::tr!("Select executable"),
     );
     emu_group.add(&exe_row);
 

@@ -54,6 +54,8 @@ struct SavedSettingsWidgets {
     linux_controller_profile: ConsoleProfileWidgets,
     wine_controller_profile: ConsoleProfileWidgets,
     prefix_base_row: adw::EntryRow,
+    default_version_row: adw::ComboRow,
+    default_version_values: Vec<(String, String)>,
     emu_version_row: adw::ComboRow,
     emu_version_model: gtk4::StringList,
 }
@@ -215,6 +217,8 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         linux_controller_profile: pages.linux_controller_profile,
         wine_controller_profile: pages.wine_controller_profile,
         prefix_base_row: pages.prefix_base_row,
+        default_version_row: pages.default_version_row,
+        default_version_values: pages.default_version_values,
         emu_version_row: pages.emu_version_row,
         emu_version_model: pages.emu_version_model,
     };
@@ -441,6 +445,11 @@ fn apply_system_defaults(cfg: &mut Config, widgets: &SystemDefaultsWidgets) {
 
 fn apply_profile_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
     cfg.default_wine_config = widgets.wine_widgets.to_wine_config();
+    cfg.default_wine_config.version = widgets
+        .default_version_values
+        .get(widgets.default_version_row.selected() as usize)
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default();
     cfg.linux_controller_profile = widgets
         .linux_controller_profile
         .profile_path

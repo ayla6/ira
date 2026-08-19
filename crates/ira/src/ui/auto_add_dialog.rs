@@ -56,6 +56,108 @@ pub(super) struct IdentifiedGame {
     pub logo_size: i32,
 }
 
+/// Guess whether a folder holds a Windows game and pick its most likely
+/// executable. Walks two levels deep, prefers names that match the folder,
+/// and ignores installers/redistributables. Returns `(is_windows, exe)`.
+fn detect_game_exe(folder: &Path) -> (bool, String) {
+    let basename = folder
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let mut windows: Vec<(i32, String)> = Vec::new();
+    let mut native: Vec<(i32, String)> = Vec::new();
+
+    let mut stack = vec![(folder.to_path_buf(), 0i32)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            if path.is_dir() {
+                if depth < 2 {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
+            let lower = name.to_lowercase();
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase())
+                .unwrap_or_default();
+            if ext == "exe" {
+                if is_installer_exe(&lower) {
+                    continue;
+                }
+                windows.push((score_candidate(&basename, &lower, depth), name));
+            } else if ext.is_empty() || matches!(ext.as_str(), "x86_64" | "AppRun") {
+                if name.starts_with('.') {
+                    continue;
+                }
+                if ext.is_empty() && !is_elf(&path) {
+                    continue;
+                }
+                native.push((score_candidate(&basename, &lower, depth), name));
+            }
+        }
+    }
+
+    if let Some((_, exe)) = windows.into_iter().max_by_key(|(score, _)| *score) {
+        (true, exe)
+    } else if let Some((_, exe)) = native.into_iter().max_by_key(|(score, _)| *score) {
+        (false, exe)
+    } else {
+        (false, String::new())
+    }
+}
+
+fn is_installer_exe(lower: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "setup",
+        "install",
+        "unins",
+        "uninstall",
+        "vcredist",
+        "vc_redist",
+        "dxsetup",
+        "dxwebsetup",
+        "oalinst",
+        "redist",
+        "dotnet",
+        "directx",
+    ];
+    MARKERS.iter().any(|m| lower.contains(m))
+}
+
+fn score_candidate(basename: &str, lower_name: &str, depth: i32) -> i32 {
+    let stem = lower_name.strip_suffix(".exe").unwrap_or(lower_name);
+    let depth_penalty = depth * 2;
+    if stem == basename {
+        100 - depth_penalty
+    } else if stem.contains(basename) || basename.contains(stem) {
+        60 - depth_penalty
+    } else {
+        5 - depth_penalty
+    }
+}
+
+fn is_elf(path: &Path) -> bool {
+    use std::io::Read;
+    let mut f = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut magic = [0u8; 4];
+    f.read_exact(&mut magic)
+        .map(|_| &magic == b"\x7fELF")
+        .unwrap_or(false)
+}
+
 /// Wizard state shared between the main-thread poll closure and signal handlers.
 pub(super) struct Wizard {
     pub win: adw::Window,
@@ -64,6 +166,8 @@ pub(super) struct Wizard {
     pub profiles: Vec<WineProfile>,
     pub identified: Option<IdentifiedGame>,
     pub profile_row: Option<adw::ComboRow>,
+    pub kind_row: Option<adw::ComboRow>,
+    pub exe_entry: Option<adw::EntryRow>,
     pub last_folder: Option<PathBuf>,
     pub last_is_windows: bool,
 }
@@ -93,6 +197,8 @@ pub fn show_auto_add_dialog(state: &SharedState) {
         profiles: ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default(),
         identified: None,
         profile_row: None,
+        kind_row: None,
+        exe_entry: None,
         last_folder: None,
         last_is_windows: false,
     }));
@@ -455,14 +561,15 @@ fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf) {
     let folder_c = folder.clone();
     let name_c = name.clone();
     manual_btn.connect_clicked(move |_| {
+        let (is_windows, exe) = detect_game_exe(&folder_c);
         show_identified_form(
             &wizard_c,
             IdentifiedGame {
                 app_id: String::new(),
                 name: name_c.clone(),
-                is_windows: true,
+                is_windows,
                 game_folder: folder_c.clone(),
-                exe: String::new(),
+                exe,
                 variants: Vec::new(),
                 logo_position: String::new(),
                 logo_size: 0,
@@ -512,13 +619,45 @@ pub(super) fn show_identified_form(
     appid_row.set_sensitive(false);
     group.add(&appid_row);
 
-    let profile_row = if is_windows {
-        let row = build_wine_profile_picker(&profiles, preselected_profile_id, None, &state, &win);
-        group.add(&row);
-        Some(row)
-    } else {
-        None
+    let kind_row = adw::ComboRow::new();
+    kind_row.set_title(&crate::tr!("Kind"));
+    let kind_model = {
+        let labels = [crate::tr!("Native Linux"), crate::tr!("Wine (Windows)")];
+        let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+        gtk4::StringList::new(&refs)
     };
+    kind_row.set_model(Some(&kind_model));
+    kind_row.set_selected(if is_windows { 1 } else { 0 });
+    group.add(&kind_row);
+
+    let exe_entry = adw::EntryRow::new();
+    exe_entry.set_title(&crate::tr!("Executable"));
+    exe_entry.set_text(&game.exe);
+    let exe_browse = super::helpers::make_browse_button(
+        Some(&win),
+        &crate::tr!("Select executable"),
+        false,
+        Some((
+            &crate::tr!("Executable"),
+            &["application/x-executable", "application/x-msdos-program"],
+        )),
+        || None,
+        {
+            let entry = exe_entry.clone();
+            move |path| entry.set_text(&path.to_string_lossy())
+        },
+    );
+    exe_entry.add_suffix(&exe_browse);
+    group.add(&exe_entry);
+
+    let profile_row =
+        build_wine_profile_picker(&profiles, preselected_profile_id, None, &state, &win);
+    profile_row.set_visible(is_windows);
+    group.add(&profile_row);
+    let profile_row_c = profile_row.clone();
+    kind_row.connect_selected_notify(move |row| {
+        profile_row_c.set_visible(row.selected() == 1);
+    });
 
     body.append(&group);
 
@@ -528,10 +667,11 @@ pub(super) fn show_identified_form(
 
     {
         let folder = game.game_folder.clone();
-        let is_windows = game.is_windows;
         let mut w = wizard.borrow_mut();
         w.identified = Some(game);
-        w.profile_row = profile_row.clone();
+        w.profile_row = Some(profile_row.clone());
+        w.kind_row = Some(kind_row.clone());
+        w.exe_entry = Some(exe_entry.clone());
         w.last_folder = Some(folder);
         w.last_is_windows = is_windows;
     }
@@ -541,13 +681,26 @@ pub(super) fn show_identified_form(
     add_btn.connect_clicked(move |_| {
         let extracted = {
             let mut w = wizard_c.borrow_mut();
-            w.identified.take().map(|game| {
+            w.identified.take().map(|mut game| {
                 let name = name_c.text().to_string();
                 let app_id = appid_c.text().to_string();
-                let profile_id = w
-                    .profile_row
+                game.is_windows = w
+                    .kind_row
                     .as_ref()
-                    .and_then(|r| selected_profile_id(r, &w.profiles));
+                    .map(|r| r.selected() == 1)
+                    .unwrap_or(game.is_windows);
+                game.exe = w
+                    .exe_entry
+                    .as_ref()
+                    .map(|e| e.text().to_string())
+                    .unwrap_or(game.exe);
+                let profile_id = if game.is_windows {
+                    w.profile_row
+                        .as_ref()
+                        .and_then(|r| selected_profile_id(r, &w.profiles))
+                } else {
+                    None
+                };
                 (game, name, app_id, profile_id)
             })
         };
@@ -920,24 +1073,37 @@ fn migrate_game_saves(
     wine_config: &WineConfig,
 ) {
     let game_folder = game.game_folder.to_string_lossy();
-    if let Err(e) = ira_platforms::api_emulators::centralize_steam_settings(&game_folder) {
-        eprintln!("Failed to centralize steam_settings: {}", e);
+    let has_steam_dlls =
+        !ira_platforms::api_emulators::find_steam_dlls_recursive(&game_folder).is_empty();
+    let has_gog_dlls =
+        !ira_platforms::api_emulators::find_gog_dlls_recursive(&game_folder).is_empty();
+    if !app_id.is_empty() || has_steam_dlls {
+        if let Err(e) = ira_platforms::api_emulators::centralize_steam_settings(&game_folder) {
+            eprintln!("Failed to centralize steam_settings: {}", e);
+        }
     }
-    if let Err(e) = ira_platforms::api_emulators::centralize_galaxy_settings(&game_folder) {
-        eprintln!("Failed to centralize ngalaxye_settings: {}", e);
+    if has_gog_dlls {
+        if let Err(e) = ira_platforms::api_emulators::centralize_galaxy_settings(&game_folder) {
+            eprintln!("Failed to centralize ngalaxye_settings: {}", e);
+        }
     }
 
+    let steam_related = !app_id.is_empty() || has_steam_dlls;
     let wine_prefix = if game.is_windows {
         Some(ira_launcher::wine_launch::wine_prefix(wine_config))
     } else {
         None
     };
-    ira_platforms::emulator_save_migration::migrate_gbe_saves(
-        save_dir,
-        app_id,
-        wine_prefix.as_deref(),
-    );
-    ira_platforms::emulator_save_migration::migrate_nge_saves(save_dir, wine_prefix.as_deref());
+    if steam_related {
+        ira_platforms::emulator_save_migration::migrate_gbe_saves(
+            save_dir,
+            app_id,
+            wine_prefix.as_deref(),
+        );
+    }
+    if has_gog_dlls {
+        ira_platforms::emulator_save_migration::migrate_nge_saves(save_dir, wine_prefix.as_deref());
+    }
 
     if let Some(details) = crate::game_loader::read_app_details(save_dir, app_id) {
         if !details.ufs_savefiles.is_empty() {
@@ -1029,10 +1195,15 @@ fn prompt_install_emulator(
         None => {}
     }
 
-    let (win, default_version) = {
+    let (win, default_version, versions) = {
         let w = wizard.borrow();
-        let default_version = w.state.borrow().cfg.default_api_emu_version.clone();
-        (w.win.clone(), default_version)
+        let state = w.state.borrow();
+        let default_version = state.cfg.default_api_emu_version.clone();
+        let versions = match emu_kind {
+            EmuKind::Nge => ira_platforms::api_emulators::list_gog_versions(&state.save_dir),
+            EmuKind::Gse => ira_platforms::api_emulators::list_gse_versions(&state.save_dir),
+        };
+        (w.win.clone(), default_version, versions)
     };
     let (title, body) = match emu_kind {
         EmuKind::Nge => (
@@ -1068,9 +1239,33 @@ fn prompt_install_emulator(
     msg.set_halign(gtk4::Align::Start);
     outer.append(&msg);
 
+    let group = adw::PreferencesGroup::new();
+    let version_row = if !versions.is_empty() {
+        let version_model = {
+            let labels: Vec<&str> = versions.iter().map(|s| s.as_str()).collect();
+            gtk4::StringList::new(&labels)
+        };
+        let vr = adw::ComboRow::new();
+        vr.set_title(&crate::tr!("Emulator version"));
+        vr.set_subtitle(&crate::tr!("Version directory to install"));
+        vr.set_model(Some(&version_model));
+        if !default_version.is_empty() {
+            if let Some(idx) = versions.iter().position(|v| v == &default_version) {
+                vr.set_selected(idx as u32);
+            }
+        }
+        group.add(&vr);
+        Some(vr)
+    } else {
+        let no_ver_row = adw::ActionRow::new();
+        no_ver_row.set_title(&crate::tr!("No emulator versions available"));
+        no_ver_row.set_subtitle(&crate::tr!("Place version directories in api_emulators/"));
+        no_ver_row.set_sensitive(false);
+        group.add(&no_ver_row);
+        None
+    };
     let remember = adw::SwitchRow::new();
     remember.set_title(&crate::tr!("Don't ask me again"));
-    let group = adw::PreferencesGroup::new();
     group.add(&remember);
     outer.append(&group);
 
@@ -1090,17 +1285,22 @@ fn prompt_install_emulator(
     let wizard_c = wizard.clone();
     let remember_c = remember.clone();
     let dialog_c = dialog.clone();
+    let versions_for_yes = versions.clone();
     let resolved_for_yes = resolved.clone();
     yes_btn.connect_clicked(move |_| {
         resolved_for_yes.set(true);
         persist_remember(&wizard_c, remember_c.is_active(), true);
-        let version = wizard_c
-            .borrow()
-            .state
-            .borrow()
-            .cfg
-            .default_api_emu_version
-            .clone();
+        let version = version_row
+            .as_ref()
+            .map(|vr| {
+                let idx = vr.selected() as usize;
+                if idx < versions_for_yes.len() {
+                    versions_for_yes[idx].clone()
+                } else {
+                    String::new()
+                }
+            })
+            .unwrap_or(default_version.clone());
         dialog_c.close();
         start_install(
             wizard_c.clone(),
@@ -1129,7 +1329,6 @@ fn prompt_install_emulator(
         }
         glib::Propagation::Proceed
     });
-    let _ = default_version;
 }
 
 fn persist_remember(wizard: &Rc<RefCell<Wizard>>, remember: bool, install: bool) {
@@ -1417,4 +1616,81 @@ fn move_dir(src: &Path, dst: &Path) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(path: &std::path::Path, name: &str) {
+        let p = path.join(name);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&p, b"\x7fELF").unwrap();
+    }
+
+    #[test]
+    fn test_detect_game_exe_picks_matching_windows_exe() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "setup.exe");
+        write(tmp.path(), "Fallout3.exe");
+
+        let (is_windows, exe) = detect_game_exe(tmp.path());
+
+        assert!(is_windows);
+        assert_eq!(exe, "Fallout3.exe");
+    }
+
+    #[test]
+    fn test_detect_game_exe_skips_installers_and_prefers_folder_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path().join("HollowKnight");
+        write(&game_dir, "vcredist_x64.exe");
+        write(&game_dir, "HollowKnight.exe");
+        write(&game_dir, "bin/HollowKnight_Data.exe");
+
+        let (is_windows, exe) = detect_game_exe(&game_dir);
+
+        assert!(is_windows);
+        assert_eq!(exe, "HollowKnight.exe");
+    }
+
+    #[test]
+    fn test_detect_game_exe_finds_native_elf_when_no_exe() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "game.x86_64");
+        write(tmp.path(), "README.md");
+
+        let (is_windows, exe) = detect_game_exe(tmp.path());
+
+        assert!(!is_windows);
+        assert_eq!(exe, "game.x86_64");
+
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "game");
+        write(tmp.path(), "README.md");
+
+        let (is_windows, exe) = detect_game_exe(tmp.path());
+
+        assert!(!is_windows);
+        assert_eq!(exe, "game");
+    }
+
+    #[test]
+    fn test_detect_game_exe_returns_empty_for_bare_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "readme.txt");
+
+        let (is_windows, exe) = detect_game_exe(tmp.path());
+
+        assert!(!is_windows);
+        assert!(exe.is_empty());
+    }
+
+    #[test]
+    fn test_score_candidate_prefers_exact_folder_match() {
+        assert!(score_candidate("doom", "doom.exe", 0) > score_candidate("doom", "game.exe", 0));
+        assert!(score_candidate("doom", "doom.exe", 0) > score_candidate("doom", "doom.exe", 1));
+    }
 }

@@ -61,6 +61,8 @@ pub fn show_installer_add_dialog(state: &SharedState) {
         profiles,
         identified: None,
         profile_row: None,
+        kind_row: None,
+        exe_entry: None,
         last_folder: None,
         last_is_windows: false,
     }));

@@ -19,13 +19,7 @@ pub(super) fn setup_play_action(actions: &gio::SimpleActionGroup, state: SharedS
             super::play_button::stop_game(&state, db_id);
         } else {
             match super::play_button::launch_game(&state, db_id, game.variant_id) {
-                Ok(true) => {
-                    let _ = state
-                        .borrow()
-                        .sender
-                        .send(AppMessage::GameStarted(db_id, game.variant_id));
-                }
-                Ok(false) => {}
+                Ok(_) => {}
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);
                     let _ = state.borrow().sender.send(AppMessage::AddGameError(e));

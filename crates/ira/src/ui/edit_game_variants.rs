@@ -255,7 +255,7 @@ fn build_variant_card(
     exe_entry.set_text(&v.exe);
     let browse = helpers::make_browse_button(
         None,
-        &crate::tr!("Select variant executable"),
+        &crate::tr!("Select executable"),
         false,
         Some((&crate::tr!("Executable"), &["application/x-executable"])),
         helpers::entry_path_closure(&exe_entry),

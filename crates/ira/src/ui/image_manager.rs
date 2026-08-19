@@ -514,7 +514,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         parent_win,
         pending_copies,
     } = params;
-    let is_steam = game.trophy_source.has_steam_enrichment();
+    let is_steam = game.trophy_source.has_steam_enrichment() && !game.app_id.is_empty();
     let id = game.app_id.clone();
     let save_dir = state.borrow().save_dir.clone();
 

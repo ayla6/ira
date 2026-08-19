@@ -312,7 +312,7 @@ fn build_dialog_contents(
         &pending_copies,
     );
     sidebar.append(&super::settings_dialog::settings_sidebar_row(
-        "preferences-system-symbolic",
+        "emblem-system-symbolic",
         "General",
         "general",
     ));
@@ -333,7 +333,7 @@ fn build_dialog_contents(
         &stack,
     );
 
-    if !game.app_id.is_empty() {
+    {
         let images_page = super::image_manager::build_image_manager_content_with_drafts(
             &state,
             &game,
@@ -391,6 +391,7 @@ fn build_dialog_contents(
             emu_app_id: &game.app_id,
             save_dir: &emu_save_dir,
             win: &win,
+            emu_pending_uninstall: None,
         },
         &state,
         &languages,

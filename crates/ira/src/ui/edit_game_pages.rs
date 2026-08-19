@@ -157,6 +157,43 @@ pub(super) struct ApiEmuPageParams<'a> {
     pub emu_app_id: &'a str,
     pub save_dir: &'a str,
     pub win: &'a adw::Window,
+    /// Shared pending-uninstall flag. Reused across page rebuilds so the
+    /// dialog's save handler keeps observing the same cell.
+    pub emu_pending_uninstall: Option<Rc<RefCell<bool>>>,
+}
+
+/// Remove the previously-built "api_emulator" page (sidebar row, its separator,
+/// and stack child) so the page can be rebuilt with fresh install state.
+fn remove_api_emulator_page(sidebar: &gtk4::ListBox, stack: &gtk4::Stack) {
+    if let Some(child) = stack.child_by_name("api_emulator") {
+        stack.remove(&child);
+    }
+    let mut iter = sidebar.first_child();
+    let mut prev: Option<gtk4::ListBoxRow> = None;
+    while let Some(c) = iter {
+        if c.widget_name() == "api_emulator" {
+            if let Some(p) = prev {
+                if p.widget_name().is_empty() {
+                    sidebar.remove(&p);
+                }
+            }
+            sidebar.remove(&c.downcast::<gtk4::ListBoxRow>().unwrap());
+            break;
+        }
+        prev = c.clone().downcast::<gtk4::ListBoxRow>().ok();
+        iter = c.next_sibling();
+    }
+}
+
+fn select_api_emulator_row(sidebar: &gtk4::ListBox) {
+    let mut iter = sidebar.first_child();
+    while let Some(c) = iter {
+        if c.widget_name() == "api_emulator" {
+            sidebar.select_row(c.downcast_ref::<gtk4::ListBoxRow>());
+            break;
+        }
+        iter = c.next_sibling();
+    }
 }
 
 /// Resolve the game's API-emulator DLL folder, preferring the per-game DB
@@ -205,6 +242,9 @@ pub(super) fn build_api_emulator_page(
         params.save_dir,
         params.win,
     );
+    let pending_uninstall = params
+        .emu_pending_uninstall
+        .unwrap_or_else(|| Rc::new(RefCell::new(false)));
     if (emu_trophy_source != ira_models::TrophySource::Gse
         && emu_trophy_source != ira_models::TrophySource::Nge)
         || emu_exe.is_empty()
@@ -248,8 +288,6 @@ pub(super) fn build_api_emulator_page(
 
     let action_group = adw::PreferencesGroup::new();
     action_group.set_title(&crate::tr!("Actions"));
-
-    let pending_uninstall: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
 
     if is_installed {
         let uninstall_btn = gtk4::Button::with_label(&crate::tr!("Uninstall API emulator"));
@@ -347,6 +385,11 @@ pub(super) fn build_api_emulator_page(
         let status_c = status_row.clone();
         let langs_c = languages.to_vec();
         let ts_c = emu_trophy_source;
+        let state_c = state.clone();
+        let win_c = win.clone();
+        let sidebar_c = sidebar.clone();
+        let stack_c = stack.clone();
+        let pending_uninstall_c = pending_uninstall.clone();
         install_btn.connect_clicked(move |_| {
             let ver = version_row
                 .as_ref()
@@ -379,14 +422,34 @@ pub(super) fn build_api_emulator_page(
             };
             match result {
                 Ok(folder) => {
-                    status_c.set_title(&crate::tr!("API emulator installed"));
                     if let Err(e) =
                         ira_db::set_api_dll_folder(&db_c, db_id_c, &folder.to_string_lossy())
                     {
                         eprintln!("Failed to cache API DLL folder: {}", e);
                     }
+                    remove_api_emulator_page(&sidebar_c, &stack_c);
+                    build_api_emulator_page(
+                        ApiEmuPageParams {
+                            emu_exe: &exe_c,
+                            emu_game_folder: &game_folder_c,
+                            emu_db_id: db_id_c,
+                            emu_trophy_source: ts_c,
+                            emu_app_id: &app_id_c,
+                            save_dir: &save_dir_c,
+                            win: &win_c,
+                            emu_pending_uninstall: Some(pending_uninstall_c.clone()),
+                        },
+                        &state_c,
+                        &langs_c,
+                        &sidebar_c,
+                        &stack_c,
+                    );
+                    select_api_emulator_row(&sidebar_c);
                 }
-                Err(e) => eprintln!("Install failed: {}", e),
+                Err(e) => {
+                    eprintln!("Install failed: {}", e);
+                    status_c.set_title(&crate::tr!("API emulator install failed"));
+                }
             }
         });
         let install_row = adw::ActionRow::new();

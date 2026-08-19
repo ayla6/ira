@@ -2,7 +2,6 @@ use crate::Game;
 use gtk4::prelude::*;
 
 use super::achievement_view::build_achievements_view;
-use super::css::*;
 use super::game_header::build_game_header;
 use super::helpers::clear_children;
 use super::state::SharedState;
@@ -46,22 +45,6 @@ pub fn display_game(game: &Game, state: &SharedState) {
 
     let header_widget = build_game_header(game, fraction, state, content_width);
     content_box.append(&header_widget);
-
-    if game.app_id.is_empty() {
-        let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
-        box_.set_margin_top(32);
-        box_.set_margin_bottom(32);
-        box_.set_halign(gtk4::Align::Center);
-        let label = gtk4::Label::new(Some(&crate::tr!(
-            "This game isn't linked to a trophy source yet.\nUse \"Match unmatched games\" in the menu to find a match."
-        )));
-        label.add_css_class(CSS_DIM_LABEL);
-        label.set_wrap(true);
-        label.set_justify(gtk4::Justification::Center);
-        box_.append(&label);
-        content_box.append(&box_);
-        return;
-    }
 
     let spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     spacer.set_margin_top(12);

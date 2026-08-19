@@ -4,6 +4,7 @@ use super::input_profile_editor_calibration::add_calibration_group;
 use super::input_profile_editor_pages::{
     connect_backend_change, reset_to_defaults, setup_pages, setup_sidebar,
 };
+use super::input_profile_editor_sections::default_profile_bindings;
 use super::input_profile_store::{new_managed_profile_path, read_profile, write_profile};
 use adw::prelude::*;
 use ira_input::{DeviceInfo, InputProfile, VirtualGamepadBackend};
@@ -69,12 +70,15 @@ pub(super) fn show_input_profile_editor(
             profile.name = layout_name.to_string();
         }
     }
-    let calibration = Rc::new(RefCell::new(profile.gyro_calibration));
-    let compatible_game_ids = profile.compatible_game_ids.clone();
-    let profile_name = Rc::new(RefCell::new(profile.name.clone()));
     let detected_devices = registry.snapshot();
     let device_was_explicit = device.is_some();
     let device = device.or_else(|| detected_devices.first().cloned());
+    if profile_path.is_none() {
+        profile = seed_new_profile_bindings(profile, device.as_ref());
+    }
+    let calibration = Rc::new(RefCell::new(profile.gyro_calibration));
+    let compatible_game_ids = profile.compatible_game_ids.clone();
+    let profile_name = Rc::new(RefCell::new(profile.name.clone()));
     let calibration_device = (device_was_explicit || detected_devices.len() == 1)
         .then(|| device.clone())
         .flatten();
@@ -369,6 +373,16 @@ fn build_profile(
     };
     profile.validate()?;
     Ok(profile)
+}
+
+fn seed_new_profile_bindings(
+    mut profile: InputProfile,
+    device: Option<&DeviceInfo>,
+) -> InputProfile {
+    if profile.bindings.is_empty() {
+        profile.bindings = default_profile_bindings(device, profile.backend);
+    }
+    profile
 }
 
 fn profile_with_game(mut profile: InputProfile, game_id: Option<i64>) -> InputProfile {

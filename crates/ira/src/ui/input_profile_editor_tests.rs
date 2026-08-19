@@ -2,10 +2,10 @@ use super::super::input_profile_editor_pages::section_order;
 use super::super::input_profile_editor_sections::{
     default_profile_bindings, section_behavior_bindings, stick_to_dpad_bindings,
 };
-use super::{build_profile, profile_path_for_save};
+use super::{build_profile, profile_path_for_save, seed_new_profile_bindings};
 use ira_input::{
-    AxisDirection, DeviceInfo, GamepadAxis, GamepadButton, GyroCalibration, InputSource,
-    OutputAction, VirtualGamepadBackend,
+    AxisDirection, Binding, DeviceInfo, GamepadAxis, GamepadButton, GyroCalibration, InputProfile,
+    InputSource, OutputAction, VirtualGamepadBackend,
 };
 use std::path::PathBuf;
 
@@ -103,6 +103,29 @@ fn test_profile_save_keeps_existing_path() {
     let saved_path =
         profile_path_for_save(tmp.path().to_str().unwrap(), Some(&old_path), "New name");
     assert_eq!(saved_path, old_path);
+}
+
+#[test]
+fn test_seed_new_profile_bindings_populates_defaults() {
+    let profile = seed_new_profile_bindings(InputProfile::default(), None);
+    assert!(!profile.bindings.is_empty());
+    assert!(profile
+        .bindings
+        .iter()
+        .any(|binding| binding.source == InputSource::Button(GamepadButton::A)));
+}
+
+#[test]
+fn test_seed_new_profile_bindings_keeps_existing_bindings() {
+    let profile = InputProfile {
+        bindings: vec![Binding::new(
+            InputSource::Button(GamepadButton::X),
+            OutputAction::GamepadButton(GamepadButton::Y),
+        )],
+        ..InputProfile::default()
+    };
+    let seeded = seed_new_profile_bindings(profile.clone(), None);
+    assert_eq!(seeded.bindings, profile.bindings);
 }
 
 #[test]

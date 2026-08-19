@@ -24,6 +24,25 @@ distrobox enter rust-dev -- cargo clippy --all-targets -- -D warnings   # Zero c
 
 **Always run `cargo build` and `cargo test` before committing.** Zero warnings is the baseline.
 
+### Running the app
+
+Always run the app from inside the distrobox. The host has no GTK/libadwaita
+development libraries, so any `cargo` invocation on the host that has to link
+will fail (`rust-lld: error: unable to find library -ladwaita-1`). It also sees
+the repo at a different path (`/var/data/...` vs the container's
+`/run/host/var/data/...`), which makes cargo rebuild everything and then fail at
+link time:
+
+```
+distrobox enter rust-dev -- cargo run            # build + run inside the container
+distrobox enter rust-dev -- cargo build && ./target/debug/ira   # build in container, run binary from host
+```
+
+The host can execute the container-built binary (all shared libs resolve at
+runtime); it just can't link one. If you use the second form, run it as two
+separate commands — `distrobox enter rust-dev -- cargo build && cargo run`
+leaves `cargo run` running on the host, which rebuilds and fails to link.
+
 ### Adding dependencies
 
 **Always use `cargo add` from the CLI, never edit `Cargo.toml` files directly.**

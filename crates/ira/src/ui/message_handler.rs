@@ -6,10 +6,12 @@ use super::message_helpers::{
     refresh_steam_playtimes_for, switch_to_game,
 };
 use super::sidebar::{rebuild_sidebar, set_sidebar_playing};
+use super::sidebar_item::{SidebarItem, SidebarItemKind};
 use super::state::SharedState;
 use crate::AppMessage;
 use crate::GameEntry;
 use adw::prelude::*;
+use std::collections::HashSet;
 
 pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
     match msg {
@@ -89,6 +91,7 @@ fn handle_game_stopped(state: &SharedState, db_id: i64) {
 
 fn handle_game_started(state: &SharedState, db_id: i64) {
     set_sidebar_playing(state, db_id, true);
+    trim_stale_images(state);
     let (watcher, game, save_dir) = {
         let s = state.borrow();
         let game = s
@@ -112,6 +115,59 @@ fn handle_game_started(state: &SharedState, db_id: i64) {
         }
     }
     refresh_selected_game(state, db_id);
+}
+
+/// Release the decoded heroes/covers/achievements of previously viewed games
+/// from the image caches when a game starts. Sidebar icons stay warm, and so
+/// do the images of the game currently on screen, so nothing visibly reloads.
+fn trim_stale_images(state: &SharedState) {
+    let protected = {
+        let s = state.borrow();
+        let mut protected = HashSet::new();
+        for i in 0..s.sidebar_store.n_items() {
+            if let Some(item) = s
+                .sidebar_store
+                .item(i)
+                .and_then(|obj| obj.downcast::<SidebarItem>().ok())
+            {
+                if item.kind() == SidebarItemKind::Game && !item.icon_path().is_empty() {
+                    protected.insert(item.icon_path());
+                }
+            }
+        }
+        if s.displayed_db_id != 0 {
+            if let Some(game) = s.games.iter().find(|g| {
+                g.db_id == s.displayed_db_id && g.variant_id == s.displayed_variant_id
+            }) {
+                for path in [
+                    &game.icon_path,
+                    &game.hero_image_path,
+                    &game.logo_path,
+                    &game.grid_path,
+                    &game.header_path,
+                ] {
+                    if !path.is_empty() {
+                        protected.insert(path.clone());
+                    }
+                }
+                protected.extend(
+                    game.achievements
+                        .iter()
+                        .map(|ach| &ach.icon_path)
+                        .filter(|path| !path.is_empty())
+                        .cloned(),
+                );
+            }
+        }
+        protected
+    };
+    if protected.is_empty() {
+        return;
+    }
+    ira_images::trim_image_caches(&protected);
+    glib::idle_add_local_once(move || unsafe {
+        super::state::malloc_trim(0);
+    });
 }
 
 fn handle_session_recorded(

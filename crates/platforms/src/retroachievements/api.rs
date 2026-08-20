@@ -18,6 +18,7 @@ const RA_WEB_GAME_LIST: &str = "https://retroachievements.org/API/API_GetGameLis
 const RA_WEB_GAME_PROGRESS: &str =
     "https://retroachievements.org/API/API_GetGameInfoAndUserProgress.php";
 const RA_BADGE_URL: &str = "https://media.retroachievements.org/Badge";
+const RA_IMAGE_URL: &str = "https://media.retroachievements.org";
 const CACHE_SECS: u64 = 3600;
 const RA_RATE_LIMIT_MS: u64 = 500;
 
@@ -216,37 +217,81 @@ impl RaClient {
         String::new()
     }
 
+    /// Fetch the bytes at an RA image path, applying the `RA_IMAGE_URL`
+    /// prefix unless the path is already an absolute URL. Errors on network
+    /// failure or a non-success status.
+    fn fetch_ra_bytes(&self, image_icon: &str) -> Result<Vec<u8>, String> {
+        let url = if image_icon.starts_with("http") {
+            image_icon.to_string()
+        } else {
+            format!("{}{}", RA_IMAGE_URL, image_icon)
+        };
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .map_err(|e| format!("RA icon download error: {}", e))?;
+        if !resp.status().is_success() {
+            return Err(format!("RA icon HTTP {}", resp.status()));
+        }
+        resp.bytes()
+            .map(|b| b.to_vec())
+            .map_err(|e| format!("RA icon download read error: {}", e))
+    }
+
+    /// Download the RA game icon as image bytes without touching any game
+    /// data directory. Returns lossless WebP for PNG/ICO sources, the raw
+    /// bytes for JPEG/WebP, and an error when the fetch fails or the body
+    /// isn't a decodable image. Callers treat the result as a pending draft
+    /// applied only on Save.
+    pub fn download_game_icon_bytes(&self, image_icon: &str) -> Result<Vec<u8>, String> {
+        let bytes = self.fetch_ra_bytes(image_icon)?;
+        if bytes.is_empty() {
+            return Err("RA icon: empty body".to_string());
+        }
+        let out = ira_parser::convert_bytes_to_lossless_webp(&bytes)
+            .ok_or_else(|| "RA icon: body is not a decodable image".to_string())?;
+        // convert passes JPEG/WebP through on magic bytes alone; fully decode
+        // the payload so a corrupt body never reaches disk on Save.
+        if !ira_parser::is_decodable_image(&bytes) {
+            return Err("RA icon: body is not a decodable image".to_string());
+        }
+        Ok(out)
+    }
+
+    /// Download the game's icon from RA to `data/retro/{db_id}/icon.webp`,
+    /// reusing the on-disk copy when it already exists. Returns the icon path
+    /// on success, or an empty string when the fetch fails or the body isn't
+    /// a decodable image.
     pub fn download_game_icon(&self, save_dir: &str, db_id: i64, image_icon: &str) -> String {
         let _s = info_span!("download_game_icon", db_id).entered();
         let dest = ira_parser::retro_data_dir(save_dir, db_id).join("icon.webp");
         if dest.is_file() {
             return dest.to_string_lossy().into_owned();
         }
-        let _ = std::fs::create_dir_all(dest.parent().unwrap_or(Path::new(".")));
-        let url = if image_icon.starts_with("http") {
-            image_icon.to_string()
-        } else {
-            format!("https://retroachievements.org{}", image_icon)
+        let bytes = match self.fetch_ra_bytes(image_icon) {
+            Ok(b) if !b.is_empty() && ira_parser::is_decodable_image(&b) => b,
+            Ok(_) => {
+                eprintln!("RA icon: body is not a decodable image");
+                return String::new();
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                return String::new();
+            }
         };
+        let _ = std::fs::create_dir_all(dest.parent().unwrap_or(Path::new(".")));
         let tmp = dest.with_extension("png");
-        match self.http.get(&url).send() {
-            Ok(resp) if resp.status().is_success() => match resp.bytes() {
-                Ok(bytes) => {
-                    if std::fs::write(&tmp, &bytes).is_ok() {
-                        ira_parser::convert_to_lossless_webp(&tmp);
-                        if dest.is_file() {
-                            return dest.to_string_lossy().into_owned();
-                        }
-                        if tmp.is_file() {
-                            return tmp.to_string_lossy().into_owned();
-                        }
-                    }
-                }
-                Err(e) => eprintln!("RA icon download read error: {}", e),
-            },
-            Ok(resp) => eprintln!("RA icon HTTP {}", resp.status()),
-            Err(e) => eprintln!("RA icon download error: {}", e),
+        if std::fs::write(&tmp, &bytes).is_ok() {
+            ira_parser::convert_to_lossless_webp(&tmp);
+            if dest.is_file() {
+                return dest.to_string_lossy().into_owned();
+            }
+            if tmp.is_file() {
+                return tmp.to_string_lossy().into_owned();
+            }
         }
+        let _ = std::fs::remove_file(&tmp);
         String::new()
     }
 }

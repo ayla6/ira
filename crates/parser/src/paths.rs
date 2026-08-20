@@ -276,6 +276,14 @@ pub fn convert_bytes_to_lossless_webp(data: &[u8]) -> Option<Vec<u8>> {
     )
 }
 
+/// Check that raw bytes fully decode to an image. Unlike
+/// `convert_bytes_to_lossless_webp` — which passes JPEG/WebP through based on
+/// magic bytes alone — this decodes the whole payload, so callers that must
+/// never write a corrupt file to disk should run this before persisting.
+pub fn is_decodable_image(data: &[u8]) -> bool {
+    image::load_from_memory(data).is_ok()
+}
+
 /// Open an image file (PNG, ICO, etc.) and re-save as lossless WebP,
 /// removing the original. Does nothing if the file is already WebP or is
 /// a JPEG (JPEGs are kept as-is to avoid generation loss).
@@ -366,6 +374,23 @@ mod tests {
     #[test]
     fn test_url_extension_jpg() {
         assert_eq!(url_extension("photo.jpg"), "jpg");
+    }
+
+    #[test]
+    fn test_is_decodable_image_accepts_valid_rejects_garbage() {
+        let mut png = Vec::new();
+        let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 0, 0, 255]));
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        assert!(is_decodable_image(&png), "valid PNG must decode");
+
+        // PNG signature with garbage payload: magic bytes alone would pass a
+        // guess-format check, but a full decode must reject it.
+        let truncated_png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0xFF, 0xFF];
+        assert!(!is_decodable_image(&truncated_png));
+        assert!(!is_decodable_image(b"not an image"));
+        assert!(!is_decodable_image(&[]));
     }
 
     #[test]

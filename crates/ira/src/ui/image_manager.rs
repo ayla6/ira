@@ -444,7 +444,6 @@ fn build_ra_icon_button(
         return None;
     }
     let btn = gtk4::Button::with_label(&crate::tr!("RA icon"));
-    let db_id = game.db_id;
     let app_id = game.app_id.clone();
     let save_dir = state.borrow().save_dir.clone();
     let ra_username = state.borrow().cfg.ra_username.clone();
@@ -456,30 +455,25 @@ fn build_ra_icon_button(
     btn.connect_clicked(move |_| {
         btn_clone.set_sensitive(false);
         btn_clone.set_label(&crate::tr!("Downloading…"));
-        let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+        let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<u8>, String>>();
         let rx = std::cell::RefCell::new(rx);
         let ra_username = ra_username.clone();
         let ra_web_api_key = ra_web_api_key.clone();
         let app_id = app_id.clone();
         let save_dir = save_dir.clone();
-        let db_id = db_id;
         std::thread::spawn(move || {
-            let _s = tracing::info_span!("ra_icon_download", db_id).entered();
+            let _s = tracing::info_span!("ra_icon_download", app_id = %app_id).entered();
             let client =
                 ira_platforms::retroachievements::RaClient::new(&ra_username, &ra_web_api_key);
             let image_icon = match client.fetch_web_game_progress(&save_dir, &app_id) {
                 Ok((game_data, _)) => Some(game_data.image_icon),
                 _ => None,
             };
-            match image_icon.filter(|icon| !icon.is_empty()) {
-                Some(icon) => {
-                    let icon = client.download_game_icon(&save_dir, db_id, &icon);
-                    let _ = tx.send(if icon.is_empty() { None } else { Some(icon) });
-                }
-                None => {
-                    let _ = tx.send(None);
-                }
-            }
+            let result = match image_icon.filter(|icon| !icon.is_empty()) {
+                Some(icon) => client.download_game_icon_bytes(&icon),
+                None => Err(crate::tr!("No RA icon available").to_string()),
+            };
+            let _ = tx.send(result);
         });
         let btn_weak = btn_clone.downgrade();
         let refresh = refresh.clone();
@@ -491,12 +485,30 @@ fn build_ra_icon_button(
                     btn.set_sensitive(true);
                     btn.set_label(&crate::tr!("RA icon"));
                 }
-                if let Some(path) = result {
-                    if let Some(ref pc) = pc {
-                        pc.borrow_mut()
-                            .insert(asset.clone(), PendingImage::Path(path));
+                match result {
+                    Ok(bytes) => {
+                        if let Some(ref pc) = pc {
+                            pc.borrow_mut()
+                                .insert(asset.clone(), PendingImage::Bytes(bytes));
+                        }
+                        refresh();
                     }
-                    refresh();
+                    Err(err) => {
+                        if let Some(btn) = btn_weak.upgrade() {
+                            let short: String = err.chars().take(40).collect();
+                            btn.set_label(&short);
+                            let btn_weak = btn.downgrade();
+                            glib::timeout_add_local(
+                                std::time::Duration::from_secs(2),
+                                move || {
+                                    if let Some(btn) = btn_weak.upgrade() {
+                                        btn.set_label(&crate::tr!("RA icon"));
+                                    }
+                                    glib::ControlFlow::Break
+                                },
+                            );
+                        }
+                    }
                 }
                 glib::ControlFlow::Break
             } else {

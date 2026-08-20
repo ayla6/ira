@@ -6,7 +6,7 @@ use super::edit_game_pages::{build_api_emulator_page, build_dlc_page};
 use super::edit_game_save::{save_game_settings, SaveGameSettingsParams};
 use super::edit_game_system::{build_system_page, SystemWidgets};
 use super::edit_game_variants::build_variants_page;
-use super::state::{PendingImage, SharedState};
+use super::state::{PendingImage, SharedState, SgdbAssetsCacheEntry};
 use super::wine_config_widget::{build_wine_config_pages, WineConfigWidgets};
 use crate::Game;
 use adw::prelude::*;
@@ -291,6 +291,7 @@ fn build_dialog_contents(
     languages
         .sort_by(|a, b| ira_models::steam_language_name(a).cmp(ira_models::steam_language_name(b)));
     let pending_copies: Rc<RefCell<HashMap<String, PendingImage>>> = Default::default();
+    let sgdb_cache: Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>> = Default::default();
     let (
         general_page,
         title_entry,
@@ -339,6 +340,7 @@ fn build_dialog_contents(
             &game,
             &win,
             Some(pending_copies.clone()),
+            Some(sgdb_cache.clone()),
         );
         sidebar.append(&super::settings_dialog::settings_sidebar_row(
             "image-x-generic-symbolic",
@@ -563,6 +565,7 @@ fn build_dialog_contents(
             stack: stack.clone(),
             db_id,
             pending_copies: pending_copies.clone(),
+            sgdb_cache: sgdb_cache.clone(),
             ra_container,
         });
     }

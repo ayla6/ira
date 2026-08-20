@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use super::css::*;
 use super::game_item::GameItem;
-use super::state::{PendingImage, SharedState};
+use super::state::{PendingImage, SharedState, SgdbAssetsCacheEntry};
 
 pub struct DialogLayout {
     pub window: adw::Window,
@@ -389,6 +389,7 @@ pub fn refresh_settings_images_page(
         &Game,
         &adw::Window,
         Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
+        Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
     ) -> gtk4::Widget,
 ) {
     let sd = match state.borrow().settings_data.clone() {
@@ -406,7 +407,13 @@ pub fn refresh_settings_images_page(
             .find(|g| g.db_id == db_id)
             .cloned()
         {
-            let new_page = build_page(state, &game, &sd.window, Some(sd.pending_copies.clone()));
+            let new_page = build_page(
+                state,
+                &game,
+                &sd.window,
+                Some(sd.pending_copies.clone()),
+                Some(sd.sgdb_cache.clone()),
+            );
             sd.stack.add_named(&new_page, Some("images"));
         }
     }

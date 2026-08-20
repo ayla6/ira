@@ -377,8 +377,8 @@ fn handle_sgdb_assets_downloaded(
         }
     }
 
-    super::helpers::refresh_settings_images_page(state, db_id, |s, game, win, pc| {
-        build_image_manager_content_with_drafts(s, game, win, pc).upcast()
+    super::helpers::refresh_settings_images_page(state, db_id, |s, game, win, pc, scache| {
+        build_image_manager_content_with_drafts(s, game, win, pc, scache).upcast()
     });
     refresh_selected_game(state, db_id);
 }

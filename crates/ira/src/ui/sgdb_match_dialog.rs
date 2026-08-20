@@ -138,8 +138,8 @@ pub(super) fn handle_unified_sgdb_result(
             if let Some(game) = game_to_display {
                 display_game(&game, &sc);
             }
-            refresh_settings_images_page(&sc, db_id, |s, game, win, pc| {
-                build_image_manager_content_with_drafts(s, game, win, pc).upcast()
+            refresh_settings_images_page(&sc, db_id, |s, game, win, pc, scache| {
+                build_image_manager_content_with_drafts(s, game, win, pc, scache).upcast()
             });
             if is_grid_showing {
                 show_grid_view(&sc);
@@ -310,8 +310,9 @@ pub fn show_sgdb_search_dialog(
                                     sd.pending_copies.borrow_mut().remove("__unmatch__");
                                 }
                             }
-                            refresh_settings_images_page(&state_c3, db_id, |s, game, win, pc| {
-                                build_image_manager_content_with_drafts(s, game, win, pc).upcast()
+                            refresh_settings_images_page(&state_c3, db_id, |s, game, win, pc, scache| {
+                                build_image_manager_content_with_drafts(s, game, win, pc, scache)
+                                    .upcast()
                             });
                             let steam = state_c3.borrow().steam.clone();
                             let sgdb_id_d = sgdb_id_c.clone();

@@ -1,6 +1,7 @@
 use super::game_selection_model::GameSelectionModel;
 use crate::AppSender;
 use crate::Game;
+use ira_api::types::SgdbAsset;
 use ira_api::SteamDataClient;
 use ira_config::Config;
 use ira_db::DbConn;
@@ -18,12 +19,22 @@ pub enum PendingImage {
     Bytes(Vec<u8>),
 }
 
+/// Fetched SGDB asset list for one asset type, kept alive only while the
+/// per-game settings screen is open so reopening the picker is instant.
+#[derive(Clone)]
+pub struct SgdbAssetsCacheEntry {
+    pub assets: Vec<SgdbAsset>,
+    pub has_more: bool,
+    pub next_page: u32,
+}
+
 #[derive(Clone)]
 pub struct SettingsData {
     pub window: adw::Window,
     pub stack: gtk4::Stack,
     pub db_id: i64,
     pub pending_copies: Rc<RefCell<HashMap<String, PendingImage>>>,
+    pub sgdb_cache: Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>,
     pub ra_container: Option<gtk4::Box>,
 }
 

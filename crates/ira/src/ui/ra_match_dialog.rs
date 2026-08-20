@@ -82,9 +82,11 @@ fn apply_ra_match(
     let sc_refresh = sc.clone();
     glib::idle_add_local_once(move || {
         super::game_settings::refresh_ra_section(&sc_refresh, db_id);
-        super::helpers::refresh_settings_images_page(&sc_refresh, db_id, |s, game, win, pc| {
-            super::image_manager::build_image_manager_content_with_drafts(s, game, win, pc)
-                .upcast()
+        super::helpers::refresh_settings_images_page(&sc_refresh, db_id, |s, game, win, pc, scache| {
+            super::image_manager::build_image_manager_content_with_drafts(
+                s, game, win, pc, scache,
+            )
+            .upcast()
         });
     });
 }

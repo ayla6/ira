@@ -3,7 +3,7 @@ use super::helpers::{clear_children, make_browse_button, refresh_settings_images
 use super::image_manager_helpers::{find_best_image_path, make_refresh_closure, AssetRefreshCtx};
 use super::sgdb_match_dialog::show_sgdb_search_dialog;
 use super::sgdb_picker::{show_sgdb_picker, ShowSgdbPickerParams};
-use super::state::{PendingImage, SharedState};
+use super::state::{PendingImage, SharedState, SgdbAssetsCacheEntry};
 use crate::Game;
 use adw::prelude::*;
 use ira_models::AssetType;
@@ -16,7 +16,7 @@ pub fn build_image_manager_content(
     game: &Game,
     parent_win: &adw::Window,
 ) -> gtk4::Box {
-    build_image_manager_content_with_drafts(state, game, parent_win, None)
+    build_image_manager_content_with_drafts(state, game, parent_win, None, None)
 }
 
 pub fn build_image_manager_content_with_drafts(
@@ -24,6 +24,7 @@ pub fn build_image_manager_content_with_drafts(
     game: &Game,
     parent_win: &adw::Window,
     pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
+    sgdb_cache: Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
 ) -> gtk4::Box {
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
     content.set_margin_start(16);
@@ -52,6 +53,7 @@ pub fn build_image_manager_content_with_drafts(
             state,
             parent_win,
             pending_copies: pending_copies.clone(),
+            sgdb_cache: sgdb_cache.clone(),
         });
         content.append(&section);
     }
@@ -91,10 +93,10 @@ pub fn build_image_manager_content_with_drafts(
                 if let Some(ref pc) = pending_pc {
                     pc.borrow_mut()
                         .insert("__unmatch__".to_string(), PendingImage::Path(String::new()));
-                    refresh_settings_images_page(&sc, did, |s, game, win, pc| {
+                    refresh_settings_images_page(&sc, did, |s, game, win, pc, scache| {
                         let mut g2 = game.clone();
                         g2.sgdb_id.clear();
-                        build_image_manager_content_with_drafts(s, &g2, win, pc).upcast()
+                        build_image_manager_content_with_drafts(s, &g2, win, pc, scache).upcast()
                     });
                 }
             });
@@ -118,6 +120,7 @@ struct BuildImageSectionParams<'a> {
     state: &'a SharedState,
     parent_win: &'a adw::Window,
     pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
+    sgdb_cache: Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
 }
 
 fn resolve_image_source(
@@ -306,6 +309,7 @@ struct SgdbPickerCtx<'a> {
     refresh_images: &'a Rc<dyn Fn()>,
     dims: &'a [&'static str],
     pending_copies: &'a Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
+    sgdb_cache: &'a Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
     save_dir: &'a str,
 }
 
@@ -333,6 +337,7 @@ fn build_sgdb_picker_button(
     let dims_vec: Vec<&str> = ctx.dims.to_vec();
     let sgdb_id_c = sgdb_id_for_picker.clone();
     let save_dir_c = ctx.save_dir.to_string();
+    let sgdb_cache_btn = ctx.sgdb_cache.clone();
     let dest_dir = ira_parser::game_data_dir(&save_dir_c, game)
         .to_string_lossy()
         .into_owned();
@@ -346,6 +351,7 @@ fn build_sgdb_picker_button(
             parent: &parent,
             on_done: refresh.clone(),
             pending_copies: pending_copies_btn.clone(),
+            sgdb_cache: sgdb_cache_btn.clone(),
             save_dir: &save_dir_c,
             dest_dir: Some(&dest_dir),
         });
@@ -513,6 +519,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         state,
         parent_win,
         pending_copies,
+        sgdb_cache,
     } = params;
     let is_steam = game.trophy_source.has_steam_enrichment() && !game.app_id.is_empty();
     let id = game.app_id.clone();
@@ -615,6 +622,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         refresh_images: &refresh_images,
         dims,
         pending_copies: &pending_copies,
+        sgdb_cache: &sgdb_cache,
         save_dir: &save_dir,
     };
     if let Some(btn) = build_sgdb_picker_button(game, is_steam, &id, &sgdb_ctx) {
@@ -767,6 +775,7 @@ fn build_dir_buttons(
                 parent: &parent,
                 on_done,
                 pending_copies: None,
+                sgdb_cache: None,
                 save_dir: &save_dir,
                 dest_dir: Some(&target_dir_c),
             });

@@ -26,6 +26,13 @@ fn init_tracing() -> Option<()> {
 
 fn main() {
     let _flush_guard = init_tracing();
+    // Keep large image buffers (covers, heroes, logos) mmap-backed so freeing
+    // them returns the memory to the OS instead of leaving fragmented holes in
+    // the sbrk arena that malloc_trim can't reclaim. Pinning the threshold
+    // also stops glibc from dynamically raising it.
+    unsafe {
+        libc::mallopt(libc::M_MMAP_THRESHOLD, 256 * 1024);
+    }
     ira::i18n::init();
 
     gio::resources_register_include!("ira.gresource")

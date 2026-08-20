@@ -128,29 +128,33 @@ fn drain_results() -> glib::ControlFlow {
                     PENDING_LOADS.with(|cell| cell.borrow_mut().remove(&path));
                 let pixbuf_callbacks =
                     PENDING_PIXBUFS.with(|cell| cell.borrow_mut().remove(&path));
-                let texture = result.as_ref().map(|(pixels, w, h)| {
-                    let bytes = glib::Bytes::from_owned(pixels.clone());
-                    MemoryTexture::new(
-                        *w as i32,
-                        *h as i32,
-                        MemoryFormat::R8g8b8a8,
-                        &bytes,
-                        (*w * 4) as usize,
-                    )
-                    .upcast::<Texture>()
-                });
-                let pixbuf = result.as_ref().map(|(pixels, w, h)| {
-                    let bytes = glib::Bytes::from_owned(pixels.clone());
-                    Pixbuf::from_bytes(
-                        &bytes,
-                        Colorspace::Rgb,
-                        true,
-                        8,
-                        *w as i32,
-                        *h as i32,
-                        (*w * 4) as i32,
-                    )
-                });
+                // One decoded byte buffer, shared by both wrappers: the texture
+                // and the pixbuf each just refcount the same `Bytes`, so the
+                // pixbuf path adds no pixel data of its own.
+                let (texture, pixbuf) = match result.as_ref() {
+                    Some((pixels, w, h)) => {
+                        let bytes = glib::Bytes::from_owned(pixels.clone());
+                        let texture = MemoryTexture::new(
+                            *w as i32,
+                            *h as i32,
+                            MemoryFormat::R8g8b8a8,
+                            &bytes,
+                            (*w * 4) as usize,
+                        )
+                        .upcast::<Texture>();
+                        let pixbuf = Pixbuf::from_bytes(
+                            &bytes,
+                            Colorspace::Rgb,
+                            true,
+                            8,
+                            *w as i32,
+                            *h as i32,
+                            (*w * 4) as i32,
+                        );
+                        (Some(texture), Some(pixbuf))
+                    }
+                    None => (None, None),
+                };
                 if let Some(ref t) = texture {
                     insert_texture(&path, t.clone());
                 }

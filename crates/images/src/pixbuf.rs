@@ -1,17 +1,11 @@
 use crate::async_load::{ensure_drain, submit_decode};
-use crate::cache::{PENDING_LOADS, PENDING_PIXBUFS, PIXBUF_CACHE, PIXBUF_CACHE_MAX};
+use crate::cache::{PENDING_LOADS, PENDING_PIXBUFS, PIXBUF_CACHE};
 use gtk4::gdk_pixbuf::Pixbuf;
 use tracing::info_span;
 
 pub(crate) fn cache_pixbuf(path: &str, pb: &Pixbuf) {
     PIXBUF_CACHE.with(|cell| {
-        let mut cache = cell.borrow_mut();
-        if cache.len() >= PIXBUF_CACHE_MAX {
-            if let Some(key) = cache.keys().next().cloned() {
-                cache.remove(&key);
-            }
-        }
-        cache.insert(path.to_string(), pb.clone());
+        cell.borrow_mut().insert(path, pb.clone());
     });
 }
 
@@ -20,7 +14,7 @@ pub fn pixbuf_for(path: &str) -> Option<Pixbuf> {
     if path.is_empty() {
         return None;
     }
-    if let Some(pb) = PIXBUF_CACHE.with(|cell| cell.borrow().get(path).cloned()) {
+    if let Some(pb) = PIXBUF_CACHE.with(|cell| cell.borrow().get(path)) {
         return Some(pb);
     }
     match Pixbuf::from_file(path) {
@@ -45,7 +39,7 @@ where
         callback(None);
         return;
     }
-    if let Some(pb) = PIXBUF_CACHE.with(|cell| cell.borrow().get(&path).cloned()) {
+    if let Some(pb) = PIXBUF_CACHE.with(|cell| cell.borrow().get(&path)) {
         callback(Some(pb));
         return;
     }

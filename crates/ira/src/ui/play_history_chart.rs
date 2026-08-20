@@ -104,14 +104,14 @@ struct State {
     current_idx: usize,
     selected_day: usize,
     is_single_game: bool,
-    chart: BarChart,
-    sidebar_header: gtk4::Label,
-    sidebar_list: gtk4::ListBox,
-    week_label: gtk4::Label,
-    prev_w: gtk4::Button,
-    next_w: gtk4::Button,
-    prev_d: gtk4::Button,
-    next_d: gtk4::Button,
+    chart: glib::WeakRef<BarChart>,
+    sidebar_header: glib::WeakRef<gtk4::Label>,
+    sidebar_list: glib::WeakRef<gtk4::ListBox>,
+    week_label: glib::WeakRef<gtk4::Label>,
+    prev_w: glib::WeakRef<gtk4::Button>,
+    next_w: glib::WeakRef<gtk4::Button>,
+    prev_d: glib::WeakRef<gtk4::Button>,
+    next_d: glib::WeakRef<gtk4::Button>,
     on_delete: Option<DeleteSessionFn>,
     ctrl_held: Rc<Cell<bool>>,
 }
@@ -125,9 +125,11 @@ pub(super) fn build_weekly_chart(
 ) -> gtk4::Widget {
     let container = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     container.set_focusable(true);
-    let focus_target = container.clone();
+    let focus_target = container.downgrade();
     container.connect_map(move |_| {
-        focus_target.grab_focus();
+        if let Some(t) = focus_target.upgrade() {
+            t.grab_focus();
+        }
     });
 
     let week_label = gtk4::Label::new(Some(""));
@@ -205,14 +207,14 @@ pub(super) fn build_weekly_chart(
         selected_day: 6,
         is_single_game,
         weeks,
-        chart: chart.clone(),
-        sidebar_header: sidebar_header.clone(),
-        sidebar_list: sidebar_list.clone(),
-        week_label: week_label.clone(),
-        prev_w: pw.clone(),
-        next_w: nw.clone(),
-        prev_d: pd.clone(),
-        next_d: nd.clone(),
+        chart: chart.downgrade(),
+        sidebar_header: sidebar_header.downgrade(),
+        sidebar_list: sidebar_list.downgrade(),
+        week_label: week_label.downgrade(),
+        prev_w: pw.downgrade(),
+        next_w: nw.downgrade(),
+        prev_d: pd.downgrade(),
+        next_d: nd.downgrade(),
         on_delete,
         ctrl_held,
     }));
@@ -354,24 +356,33 @@ fn rebuild(state: &Rc<RefCell<State>>, forced: Option<usize>) {
 
     {
         let s = state.borrow();
-        s.chart.set_data(&week.days, nmax, interval, is_sg);
-        s.chart.set_selected_day(sel, is_sg);
+        let Some(chart) = s.chart.upgrade() else {
+            return;
+        };
+        chart.set_data(&week.days, nmax, interval, is_sg);
+        chart.set_selected_day(sel, is_sg);
     }
 
     {
         let s = state.borrow();
         update_stats(&s);
-        s.prev_w.set_sensitive(s.current_idx > 0);
-        s.next_w.set_sensitive(s.current_idx + 1 < s.weeks.len());
+        if let Some(w) = s.prev_w.upgrade() {
+            w.set_sensitive(s.current_idx > 0);
+        }
+        if let Some(w) = s.next_w.upgrade() {
+            w.set_sensitive(s.current_idx + 1 < s.weeks.len());
+        }
         update_day_btns(&s);
     }
 }
 
 fn update_day_btns(s: &State) {
-    s.prev_d
-        .set_sensitive(s.current_idx > 0 || s.selected_day > 0);
-    s.next_d
-        .set_sensitive(s.current_idx + 1 < s.weeks.len() || s.selected_day < 6);
+    if let Some(w) = s.prev_d.upgrade() {
+        w.set_sensitive(s.current_idx > 0 || s.selected_day > 0);
+    }
+    if let Some(w) = s.next_d.upgrade() {
+        w.set_sensitive(s.current_idx + 1 < s.weeks.len() || s.selected_day < 6);
+    }
 }
 
 fn select_day(state: &Rc<RefCell<State>>, idx: usize) {
@@ -382,7 +393,10 @@ fn select_day(state: &Rc<RefCell<State>>, idx: usize) {
     };
     {
         let s = state.borrow();
-        s.chart.set_selected_day(idx, is_sg);
+        let Some(chart) = s.chart.upgrade() else {
+            return;
+        };
+        chart.set_selected_day(idx, is_sg);
         update_stats(&s);
         update_day_btns(&s);
     }
@@ -447,7 +461,9 @@ fn update_stats(s: &State) {
             format_duration(week.week_total as i64)
         )
     };
-    s.week_label.set_markup(&wt);
+    if let Some(w) = s.week_label.upgrade() {
+        w.set_markup(&wt);
+    }
 
     let ht = if day.total > 0.0 {
         format!(
@@ -459,18 +475,23 @@ fn update_stats(s: &State) {
     } else {
         day.date.format("%a, %b %d").to_string()
     };
-    s.sidebar_header.set_markup(&ht);
+    if let Some(w) = s.sidebar_header.upgrade() {
+        w.set_markup(&ht);
+    }
 
     update_sidebar(s, day);
 }
 
 fn update_sidebar(s: &State, day: &DayData) {
-    clear_children(&s.sidebar_list);
+    let Some(sidebar_list) = s.sidebar_list.upgrade() else {
+        return;
+    };
+    clear_children(&sidebar_list);
     if day.details.is_empty() {
         let r = adw::ActionRow::new();
         r.set_title(&crate::tr!("No sessions"));
         r.add_css_class(CSS_DIM_LABEL);
-        s.sidebar_list.append(&r);
+        sidebar_list.append(&r);
         return;
     }
     for d in &day.details {
@@ -488,7 +509,7 @@ fn update_sidebar(s: &State, day: &DayData) {
             if let (Some(sid), Some(on_delete)) = (d.session_id, &s.on_delete) {
                 r.add_suffix(&make_delete_button(sid, on_delete, &s.ctrl_held));
             }
-            s.sidebar_list.append(&r);
+            sidebar_list.append(&r);
         } else {
             let ex = adw::ExpanderRow::new();
             ex.set_title(&esc(&d.label));
@@ -511,7 +532,7 @@ fn update_sidebar(s: &State, day: &DayData) {
                 }
                 ex.add_row(&sub);
             }
-            s.sidebar_list.append(&ex);
+            sidebar_list.append(&ex);
         }
     }
 }

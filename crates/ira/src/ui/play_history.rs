@@ -126,9 +126,12 @@ pub fn show_play_history_dialog(
             } else {
                 let on_delete: super::play_history_chart::DeleteSessionFn = {
                     let state = state.clone();
-                    let dialog = dialog.clone();
+                    let dialog_weak = dialog.downgrade();
                     let rebuild_handle = rebuild_handle_c.clone();
                     std::rc::Rc::new(move |session_id: i64, ctrl: bool| {
+                        let Some(dialog) = dialog_weak.upgrade() else {
+                            return;
+                        };
                         let rebuild = rebuild_handle.borrow().clone();
                         if let Some(rebuild) = rebuild {
                             delete_session_with_confirm(&state, &dialog, session_id, ctrl, rebuild);
@@ -157,7 +160,12 @@ pub fn show_play_history_dialog(
     dialog.present(Some(&state.borrow().window));
 
     let refresh_state = state.clone();
+    let rebuild_handle_close = rebuild_handle.clone();
     dialog.connect_closed(move |_| {
+        // The rebuild closure is stored inside rebuild_handle and itself holds
+        // a strong clone of it — an Rc cycle. Clear it here so the dialog and
+        // its widget tree are freed on close instead of leaking.
+        *rebuild_handle_close.borrow_mut() = None;
         let still_active = refresh_state.borrow().displayed_db_id == game_id;
         let game = if still_active {
             refresh_state
@@ -172,6 +180,12 @@ pub fn show_play_history_dialog(
         if let Some(game) = game {
             super::game_display::display_game(&game, &refresh_state);
         }
+        // The dialog allocates many small widgets; freeing them in scattered
+        // order leaves holes in the glibc arena that RSS holds onto. Trim the
+        // arena tail once the dialog is gone so repeated opens don't creep RSS.
+        glib::idle_add_local_once(|| unsafe {
+            super::state::malloc_trim(0);
+        });
     });
 
     dialog

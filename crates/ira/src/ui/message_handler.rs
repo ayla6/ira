@@ -6,7 +6,6 @@ use super::message_helpers::{
     refresh_steam_playtimes_for, switch_to_game,
 };
 use super::sidebar::{rebuild_sidebar, set_sidebar_playing};
-use super::sidebar_item::{SidebarItem, SidebarItemKind};
 use super::state::SharedState;
 use crate::AppMessage;
 use crate::GameEntry;
@@ -91,7 +90,7 @@ fn handle_game_stopped(state: &SharedState, db_id: i64) {
 
 fn handle_game_started(state: &SharedState, db_id: i64) {
     set_sidebar_playing(state, db_id, true);
-    trim_stale_images(state);
+    trim_stale_images(state, db_id);
     let (watcher, game, save_dir) = {
         let s = state.borrow();
         let game = s
@@ -119,26 +118,30 @@ fn handle_game_started(state: &SharedState, db_id: i64) {
 
 /// Release the decoded heroes/covers/achievements of previously viewed games
 /// from the image caches when a game starts. Sidebar icons stay warm, and so
-/// do the images of the game currently on screen, so nothing visibly reloads.
-fn trim_stale_images(state: &SharedState) {
+/// do the images of the game currently on screen (and the one being launched),
+/// so nothing visibly reloads.
+fn trim_stale_images(state: &SharedState, started_db_id: i64) {
     let protected = {
         let s = state.borrow();
-        let mut protected = HashSet::new();
-        for i in 0..s.sidebar_store.n_items() {
-            if let Some(item) = s
-                .sidebar_store
-                .item(i)
-                .and_then(|obj| obj.downcast::<SidebarItem>().ok())
-            {
-                if item.kind() == SidebarItemKind::Game && !item.icon_path().is_empty() {
-                    protected.insert(item.icon_path());
-                }
+        // Sidebar rows are populated straight from `game.icon_path`, so the
+        // game list is the source of truth for which icons must stay warm.
+        let mut protected: HashSet<String> = s
+            .games
+            .iter()
+            .map(|g| g.icon_path.clone())
+            .filter(|p| !p.is_empty())
+            .collect();
+        for (db_id, variant_id) in
+            [(s.displayed_db_id, s.displayed_variant_id), (started_db_id, None)]
+        {
+            if db_id == 0 {
+                continue;
             }
-        }
-        if s.displayed_db_id != 0 {
-            if let Some(game) = s.games.iter().find(|g| {
-                g.db_id == s.displayed_db_id && g.variant_id == s.displayed_variant_id
-            }) {
+            if let Some(game) = s
+                .games
+                .iter()
+                .find(|g| g.db_id == db_id && g.variant_id == variant_id)
+            {
                 for path in [
                     &game.icon_path,
                     &game.hero_image_path,
@@ -150,13 +153,13 @@ fn trim_stale_images(state: &SharedState) {
                         protected.insert(path.clone());
                     }
                 }
-                protected.extend(
-                    game.achievements
-                        .iter()
-                        .map(|ach| &ach.icon_path)
-                        .filter(|path| !path.is_empty())
-                        .cloned(),
-                );
+                for path in game.achievements.iter().flat_map(|ach| {
+                    [ach.icon_path.clone(), ach.icon_gray_path.clone()]
+                }) {
+                    if !path.is_empty() {
+                        protected.insert(path);
+                    }
+                }
             }
         }
         protected

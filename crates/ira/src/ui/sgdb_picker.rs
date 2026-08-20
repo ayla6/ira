@@ -400,6 +400,24 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         save_dir,
         dest_dir,
     } = params;
+    // Key the settings-screen cache by the full SGDB query, not just the
+    // asset type: a Steam game's picker runs against its Steam id until it's
+    // matched to an SGDB id, and reusing one entry across both would serve
+    // stale results (and resume pagination from the wrong stream).
+    let cache_key = format!("{}|{}|{}|{}", id, is_steam_id, asset, dimensions.join(","));
+
+    // If a picker window for this exact query is still alive (hidden, not
+    // destroyed), re-present it with its loaded thumbnails and scroll intact
+    // instead of rebuilding everything and refetching the list.
+    if let Some(c) = sgdb_cache.as_ref() {
+        if let Some(entry) = c.borrow().get(&cache_key) {
+            if let Some(win) = entry.picker.upgrade() {
+                win.present();
+                return;
+            }
+        }
+    }
+
     let picker = adw::Window::new();
     picker.set_default_width(900);
     picker.set_default_height(700);
@@ -479,6 +497,31 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     picker.set_content(Some(&outer));
     picker.present();
 
+    // Keep the picker alive while the settings screen is open: closing it
+    // hides the window instead of destroying it, so its loaded thumbnails and
+    // scroll position survive. It is torn down only when the settings window
+    // closes (set_destroy_with_parent above destroys it with its parent).
+    let picker_hide = picker.clone();
+    picker.connect_close_request(move |_| {
+        picker_hide.set_visible(false);
+        glib::Propagation::Stop
+    });
+
+    // Register the live window in the settings-screen cache immediately so a
+    // reopen (even before the first fetch lands) can re-present it instead of
+    // building a fresh one. The fetch handler updates this entry in place.
+    if let Some(ref cache) = sgdb_cache {
+        cache.borrow_mut().insert(
+            cache_key.clone(),
+            SgdbAssetsCacheEntry {
+                assets: Vec::new(),
+                has_more: true,
+                next_page: 0,
+                picker: picker.downgrade(),
+            },
+        );
+    }
+
     let picker_ctx = SgdbPickerCtx {
         id: id.to_string(),
         save_dir: save_dir.to_string(),
@@ -499,6 +542,17 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let rendered_count: Rc<Cell<usize>> = Rc::new(Cell::new(0));
     let all_buttons: Rc<RefCell<Vec<gtk4::Button>>> = Rc::new(RefCell::new(Vec::new()));
     let is_initial_load: Rc<Cell<bool>> = Rc::new(Cell::new(true));
+
+    // Re-showing a hidden picker resets any buttons left disabled by a
+    // previous download so the same window is ready to pick again.
+    let reset_buttons = all_buttons.clone();
+    let picker_map = picker.clone();
+    picker_map.connect_map(move |_| {
+        for b in reset_buttons.borrow().iter() {
+            b.set_sensitive(true);
+            b.set_label(&crate::tr!("Download"));
+        }
+    });
 
     let do_full_rebuild = {
         let assets_store = assets_store.clone();
@@ -558,12 +612,11 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         }
     });
 
-    let cache_key = asset.to_string();
-    let cached = sgdb_cache
+    if let Some(entry) = sgdb_cache
         .as_ref()
-        .and_then(|c| c.borrow().get(&cache_key).cloned());
-
-    if let Some(entry) = cached {
+        .and_then(|c| c.borrow().get(&cache_key).cloned())
+        .filter(|e| !e.assets.is_empty())
+    {
         // Cache hit: render straight from the settings-screen cache instead of
         // re-issuing the network request. Pagination continues from the
         // page where the previous session left off.
@@ -615,14 +668,21 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
                     loading_label2.set_visible(false);
                     do_full_rebuild_t();
                     if let Some(ref cache) = sgdb_cache_t {
-                        cache.borrow_mut().insert(
-                            cache_key_t.clone(),
-                            SgdbAssetsCacheEntry {
-                                assets: new_assets,
-                                has_more: more,
-                                next_page: 1,
-                            },
-                        );
+                        if let Some(entry) = cache.borrow_mut().get_mut(&cache_key_t) {
+                            entry.assets = new_assets;
+                            entry.has_more = more;
+                            entry.next_page = 1;
+                        } else {
+                            cache.borrow_mut().insert(
+                                cache_key_t.clone(),
+                                SgdbAssetsCacheEntry {
+                                    assets: new_assets,
+                                    has_more: more,
+                                    next_page: 1,
+                                    picker: picker_weak.clone(),
+                                },
+                            );
+                        }
                     }
                 } else {
                     assets_store_t.borrow_mut().extend(new_assets);
@@ -658,8 +718,12 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let picker_scroll = picker.clone();
     let sgdb_cache_scroll = sgdb_cache.clone();
     let cache_key_scroll = cache_key.clone();
+    let is_initial_load_scroll = is_initial_load.clone();
 
     vadj.connect_value_changed(move |adj| {
+        if is_initial_load_scroll.get() {
+            return;
+        }
         if !has_more_scroll.get() || loading_more_scroll.get() {
             return;
         }

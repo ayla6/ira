@@ -1,4 +1,4 @@
-use crate::cache::TEXTURE_CACHE;
+use crate::cache::{get_texture, insert_texture};
 use crate::scaled::ScaledPaintable;
 use gdk4::Texture;
 use gtk4::prelude::*;
@@ -9,7 +9,7 @@ pub fn cached_texture(path: &str) -> Option<Texture> {
     if path.is_empty() {
         return None;
     }
-    TEXTURE_CACHE.with(|cell| cell.borrow_mut().get(path))
+    get_texture(path)
 }
 
 pub fn texture_for(path: &str) -> Option<Texture> {
@@ -17,24 +17,21 @@ pub fn texture_for(path: &str) -> Option<Texture> {
     if path.is_empty() {
         return None;
     }
-    TEXTURE_CACHE.with(|cell| {
-        let mut cache = cell.borrow_mut();
-        if let Some(t) = cache.get(path) {
-            return Some(t);
+    if let Some(t) = get_texture(path) {
+        return Some(t);
+    }
+    let decoded = {
+        let _s = info_span!("Texture::from_filename", path).entered();
+        Texture::from_filename(path)
+    };
+    match decoded {
+        Ok(t) => {
+            let cloned = t.clone();
+            insert_texture(path, t);
+            Some(cloned)
         }
-        let decoded = {
-            let _s = info_span!("Texture::from_filename", path).entered();
-            Texture::from_filename(path)
-        };
-        match decoded {
-            Ok(t) => {
-                let cloned = t.clone();
-                cache.insert(path, t);
-                Some(cloned)
-            }
-            Err(_) => None,
-        }
-    })
+        Err(_) => None,
+    }
 }
 
 pub fn set_image(img: &gtk4::Image, path: &str) {

@@ -1,4 +1,6 @@
-use crate::cache::{DecodeResult, DECODE_POOL_SIZE, PENDING_LOADS, PENDING_PIXBUFS, TEXTURE_CACHE};
+use crate::cache::{
+    insert_texture, DecodeResult, DECODE_POOL_SIZE, PENDING_LOADS, PENDING_PIXBUFS,
+};
 use crate::texture::cached_texture;
 use gdk4::{MemoryFormat, MemoryTexture, Texture};
 use gtk4::gdk_pixbuf::{Colorspace, Pixbuf};
@@ -150,7 +152,7 @@ fn drain_results() -> glib::ControlFlow {
                     )
                 });
                 if let Some(ref t) = texture {
-                    TEXTURE_CACHE.with(|cell| cell.borrow_mut().insert(&path, t.clone()));
+                    insert_texture(&path, t.clone());
                 }
                 if let Some(ref pb) = pixbuf {
                     crate::pixbuf::cache_pixbuf(&path, pb);

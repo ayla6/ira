@@ -118,9 +118,12 @@ fn build_sgdb_asset_card(
             .filter(|b| !b.is_empty());
         let _ = tx_thumb.send(bytes);
     });
-    let tp_g = grid_pic.clone();
-    let tp_l = list_pic.clone();
+    let tp_g = grid_pic.downgrade();
+    let tp_l = list_pic.downgrade();
     glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        let (Some(tp_g), Some(tp_l)) = (tp_g.upgrade(), tp_l.upgrade()) else {
+            return glib::ControlFlow::Break;
+        };
         if let Ok(bytes) = rx_thumb.borrow_mut().try_recv() {
             if let Some(bytes) = bytes {
                 let texture = gdk4::Texture::from_bytes(&glib::Bytes::from_owned(bytes));
@@ -215,10 +218,13 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
             });
             let pc_c = pc.clone();
             let on_done_c = on_done_dl.clone();
-            let picker_c = picker_dl.clone();
+            let picker_weak = picker_dl.downgrade();
             let asset_c = asset_dl.clone();
             let done = Rc::new(Cell::new(false));
             glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+                if picker_weak.upgrade().is_none() {
+                    return glib::ControlFlow::Break;
+                }
                 loop {
                     match rx.borrow_mut().try_recv() {
                         Ok((bytes, is_converted)) => {
@@ -226,7 +232,9 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
                                 .insert(asset_c.clone(), PendingImage::Bytes(bytes));
                             if !is_converted {
                                 on_done_c();
-                                picker_c.close();
+                                if let Some(picker) = picker_weak.upgrade() {
+                                    picker.close();
+                                }
                             } else {
                                 done.set(true);
                             }
@@ -293,12 +301,17 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
                 });
             });
             let on_done_c = on_done_dl.clone();
-            let picker_c = picker_dl.clone();
+            let picker_weak = picker_dl.downgrade();
             glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+                if picker_weak.upgrade().is_none() {
+                    return glib::ControlFlow::Break;
+                }
                 if let Ok(result) = rx.borrow_mut().try_recv() {
                     if result.is_some() {
                         on_done_c();
-                        picker_c.close();
+                        if let Some(picker) = picker_weak.upgrade() {
+                            picker.close();
+                        }
                     }
                     glib::ControlFlow::Break
                 } else {

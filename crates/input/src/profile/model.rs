@@ -1308,10 +1308,16 @@ mod tests {
             "gyro_mode": "rate"
         }"#;
         let profile = InputProfile::from_json(json).unwrap();
-        assert_eq!(profile.bindings.len(), 1);
+        // The surviving A→B binding lands in the converted action set; gyro
+        // and recenter entries are gone.
+        assert!(profile.bindings.is_empty());
+        assert_eq!(profile.action_sets.len(), 1);
+        let inputs = &profile.action_sets[0].inputs;
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0].source, InputSource::Button(GamepadButton::A));
         assert_eq!(
-            profile.bindings[0].source,
-            InputSource::Button(GamepadButton::A)
+            inputs[0].activators[0].outputs,
+            vec![OutputAction::GamepadButton(GamepadButton::B)]
         );
         assert!(!profile.gyro.enabled, "gyro starts fresh, not synthesized");
     }

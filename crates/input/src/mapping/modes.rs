@@ -48,29 +48,47 @@ impl MappingEngine {
         order: &mut Vec<GamepadAxis>,
     ) {
         for (source, mode) in self.mode_inputs() {
-            let SourceMode::Joystick {
-                output,
-                deadzone_inner,
-                deadzone_outer,
-                curve,
-            } = mode
-            else {
-                continue;
-            };
-            let (x_axis, y_axis) = stick_axes(source);
-            let Some((x, y)) = self.stick_pair(x_axis, y_axis) else {
-                continue;
-            };
-            let (x, y) = apply_radial_deadzone(x, y, deadzone_inner, deadzone_outer, curve);
-            let (target_x, target_y) = match output {
-                StickOutput::Left => (GamepadAxis::LeftX, GamepadAxis::LeftY),
-                StickOutput::Right => (GamepadAxis::RightX, GamepadAxis::RightY),
-            };
-            for (axis, value) in [(target_x, x), (target_y, y)] {
-                if !totals.contains_key(&axis) {
-                    order.push(axis);
+            match mode {
+                SourceMode::Joystick {
+                    output,
+                    deadzone_inner,
+                    deadzone_outer,
+                    curve,
+                } => {
+                    let (x_axis, y_axis) = stick_axes(source);
+                    let Some((x, y)) = self.stick_pair(x_axis, y_axis) else {
+                        continue;
+                    };
+                    let (x, y) =
+                        apply_radial_deadzone(x, y, deadzone_inner, deadzone_outer, curve);
+                    let (target_x, target_y) = match output {
+                        StickOutput::Left => (GamepadAxis::LeftX, GamepadAxis::LeftY),
+                        StickOutput::Right => (GamepadAxis::RightX, GamepadAxis::RightY),
+                    };
+                    for (axis, value) in [(target_x, x), (target_y, y)] {
+                        if !totals.contains_key(&axis) {
+                            order.push(axis);
+                        }
+                        *totals.entry(axis).or_insert(0.0) += value;
+                    }
                 }
-                *totals.entry(axis).or_insert(0.0) += value;
+                SourceMode::Trigger { threshold } => {
+                    let Some(axis) = trigger_axis(source) else {
+                        continue;
+                    };
+                    let value = self.source_value(source);
+                    if value <= threshold {
+                        continue;
+                    }
+                    // Rescale so the threshold reads as zero and full pull
+                    // saturates.
+                    let deflection = (value - threshold) / (1.0 - threshold).max(VALUE_EPSILON);
+                    if !totals.contains_key(&axis) {
+                        order.push(axis);
+                    }
+                    *totals.entry(axis).or_insert(0.0) += deflection.clamp(0.0, 1.0);
+                }
+                _ => {}
             }
         }
     }
@@ -164,6 +182,15 @@ fn stick_axes(source: InputSource) -> (GamepadAxis, GamepadAxis) {
             ..
         } => (GamepadAxis::LeftX, GamepadAxis::LeftY),
         _ => (GamepadAxis::RightX, GamepadAxis::RightY),
+    }
+}
+
+/// The output axis an analog trigger source drives, if it is one.
+fn trigger_axis(source: InputSource) -> Option<GamepadAxis> {
+    match source {
+        InputSource::Axis(GamepadAxis::LeftTrigger) => Some(GamepadAxis::LeftTrigger),
+        InputSource::Axis(GamepadAxis::RightTrigger) => Some(GamepadAxis::RightTrigger),
+        _ => None,
     }
 }
 

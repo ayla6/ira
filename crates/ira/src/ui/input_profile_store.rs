@@ -52,19 +52,40 @@ pub(super) fn ensure_controller_default_profile(
     } else {
         let mut profile = read_profile_data(&path)?;
         let original = profile.clone();
-        profile.bindings.retain(|binding| {
-            let source_supported = match binding.source {
-                InputSource::Button(button) => supported_buttons.contains(&button),
-                _ => true,
-            };
-            source_supported && binding.output.is_supported_by(profile.backend)
-        });
+        prune_unsupported_controls(&mut profile, supported_buttons);
         profile.validate()?;
         if profile != original {
             write_profile(&path, &profile)?;
         }
     }
     Ok(path)
+}
+
+/// Drop controls the connected device does not report and outputs the virtual
+/// backend cannot carry, across both the legacy binding list and action sets.
+fn prune_unsupported_controls(profile: &mut InputProfile, supported_buttons: &[GamepadButton]) {
+    profile.bindings.retain(|binding| {
+        let source_supported = match binding.source {
+            InputSource::Button(button) => supported_buttons.contains(&button),
+            _ => true,
+        };
+        source_supported && binding.output.is_supported_by(profile.backend)
+    });
+    let backend = profile.backend;
+    for set in &mut profile.action_sets {
+        set.inputs.retain(|input| {
+            let source_supported = match input.source {
+                InputSource::Button(button) => supported_buttons.contains(&button),
+                _ => true,
+            };
+            input.activators.iter().all(|activator| {
+                activator
+                    .outputs
+                    .iter()
+                    .all(|output| output.is_supported_by(backend))
+            }) && source_supported
+        });
+    }
 }
 
 pub(super) fn list_profiles(save_dir: &str) -> Result<Vec<StoredProfile>, String> {
@@ -265,14 +286,21 @@ mod tests {
         .unwrap();
 
         let saved = super::read_profile(&path).unwrap();
-        assert_eq!(saved.bindings.len(), 4);
-        assert!(saved
-            .bindings
-            .iter()
-            .all(|binding| binding.output.is_xinput_compatible()));
-        assert!(!saved.bindings.iter().any(|binding| {
+        // Loading converts the flat bindings into one action set; the four
+        // reported paddles survive, the unreported ones do not.
+        let inputs = &saved.action_sets[0].inputs;
+        assert_eq!(inputs.len(), 4);
+        assert!(inputs.iter().all(|input| {
+            input.activators.iter().all(|activator| {
+                activator.outputs.iter().all(|output| match output {
+                    OutputAction::GamepadButton(button) => button.is_xinput(),
+                    _ => true,
+                })
+            })
+        }));
+        assert!(!inputs.iter().any(|input| {
             matches!(
-                binding.source,
+                input.source,
                 InputSource::Button(
                     GamepadButton::Paddle5
                         | GamepadButton::Paddle6
@@ -309,9 +337,10 @@ mod tests {
         .unwrap();
 
         let saved = super::read_profile(&path).unwrap();
+        assert_eq!(saved.action_sets.len(), 1);
         assert_eq!(
-            saved.bindings[0].output,
-            OutputAction::Keyboard { keycode: 57 }
+            saved.action_sets[0].inputs[0].activators[0].outputs,
+            vec![OutputAction::Keyboard { keycode: 57 }]
         );
     }
 

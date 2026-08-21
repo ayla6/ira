@@ -3,6 +3,7 @@ mod mapping;
 mod physical;
 mod profile;
 mod registry;
+mod report_rate;
 mod sensor;
 mod virtual_gamepad;
 mod virtual_keyboard;
@@ -19,6 +20,7 @@ pub use profile::{
 };
 pub use gyro::{GyroProcessingOptions, GyroProcessor, GyroRates};
 pub use registry::ControllerRegistry;
+pub use report_rate::ReportRateEstimator;
 pub use sensor::{discover_sdl_gamepads, SensorSample, Sdl3SensorBackend, SdlGamepadInfo};
 pub use virtual_gamepad::VirtualGamepad;
 pub use virtual_keyboard::VirtualKeyboard;

@@ -8,8 +8,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ira_input::{
     discover_gamepads, discover_sdl_gamepads, GyroProcessingOptions, GyroProcessor, InputEvent,
-    InputProfile, MappingEngine, OutputEvent, PhysicalGamepad, Sdl3SensorBackend, VirtualGamepad,
-    VirtualGamepadBackend, VirtualKeyboard, VirtualMouse,
+    InputProfile, MappingEngine, OutputEvent, PhysicalGamepad, ReportRateEstimator,
+    Sdl3SensorBackend, VirtualGamepad, VirtualGamepadBackend, VirtualKeyboard, VirtualMouse,
 };
 
 static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -18,7 +18,6 @@ const VIRTUAL_XBOX_VENDOR: u16 = 0x045e;
 const VIRTUAL_XBOX_PRODUCT: u16 = 0x028e;
 const SWITCH_PRO_VENDOR: u16 = 0x057e;
 const SWITCH_PRO_PRODUCT: u16 = 0x2009;
-const SENSOR_SAMPLE_INTERVAL: Duration = Duration::from_millis(4);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const PROFILE_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const STEAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -68,14 +67,15 @@ impl LoopSchedule {
 
     fn timeout(
         &self,
-        sensor_active: bool,
+        tick_active: bool,
+        tick_interval: Duration,
         child_active: bool,
         profile_active: bool,
         steam_active: bool,
         disconnected: bool,
     ) -> Option<Duration> {
         [
-            sensor_active.then(|| remaining(self.sensor, SENSOR_SAMPLE_INTERVAL)),
+            tick_active.then(|| remaining(self.sensor, tick_interval)),
             child_active.then(|| remaining(self.process, PROCESS_POLL_INTERVAL)),
             profile_active.then(|| remaining(self.profile, PROFILE_POLL_INTERVAL)),
             steam_active.then(|| remaining(self.steam, STEAM_POLL_INTERVAL)),
@@ -412,6 +412,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
     // even when no sensor exists, as long as something consumes them.
     let mut tick_needed = sensor.is_some() || mapper.has_continuous_outputs();
+    let mut report_rate = ReportRateEstimator::default();
     if let Some(gamepad) = gamepad.as_mut() {
         if let Err(error) = gamepad.grab() {
             eprintln!("ira-input: {error}; continuing without exclusive grab");
@@ -468,13 +469,15 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     }
     loop {
         let was_connected = gamepad.as_ref().is_some_and(|gamepad| gamepad.is_connected());
-        let run_tick = tick_needed && schedule.sensor.elapsed() >= SENSOR_SAMPLE_INTERVAL;
+        let tick_interval = report_rate.interval();
+        let run_tick = tick_needed && schedule.sensor.elapsed() >= tick_interval;
         if run_tick {
             schedule.sensor = Instant::now();
         }
         let result = process_physical_inputs(
             &mut gamepad,
             &mut mapper,
+            &mut report_rate,
             OutputTargets {
                 gamepad: &mut virtual_gamepad,
                 keyboard: keyboard.as_mut(),
@@ -579,6 +582,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                         sensor = open_sensor(gamepad.info());
                         last_sensor_us = None;
                         tick_needed = sensor.is_some() || mapper.has_continuous_outputs();
+                        report_rate.reset();
                     }
                     schedule.sensor = Instant::now();
                     if let Some(gamepad) = gamepad.as_mut() {
@@ -617,6 +621,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         }
         let timeout = schedule.timeout(
             tick_needed,
+            tick_interval,
             child.is_some(),
             profile_monitor.is_some(),
             steam_session.is_some(),
@@ -1137,13 +1142,18 @@ fn open_sensor(device: &ira_input::DeviceInfo) -> Option<Sdl3SensorBackend> {
 fn process_physical_inputs(
     gamepad: &mut Option<PhysicalGamepad>,
     mapper: &mut MappingEngine,
+    report_rate: &mut ReportRateEstimator,
     mut targets: OutputTargets<'_>,
     trace: &mut TraceState,
 ) -> Result<(), String> {
     let Some(gamepad) = gamepad.as_mut() else {
         return Ok(());
     };
-    for event in gamepad.fetch_events()? {
+    let events = gamepad.fetch_events()?;
+    if !events.is_empty() {
+        report_rate.observe(Instant::now());
+    }
+    for event in events {
         emit_mapped(
             mapper,
             OutputTargets {
@@ -1409,16 +1419,19 @@ mod tests {
     #[test]
     fn test_loop_schedule_blocks_without_periodic_work() {
         let schedule = LoopSchedule::new();
-        assert_eq!(schedule.timeout(false, false, false, false, false), None);
+        assert_eq!(
+            schedule.timeout(false, Duration::from_millis(1), false, false, false, false),
+            None
+        );
     }
 
     #[test]
     fn test_loop_schedule_uses_earliest_active_deadline() {
         let schedule = LoopSchedule::new();
         let timeout = schedule
-            .timeout(true, true, true, true, true)
+            .timeout(true, Duration::from_millis(1), true, true, true, true)
             .expect("active work must have a deadline");
-        assert!(timeout <= SENSOR_SAMPLE_INTERVAL);
+        assert!(timeout <= Duration::from_millis(1));
     }
 
     fn make_event(mask: u32, name: &str) -> Vec<u8> {

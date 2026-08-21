@@ -222,11 +222,11 @@ pub fn show_game_context_menu(
         setup_delete_game_action(&actions, state.clone(), game.clone());
     }
     if game_file.is_some() || game_folder.is_some() {
-        setup_open_game_folder_action(&actions, game_file.clone(), game_folder.clone());
+        setup_open_game_folder_action(&actions, game_file, game_folder);
     }
-    setup_open_wine_prefix_action(&actions, wine_prefix.clone());
+    setup_open_wine_prefix_action(&actions, wine_prefix);
     setup_open_images_action(&actions, state.clone(), game.clone());
-    if let Some(save_location) = save_location.clone() {
+    if let Some(save_location) = save_location {
         setup_open_save_location_action(&actions, save_location);
     }
     if game.trophy_source == ira_models::TrophySource::Gse {
@@ -296,7 +296,7 @@ pub fn show_multi_game_context_menu(
 
     setup_multi_toggle_group_action(&actions, state.clone(), ids.clone());
     setup_multi_new_collection_action(&actions, state.clone(), ids.clone());
-    setup_multi_toggle_hide_action(&actions, state.clone(), ids.clone(), all_hidden);
+    setup_multi_toggle_hide_action(&actions, state.clone(), ids, all_hidden);
 
     setup_and_show_popover(&menu, &actions, parent, at_x, at_y);
 }

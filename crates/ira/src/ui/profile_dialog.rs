@@ -58,11 +58,11 @@ pub fn build_profiles_page(
     add_btn.set_tooltip_text(Some(&crate::tr!("Create profile")));
     add_btn.set_valign(gtk4::Align::Center);
     add_btn.add_css_class(CSS_FLAT);
-    let win_add = window.clone();
-    let db_add = db.clone();
-    let sc_add = state_clone.clone();
-    let sw_add = settings_win_clone.clone();
-    let list_rc_add = list_rc.clone();
+    let win_add = window;
+    let db_add = db;
+    let sc_add = state_clone;
+    let sw_add = settings_win_clone;
+    let list_rc_add = list_rc;
     add_btn.connect_clicked(move |_| {
         show_profile_dialog(
             &win_add,
@@ -344,7 +344,7 @@ pub fn show_profile_dialog(
     prefix_reset.set_tooltip_text(Some(&crate::tr!("Reset to auto-generated path")));
     let prefix_entry_for_reset = prefix_entry.clone();
     let name_entry_for_reset = name_entry.clone();
-    let me_for_reset = prefix_manually_edited.clone();
+    let me_for_reset = prefix_manually_edited;
     let state_for_reset = state.clone();
     prefix_reset.connect_clicked(move |_| {
         let name = name_entry_for_reset.text().to_string();
@@ -436,14 +436,14 @@ pub fn show_profile_dialog(
     win.set_content(Some(&toolbar));
     win.present();
 
-    let name_c = name_entry.clone();
-    let version_row_c = version_row.clone();
-    let prefix_c = prefix_entry.clone();
-    let arch_row_c = arch_row.clone();
-    let umu_row_c = umu_row.clone();
-    let win_c2 = win.clone();
+    let name_c = name_entry;
+    let version_row_c = version_row;
+    let prefix_c = prefix_entry;
+    let arch_row_c = arch_row;
+    let umu_row_c = umu_row;
+    let win_c2 = win;
     let db_c = db.clone();
-    let versions_c = versions.clone();
+    let versions_c = versions;
     let parent_c = parent.clone();
     let sc_c = state.clone();
     let sw_c = settings_win.clone();

@@ -103,8 +103,8 @@ pub(super) fn build_recent_row(
         adj_click.set_value(step_target_right(adj_click.value(), &steps2, max));
     });
 
-    let adj_click = adj.clone();
-    let steps2 = steps.clone();
+    let adj_click = adj;
+    let steps2 = steps;
     left_btn.connect_clicked(move |_| {
         adj_click.set_value(step_target_left(adj_click.value(), &steps2));
     });

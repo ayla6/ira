@@ -263,7 +263,7 @@ pub(super) fn build_weekly_chart(
             s.ctrl_held.clone()
         };
         let ctrl_pressed = ctrl.clone();
-        let ctrl_released = ctrl.clone();
+        let ctrl_released = ctrl;
         kc.connect_key_pressed(move |_, key, _, _| {
             if key == gtk4::gdk::Key::Control_L || key == gtk4::gdk::Key::Control_R {
                 ctrl_pressed.set(true);

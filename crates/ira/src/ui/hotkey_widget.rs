@@ -156,7 +156,7 @@ fn setup_keyboard(
     });
 
     let btn_c = btn.clone();
-    let capturing_c = capturing.clone();
+    let capturing_c = capturing;
     let value_c = value.clone();
     let reset_c = reset.clone();
     btn.connect_clicked(move |_| {
@@ -186,7 +186,7 @@ fn setup_keyboard(
 
     let btn_c = btn.clone();
     let value_c = value.clone();
-    let default_c = default.clone();
+    let default_c = default;
     reset.connect_clicked(move |_| {
         *value_c.borrow_mut() = default_c.clone();
         update_kb_label(&btn_c, &default_c);
@@ -206,7 +206,7 @@ fn setup_gamepad(
 
     let btn_c = btn.clone();
     let capturing_c = capturing.clone();
-    let pressed_c = pressed.clone();
+    let pressed_c = pressed;
     let timeout_c = timeout_id.clone();
     let value_c = value.clone();
     let reset_c = reset.clone();
@@ -268,8 +268,8 @@ fn setup_gamepad(
     right_click.set_button(3);
     btn.add_controller(right_click.clone());
     let btn_c = btn.clone();
-    let capturing_c = capturing.clone();
-    let timeout_c = timeout_id.clone();
+    let capturing_c = capturing;
+    let timeout_c = timeout_id;
     let value_c = value.clone();
     let reset_c = reset.clone();
     let default_c = default.clone();
@@ -282,7 +282,7 @@ fn setup_gamepad(
 
     let btn_c = btn.clone();
     let value_c = value.clone();
-    let default_c = default.clone();
+    let default_c = default;
     reset.connect_clicked(move |_| {
         *value_c.borrow_mut() = default_c.clone();
         update_gp_label(&btn_c, &default_c);

@@ -401,7 +401,7 @@ fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &S
 
     if item.kind() == SidebarItemKind::CollectionHeader {
         let sc = state.clone();
-        let group_name = header_name.clone();
+        let group_name = header_name;
         let row_weak = row.downgrade();
         let right_click = gtk4::GestureClick::new();
         right_click.set_button(3);

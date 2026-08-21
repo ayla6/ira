@@ -49,7 +49,7 @@ pub(super) fn handle_unified_sgdb_result(
         }
         let steam_dl = state.borrow().steam.clone();
         let sender = state.borrow().sender.clone();
-        let sgdb_id_dl = sgdb_id.clone();
+        let sgdb_id_dl = sgdb_id;
         let save_dir = state.borrow().save_dir.clone();
         let game_for_dir = state
             .borrow()
@@ -251,7 +251,7 @@ pub fn show_sgdb_search_dialog(
 
     let state_c = state.clone();
     let dialog_c = dialog.clone();
-    let list_c = list.clone();
+    let list_c = list;
 
     let entry_s = entry.clone();
     let do_search = move || {
@@ -266,7 +266,7 @@ pub fn show_sgdb_search_dialog(
             let r = steam.search_sgdb(&term);
             *results_thread.lock().unwrap() = Some(r);
         });
-        let results_poll = results_shared.clone();
+        let results_poll = results_shared;
         let list_c2 = list_c.clone();
         let dialog_c2 = dialog_c.clone();
         let state_c2 = state_c.clone();

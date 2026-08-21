@@ -189,7 +189,7 @@ pub(super) fn build_general_page(
                     let shared = Arc::new(Mutex::new(None::<String>));
                     let shared_c = shared.clone();
                     let exe_c = exe.clone();
-                    let folder_c = folder.clone();
+                    let folder_c = folder;
                     std::thread::spawn(move || {
                         let path = std::fs::read_dir(&folder_c).ok().and_then(|dir| {
                             for entry in dir.flatten() {

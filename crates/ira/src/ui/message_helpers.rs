@@ -254,8 +254,6 @@ fn start_background_enrichment(state: &SharedState) {
         let sender = sender.clone();
         let db = db.clone();
         let save_dir = save_dir.clone();
-        let ra_username = ra_username.clone();
-        let ra_web_api_key = ra_web_api_key.clone();
         std::thread::spawn(move || {
             let _s =
                 tracing::info_span!("background_enrich", count = enrich_targets.len()).entered();
@@ -302,7 +300,6 @@ fn start_background_enrichment(state: &SharedState) {
     }
 
     if !ra_games.is_empty() {
-        let db = db.clone();
         let sender = sender.clone();
         let save_dir = save_dir.clone();
         std::thread::spawn(move || {
@@ -528,7 +525,7 @@ pub(super) fn insert_or_update_game(state: &SharedState, game: Game) {
             s.game_names
                 .lock()
                 .unwrap()
-                .insert(app_id.clone(), game.name.clone());
+                .insert(app_id, game.name.clone());
         }
 
         let found = s.games.iter().position(|g| g.db_id == game.db_id);
@@ -624,7 +621,7 @@ pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) 
                 trophy_source: game.trophy_source,
                 platform_id: game.platform_id.clone(),
                 db_id: game.db_id,
-                title: game.name.clone(),
+                title: game.name,
                 steam,
                 sender,
                 save_dir,

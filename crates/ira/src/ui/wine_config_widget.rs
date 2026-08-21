@@ -311,7 +311,7 @@ fn build_wine_gfx_page(
     };
 
     {
-        let dr = dpi_row.clone();
+        let dr = dpi_row;
         dpi_enabled.connect_active_notify(move |sw| {
             dr.set_visible(sw.is_active());
         });

@@ -121,7 +121,7 @@ pub(super) fn build_input_settings_page(
         &controller_group,
         save_dir,
         registry,
-        controller_rows_params.configured_defaults.clone(),
+        controller_rows_params.configured_defaults,
         controller_defaults.clone(),
         no_controllers_row,
     );
@@ -260,15 +260,9 @@ fn add_console_remapping_rows(
             registry_for_monitor.clone(),
         );
     });
-    let paths_for_notify = profile_paths.clone();
-    let last_real_for_notify = last_real.clone();
+    let paths_for_notify = profile_paths;
+    let last_real_for_notify = last_real;
     profile_row.connect_selected_notify({
-        let edit = edit.clone();
-        let monitor = monitor.clone();
-        let parent = parent.clone();
-        let save_dir = save_dir.clone();
-        let label = label.clone();
-        let registry = registry.clone();
         move |row| {
             let sentinel = paths_for_notify.borrow().len().saturating_sub(1) as u32;
             if row.selected() == sentinel {
@@ -540,8 +534,8 @@ fn add_controller_row(
     let key_for_edit = key.clone();
     let device_name_for_edit = device_name.clone();
     let supported_buttons_for_edit = supported_buttons.clone();
-    let device_for_edit = device.clone();
-    let registry_for_edit = registry.clone();
+    let device_for_edit = device;
+    let registry_for_edit = registry;
     let mode_for_edit = mode.clone();
     edit.connect_clicked(move |_| {
         let backend = backend_for_mode(mode_from_selection(mode_for_edit.selected()));
@@ -634,9 +628,9 @@ fn start_controller_registry_refresh(
         glib::Propagation::Proceed
     });
     let save_dir_for_refresh = save_dir.to_string();
-    let widgets_for_refresh = widgets.clone();
+    let widgets_for_refresh = widgets;
     let generation = Rc::new(Cell::new(registry.generation()));
-    let generation_for_refresh = generation.clone();
+    let generation_for_refresh = generation;
     glib::timeout_add_local(Duration::from_millis(100), move || {
         if closing.get() {
             return glib::ControlFlow::Break;
@@ -742,7 +736,7 @@ fn rebuild_profile_rows(
     preview_row.set_title(&crate::tr!("Controller preview"));
     preview_row.add_suffix(&preview);
     let parent_for_preview = parent.clone();
-    let registry_for_preview = registry.clone();
+    let registry_for_preview = registry;
     preview.connect_clicked(move |_| {
         super::input_profile_viewer::show_raw_input_viewer(
             parent_for_preview.upcast_ref(),
@@ -820,7 +814,7 @@ fn add_profile_row(
         );
     });
     let parent_for_delete = parent.clone();
-    let path_for_delete = stored.path.clone();
+    let path_for_delete = stored.path;
     let group_for_delete = group.clone();
     let save_dir_for_delete = save_dir.to_string();
     let rows_for_delete = rows.clone();

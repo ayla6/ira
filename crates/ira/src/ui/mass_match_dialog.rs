@@ -156,8 +156,6 @@ fn start_steam_batch_matching(
     let steam = state.borrow().steam.clone();
 
     {
-        let steam_games = steam_games.clone();
-        let title_map = title_map.clone();
         let steam = steam.clone();
         std::thread::spawn(move || {
             for (i, (game_name, db_id, _kind)) in steam_games.iter().enumerate() {
@@ -192,10 +190,9 @@ fn start_steam_batch_matching(
     }
 
     let state_rx = state.clone();
-    let steam_rx_steam = steam.clone();
+    let steam_rx_steam = steam;
     let row_boxes = row_action_boxes.to_vec();
     let parent_dialog = dialog.clone();
-    let steam_row_indices = steam_row_indices.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
         if let Ok((idx, matched, game_name, db_id)) = steam_rx.borrow_mut().try_recv() {
             if let Some(&row_idx) = steam_row_indices.get(idx) {

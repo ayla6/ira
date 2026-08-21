@@ -85,7 +85,7 @@ fn show_input_viewer(
     toolbar.set_content(Some(&content));
     window.set_content(Some(&toolbar));
 
-    let stop_for_close = stop.clone();
+    let stop_for_close = stop;
     window.connect_close_request(move |_| {
         stop_for_close.store(true, Ordering::Relaxed);
         glib::Propagation::Proceed

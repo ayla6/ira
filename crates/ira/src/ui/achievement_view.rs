@@ -109,7 +109,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
         if earned.len() > first_n {
             let remaining: Vec<MergedAchievement> =
                 earned[first_n..].iter().map(|a| (*a).clone()).collect();
-            let group = earned_group.clone();
+            let group = earned_group;
             let state_gen = state.clone();
             let mut i = 0;
             glib::idle_add_local(move || {
@@ -224,8 +224,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
         if locked.len() > first_n {
             let remaining: Vec<MergedAchievement> =
                 locked[first_n..].iter().map(|a| (*a).clone()).collect();
-            let group = locked_group.clone();
-            let reload = reload.clone();
+            let group = locked_group;
             let trophy_source = game.trophy_source;
             let app_id = game.app_id.clone();
             let platform_id = game.platform_id.clone();

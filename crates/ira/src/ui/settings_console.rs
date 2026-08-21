@@ -434,7 +434,7 @@ pub(super) fn build_console_settings_page(
             && std::path::Path::new(&cc.ra_core).is_file())
         .then(|| cc.ra_core.clone());
         let selected_core = configured_core
-            .clone()
+            
             .or_else(|| cores.first().map(|core| core.path.clone()));
         let core_path = adw::EntryRow::new();
         core_path.set_title(&crate::tr!("Custom core file"));
@@ -487,7 +487,7 @@ pub(super) fn build_console_settings_page(
             let custom_selected = Rc::new(Cell::new(selected_idx == cores.len()));
             core_path.set_visible(is_retroarch && custom_selected.get());
             let core_path_for_selection = core_path.clone();
-            let cores_for_selection = cores.clone();
+            let cores_for_selection = cores;
             let custom_selected_for_selection = custom_selected.clone();
             dropdown.connect_selected_notify(move |dropdown| {
                 if let Some(core) = cores_for_selection.get(dropdown.selected() as usize) {
@@ -510,7 +510,7 @@ pub(super) fn build_console_settings_page(
     let core_row_c = core_row_opt;
     let core_selector_c = core_selector_opt;
     let core_path_row_c = core_path_row.clone();
-    let custom_core_selected_c = custom_core_selected.clone();
+    let custom_core_selected_c = custom_core_selected;
     exe_row.connect_changed(move |entry| {
         let text = entry.text().to_string();
         if let Some(ref cr) = core_row_c {

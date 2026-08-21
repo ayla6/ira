@@ -56,7 +56,7 @@ pub fn show_installer_add_dialog(state: &SharedState) {
     let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
     let wizard = Rc::new(RefCell::new(Wizard {
         win: win.clone(),
-        content: page.clone(),
+        content: page,
         state: state.clone(),
         profiles,
         identified: None,
@@ -186,7 +186,7 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
         open_btn.set_icon_name("folder-open-symbolic");
         open_btn.set_valign(gtk4::Align::Center);
         open_btn.add_css_class(CSS_FLAT);
-        let path = default_folder.clone();
+        let path = default_folder;
         open_btn.connect_clicked(move |_| {
             let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
         });
@@ -201,9 +201,9 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
 
     let wizard_c = wizard.clone();
     let ist_c = ist.clone();
-    let profile_row_c = profile_row.clone();
-    let wow64_row_c = wow64_row.clone();
-    let gamescope_row_c = gamescope_row.clone();
+    let profile_row_c = profile_row;
+    let wow64_row_c = wow64_row;
+    let gamescope_row_c = gamescope_row;
     let profiles_c = wizard.borrow().profiles.clone();
     start_btn.connect_clicked(move |_| {
         let installers = ist_c.borrow().installers.clone();
@@ -464,7 +464,7 @@ fn run_wine_interactive(
             .unwrap_or_else(|_| "wine".to_string());
     let env = ira_launcher::wine_launch::build_wine_env(&wine, &wine_exe);
 
-    let mut cmd = vec![wine_exe.clone(), installer.to_string_lossy().to_string()];
+    let mut cmd = vec![wine_exe, installer.to_string_lossy().to_string()];
     if gamescope {
         let launch_cfg = ira_models::GameLaunchConfig {
             gamescope: Some(true),
@@ -765,7 +765,7 @@ fn flatten_linuxrulez_if_needed(wizard: &Rc<RefCell<Wizard>>, folder: &Path) -> 
     alert.set_default_response(Some("delete"));
     alert.set_close_response("keep");
 
-    let lrz_dir_c = lrz_dir.clone();
+    let lrz_dir_c = lrz_dir;
     alert.choose(
         Some(&win),
         None::<&gtk4::gio::Cancellable>,
@@ -828,7 +828,7 @@ fn pick_from_multiple(
 
     let wizard_c = wizard.clone();
     let ist_c = ist.clone();
-    let dirs_c = dirs.clone();
+    let dirs_c = dirs;
     list.connect_row_activated(move |_list, row| {
         let idx = row.index() as usize;
         if let Some(dir) = dirs_c.get(idx) {

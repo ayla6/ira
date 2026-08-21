@@ -395,7 +395,7 @@ pub(super) fn show_collection_name_dialog(
     dialog.set_default_response(Some("create"));
     dialog.set_close_response("cancel");
 
-    let entry_clone = entry.clone();
+    let entry_clone = entry;
     dialog.connect_response(None, move |_, resp| {
         if resp != "create" {
             return;

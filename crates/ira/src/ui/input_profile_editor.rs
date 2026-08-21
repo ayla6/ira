@@ -101,7 +101,6 @@ pub(super) fn show_input_profile_editor(
         let rows = rows.clone();
         let name = profile_name.clone();
         let compatible_game_ids = compatible_game_ids.clone();
-        let original_profile = original_profile.clone();
         let calibration = calibration.clone();
         let backend = backend.clone();
         Rc::new(move || {
@@ -288,7 +287,6 @@ fn connect_save(
     on_saved: Rc<dyn Fn(PathBuf)>,
 ) {
     let save_dir = save_dir.to_string();
-    let form = form.clone();
     let status = status.clone();
     let window = window.clone();
     let button_for_save = button.clone();

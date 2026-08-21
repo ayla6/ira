@@ -174,7 +174,7 @@ fn connect_sidebar_selection(sidebar: &gtk4::ListBox, stack: &gtk4::Stack) {
     let stack_clone = stack.clone();
     sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
-            let page_id = row.widget_name().to_string().to_string();
+            let page_id = row.widget_name().to_string();
             stack_clone.set_visible_child_name(&page_id);
         }
     });
@@ -308,9 +308,9 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
             ira_models::GameKind::Linux
         };
         let platform_id = if !steam_app_id.is_empty() {
-            steam_app_id.clone()
+            steam_app_id
         } else if !gog_product_id.is_empty() {
-            gog_product_id.clone()
+            gog_product_id
         } else {
             format!(
                 "manual_{}",
@@ -346,9 +346,9 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
 
         let db_c = db.clone();
         let sender_c = sender.clone();
-        let name_c = name.clone();
+        let name_c = name;
         let app_id_c = platform_id.clone();
-        let game_folder_c = game_folder.clone();
+        let game_folder_c = game_folder;
         let kind_c = kind;
         let ts_c = trophy_source;
         let steam_c = steam.clone();

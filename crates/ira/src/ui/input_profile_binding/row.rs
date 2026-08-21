@@ -171,7 +171,7 @@ fn make_binding_row(
             source: controls.source.clone(),
             source_options: controls.source_options.clone(),
             output: controls.output_action.clone(),
-            gyro_mode_row: rows.gyro_mode.clone(),
+            gyro_mode_row: rows.gyro_mode,
             row: container.clone(),
             on_dirty: on_dirty.clone(),
             backend,

@@ -23,7 +23,7 @@ pub fn show_create_group_dialog(state: &SharedState) {
     dialog.set_default_response(Some("create"));
     dialog.set_close_response("cancel");
 
-    let entry_clone = entry.clone();
+    let entry_clone = entry;
     let state_clone = state.clone();
     dialog.connect_response(None, move |_, resp| {
         if resp != "create" {
@@ -70,7 +70,7 @@ pub fn show_rename_group_dialog(state: &SharedState, group_id: i64, current_name
     dialog.set_default_response(Some("rename"));
     dialog.set_close_response("cancel");
 
-    let entry_clone = entry.clone();
+    let entry_clone = entry;
     let state_clone = state.clone();
     dialog.connect_response(None, move |_, resp| {
         if resp != "rename" {

@@ -33,7 +33,7 @@ fn apply_ra_match(
         eprintln!("Failed to clear manual unmatch: {}", e);
     }
     if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
-        g.app_id = app_id.clone();
+        g.app_id = app_id;
         g.trophy_source = ira_models::TrophySource::Ra;
         if !ra_title.is_empty() {
             g.set_name(ra_title);
@@ -65,7 +65,7 @@ fn apply_ra_match(
             trophy_source: g.trophy_source,
             platform_id: g.platform_id.clone(),
             db_id: g.db_id,
-            title: g.name.clone(),
+            title: g.name,
             steam,
             sender,
             save_dir,
@@ -194,7 +194,7 @@ pub fn show_ra_search_dialog(
     outer.append(&scrolled);
 
     let state_c = state.clone();
-    let list_c = list.clone();
+    let list_c = list;
     let platform_id = platform_id.to_string();
 
     let entry_s = entry.clone();

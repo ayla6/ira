@@ -223,10 +223,10 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         emu_version_model: pages.emu_version_model,
     };
 
-    let stack_clone = stack.clone();
+    let stack_clone = stack;
     sidebar.connect_row_selected(move |_, row| {
         if let Some(row) = row {
-            let page_id = row.widget_name().to_string().to_string();
+            let page_id = row.widget_name().to_string();
             stack_clone.set_visible_child_name(&page_id);
         }
     });
@@ -260,9 +260,9 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
     let save_btn = gtk4::Button::with_label(&crate::tr!("Save"));
     save_btn.add_css_class(CSS_SUGGESTED_ACTION);
 
-    let state_clone = state.clone();
-    let win_clone = win.clone();
-    let steam_clone = steam.clone();
+    let state_clone = state;
+    let win_clone = win;
+    let steam_clone = steam;
     save_btn.connect_clicked(move |_| {
         let mut s = state_clone.borrow_mut();
         let old_cfg = s.cfg.clone();

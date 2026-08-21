@@ -52,7 +52,7 @@ pub(super) fn add_calibration_group(
     }
     let Some(device) = device else { return };
     let calibration_for_dialog = calibration.clone();
-    let values_for_dialog = values.clone();
+    let values_for_dialog = values;
     let mark_dirty_for_dialog = mark_dirty.clone();
     let registry = registry.clone();
     calibrate.connect_clicked(move |button| {

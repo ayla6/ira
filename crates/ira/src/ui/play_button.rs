@@ -448,8 +448,8 @@ fn build_simple_play_button(
         label.set_text(&crate::tr!("Stop"));
     }
 
-    let icon_click = icon.clone();
-    let label_click = label.clone();
+    let icon_click = icon;
+    let label_click = label;
     let st = state.clone();
     let sender_c = sender.clone();
     btn.connect_clicked(move |btn| {
@@ -546,8 +546,8 @@ fn build_disc_play_button(
     split.insert_action_group("play", Some(&actions));
     split.set_menu_model(Some(&menu));
 
-    let icon_click = icon.clone();
-    let label_click = label.clone();
+    let icon_click = icon;
+    let label_click = label;
     let st_launch = state.clone();
     let sender_c = sender.clone();
     split.connect_clicked(move |btn| {
@@ -655,10 +655,10 @@ fn build_variant_play_button(
     split.insert_action_group("play", Some(&actions));
     split.set_menu_model(Some(&menu));
 
-    let icon_click = icon.clone();
-    let label_click = label.clone();
+    let icon_click = icon;
+    let label_click = label;
     let st_launch = state.clone();
-    let current_variant_launch = current_variant.clone();
+    let current_variant_launch = current_variant;
     let sender_c = sender.clone();
     split.connect_clicked(move |btn| {
         let is_running = is_game_running(&st_launch, db_id);

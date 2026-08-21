@@ -192,7 +192,7 @@ pub fn show_auto_add_dialog(state: &SharedState) {
 
     let wizard = Rc::new(RefCell::new(Wizard {
         win: win.clone(),
-        content: page.clone(),
+        content: page,
         state: state.clone(),
         profiles: ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default(),
         identified: None,
@@ -528,9 +528,9 @@ fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf) {
     let search_btn = gtk4::Button::with_label(&crate::tr!("Search Steam…"));
     search_btn.add_css_class(CSS_SUGGESTED_ACTION);
     search_btn.set_halign(gtk4::Align::Center);
-    let state_c = state.clone();
-    let steam_c = steam.clone();
-    let win_c = win.clone();
+    let state_c = state;
+    let steam_c = steam;
+    let win_c = win;
     let wizard_c = wizard.clone();
     let folder_c = folder.clone();
     let name_c = name.clone();
@@ -558,8 +558,8 @@ fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf) {
     let manual_btn = gtk4::Button::with_label(&crate::tr!("Set up manually"));
     manual_btn.set_halign(gtk4::Align::Center);
     let wizard_c = wizard.clone();
-    let folder_c = folder.clone();
-    let name_c = name.clone();
+    let folder_c = folder;
+    let name_c = name;
     manual_btn.connect_clicked(move |_| {
         let (is_windows, exe) = detect_game_exe(&folder_c);
         show_identified_form(
@@ -669,14 +669,14 @@ pub(super) fn show_identified_form(
         let folder = game.game_folder.clone();
         let mut w = wizard.borrow_mut();
         w.identified = Some(game);
-        w.profile_row = Some(profile_row.clone());
-        w.kind_row = Some(kind_row.clone());
-        w.exe_entry = Some(exe_entry.clone());
+        w.profile_row = Some(profile_row);
+        w.kind_row = Some(kind_row);
+        w.exe_entry = Some(exe_entry);
         w.last_folder = Some(folder);
         w.last_is_windows = is_windows;
     }
-    let name_c = name_entry.clone();
-    let appid_c = appid_row.clone();
+    let name_c = name_entry;
+    let appid_c = appid_row;
     let wizard_c = wizard.clone();
     add_btn.connect_clicked(move |_| {
         let extracted = {
@@ -760,7 +760,7 @@ pub(super) fn start_add(
         },
     );
 
-    let wizard_c = wizard.clone();
+    let wizard_c = wizard;
     glib::source::idle_add_local_full(glib::Priority::LOW, move || {
         match rx.borrow_mut().try_recv() {
             Ok(ev) => {
@@ -859,7 +859,7 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
 
         let save_dir_for_lang = save_dir.clone();
         let db_for_cache = db.clone();
-        enrich_added_game(db, steam, sender, save_dir, &game_obj, name.clone());
+        enrich_added_game(db, steam, sender, save_dir, &game_obj, name);
         apply_language_preference(
             &game,
             &game_obj,
@@ -886,7 +886,7 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
             let _ = tx.send(WizardEvent::EmulatorPrompt {
                 db_id,
                 game_folder: game.game_folder.clone(),
-                app_id: app_id.clone(),
+                app_id,
                 emu_kind,
             });
         } else {
@@ -1285,7 +1285,7 @@ fn prompt_install_emulator(
     let wizard_c = wizard.clone();
     let remember_c = remember.clone();
     let dialog_c = dialog.clone();
-    let versions_for_yes = versions.clone();
+    let versions_for_yes = versions;
     let resolved_for_yes = resolved.clone();
     yes_btn.connect_clicked(move |_| {
         resolved_for_yes.set(true);
@@ -1313,7 +1313,7 @@ fn prompt_install_emulator(
     });
 
     let wizard_c2 = wizard.clone();
-    let remember_c2 = remember.clone();
+    let remember_c2 = remember;
     let dialog_c2 = dialog.clone();
     let resolved_for_no = resolved.clone();
     no_btn.connect_clicked(move |_| {
@@ -1358,10 +1358,10 @@ fn start_install(
     set_status(&wizard, &status);
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
-    let tx_c = tx.clone();
-    let game_folder_c = game_folder.clone();
-    let app_id_c = app_id.clone();
-    let version_c = version.clone();
+    let tx_c = tx;
+    let game_folder_c = game_folder;
+    let app_id_c = app_id;
+    let version_c = version;
     std::thread::spawn(move || {
         let result = match emu_kind {
             EmuKind::Nge => ira_platforms::api_emulators::install_nge_from_folder(
@@ -1384,7 +1384,7 @@ fn start_install(
         let _ = tx_c.send(WizardEvent::InstallDone);
     });
 
-    let wizard_c = wizard.clone();
+    let wizard_c = wizard;
     glib::source::idle_add_local_full(glib::Priority::LOW, move || match rx.try_recv() {
         Ok(_) => {
             finalize(&wizard_c, db_id);
@@ -1525,7 +1525,7 @@ pub(super) fn start_redist_install(
         let _ = tx.send(WizardEvent::InstallDone);
     });
 
-    let wizard_c = wizard.clone();
+    let wizard_c = wizard;
     glib::source::idle_add_local_full(glib::Priority::LOW, move || {
         match rx.borrow_mut().try_recv() {
             Ok(_) => {

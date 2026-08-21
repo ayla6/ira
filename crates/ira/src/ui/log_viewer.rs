@@ -151,10 +151,9 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
     if is_running {
         let log = ira_launcher::wrapper::get_game_log(db_id);
         let window_weak = window.downgrade();
-        let buf_clone = buffer.clone();
-        let tv_clone = text_view.clone();
-        let mark_clone = mark.clone();
-        let search_state = search_state.clone();
+        let buf_clone = buffer;
+        let tv_clone = text_view;
+        let mark_clone = mark;
         let mut last_len: usize = {
             let lines = log.lock().unwrap();
             lines.len()

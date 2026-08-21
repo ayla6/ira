@@ -231,7 +231,7 @@ fn make_setup(state: &SharedState, item_size: Rc<Cell<(i32, i32)>>) -> SetupFn {
 
         unsafe { vbox.set_data::<AtomicI64>("game-db-id", AtomicI64::new(0)) };
         unsafe { vbox.set_data::<AtomicI64>("game-variant-id", AtomicI64::new(0)) };
-        unsafe { vbox.set_data::<gtk4::Label>("name-label", name_label.clone()) };
+        unsafe { vbox.set_data::<gtk4::Label>("name-label", name_label) };
 
         let sc = state.clone();
         let click = gtk4::GestureClick::new();

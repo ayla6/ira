@@ -711,7 +711,7 @@ pub(super) fn build_api_emulators_page(
     open_btn.add_css_class(CSS_FLAT);
     open_btn.set_valign(gtk4::Align::Center);
     {
-        let path = emu_dir.clone();
+        let path = emu_dir;
         open_btn.connect_clicked(move |_| {
             let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
         });
@@ -1064,7 +1064,7 @@ fn add_add_language_row(list: &gtk4::ListBox) {
     row.set_child(Some(&hbox));
 
     let list_c = list.clone();
-    let dropdown_c = dropdown.clone();
+    let dropdown_c = dropdown;
     add_btn.connect_clicked(move |_| {
         let selected = dropdown_c.selected() as usize;
         let available = available_language_codes(&list_c);

@@ -110,7 +110,6 @@ pub fn show_play_history_dialog(
     {
         let state = state.clone();
         let box_ = box_.clone();
-        let game_name = game_name.clone();
         let dialog = dialog.clone();
         let rebuild_handle_c = rebuild_handle.clone();
         let rebuild: RebuildFn = std::rc::Rc::new(move |focus_week: Option<chrono::NaiveDate>| {

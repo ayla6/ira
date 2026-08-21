@@ -200,9 +200,9 @@ pub fn show_search_results_dialog(params: SearchResultsDialogParams) {
     dialog.set_content(Some(&outer));
 
     let entry_clone = entry.clone();
-    let results_clone = results_list.clone();
+    let results_clone = results_list;
     let state_clone = state.clone();
-    let steam_clone = steam.clone();
+    let steam_clone = steam;
     let name_clone = game_name.to_string();
     let dialog_clone = dialog.clone();
     let on_match_clone = on_match.clone();

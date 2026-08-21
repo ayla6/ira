@@ -63,7 +63,7 @@ pub(super) fn show_steam_id_search_popup(
     dialog.set_content(Some(&outer));
 
     let state_c = state.clone();
-    let list_c = list.clone();
+    let list_c = list;
     let dialog_c = dialog.clone();
     let row_c = app_id_row.clone();
     let on_select_c = on_select.clone();
@@ -82,7 +82,7 @@ pub(super) fn show_steam_id_search_popup(
             let r = steam.search_steam_store(&term);
             *results_thread.lock().unwrap() = Some(r);
         });
-        let results_poll = results_shared.clone();
+        let results_poll = results_shared;
         let list_c2 = list_c.clone();
         let dialog_c2 = dialog_c.clone();
         let row_c2 = row_c.clone();

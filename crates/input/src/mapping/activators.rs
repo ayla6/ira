@@ -25,17 +25,21 @@ impl ActivatorStates {
         self.inner.clear();
     }
 
-    pub(crate) fn sources(&self) -> impl Iterator<Item = InputSource> + '_ {
+    pub(super) fn sources(&self) -> impl Iterator<Item = InputSource> + '_ {
         self.inner.keys().copied()
     }
 
-    fn entry(&mut self, source: InputSource) -> &mut PatternState {
+    pub(super) fn entry(&mut self, source: InputSource) -> &mut PatternState {
         self.inner.entry(source).or_default()
+    }
+
+    pub(super) fn get_mut(&mut self, source: InputSource) -> Option<&mut PatternState> {
+        self.inner.get_mut(&source)
     }
 }
 
 #[derive(Default)]
-struct PatternState {
+pub(crate) struct PatternState {
     pressed_at: Option<u64>,
     /// Set while the input is held and its long-press activator has fired.
     long_fired: bool,
@@ -52,8 +56,12 @@ struct PatternState {
 }
 
 impl PatternState {
-    fn reset(&mut self) {
+    pub(super) fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    pub(super) fn held_mut(&mut self) -> &mut Vec<(usize, OutputAction)> {
+        &mut self.held
     }
 }
 
@@ -66,7 +74,7 @@ pub(crate) struct ActivatorOutcome {
     pub internal: Vec<OutputAction>,
 }
 
-fn push_release_of(output: &OutputAction, outputs: &mut Vec<OutputEvent>) {
+pub(super) fn push_release_of(output: &OutputAction, outputs: &mut Vec<OutputEvent>) {
     match output {
         OutputAction::GamepadButton(button) => outputs.push(OutputEvent::GamepadButton {
             button: *button,

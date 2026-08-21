@@ -63,6 +63,10 @@ impl MappingEngine {
     pub fn tick(&mut self, now_us: u64) -> Vec<OutputEvent> {
         let dt = self.tick_delta(now_us);
         let mut output = Vec::new();
+        if !self.profile.action_sets.is_empty() {
+            output.extend(self.advance_set_activators(now_us));
+            output.extend(self.take_pending_releases());
+        }
         self.emit_mouse_motion(dt, &mut output);
         let computed = self.compute_values();
         self.emit_axis_outputs(&computed, &mut output);

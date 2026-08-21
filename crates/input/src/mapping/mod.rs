@@ -1,5 +1,6 @@
 mod activators;
 mod continuous;
+mod sets;
 
 use std::collections::HashMap;
 
@@ -8,6 +9,7 @@ use crate::profile::{
     Activation, ChordMode, GamepadAxis, GamepadButton, GyroActivation, InputProfile, InputSource,
     MouseButton, OutputAction,
 };
+use activators::ActivatorStates;
 
 pub(crate) const BUTTON_THRESHOLD: f32 = 0.5;
 pub(crate) const VALUE_EPSILON: f32 = 0.0001;
@@ -58,6 +60,13 @@ pub struct MappingEngine {
     /// Latest player-space rotation rates, fed by the gyro processor.
     pub(crate) gyro_rates: GyroRates,
     pub(crate) last_tick_us: Option<u64>,
+    /// Action-set engine state: press-pattern tracking per source, the
+    /// active set index, toggled layers, and releases waiting to be merged
+    /// into the next event batch.
+    pub(crate) activator_states: ActivatorStates,
+    pub(crate) active_set: usize,
+    pub(crate) toggled_layers: Vec<usize>,
+    pub(crate) pending_releases: Vec<OutputEvent>,
 }
 
 impl MappingEngine {
@@ -73,6 +82,10 @@ impl MappingEngine {
             axis_outputs: HashMap::new(),
             gyro_rates: GyroRates::default(),
             last_tick_us: None,
+            activator_states: ActivatorStates::default(),
+            active_set: 0,
+            toggled_layers: Vec::new(),
+            pending_releases: Vec::new(),
         })
     }
 
@@ -89,25 +102,30 @@ impl MappingEngine {
         if previous <= BUTTON_THRESHOLD && event.value > BUTTON_THRESHOLD {
             self.toggle_activations(event.source);
         }
-        let computed = self.compute_values();
-        let discrete: Vec<(usize, OutputAction)> = self
-            .profile
-            .bindings
-            .iter()
-            .enumerate()
-            .filter(|(_, binding)| {
-                !matches!(
-                    &binding.output,
-                    OutputAction::GamepadAxis(_) | OutputAction::MouseAxis(_)
-                )
-            })
-            .map(|(index, binding)| (index, binding.output.clone()))
-            .collect();
         let mut output = Vec::new();
-        for (index, action) in discrete {
-            self.emit_changed(index, &action, computed[index], &mut output);
+        if self.profile.action_sets.is_empty() {
+            let computed = self.compute_values();
+            let discrete: Vec<(usize, OutputAction)> = self
+                .profile
+                .bindings
+                .iter()
+                .enumerate()
+                .filter(|(_, binding)| {
+                    !matches!(
+                        &binding.output,
+                        OutputAction::GamepadAxis(_) | OutputAction::MouseAxis(_)
+                    )
+                })
+                .map(|(index, binding)| (index, binding.output.clone()))
+                .collect();
+            for (index, action) in discrete {
+                self.emit_changed(index, &action, computed[index], &mut output);
+            }
+            self.emit_axis_outputs(&computed, &mut output);
+        } else {
+            output.extend(self.run_activators(event.source, event.value, event.timestamp_us));
+            output.extend(self.take_pending_releases());
         }
-        self.emit_axis_outputs(&computed, &mut output);
         output
     }
 
@@ -117,6 +135,10 @@ impl MappingEngine {
         self.chord_toggles.clear();
         self.gyro_rates = GyroRates::default();
         self.last_tick_us = None;
+        self.active_set = 0;
+        self.toggled_layers.clear();
+        self.activator_states.clear();
+        self.pending_releases.clear();
         let outputs: Vec<OutputAction> = self
             .profile
             .bindings
@@ -136,22 +158,48 @@ impl MappingEngine {
                 discrete => self.emit_changed(index, &discrete, 0.0, &mut output),
             }
         }
-        for axis in [GamepadAxis::LeftX, GamepadAxis::LeftY, GamepadAxis::RightX, GamepadAxis::RightY] {
+        for axis in [
+            GamepadAxis::LeftX,
+            GamepadAxis::LeftY,
+            GamepadAxis::RightX,
+            GamepadAxis::RightY,
+        ] {
             let previous = self.axis_outputs.remove(&axis).unwrap_or(0.0);
             if changed(previous, 0.0) {
                 output.push(OutputEvent::GamepadAxis { axis, value: 0.0 });
             }
         }
+        // Set-driven profiles can hold activator outputs anywhere; release
+        // them bluntly by iterating every mapping in every set and layer.
+        self.release_all_activator_states();
+        output.extend(self.take_pending_releases());
         output
     }
 
     pub(crate) fn toggle_activations(&mut self, source: InputSource) {
+        let set_toggle = self
+            .profile
+            .action_sets
+            .iter()
+            .flat_map(|set| set.inputs.iter())
+            .chain(
+                self.profile
+                    .action_layers
+                    .iter()
+                    .flat_map(|layer| layer.inputs.iter()),
+            )
+            .any(|input| {
+                input.activators.iter().any(|activator| {
+                    matches!(&activator.activation, Activation::Toggle(activator) if *activator == source)
+                })
+            });
         let has_toggle = self.profile.bindings.iter().any(|binding| {
             matches!(&binding.activation, Activation::Toggle(activator) if *activator == source)
-        }) || matches!(
-            self.profile.gyro.activation,
-            GyroActivation::Toggle(button) if InputSource::Button(button) == source
-        );
+        }) || set_toggle
+            || matches!(
+                self.profile.gyro.activation,
+                GyroActivation::Toggle(button) if InputSource::Button(button) == source
+            );
         if has_toggle {
             let enabled = self.toggles.entry(source).or_insert(false);
             *enabled = !*enabled;

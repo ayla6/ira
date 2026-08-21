@@ -1,5 +1,6 @@
 mod activators;
 mod continuous;
+mod modes;
 mod sets;
 
 use std::collections::HashMap;
@@ -67,6 +68,8 @@ pub struct MappingEngine {
     pub(crate) active_set: usize,
     pub(crate) toggled_layers: Vec<usize>,
     pub(crate) pending_releases: Vec<OutputEvent>,
+    /// Dpad directions currently held by stick-as-dpad modes.
+    pub(crate) mode_dpad_pressed: Vec<GamepadButton>,
 }
 
 impl MappingEngine {
@@ -86,6 +89,7 @@ impl MappingEngine {
             active_set: 0,
             toggled_layers: Vec::new(),
             pending_releases: Vec::new(),
+            mode_dpad_pressed: Vec::new(),
         })
     }
 
@@ -139,6 +143,7 @@ impl MappingEngine {
         self.toggled_layers.clear();
         self.activator_states.clear();
         self.pending_releases.clear();
+        self.mode_dpad_pressed.clear();
         let outputs: Vec<OutputAction> = self
             .profile
             .bindings
@@ -334,6 +339,7 @@ impl MappingEngine {
             }
         }
         self.add_gyro_axis_deflections(&mut totals, &mut order);
+        self.add_mode_axis_deflections(&mut totals, &mut order);
         for axis in order {
             let value = totals[&axis].clamp(-1.0, 1.0);
             let previous = self.axis_outputs.get(&axis).copied().unwrap_or(0.0);

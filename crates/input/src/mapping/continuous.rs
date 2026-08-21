@@ -21,9 +21,9 @@ use crate::OutputEvent;
 const GYRO_MOUSE_COUNTS_PER_RADIAN: f32 = 1718.87;
 /// Stick-to-mouse velocity at full deflection and sensitivity 1.0, in counts
 /// per second.
-const STICK_MOUSE_COUNTS_PER_SECOND: f32 = 2000.0;
+pub(crate) const STICK_MOUSE_COUNTS_PER_SECOND: f32 = 2000.0;
 /// Stick-to-wheel velocity at full deflection, in detents per second.
-const STICK_WHEEL_DETENTS_PER_SECOND: f32 = 8.0;
+pub(crate) const STICK_WHEEL_DETENTS_PER_SECOND: f32 = 8.0;
 /// Gyro-to-stick scaling: rotation rate (rad/s) that drives the stick to full
 /// deflection at sensitivity 1.0. Without scaling, an ordinary hand turn
 /// (1-3 rad/s) would slam the stick to its rail.
@@ -66,6 +66,8 @@ impl MappingEngine {
         if !self.profile.action_sets.is_empty() {
             output.extend(self.advance_set_activators(now_us));
             output.extend(self.take_pending_releases());
+            self.emit_mode_mouse_motion(dt, &mut output);
+            self.emit_mode_dpad(&mut output);
         }
         self.emit_mouse_motion(dt, &mut output);
         let computed = self.compute_values();
@@ -162,7 +164,10 @@ fn push_mouse(output: &mut Vec<OutputEvent>, axis: MouseAxis, value: f32) {
 /// Whether any continuous output is configured, so the daemon knows to run
 /// ticks even without a gyro sensor present.
 fn continuous_outputs_configured(profile: &InputProfile) -> bool {
-    profile.gyro.enabled
+    // Set-driven profiles always tick: activator deadlines and mode-driven
+    // axes need time even without mouse or gyro.
+    !profile.action_sets.is_empty()
+        || profile.gyro.enabled
         || profile
             .bindings
             .iter()

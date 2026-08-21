@@ -464,6 +464,12 @@ pub enum SourceMode {
         #[serde(default = "default_soft_threshold")]
         threshold: f32,
     },
+    /// Stick deflection as four digital directions (stick-as-dpad preset
+    /// and Steam's dpad group).
+    Dpad {
+        #[serde(default = "default_dpad_threshold")]
+        threshold: f32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -595,6 +601,10 @@ fn default_long_press_ms() -> u32 {
 }
 
 fn default_soft_threshold() -> f32 {
+    0.5
+}
+
+fn default_dpad_threshold() -> f32 {
     0.5
 }
 

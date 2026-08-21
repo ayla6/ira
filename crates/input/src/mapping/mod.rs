@@ -262,6 +262,11 @@ impl MappingEngine {
             OutputAction::MouseAxis(_) => {
                 // Mouse motion is tick-driven; see continuous.rs.
             }
+            // Engine-internal actions are consumed by the activator engine,
+            // never emitted to virtual devices.
+            OutputAction::SwitchActionSet(_)
+            | OutputAction::EnableLayer { .. }
+            | OutputAction::ModeShiftActivate { .. } => {}
         }
     }
 

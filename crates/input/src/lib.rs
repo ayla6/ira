@@ -14,9 +14,11 @@ pub use physical::{
     discover_gamepads, ControllerFamily, DeviceInfo, PhysicalGamepad, ReportedInputMode,
 };
 pub use profile::{
-    Activation, AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton,
-    GyroActivation, GyroCalibration, GyroConfig, GyroOutput, InputCategory, InputProfile,
-    InputSource, MouseAxis, MouseButton, OutputAction, VirtualGamepadBackend, PROFILE_VERSION,
+    Activator, ActivatorKind, ActivatorSettings, ActionSet, ActionSetLayer, Activation,
+    AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton, GyroActivation,
+    GyroCalibration, GyroConfig, GyroOutput, InputCategory, InputMapping, InputProfile,
+    InputSource, ModeShift, MouseAxis, MouseButton, OutputAction, SourceMode, StickOutput,
+    VirtualGamepadBackend, PROFILE_VERSION,
 };
 pub use gyro::{GyroProcessingOptions, GyroProcessor, GyroRates};
 pub use registry::ControllerRegistry;

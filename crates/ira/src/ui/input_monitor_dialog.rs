@@ -369,6 +369,8 @@ fn output_label(output: &OutputAction) -> String {
         OutputAction::MouseAxis(axis) => {
             crate::tr!("Mouse {axis:?}").replace("{axis:?}", &format!("{axis:?}"))
         }
+        OutputAction::SwitchActionSet(_) | OutputAction::EnableLayer { .. }
+        | OutputAction::ModeShiftActivate { .. } => crate::tr!("Action set control"),
     }
 }
 

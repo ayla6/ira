@@ -231,13 +231,29 @@ pub enum OutputAction {
     Keyboard { keycode: u16 },
     MouseButton(MouseButton),
     MouseAxis(MouseAxis),
+    /// Engine-internal: switch the active action set. Never reaches virtual
+    /// devices.
+    SwitchActionSet(usize),
+    /// Engine-internal: overlay an action set layer while held or until
+    /// toggled off.
+    EnableLayer {
+        layer: usize,
+        #[serde(default)]
+        mode: ChordMode,
+    },
+    /// Engine-internal: while the activator's condition holds, `target`
+    /// uses the referenced mode shift.
+    ModeShiftActivate { target: InputSource },
 }
 
 impl OutputAction {
     pub fn is_xinput_compatible(&self) -> bool {
         match self {
             Self::GamepadButton(button) => button.is_xinput(),
-            Self::GamepadAxis(_) => true,
+            Self::GamepadAxis(_)
+            | Self::SwitchActionSet(_)
+            | Self::EnableLayer { .. }
+            | Self::ModeShiftActivate { .. } => true,
             Self::Keyboard { .. } | Self::MouseButton(_) | Self::MouseAxis(_) => false,
         }
     }
@@ -364,6 +380,232 @@ impl Binding {
     }
 }
 
+/// A named group of input mappings. Profile action set `[0]` is the default;
+/// higher sets are switched to by bindings with
+/// [`OutputAction::SwitchActionSet`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActionSet {
+    pub name: String,
+    #[serde(default)]
+    pub inputs: Vec<InputMapping>,
+}
+
+/// Additive override applied on top of a parent action set while a layer
+/// binding is held or toggled on: inputs defined here replace the parent's
+/// mapping for the same source; everything else falls through.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActionSetLayer {
+    pub name: String,
+    /// Name of the action set this layer applies to.
+    pub parent_set: String,
+    #[serde(default)]
+    pub inputs: Vec<InputMapping>,
+}
+
+/// One physical input and everything it does, mirroring Steam Input's
+/// per-input model instead of a flat binding list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InputMapping {
+    pub source: InputSource,
+    /// Analog sources get an output mode; button sources leave this `None`.
+    #[serde(default)]
+    pub mode: Option<SourceMode>,
+    #[serde(default)]
+    pub mode_shifts: Vec<ModeShift>,
+    #[serde(default)]
+    pub activators: Vec<Activator>,
+}
+
+impl InputMapping {
+    pub fn new(source: InputSource) -> Self {
+        Self {
+            source,
+            mode: None,
+            mode_shifts: Vec::new(),
+            activators: Vec::new(),
+        }
+    }
+
+    /// Convenience constructor: a single full-press activator, the shape all
+    /// identity bindings migrate to.
+    pub fn simple(source: InputSource, output: OutputAction) -> Self {
+        let mut mapping = Self::new(source);
+        mapping.activators.push(Activator::full_press(vec![output]));
+        mapping
+    }
+}
+
+/// What an analog input (stick, trigger) drives.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceMode {
+    Joystick {
+        output: StickOutput,
+        #[serde(default = "default_deadzone_inner")]
+        deadzone_inner: f32,
+        #[serde(default = "default_deadzone_outer")]
+        deadzone_outer: f32,
+        #[serde(default = "default_exponent")]
+        curve: f32,
+    },
+    Mouse {
+        #[serde(default = "default_sensitivity")]
+        sensitivity: f32,
+    },
+    /// Reserved for the phase-5 flickstick implementation; parseable now so
+    /// imported profiles round-trip.
+    Flickstick {
+        #[serde(default = "default_flickstick_rotation")]
+        rotation_sensitivity: f32,
+        #[serde(default = "default_flickstick_flick_ms")]
+        flick_duration_ms: u32,
+    },
+    Trigger {
+        #[serde(default = "default_soft_threshold")]
+        threshold: f32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StickOutput {
+    Left,
+    Right,
+}
+
+impl SourceMode {
+    pub fn validate(&self) -> Result<(), String> {
+        let SourceMode::Joystick {
+            deadzone_inner,
+            deadzone_outer,
+            curve,
+            ..
+        } = self
+        else {
+            return Ok(());
+        };
+        if !(0.0..1.0).contains(deadzone_inner) || !deadzone_inner.is_finite() {
+            return Err("deadzone_inner must be finite and in [0, 1)".to_string());
+        }
+        if !(0.0..=1.0).contains(deadzone_outer) || !deadzone_outer.is_finite() {
+            return Err("deadzone_outer must be finite and in (0, 1]".to_string());
+        }
+        if deadzone_inner >= deadzone_outer {
+            return Err("deadzone_inner must be below deadzone_outer".to_string());
+        }
+        if !curve.is_finite() || *curve <= 0.0 {
+            return Err("curve exponent must be finite and positive".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// While `trigger` is held, the source uses this shift's mode/activators
+/// instead of its own — Steam Input's mode shift.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModeShift {
+    pub trigger: InputSource,
+    #[serde(default)]
+    pub mode: Option<SourceMode>,
+    #[serde(default)]
+    pub activators: Vec<Activator>,
+}
+
+/// One press pattern an input recognizes and the outputs it fires.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Activator {
+    pub kind: ActivatorKind,
+    #[serde(default)]
+    pub outputs: Vec<OutputAction>,
+    /// Gating that must hold for the activator to participate; carried over
+    /// from the flat-binding model.
+    #[serde(default)]
+    pub activation: Activation,
+    #[serde(default)]
+    pub settings: ActivatorSettings,
+}
+
+impl Activator {
+    pub fn full_press(outputs: Vec<OutputAction>) -> Self {
+        Self {
+            kind: ActivatorKind::FullPress,
+            outputs,
+            activation: Activation::Always,
+            settings: ActivatorSettings::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivatorKind {
+    FullPress,
+    DoublePress {
+        #[serde(default = "default_double_press_ms")]
+        window_ms: u32,
+    },
+    LongPress {
+        #[serde(default = "default_long_press_ms")]
+        duration_ms: u32,
+    },
+    StartPress,
+    Release,
+    /// Analog threshold crossing (triggers).
+    SoftPress {
+        #[serde(default = "default_soft_threshold")]
+        threshold: f32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct ActivatorSettings {
+    /// Fire again every N ms while the activator's condition keeps holding.
+    pub repeat_rate_ms: Option<u32>,
+    /// Press-on, press-again-off instead of hold-to-fire.
+    pub toggle: bool,
+    /// A later press pattern may cancel this activator before it completes.
+    pub interruptable: bool,
+}
+
+impl Default for ActivatorSettings {
+    fn default() -> Self {
+        Self {
+            repeat_rate_ms: None,
+            toggle: false,
+            interruptable: true,
+        }
+    }
+}
+
+fn default_deadzone_inner() -> f32 {
+    0.1
+}
+
+fn default_deadzone_outer() -> f32 {
+    0.95
+}
+
+fn default_double_press_ms() -> u32 {
+    320
+}
+
+fn default_long_press_ms() -> u32 {
+    600
+}
+
+fn default_soft_threshold() -> f32 {
+    0.5
+}
+
+fn default_flickstick_rotation() -> f32 {
+    1.0
+}
+
+fn default_flickstick_flick_ms() -> u32 {
+    120
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InputProfile {
     #[serde(default = "default_profile_version")]
@@ -378,6 +620,12 @@ pub struct InputProfile {
     pub gyro_calibration: GyroCalibration,
     #[serde(default)]
     pub gyro: GyroConfig,
+    /// Action-set model. Empty while a profile still uses the flat `bindings`
+    /// form; loaders convert bindings to a single default action set.
+    #[serde(default)]
+    pub action_sets: Vec<ActionSet>,
+    #[serde(default)]
+    pub action_layers: Vec<ActionSetLayer>,
     /// Internal Ira game IDs this profile has been assigned to.
     /// Empty means the profile is available to every game.
     #[serde(default)]
@@ -393,6 +641,8 @@ impl Default for InputProfile {
             bindings: Vec::new(),
             gyro_calibration: GyroCalibration::default(),
             gyro: GyroConfig::default(),
+            action_sets: Vec::new(),
+            action_layers: Vec::new(),
             compatible_game_ids: Vec::new(),
         }
     }
@@ -423,23 +673,120 @@ impl InputProfile {
             }
         }
         self.gyro.validate()?;
+        self.validate_action_sets()?;
         Ok(())
     }
 
-    /// Parse a profile from JSON, dropping legacy entries that no longer have
-    /// a meaning (per-axis gyro bindings, recenter bindings) so profiles from
-    /// before the gyro rework keep loading. Ira is pre-release: nothing tries
-    /// to translate old gyro setups, they are simply removed.
-    pub fn from_json(json: &str) -> Result<Self, String> {
-        let mut value: serde_json::Value = serde_json::from_str(json)
-            .map_err(|error| format!("invalid profile JSON: {error}"))?;
-        if let Some(bindings) = value.get_mut("bindings").and_then(|b| b.as_array_mut()) {
-            let dropped = strip_legacy_gyro_bindings(bindings);
-            if dropped > 0 {
-                eprintln!("ira-input: dropped {dropped} legacy gyro/recenter binding(s)");
+    fn validate_action_sets(&self) -> Result<(), String> {
+        if self.action_sets.is_empty() {
+            return Ok(());
+        }
+        for (index, output) in self.all_activator_outputs().enumerate() {
+            if !output.is_supported_by(self.backend) {
+                return Err(format!(
+                    "action set entry {index}: output is not supported by Ira's virtual input devices"
+                ));
             }
         }
-        serde_json::from_value(value).map_err(|error| format!("invalid profile: {error}"))
+        for (set_index, set) in self.action_sets.iter().enumerate() {
+            if set.name.trim().is_empty() {
+                return Err(format!("action set {set_index} needs a name"));
+            }
+            for (input_index, input) in set.inputs.iter().enumerate() {
+                self.validate_input_mapping(&set.name, input_index, input)?;
+            }
+        }
+        for (layer_index, layer) in self.action_layers.iter().enumerate() {
+            if !self.action_sets.iter().any(|set| set.name == layer.parent_set) {
+                return Err(format!(
+                    "action layer {layer_index} references unknown parent set '{}'",
+                    layer.parent_set
+                ));
+            }
+            for (input_index, input) in layer.inputs.iter().enumerate() {
+                self.validate_input_mapping(&layer.name, input_index, input)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_input_mapping(
+        &self,
+        context: &str,
+        input_index: usize,
+        input: &InputMapping,
+    ) -> Result<(), String> {
+        let label = format!("{context} input {input_index}");
+        if let Some(mode) = &input.mode {
+            mode.validate()
+                .map_err(|error| format!("{label}: {error}"))?;
+        }
+        // Button inputs express everything through activators; mode-driven
+        // analog inputs (sticks, triggers) work without any.
+        if input.mode.is_none() && input.activators.is_empty() {
+            return Err(format!("{label}: needs at least one activator"));
+        }
+        for activator in &input.activators {
+            if activator.outputs.is_empty() {
+                return Err(format!("{label}: activator needs at least one output"));
+            }
+            if let ActivatorKind::SoftPress { threshold } = activator.kind {
+                if !(0.0..1.0).contains(&threshold) || !threshold.is_finite() {
+                    return Err(format!("{label}: soft-press threshold must be in [0, 1)"));
+                }
+            }
+            for output in &activator.outputs {
+                match output {
+                    OutputAction::SwitchActionSet(target)
+                        if *target >= self.action_sets.len() =>
+                    {
+                        return Err(format!(
+                            "{label}: switch-action-set target {target} out of range"
+                        ));
+                    }
+                    OutputAction::EnableLayer { layer, .. }
+                        if *layer >= self.action_layers.len() =>
+                    {
+                        return Err(format!(
+                            "{label}: enable-layer target {layer} out of range"
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for (shift_index, shift) in input.mode_shifts.iter().enumerate() {
+            if !matches!(shift.trigger, InputSource::Button(_)) {
+                return Err(format!(
+                    "{label}: mode shift {shift_index} trigger must be a button"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Every output fired by any activator anywhere in the profile.
+    pub fn all_activator_outputs(&self) -> impl Iterator<Item = &OutputAction> {
+        let mut outputs: Vec<&OutputAction> = self
+            .bindings
+            .iter()
+            .map(|binding| &binding.output)
+            .collect();
+        for input in self
+            .action_sets
+            .iter()
+            .flat_map(|set| set.inputs.iter())
+            .chain(self.action_layers.iter().flat_map(|layer| layer.inputs.iter()))
+        {
+            for activator in input
+                .activators
+                .iter()
+                .chain(input.mode_shifts.iter().flat_map(|shift| shift.activators.iter()))
+            {
+                outputs.extend(activator.outputs.iter());
+            }
+        }
+        outputs.into_iter()
     }
 
     pub fn default_gamepad() -> Self {
@@ -572,10 +919,9 @@ impl InputProfile {
     }
 
     pub fn keyboard_keycodes(&self) -> Vec<u16> {
-        self.bindings
-            .iter()
-            .filter_map(|binding| match binding.output {
-                OutputAction::Keyboard { keycode } => Some(keycode),
+        self.all_activator_outputs()
+            .filter_map(|output| match output {
+                OutputAction::Keyboard { keycode } => Some(*keycode),
                 _ => None,
             })
             .collect()
@@ -583,9 +929,9 @@ impl InputProfile {
 
     pub fn uses_mouse(&self) -> bool {
         (self.gyro.enabled && self.gyro.output == GyroOutput::Mouse)
-            || self.bindings.iter().any(|binding| {
+            || self.all_activator_outputs().any(|output| {
                 matches!(
-                    binding.output,
+                    output,
                     OutputAction::MouseAxis(_) | OutputAction::MouseButton(_)
                 )
             })
@@ -606,22 +952,6 @@ fn default_sensitivity() -> f32 {
 
 fn default_exponent() -> f32 {
     1.0
-}
-
-/// Remove bindings that reference removed model features, in place, and
-/// return how many were dropped.
-fn strip_legacy_gyro_bindings(bindings: &mut Vec<serde_json::Value>) -> usize {
-    let before = bindings.len();
-    bindings.retain(|binding| {
-        let is_gyro_source = binding
-            .get("source")
-            .and_then(|source| source.as_object())
-            .is_some_and(|source| source.contains_key("gyro"));
-        let is_recenter_output = binding.get("output").and_then(|o| o.as_str())
-            == Some("recenter_gyro");
-        !is_gyro_source && !is_recenter_output
-    });
-    before - bindings.len()
 }
 
 #[cfg(test)]
@@ -986,5 +1316,130 @@ mod tests {
         assert!(profile.bindings.is_empty());
         assert!(profile.gyro.enabled);
         assert_eq!(profile.gyro.output, GyroOutput::RightStick);
+    }
+
+    #[test]
+    fn test_action_set_profile_roundtrips_through_json() {
+        let profile = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![
+                    InputMapping {
+                        source: InputSource::Button(GamepadButton::A),
+                        activators: vec![
+                            Activator::full_press(vec![OutputAction::GamepadButton(
+                                GamepadButton::A,
+                            )]),
+                            Activator {
+                                kind: ActivatorKind::DoublePress {
+                                    window_ms: 280,
+                                },
+                                outputs: vec![OutputAction::Keyboard { keycode: 32 }],
+                                activation: Activation::Always,
+                                settings: ActivatorSettings::default(),
+                            },
+                        ],
+                        ..InputMapping::new(InputSource::Button(GamepadButton::A))
+                    },
+                    InputMapping {
+                        source: InputSource::Axis(GamepadAxis::LeftX),
+                        mode: Some(SourceMode::Joystick {
+                            output: StickOutput::Left,
+                            deadzone_inner: 0.12,
+                            deadzone_outer: 0.94,
+                            curve: 1.4,
+                        }),
+                        ..InputMapping::new(InputSource::Axis(GamepadAxis::LeftX))
+                    },
+                ],
+            }],
+            action_layers: vec![ActionSetLayer {
+                name: "Menus".to_string(),
+                parent_set: "Default".to_string(),
+                inputs: vec![InputMapping::simple(
+                    InputSource::Button(GamepadButton::A),
+                    OutputAction::GamepadButton(GamepadButton::B),
+                )],
+            }],
+            ..InputProfile::default()
+        };
+        let decoded = InputProfile::from_json(&serde_json::to_string(&profile).unwrap()).unwrap();
+        assert_eq!(decoded, profile);
+        assert!(decoded.validate().is_ok());
+    }
+
+    #[test]
+    fn test_action_set_validation_rejects_bad_references() {
+        let out_of_range = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping::simple(
+                    InputSource::Button(GamepadButton::A),
+                    OutputAction::SwitchActionSet(1),
+                )],
+            }],
+            ..InputProfile::default()
+        };
+        assert!(out_of_range.validate().is_err());
+
+        let unknown_parent = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: Vec::new(),
+            }],
+            action_layers: vec![ActionSetLayer {
+                name: "Layer".to_string(),
+                parent_set: "Missing".to_string(),
+                inputs: Vec::new(),
+            }],
+            ..InputProfile::default()
+        };
+        assert!(unknown_parent.validate().is_err());
+
+        let empty_activators = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping::new(InputSource::Button(GamepadButton::A))],
+            }],
+            ..InputProfile::default()
+        };
+        assert!(empty_activators.validate().is_err());
+    }
+
+    #[test]
+    fn test_keyboard_and_mouse_helpers_see_activator_outputs() {
+        let profile = InputProfile {
+            bindings: Vec::new(),
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping::simple(
+                    InputSource::Button(GamepadButton::A),
+                    OutputAction::Keyboard { keycode: 42 },
+                )],
+            }],
+            ..InputProfile::default()
+        };
+        assert_eq!(profile.keyboard_keycodes(), vec![42]);
+        assert!(!profile.uses_mouse());
+    }
+
+    #[test]
+    fn test_mode_shift_trigger_must_be_a_button() {
+        let analog_trigger = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping {
+                    source: InputSource::Axis(GamepadAxis::LeftX),
+                    mode_shifts: vec![ModeShift {
+                        trigger: InputSource::Axis(GamepadAxis::RightX),
+                        mode: None,
+                        activators: Vec::new(),
+                    }],
+                    ..InputMapping::new(InputSource::Axis(GamepadAxis::LeftX))
+                }],
+            }],
+            ..InputProfile::default()
+        };
+        assert!(analog_trigger.validate().is_err());
     }
 }

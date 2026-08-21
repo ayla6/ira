@@ -43,7 +43,7 @@ const SMOOTH_LOW: f32 = 0.05;
 const SMOOTH_HIGH: f32 = 0.5;
 const SMOOTH_MAX_ALPHA: f32 = 0.8;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct GyroRates {
     /// Rotation around the gravity axis in rad/s; positive turns right.
     pub yaw: f32,

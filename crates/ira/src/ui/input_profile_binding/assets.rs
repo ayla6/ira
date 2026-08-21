@@ -1,5 +1,5 @@
 use adw::prelude::*;
-use ira_input::{ControllerFamily, GamepadAxis, GamepadButton, GyroAxis, InputSource};
+use ira_input::{ControllerFamily, GamepadAxis, GamepadButton, InputSource};
 
 pub(super) fn set_source_asset(
     image: &gtk4::Image,
@@ -66,11 +66,6 @@ pub(super) fn source_asset_name(
             GamepadAxis::RightX | GamepadAxis::RightY => Some("shared_rstick.svg"),
             GamepadAxis::LeftTrigger => family_asset(family, "lt"),
             GamepadAxis::RightTrigger => family_asset(family, "rt"),
-        },
-        InputSource::Gyro(axis) => match axis {
-            GyroAxis::X => Some("shared_gyro_pitch.svg"),
-            GyroAxis::Y => Some("shared_gyro_yaw.svg"),
-            GyroAxis::Z => Some("shared_gyro_roll.svg"),
         },
     }
 }
@@ -235,22 +230,13 @@ pub(super) fn source_badge(source: InputSource, family: ControllerFamily) -> Str
             };
             format!("{}{sign}", source_badge(InputSource::Axis(axis), family))
         }
-        InputSource::Gyro(axis) => format!("G-{}", gyro_axis_label(axis)),
-    }
-}
-
-fn gyro_axis_label(axis: GyroAxis) -> &'static str {
-    match axis {
-        GyroAxis::X => "X (Pitch)",
-        GyroAxis::Y => "Y (Yaw)",
-        GyroAxis::Z => "Z (Roll)",
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{source_asset_name, source_badge};
-    use ira_input::{ControllerFamily, GamepadButton, GyroAxis, InputSource};
+    use super::source_asset_name;
+    use ira_input::{ControllerFamily, GamepadButton, InputSource};
 
     #[test]
     fn test_source_asset_name_uses_shared_standard_controls() {
@@ -316,35 +302,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_gyro_assets_follow_sdl_axis_semantics() {
-        assert_eq!(
-            source_asset_name(InputSource::Gyro(GyroAxis::X), ControllerFamily::Generic),
-            Some("shared_gyro_pitch.svg")
-        );
-        assert_eq!(
-            source_asset_name(InputSource::Gyro(GyroAxis::Y), ControllerFamily::Generic),
-            Some("shared_gyro_yaw.svg")
-        );
-        assert_eq!(
-            source_asset_name(InputSource::Gyro(GyroAxis::Z), ControllerFamily::Generic),
-            Some("shared_gyro_roll.svg")
-        );
-    }
-
-    #[test]
-    fn test_gyro_badge_uses_semantic_labels() {
-        assert_eq!(
-            source_badge(InputSource::Gyro(GyroAxis::X), ControllerFamily::Generic),
-            "G-X (Pitch)"
-        );
-        assert_eq!(
-            source_badge(InputSource::Gyro(GyroAxis::Y), ControllerFamily::Generic),
-            "G-Y (Yaw)"
-        );
-        assert_eq!(
-            source_badge(InputSource::Gyro(GyroAxis::Z), ControllerFamily::Generic),
-            "G-Z (Roll)"
-        );
-    }
 }

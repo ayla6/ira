@@ -6,10 +6,10 @@ use super::super::input_profile_output_capture::{
     show_keyboard_output_capture, show_mouse_output_capture,
 };
 use super::assets::{set_source_asset, source_badge};
-use super::categories::{is_analog_source, uses_gyro_stick_output};
+use super::categories::is_analog_source;
 use super::types::{BindingRow, OutputChangeContext, SourceChangeContext};
 use adw::prelude::*;
-use ira_input::{InputSource, OutputAction};
+use ira_input::OutputAction;
 use std::rc::Rc;
 
 pub(super) fn connect_dirty(row: &BindingRow, on_dirty: &Rc<dyn Fn()>) {
@@ -30,14 +30,6 @@ pub(super) fn connect_dirty(row: &BindingRow, on_dirty: &Rc<dyn Fn()>) {
         move |_| on_dirty()
     });
     row.chord.connect_changed({
-        let on_dirty = on_dirty.clone();
-        move |_| on_dirty()
-    });
-    row.recenter.connect_selected_notify({
-        let on_dirty = on_dirty.clone();
-        move |_| on_dirty()
-    });
-    row.gyro_mode.connect_selected_notify({
         let on_dirty = on_dirty.clone();
         move |_| on_dirty()
     });
@@ -67,12 +59,6 @@ pub(super) fn connect_source_changes(dropdown: &gtk4::DropDown, context: SourceC
             context.sensitivity_row.set_visible(analog);
             context.exponent_row.set_visible(analog);
             context.invert_row.set_visible(analog);
-            context
-                .recenter_row
-                .set_visible(matches!(*source, InputSource::Gyro(_)));
-            context
-                .gyro_mode_row
-                .set_visible(uses_gyro_stick_output(*source, &context.output.borrow()));
         }
     });
 }
@@ -118,14 +104,6 @@ fn show_output_capture(option: OutputOption, parent: &gtk4::Window, context: Out
 
 fn update_output_state(context: &OutputChangeContext) {
     update_binding_summary(&context.source, &context.output.borrow(), &context.row);
-    if let Some((source, _)) = context
-        .source_options
-        .get(context.source.selected() as usize)
-    {
-        context
-            .gyro_mode_row
-            .set_visible(uses_gyro_stick_output(*source, &context.output.borrow()));
-    }
     (context.on_dirty)();
 }
 

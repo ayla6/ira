@@ -3,13 +3,13 @@ use super::super::css::{
 };
 use super::super::helpers::esc;
 use super::super::input_profile_options::{
-    activation_index, activation_labels, activator_index, gyro_mode_index, gyro_mode_labels,
-    output_index, output_labels, recenter_index, source_options_for_device,
+    activation_index, activation_labels, activator_index, output_index, output_labels,
+    source_options_for_device,
 };
 use super::assets::{set_source_asset, source_badge};
 use super::categories::{
     activation_sources, chord_text_for_options, is_analog_source, section_source_options,
-    section_title_label, source_index_for, uses_gyro_stick_output,
+    section_title_label, source_index_for,
 };
 use super::signals::{
     connect_dirty, connect_output_changes, connect_source_changes, update_activation_controls,
@@ -104,8 +104,6 @@ struct RowControls {
     activation: gtk4::DropDown,
     activator: gtk4::DropDown,
     chord: adw::EntryRow,
-    recenter: gtk4::DropDown,
-    gyro_mode: gtk4::DropDown,
     dead_zone: gtk4::SpinButton,
     sensitivity: gtk4::SpinButton,
     exponent: gtk4::SpinButton,
@@ -114,8 +112,6 @@ struct RowControls {
 
 struct BindingRows {
     activator: adw::ActionRow,
-    recenter: adw::ActionRow,
-    gyro_mode: adw::ActionRow,
     dead_zone: adw::ActionRow,
     sensitivity: adw::ActionRow,
     exponent: adw::ActionRow,
@@ -140,7 +136,7 @@ fn make_binding_row(
     let family = device.map(DeviceInfo::family).unwrap_or_default();
     let (fallback, asset, current_source) = add_source_prefix(&container, binding.source, family);
     let rows = add_binding_controls(&container, &controls);
-    configure_control_visibility(&rows, binding.source, &binding.output);
+    configure_control_visibility(&rows, binding.source);
     connect_activation_changes(
         &controls.activation,
         &controls.activator,
@@ -161,17 +157,13 @@ fn make_binding_row(
             sensitivity_row: rows.sensitivity.clone(),
             exponent_row: rows.exponent.clone(),
             invert_row: rows.invert.clone(),
-            recenter_row: rows.recenter.clone(),
-            gyro_mode_row: rows.gyro_mode.clone(),
         },
     );
     connect_output_changes(
         &controls.output,
         OutputChangeContext {
             source: controls.source.clone(),
-            source_options: controls.source_options.clone(),
             output: controls.output_action.clone(),
-            gyro_mode_row: rows.gyro_mode,
             row: container.clone(),
             on_dirty: on_dirty.clone(),
             backend,
@@ -187,8 +179,6 @@ fn make_binding_row(
         activation: controls.activation,
         activator: controls.activator,
         chord: controls.chord,
-        recenter: controls.recenter,
-        gyro_mode: controls.gyro_mode,
         dead_zone: controls.dead_zone,
         sensitivity: controls.sensitivity,
         exponent: controls.exponent,
@@ -238,16 +228,6 @@ fn build_controls(
         &activator_options,
     ));
     chord.set_tooltip_text(Some(&crate::tr!("Comma-separated input sources")));
-    let recenter = combo_row(
-        &[
-            crate::tr!("Never"),
-            crate::tr!("On enable"),
-            crate::tr!("On disable"),
-            crate::tr!("On enable and disable"),
-        ],
-        recenter_index(binding.recenter),
-    );
-    let gyro_mode = combo_row(&gyro_mode_labels(), gyro_mode_index(binding.gyro_mode));
     let dead_zone = spin_button(0.0, 0.99, 0.01, 2, binding.transform.dead_zone);
     let sensitivity = spin_button(0.0, 1000.0, 0.1, 2, binding.transform.sensitivity);
     let exponent = spin_button(0.1, 5.0, 0.1, 2, binding.transform.exponent);
@@ -262,8 +242,6 @@ fn build_controls(
         activation,
         activator,
         chord,
-        recenter,
-        gyro_mode,
         dead_zone,
         sensitivity,
         exponent,
@@ -319,8 +297,6 @@ fn add_binding_controls(container: &adw::ExpanderRow, controls: &RowControls) ->
     add_control_row(container, "Activation", &controls.activation);
     let activator = add_control_row(container, "Activator", &controls.activator);
     container.add_row(&controls.chord);
-    let recenter = add_control_row(container, "Recenter", &controls.recenter);
-    let gyro_mode = add_control_row(container, "Gyro output", &controls.gyro_mode);
     add_section_header(container, "Response");
     let dead_zone = add_control_row(container, "Dead zone", &controls.dead_zone);
     let sensitivity = add_control_row(container, "Sensitivity", &controls.sensitivity);
@@ -328,8 +304,6 @@ fn add_binding_controls(container: &adw::ExpanderRow, controls: &RowControls) ->
     let invert = add_control_row(container, "Invert", &controls.invert);
     BindingRows {
         activator,
-        recenter,
-        gyro_mode,
         dead_zone,
         sensitivity,
         exponent,
@@ -348,8 +322,6 @@ fn add_control_row<W: IsA<gtk4::Widget>>(
         "Output" => crate::tr!("Output"),
         "Activation" => crate::tr!("Activation"),
         "Activator" => crate::tr!("Activator"),
-        "Recenter" => crate::tr!("Recenter"),
-        "Gyro output" => crate::tr!("Gyro output"),
         "Dead zone" => crate::tr!("Dead zone"),
         "Sensitivity" => crate::tr!("Sensitivity"),
         "Exponent" => crate::tr!("Exponent"),
@@ -382,7 +354,7 @@ fn add_section_header(container: &adw::ExpanderRow, title: &str) {
     container.add_row(&row);
 }
 
-fn configure_control_visibility(rows: &BindingRows, source: InputSource, output: &OutputAction) {
+fn configure_control_visibility(rows: &BindingRows, source: InputSource) {
     let analog = is_analog_source(source);
     for row in [
         &rows.dead_zone,
@@ -392,10 +364,6 @@ fn configure_control_visibility(rows: &BindingRows, source: InputSource, output:
     ] {
         row.set_visible(analog);
     }
-    rows.recenter
-        .set_visible(matches!(source, InputSource::Gyro(_)));
-    rows.gyro_mode
-        .set_visible(uses_gyro_stick_output(source, output));
 }
 
 fn connect_activation_changes(

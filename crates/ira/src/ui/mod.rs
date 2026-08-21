@@ -41,6 +41,7 @@ mod input_profile_editor_pages;
 mod input_profile_editor_sections;
 mod input_profile_gamepad;
 mod input_profile_options;
+mod input_profile_gyro_card;
 mod input_profile_output_capture;
 mod input_profile_settings;
 mod input_profile_store;

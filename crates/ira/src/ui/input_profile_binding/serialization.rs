@@ -1,8 +1,6 @@
 use super::types::BindingRow;
 use adw::prelude::*;
-use ira_input::{
-    Activation, AxisTransform, Binding, ChordMode, GyroMode, InputSource, RecenterMode,
-};
+use ira_input::{Activation, AxisTransform, Binding, ChordMode, InputSource};
 
 pub(crate) fn binding_from_row(row: &BindingRow) -> Result<Binding, String> {
     let source = row
@@ -15,22 +13,12 @@ pub(crate) fn binding_from_row(row: &BindingRow) -> Result<Binding, String> {
     Ok(Binding {
         source,
         output,
-        gyro_mode: match row.gyro_mode.selected() {
-            1 => GyroMode::HoldLast,
-            _ => GyroMode::Rate,
-        },
         activation,
         transform: AxisTransform {
             dead_zone: row.dead_zone.value() as f32,
             sensitivity: row.sensitivity.value() as f32,
             exponent: row.exponent.value() as f32,
             invert: row.invert.is_active(),
-        },
-        recenter: match row.recenter.selected() {
-            1 => RecenterMode::OnEnable,
-            2 => RecenterMode::OnDisable,
-            3 => RecenterMode::OnEnableOrDisable,
-            _ => RecenterMode::Never,
         },
     })
 }

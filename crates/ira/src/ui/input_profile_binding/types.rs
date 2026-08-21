@@ -12,8 +12,6 @@ pub(crate) struct BindingRow {
     pub activation: gtk4::DropDown,
     pub activator: gtk4::DropDown,
     pub chord: adw::EntryRow,
-    pub recenter: gtk4::DropDown,
-    pub gyro_mode: gtk4::DropDown,
     pub dead_zone: gtk4::SpinButton,
     pub sensitivity: gtk4::SpinButton,
     pub exponent: gtk4::SpinButton,
@@ -33,16 +31,12 @@ pub(super) struct SourceChangeContext {
     pub sensitivity_row: adw::ActionRow,
     pub exponent_row: adw::ActionRow,
     pub invert_row: adw::ActionRow,
-    pub recenter_row: adw::ActionRow,
-    pub gyro_mode_row: adw::ActionRow,
 }
 
 #[derive(Clone)]
 pub(super) struct OutputChangeContext {
     pub source: gtk4::DropDown,
-    pub source_options: Vec<(InputSource, String)>,
     pub output: Rc<RefCell<OutputAction>>,
-    pub gyro_mode_row: adw::ActionRow,
     pub row: adw::ExpanderRow,
     pub on_dirty: Rc<dyn Fn()>,
     pub backend: VirtualGamepadBackend,

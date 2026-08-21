@@ -8,7 +8,7 @@ use super::input_profile_editor_sections::{
 };
 use adw::prelude::*;
 use ira_input::{
-    Binding, DeviceInfo, GamepadAxis, GamepadButton, GyroAxis, InputSource, OutputAction,
+    Binding, DeviceInfo, GamepadAxis, GamepadButton, InputSource, OutputAction,
     VirtualGamepadBackend,
 };
 use std::cell::RefCell;
@@ -66,6 +66,9 @@ pub(super) fn setup_pages(
         mark_dirty: mark_dirty.clone(),
     };
     for (page, default_binding) in page_boxes.iter().zip(default_bindings()) {
+        let Some(default_binding) = default_binding else {
+            continue;
+        };
         let add_binding = gtk4::Button::from_icon_name("list-add-symbolic");
         add_binding.add_css_class(super::css::CSS_FLAT);
         add_binding.set_tooltip_text(Some(&crate::tr!("Add binding")));
@@ -111,28 +114,27 @@ fn page_descriptors() -> Vec<(&'static str, String, &'static str)> {
     ]
 }
 
-fn default_bindings() -> [Binding; 5] {
+fn default_bindings() -> [Option<Binding>; 5] {
     [
-        Binding::new(
+        Some(Binding::new(
             InputSource::Button(GamepadButton::A),
             OutputAction::GamepadButton(GamepadButton::A),
-        ),
-        Binding::new(
+        )),
+        Some(Binding::new(
             InputSource::Button(GamepadButton::DpadUp),
             OutputAction::GamepadButton(GamepadButton::DpadUp),
-        ),
-        Binding::new(
+        )),
+        Some(Binding::new(
             InputSource::Axis(GamepadAxis::LeftTrigger),
             OutputAction::GamepadAxis(GamepadAxis::LeftTrigger),
-        ),
-        Binding::new(
+        )),
+        Some(Binding::new(
             InputSource::Axis(GamepadAxis::LeftX),
             OutputAction::GamepadAxis(GamepadAxis::LeftX),
-        ),
-        Binding::new(
-            InputSource::Gyro(GyroAxis::X),
-            OutputAction::GamepadAxis(GamepadAxis::RightX),
-        ),
+        )),
+        // The gyro page has no bindings: it holds the whole-controller gyro
+        // config card instead.
+        None,
     ]
 }
 
@@ -340,6 +342,5 @@ fn binding_order(binding: &Binding) -> usize {
             InputSource::Axis(axis),
             OutputAction::GamepadAxis(axis),
         )),
-        InputSource::Gyro(axis) => axis as usize,
     }
 }

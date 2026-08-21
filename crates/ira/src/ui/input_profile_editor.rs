@@ -5,9 +5,10 @@ use super::input_profile_editor_pages::{
     connect_backend_change, reset_to_defaults, setup_pages, setup_sidebar,
 };
 use super::input_profile_editor_sections::default_profile_bindings;
+use super::input_profile_gyro_card::add_gyro_group;
 use super::input_profile_store::{new_managed_profile_path, read_profile, write_profile};
 use adw::prelude::*;
-use ira_input::{DeviceInfo, InputProfile, VirtualGamepadBackend};
+use ira_input::{DeviceInfo, GyroConfig, InputProfile, VirtualGamepadBackend};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -18,6 +19,7 @@ struct ProfileForm {
     name: Rc<RefCell<String>>,
     rows: Rc<RefCell<Vec<BindingRow>>>,
     calibration: Rc<RefCell<ira_input::GyroCalibration>>,
+    gyro: Rc<RefCell<GyroConfig>>,
     compatible_game_ids: Vec<i64>,
     game_id: Option<i64>,
     backend: Rc<RefCell<VirtualGamepadBackend>>,
@@ -77,6 +79,7 @@ pub(super) fn show_input_profile_editor(
         profile = seed_new_profile_bindings(profile, device.as_ref());
     }
     let calibration = Rc::new(RefCell::new(profile.gyro_calibration));
+    let gyro = Rc::new(RefCell::new(profile.gyro.clone()));
     let compatible_game_ids = profile.compatible_game_ids.clone();
     let profile_name = Rc::new(RefCell::new(profile.name.clone()));
     let calibration_device = (device_was_explicit || detected_devices.len() == 1)
@@ -102,12 +105,14 @@ pub(super) fn show_input_profile_editor(
         let name = profile_name.clone();
         let compatible_game_ids = compatible_game_ids.clone();
         let calibration = calibration.clone();
+        let gyro = gyro.clone();
         let backend = backend.clone();
         Rc::new(move || {
             let result = build_profile(
                 &name.borrow(),
                 &rows.borrow(),
                 *calibration.borrow(),
+                gyro.borrow().clone(),
                 &compatible_game_ids,
                 game_id,
                 *backend.borrow(),
@@ -132,6 +137,7 @@ pub(super) fn show_input_profile_editor(
     let section_groups = setup.section_groups;
     let backend_dropdown = setup.backend_dropdown;
 
+    add_gyro_group(&page_boxes[4], &gyro, device.as_ref(), &mark_dirty);
     add_calibration_group(
         &page_boxes[4],
         &calibration,
@@ -168,6 +174,7 @@ pub(super) fn show_input_profile_editor(
         name: profile_name,
         rows,
         calibration,
+        gyro,
         compatible_game_ids,
         game_id,
         backend,
@@ -295,6 +302,7 @@ fn connect_save(
             &form.name.borrow(),
             &form.rows.borrow(),
             *form.calibration.borrow(),
+            form.gyro.borrow().clone(),
             &form.compatible_game_ids,
             form.game_id,
             *form.backend.borrow(),
@@ -348,6 +356,7 @@ fn build_profile(
     name: &str,
     rows: &[BindingRow],
     calibration: ira_input::GyroCalibration,
+    gyro: GyroConfig,
     compatible_game_ids: &[i64],
     game_id: Option<i64>,
     backend: VirtualGamepadBackend,
@@ -365,6 +374,7 @@ fn build_profile(
             .map(binding_from_row)
             .collect::<Result<_, _>>()?,
         gyro_calibration: calibration,
+        gyro,
         compatible_game_ids,
         backend,
         ..InputProfile::default()

@@ -1,7 +1,8 @@
 use super::input_profile_options::{axis_label, button_label};
 use ira_input::{
-    ControllerRegistry, DeviceInfo, GamepadAxis, GamepadButton, InputEvent, InputProfile,
-    InputSource, MappingEngine, OutputAction, OutputEvent, Sdl3SensorBackend,
+    ControllerRegistry, DeviceInfo, GamepadAxis, GamepadButton, GyroProcessingOptions,
+    GyroProcessor, InputEvent, InputProfile, InputSource, MappingEngine, OutputAction,
+    OutputEvent, Sdl3SensorBackend,
 };
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -53,6 +54,16 @@ fn monitor_loop(
     registry: Arc<ControllerRegistry>,
 ) -> Result<(), String> {
     let mut engine = profile.map(MappingEngine::new).transpose()?;
+    let mut gyro_processor = engine.as_ref().map(|engine| {
+        GyroProcessor::new(
+            engine.profile().gyro_calibration,
+            GyroProcessingOptions {
+                smoothing: engine.profile().gyro.smoothing,
+                auto_calibrate: true,
+            },
+        )
+    });
+    let mut last_sensor_us: Option<u64> = None;
     let mut values = MonitorValues::default();
     let mut gamepad = None;
     let mut sensor = None;
@@ -92,29 +103,25 @@ fn monitor_loop(
             if let Some(engine) = engine.as_mut() {
                 let events = engine.process(event);
                 update_mapped_values(&mut values, &events);
-                update_outputs(
-                    &mut values.active_outputs,
-                    &events,
-                    event.source,
-                    engine.profile(),
-                );
+                update_outputs(&mut values.active_outputs, &events, engine.profile());
             }
         }
         let sensor_failed = if let Some(sensor_backend) = sensor.as_mut() {
             match sensor_backend.read(timestamp_us()) {
                 Ok(Some(sample)) => {
                     values.gyro = sample.gyro;
-                    if let Some(engine) = engine.as_mut() {
-                        for event in sample.input_events() {
-                            let events = engine.process(event);
-                            update_mapped_values(&mut values, &events);
-                            update_outputs(
-                                &mut values.active_outputs,
-                                &events,
-                                event.source,
-                                engine.profile(),
-                            );
-                        }
+                    if let (Some(engine), Some(processor)) =
+                        (engine.as_mut(), gyro_processor.as_mut())
+                    {
+                        let dt = last_sensor_us
+                            .map(|last| {
+                                sample.timestamp_us.saturating_sub(last) as f32 / 1_000_000.0
+                            })
+                            .unwrap_or(1.0 / 250.0)
+                            .clamp(0.0005, 0.05);
+                        last_sensor_us = Some(sample.timestamp_us);
+                        let rates = processor.process(sample.gyro, sample.accel, dt);
+                        engine.update_gyro(rates);
                     }
                     false
                 }
@@ -127,6 +134,12 @@ fn monitor_loop(
         } else {
             false
         };
+        if let Some(engine) = engine.as_mut() {
+            // Continuous outputs (gyro axes, mouse motion) are tick-driven.
+            let events = engine.tick(timestamp_us());
+            update_mapped_values(&mut values, &events);
+            update_outputs(&mut values.active_outputs, &events, engine.profile());
+        }
         let disconnected = !current_gamepad.is_connected();
         if disconnected {
             if let Some(engine) = engine.as_mut() {
@@ -251,7 +264,6 @@ fn update_values(values: &mut MonitorValues, event: InputEvent) {
             }
         }
         InputSource::AxisDirection { .. } => {}
-        InputSource::Gyro(_) => {}
     }
 }
 
@@ -277,12 +289,7 @@ fn update_mapped_values(values: &mut MonitorValues, events: &[OutputEvent]) {
     }
 }
 
-fn update_outputs(
-    outputs: &mut Vec<String>,
-    events: &[OutputEvent],
-    source: InputSource,
-    profile: &InputProfile,
-) {
+fn update_outputs(outputs: &mut Vec<String>, events: &[OutputEvent], profile: &InputProfile) {
     for event in events {
         let (output, active) = match &event {
             OutputEvent::GamepadButton { button, pressed } => {
@@ -300,12 +307,11 @@ fn update_outputs(
             OutputEvent::MouseMotion { axis, value } => {
                 (OutputAction::MouseAxis(*axis), value.abs() > 0.01)
             }
-            OutputEvent::RecenterGyro => continue,
         };
         let relations = profile
             .bindings
             .iter()
-            .filter(|binding| binding.output == output && source_matches(source, binding.source))
+            .filter(|binding| binding.output == output)
             .map(|binding| {
                 format!(
                     "{} -> {}",
@@ -331,17 +337,6 @@ fn update_outputs(
     }
 }
 
-fn source_matches(event: InputSource, binding: InputSource) -> bool {
-    event == binding
-        || matches!(
-            (event, binding),
-            (
-                InputSource::Axis(event_axis),
-                InputSource::AxisDirection { axis: binding_axis, .. }
-            ) if event_axis == binding_axis
-        )
-}
-
 fn input_source_label(source: InputSource) -> String {
     match source {
         InputSource::Button(button) => button_label(button),
@@ -354,7 +349,6 @@ fn input_source_label(source: InputSource) -> String {
                 ira_input::AxisDirection::Positive => "+",
             }
         ),
-        InputSource::Gyro(axis) => gyro_label(axis).to_string(),
     }
 }
 
@@ -375,15 +369,6 @@ fn output_label(output: &OutputAction) -> String {
         OutputAction::MouseAxis(axis) => {
             crate::tr!("Mouse {axis:?}").replace("{axis:?}", &format!("{axis:?}"))
         }
-        OutputAction::RecenterGyro => crate::tr!("Recenter gyro"),
-    }
-}
-
-fn gyro_label(axis: ira_input::GyroAxis) -> &'static str {
-    match axis {
-        ira_input::GyroAxis::X => "Gyro X (Pitch)",
-        ira_input::GyroAxis::Y => "Gyro Y (Yaw)",
-        ira_input::GyroAxis::Z => "Gyro Z (Roll)",
     }
 }
 

@@ -1,6 +1,6 @@
 use ira_input::{
-    Activation, AxisDirection, DeviceInfo, GamepadAxis, GamepadButton, GyroAxis, GyroMode,
-    InputSource, MouseAxis, MouseButton, OutputAction, RecenterMode, VirtualGamepadBackend,
+    Activation, AxisDirection, DeviceInfo, GamepadAxis, GamepadButton, InputSource, MouseAxis,
+    MouseButton, OutputAction, VirtualGamepadBackend,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -35,15 +35,6 @@ pub(super) fn source_options_for_device(
             .map(|axis| (InputSource::Axis(axis), axis_label(axis))),
     );
     options.extend(axis_directions());
-    options.extend(
-        [
-            (GyroAxis::X, "Gyro X (Pitch)"),
-            (GyroAxis::Y, "Gyro Y (Yaw)"),
-            (GyroAxis::Z, "Gyro Z (Roll)"),
-        ]
-        .into_iter()
-        .map(|(axis, label)| (InputSource::Gyro(axis), label.to_string())),
-    );
     options
 }
 
@@ -213,28 +204,6 @@ pub(super) fn activation_index(activation: &Activation) -> u32 {
     }
 }
 
-pub(super) fn recenter_index(recenter: RecenterMode) -> u32 {
-    match recenter {
-        RecenterMode::OnEnable => 1,
-        RecenterMode::OnDisable => 2,
-        RecenterMode::OnEnableOrDisable => 3,
-        RecenterMode::Never => 0,
-    }
-}
-
-pub(super) fn gyro_mode_labels() -> Vec<String> {
-    [crate::tr!("Rate"), crate::tr!("Joystick position")]
-        .into_iter()
-        .collect()
-}
-
-pub(super) fn gyro_mode_index(mode: GyroMode) -> u32 {
-    match mode {
-        GyroMode::Rate => 0,
-        GyroMode::HoldLast => 1,
-    }
-}
-
 fn output_buttons() -> [GamepadButton; 17] {
     [
         GamepadButton::A,
@@ -286,7 +255,7 @@ pub(super) fn output_options(backend: VirtualGamepadBackend) -> Vec<OutputOption
             .map(|axis| OutputOption::Action(OutputAction::GamepadAxis(axis))),
     );
     options.extend(
-        [MouseAxis::X, MouseAxis::Y, MouseAxis::Wheel]
+        [MouseAxis::X, MouseAxis::Y, MouseAxis::Wheel, MouseAxis::WheelX]
             .into_iter()
             .map(|axis| OutputOption::Action(OutputAction::MouseAxis(axis))),
     );
@@ -333,8 +302,8 @@ pub(super) fn output_display_label(output: &OutputAction) -> String {
             MouseAxis::X => crate::tr!("Mouse X"),
             MouseAxis::Y => crate::tr!("Mouse Y"),
             MouseAxis::Wheel => crate::tr!("Mouse Wheel"),
+            MouseAxis::WheelX => crate::tr!("Mouse Wheel (Horizontal)"),
         },
-        OutputAction::RecenterGyro => crate::tr!("Recenter gyro"),
     }
 }
 
@@ -357,12 +326,12 @@ fn output_option_label(option: &OutputOption) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        activator_index, gyro_mode_index, gyro_mode_labels, output_display_label, output_index,
-        output_labels, output_option, source_options_for_device, OutputOption,
+        activator_index, output_display_label, output_index, output_labels, output_option,
+        source_options_for_device, OutputOption,
     };
     use ira_input::{
-        Activation, DeviceInfo, GamepadAxis, GamepadButton, GyroAxis, GyroMode, InputSource,
-        MouseButton, OutputAction, VirtualGamepadBackend,
+        Activation, DeviceInfo, GamepadAxis, GamepadButton, InputSource, MouseButton,
+        OutputAction, VirtualGamepadBackend,
     };
     use std::path::PathBuf;
 
@@ -399,14 +368,6 @@ mod tests {
     }
 
     #[test]
-    fn test_source_options_show_raw_gyro_axes_with_semantics() {
-        let options = source_options_for_device(None, VirtualGamepadBackend::XInput);
-        assert!(options.contains(&(InputSource::Gyro(GyroAxis::X), "Gyro X (Pitch)".to_string())));
-        assert!(options.contains(&(InputSource::Gyro(GyroAxis::Y), "Gyro Y (Yaw)".to_string())));
-        assert!(options.contains(&(InputSource::Gyro(GyroAxis::Z), "Gyro Z (Roll)".to_string())));
-    }
-
-    #[test]
     fn test_activator_index_keeps_paddle_selection() {
         let options = vec![
             (InputSource::Button(GamepadButton::A), "A".to_string()),
@@ -427,9 +388,10 @@ mod tests {
     #[test]
     fn test_output_options_include_supported_virtual_controls() {
         let labels = output_labels(VirtualGamepadBackend::XInput);
-        assert_eq!(labels.len(), 28);
+        assert_eq!(labels.len(), 29);
         assert!(!labels.iter().any(|label| label.contains("Paddle")));
         assert!(labels.contains(&"Mouse X".to_string()));
+        assert!(labels.contains(&"Mouse Wheel (Horizontal)".to_string()));
         assert!(labels.contains(&"Keyboard key...".to_string()));
         assert_eq!(
             output_option(
@@ -453,7 +415,7 @@ mod tests {
             ),
             Some(OutputOption::CaptureKeyboard)
         );
-        assert!(output_option(28, VirtualGamepadBackend::XInput).is_none());
+        assert!(output_option(29, VirtualGamepadBackend::XInput).is_none());
     }
 
     #[test]
@@ -526,13 +488,5 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(extended, vec!["L4", "R4", "PL", "PR"]);
-    }
-
-    #[test]
-    fn test_gyro_mode_labels_roundtrip_indices() {
-        let labels = gyro_mode_labels();
-        assert_eq!(labels, vec!["Rate", "Joystick position"]);
-        assert_eq!(gyro_mode_index(GyroMode::Rate), 0);
-        assert_eq!(gyro_mode_index(GyroMode::HoldLast), 1);
     }
 }

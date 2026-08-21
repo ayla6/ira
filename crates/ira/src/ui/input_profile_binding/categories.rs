@@ -58,7 +58,6 @@ pub(crate) fn binding_section_title(binding: &Binding) -> &'static str {
             axis: GamepadAxis::RightX | GamepadAxis::RightY,
             ..
         } => "Right Stick",
-        InputSource::Gyro(_) => "Gyro",
     }
 }
 
@@ -151,23 +150,15 @@ pub(super) fn source_index_for(options: &[(InputSource, String)], source: InputS
 pub(super) fn is_analog_source(source: InputSource) -> bool {
     matches!(
         source,
-        InputSource::Axis(_) | InputSource::AxisDirection { .. } | InputSource::Gyro(_)
+        InputSource::Axis(_) | InputSource::AxisDirection { .. }
     )
-}
-
-pub(super) fn uses_gyro_stick_output(
-    source: InputSource,
-    output: &ira_input::OutputAction,
-) -> bool {
-    matches!(source, InputSource::Gyro(_))
-        && matches!(output, ira_input::OutputAction::GamepadAxis(_))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{activation_sources, is_analog_source};
     use ira_input::{
-        Activation, AxisDirection, ChordMode, GamepadAxis, GamepadButton, GyroAxis, InputSource,
+        Activation, AxisDirection, ChordMode, GamepadAxis, GamepadButton, InputSource,
     };
 
     #[test]
@@ -178,7 +169,6 @@ mod tests {
             axis: GamepadAxis::RightY,
             direction: AxisDirection::Positive,
         }));
-        assert!(is_analog_source(InputSource::Gyro(GyroAxis::X)));
     }
 
     #[test]

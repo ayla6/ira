@@ -3,7 +3,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::{DeviceInfo, GyroAxis, GyroCalibration, InputEvent, InputSource};
+use crate::{DeviceInfo, GyroCalibration};
 
 const SDL_INIT_GAMEPAD: u32 = 0x0000_2000;
 const SDL_INIT_EVENTS: u32 = 0x0000_4000;
@@ -119,28 +119,6 @@ pub struct SensorSample {
     pub timestamp_us: u64,
 }
 
-impl SensorSample {
-    pub fn input_events(self) -> [InputEvent; 3] {
-        [
-            InputEvent {
-                source: InputSource::Gyro(GyroAxis::X),
-                value: self.gyro[0],
-                timestamp_us: self.timestamp_us,
-            },
-            InputEvent {
-                source: InputSource::Gyro(GyroAxis::Y),
-                value: self.gyro[1],
-                timestamp_us: self.timestamp_us,
-            },
-            InputEvent {
-                source: InputSource::Gyro(GyroAxis::Z),
-                value: self.gyro[2],
-                timestamp_us: self.timestamp_us,
-            },
-        ]
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SdlGamepadInfo {
     pub id: i32,
@@ -165,8 +143,8 @@ impl GyroCalibration {
         }
         let count = samples.len() as f32;
         let sums = samples.iter().fold([0.0; 3], |mut sums, sample| {
-            for axis in 0..3 {
-                sums[axis] += sample.gyro[axis];
+            for (sum, value) in sums.iter_mut().zip(sample.gyro) {
+                *sum += value;
             }
             sums
         });
@@ -473,9 +451,7 @@ fn c_string(pointer: *const c_char) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        names_match, select_gyro_id, sensor_timestamp_us, GyroCalibration, SensorSample,
-    };
+    use super::{names_match, select_gyro_id, sensor_timestamp_us, GyroCalibration, SensorSample};
 
     fn sample(gyro: [f32; 3], timestamp_us: u64) -> SensorSample {
         SensorSample {
@@ -519,15 +495,6 @@ mod tests {
         assert!((calibration.y - 0.3).abs() < 0.001);
         assert!((calibration.z - 0.4).abs() < 0.001);
         assert!(GyroCalibration::from_samples(&[]).is_none());
-    }
-
-    #[test]
-    fn test_sensor_sample_becomes_three_mapping_events() {
-        let events = sample([1.0, 2.0, 3.0], 42).input_events();
-        assert_eq!(events[0].value, 1.0);
-        assert_eq!(events[1].value, 2.0);
-        assert_eq!(events[2].value, 3.0);
-        assert!(events.iter().all(|event| event.timestamp_us == 42));
     }
 
     #[test]

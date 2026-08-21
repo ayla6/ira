@@ -79,22 +79,6 @@ pub enum AxisDirection {
     Positive,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GyroAxis {
-    X,
-    Y,
-    Z,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GyroMode {
-    #[default]
-    Rate,
-    HoldLast,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct GyroCalibration {
     #[serde(default)]
@@ -103,16 +87,6 @@ pub struct GyroCalibration {
     pub y: f32,
     #[serde(default)]
     pub z: f32,
-}
-
-impl GyroCalibration {
-    pub fn axis_value(self, axis: GyroAxis) -> f32 {
-        match axis {
-            GyroAxis::X => self.x,
-            GyroAxis::Y => self.y,
-            GyroAxis::Z => self.z,
-        }
-    }
 }
 
 /// Whole-controller gyro behaviour. The old model exposed each gyro axis as
@@ -196,7 +170,6 @@ pub enum InputSource {
         axis: GamepadAxis,
         direction: AxisDirection,
     },
-    Gyro(GyroAxis),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -211,7 +184,6 @@ pub enum InputCategory {
 impl InputSource {
     pub fn category(self) -> InputCategory {
         match self {
-            InputSource::Gyro(_) => InputCategory::Gyro,
             InputSource::Button(GamepadButton::LeftTrigger | GamepadButton::RightTrigger) => {
                 InputCategory::Triggers
             }
@@ -238,6 +210,7 @@ pub enum MouseAxis {
     X,
     Y,
     Wheel,
+    WheelX,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -258,14 +231,13 @@ pub enum OutputAction {
     Keyboard { keycode: u16 },
     MouseButton(MouseButton),
     MouseAxis(MouseAxis),
-    RecenterGyro,
 }
 
 impl OutputAction {
     pub fn is_xinput_compatible(&self) -> bool {
         match self {
             Self::GamepadButton(button) => button.is_xinput(),
-            Self::GamepadAxis(_) | Self::RecenterGyro => true,
+            Self::GamepadAxis(_) => true,
             Self::Keyboard { .. } | Self::MouseButton(_) | Self::MouseAxis(_) => false,
         }
     }
@@ -371,28 +343,14 @@ pub enum ChordMode {
     Toggle,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RecenterMode {
-    #[default]
-    Never,
-    OnEnable,
-    OnDisable,
-    OnEnableOrDisable,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Binding {
     pub source: InputSource,
     pub output: OutputAction,
     #[serde(default)]
-    pub gyro_mode: GyroMode,
-    #[serde(default)]
     pub activation: Activation,
     #[serde(default)]
     pub transform: AxisTransform,
-    #[serde(default)]
-    pub recenter: RecenterMode,
 }
 
 impl Binding {
@@ -400,10 +358,8 @@ impl Binding {
         Self {
             source,
             output,
-            gyro_mode: GyroMode::default(),
             activation: Activation::Always,
             transform: AxisTransform::default(),
-            recenter: RecenterMode::Never,
         }
     }
 }
@@ -464,13 +420,6 @@ impl InputProfile {
                 if sources.is_empty() {
                     return Err(format!("binding {index}: chord cannot be empty"));
                 }
-            }
-            if binding.recenter != RecenterMode::Never
-                && !matches!(binding.source, InputSource::Gyro(_))
-            {
-                return Err(format!(
-                    "binding {index}: recentering requires a gyro source"
-                ));
             }
         }
         self.gyro.validate()?;
@@ -546,7 +495,7 @@ impl InputProfile {
     ) -> Self {
         let mut profile = Self::default_gamepad_controls(backend);
         profile.bindings.retain(|binding| {
-            matches!(binding.source, InputSource::Axis(_) | InputSource::Gyro(_))
+            matches!(binding.source, InputSource::Axis(_))
                 || matches!(
                     binding.source,
                     InputSource::Button(button) if supported_buttons.contains(&button)
@@ -633,12 +582,13 @@ impl InputProfile {
     }
 
     pub fn uses_mouse(&self) -> bool {
-        self.bindings.iter().any(|binding| {
-            matches!(
-                binding.output,
-                OutputAction::MouseAxis(_) | OutputAction::MouseButton(_)
-            )
-        })
+        (self.gyro.enabled && self.gyro.output == GyroOutput::Mouse)
+            || self.bindings.iter().any(|binding| {
+                matches!(
+                    binding.output,
+                    OutputAction::MouseAxis(_) | OutputAction::MouseButton(_)
+                )
+            })
     }
 }
 
@@ -780,25 +730,19 @@ mod tests {
             .category(),
             InputCategory::Joysticks
         );
-        assert_eq!(
-            InputSource::Gyro(GyroAxis::Z).category(),
-            InputCategory::Gyro
-        );
     }
 
     #[test]
     fn test_profile_rejects_invalid_transform() {
         let mut profile = InputProfile::default();
         profile.bindings.push(Binding {
-            source: InputSource::Gyro(GyroAxis::X),
+            source: InputSource::Axis(GamepadAxis::LeftX),
             output: OutputAction::GamepadAxis(GamepadAxis::RightX),
             activation: Activation::Always,
-            gyro_mode: GyroMode::default(),
             transform: AxisTransform {
                 dead_zone: 1.0,
                 ..AxisTransform::default()
             },
-            recenter: RecenterMode::Never,
         });
         assert!(profile.validate().is_err());
     }
@@ -925,11 +869,11 @@ mod tests {
     }
 
     #[test]
-    fn test_profile_serde_roundtrip_preserves_custom_gyro_chord() {
+    fn test_profile_serde_roundtrip_preserves_custom_chord() {
         let profile = InputProfile {
-            name: "My gyro layout".to_string(),
+            name: "My layout".to_string(),
             bindings: vec![Binding {
-                source: InputSource::Gyro(GyroAxis::Z),
+                source: InputSource::Axis(GamepadAxis::LeftX),
                 output: OutputAction::GamepadAxis(GamepadAxis::RightX),
                 activation: Activation::Chord {
                     sources: vec![
@@ -938,14 +882,12 @@ mod tests {
                     ],
                     mode: ChordMode::Toggle,
                 },
-                gyro_mode: GyroMode::default(),
                 transform: AxisTransform {
                     dead_zone: 0.08,
                     sensitivity: 2.5,
                     exponent: 1.2,
                     invert: true,
                 },
-                recenter: RecenterMode::OnEnableOrDisable,
             }],
             ..InputProfile::default()
         };
@@ -958,30 +900,14 @@ mod tests {
     fn test_profile_rejects_empty_chord() {
         let profile = InputProfile {
             bindings: vec![Binding {
-                source: InputSource::Gyro(GyroAxis::X),
+                source: InputSource::Axis(GamepadAxis::LeftX),
                 output: OutputAction::GamepadAxis(GamepadAxis::RightX),
                 activation: Activation::Chord {
                     sources: Vec::new(),
                     mode: ChordMode::Hold,
                 },
-                gyro_mode: GyroMode::default(),
                 transform: AxisTransform::default(),
-                recenter: RecenterMode::Never,
             }],
-            ..InputProfile::default()
-        };
-        assert!(profile.validate().is_err());
-    }
-
-    #[test]
-    fn test_profile_rejects_recentering_non_gyro_binding() {
-        let mut binding = Binding::new(
-            InputSource::Button(GamepadButton::A),
-            OutputAction::GamepadButton(GamepadButton::B),
-        );
-        binding.recenter = RecenterMode::OnEnable;
-        let profile = InputProfile {
-            bindings: vec![binding],
             ..InputProfile::default()
         };
         assert!(profile.validate().is_err());

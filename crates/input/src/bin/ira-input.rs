@@ -7,9 +7,9 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ira_input::{
-    discover_gamepads, discover_sdl_gamepads, InputEvent, InputProfile, InputSource, MappingEngine,
-    OutputEvent, PhysicalGamepad, Sdl3SensorBackend, VirtualGamepad, VirtualGamepadBackend,
-    VirtualKeyboard, VirtualMouse,
+    discover_gamepads, discover_sdl_gamepads, GyroProcessingOptions, GyroProcessor, InputEvent,
+    InputProfile, MappingEngine, OutputEvent, PhysicalGamepad, Sdl3SensorBackend, VirtualGamepad,
+    VirtualGamepadBackend, VirtualKeyboard, VirtualMouse,
 };
 
 static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -165,7 +165,6 @@ struct TraceState {
     last_report: Instant,
     gyro: [f32; 3],
     mouse: [f32; 2],
-    recentered: bool,
 }
 
 impl TraceState {
@@ -175,24 +174,20 @@ impl TraceState {
             last_report: Instant::now(),
             gyro: [0.0; 3],
             mouse: [0.0; 2],
-            recentered: false,
         }
     }
 
     fn record_input(&mut self, event: InputEvent) {
-        if self.enabled && !matches!(event.source, InputSource::Gyro(_)) {
+        if self.enabled {
             eprintln!(
                 "ira-input: input source={:?} value={:.3}",
                 event.source, event.value
             );
         }
-        if let InputSource::Gyro(axis) = event.source {
-            self.gyro[match axis {
-                ira_input::GyroAxis::X => 0,
-                ira_input::GyroAxis::Y => 1,
-                ira_input::GyroAxis::Z => 2,
-            }] = event.value;
-        }
+    }
+
+    fn record_gyro(&mut self, gyro: [f32; 3]) {
+        self.gyro = gyro;
     }
 
     fn record_output(&mut self, output: &OutputEvent) {
@@ -204,14 +199,12 @@ impl TraceState {
         {
             eprintln!("ira-input: output {output:?}");
         }
-        match output {
-            OutputEvent::MouseMotion { axis, value } => match axis {
+        if let OutputEvent::MouseMotion { axis, value } = output {
+            match axis {
                 ira_input::MouseAxis::X => self.mouse[0] += value,
                 ira_input::MouseAxis::Y => self.mouse[1] += value,
-                ira_input::MouseAxis::Wheel => {}
-            },
-            OutputEvent::RecenterGyro => self.recentered = true,
-            _ => {}
+                ira_input::MouseAxis::Wheel | ira_input::MouseAxis::WheelX => {}
+            }
         }
     }
 
@@ -221,22 +214,19 @@ impl TraceState {
         }
         if self.gyro.iter().any(|value| value.abs() > 0.001)
             || self.mouse.iter().any(|value| value.abs() > 0.01)
-            || self.recentered
         {
             eprintln!(
-                "ira-input: trace gyro=({:.3}, {:.3}, {:.3}) mouse_delta=({:.2}, {:.2}){}",
+                "ira-input: trace gyro=({:.3}, {:.3}, {:.3}) mouse_delta=({:.2}, {:.2})",
                 self.gyro[0],
                 self.gyro[1],
                 self.gyro[2],
                 self.mouse[0],
                 self.mouse[1],
-                if self.recentered { " recentered" } else { "" },
             );
         }
         self.last_report = Instant::now();
         self.gyro = [0.0; 3];
         self.mouse = [0.0; 2];
-        self.recentered = false;
     }
 }
 
@@ -417,6 +407,11 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let mut virtual_gamepad = VirtualGamepad::create_for_backend(mapper.profile().backend)
         .map_err(|error| format!("failed to create virtual gamepad: {error}"))?;
     let mut sensor = gamepad.as_ref().and_then(|gamepad| open_sensor(gamepad.info()));
+    let mut gyro_processor = make_gyro_processor(mapper.profile());
+    let mut last_sensor_us: Option<u64> = None;
+    // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
+    // even when no sensor exists, as long as something consumes them.
+    let mut tick_needed = sensor.is_some() || mapper.has_continuous_outputs();
     if let Some(gamepad) = gamepad.as_mut() {
         if let Err(error) = gamepad.grab() {
             eprintln!("ira-input: {error}; continuing without exclusive grab");
@@ -473,38 +468,47 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     }
     loop {
         let was_connected = gamepad.as_ref().is_some_and(|gamepad| gamepad.is_connected());
-        let sample_sensor = sensor.is_some() && schedule.sensor.elapsed() >= SENSOR_SAMPLE_INTERVAL;
-        if sample_sensor {
+        let run_tick = tick_needed && schedule.sensor.elapsed() >= SENSOR_SAMPLE_INTERVAL;
+        if run_tick {
             schedule.sensor = Instant::now();
         }
         let result = process_physical_inputs(
             &mut gamepad,
             &mut mapper,
-            &mut virtual_gamepad,
-            keyboard.as_mut(),
-            mouse.as_mut(),
+            OutputTargets {
+                gamepad: &mut virtual_gamepad,
+                keyboard: keyboard.as_mut(),
+                mouse: mouse.as_mut(),
+            },
             &mut trace,
         )
         .and_then(|()| {
-            process_sensor_inputs(
+            process_tick(
                 &mut sensor,
+                &mut gyro_processor,
+                &mut last_sensor_us,
                 &mut mapper,
-                &mut virtual_gamepad,
-                keyboard.as_mut(),
-                mouse.as_mut(),
+                OutputTargets {
+                    gamepad: &mut virtual_gamepad,
+                    keyboard: keyboard.as_mut(),
+                    mouse: mouse.as_mut(),
+                },
                 &mut trace,
-                sample_sensor,
+                run_tick,
             )
         });
         trace.flush();
         if let Err(error) = result {
-            if let Err(reset_error) = emit_outputs(
+            let resets = emit_outputs(
                 mapper.reset(),
-                &mut virtual_gamepad,
-                keyboard.as_mut(),
-                mouse.as_mut(),
+                OutputTargets {
+                    gamepad: &mut virtual_gamepad,
+                    keyboard: keyboard.as_mut(),
+                    mouse: mouse.as_mut(),
+                },
                 &mut trace,
-            ) {
+            );
+            if let Err(reset_error) = resets {
                 eprintln!("ira-input: failed to emit reset releases: {reset_error}");
             }
             stop_child(&mut child);
@@ -513,12 +517,16 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         let connected = gamepad.as_ref().is_some_and(|gamepad| gamepad.is_connected());
         if was_connected && !connected {
             sensor = None;
+            last_sensor_us = None;
+            tick_needed = mapper.has_continuous_outputs();
             schedule.reconnect = Instant::now();
             emit_outputs(
                 mapper.reset(),
-                &mut virtual_gamepad,
-                keyboard.as_mut(),
-                mouse.as_mut(),
+                OutputTargets {
+                    gamepad: &mut virtual_gamepad,
+                    keyboard: keyboard.as_mut(),
+                    mouse: mouse.as_mut(),
+                },
                 &mut trace,
             )?;
         }
@@ -569,6 +577,8 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             gamepad.info().path.display()
                         );
                         sensor = open_sensor(gamepad.info());
+                        last_sensor_us = None;
+                        tick_needed = sensor.is_some() || mapper.has_continuous_outputs();
                     }
                     schedule.sensor = Instant::now();
                     if let Some(gamepad) = gamepad.as_mut() {
@@ -597,12 +607,16 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             "ira-input: profile reload failed for {}: {error}",
                             monitor.path().display()
                         );
+                    } else {
+                        gyro_processor = make_gyro_processor(mapper.profile());
+                        last_sensor_us = None;
+                        tick_needed = sensor.is_some() || mapper.has_continuous_outputs();
                     }
                 }
             }
         }
         let timeout = schedule.timeout(
-            sensor.is_some(),
+            tick_needed,
             child.is_some(),
             profile_monitor.is_some(),
             steam_session.is_some(),
@@ -1081,9 +1095,11 @@ fn reload_profile(
     };
     emit_outputs(
         mapper.reset(),
-        virtual_gamepad,
-        keyboard.as_mut(),
-        mouse.as_mut(),
+        OutputTargets {
+            gamepad: virtual_gamepad,
+            keyboard: keyboard.as_mut(),
+            mouse: mouse.as_mut(),
+        },
         trace,
     )?;
     if keycodes_changed {
@@ -1121,9 +1137,7 @@ fn open_sensor(device: &ira_input::DeviceInfo) -> Option<Sdl3SensorBackend> {
 fn process_physical_inputs(
     gamepad: &mut Option<PhysicalGamepad>,
     mapper: &mut MappingEngine,
-    virtual_gamepad: &mut VirtualGamepad,
-    mut keyboard: Option<&mut VirtualKeyboard>,
-    mut mouse: Option<&mut VirtualMouse>,
+    mut targets: OutputTargets<'_>,
     trace: &mut TraceState,
 ) -> Result<(), String> {
     let Some(gamepad) = gamepad.as_mut() else {
@@ -1132,9 +1146,11 @@ fn process_physical_inputs(
     for event in gamepad.fetch_events()? {
         emit_mapped(
             mapper,
-            virtual_gamepad,
-            keyboard.as_deref_mut(),
-            mouse.as_deref_mut(),
+            OutputTargets {
+                gamepad: targets.gamepad,
+                keyboard: targets.keyboard.as_deref_mut(),
+                mouse: targets.mouse.as_deref_mut(),
+            },
             event,
             trace,
         )?;
@@ -1142,39 +1158,60 @@ fn process_physical_inputs(
     Ok(())
 }
 
-fn process_sensor_inputs(
+fn make_gyro_processor(profile: &InputProfile) -> GyroProcessor {
+    GyroProcessor::new(
+        profile.gyro_calibration,
+        GyroProcessingOptions {
+            smoothing: profile.gyro.smoothing,
+            auto_calibrate: true,
+        },
+    )
+}
+
+/// The virtual devices mapped events are written to, borrowed per loop pass.
+struct OutputTargets<'a> {
+    gamepad: &'a mut VirtualGamepad,
+    keyboard: Option<&'a mut VirtualKeyboard>,
+    mouse: Option<&'a mut VirtualMouse>,
+}
+
+fn process_tick(
     sensor: &mut Option<Sdl3SensorBackend>,
+    gyro_processor: &mut GyroProcessor,
+    last_sensor_us: &mut Option<u64>,
     mapper: &mut MappingEngine,
-    virtual_gamepad: &mut VirtualGamepad,
-    mut keyboard: Option<&mut VirtualKeyboard>,
-    mut mouse: Option<&mut VirtualMouse>,
+    targets: OutputTargets<'_>,
     trace: &mut TraceState,
-    sample: bool,
+    run: bool,
 ) -> Result<(), String> {
-    let sensor_result = sample
-        .then(|| sensor.as_mut().map(|sensor| sensor.read(now_us())))
-        .flatten();
-    match sensor_result {
-        Some(Ok(Some(sample))) => {
-            for event in sample.input_events() {
-                emit_mapped(
-                    mapper,
-                    virtual_gamepad,
-                    keyboard.as_deref_mut(),
-                    mouse.as_deref_mut(),
-                    event,
-                    trace,
-                )?;
+    if !run {
+        return Ok(());
+    }
+    let mut sensor_failed = false;
+    if let Some(sensor) = sensor.as_mut() {
+        match sensor.read(now_us()) {
+            Ok(Some(sample)) => {
+                let dt = last_sensor_us
+                    .map(|last| sample.timestamp_us.saturating_sub(last) as f32 / 1_000_000.0)
+                    .unwrap_or(1.0 / 250.0)
+                    .clamp(0.0005, 0.05);
+                *last_sensor_us = Some(sample.timestamp_us);
+                trace.record_gyro(sample.gyro);
+                let rates = gyro_processor.process(sample.gyro, sample.accel, dt);
+                mapper.update_gyro(rates);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!("ira-input: gyro backend stopped: {error}");
+                sensor_failed = true;
             }
         }
-        Some(Ok(None)) => {}
-        Some(Err(error)) => {
-            eprintln!("ira-input: gyro backend stopped: {error}");
-            *sensor = None;
-        }
-        None => {}
     }
-    Ok(())
+    if sensor_failed {
+        *sensor = None;
+    }
+    let outputs = mapper.tick(now_us());
+    emit_outputs(outputs, targets, trace)
 }
 
 fn stop_child(child: &mut Option<std::process::Child>) {
@@ -1186,44 +1223,40 @@ fn stop_child(child: &mut Option<std::process::Child>) {
 
 fn emit_mapped(
     mapper: &mut MappingEngine,
-    virtual_gamepad: &mut VirtualGamepad,
-    keyboard: Option<&mut VirtualKeyboard>,
-    mouse: Option<&mut VirtualMouse>,
+    targets: OutputTargets<'_>,
     event: InputEvent,
     trace: &mut TraceState,
 ) -> Result<(), String> {
     trace.record_input(event);
-    emit_outputs(
-        mapper.process(event),
-        virtual_gamepad,
-        keyboard,
-        mouse,
-        trace,
-    )
+    emit_outputs(mapper.process(event), targets, trace)
 }
 
 fn emit_outputs(
     outputs: Vec<OutputEvent>,
-    virtual_gamepad: &mut VirtualGamepad,
-    mut keyboard: Option<&mut VirtualKeyboard>,
-    mut mouse: Option<&mut VirtualMouse>,
+    mut targets: OutputTargets<'_>,
     trace: &mut TraceState,
 ) -> Result<(), String> {
     for output in outputs {
         trace.record_output(&output);
-        virtual_gamepad
+        targets
+            .gamepad
             .emit(&output)
             .map_err(|error| format!("failed to emit virtual input: {error}"))?;
-        if let Some(keyboard) = keyboard.as_deref_mut() {
+        if let Some(keyboard) = targets.keyboard.as_deref_mut() {
             keyboard
                 .emit(&output)
                 .map_err(|error| format!("failed to emit virtual keyboard input: {error}"))?;
         }
-        if let Some(mouse) = mouse.as_deref_mut() {
+        if let Some(mouse) = targets.mouse.as_deref_mut() {
             mouse
                 .emit(&output)
                 .map_err(|error| format!("failed to emit virtual mouse input: {error}"))?;
         }
+    }
+    if let Some(mouse) = targets.mouse {
+        mouse
+            .flush()
+            .map_err(|error| format!("failed to emit virtual mouse input: {error}"))?;
     }
     Ok(())
 }

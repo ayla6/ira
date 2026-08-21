@@ -11,9 +11,11 @@ const VIRTUAL_VERSION: u16 = 0x0001;
 
 pub struct VirtualMouse {
     device: VirtualDevice,
-    fractional_x: f32,
-    fractional_y: f32,
-    fractional_wheel: f32,
+    /// Fractional motion accumulated between integer uinput reports.
+    pending_x: f32,
+    pending_y: f32,
+    pending_wheel: f32,
+    pending_wheel_x: f32,
 }
 
 impl VirtualMouse {
@@ -31,6 +33,7 @@ impl VirtualMouse {
             RelativeAxisCode::REL_X,
             RelativeAxisCode::REL_Y,
             RelativeAxisCode::REL_WHEEL,
+            RelativeAxisCode::REL_HWHEEL,
         ]
         .into_iter()
         .collect();
@@ -47,9 +50,10 @@ impl VirtualMouse {
             .build()?;
         Ok(Self {
             device,
-            fractional_x: 0.0,
-            fractional_y: 0.0,
-            fractional_wheel: 0.0,
+            pending_x: 0.0,
+            pending_y: 0.0,
+            pending_wheel: 0.0,
+            pending_wheel_x: 0.0,
         })
     }
 
@@ -60,36 +64,56 @@ impl VirtualMouse {
                 let input = InputEvent::new(EventType::KEY.0, code.0, i32::from(*pressed));
                 self.device.emit(&[input])
             }
-            OutputEvent::MouseMotion { axis, value } => self.emit_motion(*axis, *value),
+            OutputEvent::MouseMotion { axis, value } => {
+                self.accumulate(*axis, *value);
+                Ok(())
+            }
             _ => Ok(()),
         }
     }
 
-    fn emit_motion(&mut self, axis: MouseAxis, value: f32) -> io::Result<()> {
-        let (code, delta) = match axis {
-            MouseAxis::X => (
-                RelativeAxisCode::REL_X,
-                take_delta(&mut self.fractional_x, value),
-            ),
-            MouseAxis::Y => (
-                RelativeAxisCode::REL_Y,
-                take_delta(&mut self.fractional_y, value),
-            ),
-            MouseAxis::Wheel => (
-                RelativeAxisCode::REL_WHEEL,
-                take_delta(&mut self.fractional_wheel, value),
-            ),
-        };
-        if delta == 0 {
+    /// Write accumulated motion as one uinput report so X/Y/wheel deltas that
+    /// arrived in the same tick reach the game as a single synchronized
+    /// batch instead of one SYN_REPORT per axis.
+    pub fn flush(&mut self) -> io::Result<()> {
+        let mut reports = Vec::with_capacity(4);
+        let x = take_delta(&mut self.pending_x);
+        if x != 0 {
+            reports.push(relative(RelativeAxisCode::REL_X, x));
+        }
+        let y = take_delta(&mut self.pending_y);
+        if y != 0 {
+            reports.push(relative(RelativeAxisCode::REL_Y, y));
+        }
+        let wheel = take_delta(&mut self.pending_wheel);
+        if wheel != 0 {
+            reports.push(relative(RelativeAxisCode::REL_WHEEL, wheel));
+        }
+        let wheel_x = take_delta(&mut self.pending_wheel_x);
+        if wheel_x != 0 {
+            reports.push(relative(RelativeAxisCode::REL_HWHEEL, wheel_x));
+        }
+        if reports.is_empty() {
             return Ok(());
         }
-        self.device
-            .emit(&[InputEvent::new(EventType::RELATIVE.0, code.0, delta)])
+        self.device.emit(&reports)
+    }
+
+    fn accumulate(&mut self, axis: MouseAxis, value: f32) {
+        match axis {
+            MouseAxis::X => self.pending_x += value,
+            MouseAxis::Y => self.pending_y += value,
+            MouseAxis::Wheel => self.pending_wheel += value,
+            MouseAxis::WheelX => self.pending_wheel_x += value,
+        }
     }
 }
 
-fn take_delta(remainder: &mut f32, value: f32) -> i32 {
-    *remainder += value;
+fn relative(code: RelativeAxisCode, delta: i32) -> InputEvent {
+    InputEvent::new(EventType::RELATIVE.0, code.0, delta)
+}
+
+fn take_delta(remainder: &mut f32) -> i32 {
     let delta = remainder.trunc() as i32;
     *remainder -= delta as f32;
     delta
@@ -112,8 +136,10 @@ mod tests {
     #[test]
     fn test_take_delta_preserves_fractional_motion() {
         let mut remainder = 0.0;
-        assert_eq!(take_delta(&mut remainder, 0.4), 0);
-        assert_eq!(take_delta(&mut remainder, 0.7), 1);
+        remainder += 0.4;
+        assert_eq!(take_delta(&mut remainder), 0);
+        remainder += 0.7;
+        assert_eq!(take_delta(&mut remainder), 1);
         assert!((remainder - 0.1).abs() < 0.001);
     }
 }

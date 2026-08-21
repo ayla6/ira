@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use glib::clone::Downgrade;
+
 type VariantImagesSectionResult = (
     Option<Rc<RefCell<String>>>,
     Option<gtk4::Adjustment>,
@@ -64,15 +66,24 @@ fn build_variant_name_entry_buttons(
     group: &adw::PreferencesGroup,
     var_widgets: &Rc<RefCell<Vec<VarW>>>,
     container: &gtk4::Box,
-    main_win: adw::Window,
+    main_win: &adw::Window,
 ) {
     let up_btn = gtk4::Button::from_icon_name("go-up-symbolic");
     up_btn.set_tooltip_text(Some(&crate::tr!("Move up")));
     up_btn.set_valign(gtk4::Align::Center);
-    let group_up = group.clone();
-    let vw_up = var_widgets.clone();
-    let container_up = container.clone();
+    let group_up = Downgrade::downgrade(group);
+    let vw_up = Rc::downgrade(var_widgets);
+    let container_up = Downgrade::downgrade(container);
     up_btn.connect_clicked(move |_| {
+        let Some(group_up) = group_up.upgrade() else {
+            return;
+        };
+        let Some(vw_up) = vw_up.upgrade() else {
+            return;
+        };
+        let Some(container_up) = container_up.upgrade() else {
+            return;
+        };
         move_variant_card(&group_up, -1, &vw_up, &container_up);
     });
     name_entry.add_suffix(&up_btn);
@@ -80,10 +91,19 @@ fn build_variant_name_entry_buttons(
     let down_btn = gtk4::Button::from_icon_name("go-down-symbolic");
     down_btn.set_tooltip_text(Some(&crate::tr!("Move down")));
     down_btn.set_valign(gtk4::Align::Center);
-    let group_down = group.clone();
-    let vw_down = var_widgets.clone();
-    let container_down = container.clone();
+    let group_down = Downgrade::downgrade(group);
+    let vw_down = Rc::downgrade(var_widgets);
+    let container_down = Downgrade::downgrade(container);
     down_btn.connect_clicked(move |_| {
+        let Some(group_down) = group_down.upgrade() else {
+            return;
+        };
+        let Some(vw_down) = vw_down.upgrade() else {
+            return;
+        };
+        let Some(container_down) = container_down.upgrade() else {
+            return;
+        };
         move_variant_card(&group_down, 1, &vw_down, &container_down);
     });
     name_entry.add_suffix(&down_btn);
@@ -92,10 +112,17 @@ fn build_variant_name_entry_buttons(
     del_btn.set_tooltip_text(Some(&crate::tr!("Delete variant")));
     del_btn.set_valign(gtk4::Align::Center);
     del_btn.add_css_class(CSS_ERROR);
-    let container_c = container.clone();
-    let group_c = group.clone();
-    let name_entry_c = name_entry.clone();
+    let container_c = Downgrade::downgrade(container);
+    let group_c = Downgrade::downgrade(group);
+    let name_entry_c = Downgrade::downgrade(name_entry);
+    let main_win_weak = Downgrade::downgrade(main_win);
     del_btn.connect_clicked(move |_| {
+        let Some(main_win) = main_win_weak.upgrade() else {
+            return;
+        };
+        let Some(name_entry_c) = name_entry_c.upgrade() else {
+            return;
+        };
         let variant_name = name_entry_c.text().to_string();
         let dialog = adw::AlertDialog::new(
             Some(&crate::tr!("Delete variant?")),
@@ -116,7 +143,11 @@ fn build_variant_name_entry_buttons(
         let group_cc = group_c.clone();
         dialog.connect_response(None, move |_, response| {
             if response == "delete" {
-                container_cc.remove(&group_cc);
+                if let (Some(container_cc), Some(group_cc)) =
+                    (container_cc.upgrade(), group_cc.upgrade())
+                {
+                    container_cc.remove(&group_cc);
+                }
             }
         });
         dialog.present(Some(&main_win));
@@ -216,7 +247,7 @@ fn build_variant_images_and_logo_section(
                 logo_expander.add_row(&logo_row);
                 group.add(&logo_expander);
                 {
-                    let logo_exp_c = logo_expander.clone();
+                    let logo_exp_c = logo_expander;
                     custom_images_row.connect_notify_local(Some("active"), move |row, _| {
                         logo_exp_c.set_visible(row.is_active());
                     });
@@ -245,8 +276,7 @@ fn build_variant_card(
     name_entry.set_title(&crate::tr!("Variant name"));
     name_entry.set_text(&v.name);
 
-    let main_win = win.clone();
-    build_variant_name_entry_buttons(&name_entry, &group, var_widgets, container, main_win);
+    build_variant_name_entry_buttons(&name_entry, &group, var_widgets, container, win);
 
     group.add(&name_entry);
 
@@ -423,10 +453,13 @@ pub(super) fn build_variants_page(
 
     {
         let var_widgets_c = var_widgets.clone();
-        let container_c = variant_container.clone();
+        let container_c = variant_container;
         let state_c = state.clone();
-        let win_c = win.clone();
+        let win_c = Downgrade::downgrade(win);
         add_btn.connect_clicked(move |_| {
+            let Some(win) = win_c.upgrade() else {
+                return;
+            };
             let vw = build_variant_card(
                 GameVariant {
                     game_id: db_id,
@@ -436,7 +469,7 @@ pub(super) fn build_variants_page(
                 &container_c,
                 &state_c,
                 db_id,
-                &win_c,
+                &win,
             );
             var_widgets_c.borrow_mut().push(vw);
         });

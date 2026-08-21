@@ -45,11 +45,17 @@ pub fn build_wine_profile_picker(
     edit_btn.add_css_class(CSS_FLAT);
 
     let profiles_c: Vec<WineProfile> = profiles.to_vec();
-    let row_c = row.clone();
+    let row_c = glib::clone::Downgrade::downgrade(&row);
     let state_c = state.clone();
-    let win_c = win.clone();
+    let win_c = glib::clone::Downgrade::downgrade(win);
     let slug_c = game_slug.map(|s| s.to_string());
     edit_btn.connect_clicked(move |_| {
+        let Some(win) = win_c.upgrade() else {
+            return;
+        };
+        let Some(row_c) = row_c.upgrade() else {
+            return;
+        };
         let idx = row_c.selected() as usize;
         let parent = state_c.borrow().window.clone();
         let db = state_c.borrow().db.clone();
@@ -82,7 +88,7 @@ pub fn build_wine_profile_picker(
                 &db,
                 None,
                 &state_c,
-                &win_c,
+                &win,
                 slug_arg,
                 ProfileDialogCallbacks {
                     list_rc: None,
@@ -95,7 +101,7 @@ pub fn build_wine_profile_picker(
                 &db,
                 Some(p.clone()),
                 &state_c,
-                &win_c,
+                &win,
                 slug_arg,
                 ProfileDialogCallbacks {
                     list_rc: None,

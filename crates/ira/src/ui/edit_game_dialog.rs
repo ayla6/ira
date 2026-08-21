@@ -10,6 +10,7 @@ use super::state::{PendingImage, SharedState, SgdbAssetsCacheEntry};
 use super::wine_config_widget::{build_wine_config_pages, WineConfigWidgets};
 use crate::Game;
 use adw::prelude::*;
+use glib::clone::Downgrade;
 use gtk4::prelude::IsA;
 use ira_models::{AppDetails, GameLaunchConfig, WineConfig, WineProfile};
 use std::cell::RefCell;
@@ -232,11 +233,14 @@ fn build_launch_wine_advanced_pages(
 }
 
 fn setup_sidebar_navigation(sidebar: &gtk4::ListBox, stack: &gtk4::Stack) {
-    let stack_clone = stack.clone();
+    let stack_weak = Downgrade::downgrade(stack);
     sidebar.connect_row_selected(move |_, row| {
+        let Some(stack) = stack_weak.upgrade() else {
+            return;
+        };
         if let Some(row) = row {
-            let page_id = row.widget_name().to_string().to_string();
-            stack_clone.set_visible_child_name(&page_id);
+            let page_id = row.widget_name().to_string();
+            stack.set_visible_child_name(&page_id);
         }
     });
     if let Some(first) = sidebar.row_at_index(0) {
@@ -414,7 +418,7 @@ fn build_dialog_contents(
     btn_row.set_margin_bottom(12);
 
     let cancel_btn = gtk4::Button::with_label(&crate::tr!("Cancel"));
-    let win_c = win.downgrade();
+    let win_c = Downgrade::downgrade(&win);
     cancel_btn.connect_clicked(move |_| {
         if let Some(win) = win_c.upgrade() {
             win.close();
@@ -422,12 +426,20 @@ fn build_dialog_contents(
     });
 
     if let Some(btn) = &migrate_btn {
-        let state_m = state.clone();
-        let game_m = game.clone();
+        let state_w = Rc::downgrade(&state);
+        let game_app_id = game.app_id.clone();
+        let game_db_id = game.db_id;
+        let game_kind = game.kind;
         let save_dir_m = save_dir.clone();
-        let btn_m = btn.clone();
+        let btn_w = Downgrade::downgrade(btn);
         btn.connect_clicked(move |_| {
-            let Some(details) = crate::game_loader::read_app_details(&save_dir_m, &game_m.app_id)
+            let Some(state) = state_w.upgrade() else {
+                return;
+            };
+            let Some(btn_m) = btn_w.upgrade() else {
+                return;
+            };
+            let Some(details) = crate::game_loader::read_app_details(&save_dir_m, &game_app_id)
             else {
                 btn_m.set_label(&crate::tr!("No save paths known"));
                 return;
@@ -437,15 +449,15 @@ fn build_dialog_contents(
                 return;
             }
             let (wine_prefix, is_wine) = {
-                let s = state_m.borrow();
-                let cfg = ira_db::get_game_config(&s.db, game_m.db_id)
+                let s = state.borrow();
+                let cfg = ira_db::get_game_config(&s.db, game_db_id)
                     .ok()
                     .flatten()
                     .map(|(_, w, _)| w)
                     .unwrap_or_default();
                 (
                     ira_launcher::wine_launch::wine_prefix(&cfg),
-                    game_m.kind == ira_models::GameKind::Wine && cfg.enabled,
+                    game_kind == ira_models::GameKind::Wine && cfg.enabled,
                 )
             };
             let pfx = if is_wine {
@@ -456,7 +468,7 @@ fn build_dialog_contents(
             let count = match ira_launcher::game_saves::setup_game_saves_checked(
                 &details.ufs_savefiles,
                 &details.ufs_rootoverrides,
-                &game_m.app_id,
+                &game_app_id,
                 &save_dir_m,
                 pfx,
             ) {
@@ -476,8 +488,7 @@ fn build_dialog_contents(
             } else {
                 btn_m.set_label(&crate::tr!("Already centralized"));
             }
-            if let Err(e) = ira_db::set_saves_centralized(&state_m.borrow().db, game_m.db_id, true)
-            {
+            if let Err(e) = ira_db::set_saves_centralized(&state.borrow().db, game_db_id, true) {
                 eprintln!("Failed to cache saves centralized: {}", e);
             }
             btn_m.set_sensitive(false);
@@ -487,77 +498,114 @@ fn build_dialog_contents(
     let save_btn = gtk4::Button::with_label(&crate::tr!("Save"));
     save_btn.add_css_class(CSS_SUGGESTED_ACTION);
 
-    let save_btn_c = save_btn.clone();
-    let state_s = state.clone();
-    let win_s = win.downgrade();
-    let app_id = game.app_id.clone();
+    let save_btn_w = Downgrade::downgrade(&save_btn);
+    let state_w = Rc::downgrade(&state);
+    let win_w = Downgrade::downgrade(&win);
+    let game_app_id = game.app_id.clone();
+    let game_folder = game.game_folder.clone();
     let trophy_source = game.trophy_source;
     let game_kind = game.kind;
-    let var_widgets_s = var_widgets.clone();
+    let saved_platform_id_s = game.platform_id.clone();
+    let var_widgets_w = Rc::downgrade(&var_widgets);
     let save_dir_s = save_dir.clone();
     let logo_controls_s = logo_controls.clone();
     let dlc_switches_s = dlc_switches.clone();
-    let pending_copies_s = pending_copies.clone();
+    let pending_copies_w = Rc::downgrade(&pending_copies);
     let old_wine_s = saved_wine.clone();
     let app_default_wine_s = app_default_wine.clone();
     let game_exe_s = saved_launch.exe.clone();
-    let language_row_s = language_row.clone();
+    let language_row_w = language_row.as_ref().map(Downgrade::downgrade);
     let languages_s = languages.clone();
-    let saved_platform_id_s = game.platform_id.clone();
-    let system_widgets_s = lwa.system_widgets.clone();
-    let overlay_widgets_s = lwa.overlay_widgets.clone();
-    let controller_widgets_s = lwa.controller_widgets.clone();
-    let title_entry_s = title_entry.clone();
-    let sort_entry_s = sort_entry.clone();
-    let pending_version_s = pending_version.clone();
-    let app_id_entry_s = app_id_entry.clone();
-    let pending_ra_core_s = pending_ra_core.clone();
-    let pending_emulator_s = pending_emulator.clone();
-    let profiles_s = lwa.profiles.clone();
-    let game_folder_entry_s = game_folder_entry.clone();
-    let runtime_row_s = runtime_row.clone();
+    let lwa_rc = Rc::new(lwa);
+    let lwa_w = Rc::downgrade(&lwa_rc);
+    let title_entry_w = Downgrade::downgrade(&title_entry);
+    let sort_entry_w = Downgrade::downgrade(&sort_entry);
+    let pending_version_w = Rc::downgrade(&pending_version);
+    let app_id_entry_w = app_id_entry.as_ref().map(Downgrade::downgrade);
+    let pending_ra_core_w = Rc::downgrade(&pending_ra_core);
+    let pending_emulator_w = Rc::downgrade(&pending_emulator);
+    let game_folder_entry_w = game_folder_entry.as_ref().map(Downgrade::downgrade);
+    let runtime_row_w = runtime_row.as_ref().map(Downgrade::downgrade);
+    let pending_emu_uninstall_w = pending_emu_uninstall.as_ref().map(Rc::downgrade);
 
     save_btn.connect_clicked(move |_| {
-        let Some(win) = win_s.upgrade() else {
+        let Some(win) = win_w.upgrade() else {
             return;
         };
-        save_btn_c.set_sensitive(false);
+        let Some(state) = state_w.upgrade() else {
+            return;
+        };
+        let Some(pending_copies) = pending_copies_w.upgrade() else {
+            return;
+        };
+        let Some(var_widgets) = var_widgets_w.upgrade() else {
+            return;
+        };
+        let Some(title_entry) = title_entry_w.upgrade() else {
+            return;
+        };
+        let Some(sort_entry) = sort_entry_w.upgrade() else {
+            return;
+        };
+        let Some(pending_version) = pending_version_w.upgrade() else {
+            return;
+        };
+        let Some(pending_ra_core) = pending_ra_core_w.upgrade() else {
+            return;
+        };
+        let Some(pending_emulator) = pending_emulator_w.upgrade() else {
+            return;
+        };
+        let Some(lwa) = lwa_w.upgrade() else {
+            return;
+        };
+        let Some(save_btn) = save_btn_w.upgrade() else {
+            return;
+        };
+        let language_row = language_row_w.as_ref().and_then(|w| w.upgrade());
+        let app_id_entry = app_id_entry_w.as_ref().and_then(|w| w.upgrade());
+        let game_folder_entry = game_folder_entry_w.as_ref().and_then(|w| w.upgrade());
+        let runtime_row = runtime_row_w.as_ref().and_then(|w| w.upgrade());
+        let pending_emu_uninstall = pending_emu_uninstall_w
+            .as_ref()
+            .and_then(|w| w.upgrade());
+        save_btn.set_sensitive(false);
         save_game_settings(SaveGameSettingsParams {
-            state: state_s.clone(),
+            state,
             win,
             db_id,
-            app_id: app_id.clone(),
+            app_id: game_app_id.clone(),
             trophy_source,
             game_kind,
-            var_widgets: var_widgets_s.clone(),
+            var_widgets,
             save_dir: save_dir_s.clone(),
             logo_controls: logo_controls_s.clone(),
             dlc_switches: dlc_switches_s.clone(),
-            pending_copies: pending_copies_s.clone(),
+            pending_copies,
             old_wine: old_wine_s.clone(),
             app_default_wine: app_default_wine_s.clone(),
             game_exe: game_exe_s.clone(),
-            game_folder: game.game_folder.clone(),
-            language_row: language_row_s.clone(),
+            game_folder: game_folder.clone(),
+            language_row,
             languages: languages_s.clone(),
             saved_platform_id: saved_platform_id_s.clone(),
-            system_widgets: system_widgets_s.clone(),
-            overlay_widgets: overlay_widgets_s.clone(),
-            controller_widgets: controller_widgets_s.clone(),
-            title_entry: title_entry_s.clone(),
-            sort_entry: sort_entry_s.clone(),
-            pending_version: pending_version_s.clone(),
-            app_id_entry: app_id_entry_s.clone(),
-            pending_ra_core: pending_ra_core_s.clone(),
-            pending_emulator: pending_emulator_s.clone(),
+            system_widgets: lwa.system_widgets.clone(),
+            overlay_widgets: lwa.overlay_widgets.clone(),
+            controller_widgets: lwa.controller_widgets.clone(),
+            title_entry,
+            sort_entry,
+            pending_version,
+            app_id_entry,
+            pending_ra_core,
+            pending_emulator,
             launch_config_widgets: lwa.launch_config_widgets.clone(),
             show_wine_tabs: lwa.show_wine_tabs,
             wine_widgets: lwa.wine_widgets_opt.clone(),
-            profiles: profiles_s.clone(),
+            profiles: lwa.profiles.clone(),
             saved_profile_id,
-            game_folder_entry: game_folder_entry_s.clone(),
-            runtime_row: runtime_row_s.clone(),
-            pending_emu_uninstall: pending_emu_uninstall.clone(),
+            game_folder_entry,
+            runtime_row,
+            pending_emu_uninstall,
         });
     });
 
@@ -576,10 +624,20 @@ fn build_dialog_contents(
             ra_container,
         });
     }
-    let state_close = state.clone();
+    let state_close_w = Rc::downgrade(&state);
     win.connect_close_request(move |_| {
-        state_close.borrow_mut().settings_data = None;
+        if let Some(state) = state_close_w.upgrade() {
+            state.borrow_mut().settings_data = None;
+        }
         glib::Propagation::Proceed
+    });
+    // Anchor the page-widget structs to the dialog window: the save button
+    // reaches them through weak refs, so something must own them strongly
+    // for exactly as long as the dialog exists. The destroy handler dies
+    // with the window, releasing them at teardown.
+    let lwa_lifetime = lwa_rc;
+    win.connect_destroy(move |_| {
+        let _ = lwa_lifetime;
     });
 }
 

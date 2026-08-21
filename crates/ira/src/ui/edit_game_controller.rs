@@ -4,6 +4,7 @@ use super::input_profile_store::{
 };
 use super::settings_dialog;
 use adw::prelude::*;
+use glib::clone::Downgrade;
 use ira_models::{ControllerInputMode, Game, GameLaunchConfig};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -87,12 +88,18 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     input_profile_row.add_suffix(&edit_button);
     input_profile_row.add_suffix(&monitor_button);
 
-    let stack_for_monitor = params.stack.clone();
+    let stack_for_monitor = Downgrade::downgrade(params.stack);
     let registry_for_monitor = params.registry.clone();
-    let profile_row_for_monitor = input_profile_row.clone();
+    let profile_row_for_monitor = Downgrade::downgrade(&input_profile_row);
     let profile_paths_for_monitor = input_profile_paths.clone();
     monitor_button.connect_clicked(move |_| {
+        let Some(profile_row_for_monitor) = profile_row_for_monitor.upgrade() else {
+            return;
+        };
         let Some(path) = selected_path(&profile_row_for_monitor, &profile_paths_for_monitor) else {
+            return;
+        };
+        let Some(stack_for_monitor) = stack_for_monitor.upgrade() else {
             return;
         };
         let Some(window) = stack_for_monitor
@@ -108,8 +115,8 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         );
     });
 
-    let stack_for_edit = params.stack.clone();
-    let profile_row_for_edit = input_profile_row.clone();
+    let stack_for_edit = Downgrade::downgrade(params.stack);
+    let profile_row_for_edit = Downgrade::downgrade(&input_profile_row);
     let profile_paths_for_edit = input_profile_paths.clone();
     let save_dir_for_edit = params.save_dir.to_string();
     let game_id_for_edit = params.game.db_id;
@@ -117,7 +124,13 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     let registry_for_edit = params.registry.clone();
     let last_real_for_edit = last_real.clone();
     edit_button.connect_clicked(move |_| {
+        let Some(profile_row_for_edit) = profile_row_for_edit.upgrade() else {
+            return;
+        };
         let Some(path) = selected_path(&profile_row_for_edit, &profile_paths_for_edit) else {
+            return;
+        };
+        let Some(stack_for_edit) = stack_for_edit.upgrade() else {
             return;
         };
         let Some(window) = stack_for_edit
@@ -157,14 +170,20 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
 
     let last_real_for_new = last_real.clone();
     let new_profile_cb: Rc<dyn Fn()> = {
-        let stack = params.stack.clone();
-        let row = input_profile_row.clone();
+        let stack = Downgrade::downgrade(params.stack);
+        let row = Downgrade::downgrade(&input_profile_row);
         let paths = input_profile_paths.clone();
         let save_dir = params.save_dir.to_string();
         let game_id = params.game.db_id;
         let game_name = params.game.name.clone();
         let registry = params.registry.clone();
         Rc::new(move || {
+            let Some(row) = row.upgrade() else {
+                return;
+            };
+            let Some(stack) = stack.upgrade() else {
+                return;
+            };
             let Some(window) = stack
                 .root()
                 .and_then(|root| root.downcast::<gtk4::Window>().ok())
@@ -179,7 +198,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
             super::input_profile_editor::show_input_profile_editor(
                 &window,
                 super::input_profile_editor::InputProfileEditorParams {
-                    save_dir: save_dir.clone(),
+                    save_dir,
                     profile_path: None,
                     game_id: Some(game_id),
                     layout_name: Some(game_name.clone()),
@@ -201,11 +220,9 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     };
 
     let paths_for_sensitivity = input_profile_paths.clone();
-    let last_real_for_notify = last_real.clone();
+    let last_real_for_notify = last_real;
     let new_profile_for_notify = new_profile_cb.clone();
     input_profile_row.connect_selected_notify({
-        let edit_button = edit_button.clone();
-        let monitor_button = monitor_button.clone();
         move |row| {
             let sentinel = paths_for_sensitivity.borrow().len().saturating_sub(1) as u32;
             let selected = row.selected();

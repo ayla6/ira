@@ -8,6 +8,7 @@ use ira_db::DbConn;
 use ira_input::ControllerRegistry;
 use ira_models::{Group, GroupSelection};
 use ira_watcher::AchievementWatcher;
+use gtk4::glib::Bytes;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -16,21 +17,21 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone)]
 pub enum PendingImage {
     Path(String),
-    Bytes(Vec<u8>),
+    Bytes(Bytes),
 }
 
 /// Fetched SGDB asset list for one asset type, kept alive only while the
 /// per-game settings screen is open so reopening the picker is instant. The
 /// picker window itself is also kept alive (hidden, not destroyed) so its
-/// loaded thumbnails survive closing and reopening. The window is owned
-/// strongly here, not by the picker's own signal handlers, so closing the
-/// settings screen (which drops the cache) is the only teardown path.
+/// loaded thumbnails survive closing and reopening. Held weakly so the
+/// settings window always owns its own teardown: if the picker was already
+/// destroyed, `upgrade()` fails and a fresh picker is built.
 #[derive(Clone)]
 pub struct SgdbAssetsCacheEntry {
     pub assets: Vec<SgdbAsset>,
     pub has_more: bool,
     pub next_page: u32,
-    pub picker: adw::Window,
+    pub picker: glib::WeakRef<adw::Window>,
 }
 
 #[derive(Clone)]

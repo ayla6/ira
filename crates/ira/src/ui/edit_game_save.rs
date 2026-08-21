@@ -591,22 +591,23 @@ fn spawn_image_copy_thread(
                     }
                 }
                 PendingImage::Bytes(data) => {
-                    let ext = if ira_parser::is_ico_data(data) {
+                    let data_ref: &[u8] = data;
+                    let ext = if ira_parser::is_ico_data(data_ref) {
                         "ico"
-                    } else if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                    } else if data_ref.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
                         "png"
-                    } else if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+                    } else if data_ref.starts_with(&[0xFF, 0xD8, 0xFF]) {
                         "jpg"
-                    } else if data.starts_with(b"RIFF")
-                        && data.len() > 11
-                        && &data[8..12] == b"WEBP"
+                    } else if data_ref.starts_with(b"RIFF")
+                        && data_ref.len() > 11
+                        && &data_ref[8..12] == b"WEBP"
                     {
                         "webp"
                     } else {
                         "png"
                     };
                     let dest = cloud_dir.join(format!("{}.{}", base_name, ext));
-                    if let Err(e) = std::fs::write(&dest, data) {
+                    if let Err(e) = std::fs::write(&dest, data_ref) {
                         eprintln!("Failed to write {}: {}", asset, e);
                     }
                     dest

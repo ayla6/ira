@@ -71,13 +71,13 @@ pub(super) fn make_refresh_closure(
         .entered();
     let save_dir = state.borrow().save_dir.clone();
     let (tw, th) = ctx.thumb_size;
+    let db_id = game.db_id;
     Rc::new({
         let preview_wrapper = preview_wrapper.downgrade();
         let cloud_dir = ctx.cloud_dir.to_path_buf();
         let base_name = ctx.base_name.to_string();
-        let state_clone = state.clone();
-        let game_clone = game.clone();
-        let pending_copies = pending_copies.clone();
+        let state_w = Rc::downgrade(state);
+        let pending_copies = pending_copies.as_ref().map(Rc::downgrade);
         let asset_c = asset_type.to_string();
         move || {
             let Some(preview_wrapper) = preview_wrapper.upgrade() else {
@@ -86,6 +86,7 @@ pub(super) fn make_refresh_closure(
             clear_children(&preview_wrapper);
             let from_pending = pending_copies
                 .as_ref()
+                .and_then(|pc| pc.upgrade())
                 .and_then(|pc| pc.borrow().get(&asset_c).cloned());
             let shown = match &from_pending {
                 Some(PendingImage::Path(p)) if std::path::Path::new(p).is_file() => {
@@ -95,9 +96,7 @@ pub(super) fn make_refresh_closure(
                     true
                 }
                 Some(PendingImage::Bytes(b)) if !b.is_empty() => {
-                    if let Ok(texture) =
-                        gdk4::Texture::from_bytes(&glib::Bytes::from_owned(b.clone()))
-                    {
+                    if let Ok(texture) = gdk4::Texture::from_bytes(b) {
                         let pic = gtk4::Picture::for_paintable(&texture);
                         pic.set_content_fit(gtk4::ContentFit::Contain);
                         pic.set_height_request(th.max(tw));
@@ -124,15 +123,18 @@ pub(super) fn make_refresh_closure(
             if from_pending.is_some() {
                 return;
             }
-            let s = state_clone.borrow();
-            if let Ok(Some(entry)) = ira_db::find_by_db_id(&s.db, game_clone.db_id) {
+            let Some(state) = state_w.upgrade() else {
+                return;
+            };
+            let s = state.borrow();
+            if let Ok(Some(entry)) = ira_db::find_by_db_id(&s.db, db_id) {
                 drop(s);
                 if let Ok(updated) = crate::game_loader::load_game(&entry, &save_dir) {
                     let new_path = image_path_for_asset(&updated, &asset_c).to_string();
                     if !new_path.is_empty() {
                         ira_images::invalidate_texture(&new_path);
                     }
-                    apply_game_update(&state_clone, updated);
+                    apply_game_update(&state, updated);
                 }
             }
         }

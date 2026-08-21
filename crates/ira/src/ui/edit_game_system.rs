@@ -4,6 +4,7 @@ use super::system_settings::{
 };
 use super::wine_config_helpers::make_revert_btn;
 use adw::prelude::*;
+use glib::clone::Downgrade;
 use ira_models::GameLaunchConfig;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -82,7 +83,7 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     {
         let state_c = gamescope_state.clone();
         let btn_c = gs_revert_btn.clone();
-        let gse = gamescope_row.clone();
+        let gse = Downgrade::downgrade(&gamescope_row);
         let rev_c = gs_reverting.clone();
         gs_switch.connect_active_notify(move |sw| {
             if *rev_c.borrow() {
@@ -91,16 +92,24 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
             *state_c.borrow_mut() = Some(sw.is_active());
             btn_c.set_visible(true);
             if sw.is_active() {
-                gse.set_expanded(true);
+                if let Some(gse) = gse.upgrade() {
+                    gse.set_expanded(true);
+                }
             }
         });
     }
     {
         let state_c = gamescope_state.clone();
-        let btn_c = gs_revert_btn.clone();
-        let sw_c = gs_switch.clone();
+        let btn_c = Downgrade::downgrade(&gs_revert_btn);
+        let sw_c = Downgrade::downgrade(&gs_switch);
         let rev_c = gs_reverting.clone();
         gs_revert_btn.connect_clicked(move |_| {
+            let Some(sw_c) = sw_c.upgrade() else {
+                return;
+            };
+            let Some(btn_c) = btn_c.upgrade() else {
+                return;
+            };
             *rev_c.borrow_mut() = true;
             sw_c.set_active(params.gamescope_default);
             *rev_c.borrow_mut() = false;

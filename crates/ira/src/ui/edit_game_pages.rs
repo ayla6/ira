@@ -7,6 +7,7 @@ use super::helpers;
 use super::settings_dialog;
 use super::state::SharedState;
 use adw::prelude::*;
+use glib::clone::Downgrade;
 use ira_db::DbConn;
 use ira_models::{AppDetails, GameLaunchConfig, WineConfig, WineProfile};
 
@@ -295,8 +296,11 @@ pub(super) fn build_api_emulator_page(
         uninstall_btn.set_valign(gtk4::Align::Center);
         let status_c = status_row.clone();
         let pu_c = pending_uninstall.clone();
-        let win_c = win.clone();
+        let win_c = Downgrade::downgrade(win);
         uninstall_btn.connect_clicked(move |_| {
+            let Some(win_c) = win_c.upgrade() else {
+                return;
+            };
             let alert = adw::AlertDialog::new(
                 Some(&crate::tr!("Uninstall API emulator?")),
                 Some(&crate::tr!("This will restore the original Steam/GOG DLLs. The change will be applied when you save.")),
@@ -385,12 +389,24 @@ pub(super) fn build_api_emulator_page(
         let status_c = status_row.clone();
         let langs_c = languages.to_vec();
         let ts_c = emu_trophy_source;
-        let state_c = state.clone();
-        let win_c = win.clone();
-        let sidebar_c = sidebar.clone();
-        let stack_c = stack.clone();
+        let state_c = Rc::downgrade(state);
+        let win_c = Downgrade::downgrade(win);
+        let sidebar_c = Downgrade::downgrade(sidebar);
+        let stack_c = Downgrade::downgrade(stack);
         let pending_uninstall_c = pending_uninstall.clone();
         install_btn.connect_clicked(move |_| {
+            let Some(state_c) = state_c.upgrade() else {
+                return;
+            };
+            let Some(win_c) = win_c.upgrade() else {
+                return;
+            };
+            let Some(sidebar_c) = sidebar_c.upgrade() else {
+                return;
+            };
+            let Some(stack_c) = stack_c.upgrade() else {
+                return;
+            };
             let ver = version_row
                 .as_ref()
                 .map(|vr| {

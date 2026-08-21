@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
+use glib::clone::Downgrade;
 
 use super::add_game_dialog::build_env_var_row;
 use super::css::CSS_BOXED_LIST;
@@ -37,21 +38,26 @@ pub(super) fn build_override_switch_row(
 
     let state_c = state.clone();
     let btn_c = revert_btn.clone();
-    let row_c = row.clone();
     let rev_c = reverting.clone();
-    row.connect_active_notify(move |_| {
+    row.connect_active_notify(move |row| {
         if *rev_c.borrow() {
             return;
         }
-        *state_c.borrow_mut() = Some(row_c.is_active());
+        *state_c.borrow_mut() = Some(row.is_active());
         btn_c.set_visible(true);
     });
 
     let state_c2 = state.clone();
-    let btn_c2 = revert_btn.clone();
-    let row_c2 = row.clone();
-    let rev_c2 = reverting.clone();
+    let btn_c2 = Downgrade::downgrade(&revert_btn);
+    let row_c2 = Downgrade::downgrade(&row);
+    let rev_c2 = reverting;
     revert_btn.connect_clicked(move |_| {
+        let Some(row_c2) = row_c2.upgrade() else {
+            return;
+        };
+        let Some(btn_c2) = btn_c2.upgrade() else {
+            return;
+        };
         *rev_c2.borrow_mut() = true;
         row_c2.set_active(global_default);
         *rev_c2.borrow_mut() = false;
@@ -172,11 +178,17 @@ fn make_spin_row(
     }
     {
         let state_c = state.clone();
-        let btn_c = revert_btn.clone();
-        let row_c = row.clone();
-        let rev_c = rev.clone();
+        let btn_c = Downgrade::downgrade(&revert_btn);
+        let row_c = Downgrade::downgrade(&row);
+        let rev_c = rev;
         let d = default_val as f64;
         revert_btn.connect_clicked(move |_| {
+            let Some(row_c) = row_c.upgrade() else {
+                return;
+            };
+            let Some(btn_c) = btn_c.upgrade() else {
+                return;
+            };
             *rev_c.borrow_mut() = true;
             row_c.set_value(d);
             *rev_c.borrow_mut() = false;
@@ -236,14 +248,20 @@ fn make_upscaling_row(
     }
     {
         let state_c = state.clone();
-        let btn_c = revert_btn.clone();
-        let rev_c = rev.clone();
+        let btn_c = Downgrade::downgrade(&revert_btn);
+        let rev_c = rev;
         let default_idx = UPSCALE_VALUES
             .iter()
             .position(|&v| v == default_upscaling)
             .unwrap_or(0) as u32;
-        let row_c = row.clone();
+        let row_c = Downgrade::downgrade(&row);
         revert_btn.connect_clicked(move |_| {
+            let Some(row_c) = row_c.upgrade() else {
+                return;
+            };
+            let Some(btn_c) = btn_c.upgrade() else {
+                return;
+            };
             *rev_c.borrow_mut() = true;
             row_c.set_selected(default_idx);
             *rev_c.borrow_mut() = false;

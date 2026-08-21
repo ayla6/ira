@@ -24,6 +24,7 @@ pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
     win.set_modal(true);
     win.set_transient_for(Some(parent));
     win.set_destroy_with_parent(true);
+    win.set_hide_on_close(false);
 
     let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
 
@@ -82,8 +83,9 @@ pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
 /// `Option<String>`, for use as the `initial_path` parameter of
 /// `make_browse_button`.
 pub fn entry_path_closure(entry: &adw::EntryRow) -> impl Fn() -> Option<String> + 'static {
-    let entry = entry.clone();
+    let entry = glib::clone::Downgrade::downgrade(entry);
     move || {
+        let entry = entry.upgrade()?;
         let t = entry.text().to_string();
         if t.is_empty() {
             None

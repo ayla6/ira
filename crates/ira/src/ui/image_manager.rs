@@ -196,8 +196,11 @@ fn build_steam_non_icon_button(
     let id_c = id.to_string();
     let asset_c = asset_type.to_string();
     let refresh = Rc::clone(refresh_images);
-    let btn_clone = btn.clone();
+    let btn_clone = btn.downgrade();
     btn.connect_clicked(move |_| {
+        let Some(btn_clone) = btn_clone.upgrade() else {
+            return;
+        };
         btn_clone.set_sensitive(false);
         btn_clone.set_label(&crate::tr!("Downloading…"));
         let steam = steam.clone();
@@ -247,8 +250,11 @@ fn build_steam_icon_button(
     let id_c = id.to_string();
     let save_dir_c = save_dir.to_string();
     let refresh = Rc::clone(refresh_images);
-    let btn_clone = btn.clone();
+    let btn_clone = btn.downgrade();
     btn.connect_clicked(move |_| {
+        let Some(btn_clone) = btn_clone.upgrade() else {
+            return;
+        };
         btn_clone.set_sensitive(false);
         btn_clone.set_label(&crate::tr!("Downloading…"));
         let steam = steam.clone();
@@ -457,8 +463,11 @@ fn build_ra_icon_button(
     let refresh = Rc::clone(refresh_images);
     let pending_copies_ra = pending_copies.clone();
     let asset_ra = asset_type.to_string();
-    let btn_clone = btn.clone();
+    let btn_clone = btn.downgrade();
     btn.connect_clicked(move |_| {
+        let Some(btn_clone) = btn_clone.upgrade() else {
+            return;
+        };
         btn_clone.set_sensitive(false);
         btn_clone.set_label(&crate::tr!("Downloading…"));
         let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<u8>, String>>();
@@ -494,8 +503,10 @@ fn build_ra_icon_button(
                 match result {
                     Ok(bytes) => {
                         if let Some(ref pc) = pc {
-                            pc.borrow_mut()
-                                .insert(asset.clone(), PendingImage::Bytes(bytes));
+                            pc.borrow_mut().insert(
+                                asset.clone(),
+                                PendingImage::Bytes(gtk4::glib::Bytes::from_owned(bytes)),
+                            );
                         }
                         refresh();
                     }

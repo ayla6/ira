@@ -6,6 +6,7 @@ use super::settings_console::build_emulator_dropdown;
 use super::state::{PendingImage, SharedState};
 use crate::Game;
 use adw::prelude::*;
+use glib::clone::Downgrade;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -54,7 +55,7 @@ fn build_ra_section(
             unmatch_btn.set_sensitive(false);
         }
         let pc = pending_copies.clone();
-        let pkey = pending_key.clone();
+        let pkey = pending_key;
         let sc = state.clone();
         let game_clone = game.clone();
         unmatch_btn.connect_clicked(move |_| {
@@ -85,7 +86,7 @@ fn build_ra_section(
         let db_id = game.db_id;
         let gn = game.name.clone();
         let pid = game.platform_id.clone();
-        let pw = win.downgrade();
+        let pw = Downgrade::downgrade(win);
         match_btn.connect_clicked(move |_| {
             let Some(pw) = pw.upgrade() else {
                 return;
@@ -191,8 +192,12 @@ fn build_game_folder_row(
         None,
         super::helpers::entry_path_closure(&row),
         {
-            let row_c = row.clone();
-            move |path| row_c.set_text(&path.to_string_lossy())
+            let row_c = Downgrade::downgrade(&row);
+            move |path| {
+                if let Some(row_c) = row_c.upgrade() {
+                    row_c.set_text(&path.to_string_lossy());
+                }
+            }
         },
     );
     row.add_suffix(&browse);
@@ -350,7 +355,7 @@ fn add_emulator_dropdown_section(
 
     let pending_emu_c = pending_emulator.clone();
     let emus_clone = emulators.clone();
-    let core_row_clone = core_row.clone();
+    let core_row_clone = core_row;
     emu_dropdown.connect_selected_notify(move |dd| {
         let idx = dd.selected();
         let cmd = if idx == 0 {
@@ -450,11 +455,14 @@ fn build_service_ids_section(
         let sc = state.clone();
         let game_name = game.name.clone();
         let db_id = game.db_id;
-        let win_c = win.downgrade();
-        let row_c = row.clone();
+        let win_c = Downgrade::downgrade(win);
+        let row_c = Downgrade::downgrade(&row);
         let matched_name = game.name.clone();
         search_btn.connect_clicked(move |_| {
-            let Some(win_c) = win_c.upgrade() else {
+            let Some(win) = win_c.upgrade() else {
+                return;
+            };
+            let Some(row_c) = row_c.upgrade() else {
                 return;
             };
             let on_select = {
@@ -465,7 +473,7 @@ fn build_service_ids_section(
                 })
             };
             super::steam_search::show_steam_id_search_popup(
-                &sc, &game_name, &win_c, &row_c, "Match", on_select,
+                &sc, &game_name, &win, &row_c, "Match", on_select,
             );
         });
         row.add_suffix(&search_btn);

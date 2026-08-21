@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use super::css::*;
 use adw::prelude::*;
+use glib::clone::Downgrade;
 
 pub(super) type OverrideList = Rc<RefCell<Vec<String>>>;
 
@@ -81,10 +82,16 @@ pub(super) fn track_switch(
 
     let field_s2 = field.to_string();
     let ov2 = overridden.clone();
-    let row2 = row.clone();
-    let btn2 = revert_btn.clone();
-    let rev2 = reverting.clone();
+    let row2 = Downgrade::downgrade(row);
+    let btn2 = Downgrade::downgrade(&revert_btn);
+    let rev2 = reverting;
     revert_btn.connect_clicked(move |_| {
+        let Some(row2) = row2.upgrade() else {
+            return;
+        };
+        let Some(btn2) = btn2.upgrade() else {
+            return;
+        };
         *rev2.borrow_mut() = true;
         row2.set_active(default_val);
         *rev2.borrow_mut() = false;
@@ -122,10 +129,16 @@ pub(super) fn track_spin_row(
 
     let field_s2 = field.to_string();
     let ov2 = overridden.clone();
-    let row2 = row.clone();
-    let btn2 = revert_btn.clone();
-    let rev2 = reverting.clone();
+    let row2 = Downgrade::downgrade(row);
+    let btn2 = Downgrade::downgrade(&revert_btn);
+    let rev2 = reverting;
     revert_btn.connect_clicked(move |_| {
+        let Some(row2) = row2.upgrade() else {
+            return;
+        };
+        let Some(btn2) = btn2.upgrade() else {
+            return;
+        };
         *rev2.borrow_mut() = true;
         row2.set_value(default_val as f64);
         *rev2.borrow_mut() = false;
@@ -163,10 +176,16 @@ pub(super) fn track_combo(
 
     let field_s2 = field.to_string();
     let ov2 = overridden.clone();
-    let row2 = row.clone();
-    let btn2 = revert_btn.clone();
-    let rev2 = reverting.clone();
+    let row2 = Downgrade::downgrade(row);
+    let btn2 = Downgrade::downgrade(&revert_btn);
+    let rev2 = reverting;
     revert_btn.connect_clicked(move |_| {
+        let Some(row2) = row2.upgrade() else {
+            return;
+        };
+        let Some(btn2) = btn2.upgrade() else {
+            return;
+        };
         *rev2.borrow_mut() = true;
         row2.set_selected(default_selected);
         *rev2.borrow_mut() = false;
@@ -202,9 +221,15 @@ pub(super) fn track_spin(
     });
     let field_s = field.to_string();
     let overridden_for_revert = overridden.clone();
-    let spin_for_revert = spin.clone();
-    let button_for_revert = revert_btn.clone();
+    let spin_for_revert = Downgrade::downgrade(spin);
+    let button_for_revert = Downgrade::downgrade(&revert_btn);
     revert_btn.connect_clicked(move |_| {
+        let Some(spin_for_revert) = spin_for_revert.upgrade() else {
+            return;
+        };
+        let Some(button_for_revert) = button_for_revert.upgrade() else {
+            return;
+        };
         *reverting.borrow_mut() = true;
         spin_for_revert.set_value(default_val as f64);
         *reverting.borrow_mut() = false;

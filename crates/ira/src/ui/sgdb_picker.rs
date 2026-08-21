@@ -233,8 +233,10 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
                 loop {
                     match rx.borrow_mut().try_recv() {
                         Ok((bytes, is_converted)) => {
-                            pc_c.borrow_mut()
-                                .insert(asset_c.clone(), PendingImage::Bytes(bytes));
+                            pc_c.borrow_mut().insert(
+                                asset_c.clone(),
+                                PendingImage::Bytes(gtk4::glib::Bytes::from_owned(bytes)),
+                            );
                             if !is_converted {
                                 on_done_c();
                                 if let Some(picker) = picker_weak.upgrade() {
@@ -416,7 +418,9 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     // instead of rebuilding everything and refetching the list.
     if let Some(c) = sgdb_cache.as_ref() {
         if let Some(entry) = c.borrow().get(&cache_key) {
-            entry.picker.present();
+            if let Some(w) = entry.picker.upgrade() {
+                w.present();
+            }
             return;
         }
     }
@@ -526,7 +530,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
                 assets: Vec::new(),
                 has_more: true,
                 next_page: 0,
-                picker: picker.clone(),
+                picker: picker.downgrade(),
             },
         );
     }
@@ -689,7 +693,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
                                     assets: new_assets,
                                     has_more: more,
                                     next_page: 1,
-                                    picker,
+                                    picker: picker.downgrade(),
                                 },
                             );
                         }

@@ -56,8 +56,12 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
         Some((&crate::tr!("Executable"), &["application/x-executable"])),
         helpers::entry_path_closure(&exe_entry),
         {
-            let entry = exe_entry.clone();
-            move |path| entry.set_text(&path.to_string_lossy())
+            let entry = glib::clone::Downgrade::downgrade(&exe_entry);
+            move |path| {
+                if let Some(entry) = entry.upgrade() {
+                    entry.set_text(&path.to_string_lossy());
+                }
+            }
         },
     );
     exe_entry.add_suffix(&exe_browse);
@@ -79,8 +83,12 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
         None,
         helpers::entry_path_closure(&wd_entry),
         {
-            let entry = wd_entry.clone();
-            move |path| entry.set_text(&path.to_string_lossy())
+            let entry = glib::clone::Downgrade::downgrade(&wd_entry);
+            move |path| {
+                if let Some(entry) = entry.upgrade() {
+                    entry.set_text(&path.to_string_lossy());
+                }
+            }
         },
     );
     wd_entry.add_suffix(&wd_browse);

@@ -148,15 +148,19 @@ pub(super) fn build_game_logo_page(
         all_btns.push(btn);
     }
 
-    let btns: Rc<Vec<gtk4::Button>> = Rc::new(all_btns);
+    let btns: Rc<Vec<glib::WeakRef<gtk4::Button>>> =
+        Rc::new(all_btns.iter().map(|b| b.downgrade()).collect());
     for (i, &pos) in logo_positions.iter().enumerate() {
         let btns_c = btns.clone();
         let selected_pos_c = selected_pos.clone();
         let pos_owned = pos.to_string();
         let preview_clone = preview_draw.clone();
         let modified_c = modified.clone();
-        btns[i].connect_clicked(move |btn| {
-            for b in btns_c.iter() {
+        let Some(button) = btns[i].upgrade() else {
+            continue;
+        };
+        button.connect_clicked(move |btn| {
+            for b in btns_c.iter().filter_map(|b| b.upgrade()) {
                 b.remove_css_class(CSS_SELECTED);
             }
             btn.add_css_class(CSS_SELECTED);
@@ -194,12 +198,14 @@ pub(super) fn build_game_logo_page(
             *selected_pos_reset.borrow_mut() = ira_models::LogoPosition::DEFAULT.to_string();
             size_adj_reset.set_value(50.0);
             modified_reset.set(false);
-            for b in btns_reset.iter() {
+            for b in btns_reset.iter().filter_map(|b| b.upgrade()) {
                 b.remove_css_class(CSS_SELECTED);
             }
             for (i, &pos) in ira_models::LogoPosition::all().iter().enumerate() {
                 if pos == ira_models::LogoPosition::DEFAULT {
-                    btns_reset[i].add_css_class(CSS_SELECTED);
+                    if let Some(b) = btns_reset[i].upgrade() {
+                        b.add_css_class(CSS_SELECTED);
+                    }
                 }
             }
             preview_reset.queue_draw();
@@ -216,7 +222,7 @@ pub(super) fn build_game_logo_page(
         steam_reset_btn.set_tooltip_text(Some(&crate::tr!("Reset")));
         let selected_pos_r = selected_pos.clone();
         let size_adj_r = size_adj.clone();
-        let btns_r = btns.clone();
+        let btns_r = btns;
         let preview_r = preview_draw.clone();
         let modified_r = modified.clone();
         let app_id_clone = info.app_id.clone();
@@ -266,13 +272,15 @@ pub(super) fn build_game_logo_page(
                         *selected.borrow_mut() = pos_str.clone();
                         size_adj.set_value(size.clamp(5, 100) as f64);
                         modified.set(true);
-                        for b in btns.iter() {
+                        for b in btns.iter().filter_map(|b| b.upgrade()) {
                             b.remove_css_class(CSS_SELECTED);
                         }
                         let target = ira_models::LogoPosition::from_string(&pos_str);
                         for (i, &p) in ira_models::LogoPosition::all().iter().enumerate() {
                             if p == target {
-                                btns[i].add_css_class(CSS_SELECTED);
+                                if let Some(b) = btns[i].upgrade() {
+                                    b.add_css_class(CSS_SELECTED);
+                                }
                             }
                         }
                         preview.queue_draw();
@@ -307,7 +315,7 @@ pub(super) fn build_game_logo_page(
     size_spin.set_numeric(true);
     size_spin.set_digits(1);
 
-    let preview_draw_for_size = preview_draw.clone();
+    let preview_draw_for_size = preview_draw;
     let modified_for_size = modified.clone();
     size_adj.connect_value_changed(move |_| {
         preview_draw_for_size.queue_draw();

@@ -8,6 +8,7 @@ use ira_models::AssetType;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::rc::Weak;
 use std::sync::Arc;
 
 fn build_sgdb_asset_card(
@@ -16,7 +17,7 @@ fn build_sgdb_asset_card(
     steam: &Arc<SteamDataClient>,
     on_download: Rc<dyn Fn()>,
     thumb_size: i32,
-    all_buttons: Rc<RefCell<Vec<gtk4::Button>>>,
+    all_buttons: Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>>,
 ) -> (gtk4::Widget, gtk4::Widget) {
     let mut info = String::new();
     if a.width > 0 && a.height > 0 {
@@ -81,23 +82,27 @@ fn build_sgdb_asset_card(
     ldl.add_css_class(CSS_SUGGESTED_ACTION);
     row.append(&ldl);
 
-    all_buttons.borrow_mut().push(gdl.clone());
-    all_buttons.borrow_mut().push(ldl.clone());
+    all_buttons.borrow_mut().push(gdl.downgrade());
+    all_buttons.borrow_mut().push(ldl.downgrade());
 
     let cb_g = on_download.clone();
     let buttons_g = all_buttons.clone();
     gdl.connect_clicked(move |_| {
         for b in buttons_g.borrow().iter() {
-            b.set_sensitive(false);
-            b.set_label(&crate::tr!("Downloading\u{2026}"));
+            if let Some(b) = b.upgrade() {
+                b.set_sensitive(false);
+                b.set_label(&crate::tr!("Downloading\u{2026}"));
+            }
         }
         cb_g();
     });
     let buttons_l = all_buttons.clone();
     ldl.connect_clicked(move |_| {
         for b in buttons_l.borrow().iter() {
-            b.set_sensitive(false);
-            b.set_label(&crate::tr!("Downloading\u{2026}"));
+            if let Some(b) = b.upgrade() {
+                b.set_sensitive(false);
+                b.set_label(&crate::tr!("Downloading\u{2026}"));
+            }
         }
         on_download();
     });
@@ -148,7 +153,7 @@ struct SgdbPickerCtx {
     steam: Arc<SteamDataClient>,
     asset: String,
     is_steam_id: bool,
-    picker: adw::Window,
+    picker: glib::WeakRef<adw::Window>,
     on_done: Rc<dyn Fn()>,
     pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     dest_dir: Option<String>,
@@ -218,7 +223,7 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
             });
             let pc_c = pc.clone();
             let on_done_c = on_done_dl.clone();
-            let picker_weak = picker_dl.downgrade();
+            let picker_weak = picker_dl.clone();
             let asset_c = asset_dl.clone();
             let done = Rc::new(Cell::new(false));
             glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
@@ -301,7 +306,7 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
                 });
             });
             let on_done_c = on_done_dl.clone();
-            let picker_weak = picker_dl.downgrade();
+            let picker_weak = picker_dl.clone();
             glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
                 if picker_weak.upgrade().is_none() {
                     return glib::ControlFlow::Break;
@@ -329,7 +334,7 @@ fn append_assets(
     start: usize,
     thumb_size: i32,
     ctx: &SgdbPickerCtx,
-    all_buttons: &Rc<RefCell<Vec<gtk4::Button>>>,
+    all_buttons: &Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>>,
 ) {
     flow.set_max_children_per_line((900 / (thumb_size + 20)).clamp(1, 8) as u32);
     for a in &assets[start..] {
@@ -353,7 +358,7 @@ fn full_rebuild(
     assets: &[SgdbAsset],
     thumb_size: i32,
     ctx: &SgdbPickerCtx,
-    all_buttons: &Rc<RefCell<Vec<gtk4::Button>>>,
+    all_buttons: &Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>>,
 ) {
     clear_children(flow);
     clear_children(list_view);
@@ -411,10 +416,8 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     // instead of rebuilding everything and refetching the list.
     if let Some(c) = sgdb_cache.as_ref() {
         if let Some(entry) = c.borrow().get(&cache_key) {
-            if let Some(win) = entry.picker.upgrade() {
-                win.present();
-                return;
-            }
+            entry.picker.present();
+            return;
         }
     }
 
@@ -490,8 +493,12 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     close_btn.set_margin_start(12);
     close_btn.set_margin_end(12);
     close_btn.set_margin_bottom(12);
-    let win = picker.clone();
-    close_btn.connect_clicked(move |_| win.close());
+    let win = picker.downgrade();
+    close_btn.connect_clicked(move |_| {
+        if let Some(win) = win.upgrade() {
+            win.close();
+        }
+    });
     outer.append(&close_btn);
 
     picker.set_content(Some(&outer));
@@ -501,9 +508,11 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     // hides the window instead of destroying it, so its loaded thumbnails and
     // scroll position survive. It is torn down only when the settings window
     // closes (set_destroy_with_parent above destroys it with its parent).
-    let picker_hide = picker.clone();
+    let picker_hide = picker.downgrade();
     picker.connect_close_request(move |_| {
-        picker_hide.set_visible(false);
+        if let Some(win) = picker_hide.upgrade() {
+            win.set_visible(false);
+        }
         glib::Propagation::Stop
     });
 
@@ -517,7 +526,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
                 assets: Vec::new(),
                 has_more: true,
                 next_page: 0,
-                picker: picker.downgrade(),
+                picker: picker.clone(),
             },
         );
     }
@@ -528,7 +537,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         steam: steam.clone(),
         asset: asset.to_string(),
         is_steam_id,
-        picker: picker.clone(),
+        picker: picker.downgrade(),
         on_done: on_done.clone(),
         pending_copies: pending_copies.clone(),
         dest_dir: dest_dir.map(|s| s.to_string()),
@@ -540,17 +549,18 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let has_more: Rc<Cell<bool>> = Rc::new(Cell::new(true));
     let loading_more: Rc<Cell<bool>> = Rc::new(Cell::new(false));
     let rendered_count: Rc<Cell<usize>> = Rc::new(Cell::new(0));
-    let all_buttons: Rc<RefCell<Vec<gtk4::Button>>> = Rc::new(RefCell::new(Vec::new()));
+    let all_buttons: Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>> = Rc::new(RefCell::new(Vec::new()));
     let is_initial_load: Rc<Cell<bool>> = Rc::new(Cell::new(true));
 
     // Re-showing a hidden picker resets any buttons left disabled by a
     // previous download so the same window is ready to pick again.
     let reset_buttons = all_buttons.clone();
-    let picker_map = picker.clone();
-    picker_map.connect_map(move |_| {
+    picker.connect_map(move |_| {
         for b in reset_buttons.borrow().iter() {
-            b.set_sensitive(true);
-            b.set_label(&crate::tr!("Download"));
+            if let Some(b) = b.upgrade() {
+                b.set_sensitive(true);
+                b.set_label(&crate::tr!("Download"));
+            }
         }
     });
 
@@ -652,7 +662,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         let loading_label = loading_label.clone();
         let loading_label2 = loading_label2.clone();
         let picker_weak = picker.downgrade();
-        let sgdb_cache_t = sgdb_cache.clone();
+        let sgdb_cache_t = sgdb_cache.as_ref().map(Rc::downgrade);
         let cache_key_t = cache_key.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
             if picker_weak.upgrade().is_none() {
@@ -667,19 +677,19 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
                     loading_label2.set_text("");
                     loading_label2.set_visible(false);
                     do_full_rebuild_t();
-                    if let Some(ref cache) = sgdb_cache_t {
+                    if let Some(ref cache) = sgdb_cache_t.as_ref().and_then(Weak::upgrade) {
                         if let Some(entry) = cache.borrow_mut().get_mut(&cache_key_t) {
                             entry.assets = new_assets;
                             entry.has_more = more;
                             entry.next_page = 1;
-                        } else {
+                        } else if let Some(picker) = picker_weak.upgrade() {
                             cache.borrow_mut().insert(
                                 cache_key_t.clone(),
                                 SgdbAssetsCacheEntry {
                                     assets: new_assets,
                                     has_more: more,
                                     next_page: 1,
-                                    picker: picker_weak.clone(),
+                                    picker,
                                 },
                             );
                         }
@@ -715,8 +725,8 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let has_more_scroll = has_more.clone();
     let loading_more_scroll = loading_more.clone();
     let current_page_scroll = current_page.clone();
-    let picker_scroll = picker.clone();
-    let sgdb_cache_scroll = sgdb_cache.clone();
+    let picker_scroll = picker.downgrade();
+    let sgdb_cache_scroll = sgdb_cache.as_ref().map(Rc::downgrade);
     let cache_key_scroll = cache_key.clone();
     let is_initial_load_scroll = is_initial_load.clone();
 
@@ -727,7 +737,10 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         if !has_more_scroll.get() || loading_more_scroll.get() {
             return;
         }
-        if !picker_scroll.is_visible() {
+        let Some(picker_vis) = picker_scroll.upgrade() else {
+            return;
+        };
+        if !picker_vis.is_visible() {
             return;
         }
 
@@ -760,7 +773,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         let has_more_m = has_more_scroll.clone();
         let loading_more_m = loading_more_scroll.clone();
         let assets_store_m = assets_store_scroll.clone();
-        let picker_weak = picker_scroll.downgrade();
+        let picker_weak = picker_scroll.clone();
         let sgdb_cache_m = sgdb_cache_scroll.clone();
         let cache_key_m = cache_key_scroll.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
@@ -772,7 +785,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
                 if !new_assets.is_empty() {
                     assets_store_m.borrow_mut().extend(new_assets.clone());
                     do_append_m();
-                    if let Some(ref cache) = sgdb_cache_m {
+                    if let Some(ref cache) = sgdb_cache_m.as_ref().and_then(Weak::upgrade) {
                         if let Some(entry) = cache.borrow_mut().get_mut(&cache_key_m) {
                             entry.assets.extend(new_assets);
                             entry.has_more = more;

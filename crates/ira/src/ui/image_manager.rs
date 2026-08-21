@@ -69,8 +69,11 @@ pub fn build_image_manager_content_with_drafts(
             let sc = state.clone();
             let gn = game.name.clone();
             let did = game.db_id;
-            let pw = parent_win.clone();
+            let pw = parent_win.downgrade();
             match_btn.connect_clicked(move |_| {
+                let Some(pw) = pw.upgrade() else {
+                    return;
+                };
                 show_sgdb_search_dialog(&sc, did, &gn, &pw, None);
             });
             btn_box.append(&match_btn);
@@ -332,7 +335,7 @@ fn build_sgdb_picker_button(
     let btn = gtk4::Button::with_label(&crate::tr!("SGDB…"));
     let steam = ctx.state.borrow().steam.clone();
     let asset_c = ctx.asset_type.to_string();
-    let parent = ctx.parent_win.clone();
+    let parent = ctx.parent_win.downgrade();
     let refresh = Rc::clone(ctx.refresh_images);
     let dims_vec: Vec<&str> = ctx.dims.to_vec();
     let sgdb_id_c = sgdb_id_for_picker.clone();
@@ -342,6 +345,9 @@ fn build_sgdb_picker_button(
         .to_string_lossy()
         .into_owned();
     btn.connect_clicked(move |_| {
+        let Some(parent) = parent.upgrade() else {
+            return;
+        };
         show_sgdb_picker(ShowSgdbPickerParams {
             steam: &steam,
             id: &sgdb_id_c,
@@ -764,7 +770,7 @@ fn build_dir_buttons(
         btn.add_css_class(CSS_FLAT);
         let steam = ctx.state.borrow().steam.clone();
         let asset_c = ctx.asset_type.to_string();
-        let parent = parent_win.clone();
+        let parent = parent_win.downgrade();
         let refresh = Rc::clone(ctx.refresh_preview);
         let sgdb_id_c = sgdb_id_for_picker.clone();
         let save_dir = ctx.state.borrow().save_dir.clone();
@@ -772,6 +778,9 @@ fn build_dir_buttons(
         let dims_vec: Vec<&str> = ctx.dimensions.to_vec();
         let target_dir_c = target_dir.to_string_lossy().into_owned();
         btn.connect_clicked(move |_| {
+            let Some(parent) = parent.upgrade() else {
+                return;
+            };
             let on_done: Rc<dyn Fn()> = {
                 let refresh = refresh.clone();
                 Rc::new(move || {

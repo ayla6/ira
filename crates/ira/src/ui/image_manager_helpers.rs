@@ -72,7 +72,7 @@ pub(super) fn make_refresh_closure(
     let save_dir = state.borrow().save_dir.clone();
     let (tw, th) = ctx.thumb_size;
     Rc::new({
-        let preview_wrapper = preview_wrapper.clone();
+        let preview_wrapper = preview_wrapper.downgrade();
         let cloud_dir = ctx.cloud_dir.to_path_buf();
         let base_name = ctx.base_name.to_string();
         let state_clone = state.clone();
@@ -80,6 +80,9 @@ pub(super) fn make_refresh_closure(
         let pending_copies = pending_copies.clone();
         let asset_c = asset_type.to_string();
         move || {
+            let Some(preview_wrapper) = preview_wrapper.upgrade() else {
+                return;
+            };
             clear_children(&preview_wrapper);
             let from_pending = pending_copies
                 .as_ref()

@@ -414,8 +414,12 @@ fn build_dialog_contents(
     btn_row.set_margin_bottom(12);
 
     let cancel_btn = gtk4::Button::with_label(&crate::tr!("Cancel"));
-    let win_c = win.clone();
-    cancel_btn.connect_clicked(move |_| win_c.close());
+    let win_c = win.downgrade();
+    cancel_btn.connect_clicked(move |_| {
+        if let Some(win) = win_c.upgrade() {
+            win.close();
+        }
+    });
 
     if let Some(btn) = &migrate_btn {
         let state_m = state.clone();
@@ -485,7 +489,7 @@ fn build_dialog_contents(
 
     let save_btn_c = save_btn.clone();
     let state_s = state.clone();
-    let win_s = win.clone();
+    let win_s = win.downgrade();
     let app_id = game.app_id.clone();
     let trophy_source = game.trophy_source;
     let game_kind = game.kind;
@@ -514,10 +518,13 @@ fn build_dialog_contents(
     let runtime_row_s = runtime_row.clone();
 
     save_btn.connect_clicked(move |_| {
+        let Some(win) = win_s.upgrade() else {
+            return;
+        };
         save_btn_c.set_sensitive(false);
         save_game_settings(SaveGameSettingsParams {
             state: state_s.clone(),
-            win: win_s.clone(),
+            win,
             db_id,
             app_id: app_id.clone(),
             trophy_source,

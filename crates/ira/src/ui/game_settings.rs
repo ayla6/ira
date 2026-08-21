@@ -85,8 +85,11 @@ fn build_ra_section(
         let db_id = game.db_id;
         let gn = game.name.clone();
         let pid = game.platform_id.clone();
-        let pw = win.clone();
+        let pw = win.downgrade();
         match_btn.connect_clicked(move |_| {
+            let Some(pw) = pw.upgrade() else {
+                return;
+            };
             show_ra_search_dialog(&sc, db_id, &gn, &pid, &pw, None);
         });
         let match_row = adw::ActionRow::new();
@@ -447,10 +450,13 @@ fn build_service_ids_section(
         let sc = state.clone();
         let game_name = game.name.clone();
         let db_id = game.db_id;
-        let win_c = win.clone();
+        let win_c = win.downgrade();
         let row_c = row.clone();
         let matched_name = game.name.clone();
         search_btn.connect_clicked(move |_| {
+            let Some(win_c) = win_c.upgrade() else {
+                return;
+            };
             let on_select = {
                 let sc = sc.clone();
                 let name = matched_name.clone();

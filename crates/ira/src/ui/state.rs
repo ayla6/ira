@@ -22,13 +22,15 @@ pub enum PendingImage {
 /// Fetched SGDB asset list for one asset type, kept alive only while the
 /// per-game settings screen is open so reopening the picker is instant. The
 /// picker window itself is also kept alive (hidden, not destroyed) so its
-/// loaded thumbnails survive closing and reopening.
+/// loaded thumbnails survive closing and reopening. The window is owned
+/// strongly here, not by the picker's own signal handlers, so closing the
+/// settings screen (which drops the cache) is the only teardown path.
 #[derive(Clone)]
 pub struct SgdbAssetsCacheEntry {
     pub assets: Vec<SgdbAsset>,
     pub has_more: bool,
     pub next_page: u32,
-    pub picker: glib::WeakRef<adw::Window>,
+    pub picker: adw::Window,
 }
 
 #[derive(Clone)]

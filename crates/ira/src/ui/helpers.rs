@@ -140,7 +140,7 @@ pub fn make_browse_button(
     let browse = gtk4::Button::with_label(&crate::tr!("Browse…"));
     browse.add_css_class(CSS_FLAT);
     browse.set_valign(gtk4::Align::Center);
-    let parent = parent.cloned();
+    let parent = parent.map(|w| w.downgrade());
     let title = title.to_string();
     let filter = filter.map(|(name, mimes)| {
         (
@@ -173,6 +173,7 @@ pub fn make_browse_button(
                 }
             }
         };
+        let parent = parent.as_ref().and_then(|w| w.upgrade());
         if select_folder {
             dialog.select_folder(parent.as_ref(), None::<&gio::Cancellable>, cb);
         } else {

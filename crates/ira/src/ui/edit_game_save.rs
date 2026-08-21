@@ -688,7 +688,7 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
 
     let (tx, rx) = mpsc::channel::<Vec<String>>();
     let state_cb = params.state.clone();
-    let win_cb = params.win.clone();
+    let win_cb = params.win.downgrade();
     let var_widgets_cb = params.var_widgets.clone();
     let db_cb = db.clone();
     let db_id_cb = params.db_id;
@@ -700,7 +700,9 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
             Ok(names) => names,
             Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
             Err(mpsc::TryRecvError::Disconnected) => {
-                win_cb.close();
+                if let Some(win) = win_cb.upgrade() {
+                    win.close();
+                }
                 return glib::ControlFlow::Break;
             }
         };
@@ -743,7 +745,9 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
             .borrow()
             .sender
             .send(crate::AppMessage::VariantsChanged(db_id_cb));
-        win_cb.close();
+        if let Some(win) = win_cb.upgrade() {
+            win.close();
+        }
         glib::ControlFlow::Break
     });
 

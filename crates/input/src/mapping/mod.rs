@@ -1,3 +1,4 @@
+mod activators;
 mod continuous;
 
 use std::collections::HashMap;

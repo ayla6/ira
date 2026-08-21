@@ -2,3 +2,5 @@ target
 references
 ira-trace.json
 .opencode/skills/
+*.zst
+tasks/

@@ -373,8 +373,11 @@ fn probe_sensors() {
                     thread::sleep(Duration::from_millis(20));
                     match sensor.read(now_us()) {
                         Ok(Some(sample)) => println!(
-                            "  sample: x={:.5} y={:.5} z={:.5}",
-                            sample.x, sample.y, sample.z
+                            "  sample: x={:.5} y={:.5} z={:.5} accel={:?}",
+                            sample.gyro[0],
+                            sample.gyro[1],
+                            sample.gyro[2],
+                            sample.accel
                         ),
                         Ok(None) => println!("  sample: unavailable"),
                         Err(error) => println!("  sample error: {error}"),

@@ -8,6 +8,7 @@ use crate::{DeviceInfo, GyroAxis, GyroCalibration, InputEvent, InputSource};
 const SDL_INIT_GAMEPAD: u32 = 0x0000_2000;
 const SDL_INIT_EVENTS: u32 = 0x0000_4000;
 const SDL_INIT_SENSOR: u32 = 0x0000_8000;
+const SDL_SENSOR_ACCEL: i32 = 1;
 const SDL_SENSOR_GYRO: i32 = 2;
 
 type SdlInit = unsafe extern "C" fn(u32) -> bool;
@@ -20,13 +21,20 @@ type SdlGetGamepadVendor = unsafe extern "C" fn(*mut c_void) -> u16;
 type SdlGetGamepadProduct = unsafe extern "C" fn(*mut c_void) -> u16;
 type SdlGamepadHasSensor = unsafe extern "C" fn(*mut c_void, i32) -> bool;
 type SdlSetGamepadSensorEnabled = unsafe extern "C" fn(*mut c_void, i32, bool) -> bool;
-type SdlGetGamepadSensorData = unsafe extern "C" fn(*mut c_void, i32, *mut f32, i32) -> bool;
+type SdlGetGamepadSensorDataWithTime = unsafe extern "C" fn(
+    *mut c_void,
+    i32,
+    *mut u64,
+    *mut f32,
+    i32,
+) -> bool;
 type SdlGetSensors = unsafe extern "C" fn(*mut i32) -> *mut i32;
 type SdlGetSensorNameForId = unsafe extern "C" fn(i32) -> *const c_char;
 type SdlGetSensorTypeForId = unsafe extern "C" fn(i32) -> i32;
 type SdlOpenSensor = unsafe extern "C" fn(i32) -> *mut c_void;
 type SdlCloseSensor = unsafe extern "C" fn(*mut c_void);
-type SdlGetSensorData = unsafe extern "C" fn(*mut c_void, *mut f32, i32) -> bool;
+type SdlGetSensorDataWithTime =
+    unsafe extern "C" fn(*mut c_void, *mut u64, *mut f32, i32) -> bool;
 type SdlPumpEvents = unsafe extern "C" fn();
 type SdlUpdateSensors = unsafe extern "C" fn();
 type SdlQuit = unsafe extern "C" fn();
@@ -44,13 +52,13 @@ struct Sdl3Api {
     get_product: SdlGetGamepadProduct,
     has_sensor: SdlGamepadHasSensor,
     set_sensor_enabled: SdlSetGamepadSensorEnabled,
-    get_gamepad_sensor_data: SdlGetGamepadSensorData,
+    get_gamepad_sensor_data_with_time: SdlGetGamepadSensorDataWithTime,
     get_sensors: SdlGetSensors,
     get_sensor_name_for_id: SdlGetSensorNameForId,
     get_sensor_type_for_id: SdlGetSensorTypeForId,
     open_sensor: SdlOpenSensor,
     close_sensor: SdlCloseSensor,
-    get_sensor_data: SdlGetSensorData,
+    get_sensor_data_with_time: SdlGetSensorDataWithTime,
     pump_events: SdlPumpEvents,
     update_sensors: SdlUpdateSensors,
     quit: SdlQuit,
@@ -80,13 +88,19 @@ impl Sdl3Api {
             get_product: symbol!("SDL_GetGamepadProduct", SdlGetGamepadProduct),
             has_sensor: symbol!("SDL_GamepadHasSensor", SdlGamepadHasSensor),
             set_sensor_enabled: symbol!("SDL_SetGamepadSensorEnabled", SdlSetGamepadSensorEnabled),
-            get_gamepad_sensor_data: symbol!("SDL_GetGamepadSensorData", SdlGetGamepadSensorData),
+            get_gamepad_sensor_data_with_time: symbol!(
+                "SDL_GetGamepadSensorDataWithTime",
+                SdlGetGamepadSensorDataWithTime
+            ),
             get_sensors: symbol!("SDL_GetSensors", SdlGetSensors),
             get_sensor_name_for_id: symbol!("SDL_GetSensorNameForID", SdlGetSensorNameForId),
             get_sensor_type_for_id: symbol!("SDL_GetSensorTypeForID", SdlGetSensorTypeForId),
             open_sensor: symbol!("SDL_OpenSensor", SdlOpenSensor),
             close_sensor: symbol!("SDL_CloseSensor", SdlCloseSensor),
-            get_sensor_data: symbol!("SDL_GetSensorData", SdlGetSensorData),
+            get_sensor_data_with_time: symbol!(
+                "SDL_GetSensorDataWithTime",
+                SdlGetSensorDataWithTime
+            ),
             pump_events: symbol!("SDL_PumpEvents", SdlPumpEvents),
             update_sensors: symbol!("SDL_UpdateSensors", SdlUpdateSensors),
             quit: symbol!("SDL_Quit", SdlQuit),
@@ -95,30 +109,32 @@ impl Sdl3Api {
     }
 }
 
+/// One IMU reading: angular velocity in rad/s, gravity direction in g when
+/// the controller exposes an accelerometer, and the sensor-clock timestamp in
+/// microseconds (falling back to the caller's clock when SDL provides none).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct GyroSample {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
+pub struct SensorSample {
+    pub gyro: [f32; 3],
+    pub accel: Option<[f32; 3]>,
     pub timestamp_us: u64,
 }
 
-impl GyroSample {
+impl SensorSample {
     pub fn input_events(self) -> [InputEvent; 3] {
         [
             InputEvent {
                 source: InputSource::Gyro(GyroAxis::X),
-                value: self.x,
+                value: self.gyro[0],
                 timestamp_us: self.timestamp_us,
             },
             InputEvent {
                 source: InputSource::Gyro(GyroAxis::Y),
-                value: self.y,
+                value: self.gyro[1],
                 timestamp_us: self.timestamp_us,
             },
             InputEvent {
                 source: InputSource::Gyro(GyroAxis::Z),
-                value: self.z,
+                value: self.gyro[2],
                 timestamp_us: self.timestamp_us,
             },
         ]
@@ -143,15 +159,15 @@ enum SensorSource {
 }
 
 impl GyroCalibration {
-    pub fn from_samples(samples: &[GyroSample]) -> Option<Self> {
+    pub fn from_samples(samples: &[SensorSample]) -> Option<Self> {
         if samples.is_empty() {
             return None;
         }
         let count = samples.len() as f32;
         let sums = samples.iter().fold([0.0; 3], |mut sums, sample| {
-            sums[0] += sample.x;
-            sums[1] += sample.y;
-            sums[2] += sample.z;
+            for axis in 0..3 {
+                sums[axis] += sample.gyro[axis];
+            }
             sums
         });
         Some(Self {
@@ -160,21 +176,16 @@ impl GyroCalibration {
             z: sums[2] / count,
         })
     }
-
-    pub fn apply(self, sample: GyroSample) -> GyroSample {
-        GyroSample {
-            x: sample.x - self.x,
-            y: sample.y - self.y,
-            z: sample.z - self.z,
-            timestamp_us: sample.timestamp_us,
-        }
-    }
 }
 
 pub struct Sdl3SensorBackend {
     handle: *mut c_void,
     api: Sdl3Api,
     source: SensorSource,
+    /// Accel is only readable through the gamepad handle; the global-sensor
+    /// fallback path has no paired accelerometer, leaving player-space gyro
+    /// to degrade to controller-space rates.
+    accel_on_gamepad: bool,
 }
 
 fn select_gyro_id<F>(gyro_ids: &[i32], matches: F) -> Option<i32>
@@ -205,10 +216,13 @@ impl Sdl3SensorBackend {
                 && unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_GYRO) }
                 && unsafe { (api.set_sensor_enabled)(gamepad, SDL_SENSOR_GYRO, true) }
             {
+                let accel_on_gamepad = unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_ACCEL) }
+                    && unsafe { (api.set_sensor_enabled)(gamepad, SDL_SENSOR_ACCEL, true) };
                 return Ok(Some(Self {
                     handle,
                     api,
                     source: SensorSource::Gamepad(gamepad),
+                    accel_on_gamepad,
                 }));
             }
             unsafe { (api.close_gamepad)(gamepad) };
@@ -226,6 +240,7 @@ impl Sdl3SensorBackend {
                     handle,
                     api,
                     source: SensorSource::Global(sensor),
+                    accel_on_gamepad: false,
                 }));
             }
         }
@@ -236,7 +251,7 @@ impl Sdl3SensorBackend {
         Ok(None)
     }
 
-    pub fn read(&mut self, timestamp_us: u64) -> Result<Option<GyroSample>, String> {
+    pub fn read(&mut self, timestamp_us: u64) -> Result<Option<SensorSample>, String> {
         self.read_raw(timestamp_us)
     }
 
@@ -253,23 +268,28 @@ impl Sdl3SensorBackend {
             .ok_or_else(|| "SDL3 returned no gyro samples during calibration".to_string())
     }
 
-    fn read_raw(&mut self, timestamp_us: u64) -> Result<Option<GyroSample>, String> {
+    fn read_raw(&mut self, fallback_timestamp_us: u64) -> Result<Option<SensorSample>, String> {
         let mut data = [0.0; 3];
+        let mut sensor_time_ns: u64 = 0;
         unsafe {
             (self.api.pump_events)();
             (self.api.update_sensors)();
         }
         let available = unsafe {
             match self.source {
-                SensorSource::Gamepad(gamepad) => (self.api.get_gamepad_sensor_data)(
+                SensorSource::Gamepad(gamepad) => (self.api.get_gamepad_sensor_data_with_time)(
                     gamepad,
                     SDL_SENSOR_GYRO,
+                    &mut sensor_time_ns,
                     data.as_mut_ptr(),
                     3,
                 ),
-                SensorSource::Global(sensor) => {
-                    (self.api.get_sensor_data)(sensor, data.as_mut_ptr(), 3)
-                }
+                SensorSource::Global(sensor) => (self.api.get_sensor_data_with_time)(
+                    sensor,
+                    &mut sensor_time_ns,
+                    data.as_mut_ptr(),
+                    3,
+                ),
             }
         };
         if !available {
@@ -278,12 +298,49 @@ impl Sdl3SensorBackend {
         if data.iter().any(|value| !value.is_finite()) {
             return Err("SDL3 returned a non-finite gyro sample".to_string());
         }
-        Ok(Some(GyroSample {
-            x: data[0],
-            y: data[1],
-            z: data[2],
-            timestamp_us,
+        let accel = self.read_accel().transpose()?;
+        Ok(Some(SensorSample {
+            gyro: data,
+            accel,
+            // SDL3 sensor timestamps are nanoseconds on the sensor's own
+            // clock, which keeps integration correct even when our poll rate
+            // differs from the controller's report rate.
+            timestamp_us: sensor_timestamp_us(sensor_time_ns, fallback_timestamp_us),
         }))
+    }
+
+    fn read_accel(&mut self) -> Option<Result<[f32; 3], String>> {
+        let SensorSource::Gamepad(gamepad) = self.source else {
+            return None;
+        };
+        if !self.accel_on_gamepad {
+            return None;
+        }
+        let mut data = [0.0; 3];
+        let mut sensor_time_ns: u64 = 0;
+        let available = unsafe {
+            (self.api.get_gamepad_sensor_data_with_time)(
+                gamepad,
+                SDL_SENSOR_ACCEL,
+                &mut sensor_time_ns,
+                data.as_mut_ptr(),
+                3,
+            )
+        };
+        if !available {
+            return None;
+        }
+        if data.iter().any(|value| !value.is_finite()) {
+            return Some(Err("SDL3 returned a non-finite accelerometer sample".to_string()));
+        }
+        Some(Ok(data))
+    }
+}
+
+fn sensor_timestamp_us(sensor_time_ns: u64, fallback_us: u64) -> u64 {
+    match sensor_time_ns {
+        0 => fallback_us,
+        nanos => (nanos / 1_000).max(1),
     }
 }
 
@@ -403,7 +460,7 @@ fn sdl_gamepad_info(api: &Sdl3Api, gamepad: *mut c_void, id: i32) -> SdlGamepadI
         vendor: unsafe { (api.get_vendor)(gamepad) },
         product: unsafe { (api.get_product)(gamepad) },
         has_gyro: unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_GYRO) },
-        has_accelerometer: unsafe { (api.has_sensor)(gamepad, 1) },
+        has_accelerometer: unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_ACCEL) },
     }
 }
 
@@ -416,7 +473,17 @@ fn c_string(pointer: *const c_char) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{names_match, select_gyro_id, GyroCalibration, GyroSample};
+    use super::{
+        names_match, select_gyro_id, sensor_timestamp_us, GyroCalibration, SensorSample,
+    };
+
+    fn sample(gyro: [f32; 3], timestamp_us: u64) -> SensorSample {
+        SensorSample {
+            gyro,
+            accel: None,
+            timestamp_us,
+        }
+    }
 
     #[test]
     fn test_sensor_name_matches_dinput_device_name() {
@@ -444,41 +511,10 @@ mod tests {
     }
 
     #[test]
-    fn test_gyro_calibration_removes_bias() {
-        let calibration = GyroCalibration {
-            x: 0.1,
-            y: -0.2,
-            z: 0.3,
-        };
-        let calibrated = calibration.apply(GyroSample {
-            x: 0.4,
-            y: 0.1,
-            z: 0.8,
-            timestamp_us: 42,
-        });
-        assert!((calibrated.x - 0.3).abs() < 0.001);
-        assert!((calibrated.y - 0.3).abs() < 0.001);
-        assert!((calibrated.z - 0.5).abs() < 0.001);
-        assert_eq!(calibrated.timestamp_us, 42);
-    }
-
-    #[test]
     fn test_gyro_calibration_averages_samples() {
-        let calibration = GyroCalibration::from_samples(&[
-            GyroSample {
-                x: 0.1,
-                y: 0.2,
-                z: 0.3,
-                timestamp_us: 1,
-            },
-            GyroSample {
-                x: 0.3,
-                y: 0.4,
-                z: 0.5,
-                timestamp_us: 2,
-            },
-        ])
-        .unwrap();
+        let calibration =
+            GyroCalibration::from_samples(&[sample([0.1, 0.2, 0.3], 1), sample([0.3, 0.4, 0.5], 2)])
+                .unwrap();
         assert!((calibration.x - 0.2).abs() < 0.001);
         assert!((calibration.y - 0.3).abs() < 0.001);
         assert!((calibration.z - 0.4).abs() < 0.001);
@@ -486,17 +522,17 @@ mod tests {
     }
 
     #[test]
-    fn test_gyro_sample_becomes_three_mapping_events() {
-        let events = (GyroSample {
-            x: 1.0,
-            y: 2.0,
-            z: 3.0,
-            timestamp_us: 42,
-        })
-        .input_events();
+    fn test_sensor_sample_becomes_three_mapping_events() {
+        let events = sample([1.0, 2.0, 3.0], 42).input_events();
         assert_eq!(events[0].value, 1.0);
         assert_eq!(events[1].value, 2.0);
         assert_eq!(events[2].value, 3.0);
         assert!(events.iter().all(|event| event.timestamp_us == 42));
+    }
+
+    #[test]
+    fn test_sensor_timestamp_converts_nanoseconds_and_falls_back() {
+        assert_eq!(sensor_timestamp_us(1_500_000, 7), 1_500);
+        assert_eq!(sensor_timestamp_us(0, 7), 7);
     }
 }

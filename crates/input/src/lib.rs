@@ -19,7 +19,7 @@ pub use profile::{
 };
 pub use gyro::{GyroProcessingOptions, GyroProcessor, GyroRates};
 pub use registry::ControllerRegistry;
-pub use sensor::{discover_sdl_gamepads, GyroSample, Sdl3SensorBackend, SdlGamepadInfo};
+pub use sensor::{discover_sdl_gamepads, SensorSample, Sdl3SensorBackend, SdlGamepadInfo};
 pub use virtual_gamepad::VirtualGamepad;
 pub use virtual_keyboard::VirtualKeyboard;
 pub use virtual_mouse::VirtualMouse;

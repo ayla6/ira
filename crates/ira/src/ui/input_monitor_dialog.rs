@@ -103,7 +103,7 @@ fn monitor_loop(
         let sensor_failed = if let Some(sensor_backend) = sensor.as_mut() {
             match sensor_backend.read(timestamp_us()) {
                 Ok(Some(sample)) => {
-                    values.gyro = [sample.x, sample.y, sample.z];
+                    values.gyro = sample.gyro;
                     if let Some(engine) = engine.as_mut() {
                         for event in sample.input_events() {
                             let events = engine.process(event);

@@ -1,6 +1,6 @@
 use super::css::{CSS_ERROR, CSS_SUGGESTED_ACTION};
 use adw::prelude::*;
-use ira_input::{GyroCalibration, GyroSample};
+use ira_input::GyroCalibration;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -212,7 +212,7 @@ fn collect_calibration(
     let _ = sender.send(Update::Countdown(1));
     std::thread::sleep(Duration::from_secs(1));
     let deadline = Instant::now() + CALIBRATION_DURATION;
-    let mut samples = Vec::<GyroSample>::new();
+    let mut samples = Vec::<ira_input::SensorSample>::new();
     while Instant::now() < deadline {
         if cancelled.load(Ordering::Acquire) {
             return Err("Calibration cancelled".to_string());

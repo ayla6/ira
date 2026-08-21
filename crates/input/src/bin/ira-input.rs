@@ -840,7 +840,7 @@ fn load_profile(path: Option<&Path>) -> Result<InputProfile, String> {
         Some(path) => {
             let contents = std::fs::read_to_string(path)
                 .map_err(|error| format!("failed to read profile {}: {error}", path.display()))?;
-            serde_json::from_str(&contents)
+            InputProfile::from_json(&contents)
                 .map_err(|error| format!("failed to parse profile {}: {error}", path.display()))?
         }
     };

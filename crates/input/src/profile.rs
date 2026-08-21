@@ -115,6 +115,78 @@ impl GyroCalibration {
     }
 }
 
+/// Whole-controller gyro behaviour. The old model exposed each gyro axis as
+/// three separate bindings the user had to wire up by hand; this config is
+/// the single source of truth the engine feeds with player-space yaw/pitch
+/// rates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct GyroConfig {
+    pub enabled: bool,
+    pub activation: GyroActivation,
+    pub output: GyroOutput,
+    /// Sensitivity multiplier around 1.0, applied to both axes.
+    pub sensitivity: f32,
+    pub invert_x: bool,
+    pub invert_y: bool,
+    /// Adaptive smoothing: damps jitter during fine aim, never touches flicks.
+    pub smoothing: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GyroActivation {
+    #[default]
+    Always,
+    Hold(GamepadButton),
+    Toggle(GamepadButton),
+}
+
+impl GyroActivation {
+    /// Button that enables gyro, when activation is button-driven.
+    pub fn button(self) -> Option<GamepadButton> {
+        match self {
+            Self::Always => None,
+            Self::Hold(button) | Self::Toggle(button) => Some(button),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GyroOutput {
+    #[default]
+    Mouse,
+    LeftStick,
+    RightStick,
+}
+
+impl Default for GyroConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            activation: GyroActivation::Always,
+            output: GyroOutput::Mouse,
+            sensitivity: 1.0,
+            invert_x: false,
+            invert_y: false,
+            smoothing: true,
+        }
+    }
+}
+
+impl GyroConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if !self.sensitivity.is_finite() || !(0.05..=20.0).contains(&self.sensitivity) {
+            return Err("gyro sensitivity must be finite and within [0.05, 20]".to_string());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InputSource {
@@ -348,6 +420,8 @@ pub struct InputProfile {
     pub bindings: Vec<Binding>,
     #[serde(default)]
     pub gyro_calibration: GyroCalibration,
+    #[serde(default)]
+    pub gyro: GyroConfig,
     /// Internal Ira game IDs this profile has been assigned to.
     /// Empty means the profile is available to every game.
     #[serde(default)]
@@ -362,6 +436,7 @@ impl Default for InputProfile {
             backend: VirtualGamepadBackend::default(),
             bindings: Vec::new(),
             gyro_calibration: GyroCalibration::default(),
+            gyro: GyroConfig::default(),
             compatible_game_ids: Vec::new(),
         }
     }
@@ -398,7 +473,24 @@ impl InputProfile {
                 ));
             }
         }
+        self.gyro.validate()?;
         Ok(())
+    }
+
+    /// Parse a profile from JSON, dropping legacy entries that no longer have
+    /// a meaning (per-axis gyro bindings, recenter bindings) so profiles from
+    /// before the gyro rework keep loading. Ira is pre-release: nothing tries
+    /// to translate old gyro setups, they are simply removed.
+    pub fn from_json(json: &str) -> Result<Self, String> {
+        let mut value: serde_json::Value = serde_json::from_str(json)
+            .map_err(|error| format!("invalid profile JSON: {error}"))?;
+        if let Some(bindings) = value.get_mut("bindings").and_then(|b| b.as_array_mut()) {
+            let dropped = strip_legacy_gyro_bindings(bindings);
+            if dropped > 0 {
+                eprintln!("ira-input: dropped {dropped} legacy gyro/recenter binding(s)");
+            }
+        }
+        serde_json::from_value(value).map_err(|error| format!("invalid profile: {error}"))
     }
 
     pub fn default_gamepad() -> Self {
@@ -564,6 +656,22 @@ fn default_sensitivity() -> f32 {
 
 fn default_exponent() -> f32 {
     1.0
+}
+
+/// Remove bindings that reference removed model features, in place, and
+/// return how many were dropped.
+fn strip_legacy_gyro_bindings(bindings: &mut Vec<serde_json::Value>) -> usize {
+    let before = bindings.len();
+    bindings.retain(|binding| {
+        let is_gyro_source = binding
+            .get("source")
+            .and_then(|source| source.as_object())
+            .is_some_and(|source| source.contains_key("gyro"));
+        let is_recenter_output = binding.get("output").and_then(|o| o.as_str())
+            == Some("recenter_gyro");
+        !is_gyro_source && !is_recenter_output
+    });
+    before - bindings.len()
 }
 
 #[cfg(test)]
@@ -877,5 +985,80 @@ mod tests {
             ..InputProfile::default()
         };
         assert!(profile.validate().is_err());
+    }
+
+    #[test]
+    fn test_gyro_config_defaults_to_disabled_mouse() {
+        let config = GyroConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.activation, GyroActivation::Always);
+        assert_eq!(config.output, GyroOutput::Mouse);
+        assert!((config.sensitivity - 1.0).abs() < f32::EPSILON);
+        assert!(config.smoothing);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_profile_rejects_out_of_range_gyro_sensitivity() {
+        let profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                sensitivity: 50.0,
+                ..GyroConfig::default()
+            },
+            ..InputProfile::default()
+        };
+        assert!(profile.validate().is_err());
+    }
+
+    #[test]
+    fn test_profile_gyro_config_roundtrips_through_json() {
+        let profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                activation: GyroActivation::Hold(GamepadButton::LeftTrigger),
+                output: GyroOutput::RightStick,
+                sensitivity: 2.5,
+                invert_x: true,
+                invert_y: false,
+                smoothing: false,
+            },
+            ..InputProfile::default()
+        };
+        let decoded = InputProfile::from_json(&serde_json::to_string(&profile).unwrap()).unwrap();
+        assert_eq!(decoded, profile);
+    }
+
+    #[test]
+    fn test_from_json_drops_legacy_gyro_and_recenter_bindings() {
+        let json = r#"{
+            "name": "legacy",
+            "bindings": [
+                {"source": {"button": "a"}, "output": {"gamepad_button": "b"}},
+                {"source": {"gyro": "z"}, "output": {"mouse_axis": "x"},
+                 "transform": {"sensitivity": 2.0, "invert": true}},
+                {"source": {"button": "x"}, "output": "recenter_gyro"}
+            ],
+            "gyro_mode": "rate"
+        }"#;
+        let profile = InputProfile::from_json(json).unwrap();
+        assert_eq!(profile.bindings.len(), 1);
+        assert_eq!(
+            profile.bindings[0].source,
+            InputSource::Button(GamepadButton::A)
+        );
+        assert!(!profile.gyro.enabled, "gyro starts fresh, not synthesized");
+    }
+
+    #[test]
+    fn test_from_json_keeps_gyro_config_over_legacy_bindings() {
+        let json = r#"{
+            "bindings": [{"source": {"gyro": "x"}, "output": {"mouse_axis": "y"}}],
+            "gyro": {"enabled": true, "output": "right_stick"}
+        }"#;
+        let profile = InputProfile::from_json(json).unwrap();
+        assert!(profile.bindings.is_empty());
+        assert!(profile.gyro.enabled);
+        assert_eq!(profile.gyro.output, GyroOutput::RightStick);
     }
 }

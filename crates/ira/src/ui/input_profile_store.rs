@@ -108,7 +108,7 @@ pub(super) fn read_profile(path: &Path) -> Result<InputProfile, String> {
 fn read_profile_data(path: &Path) -> Result<InputProfile, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|error| format!("Could not read controller profile: {error}"))?;
-    serde_json::from_str(&text).map_err(|error| format!("Invalid profile JSON: {error}"))
+    InputProfile::from_json(&text)
 }
 
 pub(super) fn write_profile(path: &Path, profile: &InputProfile) -> Result<(), String> {

@@ -1,3 +1,4 @@
+mod gyro;
 mod mapping;
 mod physical;
 mod profile;
@@ -16,6 +17,7 @@ pub use profile::{
     GyroAxis, GyroCalibration, GyroMode, InputCategory, InputProfile, InputSource, MouseAxis,
     MouseButton, OutputAction, RecenterMode, VirtualGamepadBackend, PROFILE_VERSION,
 };
+pub use gyro::{GyroProcessingOptions, GyroProcessor, GyroRates};
 pub use registry::ControllerRegistry;
 pub use sensor::{discover_sdl_gamepads, GyroSample, Sdl3SensorBackend, SdlGamepadInfo};
 pub use virtual_gamepad::VirtualGamepad;

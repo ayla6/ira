@@ -149,13 +149,32 @@ pub(super) fn show_input_profile_editor(
         let baseline = baseline.clone();
         let save = save.clone();
         let apply = apply.clone();
+        let rebuild_pending = Rc::new(std::cell::Cell::new(false));
         *dirty_hook.borrow_mut() = Some(Rc::new(move || {
-            rebuild_region_pages(&ctx, &pages);
-            let dirty = build_profile(&form)
-                .map(|built| built != *baseline.borrow())
-                .unwrap_or(true);
-            save.set_sensitive(dirty);
-            apply.set_sensitive(dirty);
+            // The rebuild destroys and recreates every region page. Running
+            // that while a signal emission is still unwinding through those
+            // widgets finalizes them under GTK's feet (the recurring
+            // gtk_widget_get_parent/add_css_class criticals), so defer to the
+            // next idle and coalesce bursts of change notifications.
+            if rebuild_pending.replace(true) {
+                return;
+            }
+            let ctx = ctx.clone();
+            let pages = pages.clone();
+            let form = form.clone();
+            let baseline = baseline.clone();
+            let save = save.clone();
+            let apply = apply.clone();
+            let rebuild_pending = rebuild_pending.clone();
+            gtk4::glib::idle_add_local_once(move || {
+                rebuild_pending.set(false);
+                rebuild_region_pages(&ctx, &pages);
+                let dirty = build_profile(&form)
+                    .map(|built| built != *baseline.borrow())
+                    .unwrap_or(true);
+                save.set_sensitive(dirty);
+                apply.set_sensitive(dirty);
+            });
         }));
     }
     (on_dirty)();

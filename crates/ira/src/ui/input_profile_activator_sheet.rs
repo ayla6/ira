@@ -38,6 +38,9 @@ pub(crate) struct SheetBase {
     pub(crate) device: Option<ira_input::DeviceInfo>,
     pub(crate) backend: VirtualGamepadBackend,
     pub(crate) on_changed: OnChanged,
+    /// Coalesces deferred rebuilds so a burst of change notifications only
+    /// rebuilds once.
+    pub(crate) rebuild_pending: Rc<std::cell::Cell<bool>>,
 }
 
 pub(crate) fn find_mapping(base: &SheetBase) -> Option<InputMapping> {
@@ -92,6 +95,7 @@ pub(crate) fn show_input_sheet(parent: &adw::Window, request: InputSheetRequest)
         device: request.device,
         backend: request.backend,
         on_changed: request.on_changed,
+        rebuild_pending: Rc::new(std::cell::Cell::new(false)),
     };
     fill_sheet(&base);
     window.present();
@@ -102,9 +106,24 @@ fn sheet_title(request: &InputSheetRequest) -> String {
         .replace("{input}", &source_label(request.source))
 }
 
-/// Rebuild the whole sheet. Called after every structural change (mode or
-/// activator add/remove); value edits mutate widgets in place.
+/// Rebuild the whole sheet after every structural change (mode or activator
+/// add/remove); value edits mutate widgets in place.
+///
+/// The rebuild is deferred to the next idle and coalesced: clearing children
+/// while a signal emission is still unwinding through them finalizes widgets
+/// GTK touches afterwards (the recurring get_parent/add_css_class criticals).
 fn fill_sheet(base: &SheetBase) {
+    if base.rebuild_pending.replace(true) {
+        return;
+    }
+    let base = base.clone();
+    gtk4::glib::idle_add_local_once(move || {
+        base.rebuild_pending.set(false);
+        rebuild_sheet(&base);
+    });
+}
+
+fn rebuild_sheet(base: &SheetBase) {
     let reopen: Reopen = {
         let base = base.clone();
         Rc::new(move || fill_sheet(&base))

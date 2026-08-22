@@ -419,17 +419,35 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let mut mouse = create_mouse(mapper.profile().uses_mouse())?;
     let mut virtual_gamepad = VirtualGamepad::create_for_backend(mapper.profile().backend)
         .map_err(|error| format!("failed to create virtual gamepad: {error}"))?;
-    let mut sensor = gamepad.as_ref().and_then(|gamepad| open_sensor(gamepad.info()));
+    let sensor = gamepad.as_ref().and_then(|gamepad| open_sensor(gamepad.info()));
+    let motion_server = sensor.as_ref().and_then(|_| ira_input::MotionServer::bind());
+    match (&motion_server, sensor.as_ref()) {
+        (Some(_), Some(_)) => eprintln!(
+            "ira-input: motion passthrough on udp/{} for emulators (cemuhook)",
+            ira_input::MOTION_PORT
+        ),
+        (None, Some(_)) => eprintln!(
+            "ira-input: udp/{} busy; motion passthrough disabled",
+            ira_input::MOTION_PORT
+        ),
+        _ => {}
+    }
     let (pad_vendor, pad_product) = gamepad
         .as_ref()
         .map(|gamepad| (gamepad.info().vendor, gamepad.info().product))
         .unwrap_or((0, 0));
-    let mut gyro_processor =
+    let gyro_processor =
         make_gyro_processor(mapper.profile(), pad_vendor, pad_product, arguments.calibration.as_deref());
-    let mut last_sensor_us: Option<u64> = None;
+    let last_sensor_us: Option<u64> = None;
+    let mut pipeline = SensorPipeline {
+        sensor,
+        gyro_processor,
+        last_sensor_us,
+        motion: motion_server,
+    };
     // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
     // even when no sensor exists, as long as something consumes them.
-    let mut tick_needed = sensor.is_some() || mapper.has_continuous_outputs();
+    let mut tick_needed = pipeline.sensor.is_some() || mapper.has_continuous_outputs();
     let mut report_rate = ReportRateEstimator::default();
     if let Some(gamepad) = gamepad.as_mut() {
         if let Err(error) = gamepad.grab() {
@@ -548,9 +566,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             )
             .and_then(|()| {
                 process_tick(
-                    &mut sensor,
-                    &mut gyro_processor,
-                    &mut last_sensor_us,
+                    &mut pipeline,
                     &mut mapper,
                     OutputTargets {
                         gamepad: &mut virtual_gamepad,
@@ -581,8 +597,8 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         }
         let connected = gamepad.as_ref().is_some_and(|gamepad| gamepad.is_connected());
         if was_connected && !connected {
-            sensor = None;
-            last_sensor_us = None;
+            pipeline.sensor = None;
+            pipeline.last_sensor_us = None;
             tick_needed = mapper.has_continuous_outputs();
             schedule.reconnect = Instant::now();
             emit_outputs(
@@ -633,7 +649,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         }
         if !connected && schedule.reconnect.elapsed() >= RECONNECT_INTERVAL {
             schedule.reconnect = Instant::now();
-            sensor = None;
+            pipeline.sensor = None;
             match reconnect_gamepad(&mut gamepad) {
                 Ok(true) => {
                     if let Some(gamepad) = gamepad.as_ref() {
@@ -641,9 +657,18 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             "ira-input: controller connected through {}",
                             gamepad.info().path.display()
                         );
-                        sensor = open_sensor(gamepad.info());
-                        last_sensor_us = None;
-                        tick_needed = sensor.is_some() || mapper.has_continuous_outputs();
+                        pipeline.sensor = open_sensor(gamepad.info());
+                        if pipeline.sensor.is_some() && pipeline.motion.is_none() {
+                            pipeline.motion = ira_input::MotionServer::bind();
+                            if pipeline.motion.is_some() {
+                                eprintln!(
+                                    "ira-input: motion passthrough on udp/{} for emulators (cemuhook)",
+                                    ira_input::MOTION_PORT
+                                );
+                            }
+                        }
+                        pipeline.last_sensor_us = None;
+                        tick_needed = pipeline.sensor.is_some() || mapper.has_continuous_outputs();
                         report_rate.reset();
                     }
                     schedule.sensor = Instant::now();
@@ -674,14 +699,14 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             monitor.path().display()
                         );
                     } else {
-                        gyro_processor = make_gyro_processor(
+                        pipeline.gyro_processor = make_gyro_processor(
                             mapper.profile(),
                             pad_vendor,
                             pad_product,
                             arguments.calibration.as_deref(),
                         );
-                        last_sensor_us = None;
-                        tick_needed = sensor.is_some() || mapper.has_continuous_outputs();
+                        pipeline.last_sensor_us = None;
+                        tick_needed = pipeline.sensor.is_some() || mapper.has_continuous_outputs();
                     }
                 }
             }
@@ -1263,10 +1288,16 @@ struct OutputTargets<'a> {
     mouse: Option<&'a mut VirtualMouse>,
 }
 
+/// Sensor-side state advanced by the tick loop.
+struct SensorPipeline {
+    sensor: Option<Sdl3SensorBackend>,
+    gyro_processor: GyroProcessor,
+    last_sensor_us: Option<u64>,
+    motion: Option<ira_input::MotionServer>,
+}
+
 fn process_tick(
-    sensor: &mut Option<Sdl3SensorBackend>,
-    gyro_processor: &mut GyroProcessor,
-    last_sensor_us: &mut Option<u64>,
+    pipeline: &mut SensorPipeline,
     mapper: &mut MappingEngine,
     targets: OutputTargets<'_>,
     trace: &mut TraceState,
@@ -1276,16 +1307,29 @@ fn process_tick(
         return Ok(());
     }
     let mut sensor_failed = false;
-    if let Some(sensor) = sensor.as_mut() {
+    if let Some(sensor) = pipeline.sensor.as_mut() {
         match sensor.read(now_us()) {
             Ok(Some(sample)) => {
-                let dt = last_sensor_us
+                let dt = pipeline
+                    .last_sensor_us
                     .map(|last| sample.timestamp_us.saturating_sub(last) as f32 / 1_000_000.0)
                     .unwrap_or(1.0 / 250.0)
                     .clamp(0.0005, 0.05);
-                *last_sensor_us = Some(sample.timestamp_us);
+                pipeline.last_sensor_us = Some(sample.timestamp_us);
                 trace.record_gyro(sample.gyro);
-                let rates = gyro_processor.process(sample.gyro, sample.accel, dt);
+                if let Some(motion) = pipeline.motion.as_mut() {
+                    // Raw passthrough: emulators consuming the DSU stream get
+                    // the unfiltered sensor, independent of the mapping
+                    // profile's gyro processing.
+                    let frame = ira_input::sensor_to_motion(
+                        sample.gyro,
+                        sample.accel.unwrap_or([0.0, 0.0, 0.0]),
+                        sample.timestamp_us,
+                    );
+                    motion.poll_clients(true);
+                    motion.send_sample(&frame);
+                }
+                let rates = pipeline.gyro_processor.process(sample.gyro, sample.accel, dt);
                 mapper.update_gyro(rates);
             }
             Ok(None) => {}
@@ -1296,7 +1340,7 @@ fn process_tick(
         }
     }
     if sensor_failed {
-        *sensor = None;
+        pipeline.sensor = None;
     }
     let outputs = mapper.tick(now_us());
     emit_outputs(outputs, targets, trace)

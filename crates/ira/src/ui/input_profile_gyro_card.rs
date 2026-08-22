@@ -47,6 +47,17 @@ pub(super) fn add_gyro_group(
         "Rotating the controller steers the output. Yaw and pitch are measured relative to gravity, so aiming stays consistent no matter how the controller is held."
     )));
 
+    let passthrough = adw::ActionRow::new();
+    passthrough.set_title(&crate::tr!("Emulator motion"));
+    passthrough.set_subtitle(&crate::tr!(
+        "Raw gyro also streams on UDP port 26760 (cemuhook); point Ryujinx, Yuzu, Dolphin or Cemu motion settings at this machine"
+    ));
+    let badge = gtk4::Label::new(Some(&crate::tr!("Always on")));
+    badge.add_css_class(super::css::CSS_DIM_LABEL);
+    badge.set_valign(gtk4::Align::Center);
+    passthrough.add_suffix(&badge);
+    group.add(&passthrough);
+
     let button_options = activation_button_options(device, &gyro.borrow().activation);
     let (enable_row, enable) = switch_row(&crate::tr!("Enable gyro"), gyro.borrow().enabled);
     let (activation_row, activation) = dropdown_row(

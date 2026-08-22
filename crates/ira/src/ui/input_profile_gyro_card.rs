@@ -189,10 +189,11 @@ fn connect_gyro_changes(
     let on_dirty_for_orientation = on_dirty.clone();
     widgets.orientation.connect_selected_notify(move |dropdown| {
         gyro_for_orientation.borrow_mut().orientation = match dropdown.selected() {
-            0 => GyroOrientation::Yaw,
-            1 => GyroOrientation::Roll,
-            2 => GyroOrientation::YawPlusRoll,
-            3 => GyroOrientation::PlayerSpace,
+            0 => GyroOrientation::Local,
+            1 => GyroOrientation::Yaw,
+            2 => GyroOrientation::Roll,
+            3 => GyroOrientation::YawPlusRoll,
+            4 => GyroOrientation::PlayerSpace,
             _ => GyroOrientation::WorldSpace,
         };
         on_dirty_for_orientation();
@@ -280,6 +281,7 @@ fn sensitivity_row(value: f32) -> (adw::ActionRow, gtk4::SpinButton) {
 
 fn orientation_labels() -> Vec<String> {
     [
+        crate::tr!("Passthrough"),
         crate::tr!("Yaw"),
         crate::tr!("Roll"),
         crate::tr!("Yaw + Roll"),
@@ -292,11 +294,12 @@ fn orientation_labels() -> Vec<String> {
 
 fn orientation_index(orientation: GyroOrientation) -> u32 {
     match orientation {
-        GyroOrientation::Yaw => 0,
-        GyroOrientation::Roll => 1,
-        GyroOrientation::YawPlusRoll => 2,
-        GyroOrientation::PlayerSpace => 3,
-        GyroOrientation::WorldSpace => 4,
+        GyroOrientation::Local => 0,
+        GyroOrientation::Yaw => 1,
+        GyroOrientation::Roll => 2,
+        GyroOrientation::YawPlusRoll => 3,
+        GyroOrientation::PlayerSpace => 4,
+        GyroOrientation::WorldSpace => 5,
     }
 }
 

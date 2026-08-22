@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use InputSource::Axis;
+
 pub const PROFILE_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -142,6 +144,10 @@ pub enum GyroOutput {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GyroOrientation {
+    /// Raw controller axes with no gravity math: reported yaw drives
+    /// horizontal output and reported pitch drives vertical output exactly
+    /// as the sensor delivers them. The basic pass-through preset.
+    Local,
     /// Turn the controller around its own vertical axis for horizontal
     /// output; tilt around its lateral axis for vertical output.
     Yaw,
@@ -840,6 +846,69 @@ impl InputProfile {
         self
     }
 
+    /// Canonical storage form: convert freshly built flat bindings into the
+    /// action-set model and drop the flat list, so profiles written by the
+    /// editor load identically everywhere. No-op when there is nothing to
+    /// convert.
+    pub fn into_action_set_form(mut self) -> Self {
+        crate::profile::convert_bindings_to_action_sets(&mut self);
+        self.bindings.clear();
+        self
+    }
+
+    /// Editor round-trip: flatten the primary action set back into the flat
+    /// binding form the row-based editor displays. Shapes the flat form can't
+    /// express (multi-output or timed activators, mode shifts, layers,
+    /// flickstick) are skipped loudly; they remain in the profile itself.
+    pub fn editor_bindings(&self) -> Vec<Binding> {
+        let mut bindings = Vec::new();
+        let Some(set) = self.action_sets.first() else {
+            return bindings;
+        };
+        for input in &set.inputs {
+            match (&input.mode, input.source) {
+                (
+                    Some(SourceMode::Joystick {
+                        deadzone_inner,
+                        curve,
+                        ..
+                    }),
+                    Axis(x_axis @ (GamepadAxis::LeftX | GamepadAxis::RightX)),
+                ) => bindings.extend(joystick_mode_bindings(
+                    x_axis,
+                    *deadzone_inner,
+                    *curve,
+                )),
+                (Some(SourceMode::Mouse { sensitivity }), _) => {
+                    bindings.extend(stick_mouse_bindings(input.source, *sensitivity));
+                }
+                (Some(SourceMode::Trigger { threshold }), _) => {
+                    if let Axis(axis @ (GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger)) =
+                        input.source
+                    {
+                        let mut binding =
+                            Binding::new(input.source, OutputAction::GamepadAxis(axis));
+                        binding.transform.dead_zone = *threshold;
+                        bindings.push(binding);
+                    }
+                }
+                (Some(SourceMode::Dpad { .. }), Axis(axis @ (GamepadAxis::LeftX | GamepadAxis::RightX))) => {
+                    bindings.extend(stick_dpad_bindings(axis));
+                }
+                (Some(SourceMode::Flickstick { .. }), _) => eprintln!(
+                    "ira-input: editor cannot display flick stick mode for {:?}; kept unchanged",
+                    input.source
+                ),
+                (Some(mode), _) => eprintln!(
+                    "ira-input: editor cannot display mode {mode:?} on {:?}; kept unchanged",
+                    input.source
+                ),
+                (None, _) => bindings.extend(button_activator_bindings(input)),
+            }
+        }
+        bindings
+    }
+
     pub fn default_gamepad_for_buttons(supported_buttons: &[GamepadButton]) -> Self {
         Self::default_gamepad_for_backend_and_buttons(
             VirtualGamepadBackend::XInput,
@@ -1001,6 +1070,103 @@ fn default_exponent() -> f32 {
     1.0
 }
 
+/// Flat-form bindings for one stick's Joystick mode (passthrough halves).
+/// The stick side is derived from the mapping's source axis.
+fn joystick_mode_bindings(x_axis: GamepadAxis, deadzone: f32, curve: f32) -> Vec<Binding> {
+    let y_axis = if x_axis == GamepadAxis::RightX {
+        GamepadAxis::RightY
+    } else {
+        GamepadAxis::LeftY
+    };
+    [
+        (x_axis, OutputAction::GamepadAxis(x_axis)),
+        (y_axis, OutputAction::GamepadAxis(y_axis)),
+    ]
+    .into_iter()
+    .map(|(axis, out)| {
+        let mut binding = Binding::new(InputSource::Axis(axis), out);
+        binding.transform.dead_zone = deadzone;
+        binding.transform.exponent = curve;
+        binding
+    })
+    .collect()
+}
+
+/// Flat-form bindings for one stick's mouse mode. Non-stick sources have no
+/// flat representation and are skipped loudly.
+fn stick_mouse_bindings(source: InputSource, sensitivity: f32) -> Vec<Binding> {
+    let Axis(x_axis) = source else {
+        eprintln!(
+            "ira-input: editor cannot display mouse mode on {source:?}; kept unchanged"
+        );
+        return Vec::new();
+    };
+    let y_axis = if x_axis == GamepadAxis::RightX {
+        GamepadAxis::RightY
+    } else {
+        GamepadAxis::LeftY
+    };
+    [
+        (x_axis, MouseAxis::X),
+        (y_axis, MouseAxis::Y),
+    ]
+    .into_iter()
+    .map(|(axis, mouse)| {
+        let mut binding = Binding::new(InputSource::Axis(axis), OutputAction::MouseAxis(mouse));
+        binding.transform.sensitivity = sensitivity;
+        binding
+    })
+    .collect()
+}
+
+/// Flat-form bindings for a button input's activators. Only the shapes the
+/// flat form can express survive: single-output full presses.
+fn button_activator_bindings(input: &InputMapping) -> Vec<Binding> {
+    input
+        .activators
+        .iter()
+        .filter_map(|activator| match (&activator.kind, activator.outputs.as_slice()) {
+            (ActivatorKind::FullPress, [output]) => {
+                let mut binding = Binding::new(input.source, output.clone());
+                binding.activation = activator.activation.clone();
+                Some(binding)
+            }
+            _ => {
+                eprintln!(
+                    "ira-input: editor cannot display activator {:?} on {:?}; kept unchanged",
+                    activator.kind, input.source
+                );
+                None
+            }
+        })
+        .collect()
+}
+
+/// Flat-form AxisDirection bindings matching one stick's Dpad mode, in the
+/// same shape [`crate::profile::convert_bindings_to_action_sets`] collapses
+/// back into that mode.
+fn stick_dpad_bindings(x_axis: GamepadAxis) -> Vec<Binding> {
+    let y_axis = if x_axis == GamepadAxis::RightX {
+        GamepadAxis::RightY
+    } else {
+        GamepadAxis::LeftY
+    };
+    [
+        (x_axis, AxisDirection::Negative, GamepadButton::DpadLeft),
+        (x_axis, AxisDirection::Positive, GamepadButton::DpadRight),
+        (y_axis, AxisDirection::Negative, GamepadButton::DpadUp),
+        (y_axis, AxisDirection::Positive, GamepadButton::DpadDown),
+    ]
+    .into_iter()
+    .map(|(axis, direction, button)| {
+        Binding::new(
+            InputSource::AxisDirection { axis, direction },
+            OutputAction::GamepadButton(button),
+        )
+    })
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1019,6 +1185,69 @@ mod tests {
             ..InputProfile::default()
         };
         assert!(profile.validate().is_ok());
+    }
+
+    #[test]
+    fn test_action_set_form_roundtrips_default_bindings() {
+        let flat = InputProfile::default_gamepad().bindings;
+        let canonical = InputProfile {
+            bindings: flat.clone(),
+            ..InputProfile::default()
+        }
+        .into_action_set_form();
+        assert!(canonical.bindings.is_empty());
+        assert!(!canonical.action_sets.is_empty());
+        let flattened = canonical.editor_bindings();
+        assert_eq!(flattened.len(), flat.len());
+        for binding in &flat {
+            assert!(flattened.contains(binding), "missing {binding:?}");
+        }
+    }
+
+    #[test]
+    fn test_into_action_set_form_roundtrips_dpad_and_mouse_stick() {
+        let mut dpad = stick_dpad_bindings(GamepadAxis::RightX);
+        let mut mouse_stick = stick_mouse_bindings(Axis(GamepadAxis::LeftX), 2.0);
+        let mut bindings = vec![Binding::new(
+            InputSource::Button(GamepadButton::A),
+            OutputAction::GamepadButton(GamepadButton::X),
+        )];
+        bindings.append(&mut dpad);
+        bindings.append(&mut mouse_stick);
+
+        let canonical = InputProfile {
+            bindings,
+            ..InputProfile::default()
+        }
+        .into_action_set_form();
+
+        let sources: Vec<InputSource> = canonical
+            .action_sets
+            .first()
+            .map(|set| set.inputs.iter().map(|input| input.source).collect())
+            .unwrap_or_default();
+        assert!(sources.contains(&Axis(GamepadAxis::LeftX)));
+        assert!(sources.contains(&Axis(GamepadAxis::RightX)));
+
+        let flattened = canonical.editor_bindings();
+        assert!(flattened.iter().any(|binding| {
+            matches!(
+                binding.source,
+                InputSource::AxisDirection {
+                    axis: GamepadAxis::RightX,
+                    direction: AxisDirection::Negative
+                }
+            ) && binding.output == OutputAction::GamepadButton(GamepadButton::DpadLeft)
+        }));
+        assert!(flattened.iter().any(|binding| {
+            binding.source == InputSource::Axis(GamepadAxis::LeftY)
+                && binding.output == OutputAction::MouseAxis(MouseAxis::Y)
+                && (binding.transform.sensitivity - 2.0).abs() < f32::EPSILON
+        }));
+        assert!(flattened.iter().any(|binding| {
+            binding.source == InputSource::Button(GamepadButton::A)
+                && binding.output == OutputAction::GamepadButton(GamepadButton::X)
+        }));
     }
 
     #[test]

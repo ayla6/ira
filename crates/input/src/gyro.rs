@@ -245,6 +245,7 @@ impl GyroProcessor {
             z: gyro.z - self.bias.z,
         };
         let (mut yaw, mut pitch, gravity_locked) = match self.options.orientation {
+            GyroOrientation::Local => (rotation.y, rotation.x, false),
             GyroOrientation::Yaw => (rotation.y, rotation.x, false),
             GyroOrientation::Roll => (rotation.z, rotation.x, false),
             GyroOrientation::YawPlusRoll => (rotation.y + rotation.z, rotation.x, false),
@@ -593,6 +594,20 @@ mod tests {
 
     #[test]
     fn test_local_orientations_use_controller_axes() {
+        // Passthrough (Local): raw axes, gravity data ignored entirely.
+        let mut processor = GyroProcessor::new(
+            GyroCalibration::default(),
+            GyroProcessingOptions {
+                smoothing: false,
+                orientation: GyroOrientation::Local,
+                ..GyroProcessingOptions::default()
+            },
+        );
+        let rates = processor.process([0.1, 0.4, -0.2], Some([0.0, 1.0, 0.0]), DT);
+        assert!((rates.yaw - 0.4).abs() < 0.001);
+        assert!((rates.pitch - 0.1).abs() < 0.001);
+        assert!(!rates.gravity_locked);
+
         // Yaw preset: rotation about the controller's own vertical axis.
         let mut processor = GyroProcessor::new(
             GyroCalibration::default(),

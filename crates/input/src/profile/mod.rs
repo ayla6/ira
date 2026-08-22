@@ -182,6 +182,12 @@ fn convert_stick(stick: &[Binding]) -> Option<InputMapping> {
             },
         ));
     }
+    let dpad = stick
+        .iter()
+        .any(|binding| matches!(binding.source, InputSource::AxisDirection { .. }));
+    if dpad {
+        return Some(mapping_with_mode(source, SourceMode::Dpad { threshold: 0.5 }));
+    }
     for binding in stick {
         eprintln!(
             "ira-input: dropping unconvertible stick binding {:?} -> {:?}",

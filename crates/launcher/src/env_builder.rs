@@ -502,35 +502,30 @@ pub fn wrap_with_input(
     profile: Option<&str>,
     calibration: Option<&str>,
     pause_unfocused: bool,
-    motion_udp: bool,
 ) -> Result<(), String> {
     let binary = input_binary_path()
         .ok_or_else(|| "input remapping enabled but ira-input was not found".to_string())?;
-    wrap_command_with_input(command, &binary, profile, calibration, pause_unfocused, motion_udp);
+    wrap_command_with_input(command, &binary, profile, calibration, pause_unfocused);
     Ok(())
 }
 
-/// Wraps the command only when a virtual controller backend is selected.
+/// Wraps the command only when input remapping is explicitly enabled; which
+/// virtual controller the game sees is decided by the profile itself.
 pub fn wrap_with_input_mode(
     command: &mut Vec<String>,
     mode: Option<ControllerInputMode>,
     profile: Option<&str>,
     calibration: Option<&str>,
     pause_unfocused: bool,
-    motion_udp: bool,
 ) -> Result<(), String> {
     let binary = match mode {
-        Some(ControllerInputMode::VirtualXInput)
-        | Some(ControllerInputMode::VirtualDirectInput)
-        | Some(ControllerInputMode::VirtualSwitchPro)
-        | Some(ControllerInputMode::VirtualDualShock4)
-        | Some(ControllerInputMode::VirtualDualSense) => Some(input_binary_path()),
+        Some(ControllerInputMode::Enabled) => Some(input_binary_path()),
         None | Some(ControllerInputMode::Disabled) => None,
     };
     if let Some(binary) = binary {
         let binary = binary
             .ok_or_else(|| "input remapping enabled but ira-input was not found".to_string())?;
-        wrap_command_with_input(command, &binary, profile, calibration, pause_unfocused, motion_udp);
+        wrap_command_with_input(command, &binary, profile, calibration, pause_unfocused);
     }
     Ok(())
 }
@@ -544,12 +539,8 @@ fn wrap_with_input_mode_for_binary(
     binary: &str,
 ) {
     match mode {
-        Some(ControllerInputMode::VirtualXInput)
-        | Some(ControllerInputMode::VirtualDirectInput)
-        | Some(ControllerInputMode::VirtualSwitchPro)
-        | Some(ControllerInputMode::VirtualDualShock4)
-        | Some(ControllerInputMode::VirtualDualSense) => {
-            wrap_command_with_input(command, binary, profile, calibration, true, true)
+        Some(ControllerInputMode::Enabled) => {
+            wrap_command_with_input(command, binary, profile, calibration, true)
         }
         None | Some(ControllerInputMode::Disabled) => {}
     }
@@ -561,7 +552,6 @@ fn wrap_command_with_input(
     profile: Option<&str>,
     calibration: Option<&str>,
     pause_unfocused: bool,
-    motion_udp: bool,
 ) {
     let game_command = std::mem::take(command);
     let mut wrapped = vec![binary.to_string()];
@@ -575,12 +565,6 @@ fn wrap_command_with_input(
     }
     if pause_unfocused {
         wrapped.push("--pause-unfocused".to_string());
-    }
-    wrapped.push("--motion-port".to_string());
-    if motion_udp {
-        wrapped.push("26760".to_string());
-    } else {
-        wrapped.push("0".to_string());
     }
     wrapped.push("--".to_string());
     wrapped.extend(game_command);
@@ -684,11 +668,11 @@ mod tests {
     }
 
     #[test]
-    fn test_input_mode_virtual_xinput_wraps_command() {
+    fn test_input_mode_enabled_wraps_command_with_profile() {
         let mut command = command();
         wrap_with_input_mode_for_binary(
             &mut command,
-            Some(ControllerInputMode::VirtualXInput),
+            Some(ControllerInputMode::Enabled),
             Some("profile"),
             None,
             "/bin/ira-input",
@@ -700,8 +684,6 @@ mod tests {
                 "--profile",
                 "profile",
                 "--pause-unfocused",
-                "--motion-port",
-                "26760",
                 "--",
                 "game",
                 "--fullscreen"
@@ -710,50 +692,18 @@ mod tests {
     }
 
     #[test]
-    fn test_input_mode_virtual_direct_input_wraps_command() {
+    fn test_input_mode_enabled_without_profile_omits_flag() {
         let mut command = command();
         wrap_with_input_mode_for_binary(
             &mut command,
-            Some(ControllerInputMode::VirtualDirectInput),
+            Some(ControllerInputMode::Enabled),
             None,
             None,
             "/bin/ira-input",
         );
         assert_eq!(
             command,
-            vec![
-                "/bin/ira-input",
-                "--pause-unfocused",
-                "--motion-port",
-                "26760",
-                "--",
-                "game",
-                "--fullscreen"
-            ]
-        );
-    }
-
-    #[test]
-    fn test_input_mode_virtual_switch_pro_wraps_command() {
-        let mut command = command();
-        wrap_with_input_mode_for_binary(
-            &mut command,
-            Some(ControllerInputMode::VirtualSwitchPro),
-            None,
-            None,
-            "/bin/ira-input",
-        );
-        assert_eq!(
-            command,
-            vec![
-                "/bin/ira-input",
-                "--pause-unfocused",
-                "--motion-port",
-                "26760",
-                "--",
-                "game",
-                "--fullscreen"
-            ]
+            vec!["/bin/ira-input", "--pause-unfocused", "--", "game", "--fullscreen"]
         );
     }
 

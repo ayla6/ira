@@ -20,6 +20,9 @@ fn default_true() -> bool {
 enum ControllerInputModeCompat {
     Mode(ControllerInputMode),
     Legacy(bool),
+    /// Pre-rework configs named the virtual backend here; the backend now
+    /// lives in the profile, so any of those values just means "enabled".
+    LegacyBackend(String),
 }
 
 fn deserialize_controller_input_mode<'de, D>(
@@ -31,10 +34,18 @@ where
     match ControllerInputModeCompat::deserialize(deserializer)? {
         ControllerInputModeCompat::Mode(mode) => Ok(mode),
         ControllerInputModeCompat::Legacy(enabled) => Ok(if enabled {
-            ControllerInputMode::VirtualXInput
+            ControllerInputMode::Enabled
         } else {
             ControllerInputMode::Disabled
         }),
+        ControllerInputModeCompat::LegacyBackend(backend) => {
+            if backend.starts_with("virtual_") {
+                Ok(ControllerInputMode::Enabled)
+            } else {
+                eprintln!("Unknown controller input mode \"{backend}\"; treating as disabled");
+                Ok(ControllerInputMode::Disabled)
+            }
+        }
     }
 }
 
@@ -457,7 +468,7 @@ mod tests {
     fn test_controller_input_config_accepts_legacy_and_new_modes() {
         let legacy: ControllerInputConfig =
             serde_json::from_str(r#"{"always_on":true,"profile":"x"}"#).unwrap();
-        assert_eq!(legacy.mode, ControllerInputMode::VirtualXInput);
+        assert_eq!(legacy.mode, ControllerInputMode::Enabled);
         assert_eq!(legacy.profile, "x");
 
         let disabled: ControllerInputConfig =
@@ -466,17 +477,17 @@ mod tests {
 
         let direct: ControllerInputConfig =
             serde_json::from_str(r#"{"mode":"virtual_direct_input"}"#).unwrap();
-        assert_eq!(direct.mode, ControllerInputMode::VirtualDirectInput);
+        assert_eq!(direct.mode, ControllerInputMode::Enabled);
     }
 
     #[test]
     fn test_controller_input_config_serializes_new_fields_only() {
         let cfg = ControllerInputConfig {
-            mode: ControllerInputMode::VirtualXInput,
+            mode: ControllerInputMode::Enabled,
             profile: "x".to_string(),
         };
         let json = serde_json::to_value(cfg).unwrap();
-        assert_eq!(json["mode"], "virtual_x_input");
+        assert_eq!(json["mode"], "enabled");
         assert_eq!(json["profile"], "x");
         assert!(json.get("always_on").is_none());
     }

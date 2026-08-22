@@ -1,15 +1,14 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
+/// Whether Ira's input broker runs for a game. Which virtual controller the
+/// game sees is an attribute of the selected controller profile, not of the
+/// launch configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ControllerInputMode {
     #[default]
     Disabled,
-    VirtualXInput,
-    VirtualDirectInput,
-    VirtualSwitchPro,
-    VirtualDualShock4,
-    VirtualDualSense,
+    Enabled,
 }
 
 #[derive(Deserialize)]
@@ -17,6 +16,9 @@ pub enum ControllerInputMode {
 enum ControllerInputModeCompat {
     Mode(ControllerInputMode),
     Legacy(bool),
+    /// Pre-rework configs named the virtual backend here; the backend now
+    /// lives in the profile, so any of those values just means "enabled".
+    LegacyBackend(String),
 }
 
 fn deserialize_optional_controller_input_mode<'de, D>(
@@ -30,8 +32,16 @@ where
             ControllerInputModeCompat::Mode(mode) => mode,
             ControllerInputModeCompat::Legacy(enabled) => {
                 if enabled {
-                    ControllerInputMode::VirtualXInput
+                    ControllerInputMode::Enabled
                 } else {
+                    ControllerInputMode::Disabled
+                }
+            }
+            ControllerInputModeCompat::LegacyBackend(backend) => {
+                if backend.starts_with("virtual_") {
+                    ControllerInputMode::Enabled
+                } else {
+                    eprintln!("Unknown controller input mode \"{backend}\"; treating as disabled");
                     ControllerInputMode::Disabled
                 }
             }
@@ -63,10 +73,6 @@ pub struct GameLaunchConfig {
     /// Pause ira-input while the game window is unfocused (None = enabled).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_pause_unfocused: Option<bool>,
-    /// Stream the physical controller's raw motion over cemuhook UDP for
-    /// emulators (None = enabled).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_motion_udp: Option<bool>,
     // System-level settings (moved from WineConfig — these apply to ALL games, not just Wine)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gamemode: Option<bool>,
@@ -344,7 +350,7 @@ mod tests {
     #[test]
     fn test_controller_input_mode_legacy_and_new_json() {
         let legacy: GameLaunchConfig = serde_json::from_str(r#"{"exe":"","args":"","working_dir":"","env_vars":[],"ld_preload":"","ld_library_path":"","input_enabled":true}"#).unwrap();
-        assert_eq!(legacy.input_mode, Some(ControllerInputMode::VirtualXInput));
+        assert_eq!(legacy.input_mode, Some(ControllerInputMode::Enabled));
 
         let disabled: GameLaunchConfig = serde_json::from_str(
             r#"{"exe":"","args":"","working_dir":"","env_vars":[],"ld_preload":"","ld_library_path":"","input_enabled":false}"#,
@@ -358,7 +364,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             direct.input_mode,
-            Some(ControllerInputMode::VirtualDirectInput)
+            Some(ControllerInputMode::Enabled)
         );
         let switch_pro: GameLaunchConfig = serde_json::from_str(
             r#"{"exe":"","args":"","working_dir":"","env_vars":[],"ld_preload":"","ld_library_path":"","input_mode":"virtual_switch_pro"}"#,
@@ -366,18 +372,18 @@ mod tests {
         .unwrap();
         assert_eq!(
             switch_pro.input_mode,
-            Some(ControllerInputMode::VirtualSwitchPro)
+            Some(ControllerInputMode::Enabled)
         );
     }
 
     #[test]
     fn test_controller_input_mode_serializes_new_field_only() {
         let cfg = GameLaunchConfig {
-            input_mode: Some(ControllerInputMode::VirtualDirectInput),
+            input_mode: Some(ControllerInputMode::Enabled),
             ..Default::default()
         };
         let json = serde_json::to_value(cfg).unwrap();
-        assert_eq!(json["input_mode"], "virtual_direct_input");
+        assert_eq!(json["input_mode"], "enabled");
         assert!(json.get("input_enabled").is_none());
     }
 

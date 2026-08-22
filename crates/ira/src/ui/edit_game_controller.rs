@@ -6,7 +6,6 @@ use super::settings_dialog;
 use super::state::SharedState;
 use adw::prelude::*;
 use glib::clone::Downgrade;
-use ira_input::VirtualGamepadBackend;
 use ira_models::{ControllerInputMode, Game, GameLaunchConfig};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -61,22 +60,18 @@ pub(super) fn open_controller_settings(state: &SharedState, game: &Game) {
     );
 }
 
-/// Associate `path` with the game and switch its input mode on so the saved
-/// layout is the one the launcher starts.
+/// Associate `path` with the game and switch input remapping on so the saved
+/// layout is the one the launcher starts. Which virtual controller the game
+/// sees is decided by the layout itself.
 fn enable_input_for_game(state: &SharedState, game: &Game, path: &Path) {
     if let Err(error) = add_game_compatibility(path, game.db_id) {
         eprintln!("Failed to associate controller profile with game: {error}");
     }
-    let mode = read_profile(path)
-        .ok()
-        .map(|profile| input_mode_for_backend(profile.backend));
     let db = state.borrow().db.clone();
     match ira_db::get_game_config(&db, game.db_id) {
         Ok(Some((mut launch, wine, profile_id))) => {
             launch.input_profile = Some(path.to_string_lossy().into_owned());
-            if let Some(mode) = mode {
-                launch.input_mode = Some(mode);
-            }
+            launch.input_mode = Some(ControllerInputMode::Enabled);
             if let Err(error) =
                 ira_db::save_game_config(&db, game.db_id, &launch, &wine, profile_id)
             {
@@ -86,7 +81,7 @@ fn enable_input_for_game(state: &SharedState, game: &Game, path: &Path) {
         Ok(None) => {
             let launch = GameLaunchConfig {
                 input_profile: Some(path.to_string_lossy().into_owned()),
-                input_mode: mode,
+                input_mode: Some(ControllerInputMode::Enabled),
                 ..GameLaunchConfig::default()
             };
             if let Err(error) = ira_db::save_game_config(
@@ -103,23 +98,12 @@ fn enable_input_for_game(state: &SharedState, game: &Game, path: &Path) {
     }
 }
 
-fn input_mode_for_backend(backend: VirtualGamepadBackend) -> ControllerInputMode {
-    match backend {
-        VirtualGamepadBackend::XInput => ControllerInputMode::VirtualXInput,
-        VirtualGamepadBackend::DirectInput => ControllerInputMode::VirtualDirectInput,
-        VirtualGamepadBackend::SwitchPro => ControllerInputMode::VirtualSwitchPro,
-        VirtualGamepadBackend::DualShock4 => ControllerInputMode::VirtualDualShock4,
-        VirtualGamepadBackend::DualSense => ControllerInputMode::VirtualDualSense,
-    }
-}
-
 #[derive(Clone)]
 pub(super) struct ControllerWidgets {
     pub input_mode: Rc<RefCell<Option<ControllerInputMode>>>,
     pub input_profile_row: adw::ComboRow,
     pub input_profile_paths: Rc<RefCell<Vec<Option<PathBuf>>>>,
     pub pause_unfocused: Rc<RefCell<Option<bool>>>,
-    pub motion_udp: Rc<RefCell<Option<bool>>>,
 }
 
 pub(super) struct ControllerPageParams<'a> {
@@ -144,11 +128,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     let mode_strings = [
         crate::tr!("Inherit"),
         crate::tr!("Disabled"),
-        crate::tr!("Virtual XInput"),
-        crate::tr!("Virtual DirectInput"),
-        crate::tr!("Nintendo Switch Pro Controller"),
-        crate::tr!("DualShock 4 Controller"),
-        crate::tr!("DualSense Controller"),
+        crate::tr!("Enabled"),
     ];
     let mode_refs = mode_strings.iter().map(String::as_str).collect::<Vec<_>>();
     input_mode_row.set_model(Some(&gtk4::StringList::new(&mode_refs)));
@@ -171,22 +151,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         });
     }
     input_group.add(&pause_row);
-
-    let motion_udp = Rc::new(RefCell::new(params.launch.input_motion_udp));
-    let motion_row = adw::SwitchRow::builder()
-        .title(crate::tr!("Emulator motion stream"))
-        .subtitle(crate::tr!(
-            "Broadcast the raw gyro over cemuhook UDP for emulators with native motion support"
-        ))
-        .active(params.launch.input_motion_udp.unwrap_or(true))
-        .build();
-    {
-        let motion_cell = motion_udp.clone();
-        motion_row.connect_active_notify(move |row| {
-            *motion_cell.borrow_mut() = Some(row.is_active());
-        });
-    }
-    input_group.add(&motion_row);
 
     let current_path = params.launch.input_profile.as_deref().map(PathBuf::from);
     let (labels, paths, selected) =
@@ -406,7 +370,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         input_profile_row,
         input_profile_paths,
         pause_unfocused,
-        motion_udp,
     }
 }
 
@@ -497,11 +460,7 @@ fn input_mode_index(mode: Option<ControllerInputMode>) -> u32 {
     match mode {
         None => 0,
         Some(ControllerInputMode::Disabled) => 1,
-        Some(ControllerInputMode::VirtualXInput) => 2,
-        Some(ControllerInputMode::VirtualDirectInput) => 3,
-        Some(ControllerInputMode::VirtualSwitchPro) => 4,
-        Some(ControllerInputMode::VirtualDualShock4) => 5,
-        Some(ControllerInputMode::VirtualDualSense) => 6,
+        Some(ControllerInputMode::Enabled) => 2,
     }
 }
 
@@ -509,11 +468,7 @@ fn input_mode_from_index(index: u32) -> Option<ControllerInputMode> {
     match index {
         0 => None,
         1 => Some(ControllerInputMode::Disabled),
-        2 => Some(ControllerInputMode::VirtualXInput),
-        3 => Some(ControllerInputMode::VirtualDirectInput),
-        4 => Some(ControllerInputMode::VirtualSwitchPro),
-        5 => Some(ControllerInputMode::VirtualDualShock4),
-        6 => Some(ControllerInputMode::VirtualDualSense),
+        2 => Some(ControllerInputMode::Enabled),
         _ => None,
     }
 }
@@ -537,11 +492,7 @@ mod tests {
         for mode in [
             None,
             Some(ControllerInputMode::Disabled),
-            Some(ControllerInputMode::VirtualXInput),
-            Some(ControllerInputMode::VirtualDirectInput),
-            Some(ControllerInputMode::VirtualSwitchPro),
-            Some(ControllerInputMode::VirtualDualShock4),
-            Some(ControllerInputMode::VirtualDualSense),
+            Some(ControllerInputMode::Enabled),
         ] {
             assert_eq!(input_mode_from_index(input_mode_index(mode)), mode);
         }

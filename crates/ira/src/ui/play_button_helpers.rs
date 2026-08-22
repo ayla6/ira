@@ -7,10 +7,10 @@ use gtk4::gdk::prelude::{DisplayExt, MonitorExt};
 use gtk4::gdk::{Display, Monitor};
 use ira_config::{Config, SystemDefaults};
 use ira_db::DbConn;
-use ira_input::{InputProfile, VirtualGamepadBackend};
+
 use ira_models::{AppSender, ControllerInputMode, WineConfig};
 
-use super::input_profile_store::{read_profile, write_profile};
+use super::input_profile_store::read_profile;
 use super::state::SharedState;
 
 fn detect_screen_resolution() -> (u32, u32) {
@@ -54,17 +54,6 @@ pub(super) struct PcControllerProfiles<'a> {
     pub wine: (Option<ControllerInputMode>, &'a str),
 }
 
-fn input_backend(mode: ControllerInputMode) -> Option<VirtualGamepadBackend> {
-    match mode {
-        ControllerInputMode::Disabled => None,
-        ControllerInputMode::VirtualXInput => Some(VirtualGamepadBackend::XInput),
-        ControllerInputMode::VirtualDirectInput => Some(VirtualGamepadBackend::DirectInput),
-        ControllerInputMode::VirtualSwitchPro => Some(VirtualGamepadBackend::SwitchPro),
-        ControllerInputMode::VirtualDualShock4 => Some(VirtualGamepadBackend::DualShock4),
-        ControllerInputMode::VirtualDualSense => Some(VirtualGamepadBackend::DualSense),
-    }
-}
-
 fn resolved_input_mode(
     game_kind: ira_models::GameKind,
     game_override: Option<ControllerInputMode>,
@@ -88,45 +77,33 @@ fn console_input_mode(
     if let Some(mode) = game_override.or(console_override) {
         mode
     } else if console_profile.is_some_and(|profile| !profile.is_empty()) {
-        // The selected profile owns its backend; this only enables the broker.
-        ControllerInputMode::VirtualXInput
+        // The selected profile owns the backend; this only enables the broker.
+        ControllerInputMode::Enabled
     } else {
         controller_default
     }
 }
 
+/// Resolve which layout file the broker should load. `Disabled` disables the
+/// broker entirely; an enabled mode without any layout runs on the broker's
+/// built-in default. The virtual backend is whatever the layout says.
 fn resolve_input_profile(
-    ctx: &LaunchCtx,
     mode: ControllerInputMode,
     selected_profile: Option<&str>,
     default_profile: Option<&str>,
 ) -> Result<Option<String>, String> {
-    let Some(backend) = input_backend(mode) else {
+    if mode == ControllerInputMode::Disabled {
         return Ok(None);
-    };
-    let selected_profile = selected_profile.filter(|path| !path.is_empty());
-    let generated_path = || {
-        std::path::Path::new(ctx.save_dir)
-            .join("controller_defaults")
-            .join(match backend {
-                VirtualGamepadBackend::XInput => "resolved-xinput.json",
-                VirtualGamepadBackend::DirectInput => "resolved-directinput.json",
-                VirtualGamepadBackend::SwitchPro => "resolved-switch-pro.json",
-                VirtualGamepadBackend::DualShock4 => "resolved-dualshock4.json",
-                VirtualGamepadBackend::DualSense => "resolved-dualsense.json",
-            })
-    };
-    let profile_path = selected_profile
+    }
+    let Some(path) = selected_profile
+        .filter(|path| !path.is_empty())
         .map(std::path::PathBuf::from)
         .or_else(|| default_profile.map(std::path::PathBuf::from))
-        .unwrap_or_else(generated_path);
-    if !profile_path.is_file() {
-        let mut profile = InputProfile::default_gamepad_for_backend(backend);
-        profile.name = format!("Built-in {:?} profile", backend);
-        write_profile(&profile_path, &profile)?;
-    }
-    read_profile(&profile_path)?;
-    Ok(Some(profile_path.to_string_lossy().into_owned()))
+    else {
+        return Ok(None);
+    };
+    read_profile(&path)?;
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 fn apply_system_defaults(launch: &mut ira_models::GameLaunchConfig, defaults: &SystemDefaults) {
@@ -338,19 +315,17 @@ fn build_emulator_env_and_wrap(
         console_profile,
     );
     let input_profile = resolve_input_profile(
-        ctx,
         input_mode,
         launch.input_profile.as_deref(),
         console_profile.or(ctx.controller_input_profile.as_deref()),
     )?;
-    if input_profile.is_some() {
+    if input_mode != ControllerInputMode::Disabled {
         let calibration = ira_input::calibration_store_path(ctx.save_dir);
         ira_launcher::env_builder::wrap_with_input(
             cmd,
             input_profile.as_deref(),
             Some(calibration.to_str().unwrap_or_default()),
             launch.input_pause_unfocused.unwrap_or(true),
-            launch.input_motion_udp.unwrap_or(true),
         )?;
         eprintln!(
             "ira-input: enabled for {}{}",
@@ -594,12 +569,11 @@ pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<bool, String
         ctx.controller_input_mode,
     );
     let input_profile = resolve_input_profile(
-        ctx,
         input_mode,
         launch.input_profile.as_deref(),
         ctx.controller_input_profile.as_deref(),
     )?;
-    if input_backend(input_mode).is_some() {
+    if input_mode != ControllerInputMode::Disabled {
         let calibration = ira_input::calibration_store_path(ctx.save_dir);
         ira_launcher::env_builder::wrap_with_input_mode(
             &mut cmd,
@@ -607,7 +581,6 @@ pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<bool, String
             input_profile.as_deref(),
             Some(calibration.to_str().unwrap_or_default()),
             launch.input_pause_unfocused.unwrap_or(true),
-            launch.input_motion_udp.unwrap_or(true),
         )?;
         let separator = cmd
             .iter()
@@ -714,7 +687,6 @@ pub(super) fn launch_other(
         .or(game_type_mode)
         .unwrap_or_else(|| resolved_input_mode(ctx.game_kind, None, ctx.controller_input_mode));
     launch.input_profile = resolve_input_profile(
-        ctx,
         input_mode,
         launch.input_profile.as_deref(),
         (!game_type_profile.is_empty())
@@ -799,38 +771,10 @@ pub(super) fn update_last_played(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        apply_emulator_gpu_policy, apply_system_defaults, console_input_mode, input_backend,
-        resolved_input_mode,
-    };
+    use super::{apply_emulator_gpu_policy, apply_system_defaults, console_input_mode,
+        resolved_input_mode};
     use ira_config::SystemDefaults;
-    use ira_input::VirtualGamepadBackend;
     use ira_models::ControllerInputMode;
-
-    #[test]
-    fn test_input_backend_resolves_modes() {
-        assert_eq!(input_backend(ControllerInputMode::Disabled), None);
-        assert_eq!(
-            input_backend(ControllerInputMode::VirtualXInput),
-            Some(VirtualGamepadBackend::XInput)
-        );
-        assert_eq!(
-            input_backend(ControllerInputMode::VirtualDirectInput),
-            Some(VirtualGamepadBackend::DirectInput)
-        );
-        assert_eq!(
-            input_backend(ControllerInputMode::VirtualSwitchPro),
-            Some(VirtualGamepadBackend::SwitchPro)
-        );
-        assert_eq!(
-            input_backend(ControllerInputMode::VirtualDualShock4),
-            Some(VirtualGamepadBackend::DualShock4)
-        );
-        assert_eq!(
-            input_backend(ControllerInputMode::VirtualDualSense),
-            Some(VirtualGamepadBackend::DualSense)
-        );
-    }
 
     #[test]
     fn test_console_input_mode_prioritizes_game_and_console_overrides() {
@@ -838,16 +782,16 @@ mod tests {
             console_input_mode(
                 None,
                 None,
-                ControllerInputMode::Disabled,
+                ControllerInputMode::Enabled,
                 Some("/layouts/ps1.json"),
             ),
-            ControllerInputMode::VirtualXInput
+            ControllerInputMode::Enabled
         );
         assert_eq!(
             console_input_mode(
                 Some(ControllerInputMode::Disabled),
-                Some(ControllerInputMode::VirtualXInput),
-                ControllerInputMode::VirtualXInput,
+                Some(ControllerInputMode::Enabled),
+                ControllerInputMode::Enabled,
                 Some("/layouts/ps1.json"),
             ),
             ControllerInputMode::Disabled
@@ -856,7 +800,7 @@ mod tests {
             console_input_mode(
                 None,
                 Some(ControllerInputMode::Disabled),
-                ControllerInputMode::VirtualXInput,
+                ControllerInputMode::Enabled,
                 Some("/layouts/ps1.json"),
             ),
             ControllerInputMode::Disabled
@@ -865,16 +809,16 @@ mod tests {
 
     #[test]
     fn test_pc_input_mode_prefers_game_type_override() {
-        let game_mode = Some(ControllerInputMode::VirtualDirectInput);
+        let game_mode = Some(ControllerInputMode::Enabled);
         let game_type_mode = Some(ControllerInputMode::Disabled);
         let mode = game_mode.or(game_type_mode).unwrap_or_else(|| {
             resolved_input_mode(
                 ira_models::GameKind::Linux,
                 None,
-                ControllerInputMode::VirtualXInput,
+                ControllerInputMode::Enabled,
             )
         });
-        assert_eq!(mode, ControllerInputMode::VirtualDirectInput);
+        assert_eq!(mode, ControllerInputMode::Enabled);
     }
 
     #[test]
@@ -924,25 +868,25 @@ mod tests {
             resolved_input_mode(
                 ira_models::GameKind::Steam,
                 None,
-                ControllerInputMode::VirtualXInput,
+                ControllerInputMode::Enabled,
             ),
             ControllerInputMode::Disabled
         );
         assert_eq!(
             resolved_input_mode(
                 ira_models::GameKind::Steam,
-                Some(ControllerInputMode::VirtualDirectInput),
-                ControllerInputMode::VirtualXInput,
+                Some(ControllerInputMode::Enabled),
+                ControllerInputMode::Enabled,
             ),
-            ControllerInputMode::VirtualDirectInput
+            ControllerInputMode::Enabled
         );
         assert_eq!(
             resolved_input_mode(
                 ira_models::GameKind::Ps4,
                 None,
-                ControllerInputMode::VirtualXInput,
+                ControllerInputMode::Enabled,
             ),
-            ControllerInputMode::VirtualXInput
+            ControllerInputMode::Enabled
         );
     }
 }

@@ -1,6 +1,6 @@
 use super::css::{CSS_FLAT, CSS_SQUARE_BUTTON};
 use super::helpers::esc;
-use super::input_profile_store::controller_default_path_for_backend;
+use super::input_profile_store::{controller_default_path_for_backend, find_controller_default_profile};
 use super::input_profile_store::{ensure_controller_default_profile, list_profiles, StoredProfile};
 use adw::prelude::*;
 use ira_config::{Config, ControllerInputConfig};
@@ -380,22 +380,14 @@ fn input_mode_index(mode: Option<ControllerInputMode>) -> u32 {
     match mode {
         None => 0,
         Some(ControllerInputMode::Disabled) => 1,
-        Some(ControllerInputMode::VirtualXInput) => 2,
-        Some(ControllerInputMode::VirtualDirectInput) => 3,
-        Some(ControllerInputMode::VirtualSwitchPro) => 4,
-        Some(ControllerInputMode::VirtualDualShock4) => 5,
-        Some(ControllerInputMode::VirtualDualSense) => 6,
+        Some(ControllerInputMode::Enabled) => 2,
     }
 }
 
 fn input_mode_from_index(index: u32) -> Option<ControllerInputMode> {
     match index {
         1 => Some(ControllerInputMode::Disabled),
-        2 => Some(ControllerInputMode::VirtualXInput),
-        3 => Some(ControllerInputMode::VirtualDirectInput),
-        4 => Some(ControllerInputMode::VirtualSwitchPro),
-        5 => Some(ControllerInputMode::VirtualDualShock4),
-        6 => Some(ControllerInputMode::VirtualDualSense),
+        2 => Some(ControllerInputMode::Enabled),
         _ => None,
     }
 }
@@ -410,7 +402,11 @@ fn rebuild_controller_rows(params: &ControllerRowsParams, devices: &[ira_input::
                 widget.key.clone(),
                 ControllerDefaultState {
                     config: ControllerInputConfig {
-                        mode: mode_from_selection(widget.mode.selected()),
+                        mode: if widget.mode.selected() == 0 {
+                            ControllerInputMode::Disabled
+                        } else {
+                            ControllerInputMode::Enabled
+                        },
                         profile: widget
                             .profile_path
                             .borrow()
@@ -434,13 +430,16 @@ fn rebuild_controller_rows(params: &ControllerRowsParams, devices: &[ira_input::
             .unwrap_or_default();
         let configured =
             (!config.profile.is_empty()).then(|| std::path::PathBuf::from(&config.profile));
-        let default_path = configured.filter(|path| path.is_file()).unwrap_or_else(|| {
-            controller_default_path_for_backend(
-                &params.save_dir,
-                &key,
-                super::helpers::backend_for_mode(config.mode),
-            )
-        });
+        let default_path = configured
+            .filter(|path| path.is_file())
+            .or_else(|| find_controller_default_profile(&params.save_dir, &key))
+            .unwrap_or_else(|| {
+                controller_default_path_for_backend(
+                    &params.save_dir,
+                    &key,
+                    ira_input::VirtualGamepadBackend::XInput,
+                )
+            });
         let default_state = ControllerDefaultState {
             config,
             profile_path: default_path.is_file().then_some(default_path),
@@ -490,7 +489,9 @@ fn add_controller_row(
     let supported_buttons = device.supported_buttons.clone();
     let expander = adw::ExpanderRow::new();
     expander.set_title(&esc(&device_name));
-    update_controller_subtitle(&expander, &device, state.config.mode);
+    let initial_selection = stored_selection(state.config.mode, state.profile_path.as_deref());
+    let initial_flavor = backend_for_selection(initial_selection);
+    update_controller_subtitle(&expander, &device, initial_flavor);
     let profile_path = Rc::new(RefCell::new(state.profile_path));
     let mode_strings = [
         crate::tr!("Disabled"),
@@ -503,27 +504,28 @@ fn add_controller_row(
     let mode_refs: Vec<&str> = mode_strings.iter().map(String::as_str).collect();
     let mode_model = gtk4::StringList::new(&mode_refs);
     let mode = adw::ComboRow::new();
-    mode.set_title(&crate::tr!("Input mode"));
+    mode.set_title(&crate::tr!("Default layout"));
     mode.set_model(Some(&mode_model));
-    mode.set_selected(selection_for_mode(state.config.mode));
+    mode.set_selected(initial_selection);
     let expander_for_mode = expander.clone();
     let device_for_mode = device.clone();
     let profile_path_for_mode = profile_path.clone();
     let save_dir_for_mode = save_dir.to_string();
     let key_for_mode = key.clone();
     mode.connect_selected_notify(move |row| {
-        let mode = mode_from_selection(row.selected());
-        update_controller_subtitle(&expander_for_mode, &device_for_mode, mode);
-        if mode != ControllerInputMode::Disabled {
+        let flavor = backend_for_selection(row.selected());
+        update_controller_subtitle(&expander_for_mode, &device_for_mode, flavor);
+        if let Some(backend) = flavor {
             let path = controller_default_path_for_backend(
                 &save_dir_for_mode,
                 &key_for_mode,
-                super::helpers::backend_for_mode(mode),
+                backend,
             );
             *profile_path_for_mode.borrow_mut() = path.is_file().then_some(path);
         }
     });
-    expander.set_expanded(state.config.mode != ControllerInputMode::Disabled);
+    let enabled = state.config.mode != ControllerInputMode::Disabled;
+    expander.set_expanded(enabled);
     expander.add_row(&mode);
 
     let action_row = adw::ActionRow::new();
@@ -546,7 +548,9 @@ fn add_controller_row(
     let registry_for_edit = registry;
     let mode_for_edit = mode.clone();
     edit.connect_clicked(move |_| {
-        let backend = super::helpers::backend_for_mode(mode_from_selection(mode_for_edit.selected()));
+        let Some(backend) = backend_for_selection(mode_for_edit.selected()) else {
+            return;
+        };
         let path = match ensure_controller_default_profile(
             &save_dir_for_edit,
             &key_for_edit,
@@ -591,17 +595,18 @@ fn add_controller_row(
 fn update_controller_subtitle(
     row: &adw::ExpanderRow,
     device: &ira_input::DeviceInfo,
-    mode: ControllerInputMode,
+    flavor: Option<ira_input::VirtualGamepadBackend>,
 ) {
-    let virtualization = match mode {
-        ControllerInputMode::Disabled => crate::tr!("Input virtualization disabled"),
-        ControllerInputMode::VirtualXInput => crate::tr!("Virtual XInput layout"),
-        ControllerInputMode::VirtualDirectInput => crate::tr!("Virtual DirectInput layout"),
-        ControllerInputMode::VirtualSwitchPro => {
+    use ira_input::VirtualGamepadBackend;
+    let virtualization = match flavor {
+        None => crate::tr!("Input virtualization disabled"),
+        Some(VirtualGamepadBackend::XInput) => crate::tr!("Virtual XInput layout"),
+        Some(VirtualGamepadBackend::DirectInput) => crate::tr!("Virtual DirectInput layout"),
+        Some(VirtualGamepadBackend::SwitchPro) => {
             crate::tr!("Nintendo Switch Pro Controller layout")
         }
-        ControllerInputMode::VirtualDualShock4 => crate::tr!("DualShock 4 Controller layout"),
-        ControllerInputMode::VirtualDualSense => crate::tr!("DualSense Controller layout"),
+        Some(VirtualGamepadBackend::DualShock4) => crate::tr!("DualShock 4 Controller layout"),
+        Some(VirtualGamepadBackend::DualSense) => crate::tr!("DualSense Controller layout"),
     };
     row.set_subtitle(&format!(
         "{} | Linux reports {}",
@@ -658,25 +663,42 @@ fn start_controller_registry_refresh(
     });
 }
 
-fn selection_for_mode(mode: ControllerInputMode) -> u32 {
-    match mode {
-        ControllerInputMode::Disabled => 0,
-        ControllerInputMode::VirtualXInput => 1,
-        ControllerInputMode::VirtualDirectInput => 2,
-        ControllerInputMode::VirtualSwitchPro => 3,
-        ControllerInputMode::VirtualDualShock4 => 4,
-        ControllerInputMode::VirtualDualSense => 5,
+/// Combo index for an enabled default: derived from the flavor recorded in
+/// the layout itself, since backends live on profiles now.
+fn stored_selection(mode: ControllerInputMode, profile_path: Option<&std::path::Path>) -> u32 {
+    if mode == ControllerInputMode::Disabled {
+        return 0;
+    }
+    let backend = profile_path
+        .and_then(|path| super::input_profile_store::read_profile(path).ok())
+        .map(|profile| profile.backend)
+        .unwrap_or(ira_input::VirtualGamepadBackend::XInput);
+    selection_for_backend(backend)
+}
+
+fn selection_for_backend(backend: ira_input::VirtualGamepadBackend) -> u32 {
+    use ira_input::VirtualGamepadBackend;
+    match backend {
+        VirtualGamepadBackend::DirectInput => 2,
+        VirtualGamepadBackend::SwitchPro => 3,
+        VirtualGamepadBackend::DualShock4 => 4,
+        VirtualGamepadBackend::DualSense => 5,
+        VirtualGamepadBackend::XInput => 1,
     }
 }
 
-pub(super) fn mode_from_selection(selection: u32) -> ControllerInputMode {
+/// `None` means the "Disabled" entry.
+pub(super) fn backend_for_selection(
+    selection: u32,
+) -> Option<ira_input::VirtualGamepadBackend> {
+    use ira_input::VirtualGamepadBackend;
     match selection {
-        1 => ControllerInputMode::VirtualXInput,
-        2 => ControllerInputMode::VirtualDirectInput,
-        3 => ControllerInputMode::VirtualSwitchPro,
-        4 => ControllerInputMode::VirtualDualShock4,
-        5 => ControllerInputMode::VirtualDualSense,
-        _ => ControllerInputMode::Disabled,
+        1 => Some(VirtualGamepadBackend::XInput),
+        2 => Some(VirtualGamepadBackend::DirectInput),
+        3 => Some(VirtualGamepadBackend::SwitchPro),
+        4 => Some(VirtualGamepadBackend::DualShock4),
+        5 => Some(VirtualGamepadBackend::DualSense),
+        _ => None,
     }
 }
 
@@ -876,26 +898,35 @@ fn profile_label(stored: &StoredProfile) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{input_mode_from_index, mode_from_selection};
+    use super::{
+        backend_for_selection, input_mode_from_index, selection_for_backend, stored_selection,
+    };
+    use ira_input::VirtualGamepadBackend;
     use ira_models::ControllerInputMode;
 
     #[test]
-    fn test_mode_from_selection_defaults_to_disabled() {
-        assert_eq!(mode_from_selection(0), ControllerInputMode::Disabled);
-        assert_eq!(mode_from_selection(99), ControllerInputMode::Disabled);
+    fn test_backend_for_selection_round_trip() {
+        for backend in [
+            VirtualGamepadBackend::XInput,
+            VirtualGamepadBackend::DirectInput,
+            VirtualGamepadBackend::SwitchPro,
+            VirtualGamepadBackend::DualShock4,
+            VirtualGamepadBackend::DualSense,
+        ] {
+            assert_eq!(backend_for_selection(selection_for_backend(backend)), Some(backend));
+        }
+        assert_eq!(backend_for_selection(0), None);
+        assert_eq!(backend_for_selection(99), None);
     }
 
     #[test]
-    fn test_mode_from_selection_selects_virtual_backends() {
-        assert_eq!(mode_from_selection(1), ControllerInputMode::VirtualXInput);
+    fn test_stored_selection_disabled_is_zero_and_enabled_falls_back_to_xinput() {
         assert_eq!(
-            mode_from_selection(2),
-            ControllerInputMode::VirtualDirectInput
+            stored_selection(ControllerInputMode::Disabled, None),
+            0
         );
-        assert_eq!(
-            mode_from_selection(3),
-            ControllerInputMode::VirtualSwitchPro
-        );
+        // An enabled default without a readable layout assumes XInput.
+        assert_eq!(stored_selection(ControllerInputMode::Enabled, None), 1);
     }
 
     #[test]
@@ -904,6 +935,10 @@ mod tests {
         assert_eq!(
             input_mode_from_index(1),
             Some(ControllerInputMode::Disabled)
+        );
+        assert_eq!(
+            input_mode_from_index(2),
+            Some(ControllerInputMode::Enabled)
         );
     }
 }

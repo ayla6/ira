@@ -364,21 +364,6 @@ pub fn clear_children(w: &impl Clearable) {
     w.clear_all_children();
 }
 
-/// The virtual pad a controller input mode maps to; Disabled falls back to
-/// XInput because the mode only gates whether the broker runs at all.
-pub(crate) fn backend_for_mode(mode: ira_models::ControllerInputMode) -> ira_input::VirtualGamepadBackend {
-    use ira_input::VirtualGamepadBackend;
-    match mode {
-        ira_models::ControllerInputMode::VirtualDirectInput => VirtualGamepadBackend::DirectInput,
-        ira_models::ControllerInputMode::VirtualSwitchPro => VirtualGamepadBackend::SwitchPro,
-        ira_models::ControllerInputMode::VirtualDualShock4 => VirtualGamepadBackend::DualShock4,
-        ira_models::ControllerInputMode::VirtualDualSense => VirtualGamepadBackend::DualSense,
-        ira_models::ControllerInputMode::Disabled | ira_models::ControllerInputMode::VirtualXInput => {
-            VirtualGamepadBackend::XInput
-        }
-    }
-}
-
 pub fn replace_grid_game(state: &SharedState, game: &Game) {
     let store = state.borrow().grid_store.clone();
     let grid_id = game.grid_id();

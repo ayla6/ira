@@ -236,7 +236,6 @@ pub fn launch_game(
         input_profile,
         Some(calibration.to_str().unwrap_or_default()),
         launch.input_pause_unfocused.unwrap_or(true),
-        launch.input_motion_udp.unwrap_or(true),
     )?;
 
     // Set PWD to the game's working directory

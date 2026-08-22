@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use super::css::*;
-use super::input_profile_store::{controller_default_path_for_backend, read_profile};
+use super::input_profile_store::read_profile;
 use super::play_button_helpers;
 use super::state::SharedState;
 use ira_models::ControllerInputMode;
@@ -86,12 +86,11 @@ fn active_controller_input(
             if defaults.mode == ControllerInputMode::Disabled {
                 return None;
             }
-            let backend = super::helpers::backend_for_mode(defaults.mode);
             let configured = std::path::PathBuf::from(&defaults.profile);
             let path = if configured.is_file() && read_profile(&configured).is_ok() {
                 configured
             } else {
-                controller_default_path_for_backend(save_dir, &key, backend)
+                super::input_profile_store::find_controller_default_profile(save_dir, &key)?
             };
             let profile = path.is_file().then(|| path.to_string_lossy().into_owned());
             Some((defaults.mode, profile))

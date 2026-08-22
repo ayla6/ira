@@ -352,20 +352,29 @@ fn apply_controller_defaults(
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let mode = super::input_profile_settings::mode_from_selection(widget.mode.selected());
-        if mode != ira_models::ControllerInputMode::Disabled && profile.is_empty() {
+        // The combo picks a default layout flavor; the backend lives in that
+        // layout, so only enabled/disabled is stored per device.
+        let flavor =
+            super::input_profile_settings::backend_for_selection(widget.mode.selected());
+        let enabled = flavor.is_some();
+        if let Some(backend) = flavor.filter(|_| profile.is_empty()) {
             match ensure_controller_default_profile(
                 &cfg.save_dir,
                 &widget.key,
                 &widget.device_name,
                 &widget.supported_buttons,
-                super::helpers::backend_for_mode(mode),
+                backend,
             ) {
                 Ok(path) => profile = path.to_string_lossy().into_owned(),
                 Err(error) => eprintln!("Failed to create controller mapping: {error}"),
             }
         }
-        if mode != ira_models::ControllerInputMode::Disabled || !profile.is_empty() {
+        let mode = if enabled {
+            ira_models::ControllerInputMode::Enabled
+        } else {
+            ira_models::ControllerInputMode::Disabled
+        };
+        if enabled || !profile.is_empty() {
             controller_defaults.insert(widget.key.clone(), ControllerInputConfig { mode, profile });
         } else {
             controller_defaults.remove(&widget.key);

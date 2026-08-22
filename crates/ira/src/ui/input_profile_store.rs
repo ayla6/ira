@@ -42,6 +42,22 @@ pub(super) fn controller_default_path_for_backend(
     }
 }
 
+/// First default layout that already exists for this device, any flavor.
+/// Used when a stored path is missing and the mode no longer names a backend.
+pub(super) fn find_controller_default_profile(save_dir: &str, key: &str) -> Option<PathBuf> {
+    use VirtualGamepadBackend::*;
+    [
+        XInput,
+        DirectInput,
+        SwitchPro,
+        DualShock4,
+        DualSense,
+    ]
+    .into_iter()
+    .map(|backend| controller_default_path_for_backend(save_dir, key, backend))
+    .find(|path| path.is_file())
+}
+
 pub(super) fn ensure_controller_default_profile(
     save_dir: &str,
     key: &str,

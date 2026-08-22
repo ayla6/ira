@@ -3,8 +3,8 @@ use super::input_profile_binding::{
     BindingRowContext, SectionGroups,
 };
 use super::input_profile_editor_sections::{
-    connect_add_binding, default_profile_bindings, ensure_section_behavior, section_group,
-    BindingCollectionContext,
+    connect_add_binding, default_profile_bindings, ensure_section_behavior,
+    section_behavior_bindings, section_group, BindingCollectionContext,
 };
 use adw::prelude::*;
 use ira_input::{
@@ -211,11 +211,27 @@ fn populate_bindings(
             binding_order(binding),
         )
     });
+    // Group consecutive bindings into their sections so each section's
+    // Behavior dropdown can say "Default" when the rows match the standard
+    // layout instead of always claiming "Custom".
+    let mut sections: Vec<(usize, String, Vec<Binding>)> = Vec::new();
     for binding in bindings.into_iter() {
         let page_index = binding_page_index(&binding);
-        let title = binding_section_title(&binding);
+        let title = binding_section_title(&binding).to_string();
         page_has_bindings[page_index] = true;
-        let group = section_group(&page_boxes[page_index], section_groups, page_index, title);
+        match sections.last_mut() {
+            Some((last_page, last_title, list))
+                if *last_page == page_index && *last_title == title =>
+            {
+                list.push(binding)
+            }
+            _ => sections.push((page_index, title, vec![binding])),
+        }
+    }
+    for (page_index, title, section_bindings) in sections {
+        let defaults =
+            section_behavior_bindings(&title, 1, device, *backend.borrow());
+        let group = section_group(&page_boxes[page_index], section_groups, page_index, &title);
         let context = BindingCollectionContext {
             section_groups: section_groups.clone(),
             rows: rows.clone(),
@@ -223,19 +239,27 @@ fn populate_bindings(
             backend: backend.clone(),
             mark_dirty: mark_dirty.clone(),
         };
-        ensure_section_behavior(&group, title, &page_boxes[page_index], &context);
-        add_binding_row(
+        ensure_section_behavior(
             &group,
-            binding,
-            &BindingRowContext {
-                page: page_boxes[page_index].clone(),
-                section_groups: section_groups.clone(),
-                rows: rows.clone(),
-                device: device.cloned(),
-                backend: *backend.borrow(),
-                on_dirty: mark_dirty.clone(),
-            },
+            &title,
+            &page_boxes[page_index],
+            &context,
+            section_bindings == defaults,
         );
+        for binding in section_bindings {
+            add_binding_row(
+                &group,
+                binding,
+                &BindingRowContext {
+                    page: page_boxes[page_index].clone(),
+                    section_groups: section_groups.clone(),
+                    rows: rows.clone(),
+                    device: device.cloned(),
+                    backend: *backend.borrow(),
+                    on_dirty: mark_dirty.clone(),
+                },
+            );
+        }
     }
     for (page, has_bindings) in page_boxes.iter().zip(page_has_bindings) {
         if !has_bindings {

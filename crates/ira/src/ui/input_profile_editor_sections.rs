@@ -55,6 +55,7 @@ pub(super) fn ensure_section_behavior(
     title: &str,
     page: &gtk4::Box,
     context: &BindingCollectionContext,
+    is_default: bool,
 ) {
     if group.widget_name() == "section-behavior" {
         return;
@@ -67,7 +68,7 @@ pub(super) fn ensure_section_behavior(
         )),
         None::<&gtk4::Expression>,
     );
-    behavior.set_selected(0);
+    behavior.set_selected(u32::from(is_default));
     let row = adw::ActionRow::new();
     row.set_title(&crate::tr!("Behavior"));
     row.set_subtitle(&crate::tr!(

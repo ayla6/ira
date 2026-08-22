@@ -344,7 +344,7 @@ fn persist(result: Result<InputProfile, String>, outcome: &SaveOutcome) {
             // The just-saved state is the new dirty-check baseline; only
             // further edits re-enable the buttons.
             *outcome.baseline.borrow_mut() = profile;
-            set_saved_status(&outcome.status);
+            outcome.status.set_visible(false);
             outcome.button.set_sensitive(false);
             (outcome.on_saved)(path);
             if outcome.close_on_success {
@@ -353,12 +353,6 @@ fn persist(result: Result<InputProfile, String>, outcome: &SaveOutcome) {
         }
         Err(error) => set_error(&outcome.status, &error),
     }
-}
-
-fn set_saved_status(status: &gtk4::Label) {
-    status.remove_css_class(CSS_ERROR);
-    status.set_text(&crate::tr!("Saved"));
-    status.set_visible(true);
 }
 
 fn profile_path_for_save(save_dir: &str, current_path: Option<&Path>, name: &str) -> PathBuf {

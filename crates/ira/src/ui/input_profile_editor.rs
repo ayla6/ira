@@ -217,7 +217,7 @@ fn build_pages(
         &crate::tr!("Gyro"),
         "gyro",
     ));
-    add_gyro_group(&gyro_box, gyro, ctx.device.as_ref(), &ctx.on_dirty);
+    add_gyro_group(&gyro_box, gyro, &ctx.profile, ctx.device.as_ref(), &ctx.on_dirty);
     add_calibration_group(
         &gyro_box,
         ira_input::calibration_store_path(save_dir),

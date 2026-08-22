@@ -1,43 +1,37 @@
 //! Whole-controller gyro configuration card for the editor's Gyro page.
 //!
-//! Replaces the old per-axis gyro bindings: one switch, one activation rule,
-//! one output, a sensitivity multiplier, and the smoothing toggle — mirroring
-//! the Steam Input gyro panel instead of three hand-wired bindings.
+//! One full-width libadwaita row per setting: enable switch, activation rule,
+//! output, sensitivity multiplier, invert/smoothing toggles — mirroring the
+//! Steam Input gyro panel — plus the emulator-motion (cemuhook UDP) stream
+//! switch, which lives on the profile itself.
 
+use super::input_profile_activator_sheet::{combo_row, spin_row};
 use super::input_profile_options::source_options_for_device;
 use adw::prelude::*;
 use ira_input::{
     DeviceInfo, GamepadButton, GyroActivation, GyroConfig, GyroOrientation, GyroOutput,
-    InputSource, VirtualGamepadBackend,
+    InputProfile, InputSource, VirtualGamepadBackend,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
 
 #[derive(Clone)]
 struct GyroWidgets {
-    enable_row: adw::ActionRow,
-    enable: gtk4::Switch,
-    activation_row: adw::ActionRow,
-    activation: gtk4::DropDown,
-    button_row: adw::ActionRow,
-    button: gtk4::DropDown,
-    output_row: adw::ActionRow,
-    output: gtk4::DropDown,
-    orientation_row: adw::ActionRow,
-    orientation: gtk4::DropDown,
-    sensitivity_row: adw::ActionRow,
-    sensitivity: gtk4::SpinButton,
-    invert_x_row: adw::ActionRow,
-    invert_x: gtk4::Switch,
-    invert_y_row: adw::ActionRow,
-    invert_y: gtk4::Switch,
-    smoothing_row: adw::ActionRow,
-    smoothing: gtk4::Switch,
+    enable: adw::SwitchRow,
+    activation: adw::ComboRow,
+    button: adw::ComboRow,
+    output: adw::ComboRow,
+    orientation: adw::ComboRow,
+    sensitivity: adw::SpinRow,
+    invert_x: adw::SwitchRow,
+    invert_y: adw::SwitchRow,
+    smoothing: adw::SwitchRow,
 }
 
 pub(super) fn add_gyro_group(
     page: &gtk4::Box,
     gyro: &Rc<RefCell<GyroConfig>>,
+    profile: &Rc<RefCell<InputProfile>>,
     device: Option<&DeviceInfo>,
     on_dirty: &Rc<dyn Fn()>,
 ) {
@@ -47,77 +41,124 @@ pub(super) fn add_gyro_group(
         "Rotating the controller steers the output. Yaw and pitch are measured relative to gravity, so aiming stays consistent no matter how the controller is held."
     )));
 
-    let passthrough = adw::ActionRow::new();
-    passthrough.set_title(&crate::tr!("Emulator motion"));
-    passthrough.set_subtitle(&crate::tr!(
-        "Raw gyro streams on UDP port 26760 (cemuhook) while a mapped game runs; point emulator motion settings at this machine or disable it per game"
-    ));
-    let badge = gtk4::Label::new(Some(&crate::tr!("UDP 26760")));
-    badge.add_css_class(super::css::CSS_DIM_LABEL);
-    badge.set_valign(gtk4::Align::Center);
-    passthrough.add_suffix(&badge);
-    group.add(&passthrough);
-
     let button_options = activation_button_options(device, &gyro.borrow().activation);
-    let (enable_row, enable) = switch_row(&crate::tr!("Enable gyro"), gyro.borrow().enabled);
-    let (activation_row, activation) = dropdown_row(
-        &crate::tr!("Activation"),
-        &activation_labels(),
-        activation_index(&gyro.borrow().activation),
-    );
-    let (button_row, button) = dropdown_row(
-        &crate::tr!("Activation button"),
-        &button_option_labels(&button_options),
-        activation_button_index(&button_options, &gyro.borrow().activation),
-    );
-    let (output_row, output) =
-        dropdown_row(&crate::tr!("Output"), &output_labels(), output_index(gyro.borrow().output));
-    let (orientation_row, orientation) = dropdown_row(
-        &crate::tr!("Orientation"),
-        &orientation_labels(),
-        orientation_index(gyro.borrow().orientation),
-    );
-    let (sensitivity_row, sensitivity) = sensitivity_row(gyro.borrow().sensitivity);
-    let (invert_x_row, invert_x) =
-        switch_row(&crate::tr!("Invert horizontal"), gyro.borrow().invert_x);
-    let (invert_y_row, invert_y) = switch_row(&crate::tr!("Invert vertical"), gyro.borrow().invert_y);
-    let (smoothing_row, smoothing) = switch_row(&crate::tr!("Smoothing"), gyro.borrow().smoothing);
     let widgets = GyroWidgets {
-        enable_row,
-        enable,
-        activation_row,
-        activation,
-        button_row,
-        button,
-        output_row,
-        output,
-        orientation_row,
-        orientation,
-        sensitivity_row,
-        sensitivity,
-        invert_x_row,
-        invert_x,
-        invert_y_row,
-        invert_y,
-        smoothing_row,
-        smoothing,
+        enable: switch_row(
+            &crate::tr!("Enable gyro"),
+            None,
+            gyro.borrow().enabled,
+            {
+                let gyro = gyro.clone();
+                let on_dirty = on_dirty.clone();
+                Rc::new(move |active| {
+                    gyro.borrow_mut().enabled = active;
+                    on_dirty();
+                })
+            },
+        ),
+        activation: combo_row(
+            &activation_labels(),
+            activation_index(&gyro.borrow().activation),
+        ),
+        button: combo_row(
+            &button_option_labels(&button_options),
+            activation_button_index(&button_options, &gyro.borrow().activation),
+        ),
+        output: combo_row(&output_labels(), output_index(gyro.borrow().output)),
+        orientation: combo_row(
+            &orientation_labels(),
+            orientation_index(gyro.borrow().orientation),
+        ),
+        sensitivity: spin_row(
+            &crate::tr!("Sensitivity"),
+            0.05,
+            20.0,
+            0.05,
+            gyro.borrow().sensitivity as f64,
+            {
+                let gyro = gyro.clone();
+                let on_dirty = on_dirty.clone();
+                Rc::new(move |value| {
+                    gyro.borrow_mut().sensitivity = value as f32;
+                    on_dirty();
+                })
+            },
+        ),
+        invert_x: switch_row(
+            &crate::tr!("Invert horizontal"),
+            None,
+            gyro.borrow().invert_x,
+            {
+                let gyro = gyro.clone();
+                let on_dirty = on_dirty.clone();
+                Rc::new(move |active| {
+                    gyro.borrow_mut().invert_x = active;
+                    on_dirty();
+                })
+            },
+        ),
+        invert_y: switch_row(
+            &crate::tr!("Invert vertical"),
+            None,
+            gyro.borrow().invert_y,
+            {
+                let gyro = gyro.clone();
+                let on_dirty = on_dirty.clone();
+                Rc::new(move |active| {
+                    gyro.borrow_mut().invert_y = active;
+                    on_dirty();
+                })
+            },
+        ),
+        smoothing: switch_row(
+            &crate::tr!("Smoothing"),
+            Some(&crate::tr!("Damps jitter while aiming slowly; flicks stay untouched")),
+            gyro.borrow().smoothing,
+            {
+                let gyro = gyro.clone();
+                let on_dirty = on_dirty.clone();
+                Rc::new(move |active| {
+                    gyro.borrow_mut().smoothing = active;
+                    on_dirty();
+                })
+            },
+        ),
     };
-    widgets
-        .smoothing_row
-        .set_subtitle(&crate::tr!("Damps jitter while aiming slowly; flicks stay untouched"));
+    widgets.sensitivity.set_subtitle(&crate::tr!(
+        "Multiplier applied to gyro motion"
+    ));
+
+    let udp = switch_row(
+        &crate::tr!("Emulator motion stream"),
+        Some(&crate::tr!(
+            "Broadcast raw gyro over cemuhook UDP port 26760 while a mapped game runs, for emulators with native motion support"
+        )),
+        profile.borrow().emulator_udp,
+        {
+            let profile = profile.clone();
+            let on_dirty = on_dirty.clone();
+            Rc::new(move |active| {
+                profile.borrow_mut().emulator_udp = active;
+                on_dirty();
+            })
+        },
+    );
+
     update_dependency_rows(&widgets, gyro.borrow().enabled);
 
-    for row in [
-        &widgets.enable_row,
-        &widgets.activation_row,
-        &widgets.button_row,
-        &widgets.output_row,
-        &widgets.orientation_row,
-        &widgets.sensitivity_row,
-        &widgets.invert_x_row,
-        &widgets.invert_y_row,
-        &widgets.smoothing_row,
-    ] {
+    let rows: [&adw::PreferencesRow; 10] = [
+        widgets.enable.upcast_ref(),
+        widgets.activation.upcast_ref(),
+        widgets.button.upcast_ref(),
+        widgets.output.upcast_ref(),
+        widgets.orientation.upcast_ref(),
+        widgets.sensitivity.upcast_ref(),
+        widgets.invert_x.upcast_ref(),
+        widgets.invert_y.upcast_ref(),
+        widgets.smoothing.upcast_ref(),
+        udp.upcast_ref(),
+    ];
+    for row in rows {
         group.add(row);
     }
     page.append(&group);
@@ -130,59 +171,11 @@ fn connect_gyro_changes(
     gyro: &Rc<RefCell<GyroConfig>>,
     on_dirty: &Rc<dyn Fn()>,
 ) {
+    // The enable switch writes the config through its own construction
+    // closure; this second connection just refreshes dependent rows.
     let widgets_for_enable = widgets.clone();
-    let gyro_for_enable = gyro.clone();
-    let on_dirty_for_enable = on_dirty.clone();
-    widgets.enable.connect_active_notify(move |switch| {
-        gyro_for_enable.borrow_mut().enabled = switch.is_active();
-        update_dependency_rows(&widgets_for_enable, switch.is_active());
-        on_dirty_for_enable();
-    });
-
-    let gyro_for_activation = gyro.clone();
-    let on_dirty_for_activation = on_dirty.clone();
-    let button_options_for_activation = button_options.to_vec();
-    let widgets_for_activation = widgets.clone();
-    widgets.activation.connect_selected_notify(move |dropdown| {
-        let fallback_button = button_options_for_activation
-            .get(widgets_for_activation.button.selected() as usize)
-            .and_then(|(source, _)| match source {
-                InputSource::Button(button) => Some(*button),
-                _ => None,
-            })
-            .unwrap_or(GamepadButton::LeftTrigger);
-        let mut gyro = gyro_for_activation.borrow_mut();
-        gyro.activation = match dropdown.selected() {
-            1 => GyroActivation::Hold(fallback_button),
-            2 => GyroActivation::Toggle(fallback_button),
-            _ => GyroActivation::Always,
-        };
-        drop(gyro);
-        widgets_for_activation
-            .button_row
-            .set_visible(dropdown.selected() != 0);
-        on_dirty_for_activation();
-    });
-
-    let gyro_for_button = gyro.clone();
-    let on_dirty_for_button = on_dirty.clone();
-    let activation_for_button = widgets.activation.clone();
-    let button_options_for_button = button_options.to_vec();
-    widgets.button.connect_selected_notify(move |dropdown| {
-        let Some(InputSource::Button(button)) = button_options_for_button
-            .get(dropdown.selected() as usize)
-            .map(|(source, _)| *source)
-        else {
-            return;
-        };
-        let mut gyro = gyro_for_button.borrow_mut();
-        gyro.activation = match (gyro.activation, activation_for_button.selected()) {
-            (GyroActivation::Hold(_), 1) => GyroActivation::Hold(button),
-            (GyroActivation::Toggle(_), 2) => GyroActivation::Toggle(button),
-            (current, _) => current,
-        };
-        drop(gyro);
-        on_dirty_for_button();
+    widgets.enable.connect_active_notify(move |row| {
+        update_dependency_rows(&widgets_for_enable, row.is_active());
     });
 
     let gyro_for_output = gyro.clone();
@@ -209,85 +202,100 @@ fn connect_gyro_changes(
         };
         on_dirty_for_orientation();
     });
+    connect_activation_changes(widgets, button_options, gyro, on_dirty);
+}
 
-    let gyro_for_sensitivity = gyro.clone();
-    let on_dirty_for_sensitivity = on_dirty.clone();
-    widgets
-        .sensitivity
-        .connect_value_changed(move |spin| {
-            gyro_for_sensitivity.borrow_mut().sensitivity = spin.value() as f32;
-            on_dirty_for_sensitivity();
-        });
-
-    let gyro_for_invert_x = gyro.clone();
-    let on_dirty_for_invert_x = on_dirty.clone();
-    widgets.invert_x.connect_active_notify(move |switch| {
-        gyro_for_invert_x.borrow_mut().invert_x = switch.is_active();
-        on_dirty_for_invert_x();
+fn connect_activation_changes(
+    widgets: &GyroWidgets,
+    button_options: &[(InputSource, String)],
+    gyro: &Rc<RefCell<GyroConfig>>,
+    on_dirty: &Rc<dyn Fn()>,
+) {
+    let gyro_for_activation = gyro.clone();
+    let on_dirty_for_activation = on_dirty.clone();
+    let button_options_for_activation = button_options.to_vec();
+    let widgets_for_activation = widgets.clone();
+    widgets.activation.connect_selected_notify(move |dropdown| {
+        apply_activation_selection(
+            &widgets_for_activation,
+            dropdown.selected(),
+            &button_options_for_activation,
+            &gyro_for_activation,
+            &on_dirty_for_activation,
+        );
     });
 
-    let gyro_for_invert_y = gyro.clone();
-    let on_dirty_for_invert_y = on_dirty.clone();
-    widgets.invert_y.connect_active_notify(move |switch| {
-        gyro_for_invert_y.borrow_mut().invert_y = switch.is_active();
-        on_dirty_for_invert_y();
+    let gyro_for_button = gyro.clone();
+    let on_dirty_for_button = on_dirty.clone();
+    let activation_for_button = widgets.activation.clone();
+    let button_options_for_button = button_options.to_vec();
+    widgets.button.connect_selected_notify(move |dropdown| {
+        let Some(InputSource::Button(button)) = button_options_for_button
+            .get(dropdown.selected() as usize)
+            .map(|(source, _)| *source)
+        else {
+            return;
+        };
+        let mut gyro = gyro_for_button.borrow_mut();
+        gyro.activation = match (gyro.activation, activation_for_button.selected()) {
+            (GyroActivation::Hold(_), 1) => GyroActivation::Hold(button),
+            (GyroActivation::Toggle(_), 2) => GyroActivation::Toggle(button),
+            (current, _) => current,
+        };
+        drop(gyro);
+        on_dirty_for_button();
     });
+}
 
-    let gyro_for_smoothing = gyro.clone();
-    let on_dirty_for_smoothing = on_dirty.clone();
-    widgets.smoothing.connect_active_notify(move |switch| {
-        gyro_for_smoothing.borrow_mut().smoothing = switch.is_active();
-        on_dirty_for_smoothing();
-    });
+fn apply_activation_selection(
+    widgets: &GyroWidgets,
+    selected: u32,
+    button_options: &[(InputSource, String)],
+    gyro: &Rc<RefCell<GyroConfig>>,
+    on_dirty: &Rc<dyn Fn()>,
+) {
+    let fallback_button = button_options
+        .get(widgets.button.selected() as usize)
+        .and_then(|(source, _)| match source {
+            InputSource::Button(button) => Some(*button),
+            _ => None,
+        })
+        .unwrap_or(GamepadButton::LeftTrigger);
+    gyro.borrow_mut().activation = match selected {
+        1 => GyroActivation::Hold(fallback_button),
+        2 => GyroActivation::Toggle(fallback_button),
+        _ => GyroActivation::Always,
+    };
+    widgets.button.set_visible(selected != 0);
+    on_dirty();
 }
 
 fn update_dependency_rows(widgets: &GyroWidgets, enabled: bool) {
-    widgets.activation_row.set_sensitive(enabled);
-    widgets.output_row.set_sensitive(enabled);
-    widgets.orientation_row.set_sensitive(enabled);
-    widgets.sensitivity_row.set_sensitive(enabled);
-    widgets.invert_x_row.set_sensitive(enabled);
-    widgets.invert_y_row.set_sensitive(enabled);
-    widgets.smoothing_row.set_sensitive(enabled);
+    widgets.activation.set_sensitive(enabled);
+    widgets.button.set_sensitive(enabled);
+    widgets.output.set_sensitive(enabled);
+    widgets.orientation.set_sensitive(enabled);
+    widgets.sensitivity.set_sensitive(enabled);
+    widgets.invert_x.set_sensitive(enabled);
+    widgets.invert_y.set_sensitive(enabled);
+    widgets.smoothing.set_sensitive(enabled);
     widgets
-        .button_row
+        .button
         .set_visible(enabled && widgets.activation.selected() != 0);
 }
 
-fn switch_row(title: &str, active: bool) -> (adw::ActionRow, gtk4::Switch) {
-    let row = adw::ActionRow::new();
-    row.set_title(title);
-    let switch = gtk4::Switch::new();
-    switch.set_active(active);
-    switch.set_valign(gtk4::Align::Center);
-    row.add_suffix(&switch);
-    (row, switch)
-}
-
-fn dropdown_row(title: &str, labels: &[String], selected: u32) -> (adw::ActionRow, gtk4::DropDown) {
-    let row = adw::ActionRow::new();
-    row.set_title(title);
-    let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let dropdown = gtk4::DropDown::new(
-        Some(gtk4::StringList::new(&refs)),
-        None::<&gtk4::Expression>,
-    );
-    dropdown.set_selected(selected);
-    dropdown.set_valign(gtk4::Align::Center);
-    row.add_suffix(&dropdown);
-    (row, dropdown)
-}
-
-fn sensitivity_row(value: f32) -> (adw::ActionRow, gtk4::SpinButton) {
-    let row = adw::ActionRow::new();
-    row.set_title(&crate::tr!("Sensitivity"));
-    row.set_subtitle(&crate::tr!("Multiplier applied to gyro motion"));
-    let spin = gtk4::SpinButton::with_range(0.05, 20.0, 0.05);
-    spin.set_digits(2);
-    spin.set_value(value as f64);
-    spin.set_valign(gtk4::Align::Center);
-    row.add_suffix(&spin);
-    (row, spin)
+fn switch_row(
+    title: &str,
+    subtitle: Option<&str>,
+    active: bool,
+    on_change: Rc<dyn Fn(bool)>,
+) -> adw::SwitchRow {
+    let row = adw::SwitchRow::builder().title(title).active(active).build();
+    if let Some(subtitle) = subtitle {
+        row.set_subtitle(subtitle);
+    }
+    row.connect_active_notify(move |row| on_change(row.is_active()));
+    row
 }
 
 fn orientation_labels() -> Vec<String> {

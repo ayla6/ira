@@ -504,11 +504,19 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let gyro_processor =
         make_gyro_processor(mapper.profile(), pad_vendor, pad_product, arguments.calibration.as_deref());
     let last_sensor_us: Option<u64> = None;
+    // The motion node must exist before the game opens the virtual pad:
+    // SDL pairs sensor nodes with a pad at open time only.
+    let motion_device = if sensor.is_some() {
+        open_motion_node(mapper.profile().backend)
+    } else {
+        None
+    };
     let mut pipeline = SensorPipeline {
         sensor,
         gyro_processor,
         last_sensor_us,
         motion: motion_server,
+        motion_device,
     };
     // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
     // even when no sensor exists, as long as something consumes them.
@@ -723,6 +731,13 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             gamepad.info().path.display()
                         );
                         pipeline.sensor = open_sensor(gamepad.info());
+                        if pipeline.motion_device.is_none() {
+                            // Best effort: if the game already opened the pad
+                            // before this node appears, pairing waits for the
+                            // next pad (re)open.
+                            pipeline.motion_device =
+                                open_motion_node(mapper.profile().backend);
+                        }
                         if pipeline.sensor.is_some() && pipeline.motion.is_none() && motion_enabled {
                             pipeline.motion = ira_input::MotionServer::bind();
                             if pipeline.motion.is_some() {
@@ -1368,6 +1383,22 @@ struct SensorPipeline {
     gyro_processor: GyroProcessor,
     last_sensor_us: Option<u64>,
     motion: Option<ira_input::MotionServer>,
+    motion_device: Option<ira_input::VirtualMotionSensor>,
+}
+
+fn open_motion_node(backend: ira_input::VirtualGamepadBackend) -> Option<ira_input::VirtualMotionSensor> {
+    match ira_input::VirtualMotionSensor::create(backend) {
+        Ok(device) => {
+            eprintln!(
+                "ira-input: native gyro exposed through evdev motion node (SDL sensors)"
+            );
+            Some(device)
+        }
+        Err(error) => {
+            eprintln!("ira-input: failed to create native motion node: {error}");
+            None
+        }
+    }
 }
 
 fn process_tick(
@@ -1391,6 +1422,16 @@ fn process_tick(
                     .clamp(0.0005, 0.05);
                 pipeline.last_sensor_us = Some(sample.timestamp_us);
                 trace.record_gyro(sample.gyro);
+                if let Some(motion_device) = pipeline.motion_device.as_mut() {
+                    // Native passthrough: SDL-based emulators read the same
+                    // unfiltered sensor straight from the virtual pad.
+                    if let Err(error) = motion_device.emit_sample(
+                        sample.gyro,
+                        sample.accel.unwrap_or([0.0, 0.0, 0.0]),
+                    ) {
+                        eprintln!("ira-input: native motion node failed: {error}");
+                    }
+                }
                 if let Some(motion) = pipeline.motion.as_mut() {
                     // Raw passthrough: emulators consuming the DSU stream get
                     // the unfiltered sensor, independent of the mapping

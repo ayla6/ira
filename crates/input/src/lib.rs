@@ -31,6 +31,8 @@ mod focus;
 pub use focus::FocusWatcher;
 mod motion_udp;
 pub use motion_udp::{sensor_to_motion, MotionSample, MotionServer, MOTION_PORT};
+mod motion_device;
+pub use motion_device::VirtualMotionSensor;
 pub mod vdf;
 pub use vdf::{import_vdf, import_vdf_file, ImportReport};
 pub use sensor::{discover_sdl_gamepads, SensorSample, Sdl3SensorBackend, SdlGamepadInfo};

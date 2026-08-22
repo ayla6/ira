@@ -140,10 +140,9 @@ pub(super) fn show_input_profile_editor(
     add_gyro_group(&page_boxes[4], &gyro, device.as_ref(), &mark_dirty);
     add_calibration_group(
         &page_boxes[4],
-        &calibration,
+        ira_input::calibration_store_path(&save_dir),
         calibration_device,
-        &registry,
-        &mark_dirty,
+        registry.clone(),
     );
 
     let reset = reset_button(

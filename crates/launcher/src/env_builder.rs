@@ -497,10 +497,14 @@ fn input_binary_path() -> Option<String> {
 
 /// Wraps a final game command with the host-side input broker.
 /// The broker stays outside Wine, Proton, umu, gamescope, and Flatpak.
-pub fn wrap_with_input(command: &mut Vec<String>, profile: Option<&str>) -> Result<(), String> {
+pub fn wrap_with_input(
+    command: &mut Vec<String>,
+    profile: Option<&str>,
+    calibration: Option<&str>,
+) -> Result<(), String> {
     let binary = input_binary_path()
         .ok_or_else(|| "input remapping enabled but ira-input was not found".to_string())?;
-    wrap_command_with_input(command, &binary, profile);
+    wrap_command_with_input(command, &binary, profile, calibration);
     Ok(())
 }
 
@@ -509,6 +513,7 @@ pub fn wrap_with_input_mode(
     command: &mut Vec<String>,
     mode: Option<ControllerInputMode>,
     profile: Option<&str>,
+    calibration: Option<&str>,
 ) -> Result<(), String> {
     let binary = match mode {
         Some(ControllerInputMode::VirtualXInput)
@@ -519,7 +524,7 @@ pub fn wrap_with_input_mode(
     if let Some(binary) = binary {
         let binary = binary
             .ok_or_else(|| "input remapping enabled but ira-input was not found".to_string())?;
-        wrap_command_with_input(command, &binary, profile);
+        wrap_command_with_input(command, &binary, profile, calibration);
     }
     Ok(())
 }
@@ -529,24 +534,34 @@ fn wrap_with_input_mode_for_binary(
     command: &mut Vec<String>,
     mode: Option<ControllerInputMode>,
     profile: Option<&str>,
+    calibration: Option<&str>,
     binary: &str,
 ) {
     match mode {
         Some(ControllerInputMode::VirtualXInput)
         | Some(ControllerInputMode::VirtualDirectInput)
         | Some(ControllerInputMode::VirtualSwitchPro) => {
-            wrap_command_with_input(command, binary, profile)
+            wrap_command_with_input(command, binary, profile, calibration)
         }
         None | Some(ControllerInputMode::Disabled) => {}
     }
 }
 
-fn wrap_command_with_input(command: &mut Vec<String>, binary: &str, profile: Option<&str>) {
+fn wrap_command_with_input(
+    command: &mut Vec<String>,
+    binary: &str,
+    profile: Option<&str>,
+    calibration: Option<&str>,
+) {
     let game_command = std::mem::take(command);
     let mut wrapped = vec![binary.to_string()];
     if let Some(profile) = profile.filter(|profile| !profile.is_empty()) {
         wrapped.push("--profile".to_string());
         wrapped.push(profile.to_string());
+    }
+    if let Some(calibration) = calibration.filter(|calibration| !calibration.is_empty()) {
+        wrapped.push("--calibration".to_string());
+        wrapped.push(calibration.to_string());
     }
     wrapped.push("--".to_string());
     wrapped.extend(game_command);
@@ -636,6 +651,7 @@ mod tests {
             &mut command,
             Some(ControllerInputMode::Disabled),
             None,
+            None,
             "/bin/ira-input",
         );
         assert_eq!(command, vec!["game", "--fullscreen"]);
@@ -644,7 +660,7 @@ mod tests {
     #[test]
     fn test_input_mode_none_inherits_without_wrapping_command() {
         let mut command = command();
-        wrap_with_input_mode_for_binary(&mut command, None, Some("profile"), "/bin/ira-input");
+        wrap_with_input_mode_for_binary(&mut command, None, Some("profile"), None, "/bin/ira-input");
         assert_eq!(command, vec!["game", "--fullscreen"]);
     }
 
@@ -655,6 +671,7 @@ mod tests {
             &mut command,
             Some(ControllerInputMode::VirtualXInput),
             Some("profile"),
+            None,
             "/bin/ira-input",
         );
         assert_eq!(
@@ -677,6 +694,7 @@ mod tests {
             &mut command,
             Some(ControllerInputMode::VirtualDirectInput),
             None,
+            None,
             "/bin/ira-input",
         );
         assert_eq!(
@@ -691,6 +709,7 @@ mod tests {
         wrap_with_input_mode_for_binary(
             &mut command,
             Some(ControllerInputMode::VirtualSwitchPro),
+            None,
             None,
             "/bin/ira-input",
         );

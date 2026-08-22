@@ -153,6 +153,7 @@ fn install_signal_handlers() {
 struct Arguments {
     device: Option<PathBuf>,
     profile: Option<PathBuf>,
+    calibration: Option<PathBuf>,
     list: bool,
     probe_sensors: bool,
     steam_app_id: Option<String>,
@@ -262,6 +263,7 @@ fn parse_arguments() -> Result<Arguments, String> {
     let mut arguments = Arguments {
         device: None,
         profile: None,
+        calibration: None,
         list: false,
         probe_sensors: false,
         steam_app_id: None,
@@ -287,6 +289,13 @@ fn parse_arguments() -> Result<Arguments, String> {
                     values
                         .next()
                         .ok_or_else(|| "--profile requires a path".to_string())?,
+                ));
+            }
+            "--calibration" => {
+                arguments.calibration = Some(PathBuf::from(
+                    values
+                        .next()
+                        .ok_or_else(|| "--calibration requires a path".to_string())?,
                 ));
             }
             "--steam-app-id" => {
@@ -407,7 +416,12 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let mut virtual_gamepad = VirtualGamepad::create_for_backend(mapper.profile().backend)
         .map_err(|error| format!("failed to create virtual gamepad: {error}"))?;
     let mut sensor = gamepad.as_ref().and_then(|gamepad| open_sensor(gamepad.info()));
-    let mut gyro_processor = make_gyro_processor(mapper.profile());
+    let (pad_vendor, pad_product) = gamepad
+        .as_ref()
+        .map(|gamepad| (gamepad.info().vendor, gamepad.info().product))
+        .unwrap_or((0, 0));
+    let mut gyro_processor =
+        make_gyro_processor(mapper.profile(), pad_vendor, pad_product, arguments.calibration.as_deref());
     let mut last_sensor_us: Option<u64> = None;
     // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
     // even when no sensor exists, as long as something consumes them.
@@ -612,7 +626,12 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             monitor.path().display()
                         );
                     } else {
-                        gyro_processor = make_gyro_processor(mapper.profile());
+                        gyro_processor = make_gyro_processor(
+                            mapper.profile(),
+                            pad_vendor,
+                            pad_product,
+                            arguments.calibration.as_deref(),
+                        );
                         last_sensor_us = None;
                         tick_needed = sensor.is_some() || mapper.has_continuous_outputs();
                     }
@@ -1168,9 +1187,19 @@ fn process_physical_inputs(
     Ok(())
 }
 
-fn make_gyro_processor(profile: &InputProfile) -> GyroProcessor {
+fn make_gyro_processor(
+    profile: &InputProfile,
+    vendor: u16,
+    product: u16,
+    calibration_store: Option<&Path>,
+) -> GyroProcessor {
+    // Per-controller calibration wins; the profile's stored bias is only a
+    // legacy fallback.
+    let bias = calibration_store
+        .and_then(|path| ira_input::load_calibration(path, vendor, product))
+        .unwrap_or(profile.gyro_calibration);
     GyroProcessor::new(
-        profile.gyro_calibration,
+        bias,
         GyroProcessingOptions {
             smoothing: profile.gyro.smoothing,
             auto_calibrate: true,

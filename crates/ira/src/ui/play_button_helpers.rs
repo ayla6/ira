@@ -340,7 +340,12 @@ fn build_emulator_env_and_wrap(
         console_profile.or(ctx.controller_input_profile.as_deref()),
     )?;
     if input_profile.is_some() {
-        ira_launcher::env_builder::wrap_with_input(cmd, input_profile.as_deref())?;
+        let calibration = ira_input::calibration_store_path(ctx.save_dir);
+        ira_launcher::env_builder::wrap_with_input(
+            cmd,
+            input_profile.as_deref(),
+            Some(calibration.to_str().unwrap_or_default()),
+        )?;
         eprintln!(
             "ira-input: enabled for {}{}",
             ctx.game_name,
@@ -589,10 +594,12 @@ pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<bool, String
         ctx.controller_input_profile.as_deref(),
     )?;
     if input_backend(input_mode).is_some() {
+        let calibration = ira_input::calibration_store_path(ctx.save_dir);
         ira_launcher::env_builder::wrap_with_input_mode(
             &mut cmd,
             Some(input_mode),
             input_profile.as_deref(),
+            Some(calibration.to_str().unwrap_or_default()),
         )?;
         let separator = cmd
             .iter()

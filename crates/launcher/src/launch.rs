@@ -226,7 +226,16 @@ pub fn launch_game(
     };
 
     let input_profile = launch.input_profile.as_deref();
-    super::env_builder::wrap_with_input_mode(&mut command, launch.input_mode, input_profile)?;
+    // Same file ira_input::calibration_store_path writes; the launcher does
+    // not depend on that crate, so the name lives here too.
+    let calibration = std::path::Path::new(&ctx.save_dir)
+        .join("controller_calibration.json");
+    super::env_builder::wrap_with_input_mode(
+        &mut command,
+        launch.input_mode,
+        input_profile,
+        Some(calibration.to_str().unwrap_or_default()),
+    )?;
 
     // Set PWD to the game's working directory
     if let Some(ref dir) = game_dir {

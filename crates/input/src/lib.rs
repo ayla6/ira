@@ -1,3 +1,4 @@
+mod calibration;
 mod gyro;
 mod mapping;
 mod physical;
@@ -19,6 +20,9 @@ pub use profile::{
     GyroCalibration, GyroConfig, GyroOrientation, GyroOutput, InputCategory, InputMapping, InputProfile,
     InputSource, ModeShift, MouseAxis, MouseButton, OutputAction, SourceMode, StickOutput,
     VirtualGamepadBackend, PROFILE_VERSION,
+};
+pub use calibration::{
+    calibration_store_path, device_key, load_calibration, remove_calibration, save_calibration,
 };
 pub use gyro::{GyroProcessingOptions, GyroProcessor, GyroRates};
 pub use registry::ControllerRegistry;

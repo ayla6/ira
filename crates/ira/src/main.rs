@@ -24,8 +24,30 @@ fn init_tracing() -> Option<()> {
     None
 }
 
+/// When IRA_CRITICAL_BACKTRACE is set, every GTK critical warning prints a
+/// Rust backtrace after it, so a single run pinpoints which code path passed
+/// the stale widget pointer.
+fn init_critical_backtrace() {
+    if std::env::var_os("IRA_CRITICAL_BACKTRACE").is_none() {
+        return;
+    }
+    gtk4::glib::log_set_handler(
+        Some("Gtk"),
+        gtk4::glib::LogLevels::LEVEL_CRITICAL,
+        false,
+        false,
+        |_domain, _level, message| {
+            eprintln!(
+                "ira: critical: {message}\n{}",
+                std::backtrace::Backtrace::force_capture()
+            );
+        },
+    );
+}
+
 fn main() {
     let _flush_guard = init_tracing();
+    init_critical_backtrace();
     // Keep large image buffers (covers, heroes, logos) mmap-backed so freeing
     // them returns the memory to the OS instead of leaving fragmented holes in
     // the sbrk arena that malloc_trim can't reclaim. Pinning the threshold

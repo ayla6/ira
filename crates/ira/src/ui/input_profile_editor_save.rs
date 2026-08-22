@@ -77,20 +77,24 @@ pub(super) fn connect_persist(button: &gtk4::Button, persist: Rc<dyn Fn()>) {
     button.connect_clicked(move |_| persist());
 }
 
-/// Closing with unsaved changes offers Save / Discard / Cancel.
+/// Closing with unsaved changes offers Save / Discard / Cancel. The footer's
+/// Cancel button sets `force_close` first: pressing Cancel means discard and
+/// close, never another prompt.
 pub(super) fn connect_unsaved_guard(
     window: &adw::Window,
     save: &gtk4::Button,
     persist: &Rc<dyn Fn()>,
     baseline: &Rc<RefCell<InputProfile>>,
     form: &EditorForm,
+    force_close: &Rc<std::cell::Cell<bool>>,
 ) {
     let save_for_guard = save.clone();
     let persist_for_guard = persist.clone();
     let baseline_for_guard = baseline.clone();
     let form_for_guard = form.clone();
+    let force_close_for_guard = force_close.clone();
     window.connect_close_request(move |win| {
-        if !save_for_guard.is_sensitive() {
+        if !save_for_guard.is_sensitive() || force_close_for_guard.get() {
             return gtk4::glib::Propagation::Proceed;
         }
         let dialog = adw::AlertDialog::new(

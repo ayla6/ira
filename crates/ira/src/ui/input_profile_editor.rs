@@ -202,10 +202,17 @@ pub(super) fn show_input_profile_editor(
     connect_persist(&save, persist_save.clone());
     connect_persist(&apply, persist_closure(form.clone(), shared(&apply, false)));
 
-    connect_unsaved_guard(&layout.window, &save, &persist_save, &baseline, &form);
-
+    // Cancel means discard: close without the unsaved-changes prompt.
+    let force_close = Rc::new(std::cell::Cell::new(false));
     let window_for_cancel = layout.window.clone();
-    cancel.connect_clicked(move |_| window_for_cancel.close());
+    let force_close_for_cancel = force_close.clone();
+    cancel.connect_clicked(move |_| {
+        force_close_for_cancel.set(true);
+        window_for_cancel.close();
+    });
+
+    connect_unsaved_guard(&layout.window, &save, &persist_save, &baseline, &form, &force_close);
+
     layout.window.present();
 }
 

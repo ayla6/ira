@@ -102,14 +102,160 @@ pub(crate) fn rebuild_region_pages(ctx: &PagesCtx, pages: &RegionPages) {
     for (index, region) in Region::ALL.into_iter().enumerate() {
         let page = &pages.region_boxes[index];
         super::helpers::clear_children(page);
+        let sources = region_sources(region, ctx.device.as_ref());
         let group = adw::PreferencesGroup::new();
         group.set_title(&region.title());
-        for source in region_sources(region, ctx.device.as_ref()) {
-            let mapping = mappings.iter().find(|mapping| mapping.source == source);
-            group.add(&region_source_row(ctx, source, mapping, family));
+        if !sources.is_empty() {
+            group.add(&section_behavior_row(ctx, region, &mappings));
+        }
+        for source in &sources {
+            let mapping = mappings.iter().find(|mapping| mapping.source == *source);
+            group.add(&region_source_row(ctx, *source, mapping, family));
         }
         page.append(&group);
+        if let Some(pairs) = swappable_pairs(region) {
+            page.append(&swap_group(ctx, &pairs));
+        }
     }
+}
+
+/// Steam-style section behavior: "Default" while every input of the region
+/// carries its standard one-to-one mapping, "Custom" as soon as anything
+/// differs. Picking Default restores the standard mappings for the section.
+fn section_behavior_row(
+    ctx: &PagesCtx,
+    region: Region,
+    mappings: &[InputMapping],
+) -> adw::ComboRow {
+    let row = adw::ComboRow::new();
+    row.set_title(&crate::tr!("Behavior"));
+    row.set_subtitle(&crate::tr!(
+        "Apply this behavior to every binding in this section"
+    ));
+    row.set_model(Some(&gtk4::StringList::new(&[
+        &crate::tr!("Default"),
+        &crate::tr!("Custom"),
+    ])));
+    let is_default = region_is_at_defaults(region, ctx.device.as_ref(), mappings);
+    row.set_selected(if is_default { 0 } else { 1 });
+    // Only a manual flip onto Default mutates anything; the notify that
+    // fires for the initial selection must not rewrite the profile.
+    let applied = Rc::new(std::cell::Cell::new(is_default));
+    let ctx_for_select = ctx.clone();
+    row.connect_selected_notify(move |combo| {
+        if combo.selected() != 0 || applied.get() {
+            return;
+        }
+        applied.set(true);
+        for source in region_sources(region, ctx_for_select.device.as_ref()) {
+            insert_mapping(&ctx_for_select, default_mapping(source));
+        }
+        (ctx_for_select.on_dirty)();
+    });
+    row
+}
+
+/// True when every source of the region is mapped exactly to its default.
+fn region_is_at_defaults(
+    region: Region,
+    device: Option<&ira_input::DeviceInfo>,
+    mappings: &[InputMapping],
+) -> bool {
+    region_sources(region, device).into_iter().all(|source| {
+        mappings
+            .iter()
+            .find(|mapping| mapping.source == source)
+            .is_some_and(|mapping| *mapping == default_mapping(source))
+    })
+}
+
+/// Source pairs whose bindings trade places with "Swap left with right".
+type SourcePair = (InputSource, InputSource);
+
+fn swappable_pairs(region: Region) -> Option<Vec<SourcePair>> {
+    use GamepadAxis::{LeftTrigger, LeftX, LeftY, RightTrigger, RightX, RightY};
+    use GamepadButton::{
+        LeftShoulder, LeftStick, LeftTrigger as LeftTriggerButton, RightShoulder, RightStick,
+        RightTrigger as RightTriggerButton,
+    };
+    let pairs = match region {
+        Region::TriggersBumpers => vec![
+            (
+                InputSource::Axis(LeftTrigger),
+                InputSource::Axis(RightTrigger),
+            ),
+            (
+                InputSource::Button(LeftTriggerButton),
+                InputSource::Button(RightTriggerButton),
+            ),
+            (
+                InputSource::Button(LeftShoulder),
+                InputSource::Button(RightShoulder),
+            ),
+        ],
+        Region::Sticks => vec![
+            (InputSource::Axis(LeftX), InputSource::Axis(RightX)),
+            (InputSource::Axis(LeftY), InputSource::Axis(RightY)),
+            (
+                InputSource::Button(LeftStick),
+                InputSource::Button(RightStick),
+            ),
+        ],
+        _ => return None,
+    };
+    Some(pairs)
+}
+
+fn swap_group(ctx: &PagesCtx, pairs: &[SourcePair]) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::new();
+    let row = adw::ActionRow::new();
+    row.set_title(&crate::tr!("Swap left with right"));
+    row.set_subtitle(&crate::tr!(
+        "Trade every left-side binding of this page with its right-side counterpart"
+    ));
+    let swap = gtk4::Button::with_label(&crate::tr!("Swap"));
+    swap.add_css_class(super::css::CSS_FLAT);
+    swap.set_valign(gtk4::Align::Center);
+    row.add_suffix(&swap);
+    group.add(&row);
+    let ctx_for_swap = ctx.clone();
+    let pairs = pairs.to_vec();
+    swap.connect_clicked(move |_| {
+        let set = ctx_for_swap.active_set.get();
+        let mut profile = ctx_for_swap.profile.borrow_mut();
+        if let Some(set) = profile.action_sets.get_mut(set) {
+            for (left, right) in &pairs {
+                let left_mapping = set.inputs.iter().find(|m| m.source == *left).cloned();
+                let right_mapping = set.inputs.iter().find(|m| m.source == *right).cloned();
+                match (left_mapping, right_mapping) {
+                    (Some(l), Some(r)) => {
+                        for input in &mut set.inputs {
+                            if input.source == *left {
+                                *input = r.clone();
+                            } else if input.source == *right {
+                                *input = l.clone();
+                            }
+                        }
+                    }
+                    (Some(l), None) => {
+                        set.inputs.retain(|input| input.source != *left);
+                        set.inputs.push(InputMapping {
+                            source: *right,
+                            ..l
+                        });
+                    }
+                    (None, Some(r)) => {
+                        set.inputs.retain(|input| input.source != *right);
+                        set.inputs.push(InputMapping { source: *left, ..r });
+                    }
+                    (None, None) => {}
+                }
+            }
+        }
+        drop(profile);
+        (ctx_for_swap.on_dirty)();
+    });
+    group
 }
 
 fn active_mappings(profile: &ProfileRc, active_set: usize) -> Vec<InputMapping> {
@@ -243,5 +389,53 @@ pub(crate) fn default_mapping(source: InputSource) -> InputMapping {
             source,
             OutputAction::GamepadButton(GamepadButton::DpadUp),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{region_is_at_defaults, swappable_pairs, default_mapping, Region};
+    use ira_input::{InputMapping, InputSource};
+
+    #[test]
+    fn test_region_is_at_defaults_true_for_identity_mappings() {
+        let sources = super::region_sources(Region::Dpad, None);
+        let mappings: Vec<InputMapping> = sources.iter().map(|s| default_mapping(*s)).collect();
+        assert!(region_is_at_defaults(Region::Dpad, None, &mappings));
+    }
+
+    #[test]
+    fn test_region_is_at_defaults_false_when_unmapped_or_changed() {
+        let sources = super::region_sources(Region::FaceButtons, None);
+        // One source missing entirely: not at defaults.
+        let partial: Vec<InputMapping> = sources
+            .iter()
+            .skip(1)
+            .map(|s| default_mapping(*s))
+            .collect();
+        assert!(!region_is_at_defaults(Region::FaceButtons, None, &partial));
+
+        // An output that differs from identity reads as custom.
+        let mut changed: Vec<InputMapping> =
+            sources.iter().map(|s| default_mapping(*s)).collect();
+        if let Some(first) = changed.first_mut() {
+            first.activators[0].outputs.clear();
+        }
+        assert!(!region_is_at_defaults(Region::FaceButtons, None, &changed));
+    }
+
+    #[test]
+    fn test_swappable_pairs_only_on_lateral_regions() {
+        assert!(swappable_pairs(Region::TriggersBumpers).is_some());
+        assert!(swappable_pairs(Region::Sticks).is_some());
+        assert!(swappable_pairs(Region::FaceButtons).is_none());
+        assert!(swappable_pairs(Region::SystemPaddles).is_none());
+        for (left, right) in swappable_pairs(Region::Sticks).unwrap() {
+            assert_ne!(left, right);
+            assert_eq!(
+                InputSource::category(left),
+                InputSource::category(right)
+            );
+        }
     }
 }

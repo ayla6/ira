@@ -529,39 +529,30 @@ fn build_dialog_contents(
     let pending_emu_uninstall_w = pending_emu_uninstall.as_ref().map(Rc::downgrade);
 
     save_btn.connect_clicked(move |_| {
-        let Some(win) = win_w.upgrade() else {
-            return;
-        };
-        let Some(state) = state_w.upgrade() else {
-            return;
-        };
-        let Some(pending_copies) = pending_copies_w.upgrade() else {
-            return;
-        };
-        let Some(var_widgets) = var_widgets_w.upgrade() else {
-            return;
-        };
-        let Some(title_entry) = title_entry_w.upgrade() else {
-            return;
-        };
-        let Some(sort_entry) = sort_entry_w.upgrade() else {
-            return;
-        };
-        let Some(pending_version) = pending_version_w.upgrade() else {
-            return;
-        };
-        let Some(pending_ra_core) = pending_ra_core_w.upgrade() else {
-            return;
-        };
-        let Some(pending_emulator) = pending_emulator_w.upgrade() else {
-            return;
-        };
-        let Some(lwa) = lwa_w.upgrade() else {
-            return;
-        };
-        let Some(save_btn) = save_btn_w.upgrade() else {
-            return;
-        };
+        macro_rules! take {
+            ($weak:ident, $name:literal) => {
+                match $weak.upgrade() {
+                    Some(value) => value,
+                    None => {
+                        // Silent returns here made a dead Save button
+                        // impossible to diagnose; always say why.
+                        eprintln!("game settings: save aborted, {} was gone", $name);
+                        return;
+                    }
+                }
+            };
+        }
+        let win = take!(win_w, "window");
+        let state = take!(state_w, "state");
+        let pending_copies = take!(pending_copies_w, "pending copies");
+        let var_widgets = take!(var_widgets_w, "variant widgets");
+        let title_entry = take!(title_entry_w, "title entry");
+        let sort_entry = take!(sort_entry_w, "sort entry");
+        let pending_version = take!(pending_version_w, "pending version");
+        let pending_ra_core = take!(pending_ra_core_w, "pending RA core");
+        let pending_emulator = take!(pending_emulator_w, "pending emulator");
+        let lwa = take!(lwa_w, "page widgets");
+        let save_btn = take!(save_btn_w, "save button");
         let language_row = language_row_w.as_ref().and_then(|w| w.upgrade());
         let app_id_entry = app_id_entry_w.as_ref().and_then(|w| w.upgrade());
         let game_folder_entry = game_folder_entry_w.as_ref().and_then(|w| w.upgrade());

@@ -99,6 +99,8 @@ pub struct GyroConfig {
     pub enabled: bool,
     pub activation: GyroActivation,
     pub output: GyroOutput,
+    /// Which rotation axes feed horizontal/vertical output.
+    pub orientation: GyroOrientation,
     /// Sensitivity multiplier around 1.0, applied to both axes.
     pub sensitivity: f32,
     pub invert_x: bool,
@@ -135,12 +137,36 @@ pub enum GyroOutput {
     RightStick,
 }
 
+/// How gyro rotation maps to output axes, mirroring Steam Input's
+/// orientation presets.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GyroOrientation {
+    /// Turn the controller around its own vertical axis for horizontal
+    /// output; tilt around its lateral axis for vertical output.
+    Yaw,
+    /// Lean the controller around its forward axis for horizontal output;
+    /// tilt for vertical.
+    Roll,
+    /// Lean and turn added together for horizontal output; tilt stays local.
+    YawPlusRoll,
+    /// Rotation around the gravity axis drives horizontal output and local
+    /// pitch drives vertical output — consistent at any hold angle.
+    #[default]
+    PlayerSpace,
+    /// Gravity-axis rotation for horizontal output like Player Space, but
+    /// vertical output stays anchored to the world instead of following the
+    /// controller's lateral axis when the pad is rolled on its side.
+    WorldSpace,
+}
+
 impl Default for GyroConfig {
     fn default() -> Self {
         Self {
             enabled: false,
             activation: GyroActivation::Always,
             output: GyroOutput::Mouse,
+            orientation: GyroOrientation::PlayerSpace,
             sensitivity: 1.0,
             invert_x: false,
             invert_y: false,
@@ -803,6 +829,17 @@ impl InputProfile {
         Self::default_gamepad_for_backend(VirtualGamepadBackend::XInput)
     }
 
+    /// Seed an identity default action set from the standard controls,
+    /// replacing whatever sets the profile had. Used for fresh profiles and
+    /// the reset-to-defaults flow.
+    pub fn with_default_action_set(mut self) -> Self {
+        let mut fresh = Self::default_gamepad_controls(self.backend);
+        fresh.bindings = std::mem::take(&mut self.bindings);
+        crate::profile::convert_bindings_to_action_sets(&mut fresh);
+        self.action_sets = fresh.action_sets;
+        self
+    }
+
     pub fn default_gamepad_for_buttons(supported_buttons: &[GamepadButton]) -> Self {
         Self::default_gamepad_for_backend_and_buttons(
             VirtualGamepadBackend::XInput,
@@ -1284,6 +1321,7 @@ mod tests {
                 enabled: true,
                 activation: GyroActivation::Hold(GamepadButton::LeftTrigger),
                 output: GyroOutput::RightStick,
+                orientation: GyroOrientation::WorldSpace,
                 sensitivity: 2.5,
                 invert_x: true,
                 invert_y: false,
@@ -1319,7 +1357,6 @@ mod tests {
             inputs[0].activators[0].outputs,
             vec![OutputAction::GamepadButton(GamepadButton::B)]
         );
-        assert!(!profile.gyro.enabled, "gyro starts fresh, not synthesized");
     }
 
     #[test]

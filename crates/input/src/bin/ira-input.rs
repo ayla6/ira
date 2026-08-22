@@ -1174,6 +1174,7 @@ fn make_gyro_processor(profile: &InputProfile) -> GyroProcessor {
         GyroProcessingOptions {
             smoothing: profile.gyro.smoothing,
             auto_calibrate: true,
+            orientation: profile.gyro.orientation,
         },
     )
 }

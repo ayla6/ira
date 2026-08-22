@@ -15,7 +15,7 @@
 //! stay quiet long enough, their mean is folded into the bias estimate so a
 //! resting controller stops drifting as its temperature changes.
 
-use crate::profile::GyroCalibration;
+use crate::profile::{GyroCalibration, GyroOrientation};
 
 /// Samples kept for stillness detection. At a 250 Hz report rate this covers
 /// ~1 s; faster controllers converge sooner.
@@ -62,6 +62,8 @@ pub struct GyroProcessingOptions {
     pub smoothing: bool,
     /// Fold stillness-window means into the bias estimate over time.
     pub auto_calibrate: bool,
+    /// Which rotation axes feed horizontal/vertical output.
+    pub orientation: GyroOrientation,
 }
 
 impl Default for GyroProcessingOptions {
@@ -69,6 +71,7 @@ impl Default for GyroProcessingOptions {
         Self {
             smoothing: true,
             auto_calibrate: true,
+            orientation: GyroOrientation::PlayerSpace,
         }
     }
 }
@@ -203,6 +206,10 @@ pub struct GyroProcessor {
     options: GyroProcessingOptions,
     smoothed_yaw: f32,
     smoothed_pitch: f32,
+    /// World-anchored right axis for World Space: the previous right vector
+    /// re-projected onto the current horizontal plane, so vertical output
+    /// does not follow the controller's own roll.
+    world_right: Option<Vec3>,
 }
 
 impl GyroProcessor {
@@ -214,6 +221,7 @@ impl GyroProcessor {
             options,
             smoothed_yaw: 0.0,
             smoothed_pitch: 0.0,
+            world_right: None,
         }
     }
 
@@ -236,17 +244,32 @@ impl GyroProcessor {
             y: gyro.y - self.bias.y,
             z: gyro.z - self.bias.z,
         };
-        let rates = match accel {
-            Some(accel) => {
-                self.update_gravity(Vec3::from_array(accel), dt);
-                self.gravity
-                    .and_then(|gravity| gravity.normalized())
-                    .map(|gravity| Self::player_space(rotation, gravity))
+        let (mut yaw, mut pitch, gravity_locked) = match self.options.orientation {
+            GyroOrientation::Yaw => (rotation.y, rotation.x, false),
+            GyroOrientation::Roll => (rotation.z, rotation.x, false),
+            GyroOrientation::YawPlusRoll => (rotation.y + rotation.z, rotation.x, false),
+            GyroOrientation::PlayerSpace | GyroOrientation::WorldSpace => {
+                match accel {
+                    Some(accel) => {
+                        self.update_gravity(Vec3::from_array(accel), dt);
+                        match self.gravity.and_then(|gravity| gravity.normalized()) {
+                            Some(gravity) => {
+                                let (yaw, pitch, locked) = if self.options.orientation
+                                    == GyroOrientation::WorldSpace
+                                {
+                                    self.world_space(rotation, gravity)
+                                } else {
+                                    Self::player_space(rotation, gravity)
+                                };
+                                (yaw, pitch, locked)
+                            }
+                            None => Self::controller_space(rotation),
+                        }
+                    }
+                    None => Self::controller_space(rotation),
+                }
             }
-            None => None,
         };
-        let (mut yaw, mut pitch, gravity_locked) =
-            rates.unwrap_or_else(|| Self::controller_space(rotation));
         if self.options.smoothing {
             let speed = (yaw * yaw + pitch * pitch).sqrt();
             let blend = ((speed - SMOOTH_LOW) / (SMOOTH_HIGH - SMOOTH_LOW)).clamp(0.0, 1.0);
@@ -302,6 +325,33 @@ impl GyroProcessor {
             }
             None => direction,
         });
+    }
+
+    /// World Space: like Player Space for yaw, but the pitch axis is a
+    /// world-anchored right vector carried across updates, so rolling the
+    /// controller on its side does not redirect vertical output.
+    fn world_space(&mut self, rotation: Vec3, gravity: Vec3) -> (f32, f32, bool) {
+        let yaw = rotation.dot(gravity);
+        let right = match self.world_right {
+            Some(previous) => Self::horizontal_axis(gravity, previous),
+            None => Self::horizontal_axis(gravity, Vec3::X),
+        }
+        .or_else(|| Self::horizontal_axis(gravity, Vec3::Z));
+        let perpendicular = Vec3 {
+            x: rotation.x - gravity.x * yaw,
+            y: rotation.y - gravity.y * yaw,
+            z: rotation.z - gravity.z * yaw,
+        };
+        let pitch = right
+            .map(|right| {
+                self.world_right = Some(right);
+                perpendicular.dot(right)
+            })
+            .unwrap_or_else(|| {
+                self.world_right = None;
+                perpendicular.x
+            });
+        (yaw, pitch, true)
     }
 
     /// Decomposition relative to gravity. Axis-free: works for any hold angle
@@ -515,6 +565,7 @@ mod tests {
         let options = GyroProcessingOptions {
             smoothing: true,
             auto_calibrate: false,
+            ..GyroProcessingOptions::default()
         };
         let mut slow = GyroProcessor::new(GyroCalibration::default(), options);
         let mut fast = GyroProcessor::new(GyroCalibration::default(), options);
@@ -523,6 +574,7 @@ mod tests {
             GyroProcessingOptions {
                 smoothing: false,
                 auto_calibrate: false,
+                orientation: GyroOrientation::PlayerSpace,
             },
         );
         for i in 0..200 {
@@ -537,6 +589,46 @@ mod tests {
         let flick = fast.process([0.0, 0.0, 2.0], Some([0.0, 0.0, 1.0]), DT).yaw;
         let raw_flick = raw.process([0.0, 0.0, 2.0], Some([0.0, 0.0, 1.0]), DT).yaw;
         assert!((flick - raw_flick).abs() < 0.01, "flick: {flick} vs {raw_flick}");
+    }
+
+    #[test]
+    fn test_local_orientations_use_controller_axes() {
+        // Yaw preset: rotation about the controller's own vertical axis.
+        let mut processor = GyroProcessor::new(
+            GyroCalibration::default(),
+            GyroProcessingOptions {
+                smoothing: false,
+                orientation: GyroOrientation::Yaw,
+                ..GyroProcessingOptions::default()
+            },
+        );
+        let rates = processor.process([0.0, 0.4, 0.0], Some([0.0, 1.0, 0.0]), DT);
+        assert!((rates.yaw - 0.4).abs() < 0.001);
+        assert!((rates.pitch - 0.0).abs() < 0.001);
+
+        // Roll preset: lean around the forward axis drives horizontal.
+        let mut processor = GyroProcessor::new(
+            GyroCalibration::default(),
+            GyroProcessingOptions {
+                smoothing: false,
+                orientation: GyroOrientation::Roll,
+                ..GyroProcessingOptions::default()
+            },
+        );
+        let rates = processor.process([0.0, 0.0, 0.6], None, DT);
+        assert!((rates.yaw - 0.6).abs() < 0.001);
+
+        // Yaw + Roll sums both.
+        let mut processor = GyroProcessor::new(
+            GyroCalibration::default(),
+            GyroProcessingOptions {
+                smoothing: false,
+                orientation: GyroOrientation::YawPlusRoll,
+                ..GyroProcessingOptions::default()
+            },
+        );
+        let rates = processor.process([0.0, 0.2, 0.3], None, DT);
+        assert!((rates.yaw - 0.5).abs() < 0.001);
     }
 
     #[test]

@@ -5,7 +5,8 @@ use super::super::input_profile_editor_sections::{
 use super::{build_profile, profile_path_for_save, seed_new_profile_bindings};
 use ira_input::{
     AxisDirection, Binding, DeviceInfo, GamepadAxis, GamepadButton, GyroActivation, GyroCalibration,
-    GyroConfig, GyroOutput, InputProfile, InputSource, OutputAction, VirtualGamepadBackend,
+    GyroConfig, GyroOrientation, GyroOutput, InputProfile, InputSource, OutputAction,
+    VirtualGamepadBackend,
 };
 use std::path::PathBuf;
 
@@ -154,6 +155,7 @@ fn test_build_profile_uses_updated_gyro_config() {
         enabled: true,
         activation: GyroActivation::Hold(GamepadButton::LeftTrigger),
         output: GyroOutput::RightStick,
+        orientation: GyroOrientation::PlayerSpace,
         sensitivity: 2.0,
         invert_x: true,
         invert_y: false,

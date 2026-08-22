@@ -21,6 +21,7 @@ type SdlGetGamepadVendor = unsafe extern "C" fn(*mut c_void) -> u16;
 type SdlGetGamepadProduct = unsafe extern "C" fn(*mut c_void) -> u16;
 type SdlGamepadHasSensor = unsafe extern "C" fn(*mut c_void, i32) -> bool;
 type SdlSetGamepadSensorEnabled = unsafe extern "C" fn(*mut c_void, i32, bool) -> bool;
+type SdlGetGamepadSensorData = unsafe extern "C" fn(*mut c_void, i32, *mut f32, i32) -> bool;
 type SdlGetGamepadSensorDataWithTime = unsafe extern "C" fn(
     *mut c_void,
     i32,
@@ -33,6 +34,7 @@ type SdlGetSensorNameForId = unsafe extern "C" fn(i32) -> *const c_char;
 type SdlGetSensorTypeForId = unsafe extern "C" fn(i32) -> i32;
 type SdlOpenSensor = unsafe extern "C" fn(i32) -> *mut c_void;
 type SdlCloseSensor = unsafe extern "C" fn(*mut c_void);
+type SdlGetSensorData = unsafe extern "C" fn(*mut c_void, *mut f32, i32) -> bool;
 type SdlGetSensorDataWithTime =
     unsafe extern "C" fn(*mut c_void, *mut u64, *mut f32, i32) -> bool;
 type SdlPumpEvents = unsafe extern "C" fn();
@@ -52,13 +54,17 @@ struct Sdl3Api {
     get_product: SdlGetGamepadProduct,
     has_sensor: SdlGamepadHasSensor,
     set_sensor_enabled: SdlSetGamepadSensorEnabled,
-    get_gamepad_sensor_data_with_time: SdlGetGamepadSensorDataWithTime,
+    /// SDL3 preview builds lack the WithTime variants; when absent we fall
+    /// back to the caller's clock.
+    get_gamepad_sensor_data_with_time: Option<SdlGetGamepadSensorDataWithTime>,
+    get_gamepad_sensor_data: SdlGetGamepadSensorData,
     get_sensors: SdlGetSensors,
     get_sensor_name_for_id: SdlGetSensorNameForId,
     get_sensor_type_for_id: SdlGetSensorTypeForId,
     open_sensor: SdlOpenSensor,
     close_sensor: SdlCloseSensor,
-    get_sensor_data_with_time: SdlGetSensorDataWithTime,
+    get_sensor_data_with_time: Option<SdlGetSensorDataWithTime>,
+    get_sensor_data: SdlGetSensorData,
     pump_events: SdlPumpEvents,
     update_sensors: SdlUpdateSensors,
     quit: SdlQuit,
@@ -76,6 +82,16 @@ impl Sdl3Api {
                 std::mem::transmute::<*mut c_void, $type>(pointer)
             }};
         }
+        macro_rules! optional_symbol {
+            ($name:literal, $type:ty) => {{
+                let pointer = libc::dlsym(handle, concat!($name, "\0").as_ptr().cast());
+                if pointer.is_null() {
+                    None
+                } else {
+                    Some(std::mem::transmute::<*mut c_void, $type>(pointer))
+                }
+            }};
+        }
 
         Ok(Self {
             init: symbol!("SDL_Init", SdlInit),
@@ -88,19 +104,21 @@ impl Sdl3Api {
             get_product: symbol!("SDL_GetGamepadProduct", SdlGetGamepadProduct),
             has_sensor: symbol!("SDL_GamepadHasSensor", SdlGamepadHasSensor),
             set_sensor_enabled: symbol!("SDL_SetGamepadSensorEnabled", SdlSetGamepadSensorEnabled),
-            get_gamepad_sensor_data_with_time: symbol!(
+            get_gamepad_sensor_data_with_time: optional_symbol!(
                 "SDL_GetGamepadSensorDataWithTime",
                 SdlGetGamepadSensorDataWithTime
             ),
+            get_gamepad_sensor_data: symbol!("SDL_GetGamepadSensorData", SdlGetGamepadSensorData),
             get_sensors: symbol!("SDL_GetSensors", SdlGetSensors),
             get_sensor_name_for_id: symbol!("SDL_GetSensorNameForID", SdlGetSensorNameForId),
             get_sensor_type_for_id: symbol!("SDL_GetSensorTypeForID", SdlGetSensorTypeForId),
             open_sensor: symbol!("SDL_OpenSensor", SdlOpenSensor),
             close_sensor: symbol!("SDL_CloseSensor", SdlCloseSensor),
-            get_sensor_data_with_time: symbol!(
+            get_sensor_data_with_time: optional_symbol!(
                 "SDL_GetSensorDataWithTime",
                 SdlGetSensorDataWithTime
             ),
+            get_sensor_data: symbol!("SDL_GetSensorData", SdlGetSensorData),
             pump_events: symbol!("SDL_PumpEvents", SdlPumpEvents),
             update_sensors: symbol!("SDL_UpdateSensors", SdlUpdateSensors),
             quit: symbol!("SDL_Quit", SdlQuit),
@@ -255,19 +273,29 @@ impl Sdl3SensorBackend {
         }
         let available = unsafe {
             match self.source {
-                SensorSource::Gamepad(gamepad) => (self.api.get_gamepad_sensor_data_with_time)(
-                    gamepad,
-                    SDL_SENSOR_GYRO,
-                    &mut sensor_time_ns,
-                    data.as_mut_ptr(),
-                    3,
-                ),
-                SensorSource::Global(sensor) => (self.api.get_sensor_data_with_time)(
-                    sensor,
-                    &mut sensor_time_ns,
-                    data.as_mut_ptr(),
-                    3,
-                ),
+                SensorSource::Gamepad(gamepad) => {
+                    match self.api.get_gamepad_sensor_data_with_time {
+                        Some(with_time) => with_time(
+                            gamepad,
+                            SDL_SENSOR_GYRO,
+                            &mut sensor_time_ns,
+                            data.as_mut_ptr(),
+                            3,
+                        ),
+                        None => (self.api.get_gamepad_sensor_data)(
+                            gamepad,
+                            SDL_SENSOR_GYRO,
+                            data.as_mut_ptr(),
+                            3,
+                        ),
+                    }
+                }
+                SensorSource::Global(sensor) => match self.api.get_sensor_data_with_time {
+                    Some(with_time) => {
+                        with_time(sensor, &mut sensor_time_ns, data.as_mut_ptr(), 3)
+                    }
+                    None => (self.api.get_sensor_data)(sensor, data.as_mut_ptr(), 3),
+                },
             }
         };
         if !available {
@@ -297,13 +325,23 @@ impl Sdl3SensorBackend {
         let mut data = [0.0; 3];
         let mut sensor_time_ns: u64 = 0;
         let available = unsafe {
-            (self.api.get_gamepad_sensor_data_with_time)(
-                gamepad,
-                SDL_SENSOR_ACCEL,
-                &mut sensor_time_ns,
-                data.as_mut_ptr(),
-                3,
-            )
+            match self.api.get_gamepad_sensor_data_with_time {
+                Some(with_time) => with_time(
+                    gamepad,
+                    SDL_SENSOR_ACCEL,
+                    &mut sensor_time_ns,
+                    data.as_mut_ptr(),
+                    3,
+                ),
+                None => {
+                    (self.api.get_gamepad_sensor_data)(
+                        gamepad,
+                        SDL_SENSOR_ACCEL,
+                        data.as_mut_ptr(),
+                        3,
+                    )
+                }
+            }
         };
         if !available {
             return None;

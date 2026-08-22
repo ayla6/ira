@@ -60,6 +60,7 @@ fn monitor_loop(
             GyroProcessingOptions {
                 smoothing: engine.profile().gyro.smoothing,
                 auto_calibrate: true,
+                orientation: engine.profile().gyro.orientation,
             },
         )
     });

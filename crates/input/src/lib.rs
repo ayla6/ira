@@ -16,7 +16,7 @@ pub use physical::{
 pub use profile::{
     Activator, ActivatorKind, ActivatorSettings, ActionSet, ActionSetLayer, Activation,
     AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton, GyroActivation,
-    GyroCalibration, GyroConfig, GyroOutput, InputCategory, InputMapping, InputProfile,
+    GyroCalibration, GyroConfig, GyroOrientation, GyroOutput, InputCategory, InputMapping, InputProfile,
     InputSource, ModeShift, MouseAxis, MouseButton, OutputAction, SourceMode, StickOutput,
     VirtualGamepadBackend, PROFILE_VERSION,
 };

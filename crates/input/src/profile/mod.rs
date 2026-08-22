@@ -7,9 +7,9 @@ mod model;
 pub use model::{
     Activator, ActivatorKind, ActivatorSettings, ActionSet, ActionSetLayer, Activation,
     AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton, GyroActivation,
-    GyroCalibration, GyroConfig, GyroOutput, InputCategory, InputMapping, InputProfile,
-    InputSource, ModeShift, MouseAxis, MouseButton, OutputAction, SourceMode, StickOutput,
-    VirtualGamepadBackend, PROFILE_VERSION,
+    GyroCalibration, GyroConfig, GyroOrientation, GyroOutput, InputCategory, InputMapping,
+    InputProfile, InputSource, ModeShift, MouseAxis, MouseButton, OutputAction, SourceMode,
+    StickOutput, VirtualGamepadBackend, PROFILE_VERSION,
 };
 
 use InputSource::Axis;
@@ -24,9 +24,21 @@ impl InputProfile {
         let mut value: serde_json::Value = serde_json::from_str(json)
             .map_err(|error| format!("invalid profile JSON: {error}"))?;
         if let Some(bindings) = value.get_mut("bindings").and_then(|b| b.as_array_mut()) {
-            let dropped = strip_legacy_gyro_bindings(bindings);
+            let (dropped, legacy_gyro) = strip_legacy_gyro_bindings(bindings);
             if dropped > 0 {
                 eprintln!("ira-input: dropped {dropped} legacy gyro/recenter binding(s)");
+            }
+            // The user's gyro lived in per-axis bindings before the config
+            // card existed; keep it working instead of dropping their setup.
+            // An explicit new-format gyro config in the file wins.
+            if value.get("gyro").is_none() {
+                if let Some(config) = synthesize_gyro_config(&legacy_gyro) {
+                    eprintln!("ira-input: converted legacy gyro bindings to gyro config");
+                    match serde_json::to_value(config) {
+                        Ok(config) => value["gyro"] = config,
+                        Err(error) => return Err(format!("invalid profile: {error}")),
+                    }
+                }
             }
         }
         let mut profile: InputProfile =
@@ -37,8 +49,12 @@ impl InputProfile {
 }
 
 /// Remove bindings that reference removed model features, in place, and
-/// return how many were dropped.
-fn strip_legacy_gyro_bindings(bindings: &mut Vec<serde_json::Value>) -> usize {
+/// return how many were dropped. Keeps a copy of the removed gyro bindings so
+/// [`synthesize_gyro_config`] can translate them into the config card model.
+fn strip_legacy_gyro_bindings(
+    bindings: &mut Vec<serde_json::Value>,
+) -> (usize, Vec<serde_json::Value>) {
+    let mut legacy_gyro = Vec::new();
     let before = bindings.len();
     bindings.retain(|binding| {
         let is_gyro_source = binding
@@ -47,15 +63,104 @@ fn strip_legacy_gyro_bindings(bindings: &mut Vec<serde_json::Value>) -> usize {
             .is_some_and(|source| source.contains_key("gyro"));
         let is_recenter_output =
             binding.get("output").and_then(|o| o.as_str()) == Some("recenter_gyro");
+        if is_gyro_source {
+            legacy_gyro.push(binding.clone());
+        }
         !is_gyro_source && !is_recenter_output
     });
-    before - bindings.len()
+    (before - bindings.len(), legacy_gyro)
+}
+
+/// Translate pre-card per-axis gyro bindings into a [`GyroConfig`]: output by
+/// majority target, activation from any Hold/Toggle gate, sensitivity and
+/// invert flags from the yaw/pitch transforms.
+fn synthesize_gyro_config(legacy: &[serde_json::Value]) -> Option<GyroConfig> {
+    if legacy.is_empty() {
+        return None;
+    }
+    let mut config = GyroConfig {
+        enabled: true,
+        ..GyroConfig::default()
+    };
+    let mut counts = [(GyroOutput::Mouse, 0), (GyroOutput::LeftStick, 0), (GyroOutput::RightStick, 0)];
+    for binding in legacy {
+        if let Some(kind) = legacy_output_kind(binding.get("output")) {
+            for slot in counts.iter_mut() {
+                if slot.0 == kind {
+                    slot.1 += 1;
+                }
+            }
+        }
+        if config.activation == GyroActivation::Always {
+            if let Some(activation) = legacy_activation(binding.get("activation")) {
+                config.activation = activation;
+            }
+        }
+        let transform = binding.get("transform");
+        let axis = binding
+            .get("source")
+            .and_then(|source| source.get("gyro"))
+            .and_then(|axis| axis.as_str())
+            .unwrap_or("z");
+        if let Some(sensitivity) = transform
+            .and_then(|t| t.get("sensitivity"))
+            .and_then(|s| s.as_f64())
+            .map(|s| s as f32)
+            .filter(|s| (0.05..=20.0).contains(s))
+        {
+            config.sensitivity = sensitivity;
+        }
+        let invert = transform
+            .and_then(|t| t.get("invert"))
+            .and_then(|i| i.as_bool())
+            .unwrap_or(false);
+        match axis {
+            "z" => config.invert_x = invert,
+            "x" => config.invert_y = invert,
+            _ => {}
+        }
+    }
+    config.output = counts
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(output, _)| output)
+        .unwrap_or(GyroOutput::Mouse);
+    Some(config)
+}
+
+fn legacy_output_kind(output: Option<&serde_json::Value>) -> Option<GyroOutput> {
+    let output = output?.as_object()?;
+    if output.contains_key("mouse_axis") {
+        Some(GyroOutput::Mouse)
+    } else {
+        match output.get("gamepad_axis")?.as_str()? {
+            "left_x" | "left_y" => Some(GyroOutput::LeftStick),
+            "right_x" | "right_y" => Some(GyroOutput::RightStick),
+            _ => None,
+        }
+    }
+}
+
+fn legacy_activation(activation: Option<&serde_json::Value>) -> Option<GyroActivation> {
+    let activation = activation?.as_object()?;
+    for kind in ["hold", "toggle"] {
+        if let Some(button) = activation.get(kind).and_then(|b| b.as_str()) {
+            if let Ok(button) = serde_json::from_value::<GamepadButton>(button.into()) {
+                return Some(if kind == "hold" {
+                    GyroActivation::Hold(button)
+                } else {
+                    GyroActivation::Toggle(button)
+                });
+            }
+        }
+    }
+    None
 }
 
 /// Unify storage: flat-binding profiles become a single "Default" action set
 /// so the engine and editor only deal with the set model. Lossless for the
 /// shapes the old editor could express; anything exotic is dropped loudly.
-fn convert_bindings_to_action_sets(profile: &mut InputProfile) {
+pub(super) fn convert_bindings_to_action_sets(profile: &mut InputProfile) {
     if !profile.action_sets.is_empty() || profile.bindings.is_empty() {
         return;
     }

@@ -7,8 +7,8 @@
 use super::input_profile_options::source_options_for_device;
 use adw::prelude::*;
 use ira_input::{
-    DeviceInfo, GamepadButton, GyroActivation, GyroConfig, GyroOutput, InputSource,
-    VirtualGamepadBackend,
+    DeviceInfo, GamepadButton, GyroActivation, GyroConfig, GyroOrientation, GyroOutput,
+    InputSource, VirtualGamepadBackend,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -23,6 +23,8 @@ struct GyroWidgets {
     button: gtk4::DropDown,
     output_row: adw::ActionRow,
     output: gtk4::DropDown,
+    orientation_row: adw::ActionRow,
+    orientation: gtk4::DropDown,
     sensitivity_row: adw::ActionRow,
     sensitivity: gtk4::SpinButton,
     invert_x_row: adw::ActionRow,
@@ -59,6 +61,11 @@ pub(super) fn add_gyro_group(
     );
     let (output_row, output) =
         dropdown_row(&crate::tr!("Output"), &output_labels(), output_index(gyro.borrow().output));
+    let (orientation_row, orientation) = dropdown_row(
+        &crate::tr!("Orientation"),
+        &orientation_labels(),
+        orientation_index(gyro.borrow().orientation),
+    );
     let (sensitivity_row, sensitivity) = sensitivity_row(gyro.borrow().sensitivity);
     let (invert_x_row, invert_x) =
         switch_row(&crate::tr!("Invert horizontal"), gyro.borrow().invert_x);
@@ -73,6 +80,8 @@ pub(super) fn add_gyro_group(
         button,
         output_row,
         output,
+        orientation_row,
+        orientation,
         sensitivity_row,
         sensitivity,
         invert_x_row,
@@ -92,6 +101,7 @@ pub(super) fn add_gyro_group(
         &widgets.activation_row,
         &widgets.button_row,
         &widgets.output_row,
+        &widgets.orientation_row,
         &widgets.sensitivity_row,
         &widgets.invert_x_row,
         &widgets.invert_y_row,
@@ -175,6 +185,19 @@ fn connect_gyro_changes(
         on_dirty_for_output();
     });
 
+    let gyro_for_orientation = gyro.clone();
+    let on_dirty_for_orientation = on_dirty.clone();
+    widgets.orientation.connect_selected_notify(move |dropdown| {
+        gyro_for_orientation.borrow_mut().orientation = match dropdown.selected() {
+            0 => GyroOrientation::Yaw,
+            1 => GyroOrientation::Roll,
+            2 => GyroOrientation::YawPlusRoll,
+            3 => GyroOrientation::PlayerSpace,
+            _ => GyroOrientation::WorldSpace,
+        };
+        on_dirty_for_orientation();
+    });
+
     let gyro_for_sensitivity = gyro.clone();
     let on_dirty_for_sensitivity = on_dirty.clone();
     widgets
@@ -209,6 +232,7 @@ fn connect_gyro_changes(
 fn update_dependency_rows(widgets: &GyroWidgets, enabled: bool) {
     widgets.activation_row.set_sensitive(enabled);
     widgets.output_row.set_sensitive(enabled);
+    widgets.orientation_row.set_sensitive(enabled);
     widgets.sensitivity_row.set_sensitive(enabled);
     widgets.invert_x_row.set_sensitive(enabled);
     widgets.invert_y_row.set_sensitive(enabled);
@@ -252,6 +276,28 @@ fn sensitivity_row(value: f32) -> (adw::ActionRow, gtk4::SpinButton) {
     spin.set_valign(gtk4::Align::Center);
     row.add_suffix(&spin);
     (row, spin)
+}
+
+fn orientation_labels() -> Vec<String> {
+    [
+        crate::tr!("Yaw"),
+        crate::tr!("Roll"),
+        crate::tr!("Yaw + Roll"),
+        crate::tr!("Player Space"),
+        crate::tr!("World Space"),
+    ]
+    .into_iter()
+    .collect()
+}
+
+fn orientation_index(orientation: GyroOrientation) -> u32 {
+    match orientation {
+        GyroOrientation::Yaw => 0,
+        GyroOrientation::Roll => 1,
+        GyroOrientation::YawPlusRoll => 2,
+        GyroOrientation::PlayerSpace => 3,
+        GyroOrientation::WorldSpace => 4,
+    }
 }
 
 fn activation_labels() -> Vec<String> {

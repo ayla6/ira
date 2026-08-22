@@ -520,10 +520,12 @@ fn build_dialog_contents(
     let lwa_w = Rc::downgrade(&lwa_rc);
     let title_entry_w = Downgrade::downgrade(&title_entry);
     let sort_entry_w = Downgrade::downgrade(&sort_entry);
-    let pending_version_w = Rc::downgrade(&pending_version);
+    // Plain data holders cannot form widget cycles; capturing them weakly
+    // dropped the last owner before Save could read them.
+    let pending_version_c = pending_version.clone();
     let app_id_entry_w = app_id_entry.as_ref().map(Downgrade::downgrade);
-    let pending_ra_core_w = Rc::downgrade(&pending_ra_core);
-    let pending_emulator_w = Rc::downgrade(&pending_emulator);
+    let pending_ra_core_c = pending_ra_core.clone();
+    let pending_emulator_c = pending_emulator.clone();
     let game_folder_entry_w = game_folder_entry.as_ref().map(Downgrade::downgrade);
     let runtime_row_w = runtime_row.as_ref().map(Downgrade::downgrade);
     let pending_emu_uninstall_w = pending_emu_uninstall.as_ref().map(Rc::downgrade);
@@ -548,9 +550,9 @@ fn build_dialog_contents(
         let var_widgets = take!(var_widgets_w, "variant widgets");
         let title_entry = take!(title_entry_w, "title entry");
         let sort_entry = take!(sort_entry_w, "sort entry");
-        let pending_version = take!(pending_version_w, "pending version");
-        let pending_ra_core = take!(pending_ra_core_w, "pending RA core");
-        let pending_emulator = take!(pending_emulator_w, "pending emulator");
+        let pending_version = pending_version_c.clone();
+        let pending_ra_core = pending_ra_core_c.clone();
+        let pending_emulator = pending_emulator_c.clone();
         let lwa = take!(lwa_w, "page widgets");
         let save_btn = take!(save_btn_w, "save button");
         let language_row = language_row_w.as_ref().and_then(|w| w.upgrade());

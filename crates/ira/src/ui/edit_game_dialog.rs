@@ -621,7 +621,16 @@ fn build_dialog_contents(
     let state_close_w = Rc::downgrade(&state);
     win.connect_close_request(move |_| {
         if let Some(state) = state_close_w.upgrade() {
-            state.borrow_mut().settings_data = None;
+            // Defer dropping the bookkeeping refs: SettingsData owns the
+            // window itself, and finalizing it (with its whole page tree)
+            // inside the close-request emission trips GTK's post-emission
+            // widget bookkeeping.
+            let state = Rc::downgrade(&state);
+            glib::idle_add_local_once(move || {
+                if let Some(state) = state.upgrade() {
+                    state.borrow_mut().settings_data = None;
+                }
+            });
         }
         glib::Propagation::Proceed
     });

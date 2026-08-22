@@ -1,7 +1,7 @@
 use adw::prelude::*;
 use ira_input::{ControllerFamily, GamepadAxis, GamepadButton, InputSource};
 
-pub(super) fn set_source_asset(
+pub(crate) fn set_source_asset(
     image: &gtk4::Image,
     fallback: &gtk4::Label,
     source: InputSource,
@@ -179,7 +179,7 @@ fn steam_asset_path(name: &str, dark: bool) -> Option<std::path::PathBuf> {
     path.is_file().then_some(path)
 }
 
-pub(super) fn source_badge(source: InputSource, family: ControllerFamily) -> String {
+pub(crate) fn source_badge(source: InputSource, family: ControllerFamily) -> String {
     match source {
         InputSource::Button(button) => match button {
             GamepadButton::A => "A".to_string(),

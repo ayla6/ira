@@ -68,6 +68,7 @@ impl MappingEngine {
             output.extend(self.take_pending_releases());
             self.emit_mode_mouse_motion(dt, &mut output);
             self.emit_mode_dpad(&mut output);
+            output.extend(self.emit_flick_motion(dt));
         }
         self.emit_mouse_motion(dt, &mut output);
         let computed = self.compute_values();

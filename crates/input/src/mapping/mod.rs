@@ -1,5 +1,6 @@
 mod activators;
 mod continuous;
+mod flick;
 mod modes;
 mod sets;
 
@@ -70,6 +71,9 @@ pub struct MappingEngine {
     pub(crate) pending_releases: Vec<OutputEvent>,
     /// Dpad directions currently held by stick-as-dpad modes.
     pub(crate) mode_dpad_pressed: Vec<GamepadButton>,
+    /// Flick Stick state per stick source (angle, in-flight flick).
+    pub(crate) flick_states:
+        std::collections::HashMap<InputSource, crate::mapping::flick::FlickState>,
 }
 
 impl MappingEngine {
@@ -90,6 +94,7 @@ impl MappingEngine {
             toggled_layers: Vec::new(),
             pending_releases: Vec::new(),
             mode_dpad_pressed: Vec::new(),
+            flick_states: std::collections::HashMap::new(),
         })
     }
 
@@ -144,6 +149,7 @@ impl MappingEngine {
         self.activator_states.clear();
         self.pending_releases.clear();
         self.mode_dpad_pressed.clear();
+        self.flick_states.clear();
         let outputs: Vec<OutputAction> = self
             .profile
             .bindings

@@ -1,4 +1,4 @@
-mod assets;
+pub(super) mod assets;
 mod categories;
 mod row;
 mod serialization;

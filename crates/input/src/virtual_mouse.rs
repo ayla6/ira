@@ -68,6 +68,10 @@ impl VirtualMouse {
                 self.accumulate(*axis, *value);
                 Ok(())
             }
+            OutputEvent::WheelClick { axis, amount } => {
+                self.accumulate(*axis, *amount as f32);
+                Ok(())
+            }
             _ => Ok(()),
         }
     }

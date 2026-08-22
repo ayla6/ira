@@ -263,6 +263,13 @@ pub enum OutputAction {
     Keyboard { keycode: u16 },
     MouseButton(MouseButton),
     MouseAxis(MouseAxis),
+    /// One discrete scroll-wheel detent per activation (Steam's
+    /// `mouse_wheel` command). `amount` is detents; negative scrolls down /
+    /// left. Axes other than Wheel/WheelX are rejected by validation.
+    WheelClick {
+        axis: MouseAxis,
+        amount: i32,
+    },
     /// Engine-internal: switch the active action set. Never reaches virtual
     /// devices.
     SwitchActionSet(usize),
@@ -283,6 +290,7 @@ impl OutputAction {
         match self {
             Self::GamepadButton(button) => button.is_xinput(),
             Self::GamepadAxis(_)
+            | Self::WheelClick { .. }
             | Self::SwitchActionSet(_)
             | Self::EnableLayer { .. }
             | Self::ModeShiftActivate { .. } => true,
@@ -1048,7 +1056,9 @@ impl InputProfile {
             || self.all_activator_outputs().any(|output| {
                 matches!(
                     output,
-                    OutputAction::MouseAxis(_) | OutputAction::MouseButton(_)
+                    OutputAction::MouseAxis(_)
+                        | OutputAction::MouseButton(_)
+                        | OutputAction::WheelClick { .. }
                 )
             })
     }

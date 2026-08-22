@@ -302,6 +302,12 @@ impl<'a> ActivatorRunner<'a> {
                                 pressed: false,
                             });
                         }
+                        OutputAction::WheelClick { axis, amount } => {
+                            self.outcome.outputs.push(OutputEvent::WheelClick {
+                                axis: *axis,
+                                amount: *amount,
+                            });
+                        }
                         OutputAction::SwitchActionSet(_)
                         | OutputAction::EnableLayer { .. }
                         | OutputAction::ModeShiftActivate { .. } => {
@@ -365,6 +371,13 @@ impl<'a> ActivatorRunner<'a> {
                         pressed: true,
                     });
                     state.held.push((index, output.clone()));
+                }
+                OutputAction::WheelClick { axis, amount } => {
+                    // One detent per activation; nothing to hold or release.
+                    self.outcome.outputs.push(OutputEvent::WheelClick {
+                        axis: *axis,
+                        amount: *amount,
+                    });
                 }
                 OutputAction::SwitchActionSet(_)
                 | OutputAction::EnableLayer { .. }

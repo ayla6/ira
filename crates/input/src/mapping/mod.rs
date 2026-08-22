@@ -47,6 +47,12 @@ pub enum OutputEvent {
         axis: crate::MouseAxis,
         value: f32,
     },
+    /// One discrete wheel detent batch; the daemon routes it to the virtual
+    /// mouse wheel accumulators.
+    WheelClick {
+        axis: crate::MouseAxis,
+        amount: i32,
+    },
 }
 
 pub struct MappingEngine {
@@ -322,6 +328,15 @@ impl MappingEngine {
             OutputAction::MouseAxis(_) => {
                 // Mouse motion is tick-driven; see continuous.rs.
             }
+            OutputAction::WheelClick { axis, amount } => {
+                // One detent per rising edge; release produces nothing.
+                if value > BUTTON_THRESHOLD {
+                    output.push(OutputEvent::WheelClick {
+                        axis: *axis,
+                        amount: *amount,
+                    });
+                }
+            }
             // Engine-internal actions are consumed by the activator engine,
             // never emitted to virtual devices.
             OutputAction::SwitchActionSet(_)
@@ -423,6 +438,40 @@ mod tests {
             vec![OutputEvent::GamepadButton {
                 button: GamepadButton::A,
                 pressed: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn test_wheel_click_fires_once_per_press() {
+        let profile = InputProfile {
+            bindings: vec![Binding::new(
+                InputSource::Button(GamepadButton::A),
+                OutputAction::WheelClick {
+                    axis: crate::MouseAxis::Wheel,
+                    amount: -1,
+                },
+            )],
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        assert_eq!(
+            engine.process(event(InputSource::Button(GamepadButton::A), 1.0)),
+            vec![OutputEvent::WheelClick {
+                axis: crate::MouseAxis::Wheel,
+                amount: -1,
+            }]
+        );
+        // Release and a repeated press each produce exactly one detent.
+        assert_eq!(
+            engine.process(event(InputSource::Button(GamepadButton::A), 0.0)),
+            Vec::<OutputEvent>::new()
+        );
+        assert_eq!(
+            engine.process(event(InputSource::Button(GamepadButton::A), 1.0)),
+            vec![OutputEvent::WheelClick {
+                axis: crate::MouseAxis::Wheel,
+                amount: -1,
             }]
         );
     }

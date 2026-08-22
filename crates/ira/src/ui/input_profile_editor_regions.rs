@@ -4,7 +4,7 @@
 
 use super::css::{CSS_FLAT, CSS_SQUARE_BUTTON};
 use super::helpers::esc;
-use super::input_profile_binding::assets::{set_source_asset, source_badge};
+use super::input_profile_assets::{set_source_asset, source_badge};
 use super::input_profile_options::{axis_label, button_label, output_display_label};
 use adw::prelude::*;
 use ira_input::{GamepadButton, InputSource};
@@ -55,61 +55,6 @@ impl Region {
             Region::TriggersBumpers => "media-seek-forward-symbolic",
             Region::Sticks => "media-playback-start-symbolic",
             Region::SystemPaddles => "emblem-system-symbolic",
-        }
-    }
-
-    pub(crate) fn contains(self, source: InputSource) -> bool {
-        const FACE: [GamepadButton; 4] = [
-            GamepadButton::A,
-            GamepadButton::B,
-            GamepadButton::X,
-            GamepadButton::Y,
-        ];
-        const DPAD: [GamepadButton; 4] = [
-            GamepadButton::DpadUp,
-            GamepadButton::DpadDown,
-            GamepadButton::DpadLeft,
-            GamepadButton::DpadRight,
-        ];
-        const SHOULDERS: [GamepadButton; 2] = [
-            GamepadButton::LeftShoulder,
-            GamepadButton::RightShoulder,
-        ];
-        const TRIGGER_BUTTONS: [GamepadButton; 2] = [
-            GamepadButton::LeftTrigger,
-            GamepadButton::RightTrigger,
-        ];
-        const CLICKS: [GamepadButton; 2] = [GamepadButton::LeftStick, GamepadButton::RightStick];
-        const SYSTEM: [GamepadButton; 3] = [
-            GamepadButton::Back,
-            GamepadButton::Start,
-            GamepadButton::Guide,
-        ];
-        match (self, source) {
-            (Region::FaceButtons, InputSource::Button(button)) => FACE.contains(&button),
-            (Region::Dpad, InputSource::Button(button)) => DPAD.contains(&button),
-            (Region::TriggersBumpers, InputSource::Button(button)) => {
-                SHOULDERS.contains(&button) || TRIGGER_BUTTONS.contains(&button)
-            }
-            (Region::Sticks, InputSource::Button(button)) => CLICKS.contains(&button),
-            (
-                Region::Sticks,
-                InputSource::Axis(
-                    ira_input::GamepadAxis::LeftX
-                    | ira_input::GamepadAxis::LeftY
-                    | ira_input::GamepadAxis::RightX
-                    | ira_input::GamepadAxis::RightY,
-                ),
-            ) => true,
-            (
-                Region::TriggersBumpers,
-                InputSource::Axis(ira_input::GamepadAxis::LeftTrigger)
-                | InputSource::Axis(ira_input::GamepadAxis::RightTrigger),
-            ) => true,
-            (Region::SystemPaddles, InputSource::Button(button)) => {
-                SYSTEM.contains(&button) || button.is_paddle()
-            }
-            _ => false,
         }
     }
 }

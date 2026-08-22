@@ -157,27 +157,6 @@ fn axis_directions() -> Vec<(InputSource, String)> {
         .collect()
 }
 
-pub(super) fn activator_index(activation: &Activation, options: &[(InputSource, String)]) -> u32 {
-    let source_index = |source| {
-        options
-            .iter()
-            .position(|(candidate, _)| *candidate == source)
-            .unwrap_or(0) as u32
-    };
-    match activation {
-        Activation::Hold(source)
-        | Activation::Toggle(source)
-        | Activation::DisableWhile(source) => source_index(*source),
-        Activation::Chord { sources, .. } => {
-            sources.first().copied().map(source_index).unwrap_or(0)
-        }
-        // The flat dropdown cannot configure the gate; it round-trips as a
-        // default active-axis gate until the binding sheet replaces it.
-        Activation::Analog { axis, .. } => source_index(InputSource::Axis(*axis)),
-        Activation::Always => 0,
-    }
-}
-
 pub(super) fn activation_labels() -> Vec<String> {
     [
         crate::tr!("Always"),
@@ -240,10 +219,10 @@ pub(super) fn output_display_label(output: &OutputAction) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{activator_index, output_display_label, source_options_for_device};
+    use super::{output_display_label, source_options_for_device};
     use ira_input::{
-        Activation, DeviceInfo, GamepadAxis, GamepadButton, InputSource, MouseAxis, MouseButton,
-        OutputAction, VirtualGamepadBackend,
+        DeviceInfo, GamepadAxis, GamepadButton, InputSource, MouseAxis, MouseButton, OutputAction,
+        VirtualGamepadBackend,
     };
     use std::path::PathBuf;
 
@@ -277,24 +256,6 @@ mod tests {
         assert!(!options
             .iter()
             .any(|(source, _)| *source == InputSource::Button(GamepadButton::Paddle2)));
-    }
-
-    #[test]
-    fn test_activator_index_keeps_paddle_selection() {
-        let options = vec![
-            (InputSource::Button(GamepadButton::A), "A".to_string()),
-            (
-                InputSource::Button(GamepadButton::Paddle4),
-                "P4".to_string(),
-            ),
-        ];
-        assert_eq!(
-            activator_index(
-                &Activation::DisableWhile(InputSource::Button(GamepadButton::Paddle4)),
-                &options,
-            ),
-            1
-        );
     }
 
     #[test]

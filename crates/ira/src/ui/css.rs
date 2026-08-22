@@ -34,7 +34,6 @@ pub const CSS_SUGGESTED_ACTION: &str = "suggested-action";
 pub const CSS_TITLE_1: &str = "title-1";
 pub const CSS_LOCKED_TROPHY: &str = "locked-trophy";
 pub const CSS_SIDEBAR_SECTION_TITLE: &str = "sidebar-section-title";
-pub const CSS_BINDING_SECTION_HEADER: &str = "binding-section-header";
 pub const CSS_BINDING_SUFFIX: &str = "binding-suffix";
 pub const CSS_SOURCE_BADGE: &str = "source-badge";
 pub const CSS_SQUARE_BUTTON: &str = "square-button";
@@ -205,25 +204,6 @@ gridview.game-grid child:focus-within {
 
 .binding-suffix {
     margin: 2px 0;
-}
-.binding-section-header {
-    min-height: 0;
-    padding: 8px 0 2px;
-    background: transparent;
-    border: none;
-    box-shadow: none;
-}
-.binding-section-header:hover,
-.binding-section-header:selected {
-    background: transparent;
-}
-.binding-section-header > box {
-    min-height: 0;
-}
-.binding-section-header label {
-    opacity: 0.65;
-    font-size: 0.85em;
-    font-weight: 700;
 }
 .square-button {
     min-width: 32px;

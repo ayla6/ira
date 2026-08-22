@@ -1,26 +1,32 @@
-use super::super::input_profile_editor_pages::section_order;
-use super::super::input_profile_editor_sections::{
-    default_profile_bindings, section_behavior_bindings, stick_to_dpad_bindings,
-};
-use super::{build_profile, profile_path_for_save, seed_new_profile_bindings};
+use super::{default_action_sets, test_default_output};
+use super::super::input_profile_editor_save::profile_path_for_save;
 use ira_input::{
-    AxisDirection, Binding, DeviceInfo, GamepadAxis, GamepadButton, GyroActivation, GyroCalibration,
-    GyroConfig, GyroOrientation, GyroOutput, InputProfile, InputSource, OutputAction,
-    VirtualGamepadBackend,
+    DeviceInfo, GamepadAxis, GamepadButton, InputSource, OutputAction, SourceMode,
+    StickOutput, VirtualGamepadBackend,
 };
 use std::path::PathBuf;
 
 #[test]
-fn test_default_profile_bindings_without_device_omit_paddles() {
-    let bindings = default_profile_bindings(None, VirtualGamepadBackend::XInput);
-    assert!(!bindings.is_empty());
-    assert!(!bindings.iter().any(
-        |binding| matches!(binding.source, InputSource::Button(button) if button.is_paddle())
-    ));
+fn test_default_action_sets_map_identity_buttons() {
+    let sets = default_action_sets(None, VirtualGamepadBackend::XInput);
+    assert!(!sets.is_empty());
+    let inputs = &sets[0].inputs;
+    let a_mapped = inputs.iter().any(|input| {
+        input.source == InputSource::Button(GamepadButton::A)
+            && input.activators.iter().any(|activator| {
+                activator
+                    .outputs
+                    .contains(&OutputAction::GamepadButton(GamepadButton::A))
+            })
+    });
+    assert!(a_mapped);
+    assert!(!inputs
+        .iter()
+        .any(|input| matches!(input.source, InputSource::Button(button) if button.is_paddle())));
 }
 
 #[test]
-fn test_default_profile_bindings_include_only_supported_buttons() {
+fn test_default_action_sets_honor_device_buttons() {
     let device = DeviceInfo {
         path: PathBuf::from("/dev/input/event0"),
         name: "Test controller".to_string(),
@@ -30,146 +36,44 @@ fn test_default_profile_bindings_include_only_supported_buttons() {
         has_evdev_gyro: false,
         supported_buttons: vec![GamepadButton::A, GamepadButton::Paddle1],
     };
-    let bindings = default_profile_bindings(Some(&device), VirtualGamepadBackend::XInput);
-    assert!(bindings
+    // Paddles only exist on DirectInput-class virtual devices.
+    let sets = default_action_sets(Some(&device), VirtualGamepadBackend::DirectInput);
+    assert!(sets[0]
+        .inputs
         .iter()
-        .any(|binding| binding.source == InputSource::Button(GamepadButton::A)));
-    assert!(!bindings
-        .iter()
-        .any(|binding| { binding.source == InputSource::Button(GamepadButton::Paddle1) }));
-    assert!(!bindings
-        .iter()
-        .any(|binding| binding.source == InputSource::Button(GamepadButton::B)));
+        .any(|input| input.source == InputSource::Button(GamepadButton::Paddle1)));
 }
 
 #[test]
-fn test_stick_to_dpad_preset_assigns_each_direction() {
-    let bindings = stick_to_dpad_bindings(GamepadAxis::LeftX, GamepadAxis::LeftY);
+fn test_default_mapping_gives_axes_their_natural_modes() {
     assert_eq!(
-        bindings[0].source,
-        InputSource::AxisDirection {
-            axis: GamepadAxis::LeftX,
-            direction: AxisDirection::Negative,
-        }
+        test_default_output(InputSource::Button(GamepadButton::B)),
+        OutputAction::GamepadButton(GamepadButton::B)
     );
+    let stick = super::super::input_profile_region_pages::default_mapping(
+        InputSource::Axis(GamepadAxis::RightX),
+    );
+    assert!(matches!(
+        stick.mode,
+        Some(SourceMode::Joystick {
+            output: StickOutput::Right,
+            ..
+        })
+    ));
+    assert!(stick.activators.is_empty());
+    let trigger = super::super::input_profile_region_pages::default_mapping(
+        InputSource::Axis(GamepadAxis::LeftTrigger),
+    );
+    assert!(matches!(trigger.mode, Some(SourceMode::Trigger { .. })));
+}
+
+#[test]
+fn test_profile_path_for_save_prefers_current_path() {
+    let existing = PathBuf::from("/tmp/profiles/mine.json");
     assert_eq!(
-        bindings[1].output,
-        OutputAction::GamepadButton(GamepadButton::DpadRight)
+        profile_path_for_save("/tmp/profiles", Some(&existing), "renamed"),
+        existing
     );
-    assert_eq!(
-        bindings[2].output,
-        OutputAction::GamepadButton(GamepadButton::DpadUp)
-    );
-    assert_eq!(
-        bindings[3].output,
-        OutputAction::GamepadButton(GamepadButton::DpadDown)
-    );
-}
-
-#[test]
-fn test_buttons_sections_follow_steam_order() {
-    assert!(section_order("Face Buttons") < section_order("Bumpers"));
-    assert!(section_order("Bumpers") < section_order("Extended Buttons"));
-    assert!(section_order("Extended Buttons") < section_order("Menu Buttons"));
-    assert!(section_order("Menu Buttons") < section_order("Stick Clicks"));
-}
-
-#[test]
-fn test_stick_behavior_replaces_with_directional_bindings() {
-    let bindings = section_behavior_bindings("Left Stick", 3, None, VirtualGamepadBackend::XInput);
-    assert_eq!(bindings.len(), 4);
-    assert!(bindings.iter().all(|binding| matches!(
-        binding.output,
-        OutputAction::GamepadButton(
-            GamepadButton::DpadUp
-                | GamepadButton::DpadDown
-                | GamepadButton::DpadLeft
-                | GamepadButton::DpadRight
-        )
-    )));
-    let default = section_behavior_bindings("Left Stick", 2, None, VirtualGamepadBackend::XInput);
-    assert_eq!(default.len(), 2);
-    assert_ne!(default, bindings);
-}
-
-#[test]
-fn test_custom_section_sorts_before_standard_sections() {
-    assert!(section_order("Custom") < section_order("Stick Clicks"));
-}
-
-#[test]
-fn test_profile_save_keeps_existing_path() {
-    let tmp = tempfile::tempdir().unwrap();
-    let old_path = tmp.path().join("old-name.json");
-    let saved_path =
-        profile_path_for_save(tmp.path().to_str().unwrap(), Some(&old_path), "New name");
-    assert_eq!(saved_path, old_path);
-}
-
-#[test]
-fn test_seed_new_profile_bindings_populates_defaults() {
-    let profile = seed_new_profile_bindings(InputProfile::default(), None);
-    assert!(!profile.bindings.is_empty());
-    assert!(profile
-        .bindings
-        .iter()
-        .any(|binding| binding.source == InputSource::Button(GamepadButton::A)));
-}
-
-#[test]
-fn test_seed_new_profile_bindings_keeps_existing_bindings() {
-    let profile = InputProfile {
-        bindings: vec![Binding::new(
-            InputSource::Button(GamepadButton::X),
-            OutputAction::GamepadButton(GamepadButton::Y),
-        )],
-        ..InputProfile::default()
-    };
-    let seeded = seed_new_profile_bindings(profile.clone(), None);
-    assert_eq!(seeded.bindings, profile.bindings);
-}
-
-#[test]
-fn test_build_profile_uses_updated_calibration() {
-    let calibration = GyroCalibration {
-        x: 1.0,
-        y: -2.0,
-        z: 3.0,
-    };
-    let profile = build_profile(
-        "Test",
-        &[],
-        calibration,
-        GyroConfig::default(),
-        &[],
-        None,
-        VirtualGamepadBackend::XInput,
-    )
-    .unwrap();
-    assert_eq!(profile.gyro_calibration, calibration);
-}
-
-#[test]
-fn test_build_profile_uses_updated_gyro_config() {
-    let gyro = GyroConfig {
-        enabled: true,
-        activation: GyroActivation::Hold(GamepadButton::LeftTrigger),
-        output: GyroOutput::RightStick,
-        orientation: GyroOrientation::PlayerSpace,
-        sensitivity: 2.0,
-        invert_x: true,
-        invert_y: false,
-        smoothing: false,
-    };
-    let profile = build_profile(
-        "Test",
-        &[],
-        GyroCalibration::default(),
-        gyro.clone(),
-        &[],
-        None,
-        VirtualGamepadBackend::XInput,
-    )
-    .unwrap();
-    assert_eq!(profile.gyro, gyro);
+    let fresh = profile_path_for_save("/tmp/profiles", None, "New Layout");
+    assert!(fresh.to_string_lossy().starts_with("/tmp/profiles"));
 }

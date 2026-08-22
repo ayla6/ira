@@ -469,18 +469,26 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let mut virtual_gamepad = VirtualGamepad::create_for_backend(mapper.profile().backend)
         .map_err(|error| format!("failed to create virtual gamepad: {error}"))?;
     let sensor = gamepad.as_ref().and_then(|gamepad| open_sensor(gamepad.info()));
-    let motion_enabled = arguments.motion_port != Some(0);
-    let motion_server =
-        if motion_enabled { sensor.as_ref().and_then(|_| ira_input::MotionServer::bind()) } else { None };
+    // The layout can opt out of streaming motion to emulators; the per-game
+    // launcher flag (--motion-port 0) remains the harder kill switch.
+    let motion_enabled =
+        arguments.motion_port != Some(0) && mapper.profile().emulator_udp;
+    let motion_server = if motion_enabled {
+        sensor.as_ref().and_then(|_| ira_input::MotionServer::bind())
+    } else {
+        None
+    };
     match (&motion_server, sensor.as_ref()) {
         (Some(_), Some(_)) => eprintln!(
             "ira-input: motion passthrough on udp/{} for emulators (cemuhook)",
             ira_input::MOTION_PORT
         ),
-        (None, Some(_)) => eprintln!(
-            "ira-input: udp/{} busy; motion passthrough disabled",
-            ira_input::MOTION_PORT
-        ),
+        (None, Some(_)) if arguments.motion_port != Some(0) && mapper.profile().emulator_udp => {
+            eprintln!(
+                "ira-input: udp/{} busy; motion passthrough disabled",
+                ira_input::MOTION_PORT
+            )
+        }
         _ => {}
     }
     let (pad_vendor, pad_product) = gamepad

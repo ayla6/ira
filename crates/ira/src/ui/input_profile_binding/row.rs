@@ -3,7 +3,7 @@ use super::super::css::{
 };
 use super::super::helpers::esc;
 use super::super::input_profile_options::{
-    activation_index, activation_labels, activator_index, output_index, output_labels,
+    activation_index, activation_labels, activator_index, output_display_label,
     source_options_for_device,
 };
 use super::assets::{set_source_asset, source_badge};
@@ -99,7 +99,7 @@ struct RowControls {
     source_options: Vec<(InputSource, String)>,
     activator_options: Vec<(InputSource, String)>,
     source: gtk4::DropDown,
-    output: gtk4::DropDown,
+    output: gtk4::Button,
     output_action: Rc<RefCell<OutputAction>>,
     activation: gtk4::DropDown,
     activator: gtk4::DropDown,
@@ -159,22 +159,19 @@ fn make_binding_row(
             invert_row: rows.invert.clone(),
         },
     );
-    connect_output_changes(
-        &controls.output,
-        OutputChangeContext {
-            source: controls.source.clone(),
-            output: controls.output_action.clone(),
-            row: container.clone(),
-            on_dirty: on_dirty.clone(),
-            backend,
-        },
-    );
+    connect_output_changes(OutputChangeContext {
+        source: controls.source.clone(),
+        output: controls.output_action.clone(),
+        output_button: controls.output.clone(),
+        row: container.clone(),
+        on_dirty: on_dirty.clone(),
+        backend,
+    });
     BindingRow {
         container,
         source_options: controls.source_options,
         activator_options: controls.activator_options,
         source: controls.source,
-        output: controls.output,
         output_action: controls.output_action,
         activation: controls.activation,
         activator: controls.activator,
@@ -196,10 +193,8 @@ fn build_controls(
         &labels(&source_options),
         source_index_for(&source_options, binding.source),
     );
-    let output = combo_row(
-        &output_labels(backend),
-        output_index(&binding.output, backend),
-    );
+    let output =
+        gtk4::Button::with_label(&output_display_label(&binding.output));
     let output_action = Rc::new(RefCell::new(binding.output.clone()));
     let activation = combo_row(&activation_labels(), activation_index(&binding.activation));
     let mut activator_options = source_options_for_device(device, backend);

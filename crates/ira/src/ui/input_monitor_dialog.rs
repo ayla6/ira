@@ -308,6 +308,9 @@ fn update_outputs(outputs: &mut Vec<String>, events: &[OutputEvent], profile: &I
             OutputEvent::MouseMotion { axis, value } => {
                 (OutputAction::MouseAxis(*axis), value.abs() > 0.01)
             }
+            OutputEvent::WheelClick { axis, amount } => {
+                (OutputAction::WheelClick { axis: *axis, amount: *amount }, true)
+            }
         };
         let relations = profile
             .bindings
@@ -369,6 +372,16 @@ fn output_label(output: &OutputAction) -> String {
         }
         OutputAction::MouseAxis(axis) => {
             crate::tr!("Mouse {axis:?}").replace("{axis:?}", &format!("{axis:?}"))
+        }
+        OutputAction::WheelClick { axis: _, amount } => {
+            let direction = if *amount < 0 {
+                crate::tr!("down")
+            } else {
+                crate::tr!("up")
+            };
+            crate::tr!("Scroll {direction} {amount}")
+                .replace("{direction}", &direction)
+                .replace("{amount}", &amount.abs().to_string())
         }
         OutputAction::SwitchActionSet(_) | OutputAction::EnableLayer { .. }
         | OutputAction::ModeShiftActivate { .. } => crate::tr!("Action set control"),

@@ -41,6 +41,8 @@ pub const CSS_SQUARE_BUTTON: &str = "square-button";
 pub const CSS_VIEWER_CARD: &str = "input-viewer-card";
 pub const CSS_STATUS_NO_SCROLL: &str = "status-no-scroll";
 pub const CSS_VIEWER_CANVAS: &str = "input-viewer-canvas";
+pub const CSS_COMMAND_TILE: &str = "command-tile";
+pub const CSS_COMMAND_TILE_ACTIVE: &str = "command-tile-active";
 
 pub const APP_CSS: &str = "
 .sidebar-row-title { min-width: 0; }
@@ -246,6 +248,20 @@ gridview.game-grid child:focus-within {
 }
 .input-viewer-card > label:first-child {
     font-weight: 700;
+}
+
+.command-tile {
+    min-width: 92px;
+    min-height: 52px;
+    padding: 8px 12px;
+    margin: 2px;
+    border-radius: 12px;
+}
+.command-tile label {
+    font-weight: 500;
+}
+.command-tile.command-tile-active {
+    box-shadow: inset 0 0 0 2px @accent_color;
 }
 
 .variant-card {

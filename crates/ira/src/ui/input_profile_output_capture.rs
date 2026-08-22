@@ -1,5 +1,4 @@
 use adw::prelude::*;
-use ira_input::MouseButton;
 use std::rc::Rc;
 
 const XKB_EVDEV_OFFSET: u32 = 8;
@@ -36,58 +35,10 @@ pub(super) fn show_keyboard_output_capture(
     present_dialog(&dialog, &content);
 }
 
-pub(super) fn show_mouse_output_capture(
-    parent: &gtk4::Window,
-    on_capture: impl Fn(MouseButton) + 'static,
-) {
-    let (dialog, status, content) = capture_dialog(
-        parent,
-        &crate::tr!("Capture mouse output"),
-        &crate::tr!("Click one mouse button to assign it. Escape cancels."),
-    );
-    let on_capture: Rc<dyn Fn(MouseButton)> = Rc::new(on_capture);
-    let click = gtk4::GestureClick::new();
-    click.set_button(0);
-    let dialog_for_click = dialog.clone();
-    click.connect_pressed(move |gesture, _, _, _| {
-        let Some(button) = mouse_button_from_gdk(gesture.current_button()) else {
-            status.set_text(&crate::tr!("Use Left, Right, Middle, Side, or Extra."));
-            return;
-        };
-        on_capture(button);
-        gesture.set_state(gtk4::EventSequenceState::Claimed);
-        dialog_for_click.close();
-    });
-    content.add_controller(click);
-
-    let key = gtk4::EventControllerKey::new();
-    let dialog_for_key = dialog.clone();
-    key.connect_key_pressed(move |_, keyval, _, _| {
-        if keyval == gdk4::Key::Escape {
-            dialog_for_key.close();
-            return gtk4::glib::Propagation::Stop;
-        }
-        gtk4::glib::Propagation::Proceed
-    });
-    dialog.add_controller(key);
-    present_dialog(&dialog, &content);
-}
-
 pub(super) fn evdev_keycode(hardware_keycode: u32) -> Option<u16> {
     hardware_keycode
         .checked_sub(XKB_EVDEV_OFFSET)
         .and_then(|keycode| keycode.try_into().ok())
-}
-
-pub(super) fn mouse_button_from_gdk(button: u32) -> Option<MouseButton> {
-    match button {
-        1 => Some(MouseButton::Left),
-        2 => Some(MouseButton::Middle),
-        3 => Some(MouseButton::Right),
-        8 => Some(MouseButton::Side),
-        9 => Some(MouseButton::Extra),
-        _ => None,
-    }
 }
 
 fn capture_dialog(
@@ -152,22 +103,11 @@ fn is_modifier_key(keyval: gdk4::Key) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{evdev_keycode, mouse_button_from_gdk};
-    use ira_input::MouseButton;
+    use super::evdev_keycode;
 
     #[test]
     fn test_evdev_keycode_removes_xkb_offset() {
         assert_eq!(evdev_keycode(38), Some(30));
         assert_eq!(evdev_keycode(7), None);
-    }
-
-    #[test]
-    fn test_mouse_button_from_gdk_maps_supported_buttons() {
-        assert_eq!(mouse_button_from_gdk(1), Some(MouseButton::Left));
-        assert_eq!(mouse_button_from_gdk(2), Some(MouseButton::Middle));
-        assert_eq!(mouse_button_from_gdk(3), Some(MouseButton::Right));
-        assert_eq!(mouse_button_from_gdk(8), Some(MouseButton::Side));
-        assert_eq!(mouse_button_from_gdk(9), Some(MouseButton::Extra));
-        assert_eq!(mouse_button_from_gdk(4), None);
     }
 }

@@ -7,7 +7,6 @@ pub(crate) struct BindingRow {
     pub source_options: Vec<(InputSource, String)>,
     pub activator_options: Vec<(InputSource, String)>,
     pub source: gtk4::DropDown,
-    pub output: gtk4::DropDown,
     pub output_action: Rc<RefCell<OutputAction>>,
     pub activation: gtk4::DropDown,
     pub activator: gtk4::DropDown,
@@ -37,6 +36,7 @@ pub(super) struct SourceChangeContext {
 pub(super) struct OutputChangeContext {
     pub source: gtk4::DropDown,
     pub output: Rc<RefCell<OutputAction>>,
+    pub output_button: gtk4::Button,
     pub row: adw::ExpanderRow,
     pub on_dirty: Rc<dyn Fn()>,
     pub backend: VirtualGamepadBackend,

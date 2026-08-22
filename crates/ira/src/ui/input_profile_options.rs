@@ -3,13 +3,6 @@ use ira_input::{
     MouseButton, OutputAction, VirtualGamepadBackend,
 };
 
-#[derive(Debug, Clone, PartialEq)]
-pub(super) enum OutputOption {
-    Action(OutputAction),
-    CaptureKeyboard,
-    CaptureMouseButton,
-}
-
 pub(super) fn source_options_for_device(
     device: Option<&DeviceInfo>,
     backend: VirtualGamepadBackend,
@@ -204,86 +197,6 @@ pub(super) fn activation_index(activation: &Activation) -> u32 {
     }
 }
 
-fn output_buttons() -> [GamepadButton; 17] {
-    [
-        GamepadButton::A,
-        GamepadButton::B,
-        GamepadButton::X,
-        GamepadButton::Y,
-        GamepadButton::LeftShoulder,
-        GamepadButton::RightShoulder,
-        GamepadButton::LeftTrigger,
-        GamepadButton::RightTrigger,
-        GamepadButton::Back,
-        GamepadButton::Start,
-        GamepadButton::Guide,
-        GamepadButton::LeftStick,
-        GamepadButton::RightStick,
-        GamepadButton::DpadUp,
-        GamepadButton::DpadDown,
-        GamepadButton::DpadLeft,
-        GamepadButton::DpadRight,
-    ]
-}
-
-pub(super) fn output_options(backend: VirtualGamepadBackend) -> Vec<OutputOption> {
-    let mut options = output_buttons()
-        .into_iter()
-        .map(|button| OutputOption::Action(OutputAction::GamepadButton(button)))
-        .collect::<Vec<_>>();
-    if backend == VirtualGamepadBackend::DirectInput {
-        options.extend((1..=8).map(|number| {
-            OutputOption::Action(OutputAction::GamepadButton(match number {
-                1 => GamepadButton::Paddle1,
-                2 => GamepadButton::Paddle2,
-                3 => GamepadButton::Paddle3,
-                4 => GamepadButton::Paddle4,
-                5 => GamepadButton::Paddle5,
-                6 => GamepadButton::Paddle6,
-                7 => GamepadButton::Paddle7,
-                _ => GamepadButton::Paddle8,
-            }))
-        }));
-    }
-    options.extend(
-        gamepad_axes()
-            .into_iter()
-            .filter(|axis| {
-                backend != VirtualGamepadBackend::SwitchPro
-                    || !matches!(axis, GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger)
-            })
-            .map(|axis| OutputOption::Action(OutputAction::GamepadAxis(axis))),
-    );
-    options.extend(
-        [MouseAxis::X, MouseAxis::Y, MouseAxis::Wheel, MouseAxis::WheelX]
-            .into_iter()
-            .map(|axis| OutputOption::Action(OutputAction::MouseAxis(axis))),
-    );
-    options.extend([
-        OutputOption::CaptureKeyboard,
-        OutputOption::CaptureMouseButton,
-    ]);
-    options
-}
-
-pub(super) fn output_labels(backend: VirtualGamepadBackend) -> Vec<String> {
-    output_options(backend)
-        .iter()
-        .map(output_option_label)
-        .collect()
-}
-
-pub(super) fn output_index(output: &OutputAction, backend: VirtualGamepadBackend) -> u32 {
-    output_options(backend)
-        .iter()
-        .position(|option| output_option_matches(option, output))
-        .unwrap_or(0) as u32
-}
-
-pub(super) fn output_option(index: u32, backend: VirtualGamepadBackend) -> Option<OutputOption> {
-    output_options(backend).get(index as usize).cloned()
-}
-
 pub(super) fn output_display_label(output: &OutputAction) -> String {
     match output {
         OutputAction::GamepadButton(button) => button_label(*button),
@@ -304,6 +217,13 @@ pub(super) fn output_display_label(output: &OutputAction) -> String {
             MouseAxis::Wheel => crate::tr!("Mouse Wheel"),
             MouseAxis::WheelX => crate::tr!("Mouse Wheel (Horizontal)"),
         },
+        OutputAction::WheelClick { axis, amount } => match (axis, *amount < 0) {
+            (MouseAxis::Wheel, false) => crate::tr!("Scroll Wheel Up"),
+            (MouseAxis::Wheel, true) => crate::tr!("Scroll Wheel Down"),
+            (MouseAxis::WheelX, false) => crate::tr!("Scroll Wheel Right"),
+            (MouseAxis::WheelX, true) => crate::tr!("Scroll Wheel Left"),
+            _ => crate::tr!("Scroll Wheel"),
+        },
         OutputAction::SwitchActionSet(index) => {
             crate::tr!("Switch to action set {index}").replace("{index}", &index.to_string())
         }
@@ -313,30 +233,11 @@ pub(super) fn output_display_label(output: &OutputAction) -> String {
     }
 }
 
-fn output_option_matches(option: &OutputOption, output: &OutputAction) -> bool {
-    match option {
-        OutputOption::Action(action) => action == output,
-        OutputOption::CaptureKeyboard => matches!(output, OutputAction::Keyboard { .. }),
-        OutputOption::CaptureMouseButton => matches!(output, OutputAction::MouseButton(_)),
-    }
-}
-
-fn output_option_label(option: &OutputOption) -> String {
-    match option {
-        OutputOption::Action(action) => output_display_label(action),
-        OutputOption::CaptureKeyboard => crate::tr!("Keyboard key..."),
-        OutputOption::CaptureMouseButton => crate::tr!("Mouse button..."),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        activator_index, output_display_label, output_index, output_labels, output_option,
-        source_options_for_device, OutputOption,
-    };
+    use super::{activator_index, output_display_label, source_options_for_device};
     use ira_input::{
-        Activation, DeviceInfo, GamepadAxis, GamepadButton, InputSource, MouseButton,
+        Activation, DeviceInfo, GamepadAxis, GamepadButton, InputSource, MouseAxis, MouseButton,
         OutputAction, VirtualGamepadBackend,
     };
     use std::path::PathBuf;
@@ -392,46 +293,6 @@ mod tests {
     }
 
     #[test]
-    fn test_output_options_include_supported_virtual_controls() {
-        let labels = output_labels(VirtualGamepadBackend::XInput);
-        assert_eq!(labels.len(), 29);
-        assert!(!labels.iter().any(|label| label.contains("Paddle")));
-        assert!(labels.contains(&"Mouse X".to_string()));
-        assert!(labels.contains(&"Mouse Wheel (Horizontal)".to_string()));
-        assert!(labels.contains(&"Keyboard key...".to_string()));
-        assert_eq!(
-            output_option(
-                output_index(
-                    &OutputAction::GamepadAxis(GamepadAxis::RightX),
-                    VirtualGamepadBackend::XInput
-                ),
-                VirtualGamepadBackend::XInput
-            ),
-            Some(OutputOption::Action(OutputAction::GamepadAxis(
-                GamepadAxis::RightX
-            )))
-        );
-        assert_eq!(
-            output_option(
-                output_index(
-                    &OutputAction::Keyboard { keycode: 30 },
-                    VirtualGamepadBackend::XInput
-                ),
-                VirtualGamepadBackend::XInput
-            ),
-            Some(OutputOption::CaptureKeyboard)
-        );
-        assert!(output_option(29, VirtualGamepadBackend::XInput).is_none());
-    }
-
-    #[test]
-    fn test_output_labels_are_concise() {
-        let labels = output_labels(VirtualGamepadBackend::XInput);
-        assert!(labels.contains(&"A Button".to_string()));
-        assert!(!labels.iter().any(|label| label.starts_with("Gamepad ")));
-    }
-
-    #[test]
     fn test_trigger_labels_distinguish_axis_and_button_bindings() {
         let sources = source_options_for_device(None, VirtualGamepadBackend::XInput);
         assert!(sources.contains(&(
@@ -442,19 +303,6 @@ mod tests {
             InputSource::Axis(GamepadAxis::LeftTrigger),
             "Left Trigger".to_string()
         )));
-
-        let outputs = output_labels(VirtualGamepadBackend::XInput);
-        assert!(outputs.contains(&"Right Trigger Button".to_string()));
-        assert!(outputs.contains(&"Right Trigger".to_string()));
-    }
-
-    #[test]
-    fn test_switch_pro_output_uses_digital_triggers() {
-        let outputs = output_labels(VirtualGamepadBackend::SwitchPro);
-        assert!(outputs.contains(&"Left Trigger Button".to_string()));
-        assert!(outputs.contains(&"Right Trigger Button".to_string()));
-        assert!(!outputs.contains(&"Left Trigger".to_string()));
-        assert!(!outputs.contains(&"Right Trigger".to_string()));
     }
 
     #[test]
@@ -466,6 +314,13 @@ mod tests {
         assert_eq!(
             output_display_label(&OutputAction::MouseButton(MouseButton::Side)),
             "Mouse Side"
+        );
+        assert_eq!(
+            output_display_label(&OutputAction::WheelClick {
+                axis: MouseAxis::Wheel,
+                amount: -1
+            }),
+            "Scroll Wheel Down"
         );
     }
 

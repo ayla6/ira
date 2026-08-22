@@ -1,10 +1,6 @@
 use super::super::helpers::esc;
-use super::super::input_profile_options::{
-    output_display_label, output_index, output_option, OutputOption,
-};
-use super::super::input_profile_output_capture::{
-    show_keyboard_output_capture, show_mouse_output_capture,
-};
+use super::super::input_profile_options::output_display_label;
+use super::super::input_output_picker::{show_output_picker, OutputPickerScope};
 use super::assets::{set_source_asset, source_badge};
 use super::categories::is_analog_source;
 use super::types::{BindingRow, OutputChangeContext, SourceChangeContext};
@@ -14,10 +10,6 @@ use std::rc::Rc;
 
 pub(super) fn connect_dirty(row: &BindingRow, on_dirty: &Rc<dyn Fn()>) {
     row.source.connect_selected_notify({
-        let on_dirty = on_dirty.clone();
-        move |_| on_dirty()
-    });
-    row.output.connect_selected_notify({
         let on_dirty = on_dirty.clone();
         move |_| on_dirty()
     });
@@ -63,47 +55,49 @@ pub(super) fn connect_source_changes(dropdown: &gtk4::DropDown, context: SourceC
     });
 }
 
-pub(super) fn connect_output_changes(dropdown: &gtk4::DropDown, context: OutputChangeContext) {
-    dropdown.connect_selected_notify(move |dropdown| {
-        let Some(option) = output_option(dropdown.selected(), context.backend) else {
-            return;
-        };
-        match option {
-            OutputOption::Action(action) => *context.output.borrow_mut() = action,
-            capture_option => {
-                dropdown.set_selected(output_index(&context.output.borrow(), context.backend));
-                if let Some(parent) = dropdown.root().and_downcast::<gtk4::Window>() {
-                    show_output_capture(capture_option, &parent, context.clone());
-                }
+pub(super) fn connect_output_changes(context: OutputChangeContext) {
+    context.output_button.connect_clicked({
+        let context = context.clone();
+        move |button| {
+            let Some(parent) = button.root().and_downcast::<gtk4::Window>() else {
                 return;
-            }
+            };
+            let source_text = source_label(&context.source);
+            let scope = OutputPickerScope::flat(context.backend);
+            let current = context.output.borrow().clone();
+            let handler = context.clone();
+            show_output_picker(
+                &parent,
+                &crate::tr!("Select a command for {input}").replace("{input}", &source_text),
+                &scope,
+                Some(&current),
+                move |action| {
+                    *handler.output.borrow_mut() = action;
+                    update_output_state(&handler);
+                },
+            );
         }
-        update_output_state(&context);
     });
 }
 
-fn show_output_capture(option: OutputOption, parent: &gtk4::Window, context: OutputChangeContext) {
-    let complete: Rc<dyn Fn(OutputAction)> = Rc::new(move |action| {
-        *context.output.borrow_mut() = action;
-        update_output_state(&context);
-    });
-    match option {
-        OutputOption::CaptureKeyboard => {
-            show_keyboard_output_capture(parent, move |keycode| {
-                complete(OutputAction::Keyboard { keycode });
-            });
-        }
-        OutputOption::CaptureMouseButton => {
-            show_mouse_output_capture(parent, move |button| {
-                complete(OutputAction::MouseButton(button));
-            });
-        }
-        OutputOption::Action(_) => {}
-    }
+fn source_label(source: &gtk4::DropDown) -> String {
+    source
+        .model()
+        .and_then(|model| model.item(source.selected()))
+        .and_then(|item| item.downcast::<gtk4::StringObject>().ok())
+        .map(|item| item.string().to_string())
+        .unwrap_or_else(|| crate::tr!("input").to_string())
 }
 
 fn update_output_state(context: &OutputChangeContext) {
-    update_binding_summary(&context.source, &context.output.borrow(), &context.row);
+    context
+        .output_button
+        .set_label(&output_display_label(&context.output.borrow()));
+    update_binding_summary(
+        &context.source,
+        &context.output.borrow(),
+        &context.row,
+    );
     (context.on_dirty)();
 }
 

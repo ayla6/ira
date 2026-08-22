@@ -30,6 +30,9 @@ impl SteamDataClient {
             (AssetType::Logo, &mut logo_path),
             (AssetType::Header, &mut header_path),
         ] {
+            // Older icon downloads could leave an undecoded .ico behind;
+            // convert or drop it so it stops shadowing fresh downloads.
+            ira_parser::heal_ico_variant(dir, asset_type.file_base());
             *path = if let Some(existing) = ira_parser::find_image_file(dir, asset_type.file_base())
             {
                 let p = existing.to_string_lossy().into_owned();
@@ -56,25 +59,26 @@ impl SteamDataClient {
             String::new()
         } else {
             let mut found = String::new();
+            ira_parser::heal_ico_variant(&dir, AssetType::Icon.file_base());
             if let Some(cached) = self.find_cached_icon(app_id) {
                 found = cached.to_string_lossy().into_owned();
             }
             if found.is_empty() {
                 if let Some(url) = self.fetch_sgdb_icon_url(app_id) {
                     ira_parser::remove_image_variants(&dir, AssetType::Icon.file_base());
-                    let ext = Path::new(&url)
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or("png");
-                    let dest = dir.join(format!("{}.{}", AssetType::Icon.file_base(), ext));
-                    if self.download_file(&url, &dest).is_ok() {
-                        ira_parser::convert_to_lossless_webp(&dest);
-                        let webp = dir.join(format!("{}.webp", AssetType::Icon.file_base()));
-                        found = if webp.is_file() {
-                            webp.to_string_lossy().into_owned()
-                        } else {
-                            dest.to_string_lossy().into_owned()
-                        };
+                    // Download as bytes and decode before anything touches
+                    // disk: an icon URL can serve anything, and a raw dump
+                    // used to strand icon.ico files that never converted.
+                    let dest_webp = dir.join(format!("{}.webp", AssetType::Icon.file_base()));
+                    if let Some(webp) = self
+                        .download_bytes(&url)
+                        .ok()
+                        .filter(|bytes| ira_parser::is_decodable_image(bytes))
+                        .and_then(|bytes| ira_parser::convert_bytes_to_lossless_webp(&bytes))
+                    {
+                        if std::fs::write(&dest_webp, &webp).is_ok() {
+                            found = dest_webp.to_string_lossy().into_owned();
+                        }
                     }
                 }
             }
@@ -383,35 +387,53 @@ impl SteamDataClient {
             Some(u) => u,
             None => return String::new(),
         };
-        let ext = Path::new(&url)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("png");
-        let is_png = ext.eq_ignore_ascii_case("png");
 
         let base_name = asset.file_base();
         ira_parser::remove_image_variants(dir, base_name);
 
-        let dest = dir.join(format!("{}.{}", base_name, ext));
-        let r = if is_png || asset == AssetType::Icon {
-            if self.download_file(&url, &dest).is_ok() {
-                dest.to_string_lossy().into_owned()
-            } else {
-                String::new()
+        let r = if asset == AssetType::Icon {
+            // Icons: decode in memory and write WebP directly. Icon URLs
+            // frequently end in .ico and a raw dump used to strand files
+            // that never converted.
+            let dest_webp = dir.join(format!("{base_name}.webp"));
+            match self
+                .download_bytes(&url)
+                .ok()
+                .filter(|bytes| ira_parser::is_decodable_image(bytes))
+                .and_then(|bytes| ira_parser::convert_bytes_to_lossless_webp(&bytes))
+            {
+                Some(webp) if std::fs::write(&dest_webp, &webp).is_ok() => {
+                    dest_webp.to_string_lossy().into_owned()
+                }
+                _ => String::new(),
             }
         } else {
-            self.fetch_image(&url, &dest)
-        };
-        let r = if !r.is_empty() {
-            ira_parser::convert_to_lossless_webp(&dest);
-            let webp = dir.join(format!("{}.webp", base_name));
-            if webp.is_file() {
-                webp.to_string_lossy().into_owned()
+            let ext = Path::new(&url)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("png");
+            let dest = dir.join(format!("{}.{}", base_name, ext));
+            let is_png = ext.eq_ignore_ascii_case("png");
+            let r = if is_png {
+                if self.download_file(&url, &dest).is_ok() {
+                    dest.to_string_lossy().into_owned()
+                } else {
+                    String::new()
+                }
             } else {
+                self.fetch_image(&url, &dest)
+            };
+            if r.is_empty() {
                 r
+            } else {
+                ira_parser::convert_to_lossless_webp(&dest);
+                let webp = dir.join(format!("{base_name}.webp"));
+                if webp.is_file() {
+                    webp.to_string_lossy().into_owned()
+                } else {
+                    r
+                }
             }
-        } else {
-            r
         };
 
         if !r.is_empty() {

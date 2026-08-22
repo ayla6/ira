@@ -741,10 +741,18 @@ fn build_dir_buttons(
             move |path| {
                 ira_parser::remove_image_variants(&target_dir, &file_base);
                 ira_parser::remove_image_variants(&target_dir, &format!("{}_small", file_base));
-                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png");
-                let dest = target_dir.join(format!("{}.{}", file_base, ext));
-                let _ = std::fs::copy(path, &dest);
-                ira_parser::convert_to_lossless_webp(&dest);
+                // Decode in memory and persist WebP only: a raw copy of an
+                // .ico pick used to strand files that never converted.
+                let dest_webp = target_dir.join(format!("{file_base}.webp"));
+                if let Ok(bytes) = std::fs::read(path) {
+                    if ira_parser::is_decodable_image(&bytes) {
+                        if let Some(webp) = ira_parser::convert_bytes_to_lossless_webp(&bytes) {
+                            if std::fs::write(&dest_webp, &webp).is_ok() {
+                                ira_images::invalidate_texture(&dest_webp.to_string_lossy());
+                            }
+                        }
+                    }
+                }
                 let (sw, sh) = match AssetType::all()
                     .iter()
                     .find(|at| at.file_base() == file_base.as_str())

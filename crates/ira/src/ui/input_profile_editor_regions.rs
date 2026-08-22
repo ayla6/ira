@@ -42,9 +42,10 @@ impl Region {
         match self {
             Region::FaceButtons => crate::tr!("Face Buttons"),
             Region::Dpad => crate::tr!("D-pad"),
-            Region::TriggersBumpers => crate::tr!("Triggers & Bumpers"),
+            // The "&" is escaped when set on markup-parsing widgets.
+            Region::TriggersBumpers => crate::tr!("Triggers and Bumpers"),
             Region::Sticks => crate::tr!("Sticks"),
-            Region::SystemPaddles => crate::tr!("System & Paddles"),
+            Region::SystemPaddles => crate::tr!("System and Paddles"),
         }
     }
 

@@ -322,6 +322,20 @@ pub fn url_extension(url: &str) -> &str {
     path.extension().and_then(|e| e.to_str()).unwrap_or("png")
 }
 
+/// Convert a leftover `.ico` variant of `base` to WebP. Undecodable files
+/// are removed rather than kept: they came from downloads that failed to
+/// convert, and leaving them around pins the broken asset forever.
+pub fn heal_ico_variant(dir: &Path, base: &str) {
+    let ico = dir.join(format!("{base}.ico"));
+    if !ico.is_file() {
+        return;
+    }
+    convert_to_lossless_webp(&ico);
+    if ico.is_file() {
+        let _ = std::fs::remove_file(&ico);
+    }
+}
+
 /// Decode an image file to raw RGBA8 pixels suitable for `gdk::MemoryTexture`.
 /// Reads the file and decodes it using the `image` crate. Returns `None` if
 /// the file can't be read or the format is unsupported.
@@ -631,5 +645,25 @@ mod tests {
             webp_is_lossless(&small),
             "already-small source should stay lossless WebP"
         );
+    }
+
+    #[test]
+    fn test_heal_ico_variant_converts_decodable_ico() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ico = tmp.path().join("icon.ico");
+        let img = image::DynamicImage::new_rgba8(4, 4);
+        img.save(&ico).unwrap();
+        heal_ico_variant(tmp.path(), "icon");
+        assert!(tmp.path().join("icon.webp").is_file());
+        assert!(!ico.exists());
+    }
+
+    #[test]
+    fn test_heal_ico_variant_drops_undecodable_ico() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ico = tmp.path().join("icon.ico");
+        std::fs::write(&ico, b"not an image").unwrap();
+        heal_ico_variant(tmp.path(), "icon");
+        assert!(!ico.exists(), "junk .ico must not pin the asset forever");
     }
 }

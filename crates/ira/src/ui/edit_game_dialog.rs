@@ -506,22 +506,23 @@ fn build_dialog_contents(
     let trophy_source = game.trophy_source;
     let game_kind = game.kind;
     let saved_platform_id_s = game.platform_id.clone();
-    let var_widgets_w = Rc::downgrade(&var_widgets);
     let save_dir_s = save_dir.clone();
     let logo_controls_s = logo_controls.clone();
     let dlc_switches_s = dlc_switches.clone();
-    let pending_copies_w = Rc::downgrade(&pending_copies);
     let old_wine_s = saved_wine.clone();
     let app_default_wine_s = app_default_wine.clone();
     let game_exe_s = saved_launch.exe.clone();
     let language_row_w = language_row.as_ref().map(Downgrade::downgrade);
     let languages_s = languages.clone();
     let lwa_rc = Rc::new(lwa);
-    let lwa_w = Rc::downgrade(&lwa_rc);
     let title_entry_w = Downgrade::downgrade(&title_entry);
     let sort_entry_w = Downgrade::downgrade(&sort_entry);
-    // Plain data holders cannot form widget cycles; capturing them weakly
-    // dropped the last owner before Save could read them.
+    // Data holders (Rc structs, no owner in the widget tree) must be captured
+    // strongly: a weak ref to them has no other owner and dies before Save
+    // runs. Actual widgets stay weak — the dialog window owns those.
+    let pending_copies_c = pending_copies.clone();
+    let var_widgets_c = var_widgets.clone();
+    let lwa_c = lwa_rc.clone();
     let pending_version_c = pending_version.clone();
     let app_id_entry_w = app_id_entry.as_ref().map(Downgrade::downgrade);
     let pending_ra_core_c = pending_ra_core.clone();
@@ -546,14 +547,14 @@ fn build_dialog_contents(
         }
         let win = take!(win_w, "window");
         let state = take!(state_w, "state");
-        let pending_copies = take!(pending_copies_w, "pending copies");
-        let var_widgets = take!(var_widgets_w, "variant widgets");
+        let pending_copies = pending_copies_c.clone();
+        let var_widgets = var_widgets_c.clone();
         let title_entry = take!(title_entry_w, "title entry");
         let sort_entry = take!(sort_entry_w, "sort entry");
         let pending_version = pending_version_c.clone();
         let pending_ra_core = pending_ra_core_c.clone();
         let pending_emulator = pending_emulator_c.clone();
-        let lwa = take!(lwa_w, "page widgets");
+        let lwa = lwa_c.clone();
         let save_btn = take!(save_btn_w, "save button");
         let language_row = language_row_w.as_ref().and_then(|w| w.upgrade());
         let app_id_entry = app_id_entry_w.as_ref().and_then(|w| w.upgrade());
@@ -623,14 +624,6 @@ fn build_dialog_contents(
             state.borrow_mut().settings_data = None;
         }
         glib::Propagation::Proceed
-    });
-    // Anchor the page-widget structs to the dialog window: the save button
-    // reaches them through weak refs, so something must own them strongly
-    // for exactly as long as the dialog exists. The destroy handler dies
-    // with the window, releasing them at teardown.
-    let lwa_lifetime = lwa_rc;
-    win.connect_destroy(move |_| {
-        let _ = lwa_lifetime;
     });
 }
 

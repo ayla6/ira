@@ -117,6 +117,7 @@ pub(super) fn activation_sources(activation: &Activation) -> Vec<InputSource> {
         | Activation::Toggle(source)
         | Activation::DisableWhile(source) => vec![*source],
         Activation::Chord { sources, .. } => sources.clone(),
+        Activation::Analog { axis, .. } => vec![InputSource::Axis(*axis)],
         Activation::Always => Vec::new(),
     }
 }

@@ -449,4 +449,71 @@ mod tests {
         )));
         let _ = GamepadAxis::LeftX;
     }
+
+    #[test]
+    fn test_analog_activation_gates_on_axis_state() {
+        let mut input = InputMapping::simple(
+            InputSource::Button(GamepadButton::A),
+            OutputAction::Keyboard { keycode: 32 },
+        );
+        input.activators[0].activation = Activation::Analog {
+            axis: GamepadAxis::LeftTrigger,
+            condition: crate::profile::AnalogCondition::Active,
+            threshold: 0.3,
+        };
+        let profile = profile_with_sets(
+            vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![input],
+            }],
+            Vec::new(),
+        );
+        let mut engine = MappingEngine::new(profile).unwrap();
+
+        // Gate closed (trigger at rest): the press produces nothing.
+        assert_eq!(
+            engine.process(press(InputSource::Button(GamepadButton::A), 1.0, 2_000)),
+            Vec::<OutputEvent>::new()
+        );
+        engine.process(press(InputSource::Button(GamepadButton::A), 0.0, 3_000));
+        // Trigger held: gate open, the same press fires.
+        engine.process(press(InputSource::Axis(GamepadAxis::LeftTrigger), 0.8, 4_000));
+        assert_eq!(
+            engine.process(press(InputSource::Button(GamepadButton::A), 1.0, 5_000)),
+            vec![OutputEvent::Key {
+                keycode: 32,
+                pressed: true
+            }]
+        );
+        // Gate flips off mid-hold: the next tick releases the held key.
+        engine.process(press(InputSource::Axis(GamepadAxis::LeftTrigger), 0.0, 6_000));
+        assert_eq!(
+            engine.tick(7_000),
+            vec![OutputEvent::Key {
+                keycode: 32,
+                pressed: false
+            }]
+        );
+    }
+
+    #[test]
+    fn test_analog_activation_conditions() {
+        let mut engine = MappingEngine::new(InputProfile::default()).unwrap();
+        let at_rest = Activation::Analog {
+            axis: GamepadAxis::RightTrigger,
+            condition: crate::profile::AnalogCondition::AtRest,
+            threshold: 0.1,
+        };
+        let maxed = Activation::Analog {
+            axis: GamepadAxis::RightTrigger,
+            condition: crate::profile::AnalogCondition::MaxedOut,
+            threshold: 0.1,
+        };
+        engine.process(press(InputSource::Axis(GamepadAxis::RightTrigger), 0.95, 1_000));
+        assert!(!engine.activation_active(&at_rest));
+        assert!(engine.activation_active(&maxed));
+        engine.process(press(InputSource::Axis(GamepadAxis::RightTrigger), 0.0, 2_000));
+        assert!(engine.activation_active(&at_rest));
+        assert!(!engine.activation_active(&maxed));
+    }
 }

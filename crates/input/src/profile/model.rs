@@ -376,7 +376,7 @@ impl AxisTransform {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Activation {
     #[default]
@@ -389,6 +389,40 @@ pub enum Activation {
         #[serde(default)]
         mode: ChordMode,
     },
+    /// Gate on an analog axis's state — Steam's "activate when the input is
+    /// at rest / not at zero / maxed out" family.
+    Analog {
+        axis: GamepadAxis,
+        condition: AnalogCondition,
+        #[serde(default = "default_analog_threshold")]
+        threshold: f32,
+    },
+}
+
+impl Activation {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        if let Self::Analog { threshold, .. } = self {
+            if !threshold.is_finite() || !(0.0..0.9).contains(threshold) {
+                return Err("analog activation threshold must be in [0, 0.9)".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// How [`Activation::Analog`] interprets `threshold` against the axis
+/// magnitude `|v|`: at rest means `|v| <= threshold`, active means
+/// `|v| > threshold`, maxed out means `|v| >= 1 - threshold`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalogCondition {
+    AtRest,
+    Active,
+    MaxedOut,
+}
+
+pub(crate) fn default_analog_threshold() -> f32 {
+    0.1
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -721,6 +755,10 @@ impl InputProfile {
                     return Err(format!("binding {index}: chord cannot be empty"));
                 }
             }
+            binding
+                .activation
+                .validate()
+                .map_err(|error| format!("binding {index}: {error}"))?;
         }
         self.gyro.validate()?;
         self.validate_action_sets()?;
@@ -780,6 +818,10 @@ impl InputProfile {
             if activator.outputs.is_empty() {
                 return Err(format!("{label}: activator needs at least one output"));
             }
+            activator
+                .activation
+                .validate()
+                .map_err(|error| format!("{label}: {error}"))?;
             if let ActivatorKind::SoftPress { threshold } = activator.kind {
                 if !(0.0..1.0).contains(&threshold) || !threshold.is_finite() {
                     return Err(format!("{label}: soft-press threshold must be in [0, 1)"));

@@ -252,6 +252,18 @@ impl MappingEngine {
                 ChordMode::Hold => self.chord_active(sources),
                 ChordMode::Toggle => self.chord_toggles.get(sources).copied().unwrap_or(false),
             },
+            Activation::Analog {
+                axis,
+                condition,
+                threshold,
+            } => {
+                let magnitude = self.source_value(InputSource::Axis(*axis)).abs();
+                match condition {
+                    crate::profile::AnalogCondition::AtRest => magnitude <= *threshold,
+                    crate::profile::AnalogCondition::Active => magnitude > *threshold,
+                    crate::profile::AnalogCondition::MaxedOut => magnitude >= 1.0 - *threshold,
+                }
+            }
         }
     }
 

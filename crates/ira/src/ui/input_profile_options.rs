@@ -171,6 +171,9 @@ pub(super) fn activator_index(activation: &Activation, options: &[(InputSource, 
         Activation::Chord { sources, .. } => {
             sources.first().copied().map(source_index).unwrap_or(0)
         }
+        // The flat dropdown cannot configure the gate; it round-trips as a
+        // default active-axis gate until the binding sheet replaces it.
+        Activation::Analog { axis, .. } => source_index(InputSource::Axis(*axis)),
         Activation::Always => 0,
     }
 }
@@ -182,6 +185,7 @@ pub(super) fn activation_labels() -> Vec<String> {
         crate::tr!("Toggle"),
         crate::tr!("Disable while held"),
         crate::tr!("Chord"),
+        crate::tr!("Analog gate"),
     ]
     .into_iter()
     .collect()
@@ -193,6 +197,7 @@ pub(super) fn activation_index(activation: &Activation) -> u32 {
         Activation::Toggle(_) => 2,
         Activation::DisableWhile(_) => 3,
         Activation::Chord { .. } => 4,
+        Activation::Analog { .. } => 5,
         Activation::Always => 0,
     }
 }

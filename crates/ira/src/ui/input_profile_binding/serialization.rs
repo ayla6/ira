@@ -1,6 +1,6 @@
 use super::types::BindingRow;
 use adw::prelude::*;
-use ira_input::{Activation, AxisTransform, Binding, ChordMode, InputSource};
+use ira_input::{Activation, AnalogCondition, AxisTransform, Binding, ChordMode, GamepadAxis, InputSource};
 
 pub(crate) fn binding_from_row(row: &BindingRow) -> Result<Binding, String> {
     let source = row
@@ -36,6 +36,14 @@ fn activation_from_row(row: &BindingRow) -> Result<Activation, String> {
         4 => Activation::Chord {
             sources: parse_chord(&row.chord.text(), &row.activator_options)?,
             mode: ChordMode::Hold,
+        },
+        5 => Activation::Analog {
+            axis: match source {
+                InputSource::Axis(axis) => axis,
+                _ => GamepadAxis::LeftTrigger,
+            },
+            condition: AnalogCondition::Active,
+            threshold: 0.1,
         },
         _ => Activation::Always,
     })

@@ -6,10 +6,10 @@ mod model;
 
 pub use model::{
     Activator, ActivatorKind, ActivatorSettings, ActionSet, ActionSetLayer, Activation,
-    AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton, GyroActivation,
-    GyroCalibration, GyroConfig, GyroOrientation, GyroOutput, InputCategory, InputMapping,
-    InputProfile, InputSource, ModeShift, MouseAxis, MouseButton, OutputAction, SourceMode,
-    StickOutput, VirtualGamepadBackend, PROFILE_VERSION,
+    AnalogCondition, AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton,
+    GyroActivation, GyroCalibration, GyroConfig, GyroOrientation, GyroOutput, InputCategory,
+    InputMapping, InputProfile, InputSource, ModeShift, MouseAxis, MouseButton, OutputAction,
+    SourceMode, StickOutput, VirtualGamepadBackend, PROFILE_VERSION,
 };
 
 use InputSource::Axis;

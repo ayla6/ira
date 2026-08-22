@@ -16,10 +16,10 @@ pub use physical::{
 };
 pub use profile::{
     Activator, ActivatorKind, ActivatorSettings, ActionSet, ActionSetLayer, Activation,
-    AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton, GyroActivation,
-    GyroCalibration, GyroConfig, GyroOrientation, GyroOutput, InputCategory, InputMapping, InputProfile,
-    InputSource, ModeShift, MouseAxis, MouseButton, OutputAction, SourceMode, StickOutput,
-    VirtualGamepadBackend, PROFILE_VERSION,
+    AnalogCondition, AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton,
+    GyroActivation, GyroCalibration, GyroConfig, GyroOrientation, GyroOutput, InputCategory,
+    InputMapping, InputProfile, InputSource, ModeShift, MouseAxis, MouseButton, OutputAction,
+    SourceMode, StickOutput, VirtualGamepadBackend, PROFILE_VERSION,
 };
 pub use calibration::{
     calibration_store_path, device_key, load_calibration, remove_calibration, save_calibration,

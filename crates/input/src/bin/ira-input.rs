@@ -19,6 +19,7 @@ const VIRTUAL_XBOX_PRODUCT: u16 = 0x028e;
 const SWITCH_PRO_VENDOR: u16 = 0x057e;
 const SWITCH_PRO_PRODUCT: u16 = 0x2009;
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const FOCUS_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const PROFILE_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const STEAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(250);
@@ -154,6 +155,7 @@ struct Arguments {
     device: Option<PathBuf>,
     profile: Option<PathBuf>,
     calibration: Option<PathBuf>,
+    pause_unfocused: bool,
     list: bool,
     probe_sensors: bool,
     steam_app_id: Option<String>,
@@ -264,6 +266,7 @@ fn parse_arguments() -> Result<Arguments, String> {
         device: None,
         profile: None,
         calibration: None,
+        pause_unfocused: false,
         list: false,
         probe_sensors: false,
         steam_app_id: None,
@@ -305,6 +308,7 @@ fn parse_arguments() -> Result<Arguments, String> {
                         .ok_or_else(|| "--steam-app-id requires an ID".to_string())?,
                 );
             }
+            "--pause-unfocused" => arguments.pause_unfocused = true,
             "--list" => arguments.list = true,
             "--probe-sensors" => arguments.probe_sensors = true,
             "--trace" => arguments.trace = true,
@@ -467,6 +471,22 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         )
     };
     let mut schedule = LoopSchedule::new();
+    // Pause injection while the game window is unfocused (alt-tab). Without
+    // an X server to ask, the watcher cannot exist and input stays active.
+    let focus = if arguments.pause_unfocused {
+        child
+            .as_ref()
+            .and_then(|child| ira_input::FocusWatcher::for_child(child.id()))
+    } else {
+        None
+    };
+    if arguments.pause_unfocused && focus.is_none() {
+        eprintln!(
+            "ira-input: no X server available for focus tracking; input stays active while unfocused"
+        );
+    }
+    let mut paused_for_focus = false;
+    let mut focus_check = Instant::now();
     if let Some(gamepad) = gamepad.as_ref() {
         eprintln!(
             "ira-input: mapping {} through {}",
@@ -488,32 +508,60 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         if run_tick {
             schedule.sensor = Instant::now();
         }
-        let result = process_physical_inputs(
-            &mut gamepad,
-            &mut mapper,
-            &mut report_rate,
-            OutputTargets {
-                gamepad: &mut virtual_gamepad,
-                keyboard: keyboard.as_mut(),
-                mouse: mouse.as_mut(),
-            },
-            &mut trace,
-        )
-        .and_then(|()| {
-            process_tick(
-                &mut sensor,
-                &mut gyro_processor,
-                &mut last_sensor_us,
+        if focus.is_some() && focus_check.elapsed() >= FOCUS_POLL_INTERVAL {
+            focus_check = Instant::now();
+            let focused = focus
+                .as_ref()
+                .is_some_and(ira_input::FocusWatcher::game_is_focused);
+            if !focused && !paused_for_focus {
+                paused_for_focus = true;
+                eprintln!("ira-input: game window unfocused; pausing input");
+                if let Err(error) = emit_outputs(
+                    mapper.reset(),
+                    OutputTargets {
+                        gamepad: &mut virtual_gamepad,
+                        keyboard: keyboard.as_mut(),
+                        mouse: mouse.as_mut(),
+                    },
+                    &mut trace,
+                ) {
+                    eprintln!("ira-input: failed to release outputs on pause: {error}");
+                }
+            } else if focused && paused_for_focus {
+                paused_for_focus = false;
+                eprintln!("ira-input: game window focused; resuming input");
+            }
+        }
+        let result = if paused_for_focus {
+            Ok(())
+        } else {
+            process_physical_inputs(
+                &mut gamepad,
                 &mut mapper,
+                &mut report_rate,
                 OutputTargets {
                     gamepad: &mut virtual_gamepad,
                     keyboard: keyboard.as_mut(),
                     mouse: mouse.as_mut(),
                 },
                 &mut trace,
-                run_tick,
             )
-        });
+            .and_then(|()| {
+                process_tick(
+                    &mut sensor,
+                    &mut gyro_processor,
+                    &mut last_sensor_us,
+                    &mut mapper,
+                    OutputTargets {
+                        gamepad: &mut virtual_gamepad,
+                        keyboard: keyboard.as_mut(),
+                        mouse: mouse.as_mut(),
+                    },
+                    &mut trace,
+                    run_tick,
+                )
+            })
+        };
         trace.flush();
         if let Err(error) = result {
             let resets = emit_outputs(

@@ -212,6 +212,7 @@ fn build_launch_config_and_wine(
         overlay_enabled,
         input_mode,
         input_profile,
+        input_pause_unfocused: cw.and_then(|s| *s.pause_unfocused.borrow()),
         gamemode,
         mangohud,
         gamescope,

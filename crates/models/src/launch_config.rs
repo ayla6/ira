@@ -58,6 +58,9 @@ pub struct GameLaunchConfig {
     pub input_mode: Option<ControllerInputMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_profile: Option<String>,
+    /// Pause ira-input while the game window is unfocused (None = enabled).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_pause_unfocused: Option<bool>,
     // System-level settings (moved from WineConfig — these apply to ALL games, not just Wine)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gamemode: Option<bool>,

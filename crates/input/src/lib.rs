@@ -27,6 +27,8 @@ pub use calibration::{
 pub use gyro::{GyroProcessingOptions, GyroProcessor, GyroRates};
 pub use registry::ControllerRegistry;
 pub use report_rate::ReportRateEstimator;
+mod focus;
+pub use focus::FocusWatcher;
 pub use sensor::{discover_sdl_gamepads, SensorSample, Sdl3SensorBackend, SdlGamepadInfo};
 pub use virtual_gamepad::VirtualGamepad;
 pub use virtual_keyboard::VirtualKeyboard;

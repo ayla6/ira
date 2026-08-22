@@ -116,6 +116,7 @@ pub(super) struct ControllerWidgets {
     pub input_mode: Rc<RefCell<Option<ControllerInputMode>>>,
     pub input_profile_row: adw::ComboRow,
     pub input_profile_paths: Rc<RefCell<Vec<Option<PathBuf>>>>,
+    pub pause_unfocused: Rc<RefCell<Option<bool>>>,
 }
 
 pub(super) struct ControllerPageParams<'a> {
@@ -149,6 +150,22 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     input_mode_row.set_selected(input_mode_index(initial_mode));
     let input_group = adw::PreferencesGroup::new();
     input_group.add(&input_mode_row);
+
+    let pause_unfocused = Rc::new(RefCell::new(params.launch.input_pause_unfocused));
+    let pause_row = adw::SwitchRow::builder()
+        .title(crate::tr!("Pause when the game loses focus"))
+        .subtitle(crate::tr!(
+            "Suspend controller input and gyro while another window is focused"
+        ))
+        .active(params.launch.input_pause_unfocused.unwrap_or(true))
+        .build();
+    {
+        let pause_cell = pause_unfocused.clone();
+        pause_row.connect_active_notify(move |row| {
+            *pause_cell.borrow_mut() = Some(row.is_active());
+        });
+    }
+    input_group.add(&pause_row);
 
     let current_path = params.launch.input_profile.as_deref().map(PathBuf::from);
     let (labels, paths, selected) =
@@ -367,6 +384,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         input_mode,
         input_profile_row,
         input_profile_paths,
+        pause_unfocused,
     }
 }
 

@@ -501,10 +501,11 @@ pub fn wrap_with_input(
     command: &mut Vec<String>,
     profile: Option<&str>,
     calibration: Option<&str>,
+    pause_unfocused: bool,
 ) -> Result<(), String> {
     let binary = input_binary_path()
         .ok_or_else(|| "input remapping enabled but ira-input was not found".to_string())?;
-    wrap_command_with_input(command, &binary, profile, calibration);
+    wrap_command_with_input(command, &binary, profile, calibration, pause_unfocused);
     Ok(())
 }
 
@@ -514,6 +515,7 @@ pub fn wrap_with_input_mode(
     mode: Option<ControllerInputMode>,
     profile: Option<&str>,
     calibration: Option<&str>,
+    pause_unfocused: bool,
 ) -> Result<(), String> {
     let binary = match mode {
         Some(ControllerInputMode::VirtualXInput)
@@ -524,7 +526,7 @@ pub fn wrap_with_input_mode(
     if let Some(binary) = binary {
         let binary = binary
             .ok_or_else(|| "input remapping enabled but ira-input was not found".to_string())?;
-        wrap_command_with_input(command, &binary, profile, calibration);
+        wrap_command_with_input(command, &binary, profile, calibration, pause_unfocused);
     }
     Ok(())
 }
@@ -541,7 +543,7 @@ fn wrap_with_input_mode_for_binary(
         Some(ControllerInputMode::VirtualXInput)
         | Some(ControllerInputMode::VirtualDirectInput)
         | Some(ControllerInputMode::VirtualSwitchPro) => {
-            wrap_command_with_input(command, binary, profile, calibration)
+            wrap_command_with_input(command, binary, profile, calibration, true)
         }
         None | Some(ControllerInputMode::Disabled) => {}
     }
@@ -552,6 +554,7 @@ fn wrap_command_with_input(
     binary: &str,
     profile: Option<&str>,
     calibration: Option<&str>,
+    pause_unfocused: bool,
 ) {
     let game_command = std::mem::take(command);
     let mut wrapped = vec![binary.to_string()];
@@ -562,6 +565,9 @@ fn wrap_command_with_input(
     if let Some(calibration) = calibration.filter(|calibration| !calibration.is_empty()) {
         wrapped.push("--calibration".to_string());
         wrapped.push(calibration.to_string());
+    }
+    if pause_unfocused {
+        wrapped.push("--pause-unfocused".to_string());
     }
     wrapped.push("--".to_string());
     wrapped.extend(game_command);
@@ -680,6 +686,7 @@ mod tests {
                 "/bin/ira-input",
                 "--profile",
                 "profile",
+                "--pause-unfocused",
                 "--",
                 "game",
                 "--fullscreen"
@@ -699,7 +706,13 @@ mod tests {
         );
         assert_eq!(
             command,
-            vec!["/bin/ira-input", "--", "game", "--fullscreen"]
+            vec![
+                "/bin/ira-input",
+                "--pause-unfocused",
+                "--",
+                "game",
+                "--fullscreen"
+            ]
         );
     }
 
@@ -715,7 +728,13 @@ mod tests {
         );
         assert_eq!(
             command,
-            vec!["/bin/ira-input", "--", "game", "--fullscreen"]
+            vec![
+                "/bin/ira-input",
+                "--pause-unfocused",
+                "--",
+                "game",
+                "--fullscreen"
+            ]
         );
     }
 

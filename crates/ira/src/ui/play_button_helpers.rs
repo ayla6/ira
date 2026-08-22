@@ -346,6 +346,7 @@ fn build_emulator_env_and_wrap(
             input_profile.as_deref(),
             Some(calibration.to_str().unwrap_or_default()),
             launch.input_pause_unfocused.unwrap_or(true),
+            launch.input_motion_udp.unwrap_or(true),
         )?;
         eprintln!(
             "ira-input: enabled for {}{}",
@@ -602,6 +603,7 @@ pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<bool, String
             input_profile.as_deref(),
             Some(calibration.to_str().unwrap_or_default()),
             launch.input_pause_unfocused.unwrap_or(true),
+            launch.input_motion_udp.unwrap_or(true),
         )?;
         let separator = cmd
             .iter()

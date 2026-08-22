@@ -117,6 +117,7 @@ pub(super) struct ControllerWidgets {
     pub input_profile_row: adw::ComboRow,
     pub input_profile_paths: Rc<RefCell<Vec<Option<PathBuf>>>>,
     pub pause_unfocused: Rc<RefCell<Option<bool>>>,
+    pub motion_udp: Rc<RefCell<Option<bool>>>,
 }
 
 pub(super) struct ControllerPageParams<'a> {
@@ -166,6 +167,22 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         });
     }
     input_group.add(&pause_row);
+
+    let motion_udp = Rc::new(RefCell::new(params.launch.input_motion_udp));
+    let motion_row = adw::SwitchRow::builder()
+        .title(crate::tr!("Emulator motion stream"))
+        .subtitle(crate::tr!(
+            "Broadcast the raw gyro over cemuhook UDP for emulators with native motion support"
+        ))
+        .active(params.launch.input_motion_udp.unwrap_or(true))
+        .build();
+    {
+        let motion_cell = motion_udp.clone();
+        motion_row.connect_active_notify(move |row| {
+            *motion_cell.borrow_mut() = Some(row.is_active());
+        });
+    }
+    input_group.add(&motion_row);
 
     let current_path = params.launch.input_profile.as_deref().map(PathBuf::from);
     let (labels, paths, selected) =
@@ -385,6 +402,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         input_profile_row,
         input_profile_paths,
         pause_unfocused,
+        motion_udp,
     }
 }
 

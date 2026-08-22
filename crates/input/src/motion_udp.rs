@@ -33,10 +33,16 @@ pub struct MotionServer {
 }
 
 impl MotionServer {
-    /// Bind the motion port. `None` when the port is taken (another motion
-    /// server, e.g. an emulator's own helper, already listens).
+    /// Bind the default motion port. `None` when the port is taken (another
+    /// motion server, e.g. an emulator's own helper, already listens).
     pub fn bind() -> Option<Self> {
-        let socket = UdpSocket::bind(("127.0.0.1", MOTION_PORT)).ok()?;
+        Self::bind_on(MOTION_PORT)
+    }
+
+    /// Bind a specific port so launches can move or disable the stream
+    /// (`--motion-port 0` means off).
+    pub fn bind_on(port: u16) -> Option<Self> {
+        let socket = UdpSocket::bind(("127.0.0.1", port)).ok()?;
         socket.set_nonblocking(true).ok()?;
         Some(Self {
             socket,

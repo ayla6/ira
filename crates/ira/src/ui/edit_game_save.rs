@@ -213,6 +213,7 @@ fn build_launch_config_and_wine(
         input_mode,
         input_profile,
         input_pause_unfocused: cw.and_then(|s| *s.pause_unfocused.borrow()),
+        input_motion_udp: cw.and_then(|s| *s.motion_udp.borrow()),
         gamemode,
         mangohud,
         gamescope,

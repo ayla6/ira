@@ -61,6 +61,10 @@ pub struct GameLaunchConfig {
     /// Pause ira-input while the game window is unfocused (None = enabled).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_pause_unfocused: Option<bool>,
+    /// Stream the physical controller's raw motion over cemuhook UDP for
+    /// emulators (None = enabled).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_motion_udp: Option<bool>,
     // System-level settings (moved from WineConfig — these apply to ALL games, not just Wine)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gamemode: Option<bool>,

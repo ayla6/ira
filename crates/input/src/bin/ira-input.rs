@@ -156,6 +156,7 @@ struct Arguments {
     profile: Option<PathBuf>,
     calibration: Option<PathBuf>,
     pause_unfocused: bool,
+    motion_port: Option<u16>,
     list: bool,
     probe_sensors: bool,
     steam_app_id: Option<String>,
@@ -267,6 +268,7 @@ fn parse_arguments() -> Result<Arguments, String> {
         profile: None,
         calibration: None,
         pause_unfocused: false,
+        motion_port: None,
         list: false,
         probe_sensors: false,
         steam_app_id: None,
@@ -309,6 +311,14 @@ fn parse_arguments() -> Result<Arguments, String> {
                 );
             }
             "--pause-unfocused" => arguments.pause_unfocused = true,
+            "--motion-port" => {
+                let raw = values
+                    .next()
+                    .ok_or_else(|| "--motion-port requires a port number".to_string())?;
+                arguments.motion_port = Some(raw.parse().map_err(|_| {
+                    format!("--motion-port expects a number, got {raw}")
+                })?);
+            }
             "--list" => arguments.list = true,
             "--probe-sensors" => arguments.probe_sensors = true,
             "--trace" => arguments.trace = true,
@@ -420,7 +430,9 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let mut virtual_gamepad = VirtualGamepad::create_for_backend(mapper.profile().backend)
         .map_err(|error| format!("failed to create virtual gamepad: {error}"))?;
     let sensor = gamepad.as_ref().and_then(|gamepad| open_sensor(gamepad.info()));
-    let motion_server = sensor.as_ref().and_then(|_| ira_input::MotionServer::bind());
+    let motion_enabled = arguments.motion_port != Some(0);
+    let motion_server =
+        if motion_enabled { sensor.as_ref().and_then(|_| ira_input::MotionServer::bind()) } else { None };
     match (&motion_server, sensor.as_ref()) {
         (Some(_), Some(_)) => eprintln!(
             "ira-input: motion passthrough on udp/{} for emulators (cemuhook)",
@@ -658,7 +670,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             gamepad.info().path.display()
                         );
                         pipeline.sensor = open_sensor(gamepad.info());
-                        if pipeline.sensor.is_some() && pipeline.motion.is_none() {
+                        if pipeline.sensor.is_some() && pipeline.motion.is_none() && motion_enabled {
                             pipeline.motion = ira_input::MotionServer::bind();
                             if pipeline.motion.is_some() {
                                 eprintln!(

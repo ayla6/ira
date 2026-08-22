@@ -50,9 +50,9 @@ pub(super) fn add_gyro_group(
     let passthrough = adw::ActionRow::new();
     passthrough.set_title(&crate::tr!("Emulator motion"));
     passthrough.set_subtitle(&crate::tr!(
-        "Raw gyro also streams on UDP port 26760 (cemuhook); point Ryujinx, Yuzu, Dolphin or Cemu motion settings at this machine"
+        "Raw gyro streams on UDP port 26760 (cemuhook) while a mapped game runs; point emulator motion settings at this machine or disable it per game"
     ));
-    let badge = gtk4::Label::new(Some(&crate::tr!("Always on")));
+    let badge = gtk4::Label::new(Some(&crate::tr!("UDP 26760")));
     badge.add_css_class(super::css::CSS_DIM_LABEL);
     badge.set_valign(gtk4::Align::Center);
     passthrough.add_suffix(&badge);

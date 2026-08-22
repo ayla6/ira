@@ -726,9 +726,18 @@ pub struct InputProfile {
     /// off; this is the layout-level default.
     #[serde(default = "default_emulator_udp")]
     pub emulator_udp: bool,
+    /// Whether the layout also exposes the physical motion sensors as
+    /// standard evdev axes (the companion motion node SDL emulators pair
+    /// with the virtual gamepad).
+    #[serde(default = "default_native_motion")]
+    pub native_motion: bool,
 }
 
 fn default_emulator_udp() -> bool {
+    true
+}
+
+fn default_native_motion() -> bool {
     true
 }
 
@@ -745,6 +754,7 @@ impl Default for InputProfile {
             action_layers: Vec::new(),
             compatible_game_ids: Vec::new(),
             emulator_udp: true,
+            native_motion: true,
         }
     }
 }

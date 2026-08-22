@@ -144,9 +144,25 @@ pub(super) fn add_gyro_group(
         },
     );
 
+    let native_motion = switch_row(
+        &crate::tr!("Native motion sensors"),
+        Some(&crate::tr!(
+            "Expose the physical accelerometer and gyroscope as standard evdev axes next to the virtual pad, so emulators read them like real hardware"
+        )),
+        profile.borrow().native_motion,
+        {
+            let profile = profile.clone();
+            let on_dirty = on_dirty.clone();
+            Rc::new(move |active| {
+                profile.borrow_mut().native_motion = active;
+                on_dirty();
+            })
+        },
+    );
+
     update_dependency_rows(&widgets, gyro.borrow().enabled);
 
-    let rows: [&adw::PreferencesRow; 10] = [
+    let rows: [&adw::PreferencesRow; 11] = [
         widgets.enable.upcast_ref(),
         widgets.activation.upcast_ref(),
         widgets.button.upcast_ref(),
@@ -156,6 +172,7 @@ pub(super) fn add_gyro_group(
         widgets.invert_x.upcast_ref(),
         widgets.invert_y.upcast_ref(),
         widgets.smoothing.upcast_ref(),
+        native_motion.upcast_ref(),
         udp.upcast_ref(),
     ];
     for row in rows {

@@ -506,7 +506,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let last_sensor_us: Option<u64> = None;
     // The motion node must exist before the game opens the virtual pad:
     // SDL pairs sensor nodes with a pad at open time only.
-    let motion_device = if sensor.is_some() {
+    let motion_device = if sensor.is_some() && mapper.profile().native_motion {
         open_motion_node(mapper.profile().backend)
     } else {
         None
@@ -731,7 +731,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             gamepad.info().path.display()
                         );
                         pipeline.sensor = open_sensor(gamepad.info());
-                        if pipeline.motion_device.is_none() {
+                        if pipeline.motion_device.is_none() && mapper.profile().native_motion {
                             // Best effort: if the game already opened the pad
                             // before this node appears, pairing waits for the
                             // next pad (re)open.

@@ -1,17 +1,36 @@
 //! The Action Sets editor page: which set is being edited, set management
 //! (add/rename/delete), layer management, and the virtual-gamepad backend —
-//! Steam Input's "Action Sets" header controls.
+//! Steam Input's "Action Sets" header controls. Every action is a full-width
+//! row; raw buttons dropped straight into a preferences group both look
+//! wrong and trip GTK widget assertions.
 
 use super::helpers::esc;
 use super::input_profile_region_pages::PagesCtx;
 use adw::prelude::*;
 use ira_input::{ActionSet, ActionSetLayer, VirtualGamepadBackend};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// Fired when structural changes require rebuilding the region pages (set
 /// switch, set add/delete) on top of the usual dirty marking.
 pub(crate) type Rebuild = Rc<dyn Fn()>;
+
+/// One "+ action" row: a full-width activatable row with a plus affordance.
+fn add_action_row(group: &adw::PreferencesGroup, label: &str, destructive: bool) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    let content = adw::ButtonContent::builder()
+        .icon_name("list-add-symbolic")
+        .label(label)
+        .build();
+    content.set_valign(gtk4::Align::Center);
+    if destructive {
+        content.add_css_class(super::css::CSS_ERROR);
+    }
+    row.add_suffix(&content);
+    row.set_activatable(true);
+    group.add(&row);
+    row
+}
 
 pub(crate) fn build_sets_page(ctx: &PagesCtx, rebuild: &Rebuild) -> gtk4::Box {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
@@ -95,14 +114,12 @@ fn sets_group(ctx: &PagesCtx, rebuild: &Rebuild) -> adw::PreferencesGroup {
         (ctx_for_rename.on_dirty)();
     });
 
-    let add = gtk4::Button::with_label(&crate::tr!("Add set"));
-    add.add_css_class(super::css::CSS_FLAT);
-    add.set_halign(gtk4::Align::Start);
+    let add_row = add_action_row(&group, &crate::tr!("Add set"), false);
     let ctx_for_add = ctx.clone();
     let combo_for_add = combo.clone();
     let rebuild_for_add = rebuild.clone();
     let rename_for_add = rename.clone();
-    add.connect_clicked(move |_| {
+    add_row.connect_activated(move |_| {
         let mut profile = ctx_for_add.profile.borrow_mut();
         let number = profile.action_sets.len() + 1;
         let name = crate::tr!("Set {number}").replace("{number}", &number.to_string());
@@ -120,15 +137,13 @@ fn sets_group(ctx: &PagesCtx, rebuild: &Rebuild) -> adw::PreferencesGroup {
         (ctx_for_add.on_dirty)();
         rebuild_for_add();
     });
-    group.add(&add);
 
-    let delete = gtk4::Button::with_label(&crate::tr!("Delete set"));
-    delete.add_css_class(super::css::CSS_FLAT);
-    delete.set_halign(gtk4::Align::Start);
+    let delete_row = add_action_row(&group, &crate::tr!("Delete set"), true);
+    delete_row.set_sensitive(ctx.profile.borrow().action_sets.len() > 1);
     let ctx_for_delete = ctx.clone();
     let combo_for_delete = combo.clone();
     let rebuild_for_delete = rebuild.clone();
-    delete.connect_clicked(move |_| {
+    delete_row.connect_activated(move |_| {
         let mut profile = ctx_for_delete.profile.borrow_mut();
         // The first set is the default and always stays.
         if profile.action_sets.len() <= 1 {
@@ -145,7 +160,6 @@ fn sets_group(ctx: &PagesCtx, rebuild: &Rebuild) -> adw::PreferencesGroup {
         (ctx_for_delete.on_dirty)();
         rebuild_for_delete();
     });
-    group.add(&delete);
 
     group
 }
@@ -167,19 +181,10 @@ fn layers_group(ctx: &PagesCtx, rebuild: &Rebuild) -> adw::PreferencesGroup {
         "Layers overlay the active set while held or toggled"
     )));
 
-    // Layer rows live in their own container so layer add/delete can clear
-    // and refill them without touching the rest of the page.
-    let layers_list = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    refill_layer_rows(ctx, rebuild, &layers_list);
-    group.add(&layers_list);
-
-    let add = gtk4::Button::with_label(&crate::tr!("Add layer"));
-    add.add_css_class(super::css::CSS_FLAT);
-    add.set_halign(gtk4::Align::Start);
+    let add_row = add_action_row(&group, &crate::tr!("Add layer"), false);
     let ctx_for_add = ctx.clone();
-    let layers_list_for_add = layers_list.clone();
     let rebuild_for_layers = rebuild.clone();
-    add.connect_clicked(move |_| {
+    add_row.connect_activated(move |_| {
         let parent = ctx_for_add
             .profile
             .borrow()
@@ -187,24 +192,37 @@ fn layers_group(ctx: &PagesCtx, rebuild: &Rebuild) -> adw::PreferencesGroup {
             .get(ctx_for_add.active_set.get())
             .map(|set| set.name.clone())
             .unwrap_or_default();
-        let mut profile = ctx_for_add.profile.borrow_mut();
-        let number = profile.action_layers.len() + 1;
-        profile.action_layers.push(ActionSetLayer {
-            name: crate::tr!("Layer {number}").replace("{number}", &number.to_string()),
-            parent_set: parent,
-            inputs: Vec::new(),
-        });
-        drop(profile);
+        {
+            let mut profile = ctx_for_add.profile.borrow_mut();
+            let number = profile.action_layers.len() + 1;
+            profile.action_layers.push(ActionSetLayer {
+                name: crate::tr!("Layer {number}").replace("{number}", &number.to_string()),
+                parent_set: parent,
+                inputs: Vec::new(),
+            });
+        }
         (ctx_for_add.on_dirty)();
-        refill_layer_rows(&ctx_for_add, &rebuild_for_layers, &layers_list_for_add);
+        rebuild_for_layers();
     });
-    group.add(&add);
+
+    // Layer rows are rebuilt on every structural change so adds and deletes
+    // stay consistent without juggling a separate container widget.
+    let layer_rows: Rc<RefCell<Vec<adw::ActionRow>>> = Rc::new(RefCell::new(Vec::new()));
+    refill_layer_rows(ctx, rebuild, &group.clone(), &layer_rows, &add_row);
 
     group
 }
 
-fn refill_layer_rows(ctx: &PagesCtx, rebuild: &Rebuild, container: &gtk4::Box) {
-    super::helpers::clear_children(container);
+fn refill_layer_rows(
+    ctx: &PagesCtx,
+    rebuild: &Rebuild,
+    group: &adw::PreferencesGroup,
+    layer_rows: &Rc<RefCell<Vec<adw::ActionRow>>>,
+    add_row: &adw::ActionRow,
+) {
+    for row in layer_rows.borrow_mut().drain(..) {
+        group.remove(&row);
+    }
     let layers = ctx.profile.borrow().action_layers.clone();
     for (index, layer) in layers.iter().enumerate() {
         let row = adw::ActionRow::new();
@@ -219,8 +237,10 @@ fn refill_layer_rows(ctx: &PagesCtx, rebuild: &Rebuild, container: &gtk4::Box) {
         trash.set_tooltip_text(Some(&crate::tr!("Delete layer")));
         row.add_suffix(&trash);
         let ctx_for_delete = ctx.clone();
-        let container_for_delete = container.clone();
         let rebuild_for_delete = rebuild.clone();
+        let layer_rows_for_delete = layer_rows.clone();
+        let add_row_for_delete = add_row.clone();
+        let group_for_delete = group.clone();
         trash.connect_clicked(move |_| {
             let mut profile = ctx_for_delete.profile.borrow_mut();
             if index < profile.action_layers.len() {
@@ -231,10 +251,13 @@ fn refill_layer_rows(ctx: &PagesCtx, rebuild: &Rebuild, container: &gtk4::Box) {
             refill_layer_rows(
                 &ctx_for_delete,
                 &rebuild_for_delete,
-                &container_for_delete,
+                &group_for_delete,
+                &layer_rows_for_delete,
+                &add_row_for_delete,
             );
         });
-        container.append(&row);
+        group.add(&row);
+        layer_rows.borrow_mut().push(row);
     }
 }
 

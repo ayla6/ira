@@ -62,13 +62,22 @@ pub(crate) fn activators_group(
         group.add(&activator_expander(base, reopen, index, activator));
     }
 
-    let add = gtk4::Button::with_label(&crate::tr!("Add activator"));
-    add.add_css_class(CSS_FLAT);
-    add.set_halign(gtk4::Align::Start);
+    // Full-width row rather than a floating button: a raw button as a
+    // direct child of a preferences group looks wrong and trips GTK
+    // widget assertions.
+    let add_row = adw::ActionRow::new();
+    let add = adw::ButtonContent::builder()
+        .icon_name("list-add-symbolic")
+        .label(crate::tr!("Add activator"))
+        .build();
+    add.set_valign(gtk4::Align::Center);
+    add_row.add_suffix(&add);
+    add_row.set_activatable(true);
+    group.add(&add_row);
     {
         let base = base.clone();
         let reopen = reopen.clone();
-        add.connect_clicked(move |_| {
+        add_row.connect_activated(move |_| {
             with_mapping(&base, |input| {
                 input
                     .activators
@@ -80,7 +89,6 @@ pub(crate) fn activators_group(
             reopen();
         });
     }
-    group.add(&add);
     group
 }
 

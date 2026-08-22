@@ -1,11 +1,12 @@
 use super::css::CSS_SQUARE_BUTTON;
 use super::input_profile_store::{
-    list_profiles, profile_matches_game, read_profile, StoredProfile,
+    add_game_compatibility, list_profiles, profile_matches_game, read_profile, StoredProfile,
 };
 use super::settings_dialog;
 use super::state::SharedState;
 use adw::prelude::*;
 use glib::clone::Downgrade;
+use ira_input::VirtualGamepadBackend;
 use ira_models::{ControllerInputMode, Game, GameLaunchConfig};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -14,7 +15,8 @@ use std::sync::Arc;
 
 /// Quick access to a game's controller layout (game header button, context
 /// menu): opens the input profile editor on the associated layout, or seeds a
-/// new one bound to this game when none is associated yet.
+/// new one bound to this game when none is associated yet. Saving from here
+/// also enables ira-input for the game and points it at the saved layout.
 pub(super) fn open_controller_settings(state: &SharedState, game: &Game) {
     let (window, save_dir, registry, associated) = {
         let s = state.borrow();
@@ -41,6 +43,8 @@ pub(super) fn open_controller_settings(state: &SharedState, game: &Game) {
             None
         }
     });
+    let state_for_saved = state.clone();
+    let game_for_saved = game.clone();
     super::input_profile_editor::show_input_profile_editor(
         window.upcast_ref(),
         super::input_profile_editor::InputProfileEditorParams {
@@ -51,8 +55,60 @@ pub(super) fn open_controller_settings(state: &SharedState, game: &Game) {
             registry,
             device: None,
         },
-        |_| {},
+        move |path| {
+            enable_input_for_game(&state_for_saved, &game_for_saved, &path);
+        },
     );
+}
+
+/// Associate `path` with the game and switch its input mode on so the saved
+/// layout is the one the launcher starts.
+fn enable_input_for_game(state: &SharedState, game: &Game, path: &Path) {
+    if let Err(error) = add_game_compatibility(path, game.db_id) {
+        eprintln!("Failed to associate controller profile with game: {error}");
+    }
+    let mode = read_profile(path)
+        .ok()
+        .map(|profile| input_mode_for_backend(profile.backend));
+    let db = state.borrow().db.clone();
+    match ira_db::get_game_config(&db, game.db_id) {
+        Ok(Some((mut launch, wine, profile_id))) => {
+            launch.input_profile = Some(path.to_string_lossy().into_owned());
+            if let Some(mode) = mode {
+                launch.input_mode = Some(mode);
+            }
+            if let Err(error) =
+                ira_db::save_game_config(&db, game.db_id, &launch, &wine, profile_id)
+            {
+                eprintln!("Failed to enable controller input for game: {error}");
+            }
+        }
+        Ok(None) => {
+            let launch = GameLaunchConfig {
+                input_profile: Some(path.to_string_lossy().into_owned()),
+                input_mode: mode,
+                ..GameLaunchConfig::default()
+            };
+            if let Err(error) = ira_db::save_game_config(
+                &db,
+                game.db_id,
+                &launch,
+                &ira_models::WineConfig::default(),
+                None,
+            ) {
+                eprintln!("Failed to enable controller input for game: {error}");
+            }
+        }
+        Err(error) => eprintln!("Failed to read game config for input enable: {error}"),
+    }
+}
+
+fn input_mode_for_backend(backend: VirtualGamepadBackend) -> ControllerInputMode {
+    match backend {
+        VirtualGamepadBackend::XInput => ControllerInputMode::VirtualXInput,
+        VirtualGamepadBackend::DirectInput => ControllerInputMode::VirtualDirectInput,
+        VirtualGamepadBackend::SwitchPro => ControllerInputMode::VirtualSwitchPro,
+    }
 }
 
 #[derive(Clone)]

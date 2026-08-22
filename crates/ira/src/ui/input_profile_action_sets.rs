@@ -272,6 +272,8 @@ fn backend_group(ctx: &PagesCtx) -> adw::PreferencesGroup {
         crate::tr!("XInput (Xbox)"),
         crate::tr!("DirectInput"),
         crate::tr!("Switch Pro"),
+        crate::tr!("DualShock 4"),
+        crate::tr!("DualSense"),
     ];
     let combo = super::input_profile_activator_sheet::combo_row(
         &labels,
@@ -285,6 +287,8 @@ fn backend_group(ctx: &PagesCtx) -> adw::PreferencesGroup {
         let backend = match combo.selected() {
             1 => VirtualGamepadBackend::DirectInput,
             2 => VirtualGamepadBackend::SwitchPro,
+            3 => VirtualGamepadBackend::DualShock4,
+            4 => VirtualGamepadBackend::DualSense,
             _ => VirtualGamepadBackend::XInput,
         };
         ctx_for_backend.profile.borrow_mut().backend = backend;
@@ -299,5 +303,7 @@ fn backend_index(backend: VirtualGamepadBackend) -> u32 {
         VirtualGamepadBackend::XInput => 0,
         VirtualGamepadBackend::DirectInput => 1,
         VirtualGamepadBackend::SwitchPro => 2,
+        VirtualGamepadBackend::DualShock4 => 3,
+        VirtualGamepadBackend::DualSense => 4,
     }
 }

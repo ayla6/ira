@@ -18,6 +18,12 @@ const VIRTUAL_XBOX_VENDOR: u16 = 0x045e;
 const VIRTUAL_XBOX_PRODUCT: u16 = 0x028e;
 const SWITCH_PRO_VENDOR: u16 = 0x057e;
 const SWITCH_PRO_PRODUCT: u16 = 0x2009;
+// Same ids the Sony kernel drivers report for the real hardware; the virtual
+// pads reuse them so SDL's built-in mappings apply.
+const DUAL_SHOCK_4_VENDOR: u16 = 0x054c;
+const DUAL_SHOCK_4_PRODUCT: u16 = 0x09cc;
+const DUAL_SENSE_VENDOR: u16 = 0x054c;
+const DUAL_SENSE_PRODUCT: u16 = 0x0ce6;
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const FOCUS_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const PROFILE_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -982,6 +988,8 @@ fn sdl_mapping_for_backend(backend: VirtualGamepadBackend) -> Option<String> {
         VirtualGamepadBackend::XInput => None,
         VirtualGamepadBackend::DirectInput => Some(VirtualGamepad::direct_input_sdl_mapping()),
         VirtualGamepadBackend::SwitchPro => Some(VirtualGamepad::switch_pro_sdl_mapping()),
+        VirtualGamepadBackend::DualShock4 => Some(VirtualGamepad::dual_shock_4_sdl_mapping()),
+        VirtualGamepadBackend::DualSense => Some(VirtualGamepad::dual_sense_sdl_mapping()),
     }
 }
 
@@ -990,14 +998,21 @@ fn ignored_device_for_target(
     product: u16,
     backend: VirtualGamepadBackend,
 ) -> Option<String> {
-    if ((vendor, product) == (VIRTUAL_XBOX_VENDOR, VIRTUAL_XBOX_PRODUCT)
-        && backend == VirtualGamepadBackend::XInput)
-        || ((vendor, product) == (SWITCH_PRO_VENDOR, SWITCH_PRO_PRODUCT)
-            && backend == VirtualGamepadBackend::SwitchPro)
-    {
-        None
-    } else {
-        Some(format!("0x{vendor:04x}/0x{product:04x}"))
+    let same_identity = |expected: (u16, u16)| (vendor, product) == expected;
+    let virtual_identity = match backend {
+        VirtualGamepadBackend::XInput => Some((VIRTUAL_XBOX_VENDOR, VIRTUAL_XBOX_PRODUCT)),
+        VirtualGamepadBackend::SwitchPro => Some((SWITCH_PRO_VENDOR, SWITCH_PRO_PRODUCT)),
+        VirtualGamepadBackend::DualShock4 => Some((DUAL_SHOCK_4_VENDOR, DUAL_SHOCK_4_PRODUCT)),
+        VirtualGamepadBackend::DualSense => Some((DUAL_SENSE_VENDOR, DUAL_SENSE_PRODUCT)),
+        VirtualGamepadBackend::DirectInput => None,
+    };
+    match virtual_identity {
+        // The physical pad shares the virtual one's identity, so it cannot be
+        // hidden without hiding the virtual pad too.
+        Some(identity) if same_identity(identity) => None,
+        // DirectInput presents a private BUS_VIRTUAL identity; the physical
+        // pad is hidden so only Ira's device shows up.
+        _ => Some(format!("0x{vendor:04x}/0x{product:04x}")),
     }
 }
 
@@ -1567,6 +1582,36 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn test_ignored_device_for_target_preserves_sony_identity() {
+        assert_eq!(
+            ignored_device_for_target(
+                DUAL_SHOCK_4_VENDOR,
+                DUAL_SHOCK_4_PRODUCT,
+                VirtualGamepadBackend::DualShock4,
+            ),
+            None
+        );
+        assert_eq!(
+            ignored_device_for_target(
+                DUAL_SENSE_VENDOR,
+                DUAL_SENSE_PRODUCT,
+                VirtualGamepadBackend::DualSense,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn test_sdl_mapping_is_configured_for_sony_backends() {
+        assert!(sdl_mapping_for_backend(VirtualGamepadBackend::DualShock4)
+            .unwrap()
+            .starts_with("030000004c050000cc09000000010000"));
+        assert!(sdl_mapping_for_backend(VirtualGamepadBackend::DualSense)
+            .unwrap()
+            .starts_with("030000004c050000e60c000011010000"));
     }
 
     #[test]

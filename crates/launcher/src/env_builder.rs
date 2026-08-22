@@ -522,7 +522,9 @@ pub fn wrap_with_input_mode(
     let binary = match mode {
         Some(ControllerInputMode::VirtualXInput)
         | Some(ControllerInputMode::VirtualDirectInput)
-        | Some(ControllerInputMode::VirtualSwitchPro) => Some(input_binary_path()),
+        | Some(ControllerInputMode::VirtualSwitchPro)
+        | Some(ControllerInputMode::VirtualDualShock4)
+        | Some(ControllerInputMode::VirtualDualSense) => Some(input_binary_path()),
         None | Some(ControllerInputMode::Disabled) => None,
     };
     if let Some(binary) = binary {
@@ -544,7 +546,9 @@ fn wrap_with_input_mode_for_binary(
     match mode {
         Some(ControllerInputMode::VirtualXInput)
         | Some(ControllerInputMode::VirtualDirectInput)
-        | Some(ControllerInputMode::VirtualSwitchPro) => {
+        | Some(ControllerInputMode::VirtualSwitchPro)
+        | Some(ControllerInputMode::VirtualDualShock4)
+        | Some(ControllerInputMode::VirtualDualSense) => {
             wrap_command_with_input(command, binary, profile, calibration, true, true)
         }
         None | Some(ControllerInputMode::Disabled) => {}

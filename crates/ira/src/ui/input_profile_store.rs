@@ -33,6 +33,12 @@ pub(super) fn controller_default_path_for_backend(
         VirtualGamepadBackend::SwitchPro => Path::new(save_dir)
             .join(CONTROLLER_DEFAULT_DIRECTORY)
             .join(format!("{key}-switch-pro.json")),
+        VirtualGamepadBackend::DualShock4 => Path::new(save_dir)
+            .join(CONTROLLER_DEFAULT_DIRECTORY)
+            .join(format!("{key}-dualshock4.json")),
+        VirtualGamepadBackend::DualSense => Path::new(save_dir)
+            .join(CONTROLLER_DEFAULT_DIRECTORY)
+            .join(format!("{key}-dualsense.json")),
     }
 }
 

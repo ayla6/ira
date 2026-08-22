@@ -23,11 +23,33 @@ const SWITCH_PRO_PRODUCT: u16 = 0x2009;
 const SWITCH_PRO_VERSION: u16 = 0x8111;
 const SWITCH_PRO_NAME: &str = "Ira Virtual Nintendo Switch Pro Controller";
 const SWITCH_PRO_SDL_BINDINGS: &str = "a:b0,b:b1,back:b9,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b11,leftshoulder:b5,leftstick:b12,lefttrigger:b7,leftx:a0,lefty:a1,misc1:b4,rightshoulder:b6,rightstick:b13,righttrigger:b8,rightx:a2,righty:a3,start:b10,x:b2,y:b3,platform:Linux";
+// Sony ids copied from the kernel drivers' hardware: hid-sony exposes the
+// DualShock 4 as 054c:09cc rev 0x0001, hid-playstation the DualSense as
+// 054c:0ce6. SDL ships evdev mappings for those GUIDs in its built-in
+// controller database, so emulators recognize the pads without extra config.
+//
+// Both Sony kernel drivers use the same quirky evdev layout: the right stick
+// sits on ABS_Z/ABS_RZ, the analog triggers on ABS_RX/ABS_RY, the d-pad is
+// hat 0, and square is BTN_C rather than BTN_WEST.
+const DUAL_SHOCK_4_VENDOR: u16 = 0x054c;
+const DUAL_SHOCK_4_PRODUCT: u16 = 0x09cc;
+const DUAL_SHOCK_4_VERSION: u16 = 0x0001;
+const DUAL_SHOCK_4_NAME: &str = "Sony Interactive Entertainment Wireless Controller";
+const DUAL_SHOCK_4_GUID: &str = "030000004c050000cc09000000010000";
+const DUAL_SENSE_VENDOR: u16 = 0x054c;
+const DUAL_SENSE_PRODUCT: u16 = 0x0ce6;
+const DUAL_SENSE_VERSION: u16 = 0x0111;
+const DUAL_SENSE_NAME: &str = "Sony Interactive Entertainment DualSense Wireless Controller";
+const DUAL_SENSE_GUID: &str = "030000004c050000e60c000011010000";
+
+fn sony_sdl_bindings() -> &'static str {
+    "a:b0,b:b1,x:b2,y:b3,back:b8,start:b9,guide:b12,leftstick:b10,rightstick:b11,leftshoulder:b4,rightshoulder:b5,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,leftx:a0,lefty:a1,rightx:a2,righty:a5,lefttrigger:a3,righttrigger:a4,misc1:b13,platform:Linux"
+}
 
 pub struct VirtualGamepad {
     device: VirtualDevice,
     backend: VirtualGamepadBackend,
-    switch_pro_dpad: [bool; 4],
+    hat_dpad: [bool; 4],
 }
 
 impl VirtualGamepad {
@@ -49,13 +71,13 @@ impl VirtualGamepad {
         Ok(Self {
             device,
             backend,
-            switch_pro_dpad: [false; 4],
+            hat_dpad: [false; 4],
         })
     }
 
     pub fn emit(&mut self, event: &OutputEvent) -> io::Result<()> {
         if let OutputEvent::GamepadButton { button, pressed } = event {
-            if let Some(input) = self.switch_pro_dpad_event(*button, *pressed) {
+            if let Some(input) = self.hat_dpad_event(*button, *pressed) {
                 return self.device.emit(&[input]);
             }
         }
@@ -100,12 +122,33 @@ impl VirtualGamepad {
         )
     }
 
-    fn switch_pro_dpad_event(
-        &mut self,
-        button: GamepadButton,
-        pressed: bool,
-    ) -> Option<InputEvent> {
-        if self.backend != VirtualGamepadBackend::SwitchPro {
+    pub fn dual_shock_4_sdl_mapping() -> String {
+        format!(
+            "{},{},{}",
+            DUAL_SHOCK_4_GUID,
+            DUAL_SHOCK_4_NAME,
+            sony_sdl_bindings()
+        )
+    }
+
+    pub fn dual_sense_sdl_mapping() -> String {
+        format!(
+            "{},{},{}",
+            DUAL_SENSE_GUID,
+            DUAL_SENSE_NAME,
+            sony_sdl_bindings()
+        )
+    }
+
+    /// Backends whose d-pad is reported as hat 0 movements instead of
+    /// BTN_DPAD_* keys (Nintendo Switch Pro and both Sony pads).
+    fn hat_dpad_event(&mut self, button: GamepadButton, pressed: bool) -> Option<InputEvent> {
+        if !matches!(
+            self.backend,
+            VirtualGamepadBackend::SwitchPro
+                | VirtualGamepadBackend::DualShock4
+                | VirtualGamepadBackend::DualSense
+        ) {
             return None;
         }
         let index = match button {
@@ -115,9 +158,9 @@ impl VirtualGamepad {
             GamepadButton::DpadRight => 3,
             _ => return None,
         };
-        self.switch_pro_dpad[index] = pressed;
+        self.hat_dpad[index] = pressed;
         let horizontal = matches!(button, GamepadButton::DpadLeft | GamepadButton::DpadRight);
-        let value = switch_pro_hat_value(self.switch_pro_dpad, horizontal);
+        let value = hat_value(self.hat_dpad, horizontal);
         let code = match button {
             GamepadButton::DpadUp | GamepadButton::DpadDown => AbsoluteAxisCode::ABS_HAT0Y,
             GamepadButton::DpadLeft | GamepadButton::DpadRight => AbsoluteAxisCode::ABS_HAT0X,
@@ -127,7 +170,7 @@ impl VirtualGamepad {
     }
 }
 
-fn switch_pro_hat_value(state: [bool; 4], horizontal: bool) -> i32 {
+fn hat_value(state: [bool; 4], horizontal: bool) -> i32 {
     let (negative, positive) = if horizontal {
         (state[2], state[3])
     } else {
@@ -191,6 +234,12 @@ fn gamepad_buttons(backend: VirtualGamepadBackend) -> AttributeSet<KeyCode> {
     .collect();
     if backend == VirtualGamepadBackend::SwitchPro {
         buttons.insert(KeyCode::BTN_Z);
+    } else if sony_layout(backend) {
+        // Sony pads report square on BTN_C and keep the d-pad on hat 0;
+        // BTN_WEST stays unused so the button indexes match the kernel
+        // drivers that SDL's built-in mappings were written against.
+        buttons.remove(KeyCode::BTN_WEST);
+        buttons.insert(KeyCode::BTN_C);
     } else {
         for code in [
             KeyCode::BTN_DPAD_UP,
@@ -218,11 +267,20 @@ fn gamepad_buttons(backend: VirtualGamepadBackend) -> AttributeSet<KeyCode> {
     buttons
 }
 
+fn sony_layout(backend: VirtualGamepadBackend) -> bool {
+    matches!(
+        backend,
+        VirtualGamepadBackend::DualShock4 | VirtualGamepadBackend::DualSense
+    )
+}
+
 fn device_name(backend: VirtualGamepadBackend) -> &'static str {
     match backend {
         VirtualGamepadBackend::XInput => "Ira Virtual Xbox Controller",
         VirtualGamepadBackend::DirectInput => DIRECT_INPUT_NAME,
         VirtualGamepadBackend::SwitchPro => SWITCH_PRO_NAME,
+        VirtualGamepadBackend::DualShock4 => DUAL_SHOCK_4_NAME,
+        VirtualGamepadBackend::DualSense => DUAL_SENSE_NAME,
     }
 }
 
@@ -246,6 +304,18 @@ fn device_id(backend: VirtualGamepadBackend) -> InputId {
             SWITCH_PRO_PRODUCT,
             SWITCH_PRO_VERSION,
         ),
+        VirtualGamepadBackend::DualShock4 => InputId::new(
+            BusType::BUS_USB,
+            DUAL_SHOCK_4_VENDOR,
+            DUAL_SHOCK_4_PRODUCT,
+            DUAL_SHOCK_4_VERSION,
+        ),
+        VirtualGamepadBackend::DualSense => InputId::new(
+            BusType::BUS_USB,
+            DUAL_SENSE_VENDOR,
+            DUAL_SENSE_PRODUCT,
+            DUAL_SENSE_VERSION,
+        ),
     }
 }
 
@@ -253,18 +323,35 @@ fn axis_setups(backend: VirtualGamepadBackend) -> Vec<UinputAbsSetup> {
     let mut setups = vec![
         axis_setup(AbsoluteAxisCode::ABS_X, -32768, 32767),
         axis_setup(AbsoluteAxisCode::ABS_Y, -32768, 32767),
-        axis_setup(AbsoluteAxisCode::ABS_RX, -32768, 32767),
-        axis_setup(AbsoluteAxisCode::ABS_RY, -32768, 32767),
     ];
-    if backend == VirtualGamepadBackend::SwitchPro {
+    if sony_layout(backend) {
+        // Kernel Sony layout: right stick on ABS_Z/ABS_RZ (full range),
+        // analog triggers on ABS_RX/ABS_RY (0..255).
+        setups.extend([
+            axis_setup(AbsoluteAxisCode::ABS_Z, -32768, 32767),
+            axis_setup(AbsoluteAxisCode::ABS_RZ, -32768, 32767),
+            axis_setup(AbsoluteAxisCode::ABS_RX, 0, 255),
+            axis_setup(AbsoluteAxisCode::ABS_RY, 0, 255),
+        ]);
         setups.extend([
             axis_setup(AbsoluteAxisCode::ABS_HAT0X, -1, 1),
             axis_setup(AbsoluteAxisCode::ABS_HAT0Y, -1, 1),
         ]);
-    } else {
+        return setups;
+    }
+    setups.extend([
+        axis_setup(AbsoluteAxisCode::ABS_RX, -32768, 32767),
+        axis_setup(AbsoluteAxisCode::ABS_RY, -32768, 32767),
+    ]);
+    if backend != VirtualGamepadBackend::SwitchPro {
         setups.extend([
             axis_setup(AbsoluteAxisCode::ABS_Z, 0, 255),
             axis_setup(AbsoluteAxisCode::ABS_RZ, 0, 255),
+        ]);
+    } else {
+        setups.extend([
+            axis_setup(AbsoluteAxisCode::ABS_HAT0X, -1, 1),
+            axis_setup(AbsoluteAxisCode::ABS_HAT0Y, -1, 1),
         ]);
     }
     setups
@@ -280,7 +367,9 @@ fn button_code(backend: VirtualGamepadBackend, button: GamepadButton) -> Option<
         GamepadButton::A => KeyCode::BTN_SOUTH,
         GamepadButton::B if backend == VirtualGamepadBackend::SwitchPro => KeyCode::BTN_SOUTH,
         GamepadButton::B => KeyCode::BTN_EAST,
+        GamepadButton::X if sony_layout(backend) => KeyCode::BTN_C,
         GamepadButton::X => KeyCode::BTN_NORTH,
+        GamepadButton::Y if sony_layout(backend) => KeyCode::BTN_NORTH,
         GamepadButton::Y => KeyCode::BTN_WEST,
         GamepadButton::LeftShoulder => KeyCode::BTN_TL,
         GamepadButton::RightShoulder => KeyCode::BTN_TR,
@@ -291,16 +380,24 @@ fn button_code(backend: VirtualGamepadBackend, button: GamepadButton) -> Option<
         GamepadButton::Guide => KeyCode::BTN_MODE,
         GamepadButton::LeftStick => KeyCode::BTN_THUMBL,
         GamepadButton::RightStick => KeyCode::BTN_THUMBR,
-        GamepadButton::DpadUp if backend != VirtualGamepadBackend::SwitchPro => {
+        GamepadButton::DpadUp
+            if backend != VirtualGamepadBackend::SwitchPro && !sony_layout(backend) =>
+        {
             KeyCode::BTN_DPAD_UP
         }
-        GamepadButton::DpadDown if backend != VirtualGamepadBackend::SwitchPro => {
+        GamepadButton::DpadDown
+            if backend != VirtualGamepadBackend::SwitchPro && !sony_layout(backend) =>
+        {
             KeyCode::BTN_DPAD_DOWN
         }
-        GamepadButton::DpadLeft if backend != VirtualGamepadBackend::SwitchPro => {
+        GamepadButton::DpadLeft
+            if backend != VirtualGamepadBackend::SwitchPro && !sony_layout(backend) =>
+        {
             KeyCode::BTN_DPAD_LEFT
         }
-        GamepadButton::DpadRight if backend != VirtualGamepadBackend::SwitchPro => {
+        GamepadButton::DpadRight
+            if backend != VirtualGamepadBackend::SwitchPro && !sony_layout(backend) =>
+        {
             KeyCode::BTN_DPAD_RIGHT
         }
         GamepadButton::Paddle1 if backend == VirtualGamepadBackend::DirectInput => {
@@ -335,13 +432,23 @@ fn axis_code(backend: VirtualGamepadBackend, axis: GamepadAxis) -> Option<Absolu
     Some(match axis {
         GamepadAxis::LeftX => AbsoluteAxisCode::ABS_X,
         GamepadAxis::LeftY => AbsoluteAxisCode::ABS_Y,
+        GamepadAxis::RightX if sony_layout(backend) => AbsoluteAxisCode::ABS_Z,
         GamepadAxis::RightX => AbsoluteAxisCode::ABS_RX,
+        GamepadAxis::RightY if sony_layout(backend) => AbsoluteAxisCode::ABS_RZ,
         GamepadAxis::RightY => AbsoluteAxisCode::ABS_RY,
         GamepadAxis::LeftTrigger if backend != VirtualGamepadBackend::SwitchPro => {
-            AbsoluteAxisCode::ABS_Z
+            if sony_layout(backend) {
+                AbsoluteAxisCode::ABS_RX
+            } else {
+                AbsoluteAxisCode::ABS_Z
+            }
         }
         GamepadAxis::RightTrigger if backend != VirtualGamepadBackend::SwitchPro => {
-            AbsoluteAxisCode::ABS_RZ
+            if sony_layout(backend) {
+                AbsoluteAxisCode::ABS_RY
+            } else {
+                AbsoluteAxisCode::ABS_RZ
+            }
         }
         _ => return None,
     })
@@ -360,11 +467,11 @@ fn axis_value(axis: GamepadAxis, value: f32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        axis_code, axis_value, button_code, device_id, device_name, gamepad_buttons,
-        switch_pro_hat_value, VirtualGamepad, DIRECT_INPUT_NAME, DIRECT_INPUT_PRODUCT,
-        DIRECT_INPUT_VENDOR, DIRECT_INPUT_VERSION,
+        axis_code, axis_value, button_code, device_id, device_name, gamepad_buttons, hat_value,
+        sony_layout, VirtualGamepad, DIRECT_INPUT_NAME, DIRECT_INPUT_PRODUCT, DIRECT_INPUT_VENDOR,
+        DIRECT_INPUT_VERSION,
     };
-    use crate::VirtualGamepadBackend::{DirectInput, SwitchPro, XInput};
+    use crate::VirtualGamepadBackend::{DirectInput, DualSense, DualShock4, SwitchPro, XInput};
     use crate::{GamepadAxis, GamepadButton};
     use evdev::{InputId, KeyCode};
 
@@ -455,10 +562,78 @@ mod tests {
 
     #[test]
     fn test_switch_pro_hat_values_handle_opposite_directions() {
-        assert_eq!(switch_pro_hat_value([true, false, false, false], false), -1);
-        assert_eq!(switch_pro_hat_value([false, true, false, false], false), 1);
-        assert_eq!(switch_pro_hat_value([false, false, true, false], true), -1);
-        assert_eq!(switch_pro_hat_value([false, false, true, true], true), 0);
+        assert_eq!(hat_value([true, false, false, false], false), -1);
+        assert_eq!(hat_value([false, true, false, false], false), 1);
+        assert_eq!(hat_value([false, false, true, false], true), -1);
+        assert_eq!(hat_value([false, false, true, true], true), 0);
+    }
+
+    #[test]
+    fn test_sony_backends_use_kernel_layout() {
+        for backend in [DualShock4, DualSense] {
+            assert!(sony_layout(backend));
+            // Square on BTN_C (not BTN_WEST) so button indexes match the
+            // kernel drivers SDL's built-in mappings were written against.
+            assert_eq!(
+                button_code(backend, GamepadButton::X),
+                Some(KeyCode::BTN_C)
+            );
+            assert_eq!(
+                button_code(backend, GamepadButton::Y),
+                Some(KeyCode::BTN_NORTH)
+            );
+            assert_eq!(
+                button_code(backend, GamepadButton::A),
+                Some(KeyCode::BTN_SOUTH)
+            );
+            assert_eq!(
+                button_code(backend, GamepadButton::B),
+                Some(KeyCode::BTN_EAST)
+            );
+            assert_eq!(button_code(backend, GamepadButton::DpadUp), None);
+            assert_eq!(button_code(backend, GamepadButton::Paddle1), None);
+            assert!(!gamepad_buttons(backend).contains(KeyCode::BTN_WEST));
+            assert!(!gamepad_buttons(backend).contains(KeyCode::BTN_DPAD_UP));
+            assert!(gamepad_buttons(backend).contains(KeyCode::BTN_C));
+            // Right stick lives on ABS_Z/ABS_RZ, triggers on ABS_RX/ABS_RY.
+            assert_eq!(
+                axis_code(backend, GamepadAxis::RightX),
+                Some(evdev::AbsoluteAxisCode::ABS_Z)
+            );
+            assert_eq!(
+                axis_code(backend, GamepadAxis::RightY),
+                Some(evdev::AbsoluteAxisCode::ABS_RZ)
+            );
+            assert_eq!(
+                axis_code(backend, GamepadAxis::LeftTrigger),
+                Some(evdev::AbsoluteAxisCode::ABS_RX)
+            );
+            assert_eq!(
+                axis_code(backend, GamepadAxis::RightTrigger),
+                Some(evdev::AbsoluteAxisCode::ABS_RY)
+            );
+        }
+    }
+
+    #[test]
+    fn test_sony_identity_matches_hardware() {
+        assert_eq!(
+            device_id(DualShock4),
+            InputId::new(evdev::BusType::BUS_USB, 0x054c, 0x09cc, 0x0001)
+        );
+        assert_eq!(
+            device_id(DualSense),
+            InputId::new(evdev::BusType::BUS_USB, 0x054c, 0x0ce6, 0x0111)
+        );
+        assert_eq!(
+            device_name(DualShock4),
+            "Sony Interactive Entertainment Wireless Controller"
+        );
+        assert!(VirtualGamepad::dual_shock_4_sdl_mapping().starts_with(
+            "030000004c050000cc09000000010000,Sony Interactive Entertainment Wireless Controller,"
+        ));
+        assert!(VirtualGamepad::dual_sense_sdl_mapping()
+            .starts_with("030000004c050000e60c000011010000,Sony Interactive Entertainment DualSense Wireless Controller,"));
     }
 
     #[test]

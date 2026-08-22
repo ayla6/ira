@@ -178,6 +178,8 @@ fn add_console_remapping_rows(
         crate::tr!("Virtual XInput"),
         crate::tr!("Virtual DirectInput"),
         crate::tr!("Nintendo Switch Pro Controller"),
+        crate::tr!("DualShock 4 Controller"),
+        crate::tr!("DualSense Controller"),
     ];
     let mode_refs: Vec<&str> = mode_strings.iter().map(String::as_str).collect();
     mode_row.set_model(Some(&gtk4::StringList::new(&mode_refs)));
@@ -381,6 +383,8 @@ fn input_mode_index(mode: Option<ControllerInputMode>) -> u32 {
         Some(ControllerInputMode::VirtualXInput) => 2,
         Some(ControllerInputMode::VirtualDirectInput) => 3,
         Some(ControllerInputMode::VirtualSwitchPro) => 4,
+        Some(ControllerInputMode::VirtualDualShock4) => 5,
+        Some(ControllerInputMode::VirtualDualSense) => 6,
     }
 }
 
@@ -390,6 +394,8 @@ fn input_mode_from_index(index: u32) -> Option<ControllerInputMode> {
         2 => Some(ControllerInputMode::VirtualXInput),
         3 => Some(ControllerInputMode::VirtualDirectInput),
         4 => Some(ControllerInputMode::VirtualSwitchPro),
+        5 => Some(ControllerInputMode::VirtualDualShock4),
+        6 => Some(ControllerInputMode::VirtualDualSense),
         _ => None,
     }
 }
@@ -432,7 +438,7 @@ fn rebuild_controller_rows(params: &ControllerRowsParams, devices: &[ira_input::
             controller_default_path_for_backend(
                 &params.save_dir,
                 &key,
-                backend_for_mode(config.mode),
+                super::helpers::backend_for_mode(config.mode),
             )
         });
         let default_state = ControllerDefaultState {
@@ -491,6 +497,8 @@ fn add_controller_row(
         crate::tr!("Virtual XInput"),
         crate::tr!("Virtual DirectInput"),
         crate::tr!("Nintendo Switch Pro Controller"),
+        crate::tr!("DualShock 4 Controller"),
+        crate::tr!("DualSense Controller"),
     ];
     let mode_refs: Vec<&str> = mode_strings.iter().map(String::as_str).collect();
     let mode_model = gtk4::StringList::new(&mode_refs);
@@ -510,7 +518,7 @@ fn add_controller_row(
             let path = controller_default_path_for_backend(
                 &save_dir_for_mode,
                 &key_for_mode,
-                backend_for_mode(mode),
+                super::helpers::backend_for_mode(mode),
             );
             *profile_path_for_mode.borrow_mut() = path.is_file().then_some(path);
         }
@@ -538,7 +546,7 @@ fn add_controller_row(
     let registry_for_edit = registry;
     let mode_for_edit = mode.clone();
     edit.connect_clicked(move |_| {
-        let backend = backend_for_mode(mode_from_selection(mode_for_edit.selected()));
+        let backend = super::helpers::backend_for_mode(mode_from_selection(mode_for_edit.selected()));
         let path = match ensure_controller_default_profile(
             &save_dir_for_edit,
             &key_for_edit,
@@ -580,16 +588,6 @@ fn add_controller_row(
     }
 }
 
-fn backend_for_mode(mode: ControllerInputMode) -> ira_input::VirtualGamepadBackend {
-    match mode {
-        ControllerInputMode::VirtualDirectInput => ira_input::VirtualGamepadBackend::DirectInput,
-        ControllerInputMode::VirtualSwitchPro => ira_input::VirtualGamepadBackend::SwitchPro,
-        ControllerInputMode::Disabled | ControllerInputMode::VirtualXInput => {
-            ira_input::VirtualGamepadBackend::XInput
-        }
-    }
-}
-
 fn update_controller_subtitle(
     row: &adw::ExpanderRow,
     device: &ira_input::DeviceInfo,
@@ -602,6 +600,8 @@ fn update_controller_subtitle(
         ControllerInputMode::VirtualSwitchPro => {
             crate::tr!("Nintendo Switch Pro Controller layout")
         }
+        ControllerInputMode::VirtualDualShock4 => crate::tr!("DualShock 4 Controller layout"),
+        ControllerInputMode::VirtualDualSense => crate::tr!("DualSense Controller layout"),
     };
     row.set_subtitle(&format!(
         "{} | Linux reports {}",
@@ -664,6 +664,8 @@ fn selection_for_mode(mode: ControllerInputMode) -> u32 {
         ControllerInputMode::VirtualXInput => 1,
         ControllerInputMode::VirtualDirectInput => 2,
         ControllerInputMode::VirtualSwitchPro => 3,
+        ControllerInputMode::VirtualDualShock4 => 4,
+        ControllerInputMode::VirtualDualSense => 5,
     }
 }
 
@@ -672,6 +674,8 @@ pub(super) fn mode_from_selection(selection: u32) -> ControllerInputMode {
         1 => ControllerInputMode::VirtualXInput,
         2 => ControllerInputMode::VirtualDirectInput,
         3 => ControllerInputMode::VirtualSwitchPro,
+        4 => ControllerInputMode::VirtualDualShock4,
+        5 => ControllerInputMode::VirtualDualSense,
         _ => ControllerInputMode::Disabled,
     }
 }

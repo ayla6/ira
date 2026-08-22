@@ -359,18 +359,7 @@ fn apply_controller_defaults(
                 &widget.key,
                 &widget.device_name,
                 &widget.supported_buttons,
-                match mode {
-                    ira_models::ControllerInputMode::VirtualDirectInput => {
-                        ira_input::VirtualGamepadBackend::DirectInput
-                    }
-                    ira_models::ControllerInputMode::VirtualSwitchPro => {
-                        ira_input::VirtualGamepadBackend::SwitchPro
-                    }
-                    ira_models::ControllerInputMode::Disabled
-                    | ira_models::ControllerInputMode::VirtualXInput => {
-                        ira_input::VirtualGamepadBackend::XInput
-                    }
-                },
+                super::helpers::backend_for_mode(mode),
             ) {
                 Ok(path) => profile = path.to_string_lossy().into_owned(),
                 Err(error) => eprintln!("Failed to create controller mapping: {error}"),

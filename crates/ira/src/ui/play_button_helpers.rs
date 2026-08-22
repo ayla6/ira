@@ -60,6 +60,8 @@ fn input_backend(mode: ControllerInputMode) -> Option<VirtualGamepadBackend> {
         ControllerInputMode::VirtualXInput => Some(VirtualGamepadBackend::XInput),
         ControllerInputMode::VirtualDirectInput => Some(VirtualGamepadBackend::DirectInput),
         ControllerInputMode::VirtualSwitchPro => Some(VirtualGamepadBackend::SwitchPro),
+        ControllerInputMode::VirtualDualShock4 => Some(VirtualGamepadBackend::DualShock4),
+        ControllerInputMode::VirtualDualSense => Some(VirtualGamepadBackend::DualSense),
     }
 }
 
@@ -110,6 +112,8 @@ fn resolve_input_profile(
                 VirtualGamepadBackend::XInput => "resolved-xinput.json",
                 VirtualGamepadBackend::DirectInput => "resolved-directinput.json",
                 VirtualGamepadBackend::SwitchPro => "resolved-switch-pro.json",
+                VirtualGamepadBackend::DualShock4 => "resolved-dualshock4.json",
+                VirtualGamepadBackend::DualSense => "resolved-dualsense.json",
             })
     };
     let profile_path = selected_profile
@@ -817,6 +821,14 @@ mod tests {
         assert_eq!(
             input_backend(ControllerInputMode::VirtualSwitchPro),
             Some(VirtualGamepadBackend::SwitchPro)
+        );
+        assert_eq!(
+            input_backend(ControllerInputMode::VirtualDualShock4),
+            Some(VirtualGamepadBackend::DualShock4)
+        );
+        assert_eq!(
+            input_backend(ControllerInputMode::VirtualDualSense),
+            Some(VirtualGamepadBackend::DualSense)
         );
     }
 

@@ -86,17 +86,7 @@ fn active_controller_input(
             if defaults.mode == ControllerInputMode::Disabled {
                 return None;
             }
-            let backend = match defaults.mode {
-                ControllerInputMode::VirtualDirectInput => {
-                    ira_input::VirtualGamepadBackend::DirectInput
-                }
-                ControllerInputMode::VirtualSwitchPro => {
-                    ira_input::VirtualGamepadBackend::SwitchPro
-                }
-                ControllerInputMode::Disabled | ControllerInputMode::VirtualXInput => {
-                    ira_input::VirtualGamepadBackend::XInput
-                }
-            };
+            let backend = super::helpers::backend_for_mode(defaults.mode);
             let configured = std::path::PathBuf::from(&defaults.profile);
             let path = if configured.is_file() && read_profile(&configured).is_ok() {
                 configured

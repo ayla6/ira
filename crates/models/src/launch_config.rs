@@ -8,6 +8,8 @@ pub enum ControllerInputMode {
     VirtualXInput,
     VirtualDirectInput,
     VirtualSwitchPro,
+    VirtualDualShock4,
+    VirtualDualSense,
 }
 
 #[derive(Deserialize)]

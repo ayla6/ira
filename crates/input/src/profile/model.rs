@@ -11,6 +11,8 @@ pub enum VirtualGamepadBackend {
     XInput,
     DirectInput,
     SwitchPro,
+    DualShock4,
+    DualSense,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -308,6 +310,15 @@ impl OutputAction {
                 !matches!(self, Self::GamepadButton(button) if button.is_paddle())
             }
             VirtualGamepadBackend::DirectInput => true,
+            // Sony pads: no paddles, and analog triggers carry no button
+            // state of their own beyond the click.
+            VirtualGamepadBackend::DualShock4 | VirtualGamepadBackend::DualSense => {
+                !matches!(self, Self::GamepadButton(button) if button.is_paddle())
+                    && !matches!(
+                        self,
+                        Self::GamepadAxis(GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger)
+                    )
+            }
             VirtualGamepadBackend::SwitchPro => {
                 !matches!(self, Self::GamepadButton(button) if button.is_paddle())
                     && !matches!(

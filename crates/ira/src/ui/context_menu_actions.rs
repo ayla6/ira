@@ -38,6 +38,18 @@ pub(super) fn setup_edit_action(actions: &gio::SimpleActionGroup, state: SharedS
     actions.add_action(&edit_action);
 }
 
+pub(super) fn setup_controller_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    game: Game,
+) {
+    let controller_action = gio::SimpleAction::new("controller", None);
+    controller_action.connect_activate(move |_, _| {
+        super::edit_game_controller::open_controller_settings(&state, &game);
+    });
+    actions.add_action(&controller_action);
+}
+
 pub(super) fn setup_play_history_action(
     actions: &gio::SimpleActionGroup,
     state: SharedState,

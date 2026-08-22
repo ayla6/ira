@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use super::context_menu_actions::{
-    setup_delete_game_action, setup_edit_action, setup_hide_action,
+    setup_controller_action, setup_delete_game_action, setup_edit_action, setup_hide_action,
     setup_multi_new_collection_action, setup_multi_toggle_group_action,
     setup_multi_toggle_hide_action, setup_new_collection_action, setup_open_game_folder_action,
     setup_open_gog_status_action, setup_open_images_action, setup_open_save_location_action,
@@ -82,6 +82,10 @@ pub fn show_game_context_menu(
     menu.prepend_item(&play_item);
 
     menu.append(Some(&crate::tr!("Edit game settings")), Some("game.edit"));
+    menu.append(
+        Some(&crate::tr!("Controller settings")),
+        Some("game.controller"),
+    );
     menu.append(
         Some(&crate::tr!("View play history")),
         Some("game.play_history"),
@@ -216,6 +220,7 @@ pub fn show_game_context_menu(
 
     setup_play_action(&actions, state.clone(), game.clone());
     setup_edit_action(&actions, state.clone(), game.db_id);
+    setup_controller_action(&actions, state.clone(), game.clone());
     setup_play_history_action(&actions, state.clone(), game.db_id, game.variant_id);
     setup_hide_action(&actions, state.clone(), game.db_id, current_hidden);
     if is_deletable {

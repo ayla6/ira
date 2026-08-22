@@ -26,6 +26,7 @@ pub(super) fn build_game_header(
     let stats_row = build_header_stats(game, fraction, state);
     let wine_enabled = check_wine_enabled(game, state);
     let wine_btn = build_wine_tools_button(state, game.db_id, wine_enabled);
+    let controller_btn = build_controller_button(state, game);
     let settings_btn = build_settings_button(state, game.db_id);
 
     let has_hero = !game.hero_image_path.is_empty();
@@ -45,6 +46,7 @@ pub(super) fn build_game_header(
         if let Some(ref wb) = wine_btn {
             btn_group.append(wb);
         }
+        btn_group.append(&controller_btn);
         btn_group.append(&settings_btn);
         stats_wrapper.append(&btn_group);
         header.append(&stats_wrapper);
@@ -68,6 +70,7 @@ pub(super) fn build_game_header(
     if let Some(ref wb) = wine_btn {
         btn_group.append(wb);
     }
+    btn_group.append(&controller_btn);
     btn_group.append(&settings_btn);
     stats_container.append(&btn_group);
 
@@ -301,6 +304,19 @@ fn add_wine_run_exe_action(actions: &gio::SimpleActionGroup, state: &SharedState
         );
     });
     actions.add_action(&action);
+}
+
+fn build_controller_button(state: &SharedState, game: &Game) -> gtk4::Widget {
+    let btn = gtk4::Button::from_icon_name("input-gaming-symbolic");
+    btn.add_css_class(CSS_FLAT);
+    btn.set_valign(gtk4::Align::Center);
+    btn.set_tooltip_text(Some(&crate::tr!("Controller settings")));
+    let st = state.clone();
+    let g = game.clone();
+    btn.connect_clicked(move |_| {
+        super::edit_game_controller::open_controller_settings(&st, &g);
+    });
+    btn.upcast::<gtk4::Widget>()
 }
 
 fn build_settings_button(state: &SharedState, db_id: i64) -> gtk4::Widget {

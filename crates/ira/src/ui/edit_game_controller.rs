@@ -3,6 +3,7 @@ use super::input_profile_store::{
     list_profiles, profile_matches_game, read_profile, StoredProfile,
 };
 use super::settings_dialog;
+use super::state::SharedState;
 use adw::prelude::*;
 use glib::clone::Downgrade;
 use ira_models::{ControllerInputMode, Game, GameLaunchConfig};
@@ -10,6 +11,49 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
+
+/// Quick access to a game's controller layout (game header button, context
+/// menu): opens the input profile editor on the associated layout, or seeds a
+/// new one bound to this game when none is associated yet.
+pub(super) fn open_controller_settings(state: &SharedState, game: &Game) {
+    let (window, save_dir, registry, associated) = {
+        let s = state.borrow();
+        let associated = ira_db::get_game_config(&s.db, game.db_id)
+            .ok()
+            .flatten()
+            .and_then(|(launch, _, _)| launch.input_profile)
+            .map(PathBuf::from);
+        (
+            s.window.clone(),
+            s.save_dir.clone(),
+            s.controller_registry.clone(),
+            associated,
+        )
+    };
+    let profile_path = associated.and_then(|path| {
+        if path.is_file() {
+            Some(path)
+        } else {
+            eprintln!(
+                "Associated controller profile not found, starting a new layout: {}",
+                path.display()
+            );
+            None
+        }
+    });
+    super::input_profile_editor::show_input_profile_editor(
+        window.upcast_ref(),
+        super::input_profile_editor::InputProfileEditorParams {
+            save_dir,
+            profile_path,
+            game_id: Some(game.db_id),
+            layout_name: Some(game.name.clone()),
+            registry,
+            device: None,
+        },
+        |_| {},
+    );
+}
 
 #[derive(Clone)]
 pub(super) struct ControllerWidgets {

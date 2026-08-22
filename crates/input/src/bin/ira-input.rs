@@ -157,6 +157,7 @@ struct Arguments {
     calibration: Option<PathBuf>,
     pause_unfocused: bool,
     motion_port: Option<u16>,
+    vdf_import: Option<(PathBuf, PathBuf)>,
     list: bool,
     probe_sensors: bool,
     steam_app_id: Option<String>,
@@ -240,7 +241,7 @@ fn main() {
         Err(error) => {
             eprintln!("ira-input: {error}");
             eprintln!(
-                "usage: ira-input --list | [--device PATH] [--profile PATH] [--steam-app-id ID] [--trace] -- COMMAND"
+                "usage: ira-input [--vdf-import IN.vdf OUT.json] | --list | [--device PATH] [--profile PATH] [--steam-app-id ID] [--trace] -- COMMAND"
             );
             std::process::exit(2);
         }
@@ -251,6 +252,21 @@ fn main() {
     }
     if arguments.probe_sensors {
         probe_sensors();
+        return;
+    }
+    if let Some((input, output)) = arguments.vdf_import.clone() {
+        match import_vdf_file(&input, &output) {
+            Ok(report) => {
+                println!("imported {} to {}", input.display(), output.display());
+                for warning in &report.warnings {
+                    eprintln!("ira-input: import warning: {warning}");
+                }
+            }
+            Err(error) => {
+                eprintln!("ira-input: {error}");
+                std::process::exit(1);
+            }
+        }
         return;
     }
     match run_session(arguments) {
@@ -269,6 +285,7 @@ fn parse_arguments() -> Result<Arguments, String> {
         calibration: None,
         pause_unfocused: false,
         motion_port: None,
+        vdf_import: None,
         list: false,
         probe_sensors: false,
         steam_app_id: None,
@@ -319,12 +336,25 @@ fn parse_arguments() -> Result<Arguments, String> {
                     format!("--motion-port expects a number, got {raw}")
                 })?);
             }
+            "--vdf-import" => {
+                let input = PathBuf::from(
+                    values
+                        .next()
+                        .ok_or_else(|| "--vdf-import requires an input .vdf path".to_string())?,
+                );
+                let output = PathBuf::from(
+                    values
+                        .next()
+                        .ok_or_else(|| "--vdf-import requires an output .json path".to_string())?,
+                );
+                arguments.vdf_import = Some((input, output));
+            }
             "--list" => arguments.list = true,
             "--probe-sensors" => arguments.probe_sensors = true,
             "--trace" => arguments.trace = true,
             "--help" | "-h" => {
                 println!(
-                    "usage: ira-input --list | [--device PATH] [--profile PATH] [--steam-app-id ID] [--trace] -- COMMAND"
+                    "usage: ira-input [--vdf-import IN.vdf OUT.json] | --list | [--device PATH] [--profile PATH] [--steam-app-id ID] [--trace] -- COMMAND"
                 );
                 std::process::exit(0);
             }
@@ -401,6 +431,15 @@ fn probe_sensors() {
             Err(error) => println!("  SDL3 gyro probe failed: {error}"),
         }
     }
+}
+
+/// Convert a Steam VDF layout into Ira's JSON profile format.
+fn import_vdf_file(input: &Path, output: &Path) -> Result<ira_input::ImportReport, String> {
+    let (profile, report) =
+        ira_input::import_vdf_file(input).map_err(|error| format!("import failed: {error}"))?;
+    let json = serde_json::to_string_pretty(&profile).map_err(|error| error.to_string())?;
+    std::fs::write(output, json + "\n").map_err(|error| error.to_string())?;
+    Ok(report)
 }
 
 fn run_session(arguments: Arguments) -> Result<i32, String> {

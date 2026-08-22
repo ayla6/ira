@@ -68,7 +68,9 @@ impl SteamDataClient {
 
     pub(super) fn find_cached_icon(&self, app_id: &str) -> Option<PathBuf> {
         let dir = self.game_dir(app_id);
-        for ext in [".png", ".ico", ".jpg", ".webp"] {
+        // .ico is deliberately absent: icons are converted on download and
+        // stale .ico files are healed away, never served.
+        for ext in [".webp", ".png", ".jpg"] {
             let path = dir.join(format!("icon{}", ext));
             if path.exists() {
                 return Some(path);

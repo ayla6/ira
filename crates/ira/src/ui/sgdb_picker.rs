@@ -269,28 +269,32 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
             let asset_at = AssetType::from_string(&asset_dl).unwrap_or(AssetType::Icon);
             std::thread::spawn(move || {
                 let _s = tracing::info_span!("download_direct", url = %url).entered();
-                let dest_path = std::path::Path::new(&dest_dir_c).join(&file_name_c);
-                let _ = std::fs::create_dir_all(&dest_dir_c);
-                let result = if steam.download_file(&url, &dest_path).is_ok() {
-                    let ext = dest_path
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or("")
-                        .to_lowercase();
-                    if ext == "png" || ext == "ico" {
-                        ira_parser::convert_to_lossless_webp(&dest_path);
-                        let webp = dest_path.with_extension("webp");
-                        if webp.is_file() {
-                            webp.to_string_lossy().into_owned()
-                        } else {
-                            dest_path.to_string_lossy().into_owned()
+                // Byte-validated download: decode before anything touches
+                // disk and persist WebP only, so a raw .ico can never land
+                // in the game's image directory.
+                let result = match steam.download_bytes(&url) {
+                    Ok(bytes) if !bytes.is_empty() && ira_parser::is_decodable_image(&bytes) => {
+                        let webp = ira_parser::convert_bytes_to_lossless_webp(&bytes)
+                            .unwrap_or(bytes);
+                        let _ = std::fs::create_dir_all(&dest_dir_c);
+                        let dest =
+                            std::path::Path::new(&dest_dir_c).join(&file_name_c).with_extension("webp");
+                        match std::fs::write(&dest, &webp) {
+                            Ok(()) => dest.to_string_lossy().into_owned(),
+                            Err(error) => {
+                                eprintln!("Failed to write {}: {error}", dest.display());
+                                String::new()
+                            }
                         }
-                    } else {
-                        dest_path.to_string_lossy().into_owned()
                     }
-                } else {
-                    eprintln!("Download failed for {}", url);
-                    String::new()
+                    Ok(_) => {
+                        eprintln!("Download is not a decodable image: {url}");
+                        String::new()
+                    }
+                    Err(error) => {
+                        eprintln!("Download failed for {url}: {error}");
+                        String::new()
+                    }
                 };
                 if !result.is_empty() {
                     let (sw, sh) = asset_at.thumb_dims();

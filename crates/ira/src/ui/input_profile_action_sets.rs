@@ -250,17 +250,12 @@ fn backend_group(ctx: &PagesCtx) -> adw::PreferencesGroup {
         crate::tr!("DirectInput"),
         crate::tr!("Switch Pro"),
     ];
-    let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let combo = gtk4::DropDown::new(
-        Some(gtk4::StringList::new(&refs)),
-        None::<&gtk4::Expression>,
+    let combo = super::input_profile_activator_sheet::combo_row(
+        &labels,
+        backend_index(ctx.profile.borrow().backend),
     );
-    combo.set_selected(backend_index(ctx.profile.borrow().backend));
-    let row = adw::ActionRow::new();
-    row.set_title(&crate::tr!("Backend"));
-    combo.set_valign(gtk4::Align::Center);
-    row.add_suffix(&combo);
-    group.add(&row);
+    combo.set_title(&crate::tr!("Backend"));
+    group.add(&combo);
 
     let ctx_for_backend = ctx.clone();
     combo.connect_selected_notify(move |combo| {

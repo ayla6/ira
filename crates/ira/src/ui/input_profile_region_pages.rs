@@ -145,6 +145,7 @@ fn unmapped_row(ctx: &PagesCtx, source: InputSource, family: ira_input::Controll
     let row = adw::ActionRow::new();
     row.set_title(&esc(&source_label(source)));
     row.set_subtitle(&crate::tr!("Not mapped"));
+    row.add_css_class("unmapped-row");
     let badge = super::input_profile_assets::source_badge(source, family);
     let badge_label = gtk4::Label::new(Some(&badge));
     badge_label.add_css_class(super::css::CSS_SOURCE_BADGE);
@@ -152,19 +153,21 @@ fn unmapped_row(ctx: &PagesCtx, source: InputSource, family: ira_input::Controll
     badge_label.set_valign(gtk4::Align::Center);
     row.add_suffix(&badge_label);
 
-    let add = gtk4::Button::from_icon_name("list-add-symbolic");
-    add.add_css_class(super::css::CSS_FLAT);
-    add.add_css_class(super::css::CSS_SQUARE_BUTTON);
+    // Whole-area affordance instead of a bare icon: the row itself adds.
+    let add = adw::ButtonContent::builder()
+        .icon_name("list-add-symbolic")
+        .label(crate::tr!("Add"))
+        .build();
     add.set_valign(gtk4::Align::Center);
-    add.set_tooltip_text(Some(&crate::tr!("Add binding")));
+    row.add_suffix(&add);
     let ctx_for_add = ctx.clone();
-    add.connect_clicked(move |_| {
+    row.set_activatable(true);
+    row.connect_activated(move |_| {
         let mapping = default_mapping(source);
         insert_mapping(&ctx_for_add, mapping);
         (ctx_for_add.on_dirty)();
         open_sheet(&ctx_for_add, source);
     });
-    row.add_suffix(&add);
     row
 }
 

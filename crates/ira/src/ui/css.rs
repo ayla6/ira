@@ -34,7 +34,6 @@ pub const CSS_SUGGESTED_ACTION: &str = "suggested-action";
 pub const CSS_TITLE_1: &str = "title-1";
 pub const CSS_LOCKED_TROPHY: &str = "locked-trophy";
 pub const CSS_SIDEBAR_SECTION_TITLE: &str = "sidebar-section-title";
-pub const CSS_BINDING_SUFFIX: &str = "binding-suffix";
 pub const CSS_SOURCE_BADGE: &str = "source-badge";
 pub const CSS_SQUARE_BUTTON: &str = "square-button";
 pub const CSS_VIEWER_CARD: &str = "input-viewer-card";
@@ -202,9 +201,6 @@ gridview.game-grid child:focus-within {
     opacity: 0.55;
 }
 
-.binding-suffix {
-    margin: 2px 0;
-}
 .square-button {
     min-width: 32px;
     min-height: 32px;
@@ -242,6 +238,14 @@ gridview.game-grid child:focus-within {
 }
 .command-tile.command-tile-active {
     box-shadow: inset 0 0 0 2px @accent_color;
+}
+
+.unmapped-row {
+    opacity: 0.55;
+}
+.unmapped-row:hover,
+.unmapped-row:selected {
+    opacity: 1;
 }
 
 .variant-card {

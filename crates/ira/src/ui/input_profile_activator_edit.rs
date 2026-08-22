@@ -7,7 +7,7 @@ use super::helpers::esc;
 use super::input_output_picker::{show_output_picker, OutputPickerScope};
 use super::input_profile_activator_gate::activator_gate_controls;
 use super::input_profile_activator_sheet::{
-    combo_row, row_with_control, spin_row, with_mapping, Reopen, SheetBase,
+    combo_row, spin_row, with_mapping, Reopen, SheetBase,
 };
 use super::input_profile_editor_regions::{activator_kind_label, source_label};
 use super::input_profile_options::output_display_label;
@@ -142,7 +142,8 @@ fn activator_kind_controls(
         _ => 600,
     };
     let kind = combo_row(&kind_labels(), kind_index(&activator.kind));
-    expander.add_row(&row_with_control(&crate::tr!("Press pattern"), &kind));
+    kind.set_title(&crate::tr!("Press pattern"));
+    expander.add_row(&kind);
     let base_for_kind = base.clone();
     let reopen = reopen.clone();
     kind.connect_selected_notify(move |dropdown| {

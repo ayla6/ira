@@ -204,7 +204,9 @@ fn behavior_group(base: &SheetBase, reopen: &Reopen, modes: Vec<Option<SourceMod
     let labels: Vec<String> = modes.iter().map(|mode| mode_label(mode, is_trigger)).collect();
 
     let dropdown = combo_row(&labels, selected as u32);
-    group.add(&row_with_control(&crate::tr!("Behavior"), &dropdown));
+    dropdown.set_title(&crate::tr!("Behavior"));
+    dropdown.set_subtitle(&crate::tr!("What this stick or trigger does"));
+    group.add(&dropdown);
 
     let base_for_change = base.clone();
     let reopen_for_change = reopen.clone();
@@ -451,14 +453,12 @@ fn shifts_group(base: &SheetBase, reopen: &Reopen) -> adw::PreferencesGroup {
         .collect();
     let labels: Vec<String> = sources.iter().map(|(_, label)| label.clone()).collect();
     let picker = combo_row(&labels, 0);
+    picker.set_title(&crate::tr!("Shift while holding"));
     let add = gtk4::Button::with_label(&crate::tr!("Add shift"));
     add.add_css_class(CSS_FLAT);
     add.set_valign(gtk4::Align::Center);
-    let picker_row = adw::ActionRow::new();
-    picker_row.set_title(&crate::tr!("Shift while holding"));
-    picker_row.add_suffix(&picker);
-    picker_row.add_suffix(&add);
-    group.add(&picker_row);
+    picker.add_suffix(&add);
+    group.add(&picker);
     let base = base.clone();
     let reopen = reopen.clone();
     add.connect_clicked(move |_| {
@@ -483,22 +483,13 @@ fn shifts_group(base: &SheetBase, reopen: &Reopen) -> adw::PreferencesGroup {
 // Widget helpers
 // ---------------------------------------------------------------------------
 
-pub(crate) fn combo_row(labels: &[String], selected: u32) -> gtk4::DropDown {
+/// A full-width libadwaita combo row; callers add it directly instead of
+/// nesting a compact dropdown inside another row's suffix.
+pub(crate) fn combo_row(labels: &[String], selected: u32) -> adw::ComboRow {
     let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let row = gtk4::DropDown::new(
-        Some(gtk4::StringList::new(&refs)),
-        None::<&gtk4::Expression>,
-    );
+    let row = adw::ComboRow::new();
+    row.set_model(Some(&gtk4::StringList::new(&refs)));
     row.set_selected(selected);
-    row
-}
-
-pub(crate) fn row_with_control(title: &str, control: &impl IsA<gtk4::Widget>) -> adw::ActionRow {
-    let row = adw::ActionRow::new();
-    row.set_title(&esc(title));
-    control.add_css_class(super::css::CSS_BINDING_SUFFIX);
-    control.set_valign(gtk4::Align::Center);
-    row.add_suffix(control);
     row
 }
 

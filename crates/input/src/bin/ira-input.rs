@@ -554,6 +554,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             }
         }
     }
+    let ever_had_sensor = sensor.is_some();
     let mut pipeline = SensorPipeline {
         sensor,
         gyro_processor,
@@ -562,6 +563,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         motion_device,
         ds4_hid,
         imu_hid,
+        ever_had_sensor,
     };
     // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
     // even when no sensor exists, as long as something consumes them.
@@ -1457,6 +1459,9 @@ struct SensorPipeline {
     motion_device: Option<ira_input::VirtualMotionSensor>,
     ds4_hid: Option<ira_input::Ds4UhidDevice>,
     imu_hid: Option<ira_input::ImuUhidDevice>,
+    /// Whether a gyro sensor was available at startup. Gyroless DSU
+    /// sessions still stream whole-controller frames with zeroed motion.
+    ever_had_sensor: bool,
 }
 
 fn open_motion_node(backend: ira_input::VirtualGamepadBackend) -> Option<ira_input::VirtualMotionSensor> {
@@ -1563,13 +1568,29 @@ fn process_tick(
         }
     }
     if let Some(motion) = pipeline.motion.as_mut() {
-        let (gyro, accel, timestamp_us) = latest.take().unwrap_or(zero);
-        let dsu_frame = ira_input::sensor_to_dsu_frame(gyro, accel, timestamp_us);
-        motion.poll_clients(true);
-        motion.send_sample(&dsu_frame, targets.pad);
+        // Frames go out per fresh sensor sample, not per tick: Cemu
+        // integrates wire timestamps as sample deltas, so duplicating a
+        // sample across ticks double-counts its rotation and zeroed
+        // frames between samples read as instant freefall. Gyroless
+        // sessions (or a dead sensor) still stream whole-controller
+        // frames with zeroed motion at tick rate.
+        if should_send_dsu_frame(latest.is_some(), pipeline.sensor.is_some(), pipeline.ever_had_sensor)
+        {
+            let (gyro, accel, _) = latest.take().unwrap_or(([0.0; 3], [0.0; 3], now_us()));
+            let dsu_frame = ira_input::sensor_to_dsu_frame(gyro, accel, now_us());
+            motion.poll_clients(true);
+            motion.send_sample(&dsu_frame, targets.pad);
+        }
     }
     let outputs = mapper.tick(now_us());
     emit_outputs(outputs, targets, trace)
+}
+
+/// Whether a cemuhook frame should leave this tick: always for a fresh
+/// sensor sample; also at tick rate when no gyro ever existed or the
+/// sensor just died, so whole-controller state keeps flowing.
+fn should_send_dsu_frame(fresh_sample: bool, sensor_alive: bool, ever_had_sensor: bool) -> bool {
+    fresh_sample || !sensor_alive || !ever_had_sensor
 }
 
 fn stop_child(child: &mut Option<std::process::Child>) {
@@ -1631,6 +1652,18 @@ fn now_us() -> u64 {
 mod tests {
     use super::*;
     use ira_input::VirtualGamepadBackend;
+
+    #[test]
+    fn test_dsu_frames_follow_samples_not_ticks() {
+        // Fresh samples always stream; ticks without one stay silent so the
+        // same rotation is never integrated twice.
+        assert!(should_send_dsu_frame(true, true, true));
+        assert!(!should_send_dsu_frame(false, true, true));
+        // A gyroless session keeps streaming whole-controller frames.
+        assert!(should_send_dsu_frame(false, false, false));
+        // A sensor dying mid-session must not freeze the buttons either.
+        assert!(should_send_dsu_frame(false, false, true));
+    }
 
     #[test]
     fn test_is_real_profile_excludes_builtin() {

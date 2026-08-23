@@ -102,7 +102,6 @@ impl SwitchProUhidDevice {
         for event in self.device.poll()? {
             match event {
                 UhidEvent::OutputReport { data } => {
-                    eprintln!("ira-input: switch pro request {data:?}");
                     let reply = handshake_reply(&data);
                     if !reply.is_empty() {
                         self.device.send_input_report(&reply)?;
@@ -111,15 +110,7 @@ impl SwitchProUhidDevice {
                 UhidEvent::GetReport { id, .. } => {
                     let _ = self.device.reply_get_report(id, 61, &[]);
                 }
-                UhidEvent::Start => {
-                    eprintln!("ira-input: virtual Switch Pro started by the kernel");
-                }
-                UhidEvent::Stop => {
-                    eprintln!("ira-input: virtual Switch Pro stopped by the kernel");
-                }
-                other => {
-                    eprintln!("ira-input: virtual Switch Pro event {other:?}");
-                }
+                _ => {}
             }
         }
         let report = standard_report(self.timer, pad, accel_g, gyro_dps);
@@ -238,11 +229,12 @@ fn stick_calibration(left: bool) -> Vec<u8> {
     raw.to_vec()
 }
 
-/// Writes a 12-bit field MSB-first (HID bit order).
+/// Writes a 12-bit field LSB-first, the bit order hid-nintendo's
+/// `hid_field_extract` uses for both report sticks and calibration.
 fn pack_field(buf: &mut [u8], byte: usize, shift: u16, value: u16) {
-    for (i, bit) in (0..12).rev().zip(byte * 8 + shift as usize..) {
+    for (i, bit) in (0..12).zip(byte * 8 + shift as usize..) {
         if (value >> i) & 1 == 1 {
-            buf[bit / 8] |= 1 << (7 - bit % 8);
+            buf[bit / 8] |= 1 << (bit % 8);
         }
     }
 }
@@ -328,11 +320,18 @@ pub fn standard_report(
     report
 }
 
-/// Two 12-bit stick axes in three bytes, LSB-first as the driver decodes
-/// report data.
+/// Two 12-bit stick axes packed LSB-first across three bytes, matching
+/// hid-nintendo's `hid_field_extract(.., 0, 12)` / `(..+1, 4, 12)` decode.
+/// Y encodes inverted because the driver negates it after mapping
+/// (`y = -joycon_map_stick_val(..)`), so straight-through PlayStation-style
+/// down-positive values would surface flipped sticks.
 fn stick_bytes(x: f32, y: f32) -> [u8; 3] {
-    let x = (STICK_CENTER as f32 + x * STICK_RANGE as f32).round().clamp(0.0, 4095.0) as u16;
-    let y = (STICK_CENTER as f32 + y * STICK_RANGE as f32).round().clamp(0.0, 4095.0) as u16;
+    let x = (STICK_CENTER as f32 + x * STICK_RANGE as f32)
+        .round()
+        .clamp(0.0, 4095.0) as u16;
+    let y = (STICK_CENTER as f32 - y * STICK_RANGE as f32)
+        .round()
+        .clamp(0.0, 4095.0) as u16;
     [
         (x & 0xFF) as u8,
         (((y & 0xF) << 4) | (x >> 8)) as u8,
@@ -340,11 +339,21 @@ fn stick_bytes(x: f32, y: f32) -> [u8; 3] {
     ]
 }
 
+/// Decodes two 12-bit fields packed LSB-first across three bytes; mirrors
+/// the kernel's extraction so tests can assert what the driver will see.
 #[cfg(test)]
-mod tests {
-    use super::{
-        handshake_reply, spi_flash, standard_report, stick_bytes, PadState,
-    };
+fn unpack_fields(bytes: [u8; 3]) -> (u16, u16) {
+    let first = u16::from(bytes[0]) | (u16::from(bytes[1] & 0x0F) << 8);
+    let second = u16::from(bytes[1] >> 4) | (u16::from(bytes[2]) << 4);
+    (first, second)
+}
+
+    #[cfg(test)]
+    mod tests {
+        use super::{
+            handshake_reply, spi_flash, standard_report, stick_bytes, unpack_fields, PadState,
+        };
+
 
     #[test]
     fn test_usb_commands_ack_with_matching_reply() {
@@ -407,12 +416,38 @@ mod tests {
 
     #[test]
     fn test_stick_bytes_center_and_extremes() {
-        assert_eq!(stick_bytes(0.0, 0.0), [0x00, 0x08, 0x80]);
-        let right = stick_bytes(1.0, 0.0);
-        let x = u16::from(right[0]) | (u16::from(right[1] & 0x0F) << 8);
-        assert_eq!(x, 2048 + 1500);
-        let down = stick_bytes(0.0, 1.0);
-        let y = u16::from(down[1] >> 4) | (u16::from(down[2]) << 4);
-        assert_eq!(y, 2048 + 1500);
+        assert_eq!(unpack_fields(stick_bytes(0.0, 0.0)), (2048, 2048));
+        assert_eq!(unpack_fields(stick_bytes(1.0, 0.0)), (2048 + 1500, 2048));
+        // Down-positive pad values encode below center: the driver negates
+        // the mapped Y, so below-center raws surface as positive ABS_Y.
+        assert_eq!(unpack_fields(stick_bytes(0.0, 1.0)), (2048, 2048 - 1500));
+        assert_eq!(unpack_fields(stick_bytes(0.0, -1.0)), (2048, 2048 + 1500));
+    }
+
+    #[test]
+    fn test_stick_calibration_decodes_as_driver_will_read_it() {
+        for (addr, left) in [(0x603d, true), (0x6046, false)] {
+            let raw = spi_flash(addr, 9);
+            let extract = |byte: usize| -> u16 {
+                u16::from(raw[byte]) | (u16::from(raw[byte + 1] & 0x0F) << 8)
+            };
+            let extract_shifted = |byte: usize| -> u16 {
+                u16::from(raw[byte] >> 4) | (u16::from(raw[byte + 1]) << 4)
+            };
+            let (first, second, third) = (extract(0), extract_shifted(1), extract(3));
+            let fourth = extract_shifted(4);
+            let (fifth, sixth) = (extract(6), extract_shifted(7));
+            // Offsets from center for the extremes, absolute for the center.
+            let expected: [(u16, u16, u16, u16, u16, u16); 2] = [
+                (1500, 1500, 2048, 2048, 1500, 1500), // left: max,max,cen,cen,min,min
+                (2048, 2048, 1500, 1500, 1500, 1500), // right: cen,cen,min,min,max,max
+            ];
+            let e = expected[if left { 0 } else { 1 }];
+            assert_eq!(
+                (first, second, third, fourth, fifth, sixth),
+                e,
+                "addr {addr:#x}"
+            );
+        }
     }
 }

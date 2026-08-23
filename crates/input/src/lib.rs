@@ -33,7 +33,7 @@ mod focus;
 pub use focus::FocusWatcher;
 mod motion_udp;
 pub use motion_udp::{
-    sensor_to_motion, MotionSample, MotionServer, PadState, MOTION_PORT,
+    sensor_to_dsu_frame, sensor_to_motion, MotionSample, MotionServer, PadState, MOTION_PORT,
 };
 mod motion_device;
 pub use motion_device::VirtualMotionSensor;

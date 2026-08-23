@@ -1471,7 +1471,9 @@ fn process_tick(
         return Ok(());
     }
     let mut sensor_failed = false;
-    let mut latest: Option<ira_input::MotionSample> = None;
+    // The raw sensor reading, kept unconverted so each consumer can request
+    // its own frame below.
+    let mut latest: Option<([f32; 3], [f32; 3], u64)> = None;
     if let Some(sensor) = pipeline.sensor.as_mut() {
         match sensor.read(now_us()) {
             Ok(Some(sample)) => {
@@ -1495,7 +1497,7 @@ fn process_tick(
                 // Raw passthrough: emulators consuming the DSU stream get
                 // the unfiltered sensor, independent of the mapping
                 // profile's gyro processing.
-                latest = Some(ira_input::sensor_to_motion(
+                latest = Some((
                     sample.gyro,
                     sample.accel.unwrap_or([0.0, 0.0, 0.0]),
                     sample.timestamp_us,
@@ -1513,27 +1515,29 @@ fn process_tick(
     if sensor_failed {
         pipeline.sensor = None;
     }
-    // One motion frame feeds every consumer: the DSU stream (whole
-    // controller over UDP) and the experimental hidraw DS4 alike. Ticks
-    // without a fresh sensor frame still carry state with zeroed motion.
-    let frame = latest.take().unwrap_or(ira_input::MotionSample {
-        accel_ms2: [0.0; 3],
-        gyro_dps: [0.0; 3],
-        timestamp_us: now_us(),
-    });
-    if let Some(motion) = pipeline.motion.as_mut() {
-        motion.poll_clients(true);
-        motion.send_sample(&frame, targets.pad);
-    }
+    // One sensor reading feeds every consumer, each in its own frame: the
+    // virtual DS4's hidapi driver reads the SDL frame directly while the
+    // cemuhook stream wants the DSU wire frame (gyro Y/Z pre-negated to
+    // match Cemu's native SDL ingestion). Ticks without a fresh sensor
+    // frame still carry state with zeroed motion.
+    let zero = ([0.0f32; 3], [0.0f32; 3], now_us());
     if pipeline.ds4_hid.is_some() {
+        let (gyro, accel, timestamp_us) = latest.unwrap_or(zero);
+        let hid_frame = ira_input::sensor_to_motion(gyro, accel, timestamp_us);
         let ds4 = pipeline.ds4_hid.as_mut().unwrap();
-        match ds4.send_state(targets.pad, &frame) {
+        match ds4.send_state(targets.pad, &hid_frame) {
             Ok(()) => {}
             Err(error) => {
                 eprintln!("ira-input: virtual DS4 stopped: {error}");
                 pipeline.ds4_hid = None;
             }
         }
+    }
+    if let Some(motion) = pipeline.motion.as_mut() {
+        let (gyro, accel, timestamp_us) = latest.take().unwrap_or(zero);
+        let dsu_frame = ira_input::sensor_to_dsu_frame(gyro, accel, timestamp_us);
+        motion.poll_clients(true);
+        motion.send_sample(&dsu_frame, targets.pad);
     }
     let outputs = mapper.tick(now_us());
     emit_outputs(outputs, targets, trace)

@@ -314,8 +314,10 @@ fn crc32(data: &[u8]) -> u32 {
     !crc
 }
 
-/// Convert SDL sensor units to protocol units: gyro rad/s → deg/s with
-/// pitch/yaw/roll on x/y/z; accelerometer already reports g.
+/// Convert SDL sensor units to protocol units in the SDL frame: gyro rad/s
+/// → deg/s with pitch/yaw/roll on x/y/z; accelerometer already reports g.
+/// Used by consumers that read SDL-standard data back, like the virtual
+/// DS4's hidapi driver.
 pub fn sensor_to_motion(gyro_rads: [f32; 3], accel_ms2: [f32; 3], timestamp_us: u64) -> MotionSample {
     const RAD_TO_DEG: f32 = 180.0 / std::f32::consts::PI;
     MotionSample {
@@ -329,12 +331,44 @@ pub fn sensor_to_motion(gyro_rads: [f32; 3], accel_ms2: [f32; 3], timestamp_us: 
     }
 }
 
+/// Convert SDL sensor data to the cemuhook wire frame.
+///
+/// Cemu ingests SDL sensors natively by negating gyro Y and Z before its
+/// IMU (`tracking.gyro[1] = -data[1]; tracking.gyro[2] = -data[2];`) while
+/// its DSU client feeds wire values straight through unmodified — so the
+/// wire must carry those negations pre-applied to make streaming identical
+/// to what the emulator produces from the same controller read natively.
+/// The accelerometer needs no flip: both Cemu paths negate its Y/Z on
+/// receipt, so it passes through untouched.
+pub fn sensor_to_dsu_frame(
+    gyro_rads: [f32; 3],
+    accel_ms2: [f32; 3],
+    timestamp_us: u64,
+) -> MotionSample {
+    let mut sample = sensor_to_motion(gyro_rads, accel_ms2, timestamp_us);
+    sample.gyro_dps[1] = -sample.gyro_dps[1];
+    sample.gyro_dps[2] = -sample.gyro_dps[2];
+    sample
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        build_packet, crc32, data_payload, info_payload, sensor_to_motion, PadState,
+        build_packet, crc32, data_payload, info_payload, sensor_to_dsu_frame, sensor_to_motion,
+        PadState,
     };
     use crate::{GamepadAxis, GamepadButton, OutputEvent};
+
+    #[test]
+    fn test_dsu_frame_negates_gyro_yaw_and_roll() {
+        let dsu = sensor_to_dsu_frame([0.1, 0.2, 0.3], [1.0, -2.0, 3.0], 7);
+        let sdl = sensor_to_motion([0.1, 0.2, 0.3], [1.0, -2.0, 3.0], 7);
+        assert_eq!(dsu.accel_ms2, sdl.accel_ms2);
+        assert_eq!(dsu.gyro_dps[0], sdl.gyro_dps[0]);
+        assert_eq!(dsu.gyro_dps[1], -sdl.gyro_dps[1]);
+        assert_eq!(dsu.gyro_dps[2], -sdl.gyro_dps[2]);
+        assert_eq!(dsu.timestamp_us, 7);
+    }
 
     #[test]
     fn test_crc32_known_vector() {

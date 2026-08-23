@@ -607,6 +607,7 @@ fn update_controller_subtitle(
         }
         Some(VirtualGamepadBackend::DualShock4) => crate::tr!("DualShock 4 Controller layout"),
         Some(VirtualGamepadBackend::DualSense) => crate::tr!("DualSense Controller layout"),
+        Some(VirtualGamepadBackend::Dsu) => crate::tr!("DSU (cemuhook) controller layout"),
     };
     row.set_subtitle(&format!(
         "{} | Linux reports {}",
@@ -683,6 +684,7 @@ fn selection_for_backend(backend: ira_input::VirtualGamepadBackend) -> u32 {
         VirtualGamepadBackend::SwitchPro => 3,
         VirtualGamepadBackend::DualShock4 => 4,
         VirtualGamepadBackend::DualSense => 5,
+        VirtualGamepadBackend::Dsu => 6,
         VirtualGamepadBackend::XInput => 1,
     }
 }
@@ -698,6 +700,7 @@ pub(super) fn backend_for_selection(
         3 => Some(VirtualGamepadBackend::SwitchPro),
         4 => Some(VirtualGamepadBackend::DualShock4),
         5 => Some(VirtualGamepadBackend::DualSense),
+        6 => Some(VirtualGamepadBackend::Dsu),
         _ => None,
     }
 }
@@ -912,6 +915,7 @@ mod tests {
             VirtualGamepadBackend::SwitchPro,
             VirtualGamepadBackend::DualShock4,
             VirtualGamepadBackend::DualSense,
+            VirtualGamepadBackend::Dsu,
         ] {
             assert_eq!(backend_for_selection(selection_for_backend(backend)), Some(backend));
         }

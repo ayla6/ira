@@ -480,11 +480,14 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         .map_err(|error| format!("failed to create virtual gamepad: {error}"))?;
     let sensor = gamepad.as_ref().and_then(|gamepad| open_sensor(gamepad.info()));
     // The layout can opt out of streaming motion to emulators; the per-game
-    // launcher flag (--motion-port 0) remains the harder kill switch.
-    let motion_enabled =
-        arguments.motion_port != Some(0) && mapper.profile().emulator_udp;
+    // launcher flag (--motion-port 0) remains the harder kill switch. The
+    // DSU backend is nothing without the stream, so it forces the stream on
+    // and works even when no gyro exists (motion just reads zero).
+    let motion_enabled = arguments.motion_port != Some(0)
+        && (mapper.profile().emulator_udp
+            || mapper.profile().backend == ira_input::VirtualGamepadBackend::Dsu);
     let motion_server = if motion_enabled {
-        sensor.as_ref().and_then(|_| ira_input::MotionServer::bind())
+        ira_input::MotionServer::bind()
     } else {
         None
     };
@@ -524,7 +527,9 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     };
     // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
     // even when no sensor exists, as long as something consumes them.
-    let mut tick_needed = pipeline.sensor.is_some() || mapper.has_continuous_outputs();
+    let mut tick_needed = pipeline.sensor.is_some()
+        || mapper.has_continuous_outputs()
+        || mapper.profile().backend == ira_input::VirtualGamepadBackend::Dsu;
     let mut report_rate = ReportRateEstimator::default();
     if let Some(gamepad) = gamepad.as_mut() {
         if let Err(error) = gamepad.grab() {
@@ -1021,6 +1026,9 @@ fn sdl_mapping_for_backend(backend: VirtualGamepadBackend) -> Option<String> {
         VirtualGamepadBackend::SwitchPro => Some(VirtualGamepad::switch_pro_sdl_mapping()),
         VirtualGamepadBackend::DualShock4 => Some(VirtualGamepad::dual_shock_4_sdl_mapping()),
         VirtualGamepadBackend::DualSense => Some(VirtualGamepad::dual_sense_sdl_mapping()),
+        // The DSU backend presents no kernel device, so there is nothing to
+        // map in SDL; the emulator binds to the cemuhook stream instead.
+        VirtualGamepadBackend::Dsu => None,
     }
 }
 
@@ -1035,7 +1043,9 @@ fn ignored_device_for_target(
         VirtualGamepadBackend::SwitchPro => Some((SWITCH_PRO_VENDOR, SWITCH_PRO_PRODUCT)),
         VirtualGamepadBackend::DualShock4 => Some((DUAL_SHOCK_4_VENDOR, DUAL_SHOCK_4_PRODUCT)),
         VirtualGamepadBackend::DualSense => Some((DUAL_SENSE_VENDOR, DUAL_SENSE_PRODUCT)),
-        VirtualGamepadBackend::DirectInput => None,
+        // Private identities: the physical pad is hidden so only Ira's
+        // carrier shows up in the game.
+        VirtualGamepadBackend::DirectInput | VirtualGamepadBackend::Dsu => None,
     };
     match virtual_identity {
         // The physical pad shares the virtual one's identity, so it cannot be
@@ -1434,6 +1444,7 @@ fn process_tick(
         return Ok(());
     }
     let mut sensor_failed = false;
+    let mut latest: Option<ira_input::MotionSample> = None;
     if let Some(sensor) = pipeline.sensor.as_mut() {
         match sensor.read(now_us()) {
             Ok(Some(sample)) => {
@@ -1454,18 +1465,14 @@ fn process_tick(
                         eprintln!("ira-input: native motion node failed: {error}");
                     }
                 }
-                if let Some(motion) = pipeline.motion.as_mut() {
-                    // Raw passthrough: emulators consuming the DSU stream get
-                    // the unfiltered sensor, independent of the mapping
-                    // profile's gyro processing.
-                    let frame = ira_input::sensor_to_motion(
-                        sample.gyro,
-                        sample.accel.unwrap_or([0.0, 0.0, 0.0]),
-                        sample.timestamp_us,
-                    );
-                    motion.poll_clients(true);
-                    motion.send_sample(&frame, targets.pad);
-                }
+                // Raw passthrough: emulators consuming the DSU stream get
+                // the unfiltered sensor, independent of the mapping
+                // profile's gyro processing.
+                latest = Some(ira_input::sensor_to_motion(
+                    sample.gyro,
+                    sample.accel.unwrap_or([0.0, 0.0, 0.0]),
+                    sample.timestamp_us,
+                ));
                 let rates = pipeline.gyro_processor.process(sample.gyro, sample.accel, dt);
                 mapper.update_gyro(rates);
             }
@@ -1478,6 +1485,18 @@ fn process_tick(
     }
     if sensor_failed {
         pipeline.sensor = None;
+    }
+    if let Some(motion) = pipeline.motion.as_mut() {
+        // The DSU backend is a whole-controller carrier: keep streaming the
+        // pad state even on ticks without a fresh sensor frame (or without
+        // any gyro at all), with motion reading zero in that case.
+        let frame = latest.take().unwrap_or(ira_input::MotionSample {
+            accel_ms2: [0.0; 3],
+            gyro_dps: [0.0; 3],
+            timestamp_us: now_us(),
+        });
+        motion.poll_clients(true);
+        motion.send_sample(&frame, targets.pad);
     }
     let outputs = mapper.tick(now_us());
     emit_outputs(outputs, targets, trace)

@@ -47,7 +47,10 @@ fn sony_sdl_bindings() -> &'static str {
 }
 
 pub struct VirtualGamepad {
-    device: VirtualDevice,
+    /// `None` for the DSU backend: it creates no kernel device and exists
+    /// only so the output pipeline has a uniform sink; the real carrier is
+    /// the cemuhook stream.
+    device: Option<VirtualDevice>,
     backend: VirtualGamepadBackend,
     hat_dpad: [bool; 4],
 }
@@ -58,6 +61,13 @@ impl VirtualGamepad {
     }
 
     pub fn create_for_backend(backend: VirtualGamepadBackend) -> io::Result<Self> {
+        if backend == VirtualGamepadBackend::Dsu {
+            return Ok(Self {
+                device: None,
+                backend,
+                hat_dpad: [false; 4],
+            });
+        }
         let buttons = gamepad_buttons(backend);
         let mut builder = VirtualDevice::builder()?
             .name(device_name(backend))
@@ -69,24 +79,23 @@ impl VirtualGamepad {
         let mut device = builder.build()?;
         device.enumerate_dev_nodes_blocking()?;
         Ok(Self {
-            device,
+            device: Some(device),
             backend,
             hat_dpad: [false; 4],
         })
     }
 
     pub fn emit(&mut self, event: &OutputEvent) -> io::Result<()> {
-        if let OutputEvent::GamepadButton { button, pressed } = event {
-            if let Some(input) = self.hat_dpad_event(*button, *pressed) {
-                return self.device.emit(&[input]);
-            }
-        }
         let input = match event {
             OutputEvent::GamepadButton { button, pressed } => {
-                let Some(code) = button_code(self.backend, *button) else {
-                    return Ok(());
-                };
-                InputEvent::new(EventType::KEY.0, code.0, i32::from(*pressed))
+                if let Some(input) = self.hat_dpad_event(*button, *pressed) {
+                    input
+                } else {
+                    let Some(code) = button_code(self.backend, *button) else {
+                        return Ok(());
+                    };
+                    InputEvent::new(EventType::KEY.0, code.0, i32::from(*pressed))
+                }
             }
             OutputEvent::GamepadAxis { axis, value } => {
                 let Some(code) = axis_code(self.backend, *axis) else {
@@ -96,7 +105,10 @@ impl VirtualGamepad {
             }
             _ => return Ok(()),
         };
-        self.device.emit(&[input])
+        let Some(device) = self.device.as_mut() else {
+            return Ok(());
+        };
+        device.emit(&[input])
     }
 
     pub fn emit_all(&mut self, events: &[OutputEvent]) -> io::Result<()> {
@@ -281,6 +293,7 @@ fn device_name(backend: VirtualGamepadBackend) -> &'static str {
         VirtualGamepadBackend::SwitchPro => SWITCH_PRO_NAME,
         VirtualGamepadBackend::DualShock4 => DUAL_SHOCK_4_NAME,
         VirtualGamepadBackend::DualSense => DUAL_SENSE_NAME,
+        VirtualGamepadBackend::Dsu => "Ira DSU Controller",
     }
 }
 
@@ -316,6 +329,7 @@ fn device_id(backend: VirtualGamepadBackend) -> InputId {
             DUAL_SENSE_PRODUCT,
             DUAL_SENSE_VERSION,
         ),
+        VirtualGamepadBackend::Dsu => InputId::new(BusType::BUS_VIRTUAL, 0, 0, 0),
     }
 }
 

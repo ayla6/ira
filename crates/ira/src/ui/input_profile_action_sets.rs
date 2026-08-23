@@ -270,6 +270,7 @@ fn backend_group(ctx: &PagesCtx) -> adw::PreferencesGroup {
         crate::tr!("Switch Pro"),
         crate::tr!("DualShock 4"),
         crate::tr!("DualSense"),
+        crate::tr!("DSU (cemuhook)"),
     ];
     let combo = super::input_profile_activator_sheet::combo_row(
         &labels,
@@ -285,6 +286,7 @@ fn backend_group(ctx: &PagesCtx) -> adw::PreferencesGroup {
             2 => VirtualGamepadBackend::SwitchPro,
             3 => VirtualGamepadBackend::DualShock4,
             4 => VirtualGamepadBackend::DualSense,
+            5 => VirtualGamepadBackend::Dsu,
             _ => VirtualGamepadBackend::XInput,
         };
         ctx_for_backend.profile.borrow_mut().backend = backend;
@@ -301,5 +303,6 @@ fn backend_index(backend: VirtualGamepadBackend) -> u32 {
         VirtualGamepadBackend::SwitchPro => 2,
         VirtualGamepadBackend::DualShock4 => 3,
         VirtualGamepadBackend::DualSense => 4,
+        VirtualGamepadBackend::Dsu => 5,
     }
 }

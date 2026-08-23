@@ -13,6 +13,10 @@ pub enum VirtualGamepadBackend {
     SwitchPro,
     DualShock4,
     DualSense,
+    /// No kernel device at all: the whole controller is presented over the
+    /// cemuhook DSU stream (the flatpak-friendly path Cemu binds as one
+    /// provider for buttons and motion).
+    Dsu,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -309,7 +313,7 @@ impl OutputAction {
             VirtualGamepadBackend::XInput => {
                 !matches!(self, Self::GamepadButton(button) if button.is_paddle())
             }
-            VirtualGamepadBackend::DirectInput => true,
+            VirtualGamepadBackend::DirectInput | VirtualGamepadBackend::Dsu => true,
             // Sony pads expose all six axes (triggers on ABS_RX/ABS_RY);
             // only the paddles are missing.
             VirtualGamepadBackend::DualShock4 | VirtualGamepadBackend::DualSense => {
@@ -727,17 +731,16 @@ pub struct InputProfile {
     #[serde(default = "default_emulator_udp")]
     pub emulator_udp: bool,
     /// Whether the layout also exposes the physical motion sensors as
-    /// standard evdev axes (the companion motion node SDL emulators pair
-    /// with the virtual gamepad).
-    #[serde(default = "default_native_motion")]
+    /// standard evdev axes next to the virtual pad. Off by default: until
+    /// the kernel grows UNIQ support for uinput and SDL falls back to its
+    /// ioctl heuristics without udev tags, no consumer can pair with the
+    /// node (flatpak sandboxes doubly so). Enable to experiment with
+    /// future SDL versions or raw evdev readers.
+    #[serde(default)]
     pub native_motion: bool,
 }
 
 fn default_emulator_udp() -> bool {
-    true
-}
-
-fn default_native_motion() -> bool {
     true
 }
 
@@ -754,7 +757,7 @@ impl Default for InputProfile {
             action_layers: Vec::new(),
             compatible_game_ids: Vec::new(),
             emulator_udp: true,
-            native_motion: true,
+            native_motion: false,
         }
     }
 }

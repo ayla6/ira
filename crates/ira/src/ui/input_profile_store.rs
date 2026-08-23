@@ -39,6 +39,9 @@ pub(super) fn controller_default_path_for_backend(
         VirtualGamepadBackend::DualSense => Path::new(save_dir)
             .join(CONTROLLER_DEFAULT_DIRECTORY)
             .join(format!("{key}-dualsense.json")),
+        VirtualGamepadBackend::Dsu => Path::new(save_dir)
+            .join(CONTROLLER_DEFAULT_DIRECTORY)
+            .join(format!("{key}-dsu.json")),
     }
 }
 
@@ -52,6 +55,7 @@ pub(super) fn find_controller_default_profile(save_dir: &str, key: &str) -> Opti
         SwitchPro,
         DualShock4,
         DualSense,
+        Dsu,
     ]
     .into_iter()
     .map(|backend| controller_default_path_for_backend(save_dir, key, backend))

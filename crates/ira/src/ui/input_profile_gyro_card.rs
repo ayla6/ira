@@ -147,7 +147,7 @@ pub(super) fn add_gyro_group(
     let native_motion = switch_row(
         &crate::tr!("Native motion sensors"),
         Some(&crate::tr!(
-            "Expose the physical accelerometer and gyroscope as standard evdev axes next to the virtual pad, so emulators read them like real hardware"
+            "Expose the sensors as raw evdev axes next to the virtual pad. Experimental: emulators cannot read them yet until SDL and the kernel support uinput motion"
         )),
         profile.borrow().native_motion,
         {

@@ -104,6 +104,11 @@ impl PadState {
                     GamepadButton::LeftStick => self.l3 = pressed,
                     GamepadButton::RightStick => self.r3 = pressed,
                     GamepadButton::Guide => self.guide = pressed,
+                    // Trigger clicks (how button-mapped profiles express
+                    // them) read as full pull; analog axis events refine
+                    // the value when the mapping uses Trigger mode.
+                    GamepadButton::LeftTrigger => self.l2 = f32::from(pressed),
+                    GamepadButton::RightTrigger => self.r2 = f32::from(pressed),
                     _ => {}
                 }
             }
@@ -441,6 +446,21 @@ mod tests {
         assert!(pad.l3);
         assert!(!pad.circle);
         assert_eq!(pad.r2, 0.75);
+    }
+
+    #[test]
+    fn test_pad_state_reads_trigger_button_clicks() {
+        let mut pad = PadState::default();
+        pad.apply_output(&OutputEvent::GamepadButton {
+            button: GamepadButton::LeftTrigger,
+            pressed: true,
+        });
+        assert_eq!(pad.l2, 1.0);
+        pad.apply_output(&OutputEvent::GamepadButton {
+            button: GamepadButton::LeftTrigger,
+            pressed: false,
+        });
+        assert_eq!(pad.l2, 0.0);
     }
 
     #[test]

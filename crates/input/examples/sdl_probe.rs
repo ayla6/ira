@@ -29,6 +29,9 @@ type SdlGetError = unsafe extern "C" fn() -> *const c_char;
 #[repr(C)]
 struct SdlVersion { major: i32, minor: i32, patch: i32 }
 type SdlGetVersion = unsafe extern "C" fn(*mut SdlVersion);
+type SdlGetJsAxis = unsafe extern "C" fn(*mut c_void, c_int) -> i16;
+type SdlGetJsName = unsafe extern "C" fn(*mut c_void) -> *const c_char;
+type SdlGetNumJsAxes = unsafe extern "C" fn(*mut c_void) -> c_int;
 
 const SDL_INIT_GAMEPAD: u32 = 0x0000_2000;
 const SDL_INIT_EVENTS: u32 = 0x0000_4000;
@@ -52,6 +55,12 @@ struct Api {
     update_sensors: SdlUpdateSensors,
     get_error: SdlGetError,
     get_version: SdlGetVersion,
+    get_js_axis: SdlGetJsAxis,
+    get_js_name: SdlGetJsName,
+    get_num_js_axes: SdlGetNumJsAxes,
+    get_joysticks: SdlGetGamepads,
+    open_joystick: SdlOpenGamepad,
+    close_joystick: SdlCloseGamepad,
 }
 
 /// Guided pose capture: averages accel/gyro over three timed windows so
@@ -153,6 +162,12 @@ fn main() {
         update_sensors: sym!("SDL_UpdateSensors", SdlUpdateSensors),
         get_error: sym!("SDL_GetError", SdlGetError),
         get_version: sym!("SDL_GetVersion", SdlGetVersion),
+        get_js_axis: sym!("SDL_GetJoystickAxis", SdlGetJsAxis),
+        get_js_name: sym!("SDL_GetJoystickName", SdlGetJsName),
+        get_num_js_axes: sym!("SDL_GetNumJoystickAxes", SdlGetNumJsAxes),
+        get_joysticks: sym!("SDL_GetJoysticks", SdlGetGamepads),
+        open_joystick: sym!("SDL_OpenJoystick", SdlOpenGamepad),
+        close_joystick: sym!("SDL_CloseJoystick", SdlCloseGamepad),
     };
     let mut version = SdlVersion { major: 0, minor: 0, patch: 0 };
     unsafe { (api.get_version)(&mut version) };
@@ -209,7 +224,58 @@ fn main() {
         unsafe { (api.close_gamepad)(gamepad) };
     }
 
-    let Some(id) = target else {
+    if std::env::var("AXES").is_ok() {
+        // Enumerate raw joysticks: the driver's IMU twin node can appear as
+        // its own joystick or bleed into the pad's handle; streaming every
+        // axis of every joystick shows where each value really comes from.
+        let mut count = 0;
+        let ids = unsafe { (api.get_joysticks)(&mut count) };
+        if ids.is_null() {
+            println!("probe: no joysticks");
+            return;
+        }
+        let ids = unsafe { std::slice::from_raw_parts(ids, count as usize) }.to_vec();
+        let mut joysticks: Vec<(*mut c_void, usize)> = Vec::new();
+        for (index, id) in ids.iter().enumerate() {
+            let js = unsafe { (api.open_joystick)(*id) };
+            if js.is_null() {
+                continue;
+            }
+            let name = unsafe { CStr::from_ptr((api.get_js_name)(js)) }
+                .to_string_lossy()
+                .into_owned();
+            let axes = unsafe { (api.get_num_js_axes)(js) };
+            println!("js{index} \"{name}\" axes={axes}");
+            joysticks.push((js, index));
+        }
+        let mut last = vec![Vec::new(); joysticks.len()];
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs_f32() < 30.0 {
+            unsafe { (api.pump_events)() };
+            for (slot, (js, index)) in joysticks.iter().enumerate() {
+                for axis in 0..unsafe { (api.get_num_js_axes)(*js) } {
+                    let axis = axis as usize;
+                    let value = unsafe { (api.get_js_axis)(*js, axis as c_int) };
+                    if last[slot].get(axis) != Some(&value) {
+                        while last[slot].len() <= axis {
+                            last[slot].push(0);
+                        }
+                        last[slot][axis] = value;
+                        println!(
+                            "{:6.2}s js{index}[{axis}] = {:+.3}",
+                            start.elapsed().as_secs_f32(),
+                            f32::from(value) / 32767.0
+                        );
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        for (js, _) in joysticks {
+            unsafe { (api.close_joystick)(js) };
+        }
+        return;
+    }    let Some(id) = target else {
         println!("probe: FAIL - no Ira virtual gamepad found");
         std::process::exit(1);
     };

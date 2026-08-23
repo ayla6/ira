@@ -20,15 +20,29 @@ fn main() {
     let mut pad = PadState::default();
     if std::env::var("STICK_SWEEP").is_ok() {
         // Held phases so an evdev reader can attribute each extreme to an
-        // axis without correlating frequencies.
-        let phases =
-            [("center", 0.0, 0.0), ("lx +1", 1.0, 0.0), ("lx -1", -1.0, 0.0), ("ly +1", 0.0, 1.0), ("ly -1", 0.0, -1.0)];
-        for (title, x, y) in phases {
+        // axis without correlating frequencies. Midpoint holds reveal the
+        // transfer curve's shape, not just its endpoints.
+        let phases = [
+            ("center", 0.0, 0.0, 0.0, 0.0),
+            ("lx +1", 1.0, 0.0, 0.0, 0.0),
+            ("lx -1", -1.0, 0.0, 0.0, 0.0),
+            ("ly +1", 0.0, 1.0, 0.0, 0.0),
+            ("ly -1", 0.0, -1.0, 0.0, 0.0),
+            ("lx +0.5", 0.5, 0.0, 0.0, 0.0),
+            ("rx +1", 0.0, 0.0, 1.0, 0.0),
+            ("rx -1", 0.0, 0.0, -1.0, 0.0),
+            ("ry +1", 0.0, 0.0, 0.0, 1.0),
+            ("ry -1", 0.0, 0.0, 0.0, -1.0),
+            ("rx +0.5", 0.0, 0.0, 0.5, 0.0),
+        ];
+        for (title, x, y, rx, ry) in phases {
             println!("phase: {title}");
             let start = Instant::now();
             while start.elapsed() < Duration::from_secs(2) {
                 pad.lx = x;
                 pad.ly = y;
+                pad.rx = rx;
+                pad.ry = ry;
                 // Upright rest: 1 g down the device Z, zero rotation.
                 if let Err(error) = device.tick(&pad, [0.0, 0.0, 1.0], [0.0; 3]) {
                     eprintln!("switch_pro_probe: tick failed: {error}");

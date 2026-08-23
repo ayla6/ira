@@ -30,7 +30,9 @@ pub use report_rate::ReportRateEstimator;
 mod focus;
 pub use focus::FocusWatcher;
 mod motion_udp;
-pub use motion_udp::{sensor_to_motion, MotionSample, MotionServer, MOTION_PORT};
+pub use motion_udp::{
+    sensor_to_motion, MotionSample, MotionServer, PadState, MOTION_PORT,
+};
 mod motion_device;
 pub use motion_device::VirtualMotionSensor;
 pub mod vdf;

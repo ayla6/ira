@@ -570,6 +570,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                 })?,
         )
     };
+    let mut pad_state = ira_input::PadState::default();
     let mut schedule = LoopSchedule::new();
     // Pause injection while the game window is unfocused (alt-tab). Without
     // an X server to ask, the watcher cannot exist and input stays active.
@@ -622,6 +623,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                         gamepad: &mut virtual_gamepad,
                         keyboard: keyboard.as_mut(),
                         mouse: mouse.as_mut(),
+                        pad: &mut pad_state,
                     },
                     &mut trace,
                 ) {
@@ -643,6 +645,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                     gamepad: &mut virtual_gamepad,
                     keyboard: keyboard.as_mut(),
                     mouse: mouse.as_mut(),
+                    pad: &mut pad_state,
                 },
                 &mut trace,
             )
@@ -654,6 +657,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                         gamepad: &mut virtual_gamepad,
                         keyboard: keyboard.as_mut(),
                         mouse: mouse.as_mut(),
+                        pad: &mut pad_state,
                     },
                     &mut trace,
                     run_tick,
@@ -668,6 +672,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                     gamepad: &mut virtual_gamepad,
                     keyboard: keyboard.as_mut(),
                     mouse: mouse.as_mut(),
+                    pad: &mut pad_state,
                 },
                 &mut trace,
             );
@@ -689,6 +694,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                     gamepad: &mut virtual_gamepad,
                     keyboard: keyboard.as_mut(),
                     mouse: mouse.as_mut(),
+                    pad: &mut pad_state,
                 },
                 &mut trace,
             )?;
@@ -780,6 +786,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                         &mut virtual_gamepad,
                         &mut keyboard,
                         &mut mouse,
+                        &mut pad_state,
                         monitor.path(),
                         &mut trace,
                     ) {
@@ -1266,6 +1273,7 @@ fn reload_profile(
     virtual_gamepad: &mut VirtualGamepad,
     keyboard: &mut Option<VirtualKeyboard>,
     mouse: &mut Option<VirtualMouse>,
+    pad: &mut ira_input::PadState,
     path: &Path,
     trace: &mut TraceState,
 ) -> Result<(), String> {
@@ -1294,6 +1302,7 @@ fn reload_profile(
             gamepad: virtual_gamepad,
             keyboard: keyboard.as_mut(),
             mouse: mouse.as_mut(),
+            pad,
         },
         trace,
     )?;
@@ -1350,6 +1359,7 @@ fn process_physical_inputs(
                 gamepad: targets.gamepad,
                 keyboard: targets.keyboard.as_deref_mut(),
                 mouse: targets.mouse.as_deref_mut(),
+                pad: targets.pad,
             },
             event,
             trace,
@@ -1380,10 +1390,13 @@ fn make_gyro_processor(
 }
 
 /// The virtual devices mapped events are written to, borrowed per loop pass.
+/// `pad` shadows the gamepad outputs so the DSU stream can carry the full
+/// controller state without re-deriving it from the mapping engine.
 struct OutputTargets<'a> {
     gamepad: &'a mut VirtualGamepad,
     keyboard: Option<&'a mut VirtualKeyboard>,
     mouse: Option<&'a mut VirtualMouse>,
+    pad: &'a mut ira_input::PadState,
 }
 
 /// Sensor-side state advanced by the tick loop.
@@ -1451,7 +1464,7 @@ fn process_tick(
                         sample.timestamp_us,
                     );
                     motion.poll_clients(true);
-                    motion.send_sample(&frame);
+                    motion.send_sample(&frame, targets.pad);
                 }
                 let rates = pipeline.gyro_processor.process(sample.gyro, sample.accel, dt);
                 mapper.update_gyro(rates);
@@ -1494,6 +1507,7 @@ fn emit_outputs(
 ) -> Result<(), String> {
     for output in outputs {
         trace.record_output(&output);
+        targets.pad.apply_output(&output);
         targets
             .gamepad
             .emit(&output)

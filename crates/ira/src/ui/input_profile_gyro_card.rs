@@ -131,7 +131,7 @@ pub(super) fn add_gyro_group(
     let udp = switch_row(
         &crate::tr!("Emulator motion stream"),
         Some(&crate::tr!(
-            "Broadcast raw gyro over cemuhook UDP port 26760 while a mapped game runs, for emulators with native motion support"
+            "Present the whole controller (buttons, sticks, motion) on cemuhook UDP port 26760 while a mapped game runs; pick the DSU client in the emulator as the single controller"
         )),
         profile.borrow().emulator_udp,
         {

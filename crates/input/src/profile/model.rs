@@ -1086,9 +1086,21 @@ impl InputProfile {
         ];
         let mut bindings = Vec::with_capacity(buttons.len() + axes.len() + paddles.len());
         bindings.extend(buttons.into_iter().map(|button| {
+            // Nintendo layout: the button at the south position is B, so a
+            // Switch Pro pad's defaults trade A and B outputs to keep each
+            // physical position behaving like its console counterpart.
+            let output = if backend == VirtualGamepadBackend::SwitchPro {
+                match button {
+                    GamepadButton::A => GamepadButton::B,
+                    GamepadButton::B => GamepadButton::A,
+                    other => other,
+                }
+            } else {
+                button
+            };
             Binding::new(
                 InputSource::Button(button),
-                OutputAction::GamepadButton(button),
+                OutputAction::GamepadButton(output),
             )
         }));
         bindings

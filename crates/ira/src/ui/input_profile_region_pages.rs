@@ -11,7 +11,7 @@ use super::input_profile_editor_regions::{
 use adw::prelude::*;
 use ira_input::{
     GamepadAxis, GamepadButton, InputMapping, InputProfile, InputSource, OutputAction,
-    SourceMode, StickOutput,
+    SourceMode, StickOutput, VirtualGamepadBackend,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -136,7 +136,12 @@ fn section_behavior_row(
         &crate::tr!("Default"),
         &crate::tr!("Custom"),
     ])));
-    let is_default = region_is_at_defaults(region, ctx.device.as_ref(), mappings);
+    let is_default = region_is_at_defaults(
+        region,
+        ctx.device.as_ref(),
+        ctx.profile.borrow().backend,
+        mappings,
+    );
     row.set_selected(if is_default { 0 } else { 1 });
     // Only a manual flip onto Default mutates anything; the notify that
     // fires for the initial selection must not rewrite the profile.
@@ -148,7 +153,8 @@ fn section_behavior_row(
         }
         applied.set(true);
         for source in region_sources(region, ctx_for_select.device.as_ref()) {
-            insert_mapping(&ctx_for_select, default_mapping(source));
+            let backend = ctx_for_select.profile.borrow().backend;
+            insert_mapping(&ctx_for_select, default_mapping(source, backend));
         }
         (ctx_for_select.on_dirty)();
     });
@@ -159,13 +165,14 @@ fn section_behavior_row(
 fn region_is_at_defaults(
     region: Region,
     device: Option<&ira_input::DeviceInfo>,
+    backend: VirtualGamepadBackend,
     mappings: &[InputMapping],
 ) -> bool {
     region_sources(region, device).into_iter().all(|source| {
         mappings
             .iter()
             .find(|mapping| mapping.source == source)
-            .is_some_and(|mapping| *mapping == default_mapping(source))
+            .is_some_and(|mapping| *mapping == default_mapping(source, backend))
     })
 }
 
@@ -305,7 +312,7 @@ fn unmapped_row(ctx: &PagesCtx, source: InputSource, family: ira_input::Controll
     let ctx_for_add = ctx.clone();
     row.set_activatable(true);
     row.connect_activated(move |_| {
-        let mapping = default_mapping(source);
+        let mapping = default_mapping(source, ctx_for_add.profile.borrow().backend);
         insert_mapping(&ctx_for_add, mapping);
         (ctx_for_add.on_dirty)();
         open_sheet(&ctx_for_add, source);
@@ -358,10 +365,24 @@ fn remove_mapping(ctx: &PagesCtx, source: InputSource) {
 
 /// Identity mapping for a freshly added input: buttons passthrough to their
 /// virtual counterpart; sticks/triggers get their natural analog mode.
-pub(crate) fn default_mapping(source: InputSource) -> InputMapping {
+pub(crate) fn default_mapping(
+    source: InputSource,
+    backend: VirtualGamepadBackend,
+) -> InputMapping {
     match source {
         InputSource::Button(button) => {
-            InputMapping::simple(source, OutputAction::GamepadButton(button))
+            // Nintendo layout: south is B, east is A (see
+            // default_gamepad_controls for the engine-side defaults).
+            let output = if backend == VirtualGamepadBackend::SwitchPro {
+                match button {
+                    GamepadButton::A => GamepadButton::B,
+                    GamepadButton::B => GamepadButton::A,
+                    other => other,
+                }
+            } else {
+                button
+            };
+            InputMapping::simple(source, OutputAction::GamepadButton(output))
         }
         InputSource::Axis(GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger) => {
             InputMapping {
@@ -390,14 +411,22 @@ pub(crate) fn default_mapping(source: InputSource) -> InputMapping {
 
 #[cfg(test)]
 mod tests {
-    use super::{region_is_at_defaults, swappable_pairs, default_mapping, Region};
-    use ira_input::{InputMapping, InputSource};
+    use super::{default_mapping, region_is_at_defaults, swappable_pairs, Region};
+    use ira_input::{InputMapping, InputSource, OutputAction, VirtualGamepadBackend};
 
     #[test]
     fn test_region_is_at_defaults_true_for_identity_mappings() {
         let sources = super::region_sources(Region::Dpad, None);
-        let mappings: Vec<InputMapping> = sources.iter().map(|s| default_mapping(*s)).collect();
-        assert!(region_is_at_defaults(Region::Dpad, None, &mappings));
+        let mappings: Vec<InputMapping> = sources
+            .iter()
+            .map(|s| default_mapping(*s, VirtualGamepadBackend::XInput))
+            .collect();
+        assert!(region_is_at_defaults(
+            Region::Dpad,
+            None,
+            VirtualGamepadBackend::XInput,
+            &mappings
+        ));
     }
 
     #[test]
@@ -407,17 +436,57 @@ mod tests {
         let partial: Vec<InputMapping> = sources
             .iter()
             .skip(1)
-            .map(|s| default_mapping(*s))
+            .map(|s| default_mapping(*s, VirtualGamepadBackend::XInput))
             .collect();
-        assert!(!region_is_at_defaults(Region::FaceButtons, None, &partial));
+        assert!(!region_is_at_defaults(
+            Region::FaceButtons,
+            None,
+            VirtualGamepadBackend::XInput,
+            &partial
+        ));
 
         // An output that differs from identity reads as custom.
-        let mut changed: Vec<InputMapping> =
-            sources.iter().map(|s| default_mapping(*s)).collect();
+        let mut changed: Vec<InputMapping> = sources
+            .iter()
+            .map(|s| default_mapping(*s, VirtualGamepadBackend::XInput))
+            .collect();
         if let Some(first) = changed.first_mut() {
             first.activators[0].outputs.clear();
         }
-        assert!(!region_is_at_defaults(Region::FaceButtons, None, &changed));
+        assert!(!region_is_at_defaults(
+            Region::FaceButtons,
+            None,
+            VirtualGamepadBackend::XInput,
+            &changed
+        ));
+    }
+
+    #[test]
+    fn test_default_mapping_swaps_a_b_for_switch_pro() {
+        use super::{default_mapping};
+        use ira_input::GamepadButton;
+        let south = default_mapping(
+            InputSource::Button(GamepadButton::A),
+            VirtualGamepadBackend::SwitchPro,
+        );
+        assert!(south.activators[0]
+            .outputs
+            .contains(&OutputAction::GamepadButton(GamepadButton::B)));
+        let east = default_mapping(
+            InputSource::Button(GamepadButton::B),
+            VirtualGamepadBackend::SwitchPro,
+        );
+        assert!(east.activators[0]
+            .outputs
+            .contains(&OutputAction::GamepadButton(GamepadButton::A)));
+        // Non-Switch backends stay identity.
+        let plain = default_mapping(
+            InputSource::Button(GamepadButton::A),
+            VirtualGamepadBackend::XInput,
+        );
+        assert!(plain.activators[0]
+            .outputs
+            .contains(&OutputAction::GamepadButton(GamepadButton::A)));
     }
 
     #[test]

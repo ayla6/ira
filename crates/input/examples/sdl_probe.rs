@@ -138,7 +138,7 @@ fn main() {
         };
         let has_gyro = unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_GYRO) };
         let has_accel = unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_ACCEL) };
-        let gamepad_type = unsafe { ((api.get_type)(gamepad)) };
+        let gamepad_type = unsafe { (api.get_type)(gamepad) };
         println!("  [{id}] {name} ({path}) type={gamepad_type} gyro={has_gyro} accel={has_accel}");
         let wanted = std::env::var("PROBE_TARGET").unwrap_or_default();
         let matches = if wanted.is_empty() {

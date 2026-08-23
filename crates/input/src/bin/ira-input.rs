@@ -1565,12 +1565,11 @@ fn process_tick(
         pipeline.sensor = None;
     }
     // One sensor reading feeds every consumer, each in its own frame: the
-    // virtual DS4 carries our SDL frame with yaw negated on the wire (its
-    // hidapi driver passes axes through, and Cemu flips DS4 yaw back), the
-    // Switch Pro pre-shuffles into the Nintendo device frame, and the
-    // cemuhook stream wants the DSU wire frame (gyro X pre-negated to
-    // match Cemu's native SDL ingestion). Ticks without a fresh sensor
-    // frame still carry state with zeroed motion.
+    // virtual DS4 and the cemuhook stream both carry our SDL frame with
+    // wire yaw/roll negated where their respective ingestion paths apply
+    // [gx, -gy, -gz], the Switch Pro pre-shuffles into the Nintendo device
+    // frame, and ticks without a fresh sensor sample still carry state
+    // with zeroed motion.
     let zero = ([0.0f32; 3], [0.0f32; 3], now_us());
     if pipeline.ds4_hid.is_some() {
         let (gyro, accel, timestamp_us) = latest.unwrap_or(zero);

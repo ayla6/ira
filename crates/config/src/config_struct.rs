@@ -25,28 +25,46 @@ enum ControllerInputModeCompat {
     LegacyBackend(String),
 }
 
+fn mode_from_compat(mode: ControllerInputModeCompat) -> ControllerInputMode {
+    match mode {
+        ControllerInputModeCompat::Mode(mode) => mode,
+        ControllerInputModeCompat::Legacy(enabled) => {
+            if enabled {
+                ControllerInputMode::Enabled
+            } else {
+                ControllerInputMode::Disabled
+            }
+        }
+        // Pre-rework configs named the virtual backend; the backend now
+        // lives in the profile, so those values just mean "enabled".
+        ControllerInputModeCompat::LegacyBackend(backend) => {
+            if backend.starts_with("virtual_") {
+                ControllerInputMode::Enabled
+            } else {
+                eprintln!("Unknown controller input mode \"{backend}\"; treating as disabled");
+                ControllerInputMode::Disabled
+            }
+        }
+    }
+}
+
 fn deserialize_controller_input_mode<'de, D>(
     deserializer: D,
 ) -> Result<ControllerInputMode, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    match ControllerInputModeCompat::deserialize(deserializer)? {
-        ControllerInputModeCompat::Mode(mode) => Ok(mode),
-        ControllerInputModeCompat::Legacy(enabled) => Ok(if enabled {
-            ControllerInputMode::Enabled
-        } else {
-            ControllerInputMode::Disabled
-        }),
-        ControllerInputModeCompat::LegacyBackend(backend) => {
-            if backend.starts_with("virtual_") {
-                Ok(ControllerInputMode::Enabled)
-            } else {
-                eprintln!("Unknown controller input mode \"{backend}\"; treating as disabled");
-                Ok(ControllerInputMode::Disabled)
-            }
-        }
-    }
+    ControllerInputModeCompat::deserialize(deserializer).map(mode_from_compat)
+}
+
+fn deserialize_optional_controller_input_mode<'de, D>(
+    deserializer: D,
+) -> Result<Option<ControllerInputMode>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<ControllerInputModeCompat>::deserialize(deserializer)
+        .map(|mode| mode.map(mode_from_compat))
 }
 
 fn default_language_preferences() -> Vec<String> {
@@ -95,7 +113,11 @@ pub struct ConsoleConfig {
     pub ra_core: String,
     pub fullscreen: bool,
     /// Optional console-wide remapping override before controller defaults.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_controller_input_mode"
+    )]
     pub controller_mode: Option<ControllerInputMode>,
     /// Shared layout used for this console before a game-specific layout.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -206,11 +228,13 @@ pub struct Config {
     pub default_native_env_vars: Vec<(String, String)>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub linux_controller_profile: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_controller_input_mode")]
     pub linux_controller_mode: Option<ControllerInputMode>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub wine_controller_profile: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_controller_input_mode")]
     pub wine_controller_mode: Option<ControllerInputMode>,
     #[serde(default)]
     pub default_api_emu_version: String,
@@ -583,5 +607,40 @@ mod tests {
     #[test]
     fn test_rom_folder_is_empty_without_shared_root() {
         assert!(Config::default().rom_folder("gba").as_os_str().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod controller_mode_compat_tests {
+    use super::{ConsoleConfig, ControllerInputMode};
+
+    #[test]
+    fn test_console_controller_mode_accepts_legacy_backend_names() {
+        let console: ConsoleConfig = serde_json::from_str(
+            r#"{"enabled":false,"executable":"","ra_core":"","fullscreen":false,
+                "controller_mode":"virtual_switch_pro",
+                "controller_profile":"/x/wii-u.json"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            console.controller_mode,
+            Some(ControllerInputMode::Enabled)
+        );
+        assert_eq!(console.controller_profile, "/x/wii-u.json");
+    }
+
+    #[test]
+    fn test_config_level_modes_accept_legacy_backend_names() {
+        let config: super::Config =
+            serde_json::from_str(r#"{"linux_controller_mode":"virtual_dualsense",
+                "wine_controller_mode":"virtual_xinput"}"#).unwrap();
+        assert_eq!(
+            config.linux_controller_mode,
+            Some(ControllerInputMode::Enabled)
+        );
+        assert_eq!(
+            config.wine_controller_mode,
+            Some(ControllerInputMode::Enabled)
+        );
     }
 }

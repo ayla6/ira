@@ -465,10 +465,14 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         .as_deref()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "builtin:default_gamepad".to_string());
+    let mapped_inputs = mapper
+        .profile()
+        .action_sets
+        .iter()
+        .map(|set| set.inputs.len())
+        .sum::<usize>();
     eprintln!(
-        "ira-input: loaded {} bindings from {}",
-        mapper.profile().bindings.len(),
-        profile_name
+        "ira-input: loaded {mapped_inputs} mapped inputs from {profile_name}"
     );
     let mut keyboard = create_keyboard(mapper.profile().keyboard_keycodes())?;
     let mut mouse = create_mouse(mapper.profile().uses_mouse())?;
@@ -558,7 +562,12 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         Some(
             command
                 .spawn()
-                .map_err(|error| format!("failed to launch target process: {error}"))?,
+                .map_err(|error| {
+                    format!(
+                        "failed to launch target process {}: {error}",
+                        arguments.command[0]
+                    )
+                })?,
         )
     };
     let mut schedule = LoopSchedule::new();

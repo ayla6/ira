@@ -421,11 +421,13 @@ impl PhysicalGamepad {
         }
     }
 
-    /// Many pads (xinput-class, this project's own test hardware included)
-    /// report triggers only as analog axes with no BTN_TL2/BTN_TR2 keys, so
-    /// button-style trigger bindings would never fire. Synthesize click
-    /// edges from the axis the same way SDL does, with hysteresis so a noisy
-    /// axis resting near the threshold cannot chatter.
+    /// Many pads (DInput mode especially) report triggers only as analog
+    /// axes with no BTN_TL2/BTN_TR2 keys, so button-style trigger bindings
+    /// would never fire. Synthesize click edges from the axis the same way
+    /// SDL does, with hysteresis so a noisy axis resting near the threshold
+    /// cannot chatter. Pads that DO have digital trigger keys are left
+    /// alone entirely: trusting the real keys avoids double edges and any
+    /// chance of a synthesized click sticking when the axis goes quiet.
     fn synthesize_trigger_click(
         &mut self,
         axis: GamepadAxis,
@@ -444,6 +446,9 @@ impl PhysicalGamepad {
             ),
             _ => return,
         };
+        if self.info.supported_buttons.contains(&button) {
+            return;
+        }
         let previous = *clicked;
         *clicked = synthesized_trigger_click(previous, value);
         if *clicked != previous {

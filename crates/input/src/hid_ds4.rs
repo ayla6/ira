@@ -1,20 +1,27 @@
 //! A DualShock4-compatible controller built on [`super::uhid`].
 //!
-//! We present with neutral vendor/product IDs so the kernel's generic HID
-//! driver claims us (Sony's own driver rejects non-authentic DS4
-//! descriptors mid-probe, leaving no input or hidraw nodes behind). SDL
-//! then treats us as a third-party PS4 pad and probes the capabilities
-//! feature report to enable sensors and learn motion scaling: we serve it
-//! with numerators 1/16 for gyro degrees per second and 1/8192 for
-//! accelerometer g — the exact units [`usb_state_report`] emits.
+//! The identity walks a narrow line: a vendor in SDL's PlayStation-detection
+//! list (CRKD) gets its capabilities feature report probed, and our 48-byte
+//! reply with sensors enabled and the right motion numerators routes the
+//! device to SDL's DS4 hidapi driver — while the kernel side, finding no
+//! vendor driver, lets hid-generic claim it (Sony's own driver would reject
+//! our non-authentic DS4 descriptor mid-probe and leave no nodes behind).
+//! The numerators (1/16 gyro degrees per second, 1/8192 accelerometer g)
+//! are exactly the units [`usb_state_report`] emits, so motion arrives
+//! correctly scaled with no calibration exchange.
 
 use std::io;
 
 use crate::motion_udp::{MotionSample, PadState};
 use crate::uhid::{UhidDevice, BUS_USB};
 
-pub const VENDOR_ID: u32 = 0x1209;
-pub const PRODUCT_ID: u32 = 0x3151;
+/// CRKD: present in SDL's PlayStation-detection vendor list (so SDL probes
+/// our capabilities feature report and routes us to its DS4 hidapi driver)
+/// while owning no Linux kernel HID driver (so hid-generic claims the
+/// device instead of a Sony-specific driver rejecting our descriptor).
+/// Product is arbitrary; unknown products keep the generic gamepad type.
+pub const VENDOR_ID: u32 = 0x3651;
+pub const PRODUCT_ID: u32 = 0x09c4;
 pub const DEVICE_NAME: &str = "Ira Virtual DS4 Controller";
 
 /// Feature report id SDL probes on third-party controllers to learn

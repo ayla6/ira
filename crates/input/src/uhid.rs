@@ -54,9 +54,13 @@ pub struct UhidDevice {
 impl UhidDevice {
     /// Creates a kernel HID device from a report descriptor. The name also
     /// becomes the evdev twin's name; SDL picks vendor/product IDs to select
-    /// its hidapi driver.
+    /// its hidapi driver. `uniq` is the serial SDL's evdev backend compares
+    /// to pair a gamepad with its sensor node — two devices created with
+    /// the same uniq are joined by SDL, which is how flatpak-visible
+    /// motion works (uinput nodes cannot carry uniq at all).
     pub fn create(
         name: &str,
+        uniq: &str,
         descriptor: &[u8],
         bus: u16,
         vendor: u32,
@@ -73,7 +77,7 @@ impl UhidDevice {
             .write(true)
             .custom_flags(libc::O_NONBLOCK)
             .open("/dev/uhid")?;
-        file.write_all(&create2_event(name, descriptor, bus, vendor, product))?;
+        file.write_all(&create2_event(name, uniq, descriptor, bus, vendor, product))?;
         Ok(Self { file })
     }
 
@@ -121,12 +125,23 @@ impl Drop for UhidDevice {
     }
 }
 
-fn create2_event(name: &str, descriptor: &[u8], bus: u16, vendor: u32, product: u32) -> Vec<u8> {
+fn create2_event(
+    name: &str,
+    uniq: &str,
+    descriptor: &[u8],
+    bus: u16,
+    vendor: u32,
+    product: u32,
+) -> Vec<u8> {
     let mut event = vec![0u8; CREATE2_FIXED];
     event[0..4].copy_from_slice(&UHID_CREATE2.to_le_bytes());
     let bytes = name.as_bytes();
     let copied = bytes.len().min(NAME_LEN - 1);
     event[4..4 + copied].copy_from_slice(&bytes[..copied]);
+    let uniq_offset = 4 + NAME_LEN + PHYS_LEN;
+    let uniq_bytes = uniq.as_bytes();
+    let uniq_copied = uniq_bytes.len().min(UNIQ_LEN - 1);
+    event[uniq_offset..uniq_offset + uniq_copied].copy_from_slice(&uniq_bytes[..uniq_copied]);
     let rd_size_offset = 4 + NAME_LEN + PHYS_LEN + UNIQ_LEN;
     event[rd_size_offset..rd_size_offset + 2].copy_from_slice(&(descriptor.len() as u16).to_le_bytes());
     event[rd_size_offset + 2..rd_size_offset + 4].copy_from_slice(&bus.to_le_bytes());
@@ -210,12 +225,23 @@ mod tests {
 
     #[test]
     fn test_create2_event_carries_identity_and_descriptor() {
-        let event = create2_event("Ira Virtual DS4", DESCRIPTOR, BUS_USB, 0x054c, 0x09cc);
+        let event = create2_event(
+            "Ira Virtual DS4",
+            "ira-uniq-1",
+            DESCRIPTOR,
+            BUS_USB,
+            0x054c,
+            0x09cc,
+        );
         assert_eq!(u32::from_le_bytes(event[0..4].try_into().unwrap()), 11);
         let name = &event[4..4 + "Ira Virtual DS4".len()];
         assert_eq!(std::str::from_utf8(name).unwrap(), "Ira Virtual DS4");
         // Name is NUL padded inside its fixed 128-byte field.
         assert_eq!(event[4 + "Ira Virtual DS4".len()], 0);
+        // Uniq sits between the 64-byte phys field and rd_size, NUL padded.
+        let uniq_offset = 4 + 128 + 64;
+        assert_eq!(&event[uniq_offset..uniq_offset + 10], b"ira-uniq-1");
+        assert_eq!(event[uniq_offset + 10], 0);
         let base = 4 + 128 + 64 + 64;
         let rd_size = u16::from_le_bytes(event[base..base + 2].try_into().unwrap());
         assert_eq!(usize::from(rd_size), DESCRIPTOR.len());

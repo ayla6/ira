@@ -519,29 +519,41 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     };
     // Experimental whole-HID DualShock4: a real hidraw device whose reports
     // carry buttons, sticks, triggers AND motion, so SDL's DS4 driver reads
-    // our sensors natively. Runs next to the evdev gamepad for now.
-    let ds4_hid = if sensor.is_some()
+    // our sensors natively. A companion motion-only HID shares its serial:
+    // SDL's evdev backend pairs them, which is the half flatpaks can see.
+    let mut ds4_hid = None;
+    let mut imu_hid = None;
+    if sensor.is_some()
         && mapper.profile().native_motion
         && mapper.profile().backend == ira_input::VirtualGamepadBackend::DualShock4
     {
-        match ira_input::Ds4UhidDevice::create() {
+        let uniq = format!("ira-virtual-{}", std::process::id());
+        match ira_input::Ds4UhidDevice::create(&uniq) {
             Ok(device) => {
                 eprintln!(
                     "ira-input: experimental native-motion DS4 exposed over hidraw"
                 );
-                Some(device)
+                ds4_hid = Some(device);
             }
             Err(error) => {
                 eprintln!(
                     "ira-input: failed to create virtual DS4: {error}; \
                      /dev/uhid is root-only unless a uaccess rule grants it"
                 );
-                None
             }
         }
-    } else {
-        None
-    };
+        if ds4_hid.is_some() {
+            match ira_input::ImuUhidDevice::create(&uniq) {
+                Ok(device) => {
+                    eprintln!("ira-input: paired virtual IMU exposed over evdev");
+                    imu_hid = Some(device);
+                }
+                Err(error) => {
+                    eprintln!("ira-input: failed to create virtual IMU: {error}");
+                }
+            }
+        }
+    }
     let mut pipeline = SensorPipeline {
         sensor,
         gyro_processor,
@@ -549,6 +561,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         motion: motion_server,
         motion_device,
         ds4_hid,
+        imu_hid,
     };
     // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
     // even when no sensor exists, as long as something consumes them.
@@ -1443,6 +1456,7 @@ struct SensorPipeline {
     motion: Option<ira_input::MotionServer>,
     motion_device: Option<ira_input::VirtualMotionSensor>,
     ds4_hid: Option<ira_input::Ds4UhidDevice>,
+    imu_hid: Option<ira_input::ImuUhidDevice>,
 }
 
 fn open_motion_node(backend: ira_input::VirtualGamepadBackend) -> Option<ira_input::VirtualMotionSensor> {
@@ -1531,6 +1545,21 @@ fn process_tick(
                 eprintln!("ira-input: virtual DS4 stopped: {error}");
                 pipeline.ds4_hid = None;
             }
+        }
+    }
+    if pipeline.imu_hid.is_some() {
+        let (gyro, accel, _) = latest.unwrap_or(zero);
+        const GRAVITY: f32 = 9.80665;
+        let accel_g = [accel[0] / GRAVITY, accel[1] / GRAVITY, accel[2] / GRAVITY];
+        let gyro_dps = [
+            gyro[0].to_degrees(),
+            gyro[1].to_degrees(),
+            gyro[2].to_degrees(),
+        ];
+        let imu = pipeline.imu_hid.as_mut().unwrap();
+        if let Err(error) = imu.send_sample(accel_g, gyro_dps) {
+            eprintln!("ira-input: virtual IMU stopped: {error}");
+            pipeline.imu_hid = None;
         }
     }
     if let Some(motion) = pipeline.motion.as_mut() {

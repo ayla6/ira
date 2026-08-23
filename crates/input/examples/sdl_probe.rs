@@ -196,7 +196,7 @@ fn main() {
         } else {
             moving += nonzero.min(1);
         }
-        println!("probe: sensor {sensor} -> {nonzero} nonzero reads over 3s");
+        println!("probe: sensor {sensor} -> {nonzero} nonzero reads over 3s, final {values:?}");
     }
     unsafe { (api.close_gamepad)(gamepad) };
     if moving == 2 {

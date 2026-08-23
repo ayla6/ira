@@ -187,9 +187,13 @@ pub struct Ds4UhidDevice {
 }
 
 impl Ds4UhidDevice {
-    pub fn create() -> io::Result<Self> {
+    /// `uniq` becomes the pad's serial; the companion IMU device created
+    /// with the same serial is what SDL pairs motion from on the evdev
+    /// side (flatpak-visible).
+    pub fn create(uniq: &str) -> io::Result<Self> {
         let device = UhidDevice::create(
             DEVICE_NAME,
+            uniq,
             REPORT_DESCRIPTOR,
             BUS_USB,
             VENDOR_ID,

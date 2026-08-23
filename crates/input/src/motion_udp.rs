@@ -333,21 +333,19 @@ pub fn sensor_to_motion(gyro_rads: [f32; 3], accel_ms2: [f32; 3], timestamp_us: 
 
 /// Convert SDL sensor data to the cemuhook wire frame.
 ///
-/// Cemu ingests SDL sensors natively by negating gyro Y and Z before its
-/// IMU (`tracking.gyro[1] = -data[1]; tracking.gyro[2] = -data[2];`) while
-/// its DSU client feeds wire values straight through unmodified — so the
-/// wire must carry those negations pre-applied to make streaming identical
-/// to what the emulator produces from the same controller read natively.
-/// The accelerometer needs no flip: both Cemu paths negate its Y/Z on
-/// receipt, so it passes through untouched.
+/// Cemu's DSU client feeds wire values into its IMU with different signs
+/// than its native SDL ingestion, and the resulting aim directions were
+/// verified by hand against a real controller read natively: pitch comes
+/// out inverted unless wire X negates the SDL pitch rate, while yaw and
+/// roll pass through untouched. The accelerometer needs no flip: both
+/// Cemu paths negate its Y/Z on receipt identically.
 pub fn sensor_to_dsu_frame(
     gyro_rads: [f32; 3],
     accel_ms2: [f32; 3],
     timestamp_us: u64,
 ) -> MotionSample {
     let mut sample = sensor_to_motion(gyro_rads, accel_ms2, timestamp_us);
-    sample.gyro_dps[1] = -sample.gyro_dps[1];
-    sample.gyro_dps[2] = -sample.gyro_dps[2];
+    sample.gyro_dps[0] = -sample.gyro_dps[0];
     sample
 }
 
@@ -360,13 +358,13 @@ mod tests {
     use crate::{GamepadAxis, GamepadButton, OutputEvent};
 
     #[test]
-    fn test_dsu_frame_negates_gyro_yaw_and_roll() {
+    fn test_dsu_frame_negates_gyro_pitch_only() {
         let dsu = sensor_to_dsu_frame([0.1, 0.2, 0.3], [1.0, -2.0, 3.0], 7);
         let sdl = sensor_to_motion([0.1, 0.2, 0.3], [1.0, -2.0, 3.0], 7);
         assert_eq!(dsu.accel_ms2, sdl.accel_ms2);
-        assert_eq!(dsu.gyro_dps[0], sdl.gyro_dps[0]);
-        assert_eq!(dsu.gyro_dps[1], -sdl.gyro_dps[1]);
-        assert_eq!(dsu.gyro_dps[2], -sdl.gyro_dps[2]);
+        assert_eq!(dsu.gyro_dps[0], -sdl.gyro_dps[0]);
+        assert_eq!(dsu.gyro_dps[1], sdl.gyro_dps[1]);
+        assert_eq!(dsu.gyro_dps[2], sdl.gyro_dps[2]);
         assert_eq!(dsu.timestamp_us, 7);
     }
 

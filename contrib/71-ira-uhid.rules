@@ -1,0 +1,10 @@
+# Grant the active desktop user access to /dev/uhid so Ira can create its
+# virtual HID controllers (experimental native-motion DualShock4 etc.).
+#
+# The static_node option pre-creates /dev/uhid before the uhid kernel module
+# has even loaded, and logind applies the uaccess ACL to it at login. Without
+# it the node only appears on first open(), which races against udev applying
+# the ACL (and fails outright when the module was loaded before any session).
+# Same mechanism this distro already uses for /dev/uinput:
+# /usr/lib/udev/rules.d/71-uinput-dev-early-creation.rules
+KERNEL=="uhid", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uhid"

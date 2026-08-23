@@ -18,11 +18,7 @@ pub(crate) type Rebuild = Rc<dyn Fn()>;
 /// One "+ action" row: a full-width activatable row with a plus affordance.
 fn add_action_row(group: &adw::PreferencesGroup, label: &str, destructive: bool) -> adw::ActionRow {
     let row = adw::ActionRow::new();
-    let content = adw::ButtonContent::builder()
-        .icon_name("list-add-symbolic")
-        .label(label)
-        .build();
-    content.set_valign(gtk4::Align::Center);
+    let content = super::helpers::icon_label_button("list-add-symbolic", label);
     if destructive {
         content.add_css_class(super::css::CSS_ERROR);
     }

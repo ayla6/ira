@@ -300,11 +300,7 @@ fn unmapped_row(ctx: &PagesCtx, source: InputSource, family: ira_input::Controll
     row.add_suffix(&badge_label);
 
     // Whole-area affordance instead of a bare icon: the row itself adds.
-    let add = adw::ButtonContent::builder()
-        .icon_name("list-add-symbolic")
-        .label(crate::tr!("Add"))
-        .build();
-    add.set_valign(gtk4::Align::Center);
+    let add = super::helpers::icon_label_button("list-add-symbolic", &crate::tr!("Add"));
     row.add_suffix(&add);
     let ctx_for_add = ctx.clone();
     row.set_activatable(true);
@@ -437,5 +433,78 @@ mod tests {
                 InputSource::category(right)
             );
         }
+    }
+}
+
+
+#[cfg(test)]
+mod gtk_repro {
+    use super::*;
+
+    // Manual regression check for the recurring editor critical bursts:
+    // run with `cargo test -p ira --lib gtk_repro -- --ignored --nocapture`
+    // and watch stderr; the fixed bug was adw::ButtonContent suffixes, whose
+    // construction inside preferences groups finalized widgets GTK still
+    // touched (get_parent/add_css_class pairs per page per rebuild).
+    #[test]
+    #[ignore]
+    fn repro_region_rebuild_criticals() {
+        let _ = gtk4::init();
+        let _ = adw::init();
+        let window = adw::Window::new();
+        window.set_default_size(980, 740);
+        let header = adw::HeaderBar::new();
+        let sidebar_scroll = gtk4::ScrolledWindow::new();
+        let sidebar = gtk4::ListBox::new();
+        sidebar.add_css_class("navigation-sidebar");
+        sidebar_scroll.set_child(Some(&sidebar));
+        sidebar_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+        let stack = gtk4::Stack::new();
+        stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
+        let layout = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        layout.append(&sidebar_scroll);
+        layout.append(&stack);
+        let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        root.append(&header);
+        root.append(&layout);
+        window.set_content(Some(&root));
+
+        let ctx = PagesCtx {
+            window: window.clone(),
+            profile: std::rc::Rc::new(std::cell::RefCell::new(InputProfile::default())),
+            active_set: std::rc::Rc::new(std::cell::Cell::new(0usize)),
+            device: None,
+            on_dirty: std::rc::Rc::new(|| {}),
+        };
+        let mut region_boxes = Vec::new();
+        for region in Region::ALL {
+            let content = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
+            let scroll = gtk4::ScrolledWindow::new();
+            scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+            scroll.set_child(Some(&content));
+            stack.add_named(&scroll, Some(region.id()));
+            sidebar.append(&super::super::settings_dialog::settings_sidebar_row(
+                region.icon(),
+                &region.title(),
+                region.id(),
+            ));
+            region_boxes.push(content);
+        }
+        let pages = RegionPages { region_boxes };
+        window.present();
+        let main = gtk4::glib::MainContext::default();
+        for _ in 0..3 {
+            let ctx = ctx.clone();
+            let pages = pages.clone();
+            gtk4::glib::idle_add_local_once(move || {
+                rebuild_region_pages(&ctx, &pages);
+            });
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(300);
+            while std::time::Instant::now() < deadline {
+                while main.iteration(false) {}
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+        window.close();
     }
 }

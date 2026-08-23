@@ -364,6 +364,20 @@ pub fn clear_children(w: &impl Clearable) {
     w.clear_all_children();
 }
 
+/// A button with an icon next to its label. Composed from plain gtk4
+/// widgets on purpose: `adw::ButtonContent` used as a suffix fires GTK
+/// criticals (`gtk_widget_get_parent`/`add_css_class` on a finalized
+/// widget) during construction inside preferences groups.
+pub(crate) fn icon_label_button(icon: &str, label: &str) -> gtk4::Button {
+    let button = gtk4::Button::new();
+    let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    content.append(&gtk4::Image::from_icon_name(icon));
+    content.append(&gtk4::Label::new(Some(label)));
+    button.set_child(Some(&content));
+    button.set_valign(gtk4::Align::Center);
+    button
+}
+
 pub fn replace_grid_game(state: &SharedState, game: &Game) {
     let store = state.borrow().grid_store.clone();
     let grid_id = game.grid_id();

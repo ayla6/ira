@@ -66,11 +66,8 @@ pub(crate) fn activators_group(
     // direct child of a preferences group looks wrong and trips GTK
     // widget assertions.
     let add_row = adw::ActionRow::new();
-    let add = adw::ButtonContent::builder()
-        .icon_name("list-add-symbolic")
-        .label(crate::tr!("Add activator"))
-        .build();
-    add.set_valign(gtk4::Align::Center);
+    let add =
+        super::helpers::icon_label_button("list-add-symbolic", &crate::tr!("Add activator"));
     add_row.add_suffix(&add);
     add_row.set_activatable(true);
     group.add(&add_row);

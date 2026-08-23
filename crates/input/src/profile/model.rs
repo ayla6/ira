@@ -725,11 +725,6 @@ pub struct InputProfile {
     /// Empty means the profile is available to every game.
     #[serde(default)]
     pub compatible_game_ids: Vec<i64>,
-    /// Whether the daemon streams raw sensor data over cemuhook UDP while
-    /// this layout is active. Per-game launcher settings can still force it
-    /// off; this is the layout-level default.
-    #[serde(default = "default_emulator_udp")]
-    pub emulator_udp: bool,
     /// Whether the layout also exposes the physical motion sensors as
     /// standard evdev axes next to the virtual pad. Off by default: until
     /// the kernel grows UNIQ support for uinput and SDL falls back to its
@@ -738,10 +733,6 @@ pub struct InputProfile {
     /// future SDL versions or raw evdev readers.
     #[serde(default)]
     pub native_motion: bool,
-}
-
-fn default_emulator_udp() -> bool {
-    true
 }
 
 impl Default for InputProfile {
@@ -756,7 +747,6 @@ impl Default for InputProfile {
             action_sets: Vec::new(),
             action_layers: Vec::new(),
             compatible_game_ids: Vec::new(),
-            emulator_udp: true,
             native_motion: false,
         }
     }

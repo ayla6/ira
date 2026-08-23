@@ -2,8 +2,9 @@
 //!
 //! One full-width libadwaita row per setting: enable switch, activation rule,
 //! output, sensitivity multiplier, invert/smoothing toggles — mirroring the
-//! Steam Input gyro panel — plus the emulator-motion (cemuhook UDP) stream
-//! switch, which lives on the profile itself.
+//! Steam Input gyro panel — plus the motion transport rows: the native
+//! sensor switch and the DSU output-mode note (the cemuhook stream is
+//! inherent to picking DSU, never a toggle).
 
 use super::input_profile_activator_sheet::{combo_row, spin_row};
 use super::input_profile_options::source_options_for_device;
@@ -33,7 +34,6 @@ struct GyroWidgets {
 /// backend changes.
 #[derive(Clone)]
 pub(super) struct MotionRows {
-    pub(super) udp: adw::SwitchRow,
     pub(super) native: adw::SwitchRow,
     pub(super) dsu_note: adw::ActionRow,
 }
@@ -42,8 +42,7 @@ impl MotionRows {
     fn apply_backend(&self, backend: VirtualGamepadBackend) {
         let dsu = backend == VirtualGamepadBackend::Dsu;
         // With the DSU backend the cemuhook stream IS the transport for the
-        // whole controller, so neither switch is an option anymore.
-        self.udp.set_visible(!dsu);
+        // whole controller, so the switches are not options anymore.
         self.native.set_visible(!dsu);
         self.dsu_note.set_visible(dsu);
     }
@@ -153,22 +152,6 @@ pub(super) fn add_gyro_group(
         "Multiplier applied to gyro motion"
     ));
 
-    let udp = switch_row(
-        &crate::tr!("Emulator motion stream"),
-        Some(&crate::tr!(
-            "Present the whole controller (buttons, sticks, motion) on cemuhook UDP port 26760 while a mapped game runs; pick the DSU client in the emulator as the single controller"
-        )),
-        profile.borrow().emulator_udp,
-        {
-            let profile = profile.clone();
-            let on_dirty = on_dirty.clone();
-            Rc::new(move |active| {
-                profile.borrow_mut().emulator_udp = active;
-                on_dirty();
-            })
-        },
-    );
-
     let native_motion = switch_row(
         &crate::tr!("Native motion sensors"),
         Some(&crate::tr!(
@@ -187,7 +170,7 @@ pub(super) fn add_gyro_group(
     native_motion.add_suffix(&experimental_badge());
 
     // DSU is an output mode, not a toggle: picking it means the whole
-    // controller travels the cemuhook stream, so both switches above give
+    // controller travels the cemuhook stream, so the switches above give
     // way to this note.
     let dsu_note = adw::ActionRow::builder()
         .title(crate::tr!("Cemuhook stream (DSU output mode)"))
@@ -198,7 +181,7 @@ pub(super) fn add_gyro_group(
 
     update_dependency_rows(&widgets, gyro.borrow().enabled);
 
-    let rows: [&adw::PreferencesRow; 11] = [
+    let rows: [&adw::PreferencesRow; 10] = [
         widgets.enable.upcast_ref(),
         widgets.activation.upcast_ref(),
         widgets.button.upcast_ref(),
@@ -209,7 +192,6 @@ pub(super) fn add_gyro_group(
         widgets.invert_y.upcast_ref(),
         widgets.smoothing.upcast_ref(),
         native_motion.upcast_ref(),
-        udp.upcast_ref(),
     ];
     for row in rows {
         group.add(row);
@@ -219,7 +201,6 @@ pub(super) fn add_gyro_group(
     connect_gyro_changes(&widgets, &button_options, gyro, on_dirty);
 
     let motion_rows = MotionRows {
-        udp,
         native: native_motion,
         dsu_note,
     };

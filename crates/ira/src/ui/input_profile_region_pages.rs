@@ -568,7 +568,6 @@ mod gtk_repro {
             region_boxes.push(content);
         }
         let motion_rows = super::super::input_profile_gyro_card::MotionRows {
-            udp: adw::SwitchRow::default(),
             native: adw::SwitchRow::default(),
             dsu_note: adw::ActionRow::default(),
         };
@@ -604,11 +603,9 @@ mod gtk_repro {
         let window = adw::Window::new();
         let group = adw::PreferencesGroup::new();
         let motion_rows = super::super::input_profile_gyro_card::MotionRows {
-            udp: adw::SwitchRow::default(),
             native: adw::SwitchRow::default(),
             dsu_note: adw::ActionRow::default(),
         };
-        group.add(&motion_rows.udp);
         group.add(&motion_rows.native);
         let badge = gtk4::Label::new(Some("Experimental"));
         badge.add_css_class("experimental-badge");

@@ -479,13 +479,12 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let mut virtual_gamepad = VirtualGamepad::create_for_backend(mapper.profile().backend)
         .map_err(|error| format!("failed to create virtual gamepad: {error}"))?;
     let sensor = gamepad.as_ref().and_then(|gamepad| open_sensor(gamepad.info()));
-    // The layout can opt out of streaming motion to emulators; the per-game
-    // launcher flag (--motion-port 0) remains the harder kill switch. The
-    // DSU backend is nothing without the stream, so it forces the stream on
-    // and works even when no gyro exists (motion just reads zero).
+    // The cemuhook stream is the DSU backend itself: picking that output
+    // mode always streams, nothing toggles it. The per-game launcher flag
+    // (--motion-port 0) remains the harder kill switch. It works even when
+    // no gyro exists (motion just reads zero).
     let motion_enabled = arguments.motion_port != Some(0)
-        && (mapper.profile().emulator_udp
-            || mapper.profile().backend == ira_input::VirtualGamepadBackend::Dsu);
+        && mapper.profile().backend == ira_input::VirtualGamepadBackend::Dsu;
     let motion_server = if motion_enabled {
         ira_input::MotionServer::bind()
     } else {
@@ -496,7 +495,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             "ira-input: motion passthrough on udp/{} for emulators (cemuhook)",
             ira_input::MOTION_PORT
         ),
-        (None, Some(_)) if arguments.motion_port != Some(0) && mapper.profile().emulator_udp => {
+        (None, Some(_)) if arguments.motion_port != Some(0) => {
             eprintln!(
                 "ira-input: udp/{} busy; motion passthrough disabled",
                 ira_input::MOTION_PORT

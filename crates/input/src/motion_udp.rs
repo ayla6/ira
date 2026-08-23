@@ -7,7 +7,8 @@
 //!
 //! Protocol: https://v1993.github.io/cemuhook-protocol/ — "DSUS"/"DSUC"
 //! magic, protocol version 1001, CRC32 over the whole packet with the
-//! checksum field zeroed, accelerometer in g, gyroscope in degrees/second.
+//! checksum field zeroed, accelerometer in m/s^2 (the unit Cemu's client
+//! expects, matching what SDL provides), gyroscope in degrees/second.
 
 use crate::{GamepadAxis, GamepadButton, OutputEvent};
 use std::net::{SocketAddr, UdpSocket};
@@ -121,7 +122,7 @@ impl PadState {
 
 /// One raw motion frame to broadcast, already in protocol units.
 pub struct MotionSample {
-    pub accel_g: [f32; 3],
+    pub accel_ms2: [f32; 3],
     pub gyro_dps: [f32; 3],
     pub timestamp_us: u64,
 }
@@ -273,7 +274,7 @@ fn data_payload(counter: u32, sample: &MotionSample, pad: &PadState) -> [u8; 8 *
     payload[48..56].copy_from_slice(&sample.timestamp_us.to_le_bytes());
     for (offset, value) in payload[56..80]
         .chunks_exact_mut(4)
-        .zip(sample.accel_g.iter().chain(sample.gyro_dps.iter()))
+        .zip(sample.accel_ms2.iter().chain(sample.gyro_dps.iter()))
     {
         offset.copy_from_slice(&value.to_le_bytes());
     }
@@ -310,10 +311,10 @@ fn crc32(data: &[u8]) -> u32 {
 
 /// Convert SDL sensor units to protocol units: gyro rad/s → deg/s with
 /// pitch/yaw/roll on x/y/z; accelerometer already reports g.
-pub fn sensor_to_motion(gyro_rads: [f32; 3], accel_g: [f32; 3], timestamp_us: u64) -> MotionSample {
+pub fn sensor_to_motion(gyro_rads: [f32; 3], accel_ms2: [f32; 3], timestamp_us: u64) -> MotionSample {
     const RAD_TO_DEG: f32 = 180.0 / std::f32::consts::PI;
     MotionSample {
-        accel_g,
+        accel_ms2,
         gyro_dps: [
             gyro_rads[0] * RAD_TO_DEG,
             gyro_rads[1] * RAD_TO_DEG,

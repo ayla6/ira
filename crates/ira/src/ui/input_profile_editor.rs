@@ -403,7 +403,7 @@ fn add_editor_footer(
 /// Used by tests through the region module's default mapping.
 #[cfg(test)]
 pub(super) fn test_default_output(source: ira_input::InputSource) -> ira_input::OutputAction {
-    super::input_profile_region_pages::default_mapping(source, ira_input::VirtualGamepadBackend::XInput)
+    super::input_profile_region_pages::default_mapping(source)
         .activators
         .first()
         .and_then(|activator| activator.outputs.first().cloned())

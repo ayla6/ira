@@ -377,9 +377,11 @@ fn axis_setup(code: AbsoluteAxisCode, minimum: i32, maximum: i32) -> UinputAbsSe
 
 fn button_code(backend: VirtualGamepadBackend, button: GamepadButton) -> Option<KeyCode> {
     Some(match button {
-        GamepadButton::A if backend == VirtualGamepadBackend::SwitchPro => KeyCode::BTN_EAST,
+        // Face buttons are positional for every backend (A = south, B =
+        // east): a virtual pad must identify exactly like the real
+        // controller SDL names after, and Nintendo lettering is purely
+        // cosmetic on the hardware.
         GamepadButton::A => KeyCode::BTN_SOUTH,
-        GamepadButton::B if backend == VirtualGamepadBackend::SwitchPro => KeyCode::BTN_SOUTH,
         GamepadButton::B => KeyCode::BTN_EAST,
         GamepadButton::X if sony_layout(backend) => KeyCode::BTN_C,
         GamepadButton::X => KeyCode::BTN_NORTH,
@@ -503,14 +505,17 @@ mod tests {
     }
 
     #[test]
-    fn test_switch_pro_uses_nintendo_button_positions() {
+    fn test_switch_pro_matches_sdl_positional_layout() {
+        // A real Pro Controller through SDL is positional (south = a, east =
+        // b); the virtual pad must identify exactly the same way instead of
+        // following Nintendo's printed letters.
         assert_eq!(
             button_code(SwitchPro, GamepadButton::A),
-            Some(KeyCode::BTN_EAST)
+            Some(KeyCode::BTN_SOUTH)
         );
         assert_eq!(
             button_code(SwitchPro, GamepadButton::B),
-            Some(KeyCode::BTN_SOUTH)
+            Some(KeyCode::BTN_EAST)
         );
         assert_eq!(
             button_code(SwitchPro, GamepadButton::X),

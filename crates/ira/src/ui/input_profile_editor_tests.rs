@@ -52,7 +52,6 @@ fn test_default_mapping_gives_axes_their_natural_modes() {
     );
     let stick = super::super::input_profile_region_pages::default_mapping(
         InputSource::Axis(GamepadAxis::RightX),
-        VirtualGamepadBackend::XInput,
     );
     assert!(matches!(
         stick.mode,
@@ -64,7 +63,6 @@ fn test_default_mapping_gives_axes_their_natural_modes() {
     assert!(stick.activators.is_empty());
     let trigger = super::super::input_profile_region_pages::default_mapping(
         InputSource::Axis(GamepadAxis::LeftTrigger),
-        VirtualGamepadBackend::XInput,
     );
     assert!(matches!(trigger.mode, Some(SourceMode::Trigger { .. })));
 }

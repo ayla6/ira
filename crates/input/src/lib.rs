@@ -1,11 +1,13 @@
 mod calibration;
 mod gyro;
+mod hid_ds4;
 mod mapping;
 mod physical;
 mod profile;
 mod registry;
 mod report_rate;
 mod sensor;
+mod uhid;
 mod virtual_gamepad;
 mod virtual_keyboard;
 mod virtual_mouse;
@@ -35,6 +37,7 @@ pub use motion_udp::{
 };
 mod motion_device;
 pub use motion_device::VirtualMotionSensor;
+pub use hid_ds4::Ds4UhidDevice;
 pub mod vdf;
 pub use vdf::{import_vdf, import_vdf_file, ImportReport};
 pub use sensor::{discover_sdl_gamepads, SensorSample, Sdl3SensorBackend, SdlGamepadInfo};

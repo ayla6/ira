@@ -518,18 +518,45 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     } else {
         None
     };
+    // Experimental whole-HID DualShock4: a real hidraw device whose reports
+    // carry buttons, sticks, triggers AND motion, so SDL's DS4 driver reads
+    // our sensors natively. Runs next to the evdev gamepad for now.
+    let ds4_hid = if sensor.is_some()
+        && mapper.profile().native_motion
+        && mapper.profile().backend == ira_input::VirtualGamepadBackend::DualShock4
+    {
+        match ira_input::Ds4UhidDevice::create() {
+            Ok(device) => {
+                eprintln!(
+                    "ira-input: experimental native-motion DS4 exposed over hidraw"
+                );
+                Some(device)
+            }
+            Err(error) => {
+                eprintln!(
+                    "ira-input: failed to create virtual DS4: {error}; \
+                     /dev/uhid is root-only unless a uaccess rule grants it"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
     let mut pipeline = SensorPipeline {
         sensor,
         gyro_processor,
         last_sensor_us,
         motion: motion_server,
         motion_device,
+        ds4_hid,
     };
     // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
     // even when no sensor exists, as long as something consumes them.
     let mut tick_needed = pipeline.sensor.is_some()
         || mapper.has_continuous_outputs()
-        || mapper.profile().backend == ira_input::VirtualGamepadBackend::Dsu;
+        || mapper.profile().backend == ira_input::VirtualGamepadBackend::Dsu
+        || pipeline.ds4_hid.is_some();
     let mut report_rate = ReportRateEstimator::default();
     if let Some(gamepad) = gamepad.as_mut() {
         if let Err(error) = gamepad.grab() {
@@ -1416,6 +1443,7 @@ struct SensorPipeline {
     last_sensor_us: Option<u64>,
     motion: Option<ira_input::MotionServer>,
     motion_device: Option<ira_input::VirtualMotionSensor>,
+    ds4_hid: Option<ira_input::Ds4UhidDevice>,
 }
 
 fn open_motion_node(backend: ira_input::VirtualGamepadBackend) -> Option<ira_input::VirtualMotionSensor> {
@@ -1486,17 +1514,27 @@ fn process_tick(
     if sensor_failed {
         pipeline.sensor = None;
     }
+    // One motion frame feeds every consumer: the DSU stream (whole
+    // controller over UDP) and the experimental hidraw DS4 alike. Ticks
+    // without a fresh sensor frame still carry state with zeroed motion.
+    let frame = latest.take().unwrap_or(ira_input::MotionSample {
+        accel_ms2: [0.0; 3],
+        gyro_dps: [0.0; 3],
+        timestamp_us: now_us(),
+    });
     if let Some(motion) = pipeline.motion.as_mut() {
-        // The DSU backend is a whole-controller carrier: keep streaming the
-        // pad state even on ticks without a fresh sensor frame (or without
-        // any gyro at all), with motion reading zero in that case.
-        let frame = latest.take().unwrap_or(ira_input::MotionSample {
-            accel_ms2: [0.0; 3],
-            gyro_dps: [0.0; 3],
-            timestamp_us: now_us(),
-        });
         motion.poll_clients(true);
         motion.send_sample(&frame, targets.pad);
+    }
+    if pipeline.ds4_hid.is_some() {
+        let ds4 = pipeline.ds4_hid.as_mut().unwrap();
+        match ds4.send_state(targets.pad, &frame) {
+            Ok(()) => {}
+            Err(error) => {
+                eprintln!("ira-input: virtual DS4 stopped: {error}");
+                pipeline.ds4_hid = None;
+            }
+        }
     }
     let outputs = mapper.tick(now_us());
     emit_outputs(outputs, targets, trace)

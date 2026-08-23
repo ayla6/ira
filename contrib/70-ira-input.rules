@@ -1,3 +1,5 @@
 # Allow the active desktop user to read Ira's virtual input devices,
 # including the motion-sensor node SDL pairs with the virtual pad.
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Ira Virtual *", TAG+="uaccess", TAG+="seat"
+# The experimental whole-HID DualShock4 exposes a hidraw node instead.
+SUBSYSTEM=="hidraw", ATTRS{name}=="Ira Virtual *", TAG+="uaccess", TAG+="seat"

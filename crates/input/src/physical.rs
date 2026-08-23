@@ -196,6 +196,8 @@ pub struct PhysicalGamepad {
     hat_y: i32,
     axis_ranges: HashMap<AbsoluteAxisCode, (i32, i32)>,
     z_axes_are_right_stick: bool,
+    left_trigger_clicked: bool,
+    right_trigger_clicked: bool,
 }
 
 impl PhysicalGamepad {
@@ -223,6 +225,8 @@ impl PhysicalGamepad {
             hat_y: 0,
             axis_ranges,
             z_axes_are_right_stick,
+            left_trigger_clicked: false,
+            right_trigger_clicked: false,
         })
     }
 
@@ -407,12 +411,47 @@ impl PhysicalGamepad {
                 value: normalized,
                 timestamp_us,
             });
+            self.synthesize_trigger_click(axis, normalized, timestamp_us, output);
         }
         if matches!(
             code,
             AbsoluteAxisCode::ABS_HAT0X | AbsoluteAxisCode::ABS_HAT0Y
         ) {
             self.emit_hat_events(timestamp_us, output);
+        }
+    }
+
+    /// Many pads (xinput-class, this project's own test hardware included)
+    /// report triggers only as analog axes with no BTN_TL2/BTN_TR2 keys, so
+    /// button-style trigger bindings would never fire. Synthesize click
+    /// edges from the axis the same way SDL does, with hysteresis so a noisy
+    /// axis resting near the threshold cannot chatter.
+    fn synthesize_trigger_click(
+        &mut self,
+        axis: GamepadAxis,
+        value: f32,
+        timestamp_us: u64,
+        output: &mut Vec<InputEvent>,
+    ) {
+        let (button, clicked) = match axis {
+            GamepadAxis::LeftTrigger => (
+                GamepadButton::LeftTrigger,
+                &mut self.left_trigger_clicked,
+            ),
+            GamepadAxis::RightTrigger => (
+                GamepadButton::RightTrigger,
+                &mut self.right_trigger_clicked,
+            ),
+            _ => return,
+        };
+        let previous = *clicked;
+        *clicked = synthesized_trigger_click(previous, value);
+        if *clicked != previous {
+            output.push(InputEvent {
+                source: InputSource::Button(button),
+                value: f32::from(*clicked),
+                timestamp_us,
+            });
         }
     }
 
@@ -559,6 +598,19 @@ fn normalize_trigger(value: i32, minimum: i32, maximum: i32) -> f32 {
     ((value - minimum) as f32 / (maximum - minimum) as f32).clamp(0.0, 1.0)
 }
 
+/// Click engages past the press threshold and releases only below a lower
+/// threshold; between the two the previous state sticks.
+const TRIGGER_CLICK_PRESS: f32 = 0.5;
+const TRIGGER_CLICK_RELEASE: f32 = 0.35;
+
+fn synthesized_trigger_click(previous: bool, value: f32) -> bool {
+    if previous {
+        value > TRIGGER_CLICK_RELEASE
+    } else {
+        value >= TRIGGER_CLICK_PRESS
+    }
+}
+
 fn format_open_error(path: &Path, error: std::io::Error) -> String {
     format!(
         "failed to open {}: {} (kind={:?}, raw_os_error={:?})",
@@ -577,8 +629,9 @@ fn is_ira_virtual_device(name: &str) -> bool {
 mod tests {
     use super::{
         device_gone, is_ira_virtual_device, is_ultimate_2, map_button, map_button_for_device,
-        normalize_signed, normalize_trigger, poll_timeout_ms, same_device, ControllerFamily,
-        DeviceInfo, ReportedInputMode, EIGHTBITDO_VENDOR, ULTIMATE_2_PRODUCT,
+        normalize_signed, normalize_trigger, poll_timeout_ms, same_device,
+        synthesized_trigger_click, ControllerFamily, DeviceInfo, ReportedInputMode,
+        EIGHTBITDO_VENDOR, ULTIMATE_2_PRODUCT,
     };
     use crate::GamepadButton;
     use std::path::PathBuf;
@@ -750,5 +803,20 @@ mod tests {
         assert_eq!(normalize_trigger(255, 0, 255), 1.0);
         assert_eq!(normalize_trigger(300, 0, 255), 1.0);
         assert_eq!(normalize_trigger(10, 10, 10), 0.0);
+    }
+
+    #[test]
+    fn test_synthesized_trigger_click_presses_and_releases_with_hysteresis() {
+        // Resting and mid-travel: no click.
+        assert!(!synthesized_trigger_click(false, 0.0));
+        assert!(!synthesized_trigger_click(false, 0.49));
+        // Crossing the press threshold clicks.
+        assert!(synthesized_trigger_click(false, 0.5));
+        assert!(synthesized_trigger_click(true, 1.0));
+        // Between the thresholds the click holds; below release it drops.
+        assert!(synthesized_trigger_click(true, 0.4));
+        assert!(!synthesized_trigger_click(true, 0.35));
+        // A noisy axis hovering in the band cannot re-click on its own.
+        assert!(!synthesized_trigger_click(false, 0.4));
     }
 }

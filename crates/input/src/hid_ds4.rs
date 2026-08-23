@@ -1,13 +1,14 @@
 //! A DualShock4-compatible controller built on [`super::uhid`].
 //!
-//! The identity walks a narrow line: a vendor in SDL's PlayStation-detection
-//! list (CRKD) gets its capabilities feature report probed, and our 48-byte
-//! reply with sensors enabled and the right motion numerators routes the
-//! device to SDL's DS4 hidapi driver — while the kernel side, finding no
-//! vendor driver, lets hid-generic claim it (Sony's own driver would reject
-//! our non-authentic DS4 descriptor mid-probe and leave no nodes behind).
-//! The numerators (1/16 gyro degrees per second, 1/8192 accelerometer g)
-//! are exactly the units [`usb_state_report`] emits, so motion arrives
+//! The identity walks a narrow line: a vendor whose PS4 pad is in SDL's
+//! controller database (Hori) so the evdev twin carries a real PS4 mapping,
+//! while also being in SDL's PlayStation-detection vendor list so its
+//! hidapi DS4 driver probes our capabilities reply and claims the hidraw
+//! node — and the kernel side, finding no vendor driver, lets hid-generic
+//! claim it (Sony's own driver would reject our non-authentic DS4
+//! descriptor mid-probe and leave no nodes behind). The capabilities
+//! numerators (1/16 gyro degrees per second, 1/8192 accelerometer g) are
+//! exactly the units [`usb_state_report`] emits, so motion arrives
 //! correctly scaled with no calibration exchange.
 
 use std::io;
@@ -15,13 +16,15 @@ use std::io;
 use crate::motion_udp::{MotionSample, PadState};
 use crate::uhid::{UhidDevice, BUS_USB};
 
-/// CRKD: present in SDL's PlayStation-detection vendor list (so SDL probes
-/// our capabilities feature report and routes us to its DS4 hidapi driver)
-/// while owning no Linux kernel HID driver (so hid-generic claims the
-/// device instead of a Sony-specific driver rejecting our descriptor).
-/// Product is arbitrary; unknown products keep the generic gamepad type.
-pub const VENDOR_ID: u32 = 0x3651;
-pub const PRODUCT_ID: u32 = 0x09c4;
+/// Hori's PS4 mini pad identity: present in SDL's controller database as a
+/// PS4 controller (so the evdev twin carries a real mapping and proper
+/// type, instead of generic a/b/x/y), inside SDL's PlayStation-detection
+/// vendor list (so its hidapi DS4 driver probes our capabilities reply and
+/// claims the hidraw node), and unknown to Linux kernel HID drivers (so
+/// hid-generic owns the device rather than a Sony-specific driver rejecting
+/// our non-authentic DS4 descriptor mid-probe).
+pub const VENDOR_ID: u32 = 0x0f0d;
+pub const PRODUCT_ID: u32 = 0x00ee;
 pub const DEVICE_NAME: &str = "Ira Virtual DS4 Controller";
 
 /// Feature report id SDL probes on third-party controllers to learn

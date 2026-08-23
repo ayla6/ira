@@ -476,9 +476,21 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     );
     let mut keyboard = create_keyboard(mapper.profile().keyboard_keycodes())?;
     let mut mouse = create_mouse(mapper.profile().uses_mouse())?;
-    let mut virtual_gamepad = VirtualGamepad::create_for_backend(mapper.profile().backend)
-        .map_err(|error| format!("failed to create virtual gamepad: {error}"))?;
     let sensor = gamepad.as_ref().and_then(|gamepad| open_sensor(gamepad.info()));
+    // When the experimental uhid DualShock4 owns the controller, the uinput
+    // pad must not exist too or games see two controllers and often bind
+    // the motionless one. Its outputs still reach the pad shadow that both
+    // the hidraw reports and the cemuhook stream read from.
+    let native_ds4 = sensor.is_some()
+        && mapper.profile().native_motion
+        && mapper.profile().backend == ira_input::VirtualGamepadBackend::DualShock4;
+    let mut virtual_gamepad = if native_ds4 {
+        eprintln!("ira-input: uinput gamepad suppressed; the uhid DS4 is the controller");
+        VirtualGamepad::shadow_only(mapper.profile().backend)
+    } else {
+        VirtualGamepad::create_for_backend(mapper.profile().backend)
+            .map_err(|error| format!("failed to create virtual gamepad: {error}"))?
+    };
     // The cemuhook stream is the DSU backend itself: picking that output
     // mode always streams, nothing toggles it. The per-game launcher flag
     // (--motion-port 0) remains the harder kill switch. It works even when
@@ -523,10 +535,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     // SDL's evdev backend pairs them, which is the half flatpaks can see.
     let mut ds4_hid = None;
     let mut imu_hid = None;
-    if sensor.is_some()
-        && mapper.profile().native_motion
-        && mapper.profile().backend == ira_input::VirtualGamepadBackend::DualShock4
-    {
+    if native_ds4 {
         let uniq = format!("ira-virtual-{}", std::process::id());
         match ira_input::Ds4UhidDevice::create(&uniq) {
             Ok(device) => {

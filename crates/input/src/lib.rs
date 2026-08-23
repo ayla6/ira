@@ -40,6 +40,7 @@ pub use motion_device::VirtualMotionSensor;
 mod hid_imu;
 pub use hid_ds4::Ds4UhidDevice;
 pub use hid_imu::ImuUhidDevice;
+pub use uhid::{UhidDevice, BUS_USB};
 pub mod vdf;
 pub use vdf::{import_vdf, import_vdf_file, ImportReport};
 pub use sensor::{discover_sdl_gamepads, SensorSample, Sdl3SensorBackend, SdlGamepadInfo};

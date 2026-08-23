@@ -60,13 +60,20 @@ impl VirtualGamepad {
         Self::create_for_backend(VirtualGamepadBackend::XInput)
     }
 
+    /// A backend with no kernel device: outputs land only in the pad shadow
+    /// that whole-controller carriers (the cemuhook stream, the uhid DS4)
+    /// read from, so games see a single controller.
+    pub fn shadow_only(backend: VirtualGamepadBackend) -> Self {
+        Self {
+            device: None,
+            backend,
+            hat_dpad: [false; 4],
+        }
+    }
+
     pub fn create_for_backend(backend: VirtualGamepadBackend) -> io::Result<Self> {
         if backend == VirtualGamepadBackend::Dsu {
-            return Ok(Self {
-                device: None,
-                backend,
-                hat_dpad: [false; 4],
-            });
+            return Ok(Self::shadow_only(backend));
         }
         let buttons = gamepad_buttons(backend);
         let mut builder = VirtualDevice::builder()?

@@ -182,6 +182,12 @@ pub struct Sdl3SensorBackend {
     /// fallback path has no paired accelerometer, leaving player-space gyro
     /// to degrade to controller-space rates.
     accel_on_gamepad: bool,
+    /// Timestamp of the last gyro sample we handed out. Polling faster
+    /// than the controller's report rate returns the same sample; handing
+    /// it out again would make consumers double-integrate the same
+    /// rotation (cemuhook clients feel it as randomly oversensitive
+    /// turning), so repeats surface as None.
+    last_gyro_time_ns: u64,
 }
 
 fn select_gyro_id<F>(gyro_ids: &[i32], matches: F) -> Option<i32>
@@ -219,6 +225,7 @@ impl Sdl3SensorBackend {
                     api,
                     source: SensorSource::Gamepad(gamepad),
                     accel_on_gamepad,
+                    last_gyro_time_ns: 0,
                 }));
             }
             unsafe { (api.close_gamepad)(gamepad) };
@@ -237,6 +244,7 @@ impl Sdl3SensorBackend {
                     api,
                     source: SensorSource::Global(sensor),
                     accel_on_gamepad: false,
+                    last_gyro_time_ns: 0,
                 }));
             }
         }
@@ -304,6 +312,10 @@ impl Sdl3SensorBackend {
         if data.iter().any(|value| !value.is_finite()) {
             return Err("SDL3 returned a non-finite gyro sample".to_string());
         }
+        if sensor_time_ns != 0 && sensor_time_ns == self.last_gyro_time_ns {
+            return Ok(None); // same sample as last poll, not fresh input
+        }
+        self.last_gyro_time_ns = sensor_time_ns;
         let accel = self.read_accel().transpose()?;
         Ok(Some(SensorSample {
             gyro: data,

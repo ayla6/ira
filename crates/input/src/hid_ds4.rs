@@ -102,8 +102,12 @@ pub fn usb_state_report(pad: &PadState, sample: &MotionSample, timestamp_us: u64
     let ticks = timestamp_us.wrapping_mul(3) / 16;
     r[10..12].copy_from_slice(&(ticks as u16).to_le_bytes());
 
+    // SDL's PS4 driver passes sensor axes through untouched, so the report
+    // carries our source frame directly — except yaw: Cemu's DS4 ingestion
+    // expects its polarity opposite to what generic SDL devices deliver,
+    // which surfaced as inverted horizontal gyro in games.
     write_i16(&mut r[13..15], sample.gyro_dps[0] * GYRO_COUNTS_PER_DPS);
-    write_i16(&mut r[15..17], sample.gyro_dps[1] * GYRO_COUNTS_PER_DPS);
+    write_i16(&mut r[15..17], -sample.gyro_dps[1] * GYRO_COUNTS_PER_DPS);
     write_i16(&mut r[17..19], sample.gyro_dps[2] * GYRO_COUNTS_PER_DPS);
     write_i16(&mut r[19..21], sample.accel_ms2[0] / GRAVITY_MS2 * ACCEL_COUNTS_PER_G);
     write_i16(&mut r[21..23], sample.accel_ms2[1] / GRAVITY_MS2 * ACCEL_COUNTS_PER_G);
@@ -335,7 +339,8 @@ mod tests {
         let read_i16 =
             |offset: usize| i16::from_le_bytes([report[offset], report[offset + 1]]);
         assert_eq!(read_i16(13), (90.0 * GYRO_COUNTS_PER_DPS) as i16);
-        assert_eq!(read_i16(15), (-180.0 * GYRO_COUNTS_PER_DPS) as i16);
+        // Yaw is negated on the wire: Cemu's DS4 ingestion flips it back.
+        assert_eq!(read_i16(15), (180.0 * GYRO_COUNTS_PER_DPS) as i16);
         assert_eq!(read_i16(17), 32767); // saturated, not wrapped
         assert_eq!(read_i16(19), ACCEL_COUNTS_PER_G as i16);
         assert_eq!(read_i16(21), -(ACCEL_COUNTS_PER_G as i16));

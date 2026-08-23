@@ -1,6 +1,7 @@
 mod calibration;
 mod gyro;
 mod hid_ds4;
+mod hid_dualsense;
 mod mapping;
 mod physical;
 mod profile;
@@ -40,6 +41,7 @@ pub use motion_device::VirtualMotionSensor;
 mod hid_imu;
 mod hid_switch_pro;
 pub use hid_ds4::Ds4UhidDevice;
+pub use hid_dualsense::DualsenseUhidDevice;
 pub use hid_imu::ImuUhidDevice;
 pub use hid_switch_pro::SwitchProUhidDevice;
 pub use uhid::{UhidDevice, BUS_USB};

@@ -488,7 +488,10 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let native_switch_pro = sensor.is_some()
         && mapper.profile().native_motion
         && mapper.profile().backend == ira_input::VirtualGamepadBackend::SwitchPro;
-    let mut virtual_gamepad = if native_ds4 || native_switch_pro {
+    let native_dualsense = sensor.is_some()
+        && mapper.profile().native_motion
+        && mapper.profile().backend == ira_input::VirtualGamepadBackend::DualSense;
+    let mut virtual_gamepad = if native_ds4 || native_switch_pro || native_dualsense {
         eprintln!("ira-input: uinput gamepad suppressed; the uhid controller is the controller");
         VirtualGamepad::shadow_only(mapper.profile().backend)
     } else {
@@ -583,6 +586,25 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             }
         }
     }
+    // Same whole-HID approach as the DS4, on SDL's PS5 third-party path:
+    // the licensed HORI PID is typed PS5 in SDL's table and feature replies
+    // enable sensors with an identity calibration.
+    let mut dualsense_hid = None;
+    if native_dualsense {
+        let uniq = format!("ira-virtual-{}", std::process::id());
+        match ira_input::DualsenseUhidDevice::create(&uniq) {
+            Ok(device) => {
+                eprintln!("ira-input: experimental native-motion DualSense exposed over hidraw");
+                dualsense_hid = Some(device);
+            }
+            Err(error) => {
+                eprintln!(
+                    "ira-input: failed to create virtual DualSense: {error}; \
+                     /dev/uhid is root-only unless a uaccess rule grants it"
+                );
+            }
+        }
+    }
     let mut pipeline = SensorPipeline {
         sensor,
         gyro_processor,
@@ -590,6 +612,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         motion: motion_server,
         motion_device,
         ds4_hid,
+        dualsense_hid,
         imu_hid,
         switch_pro_hid,
         ever_had_sensor,
@@ -1488,6 +1511,7 @@ struct SensorPipeline {
     motion: Option<ira_input::MotionServer>,
     motion_device: Option<ira_input::VirtualMotionSensor>,
     ds4_hid: Option<ira_input::Ds4UhidDevice>,
+    dualsense_hid: Option<ira_input::DualsenseUhidDevice>,
     imu_hid: Option<ira_input::ImuUhidDevice>,
     switch_pro_hid: Option<ira_input::SwitchProUhidDevice>,
     /// Whether a gyro sensor was available at startup. Gyroless DSU
@@ -1585,6 +1609,20 @@ fn process_tick(
             Err(error) => {
                 eprintln!("ira-input: virtual DS4 stopped: {error}");
                 pipeline.ds4_hid = None;
+            }
+        }
+    }
+    if pipeline.dualsense_hid.is_some() {
+        // SDL's PS5 driver passes axes through untouched like its DS4 one,
+        // so the source SDL frame goes on the wire verbatim.
+        let (gyro, accel, timestamp_us) = latest.unwrap_or(zero);
+        let hid_frame = ira_input::sensor_to_motion(gyro, accel, timestamp_us);
+        let dualsense = pipeline.dualsense_hid.as_mut().unwrap();
+        match dualsense.send_state(targets.pad, &hid_frame) {
+            Ok(()) => {}
+            Err(error) => {
+                eprintln!("ira-input: virtual DualSense stopped: {error}");
+                pipeline.dualsense_hid = None;
             }
         }
     }

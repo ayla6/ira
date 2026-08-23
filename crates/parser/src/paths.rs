@@ -258,15 +258,28 @@ pub fn is_ico_data(data: &[u8]) -> bool {
     data.len() >= 4 && data[0..4] == [0x00, 0x00, 0x01, 0x00]
 }
 
+/// Decode arbitrary image bytes. TGA carries no magic bytes, so the
+/// image crate's format guessing can never find it — after a guess fails,
+/// try the TGA decoder explicitly (Cemu game icons are uncompressed TGA).
+pub fn load_image_bytes(data: &[u8]) -> Option<image::DynamicImage> {
+    if let Ok(img) = image::load_from_memory(data) {
+        return Some(img);
+    }
+    let cursor = std::io::Cursor::new(data);
+    let decoder = image::codecs::tga::TgaDecoder::new(cursor).ok()?;
+    image::DynamicImage::from_decoder(decoder).ok()
+}
+
 /// Convert raw image bytes to lossless WebP if the source is PNG or ICO.
 /// Returns `None` if the format is not convertible or decoding/encoding fails.
 pub fn convert_bytes_to_lossless_webp(data: &[u8]) -> Option<Vec<u8>> {
     let _s = tracing::info_span!("convert_bytes_to_lossless_webp").entered();
-    let format = image::guess_format(data).ok()?;
-    if !matches!(format, image::ImageFormat::Png | image::ImageFormat::Ico) {
-        return Some(data.to_vec());
+    if let Ok(format) = image::guess_format(data) {
+        if !matches!(format, image::ImageFormat::Png | image::ImageFormat::Ico) {
+            return Some(data.to_vec());
+        }
     }
-    let img = image::load_from_memory(data).ok()?;
+    let img = load_image_bytes(data)?;
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
     Some(
@@ -281,7 +294,7 @@ pub fn convert_bytes_to_lossless_webp(data: &[u8]) -> Option<Vec<u8>> {
 /// magic bytes alone — this decodes the whole payload, so callers that must
 /// never write a corrupt file to disk should run this before persisting.
 pub fn is_decodable_image(data: &[u8]) -> bool {
-    image::load_from_memory(data).is_ok()
+    load_image_bytes(data).is_some()
 }
 
 /// Open an image file (PNG, ICO, etc.) and re-save as lossless WebP,
@@ -345,7 +358,7 @@ pub fn heal_ico_variant(dir: &Path, base: &str) {
 pub fn decode_to_rgba(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
     let _s = tracing::info_span!("decode_to_rgba", path = %path.display()).entered();
     let data = std::fs::read(path).ok()?;
-    let img = image::load_from_memory(&data).ok()?;
+    let img = load_image_bytes(&data)?;
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
     Some((rgba.into_raw(), w, h))
@@ -665,5 +678,47 @@ mod tests {
         std::fs::write(&ico, b"not an image").unwrap();
         heal_ico_variant(tmp.path(), "icon");
         assert!(!ico.exists(), "junk .ico must not pin the asset forever");
+    }
+}
+
+#[cfg(test)]
+mod tga_tests {
+    use super::{decode_to_rgba, is_decodable_image, load_image_bytes};
+
+    /// Minimal uncompressed 32-bit top-down TGA, the shape Cemu icons use.
+    fn sample_tga() -> Vec<u8> {
+        let mut data = vec![
+            0, 0, // no id, no palette
+            2, // uncompressed truecolor
+            0, 0, 0, 0, 0, // palette fields
+            0, 0, 0, 0, // no origin
+            2, 0, // width 2
+            2, 0, // height 2
+            32, // bpp
+            8, // top-down
+        ];
+        for _ in 0..4 {
+            data.extend_from_slice(&[0x11, 0x22, 0x33, 0xff]); // BGRA
+        }
+        data
+    }
+
+    #[test]
+    fn test_tga_decodes_through_explicit_fallback() {
+        let tga = sample_tga();
+        // Sanity: guessing alone cannot identify TGA (no magic bytes).
+        assert!(image::guess_format(&tga).is_err());
+        assert!(is_decodable_image(&tga));
+        let img = load_image_bytes(&tga).expect("TGA must decode");
+        assert_eq!(img.to_rgba8().dimensions(), (2, 2));
+    }
+
+    #[test]
+    fn test_decode_to_rgba_reads_tga_file() {
+        let tmp = tempfile::NamedTempFile::with_suffix(".tga").unwrap();
+        std::fs::write(tmp.path(), sample_tga()).unwrap();
+        let (pixels, w, h) = decode_to_rgba(tmp.path()).expect("file decode");
+        assert_eq!((w, h), (2, 2));
+        assert_eq!(pixels.len(), 2 * 2 * 4);
     }
 }

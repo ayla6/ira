@@ -191,6 +191,7 @@ fn main() {
     let ids = unsafe { std::slice::from_raw_parts(ids, count as usize) }.to_vec();
 
     let mut target: Option<u32> = None;
+    let mut gyro_fallback: Option<u32> = None;
     println!("probe: {} gamepad(s)", ids.len());
     for id in ids {
         let gamepad = unsafe { (api.open_gamepad)(id) };
@@ -221,7 +222,13 @@ fn main() {
         if matches && target.is_none() {
             target = Some(id);
         }
+        if has_gyro && gyro_fallback.is_none() {
+            gyro_fallback = Some(id);
+        }
         unsafe { (api.close_gamepad)(gamepad) };
+    }
+    if target.is_none() {
+        target = gyro_fallback;
     }
 
     if std::env::var("AXES").is_ok() {

@@ -175,24 +175,36 @@ fn subcmd_payload(subcmd: u8, args: &[u8]) -> Vec<u8> {
 /// driver takes the factory tables; those carry identity calibration and
 /// centered sticks.
 fn spi_flash(addr: u32, size: usize) -> Vec<u8> {
+    /// Factory stick calibration spans 0x603D..0x604E: the kernel reads each
+    /// stick's 9 bytes separately, while SDL's hidapi driver reads both
+    /// sticks in a single 18-byte request here, so the region serves one
+    /// flat left+right image.
+    const STICK_CAL_START: u32 = 0x603d;
+    const STICK_CAL_LEN: usize = 18;
+
     let mut data = vec![0xFFu8; size];
-    match addr {
-        0x6020 => {
-            // IMU calibration: zero offsets, 16384 scales -> divisor equals
-            // scale, so the driver's conversion collapses to identity.
-            if size >= 24 {
-                data = vec![0u8; size];
-                for axis in 0..3 {
-                    data[6 + axis * 2..8 + axis * 2]
-                        .copy_from_slice(&16384u16.to_le_bytes());
-                    data[18 + axis * 2..20 + axis * 2]
-                        .copy_from_slice(&16384u16.to_le_bytes());
-                }
+    if addr == 0x6020 {
+        // IMU calibration: zero offsets, 16384 scales -> divisor equals
+        // scale, so the driver's conversion collapses to identity.
+        if size >= 24 {
+            data = vec![0u8; size];
+            for axis in 0..3 {
+                data[6 + axis * 2..8 + axis * 2]
+                    .copy_from_slice(&16384u16.to_le_bytes());
+                data[18 + axis * 2..20 + axis * 2]
+                    .copy_from_slice(&16384u16.to_le_bytes());
             }
         }
-        0x603d => data = stick_calibration(true),
-        0x6046 => data = stick_calibration(false),
-        _ => {}
+        return data;
+    }
+    if (STICK_CAL_START..STICK_CAL_START + STICK_CAL_LEN as u32).contains(&addr) {
+        let blob: Vec<u8> = stick_calibration(true)
+            .into_iter()
+            .chain(stick_calibration(false))
+            .collect();
+        let start = (addr - STICK_CAL_START) as usize;
+        let end = (start + size).min(STICK_CAL_LEN);
+        data[..end - start].copy_from_slice(&blob[start..end]);
     }
     data
 }
@@ -386,6 +398,11 @@ fn unpack_fields(bytes: [u8; 3]) -> (u16, u16) {
         // Stick calibration blocks exist for both sticks.
         assert_eq!(spi_flash(0x603d, 9).len(), 9);
         assert_eq!(spi_flash(0x6046, 9).len(), 9);
+        // SDL's hidapi reads both sticks in one 18-byte request at 0x603D;
+        // its second half must equal the separate right-stick read.
+        let combined = spi_flash(0x603d, 18);
+        assert_eq!(combined.len(), 18);
+        assert_eq!(combined[9..], spi_flash(0x6046, 9)[..]);
     }
 
     #[test]

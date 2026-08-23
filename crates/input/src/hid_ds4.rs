@@ -25,7 +25,9 @@ use crate::uhid::{UhidDevice, BUS_USB};
 /// our non-authentic DS4 descriptor mid-probe).
 pub const VENDOR_ID: u32 = 0x0f0d;
 pub const PRODUCT_ID: u32 = 0x00ee;
-pub const DEVICE_NAME: &str = "Ira Virtual DS4 Controller";
+/// Real DS4 controllers literally report this product string; games and
+/// launchers whitelist by name, so the virtual pad should read identically.
+pub const DEVICE_NAME: &str = "Wireless Controller";
 
 /// Feature report id SDL probes on third-party controllers to learn
 /// capabilities and motion scaling numerators.

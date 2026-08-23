@@ -333,12 +333,11 @@ pub fn sensor_to_motion(gyro_rads: [f32; 3], accel_ms2: [f32; 3], timestamp_us: 
 
 /// Convert SDL sensor data to the cemuhook wire frame.
 ///
-/// Derived from Cemu's ingestion code (DSUControllerProvider): the DSU
-/// client feeds wire gyro straight into its motion handler while the SDL
-/// path arrives as [gx, -gy, -gz], and both must produce identical
-/// internal rotation for the same physical motion. The accelerometer
-/// passes through in g — Cemu's SDL path negates each axis then flips Y/Z
-/// back, netting to verbatim.
+/// Derived from Cemu's ingestion code (DSUControllerProvider): its DSU call
+/// site applies `[gx, gy, gz]` straight from the wire plus `-y/-z` on the
+/// accelerometer, while the SDL path arrives as `[gx, -gy, -gz]` with
+/// verbatim accel — both must produce identical internal vectors for the
+/// same physical motion.
 pub fn sensor_to_dsu_frame(
     gyro_rads: [f32; 3],
     accel_ms2: [f32; 3],
@@ -347,6 +346,7 @@ pub fn sensor_to_dsu_frame(
     let mut sample = sensor_to_motion(gyro_rads, accel_ms2, timestamp_us);
     sample.gyro_dps[1] = -sample.gyro_dps[1];
     sample.gyro_dps[2] = -sample.gyro_dps[2];
+    sample.accel_ms2 = [-accel_ms2[0], -accel_ms2[1], -accel_ms2[2]];
     sample
 }
 
@@ -359,12 +359,14 @@ mod tests {
     use crate::{GamepadAxis, GamepadButton, OutputEvent};
 
     #[test]
-    fn test_dsu_frame_negates_wire_yaw_and_roll() {
-        // Cemu's SDL path applies [gx, -gy, -gz]; feeding DSU the same
-        // transform makes both ingestion paths agree with each other.
+    fn test_dsu_frame_negates_wire_yaw_roll_and_accel() {
+        // Cemu's DSU call site passes gyro through verbatim and negates
+        // accel y/z; its SDL path applies [gx,-gy,-gz] with verbatim accel.
+        // Equal internal vectors therefore need wire gyro [gx,-gy,-gz] and
+        // fully negated accel.
         let dsu = sensor_to_dsu_frame([0.1, 0.2, 0.3], [1.0, -2.0, 3.0], 7);
         let sdl = sensor_to_motion([0.1, 0.2, 0.3], [1.0, -2.0, 3.0], 7);
-        assert_eq!(dsu.accel_ms2, sdl.accel_ms2);
+        assert_eq!(dsu.accel_ms2, [-1.0, 2.0, -3.0]);
         assert_eq!(dsu.gyro_dps[0], sdl.gyro_dps[0]);
         assert_eq!(dsu.gyro_dps[1], -sdl.gyro_dps[1]);
         assert_eq!(dsu.gyro_dps[2], -sdl.gyro_dps[2]);

@@ -593,6 +593,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         imu_hid,
         switch_pro_hid,
         ever_had_sensor,
+        last_dsu_ts: 0,
     };
     // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
     // even when no sensor exists, as long as something consumes them.
@@ -1492,6 +1493,10 @@ struct SensorPipeline {
     /// Whether a gyro sensor was available at startup. Gyroless DSU
     /// sessions still stream whole-controller frames with zeroed motion.
     ever_had_sensor: bool,
+    /// Last motion timestamp sent over cemuhook. Cemu drops any sample
+    /// whose timestamp does not advance and force-resets on >10s backwards
+    /// jumps, so outbound stamps are clamped to move forward on one clock.
+    last_dsu_ts: u64,
 }
 
 fn open_motion_node(backend: ira_input::VirtualGamepadBackend) -> Option<ira_input::VirtualMotionSensor> {
@@ -1622,8 +1627,19 @@ fn process_tick(
         // frames with zeroed motion at tick rate.
         if should_send_dsu_frame(latest.is_some(), pipeline.sensor.is_some(), pipeline.ever_had_sensor)
         {
-            let (gyro, accel, _) = latest.take().unwrap_or(([0.0; 3], [0.0; 3], now_us()));
-            let dsu_frame = ira_input::sensor_to_dsu_frame(gyro, accel, now_us());
+            // Stamp with the sensor sample's own clock when available and
+            // clamp forward otherwise: Cemu drops non-advancing timestamps
+            // and resets on >10s backwards jumps, so fallback frames must
+            // never travel backwards or collide with sample stamps.
+            let (gyro, accel, sample_ts) =
+                latest.take().unwrap_or(([0.0; 3], [0.0; 3], 0));
+            let ts = if sample_ts > pipeline.last_dsu_ts {
+                sample_ts
+            } else {
+                pipeline.last_dsu_ts + 1
+            };
+            pipeline.last_dsu_ts = ts;
+            let dsu_frame = ira_input::sensor_to_dsu_frame(gyro, accel, ts);
             motion.poll_clients(true);
             motion.send_sample(&dsu_frame, targets.pad);
         }

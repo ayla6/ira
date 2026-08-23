@@ -54,6 +54,50 @@ struct Api {
     get_version: SdlGetVersion,
 }
 
+/// Guided pose capture: averages accel/gyro over three timed windows so
+/// the resulting vectors reveal the device's sensor frame without guessing.
+fn capture_poses(api: &Api, gamepad: *mut c_void) {
+    const WINDOW_MS: u64 = 4000;
+    let phases = [
+        ("hold flat, buttons up, grips level", 0),
+        ("tilt forward 90deg (triggers toward the desk)", 1),
+        ("roll left 90deg (left grip down, flat edge up)", 2),
+    ];
+    for (title, index) in phases {
+        println!("\nNEXT POSE ({index}/2): {title}");
+        for count in (1..=3).rev() {
+            println!("  starting in {count}...");
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        println!("  HOLD IT...");
+        let mut gyro = [0.0f32; 3];
+        let mut accel = [0.0f32; 3];
+        let mut samples = 0usize;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(WINDOW_MS);
+        while std::time::Instant::now() < deadline {
+            unsafe {
+                (api.pump_events)();
+                (api.update_sensors)();
+                let mut g = [0.0f32; 3];
+                let mut a = [0.0f32; 3];
+                let _ = (api.sensor_data)(gamepad, SDL_SENSOR_GYRO, g.as_mut_ptr(), 3);
+                let _ = (api.sensor_data)(gamepad, SDL_SENSOR_ACCEL, a.as_mut_ptr(), 3);
+                for i in 0..3 {
+                    gyro[i] += g[i];
+                    accel[i] += a[i];
+                }
+            }
+            samples += 1;
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        println!("  accel avg {:?}  gyro avg {:?}  ({} samples)",
+            [accel[0] / samples as f32, accel[1] / samples as f32, accel[2] / samples as f32],
+            [gyro[0] / samples as f32, gyro[1] / samples as f32, gyro[2] / samples as f32],
+            samples);
+    }
+    println!("\ncapture done - paste all three lines back");
+}
+
 fn main() {
     let lib = std::env::var("SDL3_LIB").unwrap_or_else(|_| "libSDL3.so.0".to_string());
     let name = CString::new(lib.clone()).unwrap();
@@ -160,6 +204,11 @@ fn main() {
     if gamepad.is_null() {
         println!("probe: FAIL - could not reopen virtual gamepad");
         std::process::exit(1);
+    }
+    if std::env::var("POSES").is_ok() {
+        capture_poses(&api, gamepad);
+        unsafe { (api.close_gamepad)(gamepad) };
+        return;
     }
     let mut moving = 0usize;
     for sensor in [SDL_SENSOR_GYRO, SDL_SENSOR_ACCEL] {

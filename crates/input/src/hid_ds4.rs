@@ -1,20 +1,46 @@
 //! A DualShock4-compatible controller built on [`super::uhid`].
 //!
-//! SDL's hidapi DS4 driver selects devices by USB vendor/product, so we
-//! present as Sony's DS4 v2 (054c:09cc) over USB; the driver then enables
-//! sensors without any capability probing. Its fallback calibration scales
-//! raw gyro counts by 1/16 degrees per second and raw accelerometer counts by
-//! 1/8192 g — exactly the real hardware units this module emits, so motion
-//! arrives correctly scaled with no feature-report exchange at all.
+//! We present with neutral vendor/product IDs so the kernel's generic HID
+//! driver claims us (Sony's own driver rejects non-authentic DS4
+//! descriptors mid-probe, leaving no input or hidraw nodes behind). SDL
+//! then treats us as a third-party PS4 pad and probes the capabilities
+//! feature report to enable sensors and learn motion scaling: we serve it
+//! with numerators 1/16 for gyro degrees per second and 1/8192 for
+//! accelerometer g — the exact units [`usb_state_report`] emits.
 
 use std::io;
 
 use crate::motion_udp::{MotionSample, PadState};
 use crate::uhid::{UhidDevice, BUS_USB};
 
-pub const VENDOR_ID: u32 = 0x054c;
-pub const PRODUCT_ID: u32 = 0x09cc;
+pub const VENDOR_ID: u32 = 0x1209;
+pub const PRODUCT_ID: u32 = 0x3151;
 pub const DEVICE_NAME: &str = "Ira Virtual DS4 Controller";
+
+/// Feature report id SDL probes on third-party controllers to learn
+/// capabilities and motion scaling numerators.
+const FEATURE_CAPABILITIES: u8 = 0x03;
+/// errno-style "no data available" for feature reports we do not serve.
+const ENODATA: u16 = 61;
+
+/// The 48-byte capabilities payload SDL requires (`size == 48 &&
+/// data[2] == 0x27`): gamepad type, sensors enabled, and the motion
+/// scaling numerators that make our raw counts read correctly.
+fn capabilities_report() -> [u8; 48] {
+    let mut r = [0u8; 48];
+    r[0] = FEATURE_CAPABILITIES;
+    r[2] = 0x27;
+    r[4] = 0x02; // sensors supported
+    r[5] = 0x00; // device type: gamepad
+    // SDL scales raw counts by (numerator / denominator): 1/16 turns our
+    // gyro counts into degrees per second, 1/8192 accelerometer counts
+    // into g.
+    r[10..12].copy_from_slice(&1u16.to_le_bytes());
+    r[12..14].copy_from_slice(&16u16.to_le_bytes());
+    r[14..16].copy_from_slice(&1u16.to_le_bytes());
+    r[16..18].copy_from_slice(&8192u16.to_le_bytes());
+    r
+}
 
 /// SDL's DS4 driver expects the USB state report under report id 0x01.
 const REPORT_ID_USB_STATE: u8 = 0x01;
@@ -179,12 +205,29 @@ impl Ds4UhidDevice {
                 crate::uhid::UhidEvent::Open => {
                     eprintln!("ira-input: virtual DS4 opened by a reader");
                 }
-                crate::uhid::UhidEvent::GetReport { id, .. } => {
-                    // No calibration feature reports: SDL's fallback scaling
-                    // matches the units we emit exactly.
-                    let _ = self.device.reply_get_report(id, 61, &[]);
+                crate::uhid::UhidEvent::Start => {
+                    eprintln!("ira-input: virtual DS4 started by the kernel");
                 }
-                _ => {}
+                crate::uhid::UhidEvent::Stop => {
+                    eprintln!("ira-input: virtual DS4 stopped by the kernel");
+                }
+                crate::uhid::UhidEvent::Close => {
+                    eprintln!("ira-input: virtual DS4 closed by its reader");
+                }
+                crate::uhid::UhidEvent::GetReport { id, number, kind } => {
+                    if number == FEATURE_CAPABILITIES && kind == crate::uhid::FEATURE_REPORT {
+                        // SDL's third-party path: this reply is what enables
+                        // sensors and sets the motion scaling numerators.
+                        let _ = self
+                            .device
+                            .reply_get_report(id, 0, &capabilities_report());
+                    } else {
+                        let _ = self.device.reply_get_report(id, ENODATA, &[]);
+                    }
+                }
+                other => {
+                    eprintln!("ira-input: virtual DS4 event: {other:?}");
+                }
             }
         }
         Ok(())
@@ -194,8 +237,8 @@ impl Ds4UhidDevice {
 #[cfg(test)]
 mod tests {
     use super::{
-        hat_value, usb_state_report, ACCEL_COUNTS_PER_G, GRAVITY_MS2, GYRO_COUNTS_PER_DPS,
-        REPORT_DESCRIPTOR, USB_STATE_REPORT_LEN,
+        capabilities_report, hat_value, usb_state_report, ACCEL_COUNTS_PER_G, GRAVITY_MS2,
+        GYRO_COUNTS_PER_DPS, REPORT_DESCRIPTOR, USB_STATE_REPORT_LEN,
     };
     use crate::motion_udp::{MotionSample, PadState};
 
@@ -285,6 +328,20 @@ mod tests {
         assert_eq!(read_i16(23), 0);
         let tick = u16::from_le_bytes([report[10], report[11]]);
         assert_eq!(tick, 30_000);
+    }
+
+    #[test]
+    fn test_capabilities_report_matches_sdl_third_party_probe() {
+        let r = capabilities_report();
+        assert_eq!(r[0], 0x03);
+        assert_eq!(r[2], 0x27);
+        assert_eq!(r[4] & 0x02, 0x02); // sensors enabled
+        let read_u16 =
+            |offset: usize| u16::from_le_bytes([r[offset], r[offset + 1]]);
+        assert_eq!(read_u16(10), 1); // gyro numerator
+        assert_eq!(read_u16(12), 16); // gyro denominator: counts per deg/s
+        assert_eq!(read_u16(14), 1); // accel numerator
+        assert_eq!(read_u16(16), 8192); // accel denominator: counts per g
     }
 
     #[test]

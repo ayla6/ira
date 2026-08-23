@@ -23,6 +23,8 @@ const UHID_SET_REPORT: u32 = 13;
 
 /// BUS_USB from linux/input.h: hidapi treats USB devices as wired.
 pub const BUS_USB: u16 = 0x03;
+/// enum uhid_report_type: feature reports carry configuration both ways.
+pub const FEATURE_REPORT: u8 = 0;
 
 const NAME_LEN: usize = 128;
 const PHYS_LEN: usize = 64;

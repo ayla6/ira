@@ -28,13 +28,38 @@ struct GyroWidgets {
     smoothing: adw::SwitchRow,
 }
 
+/// The profile-level motion transport rows. The editor keeps this handle so
+/// [`refresh_motion_rows`] can re-evaluate visibility whenever the profile's
+/// backend changes.
+#[derive(Clone)]
+pub(super) struct MotionRows {
+    pub(super) udp: adw::SwitchRow,
+    pub(super) native: adw::SwitchRow,
+    pub(super) dsu_note: adw::ActionRow,
+}
+
+impl MotionRows {
+    fn apply_backend(&self, backend: VirtualGamepadBackend) {
+        let dsu = backend == VirtualGamepadBackend::Dsu;
+        // With the DSU backend the cemuhook stream IS the transport for the
+        // whole controller, so neither switch is an option anymore.
+        self.udp.set_visible(!dsu);
+        self.native.set_visible(!dsu);
+        self.dsu_note.set_visible(dsu);
+    }
+}
+
+pub(super) fn refresh_motion_rows(rows: &MotionRows, backend: VirtualGamepadBackend) {
+    rows.apply_backend(backend);
+}
+
 pub(super) fn add_gyro_group(
     page: &gtk4::Box,
     gyro: &Rc<RefCell<GyroConfig>>,
     profile: &Rc<RefCell<InputProfile>>,
     device: Option<&DeviceInfo>,
     on_dirty: &Rc<dyn Fn()>,
-) {
+) -> MotionRows {
     let group = adw::PreferencesGroup::new();
     group.set_title(&crate::tr!("Gyro"));
     group.set_description(Some(&crate::tr!(
@@ -147,7 +172,7 @@ pub(super) fn add_gyro_group(
     let native_motion = switch_row(
         &crate::tr!("Native motion sensors"),
         Some(&crate::tr!(
-            "Expose the sensors as raw evdev axes next to the virtual pad. Experimental: emulators cannot read them yet until SDL and the kernel support uinput motion"
+            "Expose the sensors as raw evdev axes next to the virtual pad; emulators cannot read them yet until SDL and the kernel support uinput motion"
         )),
         profile.borrow().native_motion,
         {
@@ -159,6 +184,17 @@ pub(super) fn add_gyro_group(
             })
         },
     );
+    native_motion.add_suffix(&experimental_badge());
+
+    // DSU is an output mode, not a toggle: picking it means the whole
+    // controller travels the cemuhook stream, so both switches above give
+    // way to this note.
+    let dsu_note = adw::ActionRow::builder()
+        .title(crate::tr!("Cemuhook stream (DSU output mode)"))
+        .subtitle(crate::tr!(
+            "The entire controller — buttons, sticks, triggers and motion — is served on UDP port 26760 while a mapped game runs; select the DSU client in the emulator as its controller"
+        ))
+        .build();
 
     update_dependency_rows(&widgets, gyro.borrow().enabled);
 
@@ -178,8 +214,25 @@ pub(super) fn add_gyro_group(
     for row in rows {
         group.add(row);
     }
+    group.add(&dsu_note);
     page.append(&group);
     connect_gyro_changes(&widgets, &button_options, gyro, on_dirty);
+
+    let motion_rows = MotionRows {
+        udp,
+        native: native_motion,
+        dsu_note,
+    };
+    motion_rows.apply_backend(profile.borrow().backend);
+    motion_rows
+}
+
+/// Small orange pill marking a setting as not production-grade yet.
+fn experimental_badge() -> gtk4::Label {
+    let badge = gtk4::Label::new(Some(&crate::tr!("Experimental")));
+    badge.add_css_class(super::css::CSS_EXPERIMENTAL_BADGE);
+    badge.set_valign(gtk4::Align::Center);
+    badge
 }
 
 fn connect_gyro_changes(

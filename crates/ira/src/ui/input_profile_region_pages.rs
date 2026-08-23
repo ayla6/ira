@@ -29,10 +29,12 @@ pub(crate) struct PagesCtx {
 }
 
 /// Handle to the region page contents; the Gyro and Action Sets pages are
-/// static and stay inside the editor shell.
+/// static and stay inside the editor shell. `motion_rows` is refreshed from
+/// here because its visibility follows the profile's output mode.
 #[derive(Clone)]
 pub(crate) struct RegionPages {
     pub region_boxes: Vec<gtk4::Box>,
+    pub motion_rows: super::input_profile_gyro_card::MotionRows,
 }
 
 pub(crate) fn region_sources(region: Region, device: Option<&ira_input::DeviceInfo>) -> Vec<InputSource> {
@@ -117,6 +119,10 @@ pub(crate) fn rebuild_region_pages(ctx: &PagesCtx, pages: &RegionPages) {
             page.append(&swap_group(ctx, &pairs));
         }
     }
+    super::input_profile_gyro_card::refresh_motion_rows(
+        &pages.motion_rows,
+        ctx.profile.borrow().backend,
+    );
 }
 
 /// Steam-style section behavior: "Default" while every input of the region
@@ -515,6 +521,8 @@ mod gtk_repro {
     // and watch stderr; the fixed bug was adw::ButtonContent suffixes, whose
     // construction inside preferences groups finalized widgets GTK still
     // touched (get_parent/add_css_class pairs per page per rebuild).
+    // GTK initializes once per process, so run the tests in this module one
+    // filter at a time.
     #[test]
     #[ignore]
     fn repro_region_rebuild_criticals() {
@@ -559,7 +567,15 @@ mod gtk_repro {
             ));
             region_boxes.push(content);
         }
-        let pages = RegionPages { region_boxes };
+        let motion_rows = super::super::input_profile_gyro_card::MotionRows {
+            udp: adw::SwitchRow::default(),
+            native: adw::SwitchRow::default(),
+            dsu_note: adw::ActionRow::default(),
+        };
+        let pages = RegionPages {
+            region_boxes,
+            motion_rows,
+        };
         window.present();
         let main = gtk4::glib::MainContext::default();
         for _ in 0..3 {
@@ -573,6 +589,49 @@ mod gtk_repro {
                 while main.iteration(false) {}
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
+        }
+        window.close();
+    }
+
+    // Same class of check for the motion rows: the experimental badge is a
+    // plain label suffix on a SwitchRow and both switches get shown/hidden
+    // on every backend change; run ignored like its sibling above.
+    #[test]
+    #[ignore]
+    fn repro_motion_rows_visibility_criticals() {
+        let _ = gtk4::init();
+        let _ = adw::init();
+        let window = adw::Window::new();
+        let group = adw::PreferencesGroup::new();
+        let motion_rows = super::super::input_profile_gyro_card::MotionRows {
+            udp: adw::SwitchRow::default(),
+            native: adw::SwitchRow::default(),
+            dsu_note: adw::ActionRow::default(),
+        };
+        group.add(&motion_rows.udp);
+        group.add(&motion_rows.native);
+        let badge = gtk4::Label::new(Some("Experimental"));
+        badge.add_css_class("experimental-badge");
+        motion_rows.native.add_suffix(&badge);
+        group.add(&motion_rows.dsu_note);
+        let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        root.append(&group);
+        window.set_content(Some(&root));
+        window.present();
+
+        super::super::input_profile_gyro_card::refresh_motion_rows(
+            &motion_rows,
+            VirtualGamepadBackend::Dsu,
+        );
+        super::super::input_profile_gyro_card::refresh_motion_rows(
+            &motion_rows,
+            VirtualGamepadBackend::DualShock4,
+        );
+        let main = gtk4::glib::MainContext::default();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
+        while std::time::Instant::now() < deadline {
+            while main.iteration(false) {}
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
         window.close();
     }

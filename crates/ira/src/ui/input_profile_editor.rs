@@ -243,7 +243,7 @@ fn build_pages(
         &crate::tr!("Gyro"),
         "gyro",
     ));
-    add_gyro_group(&gyro_box, gyro, &ctx.profile, ctx.device.as_ref(), &ctx.on_dirty);
+    let motion_rows = add_gyro_group(&gyro_box, gyro, &ctx.profile, ctx.device.as_ref(), &ctx.on_dirty);
     add_calibration_group(
         &gyro_box,
         ira_input::calibration_store_path(save_dir),
@@ -260,7 +260,10 @@ fn build_pages(
     ));
     sets_box.append(&build_sets_page(ctx, &ctx.on_dirty));
 
-    RegionPages { region_boxes }
+    RegionPages {
+        region_boxes,
+        motion_rows,
+    }
 }
 
 fn scrolling_page() -> (gtk4::ScrolledWindow, gtk4::Box) {

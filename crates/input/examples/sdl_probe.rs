@@ -58,6 +58,16 @@ struct Api {
 /// the resulting vectors reveal the device's sensor frame without guessing.
 fn capture_poses(api: &Api, gamepad: *mut c_void) {
     const WINDOW_MS: u64 = 4000;
+    // SDL returns zeros for disabled sensors; the streaming path below
+    // enables them, so the pose windows must do the same.
+    for sensor in [SDL_SENSOR_GYRO, SDL_SENSOR_ACCEL] {
+        if unsafe { (api.has_sensor)(gamepad, sensor) }
+            && !unsafe { (api.set_sensor_enabled)(gamepad, sensor, true) }
+        {
+            println!("probe: FAIL - could not enable sensor {sensor}");
+            return;
+        }
+    }
     let phases = [
         ("hold flat, buttons up, grips level", 0),
         ("tilt forward 90deg (triggers toward the desk)", 1),
@@ -96,6 +106,9 @@ fn capture_poses(api: &Api, gamepad: *mut c_void) {
             samples);
     }
     println!("\ncapture done - paste all three lines back");
+    for sensor in [SDL_SENSOR_GYRO, SDL_SENSOR_ACCEL] {
+        unsafe { (api.set_sensor_enabled)(gamepad, sensor, false) };
+    }
 }
 
 fn main() {

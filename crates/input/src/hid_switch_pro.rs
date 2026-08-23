@@ -85,13 +85,20 @@ impl SwitchProUhidDevice {
     }
 
     /// Answers kernel requests (the hid-nintendo handshake) and streams one
-    /// 0x30 standard report. Call per tick; motion uses the SDL frame.
+    /// 0x30 standard report. Call per tick; motion arrives in the SDL
+    /// frame and leaves in the Nintendo device frame.
     pub fn tick(
         &mut self,
         pad: &PadState,
         accel_g: [f32; 3],
         gyro_dps: [f32; 3],
     ) -> io::Result<()> {
+        // Consumers of Nintendo devices apply SDL's Nintendo axis shuffle
+        // (sdl = [-dev_y, dev_z, -dev_x]); feeding SDL-frame data through
+        // a Nintendo device would be shuffled twice. Pre-shuffle into the
+        // device frame so the consumer's shuffle lands on the SDL frame.
+        let accel_g = nintendo_device_frame(accel_g);
+        let gyro_dps = nintendo_device_frame(gyro_dps);
         for event in self.device.poll()? {
             match event {
                 UhidEvent::OutputReport { data } => {
@@ -119,6 +126,12 @@ impl SwitchProUhidDevice {
         self.timer = self.timer.wrapping_add(1);
         self.device.send_input_report(&report)
     }
+}
+
+/// SDL reshapes Nintendo sensor axes as `sdl = [-dev_y, dev_z, -dev_x]`;
+/// the inverse mapping turns SDL-frame data into device-frame values.
+fn nintendo_device_frame(values: [f32; 3]) -> [f32; 3] {
+    [-values[2], -values[0], values[1]]
 }
 
 /// Builds the input report answering one kernel output report: USB
@@ -382,6 +395,14 @@ mod tests {
         let offset = 13 + 2 * 12 + 4; // skip 2 samples, accel z slot
         let raw = i16::from_le_bytes([report[offset], report[offset + 1]]);
         assert_eq!(raw, 4096);
+    }
+
+    #[test]
+    fn test_device_frame_round_trips_sdl_shuffle() {
+        let device = super::nintendo_device_frame([1.0, 2.0, 3.0]);
+        // SDL's Nintendo shuffle: [-dev_y, dev_z, -dev_x]
+        let sdl = [-device[1], device[2], -device[0]];
+        assert_eq!(sdl, [1.0, 2.0, 3.0]);
     }
 
     #[test]

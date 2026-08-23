@@ -24,6 +24,7 @@ type SdlSensorData =
     unsafe extern "C" fn(*mut c_void, c_int, *mut f32, c_int) -> bool;
 type SdlPump = unsafe extern "C" fn();
 type SdlUpdateSensors = unsafe extern "C" fn();
+type SdlGetType = unsafe extern "C" fn(*mut c_void) -> c_int;
 type SdlGetError = unsafe extern "C" fn() -> *const c_char;
 #[repr(C)]
 struct SdlVersion { major: i32, minor: i32, patch: i32 }
@@ -41,6 +42,7 @@ struct Api {
     open_gamepad: SdlOpenGamepad,
     close_gamepad: SdlCloseGamepad,
     get_name: SdlGetName,
+    get_type: SdlGetType,
     get_path: SdlGetName,
     has_sensor: SdlHasSensor,
     set_sensor_enabled: SdlSetSensorEnabled,
@@ -76,6 +78,7 @@ fn main() {
         open_gamepad: sym!("SDL_OpenGamepad", SdlOpenGamepad),
         close_gamepad: sym!("SDL_CloseGamepad", SdlCloseGamepad),
         get_name: sym!("SDL_GetGamepadName", SdlGetName),
+        get_type: sym!("SDL_GetGamepadType", SdlGetType),
         get_path: sym!("SDL_GetGamepadPath", SdlGetName),
         has_sensor: sym!("SDL_GamepadHasSensor", SdlHasSensor),
         set_sensor_enabled: sym!("SDL_SetGamepadSensorEnabled", SdlSetSensorEnabled),
@@ -135,8 +138,15 @@ fn main() {
         };
         let has_gyro = unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_GYRO) };
         let has_accel = unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_ACCEL) };
-        println!("  [{id}] {name} ({path}) gyro={has_gyro} accel={has_accel}");
-        if (name.contains("Ira Virtual") || name.contains("Nintendo Switch Pro")) && target.is_none() {
+        let gamepad_type = unsafe { ((api.get_type)(gamepad)) };
+        println!("  [{id}] {name} ({path}) type={gamepad_type} gyro={has_gyro} accel={has_accel}");
+        let wanted = std::env::var("PROBE_TARGET").unwrap_or_default();
+        let matches = if wanted.is_empty() {
+            name.contains("Ira Virtual") || name.contains("Nintendo Switch Pro")
+        } else {
+            name.contains(&wanted)
+        };
+        if matches && target.is_none() {
             target = Some(id);
         }
         unsafe { (api.close_gamepad)(gamepad) };

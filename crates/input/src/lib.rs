@@ -38,8 +38,10 @@ pub use motion_udp::{
 mod motion_device;
 pub use motion_device::VirtualMotionSensor;
 mod hid_imu;
+mod hid_switch_pro;
 pub use hid_ds4::Ds4UhidDevice;
 pub use hid_imu::ImuUhidDevice;
+pub use hid_switch_pro::SwitchProUhidDevice;
 pub use uhid::{UhidDevice, BUS_USB};
 pub mod vdf;
 pub use vdf::{import_vdf, import_vdf_file, ImportReport};

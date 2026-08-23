@@ -477,15 +477,19 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let mut keyboard = create_keyboard(mapper.profile().keyboard_keycodes())?;
     let mut mouse = create_mouse(mapper.profile().uses_mouse())?;
     let sensor = gamepad.as_ref().and_then(|gamepad| open_sensor(gamepad.info()));
-    // When the experimental uhid DualShock4 owns the controller, the uinput
-    // pad must not exist too or games see two controllers and often bind
-    // the motionless one. Its outputs still reach the pad shadow that both
-    // the hidraw reports and the cemuhook stream read from.
+    // When an experimental uhid controller owns the session (DS4 or the
+    // hid-nintendo Switch Pro), the uinput pad must not exist too or games
+    // see two controllers and often bind the motionless one. Outputs still
+    // reach the pad shadow that the hidraw reports and the cemuhook stream
+    // read from.
     let native_ds4 = sensor.is_some()
         && mapper.profile().native_motion
         && mapper.profile().backend == ira_input::VirtualGamepadBackend::DualShock4;
-    let mut virtual_gamepad = if native_ds4 {
-        eprintln!("ira-input: uinput gamepad suppressed; the uhid DS4 is the controller");
+    let native_switch_pro = sensor.is_some()
+        && mapper.profile().native_motion
+        && mapper.profile().backend == ira_input::VirtualGamepadBackend::SwitchPro;
+    let mut virtual_gamepad = if native_ds4 || native_switch_pro {
+        eprintln!("ira-input: uinput gamepad suppressed; the uhid controller is the controller");
         VirtualGamepad::shadow_only(mapper.profile().backend)
     } else {
         VirtualGamepad::create_for_backend(mapper.profile().backend)
@@ -564,6 +568,21 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         }
     }
     let ever_had_sensor = sensor.is_some();
+    // A virtual *real* Switch Pro: hid-nintendo claims it, completes its
+    // handshake against our answers and builds the paired IMU input node
+    // itself — so games, flatpaks included, see genuine hardware.
+    let mut switch_pro_hid = None;
+    if native_switch_pro {
+        match ira_input::SwitchProUhidDevice::create() {
+            Ok(device) => {
+                eprintln!("ira-input: virtual Switch Pro claimed by hid-nintendo");
+                switch_pro_hid = Some(device);
+            }
+            Err(error) => {
+                eprintln!("ira-input: failed to create virtual Switch Pro: {error}");
+            }
+        }
+    }
     let mut pipeline = SensorPipeline {
         sensor,
         gyro_processor,
@@ -572,6 +591,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         motion_device,
         ds4_hid,
         imu_hid,
+        switch_pro_hid,
         ever_had_sensor,
     };
     // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
@@ -1468,6 +1488,7 @@ struct SensorPipeline {
     motion_device: Option<ira_input::VirtualMotionSensor>,
     ds4_hid: Option<ira_input::Ds4UhidDevice>,
     imu_hid: Option<ira_input::ImuUhidDevice>,
+    switch_pro_hid: Option<ira_input::SwitchProUhidDevice>,
     /// Whether a gyro sensor was available at startup. Gyroless DSU
     /// sessions still stream whole-controller frames with zeroed motion.
     ever_had_sensor: bool,
@@ -1559,6 +1580,21 @@ fn process_tick(
                 eprintln!("ira-input: virtual DS4 stopped: {error}");
                 pipeline.ds4_hid = None;
             }
+        }
+    }
+    if pipeline.switch_pro_hid.is_some() {
+        let (gyro, accel, _) = latest.unwrap_or(zero);
+        const GRAVITY: f32 = 9.80665;
+        let accel_g = [accel[0] / GRAVITY, accel[1] / GRAVITY, accel[2] / GRAVITY];
+        let gyro_dps = [
+            gyro[0].to_degrees(),
+            gyro[1].to_degrees(),
+            gyro[2].to_degrees(),
+        ];
+        let switch_pro = pipeline.switch_pro_hid.as_mut().unwrap();
+        if let Err(error) = switch_pro.tick(targets.pad, accel_g, gyro_dps) {
+            eprintln!("ira-input: virtual Switch Pro stopped: {error}");
+            pipeline.switch_pro_hid = None;
         }
     }
     if pipeline.imu_hid.is_some() {

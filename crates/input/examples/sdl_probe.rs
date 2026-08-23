@@ -136,7 +136,7 @@ fn main() {
         let has_gyro = unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_GYRO) };
         let has_accel = unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_ACCEL) };
         println!("  [{id}] {name} ({path}) gyro={has_gyro} accel={has_accel}");
-        if name.contains("Ira Virtual") && target.is_none() {
+        if (name.contains("Ira Virtual") || name.contains("Nintendo Switch Pro")) && target.is_none() {
             target = Some(id);
         }
         unsafe { (api.close_gamepad)(gamepad) };

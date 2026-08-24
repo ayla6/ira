@@ -117,9 +117,10 @@ pub(crate) fn supported_button_sources(device: Option<&ira_input::DeviceInfo>) -
         .collect()
 }
 
-/// One input's summary line: "Click → A · Double press → Space".
+/// One input's summary line: "Trigger · Soft pull → A · Click → Space".
+/// Sticks and triggers lead with their analog mode; activators follow.
 pub(crate) fn mapping_summary(mapping: &ira_input::InputMapping) -> String {
-    let parts: Vec<String> = mapping
+    let mut parts: Vec<String> = mapping
         .activators
         .iter()
         .map(|activator| {
@@ -135,10 +136,23 @@ pub(crate) fn mapping_summary(mapping: &ira_input::InputMapping) -> String {
             )
         })
         .collect();
+    if let Some(mode) = &mapping.mode {
+        parts.insert(0, mode_summary(mode));
+    }
     if parts.is_empty() {
         return crate::tr!("Not mapped");
     }
     parts.join(" · ")
+}
+
+fn mode_summary(mode: &ira_input::SourceMode) -> String {
+    match mode {
+        ira_input::SourceMode::Joystick { .. } => crate::tr!("Joystick"),
+        ira_input::SourceMode::Dpad { .. } => crate::tr!("D-pad"),
+        ira_input::SourceMode::Mouse { .. } => crate::tr!("Joystick Mouse"),
+        ira_input::SourceMode::Flickstick { .. } => crate::tr!("Flick Stick"),
+        ira_input::SourceMode::Trigger { .. } => crate::tr!("Trigger"),
+    }
 }
 
 pub(crate) fn activator_kind_label(kind: &ira_input::ActivatorKind) -> String {

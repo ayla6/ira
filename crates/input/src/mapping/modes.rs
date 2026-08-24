@@ -323,4 +323,55 @@ mod tests {
             }
         )));
     }
+
+    #[test]
+    fn test_mode_shift_swaps_stick_behavior_while_held() {
+        // What the mode-shift editor writes: a shifted behavior that
+        // replaces the stick's base mode while the trigger is held.
+        let mut profile = mode_profile(SourceMode::Joystick {
+            output: StickOutput::Left,
+            deadzone_inner: 0.1,
+            deadzone_outer: 1.0,
+            curve: 1.0,
+        });
+        profile.action_sets[0].inputs[0].mode_shifts.push(crate::profile::ModeShift {
+            trigger: InputSource::Button(GamepadButton::LeftTrigger),
+            mode: Some(SourceMode::Dpad { threshold: 0.5 }),
+            activators: Vec::new(),
+        });
+        let mut engine = MappingEngine::new(profile).unwrap();
+
+        engine.process(stick(InputSource::Button(GamepadButton::LeftTrigger), 1.0));
+        engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), 1.0));
+        let events = engine.tick(4_000);
+        // Shifted: the stick digitalizes to dpad presses, no axis output.
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadButton {
+                button: GamepadButton::DpadUp,
+                pressed: true
+            }
+        )));
+        assert!(events
+            .iter()
+            .all(|event| !matches!(event, OutputEvent::GamepadAxis { .. })));
+
+        // Shift released: the dpad press lets go and the joystick returns.
+        engine.process(stick(InputSource::Button(GamepadButton::LeftTrigger), 0.0));
+        let events = engine.tick(8_000);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadButton {
+                button: GamepadButton::DpadUp,
+                pressed: false
+            }
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadAxis {
+                axis: GamepadAxis::LeftY,
+                value
+            } if *value > 0.5
+        )));
+    }
 }

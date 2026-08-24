@@ -266,7 +266,9 @@ pub enum MouseButton {
 pub enum OutputAction {
     GamepadButton(GamepadButton),
     GamepadAxis(GamepadAxis),
-    Keyboard { keycode: u16 },
+    Keyboard {
+        keycode: u16,
+    },
     MouseButton(MouseButton),
     MouseAxis(MouseAxis),
     /// One discrete scroll-wheel detent per activation (Steam's
@@ -288,7 +290,9 @@ pub enum OutputAction {
     },
     /// Engine-internal: while the activator's condition holds, `target`
     /// uses the referenced mode shift.
-    ModeShiftActivate { target: InputSource },
+    ModeShiftActivate {
+        target: InputSource,
+    },
 }
 
 impl OutputAction {
@@ -805,7 +809,11 @@ impl InputProfile {
             }
         }
         for (layer_index, layer) in self.action_layers.iter().enumerate() {
-            if !self.action_sets.iter().any(|set| set.name == layer.parent_set) {
+            if !self
+                .action_sets
+                .iter()
+                .any(|set| set.name == layer.parent_set)
+            {
                 return Err(format!(
                     "action layer {layer_index} references unknown parent set '{}'",
                     layer.parent_set
@@ -849,9 +857,7 @@ impl InputProfile {
             }
             for output in &activator.outputs {
                 match output {
-                    OutputAction::SwitchActionSet(target)
-                        if *target >= self.action_sets.len() =>
-                    {
+                    OutputAction::SwitchActionSet(target) if *target >= self.action_sets.len() => {
                         return Err(format!(
                             "{label}: switch-action-set target {target} out of range"
                         ));
@@ -859,9 +865,7 @@ impl InputProfile {
                     OutputAction::EnableLayer { layer, .. }
                         if *layer >= self.action_layers.len() =>
                     {
-                        return Err(format!(
-                            "{label}: enable-layer target {layer} out of range"
-                        ));
+                        return Err(format!("{label}: enable-layer target {layer} out of range"));
                     }
                     _ => {}
                 }
@@ -888,13 +892,18 @@ impl InputProfile {
             .action_sets
             .iter()
             .flat_map(|set| set.inputs.iter())
-            .chain(self.action_layers.iter().flat_map(|layer| layer.inputs.iter()))
+            .chain(
+                self.action_layers
+                    .iter()
+                    .flat_map(|layer| layer.inputs.iter()),
+            )
         {
-            for activator in input
-                .activators
-                .iter()
-                .chain(input.mode_shifts.iter().flat_map(|shift| shift.activators.iter()))
-            {
+            for activator in input.activators.iter().chain(
+                input
+                    .mode_shifts
+                    .iter()
+                    .flat_map(|shift| shift.activators.iter()),
+            ) {
                 outputs.extend(activator.outputs.iter());
             }
         }
@@ -944,11 +953,7 @@ impl InputProfile {
                         ..
                     }),
                     Axis(x_axis @ (GamepadAxis::LeftX | GamepadAxis::RightX)),
-                ) => bindings.extend(joystick_mode_bindings(
-                    x_axis,
-                    *deadzone_inner,
-                    *curve,
-                )),
+                ) => bindings.extend(joystick_mode_bindings(x_axis, *deadzone_inner, *curve)),
                 (Some(SourceMode::Mouse { sensitivity }), _) => {
                     bindings.extend(stick_mouse_bindings(input.source, *sensitivity));
                 }
@@ -962,7 +967,10 @@ impl InputProfile {
                         bindings.push(binding);
                     }
                 }
-                (Some(SourceMode::Dpad { .. }), Axis(axis @ (GamepadAxis::LeftX | GamepadAxis::RightX))) => {
+                (
+                    Some(SourceMode::Dpad { .. }),
+                    Axis(axis @ (GamepadAxis::LeftX | GamepadAxis::RightX)),
+                ) => {
                     bindings.extend(stick_dpad_bindings(axis));
                 }
                 (Some(SourceMode::Flickstick { .. }), _) => eprintln!(
@@ -1168,9 +1176,7 @@ fn joystick_mode_bindings(x_axis: GamepadAxis, deadzone: f32, curve: f32) -> Vec
 /// flat representation and are skipped loudly.
 fn stick_mouse_bindings(source: InputSource, sensitivity: f32) -> Vec<Binding> {
     let Axis(x_axis) = source else {
-        eprintln!(
-            "ira-input: editor cannot display mouse mode on {source:?}; kept unchanged"
-        );
+        eprintln!("ira-input: editor cannot display mouse mode on {source:?}; kept unchanged");
         return Vec::new();
     };
     let y_axis = if x_axis == GamepadAxis::RightX {
@@ -1178,17 +1184,14 @@ fn stick_mouse_bindings(source: InputSource, sensitivity: f32) -> Vec<Binding> {
     } else {
         GamepadAxis::LeftY
     };
-    [
-        (x_axis, MouseAxis::X),
-        (y_axis, MouseAxis::Y),
-    ]
-    .into_iter()
-    .map(|(axis, mouse)| {
-        let mut binding = Binding::new(InputSource::Axis(axis), OutputAction::MouseAxis(mouse));
-        binding.transform.sensitivity = sensitivity;
-        binding
-    })
-    .collect()
+    [(x_axis, MouseAxis::X), (y_axis, MouseAxis::Y)]
+        .into_iter()
+        .map(|(axis, mouse)| {
+            let mut binding = Binding::new(InputSource::Axis(axis), OutputAction::MouseAxis(mouse));
+            binding.transform.sensitivity = sensitivity;
+            binding
+        })
+        .collect()
 }
 
 /// Flat-form bindings for a button input's activators. Only the shapes the
@@ -1197,20 +1200,22 @@ fn button_activator_bindings(input: &InputMapping) -> Vec<Binding> {
     input
         .activators
         .iter()
-        .filter_map(|activator| match (&activator.kind, activator.outputs.as_slice()) {
-            (ActivatorKind::FullPress, [output]) => {
-                let mut binding = Binding::new(input.source, output.clone());
-                binding.activation = activator.activation.clone();
-                Some(binding)
-            }
-            _ => {
-                eprintln!(
-                    "ira-input: editor cannot display activator {:?} on {:?}; kept unchanged",
-                    activator.kind, input.source
-                );
-                None
-            }
-        })
+        .filter_map(
+            |activator| match (&activator.kind, activator.outputs.as_slice()) {
+                (ActivatorKind::FullPress, [output]) => {
+                    let mut binding = Binding::new(input.source, output.clone());
+                    binding.activation = activator.activation.clone();
+                    Some(binding)
+                }
+                _ => {
+                    eprintln!(
+                        "ira-input: editor cannot display activator {:?} on {:?}; kept unchanged",
+                        activator.kind, input.source
+                    );
+                    None
+                }
+            },
+        )
         .collect()
 }
 
@@ -1685,9 +1690,7 @@ mod tests {
                                 GamepadButton::A,
                             )]),
                             Activator {
-                                kind: ActivatorKind::DoublePress {
-                                    window_ms: 280,
-                                },
+                                kind: ActivatorKind::DoublePress { window_ms: 280 },
                                 outputs: vec![OutputAction::Keyboard { keycode: 32 }],
                                 activation: Activation::Always,
                                 settings: ActivatorSettings::default(),

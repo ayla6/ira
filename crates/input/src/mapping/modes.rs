@@ -59,8 +59,7 @@ impl MappingEngine {
                     let Some((x, y)) = self.stick_pair(x_axis, y_axis) else {
                         continue;
                     };
-                    let (x, y) =
-                        apply_radial_deadzone(x, y, deadzone_inner, deadzone_outer, curve);
+                    let (x, y) = apply_radial_deadzone(x, y, deadzone_inner, deadzone_outer, curve);
                     let (target_x, target_y) = match output {
                         StickOutput::Left => (GamepadAxis::LeftX, GamepadAxis::LeftY),
                         StickOutput::Right => (GamepadAxis::RightX, GamepadAxis::RightY),
@@ -103,8 +102,16 @@ impl MappingEngine {
             let Some((x, y)) = self.stick_pair(x_axis, y_axis) else {
                 continue;
             };
-            push_mouse_axis(output, MouseAxis::X, x * sensitivity * STICK_MOUSE_COUNTS_PER_SECOND * dt);
-            push_mouse_axis(output, MouseAxis::Y, y * sensitivity * STICK_MOUSE_COUNTS_PER_SECOND * dt);
+            push_mouse_axis(
+                output,
+                MouseAxis::X,
+                x * sensitivity * STICK_MOUSE_COUNTS_PER_SECOND * dt,
+            );
+            push_mouse_axis(
+                output,
+                MouseAxis::Y,
+                y * sensitivity * STICK_MOUSE_COUNTS_PER_SECOND * dt,
+            );
         }
     }
 
@@ -150,7 +157,8 @@ impl MappingEngine {
                 if now_pressed {
                     self.mode_dpad_pressed.push(button);
                 } else {
-                    self.mode_dpad_pressed.retain(|candidate| *candidate != button);
+                    self.mode_dpad_pressed
+                        .retain(|candidate| *candidate != button);
                 }
             }
         }
@@ -197,13 +205,7 @@ fn trigger_axis(source: InputSource) -> Option<GamepadAxis> {
 /// Radial deadzone: deflection below the inner radius reads as zero, the
 /// outer radius saturates, and between them the magnitude is rescaled and
 /// curved while the direction is preserved.
-fn apply_radial_deadzone(
-    x: f32,
-    y: f32,
-    inner: f32,
-    outer: f32,
-    curve: f32,
-) -> (f32, f32) {
+fn apply_radial_deadzone(x: f32, y: f32, inner: f32, outer: f32, curve: f32) -> (f32, f32) {
     let magnitude = (x * x + y * y).sqrt();
     if magnitude <= inner || magnitude < VALUE_EPSILON {
         return (0.0, 0.0);
@@ -236,9 +238,9 @@ mod tests {
                     source: InputSource::Axis(GamepadAxis::LeftX),
                     mode: Some(mode),
                     mode_shifts: Vec::new(),
-                    activators: vec![Activator::full_press(vec![
-                        OutputAction::GamepadButton(GamepadButton::DpadUp),
-                    ])],
+                    activators: vec![Activator::full_press(vec![OutputAction::GamepadButton(
+                        GamepadButton::DpadUp,
+                    )])],
                 }],
             }],
             ..InputProfile::default()
@@ -300,19 +302,25 @@ mod tests {
         let events = engine.tick(4_000);
         assert!(events.iter().any(|event| matches!(
             event,
-            OutputEvent::GamepadButton { button: GamepadButton::DpadUp, pressed: true }
+            OutputEvent::GamepadButton {
+                button: GamepadButton::DpadUp,
+                pressed: true
+            }
         )));
         // Sustained deflection emits nothing further.
-        assert!(engine.tick(8_000).iter().all(|event| !matches!(
-            event,
-            OutputEvent::GamepadButton { .. }
-        )));
+        assert!(engine
+            .tick(8_000)
+            .iter()
+            .all(|event| !matches!(event, OutputEvent::GamepadButton { .. })));
         // Return to center releases.
         engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), 0.0));
         let events = engine.tick(12_000);
         assert!(events.iter().any(|event| matches!(
             event,
-            OutputEvent::GamepadButton { button: GamepadButton::DpadUp, pressed: false }
+            OutputEvent::GamepadButton {
+                button: GamepadButton::DpadUp,
+                pressed: false
+            }
         )));
     }
 }

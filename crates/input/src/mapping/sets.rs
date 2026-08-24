@@ -202,7 +202,7 @@ mod tests {
     use super::*;
     use crate::mapping::{InputEvent, MappingEngine, OutputEvent};
     use crate::profile::{
-        Activator, ActivatorKind, ActivatorSettings, ActionSet, ActionSetLayer, Activation,
+        ActionSet, ActionSetLayer, Activation, Activator, ActivatorKind, ActivatorSettings,
         Binding, GamepadAxis, GamepadButton, GyroConfig, InputMapping, InputProfile, InputSource,
         OutputAction,
     };
@@ -265,11 +265,16 @@ mod tests {
             source: InputSource::Button(GamepadButton::X),
             mode: None,
             mode_shifts: Vec::new(),
-            activators: vec![Activator::full_press(vec![OutputAction::SwitchActionSet(1)])],
+            activators: vec![Activator::full_press(vec![OutputAction::SwitchActionSet(
+                1,
+            )])],
         };
         let mut first = make_set("On foot", GamepadButton::B);
         first.inputs.push(switcher);
-        let profile = profile_with_sets(vec![first, make_set("In car", GamepadButton::Y)], Vec::new());
+        let profile = profile_with_sets(
+            vec![first, make_set("In car", GamepadButton::Y)],
+            Vec::new(),
+        );
         let mut engine = MappingEngine::new(profile).unwrap();
 
         // Set 0: A -> B.
@@ -360,9 +365,9 @@ mod tests {
         let shifted = crate::profile::ModeShift {
             trigger: InputSource::Button(GamepadButton::LeftTrigger),
             mode: None,
-            activators: vec![Activator::full_press(vec![
-                OutputAction::GamepadButton(GamepadButton::Y),
-            ])],
+            activators: vec![Activator::full_press(vec![OutputAction::GamepadButton(
+                GamepadButton::Y,
+            )])],
         };
         let mut input = InputMapping::simple(
             InputSource::Button(GamepadButton::A),
@@ -386,7 +391,11 @@ mod tests {
             }]
         );
         engine.process(press(InputSource::Button(GamepadButton::A), 0.0, 2_000));
-        engine.process(press(InputSource::Button(GamepadButton::LeftTrigger), 1.0, 3_000));
+        engine.process(press(
+            InputSource::Button(GamepadButton::LeftTrigger),
+            1.0,
+            3_000,
+        ));
         assert_eq!(
             engine.process(press(InputSource::Button(GamepadButton::A), 1.0, 4_000)),
             vec![OutputEvent::GamepadButton {
@@ -477,7 +486,11 @@ mod tests {
         );
         engine.process(press(InputSource::Button(GamepadButton::A), 0.0, 3_000));
         // Trigger held: gate open, the same press fires.
-        engine.process(press(InputSource::Axis(GamepadAxis::LeftTrigger), 0.8, 4_000));
+        engine.process(press(
+            InputSource::Axis(GamepadAxis::LeftTrigger),
+            0.8,
+            4_000,
+        ));
         assert_eq!(
             engine.process(press(InputSource::Button(GamepadButton::A), 1.0, 5_000)),
             vec![OutputEvent::Key {
@@ -486,7 +499,11 @@ mod tests {
             }]
         );
         // Gate flips off mid-hold: the next tick releases the held key.
-        engine.process(press(InputSource::Axis(GamepadAxis::LeftTrigger), 0.0, 6_000));
+        engine.process(press(
+            InputSource::Axis(GamepadAxis::LeftTrigger),
+            0.0,
+            6_000,
+        ));
         assert_eq!(
             engine.tick(7_000),
             vec![OutputEvent::Key {
@@ -509,10 +526,18 @@ mod tests {
             condition: crate::profile::AnalogCondition::MaxedOut,
             threshold: 0.1,
         };
-        engine.process(press(InputSource::Axis(GamepadAxis::RightTrigger), 0.95, 1_000));
+        engine.process(press(
+            InputSource::Axis(GamepadAxis::RightTrigger),
+            0.95,
+            1_000,
+        ));
         assert!(!engine.activation_active(&at_rest));
         assert!(engine.activation_active(&maxed));
-        engine.process(press(InputSource::Axis(GamepadAxis::RightTrigger), 0.0, 2_000));
+        engine.process(press(
+            InputSource::Axis(GamepadAxis::RightTrigger),
+            0.0,
+            2_000,
+        ));
         assert!(engine.activation_active(&at_rest));
         assert!(!engine.activation_active(&maxed));
     }

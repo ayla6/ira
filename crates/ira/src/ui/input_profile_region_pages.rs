@@ -524,7 +524,6 @@ mod gtk_repro {
         }
         let motion_rows = super::super::input_profile_gyro_card::MotionRows {
             native: adw::SwitchRow::default(),
-            dsu_note: adw::ActionRow::default(),
         };
         let pages = RegionPages {
             region_boxes,
@@ -547,9 +546,9 @@ mod gtk_repro {
         window.close();
     }
 
-    // Same class of check for the motion rows: the experimental badge is a
-    // plain label suffix on a SwitchRow and both switches get shown/hidden
-    // on every backend change; run ignored like its sibling above.
+    // Same class of check for the motion row: the experimental badge is a
+    // plain label suffix on a SwitchRow and it gets shown/hidden on every
+    // backend change; run ignored like its sibling above.
     #[test]
     #[ignore]
     fn repro_motion_rows_visibility_criticals() {
@@ -559,13 +558,11 @@ mod gtk_repro {
         let group = adw::PreferencesGroup::new();
         let motion_rows = super::super::input_profile_gyro_card::MotionRows {
             native: adw::SwitchRow::default(),
-            dsu_note: adw::ActionRow::default(),
         };
         group.add(&motion_rows.native);
         let badge = gtk4::Label::new(Some("Experimental"));
         badge.add_css_class("experimental-badge");
         motion_rows.native.add_suffix(&badge);
-        group.add(&motion_rows.dsu_note);
         let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
         root.append(&group);
         window.set_content(Some(&root));

@@ -35,16 +35,13 @@ struct GyroWidgets {
 #[derive(Clone)]
 pub(super) struct MotionRows {
     pub(super) native: adw::SwitchRow,
-    pub(super) dsu_note: adw::ActionRow,
 }
 
 impl MotionRows {
     fn apply_backend(&self, backend: VirtualGamepadBackend) {
-        let dsu = backend == VirtualGamepadBackend::Dsu;
         // With the DSU backend the cemuhook stream IS the transport for the
-        // whole controller, so the switches are not options anymore.
-        self.native.set_visible(!dsu);
-        self.dsu_note.set_visible(dsu);
+        // whole controller, so native motion does not apply.
+        self.native.set_visible(backend != VirtualGamepadBackend::Dsu);
     }
 }
 
@@ -169,16 +166,6 @@ pub(super) fn add_gyro_group(
     );
     native_motion.add_suffix(&experimental_badge());
 
-    // DSU is an output mode, not a toggle: picking it means the whole
-    // controller travels the cemuhook stream, so the switches above give
-    // way to this note.
-    let dsu_note = adw::ActionRow::builder()
-        .title(crate::tr!("Cemuhook stream (DSU output mode)"))
-        .subtitle(crate::tr!(
-            "The entire controller — buttons, sticks, triggers and motion — is served on UDP port 26760 while a mapped game runs; select the DSU client in the emulator as its controller"
-        ))
-        .build();
-
     update_dependency_rows(&widgets, gyro.borrow().enabled);
 
     let rows: [&adw::PreferencesRow; 10] = [
@@ -196,13 +183,11 @@ pub(super) fn add_gyro_group(
     for row in rows {
         group.add(row);
     }
-    group.add(&dsu_note);
     page.append(&group);
     connect_gyro_changes(&widgets, &button_options, gyro, on_dirty);
 
     let motion_rows = MotionRows {
         native: native_motion,
-        dsu_note,
     };
     motion_rows.apply_backend(profile.borrow().backend);
     motion_rows

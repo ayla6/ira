@@ -436,14 +436,12 @@ impl PhysicalGamepad {
         output: &mut Vec<InputEvent>,
     ) {
         let (button, clicked) = match axis {
-            GamepadAxis::LeftTrigger => (
-                GamepadButton::LeftTrigger,
-                &mut self.left_trigger_clicked,
-            ),
-            GamepadAxis::RightTrigger => (
-                GamepadButton::RightTrigger,
-                &mut self.right_trigger_clicked,
-            ),
+            GamepadAxis::LeftTrigger => {
+                (GamepadButton::LeftTrigger, &mut self.left_trigger_clicked)
+            }
+            GamepadAxis::RightTrigger => {
+                (GamepadButton::RightTrigger, &mut self.right_trigger_clicked)
+            }
             _ => return,
         };
         if self.info.supported_buttons.contains(&button) {

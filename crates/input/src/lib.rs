@@ -13,21 +13,21 @@ mod virtual_gamepad;
 mod virtual_keyboard;
 mod virtual_mouse;
 
+pub use calibration::{
+    calibration_store_path, device_key, load_calibration, remove_calibration, save_calibration,
+};
+pub use gyro::{GyroProcessingOptions, GyroProcessor, GyroRates};
 pub use mapping::{InputEvent, MappingEngine, OutputEvent};
 pub use physical::{
     discover_gamepads, ControllerFamily, DeviceInfo, PhysicalGamepad, ReportedInputMode,
 };
 pub use profile::{
-    Activator, ActivatorKind, ActivatorSettings, ActionSet, ActionSetLayer, Activation,
+    ActionSet, ActionSetLayer, Activation, Activator, ActivatorKind, ActivatorSettings,
     AnalogCondition, AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton,
     GyroActivation, GyroCalibration, GyroConfig, GyroOrientation, GyroOutput, InputCategory,
     InputMapping, InputProfile, InputSource, ModeShift, MouseAxis, MouseButton, OutputAction,
     SourceMode, StickOutput, VirtualGamepadBackend, PROFILE_VERSION,
 };
-pub use calibration::{
-    calibration_store_path, device_key, load_calibration, remove_calibration, save_calibration,
-};
-pub use gyro::{GyroProcessingOptions, GyroProcessor, GyroRates};
 pub use registry::ControllerRegistry;
 pub use report_rate::ReportRateEstimator;
 mod focus;
@@ -46,8 +46,8 @@ pub use hid_imu::ImuUhidDevice;
 pub use hid_switch_pro::SwitchProUhidDevice;
 pub use uhid::{UhidDevice, BUS_USB};
 pub mod vdf;
+pub use sensor::{discover_sdl_gamepads, Sdl3SensorBackend, SdlGamepadInfo, SensorSample};
 pub use vdf::{import_vdf, import_vdf_file, ImportReport};
-pub use sensor::{discover_sdl_gamepads, SensorSample, Sdl3SensorBackend, SdlGamepadInfo};
 pub use virtual_gamepad::VirtualGamepad;
 pub use virtual_keyboard::VirtualKeyboard;
 pub use virtual_mouse::VirtualMouse;

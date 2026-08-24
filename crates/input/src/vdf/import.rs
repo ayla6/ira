@@ -5,7 +5,7 @@
 
 use super::parse::{find, find_all, parse_vdf, Node};
 use crate::profile::{
-    Activator, ActivatorKind, ActivatorSettings, ActionSet, Activation, GamepadAxis, GamepadButton,
+    ActionSet, Activation, Activator, ActivatorKind, ActivatorSettings, GamepadAxis, GamepadButton,
     GyroConfig, GyroOrientation, GyroOutput, InputMapping, InputProfile, InputSource, ModeShift,
     MouseAxis, MouseButton, OutputAction, SourceMode, StickOutput, VirtualGamepadBackend,
 };
@@ -28,8 +28,8 @@ impl ImportReport {
 /// Import one Steam `controller_mappings` VDF document.
 pub fn import_vdf(text: &str) -> Result<(InputProfile, ImportReport), String> {
     let top = parse_vdf(text)?;
-    let root =
-        find(&top, "controller_mappings").ok_or("not a controller mapping (missing controller_mappings)")?;
+    let root = find(&top, "controller_mappings")
+        .ok_or("not a controller mapping (missing controller_mappings)")?;
     let children = root.children();
 
     let mut report = ImportReport::default();
@@ -230,7 +230,10 @@ fn append_button_mapping(
     }
     let mut mapping = InputMapping {
         activators,
-        ..InputMapping::simple(InputSource::Button(button), OutputAction::GamepadButton(button))
+        ..InputMapping::simple(
+            InputSource::Button(button),
+            OutputAction::GamepadButton(button),
+        )
     };
     attach_shifts(&mut mapping, shifts, report);
     set.inputs.push(mapping);
@@ -246,7 +249,9 @@ fn import_trigger(group: &Node, region: &str, set: &mut ActionSet, report: &mut 
         _ => GamepadButton::LeftTrigger,
     };
     // Analog side: thresholded passthrough of the physical trigger.
-    let threshold = group_setting(group, "deadzone").unwrap_or(0.5).clamp(0.05, 1.0);
+    let threshold = group_setting(group, "deadzone")
+        .unwrap_or(0.5)
+        .clamp(0.05, 1.0);
     set.inputs.push(InputMapping {
         mode: Some(SourceMode::Trigger { threshold }),
         ..InputMapping::new(InputSource::Axis(axis))
@@ -276,7 +281,9 @@ fn import_stick(group: &Node, region: &str, mode: &str, set: &mut ActionSet) {
     let stick_mode = match mode {
         "joystick_move" => SourceMode::Joystick {
             output,
-            deadzone_inner: group_setting(group, "deadzone").unwrap_or(0.1).clamp(0.0, 0.9),
+            deadzone_inner: group_setting(group, "deadzone")
+                .unwrap_or(0.1)
+                .clamp(0.0, 0.9),
             deadzone_outer: 0.95,
             curve: 1.0,
         },
@@ -310,7 +317,9 @@ fn import_gyro(group: &Node, mode: &str, gyro: &mut GyroConfig, report: &mut Imp
         gyro.sensitivity = (sensitivity / 100.0).clamp(0.05, 20.0);
     }
     if group.obj("settings").is_some_and(|settings| {
-        settings.iter().any(|node| node.key == "gyro_button" && node.as_str() != Some("0"))
+        settings
+            .iter()
+            .any(|node| node.key == "gyro_button" && node.as_str() != Some("0"))
     }) {
         report.warn("gyro button gating imports as always-on");
     }
@@ -333,7 +342,9 @@ fn collect_activators(
         let mut outputs = Vec::new();
         if let Some(bindings) = block.obj("bindings") {
             for binding in bindings.iter().filter(|node| node.key == "binding") {
-                let Some(text) = binding.as_str() else { continue };
+                let Some(text) = binding.as_str() else {
+                    continue;
+                };
                 let body = text.split(',').next().unwrap_or(text).trim();
                 if let Some(rest) = body.strip_prefix("mode_shift ") {
                     if let Some(source_name) = rest.split_whitespace().next() {

@@ -52,19 +52,20 @@ impl FocusWatcher {
     /// Whether the game's window currently has input focus. Unknown states
     /// count as focused so a WM without these hints never pauses the game.
     pub fn game_is_focused(&self) -> bool {
-        let window = match self
-            .conn
-            .get_property(false, self.root, self.active_atom, AtomEnum::WINDOW, 0, 1)
-        {
-            Ok(cookie) => match cookie.reply() {
-                Ok(reply) => reply
-                    .value32()
-                    .and_then(|mut values| values.next())
-                    .unwrap_or(0),
+        let window =
+            match self
+                .conn
+                .get_property(false, self.root, self.active_atom, AtomEnum::WINDOW, 0, 1)
+            {
+                Ok(cookie) => match cookie.reply() {
+                    Ok(reply) => reply
+                        .value32()
+                        .and_then(|mut values| values.next())
+                        .unwrap_or(0),
+                    Err(_) => return true,
+                },
                 Err(_) => return true,
-            },
-            Err(_) => return true,
-        };
+            };
         // 0 / root means the desktop itself is focused.
         if window == 0 || window == self.root {
             return false;
@@ -104,8 +105,6 @@ impl FocusWatcher {
             .get_property(false, window, self.transient_atom, AtomEnum::WINDOW, 0, 1)
             .ok()?;
         let reply = cookie.reply().ok()?;
-        reply
-            .value32()
-            .and_then(|mut values| values.next())
+        reply.value32().and_then(|mut values| values.next())
     }
 }

@@ -22,21 +22,15 @@ type SdlGetGamepadProduct = unsafe extern "C" fn(*mut c_void) -> u16;
 type SdlGamepadHasSensor = unsafe extern "C" fn(*mut c_void, i32) -> bool;
 type SdlSetGamepadSensorEnabled = unsafe extern "C" fn(*mut c_void, i32, bool) -> bool;
 type SdlGetGamepadSensorData = unsafe extern "C" fn(*mut c_void, i32, *mut f32, i32) -> bool;
-type SdlGetGamepadSensorDataWithTime = unsafe extern "C" fn(
-    *mut c_void,
-    i32,
-    *mut u64,
-    *mut f32,
-    i32,
-) -> bool;
+type SdlGetGamepadSensorDataWithTime =
+    unsafe extern "C" fn(*mut c_void, i32, *mut u64, *mut f32, i32) -> bool;
 type SdlGetSensors = unsafe extern "C" fn(*mut i32) -> *mut i32;
 type SdlGetSensorNameForId = unsafe extern "C" fn(i32) -> *const c_char;
 type SdlGetSensorTypeForId = unsafe extern "C" fn(i32) -> i32;
 type SdlOpenSensor = unsafe extern "C" fn(i32) -> *mut c_void;
 type SdlCloseSensor = unsafe extern "C" fn(*mut c_void);
 type SdlGetSensorData = unsafe extern "C" fn(*mut c_void, *mut f32, i32) -> bool;
-type SdlGetSensorDataWithTime =
-    unsafe extern "C" fn(*mut c_void, *mut u64, *mut f32, i32) -> bool;
+type SdlGetSensorDataWithTime = unsafe extern "C" fn(*mut c_void, *mut u64, *mut f32, i32) -> bool;
 type SdlPumpEvents = unsafe extern "C" fn();
 type SdlUpdateSensors = unsafe extern "C" fn();
 type SdlQuit = unsafe extern "C" fn();
@@ -299,9 +293,7 @@ impl Sdl3SensorBackend {
                     }
                 }
                 SensorSource::Global(sensor) => match self.api.get_sensor_data_with_time {
-                    Some(with_time) => {
-                        with_time(sensor, &mut sensor_time_ns, data.as_mut_ptr(), 3)
-                    }
+                    Some(with_time) => with_time(sensor, &mut sensor_time_ns, data.as_mut_ptr(), 3),
                     None => (self.api.get_sensor_data)(sensor, data.as_mut_ptr(), 3),
                 },
             }
@@ -345,21 +337,21 @@ impl Sdl3SensorBackend {
                     data.as_mut_ptr(),
                     3,
                 ),
-                None => {
-                    (self.api.get_gamepad_sensor_data)(
-                        gamepad,
-                        SDL_SENSOR_ACCEL,
-                        data.as_mut_ptr(),
-                        3,
-                    )
-                }
+                None => (self.api.get_gamepad_sensor_data)(
+                    gamepad,
+                    SDL_SENSOR_ACCEL,
+                    data.as_mut_ptr(),
+                    3,
+                ),
             }
         };
         if !available {
             return None;
         }
         if data.iter().any(|value| !value.is_finite()) {
-            return Some(Err("SDL3 returned a non-finite accelerometer sample".to_string()));
+            return Some(Err(
+                "SDL3 returned a non-finite accelerometer sample".to_string()
+            ));
         }
         Some(Ok(data))
     }
@@ -538,9 +530,11 @@ mod tests {
 
     #[test]
     fn test_gyro_calibration_averages_samples() {
-        let calibration =
-            GyroCalibration::from_samples(&[sample([0.1, 0.2, 0.3], 1), sample([0.3, 0.4, 0.5], 2)])
-                .unwrap();
+        let calibration = GyroCalibration::from_samples(&[
+            sample([0.1, 0.2, 0.3], 1),
+            sample([0.3, 0.4, 0.5], 2),
+        ])
+        .unwrap();
         assert!((calibration.x - 0.2).abs() < 0.001);
         assert!((calibration.y - 0.3).abs() < 0.001);
         assert!((calibration.z - 0.4).abs() < 0.001);

@@ -249,27 +249,24 @@ impl GyroProcessor {
             GyroOrientation::Yaw => (rotation.y, rotation.x, false),
             GyroOrientation::Roll => (rotation.z, rotation.x, false),
             GyroOrientation::YawPlusRoll => (rotation.y + rotation.z, rotation.x, false),
-            GyroOrientation::PlayerSpace | GyroOrientation::WorldSpace => {
-                match accel {
-                    Some(accel) => {
-                        self.update_gravity(Vec3::from_array(accel), dt);
-                        match self.gravity.and_then(|gravity| gravity.normalized()) {
-                            Some(gravity) => {
-                                let (yaw, pitch, locked) = if self.options.orientation
-                                    == GyroOrientation::WorldSpace
-                                {
+            GyroOrientation::PlayerSpace | GyroOrientation::WorldSpace => match accel {
+                Some(accel) => {
+                    self.update_gravity(Vec3::from_array(accel), dt);
+                    match self.gravity.and_then(|gravity| gravity.normalized()) {
+                        Some(gravity) => {
+                            let (yaw, pitch, locked) =
+                                if self.options.orientation == GyroOrientation::WorldSpace {
                                     self.world_space(rotation, gravity)
                                 } else {
                                     Self::player_space(rotation, gravity)
                                 };
-                                (yaw, pitch, locked)
-                            }
-                            None => Self::controller_space(rotation),
+                            (yaw, pitch, locked)
                         }
+                        None => Self::controller_space(rotation),
                     }
-                    None => Self::controller_space(rotation),
                 }
-            }
+                None => Self::controller_space(rotation),
+            },
         };
         if self.options.smoothing {
             let speed = (yaw * yaw + pitch * pitch).sqrt();
@@ -520,7 +517,11 @@ mod tests {
         for _ in 0..(250 * 4) {
             processor.process([0.0, 0.0, 0.5], Some([0.0, 0.0, 1.0]), DT);
         }
-        assert!(processor.bias().z.abs() < 0.01, "bias: {:?}", processor.bias());
+        assert!(
+            processor.bias().z.abs() < 0.01,
+            "bias: {:?}",
+            processor.bias()
+        );
     }
 
     #[test]
@@ -585,11 +586,16 @@ mod tests {
             fast.process([0.0, 0.0, 2.0], Some([0.0, 0.0, 1.0]), DT);
             raw.process([0.0, 0.0, 2.0], Some([0.0, 0.0, 1.0]), DT);
         }
-        let damped = slow.process([0.0, 0.0, 0.02], Some([0.0, 0.0, 1.0]), DT).yaw;
+        let damped = slow
+            .process([0.0, 0.0, 0.02], Some([0.0, 0.0, 1.0]), DT)
+            .yaw;
         assert!(damped.abs() < 0.01, "damped yaw: {damped}");
         let flick = fast.process([0.0, 0.0, 2.0], Some([0.0, 0.0, 1.0]), DT).yaw;
         let raw_flick = raw.process([0.0, 0.0, 2.0], Some([0.0, 0.0, 1.0]), DT).yaw;
-        assert!((flick - raw_flick).abs() < 0.01, "flick: {flick} vs {raw_flick}");
+        assert!(
+            (flick - raw_flick).abs() < 0.01,
+            "flick: {flick} vs {raw_flick}"
+        );
     }
 
     #[test]

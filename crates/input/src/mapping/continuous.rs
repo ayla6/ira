@@ -109,7 +109,9 @@ impl MappingEngine {
             if !self.activation_active(&binding.activation) {
                 continue;
             }
-            let velocity = binding.transform.apply_unbounded(self.source_value(binding.source));
+            let velocity = binding
+                .transform
+                .apply_unbounded(self.source_value(binding.source));
             let delta = match axis {
                 MouseAxis::X | MouseAxis::Y => velocity * STICK_MOUSE_COUNTS_PER_SECOND * dt,
                 MouseAxis::Wheel | MouseAxis::WheelX => {

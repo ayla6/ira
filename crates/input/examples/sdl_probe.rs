@@ -20,14 +20,17 @@ type SdlHasSensor = unsafe extern "C" fn(*mut c_void, c_int) -> bool;
 type SdlSetSensorEnabled = unsafe extern "C" fn(*mut c_void, c_int, bool) -> bool;
 type SdlSensorDataWithTime =
     unsafe extern "C" fn(*mut c_void, c_int, *mut f32, *mut u64, c_int) -> bool;
-type SdlSensorData =
-    unsafe extern "C" fn(*mut c_void, c_int, *mut f32, c_int) -> bool;
+type SdlSensorData = unsafe extern "C" fn(*mut c_void, c_int, *mut f32, c_int) -> bool;
 type SdlPump = unsafe extern "C" fn();
 type SdlUpdateSensors = unsafe extern "C" fn();
 type SdlGetType = unsafe extern "C" fn(*mut c_void) -> c_int;
 type SdlGetError = unsafe extern "C" fn() -> *const c_char;
 #[repr(C)]
-struct SdlVersion { major: i32, minor: i32, patch: i32 }
+struct SdlVersion {
+    major: i32,
+    minor: i32,
+    patch: i32,
+}
 type SdlGetVersion = unsafe extern "C" fn(*mut SdlVersion);
 type SdlGetJsAxis = unsafe extern "C" fn(*mut c_void, c_int) -> i16;
 type SdlGetJsName = unsafe extern "C" fn(*mut c_void) -> *const c_char;
@@ -109,10 +112,20 @@ fn capture_poses(api: &Api, gamepad: *mut c_void) {
             samples += 1;
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        println!("  accel avg {:?}  gyro avg {:?}  ({} samples)",
-            [accel[0] / samples as f32, accel[1] / samples as f32, accel[2] / samples as f32],
-            [gyro[0] / samples as f32, gyro[1] / samples as f32, gyro[2] / samples as f32],
-            samples);
+        println!(
+            "  accel avg {:?}  gyro avg {:?}  ({} samples)",
+            [
+                accel[0] / samples as f32,
+                accel[1] / samples as f32,
+                accel[2] / samples as f32
+            ],
+            [
+                gyro[0] / samples as f32,
+                gyro[1] / samples as f32,
+                gyro[2] / samples as f32
+            ],
+            samples
+        );
     }
     println!("\ncapture done - paste all three lines back");
     for sensor in [SDL_SENSOR_GYRO, SDL_SENSOR_ACCEL] {
@@ -148,7 +161,7 @@ fn main() {
         get_path: sym!("SDL_GetGamepadPath", SdlGetName),
         has_sensor: sym!("SDL_GamepadHasSensor", SdlHasSensor),
         set_sensor_enabled: sym!("SDL_SetGamepadSensorEnabled", SdlSetSensorEnabled),
-            sensor_data_with_time: {
+        sensor_data_with_time: {
             let name = CString::new("SDL_GetGamepadSensorDataWithTime").unwrap();
             let p = unsafe { libc::dlsym(handle, name.as_ptr().cast()) };
             if p.is_null() {
@@ -169,12 +182,17 @@ fn main() {
         open_joystick: sym!("SDL_OpenJoystick", SdlOpenGamepad),
         close_joystick: sym!("SDL_CloseJoystick", SdlCloseGamepad),
     };
-    let mut version = SdlVersion { major: 0, minor: 0, patch: 0 };
+    let mut version = SdlVersion {
+        major: 0,
+        minor: 0,
+        patch: 0,
+    };
     unsafe { (api.get_version)(&mut version) };
-    println!("probe: SDL {}.{}.{}", version.major, version.minor, version.patch);
-    if !unsafe {
-        (api.init)(SDL_INIT_EVENTS | SDL_INIT_GAMEPAD | SDL_INIT_SENSOR)
-    } {
+    println!(
+        "probe: SDL {}.{}.{}",
+        version.major, version.minor, version.patch
+    );
+    if !unsafe { (api.init)(SDL_INIT_EVENTS | SDL_INIT_GAMEPAD | SDL_INIT_SENSOR) } {
         let err = unsafe { CStr::from_ptr((api.get_error)()) }
             .to_string_lossy()
             .into_owned();
@@ -282,7 +300,8 @@ fn main() {
             unsafe { (api.close_joystick)(js) };
         }
         return;
-    }    let Some(id) = target else {
+    }
+    let Some(id) = target else {
         println!("probe: FAIL - no Ira virtual gamepad found");
         std::process::exit(1);
     };
@@ -322,13 +341,10 @@ fn main() {
                     Some(f) => f(gamepad, sensor, values.as_mut_ptr(), &mut timestamp, 3),
                     None => (api.sensor_data)(gamepad, sensor, values.as_mut_ptr(), 3),
                 };
-                if ok && values.iter().any(|v| v.abs() > 0.001)
-                {
+                if ok && values.iter().any(|v| v.abs() > 0.001) {
                     nonzero += 1;
                     if printed < 3 {
-                        println!(
-                            "probe: sensor {sensor} sample {values:?} @ {timestamp}us"
-                        );
+                        println!("probe: sensor {sensor} sample {values:?} @ {timestamp}us");
                         printed += 1;
                     }
                 }

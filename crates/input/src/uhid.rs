@@ -42,9 +42,19 @@ pub enum UhidEvent {
     /// A reader opened the hidraw node; input reports now reach someone.
     Open,
     Close,
-    OutputReport { data: Vec<u8> },
-    GetReport { id: u32, number: u8, kind: u8 },
-    SetReport { id: u32, number: u8, data: Vec<u8> },
+    OutputReport {
+        data: Vec<u8>,
+    },
+    GetReport {
+        id: u32,
+        number: u8,
+        kind: u8,
+    },
+    SetReport {
+        id: u32,
+        number: u8,
+        data: Vec<u8>,
+    },
 }
 
 pub struct UhidDevice {
@@ -143,7 +153,8 @@ fn create2_event(
     let uniq_copied = uniq_bytes.len().min(UNIQ_LEN - 1);
     event[uniq_offset..uniq_offset + uniq_copied].copy_from_slice(&uniq_bytes[..uniq_copied]);
     let rd_size_offset = 4 + NAME_LEN + PHYS_LEN + UNIQ_LEN;
-    event[rd_size_offset..rd_size_offset + 2].copy_from_slice(&(descriptor.len() as u16).to_le_bytes());
+    event[rd_size_offset..rd_size_offset + 2]
+        .copy_from_slice(&(descriptor.len() as u16).to_le_bytes());
     event[rd_size_offset + 2..rd_size_offset + 4].copy_from_slice(&bus.to_le_bytes());
     event[rd_size_offset + 4..rd_size_offset + 8].copy_from_slice(&vendor.to_le_bytes());
     event[rd_size_offset + 8..rd_size_offset + 12].copy_from_slice(&product.to_le_bytes());
@@ -298,6 +309,9 @@ mod tests {
     #[test]
     fn test_parse_truncated_events_degrade_without_panicking() {
         let truncated_output = [6u8, 0, 0, 0, 0xFF];
-        matches!(parse_event(&truncated_output), UhidEvent::OutputReport { .. });
+        matches!(
+            parse_event(&truncated_output),
+            UhidEvent::OutputReport { .. }
+        );
     }
 }

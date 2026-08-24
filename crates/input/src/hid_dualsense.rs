@@ -105,9 +105,7 @@ impl DualsenseUhidDevice {
 fn usb_state_report(pad: &PadState, sample: &MotionSample) -> Vec<u8> {
     let mut r = vec![0u8; USB_STATE_REPORT_LEN];
     r[0] = 0x01;
-    let stick = |value: f32| {
-        (((value.clamp(-1.0, 1.0) + 1.0) / 2.0) * 255.0).round() as u8
-    };
+    let stick = |value: f32| (((value.clamp(-1.0, 1.0) + 1.0) / 2.0) * 255.0).round() as u8;
     r[1] = stick(pad.lx);
     r[2] = stick(pad.ly);
     r[3] = stick(pad.rx);
@@ -144,8 +142,8 @@ fn usb_state_report(pad: &PadState, sample: &MotionSample) -> Vec<u8> {
             sample.accel_ms2[axis] / GRAVITY_MS2 * ACCEL_COUNTS_PER_G,
         );
     }
-    let ticks = (sample.timestamp_us.min(u32::MAX as u64 / 3) as u32)
-        .wrapping_mul(SENSOR_TICKS_PER_US);
+    let ticks =
+        (sample.timestamp_us.min(u32::MAX as u64 / 3) as u32).wrapping_mul(SENSOR_TICKS_PER_US);
     r[28..32].copy_from_slice(&ticks.to_le_bytes());
 
     // Both touch points released (high bit set), full battery, USB link.
@@ -158,12 +156,7 @@ fn usb_state_report(pad: &PadState, sample: &MotionSample) -> Vec<u8> {
 
 /// Hat switch values: 0=up through 7=up-left clockwise, 8=centered.
 fn hat_value(pad: &PadState) -> u8 {
-    match (
-        pad.dpad_up,
-        pad.dpad_right,
-        pad.dpad_down,
-        pad.dpad_left,
-    ) {
+    match (pad.dpad_up, pad.dpad_right, pad.dpad_down, pad.dpad_left) {
         (true, false, false, false) => 0,
         (true, true, false, false) => 1,
         (false, true, false, false) => 2,
@@ -233,7 +226,10 @@ mod tests {
     #[test]
     fn test_calibration_decodes_identity_units() {
         let read = |offset: usize| {
-            i16::from_le_bytes([calibration_report()[offset], calibration_report()[offset + 1]])
+            i16::from_le_bytes([
+                calibration_report()[offset],
+                calibration_report()[offset + 1],
+            ])
         };
         // Sensitivity = (speed+ + speed-) * 1024 / (plus - minus) must be
         // exactly 64 so counts/16 decode as degrees per second.
@@ -271,8 +267,7 @@ mod tests {
         assert_eq!(r[8] & 0x0F, 2); // right hat
         assert_eq!(r[9] & 0x03, 0b01); // L1 only
         assert_eq!(r[10] & 0x01, 1); // guide
-        let read_i16 =
-            |offset: usize| i16::from_le_bytes([r[offset], r[offset + 1]]);
+        let read_i16 = |offset: usize| i16::from_le_bytes([r[offset], r[offset + 1]]);
         assert_eq!(read_i16(16), (90.0 * 16.0) as i16);
         assert_eq!(read_i16(20), (-1024.0 * 16.0) as i16);
         assert_eq!(read_i16(22), 8192);

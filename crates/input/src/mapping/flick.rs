@@ -49,22 +49,14 @@ impl MappingEngine {
                 continue;
             };
             let state = self.flick_states.entry(source).or_default();
-            emit_flick_for_stick(
-                state,
-                x,
-                y,
-                dt,
-                rotation_sensitivity,
-                &mut output,
-            );
+            emit_flick_for_stick(state, x, y, dt, rotation_sensitivity, &mut output);
         }
         output
     }
 
     fn stick_pair_for(&self, source: InputSource) -> Option<(f32, f32)> {
         let (x_axis, y_axis) = match source {
-            InputSource::Axis(GamepadAxis::RightX)
-            | InputSource::Axis(GamepadAxis::RightY) => {
+            InputSource::Axis(GamepadAxis::RightX) | InputSource::Axis(GamepadAxis::RightY) => {
                 (GamepadAxis::RightX, GamepadAxis::RightY)
             }
             _ => (GamepadAxis::LeftX, GamepadAxis::LeftY),
@@ -159,8 +151,7 @@ mod tests {
     use super::*;
     use crate::mapping::MappingEngine;
     use crate::profile::{
-        ActionSet, Activator, GamepadAxis, GamepadButton, InputMapping, InputProfile,
-        OutputAction,
+        ActionSet, Activator, GamepadAxis, GamepadButton, InputMapping, InputProfile, OutputAction,
     };
 
     fn flick_profile() -> InputProfile {

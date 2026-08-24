@@ -22,11 +22,7 @@ pub fn calibration_store_path(save_dir: &str) -> std::path::PathBuf {
     Path::new(save_dir).join("controller_calibration.json")
 }
 
-pub fn load_calibration(
-    path: &Path,
-    vendor: u16,
-    product: u16,
-) -> Option<GyroCalibration> {
+pub fn load_calibration(path: &Path, vendor: u16, product: u16) -> Option<GyroCalibration> {
     let text = std::fs::read_to_string(path).ok()?;
     let entries: HashMap<String, GyroCalibration> = serde_json::from_str(&text).ok()?;
     entries.get(&device_key(vendor, product)).copied()

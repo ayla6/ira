@@ -171,11 +171,16 @@ impl MotionServer {
             match message {
                 MESSAGE_VERSION => {
                     let payload = PROTOCOL_VERSION.to_le_bytes();
-                    let _ = self.socket.send_to(&build_packet(self.server_id, MESSAGE_VERSION, &payload), from);
+                    let _ = self.socket.send_to(
+                        &build_packet(self.server_id, MESSAGE_VERSION, &payload),
+                        from,
+                    );
                 }
                 MESSAGE_INFO => {
                     let payload = info_payload(connected);
-                    let _ = self.socket.send_to(&build_packet(self.server_id, MESSAGE_INFO, &payload), from);
+                    let _ = self
+                        .socket
+                        .send_to(&build_packet(self.server_id, MESSAGE_INFO, &payload), from);
                 }
                 MESSAGE_DATA => self.subscribe(from),
                 _ => {}
@@ -194,13 +199,12 @@ impl MotionServer {
         self.packet_counter = self.packet_counter.wrapping_add(1);
         let payload = data_payload(self.packet_counter, sample, pad);
         let packet = build_packet(self.server_id, MESSAGE_DATA, &payload);
-        self.clients
-            .retain(|(client, seen)| {
-                if seen.elapsed() >= CLIENT_TIMEOUT {
-                    return false;
-                }
-                self.socket.send_to(&packet, client).is_ok()
-            });
+        self.clients.retain(|(client, seen)| {
+            if seen.elapsed() >= CLIENT_TIMEOUT {
+                return false;
+            }
+            self.socket.send_to(&packet, client).is_ok()
+        });
     }
 
     fn subscribe(&mut self, client: SocketAddr) {
@@ -318,7 +322,11 @@ fn crc32(data: &[u8]) -> u32 {
 /// → deg/s with pitch/yaw/roll on x/y/z; accelerometer already reports g.
 /// Used by consumers that read SDL-standard data back, like the virtual
 /// DS4's hidapi driver.
-pub fn sensor_to_motion(gyro_rads: [f32; 3], accel_ms2: [f32; 3], timestamp_us: u64) -> MotionSample {
+pub fn sensor_to_motion(
+    gyro_rads: [f32; 3],
+    accel_ms2: [f32; 3],
+    timestamp_us: u64,
+) -> MotionSample {
     const RAD_TO_DEG: f32 = 180.0 / std::f32::consts::PI;
     MotionSample {
         accel_ms2,
@@ -384,12 +392,21 @@ mod tests {
         assert_eq!(&packet[0..4], b"DSUS");
         assert_eq!(u16::from_le_bytes([packet[4], packet[5]]), 1001);
         assert_eq!(u16::from_le_bytes([packet[6], packet[7]]), 3);
-        assert_eq!(u32::from_le_bytes([packet[12], packet[13], packet[14], packet[15]]), 0x1122_3344);
-        assert_eq!(u32::from_le_bytes([packet[16], packet[17], packet[18], packet[19]]), 0x100002);
+        assert_eq!(
+            u32::from_le_bytes([packet[12], packet[13], packet[14], packet[15]]),
+            0x1122_3344
+        );
+        assert_eq!(
+            u32::from_le_bytes([packet[16], packet[17], packet[18], packet[19]]),
+            0x100002
+        );
         // Zeroing the CRC and recomputing must reproduce the stored value.
         let mut zeroed = packet.clone();
         zeroed[8..12].copy_from_slice(&[0; 4]);
-        assert_eq!(crc32(&zeroed), u32::from_le_bytes([packet[8], packet[9], packet[10], packet[11]]));
+        assert_eq!(
+            crc32(&zeroed),
+            u32::from_le_bytes([packet[8], packet[9], packet[10], packet[11]])
+        );
     }
 
     #[test]
@@ -399,7 +416,10 @@ mod tests {
         assert_eq!(payload.len(), 80);
         assert_eq!(payload[11], 1);
         assert_eq!(u32::from_le_bytes(payload[12..16].try_into().unwrap()), 7);
-        assert_eq!(u64::from_le_bytes(payload[48..56].try_into().unwrap()), 12_345);
+        assert_eq!(
+            u64::from_le_bytes(payload[48..56].try_into().unwrap()),
+            12_345
+        );
         let accel_x = f32::from_le_bytes(payload[56..60].try_into().unwrap());
         let accel_y = f32::from_le_bytes(payload[60..64].try_into().unwrap());
         let accel_z = f32::from_le_bytes(payload[64..68].try_into().unwrap());

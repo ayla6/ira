@@ -5,11 +5,12 @@
 mod import;
 mod parse;
 
-
 pub use import::{import_vdf, ImportReport};
 
 /// Read and import the VDF file at `path`; used by the CLI.
-pub fn import_vdf_file(path: &std::path::Path) -> Result<(crate::InputProfile, ImportReport), String> {
+pub fn import_vdf_file(
+    path: &std::path::Path,
+) -> Result<(crate::InputProfile, ImportReport), String> {
     let text = std::fs::read_to_string(path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     import_vdf(&text)

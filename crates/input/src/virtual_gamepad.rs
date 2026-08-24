@@ -600,10 +600,7 @@ mod tests {
             assert!(sony_layout(backend));
             // Square on BTN_C (not BTN_WEST) so button indexes match the
             // kernel drivers SDL's built-in mappings were written against.
-            assert_eq!(
-                button_code(backend, GamepadButton::X),
-                Some(KeyCode::BTN_C)
-            );
+            assert_eq!(button_code(backend, GamepadButton::X), Some(KeyCode::BTN_C));
             assert_eq!(
                 button_code(backend, GamepadButton::Y),
                 Some(KeyCode::BTN_NORTH)

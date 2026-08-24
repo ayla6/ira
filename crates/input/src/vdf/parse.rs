@@ -29,7 +29,10 @@ impl Node {
     }
 
     pub fn get(&self, key: &str) -> Option<&Value> {
-        self.children().iter().find(|node| node.key == key).map(|node| &node.value)
+        self.children()
+            .iter()
+            .find(|node| node.key == key)
+            .map(|node| &node.value)
     }
 
     /// This node's own string value, when it is not an object.
@@ -53,7 +56,6 @@ impl Node {
             Value::Str(_) => &EMPTY,
         }
     }
-
 
     pub fn str(&self, key: &str) -> Option<&str> {
         match self.get(key) {
@@ -80,10 +82,7 @@ pub fn find<'a>(nodes: &'a [Node], key: &str) -> Option<&'a Node> {
 
 /// Every direct child named `key`, in order — duplicates are meaningful.
 pub fn find_all<'a>(nodes: &'a [Node], key: &str) -> Vec<&'a Node> {
-    nodes
-        .iter()
-        .filter(|node| node.key == key)
-        .collect()
+    nodes.iter().filter(|node| node.key == key).collect()
 }
 
 /// Parse one KeyValues document into its top-level nodes.
@@ -128,13 +127,14 @@ impl Parser<'_> {
                 Some(c) if c.is_whitespace() => {
                     self.bump();
                 }
-                Some('/') if {
-                    // Comment runs to end of line; peek the second slash
-                    // without consuming the first.
-                    let mut clone = self.chars.clone();
-                    clone.next();
-                    clone.next() == Some('/')
-                } =>
+                Some('/')
+                    if {
+                        // Comment runs to end of line; peek the second slash
+                        // without consuming the first.
+                        let mut clone = self.chars.clone();
+                        clone.next();
+                        clone.next() == Some('/')
+                    } =>
                 {
                     while let Some(c) = self.bump() {
                         if c == '\n' {

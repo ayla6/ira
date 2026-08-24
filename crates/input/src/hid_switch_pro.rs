@@ -78,10 +78,7 @@ impl SwitchProUhidDevice {
             VENDOR_ID,
             PRODUCT_ID,
         )?;
-        Ok(Self {
-            device,
-            timer: 0,
-        })
+        Ok(Self { device, timer: 0 })
     }
 
     /// Answers kernel requests (the hid-nintendo handshake) and streams one
@@ -138,11 +135,17 @@ pub fn handshake_reply(request: &[u8]) -> Vec<u8> {
                 0x21, // subcommand reply
                 0x00, // timer (patched by caller? no: kernel ignores)
                 BAT_FULL_USB,
-                0, 0, 0,                // buttons
-                0x00, 0x08, 0x80,       // left stick centered
-                0x00, 0x08, 0x80,       // right stick centered
-                0,                      // vibrator
-                0x80 | subcmd,          // ack
+                0,
+                0,
+                0, // buttons
+                0x00,
+                0x08,
+                0x80, // left stick centered
+                0x00,
+                0x08,
+                0x80,          // right stick centered
+                0,             // vibrator
+                0x80 | subcmd, // ack
                 subcmd,
             ];
             reply.extend_from_slice(&payload);
@@ -189,10 +192,8 @@ fn spi_flash(addr: u32, size: usize) -> Vec<u8> {
         if size >= 24 {
             data = vec![0u8; size];
             for axis in 0..3 {
-                data[6 + axis * 2..8 + axis * 2]
-                    .copy_from_slice(&16384u16.to_le_bytes());
-                data[18 + axis * 2..20 + axis * 2]
-                    .copy_from_slice(&16384u16.to_le_bytes());
+                data[6 + axis * 2..8 + axis * 2].copy_from_slice(&16384u16.to_le_bytes());
+                data[18 + axis * 2..20 + axis * 2].copy_from_slice(&16384u16.to_le_bytes());
             }
         }
         return data;
@@ -360,12 +361,11 @@ fn unpack_fields(bytes: [u8; 3]) -> (u16, u16) {
     (first, second)
 }
 
-    #[cfg(test)]
-    mod tests {
-        use super::{
-            handshake_reply, spi_flash, standard_report, stick_bytes, unpack_fields, PadState,
-        };
-
+#[cfg(test)]
+mod tests {
+    use super::{
+        handshake_reply, spi_flash, standard_report, stick_bytes, unpack_fields, PadState,
+    };
 
     #[test]
     fn test_usb_commands_ack_with_matching_reply() {
@@ -417,7 +417,7 @@ fn unpack_fields(bytes: [u8; 3]) -> (u16, u16) {
         assert_eq!(report[1], 7);
         assert_eq!(report[3], 1 << 2); // south (B) in the first button byte
         assert_eq!(report[5], 1 << 7); // ZL in the third button byte
-        // Third IMU sample's accel Z lands as 1g x 4096.
+                                       // Third IMU sample's accel Z lands as 1g x 4096.
         let offset = 13 + 2 * 12 + 4; // skip 2 samples, accel z slot
         let raw = i16::from_le_bytes([report[offset], report[offset + 1]]);
         assert_eq!(raw, 4096);

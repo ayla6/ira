@@ -44,9 +44,9 @@ fn capabilities_report() -> [u8; 48] {
     r[2] = 0x27;
     r[4] = 0x02; // sensors supported
     r[5] = 0x00; // device type: gamepad
-    // SDL scales raw counts by (numerator / denominator): 1/16 turns our
-    // gyro counts into degrees per second, 1/8192 accelerometer counts
-    // into g.
+                 // SDL scales raw counts by (numerator / denominator): 1/16 turns our
+                 // gyro counts into degrees per second, 1/8192 accelerometer counts
+                 // into g.
     r[10..12].copy_from_slice(&1u16.to_le_bytes());
     r[12..14].copy_from_slice(&16u16.to_le_bytes());
     r[14..16].copy_from_slice(&1u16.to_le_bytes());
@@ -69,7 +69,11 @@ const TRIGGER_CLICK_LEVEL: f32 = 0.5;
 
 /// Report id 1 byte + PS4StatePacket_t (54 bytes) rounded out to the real
 /// controller's 64-byte USB frame. Offsets are absolute report positions.
-pub fn usb_state_report(pad: &PadState, sample: &MotionSample, timestamp_us: u64) -> [u8; USB_STATE_REPORT_LEN] {
+pub fn usb_state_report(
+    pad: &PadState,
+    sample: &MotionSample,
+    timestamp_us: u64,
+) -> [u8; USB_STATE_REPORT_LEN] {
     let mut r = [0u8; USB_STATE_REPORT_LEN];
     r[0] = REPORT_ID_USB_STATE;
     let stick = |value: f32| (((value + 1.0) / 2.0) * 255.0).round().clamp(0.0, 255.0) as u8;
@@ -80,7 +84,9 @@ pub fn usb_state_report(pad: &PadState, sample: &MotionSample, timestamp_us: u64
 
     // Byte 5: face buttons in the high nibble (west/south/east/north),
     // hat switch in the low nibble.
-    let face = u8::from(pad.square) | u8::from(pad.cross) << 1 | u8::from(pad.circle) << 2
+    let face = u8::from(pad.square)
+        | u8::from(pad.cross) << 1
+        | u8::from(pad.circle) << 2
         | u8::from(pad.triangle) << 3;
     r[5] = face << 4 | hat_value(pad);
     // Byte 6: L1, R1, digital L2/R2, share, options, L3, R3.
@@ -110,9 +116,18 @@ pub fn usb_state_report(pad: &PadState, sample: &MotionSample, timestamp_us: u64
     write_i16(&mut r[13..15], sample.gyro_dps[0] * GYRO_COUNTS_PER_DPS);
     write_i16(&mut r[15..17], sample.gyro_dps[1] * GYRO_COUNTS_PER_DPS);
     write_i16(&mut r[17..19], sample.gyro_dps[2] * GYRO_COUNTS_PER_DPS);
-    write_i16(&mut r[19..21], sample.accel_ms2[0] / GRAVITY_MS2 * ACCEL_COUNTS_PER_G);
-    write_i16(&mut r[21..23], sample.accel_ms2[1] / GRAVITY_MS2 * ACCEL_COUNTS_PER_G);
-    write_i16(&mut r[23..25], sample.accel_ms2[2] / GRAVITY_MS2 * ACCEL_COUNTS_PER_G);
+    write_i16(
+        &mut r[19..21],
+        sample.accel_ms2[0] / GRAVITY_MS2 * ACCEL_COUNTS_PER_G,
+    );
+    write_i16(
+        &mut r[21..23],
+        sample.accel_ms2[1] / GRAVITY_MS2 * ACCEL_COUNTS_PER_G,
+    );
+    write_i16(
+        &mut r[23..25],
+        sample.accel_ms2[2] / GRAVITY_MS2 * ACCEL_COUNTS_PER_G,
+    );
 
     // Byte 30: battery — level 5 of 10, discharging. Bytes 35/39: both touch
     // points up (bit 7 set means released).
@@ -128,12 +143,7 @@ fn write_i16(target: &mut [u8], value: f32) {
 
 /// Hat switch values: 0=up through 7=up-left clockwise, 8=centered.
 fn hat_value(pad: &PadState) -> u8 {
-    match (
-        pad.dpad_up,
-        pad.dpad_right,
-        pad.dpad_down,
-        pad.dpad_left,
-    ) {
+    match (pad.dpad_up, pad.dpad_right, pad.dpad_down, pad.dpad_left) {
         (true, false, false, false) => 0,
         (true, true, false, false) => 1,
         (false, true, false, false) => 2,
@@ -214,11 +224,8 @@ impl Ds4UhidDevice {
     /// before any hidraw reader opened the node are simply discarded by the
     /// kernel, so polling is best-effort logging only.
     pub fn send_state(&mut self, pad: &PadState, sample: &MotionSample) -> io::Result<()> {
-        self.device.send_input_report(&usb_state_report(
-            pad,
-            sample,
-            sample.timestamp_us,
-        ))?;
+        self.device
+            .send_input_report(&usb_state_report(pad, sample, sample.timestamp_us))?;
         for event in self.device.poll()? {
             match event {
                 crate::uhid::UhidEvent::Open => {
@@ -237,9 +244,7 @@ impl Ds4UhidDevice {
                     if number == FEATURE_CAPABILITIES && kind == crate::uhid::FEATURE_REPORT {
                         // SDL's third-party path: this reply is what enables
                         // sensors and sets the motion scaling numerators.
-                        let _ = self
-                            .device
-                            .reply_get_report(id, 0, &capabilities_report());
+                        let _ = self.device.reply_get_report(id, 0, &capabilities_report());
                     } else {
                         let _ = self.device.reply_get_report(id, ENODATA, &[]);
                     }
@@ -275,10 +280,7 @@ mod tests {
         // item is two bytes or three for wide logical/physical maxima.
         assert_eq!(REPORT_DESCRIPTOR.first(), Some(&0x05));
         assert_eq!(REPORT_DESCRIPTOR.last(), Some(&0xC0));
-        assert_eq!(
-            REPORT_DESCRIPTOR.iter().filter(|&&b| b == 0xC0).count(),
-            2
-        );
+        assert_eq!(REPORT_DESCRIPTOR.iter().filter(|&&b| b == 0xC0).count(), 2);
     }
 
     #[test]
@@ -320,7 +322,7 @@ mod tests {
         let report = usb_state_report(&pad, &resting_sample(), 0);
         // Faces west/south/east/north = bits 0-3 of the high nibble.
         assert_eq!(report[5], (0b1111 << 4) | 0x01); // up-right hat
-        // L1|R1|L2 click|R2 click|share|options|L3|R3 all set.
+                                                     // L1|R1|L2 click|R2 click|share|options|L3|R3 all set.
         assert_eq!(report[6], 0b11111111);
         assert_eq!(report[7] & 0x01, 1); // PS/guide
         assert_eq!(report[8], 255);
@@ -337,8 +339,7 @@ mod tests {
             timestamp_us: 160_000, // -> 30000 ticks
         };
         let report = usb_state_report(&PadState::default(), &sample, sample.timestamp_us);
-        let read_i16 =
-            |offset: usize| i16::from_le_bytes([report[offset], report[offset + 1]]);
+        let read_i16 = |offset: usize| i16::from_le_bytes([report[offset], report[offset + 1]]);
         assert_eq!(read_i16(13), (90.0 * GYRO_COUNTS_PER_DPS) as i16);
         // The wire carries the source frame verbatim: Cemu's own correction
         // ([gx, -gy, -gz]) matches what it applies to Nintendo pads.
@@ -357,8 +358,7 @@ mod tests {
         assert_eq!(r[0], 0x03);
         assert_eq!(r[2], 0x27);
         assert_eq!(r[4] & 0x02, 0x02); // sensors enabled
-        let read_u16 =
-            |offset: usize| u16::from_le_bytes([r[offset], r[offset + 1]]);
+        let read_u16 = |offset: usize| u16::from_le_bytes([r[offset], r[offset + 1]]);
         assert_eq!(read_u16(10), 1); // gyro numerator
         assert_eq!(read_u16(12), 16); // gyro denominator: counts per deg/s
         assert_eq!(read_u16(14), 1); // accel numerator

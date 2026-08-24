@@ -9,7 +9,10 @@ use std::time::{Duration, Instant};
 use ira_input::{Ds4UhidDevice, ImuUhidDevice, MotionSample, PadState};
 
 fn main() {
-    let seconds: f32 = std::env::args().nth(1).and_then(|v| v.parse().ok()).unwrap_or(3.0);
+    let seconds: f32 = std::env::args()
+        .nth(1)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3.0);
     let uniq = format!("ira-smoke-{}", std::process::id());
     let mut device = match Ds4UhidDevice::create(&uniq) {
         Ok(device) => device,
@@ -53,7 +56,11 @@ fn main() {
         pad.cross = (t * 2.0) as i32 % 2 == 0;
         let jitter = (t * 37.0).sin();
         let sample = MotionSample {
-            gyro_dps: [(t * 90.0).to_radians().to_degrees(), 45.0 + jitter, -30.0 - jitter],
+            gyro_dps: [
+                (t * 90.0).to_radians().to_degrees(),
+                45.0 + jitter,
+                -30.0 - jitter,
+            ],
             accel_ms2: [
                 (t * 5.0).sin() * 12.0,
                 (t * 5.0).cos() * 12.0,

@@ -8,7 +8,10 @@ use ira_input::SwitchProUhidDevice;
 use std::time::{Duration, Instant};
 
 fn main() {
-    let seconds: f32 = std::env::args().nth(1).and_then(|v| v.parse().ok()).unwrap_or(6.0);
+    let seconds: f32 = std::env::args()
+        .nth(1)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(6.0);
     let mut device = match SwitchProUhidDevice::create() {
         Ok(device) => device,
         Err(error) => {
@@ -60,7 +63,11 @@ fn main() {
         pad.lx = (t * 3.0).sin();
         pad.cross = (t * 2.0) as i32 % 2 == 0;
         let jitter = (t * 37.0).sin();
-        let accel_g = [(t * 5.0).sin() * 1.2, (t * 5.0).cos() * 1.2, 1.0 + jitter * 0.4];
+        let accel_g = [
+            (t * 5.0).sin() * 1.2,
+            (t * 5.0).cos() * 1.2,
+            1.0 + jitter * 0.4,
+        ];
         let gyro_dps = [t * 90.0, 45.0 + jitter, -30.0 - jitter];
         if let Err(error) = device.tick(&pad, accel_g, gyro_dps) {
             eprintln!("switch_pro_probe: tick failed: {error}");

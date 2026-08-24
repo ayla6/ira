@@ -5,7 +5,7 @@
 mod model;
 
 pub use model::{
-    Activator, ActivatorKind, ActivatorSettings, ActionSet, ActionSetLayer, Activation,
+    ActionSet, ActionSetLayer, Activation, Activator, ActivatorKind, ActivatorSettings,
     AnalogCondition, AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton,
     GyroActivation, GyroCalibration, GyroConfig, GyroOrientation, GyroOutput, InputCategory,
     InputMapping, InputProfile, InputSource, ModeShift, MouseAxis, MouseButton, OutputAction,
@@ -21,8 +21,8 @@ impl InputProfile {
     /// list into a default action set. Ira is pre-release: nothing tries to
     /// translate old gyro setups, they are simply removed.
     pub fn from_json(json: &str) -> Result<Self, String> {
-        let mut value: serde_json::Value = serde_json::from_str(json)
-            .map_err(|error| format!("invalid profile JSON: {error}"))?;
+        let mut value: serde_json::Value =
+            serde_json::from_str(json).map_err(|error| format!("invalid profile JSON: {error}"))?;
         if let Some(bindings) = value.get_mut("bindings").and_then(|b| b.as_array_mut()) {
             let dropped = strip_legacy_gyro_bindings(bindings);
             if dropped > 0 {
@@ -35,7 +35,6 @@ impl InputProfile {
         Ok(profile)
     }
 }
-
 
 /// Remove bindings that reference removed model features, in place, and
 /// return how many were dropped.
@@ -77,7 +76,10 @@ pub(super) fn convert_bindings_to_action_sets(profile: &mut InputProfile) {
     }
     let triggers = take_matching(
         &mut bindings,
-        &[Axis(GamepadAxis::LeftTrigger), Axis(GamepadAxis::RightTrigger)],
+        &[
+            Axis(GamepadAxis::LeftTrigger),
+            Axis(GamepadAxis::RightTrigger),
+        ],
     );
     for binding in &triggers {
         if let Some(mode) = trigger_mode(binding) {
@@ -95,10 +97,7 @@ pub(super) fn convert_bindings_to_action_sets(profile: &mut InputProfile) {
                 mapping.activators.push(activator);
                 merge_mapping(&mut inputs, mapping);
             }
-            (
-                InputSource::AxisDirection { axis, .. },
-                OutputAction::GamepadButton(_),
-            ) => {
+            (InputSource::AxisDirection { axis, .. }, OutputAction::GamepadButton(_)) => {
                 // Stick-as-dpad presets collapse into one Dpad mode per stick.
                 if !inputs
                     .iter()
@@ -148,7 +147,10 @@ fn convert_stick(stick: &[Binding]) -> Option<InputMapping> {
     let passthrough = stick.iter().find(|binding| {
         matches!(
             (&binding.source, &binding.output),
-            (Axis(GamepadAxis::LeftX | GamepadAxis::RightX), OutputAction::GamepadAxis(_))
+            (
+                Axis(GamepadAxis::LeftX | GamepadAxis::RightX),
+                OutputAction::GamepadAxis(_)
+            )
         )
     });
     if let Some(binding) = passthrough {
@@ -186,7 +188,10 @@ fn convert_stick(stick: &[Binding]) -> Option<InputMapping> {
         .iter()
         .any(|binding| matches!(binding.source, InputSource::AxisDirection { .. }));
     if dpad {
-        return Some(mapping_with_mode(source, SourceMode::Dpad { threshold: 0.5 }));
+        return Some(mapping_with_mode(
+            source,
+            SourceMode::Dpad { threshold: 0.5 },
+        ));
     }
     for binding in stick {
         eprintln!(

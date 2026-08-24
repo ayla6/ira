@@ -228,11 +228,7 @@ impl TraceState {
         {
             eprintln!(
                 "ira-input: trace gyro=({:.3}, {:.3}, {:.3}) mouse_delta=({:.2}, {:.2})",
-                self.gyro[0],
-                self.gyro[1],
-                self.gyro[2],
-                self.mouse[0],
-                self.mouse[1],
+                self.gyro[0], self.gyro[1], self.gyro[2], self.mouse[0], self.mouse[1],
             );
         }
         self.last_report = Instant::now();
@@ -320,11 +316,10 @@ fn parse_arguments() -> Result<Arguments, String> {
                 ));
             }
             "--calibration" => {
-                arguments.calibration = Some(PathBuf::from(
-                    values
-                        .next()
-                        .ok_or_else(|| "--calibration requires a path".to_string())?,
-                ));
+                arguments.calibration =
+                    Some(PathBuf::from(values.next().ok_or_else(|| {
+                        "--calibration requires a path".to_string()
+                    })?));
             }
             "--steam-app-id" => {
                 arguments.steam_app_id = Some(
@@ -338,9 +333,10 @@ fn parse_arguments() -> Result<Arguments, String> {
                 let raw = values
                     .next()
                     .ok_or_else(|| "--motion-port requires a port number".to_string())?;
-                arguments.motion_port = Some(raw.parse().map_err(|_| {
-                    format!("--motion-port expects a number, got {raw}")
-                })?);
+                arguments.motion_port = Some(
+                    raw.parse()
+                        .map_err(|_| format!("--motion-port expects a number, got {raw}"))?,
+                );
             }
             "--vdf-import" => {
                 let input = PathBuf::from(
@@ -423,10 +419,7 @@ fn probe_sensors() {
                     match sensor.read(now_us()) {
                         Ok(Some(sample)) => println!(
                             "  sample: x={:.5} y={:.5} z={:.5} accel={:?}",
-                            sample.gyro[0],
-                            sample.gyro[1],
-                            sample.gyro[2],
-                            sample.accel
+                            sample.gyro[0], sample.gyro[1], sample.gyro[2], sample.accel
                         ),
                         Ok(None) => println!("  sample: unavailable"),
                         Err(error) => println!("  sample error: {error}"),
@@ -471,12 +464,12 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         .iter()
         .map(|set| set.inputs.len())
         .sum::<usize>();
-    eprintln!(
-        "ira-input: loaded {mapped_inputs} mapped inputs from {profile_name}"
-    );
+    eprintln!("ira-input: loaded {mapped_inputs} mapped inputs from {profile_name}");
     let mut keyboard = create_keyboard(mapper.profile().keyboard_keycodes())?;
     let mut mouse = create_mouse(mapper.profile().uses_mouse())?;
-    let sensor = gamepad.as_ref().and_then(|gamepad| open_sensor(gamepad.info()));
+    let sensor = gamepad
+        .as_ref()
+        .and_then(|gamepad| open_sensor(gamepad.info()));
     // When an experimental uhid controller owns the session (DS4 or the
     // hid-nintendo Switch Pro), the uinput pad must not exist too or games
     // see two controllers and often bind the motionless one. Outputs still
@@ -526,8 +519,12 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         .as_ref()
         .map(|gamepad| (gamepad.info().vendor, gamepad.info().product))
         .unwrap_or((0, 0));
-    let gyro_processor =
-        make_gyro_processor(mapper.profile(), pad_vendor, pad_product, arguments.calibration.as_deref());
+    let gyro_processor = make_gyro_processor(
+        mapper.profile(),
+        pad_vendor,
+        pad_product,
+        arguments.calibration.as_deref(),
+    );
     let last_sensor_us: Option<u64> = None;
     // The motion node must exist before the game opens the virtual pad:
     // SDL pairs sensor nodes with a pad at open time only.
@@ -546,9 +543,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         let uniq = format!("ira-virtual-{}", std::process::id());
         match ira_input::Ds4UhidDevice::create(&uniq) {
             Ok(device) => {
-                eprintln!(
-                    "ira-input: experimental native-motion DS4 exposed over hidraw"
-                );
+                eprintln!("ira-input: experimental native-motion DS4 exposed over hidraw");
                 ds4_hid = Some(device);
             }
             Err(error) => {
@@ -658,16 +653,12 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                 command.env("SDL_GAMECONTROLLER_IGNORE_DEVICES", ignored_device);
             }
         }
-        Some(
-            command
-                .spawn()
-                .map_err(|error| {
-                    format!(
-                        "failed to launch target process {}: {error}",
-                        arguments.command[0]
-                    )
-                })?,
-        )
+        Some(command.spawn().map_err(|error| {
+            format!(
+                "failed to launch target process {}: {error}",
+                arguments.command[0]
+            )
+        })?)
     };
     let mut pad_state = ira_input::PadState::default();
     let mut schedule = LoopSchedule::new();
@@ -702,7 +693,9 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         eprintln!("ira-input: no controller found; waiting for one to be plugged in");
     }
     loop {
-        let was_connected = gamepad.as_ref().is_some_and(|gamepad| gamepad.is_connected());
+        let was_connected = gamepad
+            .as_ref()
+            .is_some_and(|gamepad| gamepad.is_connected());
         let tick_interval = report_rate.interval();
         let run_tick = tick_needed && schedule.sensor.elapsed() >= tick_interval;
         if run_tick {
@@ -781,7 +774,9 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             stop_child(&mut child);
             return Err(error);
         }
-        let connected = gamepad.as_ref().is_some_and(|gamepad| gamepad.is_connected());
+        let connected = gamepad
+            .as_ref()
+            .is_some_and(|gamepad| gamepad.is_connected());
         if was_connected && !connected {
             pipeline.sensor = None;
             pipeline.last_sensor_us = None;
@@ -849,10 +844,10 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             // Best effort: if the game already opened the pad
                             // before this node appears, pairing waits for the
                             // next pad (re)open.
-                            pipeline.motion_device =
-                                open_motion_node(mapper.profile().backend);
+                            pipeline.motion_device = open_motion_node(mapper.profile().backend);
                         }
-                        if pipeline.sensor.is_some() && pipeline.motion.is_none() && motion_enabled {
+                        if pipeline.sensor.is_some() && pipeline.motion.is_none() && motion_enabled
+                        {
                             pipeline.motion = ira_input::MotionServer::bind();
                             if pipeline.motion.is_some() {
                                 eprintln!(
@@ -1523,12 +1518,12 @@ struct SensorPipeline {
     last_dsu_ts: u64,
 }
 
-fn open_motion_node(backend: ira_input::VirtualGamepadBackend) -> Option<ira_input::VirtualMotionSensor> {
+fn open_motion_node(
+    backend: ira_input::VirtualGamepadBackend,
+) -> Option<ira_input::VirtualMotionSensor> {
     match ira_input::VirtualMotionSensor::create(backend) {
         Ok(device) => {
-            eprintln!(
-                "ira-input: native gyro exposed through evdev motion node (SDL sensors)"
-            );
+            eprintln!("ira-input: native gyro exposed through evdev motion node (SDL sensors)");
             Some(device)
         }
         Err(error) => {
@@ -1565,10 +1560,9 @@ fn process_tick(
                 if let Some(motion_device) = pipeline.motion_device.as_mut() {
                     // Native passthrough: SDL-based emulators read the same
                     // unfiltered sensor straight from the virtual pad.
-                    if let Err(error) = motion_device.emit_sample(
-                        sample.gyro,
-                        sample.accel.unwrap_or([0.0, 0.0, 0.0]),
-                    ) {
+                    if let Err(error) = motion_device
+                        .emit_sample(sample.gyro, sample.accel.unwrap_or([0.0, 0.0, 0.0]))
+                    {
                         eprintln!("ira-input: native motion node failed: {error}");
                     }
                 }
@@ -1580,7 +1574,9 @@ fn process_tick(
                     sample.accel.unwrap_or([0.0, 0.0, 0.0]),
                     sample.timestamp_us,
                 ));
-                let rates = pipeline.gyro_processor.process(sample.gyro, sample.accel, dt);
+                let rates = pipeline
+                    .gyro_processor
+                    .process(sample.gyro, sample.accel, dt);
                 mapper.update_gyro(rates);
             }
             Ok(None) => {}
@@ -1663,14 +1659,16 @@ fn process_tick(
         // frames between samples read as instant freefall. Gyroless
         // sessions (or a dead sensor) still stream whole-controller
         // frames with zeroed motion at tick rate.
-        if should_send_dsu_frame(latest.is_some(), pipeline.sensor.is_some(), pipeline.ever_had_sensor)
-        {
+        if should_send_dsu_frame(
+            latest.is_some(),
+            pipeline.sensor.is_some(),
+            pipeline.ever_had_sensor,
+        ) {
             // Stamp with the sensor sample's own clock when available and
             // clamp forward otherwise: Cemu drops non-advancing timestamps
             // and resets on >10s backwards jumps, so fallback frames must
             // never travel backwards or collide with sample stamps.
-            let (gyro, accel, sample_ts) =
-                latest.take().unwrap_or(([0.0; 3], [0.0; 3], 0));
+            let (gyro, accel, sample_ts) = latest.take().unwrap_or(([0.0; 3], [0.0; 3], 0));
             let ts = if sample_ts > pipeline.last_dsu_ts {
                 sample_ts
             } else {

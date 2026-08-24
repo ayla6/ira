@@ -73,9 +73,7 @@ pub fn imu_report(accel_g: [f32; 3], gyro_dps: [f32; 3]) -> [u8; IMU_REPORT_LEN]
         .chunks_exact_mut(2)
         .zip(accel_g.into_iter().chain(gyro_dps))
     {
-        slot.copy_from_slice(
-            &(value.round().clamp(-32768.0, 32767.0) as i16).to_le_bytes(),
-        );
+        slot.copy_from_slice(&(value.round().clamp(-32768.0, 32767.0) as i16).to_le_bytes());
     }
     report
 }
@@ -102,19 +100,19 @@ impl ImuUhidDevice {
     /// Sends one motion sample: `accel_g` in g, `gyro_dps` in deg/s, both
     /// already in the SDL sensor frame.
     pub fn send_sample(&mut self, accel_g: [f32; 3], gyro_dps: [f32; 3]) -> io::Result<()> {
-        self.device.send_input_report(&imu_report(accel_g, gyro_dps))
+        self.device
+            .send_input_report(&imu_report(accel_g, gyro_dps))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{imu_report, REPORT_DESCRIPTOR, IMU_REPORT_LEN};
+    use super::{imu_report, IMU_REPORT_LEN, REPORT_DESCRIPTOR};
 
     #[test]
     fn test_report_packs_accel_then_gyro_signed() {
         let report = imu_report([1.0, -2.4, 0.0], [-180.0, 90.0, 45.6]);
-        let read_i16 =
-            |i: usize| i16::from_le_bytes([report[i * 2], report[i * 2 + 1]]);
+        let read_i16 = |i: usize| i16::from_le_bytes([report[i * 2], report[i * 2 + 1]]);
         assert_eq!(read_i16(0), 1);
         assert_eq!(read_i16(1), -2); // rounds toward the nearest integer
         assert_eq!(read_i16(2), 0);
@@ -126,8 +124,7 @@ mod tests {
     #[test]
     fn test_report_saturates_instead_of_wrapping() {
         let report = imu_report([40000.0, -40000.0, 0.0], [0.0; 3]);
-        let read_i16 =
-            |i: usize| i16::from_le_bytes([report[i * 2], report[i * 2 + 1]]);
+        let read_i16 = |i: usize| i16::from_le_bytes([report[i * 2], report[i * 2 + 1]]);
         assert_eq!(read_i16(0), 32767);
         assert_eq!(read_i16(1), -32768);
     }

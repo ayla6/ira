@@ -9,7 +9,9 @@ const FIXTURES: [&str; 3] = [
 ];
 
 fn fixture_path(name: &str) -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
 }
 
 #[test]
@@ -19,7 +21,9 @@ fn test_workshop_fixtures_import_and_validate() {
             .unwrap_or_else(|error| panic!("read {name}: {error}"));
         let (profile, _report) =
             import_vdf(&text).unwrap_or_else(|error| panic!("{name}: {error}"));
-        profile.validate().unwrap_or_else(|error| panic!("{name}: {error}"));
+        profile
+            .validate()
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
         assert!(!profile.action_sets.is_empty(), "{name}: no sets");
         assert!(
             !profile.name.is_empty(),
@@ -36,8 +40,9 @@ fn test_ps5_gyro_fixture_maps_trigger_axis_and_sticks() {
     assert!(inputs
         .iter()
         .any(|input| input.source == InputSource::Axis(GamepadAxis::LeftTrigger)));
-    assert!(inputs.iter().any(|input| input.source
-        == InputSource::Button(ira_input::GamepadButton::A)));
+    assert!(inputs
+        .iter()
+        .any(|input| input.source == InputSource::Button(ira_input::GamepadButton::A)));
     // Gyro groups feed the gyro config rather than a mapping.
     assert!(profile.gyro.enabled);
 }
@@ -63,10 +68,18 @@ fn test_stick_modes_survive_import() {
     let sticks = profile.action_sets[0]
         .inputs
         .iter()
-        .filter(|input| matches!(input.source, InputSource::Axis(GamepadAxis::LeftX | GamepadAxis::RightX)))
+        .filter(|input| {
+            matches!(
+                input.source,
+                InputSource::Axis(GamepadAxis::LeftX | GamepadAxis::RightX)
+            )
+        })
         .count();
     assert!(sticks >= 1);
     assert!(profile.action_sets[0].inputs.iter().any(|input| {
-        matches!(input.mode, Some(SourceMode::Joystick { .. } | SourceMode::Mouse { .. }))
+        matches!(
+            input.mode,
+            Some(SourceMode::Joystick { .. } | SourceMode::Mouse { .. })
+        )
     }));
 }

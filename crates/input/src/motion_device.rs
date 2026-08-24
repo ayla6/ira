@@ -14,9 +14,7 @@
 use std::io;
 
 use evdev::uinput::VirtualDevice;
-use evdev::{
-    AbsInfo, AbsoluteAxisCode, AttributeSet, InputEvent, PropType, UinputAbsSetup,
-};
+use evdev::{AbsInfo, AbsoluteAxisCode, AttributeSet, InputEvent, PropType, UinputAbsSetup};
 
 use crate::VirtualGamepadBackend;
 
@@ -51,9 +49,24 @@ impl VirtualMotionSensor {
     pub fn emit_sample(&mut self, gyro: [f32; 3], accel: [f32; 3]) -> io::Result<()> {
         const RAD_TO_DEG: f32 = 180.0 / std::f32::consts::PI;
         let events = [
-            axis_event(AbsoluteAxisCode::ABS_X, accel[0], -ACCEL_RANGE_G, ACCEL_RANGE_G),
-            axis_event(AbsoluteAxisCode::ABS_Y, accel[1], -ACCEL_RANGE_G, ACCEL_RANGE_G),
-            axis_event(AbsoluteAxisCode::ABS_Z, accel[2], -ACCEL_RANGE_G, ACCEL_RANGE_G),
+            axis_event(
+                AbsoluteAxisCode::ABS_X,
+                accel[0],
+                -ACCEL_RANGE_G,
+                ACCEL_RANGE_G,
+            ),
+            axis_event(
+                AbsoluteAxisCode::ABS_Y,
+                accel[1],
+                -ACCEL_RANGE_G,
+                ACCEL_RANGE_G,
+            ),
+            axis_event(
+                AbsoluteAxisCode::ABS_Z,
+                accel[2],
+                -ACCEL_RANGE_G,
+                ACCEL_RANGE_G,
+            ),
             axis_event(
                 AbsoluteAxisCode::ABS_RX,
                 gyro[0] * RAD_TO_DEG,

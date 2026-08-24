@@ -9,7 +9,10 @@ use std::time::{Duration, Instant};
 use ira_input::{DualsenseUhidDevice, MotionSample, PadState};
 
 fn main() {
-    let seconds: f32 = std::env::args().nth(1).and_then(|v| v.parse().ok()).unwrap_or(3.0);
+    let seconds: f32 = std::env::args()
+        .nth(1)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3.0);
     let uniq = format!("ira-smoke-{}", std::process::id());
     let mut device = match DualsenseUhidDevice::create(&uniq) {
         Ok(device) => device,

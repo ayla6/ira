@@ -1,21 +1,18 @@
-//! The per-input editor sheet: every activator of one input, Steam-style —
-//! press patterns, outputs picked from the tabbed command picker, gating
-//! (hold/toggle/chord/analog), toggling, repeat rates, stick behaviors, and
-//! mode shifts. Mutations apply straight to the profile; `on_changed` fires
-//! after each one so the region pages can refresh their summaries.
+//! The per-input editor sheet window: activators with their press
+//! patterns and outputs, analog behavior for sticks and triggers
+//! (including dual-stage trigger activators), and mode shifts. Mutations
+//! apply straight to the profile; `on_changed` fires after each one so
+//! the region pages can refresh their summaries.
 
-use super::css::{CSS_FLAT, CSS_SQUARE_BUTTON};
-use super::helpers::esc;
-use super::input_profile_editor_regions::{source_label, supported_button_sources};
+use super::input_profile_editor_regions::source_label;
+use super::input_profile_mode_shifts::shifts_group;
+use super::input_profile_sheet_base::{
+    find_mapping, is_trigger_axis, ProfileRc, OnChanged,
+};
+use super::input_profile_source_modes::{behavior_group, mode_settings_group, modes_for};
 use adw::prelude::*;
-use ira_input::{GamepadAxis, InputMapping, InputSource, SourceMode, StickOutput, VirtualGamepadBackend};
-use std::cell::RefCell;
+use ira_input::InputSource;
 use std::rc::Rc;
-
-pub(crate) type ProfileRc = Rc<RefCell<ira_input::InputProfile>>;
-pub(crate) type OnChanged = Rc<dyn Fn()>;
-/// Structural edits rebuild the sheet contents through this hook.
-pub(crate) type Reopen = Rc<dyn Fn()>;
 
 /// Everything one input's sheet needs; built by the region pages.
 pub(crate) struct InputSheetRequest {
@@ -23,44 +20,8 @@ pub(crate) struct InputSheetRequest {
     pub active_set: usize,
     pub source: InputSource,
     pub device: Option<ira_input::DeviceInfo>,
-    pub backend: VirtualGamepadBackend,
+    pub backend: ira_input::VirtualGamepadBackend,
     pub on_changed: OnChanged,
-}
-
-/// Cloneable sheet state shared by every edit closure. `fill_sheet` derives
-/// its own reopen hook from this so any depth of rebuilds keeps working.
-#[derive(Clone)]
-pub(crate) struct SheetBase {
-    pub(crate) content: gtk4::Box,
-    pub(crate) profile: ProfileRc,
-    pub(crate) active_set: usize,
-    pub(crate) source: InputSource,
-    pub(crate) device: Option<ira_input::DeviceInfo>,
-    pub(crate) backend: VirtualGamepadBackend,
-    pub(crate) on_changed: OnChanged,
-    /// Coalesces deferred rebuilds so a burst of change notifications only
-    /// rebuilds once.
-    pub(crate) rebuild_pending: Rc<std::cell::Cell<bool>>,
-}
-
-pub(crate) fn find_mapping(base: &SheetBase) -> Option<InputMapping> {
-    base.profile
-        .borrow()
-        .action_sets
-        .get(base.active_set)?
-        .inputs
-        .iter()
-        .find(|input| input.source == base.source)
-        .cloned()
-}
-
-pub(crate) fn with_mapping(base: &SheetBase, apply: impl FnOnce(&mut InputMapping)) {
-    let mut borrow = base.profile.borrow_mut();
-    if let Some(set) = borrow.action_sets.get_mut(base.active_set) {
-        if let Some(input) = set.inputs.iter_mut().find(|input| input.source == base.source) {
-            apply(input);
-        }
-    }
 }
 
 pub(crate) fn show_input_sheet(parent: &adw::Window, request: InputSheetRequest) {
@@ -87,7 +48,7 @@ pub(crate) fn show_input_sheet(parent: &adw::Window, request: InputSheetRequest)
     root.append(&scroll);
     window.set_content(Some(&root));
 
-    let base = SheetBase {
+    let base = super::input_profile_sheet_base::SheetBase {
         content,
         profile: request.profile,
         active_set: request.active_set,
@@ -112,7 +73,7 @@ fn sheet_title(request: &InputSheetRequest) -> String {
 /// The rebuild is deferred to the next idle and coalesced: clearing children
 /// while a signal emission is still unwinding through them finalizes widgets
 /// GTK touches afterwards (the recurring get_parent/add_css_class criticals).
-fn fill_sheet(base: &SheetBase) {
+fn fill_sheet(base: &super::input_profile_sheet_base::SheetBase) {
     if base.rebuild_pending.replace(true) {
         return;
     }
@@ -123,8 +84,8 @@ fn fill_sheet(base: &SheetBase) {
     });
 }
 
-fn rebuild_sheet(base: &SheetBase) {
-    let reopen: Reopen = {
+fn rebuild_sheet(base: &super::input_profile_sheet_base::SheetBase) {
+    let reopen: super::input_profile_sheet_base::Reopen = {
         let base = base.clone();
         Rc::new(move || fill_sheet(&base))
     };
@@ -134,399 +95,25 @@ fn rebuild_sheet(base: &SheetBase) {
         base.content
             .append(&behavior_group(base, &reopen, modes_for(base.source)));
         if let Some(mapping) = find_mapping(base) {
-            if let Some(mode) = mapping.mode {
-                base.content
-                    .append(&mode_settings_group(base, &mode));
+            if let Some(ref mode) = mapping.mode {
+                base.content.append(&mode_settings_group(base, mode));
             }
+            // Triggers carry activators alongside their analog mode — the
+            // dual-stage soft/full pull. Every axis can also be shifted.
+            if is_trigger_axis(base.source) {
+                base.content.append(
+                    &super::input_profile_activator_edit::activators_group(base, &reopen, &mapping),
+                );
+            }
+            base.content.append(&shifts_group(base, &reopen));
         }
         return;
     }
 
     if let Some(mapping) = find_mapping(base) {
-        base.content.append(&super::input_profile_activator_edit::activators_group(
-            base, &reopen, &mapping,
-        ));
+        base.content.append(
+            &super::input_profile_activator_edit::activators_group(base, &reopen, &mapping),
+        );
         base.content.append(&shifts_group(base, &reopen));
     }
-}
-
-// ---------------------------------------------------------------------------
-// Behavior (analog inputs)
-// ---------------------------------------------------------------------------
-
-fn modes_for(source: InputSource) -> Vec<Option<SourceMode>> {
-    if is_trigger_axis(source) {
-        vec![None, Some(SourceMode::Trigger { threshold: 0.5 })]
-    } else {
-        vec![
-            None,
-            Some(SourceMode::Joystick {
-                output: default_stick_output(source),
-                deadzone_inner: 0.1,
-                deadzone_outer: 0.95,
-                curve: 1.0,
-            }),
-            Some(SourceMode::Dpad { threshold: 0.5 }),
-            Some(SourceMode::Mouse { sensitivity: 1.0 }),
-            Some(SourceMode::Flickstick {
-                rotation_sensitivity: 1.0,
-                flick_duration_ms: 100,
-            }),
-        ]
-    }
-}
-
-fn is_trigger_axis(source: InputSource) -> bool {
-    matches!(
-        source,
-        InputSource::Axis(GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger)
-    )
-}
-
-fn mode_label(mode: &Option<SourceMode>, is_trigger: bool) -> String {
-    match mode {
-        None => crate::tr!("None"),
-        Some(SourceMode::Joystick { .. }) => crate::tr!("Joystick"),
-        Some(SourceMode::Dpad { .. }) => crate::tr!("Directional Pad"),
-        Some(SourceMode::Mouse { .. }) => crate::tr!("Joystick Mouse"),
-        Some(SourceMode::Flickstick { .. }) => crate::tr!("Flick Stick"),
-        Some(SourceMode::Trigger { .. }) if is_trigger => crate::tr!("Trigger"),
-        _ => crate::tr!("Other"),
-    }
-}
-
-fn same_mode(left: &Option<SourceMode>, right: &SourceMode) -> bool {
-    match left {
-        Some(a) => std::mem::discriminant(a) == std::mem::discriminant(right),
-        None => false,
-    }
-}
-
-fn default_stick_output(source: InputSource) -> StickOutput {
-    match source {
-        InputSource::Axis(GamepadAxis::RightX | GamepadAxis::RightY) => StickOutput::Right,
-        _ => StickOutput::Left,
-    }
-}
-
-fn behavior_group(base: &SheetBase, reopen: &Reopen, modes: Vec<Option<SourceMode>>) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::new();
-    group.set_title(&crate::tr!("Behavior"));
-    group.set_description(Some(&crate::tr!("What this stick or trigger does")));
-
-    let is_trigger = is_trigger_axis(base.source);
-    let current = find_mapping(base).and_then(|mapping| mapping.mode);
-    let selected = current
-        .as_ref()
-        .and_then(|mode| modes.iter().position(|candidate| same_mode(candidate, mode)))
-        .unwrap_or(0);
-    let labels: Vec<String> = modes.iter().map(|mode| mode_label(mode, is_trigger)).collect();
-
-    let dropdown = combo_row(&labels, selected as u32);
-    dropdown.set_title(&crate::tr!("Behavior"));
-    dropdown.set_subtitle(&crate::tr!("What this stick or trigger does"));
-    group.add(&dropdown);
-
-    let base_for_change = base.clone();
-    let reopen_for_change = reopen.clone();
-    dropdown.connect_selected_notify(move |dropdown| {
-        let mode = modes
-            .get(dropdown.selected() as usize)
-            .cloned()
-            .flatten();
-        with_mapping(&base_for_change, |input| {
-            input.mode = mode;
-        });
-        (base_for_change.on_changed)();
-        reopen_for_change();
-    });
-
-    group
-}
-
-/// Returns a closure that mutates the current mode in place, if any.
-fn mode_writer(base: &SheetBase) -> impl Fn(&mut dyn FnMut(&mut SourceMode)) + '_ {
-    let base = base.clone();
-    move |mutate: &mut dyn FnMut(&mut SourceMode)| {
-        with_mapping(&base, |input| {
-            if let Some(current) = input.mode.as_mut() {
-                mutate(current);
-            }
-        });
-    }
-}
-
-fn mode_settings_group(base: &SheetBase, mode: &SourceMode) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::new();
-    group.set_title(&crate::tr!("Response"));
-    match mode {
-        SourceMode::Joystick {
-            deadzone_inner,
-            deadzone_outer,
-            curve,
-            ..
-        } => joystick_rows(base, &group, *deadzone_inner, *deadzone_outer, *curve),
-        SourceMode::Mouse { sensitivity } => {
-            group.add(&mode_spin_row(
-                base,
-                &crate::tr!("Sensitivity"),
-                0.05,
-                20.0,
-                0.05,
-                f64::from(*sensitivity),
-                |mode, value| {
-                    if let SourceMode::Mouse { sensitivity } = mode {
-                        *sensitivity = value as f32;
-                    }
-                },
-            ));
-        }
-        SourceMode::Dpad { threshold } => {
-            group.add(&mode_spin_row(
-                base,
-                &crate::tr!("Activation threshold"),
-                0.2,
-                0.95,
-                0.05,
-                f64::from(*threshold),
-                |mode, value| {
-                    if let SourceMode::Dpad { threshold } = mode {
-                        *threshold = value as f32;
-                    }
-                },
-            ));
-        }
-        SourceMode::Trigger { threshold } => {
-            group.add(&mode_spin_row(
-                base,
-                &crate::tr!("Full pull threshold"),
-                0.1,
-                1.0,
-                0.05,
-                f64::from(*threshold),
-                |mode, value| {
-                    if let SourceMode::Trigger { threshold } = mode {
-                        *threshold = value as f32;
-                    }
-                },
-            ));
-        }
-        SourceMode::Flickstick {
-            rotation_sensitivity,
-            flick_duration_ms,
-        } => {
-            group.add(&mode_spin_row(
-                base,
-                &crate::tr!("Rotation sensitivity"),
-                0.1,
-                10.0,
-                0.1,
-                f64::from(*rotation_sensitivity),
-                |mode, value| {
-                    if let SourceMode::Flickstick {
-                        rotation_sensitivity,
-                        ..
-                    } = mode
-                    {
-                        *rotation_sensitivity = value as f32;
-                    }
-                },
-            ));
-            group.add(&mode_spin_row(
-                base,
-                &crate::tr!("Flick duration (ms)"),
-                40.0,
-                400.0,
-                10.0,
-                f64::from(*flick_duration_ms),
-                |mode, value| {
-                    if let SourceMode::Flickstick {
-                        flick_duration_ms, ..
-                    } = mode
-                    {
-                        *flick_duration_ms = value as u32;
-                    }
-                },
-            ));
-        }
-    }
-    group
-}
-
-fn joystick_rows(
-    base: &SheetBase,
-    group: &adw::PreferencesGroup,
-    inner: f32,
-    outer: f32,
-    curve: f32,
-) {
-    group.add(&mode_spin_row(
-        base,
-        &crate::tr!("Inner dead zone"),
-        0.0,
-        0.9,
-        0.01,
-        f64::from(inner),
-        |mode, value| {
-            if let SourceMode::Joystick { deadzone_inner, .. } = mode {
-                *deadzone_inner = value as f32;
-            }
-        },
-    ));
-    group.add(&mode_spin_row(
-        base,
-        &crate::tr!("Outer dead zone"),
-        0.1,
-        1.0,
-        0.01,
-        f64::from(outer),
-        |mode, value| {
-            if let SourceMode::Joystick {
-                deadzone_outer, ..
-            } = mode
-            {
-                *deadzone_outer = value as f32;
-            }
-        },
-    ));
-    group.add(&mode_spin_row(
-        base,
-        &crate::tr!("Response curve"),
-        0.2,
-        3.0,
-        0.05,
-        f64::from(curve),
-        |mode, value| {
-            if let SourceMode::Joystick { curve, .. } = mode {
-                *curve = value as f32;
-            }
-        },
-    ));
-}
-
-/// One spin row bound to a field of the input's current SourceMode.
-fn mode_spin_row(
-    base: &SheetBase,
-    title: &str,
-    min: f64,
-    max: f64,
-    step: f64,
-    value: f64,
-    mutate: fn(&mut SourceMode, f64),
-) -> adw::SpinRow {
-    let base = base.clone();
-    spin_row(title, min, max, step, value, Rc::new(move |value| {
-        let write = mode_writer(&base);
-        write(&mut |mode| mutate(mode, value));
-        (base.on_changed)();
-    }))
-}
-
-// ---------------------------------------------------------------------------
-// Activators (button inputs)
-// ---------------------------------------------------------------------------
-
-
-// ---------------------------------------------------------------------------
-// Mode shifts
-// ---------------------------------------------------------------------------
-
-fn shifts_group(base: &SheetBase, reopen: &Reopen) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::new();
-    group.set_title(&crate::tr!("Mode shifts"));
-    group.set_description(Some(&crate::tr!(
-        "While the trigger is held, this input uses the shifted behavior"
-    )));
-
-    if let Some(mapping) = find_mapping(base) {
-        for (shift_index, shift) in mapping.mode_shifts.iter().enumerate() {
-            let row = adw::ActionRow::new();
-            row.set_title(&esc(&format!(
-                "{} {}",
-                crate::tr!("While holding"),
-                source_label(shift.trigger)
-            )));
-            let trash = gtk4::Button::from_icon_name("user-trash-symbolic");
-            trash.add_css_class(CSS_FLAT);
-            trash.add_css_class(CSS_SQUARE_BUTTON);
-            trash.set_valign(gtk4::Align::Center);
-            row.add_suffix(&trash);
-            let base = base.clone();
-            let reopen = reopen.clone();
-            trash.connect_clicked(move |_| {
-                with_mapping(&base, |input| {
-                    if shift_index < input.mode_shifts.len() {
-                        input.mode_shifts.remove(shift_index);
-                    }
-                });
-                (base.on_changed)();
-                reopen();
-            });
-            group.add(&row);
-        }
-    }
-
-    let sources: Vec<(InputSource, String)> = supported_button_sources(base.device.as_ref())
-        .into_iter()
-        .map(|source| (source, source_label(source)))
-        .collect();
-    let labels: Vec<String> = sources.iter().map(|(_, label)| label.clone()).collect();
-    let picker = combo_row(&labels, 0);
-    picker.set_title(&crate::tr!("Shift while holding"));
-    let add = gtk4::Button::with_label(&crate::tr!("Add shift"));
-    add.add_css_class(CSS_FLAT);
-    add.set_valign(gtk4::Align::Center);
-    picker.add_suffix(&add);
-    group.add(&picker);
-    let base = base.clone();
-    let reopen = reopen.clone();
-    add.connect_clicked(move |_| {
-        if let Some((trigger, _)) = sources.get(picker.selected() as usize) {
-            let trigger = *trigger;
-            with_mapping(&base, |input| {
-                input.mode_shifts.push(ira_input::ModeShift {
-                    trigger,
-                    mode: None,
-                    activators: Vec::new(),
-                });
-            });
-            (base.on_changed)();
-            reopen();
-        }
-    });
-
-    group
-}
-
-// ---------------------------------------------------------------------------
-// Widget helpers
-// ---------------------------------------------------------------------------
-
-/// A full-width libadwaita combo row; callers add it directly instead of
-/// nesting a compact dropdown inside another row's suffix.
-pub(crate) fn combo_row(labels: &[String], selected: u32) -> adw::ComboRow {
-    let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let row = adw::ComboRow::new();
-    row.set_model(Some(&gtk4::StringList::new(&refs)));
-    row.set_selected(selected);
-    row
-}
-
-pub(crate) type SpinChange = Rc<dyn Fn(f64)>;
-
-pub(crate) fn spin_row(
-    title: &str,
-    min: f64,
-    max: f64,
-    step: f64,
-    value: f64,
-    on_change: SpinChange,
-) -> adw::SpinRow {
-    let row = adw::SpinRow::with_range(min, max, step);
-    row.set_title(&esc(title));
-    row.set_value(value);
-    row.connect_value_notify(move |row| {
-        on_change(row.value());
-    });
-    row
 }

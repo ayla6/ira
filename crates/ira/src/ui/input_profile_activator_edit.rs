@@ -6,8 +6,8 @@ use super::css::{CSS_FLAT, CSS_SQUARE_BUTTON};
 use super::helpers::esc;
 use super::input_output_picker::{show_output_picker, OutputPickerScope};
 use super::input_profile_activator_gate::activator_gate_controls;
-use super::input_profile_activator_sheet::{
-    combo_row, spin_row, with_mapping, Reopen, SheetBase,
+use super::input_profile_sheet_base::{
+    combo_row, is_trigger_axis, spin_row, with_mapping, Reopen, SheetBase,
 };
 use super::input_profile_editor_regions::{activator_kind_label, source_label};
 use super::input_profile_options::output_display_label;
@@ -15,28 +15,32 @@ use adw::prelude::*;
 use ira_input::{Activator, ActivatorKind, GamepadButton, InputMapping, OutputAction};
 use std::rc::Rc;
 
-fn kind_index(kind: &ActivatorKind) -> u32 {
+fn kind_index(kind: &ActivatorKind, soft_pull: bool) -> u32 {
     match kind {
         ActivatorKind::DoublePress { .. } => 1,
         ActivatorKind::LongPress { .. } => 2,
         ActivatorKind::StartPress => 3,
         ActivatorKind::Release => 4,
+        // Off trigger sheets, where it cannot be picked, a soft pull falls
+        // back to the Click entry rather than an out-of-range selection.
+        ActivatorKind::SoftPress { .. } if soft_pull => 5,
         _ => 0,
     }
 }
 
-fn make_kind(index: u32, window_ms: u32, duration_ms: u32) -> ActivatorKind {
+fn make_kind(index: u32, window_ms: u32, duration_ms: u32, threshold: f32) -> ActivatorKind {
     match index {
         1 => ActivatorKind::DoublePress { window_ms },
         2 => ActivatorKind::LongPress { duration_ms },
         3 => ActivatorKind::StartPress,
         4 => ActivatorKind::Release,
+        5 => ActivatorKind::SoftPress { threshold },
         _ => ActivatorKind::FullPress,
     }
 }
 
-fn kind_labels() -> Vec<String> {
-    [
+fn kind_labels(soft_pull: bool) -> Vec<String> {
+    let mut labels = [
         crate::tr!("Click"),
         crate::tr!("Double press"),
         crate::tr!("Long press"),
@@ -44,7 +48,11 @@ fn kind_labels() -> Vec<String> {
         crate::tr!("On release"),
     ]
     .into_iter()
-    .collect()
+    .collect::<Vec<_>>();
+    if soft_pull {
+        labels.push(crate::tr!("Soft pull"));
+    }
+    labels
 }
 
 pub(crate) fn activators_group(
@@ -138,6 +146,7 @@ fn activator_kind_controls(
     activator: &Activator,
     expander: &adw::ExpanderRow,
 ) {
+    let soft_pull = is_trigger_axis(base.source);
     let timing_window = match &activator.kind {
         ActivatorKind::DoublePress { window_ms } => *window_ms,
         _ => 320,
@@ -146,19 +155,24 @@ fn activator_kind_controls(
         ActivatorKind::LongPress { duration_ms } => *duration_ms,
         _ => 600,
     };
-    let kind = combo_row(&kind_labels(), kind_index(&activator.kind));
+    let soft_threshold = match &activator.kind {
+        ActivatorKind::SoftPress { threshold } => *threshold,
+        _ => 0.5,
+    };
+    let kind = combo_row(&kind_labels(soft_pull), kind_index(&activator.kind, soft_pull));
     kind.set_title(&crate::tr!("Press pattern"));
     expander.add_row(&kind);
     let base_for_kind = base.clone();
-    let reopen = reopen.clone();
+    let reopen_for_kind = reopen.clone();
     kind.connect_selected_notify(move |dropdown| {
         with_mapping(&base_for_kind, |input| {
             if let Some(activator) = input.activators.get_mut(index) {
-                activator.kind = make_kind(dropdown.selected(), timing_window, timing_duration);
+                activator.kind =
+                    make_kind(dropdown.selected(), timing_window, timing_duration, soft_threshold);
             }
         });
         (base_for_kind.on_changed)();
-        reopen();
+        reopen_for_kind();
     });
 
     if let ActivatorKind::DoublePress { window_ms } = &activator.kind {
@@ -199,6 +213,28 @@ fn activator_kind_controls(
                         .map(|activator| &mut activator.kind)
                     {
                         *duration_ms = value as u32;
+                    }
+                });
+                (base.on_changed)();
+            }),
+        ));
+    }
+    if let ActivatorKind::SoftPress { threshold } = &activator.kind {
+        let base = base.clone();
+        expander.add_row(&spin_row(
+            &crate::tr!("Soft pull threshold"),
+            0.05,
+            0.95,
+            0.05,
+            f64::from(*threshold),
+            Rc::new(move |value| {
+                with_mapping(&base, |input| {
+                    if let Some(ActivatorKind::SoftPress { threshold }) = input
+                        .activators
+                        .get_mut(index)
+                        .map(|activator| &mut activator.kind)
+                    {
+                        *threshold = value as f32;
                     }
                 });
                 (base.on_changed)();

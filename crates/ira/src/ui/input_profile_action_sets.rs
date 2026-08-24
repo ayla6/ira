@@ -272,7 +272,7 @@ fn backend_group(ctx: &PagesCtx) -> adw::PreferencesGroup {
         crate::tr!("DualSense"),
         crate::tr!("DSU (cemuhook)"),
     ];
-    let combo = super::input_profile_activator_sheet::combo_row(
+    let combo = super::input_profile_sheet_base::combo_row(
         &labels,
         backend_index(ctx.profile.borrow().backend),
     );

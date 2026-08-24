@@ -1,7 +1,7 @@
 //! Activation gating for the binding sheet: hold/toggle/disable-while
 //! source pickers plus the analog gate editor (axis, condition, threshold).
 
-use super::input_profile_activator_sheet::{combo_row, find_mapping, with_mapping, Reopen, SheetBase};
+use super::input_profile_sheet_base::{combo_row, find_mapping, with_mapping, Reopen, SheetBase};
 use super::input_profile_editor_regions::{source_label, supported_button_sources};
 use super::input_profile_options::{activation_index, activation_labels};
 use adw::prelude::*;

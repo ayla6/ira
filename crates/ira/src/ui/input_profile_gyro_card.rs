@@ -6,7 +6,7 @@
 //! sensor switch and the DSU output-mode note (the cemuhook stream is
 //! inherent to picking DSU, never a toggle).
 
-use super::input_profile_activator_sheet::{combo_row, spin_row};
+use super::input_profile_sheet_base::{combo_row, spin_row};
 use super::input_profile_options::source_options_for_device;
 use adw::prelude::*;
 use ira_input::{

@@ -13,9 +13,10 @@ use crate::uhid::{UhidDevice, UhidEvent, BUS_USB};
 
 pub const VENDOR_ID: u32 = 0x0f0d;
 pub const PRODUCT_ID: u32 = 0x0163;
-/// Real PlayStation pads report this generic product string; games and
-/// launchers whitelist by name.
-pub const DEVICE_NAME: &str = "Wireless Controller";
+/// Real DualSense hardware reports this exact product string; games and
+/// launchers whitelist by name, and SDL's PS5 classification comes from the
+/// VID/PID, not the name.
+pub const DEVICE_NAME: &str = "DualSense Wireless Controller";
 
 const FEATURE_CAPABILITIES: u8 = 0x03;
 const FEATURE_CALIBRATION: u8 = 0x05;

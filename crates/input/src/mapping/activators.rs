@@ -14,6 +14,11 @@ use crate::profile::{
     Activator, ActivatorKind, ActivatorSettings, InputMapping, InputSource, OutputAction,
 };
 
+/// Gap kept between the deepest soft pull and the digitalized full pull.
+const SOFT_FULL_PULL_MARGIN: f32 = 0.05;
+/// The digitalized full pull never moves past near-full travel.
+const SOFT_FULL_PULL_CEILING: f32 = 0.95;
+
 /// Press-pattern state for one input, keyed by source.
 #[derive(Default)]
 pub(crate) struct ActivatorStates {
@@ -53,6 +58,8 @@ pub(crate) struct PatternState {
     held: Vec<(usize, OutputAction)>,
     /// Activator toggle state, activator index → on/off.
     toggles: HashMap<usize, bool>,
+    /// Soft-pull activator indices whose threshold the value is past.
+    soft_held: Vec<usize>,
 }
 
 impl PatternState {
@@ -117,7 +124,8 @@ impl<'a> ActivatorRunner<'a> {
 
     /// Feed a value change for the input.
     pub(crate) fn value_change(&mut self, state: &mut PatternState, value: f32, now_us: u64) {
-        let pressed = value > super::BUTTON_THRESHOLD;
+        self.soft_crossings(state, value);
+        let pressed = value > self.digital_threshold();
         let was_pressed = state.pressed_at.is_some();
         if pressed && !was_pressed {
             self.on_press(state, now_us);
@@ -125,6 +133,44 @@ impl<'a> ActivatorRunner<'a> {
             self.on_release(state, now_us);
         }
         self.expire_deadlines(state, now_us);
+    }
+
+    /// Soft-pull activators live outside the press-pattern machine: each
+    /// fires when the value crosses its own threshold and releases when it
+    /// falls back below (Steam's dual-stage trigger soft pull).
+    fn soft_crossings(&mut self, state: &mut PatternState, value: f32) {
+        for (index, activator) in self.mapping.activators.iter().enumerate() {
+            let ActivatorKind::SoftPress { threshold } = activator.kind else {
+                continue;
+            };
+            let passing = value > threshold;
+            let was = state.soft_held.contains(&index);
+            if passing && !was {
+                state.soft_held.push(index);
+                if self.active {
+                    self.fire(activator, state, index);
+                }
+            } else if !passing && was {
+                state.soft_held.retain(|held| *held != index);
+                // Toggled-on soft pulls persist until crossed again.
+                if self.active && !activator.settings.toggle {
+                    self.release_activator(state, index);
+                }
+            }
+        }
+    }
+
+    /// The pattern machine digitalizes the input at one threshold. With
+    /// soft pulls present, the click must sit past the deepest soft stage
+    /// so a full pull never fires before its own soft pull.
+    fn digital_threshold(&self) -> f32 {
+        let mut threshold = super::BUTTON_THRESHOLD;
+        for activator in &self.mapping.activators {
+            if let ActivatorKind::SoftPress { threshold: soft } = activator.kind {
+                threshold = threshold.max(soft + SOFT_FULL_PULL_MARGIN);
+            }
+        }
+        threshold.min(SOFT_FULL_PULL_CEILING)
     }
 
     /// Advance time-based patterns (double windows, long press, repeats).
@@ -436,238 +482,13 @@ impl<'a> ActivatorRunner<'a> {
 }
 
 fn double_activators(mapping: &InputMapping) -> impl Iterator<Item = (usize, &Activator)> {
-    mapping.activators.iter().enumerate().filter(|(_, activator)| {
-        matches!(activator.kind, ActivatorKind::DoublePress { .. })
-    })
+    mapping
+        .activators
+        .iter()
+        .enumerate()
+        .filter(|(_, activator)| matches!(activator.kind, ActivatorKind::DoublePress { .. }))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::profile::{Activation, ActivatorSettings};
-
-    fn mapping_with(activators: Vec<Activator>) -> InputMapping {
-        InputMapping {
-            source: InputSource::Button(crate::GamepadButton::A),
-            mode: None,
-            mode_shifts: Vec::new(),
-            activators,
-        }
-    }
-
-    fn button_output(pressed: bool) -> OutputEvent {
-        OutputEvent::GamepadButton {
-            button: crate::GamepadButton::B,
-            pressed,
-        }
-    }
-
-    #[test]
-    fn test_plain_click_fires_full_press_on_press_and_release() {
-        let mapping = mapping_with(vec![Activator::full_press(vec![
-            OutputAction::GamepadButton(crate::GamepadButton::B),
-        ])]);
-        let mut states = ActivatorStates::default();
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 1.0, 1_000);
-        let outcome = runner.finish();
-        assert_eq!(outcome.outputs, vec![button_output(true)]);
-
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 0.0, 50_000);
-        assert_eq!(runner.finish().outputs, vec![button_output(false)]);
-    }
-
-    #[test]
-    fn test_double_press_fires_double_and_cancels_click() {
-        let mapping = mapping_with(vec![
-            Activator::full_press(vec![OutputAction::GamepadButton(crate::GamepadButton::B)]),
-            Activator {
-                kind: ActivatorKind::DoublePress { window_ms: 300 },
-                outputs: vec![OutputAction::Keyboard { keycode: 30 }],
-                activation: Activation::Always,
-                settings: ActivatorSettings::default(),
-            },
-        ]);
-        let mut states = ActivatorStates::default();
-        // Press and release quickly; nothing fires yet.
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 1.0, 1_000);
-        runner.value_change(states.entry(mapping.source), 0.0, 30_000);
-        assert!(runner.finish().outputs.is_empty());
-
-        // Second press inside the window fires the double activator.
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 1.0, 100_000);
-        let outcome = runner.finish();
-        assert_eq!(
-            outcome.outputs,
-            vec![OutputEvent::Key {
-                keycode: 30,
-                pressed: true
-            }]
-        );
-    }
-
-    #[test]
-    fn test_slow_double_press_promotes_click_after_window() {
-        let mapping = mapping_with(vec![
-            Activator::full_press(vec![OutputAction::GamepadButton(crate::GamepadButton::B)]),
-            Activator {
-                kind: ActivatorKind::DoublePress { window_ms: 300 },
-                outputs: vec![OutputAction::Keyboard { keycode: 30 }],
-                activation: Activation::Always,
-                settings: ActivatorSettings::default(),
-            },
-        ]);
-        let mut states = ActivatorStates::default();
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 1.0, 1_000);
-        runner.value_change(states.entry(mapping.source), 0.0, 30_000);
-        runner.finish();
-
-        // Window expires with no second press: the click fires as a pulse.
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.advance(states.entry(mapping.source), 500_000);
-        let outcome = runner.finish();
-        assert_eq!(
-            outcome.outputs,
-            vec![button_output(true), button_output(false)]
-        );
-    }
-
-    #[test]
-    fn test_long_press_fires_while_held() {
-        let mapping = mapping_with(vec![
-            Activator::full_press(vec![OutputAction::GamepadButton(crate::GamepadButton::B)]),
-            Activator {
-                kind: ActivatorKind::LongPress { duration_ms: 200 },
-                outputs: vec![OutputAction::Keyboard { keycode: 42 }],
-                activation: Activation::Always,
-                settings: ActivatorSettings::default(),
-            },
-        ]);
-        let mut states = ActivatorStates::default();
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 1.0, 1_000);
-        runner.finish();
-
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.advance(states.entry(mapping.source), 250_000);
-        let outcome = runner.finish();
-        assert_eq!(
-            outcome.outputs,
-            vec![OutputEvent::Key {
-                keycode: 42,
-                pressed: true
-            }]
-        );
-
-        // Release ends both the full press and the long press.
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 0.0, 260_000);
-        let mut outcome = runner.finish();
-        outcome.outputs.sort_by_key(|event| match event {
-            OutputEvent::GamepadButton { pressed, .. } => u8::from(!*pressed),
-            _ => 1,
-        });
-        assert_eq!(outcome.outputs.len(), 2);
-    }
-
-    #[test]
-    fn test_toggle_activator_presses_and_releases_on_reactivation() {
-        let mapping = mapping_with(vec![Activator {
-            kind: ActivatorKind::FullPress,
-            outputs: vec![OutputAction::GamepadButton(crate::GamepadButton::B)],
-            activation: Activation::Always,
-            settings: ActivatorSettings {
-                repeat_rate_ms: None,
-                toggle: true,
-                interruptable: true,
-            },
-        }]);
-        let mut states = ActivatorStates::default();
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 1.0, 1_000);
-        runner.value_change(states.entry(mapping.source), 0.0, 50_000);
-        assert_eq!(runner.finish().outputs, vec![button_output(true)]);
-
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 1.0, 100_000);
-        runner.value_change(states.entry(mapping.source), 0.0, 150_000);
-        assert_eq!(runner.finish().outputs, vec![button_output(false)]);
-    }
-
-    #[test]
-    fn test_release_activator_fires_pulse_on_release() {
-        let mapping = mapping_with(vec![Activator {
-            kind: ActivatorKind::Release,
-            outputs: vec![OutputAction::GamepadButton(crate::GamepadButton::B)],
-            activation: Activation::Always,
-            settings: ActivatorSettings::default(),
-        }]);
-        let mut states = ActivatorStates::default();
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 1.0, 1_000);
-        runner.finish();
-
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 0.0, 50_000);
-        assert_eq!(
-            runner.finish().outputs,
-            vec![button_output(true), button_output(false)]
-        );
-    }
-
-    #[test]
-    fn test_inactive_input_releases_held_outputs() {
-        let mapping = mapping_with(vec![Activator::full_press(vec![
-            OutputAction::GamepadButton(crate::GamepadButton::B),
-        ])]);
-        let mut states = ActivatorStates::default();
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 1.0, 1_000);
-        runner.finish();
-
-        // Gating turns off while held: the press must be released.
-        let mut runner = ActivatorRunner::new(&mapping, false);
-        runner.advance(states.entry(mapping.source), 10_000);
-        assert_eq!(runner.finish().outputs, vec![button_output(false)]);
-    }
-
-    #[test]
-    fn test_repeat_rate_refires_while_held() {
-        let mapping = mapping_with(vec![Activator {
-            kind: ActivatorKind::FullPress,
-            outputs: vec![OutputAction::GamepadButton(crate::GamepadButton::B)],
-            activation: Activation::Always,
-            settings: ActivatorSettings {
-                repeat_rate_ms: Some(100),
-                toggle: false,
-                interruptable: true,
-            },
-        }]);
-        let mut states = ActivatorStates::default();
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 1.0, 1_000);
-        assert_eq!(runner.finish().outputs, vec![button_output(true)]);
-
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.advance(states.entry(mapping.source), 150_000);
-        let outcome = runner.finish();
-        assert_eq!(outcome.outputs, vec![button_output(true), button_output(false)]);
-    }
-
-    #[test]
-    fn test_internal_actions_are_reported_not_emitted() {
-        let mapping = mapping_with(vec![Activator::full_press(vec![
-            OutputAction::SwitchActionSet(1),
-        ])]);
-        let mut states = ActivatorStates::default();
-        let mut runner = ActivatorRunner::new(&mapping, true);
-        runner.value_change(states.entry(mapping.source), 1.0, 1_000);
-        let outcome = runner.finish();
-        assert!(outcome.outputs.is_empty());
-        assert_eq!(outcome.internal, vec![OutputAction::SwitchActionSet(1)]);
-    }
-}
+#[path = "activators_tests.rs"]
+mod tests;

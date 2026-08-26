@@ -9,11 +9,11 @@ use super::helpers::esc;
 use super::input_output_picker::{show_output_picker, OutputPickerScope};
 use super::input_profile_activator_sheet::{show_input_sheet, InputSheetRequest};
 use super::input_profile_assets::{set_source_asset, source_badge};
-use super::input_profile_editor_regions::{mapping_summary, region_groups, source_label, Region};
+use super::input_profile_editor_regions::{region_groups, source_label, Region};
 use super::input_profile_options::output_display_label;
 use super::input_profile_sheet_base::is_trigger_axis;
-use super::input_profile_source_modes::{mode_label, modes_for, same_mode};
-use super::input_profile_widgets::{option_picker_popover, picker_button, OptionChoice};
+use super::input_profile_source_modes::{modes_for, same_mode};
+use super::input_profile_widgets::OptionChoice;
 use adw::prelude::*;
 use ira_input::{
     ActivatorKind, GamepadAxis, GamepadButton, InputMapping, InputProfile, InputSource,
@@ -84,11 +84,11 @@ fn region_source_row(
     source: InputSource,
     mapping: Option<&InputMapping>,
     family: ira_input::ControllerFamily,
-) -> adw::ActionRow {
+) -> gtk4::Widget {
     if is_stick_source(source) || is_trigger_axis(source) {
-        analog_row(ctx, source, mapping, family)
+        analog_row(ctx, source, mapping, family).upcast()
     } else {
-        command_row(ctx, source, mapping, family)
+        command_row(ctx, source, mapping, family).upcast()
     }
 }
 
@@ -100,9 +100,10 @@ fn is_stick_source(source: InputSource) -> bool {
     )
 }
 
-/// A digital input's row: the current command sits on the right as a
-/// button; clicking it — or the row — reopens the command picker, the gear
-/// opens the full sheet.
+/// A digital input's row: the whole row is the click target — it reopens
+/// the command picker — with the current command shown as the row's value,
+/// Steam's command slot in libadwaita clothing. The gear opens the full
+/// sheet.
 fn command_row(
     ctx: &PagesCtx,
     source: InputSource,
@@ -113,54 +114,41 @@ fn command_row(
     let unmapped = mapping.is_none();
     add_source_prefix(&row, source, family, unmapped);
     row.set_title(&esc(&source_label(source)));
-    let on_rebind = rebind_hook(ctx, source);
-    match mapping.and_then(primary_output) {
-        Some(output) => {
-            let command = gtk4::Button::with_label(&output_display_label(&output));
-            command.add_css_class(CSS_FLAT);
-            command.set_valign(gtk4::Align::Center);
-            {
-                let on_rebind = on_rebind.clone();
-                command.connect_clicked(move |_| on_rebind());
-            }
-            row.add_suffix(&command);
-            row.add_suffix(&gear_button(ctx, source));
-            row.set_activatable(true);
-            row.connect_activated(move |_| on_rebind());
-        }
-        None => {
-            row.set_subtitle(&crate::tr!("Not mapped"));
-            let add = super::helpers::icon_label_button("list-add-symbolic", &crate::tr!("Add"));
-            add.set_valign(gtk4::Align::Center);
-            row.add_suffix(&add);
-            row.set_activatable(true);
-            row.connect_activated(move |_| on_rebind());
-        }
+    let value = match mapping.and_then(primary_output) {
+        Some(output) => output_display_label(&output),
+        None => crate::tr!("Not mapped"),
+    };
+    let value_label = gtk4::Label::new(Some(&value));
+    value_label.add_css_class(CSS_DIM_LABEL);
+    value_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    value_label.set_valign(gtk4::Align::Center);
+    row.add_suffix(&value_label);
+    if !unmapped {
+        row.add_suffix(&gear_button(ctx, source));
     }
+    let on_rebind = rebind_hook(ctx, source);
+    row.set_activatable(true);
+    row.connect_activated(move |_| on_rebind());
     row
 }
 
-/// Steam's analog row: the behavior slot shows the current mode as a
-/// button backed by a described picker, and the gear opens the full sheet.
-/// Sticks title the row "Behavior" inside their group; triggers speak for
-/// themselves.
+/// Steam's analog row as a native combo: the behavior is the row's own
+/// selection, its description sits in the subtitle, and the gear opens the
+/// full sheet. Sticks and triggers share the layout — the group header
+/// carries the hardware name.
 fn analog_row(
     ctx: &PagesCtx,
     source: InputSource,
     mapping: Option<&InputMapping>,
     family: ira_input::ControllerFamily,
-) -> adw::ActionRow {
-    let row = adw::ActionRow::new();
+) -> adw::ComboRow {
+    let row = adw::ComboRow::new();
     add_source_prefix(&row, source, family, false);
-    if is_stick_source(source) {
-        row.set_title(&crate::tr!("Behavior"));
-    } else {
-        row.set_title(&esc(&source_label(source)));
-    }
-    if let Some(mapping) = mapping.filter(|mapping| !mapping.activators.is_empty()) {
-        row.set_subtitle(&mapping_summary(mapping));
-    }
+    row.set_title(&crate::tr!("Behavior"));
 
+    let choices = behavior_choices(source);
+    let titles: Vec<&str> = choices.iter().map(|choice| choice.title.as_str()).collect();
+    row.set_model(Some(&gtk4::StringList::new(&titles)));
     let modes = modes_for(source);
     let current = mapping.and_then(|mapping| mapping.mode.clone());
     let selected = current
@@ -171,27 +159,37 @@ fn analog_row(
                 .position(|candidate| same_mode(candidate, mode))
         })
         .unwrap_or(0);
-    let label = mode_label(&current, is_trigger_axis(source));
+    row.set_selected(selected as u32);
+    if let Some(description) = choices.get(selected).and_then(|choice| choice.description.clone()) {
+        row.set_subtitle(&description);
+    }
+
+    // Connected after the model and selection are set so the initial
+    // notify never writes back through set_mode.
     let ctx_for_pick = ctx.clone();
     let modes_for_pick = modes.clone();
-    let popover = option_picker_popover(&behavior_choices(source), selected, move |index| {
+    let choices_for_pick = choices.clone();
+    row.connect_selected_notify(move |row| {
+        let index = row.selected() as usize;
         let mode = modes_for_pick.get(index).cloned().flatten();
         set_mode(&ctx_for_pick, source, mode);
+        if let Some(description) = choices_for_pick
+            .get(index)
+            .and_then(|choice| choice.description.clone())
+        {
+            row.set_subtitle(&description);
+        }
         (ctx_for_pick.on_dirty)();
     });
-    row.add_suffix(&picker_button(&label, &popover));
 
     if mapping.is_some() {
         row.add_suffix(&gear_button(ctx, source));
-        row.set_activatable(true);
-        let ctx_for_sheet = ctx.clone();
-        row.connect_activated(move |_| open_sheet(&ctx_for_sheet, source));
     }
     row
 }
 
 fn add_source_prefix(
-    row: &adw::ActionRow,
+    row: &impl gtk4::glib::object::IsA<adw::ActionRow>,
     source: InputSource,
     family: ira_input::ControllerFamily,
     dim: bool,

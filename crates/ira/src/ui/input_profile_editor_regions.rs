@@ -3,7 +3,7 @@
 //! Paddles), the inputs each page groups where they sit on the hardware,
 //! and the human labels shared by rows, pickers, and sheets.
 
-use super::input_profile_options::{axis_label, button_label, output_display_label};
+use super::input_profile_options::{axis_label, button_label};
 use ira_input::{GamepadAxis, GamepadButton, InputSource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,21 +162,31 @@ pub(crate) fn region_groups(
                 GamepadButton::DpadRight,
             ]),
         }],
-        // The analog value leads; the digital click buttons some pads
-        // report follow.
-        Region::Triggers => vec![SourceGroup {
-            title: crate::tr!("Triggers"),
-            sources: [
-                InputSource::Axis(GamepadAxis::LeftTrigger),
-                InputSource::Axis(GamepadAxis::RightTrigger),
+        // Each trigger pairs its analog value with the digital click some
+        // pads report, the way joysticks pair behavior with click.
+        Region::Triggers => {
+            let trigger_sources = |axis: GamepadAxis, click: GamepadButton| -> Vec<InputSource> {
+                let mut sources = vec![InputSource::Axis(axis)];
+                sources.extend(buttons(&[click]));
+                sources
+            };
+            vec![
+                SourceGroup {
+                    title: crate::tr!("Left Trigger"),
+                    sources: trigger_sources(
+                        GamepadAxis::LeftTrigger,
+                        GamepadButton::LeftTrigger,
+                    ),
+                },
+                SourceGroup {
+                    title: crate::tr!("Right Trigger"),
+                    sources: trigger_sources(
+                        GamepadAxis::RightTrigger,
+                        GamepadButton::RightTrigger,
+                    ),
+                },
             ]
-            .into_iter()
-            .chain(buttons(&[
-                GamepadButton::LeftTrigger,
-                GamepadButton::RightTrigger,
-            ]))
-            .collect(),
-        }],
+        }
         // A stick is one input: its behavior lives on the X axis, and the
         // click is the group's second row, like Steam's joystick list.
         Region::Joysticks => vec![
@@ -223,40 +233,6 @@ pub(crate) fn region_groups(
     // Devices without, say, a guide button skip the otherwise empty group.
     groups.retain(|group| !group.sources.is_empty());
     groups
-}
-
-/// One input's summary line: "Trigger · Soft pull → A · Click → Space".
-/// Sticks and triggers lead with their analog mode; activators follow.
-pub(crate) fn mapping_summary(mapping: &ira_input::InputMapping) -> String {
-    let mut parts: Vec<String> = mapping
-        .activators
-        .iter()
-        .map(|activator| {
-            let outputs: Vec<String> = activator.outputs.iter().map(output_display_label).collect();
-            format!(
-                "{} → {}",
-                activator_kind_label(&activator.kind),
-                outputs.join(", ")
-            )
-        })
-        .collect();
-    if let Some(mode) = &mapping.mode {
-        parts.insert(0, mode_summary(mode));
-    }
-    if parts.is_empty() {
-        return crate::tr!("Not mapped");
-    }
-    parts.join(" · ")
-}
-
-fn mode_summary(mode: &ira_input::SourceMode) -> String {
-    match mode {
-        ira_input::SourceMode::Joystick(_) => crate::tr!("Joystick"),
-        ira_input::SourceMode::Dpad { .. } => crate::tr!("D-pad"),
-        ira_input::SourceMode::Mouse { .. } => crate::tr!("Joystick Mouse"),
-        ira_input::SourceMode::Flickstick { .. } => crate::tr!("Flick Stick"),
-        ira_input::SourceMode::Trigger { .. } => crate::tr!("Trigger"),
-    }
 }
 
 pub(crate) fn activator_kind_label(kind: &ira_input::ActivatorKind) -> String {
@@ -317,21 +293,25 @@ mod tests {
     }
 
     #[test]
-    fn test_region_groups_triggers_lead_with_axes() {
+    fn test_region_groups_pair_trigger_axis_with_button() {
         let groups = region_groups(Region::Triggers, None);
-        assert_eq!(groups.len(), 1);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].title, crate::tr!("Left Trigger"));
         assert_eq!(
-            groups[0].sources[0],
-            InputSource::Axis(GamepadAxis::LeftTrigger)
+            groups[0].sources,
+            vec![
+                InputSource::Axis(GamepadAxis::LeftTrigger),
+                InputSource::Button(GamepadButton::LeftTrigger),
+            ]
         );
+        assert_eq!(groups[1].title, crate::tr!("Right Trigger"));
         assert_eq!(
-            groups[0].sources[1],
-            InputSource::Axis(GamepadAxis::RightTrigger)
+            groups[1].sources,
+            vec![
+                InputSource::Axis(GamepadAxis::RightTrigger),
+                InputSource::Button(GamepadButton::RightTrigger),
+            ]
         );
-        // Pads that report a digital trigger click list it after the axis.
-        assert!(groups[0]
-            .sources
-            .contains(&InputSource::Button(GamepadButton::LeftTrigger)));
     }
 
     #[test]

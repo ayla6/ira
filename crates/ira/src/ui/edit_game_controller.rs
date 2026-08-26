@@ -113,6 +113,7 @@ pub(super) struct ControllerPageParams<'a> {
     pub sidebar: &'a gtk4::ListBox,
     pub stack: &'a gtk4::Stack,
     pub registry: Arc<ira_input::ControllerRegistry>,
+    pub state: &'a SharedState,
 }
 
 pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerWidgets {
@@ -292,7 +293,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     };
 
     let paths_for_sensitivity = input_profile_paths.clone();
-    let last_real_for_notify = last_real;
+    let last_real_for_notify = last_real.clone();
     let new_profile_for_notify = new_profile_cb.clone();
     input_profile_row.connect_selected_notify({
         move |row| {
@@ -319,6 +320,80 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         }
     });
     input_group.add(&input_profile_row);
+
+    // Community layouts: Steam workshop controller configs, searched by this
+    // game's app id when it has one and by free text otherwise. Imports land
+    // in the managed profile pool attached to this game.
+    let (steam_client, steam_app_id) = {
+        let s = params.state.borrow();
+        (
+            s.steam.clone(),
+            ira_db::find_by_db_id(&s.db, params.game.db_id)
+                .ok()
+                .flatten()
+                .map(|entry| entry.steam_id)
+                .unwrap_or_default(),
+        )
+    };
+    let search_button = gtk4::Button::with_label(&crate::tr!("Browse…"));
+    search_button.set_valign(gtk4::Align::Center);
+    let community_row = adw::ActionRow::new();
+    community_row.set_title(&crate::tr!("Community layouts"));
+    community_row.set_subtitle(&crate::tr!("Import controller layouts shared on Steam"));
+    community_row.add_suffix(&search_button);
+    input_group.add(&community_row);
+
+    let stack_for_search = Downgrade::downgrade(params.stack);
+    let profile_row_for_search = Downgrade::downgrade(&input_profile_row);
+    let paths_for_search = input_profile_paths.clone();
+    let save_dir_for_search = params.save_dir.to_string();
+    let game_id_for_search = params.game.db_id;
+    let game_name_for_search = params.game.name.clone();
+    let last_real_for_search = last_real.clone();
+    {
+        let steam_client = steam_client;
+        search_button.connect_clicked(move |_| {
+            let Some(stack) = stack_for_search.upgrade() else {
+                return;
+            };
+            let Some(window) = stack
+                .root()
+                .and_then(|root| root.downcast::<adw::Window>().ok())
+            else {
+                return;
+            };
+            super::input_profile_search::show_steam_layout_search(
+                &window,
+                &steam_client,
+                &save_dir_for_search,
+                Some(super::input_profile_search::SteamLayoutSearchContext {
+                    game_id: game_id_for_search,
+                    game_name: game_name_for_search.clone(),
+                    steam_app_id: steam_app_id.clone(),
+                }),
+                {
+                    let profile_row_for_search = profile_row_for_search.clone();
+                    let paths = paths_for_search.clone();
+                    let save_dir = save_dir_for_search.clone();
+                    let last_real = last_real_for_search.clone();
+                    Rc::new(move |saved| {
+                        let Some(row) = profile_row_for_search.upgrade() else {
+                            return;
+                        };
+                        refresh_profile_choices(
+                            &row,
+                            &paths,
+                            &save_dir,
+                            game_id_for_search,
+                            Some(&saved),
+                            &last_real,
+                        )
+                    })
+                },
+            );
+        });
+    }
+
     page.append(&input_group);
 
     let scroll = gtk4::ScrolledWindow::new();

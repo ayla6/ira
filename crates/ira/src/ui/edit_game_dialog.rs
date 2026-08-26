@@ -200,6 +200,7 @@ fn build_launch_wine_advanced_pages(
             sidebar,
             stack,
             registry,
+            state,
         },
     ));
 

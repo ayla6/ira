@@ -73,7 +73,13 @@ pub(super) fn build_settings_pages(
     ) = build_general_settings_page(cfg);
     let (overlay_page, overlay_widgets) = build_overlay_settings_page(cfg);
     let registry = state.borrow().controller_registry.clone();
-    let (input_page, input_widgets) = build_input_settings_page(win, &cfg.save_dir, cfg, registry);
+    let (input_page, input_widgets) = build_input_settings_page(
+        win,
+        &cfg.save_dir,
+        cfg,
+        state.borrow().steam.clone(),
+        registry,
+    );
     let controller_default_widgets = input_widgets.controller_defaults;
     let (system_page, system_defaults_widgets) = build_system_defaults_page(cfg);
     let (computer_games_page, default_game_folder_row) = build_computer_games_page(win, cfg);

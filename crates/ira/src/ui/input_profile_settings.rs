@@ -85,6 +85,7 @@ pub(super) fn build_input_settings_page(
     parent: &adw::Window,
     save_dir: &str,
     cfg: &Config,
+    steam: std::sync::Arc<ira_api::SteamDataClient>,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
 ) -> (gtk4::Box, InputPageWidgets) {
     let page = settings_page_container();
@@ -95,6 +96,7 @@ pub(super) fn build_input_settings_page(
         &profiles_group,
         parent,
         save_dir,
+        steam.clone(),
         registry.clone(),
         &profile_rows,
     );
@@ -703,6 +705,7 @@ fn rebuild_profile_rows(
     group: &adw::PreferencesGroup,
     parent: &adw::Window,
     save_dir: &str,
+    steam: std::sync::Arc<ira_api::SteamDataClient>,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
     rows: &Rc<RefCell<Vec<gtk4::Widget>>>,
 ) {
@@ -714,30 +717,77 @@ fn rebuild_profile_rows(
         Vec::new()
     }) {
         rows.borrow_mut().push(
-            add_profile_row(group, parent, save_dir, stored, registry.clone(), rows).upcast(),
+            add_profile_row(
+                group,
+                parent,
+                save_dir,
+                steam.clone(),
+                stored,
+                registry.clone(),
+                rows,
+            )
+            .upcast(),
         );
     }
+    let header_actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    let import_from_steam = icon_button(
+        "folder-download-symbolic",
+        &crate::tr!("Import layout from Steam"),
+    );
+    let import_parent = parent.clone();
+    let import_save_dir = save_dir.to_string();
+    let import_steam = steam.clone();
+    let import_registry = registry.clone();
+    let import_group = group.clone();
+    let import_rows = rows.clone();
+    import_from_steam.connect_clicked(move |_| {
+        let group = import_group.clone();
+        let parent_for_saved = import_parent.clone();
+        let save_dir = import_save_dir.clone();
+        let steam_for_saved = import_steam.clone();
+        let registry_for_saved = import_registry.clone();
+        let rows = import_rows.clone();
+        super::input_profile_search::show_steam_layout_search(
+            &import_parent,
+            &import_steam,
+            &import_save_dir,
+            None,
+            Rc::new(move |_| {
+                rebuild_profile_rows(
+                    &group,
+                    &parent_for_saved,
+                    &save_dir,
+                    steam_for_saved.clone(),
+                    registry_for_saved.clone(),
+                    &rows,
+                )
+            }),
+        );
+    });
+    header_actions.append(&import_from_steam);
+
     let new_profile = icon_button("list-add-symbolic", &crate::tr!("Create profile"));
-    let group_for_new = group.clone();
-    let parent_for_new = parent.clone();
-    let save_dir_for_new = save_dir.to_string();
-    let registry_for_new = registry.clone();
-    let rows_for_new = rows.clone();
+    let create_group = group.clone();
+    let create_parent = parent.clone();
+    let create_save_dir = save_dir.to_string();
+    let create_steam = steam.clone();
+    let create_registry = registry.clone();
+    let create_rows = rows.clone();
     new_profile.connect_clicked(move |_| {
-        let group = group_for_new.clone();
-        let parent = parent_for_new.clone();
-        let parent_for_saved = parent.clone();
-        let save_dir = save_dir_for_new.clone();
-        let registry = registry_for_new.clone();
-        let rows_for_saved = rows_for_new.clone();
+        let group = create_group.clone();
+        let parent_for_saved = create_parent.clone();
+        let save_dir = create_save_dir.clone();
+        let steam_for_saved = create_steam.clone();
+        let registry_for_saved = create_registry.clone();
+        let rows = create_rows.clone();
         super::input_profile_editor::show_input_profile_editor(
-            parent.upcast_ref(),
+            create_parent.upcast_ref(),
             super::input_profile_editor::InputProfileEditorParams {
                 save_dir: save_dir.clone(),
                 profile_path: None,
                 game_id: None,
                 layout_name: None,
-                registry: registry.clone(),
+                registry: create_registry.clone(),
                 device: None,
             },
             move |_| {
@@ -745,19 +795,22 @@ fn rebuild_profile_rows(
                     &group,
                     &parent_for_saved,
                     &save_dir,
-                    registry.clone(),
-                    &rows_for_saved,
+                    steam_for_saved.clone(),
+                    registry_for_saved.clone(),
+                    &rows,
                 )
             },
         );
     });
-    group.set_header_suffix(Some(&new_profile));
+    header_actions.append(&new_profile);
+    group.set_header_suffix(Some(&header_actions));
 }
 
 fn add_profile_row(
     group: &adw::PreferencesGroup,
     parent: &adw::Window,
     save_dir: &str,
+    steam: std::sync::Arc<ira_api::SteamDataClient>,
     stored: StoredProfile,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
     rows: &Rc<RefCell<Vec<gtk4::Widget>>>,
@@ -770,6 +823,7 @@ fn add_profile_row(
     row.add_suffix(&delete);
     let parent_for_edit = parent.clone();
     let save_dir_for_edit = save_dir.to_string();
+    let steam_for_edit = steam.clone();
     let registry_for_edit = registry.clone();
     let path_for_edit = stored.path.clone();
     let group_for_edit = group.clone();
@@ -790,12 +844,14 @@ fn add_profile_row(
                 let group = group_for_edit.clone();
                 let parent = parent_for_edit.clone();
                 let save_dir = save_dir_for_edit.clone();
+                let steam = steam_for_edit.clone();
                 let registry = registry_for_edit.clone();
                 move |_| {
                     rebuild_profile_rows(
                         &group,
                         &parent,
                         &save_dir,
+                        steam.clone(),
                         registry.clone(),
                         &rows_for_saved,
                     )
@@ -807,6 +863,8 @@ fn add_profile_row(
     let path_for_delete = stored.path;
     let group_for_delete = group.clone();
     let save_dir_for_delete = save_dir.to_string();
+    let steam_for_delete = steam;
+    let registry_for_delete = registry.clone();
     let rows_for_delete = rows.clone();
     delete.connect_clicked(move |_| {
         let alert = adw::AlertDialog::new(
@@ -822,14 +880,22 @@ fn add_profile_row(
         let group = group_for_delete.clone();
         let parent = parent_for_delete.clone();
         let save_dir = save_dir_for_delete.clone();
-        let registry = registry.clone();
+        let steam = steam_for_delete.clone();
+        let registry = registry_for_delete.clone();
         let rows = rows_for_delete.clone();
         alert.connect_response(None, move |_, response| {
             if response == "delete" {
                 if let Err(error) = std::fs::remove_file(&path) {
                     eprintln!("Failed to delete controller layout: {error}");
                 } else {
-                    rebuild_profile_rows(&group, &parent, &save_dir, registry.clone(), &rows);
+                    rebuild_profile_rows(
+                        &group,
+                        &parent,
+                        &save_dir,
+                        steam.clone(),
+                        registry.clone(),
+                        &rows,
+                    );
                 }
             }
         });

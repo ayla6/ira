@@ -52,6 +52,7 @@ mod input_profile_mode_shifts;
 mod input_profile_options;
 mod input_profile_output_capture;
 mod input_profile_region_pages;
+mod input_profile_search;
 mod input_profile_settings;
 mod input_profile_sheet_base;
 mod input_profile_source_modes;

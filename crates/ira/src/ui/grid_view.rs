@@ -9,7 +9,7 @@ use super::game_item::GameItem;
 use super::helpers::clear_children;
 use super::message_helpers::switch_to_game;
 use super::recent_row::build_recent_row;
-use super::state::SharedState;
+use super::state::{LoadingWidgets, SharedState};
 use super::virtual_grid::{BindFn, SetupFn, UnbindFn, VirtualGrid};
 use std::cell::Cell;
 use std::rc::Rc;
@@ -444,8 +444,7 @@ pub fn show_grid_view(state: &SharedState) {
         s.selected_id.clear();
         s.view_generation += 1;
         s.displayed_content_dirty = true;
-        s.loading_status = None;
-        s.loading_progress = None;
+        s.loading = None;
     }
 
     let content_scroll = state.borrow().content_scroll.clone();
@@ -503,41 +502,74 @@ pub fn show_loading_view(state: &SharedState, status: &str, completed: usize, to
     let grid_header = state.borrow().grid_header.clone();
     clear_children(&grid_header);
 
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    content.set_halign(gtk4::Align::Center);
-    content.set_valign(gtk4::Align::Center);
-    content.set_margin_start(32);
-    content.set_margin_end(32);
-    content.set_margin_top(32);
-    content.set_margin_bottom(32);
-    content.set_width_request(420);
+    let header = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+    header.set_halign(gtk4::Align::Center);
 
     let icon = gtk4::Image::from_icon_name("library-symbolic");
     icon.set_pixel_size(48);
     icon.set_halign(gtk4::Align::Center);
-    content.append(&icon);
+    header.append(&icon);
 
     let title = gtk4::Label::new(Some(&crate::tr!("Loading game library")));
     title.add_css_class(CSS_SECTION_TITLE);
     title.set_halign(gtk4::Align::Center);
-    content.append(&title);
+    header.append(&title);
 
     let status_label = gtk4::Label::new(Some(status));
+    status_label.add_css_class(CSS_DIM_LABEL);
     status_label.set_halign(gtk4::Align::Center);
     status_label.set_wrap(true);
-    content.append(&status_label);
+    header.append(&status_label);
 
-    let progress = gtk4::ProgressBar::new();
-    progress.set_hexpand(true);
-    progress.set_show_text(true);
-    progress.set_fraction(progress_fraction(completed, total));
-    progress.set_text(Some(&progress_text(completed, total)));
-    content.append(&progress);
+    let (progress_box, progress, counter) = build_loading_progress(completed, total);
+
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
+    content.set_halign(gtk4::Align::Center);
+    content.set_valign(gtk4::Align::Center);
+    content.append(&header);
+    content.append(&progress_box);
 
     content_scroll.set_child(Some(&content));
     let mut s = state.borrow_mut();
-    s.loading_status = Some(status_label);
-    s.loading_progress = Some(progress);
+    s.loading = Some(LoadingWidgets {
+        status: status_label,
+        progress,
+        counter,
+    });
+}
+
+/// Progress bar with a dim "N of M sources" caption below it, sized to a
+/// readable width instead of stretching across the whole window.
+fn build_loading_progress(
+    completed: usize,
+    total: usize,
+) -> (gtk4::Box, gtk4::ProgressBar, gtk4::Label) {
+    let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+    box_.set_halign(gtk4::Align::Center);
+    box_.set_width_request(300);
+
+    let progress = gtk4::ProgressBar::new();
+    progress.set_fraction(progress_fraction(completed, total));
+    box_.append(&progress);
+
+    let counter = gtk4::Label::new(Some(&progress_text(completed, total)));
+    counter.add_css_class(CSS_DIM_LABEL);
+    counter.add_css_class(CSS_CAPTION);
+    counter.set_halign(gtk4::Align::Center);
+    box_.append(&counter);
+
+    (box_, progress, counter)
+}
+
+pub fn update_loading_view(state: &SharedState, status: &str, completed: usize, total: usize) {
+    let loading = state.borrow().loading.clone();
+    if let Some(w) = loading {
+        w.status.set_label(status);
+        w.progress.set_fraction(progress_fraction(completed, total));
+        w.counter.set_label(&progress_text(completed, total));
+    } else {
+        show_loading_view(state, status, completed, total);
+    }
 }
 
 fn show_empty_search_view(content_scroll: &gtk4::ScrolledWindow) {
@@ -548,20 +580,6 @@ fn show_empty_search_view(content_scroll: &gtk4::ScrolledWindow) {
         "Try a different title, platform, or sort title"
     )));
     content_scroll.set_child(Some(&status));
-}
-
-pub fn update_loading_view(state: &SharedState, status: &str, completed: usize, total: usize) {
-    let (status_label, progress) = {
-        let s = state.borrow();
-        (s.loading_status.clone(), s.loading_progress.clone())
-    };
-    if let (Some(status_label), Some(progress)) = (status_label, progress) {
-        status_label.set_label(status);
-        progress.set_fraction(progress_fraction(completed, total));
-        progress.set_text(Some(&progress_text(completed, total)));
-    } else {
-        show_loading_view(state, status, completed, total);
-    }
 }
 
 fn progress_fraction(completed: usize, total: usize) -> f64 {

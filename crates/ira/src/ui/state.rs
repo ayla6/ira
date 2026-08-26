@@ -44,6 +44,15 @@ pub struct SettingsData {
     pub ra_container: Option<gtk4::Box>,
 }
 
+/// Widgets of the transient "Loading game library" screen, kept so progress
+/// updates can re-render them in place instead of rebuilding the view.
+#[derive(Clone)]
+pub struct LoadingWidgets {
+    pub status: gtk4::Label,
+    pub progress: gtk4::ProgressBar,
+    pub counter: gtk4::Label,
+}
+
 pub struct AppState {
     pub source_id: Cell<Option<u32>>,
     pub window: adw::ApplicationWindow,
@@ -55,8 +64,7 @@ pub struct AppState {
     pub content_scroll: gtk4::ScrolledWindow,
     pub content_box: gtk4::Box,
     pub grid_header: gtk4::Box,
-    pub loading_status: Option<gtk4::Label>,
-    pub loading_progress: Option<gtk4::ProgressBar>,
+    pub loading: Option<LoadingWidgets>,
     pub grid_item_height: Cell<i32>,
     pub selected_id: String,
     pub displayed_db_id: i64,

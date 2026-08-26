@@ -22,6 +22,22 @@ pub fn save_rgb565_png(path: &Path, width: u32, height: u32, rgb565: &[u8]) -> R
     img.save(path).map_err(|e| e.to_string())
 }
 
+/// Encodes tightly packed RGBA8 pixel data as a PNG file.
+pub fn save_rgba_png(path: &Path, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
+    let expected = (width as usize) * (height as usize) * 4;
+    if rgba.len() < expected {
+        return Err(format!(
+            "RGBA buffer too small: {} < {expected}",
+            rgba.len()
+        ));
+    }
+    let img = image::RgbaImage::from_fn(width, height, |x, y| {
+        let i = (y as usize * width as usize + x as usize) * 4;
+        image::Rgba([rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]])
+    });
+    img.save(path).map_err(|e| e.to_string())
+}
+
 pub fn convert_ico_to_png(ico_path: &Path) -> Result<PathBuf, String> {
     let _s = tracing::info_span!("convert_ico_to_png", path = %ico_path.display()).entered();
     let png_path = ico_path.with_extension("png");

@@ -7,6 +7,7 @@ use super::state::{PendingImage, SgdbAssetsCacheEntry, SharedState};
 use crate::Game;
 use adw::prelude::*;
 use ira_models::AssetType;
+use ira_platforms::retroachievements::is_fallback_game_icon;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -472,7 +473,7 @@ fn build_ra_icon_button(
                 Ok((game_data, _)) => Some(game_data.image_icon),
                 _ => None,
             };
-            let result = match image_icon.filter(|icon| !icon.is_empty()) {
+            let result = match image_icon.filter(|icon| !is_fallback_game_icon(icon)) {
                 Some(icon) => client.download_game_icon_bytes(&icon),
                 None => Err(crate::tr!("No RA icon available").to_string()),
             };

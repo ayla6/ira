@@ -19,6 +19,17 @@ const RA_WEB_GAME_PROGRESS: &str =
     "https://retroachievements.org/API/API_GetGameInfoAndUserProgress.php";
 const RA_BADGE_URL: &str = "https://media.retroachievements.org/Badge";
 const RA_IMAGE_URL: &str = "https://media.retroachievements.org";
+/// RA's generic gamepad placeholder. Games without real artwork report this
+/// path as their `ImageIcon`; persisting it would also block a real icon
+/// from ever being fetched, since on-disk icons are never replaced.
+const RA_FALLBACK_ICON: &str = "/Images/000001.png";
+
+/// True when the given `ImageIcon` path is RA's placeholder for games
+/// without artwork rather than a real icon.
+pub fn is_fallback_game_icon(image_icon: &str) -> bool {
+    let path = image_icon.strip_prefix(RA_IMAGE_URL).unwrap_or(image_icon);
+    path.eq_ignore_ascii_case(RA_FALLBACK_ICON)
+}
 const CACHE_SECS: u64 = 3600;
 const RA_RATE_LIMIT_MS: u64 = 500;
 
@@ -270,10 +281,13 @@ impl RaClient {
 
     /// Download the RA game icon as image bytes without touching any game
     /// data directory. Returns lossless WebP for PNG/ICO sources, the raw
-    /// bytes for JPEG/WebP, and an error when the fetch fails or the body
-    /// isn't a decodable image. Callers treat the result as a pending draft
-    /// applied only on Save.
+    /// bytes for JPEG/WebP, and an error when the fetch fails, the body
+    /// isn't a decodable image, or the path is RA's fallback placeholder.
+    /// Callers treat the result as a pending draft applied only on Save.
     pub fn download_game_icon_bytes(&self, image_icon: &str) -> Result<Vec<u8>, String> {
+        if is_fallback_game_icon(image_icon) {
+            return Err("RA icon: game has no custom icon".to_string());
+        }
         let bytes = self.fetch_ra_bytes(image_icon)?;
         if bytes.is_empty() {
             return Err("RA icon: empty body".to_string());
@@ -290,13 +304,16 @@ impl RaClient {
 
     /// Download the game's icon from RA to `data/retro/{db_id}/icon.webp`,
     /// reusing the on-disk copy when it already exists. Returns the icon path
-    /// on success, or an empty string when the fetch fails or the body isn't
-    /// a decodable image.
+    /// on success, or an empty string when the fetch fails, the body isn't
+    /// a decodable image, or the path is RA's fallback placeholder.
     pub fn download_game_icon(&self, save_dir: &str, db_id: i64, image_icon: &str) -> String {
         let _s = info_span!("download_game_icon", db_id).entered();
         let dest = ira_parser::retro_data_dir(save_dir, db_id).join("icon.webp");
         if dest.is_file() {
             return dest.to_string_lossy().into_owned();
+        }
+        if is_fallback_game_icon(image_icon) {
+            return String::new();
         }
         let bytes = match self.fetch_ra_bytes(image_icon) {
             Ok(b) if !b.is_empty() && ira_parser::is_decodable_image(&b) => b,
@@ -515,6 +532,29 @@ mod cache_tests {
     #[test]
     fn test_find_game_by_hash_empty_list_is_none() {
         assert!(super::find_game_by_hash(&[], "abc123").is_none());
+    }
+
+    #[test]
+    fn test_is_fallback_game_icon_detection() {
+        use super::is_fallback_game_icon;
+        assert!(is_fallback_game_icon("/Images/000001.png"));
+        assert!(is_fallback_game_icon(
+            "https://media.retroachievements.org/Images/000001.png"
+        ));
+        assert!(!is_fallback_game_icon("/Images/123456.png"));
+        assert!(!is_fallback_game_icon(""));
+    }
+
+    #[test]
+    fn test_download_game_icon_refuses_fallback() {
+        let client = RaClient::new("user", "key");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_str().unwrap();
+        // Both entry points must refuse before any network access.
+        assert_eq!(client.download_game_icon(dir, 1, "/Images/000001.png"), "");
+        assert!(client
+            .download_game_icon_bytes("/Images/000001.png")
+            .is_err());
     }
 
     #[test]

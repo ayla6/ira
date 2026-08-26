@@ -119,7 +119,7 @@ pub(super) fn build_general_page(
         let name_entry_c = name_entry.clone();
         steam_search_btn.connect_clicked(move |_| {
             let search_text = name_entry_c.text().to_string();
-            let on_select = Rc::new(|_: &str| {});
+            let on_select = Rc::new(|_: &str, _: &str| {});
             super::steam_search::show_steam_id_search_popup(
                 &sc,
                 &search_text,

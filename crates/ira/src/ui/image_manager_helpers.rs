@@ -140,3 +140,74 @@ pub(super) fn make_refresh_closure(
         }
     })
 }
+
+/// Re-extracts an emulator-native icon into the game's data dir, replacing
+/// any imported or downloaded one. Nothing already on disk is touched until
+/// a replacement has been produced. Returns true when an icon was restored.
+pub(super) fn restore_native_icon(save_dir: &str, game: &Game) -> bool {
+    let image_dir = match game.kind {
+        ira_models::GameKind::Ps4 => std::path::Path::new(save_dir)
+            .join("data")
+            .join("ps4")
+            .join(&game.app_id),
+        ira_models::GameKind::Ps3 => std::path::Path::new(save_dir)
+            .join("data")
+            .join("ps3")
+            .join(&game.app_id),
+        ira_models::GameKind::ThreeDS => ira_parser::three_ds_data_dir(save_dir, &game.app_id),
+        ira_models::GameKind::WiiU => ira_parser::wiiu_data_dir(save_dir, &game.app_id),
+        _ => return false,
+    };
+    let game_root = std::path::Path::new(&game.game_path);
+    // Decode first: if the native source is unreadable the current icon
+    // must stay untouched.
+    let staged = match game.kind {
+        ira_models::GameKind::ThreeDS => decode_smdh_icon(game_root),
+        ira_models::GameKind::Ps4 => {
+            import_image_bytes(&game_root.join("sce_sys").join("icon0.png"))
+        }
+        ira_models::GameKind::Ps3 => import_image_bytes(&game_root.join("ICON0.PNG")),
+        ira_models::GameKind::WiiU => {
+            import_image_bytes(&game_root.join("meta").join("iconTex.tga"))
+        }
+        _ => return false,
+    };
+    let Some(webp_bytes) = staged else {
+        return false;
+    };
+    let _ = std::fs::create_dir_all(&image_dir);
+    ira_parser::remove_image_variants(&image_dir, "icon");
+    ira_parser::remove_image_variants(&image_dir, "icon_small");
+    let restored = std::fs::write(image_dir.join("icon.webp"), &webp_bytes).is_ok();
+    if restored {
+        ira_parser::ensure_small_image(
+            &image_dir,
+            "icon",
+            ira_models::AssetType::Icon.thumb_dims().0,
+            ira_models::AssetType::Icon.thumb_dims().1,
+        );
+        if let Some(p) = ira_parser::find_image_file(&image_dir, "icon") {
+            ira_images::invalidate_texture(&p.to_string_lossy());
+        }
+    }
+    restored
+}
+
+/// Decodes an icon file into lossless WebP bytes.
+fn import_image_bytes(source: &std::path::Path) -> Option<Vec<u8>> {
+    let data = std::fs::read(source).ok()?;
+    ira_parser::load_image_bytes(&data)?;
+    ira_parser::convert_bytes_to_lossless_webp(&data)
+}
+
+/// Renders the SMDH icon of a 3DS ROM or installed title into lossless
+/// WebP bytes.
+fn decode_smdh_icon(game_root: &std::path::Path) -> Option<Vec<u8>> {
+    let icon = ira_platforms::azahar::read_icon(game_root)?;
+    let png = std::env::temp_dir().join(format!("ira-icon-{}.png", std::process::id()));
+    ira_parser::save_rgb565_png(&png, 48, 48, &icon).ok()?;
+    let data = std::fs::read(&png);
+    let _ = std::fs::remove_file(&png);
+    let data = data.ok()?;
+    ira_parser::convert_bytes_to_lossless_webp(&data)
+}

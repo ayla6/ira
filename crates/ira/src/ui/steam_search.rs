@@ -5,13 +5,15 @@ use adw::prelude::*;
 use std::rc::Rc;
 use std::sync::Arc;
 
+type SelectCallback = Rc<dyn Fn(&str, &str)>;
+
 pub(super) fn show_steam_id_search_popup(
     state: &SharedState,
     game_name: &str,
     parent: &adw::Window,
     app_id_row: &adw::EntryRow,
     button_label: &str,
-    on_select: Rc<dyn Fn(&str)>,
+    on_select: SelectCallback,
 ) {
     let dialog = adw::Window::new();
     dialog.set_default_width(500);
@@ -108,11 +110,12 @@ pub(super) fn show_steam_id_search_popup(
                         match_btn.add_css_class(CSS_SUGGESTED_ACTION);
                         match_btn.set_valign(gtk4::Align::Center);
                         let sid = app_id.clone();
+                        let matched_name = name.clone();
                         let on_select_c3 = on_select_c2.clone();
                         let row_update = row_c2.clone();
                         let dlg = dialog_c2.clone();
                         match_btn.connect_clicked(move |_| {
-                            on_select_c3(&sid);
+                            on_select_c3(&sid, &matched_name);
                             row_update.set_text(&sid);
                             dlg.close();
                         });

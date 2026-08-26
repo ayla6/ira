@@ -133,12 +133,7 @@ pub(super) fn build_rpcs3_settings_page(
     exe_row.set_text(&initial_exe);
 
     add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-    add_executable_actions(
-        &exe_row,
-        win,
-        &detected,
-        &crate::tr!("Select executable"),
-    );
+    add_executable_actions(&exe_row, win, &detected, &crate::tr!("Select executable"));
     emu_group.add(&exe_row);
     page.append(&emu_group);
 
@@ -190,12 +185,7 @@ pub(super) fn build_vita3k_settings_page(
     };
     exe_row.set_text(&initial_exe);
     add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-    add_executable_actions(
-        &exe_row,
-        win,
-        &detected,
-        &crate::tr!("Select executable"),
-    );
+    add_executable_actions(&exe_row, win, &detected, &crate::tr!("Select executable"));
     emu_group.add(&exe_row);
     page.append(&emu_group);
 
@@ -205,12 +195,10 @@ pub(super) fn build_vita3k_settings_page(
         "Vita3K stores installed applications below ux0/app"
     )));
     let dir_row = adw::ActionRow::new();
-    dir_row.set_title(&esc(
-        &ira_platforms::vita3k::vita_fs_path_for(&initial_exe)
-            .join("ux0/app")
-            .display()
-            .to_string(),
-    ));
+    dir_row.set_title(&esc(&ira_platforms::vita3k::vita_fs_path_for(&initial_exe)
+        .join("ux0/app")
+        .display()
+        .to_string()));
     dir_row.set_sensitive(false);
     dirs_group.add(&dir_row);
     page.append(&dirs_group);
@@ -236,11 +224,7 @@ pub(super) fn build_cemu_settings_page(
 
     let emu_group = adw::PreferencesGroup::new();
     emu_group.set_title(&crate::tr!("Emulator"));
-    let detected = ira_platforms::emulator_detect::detect_emulator_choices(
-        &["cemu", "Cemu"],
-        &[(ira_platforms::cemu::CEMU_FLATPAK_ID, "Cemu")],
-        "Cemu",
-    );
+    let detected = ira_platforms::emulator_detect::cemu_choices();
     let exe_row = adw::EntryRow::new();
     exe_row.set_title(&crate::tr!("Cemu executable path"));
     let initial_exe = if cfg.cemu_executable.is_empty() {
@@ -253,12 +237,7 @@ pub(super) fn build_cemu_settings_page(
     };
     exe_row.set_text(&initial_exe);
     add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-    add_executable_actions(
-        &exe_row,
-        win,
-        &detected,
-        &crate::tr!("Select executable"),
-    );
+    add_executable_actions(&exe_row, win, &detected, &crate::tr!("Select executable"));
     emu_group.add(&exe_row);
     page.append(&emu_group);
 
@@ -266,11 +245,9 @@ pub(super) fn build_cemu_settings_page(
     dirs_group.set_title(&crate::tr!("Install directories"));
     dirs_group.set_description(Some(&crate::tr!("Managed by Cemu")));
     let mlc_row = adw::ActionRow::new();
-    mlc_row.set_title(
-        &esc(&ira_platforms::cemu::mlc_path_for(&initial_exe)
-            .display()
-            .to_string()),
-    );
+    mlc_row.set_title(&esc(&ira_platforms::cemu::mlc_path_for(&initial_exe)
+        .display()
+        .to_string()));
     mlc_row.set_subtitle(&crate::tr!("MLC path"));
     mlc_row.set_sensitive(false);
     dirs_group.add(&mlc_row);
@@ -278,6 +255,72 @@ pub(super) fn build_cemu_settings_page(
         let row = adw::ActionRow::new();
         row.set_title(&esc(&path.display().to_string()));
         row.set_subtitle(&crate::tr!("Configured game path"));
+        row.set_sensitive(false);
+        dirs_group.add(&row);
+    }
+    page.append(&dirs_group);
+
+    (page, enable_row, exe_row)
+}
+
+pub(super) fn build_azahar_settings_page(
+    cfg: &Config,
+    win: &adw::Window,
+) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
+    let page = settings_page_container();
+
+    let enable_group = adw::PreferencesGroup::new();
+    let enable_row = adw::SwitchRow::new();
+    enable_row.set_title(&crate::tr!("Enable Nintendo 3DS integration"));
+    enable_row.set_subtitle(&crate::tr!(
+        "Scan Azahar's game folders and installed 3DS titles"
+    ));
+    enable_row.set_active(cfg.azahar_enabled);
+    enable_group.add(&enable_row);
+    page.append(&enable_group);
+
+    let emu_group = adw::PreferencesGroup::new();
+    emu_group.set_title(&crate::tr!("Emulator"));
+    let detected = ira_platforms::emulator_detect::azahar_choices();
+    let exe_row = adw::EntryRow::new();
+    exe_row.set_title(&crate::tr!("Azahar executable path"));
+    let initial_exe = if cfg.azahar_executable.is_empty() {
+        detected
+            .first()
+            .map(|emu| emu.launch_command.clone())
+            .unwrap_or_default()
+    } else {
+        cfg.azahar_executable.clone()
+    };
+    exe_row.set_text(&initial_exe);
+    add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
+    add_executable_actions(&exe_row, win, &detected, &crate::tr!("Select executable"));
+    emu_group.add(&exe_row);
+    page.append(&emu_group);
+
+    let dirs_group = adw::PreferencesGroup::new();
+    dirs_group.set_title(&crate::tr!("Game locations"));
+    dirs_group.set_description(Some(&crate::tr!("Managed by Azahar")));
+    let paths = ira_platforms::azahar::read_paths_for_executable(&initial_exe);
+    for (path, deep_scan) in paths.game_dirs {
+        let row = adw::ActionRow::new();
+        row.set_title(&esc(&path.display().to_string()));
+        let subtitle = if deep_scan {
+            crate::tr!("Game folder (deep scan)")
+        } else {
+            crate::tr!("Game folder")
+        };
+        row.set_subtitle(&subtitle);
+        row.set_sensitive(false);
+        dirs_group.add(&row);
+    }
+    for (path, label) in [
+        (paths.nand_dir, crate::tr!("NAND")),
+        (paths.sdmc_dir, crate::tr!("SD card")),
+    ] {
+        let row = adw::ActionRow::new();
+        row.set_title(&esc(&path.display().to_string()));
+        row.set_subtitle(&label);
         row.set_sensitive(false);
         dirs_group.add(&row);
     }
@@ -294,28 +337,67 @@ fn add_detected_emulator_dropdown(
     if detected.is_empty() {
         return;
     }
-    let current = exe_row.text();
-    let labels = detected
+    let mut labels: Vec<String> = detected
         .iter()
-        .map(|emulator| emulator.display_name.as_str())
-        .collect::<Vec<_>>();
+        .map(|emulator| emulator.display_name.clone())
+        .collect();
+    labels.push(crate::tr!("Custom…"));
+
     let dropdown = adw::ComboRow::new();
     dropdown.set_title(&crate::tr!("Emulator"));
-    dropdown.set_model(Some(&gtk4::StringList::new(&labels)));
-    dropdown.set_selected(
-        detected
-            .iter()
-            .position(|emulator| emulator.launch_command == current)
-            .unwrap_or(0) as u32,
-    );
+    dropdown.set_model(Some(&string_list_from(&labels)));
+    // Selecting an unknown or empty path lands on "Custom…" instead of
+    // silently pointing at the first detection.
+    dropdown.set_selected(selection_index_for_text(detected, &exe_row.text()));
     group.add(&dropdown);
-    let exe_row = exe_row.clone();
-    let detected = detected.to_vec();
-    dropdown.connect_selected_notify(move |dropdown| {
-        if let Some(emu) = detected.get(dropdown.selected() as usize) {
-            exe_row.set_text(&emu.launch_command);
+
+    // Guards against feedback loops: programmatic entry updates triggered by
+    // a dropdown change must not re-enter the dropdown update.
+    let syncing = Rc::new(Cell::new(false));
+
+    let detected_for_entry = detected.to_vec();
+    // Weak refs: each handler holding the other widget strongly would form
+    // a retain cycle and leak both widgets per settings-dialog open.
+    let dropdown_for_entry = dropdown.downgrade();
+    let syncing_for_entry = syncing.clone();
+    exe_row.connect_changed(move |row| {
+        if syncing_for_entry.get() {
+            return;
         }
+        syncing_for_entry.set(true);
+        if let Some(dropdown) = dropdown_for_entry.upgrade() {
+            dropdown.set_selected(selection_index_for_text(&detected_for_entry, &row.text()));
+        }
+        syncing_for_entry.set(false);
     });
+
+    let exe_row_for_dropdown = exe_row.downgrade();
+    let detected_for_dropdown = detected.to_vec();
+    let syncing_for_dropdown = syncing;
+    dropdown.connect_selected_notify(move |dropdown| {
+        syncing_for_dropdown.set(true);
+        if let Some(exe_row) = exe_row_for_dropdown.upgrade() {
+            if let Some(emulator) = detected_for_dropdown.get(dropdown.selected() as usize) {
+                exe_row.set_text(&emulator.launch_command);
+            }
+        }
+        syncing_for_dropdown.set(false);
+    });
+}
+
+/// Index into the dropdown model for `text`: the matching detection, or the
+/// trailing "Custom…" entry.
+fn selection_index_for_text(
+    detected: &[ira_platforms::emulator_detect::DetectedEmulator],
+    text: &str,
+) -> u32 {
+    match detected
+        .iter()
+        .position(|emulator| emulator.launch_command == text)
+    {
+        Some(index) => index as u32,
+        None => detected.len() as u32,
+    }
 }
 
 fn add_executable_actions(
@@ -433,9 +515,7 @@ pub(super) fn build_console_settings_page(
         let configured_core = (!cc.ra_core.is_empty()
             && std::path::Path::new(&cc.ra_core).is_file())
         .then(|| cc.ra_core.clone());
-        let selected_core = configured_core
-            
-            .or_else(|| cores.first().map(|core| core.path.clone()));
+        let selected_core = configured_core.or_else(|| cores.first().map(|core| core.path.clone()));
         let core_path = adw::EntryRow::new();
         core_path.set_title(&crate::tr!("Custom core file"));
         core_path.set_text(selected_core.as_deref().unwrap_or_default());
@@ -545,4 +625,29 @@ pub(super) fn build_console_settings_page(
             fullscreen_row,
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn emu(command: &str) -> ira_platforms::emulator_detect::DetectedEmulator {
+        ira_platforms::emulator_detect::DetectedEmulator {
+            display_name: command.to_string(),
+            launch_command: command.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_selection_index_matches_detected_command() {
+        let detected = [emu("flatpak:info.cemu.Cemu"), emu("/usr/bin/cemu")];
+        assert_eq!(selection_index_for_text(&detected, "/usr/bin/cemu"), 1);
+    }
+
+    #[test]
+    fn test_selection_index_unknown_path_lands_on_custom() {
+        let detected = [emu("flatpak:info.cemu.Cemu")];
+        assert_eq!(selection_index_for_text(&detected, "/opt/Cemu"), 1);
+        assert_eq!(selection_index_for_text(&detected, ""), 1);
+    }
 }

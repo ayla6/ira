@@ -18,8 +18,8 @@ use super::auto_add_dialog::{
     clear_children, resolve_wine_config, set_status, show_error, show_identified_form,
     spawn_identify_thread, IdentifiedGame, Wizard, WizardEvent,
 };
-use super::helpers::esc;
 use super::css::*;
+use super::helpers::esc;
 use super::state::SharedState;
 use super::wine_profile_picker::{build_wine_profile_picker, selected_profile_id};
 

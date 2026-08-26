@@ -196,6 +196,10 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub cemu_executable: String,
     #[serde(default)]
+    pub azahar_enabled: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub azahar_executable: String,
+    #[serde(default)]
     pub steam_enabled: bool,
     #[serde(default = "default_true")]
     pub auto_reload_steam: bool,
@@ -209,6 +213,8 @@ pub struct Config {
     pub auto_reload_vita3k: bool,
     #[serde(default = "default_true")]
     pub auto_reload_cemu: bool,
+    #[serde(default = "default_true")]
+    pub auto_reload_azahar: bool,
 
     #[serde(default = "default_save_dir")]
     pub save_dir: String,
@@ -228,13 +234,19 @@ pub struct Config {
     pub default_native_env_vars: Vec<(String, String)>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub linux_controller_profile: String,
-    #[serde(default, skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_controller_input_mode")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_controller_input_mode"
+    )]
     pub linux_controller_mode: Option<ControllerInputMode>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub wine_controller_profile: String,
-    #[serde(default, skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_controller_input_mode")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_controller_input_mode"
+    )]
     pub wine_controller_mode: Option<ControllerInputMode>,
     #[serde(default)]
     pub default_api_emu_version: String,
@@ -296,6 +308,8 @@ impl Default for Config {
             vita3k_executable: String::new(),
             cemu_enabled: false,
             cemu_executable: String::new(),
+            azahar_enabled: false,
+            azahar_executable: String::new(),
             steam_enabled: false,
             auto_reload_steam: true,
             auto_reload_roms: false,
@@ -303,6 +317,7 @@ impl Default for Config {
             auto_reload_rpcs3: true,
             auto_reload_vita3k: true,
             auto_reload_cemu: true,
+            auto_reload_azahar: true,
 
             save_dir: default_save_dir(),
             default_wine_config: WineConfig::default(),
@@ -395,6 +410,8 @@ impl Config {
             vita3k_executable: self.vita3k_executable.clone(),
             cemu_enabled: self.cemu_enabled,
             cemu_executable: self.cemu_executable.clone(),
+            azahar_enabled: self.azahar_enabled,
+            azahar_executable: self.azahar_executable.clone(),
             steam_enabled: self.steam_enabled,
             auto_reload_steam: self.auto_reload_steam,
             auto_reload_roms: self.auto_reload_roms,
@@ -402,6 +419,7 @@ impl Config {
             auto_reload_rpcs3: self.auto_reload_rpcs3,
             auto_reload_vita3k: self.auto_reload_vita3k,
             auto_reload_cemu: self.auto_reload_cemu,
+            auto_reload_azahar: self.auto_reload_azahar,
             save_dir: self.save_dir.clone(),
             default_wine_config: self.default_wine_config.clone(),
             default_system: self.default_system.clone(),
@@ -481,6 +499,7 @@ mod tests {
         assert!(cfg.auto_reload_rpcs3);
         assert!(cfg.auto_reload_vita3k);
         assert!(cfg.auto_reload_cemu);
+        assert!(cfg.auto_reload_azahar);
     }
 
     #[test]
@@ -622,18 +641,17 @@ mod controller_mode_compat_tests {
                 "controller_profile":"/x/wii-u.json"}"#,
         )
         .unwrap();
-        assert_eq!(
-            console.controller_mode,
-            Some(ControllerInputMode::Enabled)
-        );
+        assert_eq!(console.controller_mode, Some(ControllerInputMode::Enabled));
         assert_eq!(console.controller_profile, "/x/wii-u.json");
     }
 
     #[test]
     fn test_config_level_modes_accept_legacy_backend_names() {
-        let config: super::Config =
-            serde_json::from_str(r#"{"linux_controller_mode":"virtual_dualsense",
-                "wine_controller_mode":"virtual_xinput"}"#).unwrap();
+        let config: super::Config = serde_json::from_str(
+            r#"{"linux_controller_mode":"virtual_dualsense",
+                "wine_controller_mode":"virtual_xinput"}"#,
+        )
+        .unwrap();
         assert_eq!(
             config.linux_controller_mode,
             Some(ControllerInputMode::Enabled)

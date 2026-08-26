@@ -533,15 +533,18 @@ pub(super) fn launch_vita3k(
 
 pub(super) fn launch_cemu(
     ctx: &LaunchCtx,
+    per_game_emu: &str,
     global_executable: &str,
     game_path: &str,
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
-    let exe = if global_executable.is_empty() {
-        "cemu"
-    } else {
+    let exe = if !per_game_emu.is_empty() {
+        per_game_emu
+    } else if !global_executable.is_empty() {
         global_executable
+    } else {
+        "cemu"
     };
     let args = vec!["-g".to_string(), game_path.to_string()];
     let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
@@ -551,6 +554,32 @@ pub(super) fn launch_cemu(
     );
     let env = build_emulator_env_and_wrap(ctx, &mut cmd, console_mode, console_profile)?;
     spawn_and_monitor(ctx, &cmd, &env, "Cemu")
+}
+
+pub(super) fn launch_azahar(
+    ctx: &LaunchCtx,
+    per_game_emu: &str,
+    global_executable: &str,
+    game_path: &str,
+    console_mode: Option<ControllerInputMode>,
+    console_profile: Option<&str>,
+) -> Result<(), String> {
+    let exe = if !per_game_emu.is_empty() {
+        per_game_emu
+    } else if !global_executable.is_empty() {
+        global_executable
+    } else {
+        "azahar"
+    };
+    // Azahar takes the ROM or installed title content file positionally.
+    let args = vec![game_path.to_string()];
+    let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
+        exe,
+        &args,
+        Some(std::path::Path::new(game_path)),
+    );
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd, console_mode, console_profile)?;
+    spawn_and_monitor(ctx, &cmd, &env, "Azahar")
 }
 
 pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<bool, String> {
@@ -771,8 +800,9 @@ pub(super) fn update_last_played(
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_emulator_gpu_policy, apply_system_defaults, console_input_mode,
-        resolved_input_mode};
+    use super::{
+        apply_emulator_gpu_policy, apply_system_defaults, console_input_mode, resolved_input_mode,
+    };
     use ira_config::SystemDefaults;
     use ira_models::ControllerInputMode;
 

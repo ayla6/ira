@@ -1,8 +1,8 @@
 use super::input_profile_options::{axis_label, button_label};
 use ira_input::{
     ControllerRegistry, DeviceInfo, GamepadAxis, GamepadButton, GyroProcessingOptions,
-    GyroProcessor, InputEvent, InputProfile, InputSource, MappingEngine, OutputAction,
-    OutputEvent, Sdl3SensorBackend,
+    GyroProcessor, InputEvent, InputProfile, InputSource, MappingEngine, OutputAction, OutputEvent,
+    Sdl3SensorBackend,
 };
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -56,7 +56,7 @@ fn monitor_loop(
     let mut engine = profile.map(MappingEngine::new).transpose()?;
     let mut gyro_processor = engine.as_ref().map(|engine| {
         GyroProcessor::new(
-            engine.profile().gyro_calibration,
+            engine.profile().controller_calibration,
             GyroProcessingOptions {
                 smoothing: engine.profile().gyro.smoothing,
                 auto_calibrate: true,
@@ -308,18 +308,28 @@ fn update_outputs(outputs: &mut Vec<String>, events: &[OutputEvent], profile: &I
             OutputEvent::MouseMotion { axis, value } => {
                 (OutputAction::MouseAxis(*axis), value.abs() > 0.01)
             }
-            OutputEvent::WheelClick { axis, amount } => {
-                (OutputAction::WheelClick { axis: *axis, amount: *amount }, true)
-            }
+            OutputEvent::WheelClick { axis, amount } => (
+                OutputAction::WheelClick {
+                    axis: *axis,
+                    amount: *amount,
+                },
+                true,
+            ),
         };
         let relations = profile
-            .bindings
+            .action_sets
             .iter()
-            .filter(|binding| binding.output == output)
-            .map(|binding| {
+            .flat_map(|set| set.inputs.iter())
+            .filter(|input| {
+                input
+                    .activators
+                    .iter()
+                    .any(|activator| activator.outputs.contains(&output))
+            })
+            .map(|input| {
                 format!(
                     "{} -> {}",
-                    input_source_label(binding.source),
+                    input_source_label(input.source),
                     output_label(&output)
                 )
             })
@@ -383,7 +393,8 @@ fn output_label(output: &OutputAction) -> String {
                 .replace("{direction}", &direction)
                 .replace("{amount}", &amount.abs().to_string())
         }
-        OutputAction::SwitchActionSet(_) | OutputAction::EnableLayer { .. }
+        OutputAction::SwitchActionSet(_)
+        | OutputAction::EnableLayer { .. }
         | OutputAction::ModeShiftActivate { .. } => crate::tr!("Action set control"),
     }
 }

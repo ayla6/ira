@@ -6,7 +6,7 @@ use super::edit_game_pages::{build_api_emulator_page, build_dlc_page};
 use super::edit_game_save::{save_game_settings, SaveGameSettingsParams};
 use super::edit_game_system::{build_system_page, SystemWidgets};
 use super::edit_game_variants::build_variants_page;
-use super::state::{PendingImage, SharedState, SgdbAssetsCacheEntry};
+use super::state::{PendingImage, SgdbAssetsCacheEntry, SharedState};
 use super::wine_config_widget::{build_wine_config_pages, WineConfigWidgets};
 use crate::Game;
 use adw::prelude::*;
@@ -114,6 +114,7 @@ fn build_launch_wine_advanced_pages(
         ira_models::GameKind::Ps3 => Some("ps3"),
         ira_models::GameKind::PsVita => Some("psvita"),
         ira_models::GameKind::WiiU => Some("wiiu"),
+        ira_models::GameKind::ThreeDS => Some("3ds"),
         _ => None,
     };
     let (
@@ -205,7 +206,8 @@ fn build_launch_wine_advanced_pages(
     // Wine pages — only for Wine games with wine enabled
     let show_wine_tabs = game.kind.is_managed_pc();
     let wine_widgets_opt = if show_wine_tabs {
-        let (wine_pages, ww) = build_wine_config_pages(saved_wine, Some(app_default_wine), &save_dir);
+        let (wine_pages, ww) =
+            build_wine_config_pages(saved_wine, Some(app_default_wine), &save_dir);
         for wp in &wine_pages {
             sidebar.append(&super::settings_dialog::settings_sidebar_row(
                 wp.icon, &wp.label, wp.page_id,
@@ -560,9 +562,7 @@ fn build_dialog_contents(
         let app_id_entry = app_id_entry_w.as_ref().and_then(|w| w.upgrade());
         let game_folder_entry = game_folder_entry_w.as_ref().and_then(|w| w.upgrade());
         let runtime_row = runtime_row_w.as_ref().and_then(|w| w.upgrade());
-        let pending_emu_uninstall = pending_emu_uninstall_w
-            .as_ref()
-            .and_then(|w| w.upgrade());
+        let pending_emu_uninstall = pending_emu_uninstall_w.as_ref().and_then(|w| w.upgrade());
         save_btn.set_sensitive(false);
         save_game_settings(SaveGameSettingsParams {
             state,

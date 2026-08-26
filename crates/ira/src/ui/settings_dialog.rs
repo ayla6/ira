@@ -29,7 +29,9 @@ pub(super) fn settings_page_container() -> gtk4::Box {
 }
 
 // Re-exports for backward compatibility with files that use super::settings_dialog::*
-pub(super) use super::settings_pages::{settings_sidebar_row, sidebar_separator};
+pub(super) use super::settings_pages::{
+    settings_sidebar_row, sidebar_section_title, sidebar_separator,
+};
 
 struct SavedSettingsWidgets {
     steam_entry: adw::PasswordEntryRow,
@@ -331,6 +333,7 @@ fn apply_general_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
     cfg.auto_reload_rpcs3 = widgets.auto_reload_widgets.rpcs3.is_active();
     cfg.auto_reload_vita3k = widgets.auto_reload_widgets.vita3k.is_active();
     cfg.auto_reload_cemu = widgets.auto_reload_widgets.cemu.is_active();
+    cfg.auto_reload_azahar = widgets.auto_reload_widgets.azahar.is_active();
     cfg.steam_enabled = widgets.steam_enable_row.is_active();
     cfg.default_game_folder = widgets.default_game_folder_row.text().to_string();
     cfg.roms_folder = widgets.roms_folder_row.text().to_string();
@@ -354,8 +357,7 @@ fn apply_controller_defaults(
             .unwrap_or_default();
         // The combo picks a default layout flavor; the backend lives in that
         // layout, so only enabled/disabled is stored per device.
-        let flavor =
-            super::input_profile_settings::backend_for_selection(widget.mode.selected());
+        let flavor = super::input_profile_settings::backend_for_selection(widget.mode.selected());
         let enabled = flavor.is_some();
         if let Some(backend) = flavor.filter(|_| profile.is_empty()) {
             match ensure_controller_default_profile(

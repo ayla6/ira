@@ -22,6 +22,10 @@ pub fn wiiu_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
     Path::new(save_dir).join("data").join("wiiu").join(app_id)
 }
 
+pub fn three_ds_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
+    Path::new(save_dir).join("data").join("3ds").join(app_id)
+}
+
 pub fn sgdb_data_dir(save_dir: &str, sgdb_id: &str) -> PathBuf {
     Path::new(save_dir)
         .join("data")
@@ -50,6 +54,8 @@ pub fn game_data_dir(save_dir: &str, game: &ira_models::Game) -> PathBuf {
         vita_data_dir(save_dir, &game.app_id)
     } else if game.kind == ira_models::GameKind::WiiU {
         wiiu_data_dir(save_dir, &game.app_id)
+    } else if game.kind == ira_models::GameKind::ThreeDS {
+        three_ds_data_dir(save_dir, &game.app_id)
     } else if game.trophy_source.has_steam_enrichment() {
         data_dir(save_dir, &game.app_id)
     } else if !game.sgdb_id.is_empty() {
@@ -77,6 +83,8 @@ pub fn entry_data_dir(save_dir: &str, entry: &ira_models::GameEntry) -> PathBuf 
         vita_data_dir(save_dir, app_id)
     } else if entry.kind == ira_models::GameKind::WiiU {
         wiiu_data_dir(save_dir, app_id)
+    } else if entry.kind == ira_models::GameKind::ThreeDS {
+        three_ds_data_dir(save_dir, app_id)
     } else if entry.trophy_source.has_steam_enrichment() {
         data_dir(save_dir, app_id)
     } else if !sgdb_id.is_empty() {
@@ -214,9 +222,13 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     } else {
         let lossless = webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless();
         let lossy = webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode(95.0);
-        let mode = if lossless.len() <= lossy.len() { "lossless" } else { "lossy" };
-        let _s = tracing::info_span!("ensure_small_encode", base_name, w = fw, h = fh, mode)
-            .entered();
+        let mode = if lossless.len() <= lossy.len() {
+            "lossless"
+        } else {
+            "lossy"
+        };
+        let _s =
+            tracing::info_span!("ensure_small_encode", base_name, w = fw, h = fh, mode).entered();
         let chosen = if lossless.len() <= lossy.len() {
             lossless
         } else {
@@ -693,9 +705,9 @@ mod tga_tests {
             0, 0, 0, 0, 0, // palette fields
             0, 0, 0, 0, // no origin
             2, 0, // width 2
-            2, 0, // height 2
+            2, 0,  // height 2
             32, // bpp
-            8, // top-down
+            8,  // top-down
         ];
         for _ in 0..4 {
             data.extend_from_slice(&[0x11, 0x22, 0x33, 0xff]); // BGRA

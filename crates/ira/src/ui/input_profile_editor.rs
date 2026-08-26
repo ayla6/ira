@@ -6,24 +6,19 @@
 use super::css::{CSS_ERROR, CSS_FLAT, CSS_SUGGESTED_ACTION};
 use super::helpers::DialogLayout;
 use super::input_profile_action_sets::build_sets_page;
-use super::input_profile_editor_calibration::add_calibration_group;
-use super::input_profile_editor_save::{
-    build_profile, connect_persist, connect_unsaved_guard, persist_closure, EditorForm,
-    SaveOutcome,
-};
 use super::input_profile_editor_regions::Region;
+use super::input_profile_editor_save::{
+    build_profile, connect_persist, connect_unsaved_guard, persist_closure, EditorForm, SaveOutcome,
+};
 use super::input_profile_gyro_card::add_gyro_group;
 use super::input_profile_region_pages::{rebuild_region_pages, PagesCtx, RegionPages};
 use super::input_profile_store::read_profile;
 use adw::prelude::*;
-use ira_input::{
-    ActionSet, DeviceInfo, GyroConfig, InputProfile, VirtualGamepadBackend,
-};
+use ira_input::{ActionSet, DeviceInfo, GyroConfig, InputProfile, VirtualGamepadBackend};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
-
 
 pub(super) struct InputProfileEditorParams {
     pub save_dir: String,
@@ -85,12 +80,9 @@ pub(super) fn show_input_profile_editor(
     // canonical shape build_profile produces.
     let baseline = Rc::new(RefCell::new(with_game(profile.clone(), game_id)));
     let gyro = Rc::new(RefCell::new(profile.gyro.clone()));
-    let calibration = Rc::new(RefCell::new(profile.gyro_calibration));
+    let calibration = Rc::new(RefCell::new(profile.controller_calibration));
     let compatible_game_ids = profile.compatible_game_ids.clone();
     let profile_name = Rc::new(RefCell::new(profile.name.clone()));
-    let calibration_device = (detected_devices.len() == 1)
-        .then(|| device.clone())
-        .flatten();
     let current_path = Rc::new(RefCell::new(profile_path));
 
     let status = gtk4::Label::new(Some(&initial_status));
@@ -125,14 +117,7 @@ pub(super) fn show_input_profile_editor(
         device,
         on_dirty: on_dirty.clone(),
     };
-    let pages = build_pages(
-        &layout,
-        &ctx,
-        &gyro,
-        &calibration_device,
-        &registry,
-        &save_dir,
-    );
+    let pages = build_pages(&layout, &ctx, &gyro);
 
     let form = EditorForm {
         name: profile_name,
@@ -211,7 +196,14 @@ pub(super) fn show_input_profile_editor(
         window_for_cancel.close();
     });
 
-    connect_unsaved_guard(&layout.window, &save, &persist_save, &baseline, &form, &force_close);
+    connect_unsaved_guard(
+        &layout.window,
+        &save,
+        &persist_save,
+        &baseline,
+        &form,
+        &force_close,
+    );
 
     layout.window.present();
 }
@@ -220,44 +212,81 @@ fn build_pages(
     layout: &DialogLayout,
     ctx: &PagesCtx,
     gyro: &Rc<RefCell<GyroConfig>>,
-    calibration_device: &Option<DeviceInfo>,
-    registry: &Arc<ira_input::ControllerRegistry>,
-    save_dir: &str,
 ) -> RegionPages {
     let mut region_boxes = Vec::new();
+    // Steam-style sidebar: grouped sections of pages rather than one flat
+    // list.
+    layout
+        .sidebar
+        .append(&super::settings_dialog::sidebar_section_title(&crate::tr!(
+            "Bindings"
+        )));
     for region in Region::ALL {
         let (scroll, content) = scrolling_page();
         layout.stack.add_named(&scroll, Some(region.id()));
-        layout.sidebar.append(&super::settings_dialog::settings_sidebar_row(
-            region.icon(),
-            &region.title(),
-            region.id(),
-        ));
+        layout
+            .sidebar
+            .append(&super::settings_dialog::settings_sidebar_row(
+                region.icon(),
+                &region.title(),
+                region.id(),
+            ));
         region_boxes.push(content);
     }
 
+    layout
+        .sidebar
+        .append(&super::settings_dialog::sidebar_section_title(&crate::tr!(
+            "Controller"
+        )));
+    let (controller_scroll, controller_box) = scrolling_page();
+    layout
+        .stack
+        .add_named(&controller_scroll, Some("controller"));
+    layout
+        .sidebar
+        .append(&super::settings_dialog::settings_sidebar_row(
+            "emblem-system-symbolic",
+            &crate::tr!("Controller"),
+            "controller",
+        ));
+    let motion_rows = super::input_profile_controller_page::add_controller_groups(
+        &controller_box,
+        &ctx.profile,
+        &ctx.on_dirty,
+    );
+
+    layout
+        .sidebar
+        .append(&super::settings_dialog::sidebar_section_title(&crate::tr!(
+            "Motion"
+        )));
     let (gyro_scroll, gyro_box) = scrolling_page();
     layout.stack.add_named(&gyro_scroll, Some("gyro"));
-    layout.sidebar.append(&super::settings_dialog::settings_sidebar_row(
-        "view-refresh-symbolic",
-        &crate::tr!("Gyro"),
-        "gyro",
-    ));
-    let motion_rows = add_gyro_group(&gyro_box, gyro, &ctx.profile, ctx.device.as_ref(), &ctx.on_dirty);
-    add_calibration_group(
-        &gyro_box,
-        ira_input::calibration_store_path(save_dir),
-        calibration_device.clone(),
-        registry.clone(),
-    );
+    layout
+        .sidebar
+        .append(&super::settings_dialog::settings_sidebar_row(
+            "view-refresh-symbolic",
+            &crate::tr!("Gyro"),
+            "gyro",
+        ));
+    add_gyro_group(&gyro_box, gyro, ctx.device.as_ref(), &ctx.on_dirty);
+    super::input_profile_gyro_motion::add_gyro_motion_groups(&gyro_box, gyro, &ctx.on_dirty);
 
     let (sets_scroll, sets_box) = scrolling_page();
     layout.stack.add_named(&sets_scroll, Some("sets"));
-    layout.sidebar.append(&super::settings_dialog::settings_sidebar_row(
-        "view-grid-symbolic",
-        &crate::tr!("Action Sets"),
-        "sets",
-    ));
+    layout
+        .sidebar
+        .append(&super::settings_dialog::sidebar_section_title(&crate::tr!(
+            "Layout"
+        )));
+    layout
+        .sidebar
+        .append(&super::settings_dialog::settings_sidebar_row(
+            "view-grid-symbolic",
+            &crate::tr!("Action Sets"),
+            "sets",
+        ));
     sets_box.append(&build_sets_page(ctx, &ctx.on_dirty));
 
     RegionPages {
@@ -286,9 +315,18 @@ fn setup_sidebar_navigation(layout: &DialogLayout) {
             stack.set_visible_child_name(&row.widget_name());
         }
     });
-    layout
-        .sidebar
-        .select_row(layout.sidebar.row_at_index(0).as_ref());
+    // The sidebar leads with non-selectable section titles, so the first
+    // selectable row with a page name is the one to open on.
+    let mut child = layout.sidebar.first_child();
+    while let Some(widget) = child {
+        if let Some(row) = widget.downcast_ref::<gtk4::ListBoxRow>() {
+            if row.is_selectable() && !row.widget_name().is_empty() {
+                layout.sidebar.select_row(Some(row));
+                break;
+            }
+        }
+        child = widget.next_sibling();
+    }
 }
 
 fn default_action_sets(
@@ -302,7 +340,7 @@ fn default_action_sets(
         ),
         None => InputProfile::default_gamepad_for_backend(backend),
     };
-    base.into_action_set_form().action_sets
+    base.action_sets
 }
 
 fn with_game(mut profile: InputProfile, game_id: Option<i64>) -> InputProfile {
@@ -313,7 +351,6 @@ fn with_game(mut profile: InputProfile, game_id: Option<i64>) -> InputProfile {
     }
     profile
 }
-
 
 fn reset_button(window: &adw::Window, ctx: &PagesCtx, on_dirty: &Rc<dyn Fn()>) -> gtk4::Button {
     let reset = gtk4::Button::new();
@@ -396,9 +433,6 @@ fn add_editor_footer(
     layout.content_area.append(&footer);
     cancel
 }
-
-
-
 
 /// Used by tests through the region module's default mapping.
 #[cfg(test)]

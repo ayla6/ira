@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use InputSource::Axis;
-
 pub const PROFILE_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -87,14 +85,49 @@ pub enum AxisDirection {
     Positive,
 }
 
+/// Per-controller calibration. Describes the *controller*, not the profile:
+/// the gyro bias measured on one pad and its calibrated stick deadzone apply
+/// to every profile played with that pad.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
-pub struct GyroCalibration {
+pub struct ControllerCalibration {
     #[serde(default)]
     pub x: f32,
     #[serde(default)]
     pub y: f32,
     #[serde(default)]
     pub z: f32,
+    /// Stick movement ignored around each stick's center, as a fraction of
+    /// full deflection. Joystick modes with [`StickDeadzone::Controller`]
+    /// read the value for their stick.
+    #[serde(default)]
+    pub stick_deadzone_left: f32,
+    #[serde(default)]
+    pub stick_deadzone_right: f32,
+}
+
+/// Where a joystick's deadzone radii come from, mirroring Steam Input's
+/// "Deadzone Source": raw input, the value calibrated for this controller,
+/// or per-profile radii.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StickDeadzone {
+    /// No deadzone: the raw input of the joystick is sent.
+    #[default]
+    None,
+    /// The deadzone value comes from this controller's calibration.
+    Controller,
+    /// Use the profile's own inner/outer radii.
+    Custom,
+}
+
+/// Which components of a joystick's deflection reach the output.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StickOutputAxis {
+    #[default]
+    Both,
+    Horizontal,
+    Vertical,
 }
 
 /// Whole-controller gyro behaviour. The old model exposed each gyro axis as
@@ -115,6 +148,47 @@ pub struct GyroConfig {
     pub invert_y: bool,
     /// Adaptive smoothing: damps jitter during fine aim, never touches flicks.
     pub smoothing: bool,
+    /// Glide after the gyro deactivates: its last motion keeps outputting
+    /// while friction bleeds it off.
+    pub momentum: GyroMomentum,
+    /// Scales gyro mouse output down while the chosen trigger is held.
+    pub trigger_dampening: TriggerDampening,
+    /// Fraction of gyro mouse output removed while dampening is active:
+    /// 0.0 leaves it untouched, 1.0 freezes it.
+    pub dampening_amount: f32,
+}
+
+/// Gyro momentum, mirroring Steam Input: when the gyro is deactivated (by
+/// its enable button), motion continues to output for a short time instead
+/// of stopping dead.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct GyroMomentum {
+    pub enabled: bool,
+    /// Velocity decay per second; higher friction stops the glide sooner.
+    pub friction: f32,
+}
+
+impl Default for GyroMomentum {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            friction: 2.0,
+        }
+    }
+}
+
+/// Which trigger state scales gyro mouse output down.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriggerDampening {
+    #[default]
+    Off,
+    RightTriggerSoftPull,
+    RightTriggerFullPull,
+    LeftTriggerSoftPull,
+    LeftTriggerFullPull,
+    BothTriggersFullPull,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -170,6 +244,10 @@ pub enum GyroOrientation {
     /// vertical output stays anchored to the world instead of following the
     /// controller's lateral axis when the pad is rolled on its side.
     WorldSpace,
+    /// Aim like a laser pointer: vertical output follows the controller's
+    /// long axis against gravity (absolute), horizontal output integrates
+    /// the gyro yaw (relative).
+    LaserPointer,
 }
 
 impl Default for GyroConfig {
@@ -183,6 +261,9 @@ impl Default for GyroConfig {
             invert_x: false,
             invert_y: false,
             smoothing: true,
+            momentum: GyroMomentum::default(),
+            trigger_dampening: TriggerDampening::Off,
+            dampening_amount: 0.5,
         }
     }
 }
@@ -194,6 +275,17 @@ impl GyroConfig {
         }
         if !self.sensitivity.is_finite() || !(0.05..=20.0).contains(&self.sensitivity) {
             return Err("gyro sensitivity must be finite and within [0.05, 20]".to_string());
+        }
+        if self.momentum.enabled
+            && (!self.momentum.friction.is_finite()
+                || !(0.5..=10.0).contains(&self.momentum.friction))
+        {
+            return Err("gyro momentum friction must be finite and within [0.5, 10]".to_string());
+        }
+        if self.trigger_dampening != TriggerDampening::Off
+            && (!self.dampening_amount.is_finite() || !(0.0..=1.0).contains(&self.dampening_amount))
+        {
+            return Err("gyro dampening amount must be finite and within [0, 1]".to_string());
         }
         Ok(())
     }
@@ -334,63 +426,6 @@ impl OutputAction {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct AxisTransform {
-    #[serde(default)]
-    pub dead_zone: f32,
-    #[serde(default = "default_sensitivity")]
-    pub sensitivity: f32,
-    #[serde(default = "default_exponent")]
-    pub exponent: f32,
-    #[serde(default)]
-    pub invert: bool,
-}
-
-impl Default for AxisTransform {
-    fn default() -> Self {
-        Self {
-            dead_zone: 0.0,
-            sensitivity: default_sensitivity(),
-            exponent: default_exponent(),
-            invert: false,
-        }
-    }
-}
-
-impl AxisTransform {
-    pub fn validate(self) -> Result<(), String> {
-        if !self.dead_zone.is_finite() || !(0.0..1.0).contains(&self.dead_zone) {
-            return Err("dead_zone must be finite and in [0, 1)".to_string());
-        }
-        if !self.sensitivity.is_finite() || self.sensitivity < 0.0 {
-            return Err("sensitivity must be finite and non-negative".to_string());
-        }
-        if !self.exponent.is_finite() || self.exponent <= 0.0 {
-            return Err("exponent must be finite and positive".to_string());
-        }
-        Ok(())
-    }
-
-    pub fn apply(self, value: f32) -> f32 {
-        self.apply_unbounded(value).clamp(-1.0, 1.0)
-    }
-
-    pub fn apply_unbounded(self, value: f32) -> f32 {
-        let magnitude = value.abs();
-        if magnitude <= self.dead_zone {
-            return 0.0;
-        }
-        let normalized = (magnitude - self.dead_zone) / (1.0 - self.dead_zone);
-        let curved = normalized.powf(self.exponent) * self.sensitivity;
-        let signed = curved.copysign(value);
-        if self.invert {
-            -signed
-        } else {
-            signed
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Activation {
@@ -416,10 +451,16 @@ pub enum Activation {
 
 impl Activation {
     pub(crate) fn validate(&self) -> Result<(), String> {
-        if let Self::Analog { threshold, .. } = self {
-            if !threshold.is_finite() || !(0.0..0.9).contains(threshold) {
-                return Err("analog activation threshold must be in [0, 0.9)".to_string());
+        match self {
+            Self::Analog { threshold, .. } => {
+                if !threshold.is_finite() || !(0.0..0.9).contains(threshold) {
+                    return Err("analog activation threshold must be in [0, 0.9)".to_string());
+                }
             }
+            Self::Chord { sources, .. } if sources.is_empty() => {
+                return Err("chord cannot be empty".to_string());
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -448,30 +489,8 @@ pub enum ChordMode {
     Toggle,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Binding {
-    pub source: InputSource,
-    pub output: OutputAction,
-    #[serde(default)]
-    pub activation: Activation,
-    #[serde(default)]
-    pub transform: AxisTransform,
-}
-
-impl Binding {
-    pub fn new(source: InputSource, output: OutputAction) -> Self {
-        Self {
-            source,
-            output,
-            activation: Activation::Always,
-            transform: AxisTransform::default(),
-        }
-    }
-}
-
 /// A named group of input mappings. Profile action set `[0]` is the default;
-/// higher sets are switched to by bindings with
-/// [`OutputAction::SwitchActionSet`].
+/// higher sets are switched to by [`OutputAction::SwitchActionSet`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActionSet {
     pub name: String,
@@ -528,18 +547,15 @@ impl InputMapping {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceMode {
-    Joystick {
-        output: StickOutput,
-        #[serde(default = "default_deadzone_inner")]
-        deadzone_inner: f32,
-        #[serde(default = "default_deadzone_outer")]
-        deadzone_outer: f32,
-        #[serde(default = "default_exponent")]
-        curve: f32,
-    },
+    Joystick(JoystickSettings),
     Mouse {
         #[serde(default = "default_sensitivity")]
         sensitivity: f32,
+        /// The deflection processing shared with the joystick behavior:
+        /// deadzone, curve, scaling, rotation — applied before the pointer
+        /// velocity is derived.
+        #[serde(default)]
+        stick: StickProcessing,
     },
     /// Reserved for the phase-5 flickstick implementation; parseable now so
     /// imported profiles round-trip.
@@ -561,37 +577,182 @@ pub enum SourceMode {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Steam's joystick behavior: one stick mapped onto another, with deadzone,
+/// response curve, per-axis sensitivity and invert, rotation, and axis
+/// limiting. A newtype payload of [`SourceMode::Joystick`] so the JSON shape
+/// matches the struct-variant form older profiles were written in.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct JoystickSettings {
+    pub output: StickOutput,
+    #[serde(flatten)]
+    pub processing: StickProcessing,
+}
+
+impl JoystickSettings {
+    /// Neutral settings targeting `output`: raw passthrough with no
+    /// deadzone and a linear curve.
+    pub fn new(output: StickOutput) -> Self {
+        Self {
+            output,
+            processing: StickProcessing::default(),
+        }
+    }
+}
+
+/// The analog-stick processing pipeline shared by the Joystick and Joystick
+/// Mouse behaviors: rotation, deadzone, response curve, per-axis scale and
+/// invert, axis limiting, and the outer ring command.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct StickProcessing {
+    /// Which components of the deflection reach the output.
+    pub output_axis: StickOutputAxis,
+    /// Rotates the input vector before deadzone and curve: at 90°, pushing
+    /// the stick north reads as east.
+    pub rotation: f32,
+    pub sensitivity_x: f32,
+    pub sensitivity_y: f32,
+    pub invert_x: bool,
+    pub invert_y: bool,
+    /// Where the deadzone radii come from.
+    pub deadzone: StickDeadzone,
+    pub deadzone_inner: f32,
+    pub deadzone_outer: f32,
+    pub curve: f32,
+    /// Whether the response curve bends each axis on its own or the
+    /// deflection's distance from the deadzone.
+    pub response_axis_style: ResponseAxisStyle,
+    /// Command held while the stick sits past the outer ring radius.
+    pub outer_ring: Option<OuterRingCommand>,
+}
+
+impl Default for StickProcessing {
+    fn default() -> Self {
+        Self {
+            output_axis: StickOutputAxis::default(),
+            rotation: 0.0,
+            sensitivity_x: 1.0,
+            sensitivity_y: 1.0,
+            invert_x: false,
+            invert_y: false,
+            deadzone: StickDeadzone::default(),
+            deadzone_inner: 0.1,
+            deadzone_outer: 0.95,
+            curve: 1.0,
+            response_axis_style: ResponseAxisStyle::default(),
+            outer_ring: None,
+        }
+    }
+}
+
+impl StickProcessing {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.rotation.is_finite() || !(0.0..360.0).contains(&self.rotation) {
+            return Err("rotation must be finite and in [0, 360)".to_string());
+        }
+        for (name, sensitivity) in [
+            ("sensitivity_x", self.sensitivity_x),
+            ("sensitivity_y", self.sensitivity_y),
+        ] {
+            if !sensitivity.is_finite() || !(0.0..=10.0).contains(&sensitivity) {
+                return Err(format!("{name} must be finite and within [0, 10]"));
+            }
+        }
+        if !(0.0..1.0).contains(&self.deadzone_inner) || !self.deadzone_inner.is_finite() {
+            return Err("deadzone_inner must be finite and in [0, 1)".to_string());
+        }
+        if !(0.0..=1.0).contains(&self.deadzone_outer) || !self.deadzone_outer.is_finite() {
+            return Err("deadzone_outer must be finite and in (0, 1]".to_string());
+        }
+        if self.deadzone_inner >= self.deadzone_outer {
+            return Err("deadzone_inner must be below deadzone_outer".to_string());
+        }
+        if !self.curve.is_finite() || self.curve <= 0.0 {
+            return Err("curve exponent must be finite and positive".to_string());
+        }
+        if let Some(ring) = &self.outer_ring {
+            ring.validate()?;
+        }
+        Ok(())
+    }
+}
+
+/// How the response curve is applied, mirroring Steam's "Response Axis
+/// Style": per axis, or on the deflection's distance from the deadzone.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseAxisStyle {
+    #[default]
+    Distance,
+    PerAxis,
+}
+
+/// A command held while the stick is outside the outer ring radius (inside,
+/// when inverted) — Steam's Outer Ring Command: hold the stick at the edge
+/// to walk or sprint instead of the mapped walk speed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct OuterRingCommand {
+    /// Fraction of full deflection where the ring begins.
+    pub radius: f32,
+    /// Fire inside the radius instead of outside.
+    pub invert: bool,
+    /// The discrete output (button, key, mouse button) held while active.
+    pub output: OutputAction,
+}
+
+impl Default for OuterRingCommand {
+    fn default() -> Self {
+        Self {
+            radius: 25000.0 / 32767.0,
+            invert: false,
+            output: OutputAction::GamepadButton(GamepadButton::A),
+        }
+    }
+}
+
+impl OuterRingCommand {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.radius.is_finite() || !(0.0 < self.radius && self.radius <= 1.0) {
+            return Err("outer ring radius must be finite and in (0, 1]".to_string());
+        }
+        if !matches!(
+            self.output,
+            OutputAction::GamepadButton(_)
+                | OutputAction::Keyboard { .. }
+                | OutputAction::MouseButton(_)
+        ) {
+            return Err(
+                "outer ring command must be a gamepad button, keyboard key, or mouse button"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StickOutput {
+    #[default]
     Left,
     Right,
 }
 
 impl SourceMode {
+    /// A neutral joystick mode: raw passthrough to the given stick with no
+    /// deadzone and a linear curve — the starting point for every stick.
+    pub fn joystick(output: StickOutput) -> Self {
+        Self::Joystick(JoystickSettings::new(output))
+    }
+
     pub fn validate(&self) -> Result<(), String> {
-        let SourceMode::Joystick {
-            deadzone_inner,
-            deadzone_outer,
-            curve,
-            ..
-        } = self
-        else {
-            return Ok(());
-        };
-        if !(0.0..1.0).contains(deadzone_inner) || !deadzone_inner.is_finite() {
-            return Err("deadzone_inner must be finite and in [0, 1)".to_string());
+        match self {
+            Self::Joystick(settings) => settings.processing.validate(),
+            Self::Mouse { stick, .. } => stick.validate(),
+            _ => Ok(()),
         }
-        if !(0.0..=1.0).contains(deadzone_outer) || !deadzone_outer.is_finite() {
-            return Err("deadzone_outer must be finite and in (0, 1]".to_string());
-        }
-        if deadzone_inner >= deadzone_outer {
-            return Err("deadzone_inner must be below deadzone_outer".to_string());
-        }
-        if !curve.is_finite() || *curve <= 0.0 {
-            return Err("curve exponent must be finite and positive".to_string());
-        }
-        Ok(())
     }
 }
 
@@ -673,14 +834,6 @@ impl Default for ActivatorSettings {
     }
 }
 
-fn default_deadzone_inner() -> f32 {
-    0.1
-}
-
-fn default_deadzone_outer() -> f32 {
-    0.95
-}
-
 fn default_double_press_ms() -> u32 {
     320
 }
@@ -713,10 +866,10 @@ pub struct InputProfile {
     pub name: String,
     #[serde(default)]
     pub backend: VirtualGamepadBackend,
-    #[serde(default)]
-    pub bindings: Vec<Binding>,
-    #[serde(default)]
-    pub gyro_calibration: GyroCalibration,
+    /// Legacy fallback bias used when the controller has no stored
+    /// calibration; the field name predates per-controller stick calibration.
+    #[serde(default, alias = "gyro_calibration")]
+    pub controller_calibration: ControllerCalibration,
     #[serde(default)]
     pub gyro: GyroConfig,
     /// Action-set model. Empty while a profile still uses the flat `bindings`
@@ -737,6 +890,15 @@ pub struct InputProfile {
     /// future SDL versions or raw evdev readers.
     #[serde(default)]
     pub native_motion: bool,
+    /// Forward rumble the game plays on the virtual pad to the physical
+    /// controller. On by default — a controller that never rumbles reads
+    /// as broken.
+    #[serde(default = "default_rumble_enabled")]
+    pub rumble: bool,
+}
+
+fn default_rumble_enabled() -> bool {
+    true
 }
 
 impl Default for InputProfile {
@@ -745,13 +907,13 @@ impl Default for InputProfile {
             version: PROFILE_VERSION,
             name: default_profile_name(),
             backend: VirtualGamepadBackend::default(),
-            bindings: Vec::new(),
-            gyro_calibration: GyroCalibration::default(),
+            controller_calibration: ControllerCalibration::default(),
             gyro: GyroConfig::default(),
             action_sets: Vec::new(),
             action_layers: Vec::new(),
             compatible_game_ids: Vec::new(),
             native_motion: false,
+            rumble: true,
         }
     }
 }
@@ -763,26 +925,6 @@ impl InputProfile {
                 "unsupported input profile version {} (expected {})",
                 self.version, PROFILE_VERSION
             ));
-        }
-        for (index, binding) in self.bindings.iter().enumerate() {
-            if !binding.output.is_supported_by(self.backend) {
-                return Err(format!(
-                    "binding {index}: output is not supported by Ira's virtual input devices"
-                ));
-            }
-            binding
-                .transform
-                .validate()
-                .map_err(|error| format!("binding {index}: {error}"))?;
-            if let Activation::Chord { sources, .. } = &binding.activation {
-                if sources.is_empty() {
-                    return Err(format!("binding {index}: chord cannot be empty"));
-                }
-            }
-            binding
-                .activation
-                .validate()
-                .map_err(|error| format!("binding {index}: {error}"))?;
         }
         self.gyro.validate()?;
         self.validate_action_sets()?;
@@ -883,11 +1025,7 @@ impl InputProfile {
 
     /// Every output fired by any activator anywhere in the profile.
     pub fn all_activator_outputs(&self) -> impl Iterator<Item = &OutputAction> {
-        let mut outputs: Vec<&OutputAction> = self
-            .bindings
-            .iter()
-            .map(|binding| &binding.output)
-            .collect();
+        let mut outputs: Vec<&OutputAction> = Vec::new();
         for input in self
             .action_sets
             .iter()
@@ -918,73 +1056,11 @@ impl InputProfile {
     /// replacing whatever sets the profile had. Used for fresh profiles and
     /// the reset-to-defaults flow.
     pub fn with_default_action_set(mut self) -> Self {
-        let mut fresh = Self::default_gamepad_controls(self.backend);
-        fresh.bindings = std::mem::take(&mut self.bindings);
-        crate::profile::convert_bindings_to_action_sets(&mut fresh);
-        self.action_sets = fresh.action_sets;
+        self.action_sets = vec![ActionSet {
+            name: "Default".to_string(),
+            inputs: default_action_set_inputs(self.backend, &standard_buttons(self.backend)),
+        }];
         self
-    }
-
-    /// Canonical storage form: convert freshly built flat bindings into the
-    /// action-set model and drop the flat list, so profiles written by the
-    /// editor load identically everywhere. No-op when there is nothing to
-    /// convert.
-    pub fn into_action_set_form(mut self) -> Self {
-        crate::profile::convert_bindings_to_action_sets(&mut self);
-        self.bindings.clear();
-        self
-    }
-
-    /// Editor round-trip: flatten the primary action set back into the flat
-    /// binding form the row-based editor displays. Shapes the flat form can't
-    /// express (multi-output or timed activators, mode shifts, layers,
-    /// flickstick) are skipped loudly; they remain in the profile itself.
-    pub fn editor_bindings(&self) -> Vec<Binding> {
-        let mut bindings = Vec::new();
-        let Some(set) = self.action_sets.first() else {
-            return bindings;
-        };
-        for input in &set.inputs {
-            match (&input.mode, input.source) {
-                (
-                    Some(SourceMode::Joystick {
-                        deadzone_inner,
-                        curve,
-                        ..
-                    }),
-                    Axis(x_axis @ (GamepadAxis::LeftX | GamepadAxis::RightX)),
-                ) => bindings.extend(joystick_mode_bindings(x_axis, *deadzone_inner, *curve)),
-                (Some(SourceMode::Mouse { sensitivity }), _) => {
-                    bindings.extend(stick_mouse_bindings(input.source, *sensitivity));
-                }
-                (Some(SourceMode::Trigger { threshold }), _) => {
-                    if let Axis(axis @ (GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger)) =
-                        input.source
-                    {
-                        let mut binding =
-                            Binding::new(input.source, OutputAction::GamepadAxis(axis));
-                        binding.transform.dead_zone = *threshold;
-                        bindings.push(binding);
-                    }
-                }
-                (
-                    Some(SourceMode::Dpad { .. }),
-                    Axis(axis @ (GamepadAxis::LeftX | GamepadAxis::RightX)),
-                ) => {
-                    bindings.extend(stick_dpad_bindings(axis));
-                }
-                (Some(SourceMode::Flickstick { .. }), _) => eprintln!(
-                    "ira-input: editor cannot display flick stick mode for {:?}; kept unchanged",
-                    input.source
-                ),
-                (Some(mode), _) => eprintln!(
-                    "ira-input: editor cannot display mode {mode:?} on {:?}; kept unchanged",
-                    input.source
-                ),
-                (None, _) => bindings.extend(button_activator_bindings(input)),
-            }
-        }
-        bindings
     }
 
     pub fn default_gamepad_for_buttons(supported_buttons: &[GamepadButton]) -> Self {
@@ -995,119 +1071,19 @@ impl InputProfile {
     }
 
     pub fn default_gamepad_for_backend(backend: VirtualGamepadBackend) -> Self {
-        let mut buttons = vec![
-            GamepadButton::A,
-            GamepadButton::B,
-            GamepadButton::X,
-            GamepadButton::Y,
-            GamepadButton::LeftShoulder,
-            GamepadButton::RightShoulder,
-            GamepadButton::Back,
-            GamepadButton::Start,
-            GamepadButton::Guide,
-            GamepadButton::LeftStick,
-            GamepadButton::RightStick,
-            GamepadButton::DpadUp,
-            GamepadButton::DpadDown,
-            GamepadButton::DpadLeft,
-            GamepadButton::DpadRight,
-        ];
-        if backend == VirtualGamepadBackend::SwitchPro {
-            buttons.extend([GamepadButton::LeftTrigger, GamepadButton::RightTrigger]);
-        }
-        if backend == VirtualGamepadBackend::DirectInput {
-            buttons.extend([
-                GamepadButton::Paddle1,
-                GamepadButton::Paddle2,
-                GamepadButton::Paddle3,
-                GamepadButton::Paddle4,
-                GamepadButton::Paddle5,
-                GamepadButton::Paddle6,
-                GamepadButton::Paddle7,
-                GamepadButton::Paddle8,
-            ]);
-        }
-        Self::default_gamepad_for_backend_and_buttons(backend, &buttons)
+        Self::default_gamepad_for_backend_and_buttons(backend, &standard_buttons(backend))
     }
 
     pub fn default_gamepad_for_backend_and_buttons(
         backend: VirtualGamepadBackend,
         supported_buttons: &[GamepadButton],
     ) -> Self {
-        let mut profile = Self::default_gamepad_controls(backend);
-        profile.bindings.retain(|binding| {
-            matches!(binding.source, InputSource::Axis(_))
-                || matches!(
-                    binding.source,
-                    InputSource::Button(button) if supported_buttons.contains(&button)
-                )
-        });
-        profile
-    }
-
-    fn default_gamepad_controls(backend: VirtualGamepadBackend) -> Self {
-        let mut buttons = vec![
-            GamepadButton::A,
-            GamepadButton::B,
-            GamepadButton::X,
-            GamepadButton::Y,
-            GamepadButton::LeftShoulder,
-            GamepadButton::RightShoulder,
-            GamepadButton::Back,
-            GamepadButton::Start,
-            GamepadButton::Guide,
-            GamepadButton::LeftStick,
-            GamepadButton::RightStick,
-            GamepadButton::DpadUp,
-            GamepadButton::DpadDown,
-            GamepadButton::DpadLeft,
-            GamepadButton::DpadRight,
-        ];
-        if backend == VirtualGamepadBackend::SwitchPro {
-            buttons.extend([GamepadButton::LeftTrigger, GamepadButton::RightTrigger]);
-        }
-        let mut axes = vec![
-            GamepadAxis::LeftX,
-            GamepadAxis::LeftY,
-            GamepadAxis::RightX,
-            GamepadAxis::RightY,
-        ];
-        if backend != VirtualGamepadBackend::SwitchPro {
-            axes.extend([GamepadAxis::LeftTrigger, GamepadAxis::RightTrigger]);
-        }
-        let paddles = [
-            GamepadButton::Paddle1,
-            GamepadButton::Paddle2,
-            GamepadButton::Paddle3,
-            GamepadButton::Paddle4,
-            GamepadButton::Paddle5,
-            GamepadButton::Paddle6,
-            GamepadButton::Paddle7,
-            GamepadButton::Paddle8,
-        ];
-        let mut bindings = Vec::with_capacity(buttons.len() + axes.len() + paddles.len());
-        bindings.extend(buttons.into_iter().map(|button| {
-            Binding::new(
-                InputSource::Button(button),
-                OutputAction::GamepadButton(button),
-            )
-        }));
-        bindings
-            .extend(axes.into_iter().map(|axis| {
-                Binding::new(InputSource::Axis(axis), OutputAction::GamepadAxis(axis))
-            }));
-        if backend == VirtualGamepadBackend::DirectInput {
-            bindings.extend(paddles.into_iter().map(|button| {
-                Binding::new(
-                    InputSource::Button(button),
-                    OutputAction::GamepadButton(button),
-                )
-            }));
-        }
         Self {
-            name: String::new(),
             backend,
-            bindings,
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: default_action_set_inputs(backend, supported_buttons),
+            }],
             ..Self::default()
         }
     }
@@ -1146,102 +1122,79 @@ fn default_sensitivity() -> f32 {
     1.0
 }
 
-fn default_exponent() -> f32 {
-    1.0
+/// Every button the backend's identity layout carries.
+fn standard_buttons(backend: VirtualGamepadBackend) -> Vec<GamepadButton> {
+    let mut buttons = vec![
+        GamepadButton::A,
+        GamepadButton::B,
+        GamepadButton::X,
+        GamepadButton::Y,
+        GamepadButton::LeftShoulder,
+        GamepadButton::RightShoulder,
+        GamepadButton::Back,
+        GamepadButton::Start,
+        GamepadButton::Guide,
+        GamepadButton::LeftStick,
+        GamepadButton::RightStick,
+        GamepadButton::DpadUp,
+        GamepadButton::DpadDown,
+        GamepadButton::DpadLeft,
+        GamepadButton::DpadRight,
+    ];
+    // Switch Pro presents its digital trigger clicks as buttons.
+    if backend == VirtualGamepadBackend::SwitchPro {
+        buttons.extend([GamepadButton::LeftTrigger, GamepadButton::RightTrigger]);
+    }
+    if backend == VirtualGamepadBackend::DirectInput {
+        buttons.extend([
+            GamepadButton::Paddle1,
+            GamepadButton::Paddle2,
+            GamepadButton::Paddle3,
+            GamepadButton::Paddle4,
+            GamepadButton::Paddle5,
+            GamepadButton::Paddle6,
+            GamepadButton::Paddle7,
+            GamepadButton::Paddle8,
+        ]);
+    }
+    buttons
 }
 
-/// Flat-form bindings for one stick's Joystick mode (passthrough halves).
-/// The stick side is derived from the mapping's source axis.
-fn joystick_mode_bindings(x_axis: GamepadAxis, deadzone: f32, curve: f32) -> Vec<Binding> {
-    let y_axis = if x_axis == GamepadAxis::RightX {
-        GamepadAxis::RightY
-    } else {
-        GamepadAxis::LeftY
-    };
-    [
-        (x_axis, OutputAction::GamepadAxis(x_axis)),
-        (y_axis, OutputAction::GamepadAxis(y_axis)),
-    ]
-    .into_iter()
-    .map(|(axis, out)| {
-        let mut binding = Binding::new(InputSource::Axis(axis), out);
-        binding.transform.dead_zone = deadzone;
-        binding.transform.exponent = curve;
-        binding
-    })
-    .collect()
-}
-
-/// Flat-form bindings for one stick's mouse mode. Non-stick sources have no
-/// flat representation and are skipped loudly.
-fn stick_mouse_bindings(source: InputSource, sensitivity: f32) -> Vec<Binding> {
-    let Axis(x_axis) = source else {
-        eprintln!("ira-input: editor cannot display mouse mode on {source:?}; kept unchanged");
-        return Vec::new();
-    };
-    let y_axis = if x_axis == GamepadAxis::RightX {
-        GamepadAxis::RightY
-    } else {
-        GamepadAxis::LeftY
-    };
-    [(x_axis, MouseAxis::X), (y_axis, MouseAxis::Y)]
+/// Identity mappings for the standard controls: buttons passthrough, one
+/// Joystick-mode mapping per stick (on its X axis), triggers thresholded
+/// passthrough. Buttons the device does not report are left out.
+fn default_action_set_inputs(
+    backend: VirtualGamepadBackend,
+    supported_buttons: &[GamepadButton],
+) -> Vec<InputMapping> {
+    let mut inputs: Vec<InputMapping> = standard_buttons(backend)
         .into_iter()
-        .map(|(axis, mouse)| {
-            let mut binding = Binding::new(InputSource::Axis(axis), OutputAction::MouseAxis(mouse));
-            binding.transform.sensitivity = sensitivity;
-            binding
+        .filter(|button| supported_buttons.contains(button))
+        .map(|button| {
+            InputMapping::simple(
+                InputSource::Button(button),
+                OutputAction::GamepadButton(button),
+            )
         })
-        .collect()
-}
-
-/// Flat-form bindings for a button input's activators. Only the shapes the
-/// flat form can express survive: single-output full presses.
-fn button_activator_bindings(input: &InputMapping) -> Vec<Binding> {
-    input
-        .activators
-        .iter()
-        .filter_map(
-            |activator| match (&activator.kind, activator.outputs.as_slice()) {
-                (ActivatorKind::FullPress, [output]) => {
-                    let mut binding = Binding::new(input.source, output.clone());
-                    binding.activation = activator.activation.clone();
-                    Some(binding)
-                }
-                _ => {
-                    eprintln!(
-                        "ira-input: editor cannot display activator {:?} on {:?}; kept unchanged",
-                        activator.kind, input.source
-                    );
-                    None
-                }
-            },
-        )
-        .collect()
-}
-
-/// Flat-form AxisDirection bindings matching one stick's Dpad mode, in the
-/// same shape [`crate::profile::convert_bindings_to_action_sets`] collapses
-/// back into that mode.
-fn stick_dpad_bindings(x_axis: GamepadAxis) -> Vec<Binding> {
-    let y_axis = if x_axis == GamepadAxis::RightX {
-        GamepadAxis::RightY
-    } else {
-        GamepadAxis::LeftY
-    };
-    [
-        (x_axis, AxisDirection::Negative, GamepadButton::DpadLeft),
-        (x_axis, AxisDirection::Positive, GamepadButton::DpadRight),
-        (y_axis, AxisDirection::Negative, GamepadButton::DpadUp),
-        (y_axis, AxisDirection::Positive, GamepadButton::DpadDown),
-    ]
-    .into_iter()
-    .map(|(axis, direction, button)| {
-        Binding::new(
-            InputSource::AxisDirection { axis, direction },
-            OutputAction::GamepadButton(button),
-        )
-    })
-    .collect()
+        .collect();
+    for (x_axis, output) in [
+        (GamepadAxis::LeftX, StickOutput::Left),
+        (GamepadAxis::RightX, StickOutput::Right),
+    ] {
+        inputs.push(InputMapping {
+            mode: Some(SourceMode::joystick(output)),
+            ..InputMapping::new(InputSource::Axis(x_axis))
+        });
+    }
+    if backend != VirtualGamepadBackend::SwitchPro {
+        for axis in [GamepadAxis::LeftTrigger, GamepadAxis::RightTrigger] {
+            inputs.push(InputMapping {
+                mode: Some(SourceMode::Trigger { threshold: 0.5 }),
+                ..InputMapping::new(InputSource::Axis(axis))
+            });
+        }
+    }
+    inputs
 }
 
 #[cfg(test)]
@@ -1265,100 +1218,21 @@ mod tests {
     }
 
     #[test]
-    fn test_action_set_form_roundtrips_default_bindings() {
-        let flat = InputProfile::default_gamepad().bindings;
-        let canonical = InputProfile {
-            bindings: flat.clone(),
-            ..InputProfile::default()
-        }
-        .into_action_set_form();
-        assert!(canonical.bindings.is_empty());
-        assert!(!canonical.action_sets.is_empty());
-        let flattened = canonical.editor_bindings();
-        assert_eq!(flattened.len(), flat.len());
-        for binding in &flat {
-            assert!(flattened.contains(binding), "missing {binding:?}");
-        }
-    }
-
-    #[test]
-    fn test_into_action_set_form_roundtrips_dpad_and_mouse_stick() {
-        let mut dpad = stick_dpad_bindings(GamepadAxis::RightX);
-        let mut mouse_stick = stick_mouse_bindings(Axis(GamepadAxis::LeftX), 2.0);
-        let mut bindings = vec![Binding::new(
-            InputSource::Button(GamepadButton::A),
-            OutputAction::GamepadButton(GamepadButton::X),
-        )];
-        bindings.append(&mut dpad);
-        bindings.append(&mut mouse_stick);
-
-        let canonical = InputProfile {
-            bindings,
-            ..InputProfile::default()
-        }
-        .into_action_set_form();
-
-        let sources: Vec<InputSource> = canonical
-            .action_sets
-            .first()
-            .map(|set| set.inputs.iter().map(|input| input.source).collect())
-            .unwrap_or_default();
-        assert!(sources.contains(&Axis(GamepadAxis::LeftX)));
-        assert!(sources.contains(&Axis(GamepadAxis::RightX)));
-
-        let flattened = canonical.editor_bindings();
-        assert!(flattened.iter().any(|binding| {
-            matches!(
-                binding.source,
-                InputSource::AxisDirection {
-                    axis: GamepadAxis::RightX,
-                    direction: AxisDirection::Negative
-                }
-            ) && binding.output == OutputAction::GamepadButton(GamepadButton::DpadLeft)
-        }));
-        assert!(flattened.iter().any(|binding| {
-            binding.source == InputSource::Axis(GamepadAxis::LeftY)
-                && binding.output == OutputAction::MouseAxis(MouseAxis::Y)
-                && (binding.transform.sensitivity - 2.0).abs() < f32::EPSILON
-        }));
-        assert!(flattened.iter().any(|binding| {
-            binding.source == InputSource::Button(GamepadButton::A)
-                && binding.output == OutputAction::GamepadButton(GamepadButton::X)
-        }));
-    }
-
-    #[test]
-    fn test_axis_transform_applies_dead_zone_and_inversion() {
-        let transform = AxisTransform {
-            dead_zone: 0.2,
-            sensitivity: 1.0,
-            exponent: 1.0,
-            invert: true,
-        };
-        assert_eq!(transform.apply(0.1), 0.0);
-        assert!((transform.apply(0.6) + 0.5).abs() < 0.001);
-        assert!((transform.apply_unbounded(2.0) + 2.25).abs() < 0.001);
-    }
-
-    #[test]
     fn test_default_gamepad_contains_standard_gamepad_controls() {
         let profile = InputProfile::default_gamepad();
         assert_eq!(profile.backend, VirtualGamepadBackend::XInput);
-        assert_eq!(profile.bindings.len(), 21);
-        assert!(profile.bindings.iter().any(|binding| {
-            binding.source == InputSource::Axis(GamepadAxis::LeftTrigger)
-                && binding.output == OutputAction::GamepadAxis(GamepadAxis::LeftTrigger)
-        }));
-        assert!(profile.bindings.iter().any(|binding| {
-            binding.source == InputSource::Axis(GamepadAxis::RightTrigger)
-                && binding.output == OutputAction::GamepadAxis(GamepadAxis::RightTrigger)
-        }));
-        assert!(!profile.bindings.iter().any(|binding| {
-            matches!(
-                binding.source,
-                InputSource::Button(GamepadButton::LeftTrigger | GamepadButton::RightTrigger)
-            )
-        }));
+        let inputs = &profile.action_sets[0].inputs;
+        // 15 buttons + 2 sticks + 2 triggers.
+        assert_eq!(inputs.len(), 19);
+        let trigger = inputs
+            .iter()
+            .find(|input| input.source == InputSource::Axis(GamepadAxis::LeftTrigger))
+            .unwrap();
+        assert!(matches!(trigger.mode, Some(SourceMode::Trigger { .. })));
+        assert!(!inputs.iter().any(|input| matches!(
+            input.source,
+            InputSource::Button(GamepadButton::LeftTrigger | GamepadButton::RightTrigger)
+        )));
         assert!(profile.validate().is_ok());
     }
 
@@ -1377,14 +1251,16 @@ mod tests {
             GamepadButton::Paddle1,
             GamepadButton::Paddle2,
         ]);
-        assert!(!profile
-            .bindings
+        let inputs = &profile.action_sets[0].inputs;
+        assert!(inputs
             .iter()
-            .any(|binding| { binding.source == InputSource::Button(GamepadButton::Paddle1) }));
-        assert!(!profile
-            .bindings
+            .any(|input| input.source == InputSource::Button(GamepadButton::A)));
+        assert!(!inputs
             .iter()
-            .any(|binding| { binding.source == InputSource::Button(GamepadButton::Paddle3) }));
+            .any(|input| input.source == InputSource::Button(GamepadButton::Paddle1)));
+        assert!(!inputs
+            .iter()
+            .any(|input| input.source == InputSource::Button(GamepadButton::Paddle3)));
     }
 
     #[test]
@@ -1416,29 +1292,19 @@ mod tests {
     }
 
     #[test]
-    fn test_profile_rejects_invalid_transform() {
-        let mut profile = InputProfile::default();
-        profile.bindings.push(Binding {
-            source: InputSource::Axis(GamepadAxis::LeftX),
-            output: OutputAction::GamepadAxis(GamepadAxis::RightX),
-            activation: Activation::Always,
-            transform: AxisTransform {
-                dead_zone: 1.0,
-                ..AxisTransform::default()
-            },
-        });
-        assert!(profile.validate().is_err());
-    }
-
-    #[test]
     fn test_profile_accepts_keyboard_and_mouse_outputs() {
         for output in [
             OutputAction::Keyboard { keycode: 30 },
             OutputAction::MouseButton(MouseButton::Left),
-            OutputAction::MouseAxis(MouseAxis::X),
         ] {
             let profile = InputProfile {
-                bindings: vec![Binding::new(InputSource::Button(GamepadButton::A), output)],
+                action_sets: vec![ActionSet {
+                    name: "Default".to_string(),
+                    inputs: vec![InputMapping::simple(
+                        InputSource::Button(GamepadButton::A),
+                        output,
+                    )],
+                }],
                 ..InputProfile::default()
             };
             assert!(profile.validate().is_ok());
@@ -1448,10 +1314,13 @@ mod tests {
     #[test]
     fn test_profile_rejects_paddle_output() {
         let profile = InputProfile {
-            bindings: vec![Binding::new(
-                InputSource::Button(GamepadButton::A),
-                OutputAction::GamepadButton(GamepadButton::Paddle1),
-            )],
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping::simple(
+                    InputSource::Button(GamepadButton::A),
+                    OutputAction::GamepadButton(GamepadButton::Paddle1),
+                )],
+            }],
             ..InputProfile::default()
         };
         assert!(profile.validate().is_err());
@@ -1461,10 +1330,13 @@ mod tests {
     fn test_profile_accepts_paddle_output_for_direct_input() {
         let profile = InputProfile {
             backend: VirtualGamepadBackend::DirectInput,
-            bindings: vec![Binding::new(
-                InputSource::Button(GamepadButton::A),
-                OutputAction::GamepadButton(GamepadButton::Paddle1),
-            )],
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping::simple(
+                    InputSource::Button(GamepadButton::A),
+                    OutputAction::GamepadButton(GamepadButton::Paddle1),
+                )],
+            }],
             ..InputProfile::default()
         };
         assert!(profile.validate().is_ok());
@@ -1490,21 +1362,22 @@ mod tests {
     #[test]
     fn test_direct_input_defaults_include_identity_paddle_bindings() {
         let profile = InputProfile::default_gamepad_for_backend(VirtualGamepadBackend::DirectInput);
-        assert_eq!(profile.bindings.len(), 29);
+        let inputs = &profile.action_sets[0].inputs;
+        // 23 buttons (paddles included) + 2 sticks + 2 triggers.
+        assert_eq!(inputs.len(), 27);
         for button in [
             GamepadButton::Paddle1,
-            GamepadButton::Paddle2,
-            GamepadButton::Paddle3,
             GamepadButton::Paddle4,
-            GamepadButton::Paddle5,
-            GamepadButton::Paddle6,
-            GamepadButton::Paddle7,
             GamepadButton::Paddle8,
         ] {
-            assert!(profile.bindings.iter().any(|binding| {
-                binding.source == InputSource::Button(button)
-                    && binding.output == OutputAction::GamepadButton(button)
-            }));
+            let mapping = inputs
+                .iter()
+                .find(|input| input.source == InputSource::Button(button))
+                .unwrap();
+            assert_eq!(
+                mapping.activators[0].outputs,
+                vec![OutputAction::GamepadButton(button)]
+            );
         }
         assert!(profile.validate().is_ok());
     }
@@ -1512,17 +1385,18 @@ mod tests {
     #[test]
     fn test_switch_pro_defaults_use_digital_triggers() {
         let profile = InputProfile::default_gamepad_for_backend(VirtualGamepadBackend::SwitchPro);
-        assert_eq!(profile.bindings.len(), 21);
+        let inputs = &profile.action_sets[0].inputs;
+        // 17 buttons (digital trigger clicks) + 2 sticks, no analog triggers.
+        assert_eq!(inputs.len(), 19);
         for button in [GamepadButton::LeftTrigger, GamepadButton::RightTrigger] {
-            assert!(profile.bindings.iter().any(|binding| {
-                binding.source == InputSource::Button(button)
-                    && binding.output == OutputAction::GamepadButton(button)
-            }));
+            assert!(inputs
+                .iter()
+                .any(|input| input.source == InputSource::Button(button)));
         }
-        assert!(!profile.bindings.iter().any(|binding| {
+        assert!(!inputs.iter().any(|input| {
             matches!(
-                binding.output,
-                OutputAction::GamepadAxis(GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger)
+                input.source,
+                InputSource::Axis(GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger)
             )
         }));
         assert!(profile.validate().is_ok());
@@ -1532,10 +1406,13 @@ mod tests {
     fn test_switch_pro_rejects_analog_trigger_outputs() {
         let profile = InputProfile {
             backend: VirtualGamepadBackend::SwitchPro,
-            bindings: vec![Binding::new(
-                InputSource::Axis(GamepadAxis::LeftX),
-                OutputAction::GamepadAxis(GamepadAxis::LeftTrigger),
-            )],
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping::simple(
+                    InputSource::Button(GamepadButton::A),
+                    OutputAction::GamepadAxis(GamepadAxis::LeftTrigger),
+                )],
+            }],
             ..InputProfile::default()
         };
         assert!(profile.validate().is_err());
@@ -1544,33 +1421,37 @@ mod tests {
     #[test]
     fn test_xinput_defaults_omit_paddle_bindings() {
         let profile = InputProfile::default_gamepad_for_backend(VirtualGamepadBackend::XInput);
-        assert_eq!(profile.bindings.len(), 21);
-        assert!(!profile
-            .bindings
-            .iter()
-            .any(|binding| binding.output == OutputAction::GamepadButton(GamepadButton::Paddle1)));
+        let inputs = &profile.action_sets[0].inputs;
+        assert!(!inputs.iter().any(|input| {
+            input.activators.iter().any(|activator| {
+                activator
+                    .outputs
+                    .contains(&OutputAction::GamepadButton(GamepadButton::Paddle1))
+            })
+        }));
     }
 
     #[test]
     fn test_profile_serde_roundtrip_preserves_custom_chord() {
         let profile = InputProfile {
             name: "My layout".to_string(),
-            bindings: vec![Binding {
-                source: InputSource::Axis(GamepadAxis::LeftX),
-                output: OutputAction::GamepadAxis(GamepadAxis::RightX),
-                activation: Activation::Chord {
-                    sources: vec![
-                        InputSource::Button(GamepadButton::Guide),
-                        InputSource::Button(GamepadButton::Paddle1),
-                    ],
-                    mode: ChordMode::Toggle,
-                },
-                transform: AxisTransform {
-                    dead_zone: 0.08,
-                    sensitivity: 2.5,
-                    exponent: 1.2,
-                    invert: true,
-                },
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping {
+                    activators: vec![Activator {
+                        kind: ActivatorKind::FullPress,
+                        outputs: vec![OutputAction::GamepadButton(GamepadButton::B)],
+                        activation: Activation::Chord {
+                            sources: vec![
+                                InputSource::Button(GamepadButton::Guide),
+                                InputSource::Button(GamepadButton::Paddle1),
+                            ],
+                            mode: ChordMode::Toggle,
+                        },
+                        settings: ActivatorSettings::default(),
+                    }],
+                    ..InputMapping::new(InputSource::Button(GamepadButton::A))
+                }],
             }],
             ..InputProfile::default()
         };
@@ -1582,14 +1463,20 @@ mod tests {
     #[test]
     fn test_profile_rejects_empty_chord() {
         let profile = InputProfile {
-            bindings: vec![Binding {
-                source: InputSource::Axis(GamepadAxis::LeftX),
-                output: OutputAction::GamepadAxis(GamepadAxis::RightX),
-                activation: Activation::Chord {
-                    sources: Vec::new(),
-                    mode: ChordMode::Hold,
-                },
-                transform: AxisTransform::default(),
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping {
+                    activators: vec![Activator {
+                        kind: ActivatorKind::FullPress,
+                        outputs: vec![OutputAction::GamepadButton(GamepadButton::B)],
+                        activation: Activation::Chord {
+                            sources: Vec::new(),
+                            mode: ChordMode::Hold,
+                        },
+                        settings: ActivatorSettings::default(),
+                    }],
+                    ..InputMapping::new(InputSource::Button(GamepadButton::A))
+                }],
             }],
             ..InputProfile::default()
         };
@@ -1604,6 +1491,8 @@ mod tests {
         assert_eq!(config.output, GyroOutput::Mouse);
         assert!((config.sensitivity - 1.0).abs() < f32::EPSILON);
         assert!(config.smoothing);
+        assert!(!config.momentum.enabled);
+        assert_eq!(config.trigger_dampening, TriggerDampening::Off);
         assert!(config.validate().is_ok());
     }
 
@@ -1613,6 +1502,44 @@ mod tests {
             gyro: GyroConfig {
                 enabled: true,
                 sensitivity: 50.0,
+                ..GyroConfig::default()
+            },
+            ..InputProfile::default()
+        };
+        assert!(profile.validate().is_err());
+    }
+
+    #[test]
+    fn test_gyro_config_deserializes_without_momentum_or_dampening_fields() {
+        // Profiles saved before those settings existed must load with the
+        // defaults rather than failing.
+        let config: GyroConfig =
+            serde_json::from_str(r#"{"enabled": true, "sensitivity": 2.0}"#).unwrap();
+        assert_eq!(config.momentum, GyroMomentum::default());
+        assert_eq!(config.trigger_dampening, TriggerDampening::Off);
+        assert!((config.dampening_amount - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_profile_rejects_out_of_range_momentum_and_dampening() {
+        let profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                momentum: GyroMomentum {
+                    enabled: true,
+                    friction: 99.0,
+                },
+                ..GyroConfig::default()
+            },
+            ..InputProfile::default()
+        };
+        assert!(profile.validate().is_err());
+
+        let profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                trigger_dampening: TriggerDampening::BothTriggersFullPull,
+                dampening_amount: 2.0,
                 ..GyroConfig::default()
             },
             ..InputProfile::default()
@@ -1632,49 +1559,17 @@ mod tests {
                 invert_x: true,
                 invert_y: false,
                 smoothing: false,
+                momentum: GyroMomentum {
+                    enabled: true,
+                    friction: 4.0,
+                },
+                trigger_dampening: TriggerDampening::RightTriggerSoftPull,
+                dampening_amount: 0.75,
             },
             ..InputProfile::default()
         };
         let decoded = InputProfile::from_json(&serde_json::to_string(&profile).unwrap()).unwrap();
         assert_eq!(decoded, profile);
-    }
-
-    #[test]
-    fn test_from_json_drops_legacy_gyro_and_recenter_bindings() {
-        let json = r#"{
-            "name": "legacy",
-            "bindings": [
-                {"source": {"button": "a"}, "output": {"gamepad_button": "b"}},
-                {"source": {"gyro": "z"}, "output": {"mouse_axis": "x"},
-                 "transform": {"sensitivity": 2.0, "invert": true}},
-                {"source": {"button": "x"}, "output": "recenter_gyro"}
-            ],
-            "gyro_mode": "rate"
-        }"#;
-        let profile = InputProfile::from_json(json).unwrap();
-        // The surviving A→B binding lands in the converted action set; gyro
-        // and recenter entries are gone.
-        assert!(profile.bindings.is_empty());
-        assert_eq!(profile.action_sets.len(), 1);
-        let inputs = &profile.action_sets[0].inputs;
-        assert_eq!(inputs.len(), 1);
-        assert_eq!(inputs[0].source, InputSource::Button(GamepadButton::A));
-        assert_eq!(
-            inputs[0].activators[0].outputs,
-            vec![OutputAction::GamepadButton(GamepadButton::B)]
-        );
-    }
-
-    #[test]
-    fn test_from_json_keeps_gyro_config_over_legacy_bindings() {
-        let json = r#"{
-            "bindings": [{"source": {"gyro": "x"}, "output": {"mouse_axis": "y"}}],
-            "gyro": {"enabled": true, "output": "right_stick"}
-        }"#;
-        let profile = InputProfile::from_json(json).unwrap();
-        assert!(profile.bindings.is_empty());
-        assert!(profile.gyro.enabled);
-        assert_eq!(profile.gyro.output, GyroOutput::RightStick);
     }
 
     #[test]
@@ -1700,12 +1595,16 @@ mod tests {
                     },
                     InputMapping {
                         source: InputSource::Axis(GamepadAxis::LeftX),
-                        mode: Some(SourceMode::Joystick {
+                        mode: Some(SourceMode::Joystick(JoystickSettings {
                             output: StickOutput::Left,
-                            deadzone_inner: 0.12,
-                            deadzone_outer: 0.94,
-                            curve: 1.4,
-                        }),
+                            processing: StickProcessing {
+                                deadzone: StickDeadzone::Custom,
+                                deadzone_inner: 0.12,
+                                deadzone_outer: 0.94,
+                                curve: 1.4,
+                                ..StickProcessing::default()
+                            },
+                        })),
                         ..InputMapping::new(InputSource::Axis(GamepadAxis::LeftX))
                     },
                 ],
@@ -1723,6 +1622,116 @@ mod tests {
         let decoded = InputProfile::from_json(&serde_json::to_string(&profile).unwrap()).unwrap();
         assert_eq!(decoded, profile);
         assert!(decoded.validate().is_ok());
+    }
+
+    #[test]
+    fn test_old_joystick_mode_json_gets_steam_defaults() {
+        // Profiles written before the stick rework carry no deadzone source,
+        // per-axis sensitivity, or rotation; they must load as raw
+        // passthrough instead of silently keeping a hidden deadzone.
+        let profile = InputProfile::from_json(
+            r#"{"name":"old","action_sets":[{"name":"Default","inputs":[
+                {"source":{"axis":"left_x"},
+                 "mode":{"joystick":{"output":"left","deadzone_inner":0.1,"deadzone_outer":0.95,"curve":1.0}}}
+            ]}]}"#,
+        )
+        .unwrap();
+        let Some(SourceMode::Joystick(settings)) = profile.action_sets[0].inputs[0].mode.as_ref()
+        else {
+            panic!("expected a joystick mode");
+        };
+        assert_eq!(settings.processing.deadzone, StickDeadzone::None);
+        assert_eq!(settings.processing.output_axis, StickOutputAxis::Both);
+        assert_eq!(settings.processing.rotation, 0.0);
+        assert!((settings.processing.sensitivity_x - 1.0).abs() < f32::EPSILON);
+        assert!((settings.processing.sensitivity_y - 1.0).abs() < f32::EPSILON);
+        assert!(!settings.processing.invert_x && !settings.processing.invert_y);
+    }
+
+    #[test]
+    fn test_joystick_settings_reject_out_of_range_rotation_and_sensitivity() {
+        let build = |settings: JoystickSettings| InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping {
+                    mode: Some(SourceMode::Joystick(settings)),
+                    ..InputMapping::new(InputSource::Axis(GamepadAxis::LeftX))
+                }],
+            }],
+            ..InputProfile::default()
+        };
+        assert!(build(JoystickSettings {
+            processing: StickProcessing {
+                rotation: 400.0,
+                ..StickProcessing::default()
+            },
+            ..JoystickSettings::default()
+        })
+        .validate()
+        .is_err());
+        assert!(build(JoystickSettings {
+            processing: StickProcessing {
+                sensitivity_x: 20.0,
+                ..StickProcessing::default()
+            },
+            ..JoystickSettings::default()
+        })
+        .validate()
+        .is_err());
+        assert!(build(JoystickSettings::default()).validate().is_ok());
+    }
+
+    #[test]
+    fn test_from_json_collapses_legacy_per_axis_stick_mappings() {
+        // The per-axis editor wrote one mapping per stick axis; loading
+        // merges each Y half into its X counterpart.
+        let profile = InputProfile::from_json(
+            r#"{"name":"old","action_sets":[{"name":"Default","inputs":[
+                {"source":{"axis":"left_x"},
+                 "mode":{"joystick":{"output":"left","curve":1.0}}},
+                {"source":{"axis":"left_y"},
+                 "mode":{"joystick":{"output":"left","curve":2.0}}},
+                {"source":{"axis":"right_y"},
+                 "mode":{"joystick":{"output":"right","curve":3.0}}}
+            ]}]}"#,
+        )
+        .unwrap();
+        let inputs = &profile.action_sets[0].inputs;
+        assert_eq!(inputs.len(), 2);
+        assert!(inputs.iter().all(|input| matches!(
+            input.source,
+            InputSource::Axis(GamepadAxis::LeftX) | InputSource::Axis(GamepadAxis::RightX)
+        )));
+        // The X half's own mode wins over the Y half's.
+        let Some(SourceMode::Joystick(settings)) = inputs
+            .iter()
+            .find(|input| input.source == InputSource::Axis(GamepadAxis::LeftX))
+            .and_then(|input| input.mode.as_ref())
+        else {
+            panic!("expected a joystick mode on the left stick");
+        };
+        assert!((settings.processing.curve - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_from_json_keeps_stick_y_half_carrying_activators() {
+        let profile = InputProfile::from_json(
+            r#"{"name":"old","action_sets":[{"name":"Default","inputs":[
+                {"source":{"axis":"right_x"},
+                 "mode":{"joystick":{"output":"right","curve":1.0}}},
+                {"source":{"axis":"right_y"},
+                 "mode":{"joystick":{"output":"right","curve":2.0}},
+                 "activators":[{"kind":"full_press","outputs":[{"gamepad_button":"a"}]}]}
+            ]}]}"#,
+        )
+        .unwrap();
+        let inputs = &profile.action_sets[0].inputs;
+        assert_eq!(inputs.len(), 2);
+        let y_half = inputs
+            .iter()
+            .find(|input| input.source == InputSource::Axis(GamepadAxis::RightY))
+            .unwrap();
+        assert!(!y_half.activators.is_empty());
     }
 
     #[test]
@@ -1766,7 +1775,6 @@ mod tests {
     #[test]
     fn test_keyboard_and_mouse_helpers_see_activator_outputs() {
         let profile = InputProfile {
-            bindings: Vec::new(),
             action_sets: vec![ActionSet {
                 name: "Default".to_string(),
                 inputs: vec![InputMapping::simple(

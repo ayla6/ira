@@ -3,7 +3,7 @@ use super::helpers::{clear_children, make_browse_button, refresh_settings_images
 use super::image_manager_helpers::{find_best_image_path, make_refresh_closure, AssetRefreshCtx};
 use super::sgdb_match_dialog::show_sgdb_search_dialog;
 use super::sgdb_picker::{show_sgdb_picker, ShowSgdbPickerParams};
-use super::state::{PendingImage, SharedState, SgdbAssetsCacheEntry};
+use super::state::{PendingImage, SgdbAssetsCacheEntry, SharedState};
 use crate::Game;
 use adw::prelude::*;
 use ira_models::AssetType;
@@ -378,14 +378,15 @@ fn build_reset_icon_button(
     pending_copies: &Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     save_dir: &str,
 ) -> Option<gtk4::Button> {
-    if AssetType::from_string(asset_type) != Some(AssetType::Icon) || !game.kind.is_trophy_console()
-    {
+    if AssetType::from_string(asset_type) != Some(AssetType::Icon) {
         return None;
     }
     let label = match game.kind {
         ira_models::GameKind::Ps4 => crate::tr!("PS4"),
         ira_models::GameKind::Ps3 => crate::tr!("PS3"),
-        _ => crate::tr!("Use icon"),
+        ira_models::GameKind::ThreeDS => crate::tr!("3DS"),
+        ira_models::GameKind::WiiU => crate::tr!("Wii U"),
+        _ => return None,
     };
     let reset_btn = gtk4::Button::with_label(&label);
     let gc = game.clone();
@@ -394,45 +395,7 @@ fn build_reset_icon_button(
     let asset_reset = asset_type.to_string();
     let save_dir_c2 = save_dir.to_string();
     reset_btn.connect_clicked(move |_| {
-        let app_id = gc.app_id.clone();
-        let game_path = gc.game_path.clone();
-        let kind = gc.kind;
-        let image_dir = match kind {
-            ira_models::GameKind::Ps4 => std::path::Path::new(&save_dir_c2)
-                .join("data")
-                .join("ps4")
-                .join(&app_id),
-            ira_models::GameKind::Ps3 => std::path::Path::new(&save_dir_c2)
-                .join("data")
-                .join("ps3")
-                .join(&app_id),
-            _ => return,
-        };
-        let game_icon = match kind {
-            ira_models::GameKind::Ps4 => std::path::Path::new(&game_path)
-                .join("sce_sys")
-                .join("icon0.png"),
-            ira_models::GameKind::Ps3 => std::path::Path::new(&game_path).join("ICON0.PNG"),
-            _ => return,
-        };
-        if !game_icon.is_file() {
-            return;
-        }
-        let _ = std::fs::create_dir_all(&image_dir);
-        ira_parser::remove_image_variants(&image_dir, "icon");
-        ira_parser::remove_image_variants(&image_dir, "icon_small");
-        let tmp_png = image_dir.join("icon.png");
-        if std::fs::copy(&game_icon, &tmp_png).is_ok() {
-            ira_parser::convert_to_lossless_webp(&tmp_png);
-            ira_parser::ensure_small_image(
-                &image_dir,
-                "icon",
-                AssetType::Icon.thumb_dims().0,
-                AssetType::Icon.thumb_dims().1,
-            );
-            if let Some(p) = ira_parser::find_image_file(&image_dir, "icon") {
-                ira_images::invalidate_texture(&p.to_string_lossy());
-            }
+        if super::image_manager_helpers::restore_native_icon(&save_dir_c2, &gc) {
             if let Some(ref pc) = pending_copies_reset {
                 pc.borrow_mut().remove(&asset_reset);
             }
@@ -515,15 +478,12 @@ fn build_ra_icon_button(
                             let short: String = err.chars().take(40).collect();
                             btn.set_label(&short);
                             let btn_weak = btn.downgrade();
-                            glib::timeout_add_local(
-                                std::time::Duration::from_secs(2),
-                                move || {
-                                    if let Some(btn) = btn_weak.upgrade() {
-                                        btn.set_label(&crate::tr!("RA icon"));
-                                    }
-                                    glib::ControlFlow::Break
-                                },
-                            );
+                            glib::timeout_add_local(std::time::Duration::from_secs(2), move || {
+                                if let Some(btn) = btn_weak.upgrade() {
+                                    btn.set_label(&crate::tr!("RA icon"));
+                                }
+                                glib::ControlFlow::Break
+                            });
                         }
                     }
                 }

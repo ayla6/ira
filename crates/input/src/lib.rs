@@ -23,13 +23,16 @@ pub use physical::{
 };
 pub use profile::{
     ActionSet, ActionSetLayer, Activation, Activator, ActivatorKind, ActivatorSettings,
-    AnalogCondition, AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton,
-    GyroActivation, GyroCalibration, GyroConfig, GyroOrientation, GyroOutput, InputCategory,
-    InputMapping, InputProfile, InputSource, ModeShift, MouseAxis, MouseButton, OutputAction,
-    SourceMode, StickOutput, VirtualGamepadBackend, PROFILE_VERSION,
+    AnalogCondition, AxisDirection, ChordMode, ControllerCalibration, GamepadAxis, GamepadButton,
+    GyroActivation, GyroConfig, GyroMomentum, GyroOrientation, GyroOutput, InputCategory,
+    InputMapping, InputProfile, InputSource, JoystickSettings, ModeShift, MouseAxis, MouseButton,
+    OuterRingCommand, OutputAction, ResponseAxisStyle, SourceMode, StickDeadzone, StickOutput,
+    StickOutputAxis, StickProcessing, TriggerDampening, VirtualGamepadBackend, PROFILE_VERSION,
 };
 pub use registry::ControllerRegistry;
+mod rumble;
 pub use report_rate::ReportRateEstimator;
+pub use rumble::{PhysicalRumble, RumbleCommand};
 mod focus;
 pub use focus::FocusWatcher;
 mod motion_udp;

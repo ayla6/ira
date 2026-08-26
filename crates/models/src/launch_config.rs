@@ -362,18 +362,12 @@ mod tests {
             r#"{"exe":"","args":"","working_dir":"","env_vars":[],"ld_preload":"","ld_library_path":"","input_mode":"virtual_direct_input"}"#,
         )
         .unwrap();
-        assert_eq!(
-            direct.input_mode,
-            Some(ControllerInputMode::Enabled)
-        );
+        assert_eq!(direct.input_mode, Some(ControllerInputMode::Enabled));
         let switch_pro: GameLaunchConfig = serde_json::from_str(
             r#"{"exe":"","args":"","working_dir":"","env_vars":[],"ld_preload":"","ld_library_path":"","input_mode":"virtual_switch_pro"}"#,
         )
         .unwrap();
-        assert_eq!(
-            switch_pro.input_mode,
-            Some(ControllerInputMode::Enabled)
-        );
+        assert_eq!(switch_pro.input_mode, Some(ControllerInputMode::Enabled));
     }
 
     #[test]

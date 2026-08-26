@@ -224,7 +224,7 @@ fn refill_layer_rows(
         let row = adw::ActionRow::new();
         row.set_title(&esc(&layer.name));
         row.set_subtitle(&esc(
-            &crate::tr!("over {parent}").replace("{parent}", &layer.parent_set),
+            &crate::tr!("over {parent}").replace("{parent}", &layer.parent_set)
         ));
         let trash = gtk4::Button::from_icon_name("user-trash-symbolic");
         trash.add_css_class(super::css::CSS_FLAT);

@@ -2,11 +2,16 @@ use std::io;
 
 use evdev::uinput::VirtualDevice;
 use evdev::{
-    AbsInfo, AbsoluteAxisCode, AttributeSet, BusType, EventType, InputEvent, InputId, KeyCode,
-    UinputAbsSetup,
+    AbsInfo, AbsoluteAxisCode, AttributeSet, BusType, EventSummary, EventType, FFEffectCode,
+    InputEvent, InputId, KeyCode, UInputCode, UinputAbsSetup,
 };
 
+use crate::rumble::RumbleCommand;
 use crate::{GamepadAxis, GamepadButton, OutputEvent, VirtualGamepadBackend};
+
+/// Effect slots the virtual pad advertises. Games only ever need a couple of
+/// rumble effects alive; four covers SDL's cached rumble plus headroom.
+const RUMBLE_EFFECT_SLOTS: u32 = 4;
 
 const VIRTUAL_VENDOR: u16 = 0x045e;
 const VIRTUAL_PRODUCT: u16 = 0x028e;
@@ -76,20 +81,72 @@ impl VirtualGamepad {
             return Ok(Self::shadow_only(backend));
         }
         let buttons = gamepad_buttons(backend);
+        let rumble_effects: AttributeSet<FFEffectCode> =
+            [FFEffectCode::FF_RUMBLE].into_iter().collect();
         let mut builder = VirtualDevice::builder()?
             .name(device_name(backend))
             .input_id(device_id(backend))
-            .with_keys(&buttons)?;
+            .with_keys(&buttons)?
+            .with_ff(&rumble_effects)?
+            .with_ff_effects_max(RUMBLE_EFFECT_SLOTS);
         for setup in axis_setups(backend) {
             builder = builder.with_absolute_axis(&setup)?;
         }
         let mut device = builder.build()?;
         device.enumerate_dev_nodes_blocking()?;
+        // Upload notifications are drained by poll_rumble between loop
+        // passes; without O_NONBLOCK that read would stall the daemon.
+        enable_nonblocking(&device);
         Ok(Self {
             device: Some(device),
             backend,
             hat_dpad: [false; 4],
         })
+    }
+
+    /// Drains force-feedback uploads the game made on this pad. uinput never
+    /// surfaces the play/stop writes that follow an upload, so every upload
+    /// of a rumble effect means "run these motors for the effect's duration"
+    /// — the same contract every userspace uinput bridge works under.
+    pub fn poll_rumble(&mut self) -> Vec<RumbleCommand> {
+        let Some(device) = self.device.as_mut() else {
+            return Vec::new();
+        };
+        let events: Vec<InputEvent> = match device.fetch_events() {
+            Ok(events) => events.collect(),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Vec::new(),
+            Err(error) => {
+                eprintln!("ira-input: reading virtual pad events failed: {error}");
+                return Vec::new();
+            }
+        };
+        let mut commands = Vec::new();
+        for event in events {
+            match event.destructure() {
+                EventSummary::UInput(upload, code, _) if code == UInputCode::UI_FF_UPLOAD => {
+                    match device.process_ff_upload(upload) {
+                        Ok(mut request) => {
+                            request.set_retval(0);
+                            if let Some(command) =
+                                crate::rumble::rumble_command_from_effect(&request.effect())
+                            {
+                                commands.push(command);
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("ira-input: answering rumble upload failed: {error}")
+                        }
+                    }
+                }
+                EventSummary::UInput(erase, code, _) if code == UInputCode::UI_FF_ERASE => {
+                    if let Err(error) = device.process_ff_erase(erase) {
+                        eprintln!("ira-input: answering rumble erase failed: {error}");
+                    }
+                }
+                _ => {}
+            }
+        }
+        commands
     }
 
     pub fn emit(&mut self, event: &OutputEvent) -> io::Result<()> {
@@ -231,6 +288,16 @@ fn sdl_crc16(bytes: &[u8]) -> u16 {
         }
         value ^ (crc >> 8)
     })
+}
+
+/// Best-effort O_NONBLOCK flip so event draining never blocks the daemon.
+fn enable_nonblocking(device: &VirtualDevice) {
+    use std::os::fd::AsRawFd;
+    let fd = device.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags >= 0 {
+        unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
+    }
 }
 
 fn gamepad_buttons(backend: VirtualGamepadBackend) -> AttributeSet<KeyCode> {

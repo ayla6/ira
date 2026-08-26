@@ -616,7 +616,31 @@ pub(super) fn show_identified_form(
     let appid_row = adw::EntryRow::new();
     appid_row.set_title(&crate::tr!("Steam app ID"));
     appid_row.set_text(&game.app_id);
-    appid_row.set_sensitive(false);
+    let appid_search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
+    appid_search_btn.set_valign(gtk4::Align::Center);
+    appid_search_btn.set_tooltip_text(Some(&crate::tr!("Search Steam store")));
+    appid_search_btn.add_css_class(CSS_FLAT);
+    {
+        let state_c = state.clone();
+        let win_c = win.clone();
+        let appid_c = appid_row.clone();
+        let name_c = name_entry.clone();
+        appid_search_btn.connect_clicked(move |_| {
+            let search_text = name_c.text().to_string();
+            let name_entry_c = name_c.clone();
+            super::steam_search::show_steam_id_search_popup(
+                &state_c,
+                &search_text,
+                &win_c,
+                &appid_c,
+                &crate::tr!("Select"),
+                Rc::new(move |_app_id: &str, matched_name: &str| {
+                    name_entry_c.set_text(matched_name);
+                }),
+            );
+        });
+    }
+    appid_row.add_suffix(&appid_search_btn);
     group.add(&appid_row);
 
     let kind_row = adw::ComboRow::new();

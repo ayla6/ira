@@ -2,6 +2,7 @@ use crate::game_loader;
 use ira_config::Config;
 use ira_db as db;
 use ira_models::{Game, GameEntry, GameKind, SortMode};
+use ira_platforms::azahar::discover_games_for_executable as discover_azahar_games_for_executable;
 use ira_platforms::cemu::discover_games_for_executable as discover_cemu_games_for_executable;
 use ira_platforms::ps3::{
     discover_games_for_executable as discover_rpcs3_games_for_executable, load_rpcs3_game,
@@ -66,6 +67,8 @@ pub struct GameListOptions {
     pub vita3k_executable: String,
     pub cemu_enabled: bool,
     pub cemu_executable: String,
+    pub azahar_enabled: bool,
+    pub azahar_executable: String,
     pub steam_enabled: bool,
     pub auto_reload_steam: bool,
     pub auto_reload_roms: bool,
@@ -73,6 +76,7 @@ pub struct GameListOptions {
     pub auto_reload_rpcs3: bool,
     pub auto_reload_vita3k: bool,
     pub auto_reload_cemu: bool,
+    pub auto_reload_azahar: bool,
     pub ra_enabled: bool,
     pub sort_mode: SortMode,
     pub sort_descending: bool,
@@ -89,6 +93,8 @@ impl GameListOptions {
             vita3k_executable: cfg.vita3k_executable.clone(),
             cemu_enabled: cfg.cemu_enabled,
             cemu_executable: cfg.cemu_executable.clone(),
+            azahar_enabled: cfg.azahar_enabled,
+            azahar_executable: cfg.azahar_executable.clone(),
             steam_enabled: cfg.steam_enabled,
             auto_reload_steam: cfg.auto_reload_steam,
             auto_reload_roms: cfg.auto_reload_roms,
@@ -96,6 +102,7 @@ impl GameListOptions {
             auto_reload_rpcs3: cfg.auto_reload_rpcs3,
             auto_reload_vita3k: cfg.auto_reload_vita3k,
             auto_reload_cemu: cfg.auto_reload_cemu,
+            auto_reload_azahar: cfg.auto_reload_azahar,
             ra_enabled: cfg.ra_enabled,
             sort_mode: cfg.sort_mode,
             sort_descending: cfg.sort_descending,
@@ -109,6 +116,7 @@ impl GameListOptions {
         options.rpcs3_enabled &= options.auto_reload_rpcs3;
         options.vita3k_enabled &= options.auto_reload_vita3k;
         options.cemu_enabled &= options.auto_reload_cemu;
+        options.azahar_enabled &= options.auto_reload_azahar;
         options.ra_enabled &= options.auto_reload_roms;
         options
     }
@@ -204,6 +212,7 @@ fn build_game_list_with_mode(
         + usize::from(options.rpcs3_enabled)
         + usize::from(options.vita3k_enabled)
         + usize::from(options.cemu_enabled)
+        + usize::from(options.azahar_enabled)
         + usize::from(ra_any_console);
     let reporter = ProgressReporter::new(progress, total_sources);
     reporter.status(crate::tr!("Preparing game library…"));
@@ -242,67 +251,75 @@ fn build_game_list_with_mode(
             games
         });
 
-        let ps4_handle = if options.shadps4_enabled {
-            let db_ps4 = db.clone();
-            let save_dir_ps4 = save_dir.clone();
-            let reporter = reporter.clone();
-            Some(s.spawn(move || {
-                let _s = tracing::info_span!("build_shadps4_games").entered();
-                reporter.status(crate::tr!("Scanning shadPS4 games…"));
-                let games =
-                    build_shadps4_games(&db_ps4, &save_dir_ps4, &options.shadps4_executable);
-                reporter.finish(crate::tr!("Loaded shadPS4 games"));
-                games
-            }))
-        } else {
-            None
-        };
+        let ps4_handle = spawn_source_scan(
+            s,
+            SourceScan {
+                enabled: options.shadps4_enabled,
+                source: "build_shadps4_games",
+                scanning: crate::tr!("Scanning shadPS4 games…"),
+                loaded: crate::tr!("Loaded shadPS4 games"),
+            },
+            &db,
+            &save_dir,
+            &reporter,
+            move |db, save_dir| build_shadps4_games(db, save_dir, &options.shadps4_executable),
+        );
 
-        let ps3_handle = if options.rpcs3_enabled {
-            let db_ps3 = db.clone();
-            let save_dir_ps3 = save_dir.clone();
-            let reporter = reporter.clone();
-            Some(s.spawn(move || {
-                let _s = tracing::info_span!("build_rpcs3_games").entered();
-                reporter.status(crate::tr!("Scanning RPCS3 games…"));
-                let games = build_rpcs3_games(&db_ps3, &save_dir_ps3, &options.rpcs3_executable);
-                reporter.finish(crate::tr!("Loaded RPCS3 games"));
-                games
-            }))
-        } else {
-            None
-        };
+        let ps3_handle = spawn_source_scan(
+            s,
+            SourceScan {
+                enabled: options.rpcs3_enabled,
+                source: "build_rpcs3_games",
+                scanning: crate::tr!("Scanning RPCS3 games…"),
+                loaded: crate::tr!("Loaded RPCS3 games"),
+            },
+            &db,
+            &save_dir,
+            &reporter,
+            move |db, save_dir| build_rpcs3_games(db, save_dir, &options.rpcs3_executable),
+        );
 
-        let vita3k_handle = if options.vita3k_enabled {
-            let db_vita = db.clone();
-            let save_dir_vita = save_dir.clone();
-            let reporter = reporter.clone();
-            Some(s.spawn(move || {
-                let _s = tracing::info_span!("build_vita3k_games").entered();
-                reporter.status(crate::tr!("Scanning Vita3K games…"));
-                let games =
-                    build_vita3k_games(&db_vita, &save_dir_vita, &options.vita3k_executable);
-                reporter.finish(crate::tr!("Loaded Vita3K games"));
-                games
-            }))
-        } else {
-            None
-        };
+        let vita3k_handle = spawn_source_scan(
+            s,
+            SourceScan {
+                enabled: options.vita3k_enabled,
+                source: "build_vita3k_games",
+                scanning: crate::tr!("Scanning Vita3K games…"),
+                loaded: crate::tr!("Loaded Vita3K games"),
+            },
+            &db,
+            &save_dir,
+            &reporter,
+            move |db, save_dir| build_vita3k_games(db, save_dir, &options.vita3k_executable),
+        );
 
-        let cemu_handle = if options.cemu_enabled {
-            let db_cemu = db.clone();
-            let save_dir_cemu = save_dir.clone();
-            let reporter = reporter.clone();
-            Some(s.spawn(move || {
-                let _s = tracing::info_span!("build_cemu_games").entered();
-                reporter.status(crate::tr!("Scanning Cemu games…"));
-                let games = build_cemu_games(&db_cemu, &save_dir_cemu, &options.cemu_executable);
-                reporter.finish(crate::tr!("Loaded Cemu games"));
-                games
-            }))
-        } else {
-            None
-        };
+        let cemu_handle = spawn_source_scan(
+            s,
+            SourceScan {
+                enabled: options.cemu_enabled,
+                source: "build_cemu_games",
+                scanning: crate::tr!("Scanning Cemu games…"),
+                loaded: crate::tr!("Loaded Cemu games"),
+            },
+            &db,
+            &save_dir,
+            &reporter,
+            move |db, save_dir| build_cemu_games(db, save_dir, &options.cemu_executable),
+        );
+
+        let azahar_handle = spawn_source_scan(
+            s,
+            SourceScan {
+                enabled: options.azahar_enabled,
+                source: "build_azahar_games",
+                scanning: crate::tr!("Scanning Azahar games…"),
+                loaded: crate::tr!("Loaded Azahar games"),
+            },
+            &db,
+            &save_dir,
+            &reporter,
+            move |db, save_dir| build_azahar_games(db, save_dir, &options.azahar_executable),
+        );
 
         let ra_handle = if ra_any_console {
             let db_ra = db.clone();
@@ -372,6 +389,12 @@ fn build_game_list_with_mode(
             match h.join() {
                 Ok(g) => append_source_games(&mut games, g, merge_discovered_games),
                 Err(_) => eprintln!("Cemu games thread panicked"),
+            }
+        }
+        if let Some(h) = azahar_handle {
+            match h.join() {
+                Ok(g) => append_source_games(&mut games, g, merge_discovered_games),
+                Err(_) => eprintln!("Azahar games thread panicked"),
             }
         }
         append_source_games(&mut games, steam_games, merge_discovered_games);
@@ -601,6 +624,40 @@ fn find_or_create_console_entry(
     }
 }
 
+/// One emulator-source scan descriptor: whether to run it and what to
+/// report while it runs.
+struct SourceScan {
+    enabled: bool,
+    source: &'static str,
+    scanning: String,
+    loaded: String,
+}
+
+/// Spawns one emulator-source scan on the scoped thread pool when enabled,
+/// reporting start/finish through the shared reporter.
+fn spawn_source_scan<'scope>(
+    s: &'scope std::thread::Scope<'scope, '_>,
+    scan: SourceScan,
+    db: &db::DbConn,
+    save_dir: &str,
+    reporter: &ProgressReporter,
+    build: impl FnOnce(&db::DbConn, &str) -> Vec<Game> + Send + 'scope,
+) -> Option<std::thread::ScopedJoinHandle<'scope, Vec<Game>>> {
+    if !scan.enabled {
+        return None;
+    }
+    let db = db.clone();
+    let save_dir = save_dir.to_string();
+    let reporter = reporter.clone();
+    Some(s.spawn(move || {
+        let _span = tracing::info_span!("source_scan", scan.source).entered();
+        reporter.status(scan.scanning);
+        let games = build(&db, &save_dir);
+        reporter.finish(scan.loaded);
+        games
+    }))
+}
+
 fn build_shadps4_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Game> {
     let shad_games = discover_games_for_executable(executable);
     let mut games = Vec::new();
@@ -717,6 +774,10 @@ fn build_cemu_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Ga
     discover_cemu_games_for_executable(executable)
         .iter()
         .filter_map(|game| {
+            // Cemu keeps each title's icon as meta/iconTex.tga inside the
+            // game folder; import it into the data dir so it acts as the
+            // default icon, with SteamGridDB enrichment overriding later.
+            let icon = default_wiiu_icon(save_dir, &game.title_id, &game.game_path);
             load_special_game(
                 db,
                 save_dir,
@@ -724,10 +785,71 @@ fn build_cemu_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Ga
                 &game.title_id,
                 &game.title,
                 &game.game_path,
-                &game.icon_path,
+                &icon,
             )
         })
         .collect()
+}
+
+/// Imports the title's iconTex.tga into `data/wiiu/{title_id}/` unless an
+/// icon is already present. Returns an empty path when unavailable.
+fn default_wiiu_icon(
+    save_dir: &str,
+    title_id: &str,
+    game_path: &std::path::Path,
+) -> std::path::PathBuf {
+    let data_dir = ira_parser::wiiu_data_dir(save_dir, title_id);
+    if ira_parser::find_image_file(&data_dir, "icon").is_some() {
+        return std::path::PathBuf::new();
+    }
+    let icon_tga = game_path.join("meta").join("iconTex.tga");
+    ira_parser::import_image_as_webp(&icon_tga, &data_dir, "icon").unwrap_or_default()
+}
+
+fn build_azahar_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Game> {
+    discover_azahar_games_for_executable(executable)
+        .iter()
+        .filter_map(|game| {
+            // 3DS SMDH icons live inside the ExeFS; extract them into the
+            // game's data dir so they act as the default icon, with
+            // SteamGridDB enrichment overriding later if matched.
+            load_special_game(
+                db,
+                save_dir,
+                GameKind::ThreeDS,
+                &game.title_id,
+                &game.title,
+                &game.game_path,
+                &default_azahar_icon(save_dir, &game.title_id, game.icon.as_deref()),
+            )
+        })
+        .collect()
+}
+
+/// Extracts the SMDH icon into `data/3ds/{title_id}/icon.png` (converted to
+/// lossless WebP) unless one is already present. Returns an empty path when
+/// the ROM carries no readable icon.
+fn default_azahar_icon(save_dir: &str, title_id: &str, icon: Option<&[u8]>) -> std::path::PathBuf {
+    let Some(icon) = icon else {
+        return std::path::PathBuf::new();
+    };
+    let data_dir = ira_parser::three_ds_data_dir(save_dir, title_id);
+    if ira_parser::find_image_file(&data_dir, "icon").is_some() {
+        return std::path::PathBuf::new();
+    }
+    if std::fs::create_dir_all(&data_dir).is_err() {
+        return std::path::PathBuf::new();
+    }
+    let png = data_dir.join("icon.png");
+    if let Err(e) = ira_parser::save_rgb565_png(&png, 48, 48, icon) {
+        eprintln!("Failed to write 3DS icon for {title_id}: {e}");
+        return std::path::PathBuf::new();
+    }
+    ira_parser::convert_to_lossless_webp(&png);
+    match ira_parser::find_image_file(&data_dir, "icon") {
+        Some(path) => path,
+        None => std::path::PathBuf::new(),
+    }
 }
 
 fn cleanup_steam_entries(db: &db::DbConn, discovered: &[steam::SteamGame]) {
@@ -877,6 +999,7 @@ mod tests {
             rpcs3_enabled: true,
             vita3k_enabled: true,
             cemu_enabled: true,
+            azahar_enabled: true,
             ra_enabled: true,
             auto_reload_steam: false,
             auto_reload_roms: false,
@@ -884,6 +1007,7 @@ mod tests {
             auto_reload_rpcs3: false,
             auto_reload_vita3k: true,
             auto_reload_cemu: false,
+            auto_reload_azahar: true,
             ..Config::default()
         };
 
@@ -895,6 +1019,7 @@ mod tests {
         assert!(!options.rpcs3_enabled);
         assert!(options.vita3k_enabled);
         assert!(!options.cemu_enabled);
+        assert!(options.azahar_enabled);
     }
 
     #[test]

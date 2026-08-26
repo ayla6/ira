@@ -399,8 +399,9 @@ fn build_wine_adv_page(
         gtk4::StringList::new(&denuvo_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>());
     let denuvo_combo = adw::ComboRow::new();
     denuvo_combo.set_title(&crate::tr!("Denuvo API emulator"));
-    denuvo_combo
-        .set_subtitle(&crate::tr!("Select a Denuvo API emulator to preload on launch"));
+    denuvo_combo.set_subtitle(&crate::tr!(
+        "Select a Denuvo API emulator to preload on launch"
+    ));
     denuvo_combo.set_model(Some(&denuvo_model));
     {
         let idx = denuvo_versions
@@ -486,7 +487,7 @@ fn build_wine_adv_page(
         page: page_with_content(adv_page),
     };
 
-(
+    (
         page,
         AdvPageWidgets {
             battleye,

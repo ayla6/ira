@@ -228,8 +228,7 @@ pub fn launch_game(
     let input_profile = launch.input_profile.as_deref();
     // Same file ira_input::calibration_store_path writes; the launcher does
     // not depend on that crate, so the name lives here too.
-    let calibration = std::path::Path::new(&ctx.save_dir)
-        .join("controller_calibration.json");
+    let calibration = std::path::Path::new(&ctx.save_dir).join("controller_calibration.json");
     super::env_builder::wrap_with_input_mode(
         &mut command,
         launch.input_mode,

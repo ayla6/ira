@@ -86,8 +86,7 @@ pub(super) fn build_settings_pages(
         build_wine_config_pages(&cfg.default_wine_config, None, &cfg.save_dir);
     let (profiles_page, prefix_base_row, default_version_row, default_version_values) =
         build_profiles_page(state, win);
-    let (ra_page, ra_enable_row, ra_username_row, ra_web_api_key_row) =
-        build_ra_settings_page(cfg);
+    let (ra_page, ra_enable_row, ra_username_row, ra_web_api_key_row) = build_ra_settings_page(cfg);
     let (rom_page, roms_folder_row) = build_rom_settings_page(win, cfg);
     SettingsPageWidgets {
         general_page,

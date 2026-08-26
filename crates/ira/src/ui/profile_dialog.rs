@@ -10,7 +10,12 @@ type ListRef = Rc<RefCell<gtk4::ListBox>>;
 pub fn build_profiles_page(
     state: &SharedState,
     settings_win: &adw::Window,
-) -> (gtk4::ScrolledWindow, adw::EntryRow, adw::ComboRow, Vec<(String, String)>) {
+) -> (
+    gtk4::ScrolledWindow,
+    adw::EntryRow,
+    adw::ComboRow,
+    Vec<(String, String)>,
+) {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
     let settings_group = adw::PreferencesGroup::new();
@@ -87,7 +92,12 @@ pub fn build_profiles_page(
     sw.set_hexpand(true);
     sw.set_vexpand(true);
     sw.set_child(Some(&page));
-    (sw, prefix_base_row, default_version_row, default_version_values)
+    (
+        sw,
+        prefix_base_row,
+        default_version_row,
+        default_version_values,
+    )
 }
 
 fn detect_wine_versions_with(extra: &str) -> Vec<(String, String)> {

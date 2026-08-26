@@ -2,6 +2,7 @@ pub mod api_emulators;
 pub mod api_emulators_gog;
 pub mod api_emulators_shared;
 pub mod api_emulators_steam;
+pub mod azahar;
 pub mod cemu;
 pub mod consoles;
 pub mod emulator_detect;

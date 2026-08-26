@@ -3,12 +3,12 @@
 //! the flat output dropdowns and mirrors Steam Input's output selector.
 
 use super::css::{CSS_COMMAND_TILE, CSS_COMMAND_TILE_ACTIVE};
+use super::input_output_keys::{build_keyboard_page, build_numpad_page};
 use adw::prelude::*;
 use ira_input::{
     ChordMode, GamepadAxis, GamepadButton, MouseAxis, MouseButton, OutputAction,
     VirtualGamepadBackend,
 };
-use super::input_output_keys::{build_keyboard_page, build_numpad_page};
 use std::rc::Rc;
 
 /// What the picker offers beyond plain device outputs: the profile's action
@@ -42,12 +42,12 @@ pub(crate) fn show_output_picker(
             crate::tr!("Keyboard"),
             "input-keyboard-symbolic",
         ),
-        ("numpad", crate::tr!("Numpad"), "gnome-accessibility-keyboard-symbolic"),
         (
-            "sets",
-            crate::tr!("Action Sets"),
-            "view-grid-symbolic",
+            "numpad",
+            crate::tr!("Numpad"),
+            "gnome-accessibility-keyboard-symbolic",
         ),
+        ("sets", crate::tr!("Action Sets"), "view-grid-symbolic"),
     ];
     for (name, title, icon) in pages {
         let content = gtk4::Box::new(gtk4::Orientation::Vertical, 6);

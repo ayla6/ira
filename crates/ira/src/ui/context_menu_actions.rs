@@ -188,10 +188,7 @@ pub(super) fn setup_open_images_action(
     actions.add_action(&open_images);
 }
 
-pub(super) fn setup_open_save_location_action(
-    actions: &gio::SimpleActionGroup,
-    path: String,
-) {
+pub(super) fn setup_open_save_location_action(actions: &gio::SimpleActionGroup, path: String) {
     let open_save = gio::SimpleAction::new("open_save_location", None);
     open_save.connect_activate(move |_, _| {
         open_folder(&path);

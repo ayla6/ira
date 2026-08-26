@@ -155,6 +155,7 @@ pub fn launch_game(
         global_rpcs3_exe,
         global_vita3k_exe,
         global_cemu_exe,
+        global_azahar_exe,
         db,
         save_dir,
         app_default_wine,
@@ -175,6 +176,7 @@ pub fn launch_game(
             ira_models::GameKind::Ps3 => Some("ps3"),
             ira_models::GameKind::PsVita => Some("psvita"),
             ira_models::GameKind::WiiU => Some("wiiu"),
+            ira_models::GameKind::ThreeDS => Some("3ds"),
             _ => None,
         });
         let overlay_global_enabled =
@@ -220,6 +222,7 @@ pub fn launch_game(
             s.cfg.rpcs3_executable.clone(),
             s.cfg.vita3k_executable.clone(),
             s.cfg.cemu_executable.clone(),
+            s.cfg.azahar_executable.clone(),
             s.db.clone(),
             s.save_dir.clone(),
             s.cfg.default_wine_config.clone(),
@@ -335,11 +338,22 @@ pub fn launch_game(
     } else if kind == ira_models::GameKind::WiiU {
         play_button_helpers::launch_cemu(
             &ctx,
+            &per_game_emu,
             &global_cemu_exe,
             &game_path,
             cfg_clone.console("wiiu").controller_mode,
             (!cfg_clone.console("wiiu").controller_profile.is_empty())
                 .then_some(cfg_clone.console("wiiu").controller_profile.as_str()),
+        )?;
+    } else if kind == ira_models::GameKind::ThreeDS {
+        play_button_helpers::launch_azahar(
+            &ctx,
+            &per_game_emu,
+            &global_azahar_exe,
+            &game_path,
+            cfg_clone.console("3ds").controller_mode,
+            (!cfg_clone.console("3ds").controller_profile.is_empty())
+                .then_some(cfg_clone.console("3ds").controller_profile.as_str()),
         )?;
     } else if kind == ira_models::GameKind::Steam {
         let result = play_button_helpers::launch_steam(&ctx, &app_id);

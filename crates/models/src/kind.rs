@@ -10,6 +10,7 @@ pub enum GameKind {
     Ps3,
     PsVita,
     WiiU,
+    ThreeDS,
     Steam,
     Retro,
 }
@@ -23,6 +24,7 @@ impl GameKind {
             GameKind::Ps3 => "ps3",
             GameKind::PsVita => "psvita",
             GameKind::WiiU => "wiiu",
+            GameKind::ThreeDS => "3ds",
             GameKind::Steam => "steam",
             GameKind::Retro => "retro",
             GameKind::Other => "other",
@@ -37,6 +39,7 @@ impl GameKind {
             "ps3" => GameKind::Ps3,
             "psvita" => GameKind::PsVita,
             "wiiu" => GameKind::WiiU,
+            "3ds" => GameKind::ThreeDS,
             "steam" => GameKind::Steam,
             "retro" => GameKind::Retro,
             _ => GameKind::Other,
@@ -51,6 +54,7 @@ impl GameKind {
             GameKind::Ps3 => "PS3",
             GameKind::PsVita => "PS Vita",
             GameKind::WiiU => "Wii U",
+            GameKind::ThreeDS => "Nintendo 3DS",
             GameKind::Steam => "Steam",
             GameKind::Retro => "Retro",
             GameKind::Other => "Other",
@@ -65,6 +69,15 @@ impl GameKind {
 
     pub fn is_managed_pc(self) -> bool {
         matches!(self, GameKind::Wine | GameKind::Linux)
+    }
+
+    /// Games discovered by an emulator integration (shadPS4, RPCS3, Vita3K,
+    /// Cemu, Azahar) rather than a store or a plain ROM folder.
+    pub fn is_console_emulator(self) -> bool {
+        matches!(
+            self,
+            GameKind::Ps4 | GameKind::Ps3 | GameKind::PsVita | GameKind::WiiU | GameKind::ThreeDS
+        )
     }
 }
 
@@ -158,6 +171,7 @@ mod tests {
             GameKind::Ps3,
             GameKind::PsVita,
             GameKind::WiiU,
+            GameKind::ThreeDS,
             GameKind::Steam,
             GameKind::Retro,
             GameKind::Other,
@@ -231,6 +245,7 @@ mod tests {
         assert_eq!(GameKind::Ps3.display_name(), "PS3");
         assert_eq!(GameKind::PsVita.display_name(), "PS Vita");
         assert_eq!(GameKind::WiiU.display_name(), "Wii U");
+        assert_eq!(GameKind::ThreeDS.display_name(), "Nintendo 3DS");
         assert_eq!(GameKind::Steam.display_name(), "Steam");
         assert_eq!(GameKind::Retro.display_name(), "Retro");
         assert_eq!(GameKind::Other.display_name(), "Other");
@@ -251,5 +266,17 @@ mod tests {
         assert!(GameKind::Wine.is_managed_pc());
         assert!(GameKind::Linux.is_managed_pc());
         assert!(!GameKind::Retro.is_managed_pc());
+    }
+
+    #[test]
+    fn test_is_console_emulator() {
+        assert!(GameKind::Ps4.is_console_emulator());
+        assert!(GameKind::Ps3.is_console_emulator());
+        assert!(GameKind::PsVita.is_console_emulator());
+        assert!(GameKind::WiiU.is_console_emulator());
+        assert!(GameKind::ThreeDS.is_console_emulator());
+        assert!(!GameKind::Steam.is_console_emulator());
+        assert!(!GameKind::Retro.is_console_emulator());
+        assert!(!GameKind::Wine.is_console_emulator());
     }
 }

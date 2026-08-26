@@ -211,8 +211,9 @@ pub(super) fn output_display_label(output: &OutputAction) -> String {
         OutputAction::SwitchActionSet(index) => {
             crate::tr!("Switch to action set {index}").replace("{index}", &index.to_string())
         }
-        OutputAction::EnableLayer { layer, .. } => crate::tr!("Toggle action layer {layer}")
-            .replace("{layer}", &layer.to_string()),
+        OutputAction::EnableLayer { layer, .. } => {
+            crate::tr!("Toggle action layer {layer}").replace("{layer}", &layer.to_string())
+        }
         OutputAction::ModeShiftActivate { .. } => crate::tr!("Activate mode shift"),
     }
 }

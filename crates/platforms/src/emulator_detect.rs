@@ -25,6 +25,24 @@ pub fn detect_emulator_choices(
     choices
 }
 
+/// Every installable Azahar variant (native + Flatpak).
+pub fn azahar_choices() -> Vec<DetectedEmulator> {
+    detect_emulator_choices(
+        &["azahar", "Azahar"],
+        &[(crate::azahar::AZAHAR_FLATPAK_ID, "Azahar")],
+        "Azahar",
+    )
+}
+
+/// Every installable Cemu variant (native + Flatpak).
+pub fn cemu_choices() -> Vec<DetectedEmulator> {
+    detect_emulator_choices(
+        &["cemu", "Cemu"],
+        &[(crate::cemu::CEMU_FLATPAK_ID, "Cemu")],
+        "Cemu",
+    )
+}
+
 #[derive(Clone)]
 pub struct RaCore {
     pub display_name: String,
@@ -99,6 +117,14 @@ fn detect_native_all(names: &[&str], display_name: &str) -> Vec<DetectedEmulator
 }
 
 pub fn detect_emulators(console: &str) -> Vec<DetectedEmulator> {
+    // Azahar and Cemu are emulator-integration sources, not ROM-folder
+    // consoles, so they have no ConsoleDef and are matched by id here.
+    if console == "3ds" {
+        return azahar_choices();
+    }
+    if console == "wiiu" {
+        return cemu_choices();
+    }
     let def = ira_models::find_console(console);
     let mut choices = Vec::new();
     if let Some(d) = def {

@@ -1,17 +1,23 @@
-//! Region pages for the profile editor: one page per controller region, one
-//! row per *input* (not per binding), with unmapped inputs shown as dim
-//! add-slots — mirroring Steam Input's per-input navigation. Rows open the
-//! activator sheet for deep editing.
+//! Region pages for the profile editor: Steam Input's binding list, one
+//! page per controller region. Every input is a row with its current
+//! command shown as a button — clicking it rebinds in one picker; the gear
+//! opens the full per-input sheet. Sticks and triggers expose their analog
+//! behavior through the same button pattern instead of a section dropdown.
 
+use super::css::{CSS_DIM_LABEL, CSS_FLAT, CSS_SOURCE_BADGE, CSS_SQUARE_BUTTON};
 use super::helpers::esc;
+use super::input_output_picker::{show_output_picker, OutputPickerScope};
 use super::input_profile_activator_sheet::{show_input_sheet, InputSheetRequest};
-use super::input_profile_editor_regions::{
-    input_row, source_label, supported_button_sources, Region,
-};
+use super::input_profile_assets::{set_source_asset, source_badge};
+use super::input_profile_editor_regions::{mapping_summary, region_groups, source_label, Region};
+use super::input_profile_options::output_display_label;
+use super::input_profile_sheet_base::is_trigger_axis;
+use super::input_profile_source_modes::{mode_label, modes_for, same_mode};
+use super::input_profile_widgets::{option_picker_popover, picker_button, OptionChoice};
 use adw::prelude::*;
 use ira_input::{
-    GamepadAxis, GamepadButton, InputMapping, InputProfile, InputSource, OutputAction,
-    SourceMode, StickOutput,
+    ActivatorKind, GamepadAxis, GamepadButton, InputMapping, InputProfile, InputSource,
+    OutputAction, SourceMode, StickOutput,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -34,63 +40,7 @@ pub(crate) struct PagesCtx {
 #[derive(Clone)]
 pub(crate) struct RegionPages {
     pub region_boxes: Vec<gtk4::Box>,
-    pub motion_rows: super::input_profile_gyro_card::MotionRows,
-}
-
-pub(crate) fn region_sources(region: Region, device: Option<&ira_input::DeviceInfo>) -> Vec<InputSource> {
-    let mut sources: Vec<InputSource> = match region {
-        Region::FaceButtons => [GamepadButton::A, GamepadButton::B, GamepadButton::X, GamepadButton::Y]
-            .into_iter()
-            .map(InputSource::Button)
-            .collect(),
-        Region::Dpad => [
-            GamepadButton::DpadUp,
-            GamepadButton::DpadRight,
-            GamepadButton::DpadDown,
-            GamepadButton::DpadLeft,
-        ]
-        .into_iter()
-        .map(InputSource::Button)
-        .collect(),
-        Region::TriggersBumpers => [
-            InputSource::Button(GamepadButton::LeftShoulder),
-            InputSource::Button(GamepadButton::RightShoulder),
-            InputSource::Axis(GamepadAxis::LeftTrigger),
-            InputSource::Axis(GamepadAxis::RightTrigger),
-        ]
-        .into_iter()
-        .chain([
-            InputSource::Button(GamepadButton::LeftTrigger),
-            InputSource::Button(GamepadButton::RightTrigger),
-        ])
-        .collect(),
-        Region::Sticks => [
-            InputSource::Axis(GamepadAxis::LeftX),
-            InputSource::Axis(GamepadAxis::LeftY),
-            InputSource::Axis(GamepadAxis::RightX),
-            InputSource::Axis(GamepadAxis::RightY),
-            InputSource::Button(GamepadButton::LeftStick),
-            InputSource::Button(GamepadButton::RightStick),
-        ]
-        .into_iter()
-        .collect(),
-        Region::SystemPaddles => [
-            InputSource::Button(GamepadButton::Back),
-            InputSource::Button(GamepadButton::Start),
-            InputSource::Button(GamepadButton::Guide),
-        ]
-        .into_iter()
-        .chain(
-            supported_button_sources(device)
-                .into_iter()
-                .filter(|source| {
-                    matches!(source, InputSource::Button(button) if button.is_paddle())
-                }),
-        )
-        .collect(),
-    };
-    sources.dedup();
-    sources
+    pub motion_rows: super::input_profile_controller_page::MotionRows,
 }
 
 /// Rebuild every region page from the profile's active action set.
@@ -104,164 +54,20 @@ pub(crate) fn rebuild_region_pages(ctx: &PagesCtx, pages: &RegionPages) {
     for (index, region) in Region::ALL.into_iter().enumerate() {
         let page = &pages.region_boxes[index];
         super::helpers::clear_children(page);
-        let sources = region_sources(region, ctx.device.as_ref());
-        let group = adw::PreferencesGroup::new();
-        group.set_title(&region.title());
-        if !sources.is_empty() {
-            group.add(&section_behavior_row(ctx, region, &mappings));
-        }
-        for source in &sources {
-            let mapping = mappings.iter().find(|mapping| mapping.source == *source);
-            group.add(&region_source_row(ctx, *source, mapping, family));
-        }
-        page.append(&group);
-        if let Some(pairs) = swappable_pairs(region) {
-            page.append(&swap_group(ctx, &pairs));
+        for group in region_groups(region, ctx.device.as_ref()) {
+            let widget = adw::PreferencesGroup::new();
+            widget.set_title(&group.title);
+            for source in &group.sources {
+                let mapping = mappings.iter().find(|mapping| mapping.source == *source);
+                widget.add(&region_source_row(ctx, *source, mapping, family));
+            }
+            page.append(&widget);
         }
     }
-    super::input_profile_gyro_card::refresh_motion_rows(
+    super::input_profile_controller_page::refresh_motion_rows(
         &pages.motion_rows,
         ctx.profile.borrow().backend,
     );
-}
-
-/// Steam-style section behavior: "Default" while every input of the region
-/// carries its standard one-to-one mapping, "Custom" as soon as anything
-/// differs. Picking Default restores the standard mappings for the section.
-fn section_behavior_row(
-    ctx: &PagesCtx,
-    region: Region,
-    mappings: &[InputMapping],
-) -> adw::ComboRow {
-    let row = adw::ComboRow::new();
-    row.set_title(&crate::tr!("Behavior"));
-    row.set_subtitle(&crate::tr!(
-        "Apply this behavior to every binding in this section"
-    ));
-    row.set_model(Some(&gtk4::StringList::new(&[
-        &crate::tr!("Default"),
-        &crate::tr!("Custom"),
-    ])));
-    let is_default = region_is_at_defaults(region, ctx.device.as_ref(), mappings);
-    row.set_selected(if is_default { 0 } else { 1 });
-    // Only a manual flip onto Default mutates anything; the notify that
-    // fires for the initial selection must not rewrite the profile.
-    let applied = Rc::new(std::cell::Cell::new(is_default));
-    let ctx_for_select = ctx.clone();
-    row.connect_selected_notify(move |combo| {
-        if combo.selected() != 0 || applied.get() {
-            return;
-        }
-        applied.set(true);
-        for source in region_sources(region, ctx_for_select.device.as_ref()) {
-            insert_mapping(&ctx_for_select, default_mapping(source));
-        }
-        (ctx_for_select.on_dirty)();
-    });
-    row
-}
-
-/// True when every source of the region is mapped exactly to its default.
-fn region_is_at_defaults(
-    region: Region,
-    device: Option<&ira_input::DeviceInfo>,
-    mappings: &[InputMapping],
-) -> bool {
-    region_sources(region, device).into_iter().all(|source| {
-        mappings
-            .iter()
-            .find(|mapping| mapping.source == source)
-            .is_some_and(|mapping| *mapping == default_mapping(source))
-    })
-}
-
-/// Source pairs whose bindings trade places with "Swap left with right".
-type SourcePair = (InputSource, InputSource);
-
-fn swappable_pairs(region: Region) -> Option<Vec<SourcePair>> {
-    use GamepadAxis::{LeftTrigger, LeftX, LeftY, RightTrigger, RightX, RightY};
-    use GamepadButton::{
-        LeftShoulder, LeftStick, LeftTrigger as LeftTriggerButton, RightShoulder, RightStick,
-        RightTrigger as RightTriggerButton,
-    };
-    let pairs = match region {
-        Region::TriggersBumpers => vec![
-            (
-                InputSource::Axis(LeftTrigger),
-                InputSource::Axis(RightTrigger),
-            ),
-            (
-                InputSource::Button(LeftTriggerButton),
-                InputSource::Button(RightTriggerButton),
-            ),
-            (
-                InputSource::Button(LeftShoulder),
-                InputSource::Button(RightShoulder),
-            ),
-        ],
-        Region::Sticks => vec![
-            (InputSource::Axis(LeftX), InputSource::Axis(RightX)),
-            (InputSource::Axis(LeftY), InputSource::Axis(RightY)),
-            (
-                InputSource::Button(LeftStick),
-                InputSource::Button(RightStick),
-            ),
-        ],
-        _ => return None,
-    };
-    Some(pairs)
-}
-
-fn swap_group(ctx: &PagesCtx, pairs: &[SourcePair]) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::new();
-    let row = adw::ActionRow::new();
-    row.set_title(&crate::tr!("Swap left with right"));
-    row.set_subtitle(&crate::tr!(
-        "Trade every left-side binding of this page with its right-side counterpart"
-    ));
-    let swap = gtk4::Button::with_label(&crate::tr!("Swap"));
-    swap.add_css_class(super::css::CSS_FLAT);
-    swap.set_valign(gtk4::Align::Center);
-    row.add_suffix(&swap);
-    group.add(&row);
-    let ctx_for_swap = ctx.clone();
-    let pairs = pairs.to_vec();
-    swap.connect_clicked(move |_| {
-        let set = ctx_for_swap.active_set.get();
-        let mut profile = ctx_for_swap.profile.borrow_mut();
-        if let Some(set) = profile.action_sets.get_mut(set) {
-            for (left, right) in &pairs {
-                let left_mapping = set.inputs.iter().find(|m| m.source == *left).cloned();
-                let right_mapping = set.inputs.iter().find(|m| m.source == *right).cloned();
-                match (left_mapping, right_mapping) {
-                    (Some(l), Some(r)) => {
-                        for input in &mut set.inputs {
-                            if input.source == *left {
-                                *input = r.clone();
-                            } else if input.source == *right {
-                                *input = l.clone();
-                            }
-                        }
-                    }
-                    (Some(l), None) => {
-                        set.inputs.retain(|input| input.source != *left);
-                        set.inputs.push(InputMapping {
-                            source: *right,
-                            ..l
-                        });
-                    }
-                    (None, Some(r)) => {
-                        set.inputs.retain(|input| input.source != *right);
-                        set.inputs.push(InputMapping { source: *left, ..r });
-                    }
-                    (None, None) => {}
-                }
-            }
-        }
-        drop(profile);
-        (ctx_for_swap.on_dirty)();
-    });
-    group
 }
 
 fn active_mappings(profile: &ProfileRc, active_set: usize) -> Vec<InputMapping> {
@@ -279,51 +85,286 @@ fn region_source_row(
     mapping: Option<&InputMapping>,
     family: ira_input::ControllerFamily,
 ) -> adw::ActionRow {
-    match mapping {
-        Some(mapping) => {
-            let on_edit = open_sheet_hook(ctx, source);
-            let ctx_for_remove = ctx.clone();
-            let on_remove: Rc<dyn Fn()> = Rc::new(move || {
-                remove_mapping(&ctx_for_remove, source);
-                (ctx_for_remove.on_dirty)();
-            });
-            input_row(mapping, family, &on_edit, &on_remove)
-        }
-        None => unmapped_row(ctx, source, family),
+    if is_stick_source(source) || is_trigger_axis(source) {
+        analog_row(ctx, source, mapping, family)
+    } else {
+        command_row(ctx, source, mapping, family)
     }
 }
 
-fn unmapped_row(ctx: &PagesCtx, source: InputSource, family: ira_input::ControllerFamily) -> adw::ActionRow {
-    let row = adw::ActionRow::new();
-    row.set_title(&esc(&source_label(source)));
-    row.set_subtitle(&crate::tr!("Not mapped"));
-    row.add_css_class("unmapped-row");
-    let badge = super::input_profile_assets::source_badge(source, family);
-    let badge_label = gtk4::Label::new(Some(&badge));
-    badge_label.add_css_class(super::css::CSS_SOURCE_BADGE);
-    badge_label.add_css_class(super::css::CSS_DIM_LABEL);
-    badge_label.set_valign(gtk4::Align::Center);
-    row.add_suffix(&badge_label);
+/// The X axis stands for the whole stick; its Y rides along in the mode.
+fn is_stick_source(source: InputSource) -> bool {
+    matches!(
+        source,
+        InputSource::Axis(GamepadAxis::LeftX | GamepadAxis::RightX)
+    )
+}
 
-    // Whole-area affordance instead of a bare icon: the row itself adds.
-    let add = super::helpers::icon_label_button("list-add-symbolic", &crate::tr!("Add"));
-    row.add_suffix(&add);
-    let ctx_for_add = ctx.clone();
-    row.set_activatable(true);
-    row.connect_activated(move |_| {
-        let mapping = default_mapping(source);
-        insert_mapping(&ctx_for_add, mapping);
-        (ctx_for_add.on_dirty)();
-        open_sheet(&ctx_for_add, source);
-    });
+/// A digital input's row: the current command sits on the right as a
+/// button; clicking it — or the row — reopens the command picker, the gear
+/// opens the full sheet.
+fn command_row(
+    ctx: &PagesCtx,
+    source: InputSource,
+    mapping: Option<&InputMapping>,
+    family: ira_input::ControllerFamily,
+) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    let unmapped = mapping.is_none();
+    add_source_prefix(&row, source, family, unmapped);
+    row.set_title(&esc(&source_label(source)));
+    let on_rebind = rebind_hook(ctx, source);
+    match mapping.and_then(primary_output) {
+        Some(output) => {
+            let command = gtk4::Button::with_label(&output_display_label(&output));
+            command.add_css_class(CSS_FLAT);
+            command.set_valign(gtk4::Align::Center);
+            {
+                let on_rebind = on_rebind.clone();
+                command.connect_clicked(move |_| on_rebind());
+            }
+            row.add_suffix(&command);
+            row.add_suffix(&gear_button(ctx, source));
+            row.set_activatable(true);
+            row.connect_activated(move |_| on_rebind());
+        }
+        None => {
+            row.set_subtitle(&crate::tr!("Not mapped"));
+            let add = super::helpers::icon_label_button("list-add-symbolic", &crate::tr!("Add"));
+            add.set_valign(gtk4::Align::Center);
+            row.add_suffix(&add);
+            row.set_activatable(true);
+            row.connect_activated(move |_| on_rebind());
+        }
+    }
     row
 }
 
-/// Hook that opens the sheet for one source; shared by edit buttons and row
-/// activation.
-fn open_sheet_hook(ctx: &PagesCtx, source: InputSource) -> Rc<dyn Fn()> {
+/// Steam's analog row: the behavior slot shows the current mode as a
+/// button backed by a described picker, and the gear opens the full sheet.
+/// Sticks title the row "Behavior" inside their group; triggers speak for
+/// themselves.
+fn analog_row(
+    ctx: &PagesCtx,
+    source: InputSource,
+    mapping: Option<&InputMapping>,
+    family: ira_input::ControllerFamily,
+) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    add_source_prefix(&row, source, family, false);
+    if is_stick_source(source) {
+        row.set_title(&crate::tr!("Behavior"));
+    } else {
+        row.set_title(&esc(&source_label(source)));
+    }
+    if let Some(mapping) = mapping.filter(|mapping| !mapping.activators.is_empty()) {
+        row.set_subtitle(&mapping_summary(mapping));
+    }
+
+    let modes = modes_for(source);
+    let current = mapping.and_then(|mapping| mapping.mode.clone());
+    let selected = current
+        .as_ref()
+        .and_then(|mode| {
+            modes
+                .iter()
+                .position(|candidate| same_mode(candidate, mode))
+        })
+        .unwrap_or(0);
+    let label = mode_label(&current, is_trigger_axis(source));
+    let ctx_for_pick = ctx.clone();
+    let modes_for_pick = modes.clone();
+    let popover = option_picker_popover(&behavior_choices(source), selected, move |index| {
+        let mode = modes_for_pick.get(index).cloned().flatten();
+        set_mode(&ctx_for_pick, source, mode);
+        (ctx_for_pick.on_dirty)();
+    });
+    row.add_suffix(&picker_button(&label, &popover));
+
+    if mapping.is_some() {
+        row.add_suffix(&gear_button(ctx, source));
+        row.set_activatable(true);
+        let ctx_for_sheet = ctx.clone();
+        row.connect_activated(move |_| open_sheet(&ctx_for_sheet, source));
+    }
+    row
+}
+
+fn add_source_prefix(
+    row: &adw::ActionRow,
+    source: InputSource,
+    family: ira_input::ControllerFamily,
+    dim: bool,
+) {
+    let badge = gtk4::Label::new(Some(&source_badge(source, family)));
+    badge.add_css_class(CSS_SOURCE_BADGE);
+    if dim {
+        badge.add_css_class(CSS_DIM_LABEL);
+    }
+    badge.set_valign(gtk4::Align::Center);
+    let asset = gtk4::Image::new();
+    asset.set_pixel_size(24);
+    set_source_asset(&asset, &badge, source, family);
+    row.add_prefix(&asset);
+    row.add_prefix(&badge);
+}
+
+/// The gear every Steam binding row carries: it opens the per-input sheet
+/// with activators, mode shifts, and the analog settings.
+fn gear_button(ctx: &PagesCtx, source: InputSource) -> gtk4::Button {
+    let gear = gtk4::Button::from_icon_name("emblem-system-symbolic");
+    gear.add_css_class(CSS_FLAT);
+    gear.add_css_class(CSS_SQUARE_BUTTON);
+    gear.set_valign(gtk4::Align::Center);
+    gear.set_tooltip_text(Some(&crate::tr!("Edit")));
     let ctx = ctx.clone();
-    Rc::new(move || open_sheet(&ctx, source))
+    gear.connect_clicked(move |_| open_sheet(&ctx, source));
+    gear
+}
+
+/// Steam's behavior list for an analog source: the modes it can take, each
+/// with its one-line description. Titles must match `mode_label` — the
+/// tests pin them together.
+fn behavior_choices(source: InputSource) -> Vec<OptionChoice> {
+    if is_trigger_axis(source) {
+        return vec![
+            OptionChoice {
+                title: crate::tr!("None"),
+                description: Some(crate::tr!("The trigger only runs its click bindings")),
+            },
+            OptionChoice {
+                title: crate::tr!("Trigger"),
+                description: Some(crate::tr!(
+                    "The trigger sends an analog value; soft and full pulls get their own bindings"
+                )),
+            },
+        ];
+    }
+    vec![
+        OptionChoice {
+            title: crate::tr!("None"),
+            description: Some(crate::tr!("The stick sends nothing")),
+        },
+        OptionChoice {
+            title: crate::tr!("Joystick"),
+            description: Some(crate::tr!(
+                "Deflection drives a virtual joystick — the standard analog movement"
+            )),
+        },
+        OptionChoice {
+            title: crate::tr!("Directional Pad"),
+            description: Some(crate::tr!("Deflection presses the d-pad directions")),
+        },
+        OptionChoice {
+            title: crate::tr!("Joystick Mouse"),
+            description: Some(crate::tr!("Deflection moves the mouse pointer")),
+        },
+        OptionChoice {
+            title: crate::tr!("Flick Stick"),
+            description: Some(crate::tr!(
+                "Direction sets the facing; a flick turns instantly — pairs well with gyro"
+            )),
+        },
+    ]
+}
+
+/// Behavior picks write the mode onto the mapping, creating the mapping
+/// from the identity default when the input was unmapped.
+fn set_mode(ctx: &PagesCtx, source: InputSource, mode: Option<SourceMode>) {
+    let set = ctx.active_set.get();
+    let mut profile = ctx.profile.borrow_mut();
+    if let Some(set) = profile.action_sets.get_mut(set) {
+        match set.inputs.iter_mut().find(|input| input.source == source) {
+            Some(input) => input.mode = mode,
+            None => {
+                if mode.is_some() {
+                    let mut mapping = default_mapping(source);
+                    mapping.mode = mode;
+                    set.inputs.push(mapping);
+                }
+            }
+        }
+    }
+}
+
+/// Hook for plain row activation: opens the one-window command picker that
+/// swaps the input's click command, Steam-style.
+fn rebind_hook(ctx: &PagesCtx, source: InputSource) -> Rc<dyn Fn()> {
+    let ctx = ctx.clone();
+    Rc::new(move || open_rebind_picker(&ctx, source))
+}
+
+/// The output the quick rebind targets: the click activator's command, or
+/// whatever advanced activator carries the first output.
+fn primary_output(mapping: &InputMapping) -> Option<OutputAction> {
+    mapping
+        .activators
+        .iter()
+        .find(|activator| matches!(activator.kind, ActivatorKind::FullPress))
+        .or_else(|| mapping.activators.first())
+        .and_then(|activator| activator.outputs.first())
+        .cloned()
+}
+
+/// One-window rebinding: pick a command and it replaces this input's click
+/// output. Rarer activators (double press, soft pull, shifts) keep their
+/// outputs; those stay in the advanced sheet.
+fn open_rebind_picker(ctx: &PagesCtx, source: InputSource) {
+    let current = active_mappings(&ctx.profile, ctx.active_set.get())
+        .iter()
+        .find(|mapping| mapping.source == source)
+        .and_then(primary_output);
+    let profile = ctx.profile.borrow();
+    let scope = OutputPickerScope {
+        backend: profile.backend,
+        set_names: profile
+            .action_sets
+            .iter()
+            .map(|set| set.name.clone())
+            .collect(),
+        layer_names: profile
+            .action_layers
+            .iter()
+            .map(|layer| layer.name.clone())
+            .collect(),
+    };
+    drop(profile);
+    let title = crate::tr!("Bind {}").replacen("{}", &source_label(source), 1);
+    let ctx_for_pick = ctx.clone();
+    show_output_picker(
+        ctx.window.upcast_ref::<gtk4::Window>(),
+        &title,
+        &scope,
+        current.as_ref(),
+        move |output| {
+            apply_quick_rebind(&ctx_for_pick, source, output);
+        },
+    );
+}
+
+fn apply_quick_rebind(ctx: &PagesCtx, source: InputSource, output: OutputAction) {
+    {
+        let set_index = ctx.active_set.get();
+        let mut profile = ctx.profile.borrow_mut();
+        if let Some(set) = profile.action_sets.get_mut(set_index) {
+            match set.inputs.iter_mut().find(|input| input.source == source) {
+                Some(input) => {
+                    match input
+                        .activators
+                        .iter_mut()
+                        .find(|activator| matches!(activator.kind, ActivatorKind::FullPress))
+                    {
+                        Some(activator) => activator.outputs = vec![output],
+                        None => input
+                            .activators
+                            .push(ira_input::Activator::full_press(vec![output])),
+                    }
+                }
+                None => set.inputs.push(InputMapping::simple(source, output)),
+            }
+        }
+    }
+    (ctx.on_dirty)();
 }
 
 fn open_sheet(ctx: &PagesCtx, source: InputSource) {
@@ -342,24 +383,7 @@ fn open_sheet(ctx: &PagesCtx, source: InputSource) {
             backend,
             on_changed,
         },
-    );
-}
-
-fn insert_mapping(ctx: &PagesCtx, mapping: InputMapping) {
-    let set = ctx.active_set.get();
-    let mut profile = ctx.profile.borrow_mut();
-    if let Some(set) = profile.action_sets.get_mut(set) {
-        set.inputs.retain(|input| input.source != mapping.source);
-        set.inputs.push(mapping);
-    }
-}
-
-fn remove_mapping(ctx: &PagesCtx, source: InputSource) {
-    let set = ctx.active_set.get();
-    let mut profile = ctx.profile.borrow_mut();
-    if let Some(set) = profile.action_sets.get_mut(set) {
-        set.inputs.retain(|input| input.source != source);
-    }
+    )
 }
 
 /// Identity mapping for a freshly added input: buttons passthrough to their
@@ -371,72 +395,35 @@ pub(crate) fn default_mapping(source: InputSource) -> InputMapping {
             // matching how SDL names a real controller of the same kind.
             InputMapping::simple(source, OutputAction::GamepadButton(button))
         }
-        InputSource::Axis(GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger) => {
+        InputSource::Axis(GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger) => InputMapping {
+            mode: Some(SourceMode::Trigger { threshold: 0.5 }),
+            ..InputMapping::new(source)
+        },
+        InputSource::Axis(axis) => {
+            let output = match axis {
+                GamepadAxis::RightX | GamepadAxis::RightY => StickOutput::Right,
+                _ => StickOutput::Left,
+            };
             InputMapping {
-                mode: Some(SourceMode::Trigger { threshold: 0.5 }),
+                mode: Some(SourceMode::joystick(output)),
                 ..InputMapping::new(source)
             }
         }
-        InputSource::Axis(axis) => InputMapping {
-            mode: Some(SourceMode::Joystick {
-                output: match axis {
-                    GamepadAxis::RightX | GamepadAxis::RightY => StickOutput::Right,
-                    _ => StickOutput::Left,
-                },
-                deadzone_inner: 0.1,
-                deadzone_outer: 0.95,
-                curve: 1.0,
-            }),
-            ..InputMapping::new(source)
-        },
-        InputSource::AxisDirection { .. } => InputMapping::simple(
-            source,
-            OutputAction::GamepadButton(GamepadButton::DpadUp),
-        ),
+        InputSource::AxisDirection { .. } => {
+            InputMapping::simple(source, OutputAction::GamepadButton(GamepadButton::DpadUp))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{default_mapping, region_is_at_defaults, swappable_pairs, Region};
-    use ira_input::{InputMapping, InputSource, OutputAction};
-
-    #[test]
-    fn test_region_is_at_defaults_true_for_identity_mappings() {
-        let sources = super::region_sources(Region::Dpad, None);
-        let mappings: Vec<InputMapping> = sources
-            .iter()
-            .map(|source| default_mapping(*source))
-            .collect();
-        assert!(region_is_at_defaults(Region::Dpad, None, &mappings));
-    }
-
-    #[test]
-    fn test_region_is_at_defaults_false_when_unmapped_or_changed() {
-        let sources = super::region_sources(Region::FaceButtons, None);
-        // One source missing entirely: not at defaults.
-        let partial: Vec<InputMapping> = sources
-            .iter()
-            .skip(1)
-            .map(|source| default_mapping(*source))
-            .collect();
-        assert!(!region_is_at_defaults(Region::FaceButtons, None, &partial));
-
-        // An output that differs from identity reads as custom.
-        let mut changed: Vec<InputMapping> = sources
-            .iter()
-            .map(|source| default_mapping(*source))
-            .collect();
-        if let Some(first) = changed.first_mut() {
-            first.activators[0].outputs.clear();
-        }
-        assert!(!region_is_at_defaults(Region::FaceButtons, None, &changed));
-    }
+    use super::super::input_profile_sheet_base::is_trigger_axis;
+    use super::super::input_profile_source_modes::{mode_label, modes_for};
+    use super::{behavior_choices, default_mapping, is_stick_source};
+    use ira_input::{GamepadAxis, GamepadButton, InputSource, OutputAction};
 
     #[test]
     fn test_default_mapping_is_identity_on_every_backend() {
-        use super::default_mapping;
-        use ira_input::GamepadButton;
         // Positional identity, including Switch Pro: a virtual pad must
         // identify like the real controller SDL names after.
         let south = default_mapping(InputSource::Button(GamepadButton::A));
@@ -450,26 +437,46 @@ mod tests {
     }
 
     #[test]
-    fn test_swappable_pairs_only_on_lateral_regions() {
-        assert!(swappable_pairs(Region::TriggersBumpers).is_some());
-        assert!(swappable_pairs(Region::Sticks).is_some());
-        assert!(swappable_pairs(Region::FaceButtons).is_none());
-        assert!(swappable_pairs(Region::SystemPaddles).is_none());
-        for (left, right) in swappable_pairs(Region::Sticks).unwrap() {
-            assert_ne!(left, right);
-            assert_eq!(
-                InputSource::category(left),
-                InputSource::category(right)
-            );
+    fn test_behavior_choices_align_with_modes_for() {
+        for source in [
+            InputSource::Axis(GamepadAxis::LeftX),
+            InputSource::Axis(GamepadAxis::RightX),
+            InputSource::Axis(GamepadAxis::LeftTrigger),
+        ] {
+            let trigger = is_trigger_axis(source);
+            let modes = modes_for(source);
+            let choices = behavior_choices(source);
+            assert_eq!(choices.len(), modes.len());
+            for (choice, mode) in choices.iter().zip(modes.iter()) {
+                assert_eq!(choice.title, mode_label(mode, trigger));
+            }
         }
     }
-}
 
+    #[test]
+    fn test_stick_rows_are_the_stick_x_axes() {
+        assert!(is_stick_source(InputSource::Axis(GamepadAxis::LeftX)));
+        assert!(is_stick_source(InputSource::Axis(GamepadAxis::RightX)));
+        // Y rides along inside the mode, and the click is a command row.
+        assert!(!is_stick_source(InputSource::Axis(GamepadAxis::LeftY)));
+        assert!(!is_stick_source(InputSource::Button(
+            GamepadButton::LeftStick
+        )));
+    }
+
+    #[test]
+    fn test_default_stick_mapping_has_no_activators() {
+        // A behavior pick on an unmapped stick creates the identity default
+        // with the mode swapped in — no stray click bindings.
+        let stick = default_mapping(InputSource::Axis(GamepadAxis::RightX));
+        assert!(stick.activators.is_empty());
+        assert!(stick.mode.is_some());
+    }
+}
 
 #[cfg(test)]
 mod gtk_repro {
     use super::*;
-    use ira_input::VirtualGamepadBackend;
 
     // Manual regression check for the recurring editor critical bursts:
     // run with `cargo test -p ira --lib gtk_repro -- --ignored --nocapture`
@@ -522,7 +529,7 @@ mod gtk_repro {
             ));
             region_boxes.push(content);
         }
-        let motion_rows = super::super::input_profile_gyro_card::MotionRows {
+        let motion_rows = super::super::input_profile_controller_page::MotionRows {
             native: adw::SwitchRow::default(),
         };
         let pages = RegionPages {
@@ -542,45 +549,6 @@ mod gtk_repro {
                 while main.iteration(false) {}
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
-        }
-        window.close();
-    }
-
-    // Same class of check for the motion row: the experimental badge is a
-    // plain label suffix on a SwitchRow and it gets shown/hidden on every
-    // backend change; run ignored like its sibling above.
-    #[test]
-    #[ignore]
-    fn repro_motion_rows_visibility_criticals() {
-        let _ = gtk4::init();
-        let _ = adw::init();
-        let window = adw::Window::new();
-        let group = adw::PreferencesGroup::new();
-        let motion_rows = super::super::input_profile_gyro_card::MotionRows {
-            native: adw::SwitchRow::default(),
-        };
-        group.add(&motion_rows.native);
-        let badge = gtk4::Label::new(Some("Experimental"));
-        badge.add_css_class("experimental-badge");
-        motion_rows.native.add_suffix(&badge);
-        let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-        root.append(&group);
-        window.set_content(Some(&root));
-        window.present();
-
-        super::super::input_profile_gyro_card::refresh_motion_rows(
-            &motion_rows,
-            VirtualGamepadBackend::Dsu,
-        );
-        super::super::input_profile_gyro_card::refresh_motion_rows(
-            &motion_rows,
-            VirtualGamepadBackend::DualShock4,
-        );
-        let main = gtk4::glib::MainContext::default();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(200);
-        while std::time::Instant::now() < deadline {
-            while main.iteration(false) {}
-            std::thread::sleep(std::time::Duration::from_millis(10));
         }
         window.close();
     }

@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use super::css::*;
 use super::game_item::GameItem;
-use super::state::{PendingImage, SharedState, SgdbAssetsCacheEntry};
+use super::state::{PendingImage, SgdbAssetsCacheEntry, SharedState};
 
 pub struct DialogLayout {
     pub window: adw::Window,

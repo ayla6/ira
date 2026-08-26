@@ -299,8 +299,8 @@ pub fn invalidate_texture(path: &str) {
 mod tests {
     use super::*;
     use gdk4::{MemoryFormat, MemoryTexture};
-    use glib::Bytes;
     use glib::object::Cast;
+    use glib::Bytes;
 
     fn texture(w: i32, h: i32) -> Texture {
         let bytes = Bytes::from_owned(vec![0u8; (w * h * 4) as usize]);

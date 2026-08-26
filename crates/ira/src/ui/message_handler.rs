@@ -131,9 +131,10 @@ fn trim_stale_images(state: &SharedState, started_db_id: i64) {
             .map(|g| g.icon_path.clone())
             .filter(|p| !p.is_empty())
             .collect();
-        for (db_id, variant_id) in
-            [(s.displayed_db_id, s.displayed_variant_id), (started_db_id, None)]
-        {
+        for (db_id, variant_id) in [
+            (s.displayed_db_id, s.displayed_variant_id),
+            (started_db_id, None),
+        ] {
             if db_id == 0 {
                 continue;
             }
@@ -153,9 +154,11 @@ fn trim_stale_images(state: &SharedState, started_db_id: i64) {
                         protected.insert(path.clone());
                     }
                 }
-                for path in game.achievements.iter().flat_map(|ach| {
-                    [ach.icon_path.clone(), ach.icon_gray_path.clone()]
-                }) {
+                for path in game
+                    .achievements
+                    .iter()
+                    .flat_map(|ach| [ach.icon_path.clone(), ach.icon_gray_path.clone()])
+                {
                     if !path.is_empty() {
                         protected.insert(path);
                     }

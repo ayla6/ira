@@ -41,7 +41,6 @@ pub const CSS_STATUS_NO_SCROLL: &str = "status-no-scroll";
 pub const CSS_VIEWER_CANVAS: &str = "input-viewer-canvas";
 pub const CSS_COMMAND_TILE: &str = "command-tile";
 pub const CSS_COMMAND_TILE_ACTIVE: &str = "command-tile-active";
-pub const CSS_EXPERIMENTAL_BADGE: &str = "experimental-badge";
 
 pub const APP_CSS: &str = "
 .sidebar-row-title { min-width: 0; }
@@ -135,15 +134,6 @@ gridview.game-grid child:focus-within {
     border-radius: 4px;
     padding: 2px 8px;
     font-weight: 600;
-}
-
-.experimental-badge {
-    background-color: alpha(#e66100, 0.15);
-    color: #e66100;
-    border-radius: 999px;
-    padding: 2px 10px;
-    font-size: 0.85em;
-    font-weight: 700;
 }
 
 .cover-name-fallback {

@@ -1,17 +1,19 @@
 //! Whole-controller gyro configuration card for the editor's Gyro page.
 //!
 //! One full-width libadwaita row per setting: enable switch, activation rule,
-//! output, sensitivity multiplier, invert/smoothing toggles — mirroring the
-//! Steam Input gyro panel — plus the motion transport rows: the native
-//! sensor switch and the DSU output-mode note (the cemuhook stream is
-//! inherent to picking DSU, never a toggle).
+//! output, orientation, sensitivity multiplier, invert/smoothing toggles —
+//! mirroring the Steam Input gyro panel.
 
-use super::input_profile_sheet_base::{combo_row, spin_row};
 use super::input_profile_options::source_options_for_device;
+use super::input_profile_sheet_base::combo_row;
+use super::input_profile_widgets::{
+    format_number, option_picker_popover, picker_button, slider_row, switch_row, OptionChoice,
+    SettingGroup, SliderSpec,
+};
 use adw::prelude::*;
 use ira_input::{
     DeviceInfo, GamepadButton, GyroActivation, GyroConfig, GyroOrientation, GyroOutput,
-    InputProfile, InputSource, VirtualGamepadBackend,
+    InputSource, VirtualGamepadBackend,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -22,89 +24,67 @@ struct GyroWidgets {
     activation: adw::ComboRow,
     button: adw::ComboRow,
     output: adw::ComboRow,
-    orientation: adw::ComboRow,
-    sensitivity: adw::SpinRow,
+    orientation: gtk4::ListBoxRow,
+    sensitivity: gtk4::ListBoxRow,
     invert_x: adw::SwitchRow,
     invert_y: adw::SwitchRow,
     smoothing: adw::SwitchRow,
 }
 
-/// The profile-level motion transport rows. The editor keeps this handle so
-/// [`refresh_motion_rows`] can re-evaluate visibility whenever the profile's
-/// backend changes.
-#[derive(Clone)]
-pub(super) struct MotionRows {
-    pub(super) native: adw::SwitchRow,
-}
-
-impl MotionRows {
-    fn apply_backend(&self, backend: VirtualGamepadBackend) {
-        // With the DSU backend the cemuhook stream IS the transport for the
-        // whole controller, so native motion does not apply.
-        self.native.set_visible(backend != VirtualGamepadBackend::Dsu);
-    }
-}
-
-pub(super) fn refresh_motion_rows(rows: &MotionRows, backend: VirtualGamepadBackend) {
-    rows.apply_backend(backend);
-}
-
 pub(super) fn add_gyro_group(
     page: &gtk4::Box,
     gyro: &Rc<RefCell<GyroConfig>>,
-    profile: &Rc<RefCell<InputProfile>>,
     device: Option<&DeviceInfo>,
     on_dirty: &Rc<dyn Fn()>,
-) -> MotionRows {
-    let group = adw::PreferencesGroup::new();
-    group.set_title(&crate::tr!("Gyro"));
-    group.set_description(Some(&crate::tr!(
-        "Rotating the controller steers the output. Yaw and pitch are measured relative to gravity, so aiming stays consistent no matter how the controller is held."
-    )));
+) {
+    let group = SettingGroup::new(
+        Some(&crate::tr!("Gyro")),
+        Some(&crate::tr!(
+            "Rotating the controller steers the output. Yaw and pitch are measured relative to gravity, so aiming stays consistent no matter how the controller is held."
+        )),
+    );
 
     let button_options = activation_button_options(device, &gyro.borrow().activation);
+    let activation = combo_row(
+        &activation_labels(),
+        activation_index(&gyro.borrow().activation),
+    );
+    activation.set_title(&crate::tr!("Activation"));
+    let button = combo_row(
+        &button_option_labels(&button_options),
+        activation_button_index(&button_options, &gyro.borrow().activation),
+    );
+    button.set_title(&crate::tr!("Button"));
+    let output = combo_row(&output_labels(), output_index(gyro.borrow().output));
+    output.set_title(&crate::tr!("Output"));
     let widgets = GyroWidgets {
-        enable: switch_row(
-            &crate::tr!("Enable gyro"),
-            None,
-            gyro.borrow().enabled,
-            {
-                let gyro = gyro.clone();
-                let on_dirty = on_dirty.clone();
-                Rc::new(move |active| {
-                    gyro.borrow_mut().enabled = active;
-                    on_dirty();
-                })
-            },
-        ),
-        activation: combo_row(
-            &activation_labels(),
-            activation_index(&gyro.borrow().activation),
-        ),
-        button: combo_row(
-            &button_option_labels(&button_options),
-            activation_button_index(&button_options, &gyro.borrow().activation),
-        ),
-        output: combo_row(&output_labels(), output_index(gyro.borrow().output)),
-        orientation: combo_row(
-            &orientation_labels(),
-            orientation_index(gyro.borrow().orientation),
-        ),
-        sensitivity: spin_row(
-            &crate::tr!("Sensitivity"),
-            0.05,
-            20.0,
-            0.05,
-            gyro.borrow().sensitivity as f64,
-            {
-                let gyro = gyro.clone();
-                let on_dirty = on_dirty.clone();
-                Rc::new(move |value| {
+        enable: switch_row(&crate::tr!("Enable gyro"), None, gyro.borrow().enabled, {
+            let gyro = gyro.clone();
+            let on_dirty = on_dirty.clone();
+            move |active| {
+                gyro.borrow_mut().enabled = active;
+                on_dirty();
+            }
+        }),
+        activation,
+        button,
+        output,
+        orientation: orientation_row(gyro, on_dirty, gyro.borrow().orientation),
+        sensitivity: {
+            let gyro = gyro.clone();
+            let on_dirty = on_dirty.clone();
+            let initial = f64::from(gyro.borrow().sensitivity);
+            slider_row(
+                &crate::tr!("Sensitivity"),
+                Some(&crate::tr!("Multiplier applied to gyro motion")),
+                &SliderSpec(0.05, 20.0, 0.05, initial),
+                format_number,
+                move |value| {
                     gyro.borrow_mut().sensitivity = value as f32;
                     on_dirty();
-                })
-            },
-        ),
+                },
+            )
+        },
         invert_x: switch_row(
             &crate::tr!("Invert horizontal"),
             None,
@@ -112,10 +92,10 @@ pub(super) fn add_gyro_group(
             {
                 let gyro = gyro.clone();
                 let on_dirty = on_dirty.clone();
-                Rc::new(move |active| {
+                move |active| {
                     gyro.borrow_mut().invert_x = active;
                     on_dirty();
-                })
+                }
             },
         ),
         invert_y: switch_row(
@@ -125,80 +105,41 @@ pub(super) fn add_gyro_group(
             {
                 let gyro = gyro.clone();
                 let on_dirty = on_dirty.clone();
-                Rc::new(move |active| {
+                move |active| {
                     gyro.borrow_mut().invert_y = active;
                     on_dirty();
-                })
+                }
             },
         ),
         smoothing: switch_row(
             &crate::tr!("Smoothing"),
-            Some(&crate::tr!("Damps jitter while aiming slowly; flicks stay untouched")),
+            Some(&crate::tr!(
+                "Damps jitter while aiming slowly; flicks stay untouched"
+            )),
             gyro.borrow().smoothing,
             {
                 let gyro = gyro.clone();
                 let on_dirty = on_dirty.clone();
-                Rc::new(move |active| {
+                move |active| {
                     gyro.borrow_mut().smoothing = active;
                     on_dirty();
-                })
+                }
             },
         ),
     };
-    widgets.sensitivity.set_subtitle(&crate::tr!(
-        "Multiplier applied to gyro motion"
-    ));
-
-    let native_motion = switch_row(
-        &crate::tr!("Native motion sensors"),
-        Some(&crate::tr!(
-            "Expose the sensors as raw evdev axes next to the virtual pad; emulators cannot read them yet until SDL and the kernel support uinput motion"
-        )),
-        profile.borrow().native_motion,
-        {
-            let profile = profile.clone();
-            let on_dirty = on_dirty.clone();
-            Rc::new(move |active| {
-                profile.borrow_mut().native_motion = active;
-                on_dirty();
-            })
-        },
-    );
-    native_motion.add_suffix(&experimental_badge());
-
     update_dependency_rows(&widgets, gyro.borrow().enabled);
 
-    let rows: [&adw::PreferencesRow; 10] = [
-        widgets.enable.upcast_ref(),
-        widgets.activation.upcast_ref(),
-        widgets.button.upcast_ref(),
-        widgets.output.upcast_ref(),
-        widgets.orientation.upcast_ref(),
-        widgets.sensitivity.upcast_ref(),
-        widgets.invert_x.upcast_ref(),
-        widgets.invert_y.upcast_ref(),
-        widgets.smoothing.upcast_ref(),
-        native_motion.upcast_ref(),
-    ];
-    for row in rows {
-        group.add(row);
-    }
-    page.append(&group);
+    group.add(&widgets.enable);
+    group.add(&widgets.activation);
+    group.add(&widgets.button);
+    group.add(&widgets.output);
+    group.add(&widgets.orientation);
+    group.add(&widgets.sensitivity);
+    group.add(&widgets.invert_x);
+    group.add(&widgets.invert_y);
+    group.add(&widgets.smoothing);
+    page.append(&group.root);
     connect_gyro_changes(&widgets, &button_options, gyro, on_dirty);
-
-    let motion_rows = MotionRows {
-        native: native_motion,
-    };
-    motion_rows.apply_backend(profile.borrow().backend);
-    motion_rows
-}
-
-/// Small orange pill marking a setting as not production-grade yet.
-fn experimental_badge() -> gtk4::Label {
-    let badge = gtk4::Label::new(Some(&crate::tr!("Experimental")));
-    badge.add_css_class(super::css::CSS_EXPERIMENTAL_BADGE);
-    badge.set_valign(gtk4::Align::Center);
-    badge
 }
 
 fn connect_gyro_changes(
@@ -225,19 +166,6 @@ fn connect_gyro_changes(
         on_dirty_for_output();
     });
 
-    let gyro_for_orientation = gyro.clone();
-    let on_dirty_for_orientation = on_dirty.clone();
-    widgets.orientation.connect_selected_notify(move |dropdown| {
-        gyro_for_orientation.borrow_mut().orientation = match dropdown.selected() {
-            0 => GyroOrientation::Local,
-            1 => GyroOrientation::Yaw,
-            2 => GyroOrientation::Roll,
-            3 => GyroOrientation::YawPlusRoll,
-            4 => GyroOrientation::PlayerSpace,
-            _ => GyroOrientation::WorldSpace,
-        };
-        on_dirty_for_orientation();
-    });
     connect_activation_changes(widgets, button_options, gyro, on_dirty);
 }
 
@@ -320,42 +248,108 @@ fn update_dependency_rows(widgets: &GyroWidgets, enabled: bool) {
         .set_visible(enabled && widgets.activation.selected() != 0);
 }
 
-fn switch_row(
-    title: &str,
-    subtitle: Option<&str>,
-    active: bool,
-    on_change: Rc<dyn Fn(bool)>,
-) -> adw::SwitchRow {
-    let row = adw::SwitchRow::builder().title(title).active(active).build();
-    if let Some(subtitle) = subtitle {
-        row.set_subtitle(subtitle);
-    }
-    row.connect_active_notify(move |row| on_change(row.is_active()));
-    row
-}
-
-fn orientation_labels() -> Vec<String> {
-    [
-        crate::tr!("Passthrough"),
-        crate::tr!("Yaw"),
-        crate::tr!("Roll"),
-        crate::tr!("Yaw + Roll"),
-        crate::tr!("Player Space"),
-        crate::tr!("World Space"),
+/// Steam's described orientation popup: every preset explains what it does
+/// to horizontal and vertical output.
+fn orientation_choices() -> Vec<(GyroOrientation, OptionChoice)> {
+    vec![
+        (
+            GyroOrientation::Local,
+            OptionChoice {
+                title: crate::tr!("Passthrough"),
+                description: Some(crate::tr!(
+                    "Raw controller axes with no gravity math: reported yaw drives horizontal output and reported pitch drives vertical output exactly as the sensor delivers them."
+                )),
+            },
+        ),
+        (
+            GyroOrientation::Yaw,
+            OptionChoice {
+                title: crate::tr!("Yaw"),
+                description: Some(crate::tr!(
+                    "Turn the controller around its own vertical axis for horizontal output. Tilt the controller up and down around its own lateral axis for vertical output. (Local Space Preset)"
+                )),
+            },
+        ),
+        (
+            GyroOrientation::Roll,
+            OptionChoice {
+                title: crate::tr!("Roll"),
+                description: Some(crate::tr!(
+                    "Lean the controller around its forward axis for horizontal output. Tilt the controller up and down around its own lateral axis for vertical output. (Local Space Preset)"
+                )),
+            },
+        ),
+        (
+            GyroOrientation::YawPlusRoll,
+            OptionChoice {
+                title: crate::tr!("Yaw + Roll"),
+                description: Some(crate::tr!(
+                    "Yaw + Roll adds the Lean and Turn together for horizontal output. Tilting the controller up and down around its own lateral axis still moves the output up and down. (Local Space Preset)"
+                )),
+            },
+        ),
+        (
+            GyroOrientation::PlayerSpace,
+            OptionChoice {
+                title: crate::tr!("Player Space"),
+                description: Some(crate::tr!(
+                    "Player Space uses Yaw + Roll around the gravity axis for horizontal output, and Local Pitch for vertical output."
+                )),
+            },
+        ),
+        (
+            GyroOrientation::WorldSpace,
+            OptionChoice {
+                title: crate::tr!("World Space"),
+                description: Some(crate::tr!(
+                    "World Space uses all rotation around the gravity axis for horizontal output, and World Pitch for vertical output, but does not move vertically when the controller is tilted on its side."
+                )),
+            },
+        ),
+        (
+            GyroOrientation::LaserPointer,
+            OptionChoice {
+                title: crate::tr!("Laser Pointer"),
+                description: Some(crate::tr!(
+                    "Acts similar to a laser pointer. Great for cursor control on a stand-alone controller."
+                )),
+            },
+        ),
     ]
-    .into_iter()
-    .collect()
 }
 
-fn orientation_index(orientation: GyroOrientation) -> u32 {
-    match orientation {
-        GyroOrientation::Local => 0,
-        GyroOrientation::Yaw => 1,
-        GyroOrientation::Roll => 2,
-        GyroOrientation::YawPlusRoll => 3,
-        GyroOrientation::PlayerSpace => 4,
-        GyroOrientation::WorldSpace => 5,
-    }
+fn orientation_row(
+    gyro: &Rc<RefCell<GyroConfig>>,
+    on_dirty: &Rc<dyn Fn()>,
+    orientation: GyroOrientation,
+) -> gtk4::ListBoxRow {
+    let choices = orientation_choices();
+    let current = choices
+        .iter()
+        .position(|(candidate, _)| *candidate == orientation)
+        .unwrap_or(0);
+    let row = adw::ActionRow::new();
+    row.set_title(&crate::tr!("Orientation"));
+    row.set_subtitle(&crate::tr!(
+        "How the controller's rotation maps to horizontal and vertical output"
+    ));
+    let button = picker_button(&choices[current].1.title, &gtk4::Popover::new());
+    let options: Vec<OptionChoice> = choices.iter().map(|entry| entry.1.clone()).collect();
+    let picker = option_picker_popover(&options, current, {
+        let gyro = gyro.clone();
+        let on_dirty = on_dirty.clone();
+        let button = button.clone();
+        move |index| {
+            if let Some((orientation, choice)) = choices.get(index) {
+                gyro.borrow_mut().orientation = *orientation;
+                button.set_label(&choice.title);
+                on_dirty();
+            }
+        }
+    });
+    button.set_popover(Some(&picker));
+    row.add_suffix(&button);
+    row.upcast()
 }
 
 fn activation_labels() -> Vec<String> {
@@ -398,13 +392,11 @@ fn activation_button_options(
     device: Option<&DeviceInfo>,
     activation: &GyroActivation,
 ) -> Vec<(InputSource, String)> {
-    let mut options: Vec<(InputSource, String)> = source_options_for_device(
-        device,
-        VirtualGamepadBackend::DirectInput,
-    )
-    .into_iter()
-    .filter(|(source, _)| matches!(source, InputSource::Button(_)))
-    .collect();
+    let mut options: Vec<(InputSource, String)> =
+        source_options_for_device(device, VirtualGamepadBackend::DirectInput)
+            .into_iter()
+            .filter(|(source, _)| matches!(source, InputSource::Button(_)))
+            .collect();
     if let Some(button) = activation.button() {
         let source = InputSource::Button(button);
         if !options.iter().any(|(candidate, _)| *candidate == source) {

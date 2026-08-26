@@ -8,11 +8,11 @@ use crate::retroachievements::paths;
 use ira_config::Config;
 
 pub use super::api_types::read_console_games_cache;
+use super::api_types::WebGameProgress;
 pub use super::api_types::{
     build_ra_achievements, enrich_ra_game, load_ra_achievements_from_cache,
     redownload_missing_ra_badges, RaAchievementDef, RaGameData, RaGameEntry, RaUnlockInfo,
 };
-use super::api_types::WebGameProgress;
 
 const RA_WEB_GAME_LIST: &str = "https://retroachievements.org/API/API_GetGameList.php";
 const RA_WEB_GAME_PROGRESS: &str =
@@ -111,12 +111,16 @@ impl RaClient {
         let only_achievements = "1".to_string();
         let url = reqwest::Url::parse_with_params(
             RA_WEB_GAME_LIST,
-            &[("i", &console), ("y", &self.api_key), ("f", &only_achievements)],
+            &[
+                ("i", &console),
+                ("y", &self.api_key),
+                ("f", &only_achievements),
+            ],
         )
         .map_err(|e| format!("game list url: {}", e))?;
         let text = self.get_web(url)?;
-        let resp: Vec<RaGameEntry> = serde_json::from_str(&text)
-            .map_err(|e| format!("parse game list: {}", e))?;
+        let resp: Vec<RaGameEntry> =
+            serde_json::from_str(&text).map_err(|e| format!("parse game list: {}", e))?;
 
         let _ = std::fs::create_dir_all(cache.parent().unwrap_or(Path::new(".")));
         let _ = std::fs::write(&cache, &text);
@@ -127,7 +131,12 @@ impl RaClient {
     /// Search the console's full game list (fetched on demand from the Web API
     /// when no fresh cache exists) for titles matching `query`. Returns games
     /// that have achievements, excluding Subset/hack variants.
-    pub fn search_ra_games(&self, save_dir: &str, console_id: u32, query: &str) -> Vec<RaGameEntry> {
+    pub fn search_ra_games(
+        &self,
+        save_dir: &str,
+        console_id: u32,
+        query: &str,
+    ) -> Vec<RaGameEntry> {
         let games = match self.fetch_console_games(save_dir, console_id) {
             Ok(games) => games,
             Err(e) => {
@@ -164,16 +173,14 @@ impl RaClient {
             }
         }
 
-        let url =
-            reqwest::Url::parse_with_params(RA_WEB_GAME_PROGRESS, &[
-                ("g", game_id),
-                ("u", &self.username),
-                ("y", &self.api_key),
-            ])
-            .map_err(|e| format!("web api url: {}", e))?;
+        let url = reqwest::Url::parse_with_params(
+            RA_WEB_GAME_PROGRESS,
+            &[("g", game_id), ("u", &self.username), ("y", &self.api_key)],
+        )
+        .map_err(|e| format!("web api url: {}", e))?;
         let text = self.get_web(url)?;
-        let progress: WebGameProgress = serde_json::from_str(&text)
-            .map_err(|e| format!("parse web progress: {}", e))?;
+        let progress: WebGameProgress =
+            serde_json::from_str(&text).map_err(|e| format!("parse web progress: {}", e))?;
 
         let _ = std::fs::create_dir_all(cache.parent().unwrap_or(Path::new(".")));
         let _ = std::fs::write(&cache, &text);
@@ -326,7 +333,10 @@ mod cache_tests {
             3,
             r#"[{"ID":1,"Title":"Game","ImageIcon":"","ImageUrl":"","NumAchievements":0,"Points":0}]"#,
         );
-        assert!(RaClient::console_cache_is_current(tmp.path().to_str().unwrap(), 3));
+        assert!(RaClient::console_cache_is_current(
+            tmp.path().to_str().unwrap(),
+            3
+        ));
     }
 
     #[test]
@@ -339,20 +349,29 @@ mod cache_tests {
             3,
             r#"{"Success":true,"Error":"","Response":[{"ID":1,"Title":"Game"}]}"#,
         );
-        assert!(!RaClient::console_cache_is_current(tmp.path().to_str().unwrap(), 3));
+        assert!(!RaClient::console_cache_is_current(
+            tmp.path().to_str().unwrap(),
+            3
+        ));
     }
 
     #[test]
     fn test_missing_cache_is_stale() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(!RaClient::console_cache_is_current(tmp.path().to_str().unwrap(), 3));
+        assert!(!RaClient::console_cache_is_current(
+            tmp.path().to_str().unwrap(),
+            3
+        ));
     }
 
     #[test]
     fn test_garbage_cache_is_stale() {
         let tmp = tempfile::tempdir().unwrap();
         write_cache(tmp.path().to_str().unwrap(), 3, "not json");
-        assert!(!RaClient::console_cache_is_current(tmp.path().to_str().unwrap(), 3));
+        assert!(!RaClient::console_cache_is_current(
+            tmp.path().to_str().unwrap(),
+            3
+        ));
     }
 
     #[test]
@@ -433,11 +452,11 @@ mod cache_tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "[]").unwrap();
         let old = std::time::SystemTime::now() - Duration::from_secs(60 * 60 * 24);
-        let f = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&path)
-            .unwrap();
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         f.set_modified(old).unwrap();
-        assert!(!RaClient::console_cache_is_current(tmp.path().to_str().unwrap(), 3));
+        assert!(!RaClient::console_cache_is_current(
+            tmp.path().to_str().unwrap(),
+            3
+        ));
     }
 }

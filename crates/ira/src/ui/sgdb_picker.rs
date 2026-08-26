@@ -274,11 +274,12 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
                 // in the game's image directory.
                 let result = match steam.download_bytes(&url) {
                     Ok(bytes) if !bytes.is_empty() && ira_parser::is_decodable_image(&bytes) => {
-                        let webp = ira_parser::convert_bytes_to_lossless_webp(&bytes)
-                            .unwrap_or(bytes);
+                        let webp =
+                            ira_parser::convert_bytes_to_lossless_webp(&bytes).unwrap_or(bytes);
                         let _ = std::fs::create_dir_all(&dest_dir_c);
-                        let dest =
-                            std::path::Path::new(&dest_dir_c).join(&file_name_c).with_extension("webp");
+                        let dest = std::path::Path::new(&dest_dir_c)
+                            .join(&file_name_c)
+                            .with_extension("webp");
                         match std::fs::write(&dest, &webp) {
                             Ok(()) => dest.to_string_lossy().into_owned(),
                             Err(error) => {
@@ -557,7 +558,8 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let has_more: Rc<Cell<bool>> = Rc::new(Cell::new(true));
     let loading_more: Rc<Cell<bool>> = Rc::new(Cell::new(false));
     let rendered_count: Rc<Cell<usize>> = Rc::new(Cell::new(0));
-    let all_buttons: Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>> = Rc::new(RefCell::new(Vec::new()));
+    let all_buttons: Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>> =
+        Rc::new(RefCell::new(Vec::new()));
     let is_initial_load: Rc<Cell<bool>> = Rc::new(Cell::new(true));
 
     // Re-showing a hidden picker resets any buttons left disabled by a

@@ -525,6 +525,15 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         pad_product,
         arguments.calibration.as_deref(),
     );
+    apply_controller_deadzone(
+        &mut mapper,
+        arguments.calibration.as_deref(),
+        pad_vendor,
+        pad_product,
+    );
+    // Game-side rumble replays on the physical controller unless the profile
+    // opts out; a controller without force feedback just stays silent.
+    let mut rumble_output = open_rumble(gamepad.as_ref(), mapper.profile().rumble);
     let last_sensor_us: Option<u64> = None;
     // The motion node must exist before the game opens the virtual pad:
     // SDL pairs sensor nodes with a pad at open time only.
@@ -721,6 +730,9 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                 ) {
                     eprintln!("ira-input: failed to release outputs on pause: {error}");
                 }
+                if let Some(rumble) = rumble_output.as_mut() {
+                    rumble.stop();
+                }
             } else if focused && paused_for_focus {
                 paused_for_focus = false;
                 eprintln!("ira-input: game window focused; resuming input");
@@ -757,6 +769,15 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             })
         };
         trace.flush();
+        // Rumble uploads are drained every pass so the kernel queue never
+        // overflows, even while paused — commands just land nowhere then.
+        for command in virtual_gamepad.poll_rumble() {
+            if !paused_for_focus {
+                if let Some(rumble) = rumble_output.as_mut() {
+                    rumble.play(command);
+                }
+            }
+        }
         if let Err(error) = result {
             let resets = emit_outputs(
                 mapper.reset(),
@@ -782,6 +803,9 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             pipeline.last_sensor_us = None;
             tick_needed = mapper.has_continuous_outputs();
             schedule.reconnect = Instant::now();
+            if let Some(rumble) = rumble_output.as_mut() {
+                rumble.stop();
+            }
             emit_outputs(
                 mapper.reset(),
                 OutputTargets {
@@ -839,6 +863,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             "ira-input: controller connected through {}",
                             gamepad.info().path.display()
                         );
+                        rumble_output = open_rumble(Some(gamepad), mapper.profile().rumble);
                         pipeline.sensor = open_sensor(gamepad.info());
                         if pipeline.motion_device.is_none() && mapper.profile().native_motion {
                             // Best effort: if the game already opened the pad
@@ -895,8 +920,15 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             pad_product,
                             arguments.calibration.as_deref(),
                         );
+                        apply_controller_deadzone(
+                            &mut mapper,
+                            arguments.calibration.as_deref(),
+                            pad_vendor,
+                            pad_product,
+                        );
                         pipeline.last_sensor_us = None;
                         tick_needed = pipeline.sensor.is_some() || mapper.has_continuous_outputs();
+                        rumble_output = open_rumble(gamepad.as_ref(), mapper.profile().rumble);
                     }
                 }
             }
@@ -1413,8 +1445,13 @@ fn reload_profile(
     }
     *mapper = new_mapper;
     eprintln!(
-        "ira-input: reloaded {} bindings from {}",
-        mapper.profile().bindings.len(),
+        "ira-input: reloaded {} mapped inputs from {}",
+        mapper
+            .profile()
+            .action_sets
+            .iter()
+            .map(|set| set.inputs.len())
+            .sum::<usize>(),
         path.display()
     );
     Ok(())
@@ -1467,6 +1504,47 @@ fn process_physical_inputs(
     Ok(())
 }
 
+/// Seed the mapper with the connected controller's calibrated stick
+/// deadzone; Joystick modes whose deadzone source is "Controller Preference"
+/// read it from the engine.
+fn apply_controller_deadzone(
+    mapper: &mut MappingEngine,
+    calibration_store: Option<&Path>,
+    vendor: u16,
+    product: u16,
+) {
+    let (left, right) = calibration_store
+        .and_then(|path| ira_input::load_calibration(path, vendor, product))
+        .map(|calibration| {
+            (
+                calibration.stick_deadzone_left,
+                calibration.stick_deadzone_right,
+            )
+        })
+        .unwrap_or((0.0, 0.0));
+    mapper.set_controller_deadzones(left, right);
+}
+
+/// Opens the physical side of rumble passthrough. Failure reasons are logged
+/// exactly once here; a missing handle afterwards simply means "no rumble"
+/// and every forwarded command is skipped.
+fn open_rumble(
+    gamepad: Option<&PhysicalGamepad>,
+    enabled: bool,
+) -> Option<ira_input::PhysicalRumble> {
+    if !enabled {
+        return None;
+    }
+    let path = gamepad?.info().path.clone();
+    match ira_input::PhysicalRumble::open(&path) {
+        Ok(rumble) => Some(rumble),
+        Err(error) => {
+            eprintln!("ira-input: {error}");
+            None
+        }
+    }
+}
+
 fn make_gyro_processor(
     profile: &InputProfile,
     vendor: u16,
@@ -1477,7 +1555,7 @@ fn make_gyro_processor(
     // legacy fallback.
     let bias = calibration_store
         .and_then(|path| ira_input::load_calibration(path, vendor, product))
-        .unwrap_or(profile.gyro_calibration);
+        .unwrap_or(profile.controller_calibration);
     GyroProcessor::new(
         bias,
         GyroProcessingOptions {
@@ -1771,12 +1849,10 @@ mod tests {
     }
 
     #[test]
-    fn test_load_profile_preserves_backend_and_validates_bindings() {
+    fn test_load_profile_preserves_backend() {
         let dir = temp_profile_dir("backend");
         let path = dir.join("profile.json");
-        let mut profile =
-            InputProfile::default_gamepad_for_backend(VirtualGamepadBackend::DirectInput);
-        profile.bindings.clear();
+        let profile = InputProfile::default_gamepad_for_backend(VirtualGamepadBackend::DirectInput);
         std::fs::write(&path, serde_json::to_vec(&profile).unwrap()).unwrap();
 
         let loaded = load_profile(Some(&path)).unwrap();

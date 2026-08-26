@@ -6,8 +6,9 @@
 use super::parse::{find, find_all, parse_vdf, Node};
 use crate::profile::{
     ActionSet, Activation, Activator, ActivatorKind, ActivatorSettings, GamepadAxis, GamepadButton,
-    GyroConfig, GyroOrientation, GyroOutput, InputMapping, InputProfile, InputSource, ModeShift,
-    MouseAxis, MouseButton, OutputAction, SourceMode, StickOutput, VirtualGamepadBackend,
+    GyroConfig, GyroOrientation, GyroOutput, InputMapping, InputProfile, InputSource,
+    JoystickSettings, ModeShift, MouseAxis, MouseButton, OutputAction, SourceMode, StickDeadzone,
+    StickOutput, StickProcessing, TriggerDampening, VirtualGamepadBackend,
 };
 use std::collections::HashMap;
 
@@ -147,6 +148,15 @@ fn group_setting(group: &Node, key: &str) -> Option<f32> {
     settings.iter().find(|n| n.key == key)?.as_f32()
 }
 
+/// String-valued group setting, for keys like `mouse_dampening`.
+fn group_setting_str<'a>(group: &'a Node, key: &str) -> Option<&'a str> {
+    let settings = group.obj("settings")?;
+    settings
+        .iter()
+        .find(|n| n.key == key)
+        .and_then(|node| node.as_str())
+}
+
 /// Translate one group into mappings appended to `set`. The preset binding
 /// string doubles as the physical-region hint ("left_trigger active").
 fn import_group(
@@ -279,14 +289,29 @@ fn import_stick(group: &Node, region: &str, mode: &str, set: &mut ActionSet) {
         _ => (GamepadAxis::LeftX, StickOutput::Left),
     };
     let stick_mode = match mode {
-        "joystick_move" => SourceMode::Joystick {
-            output,
-            deadzone_inner: group_setting(group, "deadzone")
-                .unwrap_or(0.1)
-                .clamp(0.0, 0.9),
-            deadzone_outer: 0.95,
-            curve: 1.0,
-        },
+        "joystick_move" => {
+            // Steam encodes the deadzone either as a fraction or as raw
+            // counts out of 32767; anything above 1 is counts.
+            let deadzone = group_setting(group, "deadzone").map(|raw| {
+                if raw > 1.0 {
+                    (raw / 32767.0).clamp(0.0, 0.9)
+                } else {
+                    raw.clamp(0.0, 0.9)
+                }
+            });
+            SourceMode::Joystick(JoystickSettings {
+                processing: StickProcessing {
+                    deadzone: if deadzone.is_some() {
+                        StickDeadzone::Custom
+                    } else {
+                        StickDeadzone::None
+                    },
+                    deadzone_inner: deadzone.unwrap_or(0.1),
+                    ..StickProcessing::default()
+                },
+                ..JoystickSettings::new(output)
+            })
+        }
         "flickstick" => SourceMode::Flickstick {
             rotation_sensitivity: 1.0,
             flick_duration_ms: 100,
@@ -294,6 +319,7 @@ fn import_stick(group: &Node, region: &str, mode: &str, set: &mut ActionSet) {
         // Mouse-style groups, trackpads included.
         _ => SourceMode::Mouse {
             sensitivity: group_setting(group, "sensitivity").unwrap_or(100.0) / 100.0,
+            stick: StickProcessing::default(),
         },
     };
     set.inputs.push(InputMapping {
@@ -315,6 +341,19 @@ fn import_gyro(group: &Node, mode: &str, gyro: &mut GyroConfig, report: &mut Imp
     };
     if let Some(sensitivity) = group_setting(group, "sensitivity") {
         gyro.sensitivity = (sensitivity / 100.0).clamp(0.05, 20.0);
+    }
+    if let Some(dampening) = group_setting_str(group, "mouse_dampening") {
+        gyro.trigger_dampening = match dampening {
+            "right_trigger_soft_pull" => TriggerDampening::RightTriggerSoftPull,
+            "right_trigger_full_pull" => TriggerDampening::RightTriggerFullPull,
+            "left_trigger_soft_pull" => TriggerDampening::LeftTriggerSoftPull,
+            "left_trigger_full_pull" => TriggerDampening::LeftTriggerFullPull,
+            "both_triggers_full_pull" => TriggerDampening::BothTriggersFullPull,
+            _ => TriggerDampening::Off,
+        };
+    }
+    if let Some(amount) = group_setting(group, "mouse_dampening_amount") {
+        gyro.dampening_amount = (amount / 100.0).clamp(0.0, 1.0);
     }
     if group.obj("settings").is_some_and(|settings| {
         settings

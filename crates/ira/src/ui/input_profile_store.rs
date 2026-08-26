@@ -49,17 +49,10 @@ pub(super) fn controller_default_path_for_backend(
 /// Used when a stored path is missing and the mode no longer names a backend.
 pub(super) fn find_controller_default_profile(save_dir: &str, key: &str) -> Option<PathBuf> {
     use VirtualGamepadBackend::*;
-    [
-        XInput,
-        DirectInput,
-        SwitchPro,
-        DualShock4,
-        DualSense,
-        Dsu,
-    ]
-    .into_iter()
-    .map(|backend| controller_default_path_for_backend(save_dir, key, backend))
-    .find(|path| path.is_file())
+    [XInput, DirectInput, SwitchPro, DualShock4, DualSense, Dsu]
+        .into_iter()
+        .map(|backend| controller_default_path_for_backend(save_dir, key, backend))
+        .find(|path| path.is_file())
 }
 
 pub(super) fn ensure_controller_default_profile(
@@ -88,15 +81,8 @@ pub(super) fn ensure_controller_default_profile(
 }
 
 /// Drop controls the connected device does not report and outputs the virtual
-/// backend cannot carry, across both the legacy binding list and action sets.
+/// backend cannot carry.
 fn prune_unsupported_controls(profile: &mut InputProfile, supported_buttons: &[GamepadButton]) {
-    profile.bindings.retain(|binding| {
-        let source_supported = match binding.source {
-            InputSource::Button(button) => supported_buttons.contains(&button),
-            _ => true,
-        };
-        source_supported && binding.output.is_supported_by(profile.backend)
-    });
     let backend = profile.backend;
     for set in &mut profile.action_sets {
         set.inputs.retain(|input| {
@@ -225,8 +211,8 @@ mod tests {
         new_managed_profile_path, profile_matches_game,
     };
     use ira_input::{
-        Binding, GamepadButton, GyroCalibration, InputProfile, InputSource, OutputAction,
-        VirtualGamepadBackend,
+        ActionSet, ControllerCalibration, GamepadButton, InputMapping, InputProfile, InputSource,
+        OutputAction, VirtualGamepadBackend,
     };
 
     #[test]
@@ -270,29 +256,32 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = super::controller_default_path(tmp.path().to_str().unwrap(), "pad");
         let profile = InputProfile {
-            bindings: (1..=8)
-                .map(|number| {
-                    let button = [
-                        GamepadButton::Paddle1,
-                        GamepadButton::Paddle2,
-                        GamepadButton::Paddle3,
-                        GamepadButton::Paddle4,
-                        GamepadButton::Paddle5,
-                        GamepadButton::Paddle6,
-                        GamepadButton::Paddle7,
-                        GamepadButton::Paddle8,
-                    ][number - 1];
-                    let output = if number <= 4 {
-                        GamepadButton::A
-                    } else {
-                        button
-                    };
-                    Binding::new(
-                        InputSource::Button(button),
-                        OutputAction::GamepadButton(output),
-                    )
-                })
-                .collect(),
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: (1..=8)
+                    .map(|number| {
+                        let button = [
+                            GamepadButton::Paddle1,
+                            GamepadButton::Paddle2,
+                            GamepadButton::Paddle3,
+                            GamepadButton::Paddle4,
+                            GamepadButton::Paddle5,
+                            GamepadButton::Paddle6,
+                            GamepadButton::Paddle7,
+                            GamepadButton::Paddle8,
+                        ][number - 1];
+                        let output = if number <= 4 {
+                            GamepadButton::A
+                        } else {
+                            button
+                        };
+                        InputMapping::simple(
+                            InputSource::Button(button),
+                            OutputAction::GamepadButton(output),
+                        )
+                    })
+                    .collect(),
+            }],
             ..InputProfile::default()
         };
         super::write_profile(&path, &profile).unwrap();
@@ -312,8 +301,7 @@ mod tests {
         .unwrap();
 
         let saved = super::read_profile(&path).unwrap();
-        // Loading converts the flat bindings into one action set; the four
-        // reported paddles survive, the unreported ones do not.
+        // The four reported paddles survive, the unreported ones do not.
         let inputs = &saved.action_sets[0].inputs;
         assert_eq!(inputs.len(), 4);
         assert!(inputs.iter().all(|input| {
@@ -344,10 +332,13 @@ mod tests {
         super::write_profile(
             &path,
             &InputProfile {
-                bindings: vec![Binding::new(
-                    InputSource::Button(GamepadButton::A),
-                    OutputAction::Keyboard { keycode: 57 },
-                )],
+                action_sets: vec![ActionSet {
+                    name: "Default".to_string(),
+                    inputs: vec![InputMapping::simple(
+                        InputSource::Button(GamepadButton::A),
+                        OutputAction::Keyboard { keycode: 57 },
+                    )],
+                }],
                 ..InputProfile::default()
             },
         )
@@ -373,16 +364,18 @@ mod tests {
     #[test]
     fn test_controller_default_preserves_gyro_calibration() {
         let tmp = tempfile::tempdir().unwrap();
-        let calibration = GyroCalibration {
+        let calibration = ControllerCalibration {
             x: 0.1,
             y: 0.2,
             z: 0.3,
+            stick_deadzone_left: 0.0,
+            stick_deadzone_right: 0.0,
         };
         let path = super::controller_default_path(tmp.path().to_str().unwrap(), "pad");
         super::write_profile(
             &path,
             &InputProfile {
-                gyro_calibration: calibration,
+                controller_calibration: calibration,
                 ..InputProfile::default()
             },
         )
@@ -396,7 +389,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            super::read_profile(&path).unwrap().gyro_calibration,
+            super::read_profile(&path).unwrap().controller_calibration,
             calibration
         );
     }

@@ -1,19 +1,20 @@
-//! Activator rows for the binding sheet: press patterns with timing,
-//! multi-output lists fed by the tabbed command picker, and per-activator
-//! settings (toggle, repeat).
+//! Activator rows for the binding sheet: press patterns with timing
+//! (picked from Steam's described-option popup), multi-output lists fed by
+//! the tabbed command picker, and per-activator settings (toggle, repeat).
 
 use super::css::{CSS_FLAT, CSS_SQUARE_BUTTON};
 use super::helpers::esc;
 use super::input_output_picker::{show_output_picker, OutputPickerScope};
 use super::input_profile_activator_gate::activator_gate_controls;
-use super::input_profile_sheet_base::{
-    combo_row, is_trigger_axis, spin_row, with_mapping, Reopen, SheetBase,
-};
 use super::input_profile_editor_regions::{activator_kind_label, source_label};
 use super::input_profile_options::output_display_label;
+use super::input_profile_sheet_base::{is_trigger_axis, with_mapping, Reopen, SheetBase};
+use super::input_profile_widgets::{
+    format_ms, format_percent, option_picker_popover, picker_button, slider_row, OptionChoice,
+    SettingGroup, SliderSpec,
+};
 use adw::prelude::*;
 use ira_input::{Activator, ActivatorKind, GamepadButton, InputMapping, OutputAction};
-use std::rc::Rc;
 
 fn kind_index(kind: &ActivatorKind, soft_pull: bool) -> u32 {
     match kind {
@@ -39,32 +40,59 @@ fn make_kind(index: u32, window_ms: u32, duration_ms: u32, threshold: f32) -> Ac
     }
 }
 
-fn kind_labels(soft_pull: bool) -> Vec<String> {
-    let mut labels = [
-        crate::tr!("Click"),
-        crate::tr!("Double press"),
-        crate::tr!("Long press"),
-        crate::tr!("On press down"),
-        crate::tr!("On release"),
-    ]
-    .into_iter()
-    .collect::<Vec<_>>();
+/// Press patterns with Steam-style descriptions; the trailing Soft Pull
+/// entry only exists on trigger sheets.
+fn kind_choices(soft_pull: bool) -> Vec<OptionChoice> {
+    let mut choices = vec![
+        OptionChoice {
+            title: crate::tr!("Click"),
+            description: Some(crate::tr!(
+                "The regular activation: fires when the input is pressed"
+            )),
+        },
+        OptionChoice {
+            title: crate::tr!("Double press"),
+            description: Some(crate::tr!(
+                "Fires when the input is pressed twice in quick succession"
+            )),
+        },
+        OptionChoice {
+            title: crate::tr!("Long press"),
+            description: Some(crate::tr!(
+                "Fires when the input is held past the hold duration"
+            )),
+        },
+        OptionChoice {
+            title: crate::tr!("On press down"),
+            description: Some(crate::tr!(
+                "Fires the instant the input goes down, without waiting for the release"
+            )),
+        },
+        OptionChoice {
+            title: crate::tr!("On release"),
+            description: Some(crate::tr!("Fires when the input is released")),
+        },
+    ];
     if soft_pull {
-        labels.push(crate::tr!("Soft pull"));
+        choices.push(OptionChoice {
+            title: crate::tr!("Soft pull"),
+            description: Some(crate::tr!(
+                "Fires when the trigger crosses the soft pull threshold, before the full pull"
+            )),
+        });
     }
-    labels
+    choices
 }
 
 pub(crate) fn activators_group(
     base: &SheetBase,
     reopen: &Reopen,
     mapping: &InputMapping,
-) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::new();
-    group.set_title(&crate::tr!("Activators"));
-    group.set_description(Some(&crate::tr!(
-        "Different actions by how the input is pressed"
-    )));
+) -> gtk4::Box {
+    let group = SettingGroup::new(
+        Some(&crate::tr!("Activators")),
+        Some(&crate::tr!("Different actions by how the input is pressed")),
+    );
 
     for (index, activator) in mapping.activators.iter().enumerate() {
         group.add(&activator_expander(base, reopen, index, activator));
@@ -74,8 +102,7 @@ pub(crate) fn activators_group(
     // direct child of a preferences group looks wrong and trips GTK
     // widget assertions.
     let add_row = adw::ActionRow::new();
-    let add =
-        super::helpers::icon_label_button("list-add-symbolic", &crate::tr!("Add activator"));
+    let add = super::helpers::icon_label_button("list-add-symbolic", &crate::tr!("Add activator"));
     add_row.add_suffix(&add);
     add_row.set_activatable(true);
     group.add(&add_row);
@@ -94,7 +121,7 @@ pub(crate) fn activators_group(
             reopen();
         });
     }
-    group
+    group.root
 }
 
 fn activator_expander(
@@ -105,11 +132,7 @@ fn activator_expander(
 ) -> adw::ExpanderRow {
     let expander = adw::ExpanderRow::new();
     expander.set_title(&activator_kind_label(&activator.kind));
-    let outputs_summary: Vec<String> = activator
-        .outputs
-        .iter()
-        .map(output_display_label)
-        .collect();
+    let outputs_summary: Vec<String> = activator.outputs.iter().map(output_display_label).collect();
     expander.set_subtitle(&esc(&outputs_summary.join(", ")));
     activator_header_controls(base, reopen, index, &expander);
     activator_kind_controls(base, reopen, index, activator, &expander);
@@ -119,7 +142,12 @@ fn activator_expander(
     expander
 }
 
-fn activator_header_controls(base: &SheetBase, reopen: &Reopen, index: usize, expander: &adw::ExpanderRow) {
+fn activator_header_controls(
+    base: &SheetBase,
+    reopen: &Reopen,
+    index: usize,
+    expander: &adw::ExpanderRow,
+) {
     let remove = gtk4::Button::from_icon_name("user-trash-symbolic");
     remove.add_css_class(CSS_FLAT);
     remove.add_css_class(CSS_SQUARE_BUTTON);
@@ -159,88 +187,103 @@ fn activator_kind_controls(
         ActivatorKind::SoftPress { threshold } => *threshold,
         _ => 0.5,
     };
-    let kind = combo_row(&kind_labels(soft_pull), kind_index(&activator.kind, soft_pull));
-    kind.set_title(&crate::tr!("Press pattern"));
-    expander.add_row(&kind);
+
+    let choices = kind_choices(soft_pull);
+    let selected = kind_index(&activator.kind, soft_pull) as usize;
+    let current_label = choices
+        .get(selected)
+        .map(|choice| choice.title.clone())
+        .unwrap_or_else(|| crate::tr!("Click"));
+    let kind_row = adw::ActionRow::new();
+    kind_row.set_title(&crate::tr!("Press pattern"));
+    kind_row.set_subtitle(&crate::tr!("What kind of press activates this"));
     let base_for_kind = base.clone();
     let reopen_for_kind = reopen.clone();
-    kind.connect_selected_notify(move |dropdown| {
+    let picker = option_picker_popover(&choices, selected, move |picked| {
         with_mapping(&base_for_kind, |input| {
             if let Some(activator) = input.activators.get_mut(index) {
-                activator.kind =
-                    make_kind(dropdown.selected(), timing_window, timing_duration, soft_threshold);
+                activator.kind = make_kind(
+                    picked as u32,
+                    timing_window,
+                    timing_duration,
+                    soft_threshold,
+                );
             }
         });
         (base_for_kind.on_changed)();
         reopen_for_kind();
     });
+    kind_row.add_suffix(&picker_button(&current_label, &picker));
+    expander.add_row(&kind_row);
 
     if let ActivatorKind::DoublePress { window_ms } = &activator.kind {
         let base = base.clone();
-        expander.add_row(&spin_row(
+        expander.add_row(&timing_slider(
             &crate::tr!("Double-press window"),
-            100.0,
-            1000.0,
-            10.0,
-            f64::from(*window_ms),
-            Rc::new(move |value| {
-                with_mapping(&base, |input| {
-                    if let Some(ActivatorKind::DoublePress { window_ms }) = input
-                        .activators
-                        .get_mut(index)
-                        .map(|activator| &mut activator.kind)
-                    {
-                        *window_ms = value as u32;
-                    }
-                });
-                (base.on_changed)();
-            }),
+            Some(&crate::tr!("Time allowed between the two presses")),
+            &SliderSpec(100.0, 1000.0, 10.0, f64::from(*window_ms)),
+            move |value| write_kind_value(&base, index, value, set_double_press_window),
         ));
     }
     if let ActivatorKind::LongPress { duration_ms } = &activator.kind {
         let base = base.clone();
-        expander.add_row(&spin_row(
+        expander.add_row(&timing_slider(
             &crate::tr!("Hold duration"),
-            200.0,
-            2000.0,
-            25.0,
-            f64::from(*duration_ms),
-            Rc::new(move |value| {
-                with_mapping(&base, |input| {
-                    if let Some(ActivatorKind::LongPress { duration_ms }) = input
-                        .activators
-                        .get_mut(index)
-                        .map(|activator| &mut activator.kind)
-                    {
-                        *duration_ms = value as u32;
-                    }
-                });
-                (base.on_changed)();
-            }),
+            Some(&crate::tr!(
+                "How long the input must be held before it fires"
+            )),
+            &SliderSpec(200.0, 2000.0, 25.0, f64::from(*duration_ms)),
+            move |value| write_kind_value(&base, index, value, set_long_press_duration),
         ));
     }
     if let ActivatorKind::SoftPress { threshold } = &activator.kind {
         let base = base.clone();
-        expander.add_row(&spin_row(
+        expander.add_row(&slider_row(
             &crate::tr!("Soft pull threshold"),
-            0.05,
-            0.95,
-            0.05,
-            f64::from(*threshold),
-            Rc::new(move |value| {
-                with_mapping(&base, |input| {
-                    if let Some(ActivatorKind::SoftPress { threshold }) = input
-                        .activators
-                        .get_mut(index)
-                        .map(|activator| &mut activator.kind)
-                    {
-                        *threshold = value as f32;
-                    }
-                });
-                (base.on_changed)();
-            }),
+            Some(&crate::tr!("Trigger travel that fires the soft pull")),
+            &SliderSpec(0.05, 0.95, 0.05, f64::from(*threshold)),
+            format_percent,
+            move |value| write_kind_value(&base, index, value, set_soft_pull_threshold),
         ));
     }
+}
+
+fn timing_slider(
+    title: &str,
+    subtitle: Option<&str>,
+    spec: &SliderSpec,
+    on_change: impl Fn(f64) + 'static,
+) -> gtk4::ListBoxRow {
+    slider_row(title, subtitle, spec, format_ms, on_change)
+}
+
+fn set_double_press_window(kind: &mut ActivatorKind, value: f64) {
+    if let ActivatorKind::DoublePress { window_ms } = kind {
+        *window_ms = value as u32;
+    }
+}
+
+fn set_long_press_duration(kind: &mut ActivatorKind, value: f64) {
+    if let ActivatorKind::LongPress { duration_ms } = kind {
+        *duration_ms = value as u32;
+    }
+}
+
+fn set_soft_pull_threshold(kind: &mut ActivatorKind, value: f64) {
+    if let ActivatorKind::SoftPress { threshold } = kind {
+        *threshold = value as f32;
+    }
+}
+
+/// Writes one activator's kind-specific field from a slider and reports
+/// the change.
+fn write_kind_value(base: &SheetBase, index: usize, value: f64, set: fn(&mut ActivatorKind, f64)) {
+    with_mapping(base, |input| {
+        if let Some(activator) = input.activators.get_mut(index) {
+            set(&mut activator.kind, value);
+        }
+    });
+    (base.on_changed)();
 }
 
 fn activator_output_rows(
@@ -328,7 +371,6 @@ fn picker_scope(base: &SheetBase) -> OutputPickerScope {
     }
 }
 
-
 fn activator_setting_controls(
     base: &SheetBase,
     index: usize,
@@ -353,15 +395,24 @@ fn activator_setting_controls(
     });
 
     if matches!(activator.kind, ActivatorKind::FullPress) {
-        let repeat_ms = activator.settings.repeat_rate_ms.map(f64::from).unwrap_or(0.0);
+        let repeat_ms = activator
+            .settings
+            .repeat_rate_ms
+            .map(f64::from)
+            .unwrap_or(0.0);
         let base_for_repeat = base.clone();
-        expander.add_row(&spin_row(
+        expander.add_row(&slider_row(
             &crate::tr!("Repeat every"),
-            0.0,
-            1000.0,
-            50.0,
-            repeat_ms,
-            Rc::new(move |value| {
+            Some(&crate::tr!("Re-fires the outputs while the input is held")),
+            &SliderSpec(0.0, 1000.0, 50.0, repeat_ms),
+            |value| {
+                if value < 50.0 {
+                    crate::tr!("Off")
+                } else {
+                    format_ms(value)
+                }
+            },
+            move |value| {
                 with_mapping(&base_for_repeat, |input| {
                     if let Some(activator) = input.activators.get_mut(index) {
                         activator.settings.repeat_rate_ms = if value >= 50.0 {
@@ -372,7 +423,7 @@ fn activator_setting_controls(
                     }
                 });
                 (base_for_repeat.on_changed)();
-            }),
+            },
         ));
     }
 }

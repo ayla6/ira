@@ -203,8 +203,7 @@ mod tests {
     use crate::mapping::{InputEvent, MappingEngine, OutputEvent};
     use crate::profile::{
         ActionSet, ActionSetLayer, Activation, Activator, ActivatorKind, ActivatorSettings,
-        Binding, GamepadAxis, GamepadButton, GyroConfig, InputMapping, InputProfile, InputSource,
-        OutputAction,
+        GamepadAxis, GamepadButton, InputMapping, InputProfile, InputSource, OutputAction,
     };
 
     fn profile_with_sets(sets: Vec<ActionSet>, layers: Vec<ActionSetLayer>) -> InputProfile {
@@ -400,26 +399,6 @@ mod tests {
             engine.process(press(InputSource::Button(GamepadButton::A), 1.0, 4_000)),
             vec![OutputEvent::GamepadButton {
                 button: GamepadButton::Y,
-                pressed: true
-            }]
-        );
-    }
-
-    #[test]
-    fn test_bindings_path_unchanged_when_no_sets() {
-        let profile = InputProfile {
-            bindings: vec![Binding::new(
-                InputSource::Button(GamepadButton::A),
-                OutputAction::GamepadButton(GamepadButton::B),
-            )],
-            gyro: GyroConfig::default(),
-            ..InputProfile::default()
-        };
-        let mut engine = MappingEngine::new(profile).unwrap();
-        assert_eq!(
-            engine.process(press(InputSource::Button(GamepadButton::A), 1.0, 1_000)),
-            vec![OutputEvent::GamepadButton {
-                button: GamepadButton::B,
                 pressed: true
             }]
         );

@@ -1,6 +1,7 @@
 use super::game_selection_model::GameSelectionModel;
 use crate::AppSender;
 use crate::Game;
+use gtk4::glib::Bytes;
 use ira_api::types::SgdbAsset;
 use ira_api::SteamDataClient;
 use ira_config::Config;
@@ -8,7 +9,6 @@ use ira_db::DbConn;
 use ira_input::ControllerRegistry;
 use ira_models::{Group, GroupSelection};
 use ira_watcher::AchievementWatcher;
-use gtk4::glib::Bytes;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;

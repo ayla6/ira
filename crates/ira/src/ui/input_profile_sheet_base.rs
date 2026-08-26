@@ -3,7 +3,7 @@
 //! active action set, and the combo/spin row helpers every group uses.
 
 use adw::prelude::*;
-use ira_input::{InputMapping, InputSource, GamepadAxis};
+use ira_input::{GamepadAxis, InputMapping, InputSource};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -42,7 +42,11 @@ pub(crate) fn find_mapping(base: &SheetBase) -> Option<InputMapping> {
 pub(crate) fn with_mapping(base: &SheetBase, apply: impl FnOnce(&mut InputMapping)) {
     let mut borrow = base.profile.borrow_mut();
     if let Some(set) = borrow.action_sets.get_mut(base.active_set) {
-        if let Some(input) = set.inputs.iter_mut().find(|input| input.source == base.source) {
+        if let Some(input) = set
+            .inputs
+            .iter_mut()
+            .find(|input| input.source == base.source)
+        {
             apply(input);
         }
     }
@@ -63,24 +67,5 @@ pub(crate) fn combo_row(labels: &[String], selected: u32) -> adw::ComboRow {
     let row = adw::ComboRow::new();
     row.set_model(Some(&gtk4::StringList::new(&refs)));
     row.set_selected(selected);
-    row
-}
-
-pub(crate) type SpinChange = Rc<dyn Fn(f64)>;
-
-pub(crate) fn spin_row(
-    title: &str,
-    min: f64,
-    max: f64,
-    step: f64,
-    value: f64,
-    on_change: SpinChange,
-) -> adw::SpinRow {
-    let row = adw::SpinRow::with_range(min, max, step);
-    row.set_title(&super::helpers::esc(title));
-    row.set_value(value);
-    row.connect_value_notify(move |row| {
-        on_change(row.value());
-    });
     row
 }

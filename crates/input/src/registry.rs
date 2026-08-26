@@ -155,13 +155,13 @@ fn has_relevant_event(inotify: &Inotify, buffer: &mut [u8]) -> EventState {
     let count = match read_events(inotify.fd, buffer) {
         Ok(count) => count,
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-            return EventState::default()
+            return EventState::default();
         }
         Err(_) => {
             return EventState {
                 relevant: true,
                 ..EventState::default()
-            }
+            };
         }
     };
     parse_events(&buffer[..count])

@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::profile::GyroCalibration;
+use crate::profile::ControllerCalibration;
 
 /// `vendor:product` in lowercase hex, matching how controllers are identified
 /// everywhere else.
@@ -22,9 +22,9 @@ pub fn calibration_store_path(save_dir: &str) -> std::path::PathBuf {
     Path::new(save_dir).join("controller_calibration.json")
 }
 
-pub fn load_calibration(path: &Path, vendor: u16, product: u16) -> Option<GyroCalibration> {
+pub fn load_calibration(path: &Path, vendor: u16, product: u16) -> Option<ControllerCalibration> {
     let text = std::fs::read_to_string(path).ok()?;
-    let entries: HashMap<String, GyroCalibration> = serde_json::from_str(&text).ok()?;
+    let entries: HashMap<String, ControllerCalibration> = serde_json::from_str(&text).ok()?;
     entries.get(&device_key(vendor, product)).copied()
 }
 
@@ -32,9 +32,9 @@ pub fn save_calibration(
     path: &Path,
     vendor: u16,
     product: u16,
-    calibration: &GyroCalibration,
+    calibration: &ControllerCalibration,
 ) -> Result<(), String> {
-    let mut entries: HashMap<String, GyroCalibration> = match std::fs::read_to_string(path) {
+    let mut entries: HashMap<String, ControllerCalibration> = match std::fs::read_to_string(path) {
         Ok(text) => serde_json::from_str(&text)
             .map_err(|error| format!("could not parse controller calibration: {error}"))?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
@@ -52,7 +52,7 @@ pub fn save_calibration(
 }
 
 pub fn remove_calibration(path: &Path, vendor: u16, product: u16) -> Result<(), String> {
-    let mut entries: HashMap<String, GyroCalibration> = match std::fs::read_to_string(path) {
+    let mut entries: HashMap<String, ControllerCalibration> = match std::fs::read_to_string(path) {
         Ok(text) => serde_json::from_str(&text)
             .map_err(|error| format!("could not parse controller calibration: {error}"))?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -74,10 +74,12 @@ mod tests {
             path,
             vendor,
             product,
-            &GyroCalibration {
+            &ControllerCalibration {
                 x: bias,
                 y: 0.0,
                 z: 0.0,
+                stick_deadzone_left: 0.0,
+                stick_deadzone_right: 0.0,
             },
         )
         .unwrap();

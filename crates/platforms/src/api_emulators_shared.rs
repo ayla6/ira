@@ -11,16 +11,23 @@ pub(crate) fn backup_file(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Restore the original file behind `path` from whichever backup variant
+/// exists (ours: `.dll.bak`; other tools: `.bak.dll`, `.owo`, `_o.dll`).
+/// Our own `.ext.bak` wins when several variants coexist, since it holds
+/// what we replaced last.
 pub(crate) fn restore_backup(path: &Path) -> Result<(), String> {
-    let bak = path.with_extension(format!(
-        "{}.bak",
-        path.extension().and_then(|e| e.to_str()).unwrap_or("")
-    ));
-    if bak.exists() {
-        if path.exists() {
-            std::fs::remove_file(path).map_err(|e| format!("remove emu file: {}", e))?;
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return Ok(());
+    };
+    for variant in backup_variants(name) {
+        let bak = path.with_file_name(variant);
+        if bak.exists() {
+            if path.exists() {
+                std::fs::remove_file(path).map_err(|e| format!("remove emu file: {}", e))?;
+            }
+            std::fs::rename(&bak, path).map_err(|e| format!("restore backup: {}", e))?;
+            break;
         }
-        std::fs::rename(&bak, path).map_err(|e| format!("restore backup: {}", e))?;
     }
     Ok(())
 }
@@ -41,15 +48,8 @@ pub fn list_denuvo_versions(save_dir: &str) -> Vec<String> {
     let mut versions = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&root) {
         for entry in entries.flatten() {
-            if entry
-                .file_type()
-                .map(|t| t.is_file())
-                .unwrap_or(false)
-                && entry
-                    .path()
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    == Some("so")
+            if entry.file_type().map(|t| t.is_file()).unwrap_or(false)
+                && entry.path().extension().and_then(|e| e.to_str()) == Some("so")
             {
                 if let Some(name) = entry.file_name().to_str() {
                     versions.push(name.to_string());
@@ -83,6 +83,59 @@ pub(crate) fn detect_arch(game_exe: &str) -> &'static str {
 
 pub(crate) fn is_windows(game_exe: &str) -> bool {
     game_exe.ends_with(".exe") || game_exe.ends_with(".bat")
+}
+
+/// Detect bitness from the DLLs actually present in `dir`, most specific
+/// signal first (file names compared case-insensitively): any `names_64`
+/// file → 64-bit; else a 64-marked folder name (`Win64`, `x86_64`, `bin64`)
+/// → 64-bit even for unsuffixed names like `steam_api.dll`/`libsteam_api.so`;
+/// else any `names_32` file → 32-bit; otherwise `None` (callers fall back to
+/// exe heuristics).
+pub(crate) fn detect_folder_bitness(
+    dir: &Path,
+    names_64: &[&str],
+    names_32: &[&str],
+) -> Option<bool> {
+    if dir_contains_any(dir, names_64) {
+        return Some(true);
+    }
+    if folder_name_says_64(dir) {
+        return Some(true);
+    }
+    if dir_contains_any(dir, names_32) {
+        return Some(false);
+    }
+    None
+}
+
+/// Case-insensitive check whether `dir` directly contains any of `names`.
+fn dir_contains_any(dir: &Path, names: &[&str]) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    let lower: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
+    entries.flatten().any(|e| {
+        e.file_name()
+            .to_str()
+            .map(|s| lower.contains(&s.to_lowercase()))
+            .unwrap_or(false)
+    })
+}
+
+/// Whether `dir`'s own name or its parent's name marks it as 64-bit:
+/// ends in "64" (`Win64`, `x86_64`, `bin64`) or contains `64bit`.
+fn folder_name_says_64(dir: &Path) -> bool {
+    [dir.file_name(), dir.parent().and_then(Path::file_name)]
+        .into_iter()
+        .flatten()
+        .any(|c| {
+            c.to_str()
+                .map(|s| {
+                    let s = s.to_lowercase();
+                    s.ends_with("64") || s.contains("64bit")
+                })
+                .unwrap_or(false)
+        })
 }
 
 pub(crate) fn find_api_emu_dll_folder(game_exe: &str, dll_names: &[&str]) -> Option<PathBuf> {
@@ -169,10 +222,12 @@ pub(crate) fn find_game_dll_folder(
     dirs.into_iter().next()
 }
 
-/// Backup filename variants for a given DLL name.
+/// Backup filename variants for a given DLL name — our own backups plus the
+/// rename conventions other tools use for the stashed original.
 /// For `steam_api64.dll` returns:
 ///   `steam_api64.dll.bak`, `steam_api64.bak.dll`,
-///   `steam_api64.owo.dll`, `steam_api64.dll.owo`
+///   `steam_api64.owo.dll`, `steam_api64.dll.owo`,
+///   `steam_api64_o.dll`
 fn backup_variants(dll_name: &str) -> Vec<String> {
     let (stem, ext) = match dll_name.rsplit_once('.') {
         Some((s, e)) => (s, e),
@@ -183,12 +238,16 @@ fn backup_variants(dll_name: &str) -> Vec<String> {
         format!("{}.bak.{}", stem, ext),
         format!("{}.owo.{}", stem, ext),
         format!("{}.{}.owo", stem, ext),
+        format!("{}_o.{}", stem, ext),
     ]
 }
 
 /// Check whether `dir` contains any emulator backup file for the given DLL
-/// names. Returns true if the emulator appears to already be installed
-/// (originals backed up as `.dll.bak`, `.bak.dll`, `.owo.dll`, or `.dll.owo`).
+/// names. Returns true if the API setup appears to already be patched —
+/// either by ira (originals backed up as `.dll.bak`, `.bak.dll`, `.owo.dll`,
+/// `.dll.owo`) or by another tool that renamed originals to `_o.dll`.
+/// Such directories are treated as already handled: no new install is
+/// attempted, and uninstall restores the stashed original.
 pub fn has_emulator_backups(dir: &Path, dll_names: &[&str]) -> bool {
     for dll in dll_names {
         for variant in backup_variants(dll) {
@@ -222,6 +281,7 @@ mod tests {
                 "steam_api64.bak.dll".to_string(),
                 "steam_api64.owo.dll".to_string(),
                 "steam_api64.dll.owo".to_string(),
+                "steam_api64_o.dll".to_string(),
             ]
         );
     }
@@ -236,6 +296,7 @@ mod tests {
                 "libsteam_api.bak.so".to_string(),
                 "libsteam_api.owo.so".to_string(),
                 "libsteam_api.so.owo".to_string(),
+                "libsteam_api_o.so".to_string(),
             ]
         );
     }
@@ -255,6 +316,7 @@ mod tests {
             "steam_api64.dll.bak",
             "steam_api64.bak.dll",
             "steam_api64.owo.dll",
+            "steam_api64_o.dll",
         ] {
             std::fs::write(dir.join(name), b"x").unwrap();
             assert!(
@@ -265,6 +327,143 @@ mod tests {
             std::fs::remove_file(dir.join(name)).unwrap();
         }
         assert!(!has_emulator_backups(dir, &["steam_api64.dll"]));
+    }
+
+    #[test]
+    fn test_restore_backup_restores_o_variant() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("steam_api64_o.dll"), b"original").unwrap();
+        std::fs::write(dir.join("steam_api64.dll"), b"emulator").unwrap();
+
+        restore_backup(&dir.join("steam_api64.dll")).unwrap();
+
+        assert!(!dir.join("steam_api64_o.dll").exists());
+        assert_eq!(
+            std::fs::read(dir.join("steam_api64.dll")).unwrap(),
+            b"original"
+        );
+    }
+
+    #[test]
+    fn test_restore_backup_prefers_own_bak_over_o() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        // GSE installed on top of a crack that had renamed the original to _o:
+        // our .bak holds the crack wrapper, the _o file must stay untouched.
+        std::fs::write(dir.join("steam_api64_o.dll"), b"crack-original").unwrap();
+        std::fs::write(dir.join("steam_api64.dll.bak"), b"wrapper").unwrap();
+        std::fs::write(dir.join("steam_api64.dll"), b"emulator").unwrap();
+
+        restore_backup(&dir.join("steam_api64.dll")).unwrap();
+
+        assert_eq!(
+            std::fs::read(dir.join("steam_api64.dll")).unwrap(),
+            b"wrapper"
+        );
+        assert!(dir.join("steam_api64_o.dll").exists());
+    }
+
+    #[test]
+    fn test_restore_backup_noop_without_backups() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("steam_api64.dll"), b"emulator").unwrap();
+
+        restore_backup(&dir.join("steam_api64.dll")).unwrap();
+
+        assert_eq!(
+            std::fs::read(dir.join("steam_api64.dll")).unwrap(),
+            b"emulator"
+        );
+    }
+
+    #[test]
+    fn test_detect_folder_bitness_prefers_64_when_both_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("steam_api.dll"), b"x").unwrap();
+        std::fs::write(dir.join("steam_api64.dll"), b"x").unwrap();
+        assert_eq!(
+            detect_folder_bitness(
+                dir,
+                &["steam_api64.dll", "libsteam_api64.so"],
+                &["steam_api.dll", "libsteam_api.so"]
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_detect_folder_bitness_32() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("steam_api.dll"), b"x").unwrap();
+        assert_eq!(
+            detect_folder_bitness(dir, &["steam_api64.dll"], &["steam_api.dll"]),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn test_detect_folder_bitness_unknown() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            detect_folder_bitness(tmp.path(), &["steam_api64.dll"], &["steam_api.dll"]),
+            None
+        );
+    }
+
+    #[test]
+    fn test_detect_folder_bitness_uses_folder_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("win64");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("steam_api.dll"), b"x").unwrap();
+        assert_eq!(
+            detect_folder_bitness(&dir, &["steam_api64.dll"], &["steam_api.dll"]),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_detect_folder_bitness_uses_parent_folder_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("x86_64").join("bin");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("libsteam_api.so"), b"x").unwrap();
+        assert_eq!(
+            detect_folder_bitness(&dir, &["libsteam_api64.so"], &["libsteam_api.so"]),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_detect_folder_bitness_folder_name_beats_unsuffixed_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("win64");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("steam_api.dll"), b"x").unwrap();
+        assert_eq!(
+            detect_folder_bitness(
+                &dir,
+                &["steam_api64.dll", "libsteam_api64.so"],
+                &["steam_api.dll", "libsteam_api.so"]
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn test_detect_folder_bitness_32_folder_stays_32() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("win32");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("steam_api.dll"), b"x").unwrap();
+        assert_eq!(
+            detect_folder_bitness(&dir, &["steam_api64.dll"], &["steam_api.dll"]),
+            Some(false)
+        );
     }
 
     #[test]
@@ -313,7 +512,10 @@ mod tests {
         std::fs::write(root.join("notes.txt"), b"x").unwrap();
 
         let versions = list_denuvo_versions(&save_dir.to_string_lossy());
-        assert_eq!(versions, vec!["denuvo-1.so".to_string(), "denuvo-2.so".to_string()]);
+        assert_eq!(
+            versions,
+            vec!["denuvo-1.so".to_string(), "denuvo-2.so".to_string()]
+        );
     }
 
     #[test]

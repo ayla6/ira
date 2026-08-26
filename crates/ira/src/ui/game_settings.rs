@@ -322,8 +322,15 @@ fn add_emulator_dropdown_section(
     pending_ra_core: &Rc<RefCell<Option<String>>>,
     pending_emulator: &Rc<RefCell<Option<String>>>,
 ) {
-    let emulators = ira_platforms::emulator_detect::detect_emulators(&game.platform_id);
-    let cores = ira_platforms::emulator_detect::detect_ra_cores_for_console(&game.platform_id);
+    // Retro games key detection off their console platform; Azahar and
+    // Cemu games carry a title id as platform, so map the kind instead.
+    let console_id: &str = match game.kind {
+        ira_models::GameKind::ThreeDS => "3ds",
+        ira_models::GameKind::WiiU => "wiiu",
+        _ => &game.platform_id,
+    };
+    let emulators = ira_platforms::emulator_detect::detect_emulators(console_id);
+    let cores = ira_platforms::emulator_detect::detect_ra_cores_for_console(console_id);
     if emulators.is_empty() {
         return;
     }
@@ -409,10 +416,20 @@ fn build_retro_emulator_and_ra(
     let pending_emulator: Rc<RefCell<Option<String>>> = Default::default();
     let mut ra_container: Option<gtk4::Box> = None;
 
+    // Retro games pick emulator + RA core per game; PS3, Cemu and Azahar
+    // games pick the emulator install per game — only these launch paths
+    // consume the generic emulator override (PS4 has its own version
+    // selector, Vita3K has a single launcher). Both store the choice as a
+    // generic emulator override.
     if game.kind == ira_models::GameKind::Retro {
         add_emulator_dropdown_section(page, game, &pending_ra_core, &pending_emulator);
         let container = build_ra_container(page, state, game, win, pending_copies);
         ra_container = Some(container);
+    } else if matches!(
+        game.kind,
+        ira_models::GameKind::ThreeDS | ira_models::GameKind::WiiU | ira_models::GameKind::Ps3
+    ) {
+        add_emulator_dropdown_section(page, game, &pending_ra_core, &pending_emulator);
     }
 
     (pending_ra_core, pending_emulator, ra_container)
@@ -457,7 +474,6 @@ fn build_service_ids_section(
         let db_id = game.db_id;
         let win_c = Downgrade::downgrade(win);
         let row_c = Downgrade::downgrade(&row);
-        let matched_name = game.name.clone();
         search_btn.connect_clicked(move |_| {
             let Some(win) = win_c.upgrade() else {
                 return;
@@ -467,9 +483,8 @@ fn build_service_ids_section(
             };
             let on_select = {
                 let sc = sc.clone();
-                let name = matched_name.clone();
-                Rc::new(move |sid: &str| {
-                    match_game_to_steam(&sc, db_id, sid.to_string(), name.clone());
+                Rc::new(move |sid: &str, matched_name: &str| {
+                    match_game_to_steam(&sc, db_id, sid.to_string(), matched_name.to_string());
                 })
             };
             super::steam_search::show_steam_id_search_popup(

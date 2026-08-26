@@ -34,19 +34,40 @@ pub fn normalize_title(s: &str) -> String {
     words[..end].join(" ")
 }
 
+/// Games with no store or SGDB id at all: candidates for a Steam store
+/// match. Console-emulator games and Retro ROMs are excluded — their names
+/// come from title ids/ROM files, so Steam search is noise; they are
+/// enriched through SGDB (and RA) instead.
+fn needs_steam_match(g: &Game) -> bool {
+    g.app_id.is_empty()
+        && g.sgdb_id.is_empty()
+        && !g.manual_unmatch
+        && !g.kind.is_console_emulator()
+        && g.kind != ira_models::GameKind::Retro
+}
+
+/// Games an SGDB match can enrich: everything without an SGDB id that has
+/// no Steam-driven enrichment path (console-emulator games, Retro ROMs, and
+/// games with no ids at all).
+fn needs_sgdb_match(g: &Game) -> bool {
+    g.sgdb_id.is_empty()
+        && !g.manual_unmatch
+        && (g.app_id.is_empty()
+            || g.kind == ira_models::GameKind::Retro
+            || g.kind.is_console_emulator())
+}
+
 fn collect_unmatched_games(state: &SharedState) -> (Vec<Game>, Vec<(String, String, String)>) {
     let s = state.borrow();
     let games = s.games.clone();
     let needs_matching: Vec<Game> = games
         .into_iter()
         .filter(|g| {
-            (g.app_id.is_empty() && !g.manual_unmatch)
+            needs_steam_match(g)
                 || (g.kind == ira_models::GameKind::Retro
                     && g.trophy_source == ira_models::TrophySource::Empty
                     && !g.manual_unmatch)
-                || (g.sgdb_id.is_empty()
-                    && !g.manual_unmatch
-                    && (g.app_id.is_empty() || g.kind == ira_models::GameKind::Retro))
+                || needs_sgdb_match(g)
         })
         .collect();
     let save_dir = &s.save_dir;
@@ -112,7 +133,7 @@ fn populate_match_list(
             inner.append(&ra_btn);
             ac
         } else {
-            let searching_text = if game.app_id.is_empty() && !game.manual_unmatch {
+            let searching_text = if needs_steam_match(game) {
                 crate::tr!("Searching Steam...")
             } else {
                 crate::tr!("Searching SGDB...")
@@ -134,13 +155,13 @@ fn start_steam_batch_matching(
 ) {
     let steam_games: Vec<(String, i64, ira_models::GameKind)> = needs_matching
         .iter()
-        .filter(|g| g.app_id.is_empty() && !g.manual_unmatch)
+        .filter(|g| needs_steam_match(g))
         .map(|g| (g.name.clone(), g.db_id, g.kind))
         .collect();
     let steam_row_indices: Vec<usize> = needs_matching
         .iter()
         .enumerate()
-        .filter(|(_, g)| g.app_id.is_empty() && !g.manual_unmatch)
+        .filter(|(_, g)| needs_steam_match(g))
         .map(|(i, _)| i)
         .collect();
 
@@ -227,11 +248,7 @@ fn start_sgdb_batch_matching(
     let sgdb_games: Vec<(String, i64, usize)> = needs_matching
         .iter()
         .enumerate()
-        .filter(|(_, g)| {
-            g.sgdb_id.is_empty()
-                && !g.manual_unmatch
-                && (g.app_id.is_empty() || g.kind == ira_models::GameKind::Retro)
-        })
+        .filter(|(_, g)| needs_sgdb_match(g))
         .map(|(row_idx, g)| (g.name.clone(), g.db_id, row_idx))
         .collect();
 
@@ -385,4 +402,60 @@ fn create_match_row(list: &gtk4::ListBox, name: &str, searching_text: &str) -> g
 
     list.append(&row);
     action_box
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn game(kind: ira_models::GameKind) -> Game {
+        Game {
+            kind,
+            ..Game::default()
+        }
+    }
+
+    #[test]
+    fn test_needs_steam_match_requires_no_ids_at_all() {
+        let mut g = game(ira_models::GameKind::Wine);
+        assert!(needs_steam_match(&g));
+        g.sgdb_id = "123".to_string();
+        assert!(
+            !needs_steam_match(&g),
+            "SGDB-only game must not steam-match"
+        );
+        g.sgdb_id.clear();
+        g.manual_unmatch = true;
+        assert!(!needs_steam_match(&g));
+    }
+
+    #[test]
+    fn test_needs_steam_match_skips_console_and_retro_kinds() {
+        for kind in [
+            ira_models::GameKind::ThreeDS,
+            ira_models::GameKind::WiiU,
+            ira_models::GameKind::Retro,
+        ] {
+            assert!(!needs_steam_match(&game(kind)), "{kind} has no steam path");
+        }
+    }
+
+    #[test]
+    fn test_needs_sgdb_match_covers_console_kinds_with_ids() {
+        let mut g = game(ira_models::GameKind::ThreeDS);
+        g.app_id = "00040000000e5c00".to_string();
+        assert!(needs_sgdb_match(&g), "3ds games match via sgdb by default");
+        g.sgdb_id = "42".to_string();
+        assert!(!needs_sgdb_match(&g));
+        g.sgdb_id.clear();
+        g.manual_unmatch = true;
+        assert!(!needs_sgdb_match(&g));
+    }
+
+    #[test]
+    fn test_needs_sgdb_match_skips_steam_enriched_games() {
+        let mut g = game(ira_models::GameKind::Wine);
+        g.app_id = "420530".to_string();
+        assert!(!needs_sgdb_match(&g), "steam-driven enrichment owns these");
+    }
 }

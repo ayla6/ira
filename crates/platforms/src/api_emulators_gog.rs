@@ -1,6 +1,6 @@
 use crate::api_emulators_shared::{
-    api_emulators_dir, backup_file, copy_file, detect_arch, find_game_dll_folder, is_windows,
-    restore_backup,
+    api_emulators_dir, backup_file, copy_file, detect_arch, detect_folder_bitness,
+    find_game_dll_folder, is_windows, restore_backup,
 };
 use ira_models::AppDetails;
 use std::path::{Path, PathBuf};
@@ -107,6 +107,12 @@ pub fn write_nge_language(settings_dir: &Path, language: &str) -> Result<(), Str
 }
 
 const NGE_VERSION_FILES: &[&str] = &["Galaxy.dll", "Galaxy64.dll"];
+
+/// Files in a game folder indicating a 64-bit Galaxy setup.
+const GALAXY_64_FILES: &[&str] = &["Galaxy64.dll", "galaxy64.dll"];
+
+/// Files in a game folder indicating a 32-bit Galaxy setup.
+const GALAXY_32_FILES: &[&str] = &["Galaxy.dll", "galaxy.dll"];
 
 fn nge_file_map(is_64: bool) -> &'static [(&'static str, &'static str)] {
     if is_64 {
@@ -296,7 +302,8 @@ pub fn install_nge(
         );
     }
 
-    let is64 = detect_arch(game_exe) == "x64";
+    let is64 = detect_folder_bitness(&dll_folder, GALAXY_64_FILES, GALAXY_32_FILES)
+        .unwrap_or_else(|| detect_arch(game_exe) == "x64");
     install_nge_into_folder(save_dir, &dll_folder, is64, product_id, version)?;
     Ok(dll_folder)
 }
@@ -317,7 +324,12 @@ pub fn install_nge_from_folder(
         .find(|d| !is_nge_installed(d))
         .ok_or_else(|| "No unpatched GOG Galaxy DLLs found in game folder".to_string())?;
 
-    let is64 = dll_folder.join("Galaxy64.dll").exists() || dll_folder.join("galaxy64.dll").exists();
+    let is64 = detect_folder_bitness(
+        dll_folder,
+        &["Galaxy64.dll", "galaxy64.dll"],
+        &["Galaxy.dll", "galaxy.dll"],
+    )
+    .unwrap_or(false);
     install_nge_into_folder(save_dir, dll_folder, is64, product_id, version)
 }
 

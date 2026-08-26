@@ -3,7 +3,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::{DeviceInfo, GyroCalibration};
+use crate::{ControllerCalibration, DeviceInfo};
 
 const SDL_INIT_GAMEPAD: u32 = 0x0000_2000;
 const SDL_INIT_EVENTS: u32 = 0x0000_4000;
@@ -148,7 +148,7 @@ enum SensorSource {
     Global(*mut c_void),
 }
 
-impl GyroCalibration {
+impl ControllerCalibration {
     pub fn from_samples(samples: &[SensorSample]) -> Option<Self> {
         if samples.is_empty() {
             return None;
@@ -164,6 +164,8 @@ impl GyroCalibration {
             x: sums[0] / count,
             y: sums[1] / count,
             z: sums[2] / count,
+            stick_deadzone_left: 0.0,
+            stick_deadzone_right: 0.0,
         })
     }
 }
@@ -253,7 +255,7 @@ impl Sdl3SensorBackend {
         self.read_raw(timestamp_us)
     }
 
-    pub fn calibrate(&mut self, duration: Duration) -> Result<GyroCalibration, String> {
+    pub fn calibrate(&mut self, duration: Duration) -> Result<ControllerCalibration, String> {
         let deadline = Instant::now() + duration;
         let mut samples = Vec::new();
         while Instant::now() < deadline {
@@ -262,7 +264,7 @@ impl Sdl3SensorBackend {
             }
             thread::sleep(Duration::from_millis(4));
         }
-        GyroCalibration::from_samples(&samples)
+        ControllerCalibration::from_samples(&samples)
             .ok_or_else(|| "SDL3 returned no gyro samples during calibration".to_string())
     }
 
@@ -493,7 +495,9 @@ fn c_string(pointer: *const c_char) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{names_match, select_gyro_id, sensor_timestamp_us, GyroCalibration, SensorSample};
+    use super::{
+        names_match, select_gyro_id, sensor_timestamp_us, ControllerCalibration, SensorSample,
+    };
 
     fn sample(gyro: [f32; 3], timestamp_us: u64) -> SensorSample {
         SensorSample {
@@ -530,7 +534,7 @@ mod tests {
 
     #[test]
     fn test_gyro_calibration_averages_samples() {
-        let calibration = GyroCalibration::from_samples(&[
+        let calibration = ControllerCalibration::from_samples(&[
             sample([0.1, 0.2, 0.3], 1),
             sample([0.3, 0.4, 0.5], 2),
         ])
@@ -538,7 +542,7 @@ mod tests {
         assert!((calibration.x - 0.2).abs() < 0.001);
         assert!((calibration.y - 0.3).abs() < 0.001);
         assert!((calibration.z - 0.4).abs() < 0.001);
-        assert!(GyroCalibration::from_samples(&[]).is_none());
+        assert!(ControllerCalibration::from_samples(&[]).is_none());
     }
 
     #[test]

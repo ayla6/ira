@@ -120,7 +120,14 @@ pub const CONSOLES: &[ConsoleDef] = &[
         id: "nds",
         display_name: "Nintendo DS",
         ra_console_id: 18,
-        extensions: &["nds", "7z", "zip"],
+        // DS ROMs (nds/srl/dsi/ids, optionally Zstandard-compressed) plus
+        // the archive formats melonDS opens; the scanner matches the final
+        // path suffix, so `game.nds.zst` and `game.tar.zst` both hit `zst`.
+        extensions: &[
+            "nds", "srl", "dsi", "ids", "zst", "zip", "7z", "tar", "gz", "tgz", "xz", "txz", "bz2",
+            "tbz2", "lz4", "tlz4", "tzst", "z", "taz", "lz", "lzma", "tlz", "lrz", "tlrz", "lzo",
+            "tzo",
+        ],
         binary_names: &[],
         flatpak_id: "",
         emu_display_name: "RetroArch",

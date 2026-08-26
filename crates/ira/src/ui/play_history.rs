@@ -372,7 +372,13 @@ pub fn show_daily_history_dialog(state: &SharedState) {
         let assignment = assign_game_colors(&all_sessions);
         let weeks = compute_app_weeks(&all_sessions, &assignment, &game_names);
 
-        box_.append(&build_weekly_chart(weeks, false, None, None, Rc::new(Cell::new(false))));
+        box_.append(&build_weekly_chart(
+            weeks,
+            false,
+            None,
+            None,
+            Rc::new(Cell::new(false)),
+        ));
     }
 
     toolbar_view.set_content(Some(&box_));

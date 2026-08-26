@@ -12,15 +12,17 @@ use super::input_profile_sheet_base::{
 use super::input_profile_source_modes::{
     mode_label, mode_setting_rows, modes_for, same_mode, ModeTarget,
 };
+use super::input_profile_widgets::SettingGroup;
 use adw::prelude::*;
 use ira_input::{InputSource, ModeShift};
 
-pub(crate) fn shifts_group(base: &SheetBase, reopen: &Reopen) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::new();
-    group.set_title(&crate::tr!("Mode shifts"));
-    group.set_description(Some(&crate::tr!(
-        "While the shift button is held, this input uses the shifted behavior"
-    )));
+pub(crate) fn shifts_group(base: &SheetBase, reopen: &Reopen) -> gtk4::Box {
+    let group = SettingGroup::new(
+        Some(&crate::tr!("Mode shifts")),
+        Some(&crate::tr!(
+            "While the shift button is held, this input uses the shifted behavior"
+        )),
+    );
 
     if let Some(mapping) = find_mapping(base) {
         for (shift_index, shift) in mapping.mode_shifts.iter().enumerate() {
@@ -58,7 +60,7 @@ pub(crate) fn shifts_group(base: &SheetBase, reopen: &Reopen) -> adw::Preference
         }
     });
 
-    group
+    group.root
 }
 
 fn shift_row(
@@ -99,7 +101,11 @@ fn shift_expander(
     let selected = shift
         .mode
         .as_ref()
-        .and_then(|mode| modes.iter().position(|candidate| same_mode(candidate, mode)))
+        .and_then(|mode| {
+            modes
+                .iter()
+                .position(|candidate| same_mode(candidate, mode))
+        })
         .unwrap_or(0);
     let mut labels: Vec<String> = vec![crate::tr!("Keep base behavior")];
     labels.extend(
@@ -113,10 +119,7 @@ fn shift_expander(
     let base_for_combo = base.clone();
     let reopen_for_combo = reopen.clone();
     combo.connect_selected_notify(move |dropdown| {
-        let mode = modes
-            .get(dropdown.selected() as usize)
-            .cloned()
-            .flatten();
+        let mode = modes.get(dropdown.selected() as usize).cloned().flatten();
         with_mapping(&base_for_combo, |input| {
             if let Some(shift) = input.mode_shifts.get_mut(shift_index) {
                 shift.mode = mode;
@@ -128,7 +131,7 @@ fn shift_expander(
     expander.add_row(&combo);
 
     if let Some(mode) = &shift.mode {
-        for row in mode_setting_rows(base, ModeTarget::Shift(shift_index), mode) {
+        for row in mode_setting_rows(base, ModeTarget::Shift(shift_index), mode, reopen) {
             expander.add_row(&row);
         }
     }

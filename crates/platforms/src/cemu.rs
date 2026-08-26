@@ -181,8 +181,18 @@ pub fn discover_games() -> Vec<CemuGame> {
 }
 
 pub fn discover_games_for_executable(executable: &str) -> Vec<CemuGame> {
-    if executable.contains('/') && !Path::new(executable).is_file() {
-        return Vec::new();
+    // A missing native executable must not stop discovery: game paths live
+    // in Cemu's own settings (portable or XDG), which is readable even when
+    // the launch command is stale (renamed AppImage, moved binary…).
+    if !executable.is_empty()
+        && !executable.starts_with("flatpak:")
+        && executable.contains('/')
+        && !Path::new(executable).is_file()
+    {
+        eprintln!(
+            "Cemu executable not found, scanning its settings anyway: {}",
+            executable
+        );
     }
     let mlc = mlc_path_for(executable);
     let mut roots = configured_game_paths_for(executable);
@@ -197,8 +207,13 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<CemuGame> {
         scan_dir(&root, 0, &mut games);
     }
 
+    // The same title can be reachable from several roots (a configured game
+    // path and the mlc storage); a title ID uniquely identifies a Wii U
+    // title, so dedupe on it instead of the path to avoid duplicating the
+    // game in the library. Configured game paths are scanned first, so the
+    // user-chosen location wins.
     let mut seen = HashSet::new();
-    games.retain(|game| seen.insert(game.game_path.clone()));
+    games.retain(|game| seen.insert(game.title_id.clone()));
     games
 }
 
@@ -217,9 +232,37 @@ mod tests {
         );
     }
 
+    /// A stale launch command (renamed AppImage, moved binary) must not
+    /// hide games: discovery falls back to the portable settings next to it.
     #[test]
-    fn test_discover_cemu_games_missing_root() {
-        assert!(discover_games_for_executable("/nonexistent/cemu").is_empty());
+    fn test_discover_cemu_stale_executable_still_scans_settings() {
+        let tmp = tempfile::tempdir().unwrap();
+        // The configured executable itself does not exist.
+        let exe = tmp.path().join("cemu");
+        assert!(!exe.exists());
+        let portable = tmp.path().join("portable");
+        std::fs::create_dir_all(&portable).unwrap();
+        let games_dir = tmp.path().join("games");
+        std::fs::create_dir_all(&games_dir).unwrap();
+        std::fs::write(
+            portable.join("settings.xml"),
+            format!(
+                "<CemuSettings><GamePaths><Entry>{}</Entry></GamePaths></CemuSettings>",
+                games_dir.display()
+            ),
+        )
+        .unwrap();
+        std::fs::create_dir_all(games_dir.join("MyGame/meta")).unwrap();
+        std::fs::write(
+            games_dir.join("MyGame/meta/meta.xml"),
+            r#"<menu><title_id>0005000010101D00</title_id><longname_en>Test Game</longname_en></menu>"#,
+        )
+        .unwrap();
+
+        let games = discover_games_for_executable(&exe.to_string_lossy());
+
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].title_id, "0005000010101d00");
     }
 
     #[test]
@@ -247,5 +290,64 @@ mod tests {
         assert_eq!(games.len(), 1);
         assert_eq!(games[0].title_id, "0005000010101d00");
         assert_eq!(games[0].title, "Test Game");
+    }
+
+    fn write_title(dir: &Path, title_id: &str) {
+        std::fs::create_dir_all(dir.join("meta")).unwrap();
+        std::fs::write(
+            dir.join("meta/meta.xml"),
+            format!(
+                r#"<menu><title_id>{title_id}</title_id><longname_en>Test Game</longname_en></menu>"#
+            ),
+        )
+        .unwrap();
+    }
+
+    /// Fixture: a portable Cemu install whose settings point at a games
+    /// folder holding one title, while the mlc storage holds a copy of the
+    /// same title under its content directory.
+    fn cemu_fixture_with_duplicated_title() -> (tempfile::TempDir, String) {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = tmp.path().join("Cemu");
+        std::fs::write(&exe, b"").unwrap();
+        let portable = tmp.path().join("portable");
+        std::fs::create_dir_all(&portable).unwrap();
+        let games_dir = tmp.path().join("games");
+        std::fs::create_dir_all(&games_dir).unwrap();
+        std::fs::write(
+            portable.join("settings.xml"),
+            format!(
+                "<CemuSettings><GamePaths><Entry>{}</Entry></GamePaths></CemuSettings>",
+                games_dir.display()
+            ),
+        )
+        .unwrap();
+        write_title(&games_dir.join("MyGame"), "0005000010101D00");
+        write_title(
+            &portable.join("mlc01/usr/title/00050000/10101d00"),
+            "0005000010101D00",
+        );
+        (tmp, exe.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn test_discover_cemu_dedupes_same_title_across_roots() {
+        let (_tmp, exe) = cemu_fixture_with_duplicated_title();
+
+        let games = discover_games_for_executable(&exe);
+
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].title_id, "0005000010101d00");
+        assert!(games[0].game_path.ends_with("MyGame"));
+    }
+
+    #[test]
+    fn test_discover_cemu_keeps_distinct_titles_across_roots() {
+        let (tmp, exe) = cemu_fixture_with_duplicated_title();
+        write_title(&tmp.path().join("games/OtherGame"), "00050000101CD00");
+
+        let games = discover_games_for_executable(&exe);
+
+        assert_eq!(games.len(), 2);
     }
 }

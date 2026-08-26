@@ -6,9 +6,7 @@
 
 use super::input_profile_editor_regions::source_label;
 use super::input_profile_mode_shifts::shifts_group;
-use super::input_profile_sheet_base::{
-    find_mapping, is_trigger_axis, ProfileRc, OnChanged,
-};
+use super::input_profile_sheet_base::{find_mapping, is_trigger_axis, OnChanged, ProfileRc};
 use super::input_profile_source_modes::{behavior_group, mode_settings_group, modes_for};
 use adw::prelude::*;
 use ira_input::InputSource;
@@ -63,8 +61,7 @@ pub(crate) fn show_input_sheet(parent: &adw::Window, request: InputSheetRequest)
 }
 
 fn sheet_title(request: &InputSheetRequest) -> String {
-    crate::tr!("Edit {input}")
-        .replace("{input}", &source_label(request.source))
+    crate::tr!("Edit {input}").replace("{input}", &source_label(request.source))
 }
 
 /// Rebuild the whole sheet after every structural change (mode or activator
@@ -96,14 +93,26 @@ fn rebuild_sheet(base: &super::input_profile_sheet_base::SheetBase) {
             .append(&behavior_group(base, &reopen, modes_for(base.source)));
         if let Some(mapping) = find_mapping(base) {
             if let Some(ref mode) = mapping.mode {
-                base.content.append(&mode_settings_group(base, mode));
+                if is_trigger_axis(base.source) {
+                    base.content
+                        .append(&mode_settings_group(base, mode, &reopen));
+                } else {
+                    // Sticks get Steam's full settings layout: sensitivity,
+                    // output, and deadzone groups.
+                    for group in
+                        super::input_profile_stick_settings::stick_mode_groups(base, mode, &reopen)
+                    {
+                        base.content.append(&group);
+                    }
+                }
             }
             // Triggers carry activators alongside their analog mode — the
             // dual-stage soft/full pull. Every axis can also be shifted.
             if is_trigger_axis(base.source) {
-                base.content.append(
-                    &super::input_profile_activator_edit::activators_group(base, &reopen, &mapping),
-                );
+                base.content
+                    .append(&super::input_profile_activator_edit::activators_group(
+                        base, &reopen, &mapping,
+                    ));
             }
             base.content.append(&shifts_group(base, &reopen));
         }
@@ -111,9 +120,10 @@ fn rebuild_sheet(base: &super::input_profile_sheet_base::SheetBase) {
     }
 
     if let Some(mapping) = find_mapping(base) {
-        base.content.append(
-            &super::input_profile_activator_edit::activators_group(base, &reopen, &mapping),
-        );
+        base.content
+            .append(&super::input_profile_activator_edit::activators_group(
+                base, &reopen, &mapping,
+            ));
         base.content.append(&shifts_group(base, &reopen));
     }
 }

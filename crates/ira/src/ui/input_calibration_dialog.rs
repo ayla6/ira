@@ -1,19 +1,19 @@
 use super::css::{CSS_ERROR, CSS_SUGGESTED_ACTION};
 use adw::prelude::*;
-use ira_input::GyroCalibration;
+use ira_input::ControllerCalibration;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
-type Completion = Box<dyn FnOnce(Result<GyroCalibration, String>) + 'static>;
+type Completion = Box<dyn FnOnce(Result<ControllerCalibration, String>) + 'static>;
 const CALIBRATION_DURATION: Duration = Duration::from_millis(700);
 
 enum Update {
     Countdown(u8),
     Progress(f64),
-    Complete(Result<GyroCalibration, String>),
+    Complete(Result<ControllerCalibration, String>),
 }
 
 #[derive(Clone)]
@@ -28,7 +28,7 @@ pub(super) fn show_input_calibration_dialog(
     parent: &gtk4::Window,
     registry: Arc<ira_input::ControllerRegistry>,
     device: ira_input::DeviceInfo,
-    on_complete: impl FnOnce(Result<GyroCalibration, String>) + 'static,
+    on_complete: impl FnOnce(Result<ControllerCalibration, String>) + 'static,
 ) {
     let window = adw::Window::new();
     window.set_default_size(460, 190);
@@ -198,7 +198,7 @@ fn collect_calibration(
     identity: &ira_input::DeviceInfo,
     cancelled: &AtomicBool,
     sender: &mpsc::Sender<Update>,
-) -> Result<GyroCalibration, String> {
+) -> Result<ControllerCalibration, String> {
     let device = registry
         .snapshot()
         .into_iter()
@@ -230,7 +230,7 @@ fn collect_calibration(
         let _ = sender.send(Update::Progress(fraction.min(1.0)));
         std::thread::sleep(Duration::from_millis(4));
     }
-    GyroCalibration::from_samples(&samples)
+    ControllerCalibration::from_samples(&samples)
         .ok_or_else(|| "No gyro samples were received during calibration".to_string())
 }
 
@@ -238,7 +238,7 @@ fn same_device(left: &ira_input::DeviceInfo, right: &ira_input::DeviceInfo) -> b
     left.vendor == right.vendor && left.product == right.product && left.name == right.name
 }
 
-fn format_calibration(calibration: GyroCalibration) -> String {
+fn format_calibration(calibration: ControllerCalibration) -> String {
     format!(
         "Calibration complete. Bias: X={:.4}, Y={:.4}, Z={:.4}",
         calibration.x, calibration.y, calibration.z

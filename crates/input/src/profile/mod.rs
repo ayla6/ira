@@ -1,242 +1,81 @@
 //! Input profile model. `model.rs` holds the types; this module re-exports
-//! them and owns cross-cutting helpers (JSON loading with legacy stripping
-//! and flat-binding unification).
+//! them and owns cross-cutting load-time normalization.
 
 mod model;
 
 pub use model::{
     ActionSet, ActionSetLayer, Activation, Activator, ActivatorKind, ActivatorSettings,
-    AnalogCondition, AxisDirection, AxisTransform, Binding, ChordMode, GamepadAxis, GamepadButton,
-    GyroActivation, GyroCalibration, GyroConfig, GyroOrientation, GyroOutput, InputCategory,
-    InputMapping, InputProfile, InputSource, ModeShift, MouseAxis, MouseButton, OutputAction,
-    SourceMode, StickOutput, VirtualGamepadBackend, PROFILE_VERSION,
+    AnalogCondition, AxisDirection, ChordMode, ControllerCalibration, GamepadAxis, GamepadButton,
+    GyroActivation, GyroConfig, GyroMomentum, GyroOrientation, GyroOutput, InputCategory,
+    InputMapping, InputProfile, InputSource, JoystickSettings, ModeShift, MouseAxis, MouseButton,
+    OuterRingCommand, OutputAction, ResponseAxisStyle, SourceMode, StickDeadzone, StickOutput,
+    StickOutputAxis, StickProcessing, TriggerDampening, VirtualGamepadBackend, PROFILE_VERSION,
 };
 
-use InputSource::Axis;
-
 impl InputProfile {
-    /// Parse a profile from JSON, dropping legacy entries that no longer have
-    /// a meaning (per-axis gyro bindings, recenter bindings) so profiles from
-    /// before the gyro rework keep loading, and converting the flat binding
-    /// list into a default action set. Ira is pre-release: nothing tries to
-    /// translate old gyro setups, they are simply removed.
+    /// Parse a profile from JSON and normalize shapes older editors wrote:
+    /// per-axis stick mappings collapse onto their X axis. Profiles from
+    /// before the action-set model carry a flat `bindings` list serde
+    /// ignores — Ira is pre-release, those simply start empty.
     pub fn from_json(json: &str) -> Result<Self, String> {
-        let mut value: serde_json::Value =
-            serde_json::from_str(json).map_err(|error| format!("invalid profile JSON: {error}"))?;
-        if let Some(bindings) = value.get_mut("bindings").and_then(|b| b.as_array_mut()) {
-            let dropped = strip_legacy_gyro_bindings(bindings);
-            if dropped > 0 {
-                eprintln!("ira-input: dropped {dropped} legacy gyro/recenter binding(s)");
-            }
-        }
         let mut profile: InputProfile =
-            serde_json::from_value(value).map_err(|error| format!("invalid profile: {error}"))?;
-        convert_bindings_to_action_sets(&mut profile);
+            serde_json::from_str(json).map_err(|error| format!("invalid profile: {error}"))?;
+        normalize_stick_mappings(&mut profile);
         Ok(profile)
     }
 }
 
-/// Remove bindings that reference removed model features, in place, and
-/// return how many were dropped.
-fn strip_legacy_gyro_bindings(bindings: &mut Vec<serde_json::Value>) -> usize {
-    let before = bindings.len();
-    bindings.retain(|binding| {
-        let is_gyro_source = binding
-            .get("source")
-            .and_then(|source| source.as_object())
-            .is_some_and(|source| source.contains_key("gyro"));
-        let is_recenter_output =
-            binding.get("output").and_then(|o| o.as_str()) == Some("recenter_gyro");
-        !is_gyro_source && !is_recenter_output
-    });
-    before - bindings.len()
-}
-
-/// Unify storage: flat-binding profiles become a single "Default" action set
-/// so the engine and editor only deal with the set model. Lossless for the
-/// shapes the old editor could express; anything exotic is dropped loudly.
-pub(super) fn convert_bindings_to_action_sets(profile: &mut InputProfile) {
-    if !profile.action_sets.is_empty() || profile.bindings.is_empty() {
-        return;
-    }
-    let mut inputs: Vec<InputMapping> = Vec::new();
-    // Sticks are converted as whole units: pull out each stick pair first so
-    // X/Y halves never become duplicate mode mappings.
-    let mut bindings = std::mem::take(&mut profile.bindings);
-    for (x_axis, y_axis) in [
-        (GamepadAxis::LeftX, GamepadAxis::LeftY),
-        (GamepadAxis::RightX, GamepadAxis::RightY),
-    ] {
-        let stick = take_matching(&mut bindings, &[Axis(x_axis), Axis(y_axis)]);
-        if !stick.is_empty() {
-            if let Some(mapping) = convert_stick(&stick) {
-                merge_mapping(&mut inputs, mapping);
+/// Older editors wrote one mapping per stick axis; a stick's behavior now
+/// lives only on its X axis. Move each Y half's mode onto its X counterpart
+/// and drop the leftover — unless the Y half carries activators or shifts
+/// the editor could have added, which stay put (the runtime then ignores the
+/// Y mode in favor of the X half's).
+fn normalize_stick_mappings(profile: &mut InputProfile) {
+    let inputs_lists = profile
+        .action_sets
+        .iter_mut()
+        .map(|set| &mut set.inputs)
+        .chain(
+            profile
+                .action_layers
+                .iter_mut()
+                .map(|layer| &mut layer.inputs),
+        );
+    for inputs in inputs_lists {
+        for (x_axis, y_axis) in [
+            (GamepadAxis::LeftX, GamepadAxis::LeftY),
+            (GamepadAxis::RightX, GamepadAxis::RightY),
+        ] {
+            let Some(y_index) = inputs
+                .iter()
+                .position(|input| input.source == InputSource::Axis(y_axis))
+            else {
+                continue;
+            };
+            if !inputs[y_index].activators.is_empty() || !inputs[y_index].mode_shifts.is_empty() {
+                continue;
             }
-        }
-    }
-    let triggers = take_matching(
-        &mut bindings,
-        &[
-            Axis(GamepadAxis::LeftTrigger),
-            Axis(GamepadAxis::RightTrigger),
-        ],
-    );
-    for binding in &triggers {
-        if let Some(mode) = trigger_mode(binding) {
-            let mut mapping = InputMapping::new(binding.source);
-            mapping.mode = Some(mode);
-            merge_mapping(&mut inputs, mapping);
-        }
-    }
-    for binding in &bindings {
-        match (&binding.source, &binding.output) {
-            (InputSource::Button(source), output) => {
-                let mut mapping = InputMapping::new(InputSource::Button(*source));
-                let mut activator = Activator::full_press(vec![output.clone()]);
-                activator.activation = binding.activation.clone();
-                mapping.activators.push(activator);
-                merge_mapping(&mut inputs, mapping);
-            }
-            (InputSource::AxisDirection { axis, .. }, OutputAction::GamepadButton(_)) => {
-                // Stick-as-dpad presets collapse into one Dpad mode per stick.
-                if !inputs
-                    .iter()
-                    .any(|candidate| candidate.source == Axis(*axis))
-                {
-                    let mut mapping = InputMapping::new(Axis(*axis));
-                    mapping.mode = Some(SourceMode::Dpad { threshold: 0.5 });
-                    inputs.push(mapping);
+            let y_mode = inputs[y_index].mode.take();
+            let x_source = InputSource::Axis(x_axis);
+            match inputs.iter_mut().find(|input| input.source == x_source) {
+                Some(x_input) => {
+                    if x_input.mode.is_none() {
+                        x_input.mode = y_mode;
+                    }
+                }
+                None => {
+                    if let Some(mode) = y_mode {
+                        inputs.push(mapping_with_mode(x_source, mode));
+                    }
                 }
             }
-            (source, output) => {
-                eprintln!(
-                    "ira-input: dropping unconvertible binding {:?} -> {:?}",
-                    source, output
-                );
-            }
+            inputs.remove(y_index);
         }
     }
-    if inputs.is_empty() {
-        return;
-    }
-    profile.action_sets = vec![model::ActionSet {
-        name: "Default".to_string(),
-        inputs,
-    }];
-}
-
-/// Remove and return every binding whose source is one of `sources`.
-fn take_matching(bindings: &mut Vec<Binding>, sources: &[InputSource]) -> Vec<Binding> {
-    let mut matched = Vec::new();
-    let mut kept = Vec::new();
-    for binding in std::mem::take(bindings) {
-        if sources.contains(&binding.source) {
-            matched.push(binding);
-        } else {
-            kept.push(binding);
-        }
-    }
-    *bindings = kept;
-    matched
-}
-
-/// Convert one stick's bindings (X and/or Y half) into its SourceMode.
-/// A joystick passthrough wins over mouse output when both exist.
-fn convert_stick(stick: &[Binding]) -> Option<InputMapping> {
-    let source = stick.first()?.source;
-    let passthrough = stick.iter().find(|binding| {
-        matches!(
-            (&binding.source, &binding.output),
-            (
-                Axis(GamepadAxis::LeftX | GamepadAxis::RightX),
-                OutputAction::GamepadAxis(_)
-            )
-        )
-    });
-    if let Some(binding) = passthrough {
-        let OutputAction::GamepadAxis(output_axis) = &binding.output else {
-            return None;
-        };
-        return Some(mapping_with_mode(
-            source,
-            SourceMode::Joystick {
-                output: match output_axis {
-                    GamepadAxis::RightX | GamepadAxis::RightY => StickOutput::Right,
-                    _ => StickOutput::Left,
-                },
-                deadzone_inner: binding.transform.dead_zone,
-                deadzone_outer: 1.0,
-                curve: binding.transform.exponent,
-            },
-        ));
-    }
-    let mouse = stick.iter().find(|binding| {
-        matches!(
-            &binding.output,
-            OutputAction::MouseAxis(MouseAxis::X | MouseAxis::Y)
-        )
-    });
-    if let Some(binding) = mouse {
-        return Some(mapping_with_mode(
-            source,
-            SourceMode::Mouse {
-                sensitivity: binding.transform.sensitivity,
-            },
-        ));
-    }
-    let dpad = stick
-        .iter()
-        .any(|binding| matches!(binding.source, InputSource::AxisDirection { .. }));
-    if dpad {
-        return Some(mapping_with_mode(
-            source,
-            SourceMode::Dpad { threshold: 0.5 },
-        ));
-    }
-    for binding in stick {
-        eprintln!(
-            "ira-input: dropping unconvertible stick binding {:?} -> {:?}",
-            binding.source, binding.output
-        );
-    }
-    None
 }
 
 fn mapping_with_mode(source: InputSource, mode: SourceMode) -> InputMapping {
     let mut mapping = InputMapping::new(source);
     mapping.mode = Some(mode);
     mapping
-}
-
-/// Trigger passthrough becomes a thresholded Trigger mode.
-fn trigger_mode(binding: &Binding) -> Option<SourceMode> {
-    match (&binding.source, &binding.output) {
-        (
-            Axis(GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger),
-            OutputAction::GamepadAxis(_),
-        ) => Some(SourceMode::Trigger {
-            threshold: binding.transform.dead_zone,
-        }),
-        (source, output) => {
-            eprintln!(
-                "ira-input: dropping unconvertible trigger binding {:?} -> {:?}",
-                source, output
-            );
-            None
-        }
-    }
-}
-
-fn merge_mapping(inputs: &mut Vec<InputMapping>, mapping: InputMapping) {
-    if let Some(existing) = inputs
-        .iter_mut()
-        .find(|candidate| candidate.source == mapping.source)
-    {
-        existing.activators.extend(mapping.activators);
-        if existing.mode.is_none() {
-            existing.mode = mapping.mode;
-        }
-    } else {
-        inputs.push(mapping);
-    }
 }

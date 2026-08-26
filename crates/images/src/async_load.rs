@@ -124,10 +124,8 @@ fn drain_results() -> glib::ControlFlow {
     loop {
         match infra.result_rx.lock().unwrap().try_recv() {
             Ok((path, result)) => {
-                let texture_callbacks =
-                    PENDING_LOADS.with(|cell| cell.borrow_mut().remove(&path));
-                let pixbuf_callbacks =
-                    PENDING_PIXBUFS.with(|cell| cell.borrow_mut().remove(&path));
+                let texture_callbacks = PENDING_LOADS.with(|cell| cell.borrow_mut().remove(&path));
+                let pixbuf_callbacks = PENDING_PIXBUFS.with(|cell| cell.borrow_mut().remove(&path));
                 // One decoded byte buffer, shared by both wrappers: the texture
                 // and the pixbuf each just refcount the same `Bytes`, so the
                 // pixbuf path adds no pixel data of its own.

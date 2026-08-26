@@ -1,7 +1,8 @@
 use super::input_profile_settings::{add_console_profile_group, ConsoleProfileWidgets};
 use super::settings_console::{
-    build_cemu_settings_page, build_console_settings_page, build_rpcs3_settings_page,
-    build_shadps4_settings_page, build_vita3k_settings_page, ConsolePageWidgets,
+    build_azahar_settings_page, build_cemu_settings_page, build_console_settings_page,
+    build_rpcs3_settings_page, build_shadps4_settings_page, build_vita3k_settings_page,
+    ConsolePageWidgets,
 };
 use super::settings_pages::{settings_sidebar_row, sidebar_section_title};
 use super::state::SharedState;
@@ -26,6 +27,8 @@ pub(super) struct ConsoleSettingsWidgets {
     pub(super) vita3k_exe_row: Option<adw::EntryRow>,
     pub(super) cemu_enable_row: Option<adw::SwitchRow>,
     pub(super) cemu_exe_row: Option<adw::EntryRow>,
+    pub(super) azahar_enable_row: Option<adw::SwitchRow>,
+    pub(super) azahar_exe_row: Option<adw::EntryRow>,
 }
 
 pub(super) type SharedConsoleSettingsWidgets = Rc<RefCell<ConsoleSettingsWidgets>>;
@@ -63,6 +66,12 @@ pub(super) fn apply_emulator_settings(cfg: &mut Config, pages: &ConsoleSettingsW
     }
     if let Some(row) = &pages.cemu_exe_row {
         cfg.cemu_executable = row.text().to_string();
+    }
+    if let Some(row) = &pages.azahar_enable_row {
+        cfg.azahar_enabled = row.is_active();
+    }
+    if let Some(row) = &pages.azahar_exe_row {
+        cfg.azahar_executable = row.text().to_string();
     }
 }
 
@@ -144,6 +153,8 @@ pub(super) fn register_console_pages(
         vita3k_exe_row: None,
         cemu_enable_row: None,
         cemu_exe_row: None,
+        azahar_enable_row: None,
+        azahar_exe_row: None,
     };
     let registry = {
         let state = state.borrow();
@@ -159,6 +170,9 @@ pub(super) fn register_console_pages(
         }
         if def.id == "wii" {
             register_lazy_console_page(sidebar, stack, &crate::tr!("Wii U"), "wiiu");
+        }
+        if def.id == "gc" {
+            register_lazy_console_page(sidebar, stack, &crate::tr!("Nintendo 3DS"), "3ds");
         }
         if !def.uses_rom_folder() {
             continue;
@@ -297,6 +311,7 @@ enum SpecialConsoleWidgets {
     Ps4(adw::SwitchRow, Option<adw::ComboRow>),
     Vita3k(adw::SwitchRow, adw::EntryRow),
     Cemu(adw::SwitchRow, adw::EntryRow),
+    Azahar(adw::SwitchRow, adw::EntryRow),
 }
 
 fn build_special_console_page(
@@ -341,6 +356,15 @@ fn build_special_console_page(
                 SpecialConsoleWidgets::Cemu(enable_row, exe_row),
             ))
         }
+        "3ds" => {
+            let (page, enable_row, exe_row) = build_azahar_settings_page(cfg, win);
+            Some((
+                "3ds",
+                crate::tr!("Nintendo 3DS"),
+                page,
+                SpecialConsoleWidgets::Azahar(enable_row, exe_row),
+            ))
+        }
         _ => None,
     }
 }
@@ -351,6 +375,7 @@ fn special_console_loaded(widgets: &ConsoleSettingsWidgets, console_id: &str) ->
         "ps4" => widgets.ps4_enable_row.is_some(),
         "psvita" => widgets.vita3k_enable_row.is_some(),
         "wiiu" => widgets.cemu_enable_row.is_some(),
+        "3ds" => widgets.azahar_enable_row.is_some(),
         _ => false,
     }
 }
@@ -375,6 +400,10 @@ fn store_special_console_widgets(
         SpecialConsoleWidgets::Cemu(enable_row, exe_row) => {
             settings.cemu_enable_row = Some(enable_row);
             settings.cemu_exe_row = Some(exe_row);
+        }
+        SpecialConsoleWidgets::Azahar(enable_row, exe_row) => {
+            settings.azahar_enable_row = Some(enable_row);
+            settings.azahar_exe_row = Some(exe_row);
         }
     }
 }
@@ -440,6 +469,8 @@ pub(super) fn discovery_settings_changed(before: &Config, after: &Config) -> boo
         || before.vita3k_executable != after.vita3k_executable
         || before.cemu_enabled != after.cemu_enabled
         || before.cemu_executable != after.cemu_executable
+        || before.azahar_enabled != after.azahar_enabled
+        || before.azahar_executable != after.azahar_executable
         || before.roms_folder != after.roms_folder
         || ira_models::all_consoles().any(|def| {
             let before_console = before.console(def.id);

@@ -1,6 +1,8 @@
 use super::css::{CSS_FLAT, CSS_SQUARE_BUTTON};
 use super::helpers::esc;
-use super::input_profile_store::{controller_default_path_for_backend, find_controller_default_profile};
+use super::input_profile_store::{
+    controller_default_path_for_backend, find_controller_default_profile,
+};
 use super::input_profile_store::{ensure_controller_default_profile, list_profiles, StoredProfile};
 use adw::prelude::*;
 use ira_config::{Config, ControllerInputConfig};
@@ -120,7 +122,7 @@ pub(super) fn build_input_settings_page(
         parent,
         &controller_group,
         save_dir,
-        registry,
+        registry.clone(),
         controller_rows_params.configured_defaults,
         controller_defaults.clone(),
         no_controllers_row,
@@ -516,11 +518,8 @@ fn add_controller_row(
         let flavor = backend_for_selection(row.selected());
         update_controller_subtitle(&expander_for_mode, &device_for_mode, flavor);
         if let Some(backend) = flavor {
-            let path = controller_default_path_for_backend(
-                &save_dir_for_mode,
-                &key_for_mode,
-                backend,
-            );
+            let path =
+                controller_default_path_for_backend(&save_dir_for_mode, &key_for_mode, backend);
             *profile_path_for_mode.borrow_mut() = path.is_file().then_some(path);
         }
     });
@@ -537,6 +536,15 @@ fn add_controller_row(
     );
     action_row.add_suffix(&edit);
     expander.add_row(&action_row);
+
+    // Calibration is per controller: deadzone preference and gyro bias for
+    // this pad, stored outside any profile.
+    super::input_calibration_settings::add_controller_calibration(
+        &expander,
+        &ira_input::calibration_store_path(save_dir),
+        &device,
+        registry.clone(),
+    );
 
     let parent_for_edit = parent.clone();
     let save_dir_for_edit = save_dir.to_string();
@@ -690,9 +698,7 @@ fn selection_for_backend(backend: ira_input::VirtualGamepadBackend) -> u32 {
 }
 
 /// `None` means the "Disabled" entry.
-pub(super) fn backend_for_selection(
-    selection: u32,
-) -> Option<ira_input::VirtualGamepadBackend> {
+pub(super) fn backend_for_selection(selection: u32) -> Option<ira_input::VirtualGamepadBackend> {
     use ira_input::VirtualGamepadBackend;
     match selection {
         1 => Some(VirtualGamepadBackend::XInput),
@@ -917,7 +923,10 @@ mod tests {
             VirtualGamepadBackend::DualSense,
             VirtualGamepadBackend::Dsu,
         ] {
-            assert_eq!(backend_for_selection(selection_for_backend(backend)), Some(backend));
+            assert_eq!(
+                backend_for_selection(selection_for_backend(backend)),
+                Some(backend)
+            );
         }
         assert_eq!(backend_for_selection(0), None);
         assert_eq!(backend_for_selection(99), None);
@@ -925,10 +934,7 @@ mod tests {
 
     #[test]
     fn test_stored_selection_disabled_is_zero_and_enabled_falls_back_to_xinput() {
-        assert_eq!(
-            stored_selection(ControllerInputMode::Disabled, None),
-            0
-        );
+        assert_eq!(stored_selection(ControllerInputMode::Disabled, None), 0);
         // An enabled default without a readable layout assumes XInput.
         assert_eq!(stored_selection(ControllerInputMode::Enabled, None), 1);
     }
@@ -940,9 +946,6 @@ mod tests {
             input_mode_from_index(1),
             Some(ControllerInputMode::Disabled)
         );
-        assert_eq!(
-            input_mode_from_index(2),
-            Some(ControllerInputMode::Enabled)
-        );
+        assert_eq!(input_mode_from_index(2), Some(ControllerInputMode::Enabled));
     }
 }

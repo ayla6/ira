@@ -66,6 +66,7 @@ pub(super) struct AutoReloadWidgets {
     pub rpcs3: adw::SwitchRow,
     pub vita3k: adw::SwitchRow,
     pub cemu: adw::SwitchRow,
+    pub azahar: adw::SwitchRow,
 }
 
 pub(super) fn build_general_settings_page(
@@ -153,6 +154,11 @@ pub(super) fn build_general_settings_page(
         &crate::tr!("Scan Cemu games when Ira starts"),
         cfg.auto_reload_cemu,
     );
+    let auto_reload_azahar = auto_reload_row(
+        &crate::tr!("Azahar"),
+        &crate::tr!("Scan Azahar games when Ira starts"),
+        cfg.auto_reload_azahar,
+    );
     for row in [
         &auto_reload_steam,
         &auto_reload_roms,
@@ -160,6 +166,7 @@ pub(super) fn build_general_settings_page(
         &auto_reload_rpcs3,
         &auto_reload_vita3k,
         &auto_reload_cemu,
+        &auto_reload_azahar,
     ] {
         reload_group.add(row);
     }
@@ -211,6 +218,7 @@ pub(super) fn build_general_settings_page(
             rpcs3: auto_reload_rpcs3,
             vita3k: auto_reload_vita3k,
             cemu: auto_reload_cemu,
+            azahar: auto_reload_azahar,
         },
     )
 }
@@ -680,12 +688,7 @@ pub(super) fn build_ra_settings_page(
     creds_group.add(&web_api_row);
     page.append(&creds_group);
 
-    (
-        page,
-        enable_row,
-        username_row,
-        web_api_row.upcast(),
-    )
+    (page, enable_row, username_row, web_api_row.upcast())
 }
 
 pub(super) fn build_api_emulators_page(

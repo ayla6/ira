@@ -48,6 +48,144 @@ fn test_ps5_gyro_fixture_maps_trigger_axis_and_sticks() {
 }
 
 #[test]
+fn test_gyro_dampening_imports_from_steam_settings() {
+    let text = r#"
+"controller_mappings"
+{
+	"title"		"Dampening layout"
+	"group"
+	{
+		"id"		"0"
+		"mode"		"four_buttons"
+		"inputs"
+		{
+			"button_a"
+			{
+				"activators"
+				{
+					"Full_Press"
+					{
+						"bindings"
+						{
+							"binding"		"xinput_button A"
+						}
+					}
+				}
+			}
+		}
+	}
+	"group"
+	{
+		"id"		"19"
+		"mode"		"gyro_to_mouse"
+		"inputs"
+		{
+		}
+		"settings"
+		{
+			"sensitivity"				"200"
+			"mouse_dampening"			"right_trigger_soft_pull"
+			"mouse_dampening_amount"		"60"
+		}
+	}
+	"preset"
+	{
+		"id"		"0"
+		"name"		"Default"
+		"group_source_bindings"
+		{
+			"0"		"button_diamond active"
+			"19"		"gyro active"
+		}
+	}
+	"settings"
+	{
+	}
+}
+"#;
+    let (profile, _) = import_vdf(text).unwrap();
+    assert!(profile.gyro.enabled);
+    assert_eq!(
+        profile.gyro.trigger_dampening,
+        ira_input::TriggerDampening::RightTriggerSoftPull
+    );
+    assert!((profile.gyro.dampening_amount - 0.6).abs() < 1.0e-6);
+    assert_eq!(profile.gyro.sensitivity, 2.0);
+    profile.validate().unwrap();
+}
+
+#[test]
+fn test_joystick_move_imports_deadzone_settings() {
+    // A deadzone setting becomes a Custom deadzone; raw counts (Steam's
+    // usual encoding) scale down to a fraction, fractions pass through.
+    let text = r#"
+"controller_mappings"
+{
+	"title"		"Stick layout"
+	"group"
+	{
+		"id"		"0"
+		"mode"		"joystick_move"
+		"inputs"
+		{
+		}
+		"settings"
+		{
+			"deadzone"		"8192"
+		}
+	}
+	"group"
+	{
+		"id"		"1"
+		"mode"		"joystick_move"
+		"inputs"
+		{
+		}
+		"settings"
+		{
+		}
+	}
+	"preset"
+	{
+		"id"		"0"
+		"name"		"Default"
+		"group_source_bindings"
+		{
+			"0"		"left_joystick active"
+			"1"		"right_joystick active"
+		}
+	}
+}
+"#;
+    let (profile, _) = import_vdf(text).unwrap();
+    let left = profile.action_sets[0]
+        .inputs
+        .iter()
+        .find(|input| input.source == InputSource::Axis(GamepadAxis::LeftX))
+        .expect("left stick must be imported");
+    let Some(SourceMode::Joystick(settings)) = left.mode.as_ref() else {
+        panic!("expected a joystick mode");
+    };
+    assert_eq!(
+        settings.processing.deadzone,
+        ira_input::StickDeadzone::Custom
+    );
+    assert!((settings.processing.deadzone_inner - 8192.0 / 32767.0).abs() < 1.0e-4);
+
+    let right = profile.action_sets[0]
+        .inputs
+        .iter()
+        .find(|input| input.source == InputSource::Axis(GamepadAxis::RightX))
+        .expect("right stick must be imported");
+    let Some(SourceMode::Joystick(settings)) = right.mode.as_ref() else {
+        panic!("expected a joystick mode");
+    };
+    // No deadzone setting: raw input, Steam's default.
+    assert_eq!(settings.processing.deadzone, ira_input::StickDeadzone::None);
+    profile.validate().unwrap();
+}
+
+#[test]
 fn test_button_activators_keep_outputs() {
     let text = std::fs::read_to_string(fixture_path("ps5_gyro_mouse.vdf")).unwrap();
     let (profile, _) = import_vdf(&text).unwrap();
@@ -56,9 +194,11 @@ fn test_button_activators_keep_outputs() {
         .iter()
         .find(|input| input.source == InputSource::Button(ira_input::GamepadButton::A))
         .expect("face button A must be imported");
-    assert!(a.activators.iter().any(|activator| activator
-        .outputs
-        .contains(&OutputAction::GamepadButton(ira_input::GamepadButton::A))));
+    assert!(a.activators.iter().any(|activator| {
+        activator
+            .outputs
+            .contains(&OutputAction::GamepadButton(ira_input::GamepadButton::A))
+    }));
 }
 
 #[test]

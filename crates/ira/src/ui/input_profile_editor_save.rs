@@ -5,7 +5,7 @@
 use super::css::CSS_ERROR;
 use super::input_profile_store::{new_managed_profile_path, write_profile};
 use adw::prelude::*;
-use ira_input::{GyroCalibration, GyroConfig, InputProfile};
+use ira_input::{ControllerCalibration, GyroConfig, InputProfile};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -14,7 +14,7 @@ use std::rc::Rc;
 pub(super) struct EditorForm {
     pub(super) name: Rc<RefCell<String>>,
     pub(super) profile: Rc<RefCell<InputProfile>>,
-    pub(super) calibration: Rc<RefCell<GyroCalibration>>,
+    pub(super) calibration: Rc<RefCell<ControllerCalibration>>,
     pub(super) gyro: Rc<RefCell<GyroConfig>>,
     pub(super) compatible_game_ids: Vec<i64>,
     pub(super) game_id: Option<i64>,
@@ -23,7 +23,7 @@ pub(super) fn build_profile(form: &EditorForm) -> Result<InputProfile, String> {
     let mut profile = form.profile.borrow().clone();
     profile.name = form.name.borrow().trim().to_string();
     profile.gyro = form.gyro.borrow().clone();
-    profile.gyro_calibration = *form.calibration.borrow();
+    profile.controller_calibration = *form.calibration.borrow();
     let mut ids = form.compatible_game_ids.clone();
     if let Some(game_id) = form.game_id {
         if !ids.contains(&game_id) {
@@ -129,7 +129,11 @@ pub(super) fn connect_unsaved_guard(
         gtk4::glib::Propagation::Stop
     });
 }
-pub(super) fn profile_path_for_save(save_dir: &str, current_path: Option<&Path>, name: &str) -> PathBuf {
+pub(super) fn profile_path_for_save(
+    save_dir: &str,
+    current_path: Option<&Path>,
+    name: &str,
+) -> PathBuf {
     current_path
         .map(Path::to_path_buf)
         .unwrap_or_else(|| new_managed_profile_path(save_dir, name))

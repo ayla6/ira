@@ -250,15 +250,21 @@ pub(super) fn build_game_logo_page(
             let modified_weak = Rc::downgrade(&modified_r);
             let btn_weak = btn_weak.clone();
             glib::source::idle_add_local_full(glib::Priority::LOW, move || {
-                let (Some(btn), Some(selected), Some(size_adj), Some(modified), Some(btns), Some(preview)) =
-                    (
-                        btn_weak.upgrade(),
-                        selected_weak.upgrade(),
-                        size_weak.upgrade(),
-                        modified_weak.upgrade(),
-                        btns_weak.upgrade(),
-                        preview_weak.upgrade(),
-                    )
+                let (
+                    Some(btn),
+                    Some(selected),
+                    Some(size_adj),
+                    Some(modified),
+                    Some(btns),
+                    Some(preview),
+                ) = (
+                    btn_weak.upgrade(),
+                    selected_weak.upgrade(),
+                    size_weak.upgrade(),
+                    modified_weak.upgrade(),
+                    btns_weak.upgrade(),
+                    preview_weak.upgrade(),
+                )
                 else {
                     return glib::ControlFlow::Break;
                 };

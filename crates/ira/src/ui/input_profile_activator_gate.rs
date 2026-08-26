@@ -1,9 +1,9 @@
 //! Activation gating for the binding sheet: hold/toggle/disable-while
 //! source pickers plus the analog gate editor (axis, condition, threshold).
 
-use super::input_profile_sheet_base::{combo_row, find_mapping, with_mapping, Reopen, SheetBase};
 use super::input_profile_editor_regions::{source_label, supported_button_sources};
 use super::input_profile_options::{activation_index, activation_labels};
+use super::input_profile_sheet_base::{combo_row, find_mapping, with_mapping, Reopen, SheetBase};
 use adw::prelude::*;
 use ira_input::{Activation, Activator, AnalogCondition, GamepadAxis, GamepadButton, InputSource};
 
@@ -14,7 +14,10 @@ pub(crate) fn activator_gate_controls(
     activator: &Activator,
     expander: &adw::ExpanderRow,
 ) {
-    let gate = combo_row(&activation_labels(), activation_index(&activator.activation));
+    let gate = combo_row(
+        &activation_labels(),
+        activation_index(&activator.activation),
+    );
     gate.set_title(&crate::tr!("Requires"));
     gate.set_subtitle(&crate::tr!("Only fire while this condition holds"));
     expander.add_row(&gate);
@@ -92,7 +95,6 @@ fn add_analog_gate_rows(
     threshold: f32,
     expander: &adw::ExpanderRow,
 ) {
-
     let axis_labels: Vec<String> = [
         GamepadAxis::LeftX,
         GamepadAxis::LeftY,
@@ -131,26 +133,24 @@ fn add_analog_gate_rows(
     threshold_row.add_suffix(&threshold_spin);
 
     let base = base.clone();
-    let apply = move |base: &SheetBase,
-                      axis: GamepadAxis,
-                      condition: AnalogCondition,
-                      threshold: f32| {
-        with_mapping(base, |input| {
-            if let Some(activator) = input.activators.get_mut(index) {
-                if let Activation::Analog {
-                    axis: gate_axis,
-                    condition: gate_condition,
-                    threshold: gate_threshold,
-                } = &mut activator.activation
-                {
-                    *gate_axis = axis;
-                    *gate_condition = condition;
-                    *gate_threshold = threshold;
+    let apply =
+        move |base: &SheetBase, axis: GamepadAxis, condition: AnalogCondition, threshold: f32| {
+            with_mapping(base, |input| {
+                if let Some(activator) = input.activators.get_mut(index) {
+                    if let Activation::Analog {
+                        axis: gate_axis,
+                        condition: gate_condition,
+                        threshold: gate_threshold,
+                    } = &mut activator.activation
+                    {
+                        *gate_axis = axis;
+                        *gate_condition = condition;
+                        *gate_threshold = threshold;
+                    }
                 }
-            }
-        });
-        (base.on_changed)();
-    };
+            });
+            (base.on_changed)();
+        };
 
     let base_for_axis = base.clone();
     let condition_for_axis = condition;
@@ -174,7 +174,12 @@ fn add_analog_gate_rows(
             2 => AnalogCondition::MaxedOut,
             _ => AnalogCondition::Active,
         };
-        apply(&base_for_condition, axis_for_condition, condition, threshold);
+        apply(
+            &base_for_condition,
+            axis_for_condition,
+            condition,
+            threshold,
+        );
     });
 
     let base_for_threshold = base.clone();
@@ -211,7 +216,10 @@ fn gate_source_row(base: &SheetBase, index: usize, activation: &Activation) -> a
         .into_iter()
         .map(|source| (source, source_label(source)))
         .collect();
-    let gate_labels: Vec<String> = gate_sources.iter().map(|(_, label)| label.clone()).collect();
+    let gate_labels: Vec<String> = gate_sources
+        .iter()
+        .map(|(_, label)| label.clone())
+        .collect();
     let selected = gate_sources
         .iter()
         .position(|(source, _)| {

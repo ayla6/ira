@@ -15,7 +15,7 @@
 //! stay quiet long enough, their mean is folded into the bias estimate so a
 //! resting controller stops drifting as its temperature changes.
 
-use crate::profile::{GyroCalibration, GyroOrientation};
+use crate::profile::{ControllerCalibration, GyroOrientation};
 
 /// Samples kept for stillness detection. At a 250 Hz report rate this covers
 /// ~1 s; faster controllers converge sooner.
@@ -210,10 +210,13 @@ pub struct GyroProcessor {
     /// re-projected onto the current horizontal plane, so vertical output
     /// does not follow the controller's own roll.
     world_right: Option<Vec3>,
+    /// Last absolute vertical aim of the Laser Pointer orientation; the
+    /// per-frame difference becomes the vertical output rate.
+    laser_pitch: Option<f32>,
 }
 
 impl GyroProcessor {
-    pub fn new(initial_bias: GyroCalibration, options: GyroProcessingOptions) -> Self {
+    pub fn new(initial_bias: ControllerCalibration, options: GyroProcessingOptions) -> Self {
         Self {
             bias: Vec3::from_array([initial_bias.x, initial_bias.y, initial_bias.z]),
             gravity: None,
@@ -222,17 +225,20 @@ impl GyroProcessor {
             smoothed_yaw: 0.0,
             smoothed_pitch: 0.0,
             world_right: None,
+            laser_pitch: None,
         }
     }
 
     /// Current bias estimate, including everything auto-calibration has
     /// learned; persisting this as the profile calibration shortens the next
     /// session's settling time.
-    pub fn bias(&self) -> GyroCalibration {
-        GyroCalibration {
+    pub fn bias(&self) -> ControllerCalibration {
+        ControllerCalibration {
             x: self.bias.x,
             y: self.bias.y,
             z: self.bias.z,
+            stick_deadzone_left: 0.0,
+            stick_deadzone_right: 0.0,
         }
     }
 
@@ -249,6 +255,33 @@ impl GyroProcessor {
             GyroOrientation::Yaw => (rotation.y, rotation.x, false),
             GyroOrientation::Roll => (rotation.z, rotation.x, false),
             GyroOrientation::YawPlusRoll => (rotation.y + rotation.z, rotation.x, false),
+            GyroOrientation::LaserPointer => match accel {
+                Some(accel) => {
+                    self.update_gravity(Vec3::from_array(accel), dt);
+                    match self.gravity.and_then(|gravity| gravity.normalized()) {
+                        Some(gravity) => {
+                            // The long axis's angle against the horizon is
+                            // the vertical aim: absolute, from gravity.
+                            let pitch = gravity.z.clamp(-1.0, 1.0).asin();
+                            let pitch_rate = match self.laser_pitch {
+                                Some(previous) if dt > 0.0 => (pitch - previous) / dt,
+                                _ => 0.0,
+                            };
+                            self.laser_pitch = Some(pitch);
+                            // Horizontal stays relative: integrated gyro yaw.
+                            (rotation.y, pitch_rate, false)
+                        }
+                        None => {
+                            self.laser_pitch = None;
+                            Self::controller_space(rotation)
+                        }
+                    }
+                }
+                None => {
+                    self.laser_pitch = None;
+                    Self::controller_space(rotation)
+                }
+            },
             GyroOrientation::PlayerSpace | GyroOrientation::WorldSpace => match accel {
                 Some(accel) => {
                     self.update_gravity(Vec3::from_array(accel), dt);
@@ -397,7 +430,10 @@ mod tests {
     const DT: f32 = 1.0 / 250.0;
 
     fn processor() -> GyroProcessor {
-        GyroProcessor::new(GyroCalibration::default(), GyroProcessingOptions::default())
+        GyroProcessor::new(
+            ControllerCalibration::default(),
+            GyroProcessingOptions::default(),
+        )
     }
 
     /// Feed gravity long enough for the low-pass to converge, then the
@@ -469,10 +505,12 @@ mod tests {
 
     #[test]
     fn test_seed_bias_is_subtracted() {
-        let bias = GyroCalibration {
+        let bias = ControllerCalibration {
             x: 0.01,
             y: -0.02,
             z: 0.03,
+            stick_deadzone_left: 0.0,
+            stick_deadzone_right: 0.0,
         };
         let mut processor = GyroProcessor::new(
             bias,
@@ -488,7 +526,7 @@ mod tests {
     #[test]
     fn test_auto_calibration_converges_to_constant_bias() {
         let mut processor = GyroProcessor::new(
-            GyroCalibration::default(),
+            ControllerCalibration::default(),
             GyroProcessingOptions {
                 smoothing: false,
                 ..GyroProcessingOptions::default()
@@ -506,7 +544,7 @@ mod tests {
     #[test]
     fn test_auto_calibration_ignores_sustained_rotation() {
         let mut processor = GyroProcessor::new(
-            GyroCalibration::default(),
+            ControllerCalibration::default(),
             GyroProcessingOptions {
                 smoothing: false,
                 ..GyroProcessingOptions::default()
@@ -527,7 +565,7 @@ mod tests {
     #[test]
     fn test_auto_calibration_ignores_changing_motion() {
         let mut processor = GyroProcessor::new(
-            GyroCalibration::default(),
+            ControllerCalibration::default(),
             GyroProcessingOptions {
                 smoothing: false,
                 ..GyroProcessingOptions::default()
@@ -569,10 +607,10 @@ mod tests {
             auto_calibrate: false,
             ..GyroProcessingOptions::default()
         };
-        let mut slow = GyroProcessor::new(GyroCalibration::default(), options);
-        let mut fast = GyroProcessor::new(GyroCalibration::default(), options);
+        let mut slow = GyroProcessor::new(ControllerCalibration::default(), options);
+        let mut fast = GyroProcessor::new(ControllerCalibration::default(), options);
         let mut raw = GyroProcessor::new(
-            GyroCalibration::default(),
+            ControllerCalibration::default(),
             GyroProcessingOptions {
                 smoothing: false,
                 auto_calibrate: false,
@@ -602,7 +640,7 @@ mod tests {
     fn test_local_orientations_use_controller_axes() {
         // Passthrough (Local): raw axes, gravity data ignored entirely.
         let mut processor = GyroProcessor::new(
-            GyroCalibration::default(),
+            ControllerCalibration::default(),
             GyroProcessingOptions {
                 smoothing: false,
                 orientation: GyroOrientation::Local,
@@ -616,7 +654,7 @@ mod tests {
 
         // Yaw preset: rotation about the controller's own vertical axis.
         let mut processor = GyroProcessor::new(
-            GyroCalibration::default(),
+            ControllerCalibration::default(),
             GyroProcessingOptions {
                 smoothing: false,
                 orientation: GyroOrientation::Yaw,
@@ -629,7 +667,7 @@ mod tests {
 
         // Roll preset: lean around the forward axis drives horizontal.
         let mut processor = GyroProcessor::new(
-            GyroCalibration::default(),
+            ControllerCalibration::default(),
             GyroProcessingOptions {
                 smoothing: false,
                 orientation: GyroOrientation::Roll,
@@ -641,7 +679,7 @@ mod tests {
 
         // Yaw + Roll sums both.
         let mut processor = GyroProcessor::new(
-            GyroCalibration::default(),
+            ControllerCalibration::default(),
             GyroProcessingOptions {
                 smoothing: false,
                 orientation: GyroOrientation::YawPlusRoll,
@@ -654,10 +692,12 @@ mod tests {
 
     #[test]
     fn test_bias_accessor_round_trips_into_new_processor() {
-        let bias = GyroCalibration {
+        let bias = ControllerCalibration {
             x: 0.05,
             y: 0.0,
             z: -0.05,
+            stick_deadzone_left: 0.0,
+            stick_deadzone_right: 0.0,
         };
         let mut processor = GyroProcessor::new(
             bias,

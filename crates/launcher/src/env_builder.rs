@@ -663,7 +663,13 @@ mod tests {
     #[test]
     fn test_input_mode_none_inherits_without_wrapping_command() {
         let mut command = command();
-        wrap_with_input_mode_for_binary(&mut command, None, Some("profile"), None, "/bin/ira-input");
+        wrap_with_input_mode_for_binary(
+            &mut command,
+            None,
+            Some("profile"),
+            None,
+            "/bin/ira-input",
+        );
         assert_eq!(command, vec!["game", "--fullscreen"]);
     }
 
@@ -703,7 +709,13 @@ mod tests {
         );
         assert_eq!(
             command,
-            vec!["/bin/ira-input", "--pause-unfocused", "--", "game", "--fullscreen"]
+            vec![
+                "/bin/ira-input",
+                "--pause-unfocused",
+                "--",
+                "game",
+                "--fullscreen"
+            ]
         );
     }
 

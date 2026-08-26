@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use super::{MappingEngine, DEFAULT_TICK_INTERVAL};
 use crate::gyro::GyroRates;
 use crate::profile::{
-    GamepadAxis, GyroActivation, GyroOutput, InputProfile, InputSource, MouseAxis, OutputAction,
+    GamepadAxis, GyroActivation, GyroOutput, InputProfile, InputSource, MouseAxis, TriggerDampening,
 };
 use crate::OutputEvent;
 
@@ -23,17 +23,55 @@ const GYRO_MOUSE_COUNTS_PER_RADIAN: f32 = 1718.87;
 /// per second.
 pub(crate) const STICK_MOUSE_COUNTS_PER_SECOND: f32 = 2000.0;
 /// Stick-to-wheel velocity at full deflection, in detents per second.
-pub(crate) const STICK_WHEEL_DETENTS_PER_SECOND: f32 = 8.0;
 /// Gyro-to-stick scaling: rotation rate (rad/s) that drives the stick to full
 /// deflection at sensitivity 1.0. Without scaling, an ordinary hand turn
 /// (1-3 rad/s) would slam the stick to its rail.
 const GYRO_STICK_RADS_PER_UNIT: f32 = 4.0;
+/// Trigger travel that counts as a soft pull for trigger dampening.
+const DAMPENING_SOFT_PULL: f32 = 0.5;
+/// Trigger travel that counts as a full pull: physical triggers report ~1.0
+/// at the bottom; a little slack absorbs sensor wear.
+const DAMPENING_FULL_PULL: f32 = 0.95;
+/// Angular rate (rad/s) under which the momentum glide is considered spent.
+const MOMENTUM_MIN_RATE: f32 = 0.01;
 
 impl MappingEngine {
     /// Feed the latest player-space rates from the gyro processor. Smoothed
     /// bias-corrected rates in rad/s; see `crate::gyro`.
     pub fn update_gyro(&mut self, rates: GyroRates) {
         self.gyro_rates = rates;
+    }
+
+    /// Recomputes the rates the output paths consume. While the gyro is
+    /// active they are the live rates; once it deactivates, momentum (if
+    /// enabled) keeps outputting the last rates while friction decays them;
+    /// without momentum output stops dead.
+    pub(crate) fn refresh_gyro_effective(&mut self, dt: f32) {
+        let momentum = &self.profile.gyro.momentum;
+        if self.gyro_active() {
+            self.gyro_effective = self.gyro_rates;
+            if momentum.enabled {
+                self.gyro_momentum = self.gyro_rates;
+            }
+            return;
+        }
+        let gliding = momentum.enabled
+            && (self.gyro_momentum.yaw.abs() >= MOMENTUM_MIN_RATE
+                || self.gyro_momentum.pitch.abs() >= MOMENTUM_MIN_RATE);
+        if !gliding {
+            self.gyro_momentum = GyroRates::default();
+            self.gyro_effective = GyroRates::default();
+            return;
+        }
+        let decay = (-momentum.friction * dt).exp();
+        self.gyro_momentum.yaw *= decay;
+        self.gyro_momentum.pitch *= decay;
+        if self.gyro_momentum.yaw.abs() < MOMENTUM_MIN_RATE
+            && self.gyro_momentum.pitch.abs() < MOMENTUM_MIN_RATE
+        {
+            self.gyro_momentum = GyroRates::default();
+        }
+        self.gyro_effective = self.gyro_momentum;
     }
 
     /// Whether any continuous (tick-driven) output is configured, so the
@@ -62,17 +100,18 @@ impl MappingEngine {
 
     pub fn tick(&mut self, now_us: u64) -> Vec<OutputEvent> {
         let dt = self.tick_delta(now_us);
+        self.refresh_gyro_effective(dt);
         let mut output = Vec::new();
         if !self.profile.action_sets.is_empty() {
             output.extend(self.advance_set_activators(now_us));
             output.extend(self.take_pending_releases());
             self.emit_mode_mouse_motion(dt, &mut output);
             self.emit_mode_dpad(&mut output);
+            self.emit_mode_outer_ring(&mut output);
             output.extend(self.emit_flick_motion(dt));
         }
         self.emit_mouse_motion(dt, &mut output);
-        let computed = self.compute_values();
-        self.emit_axis_outputs(&computed, &mut output);
+        self.emit_axis_outputs(&mut output);
         output
     }
 
@@ -88,37 +127,46 @@ impl MappingEngine {
 
     fn emit_mouse_motion(&self, dt: f32, output: &mut Vec<OutputEvent>) {
         let gyro = &self.profile.gyro;
-        if gyro.enabled && gyro.output == GyroOutput::Mouse && self.gyro_active() {
-            let scale = GYRO_MOUSE_COUNTS_PER_RADIAN * gyro.sensitivity * dt;
+        if gyro.enabled && gyro.output == GyroOutput::Mouse {
+            let scale =
+                GYRO_MOUSE_COUNTS_PER_RADIAN * gyro.sensitivity * dt * self.gyro_dampening_scale();
             push_mouse(
                 output,
                 MouseAxis::X,
-                self.gyro_rates.yaw * scale * sign(gyro.invert_x),
+                self.gyro_effective.yaw * scale * sign(gyro.invert_x),
             );
             // Screen Y grows downward while positive pitch aims up.
             push_mouse(
                 output,
                 MouseAxis::Y,
-                -self.gyro_rates.pitch * scale * sign(gyro.invert_y),
+                -self.gyro_effective.pitch * scale * sign(gyro.invert_y),
             );
         }
-        for binding in &self.profile.bindings {
-            let OutputAction::MouseAxis(axis) = &binding.output else {
-                continue;
-            };
-            if !self.activation_active(&binding.activation) {
-                continue;
+    }
+
+    /// Fraction of gyro mouse output that survives trigger dampening: while
+    /// the configured trigger state is held, output scales down by the
+    /// dampening amount (1.0 → frozen, 0.0 → untouched).
+    fn gyro_dampening_scale(&self) -> f32 {
+        let gyro = &self.profile.gyro;
+        if !self.trigger_dampening_active() {
+            return 1.0;
+        }
+        (1.0 - gyro.dampening_amount).clamp(0.0, 1.0)
+    }
+
+    fn trigger_dampening_active(&self) -> bool {
+        let left = self.source_value(InputSource::Axis(GamepadAxis::LeftTrigger));
+        let right = self.source_value(InputSource::Axis(GamepadAxis::RightTrigger));
+        match self.profile.gyro.trigger_dampening {
+            TriggerDampening::Off => false,
+            TriggerDampening::LeftTriggerSoftPull => left >= DAMPENING_SOFT_PULL,
+            TriggerDampening::LeftTriggerFullPull => left >= DAMPENING_FULL_PULL,
+            TriggerDampening::RightTriggerSoftPull => right >= DAMPENING_SOFT_PULL,
+            TriggerDampening::RightTriggerFullPull => right >= DAMPENING_FULL_PULL,
+            TriggerDampening::BothTriggersFullPull => {
+                left >= DAMPENING_FULL_PULL || right >= DAMPENING_FULL_PULL
             }
-            let velocity = binding
-                .transform
-                .apply_unbounded(self.source_value(binding.source));
-            let delta = match axis {
-                MouseAxis::X | MouseAxis::Y => velocity * STICK_MOUSE_COUNTS_PER_SECOND * dt,
-                MouseAxis::Wheel | MouseAxis::WheelX => {
-                    velocity * STICK_WHEEL_DETENTS_PER_SECOND * dt
-                }
-            };
-            push_mouse(output, *axis, delta);
         }
     }
 
@@ -130,7 +178,7 @@ impl MappingEngine {
         order: &mut Vec<GamepadAxis>,
     ) {
         let gyro = &self.profile.gyro;
-        if !gyro.enabled || gyro.output == GyroOutput::Mouse || !self.gyro_active() {
+        if !gyro.enabled || gyro.output == GyroOutput::Mouse {
             return;
         }
         let (x_axis, y_axis) = match gyro.output {
@@ -139,8 +187,8 @@ impl MappingEngine {
             GyroOutput::Mouse => return,
         };
         let scale = GYRO_STICK_RADS_PER_UNIT / gyro.sensitivity;
-        let x = (self.gyro_rates.yaw / scale).clamp(-1.0, 1.0) * sign(gyro.invert_x);
-        let y = (self.gyro_rates.pitch / scale).clamp(-1.0, 1.0) * sign(gyro.invert_y);
+        let x = (self.gyro_effective.yaw / scale).clamp(-1.0, 1.0) * sign(gyro.invert_x);
+        let y = (self.gyro_effective.pitch / scale).clamp(-1.0, 1.0) * sign(gyro.invert_y);
         for (axis, value) in [(x_axis, x), (y_axis, y)] {
             if !totals.contains_key(&axis) {
                 order.push(axis);
@@ -169,18 +217,15 @@ fn push_mouse(output: &mut Vec<OutputEvent>, axis: MouseAxis, value: f32) {
 fn continuous_outputs_configured(profile: &InputProfile) -> bool {
     // Set-driven profiles always tick: activator deadlines and mode-driven
     // axes need time even without mouse or gyro.
-    !profile.action_sets.is_empty()
-        || profile.gyro.enabled
-        || profile
-            .bindings
-            .iter()
-            .any(|binding| matches!(binding.output, OutputAction::MouseAxis(_)))
+    !profile.action_sets.is_empty() || profile.gyro.enabled
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::profile::{Binding, GyroConfig, InputSource};
+    use crate::profile::{
+        ActionSet, GyroConfig, InputMapping, InputProfile, InputSource, SourceMode, StickProcessing,
+    };
     use crate::{GamepadButton, GyroActivation, GyroOutput};
 
     fn event(source: InputSource, value: f32) -> crate::InputEvent {
@@ -188,6 +233,16 @@ mod tests {
             source,
             value,
             timestamp_us: 0,
+        }
+    }
+
+    fn set_profile(mapping: InputMapping) -> InputProfile {
+        InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![mapping],
+            }],
+            ..InputProfile::default()
         }
     }
 
@@ -206,13 +261,13 @@ mod tests {
         // The original bug: motion only fired on events, so a held stick
         // stopped the cursor. Now a single deflection event followed by
         // ticks keeps producing equal deltas.
-        let profile = InputProfile {
-            bindings: vec![Binding::new(
-                InputSource::Axis(GamepadAxis::LeftX),
-                OutputAction::MouseAxis(MouseAxis::X),
-            )],
-            ..InputProfile::default()
-        };
+        let profile = set_profile(InputMapping {
+            mode: Some(SourceMode::Mouse {
+                sensitivity: 1.0,
+                stick: StickProcessing::default(),
+            }),
+            ..InputMapping::new(InputSource::Axis(GamepadAxis::LeftX))
+        });
         let mut engine = MappingEngine::new(profile).unwrap();
         assert!(engine
             .process(event(InputSource::Axis(GamepadAxis::LeftX), 1.0))
@@ -228,13 +283,13 @@ mod tests {
 
     #[test]
     fn test_released_stick_stops_mouse_motion() {
-        let profile = InputProfile {
-            bindings: vec![Binding::new(
-                InputSource::Axis(GamepadAxis::LeftX),
-                OutputAction::MouseAxis(MouseAxis::X),
-            )],
-            ..InputProfile::default()
-        };
+        let profile = set_profile(InputMapping {
+            mode: Some(SourceMode::Mouse {
+                sensitivity: 1.0,
+                stick: StickProcessing::default(),
+            }),
+            ..InputMapping::new(InputSource::Axis(GamepadAxis::LeftX))
+        });
         let mut engine = MappingEngine::new(profile).unwrap();
         engine.process(event(InputSource::Axis(GamepadAxis::LeftX), 0.8));
         engine.tick(4_000);
@@ -370,17 +425,14 @@ mod tests {
 
     #[test]
     fn test_gyro_stick_composes_with_physical_stick() {
-        let profile = InputProfile {
-            bindings: vec![Binding::new(
-                InputSource::Axis(GamepadAxis::RightX),
-                OutputAction::GamepadAxis(GamepadAxis::RightX),
-            )],
-            gyro: GyroConfig {
-                enabled: true,
-                output: GyroOutput::RightStick,
-                ..GyroConfig::default()
-            },
-            ..InputProfile::default()
+        let mut profile = set_profile(InputMapping {
+            mode: Some(SourceMode::joystick(crate::profile::StickOutput::Right)),
+            ..InputMapping::new(InputSource::Axis(GamepadAxis::RightX))
+        });
+        profile.gyro = GyroConfig {
+            enabled: true,
+            output: GyroOutput::RightStick,
+            ..GyroConfig::default()
         };
         let mut engine = MappingEngine::new(profile).unwrap();
         engine.process(event(InputSource::Axis(GamepadAxis::RightX), 0.25));
@@ -412,6 +464,165 @@ mod tests {
     }
 
     #[test]
+    fn test_gyro_momentum_glides_after_deactivation() {
+        let profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                activation: GyroActivation::Hold(GamepadButton::LeftShoulder),
+                momentum: crate::profile::GyroMomentum {
+                    enabled: true,
+                    friction: 2.0,
+                },
+                ..GyroConfig::default()
+            },
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        engine.process(event(InputSource::Button(GamepadButton::LeftShoulder), 1.0));
+        engine.update_gyro(GyroRates {
+            yaw: 4.0,
+            pitch: 0.0,
+            gravity_locked: true,
+        });
+        let dt = 0.004f32;
+        let held = motion(&engine.tick(4_000), MouseAxis::X);
+        assert!(
+            (held - 4.0 * GYRO_MOUSE_COUNTS_PER_RADIAN * dt).abs() < 1.0,
+            "held: {held}"
+        );
+
+        // Releasing the activation button must glide, not stop dead: the
+        // first tick after release outputs the friction-decayed rate.
+        engine.process(event(InputSource::Button(GamepadButton::LeftShoulder), 0.0));
+        let glide = motion(&engine.tick(8_000), MouseAxis::X);
+        let expected = 4.0 * (-2.0 * dt).exp() * GYRO_MOUSE_COUNTS_PER_RADIAN * dt;
+        assert!((glide - expected).abs() < 1.0, "glide: {glide}");
+
+        // After a few time constants the glide is spent and output stops.
+        let mut now = 12_000u64;
+        for _ in 0..(250 * 4) {
+            engine.tick(now);
+            now += 4_000;
+        }
+        assert_eq!(motion(&engine.tick(now), MouseAxis::X), 0.0);
+    }
+
+    #[test]
+    fn test_gyro_without_momentum_stops_dead_on_deactivation() {
+        let profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                activation: GyroActivation::Hold(GamepadButton::LeftShoulder),
+                ..GyroConfig::default()
+            },
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        engine.process(event(InputSource::Button(GamepadButton::LeftShoulder), 1.0));
+        engine.update_gyro(GyroRates {
+            yaw: 4.0,
+            pitch: 0.0,
+            gravity_locked: true,
+        });
+        assert!(motion(&engine.tick(4_000), MouseAxis::X) > 0.0);
+        engine.process(event(InputSource::Button(GamepadButton::LeftShoulder), 0.0));
+        assert_eq!(motion(&engine.tick(8_000), MouseAxis::X), 0.0);
+    }
+
+    #[test]
+    fn test_trigger_dampening_scales_gyro_mouse_while_held() {
+        let profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                trigger_dampening: crate::profile::TriggerDampening::RightTriggerSoftPull,
+                dampening_amount: 0.5,
+                ..GyroConfig::default()
+            },
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        engine.update_gyro(GyroRates {
+            yaw: 1.0,
+            pitch: 0.0,
+            gravity_locked: true,
+        });
+        let full = motion(&engine.tick(4_000), MouseAxis::X);
+
+        // Below the soft-pull threshold nothing changes.
+        engine.process(event(InputSource::Axis(GamepadAxis::RightTrigger), 0.4));
+        assert!(
+            (motion(&engine.tick(8_000), MouseAxis::X) - full).abs() < 1.0,
+            "pre-soft-pull must be undampened"
+        );
+        // Past it, half the dampening amount is removed.
+        engine.process(event(InputSource::Axis(GamepadAxis::RightTrigger), 0.6));
+        let dampened = motion(&engine.tick(12_000), MouseAxis::X);
+        assert!((dampened - full * 0.5).abs() < 1.0, "dampened: {dampened}");
+        // Releasing the trigger restores full output.
+        engine.process(event(InputSource::Axis(GamepadAxis::RightTrigger), 0.0));
+        assert!(
+            (motion(&engine.tick(16_000), MouseAxis::X) - full).abs() < 1.0,
+            "released trigger must restore output"
+        );
+    }
+
+    #[test]
+    fn test_trigger_dampening_full_pull_needs_deep_travel() {
+        let profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                trigger_dampening: crate::profile::TriggerDampening::LeftTriggerFullPull,
+                dampening_amount: 1.0,
+                ..GyroConfig::default()
+            },
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        engine.update_gyro(GyroRates {
+            yaw: 1.0,
+            pitch: 0.0,
+            gravity_locked: true,
+        });
+        engine.tick(4_000);
+        // A half pull is not a full pull: no dampening.
+        engine.process(event(InputSource::Axis(GamepadAxis::LeftTrigger), 0.5));
+        assert!(motion(&engine.tick(8_000), MouseAxis::X) > 0.0);
+        // Bottoming the trigger freezes the gyro mouse entirely.
+        engine.process(event(InputSource::Axis(GamepadAxis::LeftTrigger), 1.0));
+        assert_eq!(motion(&engine.tick(12_000), MouseAxis::X), 0.0);
+    }
+
+    #[test]
+    fn test_trigger_dampening_leaves_stick_output_alone() {
+        // Steam applies trigger dampening to gyro mouse output only; the
+        // stick deflection path must stay untouched even at full dampening.
+        let profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                output: GyroOutput::RightStick,
+                trigger_dampening: crate::profile::TriggerDampening::RightTriggerSoftPull,
+                dampening_amount: 1.0,
+                ..GyroConfig::default()
+            },
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        engine.update_gyro(GyroRates {
+            yaw: 2.0,
+            pitch: 0.0,
+            gravity_locked: true,
+        });
+        // Trigger past its soft pull: had dampening leaked into the stick
+        // path, the deflection would be zeroed and no axis event emitted.
+        engine.process(event(InputSource::Axis(GamepadAxis::RightTrigger), 0.6));
+        let events = engine.tick(4_000);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadAxis { axis: GamepadAxis::RightX, value } if (value - 0.5).abs() < 0.001
+        )));
+    }
+
+    #[test]
     fn test_tick_delta_clamps_outliers() {
         let profile = InputProfile::default();
         let mut engine = MappingEngine::new(profile).unwrap();
@@ -422,32 +633,15 @@ mod tests {
     }
 
     #[test]
-    fn test_mouse_wheel_velocity_uses_detents() {
-        let profile = InputProfile {
-            bindings: vec![Binding::new(
-                InputSource::Axis(GamepadAxis::RightY),
-                OutputAction::MouseAxis(MouseAxis::Wheel),
-            )],
-            ..InputProfile::default()
-        };
-        let mut engine = MappingEngine::new(profile).unwrap();
-        engine.tick(0);
-        engine.process(event(InputSource::Axis(GamepadAxis::RightY), 1.0));
-        let events = engine.tick(4_000);
-        // Full deflection for 4 ms at 8 detents/s.
-        assert!((motion(&events, MouseAxis::Wheel) - 0.032).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_continuous_outputs_configured_detects_mouse_usage() {
+    fn test_continuous_outputs_configured_detects_set_profiles() {
         let mut profile = InputProfile::default();
         assert!(!continuous_outputs_configured(&profile));
-        profile.bindings.push(Binding::new(
-            InputSource::Axis(GamepadAxis::LeftX),
-            OutputAction::MouseAxis(MouseAxis::X),
-        ));
+        profile.action_sets.push(ActionSet {
+            name: "Default".to_string(),
+            inputs: Vec::new(),
+        });
         assert!(continuous_outputs_configured(&profile));
-        profile.bindings.clear();
+        profile.action_sets.clear();
         profile.gyro.enabled = true;
         assert!(continuous_outputs_configured(&profile));
     }

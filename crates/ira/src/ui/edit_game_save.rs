@@ -492,7 +492,8 @@ fn update_game_state_in_memory(
         }
     }
 
-    let g = &mut state_borrow.games[i];
+    let state = &mut *state_borrow;
+    let g = &mut state.games[i];
     g.set_name(title.to_string());
     g.sort_title = sort_title.to_string();
 
@@ -515,13 +516,7 @@ fn update_game_state_in_memory(
             g.total_count = 0;
             g.manual_unmatch = true;
         } else {
-            params
-                .state
-                .borrow()
-                .game_names
-                .lock()
-                .unwrap()
-                .remove(&params.app_id);
+            state.game_names.lock().unwrap().remove(&params.app_id);
             g.app_id = app_id_result.new_val.clone();
             g.platform_id = app_id_result.new_val.clone();
             g.manual_unmatch = false;

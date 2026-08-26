@@ -1,6 +1,6 @@
 use crate::api_emulators_shared::{
-    api_emulators_dir, backup_file, copy_file, detect_arch, find_game_dll_folder, is_windows,
-    restore_backup,
+    api_emulators_dir, backup_file, copy_file, detect_arch, detect_folder_bitness,
+    find_game_dll_folder, has_emulator_backups, is_windows, restore_backup,
 };
 use ira_models::AppDetails;
 use std::path::{Path, PathBuf};
@@ -217,6 +217,22 @@ const GSE_VERSION_FILES: &[&str] = &[
     "steamclient64.dll",
 ];
 
+/// Files in a game folder indicating a 64-bit Steam API setup.
+const STEAM_64_FILES: &[&str] = &[
+    "steam_api64.dll",
+    "steamclient64.dll",
+    "libsteam_api64.so",
+    "steamclient64.so",
+];
+
+/// Files in a game folder indicating a 32-bit Steam API setup.
+const STEAM_32_FILES: &[&str] = &[
+    "steam_api.dll",
+    "steamclient.dll",
+    "libsteam_api.so",
+    "steamclient.so",
+];
+
 fn gse_file_map(is_64: bool, is_win: bool) -> &'static [(&'static str, &'static str)] {
     if is_win {
         if is_64 {
@@ -250,11 +266,14 @@ pub fn find_steam_dll_folder(game_exe: &str, game_folder: &str) -> Option<PathBu
     find_game_dll_folder(game_exe, game_folder, GSE_VERSION_FILES)
 }
 
-/// Check if `dll_folder` contains original Steam API DLLs.
+/// Check if `dll_folder` contains original Steam API DLLs, either in place or
+/// renamed under a backup-style name (`.bak`, `.owo`, `_o`) by another tool.
 pub fn has_original_steam_dlls(dll_folder: &Path) -> bool {
-    ["libsteam_api.so", "steam_api.dll", "steam_api64.dll"]
+    const ORIGINAL_API_FILES: &[&str] = &["libsteam_api.so", "steam_api.dll", "steam_api64.dll"];
+    ORIGINAL_API_FILES
         .iter()
         .any(|d| dll_folder.join(d).exists())
+        || has_emulator_backups(dll_folder, ORIGINAL_API_FILES)
 }
 
 /// All Steam API DLL/SO filenames (original and emulator share these names).
@@ -275,7 +294,7 @@ pub fn find_steam_dlls_recursive(game_folder: &str) -> Vec<PathBuf> {
     crate::api_emulators_shared::find_dll_dirs_recursive(Path::new(game_folder), STEAM_DLL_NAMES)
 }
 
-/// Check whether `dir` already has emulator backups (`.dll.bak`/`.bak.dll`/`.owo.dll`).
+/// Check whether `dir` already has emulator backups (`.dll.bak`/`.bak.dll`/`.owo.dll`/`_o.dll`).
 pub fn has_steam_emulator_backups(dir: &Path) -> bool {
     crate::api_emulators_shared::has_emulator_backups(dir, STEAM_DLL_NAMES)
 }
@@ -335,7 +354,11 @@ pub fn install_gse(
     }
 
     let is_win = is_windows(game_exe);
-    let is64 = detect_arch(game_exe) == "x64";
+    // The DLLs in the folder are the ground truth for which GSE build to use —
+    // exe name/size heuristics misclassify small launcher stubs as 32-bit,
+    // which used to install steam_api.dll next to an untouched steam_api64.dll.
+    let is64 = detect_folder_bitness(&dll_folder, STEAM_64_FILES, STEAM_32_FILES)
+        .unwrap_or_else(|| detect_arch(game_exe) == "x64");
 
     install_gse_into_folder(
         save_dir,
@@ -352,9 +375,9 @@ pub fn install_gse(
 /// Recursively search `game_folder` for the directory containing Steam DLLs and
 /// install the Goldberg emulator there. Used by the auto-add flow which only
 /// knows the install folder, not the exe. Skips directories that already have
-/// emulator backups (already patched). `steam_settings` is not treated as
-/// evidence of an install — a centralized root `steam_settings` with symlinks
-/// exists for every game.
+/// emulator backups (already patched, including `_o`-renamed originals left
+/// by cracks). `steam_settings` is not treated as evidence of an install — a
+/// centralized root `steam_settings` with symlinks exists for every game.
 pub fn install_gse_from_folder(
     save_dir: &str,
     game_folder: &str,
@@ -370,10 +393,7 @@ pub fn install_gse_from_folder(
 
     let is_win =
         dll_folder.join("steam_api.dll").exists() || dll_folder.join("steam_api64.dll").exists();
-    let is64 = dll_folder.join("steam_api64.dll").exists()
-        || dll_folder.join("steamclient64.dll").exists()
-        || dll_folder.join("libsteam_api64.so").exists()
-        || dll_folder.join("steamclient64.so").exists();
+    let is64 = detect_folder_bitness(dll_folder, STEAM_64_FILES, STEAM_32_FILES).unwrap_or(false);
 
     install_gse_into_folder(
         save_dir, dll_folder, is_win, is64, app_id, languages, version,
@@ -681,5 +701,25 @@ mod tests {
         assert!(!is_gse_installed(dir));
         std::fs::write(dir.join("steam_api64.dll.bak"), b"x").unwrap();
         assert!(is_gse_installed(dir));
+    }
+
+    #[test]
+    fn test_has_original_steam_dlls_accepts_o_renamed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        // Cracked game: original renamed to _o, wrapper sits at the plain name.
+        std::fs::write(dir.join("steam_api64_o.dll"), b"x").unwrap();
+        std::fs::write(dir.join("steam_api64.dll"), b"wrapper").unwrap();
+        assert!(has_original_steam_dlls(dir));
+
+        // Even without the wrapper the stashed original counts.
+        std::fs::remove_file(dir.join("steam_api64.dll")).unwrap();
+        assert!(has_original_steam_dlls(dir));
+    }
+
+    #[test]
+    fn test_has_original_steam_dlls_empty_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(!has_original_steam_dlls(tmp.path()));
     }
 }

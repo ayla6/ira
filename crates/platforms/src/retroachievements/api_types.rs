@@ -292,12 +292,7 @@ pub fn build_ra_achievements(
     (achievements, icon_path, icon_gray_path)
 }
 
-pub fn enrich_ra_game(
-    game: &mut Game,
-    save_dir: &str,
-    username: &str,
-    web_api_key: &str,
-) {
+pub fn enrich_ra_game(game: &mut Game, save_dir: &str, username: &str, web_api_key: &str) {
     let _s = info_span!("enrich_ra_game", game_id = &game.app_id[..]).entered();
     let client = RaClient::new(username, web_api_key);
 
@@ -425,7 +420,7 @@ pub fn redownload_missing_ra_badges(save_dir: &str, game_id: &str) -> bool {
 
 #[cfg(test)]
 mod web_progress_tests {
-    use super::{web_progress_to_data, RaUnlockInfo, RA_WARNING_ACHIEVEMENT_ID, WebAchievement};
+    use super::{web_progress_to_data, RaUnlockInfo, WebAchievement, RA_WARNING_ACHIEVEMENT_ID};
     use crate::retroachievements::api_types::WebGameProgress;
 
     fn progress(achievements: Vec<WebAchievement>) -> WebGameProgress {

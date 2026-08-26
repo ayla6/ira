@@ -160,7 +160,10 @@ fn analog_row(
         })
         .unwrap_or(0);
     row.set_selected(selected as u32);
-    if let Some(description) = choices.get(selected).and_then(|choice| choice.description.clone()) {
+    if let Some(description) = choices
+        .get(selected)
+        .and_then(|choice| choice.description.clone())
+    {
         row.set_subtitle(&description);
     }
 

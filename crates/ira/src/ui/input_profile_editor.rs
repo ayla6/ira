@@ -117,7 +117,7 @@ pub(super) fn show_input_profile_editor(
         device,
         on_dirty: on_dirty.clone(),
     };
-    let pages = build_pages(&layout, &ctx, &gyro);
+    let pages = build_pages(&layout, &ctx, &gyro, &profile_name);
 
     let form = EditorForm {
         name: profile_name,
@@ -169,7 +169,7 @@ pub(super) fn show_input_profile_editor(
 
     setup_sidebar_navigation(&layout);
 
-    let cancel = add_editor_footer(&layout, &save, &apply, &status, &form, &on_dirty);
+    let cancel = add_editor_footer(&layout, &save, &apply, &status);
 
     let on_saved: Rc<dyn Fn(PathBuf)> = Rc::new(on_saved);
     let window_for_save = layout.window.clone();
@@ -212,10 +212,24 @@ fn build_pages(
     layout: &DialogLayout,
     ctx: &PagesCtx,
     gyro: &Rc<RefCell<GyroConfig>>,
+    name: &Rc<RefCell<String>>,
 ) -> RegionPages {
     let mut region_boxes = Vec::new();
-    // Steam-style sidebar: grouped sections of pages rather than one flat
-    // list.
+    // Steam-style sidebar: the profile-level General page, then grouped
+    // sections of pages rather than one flat list.
+    let (general_scroll, general_box) = scrolling_page();
+    layout.stack.add_named(&general_scroll, Some("general"));
+    layout
+        .sidebar
+        .append(&super::settings_dialog::settings_sidebar_row(
+            "document-edit-symbolic",
+            &crate::tr!("General"),
+            "general",
+        ));
+    general_box.append(&super::input_profile_general_page::build_general_page(
+        ctx, name,
+    ));
+
     layout
         .sidebar
         .append(&super::settings_dialog::sidebar_section_title(&crate::tr!(
@@ -250,7 +264,7 @@ fn build_pages(
             &crate::tr!("Controller"),
             "controller",
         ));
-    let motion_rows = super::input_profile_controller_page::add_controller_groups(
+    super::input_profile_controller_page::add_controller_groups(
         &controller_box,
         &ctx.profile,
         &ctx.on_dirty,
@@ -272,6 +286,11 @@ fn build_pages(
         ));
     add_gyro_group(&gyro_box, gyro, ctx.device.as_ref(), &ctx.on_dirty);
     super::input_profile_gyro_motion::add_gyro_motion_groups(&gyro_box, gyro, &ctx.on_dirty);
+    let motion_rows = super::input_profile_controller_page::add_native_motion_group(
+        &gyro_box,
+        &ctx.profile,
+        &ctx.on_dirty,
+    );
 
     let (sets_scroll, sets_box) = scrolling_page();
     layout.stack.add_named(&sets_scroll, Some("sets"));
@@ -402,8 +421,6 @@ fn add_editor_footer(
     save: &gtk4::Button,
     apply: &gtk4::Button,
     status: &gtk4::Label,
-    form: &EditorForm,
-    on_dirty: &Rc<dyn Fn()>,
 ) -> gtk4::Button {
     let cancel = gtk4::Button::with_label(&crate::tr!("Cancel"));
     let actions = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
@@ -415,19 +432,9 @@ fn add_editor_footer(
     actions.append(&cancel);
     actions.append(apply);
     actions.append(save);
-    let name = adw::EntryRow::new();
-    name.set_title(&crate::tr!("Profile name"));
-    name.set_text(&form.name.borrow());
-    let form_name = form.name.clone();
-    let on_dirty_for_name = on_dirty.clone();
-    name.connect_changed(move |entry| {
-        *form_name.borrow_mut() = entry.text().to_string();
-        on_dirty_for_name();
-    });
     let footer = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
     footer.set_margin_start(16);
     footer.set_margin_end(16);
-    footer.append(&name);
     footer.append(status);
     footer.append(&actions);
     layout.content_area.append(&footer);

@@ -183,39 +183,9 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         );
     });
 
-    let monitor_button = icon_button("input-gaming-symbolic", &crate::tr!("Monitor this layout"));
     let edit_button = icon_button("document-edit-symbolic", &crate::tr!("Edit profile"));
-    monitor_button.set_sensitive(selected != 0);
     edit_button.set_sensitive(selected != 0);
     input_profile_row.add_suffix(&edit_button);
-    input_profile_row.add_suffix(&monitor_button);
-
-    let stack_for_monitor = Downgrade::downgrade(params.stack);
-    let registry_for_monitor = params.registry.clone();
-    let profile_row_for_monitor = Downgrade::downgrade(&input_profile_row);
-    let profile_paths_for_monitor = input_profile_paths.clone();
-    monitor_button.connect_clicked(move |_| {
-        let Some(profile_row_for_monitor) = profile_row_for_monitor.upgrade() else {
-            return;
-        };
-        let Some(path) = selected_path(&profile_row_for_monitor, &profile_paths_for_monitor) else {
-            return;
-        };
-        let Some(stack_for_monitor) = stack_for_monitor.upgrade() else {
-            return;
-        };
-        let Some(window) = stack_for_monitor
-            .root()
-            .and_then(|root| root.downcast::<gtk4::Window>().ok())
-        else {
-            return;
-        };
-        super::input_profile_viewer::show_input_profile_viewer(
-            &window,
-            &path,
-            registry_for_monitor.clone(),
-        );
-    });
 
     let stack_for_edit = Downgrade::downgrade(params.stack);
     let profile_row_for_edit = Downgrade::downgrade(&input_profile_row);
@@ -346,7 +316,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
                 .and_then(Clone::clone)
                 .is_some();
             edit_button.set_sensitive(has_profile);
-            monitor_button.set_sensitive(has_profile);
         }
     });
     input_group.add(&input_profile_row);

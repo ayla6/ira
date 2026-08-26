@@ -1,6 +1,6 @@
 //! Whole-controller output settings for the profile editor: rumble
-//! passthrough and the native-motion transport. These apply to the pad as a
-//! whole rather than any region, so they get their own page.
+//! passthrough on the Controller page and the native-motion transport on
+//! the Gyro page. These apply to the pad as a whole rather than any region.
 
 use super::input_profile_widgets::{switch_row, SettingGroup};
 use adw::prelude::*;
@@ -29,11 +29,12 @@ pub(crate) fn refresh_motion_rows(rows: &MotionRows, backend: VirtualGamepadBack
     rows.apply_backend(backend);
 }
 
+/// Rumble passthrough, on the Controller page.
 pub(crate) fn add_controller_groups(
     page: &gtk4::Box,
     profile: &Rc<RefCell<InputProfile>>,
     on_dirty: &Rc<dyn Fn()>,
-) -> MotionRows {
+) {
     let haptics = SettingGroup::new(
         Some(&crate::tr!("Haptics")),
         Some(&crate::tr!(
@@ -55,7 +56,15 @@ pub(crate) fn add_controller_groups(
     );
     haptics.add(&rumble);
     page.append(&haptics.root);
+}
 
+/// The native motion sensor transport, on the Gyro page next to the rest of
+/// the motion settings.
+pub(crate) fn add_native_motion_group(
+    page: &gtk4::Box,
+    profile: &Rc<RefCell<InputProfile>>,
+    on_dirty: &Rc<dyn Fn()>,
+) -> MotionRows {
     let advanced = SettingGroup::new(
         Some(&crate::tr!("Native motion sensors")),
         Some(&crate::tr!(

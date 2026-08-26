@@ -36,9 +36,7 @@ pub const CSS_LOCKED_TROPHY: &str = "locked-trophy";
 pub const CSS_SIDEBAR_SECTION_TITLE: &str = "sidebar-section-title";
 pub const CSS_SOURCE_BADGE: &str = "source-badge";
 pub const CSS_SQUARE_BUTTON: &str = "square-button";
-pub const CSS_VIEWER_CARD: &str = "input-viewer-card";
 pub const CSS_STATUS_NO_SCROLL: &str = "status-no-scroll";
-pub const CSS_VIEWER_CANVAS: &str = "input-viewer-canvas";
 pub const CSS_COMMAND_TILE: &str = "command-tile";
 pub const CSS_COMMAND_TILE_ACTIVE: &str = "command-tile-active";
 
@@ -211,19 +209,6 @@ gridview.game-grid child:focus-within {
     border-radius: 8px;
     background-color: alpha(@theme_fg_color, 0.08);
     font-weight: 600;
-}
-
-.input-viewer-card {
-    padding: 10px 14px;
-    border-radius: 12px;
-    background-color: alpha(@theme_fg_color, 0.06);
-}
-.input-viewer-canvas {
-    border-radius: 14px;
-    background-color: alpha(@theme_fg_color, 0.035);
-}
-.input-viewer-card > label:first-child {
-    font-weight: 700;
 }
 
 .command-tile {

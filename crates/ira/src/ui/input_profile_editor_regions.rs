@@ -173,10 +173,7 @@ pub(crate) fn region_groups(
             vec![
                 SourceGroup {
                     title: crate::tr!("Left Trigger"),
-                    sources: trigger_sources(
-                        GamepadAxis::LeftTrigger,
-                        GamepadButton::LeftTrigger,
-                    ),
+                    sources: trigger_sources(GamepadAxis::LeftTrigger, GamepadButton::LeftTrigger),
                 },
                 SourceGroup {
                     title: crate::tr!("Right Trigger"),

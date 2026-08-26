@@ -216,12 +216,9 @@ fn add_console_remapping_rows(
             .cloned()
             .flatten();
     });
-    let monitor = icon_button("input-gaming-symbolic", &crate::tr!("Monitor this layout"));
     let edit = icon_button("document-edit-symbolic", &crate::tr!("Edit layout"));
-    monitor.set_sensitive(true);
     edit.set_sensitive(selected != 0);
     profile_row.add_suffix(&edit);
-    profile_row.add_suffix(&monitor);
     group.add(&profile_row);
     let parent = parent.clone();
     let save_dir = save_dir.to_string();
@@ -254,14 +251,6 @@ fn add_console_remapping_rows(
             move |saved| {
                 refresh_console_profile_choices(&row, &paths, &save_dir, Some(&saved), &last_real)
             },
-        );
-    });
-    let parent_for_monitor = parent.clone();
-    let registry_for_monitor = registry.clone();
-    monitor.connect_clicked(move |_| {
-        super::input_profile_viewer::show_raw_input_viewer(
-            parent_for_monitor.upcast_ref(),
-            registry_for_monitor.clone(),
         );
     });
     let paths_for_notify = profile_paths;
@@ -311,7 +300,6 @@ fn add_console_remapping_rows(
             *last_real_for_notify.borrow_mut() = row.selected();
             let has_profile = selected_console_path(row, &paths_for_notify).is_some();
             edit.set_sensitive(has_profile);
-            monitor.set_sensitive(true);
         }
     });
     ConsoleProfileWidgets {
@@ -763,25 +751,7 @@ fn rebuild_profile_rows(
             },
         );
     });
-    let preview = icon_button(
-        "input-gaming-symbolic",
-        &crate::tr!("View raw controller input"),
-    );
-    let preview_row = adw::ActionRow::new();
-    preview_row.set_title(&crate::tr!("Controller preview"));
-    preview_row.add_suffix(&preview);
-    let parent_for_preview = parent.clone();
-    let registry_for_preview = registry;
-    preview.connect_clicked(move |_| {
-        super::input_profile_viewer::show_raw_input_viewer(
-            parent_for_preview.upcast_ref(),
-            registry_for_preview.clone(),
-        );
-    });
-    group.add(&preview_row);
     group.set_header_suffix(Some(&new_profile));
-    rows.borrow_mut()
-        .extend([preview_row.upcast::<gtk4::Widget>()]);
 }
 
 fn add_profile_row(
@@ -794,13 +764,8 @@ fn add_profile_row(
 ) -> adw::ActionRow {
     let row = adw::ActionRow::new();
     row.set_title(&esc(&profile_label(&stored)));
-    let preview = icon_button(
-        "input-gaming-symbolic",
-        &crate::tr!("Preview layout output"),
-    );
     let edit = icon_button("document-edit-symbolic", &crate::tr!("Edit profile"));
     let delete = icon_button("user-trash-symbolic", &crate::tr!("Delete profile"));
-    row.add_suffix(&preview);
     row.add_suffix(&edit);
     row.add_suffix(&delete);
     let parent_for_edit = parent.clone();
@@ -836,16 +801,6 @@ fn add_profile_row(
                     )
                 }
             },
-        );
-    });
-    let parent_for_preview = parent.clone();
-    let path_for_preview = stored.path.clone();
-    let registry_for_preview = registry.clone();
-    preview.connect_clicked(move |_| {
-        super::input_profile_viewer::show_input_profile_viewer(
-            parent_for_preview.upcast_ref(),
-            &path_for_preview,
-            registry_for_preview.clone(),
         );
     });
     let parent_for_delete = parent.clone();

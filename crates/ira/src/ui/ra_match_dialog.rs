@@ -123,10 +123,12 @@ fn populate_results(
     for game in &results {
         let row = adw::ActionRow::new();
         row.set_title(&super::helpers::esc(&game.title));
-        row.set_subtitle(&format!(
-            "RA ID: {} · {} achievements",
-            game.id, game.num_achievements
-        ));
+        let achievements = if game.num_achievements == 0 {
+            crate::tr!("No achievements yet")
+        } else {
+            crate::tr!("{} achievements").replacen("{}", &game.num_achievements.to_string(), 1)
+        };
+        row.set_subtitle(&format!("RA ID: {} · {}", game.id, achievements));
         let match_btn = gtk4::Button::with_label(&crate::tr!("Match"));
         match_btn.add_css_class(CSS_SUGGESTED_ACTION);
         match_btn.set_valign(gtk4::Align::Center);

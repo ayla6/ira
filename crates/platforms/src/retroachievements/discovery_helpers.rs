@@ -87,7 +87,10 @@ pub(super) struct DiscGroup {
     pub(super) serial: Option<String>,
 }
 
-pub(super) fn group_multi_disc_roms(roms: Vec<(String, PathBuf)>) -> Vec<DiscGroup> {
+pub(super) fn group_multi_disc_roms(
+    conn: &ira_db::DbConn,
+    roms: Vec<(String, PathBuf)>,
+) -> Vec<DiscGroup> {
     let mut by_pattern: HashMap<String, Vec<(String, PathBuf, Option<i32>)>> = HashMap::new();
     let mut ungrouped: Vec<(String, PathBuf, Option<i32>)> = Vec::new();
 
@@ -119,7 +122,7 @@ pub(super) fn group_multi_disc_roms(roms: Vec<(String, PathBuf)>) -> Vec<DiscGro
 
     let mut by_serial: HashMap<String, Vec<(String, PathBuf, Option<i32>)>> = HashMap::new();
     for (name, path, _) in ungrouped {
-        let serial = crate::rom_serial::read_serial(&path);
+        let serial = crate::rom_serial::read_serial_cached(conn, &path);
         if let Some(ref s) = serial {
             by_serial
                 .entry(s.clone())
@@ -231,7 +234,7 @@ mod tests {
             ),
         ];
 
-        let groups = group_multi_disc_roms(roms);
+        let groups = group_multi_disc_roms(&test_db(), roms);
 
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].roms.len(), 3);
@@ -243,5 +246,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(1), Some(2), Some(3)]
         );
+    }
+
+    fn test_db() -> ira_db::DbConn {
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = ira_db::init_db(tmp.path().join("ira.db").to_str().unwrap());
+        std::mem::forget(tmp);
+        conn
     }
 }

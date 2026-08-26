@@ -132,7 +132,7 @@ fn build_ra_games_for_console(
     };
     let disc_owners = ira_db::get_disc_owners_for_platform(db, console.def.id).unwrap_or_default();
 
-    let all_groups = group_multi_disc_roms(roms);
+    let all_groups = group_multi_disc_roms(db, roms);
     let grouped_paths: HashSet<String> = all_groups
         .iter()
         .filter(|group| group.roms.len() > 1)
@@ -290,7 +290,7 @@ fn build_ra_games_for_console(
     if !new_roms.is_empty() {
         let _s = tracing::info_span!("process_new_roms", count = new_roms.len()).entered();
 
-        let groups = group_multi_disc_roms(new_roms);
+        let groups = group_multi_disc_roms(db, new_roms);
         for group in &groups {
             let (rom_name, rom_path, _disc_num) = &group.roms[0];
             let rom_path_str = to_relative(rom_path);
@@ -312,7 +312,7 @@ fn build_ra_games_for_console(
                 group
                     .serial
                     .clone()
-                    .or_else(|| platform_serial(console.def.id, rom_path))
+                    .or_else(|| platform_serial(console.def.id, db, rom_path))
             };
 
             let (app_id, title, trophy_source) = match matched_id {
@@ -546,11 +546,15 @@ fn rom_path_is_present(scan_succeeded: bool, seen_paths: &HashSet<String>, rom_p
 
 /// Reads the serial a ROM carries in its own data, so identity does not
 /// depend on the file name. DS ROMs expose a header game code; other
-/// consoles use the disc-info helper.
-fn platform_serial(console_id: &str, path: &std::path::Path) -> Option<String> {
+/// consoles use the cached disc-info reader.
+fn platform_serial(
+    console_id: &str,
+    conn: &ira_db::DbConn,
+    path: &std::path::Path,
+) -> Option<String> {
     match console_id {
         "nds" => crate::nds::read_serial(path),
-        _ => crate::rom_serial::read_serial(path),
+        _ => crate::rom_serial::read_serial_cached(conn, path),
     }
 }
 
@@ -593,7 +597,6 @@ mod tests {
             image_url: String::new(),
             num_achievements: 0,
             points: 0,
-            hashes: Vec::new(),
         }];
         assert_eq!(match_rom_to_game("Final Fantasy VII", &games), Some(1));
     }
@@ -607,7 +610,6 @@ mod tests {
             image_url: String::new(),
             num_achievements: 0,
             points: 0,
-            hashes: Vec::new(),
         }];
         assert_eq!(match_rom_to_game("Chrono_Trigger", &games), Some(42));
     }
@@ -621,7 +623,6 @@ mod tests {
             image_url: String::new(),
             num_achievements: 0,
             points: 0,
-            hashes: Vec::new(),
         }];
         assert_eq!(match_rom_to_game("Completely Different Game", &games), None);
     }
@@ -693,7 +694,7 @@ mod tests {
             ),
             ("Chrono Trigger".to_string(), PathBuf::from("/games/ct.bin")),
         ];
-        let groups = group_multi_disc_roms(roms);
+        let groups = group_multi_disc_roms(&test_db(), roms);
         assert_eq!(groups.len(), 2);
         let ff7 = groups.iter().find(|g| g.roms.len() == 3).unwrap();
         assert_eq!(ff7.roms[0].2, Some(1));
@@ -704,7 +705,7 @@ mod tests {
     #[test]
     fn test_group_single_rom() {
         let roms = vec![("Game".to_string(), PathBuf::from("/games/game.bin"))];
-        let groups = group_multi_disc_roms(roms);
+        let groups = group_multi_disc_roms(&test_db(), roms);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].roms.len(), 1);
     }
@@ -715,5 +716,12 @@ mod tests {
         assert!(super::rom_path_is_present(true, &seen_paths, "game.iso"));
         assert!(!super::rom_path_is_present(true, &seen_paths, "moved.iso"));
         assert!(super::rom_path_is_present(false, &seen_paths, "moved.iso"));
+    }
+
+    fn test_db() -> ira_db::DbConn {
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = ira_db::init_db(tmp.path().join("ira.db").to_str().unwrap());
+        std::mem::forget(tmp);
+        conn
     }
 }

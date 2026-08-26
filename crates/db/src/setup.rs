@@ -151,6 +151,7 @@ pub fn init_db(db_path: &str) -> DbConn {
         }
     }
     crate::create_discs_table(&pool);
+    crate::create_rom_serials_table(&pool);
     crate::create_default_disc_table(&pool);
     pool
 }

@@ -144,7 +144,13 @@ pub(super) fn make_refresh_closure(
 /// Re-extracts an emulator-native icon into the game's data dir, replacing
 /// any imported or downloaded one. Nothing already on disk is touched until
 /// a replacement has been produced. Returns true when an icon was restored.
-pub(super) fn restore_native_icon(save_dir: &str, game: &Game, roms_folder: &str) -> bool {
+pub(super) fn restore_native_icon(
+    save_dir: &str,
+    game: &Game,
+    roms_folder: &str,
+    azahar_executable: &str,
+    cemu_executable: &str,
+) -> bool {
     let image_dir = match game.kind {
         ira_models::GameKind::Ps4 => std::path::Path::new(save_dir)
             .join("data")
@@ -180,16 +186,27 @@ pub(super) fn restore_native_icon(save_dir: &str, game: &Game, roms_folder: &str
             std::path::Path::new(&game.game_path)
         };
     // Decode first: if the native source is unreadable the current icon
-    // must stay untouched.
+    // must stay untouched. 3DS and Wii U titles whose stored location
+    // vanished get relocated through the emulator's own configuration.
     let staged = match game.kind {
         ira_models::GameKind::Retro if game.platform_id == "nds" => decode_nds_icon(game_root),
-        ira_models::GameKind::ThreeDS => decode_smdh_icon(game_root),
+        ira_models::GameKind::ThreeDS => decode_smdh_icon(game_root).or_else(|| {
+            ira_platforms::azahar::find_title_path_for(azahar_executable, &game.platform_id)
+                .and_then(|path| decode_smdh_icon(&path))
+        }),
         ira_models::GameKind::Ps4 => {
             import_image_bytes(&game_root.join("sce_sys").join("icon0.png"))
         }
         ira_models::GameKind::Ps3 => import_image_bytes(&game_root.join("ICON0.PNG")),
         ira_models::GameKind::WiiU => {
-            import_image_bytes(&game_root.join("meta").join("iconTex.tga"))
+            if game_root.join("meta/iconTex.tga").is_file() {
+                import_image_bytes(&game_root.join("meta").join("iconTex.tga"))
+            } else {
+                ira_platforms::cemu::find_title_dir(cemu_executable, &game.platform_id)
+                    .map(|dir| dir.join("meta").join("iconTex.tga"))
+                    .filter(|icon| icon.is_file())
+                    .and_then(|icon| import_image_bytes(&icon))
+            }
         }
         _ => return false,
     };

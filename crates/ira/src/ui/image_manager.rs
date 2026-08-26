@@ -396,9 +396,22 @@ fn build_reset_icon_button(
     let pending_copies_reset = pending_copies.clone();
     let asset_reset = asset_type.to_string();
     let save_dir_c2 = save_dir.to_string();
-    let roms_folder = state.borrow().cfg.roms_folder.clone();
+    let (roms_folder, azahar_exe, cemu_exe) = {
+        let s = state.borrow();
+        (
+            s.cfg.roms_folder.clone(),
+            s.cfg.azahar_executable.clone(),
+            s.cfg.cemu_executable.clone(),
+        )
+    };
     reset_btn.connect_clicked(move |_| {
-        if super::image_manager_helpers::restore_native_icon(&save_dir_c2, &gc, &roms_folder) {
+        if super::image_manager_helpers::restore_native_icon(
+            &save_dir_c2,
+            &gc,
+            &roms_folder,
+            &azahar_exe,
+            &cemu_exe,
+        ) {
             if let Some(ref pc) = pending_copies_reset {
                 pc.borrow_mut().remove(&asset_reset);
             }

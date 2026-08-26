@@ -36,7 +36,9 @@ pub struct AzaharGame {
     pub icon: Option<Vec<u8>>,
 }
 
-fn scan_rom_dir(path: &Path, depth_left: u32, results: &mut Vec<AzaharGame>) {
+/// Collects ROM file paths below `path`; parsing is deferred so it can run
+/// concurrently.
+fn collect_rom_paths(path: &Path, depth_left: u32, out: &mut Vec<PathBuf>) {
     if depth_left == 0 {
         return;
     }
@@ -46,18 +48,28 @@ fn scan_rom_dir(path: &Path, depth_left: u32, results: &mut Vec<AzaharGame>) {
     for entry in entries.flatten() {
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
         if is_dir {
-            scan_rom_dir(&entry.path(), depth_left - 1, results);
+            collect_rom_paths(&entry.path(), depth_left - 1, out);
         } else if entry
             .path()
             .extension()
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| ROM_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
         {
-            if let Some(game) = scan_rom_file(&entry.path()) {
-                results.push(game);
-            }
+            out.push(entry.path());
         }
     }
+}
+
+/// Scans files concurrently; Z3DS containers decompress forward from the
+/// start for every metadata read, which made large libraries take minutes
+/// when scanned one file at a time. `par_iter` output order matches the
+/// input, so dedup priority stays deterministic.
+fn scan_rom_files(
+    paths: &[PathBuf],
+    parse: fn(&Path) -> Option<AzaharGame>,
+) -> Vec<Option<AzaharGame>> {
+    use rayon::prelude::*;
+    paths.par_iter().map(|path| parse(path)).collect()
 }
 
 /// Collects the `title` directory roots below a NAND or SDMC root:
@@ -115,24 +127,48 @@ fn main_content_file(content_dir: &Path) -> Option<PathBuf> {
         .map(|entry| entry.path())
 }
 
-fn scan_installed_titles(root: &Path, results: &mut Vec<AzaharGame>) {
+/// One installed title awaiting its metadata scan: the main content file
+/// plus the low title ID used to assemble the full `title_id`.
+struct InstalledTitle {
+    content: PathBuf,
+    low_id: String,
+}
+
+/// Enumerates installed application titles under a NAND/SDMC root without
+/// parsing their contents.
+fn collect_installed_titles(root: &Path) -> Vec<InstalledTitle> {
+    let mut titles = Vec::new();
     for title_root in installed_title_roots(root) {
         let apps = title_root.join(APPLICATIONS_CATEGORY);
-        let Ok(titles) = std::fs::read_dir(apps) else {
+        let Ok(entries) = std::fs::read_dir(apps) else {
             continue;
         };
-        for title in titles.flatten() {
-            let low_id = title.file_name().to_string_lossy().into_owned();
+        for entry in entries.flatten() {
+            let low_id = entry.file_name().to_string_lossy().into_owned();
             if low_id.len() != 8 || !low_id.chars().all(|c| c.is_ascii_hexdigit()) {
                 continue;
             }
-            let Some(game_path) = main_content_file(&title.path().join("content")) else {
+            let Some(content) = main_content_file(&entry.path().join("content")) else {
                 continue;
             };
-            if let Some(mut game) = scan_installed_content(&game_path) {
-                game.title_id = format!("{APPLICATIONS_CATEGORY}{}", low_id.to_lowercase());
-                results.push(game);
-            }
+            titles.push(InstalledTitle { content, low_id });
+        }
+    }
+    titles
+}
+
+fn scan_installed_titles(root: &Path, results: &mut Vec<AzaharGame>) {
+    let titles = collect_installed_titles(root);
+    let contents: Vec<PathBuf> = titles.iter().map(|t| t.content.clone()).collect();
+    // Content file names are hashes with no usable title, so installed
+    // titles scan without the filename fallback that ROM dumps get.
+    for (title, game) in titles
+        .into_iter()
+        .zip(scan_rom_files(&contents, scan_installed_content))
+    {
+        if let Some(mut game) = game {
+            game.title_id = format!("{APPLICATIONS_CATEGORY}{}", title.low_id.to_lowercase());
+            results.push(game);
         }
     }
 }
@@ -165,7 +201,9 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<AzaharGame> {
     let mut games = Vec::new();
     for (dir, deep_scan) in paths.game_dirs {
         let depth = if deep_scan { MAX_SCAN_DEPTH } else { 1 };
-        scan_rom_dir(&dir, depth, &mut games);
+        let mut rom_paths = Vec::new();
+        collect_rom_paths(&dir, depth, &mut rom_paths);
+        games.extend(scan_rom_files(&rom_paths, scan_rom_file).into_iter().flatten());
     }
     scan_installed_titles(&paths.nand_dir, &mut games);
     scan_installed_titles(&paths.sdmc_dir, &mut games);

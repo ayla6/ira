@@ -6,7 +6,9 @@ use crate::retroachievements::api::{RaClient, RaGameEntry};
 use ira_config::Config;
 use ira_models::{Game, GameDisc, GameKind, TrophySource};
 
-use super::discovery_helpers::{group_multi_disc_roms, normalize_name, scan_roms};
+use super::discovery_helpers::{
+    group_multi_disc_roms, normalize_name, scan_roms, DiscGroup, RaMatchIndex,
+};
 
 struct ActiveConsole {
     def: &'static ConsoleDef,
@@ -207,10 +209,7 @@ fn build_ra_games_for_console(
     } else {
         Vec::new()
     };
-    let ra_title_map: HashMap<String, u32> = ra_games
-        .iter()
-        .map(|g| (normalize_name(&g.title), g.id))
-        .collect();
+    let ra_index = RaMatchIndex::new(&ra_games);
 
     {
         let _s = tracing::info_span!("load_known_games", count = existing_by_path.len()).entered();
@@ -222,24 +221,23 @@ fn build_ra_games_for_console(
 
             if entry.trophy_source == ira_models::TrophySource::Empty
                 && !entry.manual_unmatch
-                && !ra_title_map.is_empty()
+                && !ra_index.is_empty()
             {
                 let rom_name = std::path::Path::new(&rom_path_str)
                     .file_stem()
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 let rom_norm = normalize_name(&rom_name);
-                if let Some(&ra_id) = ra_title_map.get(&rom_norm) {
+                if let Some(ra_id) = ra_index.find(&entry.rom_hash, &rom_norm) {
                     let new_game_id = ra_id.to_string();
                     if ira_db::find_by_game_id(db, &new_game_id, console.def.id)
                         .ok()
                         .flatten()
                         .is_none()
                     {
-                        let ra_title = ra_games
-                            .iter()
-                            .find(|g| g.id == ra_id)
-                            .map(|g| g.title.clone())
+                        let ra_title = ra_index
+                            .title_of(ra_id)
+                            .map(str::to_string)
                             .unwrap_or_else(|| rom_name.clone());
                         if let Err(e) = ira_db::update_game_ids(
                             db,
@@ -287,24 +285,22 @@ fn build_ra_games_for_console(
         }
     }
 
+    let mut hashed_now: HashSet<i64> = HashSet::new();
     if !new_roms.is_empty() {
         let _s = tracing::info_span!("process_new_roms", count = new_roms.len()).entered();
 
         let groups = group_multi_disc_roms(db, new_roms);
+        let nds_infos = precompute_nds_infos(console, unpack_roms, &groups, &to_relative);
         for group in &groups {
             let (rom_name, rom_path, _disc_num) = &group.roms[0];
             let rom_path_str = to_relative(rom_path);
 
-            let matched_id = if !ra_title_map.is_empty() {
-                let rom_norm = normalize_name(rom_name);
-                if rom_norm.is_empty() {
-                    None
-                } else {
-                    ra_title_map.get(&rom_norm).copied()
-                }
-            } else {
-                None
-            };
+            let rom_norm = normalize_name(rom_name);
+            let rom_hash = nds_infos
+                .get(&rom_path_str)
+                .map(|info| info.rom_hash.as_str())
+                .unwrap_or_default();
+            let matched_id = ra_index.find(rom_hash, &rom_norm);
 
             let serial = if matched_id.is_some() {
                 group.serial.clone()
@@ -317,10 +313,9 @@ fn build_ra_games_for_console(
 
             let (app_id, title, trophy_source) = match matched_id {
                 Some(id) => {
-                    let t = ra_games
-                        .iter()
-                        .find(|g| g.id == id)
-                        .map(|g| g.title.clone())
+                    let t = ra_index
+                        .title_of(id)
+                        .map(str::to_string)
                         .unwrap_or_else(|| rom_name.clone());
                     (id.to_string(), t, TrophySource::Ra)
                 }
@@ -372,6 +367,16 @@ fn build_ra_games_for_console(
 
             let existing_by_id =
                 canonical_id.and_then(|id| ira_db::find_by_db_id(db, id).ok().flatten());
+            let had_hash = existing_by_id
+                .as_ref()
+                .is_some_and(|e| !e.rom_hash.is_empty());
+            // Resolved before the match below: `rom_path_str` is moved into
+            // the built game in both branches.
+            let nds_info = if had_hash {
+                None
+            } else {
+                nds_infos.get(&rom_path_str)
+            };
             let game = match existing_by_id {
                 Some(e) => {
                     if e.rom_path.is_empty() || group.roms.len() > 1 {
@@ -434,6 +439,14 @@ fn build_ra_games_for_console(
                 }
             };
 
+            if let Some(info) = nds_info {
+                if let Err(e) = ira_db::set_rom_hash(db, game.db_id, &info.rom_hash) {
+                    eprintln!("Failed to store DS ROM hash: {e}");
+                }
+                write_nds_icon(save_dir, game.db_id, &info.icon);
+                hashed_now.insert(game.db_id);
+            }
+
             if let Err(e) = ira_db::delete_discs(db, game.db_id) {
                 eprintln!("Failed to delete discs: {}", e);
             }
@@ -469,6 +482,7 @@ fn build_ra_games_for_console(
             unpack_roms,
             &existing_entries,
             &games,
+            &hashed_now,
         );
     }
 
@@ -481,6 +495,37 @@ fn build_ra_games_for_console(
 /// concurrently while the cheap writes stay serial.
 /// Archives are handled by `read_rom_info`, which skips them unless
 /// `unpack_roms` is on.
+/// Hashes the first disc of every new ROM group up front on NDS so the
+/// scan's first pass can match by exact RA hash rather than title alone.
+/// Keyed by the ROM path relative to the console folder; always empty for
+/// other consoles.
+fn precompute_nds_infos(
+    console: &ActiveConsole,
+    unpack_roms: bool,
+    groups: &[DiscGroup],
+    to_relative: &dyn Fn(&std::path::Path) -> String,
+) -> HashMap<String, crate::nds::DsRomInfo> {
+    if console.def.id != "nds" {
+        return HashMap::new();
+    }
+    use rayon::prelude::*;
+
+    let targets: Vec<(String, PathBuf)> = groups
+        .iter()
+        .filter_map(|group| group.roms.first())
+        .map(|(_, path, _)| (to_relative(path), path.clone()))
+        .collect();
+    let infos: Vec<Option<crate::nds::DsRomInfo>> = targets
+        .par_iter()
+        .map(|(_, abs)| crate::nds::read_rom_info(abs, unpack_roms))
+        .collect();
+    targets
+        .into_iter()
+        .zip(infos)
+        .filter_map(|(target, info)| info.map(|i| (target.0, i)))
+        .collect()
+}
+
 fn enrich_nds_roms(
     db: &ira_db::DbConn,
     save_dir: &str,
@@ -488,6 +533,7 @@ fn enrich_nds_roms(
     unpack_roms: bool,
     existing: &[ira_models::GameEntry],
     games: &[Game],
+    hashed_now: &HashSet<i64>,
 ) {
     use rayon::prelude::*;
 
@@ -498,7 +544,11 @@ fn enrich_nds_roms(
         .collect();
     let targets: Vec<(i64, PathBuf)> = games
         .iter()
-        .filter(|game| !game.rom_path.is_empty() && !already_hashed.contains(&game.db_id))
+        .filter(|game| {
+            !game.rom_path.is_empty()
+                && !already_hashed.contains(&game.db_id)
+                && !hashed_now.contains(&game.db_id)
+        })
         .map(|game| {
             (
                 game.db_id,
@@ -563,7 +613,6 @@ mod tests {
     use std::path::PathBuf;
 
     use super::super::discovery_helpers::*;
-    use crate::retroachievements::api::RaGameEntry;
 
     #[test]
     fn test_normalize_name_basic() {
@@ -586,45 +635,6 @@ mod tests {
     #[test]
     fn test_normalize_name_empty() {
         assert_eq!(normalize_name(""), "");
-    }
-
-    #[test]
-    fn test_match_rom_exact() {
-        let games = vec![RaGameEntry {
-            id: 1,
-            title: "Final Fantasy VII".to_string(),
-            image_icon: String::new(),
-            image_url: String::new(),
-            num_achievements: 0,
-            points: 0,
-        }];
-        assert_eq!(match_rom_to_game("Final Fantasy VII", &games), Some(1));
-    }
-
-    #[test]
-    fn test_match_rom_normalized() {
-        let games = vec![RaGameEntry {
-            id: 42,
-            title: "Chrono Trigger".to_string(),
-            image_icon: String::new(),
-            image_url: String::new(),
-            num_achievements: 0,
-            points: 0,
-        }];
-        assert_eq!(match_rom_to_game("Chrono_Trigger", &games), Some(42));
-    }
-
-    #[test]
-    fn test_match_rom_no_match() {
-        let games = vec![RaGameEntry {
-            id: 1,
-            title: "Final Fantasy VII".to_string(),
-            image_icon: String::new(),
-            image_url: String::new(),
-            num_achievements: 0,
-            points: 0,
-        }];
-        assert_eq!(match_rom_to_game("Completely Different Game", &games), None);
     }
 
     #[test]

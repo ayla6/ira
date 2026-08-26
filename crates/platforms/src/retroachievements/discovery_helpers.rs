@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-#[cfg(test)]
 use super::api_types::RaGameEntry;
 
 pub(super) fn normalize_name(s: &str) -> String {
@@ -181,25 +180,145 @@ pub(super) fn scan_roms(folder: &str, extensions: &[&str]) -> Option<Vec<(String
     Some(roms)
 }
 
-#[cfg(test)]
-pub(super) fn match_rom_to_game(rom_name: &str, games: &[RaGameEntry]) -> Option<u32> {
-    let rom_norm = normalize_name(rom_name);
-    if rom_norm.is_empty() {
-        return None;
-    }
+/// Match index over one console's filtered RA game list. A ROM resolves to a
+/// game ID by exact RA hash first, then by normalized title — with games
+/// that have achievements preferred over achievement-less ones, so a
+/// same-titled regional duplicate without a set never steals the match from
+/// the entry a set would live on.
+pub(super) struct RaMatchIndex {
+    by_hash: HashMap<String, u32>,
+    titled: HashMap<String, u32>,
+    untitled: HashMap<String, u32>,
+    titles: HashMap<u32, String>,
+}
 
-    for g in games {
-        if normalize_name(&g.title) == rom_norm {
-            return Some(g.id);
+impl RaMatchIndex {
+    pub(super) fn new(games: &[RaGameEntry]) -> Self {
+        let mut index = RaMatchIndex {
+            by_hash: HashMap::new(),
+            titled: HashMap::new(),
+            untitled: HashMap::new(),
+            titles: HashMap::new(),
+        };
+        for g in games {
+            index.titles.insert(g.id, g.title.clone());
+            let norm = normalize_name(&g.title);
+            if !norm.is_empty() {
+                let title_map = if g.num_achievements > 0 {
+                    &mut index.titled
+                } else {
+                    &mut index.untitled
+                };
+                title_map.insert(norm, g.id);
+            }
+            for hash in &g.hashes {
+                index.by_hash.insert(hash.to_lowercase(), g.id);
+            }
         }
+        index
     }
 
-    None
+    /// Resolves a ROM to an RA game ID: exact hash first, then normalized
+    /// title with achievement-having entries preferred. Either input may be
+    /// empty (hash not computed yet / unmatchable file name).
+    pub(super) fn find(&self, rom_hash: &str, rom_norm: &str) -> Option<u32> {
+        if !rom_hash.is_empty() {
+            let hash = rom_hash.to_lowercase();
+            if let Some(&id) = self.by_hash.get(&hash) {
+                return Some(id);
+            }
+        }
+        self.titled
+            .get(rom_norm)
+            .or_else(|| self.untitled.get(rom_norm))
+            .copied()
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.titled.is_empty() && self.untitled.is_empty() && self.by_hash.is_empty()
+    }
+
+    pub(super) fn title_of(&self, id: u32) -> Option<&str> {
+        self.titles.get(&id).map(String::as_str)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(id: u32, title: &str, num_achievements: u32, hashes: &[&str]) -> RaGameEntry {
+        RaGameEntry {
+            id,
+            title: title.to_string(),
+            image_icon: String::new(),
+            image_url: String::new(),
+            num_achievements,
+            points: 0,
+            hashes: hashes.iter().map(|h| h.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn test_match_index_resolves_by_exact_hash() {
+        let games = vec![
+            entry(1, "Devil Survivor", 0, &["abc123"]),
+            entry(2, "A Totally Different Game", 10, &[]),
+        ];
+        let index = RaMatchIndex::new(&games);
+        assert_eq!(index.find("ABC123", "a totally different game"), Some(1));
+        assert_eq!(index.find("abc123", "whatever the file is named"), Some(1));
+    }
+
+    #[test]
+    fn test_match_index_prefers_hash_over_title() {
+        let games = vec![
+            entry(1, "Some Other Game", 10, &["deadbeef"]),
+            entry(2, "Final Fantasy VII", 10, &[]),
+        ];
+        let index = RaMatchIndex::new(&games);
+        assert_eq!(index.find("deadbeef", "final fantasy vii"), Some(1));
+    }
+
+    #[test]
+    fn test_match_index_prefers_achievements_on_title_collision() {
+        let games = vec![
+            entry(1, "Game (Europe)", 0, &[]),
+            entry(2, "Game (USA)", 12, &[]),
+        ];
+        let index = RaMatchIndex::new(&games);
+        assert_eq!(index.find("", "game"), Some(2));
+    }
+
+    #[test]
+    fn test_match_index_falls_back_to_zero_achievement_title() {
+        let games = vec![entry(7, "Shin Megami Tensei: Devil Survivor", 0, &["abc123"])];
+        let index = RaMatchIndex::new(&games);
+        assert_eq!(
+            index.find("", &normalize_name("Shin Megami Tensei - Devil Survivor")),
+            Some(7)
+        );
+        assert_eq!(
+            index.title_of(7),
+            Some("Shin Megami Tensei: Devil Survivor")
+        );
+    }
+
+    #[test]
+    fn test_match_index_empty_inputs_and_misses() {
+        let games = vec![entry(3, "Chrono Trigger", 5, &["cafe"])];
+
+        let index = RaMatchIndex::new(&games);
+        assert_eq!(index.find("", &normalize_name("Chrono_Trigger")), Some(3));
+        assert_eq!(index.find("", &normalize_name("Chrono Trigger [!]")), Some(3));
+        assert_eq!(index.find("", "completely different game"), None);
+        // A hash miss falls through to the title tiers rather than failing.
+        assert_eq!(index.find("unknown", "chrono trigger"), Some(3));
+
+        let empty = RaMatchIndex::new(&[]);
+        assert!(empty.is_empty());
+        assert_eq!(empty.find("cafe", "chrono trigger"), None);
+    }
 
     #[test]
     fn test_scan_roms_missing_folder_is_not_successful() {

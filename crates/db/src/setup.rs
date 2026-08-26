@@ -23,6 +23,30 @@ pub fn update_field(
     Ok(())
 }
 
+/// Adds `column` to `table` when an existing database predates it.
+/// Schema migrations like this stay forever; new databases get the column
+/// from the CREATE TABLE above.
+fn ensure_column(conn: &Connection, table: &str, column: &str, decl: &str) {
+    let present: bool = conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
+            rusqlite::params![column],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to inspect {table} schema: {e}");
+            true // don't try to ALTER on inspection failure
+        });
+    if present {
+        return;
+    }
+    if let Err(e) = conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl};"))
+    {
+        eprintln!("Failed to add column {column} to {table}: {e}");
+    }
+}
+
 pub fn init_db(db_path: &str) -> DbConn {
     if let Some(parent) = std::path::Path::new(db_path).parent() {
         std::fs::create_dir_all(parent).expect("failed to create database directory");
@@ -67,7 +91,9 @@ pub fn init_db(db_path: &str) -> DbConn {
                 cached_total_count INTEGER NOT NULL DEFAULT 0,
                 cached_achievement_mtime INTEGER NOT NULL DEFAULT 0,
                 api_dll_folder TEXT NOT NULL DEFAULT '',
-                saves_centralized INTEGER NOT NULL DEFAULT 0
+                saves_centralized INTEGER NOT NULL DEFAULT 0,
+                rom_crc32 TEXT NOT NULL DEFAULT '',
+                rom_hash TEXT NOT NULL DEFAULT ''
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_game_id_platform ON games(game_id, platform_id) WHERE game_id != '';
@@ -109,6 +135,9 @@ pub fn init_db(db_path: &str) -> DbConn {
             );
             CREATE INDEX IF NOT EXISTS idx_game_groups_group ON game_groups(group_id);",
         ).expect("failed to create tables");
+        // Schema migrations for databases created before a column existed.
+        ensure_column(&conn, "games", "rom_crc32", "TEXT NOT NULL DEFAULT ''");
+        ensure_column(&conn, "games", "rom_hash", "TEXT NOT NULL DEFAULT ''");
     }
 
     crate::create_variants_table(&pool);

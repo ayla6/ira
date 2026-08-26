@@ -51,3 +51,20 @@ pub fn set_emulator_override(conn: &DbConn, id: i64, emulator: &str) -> Result<(
 pub fn set_rom_path(conn: &DbConn, id: i64, rom_path: &str) -> Result<(), String> {
     update_field(conn, id, "rom_path", &rom_path)
 }
+
+/// Stores the ROM identification hashes used by No-Intro (CRC32) and
+/// RetroAchievements (per-console hash) for name-independent matching.
+pub fn set_rom_hashes(
+    conn: &DbConn,
+    id: i64,
+    rom_crc32: &str,
+    rom_hash: &str,
+) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute(
+        "UPDATE games SET rom_crc32 = ?1, rom_hash = ?2 WHERE id = ?3",
+        params![rom_crc32, rom_hash, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}

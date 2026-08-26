@@ -4,8 +4,10 @@ pub fn ra_data_dir(save_dir: &str) -> PathBuf {
     Path::new(save_dir).join("data").join("ra")
 }
 
+/// The `_full` suffix invalidates caches written before the game list
+/// included achievement-less games and supported hashes.
 pub fn console_games_path(save_dir: &str, console_id: u32) -> PathBuf {
-    ra_data_dir(save_dir).join(format!("console_{}.json", console_id))
+    ra_data_dir(save_dir).join(format!("console_{}_full.json", console_id))
 }
 
 pub fn game_dir(save_dir: &str, game_id: &str) -> PathBuf {

@@ -108,14 +108,14 @@ impl RaClient {
         }
 
         let console = console_id.to_string();
-        let only_achievements = "1".to_string();
+        let with_hashes = "1".to_string();
+        // `f` is omitted so the list covers every game on the console,
+        // including achievement-less ones that are still worth matching as
+        // icon sources; `h=1` inlines each game's supported hashes so
+        // matching can resolve exact game IDs locally.
         let url = reqwest::Url::parse_with_params(
             RA_WEB_GAME_LIST,
-            &[
-                ("i", &console),
-                ("y", &self.api_key),
-                ("f", &only_achievements),
-            ],
+            &[("i", &console), ("y", &self.api_key), ("h", &with_hashes)],
         )
         .map_err(|e| format!("game list url: {}", e))?;
         let text = self.get_web(url)?;
@@ -129,8 +129,8 @@ impl RaClient {
     }
 
     /// Search the console's full game list (fetched on demand from the Web API
-    /// when no fresh cache exists) for titles matching `query`. Returns games
-    /// that have achievements, excluding Subset/hack variants.
+    /// when no fresh cache exists) for titles matching `query`, excluding
+    /// Subset/hack variants.
     pub fn search_ra_games(
         &self,
         save_dir: &str,
@@ -340,6 +340,20 @@ mod cache_tests {
     }
 
     #[test]
+    fn test_console_cache_parses_hashes() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_cache(
+            tmp.path().to_str().unwrap(),
+            3,
+            r#"[{"ID":1,"Title":"Game","ImageIcon":"","ImageUrl":"","NumAchievements":0,"Points":0,"Hashes":["abc123","def456"]}]"#,
+        );
+        let games =
+            super::read_console_games_cache(tmp.path().to_str().unwrap(), 3).unwrap();
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].hashes, vec!["abc123", "def456"]);
+    }
+
+    #[test]
     fn test_legacy_format_cache_is_stale() {
         let tmp = tempfile::tempdir().unwrap();
         // Pre-migration dorequest `systemgames` wrapper — the whole reason the
@@ -384,6 +398,7 @@ mod cache_tests {
             image_url: String::new(),
             num_achievements: 1,
             points: 1,
+            hashes: Vec::new(),
         };
         let games = vec![
             entry(1, "Super Mario World"),
@@ -406,6 +421,7 @@ mod cache_tests {
             image_url: String::new(),
             num_achievements: 1,
             points: 1,
+            hashes: Vec::new(),
         }];
         let result = filter_ra_games(games, "");
         assert_eq!(result.len(), 1);

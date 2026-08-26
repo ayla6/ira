@@ -32,6 +32,10 @@ pub struct RaGameEntry {
     pub num_achievements: u32,
     #[serde(default, rename = "Points")]
     pub points: u32,
+    /// ROM hashes RA resolves to this game; only populated when the game list
+    /// is fetched with `h=1`.
+    #[serde(default, rename = "Hashes")]
+    pub hashes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

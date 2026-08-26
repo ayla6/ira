@@ -593,6 +593,7 @@ mod tests {
             image_url: String::new(),
             num_achievements: 0,
             points: 0,
+            hashes: Vec::new(),
         }];
         assert_eq!(match_rom_to_game("Final Fantasy VII", &games), Some(1));
     }
@@ -606,6 +607,7 @@ mod tests {
             image_url: String::new(),
             num_achievements: 0,
             points: 0,
+            hashes: Vec::new(),
         }];
         assert_eq!(match_rom_to_game("Chrono_Trigger", &games), Some(42));
     }
@@ -619,6 +621,7 @@ mod tests {
             image_url: String::new(),
             num_achievements: 0,
             points: 0,
+            hashes: Vec::new(),
         }];
         assert_eq!(match_rom_to_game("Completely Different Game", &games), None);
     }

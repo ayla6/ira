@@ -746,7 +746,15 @@ fn load_special_game(
     if (game.name.is_empty() || game.name.starts_with("App ID:")) && !title.is_empty() {
         game.set_name(title);
     }
-    game.game_path = game_path.to_string_lossy().into_owned();
+    // Persist the discovered location: everything built later straight from
+    // the DB row (context menu, native-icon restore) relies on it.
+    let game_path_str = game_path.to_string_lossy().into_owned();
+    if entry.rom_path != game_path_str {
+        if let Err(e) = db::set_rom_path(db, meta.db_id, &game_path_str) {
+            eprintln!("Failed to persist console game location: {e}");
+        }
+    }
+    game.game_path = game_path_str;
     if icon_path.is_file() {
         game.icon_path = icon_path.to_string_lossy().into_owned();
     }
@@ -970,6 +978,23 @@ mod tests {
         assert_eq!(updates[1].completed, 1);
         assert_eq!(updates[2].completed, 2);
         assert_eq!(updates[2].total, 2);
+    }
+
+    /// Scan-time icon extraction must never replace an icon that is
+    /// already on disk — downloaded or user-picked assets always win.
+    #[test]
+    fn test_default_azahar_icon_keeps_existing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().to_str().unwrap();
+        let title_id = "0004000000123400";
+        let data_dir = ira_parser::three_ds_data_dir(save_dir, title_id);
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::fs::write(data_dir.join("icon.webp"), b"keep").unwrap();
+
+        let result = default_azahar_icon(save_dir, title_id, Some(&[0u8; 48 * 48 * 2]));
+
+        assert!(result.as_os_str().is_empty());
+        assert_eq!(std::fs::read(data_dir.join("icon.webp")).unwrap(), b"keep");
     }
 
     #[test]

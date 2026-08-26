@@ -139,7 +139,17 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
         game_folder: entry.game_folder.clone(),
     };
 
-    if entry.kind == ira_models::GameKind::Retro && !entry.rom_path.is_empty() {
+    // Retro paths stay relative to the console's ROM folder; the other
+    // console kinds store absolute locations discovered at scan time and
+    // every later rebuild must keep them (context menu, icon restore).
+    if matches!(
+        entry.kind,
+        ira_models::GameKind::Retro
+            | ira_models::GameKind::ThreeDS
+            | ira_models::GameKind::WiiU
+            | ira_models::GameKind::PsVita
+    ) && !entry.rom_path.is_empty()
+    {
         game.game_path = entry.rom_path.clone();
     }
 
@@ -481,5 +491,38 @@ pub fn achievement_watch_file(game: &Game, save_dir: &str) -> Option<PathBuf> {
             Some(ira_platforms::ps3::tropusr_path(&game.app_id))
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ira_models::{Game, GameEntry, GameKind};
+
+    fn entry_with_path(kind: GameKind, rom_path: &str) -> GameEntry {
+        let mut entry = GameEntry::from_game(&Game::default());
+        entry.kind = kind;
+        entry.rom_path = rom_path.to_string();
+        entry
+    }
+
+    /// Console games rebuilt from the database row must keep their stored
+    /// location: the context menu and native-icon restore rely on it.
+    #[test]
+    fn test_build_game_base_restores_console_rom_path() {
+        for kind in [
+            GameKind::Retro,
+            GameKind::ThreeDS,
+            GameKind::WiiU,
+            GameKind::PsVita,
+        ] {
+            let entry = entry_with_path(kind, "/games/PQ.zcci");
+            let game = build_game_base(&entry, "/tmp/ira-test-save");
+            assert_eq!(game.game_path, "/games/PQ.zcci");
+        }
+        let entry = entry_with_path(GameKind::Steam, "/games/x");
+        assert!(build_game_base(&entry, "/tmp/ira-test-save")
+            .game_path
+            .is_empty());
     }
 }

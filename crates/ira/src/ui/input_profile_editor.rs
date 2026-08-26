@@ -1,9 +1,9 @@
 //! Profile editor shell: canonical action-set profile in an `Rc<RefCell>`,
 //! Steam-style region pages + per-input sheet for editing, Gyro and Action
 //! Sets pages, Cancel / Apply / Save footer with a canonical dirty check,
-//! reset-to-defaults with confirmation, and an unsaved-changes guard.
+//! and an unsaved-changes guard.
 
-use super::css::{CSS_ERROR, CSS_FLAT, CSS_SUGGESTED_ACTION};
+use super::css::{CSS_ERROR, CSS_SUGGESTED_ACTION};
 use super::helpers::DialogLayout;
 use super::input_profile_action_sets::build_sets_page;
 use super::input_profile_editor_regions::Region;
@@ -164,9 +164,6 @@ pub(super) fn show_input_profile_editor(
     }
     (on_dirty)();
 
-    let reset = reset_button(&layout.window, &ctx, &on_dirty);
-    layout.header.pack_end(&reset);
-
     setup_sidebar_navigation(&layout);
 
     let cancel = add_editor_footer(&layout, &save, &apply, &status);
@@ -222,7 +219,7 @@ fn build_pages(
     layout
         .sidebar
         .append(&super::settings_dialog::settings_sidebar_row(
-            "document-edit-symbolic",
+            "emblem-system-symbolic",
             &crate::tr!("General"),
             "general",
         ));
@@ -270,11 +267,6 @@ fn build_pages(
         &ctx.on_dirty,
     );
 
-    layout
-        .sidebar
-        .append(&super::settings_dialog::sidebar_section_title(&crate::tr!(
-            "Motion"
-        )));
     let (gyro_scroll, gyro_box) = scrolling_page();
     layout.stack.add_named(&gyro_scroll, Some("gyro"));
     layout
@@ -284,21 +276,16 @@ fn build_pages(
             &crate::tr!("Gyro"),
             "gyro",
         ));
-    add_gyro_group(&gyro_box, gyro, ctx.device.as_ref(), &ctx.on_dirty);
-    super::input_profile_gyro_motion::add_gyro_motion_groups(&gyro_box, gyro, &ctx.on_dirty);
     let motion_rows = super::input_profile_controller_page::add_native_motion_group(
         &gyro_box,
         &ctx.profile,
         &ctx.on_dirty,
     );
+    add_gyro_group(&gyro_box, gyro, ctx.device.as_ref(), &ctx.on_dirty);
+    super::input_profile_gyro_motion::add_gyro_motion_groups(&gyro_box, gyro, &ctx.on_dirty);
 
     let (sets_scroll, sets_box) = scrolling_page();
     layout.stack.add_named(&sets_scroll, Some("sets"));
-    layout
-        .sidebar
-        .append(&super::settings_dialog::sidebar_section_title(&crate::tr!(
-            "Layout"
-        )));
     layout
         .sidebar
         .append(&super::settings_dialog::settings_sidebar_row(
@@ -369,51 +356,6 @@ fn with_game(mut profile: InputProfile, game_id: Option<i64>) -> InputProfile {
         }
     }
     profile
-}
-
-fn reset_button(window: &adw::Window, ctx: &PagesCtx, on_dirty: &Rc<dyn Fn()>) -> gtk4::Button {
-    let reset = gtk4::Button::new();
-    reset.add_css_class(CSS_FLAT);
-    reset.set_tooltip_text(Some(&crate::tr!(
-        "Replace the layout with the standard default bindings for this controller"
-    )));
-    let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    content.append(&gtk4::Image::from_icon_name("view-refresh-symbolic"));
-    content.append(&gtk4::Label::new(Some(&crate::tr!("Reset to defaults"))));
-    reset.set_child(Some(&content));
-    let ctx = ctx.clone();
-    let on_dirty = on_dirty.clone();
-    let window = window.clone();
-    reset.connect_clicked(move |_| {
-        let dialog = adw::AlertDialog::new(
-            Some(&crate::tr!("Reset to defaults?")),
-            Some(&crate::tr!(
-                "Replace the current layout with the standard one-to-one default bindings for this controller."
-            )),
-        );
-        dialog.add_response("cancel", &crate::tr!("Cancel"));
-        dialog.add_response("reset", &crate::tr!("Reset"));
-        dialog.set_response_appearance("reset", adw::ResponseAppearance::Destructive);
-        dialog.set_default_response(Some("cancel"));
-        dialog.set_close_response("cancel");
-        let ctx = ctx.clone();
-        let on_dirty = on_dirty.clone();
-        dialog.connect_response(None, move |_, response| {
-            if response != "reset" {
-                return;
-            }
-            let backend = ctx.profile.borrow().backend;
-            let sets = default_action_sets(ctx.device.as_ref(), backend);
-            {
-                let mut profile = ctx.profile.borrow_mut();
-                profile.action_sets = sets;
-            }
-            ctx.active_set.set(0);
-            on_dirty();
-        });
-        dialog.present(Some(&window));
-    });
-    reset
 }
 
 fn add_editor_footer(

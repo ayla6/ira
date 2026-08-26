@@ -13,7 +13,7 @@ use ira_platforms::retroachievements;
 use ira_platforms::steam;
 use ira_platforms::vita3k::discover_games_for_executable as discover_vita3k_games_for_executable;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 const ROM_MIGRATION_THRESHOLD_SECONDS: i64 = 5 * 60;
 
@@ -26,35 +26,98 @@ pub struct GameListProgress {
 
 #[derive(Clone)]
 struct ProgressReporter {
+    inner: Arc<ReporterInner>,
+    /// Which source this handle reports for; `None` for statuses sent
+    /// before the sources are registered.
+    source: Option<usize>,
+}
+
+struct ReporterInner {
     callback: Arc<dyn Fn(GameListProgress) + Send + Sync>,
-    completed: Arc<AtomicUsize>,
     total: usize,
+    completed: AtomicUsize,
+    /// One entry per source in spawn order. Sources run concurrently, so a
+    /// bare "last message wins" label can name a source that finished long
+    /// ago; the displayed status is always the oldest source still working.
+    sources: Mutex<Vec<SourceProgress>>,
+    fallback: Mutex<String>,
+}
+
+struct SourceProgress {
+    status: String,
+    done: bool,
 }
 
 impl ProgressReporter {
     fn new(callback: Arc<dyn Fn(GameListProgress) + Send + Sync>, total: usize) -> Self {
         Self {
-            callback,
-            completed: Arc::new(AtomicUsize::new(0)),
-            total,
+            inner: Arc::new(ReporterInner {
+                callback,
+                total,
+                completed: AtomicUsize::new(0),
+                sources: Mutex::new(Vec::new()),
+                fallback: Mutex::new(String::new()),
+            }),
+            source: None,
+        }
+    }
+
+    /// Registers a source in spawn order and returns a handle that
+    /// attributes its statuses and finishes to it.
+    fn for_source(&self, initial: impl Into<String>) -> Self {
+        let mut sources = self.inner.sources.lock().unwrap();
+        sources.push(SourceProgress {
+            status: initial.into(),
+            done: false,
+        });
+        Self {
+            inner: self.inner.clone(),
+            source: Some(sources.len() - 1),
         }
     }
 
     fn status(&self, status: impl Into<String>) {
-        (self.callback)(GameListProgress {
-            status: status.into(),
-            completed: self.completed.load(Ordering::Relaxed),
-            total: self.total,
-        });
+        match self.source {
+            Some(idx) => self.inner.sources.lock().unwrap()[idx].status = status.into(),
+            None => *self.inner.fallback.lock().unwrap() = status.into(),
+        }
+        self.push();
     }
 
     fn finish(&self, status: impl Into<String>) {
-        let completed = self.completed.fetch_add(1, Ordering::Relaxed) + 1;
-        (self.callback)(GameListProgress {
-            status: status.into(),
+        let completed = self.inner.completed.fetch_add(1, Ordering::Relaxed) + 1;
+        if let Some(idx) = self.source {
+            let mut sources = self.inner.sources.lock().unwrap();
+            sources[idx].done = true;
+            sources[idx].status = status.into();
+        }
+        let status = self.displayed_status();
+        (self.inner.callback)(GameListProgress {
+            status,
             completed,
-            total: self.total,
+            total: self.inner.total,
         });
+    }
+
+    fn push(&self) {
+        let status = self.displayed_status();
+        (self.inner.callback)(GameListProgress {
+            status,
+            completed: self.inner.completed.load(Ordering::Relaxed),
+            total: self.inner.total,
+        });
+    }
+
+    /// The oldest source that has not finished yet; once everything is
+    /// done, the last "Loaded …" message.
+    fn displayed_status(&self) -> String {
+        let sources = self.inner.sources.lock().unwrap();
+        sources
+            .iter()
+            .find(|source| !source.done)
+            .or_else(|| sources.iter().rev().find(|source| source.done))
+            .map(|source| source.status.clone())
+            .unwrap_or_else(|| self.inner.fallback.lock().unwrap().clone())
     }
 }
 
@@ -220,7 +283,7 @@ fn build_game_list_with_mode(
     std::thread::scope(|s| {
         let steam_discovery = if options.steam_enabled {
             let db = db.clone();
-            let reporter = reporter.clone();
+            let reporter = reporter.for_source(crate::tr!("Scanning Steam games…"));
             Some(s.spawn(move || {
                 let _s = tracing::info_span!("steam_discover").entered();
                 reporter.status(crate::tr!("Scanning Steam games…"));
@@ -238,7 +301,7 @@ fn build_game_list_with_mode(
 
         let db_native = db.clone();
         let save_dir_native = save_dir.clone();
-        let native_reporter = reporter.clone();
+        let native_reporter = reporter.for_source(crate::tr!("Loading saved games…"));
         let native_handle = s.spawn(move || {
             let _s = tracing::info_span!("load_games_from_db").entered();
             native_reporter.status(crate::tr!("Loading saved games…"));
@@ -325,7 +388,7 @@ fn build_game_list_with_mode(
             let db_ra = db.clone();
             let save_dir_ra = save_dir.clone();
             let cfg_ra = cfg.clone();
-            let reporter = reporter.clone();
+            let reporter = reporter.for_source(crate::tr!("Scanning ROM library…"));
             Some(s.spawn(move || {
                 let _s = tracing::info_span!("build_ra_games").entered();
                 reporter.status(crate::tr!("Scanning ROM library…"));
@@ -648,7 +711,7 @@ fn spawn_source_scan<'scope>(
     }
     let db = db.clone();
     let save_dir = save_dir.to_string();
-    let reporter = reporter.clone();
+    let reporter = reporter.for_source(scan.scanning.clone());
     Some(s.spawn(move || {
         let _span = tracing::info_span!("source_scan", scan.source).entered();
         reporter.status(scan.scanning);
@@ -968,16 +1031,28 @@ mod tests {
             updates_clone.lock().unwrap().push(update);
         });
         let reporter = ProgressReporter::new(callback, 2);
+        let n64 = reporter.for_source("Scanning N64");
+        let nds = reporter.for_source("Scanning NDS");
 
-        reporter.status(crate::tr!("Scanning ROMs"));
-        reporter.finish(crate::tr!("Loaded N64"));
-        reporter.finish(crate::tr!("Loaded NDS"));
+        n64.status("Scanning N64 ROMs");
+        nds.status("Scanning NDS ROMs");
+        // Both sources are running; the label names the oldest unfinished
+        // one, not the last thread that happened to speak.
+        assert_eq!(
+            updates.lock().unwrap().last().unwrap().status,
+            "Scanning N64 ROMs"
+        );
 
-        let updates = updates.lock().unwrap();
-        assert_eq!(updates[0].completed, 0);
-        assert_eq!(updates[1].completed, 1);
-        assert_eq!(updates[2].completed, 2);
-        assert_eq!(updates[2].total, 2);
+        n64.finish("Loaded N64");
+        let update = updates.lock().unwrap().last().unwrap().clone();
+        assert_eq!(update.status, "Scanning NDS ROMs");
+        assert_eq!(update.completed, 1);
+
+        nds.finish("Loaded NDS");
+        let update = updates.lock().unwrap().last().unwrap().clone();
+        assert_eq!(update.status, "Loaded NDS");
+        assert_eq!(update.completed, 2);
+        assert_eq!(update.total, 2);
     }
 
     /// Scan-time icon extraction must never replace an icon that is

@@ -14,37 +14,52 @@ pub const STEAM_INPUT_CONFIGS_APP_ID: u32 = 241100;
 /// `k_EWorkshopFileTypeControllerGenerated`; the QueryFiles filetype filter
 /// value used in practice for controller layouts.
 const CONTROLLER_CONFIG_FILE_TYPE: u32 = 15;
-/// EPublishedFileQueryType::RankedByTextSearch.
-const QUERY_TYPE_TEXT_SEARCH: u32 = 25;
-/// EPublishedFileQueryType::RankedByTrend.
-const QUERY_TYPE_TRENDING: u32 = 4;
-const TRENDING_PERIOD_DAYS: i64 = 30;
-/// EPublishedFileQueryType::RankedByTotalUniqueSubscriptions.
-const QUERY_TYPE_MOST_SUBSCRIBED: u32 = 10;
-/// EPublishedFileQueryType::RankedByPublicationDate.
-const QUERY_TYPE_NEWEST: u32 = 1;
 
 const QUERY_FILES_URL: &str = "https://api.steampowered.com/IPublishedFileService/QueryFiles/v1/";
 const FILE_DETAILS_URL: &str =
     "https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/";
 
-/// Result ordering offered by the layout search.
+/// Result ordering, mirroring the workshop ranking types steaminputdb
+/// exposes. Numbers are `EPublishedFileQueryType` values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SteamLayoutSort {
-    /// Ranked by text-search relevance (requires a search text).
-    BestMatch,
+    /// `RankedByVote` — the workshop's default ranking.
+    Rank,
+    /// `RankedByPublicationDate`.
+    PublicationDate,
+    /// `RankedByTrend` over the last 30 days.
     Trending30Days,
-    MostSubscribed,
-    Newest,
+    /// `RankedByTotalUniqueSubscriptions`.
+    TotalSubscriptions,
+    /// `RankedByVotesUp`.
+    VotesUp,
+    /// `RankedByTextSearch` — relevance against `search_text`.
+    TextSearch,
 }
+
+/// EPublishedFileQueryType::RankedByVote.
+const QUERY_TYPE_RANK: u32 = 0;
+/// EPublishedFileQueryType::RankedByPublicationDate.
+const QUERY_TYPE_PUBLICATION: u32 = 1;
+/// EPublishedFileQueryType::RankedByTrend.
+const QUERY_TYPE_TRENDING: u32 = 4;
+const TRENDING_PERIOD_DAYS: i64 = 30;
+/// EPublishedFileQueryType::RankedByTotalUniqueSubscriptions.
+const QUERY_TYPE_MOST_SUBSCRIBED: u32 = 10;
+/// EPublishedFileQueryType::RankedByVotesUp.
+const QUERY_TYPE_VOTES_UP: u32 = 17;
+/// EPublishedFileQueryType::RankedByTextSearch.
+const QUERY_TYPE_TEXT_SEARCH: u32 = 25;
 
 impl SteamLayoutSort {
     fn query_type(self) -> u32 {
         match self {
-            Self::BestMatch => QUERY_TYPE_TEXT_SEARCH,
+            Self::Rank => QUERY_TYPE_RANK,
+            Self::PublicationDate => QUERY_TYPE_PUBLICATION,
             Self::Trending30Days => QUERY_TYPE_TRENDING,
-            Self::MostSubscribed => QUERY_TYPE_MOST_SUBSCRIBED,
-            Self::Newest => QUERY_TYPE_NEWEST,
+            Self::TotalSubscriptions => QUERY_TYPE_MOST_SUBSCRIBED,
+            Self::VotesUp => QUERY_TYPE_VOTES_UP,
+            Self::TextSearch => QUERY_TYPE_TEXT_SEARCH,
         }
     }
 }
@@ -121,8 +136,8 @@ pub struct SteamLayoutQuery {
 fn query_request_body(query: &SteamLayoutQuery) -> serde_json::Value {
     let search_text = query.search_text.trim().to_string();
     // Relevance ranking is only meaningful with a text query.
-    let effective_sort = if search_text.is_empty() && query.sort == SteamLayoutSort::BestMatch {
-        SteamLayoutSort::Trending30Days
+    let effective_sort = if search_text.is_empty() && query.sort == SteamLayoutSort::TextSearch {
+        SteamLayoutSort::Rank
     } else {
         query.sort
     };
@@ -270,7 +285,7 @@ mod tests {
             required_tags: Vec::new(),
             page: 1,
             page_size: 20,
-            sort: SteamLayoutSort::BestMatch,
+            sort: SteamLayoutSort::TextSearch,
         };
         let body = query_request_body(&query);
         assert_eq!(body["appid"], STEAM_INPUT_CONFIGS_APP_ID);
@@ -280,10 +295,10 @@ mod tests {
         assert_eq!(body["required_kv_tags"][1]["key"], "deleted");
         assert_eq!(body["required_kv_tags"][1]["value"], "0");
         assert_eq!(body["required_kv_tags"].as_array().unwrap().len(), 2);
-        // Empty search falls back to trending, so relevance rank never runs
-        // against an empty text filter.
-        assert_eq!(body["query_type"], QUERY_TYPE_TRENDING);
-        assert_eq!(body["days"], TRENDING_PERIOD_DAYS);
+        // Empty search falls back to the workshop's default rank, so
+        // relevance never runs against an empty text filter.
+        assert_eq!(body["query_type"], QUERY_TYPE_RANK);
+        assert!(body.get("days").is_none());
         assert!(body.get("search_text").is_none());
         assert!(body.get("requiredtags").is_none());
     }
@@ -296,7 +311,7 @@ mod tests {
             required_tags: vec!["controller_ps5".into(), "feature_gyro".into()],
             page: 2,
             page_size: 50,
-            sort: SteamLayoutSort::MostSubscribed,
+            sort: SteamLayoutSort::TotalSubscriptions,
         };
         let body = query_request_body(&query);
         assert_eq!(body["search_text"], "hollow knight");
@@ -315,6 +330,21 @@ mod tests {
     }
 
     #[test]
+    fn test_query_request_body_trending_includes_period() {
+        let query = SteamLayoutQuery {
+            search_text: "hollow knight".into(),
+            app_id: None,
+            required_tags: Vec::new(),
+            page: 1,
+            page_size: 20,
+            sort: SteamLayoutSort::Trending30Days,
+        };
+        let body = query_request_body(&query);
+        assert_eq!(body["query_type"], QUERY_TYPE_TRENDING);
+        assert_eq!(body["days"], TRENDING_PERIOD_DAYS);
+    }
+
+    #[test]
     fn test_query_request_body_ignores_blank_app_filter() {
         let query = SteamLayoutQuery {
             search_text: "x".into(),
@@ -322,10 +352,10 @@ mod tests {
             required_tags: vec!["   ".into()],
             page: 1,
             page_size: 20,
-            sort: SteamLayoutSort::Newest,
+            sort: SteamLayoutSort::PublicationDate,
         };
         let body = query_request_body(&query);
-        assert_eq!(body["query_type"], QUERY_TYPE_NEWEST);
+        assert_eq!(body["query_type"], QUERY_TYPE_PUBLICATION);
         assert_eq!(body["required_kv_tags"].as_array().unwrap().len(), 2);
         assert!(body.get("requiredtags").is_none());
     }

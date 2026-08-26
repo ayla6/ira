@@ -3,7 +3,7 @@
 //! sets and bindings, and performs the actual import from the preview page.
 
 use super::css::{CSS_DIM_LABEL, CSS_SUGGESTED_ACTION};
-use super::helpers::{esc, poll_channel};
+use super::helpers::{esc, poll_channel, SearchStatus};
 use super::input_profile_editor_regions::source_label;
 use super::input_profile_options::output_display_label;
 use super::input_profile_store::{new_managed_profile_path, write_profile};
@@ -55,7 +55,7 @@ pub(super) struct PreviewRequest {
     pub attach_game_id: Option<i64>,
     pub layout: SteamLayout,
     pub on_imported: Rc<dyn Fn(PathBuf)>,
-    pub search_status: gtk4::Label,
+    pub search_status: SearchStatus,
     pub loading: Rc<Cell<bool>>,
 }
 
@@ -76,7 +76,7 @@ impl PreviewRequest {
         if loading.replace(true) {
             return;
         }
-        search_status.set_text(&crate::tr!("Downloading {}…").replacen(
+        search_status.show(&crate::tr!("Downloading {}…").replacen(
             "{}",
             &layout_display_name(&layout),
             1,
@@ -95,7 +95,7 @@ impl PreviewRequest {
             loading.set(false);
             match outcome {
                 Ok((profile, warnings)) => {
-                    status.set_text("");
+                    status.clear();
                     nav.push(&build_preview_page(
                         &layout,
                         profile,
@@ -106,7 +106,7 @@ impl PreviewRequest {
                     ));
                 }
                 Err(error) => {
-                    status.set_text(&crate::tr!("Preview failed: {}").replacen("{}", &error, 1));
+                    status.show(&crate::tr!("Preview failed: {}").replacen("{}", &error, 1));
                 }
             }
         });

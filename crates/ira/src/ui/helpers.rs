@@ -373,6 +373,39 @@ pub(crate) fn status_row(text: &str) -> adw::ActionRow {
     row
 }
 
+/// A status row parked at the top of a boxed result list: prepended while a
+/// worker runs ("Searching…", "Downloading…"), removable without touching
+/// the results beneath it.
+#[derive(Clone, Default)]
+pub(crate) struct SearchStatus {
+    list: gtk4::ListBox,
+    current: Rc<RefCell<Option<adw::ActionRow>>>,
+}
+
+impl SearchStatus {
+    pub(crate) fn for_list(list: &gtk4::ListBox) -> Self {
+        Self {
+            list: list.clone(),
+            current: Rc::new(RefCell::new(None)),
+        }
+    }
+
+    /// Replace any current status row with `text` (prepended, insensitive).
+    pub(crate) fn show(&self, text: &str) {
+        self.clear();
+        let row = status_row(text);
+        self.list.insert(&row, 0);
+        *self.current.borrow_mut() = Some(row);
+    }
+
+    /// Remove the status row, leaving the results untouched.
+    pub(crate) fn clear(&self) {
+        if let Some(row) = self.current.borrow_mut().take() {
+            self.list.remove(&row);
+        }
+    }
+}
+
 /// Wrap `child` in an `adw::Clamp` so wide dialogs don't stretch it.
 /// Margins are `(top, bottom, start, end)`.
 pub(crate) fn clamped(

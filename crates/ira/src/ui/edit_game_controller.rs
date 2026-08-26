@@ -323,9 +323,21 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
 
     // Community layouts: Steam workshop controller configs, searched by this
     // game's app id when it has one and by free text otherwise. Imports land
-    // in the managed profile pool attached to this game. The db lookup stays
-    // inside the click handler so building this page does no IO.
+    // in the managed profile pool attached to this game. The steam id comes
+    // straight from the in-memory game: trophy sources with Steam enrichment
+    // (Goldberg, Nemirtingas, native Steam) carry the app id in `app_id`,
+    // even when the db's steam_id column is empty and the id lives in
+    // game_id instead.
     let steam_client = params.state.borrow().steam.clone();
+    let steam_app_id = {
+        let game = params.game;
+        let numeric = !game.app_id.is_empty() && game.app_id.bytes().all(|b| b.is_ascii_digit());
+        if game.trophy_source.has_steam_enrichment() && numeric {
+            game.app_id.clone()
+        } else {
+            String::new()
+        }
+    };
     let search_button = icon_button(
         "system-search-symbolic",
         &crate::tr!("Search community layouts"),
@@ -345,7 +357,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     let last_real_for_search = last_real.clone();
     {
         let steam_client = steam_client;
-        let db = params.state.borrow().db.clone();
         search_button.connect_clicked(move |_| {
             let Some(stack) = stack_for_search.upgrade() else {
                 return;
@@ -356,11 +367,6 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
             else {
                 return;
             };
-            let steam_app_id = ira_db::find_by_db_id(&db, game_id_for_search)
-                .ok()
-                .flatten()
-                .map(|entry| entry.steam_id)
-                .unwrap_or_default();
             super::input_profile_search::show_steam_layout_search(
                 &window,
                 &steam_client,
@@ -368,7 +374,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
                 Some(super::input_profile_search::SteamLayoutSearchContext {
                     game_id: game_id_for_search,
                     game_name: game_name_for_search.clone(),
-                    steam_app_id,
+                    steam_app_id: steam_app_id.clone(),
                 }),
                 {
                     let profile_row_for_search = profile_row_for_search.clone();

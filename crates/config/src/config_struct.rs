@@ -322,7 +322,7 @@ impl Default for Config {
             auto_reload_vita3k: true,
             auto_reload_cemu: true,
             auto_reload_azahar: true,
-            unpack_roms: false,
+            unpack_roms: true,
 
             save_dir: default_save_dir(),
             default_wine_config: WineConfig::default(),
@@ -506,7 +506,7 @@ mod tests {
         assert!(cfg.auto_reload_vita3k);
         assert!(cfg.auto_reload_cemu);
         assert!(cfg.auto_reload_azahar);
-        assert!(!cfg.unpack_roms);
+        assert!(cfg.unpack_roms);
     }
 
     #[test]

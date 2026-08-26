@@ -136,9 +136,9 @@ pub(super) fn build_general_settings_page(
         cfg.auto_reload_roms,
     );
     let unpack_roms = auto_reload_row(
-        &crate::tr!("Read compressed ROMs"),
+        &crate::tr!("Read ROM contents"),
         &crate::tr!(
-            "Unpack .zip/.7z/.zst ROMs in memory to extract DS icons and hashes — slower scans"
+            "Extract DS icons and RetroAchievements hashes from ROM files, including .zip/.7z/.zst archives — slower scans"
         ),
         cfg.unpack_roms,
     );

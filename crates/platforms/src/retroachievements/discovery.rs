@@ -489,23 +489,17 @@ fn build_ra_games_for_console(
     games
 }
 
-/// Extracts DS banner icons and RetroAchievements hashes for games that
-/// don't have them yet. Reads stop once the hashed header ranges are in,
-/// so containers only decompress a few megabytes; the reads run
-/// concurrently while the cheap writes stay serial.
-/// Archives are handled by `read_rom_info`, which skips them unless
-/// `unpack_roms` is on.
 /// Hashes the first disc of every new ROM group up front on NDS so the
 /// scan's first pass can match by exact RA hash rather than title alone.
 /// Keyed by the ROM path relative to the console folder; always empty for
-/// other consoles.
+/// other consoles or when ROM reading is disabled.
 fn precompute_nds_infos(
     console: &ActiveConsole,
     unpack_roms: bool,
     groups: &[DiscGroup],
     to_relative: &dyn Fn(&std::path::Path) -> String,
 ) -> HashMap<String, crate::nds::DsRomInfo> {
-    if console.def.id != "nds" {
+    if console.def.id != "nds" || !unpack_roms {
         return HashMap::new();
     }
     use rayon::prelude::*;
@@ -526,6 +520,11 @@ fn precompute_nds_infos(
         .collect()
 }
 
+/// Extracts DS banner icons and RetroAchievements hashes for games that
+/// don't have them yet. Reads stop once the hashed header ranges are in,
+/// so containers only decompress a few megabytes; the reads run
+/// concurrently while the cheap writes stay serial. Skipped entirely when
+/// `unpack_roms` is off, so scans never touch ROM files.
 fn enrich_nds_roms(
     db: &ira_db::DbConn,
     save_dir: &str,
@@ -535,6 +534,9 @@ fn enrich_nds_roms(
     games: &[Game],
     hashed_now: &HashSet<i64>,
 ) {
+    if !unpack_roms {
+        return;
+    }
     use rayon::prelude::*;
 
     let already_hashed: HashSet<i64> = existing

@@ -312,7 +312,7 @@ fn build_ra_games_for_console(
                 group
                     .serial
                     .clone()
-                    .or_else(|| crate::rom_serial::read_serial(rom_path))
+                    .or_else(|| platform_serial(console.def.id, rom_path))
             };
 
             let (app_id, title, trophy_source) = match matched_id {
@@ -542,6 +542,16 @@ fn write_nds_icon(save_dir: &str, db_id: i64, icon_rgba: &[u8]) {
 
 fn rom_path_is_present(scan_succeeded: bool, seen_paths: &HashSet<String>, rom_path: &str) -> bool {
     !scan_succeeded || seen_paths.contains(rom_path)
+}
+
+/// Reads the serial a ROM carries in its own data, so identity does not
+/// depend on the file name. DS ROMs expose a header game code; other
+/// consoles use the disc-info helper.
+fn platform_serial(console_id: &str, path: &std::path::Path) -> Option<String> {
+    match console_id {
+        "nds" => crate::nds::read_serial(path),
+        _ => crate::rom_serial::read_serial(path),
+    }
 }
 
 #[cfg(test)]

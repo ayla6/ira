@@ -222,6 +222,41 @@ fn read_icon_from_stream(reader: &mut dyn Read) -> Option<Vec<u8>> {
     Some(icon)
 }
 
+/// Reads the four-character game code from the ROM header at 0x0C (e.g.
+/// "AQQE") — the serial every DS title ships with. Works through
+/// containers: only the first bytes of the entry are read.
+pub fn read_serial(path: &Path) -> Option<String> {
+    let pick = |name: &str| {
+        Path::new(name)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(is_ds_extension)
+            .unwrap_or(false)
+    };
+    archives::with_entry_reader(path, &pick, |reader| {
+        let mut lead = vec![0u8; 512 + 0x10];
+        reader.read_exact(&mut lead).ok()?;
+        let base = supercard_base(&lead) as usize;
+        serial_from_header(lead.get(base..)?)
+    })
+}
+
+/// Header bytes 0..0x0C hold the internal game title (ASCII, NUL-padded)
+/// and 0x0C..0x10 the game code (ASCII), which gates against reading
+/// serials out of non-DS files.
+fn serial_from_header(header: &[u8]) -> Option<String> {
+    let title_ok = |byte: &u8| byte.is_ascii_graphic() || *byte == b' ' || *byte == 0;
+    if !header.get(..0x0C)?.iter().all(title_ok) {
+        return None;
+    }
+    let code = header.get(0x0C..0x10)?;
+    if !code.iter().all(|byte| byte.is_ascii_graphic()) {
+        return None;
+    }
+    let serial = String::from_utf8_lossy(code).trim().to_string();
+    (!serial.is_empty()).then_some(serial)
+}
+
 /// One sequential pass over a ROM image: hashes the ranges rcheevos's
 /// `rc_hash_nintendo_ds` uses and captures the banner.
 fn read_from_stream(reader: &mut dyn Read) -> Option<DsRomInfo> {
@@ -401,5 +436,24 @@ mod tests {
         let (_dir, zip_path) = write_zip("game.nds", &archived);
 
         assert_eq!(read_icon(&zip_path), Some(expected));
+    }
+
+    #[test]
+    fn test_read_serial_reads_header_game_code() {
+        let mut rom = nds_fixture();
+        rom[0..12].copy_from_slice(b"TEST GAME\0\0\0");
+        rom[0x0C..0x10].copy_from_slice(b"AQQE");
+        let file = write_fixture(&rom);
+        assert_eq!(read_serial(file.path()).as_deref(), Some("AQQE"));
+
+        // Same through an archive — the header is all a serial needs.
+        let (_dir, zip_path) = write_zip("game.nds", &rom);
+        assert_eq!(read_serial(&zip_path).as_deref(), Some("AQQE"));
+    }
+
+    #[test]
+    fn test_read_serial_rejects_non_ds_header() {
+        let file = write_fixture(&[0u8; 0x8000]);
+        assert!(read_serial(file.path()).is_none());
     }
 }

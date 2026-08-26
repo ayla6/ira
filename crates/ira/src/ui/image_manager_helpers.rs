@@ -141,32 +141,17 @@ pub(super) fn make_refresh_closure(
     })
 }
 
-/// Re-extracts an emulator-native icon into the game's data dir, replacing
-/// any imported or downloaded one. Nothing already on disk is touched until
-/// a replacement has been produced. Returns true when an icon was restored.
-pub(super) fn restore_native_icon(
-    save_dir: &str,
+/// Decodes an emulator-native icon into lossless WebP bytes without
+/// touching anything on disk, so the result can be staged as a pending
+/// image and only applied when the settings Save button is pressed.
+/// 3DS and Wii U titles whose stored location vanished get relocated
+/// through the emulator's own configuration.
+pub(super) fn native_icon_bytes(
     game: &Game,
     roms_folder: &str,
     azahar_executable: &str,
     cemu_executable: &str,
-) -> bool {
-    let image_dir = match game.kind {
-        ira_models::GameKind::Ps4 => std::path::Path::new(save_dir)
-            .join("data")
-            .join("ps4")
-            .join(&game.app_id),
-        ira_models::GameKind::Ps3 => std::path::Path::new(save_dir)
-            .join("data")
-            .join("ps3")
-            .join(&game.app_id),
-        ira_models::GameKind::ThreeDS => ira_parser::three_ds_data_dir(save_dir, &game.app_id),
-        ira_models::GameKind::WiiU => ira_parser::wiiu_data_dir(save_dir, &game.app_id),
-        ira_models::GameKind::Retro if game.platform_id == "nds" => {
-            ira_parser::retro_data_dir(save_dir, game.db_id)
-        }
-        _ => return false,
-    };
+) -> Option<Vec<u8>> {
     // Resolve ROM path: Retro games store it relative to the ROMs folder
     // (e.g. "game.nds" or "game.zip"), while console games store an
     // absolute path.
@@ -185,10 +170,7 @@ pub(super) fn restore_native_icon(
         } else {
             std::path::Path::new(&game.game_path)
         };
-    // Decode first: if the native source is unreadable the current icon
-    // must stay untouched. 3DS and Wii U titles whose stored location
-    // vanished get relocated through the emulator's own configuration.
-    let staged = match game.kind {
+    match game.kind {
         ira_models::GameKind::Retro if game.platform_id == "nds" => decode_nds_icon(game_root),
         ira_models::GameKind::ThreeDS => decode_smdh_icon(game_root).or_else(|| {
             ira_platforms::azahar::find_title_path_for(azahar_executable, &game.platform_id)
@@ -208,27 +190,44 @@ pub(super) fn restore_native_icon(
                     .and_then(|icon| import_image_bytes(&icon))
             }
         }
+        _ => None,
+    }
+}
+
+/// Writes a rendered native icon into the game's data dir, replacing any
+/// existing one. Only used when there is no settings dialog to Save from;
+/// the dialog stages instead and lets the Save flow apply it.
+pub(super) fn write_native_icon_to_disk(save_dir: &str, game: &Game, webp_bytes: &[u8]) -> bool {
+    let image_dir = match game.kind {
+        ira_models::GameKind::Ps4 => std::path::Path::new(save_dir)
+            .join("data")
+            .join("ps4")
+            .join(&game.app_id),
+        ira_models::GameKind::Ps3 => std::path::Path::new(save_dir)
+            .join("data")
+            .join("ps3")
+            .join(&game.app_id),
+        ira_models::GameKind::ThreeDS => ira_parser::three_ds_data_dir(save_dir, &game.app_id),
+        ira_models::GameKind::WiiU => ira_parser::wiiu_data_dir(save_dir, &game.app_id),
+        ira_models::GameKind::Retro => ira_parser::retro_data_dir(save_dir, game.db_id),
         _ => return false,
-    };
-    let Some(webp_bytes) = staged else {
-        return false;
     };
     let _ = std::fs::create_dir_all(&image_dir);
     ira_parser::remove_image_variants(&image_dir, "icon");
     ira_parser::remove_image_variants(&image_dir, "icon_small");
-    let restored = std::fs::write(image_dir.join("icon.webp"), &webp_bytes).is_ok();
-    if restored {
-        ira_parser::ensure_small_image(
-            &image_dir,
-            "icon",
-            ira_models::AssetType::Icon.thumb_dims().0,
-            ira_models::AssetType::Icon.thumb_dims().1,
-        );
-        if let Some(p) = ira_parser::find_image_file(&image_dir, "icon") {
-            ira_images::invalidate_texture(&p.to_string_lossy());
-        }
+    if std::fs::write(image_dir.join("icon.webp"), webp_bytes).is_err() {
+        return false;
     }
-    restored
+    ira_parser::ensure_small_image(
+        &image_dir,
+        "icon",
+        ira_models::AssetType::Icon.thumb_dims().0,
+        ira_models::AssetType::Icon.thumb_dims().1,
+    );
+    if let Some(p) = ira_parser::find_image_file(&image_dir, "icon") {
+        ira_images::invalidate_texture(&p.to_string_lossy());
+    }
+    true
 }
 
 /// Decodes an icon file into lossless WebP bytes.
@@ -259,4 +258,57 @@ fn decode_nds_icon(game_root: &std::path::Path) -> Option<Vec<u8>> {
     let _ = std::fs::remove_file(&png);
     let data = data.ok()?;
     ira_parser::convert_bytes_to_lossless_webp(&data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ira_models::GameKind;
+
+    fn nds_game(game_path: &str, db_id: i64) -> Game {
+        Game {
+            kind: GameKind::Retro,
+            platform_id: "nds".to_string(),
+            game_path: game_path.to_string(),
+            db_id,
+            ..Default::default()
+        }
+    }
+
+    /// A failed native decode must not touch the disk: nothing may be
+    /// applied before the Save button, including on failure.
+    #[test]
+    fn test_native_icon_bytes_failure_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().to_str().unwrap();
+        let game = nds_game("missing.nds", 0);
+
+        let bytes = native_icon_bytes(&game, save_dir, "", "");
+
+        assert!(bytes.is_none());
+        let data_dir = ira_parser::retro_data_dir(save_dir, game.db_id);
+        assert!(ira_parser::find_image_file(&data_dir, "icon").is_none());
+    }
+
+    /// The direct-write fallback (no dialog to Save from) replaces the
+    /// icon variants and leaves the small thumbnail behind.
+    #[test]
+    fn test_write_native_icon_to_disk_replaces_variants() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().to_str().unwrap();
+        let game = nds_game("game.nds", 7);
+        let data_dir = ira_parser::retro_data_dir(save_dir, 7);
+        std::fs::create_dir_all(&data_dir).unwrap();
+        std::fs::write(data_dir.join("icon.png"), b"stale").unwrap();
+        let png = tmp.path().join("render.png");
+        ira_parser::save_rgba_png(&png, 4, 4, &[255u8; 4 * 4 * 4]).unwrap();
+        let webp =
+            ira_parser::convert_bytes_to_lossless_webp(&std::fs::read(&png).unwrap()).unwrap();
+
+        assert!(write_native_icon_to_disk(save_dir, &game, &webp));
+
+        assert!(data_dir.join("icon.webp").is_file());
+        assert!(!data_dir.join("icon.png").is_file());
+        assert!(ira_parser::find_image_file(&data_dir, "icon_small").is_some());
+    }
 }

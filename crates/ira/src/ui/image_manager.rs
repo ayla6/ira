@@ -405,16 +405,25 @@ fn build_reset_icon_button(
         )
     };
     reset_btn.connect_clicked(move |_| {
-        if super::image_manager_helpers::restore_native_icon(
-            &save_dir_c2,
+        // Decode only: like Browse and SGDB picks, the restored icon is
+        // staged as a pending image and applied by the Save button, never
+        // written behind it.
+        let Some(bytes) = super::image_manager_helpers::native_icon_bytes(
             &gc,
             &roms_folder,
             &azahar_exe,
             &cemu_exe,
-        ) {
-            if let Some(ref pc) = pending_copies_reset {
-                pc.borrow_mut().remove(&asset_reset);
-            }
+        ) else {
+            refresh();
+            return;
+        };
+        if let Some(pc) = &pending_copies_reset {
+            pc.borrow_mut().insert(
+                asset_reset.clone(),
+                PendingImage::Bytes(gtk4::glib::Bytes::from_owned(bytes)),
+            );
+        } else {
+            super::image_manager_helpers::write_native_icon_to_disk(&save_dir_c2, &gc, &bytes);
         }
         refresh();
     });

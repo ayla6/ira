@@ -62,6 +62,7 @@ pub(super) fn sidebar_section_title(title: &str) -> gtk4::ListBoxRow {
 pub(super) struct AutoReloadWidgets {
     pub steam: adw::SwitchRow,
     pub roms: adw::SwitchRow,
+    pub unpack_roms: adw::SwitchRow,
     pub shadps4: adw::SwitchRow,
     pub rpcs3: adw::SwitchRow,
     pub vita3k: adw::SwitchRow,
@@ -134,6 +135,13 @@ pub(super) fn build_general_settings_page(
         &crate::tr!("Scan ROM folders and refresh RetroAchievements games when Ira starts"),
         cfg.auto_reload_roms,
     );
+    let unpack_roms = auto_reload_row(
+        &crate::tr!("Read compressed ROMs"),
+        &crate::tr!(
+            "Unpack .zip/.7z/.zst ROMs in memory to extract DS icons and hashes — slower scans"
+        ),
+        cfg.unpack_roms,
+    );
     let auto_reload_shadps4 = auto_reload_row(
         &crate::tr!("shadPS4"),
         &crate::tr!("Scan shadPS4 games when Ira starts"),
@@ -162,6 +170,7 @@ pub(super) fn build_general_settings_page(
     for row in [
         &auto_reload_steam,
         &auto_reload_roms,
+        &unpack_roms,
         &auto_reload_shadps4,
         &auto_reload_rpcs3,
         &auto_reload_vita3k,
@@ -214,6 +223,7 @@ pub(super) fn build_general_settings_page(
         AutoReloadWidgets {
             steam: auto_reload_steam,
             roms: auto_reload_roms,
+            unpack_roms,
             shadps4: auto_reload_shadps4,
             rpcs3: auto_reload_rpcs3,
             vita3k: auto_reload_vita3k,

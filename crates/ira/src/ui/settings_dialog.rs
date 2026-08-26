@@ -329,6 +329,7 @@ fn apply_general_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
     cfg.centralize_game_saves = widgets.saves_row.is_active();
     cfg.auto_reload_steam = widgets.auto_reload_widgets.steam.is_active();
     cfg.auto_reload_roms = widgets.auto_reload_widgets.roms.is_active();
+    cfg.unpack_roms = widgets.auto_reload_widgets.unpack_roms.is_active();
     cfg.auto_reload_shadps4 = widgets.auto_reload_widgets.shadps4.is_active();
     cfg.auto_reload_rpcs3 = widgets.auto_reload_widgets.rpcs3.is_active();
     cfg.auto_reload_vita3k = widgets.auto_reload_widgets.vita3k.is_active();

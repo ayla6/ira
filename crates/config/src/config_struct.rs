@@ -215,6 +215,10 @@ pub struct Config {
     pub auto_reload_cemu: bool,
     #[serde(default = "default_true")]
     pub auto_reload_azahar: bool,
+    /// Stream .zip/.7z/.zst DS ROMs in memory to read icons and hashes.
+    /// Off by default: unpacking is slower than plain-file reads.
+    #[serde(default)]
+    pub unpack_roms: bool,
 
     #[serde(default = "default_save_dir")]
     pub save_dir: String,
@@ -318,6 +322,7 @@ impl Default for Config {
             auto_reload_vita3k: true,
             auto_reload_cemu: true,
             auto_reload_azahar: true,
+            unpack_roms: false,
 
             save_dir: default_save_dir(),
             default_wine_config: WineConfig::default(),
@@ -420,6 +425,7 @@ impl Config {
             auto_reload_vita3k: self.auto_reload_vita3k,
             auto_reload_cemu: self.auto_reload_cemu,
             auto_reload_azahar: self.auto_reload_azahar,
+            unpack_roms: self.unpack_roms,
             save_dir: self.save_dir.clone(),
             default_wine_config: self.default_wine_config.clone(),
             default_system: self.default_system.clone(),
@@ -500,6 +506,7 @@ mod tests {
         assert!(cfg.auto_reload_vita3k);
         assert!(cfg.auto_reload_cemu);
         assert!(cfg.auto_reload_azahar);
+        assert!(!cfg.unpack_roms);
     }
 
     #[test]

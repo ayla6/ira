@@ -184,6 +184,9 @@ pub(crate) struct QueryFilesResponse {
 
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct QueryFilesResult {
+    /// Total matches across all pages.
+    #[serde(deserialize_with = "flexible_i64", default)]
+    pub total: Option<i64>,
     #[serde(default, rename = "publishedfiledetails")]
     pub published_file_details: Vec<PublishedFileEntry>,
 }

@@ -126,9 +126,19 @@ pub struct SteamLayoutQuery {
     /// Require a plain workshop tag, e.g. `controller_ps5` or
     /// `feature_gyro`; results must carry every tag listed here.
     pub required_tags: Vec<String>,
+    /// Forbid a plain workshop tag; results must carry none of these.
+    pub excluded_tags: Vec<String>,
     pub page: u32,
     pub page_size: u32,
     pub sort: SteamLayoutSort,
+}
+
+/// One page of [`SteamDataClient::query_steam_layouts`] results.
+#[derive(Debug, Clone, Default)]
+pub struct SteamLayoutPage {
+    pub items: Vec<SteamLayout>,
+    /// Total matching layouts across all pages, as reported by Steam.
+    pub total: i64,
 }
 
 /// The `input_json` payload QueryFiles expects; split out so the encoding
@@ -181,27 +191,36 @@ fn query_request_body(query: &SteamLayoutQuery) -> serde_json::Value {
     if !tags.is_empty() {
         body["requiredtags"] = serde_json::json!(tags);
     }
+    let excluded: Vec<&str> = query
+        .excluded_tags
+        .iter()
+        .map(|tag| tag.trim())
+        .filter(|tag| !tag.is_empty())
+        .collect();
+    if !excluded.is_empty() {
+        body["excludedtags"] = serde_json::json!(excluded);
+    }
     body
 }
 
-fn parse_query_files_json(text: &str) -> Result<Vec<SteamLayout>, String> {
+fn parse_query_files_json(text: &str) -> Result<SteamLayoutPage, String> {
     let parsed: QueryFilesResponse =
         serde_json::from_str(text).map_err(|e| format!("layout search decode error: {e}"))?;
-    Ok(parsed
-        .response
-        .published_file_details
-        .iter()
-        .filter_map(SteamLayout::from_entry)
-        .collect())
+    Ok(SteamLayoutPage {
+        items: parsed
+            .response
+            .published_file_details
+            .iter()
+            .filter_map(SteamLayout::from_entry)
+            .collect(),
+        total: parsed.response.total.unwrap_or(0),
+    })
 }
 
 impl SteamDataClient {
     /// Search Steam's community controller layouts. Requires a Steam Web API
     /// key to be configured (Valve closed anonymous QueryFiles access).
-    pub fn query_steam_layouts(
-        &self,
-        query: &SteamLayoutQuery,
-    ) -> Result<Vec<SteamLayout>, String> {
+    pub fn query_steam_layouts(&self, query: &SteamLayoutQuery) -> Result<SteamLayoutPage, String> {
         let api_key = self.api_key();
         if api_key.is_empty() {
             return Err("no Steam Web API key configured".into());
@@ -283,6 +302,7 @@ mod tests {
             search_text: String::new(),
             app_id: None,
             required_tags: Vec::new(),
+            excluded_tags: Vec::new(),
             page: 1,
             page_size: 20,
             sort: SteamLayoutSort::TextSearch,
@@ -301,6 +321,7 @@ mod tests {
         assert!(body.get("days").is_none());
         assert!(body.get("search_text").is_none());
         assert!(body.get("requiredtags").is_none());
+        assert!(body.get("excludedtags").is_none());
     }
 
     #[test]
@@ -309,6 +330,7 @@ mod tests {
             search_text: "hollow knight".into(),
             app_id: Some("367520".into()),
             required_tags: vec!["controller_ps5".into(), "feature_gyro".into()],
+            excluded_tags: vec!["feature_mouse".into()],
             page: 2,
             page_size: 50,
             sort: SteamLayoutSort::TotalSubscriptions,
@@ -325,6 +347,7 @@ mod tests {
             body["requiredtags"],
             serde_json::json!(["controller_ps5", "feature_gyro"])
         );
+        assert_eq!(body["excludedtags"], serde_json::json!(["feature_mouse"]));
         assert_eq!(body["numperpage"], 50);
         assert_eq!(body["page"], 2);
     }
@@ -335,6 +358,7 @@ mod tests {
             search_text: "hollow knight".into(),
             app_id: None,
             required_tags: Vec::new(),
+            excluded_tags: Vec::new(),
             page: 1,
             page_size: 20,
             sort: SteamLayoutSort::Trending30Days,
@@ -350,6 +374,7 @@ mod tests {
             search_text: "x".into(),
             app_id: Some("   ".into()),
             required_tags: vec!["   ".into()],
+            excluded_tags: vec!["   ".into()],
             page: 1,
             page_size: 20,
             sort: SteamLayoutSort::PublicationDate,
@@ -358,6 +383,7 @@ mod tests {
         assert_eq!(body["query_type"], QUERY_TYPE_PUBLICATION);
         assert_eq!(body["required_kv_tags"].as_array().unwrap().len(), 2);
         assert!(body.get("requiredtags").is_none());
+        assert!(body.get("excludedtags").is_none());
     }
 
     #[test]
@@ -366,6 +392,7 @@ mod tests {
             "response": {
                 "result": 1,
                 "resultcount": 2,
+                "total": 552,
                 "publishedfiledetails": [
                     {
                         "publishedfileid": "2894527036",
@@ -390,9 +417,10 @@ mod tests {
                 ]
             }
         }"#;
-        let layouts = parse_query_files_json(json).unwrap();
-        assert_eq!(layouts.len(), 1);
-        let layout = &layouts[0];
+        let page = parse_query_files_json(json).unwrap();
+        assert_eq!(page.total, 552);
+        assert_eq!(page.items.len(), 1);
+        let layout = &page.items[0];
         assert_eq!(layout.published_file_id, "2894527036");
         assert_eq!(layout.controller_type, "controller_ps5");
         assert_eq!(layout.app_id, "123456");

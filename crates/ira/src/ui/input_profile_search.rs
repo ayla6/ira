@@ -3,16 +3,17 @@
 //! `AdwNavigationView` whose preview page handles the actual import.
 //! Filter and sort options mirror steaminputdb's search form.
 
-use super::css::{CSS_BOXED_LIST, CSS_SUGGESTED_ACTION};
+use super::css::CSS_SUGGESTED_ACTION;
 use super::helpers::{
     clamped, clamped_boxed_list, clear_children, esc, poll_channel, status_row, SearchStatus,
 };
-use super::input_profile_preview::{
-    controller_display_label, controller_filter_options, layout_display_name, PreviewRequest,
+use super::input_profile_preview::{layout_display_name, PreviewRequest};
+use super::input_profile_search_filters::{
+    build_filter_card, controller_display_label, controller_filter_options, FeatureRow,
 };
 use adw::prelude::*;
 use ira_api::steam_input::{SteamLayout, SteamLayoutQuery, SteamLayoutSort};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{mpsc, Arc};
@@ -36,7 +37,6 @@ const SORTS: [SteamLayoutSort; 6] = [
 ];
 
 const RESULTS_PER_PAGE: u32 = 50;
-const GYRO_TAG: &str = "feature_gyro";
 
 /// Everything the dialog's async pieces need; kept off worker threads
 /// (GTK widgets are main-thread only — workers get plain owned data).
@@ -53,11 +53,16 @@ struct DialogContext {
     entry: gtk4::SearchEntry,
     sort_row: adw::ComboRow,
     controller_row: adw::ComboRow,
-    gyro_row: adw::SwitchRow,
+    include_rows: Rc<Vec<FeatureRow>>,
+    exclude_rows: Rc<Vec<FeatureRow>>,
     app_only_row: adw::SwitchRow,
+    count_label: gtk4::Label,
     status: SearchStatus,
     /// One preview download at a time.
     loading: Rc<Cell<bool>>,
+    /// Which results page is displayed (1-based).
+    page: Cell<u32>,
+    pager: RefCell<Option<adw::ButtonRow>>,
 }
 
 /// The search page's interactive widgets, kept out of the widget tree so the
@@ -65,23 +70,15 @@ struct DialogContext {
 struct SearchWidgets {
     page: adw::NavigationPage,
     entry: gtk4::SearchEntry,
+    search_btn: gtk4::Button,
     sort_row: adw::ComboRow,
     controller_row: adw::ComboRow,
-    gyro_row: adw::SwitchRow,
+    include_rows: Vec<FeatureRow>,
+    exclude_rows: Vec<FeatureRow>,
     app_only_row: adw::SwitchRow,
+    count_label: gtk4::Label,
     list: gtk4::ListBox,
     status: SearchStatus,
-}
-
-fn sort_label(sort: SteamLayoutSort) -> String {
-    match sort {
-        SteamLayoutSort::Rank => crate::tr!("Rank"),
-        SteamLayoutSort::PublicationDate => crate::tr!("Date"),
-        SteamLayoutSort::Trending30Days => crate::tr!("Trending (30 days)"),
-        SteamLayoutSort::TotalSubscriptions => crate::tr!("Most subscribed"),
-        SteamLayoutSort::VotesUp => crate::tr!("Most upvoted"),
-        SteamLayoutSort::TextSearch => crate::tr!("Relevance"),
-    }
 }
 
 pub fn show_steam_layout_search(
@@ -118,10 +115,14 @@ pub fn show_steam_layout_search(
         entry: widgets.entry,
         sort_row: widgets.sort_row,
         controller_row: widgets.controller_row,
-        gyro_row: widgets.gyro_row,
+        include_rows: Rc::new(widgets.include_rows),
+        exclude_rows: Rc::new(widgets.exclude_rows),
         app_only_row: widgets.app_only_row,
+        count_label: widgets.count_label,
         status: widgets.status,
         loading: Rc::new(Cell::new(false)),
+        page: Cell::new(1),
+        pager: RefCell::new(None),
     });
 
     // Like steaminputdb's form: changing any filter re-submits the search.
@@ -129,11 +130,19 @@ pub fn show_steam_layout_search(
         let ctx = ctx.clone();
         move |_| run_search(&ctx)
     });
+    {
+        let ctx = ctx.clone();
+        widgets.search_btn.connect_clicked(move |_| run_search(&ctx));
+    }
     for changed in [&ctx.sort_row, &ctx.controller_row] {
         let ctx = ctx.clone();
         changed.connect_selected_notify(move |_| run_search(&ctx));
     }
-    for changed in [&ctx.gyro_row, &ctx.app_only_row] {
+    let scope_changes: Vec<adw::SwitchRow> = std::iter::once(ctx.app_only_row.clone())
+        .chain(ctx.include_rows.iter().map(|row| row.switch.clone()))
+        .chain(ctx.exclude_rows.iter().map(|row| row.switch.clone()))
+        .collect();
+    for changed in scope_changes {
         let ctx = ctx.clone();
         changed.connect_active_notify(move |_| run_search(&ctx));
     }
@@ -166,55 +175,20 @@ fn build_search_ui(context: &Option<SteamLayoutSearchContext>) -> SearchWidgets 
     search_row.append(&search_btn);
     query_column.append(&search_row);
 
-    // Filters in one boxed list, like steaminputdb's card: sort, controller
-    // kind, feature toggles — each an ordinary Adwaita row.
-    let filters = gtk4::ListBox::new();
-    filters.add_css_class(CSS_BOXED_LIST);
-    filters.set_selection_mode(gtk4::SelectionMode::None);
-
-    let sort_labels: Vec<String> = SORTS.iter().map(|sort| sort_label(*sort)).collect();
-    let sort_row = adw::ComboRow::new();
-    sort_row.set_title(&crate::tr!("Sort by"));
-    sort_row.set_model(Some(&gtk4::StringList::new(
-        &sort_labels.iter().map(String::as_str).collect::<Vec<_>>(),
-    )));
-    filters.append(&sort_row);
-
-    let mut controller_labels = vec![crate::tr!("Any controller")];
-    controller_labels.extend(
-        controller_filter_options()
-            .into_iter()
-            .map(|(label, _)| label),
-    );
-    let controller_row = adw::ComboRow::new();
-    controller_row.set_title(&crate::tr!("Controller"));
-    controller_row.set_model(Some(&gtk4::StringList::new(
-        &controller_labels
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-    )));
-    filters.append(&controller_row);
-
-    let gyro_row = adw::SwitchRow::new();
-    gyro_row.set_title(&crate::tr!("Uses gyro"));
-    gyro_row.set_subtitle(&crate::tr!("Only layouts that use gyro aiming or motion"));
-    filters.append(&gyro_row);
-
     // A known Steam app id scopes the query to that game's pool; everything
     // else searches all workshop layouts by text only.
     let has_app_context = context
         .as_ref()
         .is_some_and(|context| !context.steam_app_id.is_empty());
-    let app_only_row = adw::SwitchRow::new();
-    app_only_row.set_title(&crate::tr!("This game only"));
-    app_only_row.set_subtitle(&crate::tr!("Only layouts published for this game"));
-    app_only_row.set_active(has_app_context);
-    app_only_row.set_visible(has_app_context);
-    filters.append(&app_only_row);
-    query_column.append(&filters);
-
+    let card = build_filter_card(&SORTS, has_app_context);
+    query_column.append(&card.list);
     content.append(&clamped(&query_column, 560, (12, 0, 12, 12)));
+
+    let count_label = gtk4::Label::new(None);
+    count_label.set_xalign(0.0);
+    count_label.set_visible(false);
+    count_label.add_css_class(super::css::CSS_DIM_LABEL);
+    content.append(&clamped(&count_label, 560, (8, 0, 12, 12)));
 
     let (scrolled, list) = clamped_boxed_list(560);
     let status = SearchStatus::for_list(&list);
@@ -226,16 +200,48 @@ fn build_search_ui(context: &Option<SteamLayoutSearchContext>) -> SearchWidgets 
     SearchWidgets {
         page,
         entry,
-        sort_row,
-        controller_row,
-        gyro_row,
-        app_only_row,
+        search_btn,
+        sort_row: card.sort_row,
+        controller_row: card.controller_row,
+        include_rows: card.include_rows,
+        exclude_rows: card.exclude_rows,
+        app_only_row: card.app_only_row,
+        count_label,
         list,
         status,
     }
 }
 
 fn run_search(ctx: &Rc<DialogContext>) {
+    ctx.page.set(1);
+    clear_children(&ctx.list);
+    remove_pager(ctx);
+    ctx.status.show(&crate::tr!("Searching…"));
+    fetch_page(ctx, 1);
+}
+
+fn load_more(ctx: &Rc<DialogContext>) {
+    remove_pager(ctx);
+    let next = ctx.page.get() + 1;
+    ctx.page.set(next);
+    fetch_page(ctx, next);
+}
+
+fn fetch_page(ctx: &Rc<DialogContext>, page: u32) {
+    let query = current_query(ctx, page);
+    let (tx, rx) = mpsc::channel::<Result<ira_api::steam_input::SteamLayoutPage, String>>();
+    let steam = ctx.steam.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(steam.query_steam_layouts(&query));
+    });
+
+    let poll_ctx = ctx.clone();
+    poll_channel(rx, move |outcome| {
+        populate_results(&poll_ctx, page, outcome);
+    });
+}
+
+fn current_query(ctx: &Rc<DialogContext>, page: u32) -> SteamLayoutQuery {
     let term = ctx.entry.text().trim().to_string();
     let scoped_to_game = ctx.app_only_row.is_visible() && ctx.app_only_row.is_active();
     let app_id = if scoped_to_game {
@@ -244,9 +250,6 @@ fn run_search(ctx: &Rc<DialogContext>) {
         None
     };
     let mut required_tags = Vec::new();
-    if ctx.gyro_row.is_active() {
-        required_tags.push(GYRO_TAG.to_string());
-    }
     if ctx.controller_row.selected() > 0 {
         if let Some((_, tag)) =
             controller_filter_options().get(ctx.controller_row.selected() as usize - 1)
@@ -254,52 +257,98 @@ fn run_search(ctx: &Rc<DialogContext>) {
             required_tags.push(tag.clone());
         }
     }
-    let query = SteamLayoutQuery {
+    for row in ctx.include_rows.iter().filter(|row| row.switch.is_active()) {
+        required_tags.push(row.tag.clone());
+    }
+    let excluded_tags = ctx
+        .exclude_rows
+        .iter()
+        .filter(|row| row.switch.is_active())
+        .map(|row| row.tag.clone())
+        .collect();
+    SteamLayoutQuery {
         search_text: term,
         app_id,
         required_tags,
-        page: 1,
+        excluded_tags,
+        page,
         page_size: RESULTS_PER_PAGE,
         sort: SORTS[ctx.sort_row.selected() as usize],
-    };
-    clear_children(&ctx.list);
-    ctx.status.show(&crate::tr!("Searching…"));
-
-    let (tx, rx) = mpsc::channel::<Result<Vec<SteamLayout>, String>>();
-    let steam = ctx.steam.clone();
-    std::thread::spawn(move || {
-        let _ = tx.send(steam.query_steam_layouts(&query));
-    });
-
-    let search_ctx = ctx.clone();
-    poll_channel(rx, move |outcome| {
-        populate_results(&search_ctx, outcome);
-    });
+    }
 }
 
-fn populate_results(ctx: &Rc<DialogContext>, outcome: Result<Vec<SteamLayout>, String>) {
-    ctx.status.clear();
-    clear_children(&ctx.list);
-    match &outcome {
+fn populate_results(
+    ctx: &Rc<DialogContext>,
+    page: u32,
+    outcome: Result<ira_api::steam_input::SteamLayoutPage, String>,
+) {
+    if page == 1 {
+        ctx.status.clear();
+        clear_children(&ctx.list);
+    }
+    match outcome {
         Err(error) if error.contains("no Steam Web API key") => {
-            ctx.list.append(&status_row(&crate::tr!(
+            fail_results(ctx, page, &crate::tr!(
                 "A Steam Web API key is needed to browse community layouts. Add one under Settings."
-            )));
-        }
-        Err(error) => {
-            ctx.list.append(&status_row(
-                &crate::tr!("Search failed: {}").replacen("{}", error, 1),
             ));
         }
-        Ok(layouts) if layouts.is_empty() => {
-            ctx.list
-                .append(&status_row(&crate::tr!("No layouts found")));
+        Err(error) => {
+            fail_results(
+                ctx,
+                page,
+                &crate::tr!("Search failed: {}").replacen("{}", &error, 1),
+            );
         }
-        Ok(layouts) => {
-            for layout in layouts {
+        Ok(page_result) => {
+            update_count_label(ctx, page_result.total);
+            for layout in &page_result.items {
                 ctx.list.append(&layout_row(ctx, layout));
             }
+            let shown = page as i64 * RESULTS_PER_PAGE as i64;
+            if shown < page_result.total {
+                append_pager(ctx);
+            }
         }
+    }
+}
+
+/// First-page failures replace the list; load-more failures surface as a
+/// status row and restore the pager so the fetch can be retried.
+fn fail_results(ctx: &Rc<DialogContext>, page: u32, text: &str) {
+    if page == 1 {
+        ctx.count_label.set_visible(false);
+        ctx.list.append(&status_row(text));
+    } else {
+        ctx.status.show(text);
+        append_pager(ctx);
+    }
+}
+
+fn update_count_label(ctx: &Rc<DialogContext>, total: i64) {
+    if total > 0 {
+        ctx.count_label
+            .set_text(&crate::tr!("{} layouts").replacen("{}", &total.to_string(), 1));
+        ctx.count_label.set_visible(true);
+    } else {
+        ctx.count_label.set_visible(false);
+    }
+}
+
+fn append_pager(ctx: &Rc<DialogContext>) {
+    let pager = adw::ButtonRow::new();
+    pager.set_title(&crate::tr!("Load more"));
+    pager.set_start_icon_name(Some("view-more-symbolic"));
+    {
+        let ctx = ctx.clone();
+        pager.connect_activated(move |_| load_more(&ctx));
+    }
+    ctx.list.append(&pager);
+    *ctx.pager.borrow_mut() = Some(pager);
+}
+
+fn remove_pager(ctx: &Rc<DialogContext>) {
+    if let Some(row) = ctx.pager.borrow_mut().take() {
+        ctx.list.remove(&row);
     }
 }
 
@@ -334,11 +383,10 @@ fn layout_subtitle(layout: &SteamLayout) -> String {
         parts.push(controller_display_label(&layout.controller_type));
     }
     if layout.lifetime_subscriptions > 0 {
-        parts.push(crate::tr!("{} subscribers").replacen(
-            "{}",
-            &layout.lifetime_subscriptions.to_string(),
-            1,
-        ));
+        parts.push(
+            crate::tr!("{} subscribers")
+                .replacen("{}", &layout.lifetime_subscriptions.to_string(), 1),
+        );
     }
     if layout.votes_up > 0 {
         parts.push(crate::tr!("{} upvotes").replacen("{}", &layout.votes_up.to_string(), 1));
@@ -349,8 +397,7 @@ fn layout_subtitle(layout: &SteamLayout) -> String {
     if layout.description.trim().is_empty() {
         return parts.join(" · ");
     }
-    // Keep the blurb short: the preview page shows the full text. The row
-    // subtitle parses Pango markup, so escape the workshop text.
+    // Keep the blurb short: the preview page shows the full text.
     let mut description = layout
         .description
         .trim()
@@ -360,7 +407,6 @@ fn layout_subtitle(layout: &SteamLayout) -> String {
     if layout.description.trim().chars().count() > 80 {
         description.push('…');
     }
-    let description = esc(&description);
     if parts.is_empty() {
         description
     } else {

@@ -54,6 +54,7 @@ mod input_profile_output_capture;
 mod input_profile_preview;
 mod input_profile_region_pages;
 mod input_profile_search;
+mod input_profile_search_filters;
 mod input_profile_settings;
 mod input_profile_sheet_base;
 mod input_profile_source_modes;

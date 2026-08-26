@@ -6,6 +6,7 @@ use super::css::{CSS_DIM_LABEL, CSS_SUGGESTED_ACTION};
 use super::helpers::{esc, poll_channel, SearchStatus};
 use super::input_profile_editor_regions::source_label;
 use super::input_profile_options::output_display_label;
+use super::input_profile_search_filters::controller_display_label;
 use super::input_profile_store::{new_managed_profile_path, write_profile};
 use adw::prelude::*;
 use ira_api::steam_input::SteamLayout;
@@ -14,29 +15,6 @@ use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{mpsc, Arc};
-
-/// Filter entries for the search dialog: display label + required workshop
-/// tag. Also the label source for preview summaries.
-pub(super) fn controller_filter_options() -> Vec<(String, String)> {
-    vec![
-        (crate::tr!("DualSense"), "controller_ps5".into()),
-        (crate::tr!("DualShock 4"), "controller_ps4".into()),
-        (crate::tr!("Xbox One / Elite"), "controller_xboxone".into()),
-        (crate::tr!("Xbox 360"), "controller_xbox360".into()),
-        (crate::tr!("Switch Pro"), "controller_switch".into()),
-        (crate::tr!("Steam Deck"), "controller_neptune".into()),
-        (crate::tr!("Generic"), "controller_generic".into()),
-    ]
-}
-
-pub(super) fn controller_display_label(tag: &str) -> String {
-    let kind = tag.trim_start_matches("controller_");
-    controller_filter_options()
-        .into_iter()
-        .find(|(_, filter_tag)| filter_tag == kind)
-        .map(|(label, _)| label)
-        .unwrap_or_else(|| capitalize(kind))
-}
 
 pub(super) fn layout_display_name(layout: &SteamLayout) -> String {
     if layout.title.trim().is_empty() {
@@ -397,12 +375,4 @@ fn store_profile(job: StoreJob) -> Result<PathBuf, String> {
     let path = new_managed_profile_path(&job.save_dir, &profile.name);
     write_profile(&path, &profile)?;
     Ok(path)
-}
-
-fn capitalize(text: &str) -> String {
-    let mut chars = text.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
 }

@@ -102,9 +102,9 @@ fn populate_results(
     platform_id: &str,
     dialog: &adw::Window,
     on_match: &Option<Rc<dyn Fn()>>,
-    outcome: (Option<String>, Vec<RaGameEntry>),
+    outcome: (Option<String>, Option<RaGameEntry>, Vec<RaGameEntry>),
 ) {
-    let (notice, results) = outcome;
+    let (notice, hash_hit, results) = outcome;
     clear_children(list);
     if let Some(notice) = notice {
         let row = adw::ActionRow::new();
@@ -113,22 +113,34 @@ fn populate_results(
         list.append(&row);
         return;
     }
-    if results.is_empty() {
+    let mut rows: Vec<(RaGameEntry, bool)> = Vec::new();
+    if let Some(hit) = hash_hit {
+        rows.push((hit, true));
+    }
+    for game in results {
+        if rows.iter().any(|(g, _)| g.id == game.id) {
+            continue;
+        }
+        rows.push((game, false));
+    }
+    if rows.is_empty() {
         let row = adw::ActionRow::new();
         row.set_title(&crate::tr!("No results found"));
         row.set_sensitive(false);
         list.append(&row);
         return;
     }
-    for game in &results {
+    for (game, exact_hash) in rows {
         let row = adw::ActionRow::new();
         row.set_title(&super::helpers::esc(&game.title));
-        let achievements = if game.num_achievements == 0 {
+        let tag = if exact_hash {
+            crate::tr!("Exact hash match")
+        } else if game.num_achievements == 0 {
             crate::tr!("No achievements yet")
         } else {
             crate::tr!("{} achievements").replacen("{}", &game.num_achievements.to_string(), 1)
         };
-        row.set_subtitle(&format!("RA ID: {} · {}", game.id, achievements));
+        row.set_subtitle(&format!("RA ID: {} · {}", game.id, tag));
         let match_btn = gtk4::Button::with_label(&crate::tr!("Match"));
         match_btn.add_css_class(CSS_SUGGESTED_ACTION);
         match_btn.set_valign(gtk4::Align::Center);
@@ -157,6 +169,14 @@ pub fn show_ra_search_dialog(
     let console_id = match ira_models::find_console(platform_id) {
         Some(c) => c.ra_console_id,
         None => return,
+    };
+    let rom_hash = {
+        let s = state.borrow();
+        ira_db::find_by_db_id(&s.db, db_id)
+            .ok()
+            .flatten()
+            .map(|e| e.rom_hash)
+            .unwrap_or_default()
     };
 
     let dialog = adw::Window::new();
@@ -207,7 +227,7 @@ pub fn show_ra_search_dialog(
     let dialog_s = dialog.clone();
     let do_search = move || {
         let term = entry_s.text().trim().to_string();
-        if term.is_empty() {
+        if term.is_empty() && rom_hash.is_empty() {
             return;
         }
         let (cfg, save_dir) = {
@@ -219,22 +239,34 @@ pub fn show_ra_search_dialog(
         let dialog_c2 = dialog_s.clone();
         let on_match_c2 = on_match.clone();
         let platform_id_c2 = platform_id.clone();
-        let (tx, rx) = mpsc::channel::<(Option<String>, Vec<RaGameEntry>)>();
+        let rom_hash_c = rom_hash.clone();
+        let (tx, rx) =
+            mpsc::channel::<(Option<String>, Option<RaGameEntry>, Vec<RaGameEntry>)>();
         std::thread::spawn(move || {
-            let (notice, results) = match RaClient::from_config(&cfg) {
-                Some(client) => (None, client.search_ra_games(&save_dir, console_id, &term)),
+            let (notice, hash_hit, results) = match RaClient::from_config(&cfg) {
+                Some(client) => {
+                    let hash_hit =
+                        client.find_game_by_hash(&save_dir, console_id, &rom_hash_c);
+                    let results = if term.is_empty() {
+                        Vec::new()
+                    } else {
+                        client.search_ra_games(&save_dir, console_id, &term)
+                    };
+                    (None, hash_hit, results)
+                }
                 None => (
                     Some(crate::tr!("RetroAchievements credentials not configured")),
+                    None,
                     Vec::new(),
                 ),
             };
-            let _ = tx.send((notice, results));
+            let _ = tx.send((notice, hash_hit, results));
         });
         let rx = Rc::new(RefCell::new(rx));
         glib::source::idle_add_local_full(glib::Priority::DEFAULT, move || {
             let rx = rx.borrow();
             match rx.try_recv() {
-                Ok((notice, results)) => {
+                Ok((notice, hash_hit, results)) => {
                     populate_results(
                         &list_c2,
                         &state_c2,
@@ -242,7 +274,7 @@ pub fn show_ra_search_dialog(
                         &platform_id_c2,
                         &dialog_c2,
                         &on_match_c2,
-                        (notice, results),
+                        (notice, hash_hit, results),
                     );
                     glib::ControlFlow::Break
                 }

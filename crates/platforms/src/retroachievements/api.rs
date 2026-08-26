@@ -158,6 +158,28 @@ impl RaClient {
         results
     }
 
+    /// Returns the game in the console's list whose supported hashes contain
+    /// `rom_hash` (case-insensitive), or None when the hash is empty, the
+    /// list can't be loaded, or no game claims the hash.
+    pub fn find_game_by_hash(
+        &self,
+        save_dir: &str,
+        console_id: u32,
+        rom_hash: &str,
+    ) -> Option<RaGameEntry> {
+        if rom_hash.is_empty() {
+            return None;
+        }
+        let games = match self.fetch_console_games(save_dir, console_id) {
+            Ok(games) => games,
+            Err(e) => {
+                eprintln!("RA hash lookup: failed to load console game list: {}", e);
+                read_console_games_cache(save_dir, console_id)?
+            }
+        };
+        find_game_by_hash(&games, rom_hash)
+    }
+
     pub fn fetch_web_game_progress(
         &self,
         save_dir: &str,
@@ -312,6 +334,16 @@ fn filter_ra_games(games: Vec<RaGameEntry>, q: &str) -> Vec<RaGameEntry> {
         .collect()
 }
 
+fn find_game_by_hash(games: &[RaGameEntry], rom_hash: &str) -> Option<RaGameEntry> {
+    if rom_hash.is_empty() {
+        return None;
+    }
+    games
+        .iter()
+        .find(|g| g.hashes.iter().any(|h| h.eq_ignore_ascii_case(rom_hash)))
+        .cloned()
+}
+
 #[cfg(test)]
 mod cache_tests {
     use std::time::Duration;
@@ -459,6 +491,30 @@ mod cache_tests {
         );
         let results = client.search_ra_games(dir, 3, "9999");
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_find_game_by_hash_resolves_cached_list() {
+        let client = RaClient::new("user", "key");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_str().unwrap();
+        write_cache(
+            dir,
+            3,
+            r#"[{"ID":1,"Title":"Super Mario World","ImageIcon":"","ImageUrl":"","NumAchievements":1,"Points":1,"Hashes":["aaa"]},
+                {"ID":24933,"Title":"Shin Megami Tensei: Devil Survivor","ImageIcon":"/Images/x.png","ImageUrl":"","NumAchievements":0,"Points":0,"Hashes":["abc123"]}]"#,
+        );
+        let hit = client.find_game_by_hash(dir, 3, "abc123").unwrap();
+        assert_eq!(hit.id, 24933);
+        // Case-insensitive on the ROM side; RA hashes are lowercase.
+        assert_eq!(client.find_game_by_hash(dir, 3, "ABC123").unwrap().id, 24933);
+        assert!(client.find_game_by_hash(dir, 3, "nomatch").is_none());
+        assert!(client.find_game_by_hash(dir, 3, "").is_none());
+    }
+
+    #[test]
+    fn test_find_game_by_hash_empty_list_is_none() {
+        assert!(super::find_game_by_hash(&[], "abc123").is_none());
     }
 
     #[test]

@@ -51,6 +51,7 @@ mod input_profile_gyro_motion;
 mod input_profile_mode_shifts;
 mod input_profile_options;
 mod input_profile_output_capture;
+mod input_profile_preview;
 mod input_profile_region_pages;
 mod input_profile_search;
 mod input_profile_settings;

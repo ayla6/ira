@@ -1,13 +1,15 @@
-//! Search Steam's community controller layouts and import one as an Ira
-//! profile: app-id/text search through `IPublishedFileService`, CDN download,
-//! VDF→`InputProfile` conversion, then a save into `controller_profiles`.
+//! Search Steam's community controller layouts: app-id/text search through
+//! `IPublishedFileService` with tag filters, showing results in an
+//! `AdwNavigationView` whose preview page handles the actual import.
 
 use super::css::{CSS_BOXED_LIST, CSS_DIM_LABEL, CSS_SUGGESTED_ACTION};
-use super::helpers::{clear_children, esc};
-use super::input_profile_store::{new_managed_profile_path, write_profile};
+use super::helpers::{clear_children, esc, poll_channel};
+use super::input_profile_preview::{
+    controller_display_label, controller_filter_options, layout_display_name,
+};
 use adw::prelude::*;
 use ira_api::steam_input::{SteamLayout, SteamLayoutQuery, SteamLayoutSort};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{mpsc, Arc};
@@ -29,6 +31,7 @@ const SORTS: [SteamLayoutSort; 4] = [
 ];
 
 const RESULTS_PER_PAGE: u32 = 50;
+const GYRO_TAG: &str = "feature_gyro";
 
 /// Everything the dialog's async pieces need; kept off worker threads
 /// (GTK widgets are main-thread only — workers get plain owned data).
@@ -40,10 +43,29 @@ struct DialogContext {
     on_imported: Rc<dyn Fn(PathBuf)>,
     /// Steam app id scoping ("This game only"), when opened per-game.
     steam_app_id: Option<String>,
+    nav: adw::NavigationView,
     list: gtk4::ListBox,
-    entry: gtk4::Entry,
+    entry: gtk4::SearchEntry,
     sort_dropdown: gtk4::DropDown,
+    controller_dropdown: gtk4::DropDown,
+    gyro_check: gtk4::CheckButton,
     app_only: gtk4::CheckButton,
+    status: gtk4::Label,
+    /// One preview download at a time.
+    loading: Rc<Cell<bool>>,
+}
+
+/// The search page's interactive widgets, kept out of the widget tree so the
+/// dialog context can hold direct handles instead of walking the tree.
+struct SearchWidgets {
+    page: adw::NavigationPage,
+    entry: gtk4::SearchEntry,
+    search_btn: gtk4::Button,
+    sort_dropdown: gtk4::DropDown,
+    controller_dropdown: gtk4::DropDown,
+    gyro_check: gtk4::CheckButton,
+    app_only: gtk4::CheckButton,
+    list: gtk4::ListBox,
     status: gtk4::Label,
 }
 
@@ -56,33 +78,6 @@ fn sort_label(sort: SteamLayoutSort) -> String {
     }
 }
 
-/// Poll a worker-thread channel on the GTK main loop without blocking it;
-/// one value is delivered to `on_value`. A dropped sender ends polling
-/// silently — a panicking worker has nothing useful to report anyway.
-fn poll_channel<T: Send + 'static>(rx: mpsc::Receiver<T>, on_value: impl FnOnce(T) + 'static) {
-    let rx = Rc::new(RefCell::new(Some(rx)));
-    let on_value = Rc::new(RefCell::new(Some(on_value)));
-    glib::source::idle_add_local_full(glib::Priority::DEFAULT, move || {
-        let polled = {
-            let rx = rx.borrow();
-            rx.as_ref().map(|receiver| receiver.try_recv())
-        };
-        let Some(polled) = polled else {
-            return glib::ControlFlow::Break;
-        };
-        match polled {
-            Ok(value) => {
-                if let Some(on_value) = on_value.borrow_mut().take() {
-                    on_value(value);
-                }
-                glib::ControlFlow::Break
-            }
-            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
-        }
-    });
-}
-
 pub fn show_steam_layout_search(
     parent: &adw::Window,
     steam: &Arc<ira_api::SteamDataClient>,
@@ -90,103 +85,158 @@ pub fn show_steam_layout_search(
     context: Option<SteamLayoutSearchContext>,
     on_imported: Rc<dyn Fn(PathBuf)>,
 ) {
-    let (steam, save_dir) = (steam.clone(), save_dir.to_string());
-
     let dialog = adw::Window::new();
-    dialog.set_default_size(560, 520);
+    dialog.set_default_size(560, 540);
     dialog.set_modal(true);
     dialog.set_transient_for(Some(parent));
 
-    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&gtk4::Label::new(Some(&crate::tr!(
-        "Import layout from Steam"
-    )))));
-    outer.append(&header);
+    let nav = adw::NavigationView::new();
+    let widgets = build_search_ui(&context);
+    nav.add(&widgets.page);
 
-    // Query row: free-text search plus, when a specific game is known, the
-    // choice between its own layout pool and the whole workshop.
-    let filter_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    filter_row.set_margin_start(12);
-    filter_row.set_margin_end(12);
-    filter_row.set_margin_top(8);
-
-    let entry = gtk4::Entry::new();
-    entry.set_hexpand(true);
-    entry.set_placeholder_text(Some(&crate::tr!("Search community layouts…")));
-    if let Some(context) = &context {
-        entry.set_text(&context.game_name);
-    }
-    filter_row.append(&entry);
-
-    let sort_labels: Vec<String> = SORTS.iter().map(|sort| sort_label(*sort)).collect();
-    let sort_dropdown =
-        gtk4::DropDown::from_strings(&sort_labels.iter().map(String::as_str).collect::<Vec<_>>());
-    filter_row.append(&sort_dropdown);
-
-    let search_btn = gtk4::Button::with_label(&crate::tr!("Search"));
-    search_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    filter_row.append(&search_btn);
-
-    // A known Steam app id scopes the initial query to that game's pool;
-    // everything else searches all workshop layouts by text only.
+    // A known Steam app id scopes the query to that game's pool; everything
+    // else searches all workshop layouts by text only.
     let app_id = context
         .as_ref()
         .map(|context| context.steam_app_id.trim())
         .filter(|app_id| !app_id.is_empty())
         .map(str::to_string);
+    let ctx = Rc::new(DialogContext {
+        steam: steam.clone(),
+        save_dir: save_dir.to_string(),
+        attach_game_id: context.as_ref().map(|context| context.game_id),
+        on_imported,
+        steam_app_id: app_id,
+        nav,
+        list: widgets.list,
+        entry: widgets.entry,
+        sort_dropdown: widgets.sort_dropdown,
+        controller_dropdown: widgets.controller_dropdown,
+        gyro_check: widgets.gyro_check,
+        app_only: widgets.app_only,
+        status: widgets.status,
+        loading: Rc::new(Cell::new(false)),
+    });
+
+    ctx.entry.connect_activate({
+        let ctx = ctx.clone();
+        move |_| run_search(&ctx)
+    });
+    {
+        let ctx = ctx.clone();
+        widgets
+            .search_btn
+            .connect_clicked(move |_| run_search(&ctx));
+    }
+    run_search(&ctx);
+
+    dialog.set_content(Some(&ctx.nav.clone()));
+    dialog.present();
+}
+
+fn build_search_ui(context: &Option<SteamLayoutSearchContext>) -> SearchWidgets {
+    let toolbar = adw::ToolbarView::new();
+    let header = adw::HeaderBar::new();
+    header.set_title_widget(Some(&gtk4::Label::new(Some(&crate::tr!(
+        "Import layout from Steam"
+    )))));
+    toolbar.add_top_bar(&header);
+
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+
+    // Query + filters, clamped so wide windows don't stretch them.
+    let header_area = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+    header_area.set_margin_top(12);
+    header_area.set_margin_bottom(4);
+    header_area.set_margin_start(12);
+    header_area.set_margin_end(12);
+
+    let search_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    let entry = gtk4::SearchEntry::new();
+    entry.set_hexpand(true);
+    entry.set_placeholder_text(Some(&crate::tr!("Search community layouts…")));
+    if let Some(context) = context {
+        entry.set_text(&context.game_name);
+    }
+    search_row.append(&entry);
+    let sort_labels: Vec<String> = SORTS.iter().map(|sort| sort_label(*sort)).collect();
+    let sort_dropdown =
+        gtk4::DropDown::from_strings(&sort_labels.iter().map(String::as_str).collect::<Vec<_>>());
+    search_row.append(&sort_dropdown);
+    let search_btn = gtk4::Button::with_label(&crate::tr!("Search"));
+    search_btn.add_css_class(CSS_SUGGESTED_ACTION);
+    search_row.append(&search_btn);
+    header_area.append(&search_row);
+
+    let filter_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    let mut controller_labels = vec![crate::tr!("Any controller")];
+    controller_labels.extend(
+        controller_filter_options()
+            .into_iter()
+            .map(|(label, _)| label),
+    );
+    let controller_dropdown = gtk4::DropDown::from_strings(
+        &controller_labels
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    );
+    filter_row.append(&controller_dropdown);
+    let gyro_check = gtk4::CheckButton::with_label(&crate::tr!("Gyro"));
+    gyro_check.set_tooltip_text(Some(&crate::tr!("Only layouts that use gyro")));
+    filter_row.append(&gyro_check);
+    // A known Steam app id scopes the query to that game's pool; everything
+    // else searches all workshop layouts by text only.
+    let has_app_context = context
+        .as_ref()
+        .is_some_and(|context| !context.steam_app_id.is_empty());
     let app_only = gtk4::CheckButton::with_label(&crate::tr!("This game only"));
-    app_only.set_active(app_id.is_some());
-    app_only.set_visible(app_id.is_some());
+    app_only.set_active(has_app_context);
+    app_only.set_visible(has_app_context);
     filter_row.append(&app_only);
-    outer.append(&filter_row);
+    header_area.append(&filter_row);
+
+    let header_clamp = adw::Clamp::new();
+    header_clamp.set_maximum_size(560);
+    header_clamp.set_child(Some(&header_area));
+    content.append(&header_clamp);
 
     let scrolled = gtk4::ScrolledWindow::new();
     scrolled.set_vexpand(true);
-    scrolled.set_margin_top(8);
+    let list_column = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+    list_column.set_margin_top(8);
+    list_column.set_margin_bottom(10);
     let list = gtk4::ListBox::new();
-    list.set_margin_start(12);
-    list.set_margin_end(12);
     list.set_valign(gtk4::Align::Start);
     list.add_css_class(CSS_BOXED_LIST);
-    scrolled.set_child(Some(&list));
-    outer.append(&scrolled);
-
+    list_column.append(&list);
     let status = gtk4::Label::new(None);
     status.set_xalign(0.0);
     status.set_wrap(true);
     status.add_css_class(CSS_DIM_LABEL);
     status.set_margin_start(12);
     status.set_margin_end(12);
-    status.set_margin_top(6);
-    status.set_margin_bottom(10);
-    outer.append(&status);
+    list_column.append(&status);
+    let list_clamp = adw::Clamp::new();
+    list_clamp.set_maximum_size(560);
+    list_clamp.set_child(Some(&list_column));
+    scrolled.set_child(Some(&list_clamp));
+    content.append(&scrolled);
 
-    let ctx = Rc::new(DialogContext {
-        steam,
-        save_dir,
-        attach_game_id: context.as_ref().map(|context| context.game_id),
-        on_imported,
-        steam_app_id: app_id.clone(),
-        list,
-        entry: entry.clone(),
+    toolbar.set_content(Some(&content));
+    let page = adw::NavigationPage::new(&toolbar, "search");
+
+    SearchWidgets {
+        page,
+        entry,
+        search_btn,
         sort_dropdown,
+        controller_dropdown,
+        gyro_check,
         app_only,
-        status: status.clone(),
-    });
-
-    {
-        let ctx = ctx.clone();
-        search_btn.connect_clicked(move |_| run_search(&ctx));
+        list,
+        status,
     }
-    {
-        let ctx = ctx.clone();
-        entry.connect_activate(move |_| run_search(&ctx));
-    }
-
-    dialog.set_content(Some(&outer));
-    dialog.present();
-    run_search(&ctx);
 }
 
 fn run_search(ctx: &Rc<DialogContext>) {
@@ -197,9 +247,21 @@ fn run_search(ctx: &Rc<DialogContext>) {
     } else {
         None
     };
+    let mut required_tags = Vec::new();
+    if ctx.gyro_check.is_active() {
+        required_tags.push(GYRO_TAG.to_string());
+    }
+    if ctx.controller_dropdown.selected() > 0 {
+        if let Some((_, tag)) =
+            controller_filter_options().get(ctx.controller_dropdown.selected() as usize - 1)
+        {
+            required_tags.push(tag.clone());
+        }
+    }
     let query = SteamLayoutQuery {
         search_text: term,
         app_id,
+        required_tags,
         page: 1,
         page_size: RESULTS_PER_PAGE,
         sort: SORTS[ctx.sort_dropdown.selected() as usize],
@@ -245,116 +307,35 @@ fn populate_results(ctx: &Rc<DialogContext>, outcome: Result<Vec<SteamLayout>, S
     }
 }
 
-/// An owned, `Send` unit of work for the download/import worker thread.
-struct ImportJob {
-    published_file_id: String,
-    /// Workshop title; used when the VDF itself carries no usable name.
-    title: String,
-    save_dir: String,
-    attach_game_id: Option<i64>,
-}
-
+/// Rows open the preview page when activated; import happens from there.
 fn layout_row(ctx: &Rc<DialogContext>, layout: &SteamLayout) -> adw::ActionRow {
     let row = adw::ActionRow::new();
     row.set_title(&esc(&layout_display_name(layout)));
     row.set_subtitle(&layout_subtitle(layout));
+    row.set_activatable(true);
 
-    let import_btn = gtk4::Button::with_label(&crate::tr!("Import"));
-    import_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    import_btn.set_valign(gtk4::Align::Center);
-    {
-        let ctx = ctx.clone();
-        let layout = layout.clone();
-        import_btn.connect_clicked(move |button| start_import(&ctx, &layout, button));
-    }
-    row.add_suffix(&import_btn);
-    row
-}
-
-fn layout_display_name(layout: &SteamLayout) -> String {
-    if layout.title.trim().is_empty() {
-        format!("Steam layout {}", layout.published_file_id)
-    } else {
-        layout.title.clone()
-    }
-}
-
-fn start_import(ctx: &Rc<DialogContext>, layout: &SteamLayout, button: &gtk4::Button) {
-    button.set_sensitive(false);
-    let display = layout_display_name(layout);
-    ctx.status
-        .set_text(&crate::tr!("Downloading {}…").replacen("{}", &display, 1));
-
-    let job = ImportJob {
-        published_file_id: layout.published_file_id.clone(),
-        title: layout.title.clone(),
-        save_dir: ctx.save_dir.clone(),
-        attach_game_id: ctx.attach_game_id,
-    };
-    let steam = ctx.steam.clone();
-    let (tx, rx) = mpsc::channel::<Result<(PathBuf, Vec<String>), String>>();
-    std::thread::spawn(move || {
-        let _ = tx.send(import_layout(steam, job));
+    let request_ctx = ctx.clone();
+    let row_layout = layout.clone();
+    row.connect_activated(move |_| {
+        super::input_profile_preview::PreviewRequest {
+            nav: request_ctx.nav.clone(),
+            steam: request_ctx.steam.clone(),
+            save_dir: request_ctx.save_dir.clone(),
+            attach_game_id: request_ctx.attach_game_id,
+            layout: row_layout.clone(),
+            on_imported: request_ctx.on_imported.clone(),
+            search_status: request_ctx.status.clone(),
+            loading: request_ctx.loading.clone(),
+        }
+        .open();
     });
-
-    let ui_ctx = ctx.clone();
-    poll_channel(rx, move |result| finish_import(&ui_ctx, result));
-}
-
-/// Download the workshop VDF, convert it and store it as a managed profile.
-fn import_layout(
-    steam: Arc<ira_api::SteamDataClient>,
-    job: ImportJob,
-) -> Result<(PathBuf, Vec<String>), String> {
-    let vdf = steam.fetch_steam_layout_vdf(&job.published_file_id)?;
-    let (mut profile, report) = ira_input::import_vdf(&vdf)?;
-    if profile.name.trim().is_empty() {
-        profile.name = if job.title.trim().is_empty() {
-            format!("Steam layout {}", job.published_file_id)
-        } else {
-            job.title.clone()
-        };
-    }
-    if let Some(game_id) = job.attach_game_id {
-        if !profile.compatible_game_ids.contains(&game_id) {
-            profile.compatible_game_ids.push(game_id);
-        }
-    }
-    let path = new_managed_profile_path(&job.save_dir, &profile.name);
-    write_profile(&path, &profile)?;
-    Ok((path, report.warnings))
-}
-
-fn finish_import(ctx: &Rc<DialogContext>, result: Result<(PathBuf, Vec<String>), String>) {
-    match result {
-        Ok((path, warnings)) => {
-            let detail = if warnings.is_empty() {
-                crate::tr!("Layout imported")
-            } else {
-                crate::tr!("Layout imported with {} warnings").replacen(
-                    "{}",
-                    &warnings.len().to_string(),
-                    1,
-                )
-            };
-            let saved_as = path
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.display().to_string());
-            ctx.status.set_text(&format!("{detail} · {saved_as}"));
-            (ctx.on_imported)(path);
-        }
-        Err(error) => {
-            ctx.status
-                .set_text(&crate::tr!("Import failed: {}").replacen("{}", &error, 1));
-        }
-    }
+    row
 }
 
 fn layout_subtitle(layout: &SteamLayout) -> String {
     let mut parts: Vec<String> = Vec::new();
     if !layout.controller_type.is_empty() {
-        parts.push(controller_label(&layout.controller_type));
+        parts.push(controller_display_label(&layout.controller_type));
     }
     if layout.lifetime_subscriptions > 0 {
         parts.push(crate::tr!("{} subscribers").replacen(
@@ -370,47 +351,21 @@ fn layout_subtitle(layout: &SteamLayout) -> String {
         parts.push(date.format("%Y-%m-%d").to_string());
     }
     if layout.description.trim().is_empty() {
-        parts.join(" · ")
+        return parts.join(" · ");
+    }
+    // Keep the blurb short: the preview page shows the full text.
+    let mut description = layout
+        .description
+        .trim()
+        .chars()
+        .take(80)
+        .collect::<String>();
+    if layout.description.trim().chars().count() > 80 {
+        description.push('…');
+    }
+    if parts.is_empty() {
+        description
     } else {
-        // Keep the blurb short: the row title already carries the name.
-        let mut description = layout
-            .description
-            .trim()
-            .chars()
-            .take(80)
-            .collect::<String>();
-        if layout.description.trim().chars().count() > 80 {
-            description.push('…');
-        }
-        if parts.is_empty() {
-            description
-        } else {
-            format!("{} — {}", parts.join(" · "), description)
-        }
-    }
-}
-
-/// "controller_ps5" → "DualSense", "controller_switch" → "Switch Pro", etc.
-fn controller_label(tag: &str) -> String {
-    let kind = tag.trim_start_matches("controller_");
-    let label = match kind {
-        "ps5" | "dualsense" => Some("DualSense"),
-        "ps4" | "dualshock4" => Some("DualShock 4"),
-        "switch" | "switch_pro" => Some("Switch Pro"),
-        "xboxone" | "xbox360" | "xboxelite" | "xbox" => Some("Xbox"),
-        "neptune" => Some("Steam Deck"),
-        _ => None,
-    };
-    match label {
-        Some(label) => label.to_string(),
-        None => capitalize(kind),
-    }
-}
-
-fn capitalize(text: &str) -> String {
-    let mut chars = text.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
+        format!("{} — {}", parts.join(" · "), description)
     }
 }

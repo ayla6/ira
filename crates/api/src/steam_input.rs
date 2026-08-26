@@ -86,7 +86,7 @@ impl SteamLayout {
         Some(Self {
             published_file_id: entry.publishedfileid.clone(),
             title: entry.title.clone(),
-            description: entry.file_description.replace('\n', " "),
+            description: entry.file_description.clone(),
             app_id: kv_app,
             controller_type,
             time_updated: entry.time_updated.unwrap_or(0),
@@ -108,6 +108,9 @@ pub struct SteamLayoutQuery {
     /// Only return layouts published for this Steam app id. Layouts shared
     /// for non-Steam games carry no such tag and are excluded by this.
     pub app_id: Option<String>,
+    /// Require a plain workshop tag, e.g. `controller_ps5` or
+    /// `feature_gyro`; results must carry every tag listed here.
+    pub required_tags: Vec<String>,
     pub page: u32,
     pub page_size: u32,
     pub sort: SteamLayoutSort,
@@ -153,6 +156,15 @@ fn query_request_body(query: &SteamLayoutQuery) -> serde_json::Value {
             .as_array_mut()
             .expect("required_kv_tags starts as an array")
             .push(serde_json::json!({"key": "app", "value": app_id}));
+    }
+    let tags: Vec<&str> = query
+        .required_tags
+        .iter()
+        .map(|tag| tag.trim())
+        .filter(|tag| !tag.is_empty())
+        .collect();
+    if !tags.is_empty() {
+        body["requiredtags"] = serde_json::json!(tags);
     }
     body
 }
@@ -255,6 +267,7 @@ mod tests {
         let query = SteamLayoutQuery {
             search_text: String::new(),
             app_id: None,
+            required_tags: Vec::new(),
             page: 1,
             page_size: 20,
             sort: SteamLayoutSort::BestMatch,
@@ -272,6 +285,7 @@ mod tests {
         assert_eq!(body["query_type"], QUERY_TYPE_TRENDING);
         assert_eq!(body["days"], TRENDING_PERIOD_DAYS);
         assert!(body.get("search_text").is_none());
+        assert!(body.get("requiredtags").is_none());
     }
 
     #[test]
@@ -279,6 +293,7 @@ mod tests {
         let query = SteamLayoutQuery {
             search_text: "hollow knight".into(),
             app_id: Some("367520".into()),
+            required_tags: vec!["controller_ps5".into(), "feature_gyro".into()],
             page: 2,
             page_size: 50,
             sort: SteamLayoutSort::MostSubscribed,
@@ -291,6 +306,10 @@ mod tests {
         assert_eq!(tags.len(), 3);
         assert_eq!(tags[2]["key"], "app");
         assert_eq!(tags[2]["value"], "367520");
+        assert_eq!(
+            body["requiredtags"],
+            serde_json::json!(["controller_ps5", "feature_gyro"])
+        );
         assert_eq!(body["numperpage"], 50);
         assert_eq!(body["page"], 2);
     }
@@ -300,6 +319,7 @@ mod tests {
         let query = SteamLayoutQuery {
             search_text: "x".into(),
             app_id: Some("   ".into()),
+            required_tags: vec!["   ".into()],
             page: 1,
             page_size: 20,
             sort: SteamLayoutSort::Newest,
@@ -307,6 +327,7 @@ mod tests {
         let body = query_request_body(&query);
         assert_eq!(body["query_type"], QUERY_TYPE_NEWEST);
         assert_eq!(body["required_kv_tags"].as_array().unwrap().len(), 2);
+        assert!(body.get("requiredtags").is_none());
     }
 
     #[test]
@@ -347,7 +368,8 @@ mod tests {
         assert_eq!(layout.app_id, "123456");
         assert_eq!(layout.votes_up, 12);
         assert_eq!(layout.lifetime_subscriptions, 34);
-        assert!(!layout.description.contains('\n'));
+        // The raw description is kept for the preview page.
+        assert!(layout.description.contains('\n'));
     }
 
     #[test]

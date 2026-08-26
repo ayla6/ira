@@ -364,6 +364,36 @@ pub fn clear_children(w: &impl Clearable) {
     w.clear_all_children();
 }
 
+/// Poll a worker-thread channel on the GTK main loop without blocking it;
+/// one value is delivered to `on_value`. A dropped sender ends polling
+/// silently — a panicking worker has nothing useful to report anyway.
+pub(crate) fn poll_channel<T: Send + 'static>(
+    rx: std::sync::mpsc::Receiver<T>,
+    on_value: impl FnOnce(T) + 'static,
+) {
+    let rx = Rc::new(RefCell::new(Some(rx)));
+    let on_value = Rc::new(RefCell::new(Some(on_value)));
+    glib::source::idle_add_local_full(glib::Priority::DEFAULT, move || {
+        let polled = {
+            let rx = rx.borrow();
+            rx.as_ref().map(|receiver| receiver.try_recv())
+        };
+        let Some(polled) = polled else {
+            return glib::ControlFlow::Break;
+        };
+        match polled {
+            Ok(value) => {
+                if let Some(on_value) = on_value.borrow_mut().take() {
+                    on_value(value);
+                }
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
+}
+
 /// A button with an icon next to its label. Composed from plain gtk4
 /// widgets on purpose: `adw::ButtonContent` used as a suffix fires GTK
 /// criticals (`gtk_widget_get_parent`/`add_css_class` on a finalized

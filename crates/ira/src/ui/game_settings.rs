@@ -435,32 +435,54 @@ fn build_retro_emulator_and_ra(
     (pending_ra_core, pending_emulator, ra_container)
 }
 
+/// Builds the Service group's identification rows. Returns whether any row
+/// was added plus the editable app-ID entry for API-emulator games.
 fn build_service_ids_section(
     parent: &adw::PreferencesGroup,
     game: &Game,
     state: &SharedState,
     win: &adw::Window,
-) -> Option<adw::EntryRow> {
+) -> (bool, Option<adw::EntryRow>) {
     let mut app_id_entry: Option<adw::EntryRow> = None;
+    let add_id_row = |title: &str, value: &str| {
+        let row = adw::ActionRow::new();
+        row.set_title(title);
+        row.set_subtitle(value);
+        row.set_sensitive(false);
+        parent.add(&row);
+    };
+
+    // Console games identified by their own shipped IDs: read-only, the
+    // value comes from the ROM or the emulator, never from user input.
+    if matches!(
+        game.kind,
+        ira_models::GameKind::ThreeDS
+            | ira_models::GameKind::WiiU
+            | ira_models::GameKind::PsVita
+            | ira_models::GameKind::Retro
+    ) {
+        if game.kind == ira_models::GameKind::Retro {
+            add_id_row(&crate::tr!("Game ID"), &game.app_id);
+        } else {
+            add_id_row(&crate::tr!("Title ID"), &game.app_id);
+        }
+        if let Some(hash) = rom_hash_for(state, game.db_id) {
+            add_id_row(&crate::tr!("ROM hash"), &hash);
+        }
+        return (true, None);
+    }
 
     if game.trophy_source != ira_models::TrophySource::Gse
         && game.trophy_source != ira_models::TrophySource::Nge
         && !game.kind.is_trophy_console()
     {
-        return None;
+        return (false, None);
     }
 
     if game.kind.is_trophy_console() {
-        let row = adw::ActionRow::new();
-        row.set_title(&crate::tr!("NPWR code"));
-        row.set_subtitle(&game.app_id);
-        row.set_sensitive(false);
-        parent.add(&row);
-        let serial_row = adw::ActionRow::new();
-        serial_row.set_title(&crate::tr!("Game serial"));
-        serial_row.set_subtitle(&game.platform_id);
-        serial_row.set_sensitive(false);
-        parent.add(&serial_row);
+        add_id_row(&crate::tr!("NPWR code"), &game.app_id);
+        add_id_row(&crate::tr!("Game serial"), &game.platform_id);
+        return (true, None);
     } else if game.trophy_source == ira_models::TrophySource::Gse {
         let row = adw::EntryRow::new();
         row.set_title(&crate::tr!("Steam app ID"));
@@ -502,7 +524,18 @@ fn build_service_ids_section(
         app_id_entry = Some(row);
     }
 
-    app_id_entry
+    (app_id_entry.is_some(), app_id_entry)
+}
+
+/// The RetroAchievements hash stored at scan time, when the ROM carries
+/// one — NDS titles hash their header ranges, other consoles have none.
+fn rom_hash_for(state: &SharedState, db_id: i64) -> Option<String> {
+    let s = state.borrow();
+    ira_db::find_by_db_id(&s.db, db_id)
+        .ok()
+        .flatten()
+        .map(|entry| entry.rom_hash)
+        .filter(|hash| !hash.is_empty())
 }
 
 fn build_language_section(
@@ -653,10 +686,11 @@ pub(super) fn build_game_general_page(
 
     let service_group = adw::PreferencesGroup::new();
     service_group.set_title(&crate::tr!("Service"));
-    let app_id_entry = build_service_ids_section(&service_group, game, state, win);
+    let (has_service_ids, app_id_entry) =
+        build_service_ids_section(&service_group, game, state, win);
     let language_row = build_language_section(&service_group, state, game, languages);
     let migrate_btn = build_save_migration_section(&service_group, state, game);
-    if app_id_entry.is_some() || language_row.is_some() || migrate_btn.is_some() {
+    if has_service_ids || language_row.is_some() || migrate_btn.is_some() {
         general_page.append(&service_group);
     }
 

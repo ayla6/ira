@@ -217,6 +217,68 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<CemuGame> {
     games
 }
 
+/// A directory holding a Wii U title's `meta/meta.xml` or `code/app.xml`.
+fn is_title_dir(path: &Path) -> bool {
+    path.join("meta/meta.xml").is_file() || path.join("code/app.xml").is_file()
+}
+
+/// Reads the `<path>` of `title_id` from Cemu's title list cache, which
+/// remembers where every library title was last seen — including titles
+/// whose configured game paths are empty, as in flatpak installs.
+fn title_path_from_cache_file(cache: &Path, title_id: &str) -> Option<PathBuf> {
+    let data = std::fs::read_to_string(cache).ok()?;
+    let document = roxmltree::Document::parse(&data).ok()?;
+    document
+        .descendants()
+        .filter(|node| node.has_tag_name("title"))
+        .find(|node| {
+            node.attribute("titleId")
+                .is_some_and(|id| id.eq_ignore_ascii_case(title_id))
+        })
+        .and_then(|node| {
+            node.children()
+                .find(|child| child.has_tag_name("path"))
+                .and_then(|child| child.text())
+        })
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Relocates a title whose recorded folder moved: the title list cache
+/// remembers the last known location, and the mlc/title roots match by
+/// directory name.
+pub fn find_title_dir(executable: &str, title_id: &str) -> Option<PathBuf> {
+    let cache = cemu_data_dir_for(executable).join("title_list_cache.xml");
+    if let Some(dir) = title_path_from_cache_file(&cache, title_id) {
+        if is_title_dir(&dir) {
+            return Some(dir);
+        }
+    }
+    let mlc = mlc_path_for(executable);
+    let mut roots = configured_game_paths_for(executable);
+    roots.extend([
+        mlc.join("usr/title"),
+        mlc.join("sys/title"),
+        mlc.join("sys/title/00050010"),
+    ]);
+    // mlc titles nest under their title-type category, keyed by the low
+    // eight ID digits (usr/title/00050000/10176900); dumps use the full ID.
+    let (category, low_id) = (title_id.get(..8), title_id.get(8..));
+    for root in roots {
+        let mut candidates = vec![root.join(title_id)];
+        if let (Some(category), Some(low_id)) = (category, low_id) {
+            candidates.push(root.join(category).join(low_id));
+        }
+        for candidate in candidates {
+            if is_title_dir(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,6 +352,54 @@ mod tests {
         assert_eq!(games.len(), 1);
         assert_eq!(games[0].title_id, "0005000010101d00");
         assert_eq!(games[0].title, "Test Game");
+    }
+
+    #[test]
+    fn test_title_path_from_cache_file_matches_case_insensitively() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tmp.path().join("title_list_cache.xml");
+        std::fs::write(
+            &cache,
+            r#"<title_list>
+                <title titleId="0005000010176900" version="16">
+                    <name>Splatoon</name>
+                    <path>/mlc01/usr/title/00050000/10176900</path>
+                </title>
+            </title_list>"#,
+        )
+        .unwrap();
+        let found = title_path_from_cache_file(&cache, "0005000010176900").unwrap();
+        assert_eq!(found, PathBuf::from("/mlc01/usr/title/00050000/10176900"));
+        assert!(title_path_from_cache_file(&cache, "00050000101769ff").is_none());
+    }
+
+    #[test]
+    fn test_find_title_dir_prefers_cache_then_mlc_layout() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Fake a portable Cemu so mlc/cache paths stay inside the tempdir.
+        let portable = tmp.path().join("portable");
+        let executable = tmp.path().join("Cemu");
+        std::fs::create_dir_all(&portable).unwrap();
+        let title = portable
+            .join("mlc01/usr/title/00050000/10176900")
+            .join("meta");
+        std::fs::create_dir_all(&title).unwrap();
+        std::fs::write(
+            portable
+                .join("mlc01/usr/title/00050000/10176900")
+                .join("meta/meta.xml"),
+            r#"<menu><title_id>0005000010176900</title_id></menu>"#,
+        )
+        .unwrap();
+        std::fs::write(
+            portable.join("title_list_cache.xml"),
+            r#"<title_list><title titleId="0005000010176900"><path>nowhere</path></title></title_list>"#,
+        )
+        .unwrap();
+
+        // The cache path does not exist, so the mlc directory layout wins.
+        let found = find_title_dir(&executable.to_string_lossy(), "0005000010176900").unwrap();
+        assert!(found.ends_with("00050000/10176900"));
     }
 
     fn write_title(dir: &Path, title_id: &str) {

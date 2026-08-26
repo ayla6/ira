@@ -183,6 +183,63 @@ pub fn read_icon(path: &Path) -> Option<Vec<u8>> {
     scan_rom_file(path).and_then(|game| game.icon)
 }
 
+/// Relocates a title whose stored path vanished (moved library, renamed
+/// drive): installed titles are found again through Azahar's NAND/SDMC
+/// layout, ROM dumps by the title ID embedded in their file name. Only the
+/// matching dump is parsed, so this stays cheap at click time.
+pub fn find_title_path_for(executable: &str, title_id: &str) -> Option<PathBuf> {
+    let paths = read_paths_for_executable(executable);
+    let (category, low_id) = (title_id.get(..8)?, title_id.get(8..)?);
+    for root in [&paths.nand_dir, &paths.sdmc_dir] {
+        for title_root in installed_title_roots(root) {
+            let content = title_root.join(category).join(low_id).join("content");
+            if let Some(main) = main_content_file(&content) {
+                return Some(main);
+            }
+        }
+    }
+    for (dir, deep_scan) in paths.game_dirs {
+        let depth = if deep_scan { MAX_SCAN_DEPTH } else { 1 };
+        if let Some(path) = find_dump_by_name(&dir, title_id, depth) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Finds a ROM dump whose file name mentions `title_id` and whose header
+/// confirms the match; a name match alone would also hit update dumps.
+fn find_dump_by_name(dir: &Path, title_id: &str, depth_left: u32) -> Option<PathBuf> {
+    if depth_left == 0 {
+        return None;
+    }
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            if let Some(found) = find_dump_by_name(&path, title_id, depth_left - 1) {
+                return Some(found);
+            }
+            continue;
+        }
+        let is_rom = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ROM_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()));
+        let name_matches = path.file_name().is_some_and(|name| {
+            name.to_string_lossy()
+                .to_ascii_lowercase()
+                .contains(&title_id.to_ascii_lowercase())
+        });
+        if is_rom
+            && name_matches
+            && scan_rom_file(&path).is_some_and(|game| game.title_id == title_id)
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
 pub fn discover_games_for_executable(executable: &str) -> Vec<AzaharGame> {
     // A missing native executable must not stop discovery: game locations
     // live in Azahar's own config (XDG or portable), which is readable even
@@ -203,7 +260,11 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<AzaharGame> {
         let depth = if deep_scan { MAX_SCAN_DEPTH } else { 1 };
         let mut rom_paths = Vec::new();
         collect_rom_paths(&dir, depth, &mut rom_paths);
-        games.extend(scan_rom_files(&rom_paths, scan_rom_file).into_iter().flatten());
+        games.extend(
+            scan_rom_files(&rom_paths, scan_rom_file)
+                .into_iter()
+                .flatten(),
+        );
     }
     scan_installed_titles(&paths.nand_dir, &mut games);
     scan_installed_titles(&paths.sdmc_dir, &mut games);
@@ -374,5 +435,74 @@ mod tests {
 
         assert_eq!(games.len(), 1);
         assert_eq!(games[0].title_id, "00040000000e5c00");
+    }
+
+    /// A title whose stored path vanished is found again: installed titles
+    /// through the NAND layout, dumps through the title ID in their name.
+    #[test]
+    fn test_find_title_path_relocates_installed_and_dump() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = tmp.path().join("azahar");
+        std::fs::write(&exe, b"").unwrap();
+        let user = tmp.path().join("user");
+        let nand = user.join("nand");
+        std::fs::create_dir_all(user.join("config")).unwrap();
+        let roms = tmp.path().join("roms");
+        std::fs::create_dir_all(&roms).unwrap();
+        std::fs::write(
+            user.join("config/qt-config.ini"),
+            format!(
+                "[Data%20Storage]\nnand_directory={}/\n[UI]\n\
+                 Paths\\gamedirs\\1\\path={}\nPaths\\gamedirs\\size=1\n",
+                nand.display(),
+                roms.display()
+            ),
+        )
+        .unwrap();
+
+        // Installed title 0004000000159500 under the NAND, keyed by its low
+        // eight ID digits like on a real device.
+        let content = nand.join("title/00040000/00159500/content");
+        std::fs::create_dir_all(&content).unwrap();
+        std::fs::write(content.join("00000000.tmd"), vec![0u8; 16]).unwrap();
+        let mut app = cxi_fixture(0x0004000000159500);
+        app.resize(app.len() + 128, 0);
+        std::fs::write(content.join("7926fc67.app"), &app).unwrap();
+
+        let found = find_title_path_for(&exe.to_string_lossy(), "0004000000159500").unwrap();
+        assert!(found.ends_with("7926fc67.app"));
+
+        // Dump whose file name carries the full title ID.
+        let dump = roms.join("00040000000E5C00 Shin (U).zcci");
+        std::fs::write(&dump, z3ds_fixture(&cxi_fixture(0x00040000000E5C00))).unwrap();
+        let found = find_title_path_for(&exe.to_string_lossy(), "00040000000e5c00").unwrap();
+        assert_eq!(found, dump);
+    }
+
+    /// A file name match alone is not enough: update dumps share the ID
+    /// prefix, so the header must confirm the title.
+    #[test]
+    fn test_find_title_path_rejects_wrong_title_dump() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = tmp.path().join("azahar");
+        std::fs::write(&exe, b"").unwrap();
+        let user = tmp.path().join("user");
+        std::fs::create_dir_all(user.join("config")).unwrap();
+        let roms = tmp.path().join("roms");
+        std::fs::create_dir_all(&roms).unwrap();
+        std::fs::write(
+            user.join("config/qt-config.ini"),
+            format!(
+                "[Data%20Storage]\nnand_directory={}/\n[UI]\n\
+                 Paths\\gamedirs\\1\\path={}\nPaths\\gamedirs\\size=1\n",
+                user.join("nand").display(),
+                roms.display()
+            ),
+        )
+        .unwrap();
+        // Named for 159500 but actually a different title's content.
+        let dump = roms.join("0004000000159500 fake.cci");
+        std::fs::write(&dump, cxi_fixture(0x0004000000123400)).unwrap();
+        assert!(find_title_path_for(&exe.to_string_lossy(), "0004000000159500").is_none());
     }
 }

@@ -69,7 +69,14 @@ pub fn build_ra_games(
             handles.push(s.spawn(move || {
                 let _console_span =
                     tracing::info_span!("ra_console", console = console.def.id).entered();
-                build_ra_games_for_console(&db, save_dir, console, load_game, progress)
+                build_ra_games_for_console(
+                    &db,
+                    save_dir,
+                    console,
+                    cfg.unpack_roms,
+                    load_game,
+                    progress,
+                )
             }));
         }
 
@@ -88,6 +95,7 @@ fn build_ra_games_for_console(
     db: &ira_db::DbConn,
     save_dir: &str,
     console: &ActiveConsole,
+    unpack_roms: bool,
     load_game: &dyn Fn(&ira_models::GameEntry, &str) -> Result<ira_models::Game, String>,
     progress: &dyn Fn(&str),
 ) -> Vec<Game> {
@@ -453,7 +461,83 @@ fn build_ra_games_for_console(
         }
     }
 
+    if console.def.id == "nds" {
+        enrich_nds_roms(
+            db,
+            save_dir,
+            &console.folder,
+            unpack_roms,
+            &existing_entries,
+            &games,
+        );
+    }
+
     games
+}
+
+/// Extracts DS banner icons and identification hashes (No-Intro CRC32,
+/// RetroAchievements hash) for games that don't have them yet. Reading a
+/// ROM streams — and for containers, decompresses — its whole image, so
+/// the reads run concurrently while the cheap writes stay serial.
+/// Archives are handled by `read_rom_info`, which skips them unless
+/// `unpack_roms` is on.
+fn enrich_nds_roms(
+    db: &ira_db::DbConn,
+    save_dir: &str,
+    folder: &str,
+    unpack_roms: bool,
+    existing: &[ira_models::GameEntry],
+    games: &[Game],
+) {
+    use rayon::prelude::*;
+
+    let already_hashed: HashSet<i64> = existing
+        .iter()
+        .filter(|entry| !entry.rom_hash.is_empty())
+        .map(|entry| entry.id)
+        .collect();
+    let targets: Vec<(i64, PathBuf)> = games
+        .iter()
+        .filter(|game| !game.rom_path.is_empty() && !already_hashed.contains(&game.db_id))
+        .map(|game| {
+            (
+                game.db_id,
+                std::path::Path::new(folder).join(&game.rom_path),
+            )
+        })
+        .collect();
+
+    let infos: Vec<Option<crate::nds::DsRomInfo>> = targets
+        .par_iter()
+        .map(|(_, abs)| crate::nds::read_rom_info(abs, unpack_roms))
+        .collect();
+    for ((db_id, _), info) in targets.into_iter().zip(infos) {
+        let Some(info) = info else {
+            continue;
+        };
+        if let Err(e) = ira_db::set_rom_hashes(db, db_id, &info.rom_crc32, &info.rom_hash) {
+            eprintln!("Failed to store DS ROM hashes: {e}");
+        }
+        write_nds_icon(save_dir, db_id, &info.icon);
+    }
+}
+
+/// Saves the banner icon into the game's retro data dir unless one already
+/// exists, so downloaded or user-chosen icons always win.
+fn write_nds_icon(save_dir: &str, db_id: i64, icon_rgba: &[u8]) {
+    let data_dir = ira_parser::retro_data_dir(save_dir, db_id);
+    if ira_parser::find_image_file(&data_dir, "icon").is_some() {
+        return;
+    }
+    if std::fs::create_dir_all(&data_dir).is_err() {
+        return;
+    }
+    let png = data_dir.join("icon.png");
+    if let Err(e) = ira_parser::save_rgba_png(&png, 32, 32, icon_rgba) {
+        eprintln!("Failed to write DS icon for game {db_id}: {e}");
+        return;
+    }
+    ira_parser::convert_to_lossless_webp(&png);
 }
 
 fn rom_path_is_present(scan_succeeded: bool, seen_paths: &HashSet<String>, rom_path: &str) -> bool {

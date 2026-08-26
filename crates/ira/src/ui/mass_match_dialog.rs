@@ -91,7 +91,7 @@ fn populate_match_list(
     list: &gtk4::ListBox,
     needs_matching: &[Game],
     state: &SharedState,
-    dialog: &adw::Window,
+    dialog: &adw::Dialog,
 ) -> Vec<gtk4::Box> {
     let mut row_action_boxes: Vec<gtk4::Box> = Vec::new();
 
@@ -151,7 +151,7 @@ fn start_steam_batch_matching(
     needs_matching: &[Game],
     title_map: Vec<(String, String, String)>,
     row_action_boxes: &[gtk4::Box],
-    dialog: &adw::Window,
+    dialog: &adw::Dialog,
 ) {
     let steam_games: Vec<(String, i64, ira_models::GameKind)> = needs_matching
         .iter()
@@ -243,7 +243,7 @@ fn start_sgdb_batch_matching(
     state: &SharedState,
     needs_matching: &[Game],
     row_action_boxes: &[gtk4::Box],
-    dialog: &adw::Window,
+    dialog: &adw::Dialog,
 ) {
     let sgdb_games: Vec<(String, i64, usize)> = needs_matching
         .iter()
@@ -319,57 +319,35 @@ pub fn show_mass_match_dialog(state: &SharedState) {
         return;
     }
 
-    let dialog = adw::Window::new();
-    dialog.set_default_width(600);
-    dialog.set_default_height(500);
-    dialog.set_transient_for(Some(&window));
-    dialog.set_modal(true);
+    let dialog = adw::Dialog::new();
+    dialog.set_title(&crate::tr!("Match unmatched games"));
+    dialog.set_content_width(600);
 
-    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&adw::HeaderBar::new());
 
-    let header_bar = adw::HeaderBar::new();
-    header_bar.set_title_widget(Some(&gtk4::Label::new(Some(&crate::tr!(
-        "Match unmatched games"
-    )))));
-    outer.append(&header_bar);
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
     let header = gtk4::Label::new(Some(&crate::tr!("{} game(s) to match").replacen(
         "{}",
         &needs_matching.len().to_string(),
         1,
     )));
-    header.set_margin_top(16);
-    header.set_margin_bottom(8);
-    header.set_margin_start(16);
-    header.set_margin_end(16);
     header.set_xalign(0.0);
     header.add_css_class(CSS_HEADING);
-    outer.append(&header);
+    content.append(&super::helpers::clamped(&header, 600, (12, 8, 12, 12)));
 
-    let scrolled = gtk4::ScrolledWindow::new();
-    scrolled.set_vexpand(true);
-    scrolled.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-
-    let list = gtk4::ListBox::new();
-    list.set_selection_mode(gtk4::SelectionMode::None);
-
+    let (scrolled, list) = super::helpers::clamped_boxed_list(600);
+    // Size to the rows when few, cap and scroll when many.
+    scrolled.set_propagate_natural_height(true);
+    scrolled.set_min_content_height(160);
+    scrolled.set_max_content_height(500);
     let row_action_boxes = populate_match_list(&list, &needs_matching, state, &dialog);
+    content.append(&scrolled);
 
-    scrolled.set_child(Some(&list));
-    outer.append(&scrolled);
-
-    let close_btn = gtk4::Button::with_label(&crate::tr!("Close"));
-    close_btn.set_halign(gtk4::Align::End);
-    close_btn.set_margin_top(8);
-    close_btn.set_margin_bottom(12);
-    close_btn.set_margin_start(16);
-    close_btn.set_margin_end(16);
-    let win = dialog.clone();
-    close_btn.connect_clicked(move |_| win.close());
-    outer.append(&close_btn);
-
-    dialog.set_content(Some(&outer));
-    dialog.present();
+    toolbar.set_content(Some(&content));
+    dialog.set_child(Some(&toolbar));
+    dialog.present(Some(&window));
 
     start_steam_batch_matching(
         state,
@@ -382,23 +360,15 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 }
 
 fn create_match_row(list: &gtk4::ListBox, name: &str, searching_text: &str) -> gtk4::Box {
-    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    row.set_margin_start(12);
-    row.set_margin_end(12);
-    row.set_margin_top(6);
-    row.set_margin_bottom(6);
-
-    let name_label = gtk4::Label::new(Some(name));
-    name_label.set_xalign(0.0);
-    name_label.set_hexpand(true);
-    name_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    row.append(&name_label);
+    let row = adw::ActionRow::new();
+    row.set_title(name);
 
     let action_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    action_box.set_valign(gtk4::Align::Center);
     let searching = gtk4::Label::new(Some(searching_text));
     searching.add_css_class(CSS_DIM_LABEL);
     action_box.append(&searching);
-    row.append(&action_box);
+    row.add_suffix(&action_box);
 
     list.append(&row);
     action_box

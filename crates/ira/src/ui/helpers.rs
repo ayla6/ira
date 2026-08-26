@@ -1,5 +1,5 @@
 use crate::Game;
-use adw::prelude::{AdwDialogExt, AdwWindowExt, AlertDialogExt};
+use adw::prelude::{AdwDialogExt, AdwWindowExt, AlertDialogExt, PreferencesRowExt};
 use gtk4::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -362,6 +362,52 @@ impl Clearable for gtk4::FlowBox {
 
 pub fn clear_children(w: &impl Clearable) {
     w.clear_all_children();
+}
+
+/// An insensitive `ActionRow` carrying list status text ("Searching…",
+/// "No results found") inside boxed lists of the match/search dialogs.
+pub(crate) fn status_row(text: &str) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    row.set_title(text);
+    row.set_sensitive(false);
+    row
+}
+
+/// Wrap `child` in an `adw::Clamp` so wide dialogs don't stretch it.
+/// Margins are `(top, bottom, start, end)`.
+pub(crate) fn clamped(
+    child: &impl IsA<gtk4::Widget>,
+    max_width: i32,
+    margins: (i32, i32, i32, i32),
+) -> adw::Clamp {
+    let clamp = adw::Clamp::new();
+    clamp.set_maximum_size(max_width);
+    clamp.set_margin_top(margins.0);
+    clamp.set_margin_bottom(margins.1);
+    clamp.set_margin_start(margins.2);
+    clamp.set_margin_end(margins.3);
+    clamp.set_child(Some(child));
+    clamp
+}
+
+/// A vertically scrolling, width-clamped boxed `ListBox` for dialog result
+/// areas. Returns the scrolled container to pack and the list to fill.
+pub(crate) fn clamped_boxed_list(max_width: i32) -> (gtk4::ScrolledWindow, gtk4::ListBox) {
+    let list = gtk4::ListBox::new();
+    list.set_selection_mode(gtk4::SelectionMode::None);
+    list.set_valign(gtk4::Align::Start);
+    list.add_css_class(CSS_BOXED_LIST);
+    let column = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    column.set_margin_top(8);
+    column.set_margin_bottom(12);
+    column.append(&list);
+    let clamp = adw::Clamp::new();
+    clamp.set_maximum_size(max_width);
+    clamp.set_child(Some(&column));
+    let scrolled = gtk4::ScrolledWindow::new();
+    scrolled.set_vexpand(true);
+    scrolled.set_child(Some(&clamp));
+    (scrolled, list)
 }
 
 /// Poll a worker-thread channel on the GTK main loop without blocking it;

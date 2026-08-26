@@ -1,11 +1,10 @@
 use adw::prelude::*;
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
 
 use super::css::*;
 use super::enrichment::{enrich_game_async, EnrichGameParams};
-use super::helpers::clear_children;
+use super::helpers::{clamped, clamped_boxed_list, clear_children, esc, poll_channel, status_row};
 use super::state::SharedState;
 use ira_platforms::retroachievements::api::{RaClient, RaGameEntry};
 
@@ -16,7 +15,7 @@ fn apply_ra_match(
     ra_id: u32,
     ra_title: &str,
     on_match: &Option<Rc<dyn Fn()>>,
-    dialog: &adw::Window,
+    dialog: &adw::Dialog,
 ) {
     let app_id = ra_id.to_string();
     if let Err(e) = ira_db::update_game_ids(
@@ -100,17 +99,14 @@ fn populate_results(
     state: &SharedState,
     db_id: i64,
     platform_id: &str,
-    dialog: &adw::Window,
+    dialog: &adw::Dialog,
     on_match: &Option<Rc<dyn Fn()>>,
     outcome: (Option<String>, Option<RaGameEntry>, Vec<RaGameEntry>),
 ) {
     let (notice, hash_hit, results) = outcome;
     clear_children(list);
     if let Some(notice) = notice {
-        let row = adw::ActionRow::new();
-        row.set_title(&notice);
-        row.set_sensitive(false);
-        list.append(&row);
+        list.append(&status_row(&notice));
         return;
     }
     let mut rows: Vec<(RaGameEntry, bool)> = Vec::new();
@@ -124,15 +120,12 @@ fn populate_results(
         rows.push((game, false));
     }
     if rows.is_empty() {
-        let row = adw::ActionRow::new();
-        row.set_title(&crate::tr!("No results found"));
-        row.set_sensitive(false);
-        list.append(&row);
+        list.append(&status_row(&crate::tr!("No results found")));
         return;
     }
     for (game, exact_hash) in rows {
         let row = adw::ActionRow::new();
-        row.set_title(&super::helpers::esc(&game.title));
+        row.set_title(&esc(&game.title));
         let tag = if exact_hash {
             crate::tr!("Exact hash match")
         } else if game.num_achievements == 0 {
@@ -163,7 +156,7 @@ pub fn show_ra_search_dialog(
     db_id: i64,
     game_name: &str,
     platform_id: &str,
-    parent: &adw::Window,
+    parent: &impl IsA<gtk4::Widget>,
     on_match: Option<Rc<dyn Fn()>>,
 ) {
     let console_id = match ira_models::find_console(platform_id) {
@@ -179,54 +172,40 @@ pub fn show_ra_search_dialog(
             .unwrap_or_default()
     };
 
-    let dialog = adw::Window::new();
-    dialog.set_default_width(500);
-    dialog.set_default_height(400);
-    dialog.set_modal(true);
-    dialog.set_transient_for(Some(parent));
+    let dialog = adw::Dialog::new();
+    dialog.set_title(&crate::tr!("Match to RetroAchievements"));
+    dialog.set_content_width(500);
+    dialog.set_content_height(400);
 
-    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&gtk4::Label::new(Some(&crate::tr!(
-        "Match to RetroAchievements"
-    )))));
-    outer.append(&header);
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&adw::HeaderBar::new());
 
-    let search_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    search_box.set_margin_start(12);
-    search_box.set_margin_end(12);
-    search_box.set_margin_top(8);
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
-    let entry = gtk4::Entry::new();
+    let search_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    let entry = gtk4::SearchEntry::new();
     entry.set_placeholder_text(Some(&crate::tr!("Game name…")));
     entry.set_text(game_name);
     entry.set_hexpand(true);
+    search_row.append(&entry);
     let search_btn = gtk4::Button::with_label(&crate::tr!("Search"));
     search_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    search_box.append(&entry);
-    search_box.append(&search_btn);
-    outer.append(&search_box);
+    search_row.append(&search_btn);
+    content.append(&clamped(&search_row, 500, (12, 12, 12, 12)));
 
-    let scrolled = gtk4::ScrolledWindow::new();
-    scrolled.set_vexpand(true);
-    scrolled.set_margin_top(8);
-    let list = gtk4::ListBox::new();
-    list.set_margin_start(12);
-    list.set_margin_end(12);
-    list.set_margin_top(8);
-    list.set_margin_bottom(12);
-    list.set_valign(gtk4::Align::Start);
-    scrolled.set_child(Some(&list));
-    outer.append(&scrolled);
+    let (scrolled, list) = clamped_boxed_list(500);
+    content.append(&scrolled);
+
+    toolbar.set_content(Some(&content));
+    dialog.set_child(Some(&toolbar));
 
     let state_c = state.clone();
-    let list_c = list;
     let platform_id = platform_id.to_string();
 
-    let entry_s = entry.clone();
-    let dialog_s = dialog.clone();
+    let entry_c = entry.clone();
+    let dialog_c = dialog.clone();
     let do_search = move || {
-        let term = entry_s.text().trim().to_string();
+        let term = entry_c.text().trim().to_string();
         if term.is_empty() && rom_hash.is_empty() {
             return;
         }
@@ -234,19 +213,12 @@ pub fn show_ra_search_dialog(
             let s = state_c.borrow();
             (s.cfg.clone(), s.save_dir.clone())
         };
-        let list_c2 = list_c.clone();
-        let state_c2 = state_c.clone();
-        let dialog_c2 = dialog_s.clone();
-        let on_match_c2 = on_match.clone();
-        let platform_id_c2 = platform_id.clone();
+        let (tx, rx) = mpsc::channel::<(Option<String>, Option<RaGameEntry>, Vec<RaGameEntry>)>();
         let rom_hash_c = rom_hash.clone();
-        let (tx, rx) =
-            mpsc::channel::<(Option<String>, Option<RaGameEntry>, Vec<RaGameEntry>)>();
         std::thread::spawn(move || {
             let (notice, hash_hit, results) = match RaClient::from_config(&cfg) {
                 Some(client) => {
-                    let hash_hit =
-                        client.find_game_by_hash(&save_dir, console_id, &rom_hash_c);
+                    let hash_hit = client.find_game_by_hash(&save_dir, console_id, &rom_hash_c);
                     let results = if term.is_empty() {
                         Vec::new()
                     } else {
@@ -262,25 +234,21 @@ pub fn show_ra_search_dialog(
             };
             let _ = tx.send((notice, hash_hit, results));
         });
-        let rx = Rc::new(RefCell::new(rx));
-        glib::source::idle_add_local_full(glib::Priority::DEFAULT, move || {
-            let rx = rx.borrow();
-            match rx.try_recv() {
-                Ok((notice, hash_hit, results)) => {
-                    populate_results(
-                        &list_c2,
-                        &state_c2,
-                        db_id,
-                        &platform_id_c2,
-                        &dialog_c2,
-                        &on_match_c2,
-                        (notice, hash_hit, results),
-                    );
-                    glib::ControlFlow::Break
-                }
-                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(_) => glib::ControlFlow::Break,
-            }
+        let list_c2 = list.clone();
+        let state_c2 = state_c.clone();
+        let dialog_c2 = dialog_c.clone();
+        let on_match_c2 = on_match.clone();
+        let platform_id_c2 = platform_id.clone();
+        poll_channel(rx, move |outcome| {
+            populate_results(
+                &list_c2,
+                &state_c2,
+                db_id,
+                &platform_id_c2,
+                &dialog_c2,
+                &on_match_c2,
+                outcome,
+            );
         });
     };
 
@@ -294,7 +262,6 @@ pub fn show_ra_search_dialog(
         move |_| ds()
     });
 
-    dialog.set_content(Some(&outer));
-    dialog.present();
+    dialog.present(Some(parent));
     do_search();
 }

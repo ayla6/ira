@@ -144,7 +144,7 @@ pub(super) fn make_refresh_closure(
 /// Re-extracts an emulator-native icon into the game's data dir, replacing
 /// any imported or downloaded one. Nothing already on disk is touched until
 /// a replacement has been produced. Returns true when an icon was restored.
-pub(super) fn restore_native_icon(save_dir: &str, game: &Game) -> bool {
+pub(super) fn restore_native_icon(save_dir: &str, game: &Game, roms_folder: &str) -> bool {
     let image_dir = match game.kind {
         ira_models::GameKind::Ps4 => std::path::Path::new(save_dir)
             .join("data")
@@ -156,12 +156,33 @@ pub(super) fn restore_native_icon(save_dir: &str, game: &Game) -> bool {
             .join(&game.app_id),
         ira_models::GameKind::ThreeDS => ira_parser::three_ds_data_dir(save_dir, &game.app_id),
         ira_models::GameKind::WiiU => ira_parser::wiiu_data_dir(save_dir, &game.app_id),
+        ira_models::GameKind::Retro if game.platform_id == "nds" => {
+            ira_parser::retro_data_dir(save_dir, game.db_id)
+        }
         _ => return false,
     };
-    let game_root = std::path::Path::new(&game.game_path);
+    // Resolve ROM path: Retro games store it relative to the ROMs folder
+    // (e.g. "game.nds" or "game.zip"), while console games store an
+    // absolute path.
+    let game_root_owned;
+    let game_root: &std::path::Path =
+        if game.kind == ira_models::GameKind::Retro && game.platform_id == "nds" {
+            let p = std::path::Path::new(&game.game_path);
+            if p.is_absolute() {
+                p
+            } else {
+                game_root_owned = std::path::Path::new(roms_folder)
+                    .join(&game.platform_id)
+                    .join(p);
+                &game_root_owned
+            }
+        } else {
+            std::path::Path::new(&game.game_path)
+        };
     // Decode first: if the native source is unreadable the current icon
     // must stay untouched.
     let staged = match game.kind {
+        ira_models::GameKind::Retro if game.platform_id == "nds" => decode_nds_icon(game_root),
         ira_models::GameKind::ThreeDS => decode_smdh_icon(game_root),
         ira_models::GameKind::Ps4 => {
             import_image_bytes(&game_root.join("sce_sys").join("icon0.png"))
@@ -206,6 +227,17 @@ fn decode_smdh_icon(game_root: &std::path::Path) -> Option<Vec<u8>> {
     let icon = ira_platforms::azahar::read_icon(game_root)?;
     let png = std::env::temp_dir().join(format!("ira-icon-{}.png", std::process::id()));
     ira_parser::save_rgb565_png(&png, 48, 48, &icon).ok()?;
+    let data = std::fs::read(&png);
+    let _ = std::fs::remove_file(&png);
+    let data = data.ok()?;
+    ira_parser::convert_bytes_to_lossless_webp(&data)
+}
+
+/// Renders the banner icon of a DS ROM into lossless WebP bytes.
+fn decode_nds_icon(game_root: &std::path::Path) -> Option<Vec<u8>> {
+    let icon = ira_platforms::nds::read_icon(game_root)?;
+    let png = std::env::temp_dir().join(format!("ira-icon-{}.png", std::process::id()));
+    ira_parser::save_rgba_png(&png, 32, 32, &icon).ok()?;
     let data = std::fs::read(&png);
     let _ = std::fs::remove_file(&png);
     let data = data.ok()?;

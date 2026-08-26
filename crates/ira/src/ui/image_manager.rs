@@ -377,6 +377,7 @@ fn build_reset_icon_button(
     refresh_images: &Rc<dyn Fn()>,
     pending_copies: &Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     save_dir: &str,
+    state: &SharedState,
 ) -> Option<gtk4::Button> {
     if AssetType::from_string(asset_type) != Some(AssetType::Icon) {
         return None;
@@ -386,6 +387,7 @@ fn build_reset_icon_button(
         ira_models::GameKind::Ps3 => crate::tr!("PS3"),
         ira_models::GameKind::ThreeDS => crate::tr!("3DS"),
         ira_models::GameKind::WiiU => crate::tr!("Wii U"),
+        ira_models::GameKind::Retro if game.platform_id == "nds" => crate::tr!("NDS"),
         _ => return None,
     };
     let reset_btn = gtk4::Button::with_label(&label);
@@ -394,8 +396,9 @@ fn build_reset_icon_button(
     let pending_copies_reset = pending_copies.clone();
     let asset_reset = asset_type.to_string();
     let save_dir_c2 = save_dir.to_string();
+    let roms_folder = state.borrow().cfg.roms_folder.clone();
     reset_btn.connect_clicked(move |_| {
-        if super::image_manager_helpers::restore_native_icon(&save_dir_c2, &gc) {
+        if super::image_manager_helpers::restore_native_icon(&save_dir_c2, &gc, &roms_folder) {
             if let Some(ref pc) = pending_copies_reset {
                 pc.borrow_mut().remove(&asset_reset);
             }
@@ -418,7 +421,7 @@ fn build_ra_icon_button(
     {
         return None;
     }
-    let btn = gtk4::Button::with_label(&crate::tr!("RA icon"));
+    let btn = gtk4::Button::with_label(&crate::tr!("RA"));
     let app_id = game.app_id.clone();
     let save_dir = state.borrow().save_dir.clone();
     let ra_username = state.borrow().cfg.ra_username.clone();
@@ -461,7 +464,7 @@ fn build_ra_icon_button(
             if let Ok(result) = rx.borrow_mut().try_recv() {
                 if let Some(btn) = btn_weak.upgrade() {
                     btn.set_sensitive(true);
-                    btn.set_label(&crate::tr!("RA icon"));
+                    btn.set_label(&crate::tr!("RA"));
                 }
                 match result {
                     Ok(bytes) => {
@@ -480,7 +483,7 @@ fn build_ra_icon_button(
                             let btn_weak = btn.downgrade();
                             glib::timeout_add_local(std::time::Duration::from_secs(2), move || {
                                 if let Some(btn) = btn_weak.upgrade() {
-                                    btn.set_label(&crate::tr!("RA icon"));
+                                    btn.set_label(&crate::tr!("RA"));
                                 }
                                 glib::ControlFlow::Break
                             });
@@ -600,7 +603,14 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         &refresh_images,
         &pending_copies,
         &save_dir,
+        state,
     ) {
+        btns.append(&btn);
+    }
+
+    if let Some(btn) =
+        build_ra_icon_button(asset_type, game, state, &refresh_images, &pending_copies)
+    {
         btns.append(&btn);
     }
 
@@ -615,12 +625,6 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         save_dir: &save_dir,
     };
     if let Some(btn) = build_sgdb_picker_button(game, is_steam, &id, &sgdb_ctx) {
-        btns.append(&btn);
-    }
-
-    if let Some(btn) =
-        build_ra_icon_button(asset_type, game, state, &refresh_images, &pending_copies)
-    {
         btns.append(&btn);
     }
 
@@ -735,6 +739,21 @@ fn build_dir_buttons(
     );
     btns.append(&browse_btn);
 
+    let reset_btn = gtk4::Button::with_label(&crate::tr!("Reset"));
+    reset_btn.add_css_class(CSS_FLAT);
+    {
+        let target_dir = target_dir.to_path_buf();
+        let file_base = file_base.to_string();
+        let refresh = Rc::clone(ctx.refresh_preview);
+        reset_btn.connect_clicked(move |_| {
+            ira_parser::remove_image_variants(&target_dir, &file_base);
+            let small = format!("{}_small", file_base);
+            ira_parser::remove_image_variants(&target_dir, &small);
+            refresh();
+        });
+    }
+    btns.append(&reset_btn);
+
     let sgdb_id = entry.sgdb_id.clone().unwrap_or_default();
     let is_steam = entry.trophy_source.has_steam_enrichment();
     let sgdb_id_for_picker = if !sgdb_id.is_empty() {
@@ -782,21 +801,6 @@ fn build_dir_buttons(
         });
         btns.append(&btn);
     }
-
-    let reset_btn = gtk4::Button::with_label(&crate::tr!("Reset"));
-    reset_btn.add_css_class(CSS_FLAT);
-    {
-        let target_dir = target_dir.to_path_buf();
-        let file_base = file_base.to_string();
-        let refresh = Rc::clone(ctx.refresh_preview);
-        reset_btn.connect_clicked(move |_| {
-            ira_parser::remove_image_variants(&target_dir, &file_base);
-            let small = format!("{}_small", file_base);
-            ira_parser::remove_image_variants(&target_dir, &small);
-            refresh();
-        });
-    }
-    btns.append(&reset_btn);
 
     btns
 }

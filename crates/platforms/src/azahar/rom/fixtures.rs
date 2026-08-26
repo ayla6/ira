@@ -21,11 +21,19 @@ pub fn smdh_bytes(english: &str) -> Vec<u8> {
         let start = 8 + 0x200 + i * 2; // region 1 = English
         smdh[start..start + 2].copy_from_slice(&unit.to_le_bytes());
     }
-    // Distinctive Morton-tiled icon pixels: red at (0,0), green at (0,1).
+    // Distinctive Morton-tiled icon pixels: red at (0,0), green at (0,1),
+    // blue at (10,9) — the latter sits in tile row 1, so decoding it
+    // correctly requires the per-tile-row stride, catching degenerate
+    // layouts where every tile row reads tile row 0 again.
     let icon = LARGE_ICON_OFFSET;
     smdh[icon..icon + 2].copy_from_slice(&0xF800u16.to_le_bytes());
     let green = icon + morton_offset(0, 1);
     smdh[green..green + 2].copy_from_slice(&0x07E0u16.to_le_bytes());
+    const BLUE_X: u32 = 10;
+    const BLUE_Y: u32 = 9;
+    let coarse = ((BLUE_Y & !7) as usize) * 48 + ((BLUE_X & !7) as usize) * 8;
+    let blue_px = morton_offset(BLUE_X % 8, BLUE_Y % 8) / 2 + coarse;
+    smdh[icon + blue_px * 2..icon + blue_px * 2 + 2].copy_from_slice(&0x001Fu16.to_le_bytes());
     smdh
 }
 

@@ -124,7 +124,7 @@ fn decode_large_icon(raw: &[u8]) -> Vec<u8> {
     for y in 0..48u32 {
         for x in 0..48u32 {
             let morton = (XLUT[(x % 8) as usize] + YLUT[(y % 8) as usize]) as usize;
-            let src = (morton + (x & !7) as usize * 8) * 2;
+            let src = (morton + (x & !7) as usize * 8 + (y & !7) as usize * 48) * 2;
             let dst = (y as usize * 48 + x as usize) * 2;
             linear[dst..dst + 2].copy_from_slice(&raw[src..src + 2]);
         }
@@ -317,9 +317,12 @@ mod tests {
         assert_eq!(game.title, "Test Game");
         let icon = game.icon.unwrap();
         assert_eq!(icon.len(), 48 * 48 * 2);
-        // The fixture icon is Morton-tiled: red at (0,0), green at (0,1).
+        // The fixture icon is Morton-tiled: red at (0,0), green at (0,1),
+        // and blue at (10,9) — a pixel in tile row 1.
         assert_eq!(&icon[0..2], &0xF800u16.to_le_bytes());
         assert_eq!(&icon[48 * 2..48 * 2 + 2], &0x07E0u16.to_le_bytes());
+        let blue = (9 * 48 + 10) * 2;
+        assert_eq!(&icon[blue..blue + 2], &0x001Fu16.to_le_bytes());
     }
 
     #[test]

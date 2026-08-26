@@ -3,10 +3,10 @@ use std::collections::HashSet;
 use super::context_menu_actions::{
     setup_controller_action, setup_delete_game_action, setup_edit_action, setup_hide_action,
     setup_multi_new_collection_action, setup_multi_toggle_group_action,
-    setup_multi_toggle_hide_action, setup_new_collection_action, setup_open_game_folder_action,
-    setup_open_gog_status_action, setup_open_images_action, setup_open_save_location_action,
-    setup_open_steam_status_action, setup_open_wine_prefix_action, setup_play_action,
-    setup_play_history_action, setup_toggle_group_action,
+    setup_multi_toggle_hide_action, setup_new_collection_action, setup_open_emulator_action,
+    setup_open_game_folder_action, setup_open_gog_status_action, setup_open_images_action,
+    setup_open_save_location_action, setup_open_steam_status_action, setup_open_wine_prefix_action,
+    setup_play_action, setup_play_history_action, setup_toggle_group_action,
 };
 use super::state::SharedState;
 use crate::Game;
@@ -80,6 +80,14 @@ pub fn show_game_context_menu(
 
     let play_item = gio::MenuItem::new(Some(&crate::tr!("Play")), Some("game.play"));
     menu.prepend_item(&play_item);
+
+    let opens_emulator = game.kind.has_standalone_emulator();
+    if opens_emulator {
+        menu.append(
+            Some(&crate::tr!("Open emulator without game")),
+            Some("game.open_emulator"),
+        );
+    }
 
     menu.append(Some(&crate::tr!("Edit game settings")), Some("game.edit"));
     menu.append(
@@ -219,6 +227,9 @@ pub fn show_game_context_menu(
     let actions = gio::SimpleActionGroup::new();
 
     setup_play_action(&actions, state.clone(), game.clone());
+    if opens_emulator {
+        setup_open_emulator_action(&actions, state.clone(), game.db_id);
+    }
     setup_edit_action(&actions, state.clone(), game.db_id);
     setup_controller_action(&actions, state.clone(), game.clone());
     setup_play_history_action(&actions, state.clone(), game.db_id, game.variant_id);

@@ -30,6 +30,24 @@ pub(super) fn setup_play_action(actions: &gio::SimpleActionGroup, state: SharedS
     actions.add_action(&play_action);
 }
 
+pub(super) fn setup_open_emulator_action(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    db_id: i64,
+) {
+    let open_emulator = gio::SimpleAction::new("open_emulator", None);
+    open_emulator.connect_activate(move |_, _| {
+        match super::play_button::open_emulator_no_game(&state, db_id) {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("Failed to open emulator: {}", e);
+                let _ = state.borrow().sender.send(AppMessage::AddGameError(e));
+            }
+        }
+    });
+    actions.add_action(&open_emulator);
+}
+
 pub(super) fn setup_edit_action(actions: &gio::SimpleActionGroup, state: SharedState, db_id: i64) {
     let edit_action = gio::SimpleAction::new("edit", None);
     edit_action.connect_activate(move |_, _| {

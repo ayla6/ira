@@ -73,7 +73,7 @@ fn sorted_controller_snapshot(
     devices
 }
 
-fn active_controller_input(
+pub(super) fn active_controller_input(
     cfg: &ira_config::Config,
     save_dir: &str,
     controller_registry: &ira_input::ControllerRegistry,
@@ -398,6 +398,140 @@ pub fn launch_game(
     Ok(true)
 }
 
+/// Opens this game's configured emulator with no game loaded (the
+/// "Open emulator without game" menu entries). The process is detached:
+/// no playtime is recorded, no play state changes, no messages are sent.
+pub fn open_emulator_no_game(state: &SharedState, db_id: i64) -> Result<(), String> {
+    if is_game_running(state, db_id) {
+        return Err(crate::tr!(
+            "Stop the running game before opening its emulator"
+        ));
+    }
+
+    let (
+        sender,
+        game_info,
+        global_shadps4_exe,
+        global_rpcs3_exe,
+        global_vita3k_exe,
+        global_cemu_exe,
+        global_azahar_exe,
+        db,
+        save_dir,
+        cfg_clone,
+        overlay_shm,
+        overlay_global_enabled,
+        overlay_font_family,
+        system_defaults,
+        controller_registry,
+        running_games,
+    ) = {
+        let s = state.borrow();
+        let game = s.games.iter().find(|g| g.db_id == db_id);
+        let source_id = game.and_then(|g| match g.kind {
+            ira_models::GameKind::Steam => Some("steam"),
+            ira_models::GameKind::Retro => Some(g.platform_id.as_str()),
+            ira_models::GameKind::Ps4 => Some("ps4"),
+            ira_models::GameKind::Ps3 => Some("ps3"),
+            ira_models::GameKind::PsVita => Some("psvita"),
+            ira_models::GameKind::WiiU => Some("wiiu"),
+            ira_models::GameKind::ThreeDS => Some("3ds"),
+            _ => None,
+        });
+        let overlay_global_enabled =
+            source_id.map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id));
+        let mut system_defaults = s.cfg.default_system.clone();
+        system_defaults.gamescope = source_id
+            .and_then(|id| s.cfg.overlay.source_gamescope.get(id).copied())
+            .unwrap_or(system_defaults.gamescope);
+        let overlay_shm = game.and_then(|game| {
+            let launch = ira_db::get_game_config(&s.db, game.db_id)
+                .ok()
+                .flatten()
+                .map(|(launch, _, _)| launch)
+                .unwrap_or_default();
+            crate::overlay::write_game_shm(
+                game,
+                &s.cfg.overlay,
+                launch.overlay_encoder,
+                launch.overlay_recording_quality,
+            )
+        });
+        let game_info = game
+            .map(|g| {
+                (
+                    g.kind,
+                    g.name.clone(),
+                    g.shadps4_version.clone(),
+                    g.platform_id.clone(),
+                    g.emulator_override.clone(),
+                    g.trophy_source,
+                )
+            })
+            .unwrap_or_default();
+        (
+            s.sender.clone(),
+            game_info,
+            s.cfg.shadps4_executable.clone(),
+            s.cfg.rpcs3_executable.clone(),
+            s.cfg.vita3k_executable.clone(),
+            s.cfg.cemu_executable.clone(),
+            s.cfg.azahar_executable.clone(),
+            s.db.clone(),
+            s.save_dir.clone(),
+            s.cfg.clone(),
+            overlay_shm,
+            overlay_global_enabled,
+            s.cfg.overlay.font_family.clone(),
+            system_defaults,
+            s.controller_registry.clone(),
+            s.running_games.clone(),
+        )
+    };
+
+    let (kind, game_name, per_game_version, platform_id, per_game_emu, trophy_source) = game_info;
+
+    let (controller_input_mode, controller_input_profile) =
+        active_controller_input(&cfg_clone, &save_dir, &controller_registry);
+
+    let ctx = play_button_helpers::LaunchCtx {
+        db: &db,
+        save_dir: &save_dir,
+        game_id: db_id,
+        db_id,
+        game_name: &game_name,
+        game_kind: kind,
+        trophy_source,
+        ufs_savefiles: Vec::new(),
+        ufs_rootoverrides: Vec::new(),
+        centralize_saves: false,
+        sender: &sender,
+        running_games: &running_games,
+        started_at: 0,
+        overlay_shm,
+        overlay_global_enabled,
+        overlay_font_family,
+        system_defaults,
+        controller_input_mode,
+        controller_input_profile,
+    };
+
+    play_button_helpers::launch_emulator_no_game(
+        &ctx,
+        &cfg_clone,
+        &play_button_helpers::EmulatorExes {
+            platform_id: &platform_id,
+            per_game_version: &per_game_version,
+            per_game_emu: &per_game_emu,
+            shadps4: &global_shadps4_exe,
+            rpcs3: &global_rpcs3_exe,
+            vita3k: &global_vita3k_exe,
+            cemu: &global_cemu_exe,
+            azahar: &global_azahar_exe,
+        },
+    )
+}
+
 pub fn play_button(state: &SharedState, db_id: i64, variant_id: Option<i64>) -> gtk4::Widget {
     let (sender, db) = {
         let s = state.borrow();
@@ -545,6 +679,7 @@ fn build_disc_play_button(
         };
         menu.append(Some(&name), Some(&format!("play.disc::{}", disc.id)));
     }
+    add_open_emulator_menu_item(state, db_id, &actions, &menu, sender);
 
     split.insert_action_group("play", Some(&actions));
     split.set_menu_model(Some(&menu));
@@ -654,6 +789,7 @@ fn build_variant_play_button(
     for var in variants {
         menu.append(Some(&var.name), Some(&format!("play.variant::{}", var.id)));
     }
+    add_open_emulator_menu_item(state, db_id, &actions, &menu, sender);
 
     split.insert_action_group("play", Some(&actions));
     split.set_menu_model(Some(&menu));
@@ -684,6 +820,45 @@ fn build_variant_play_button(
     });
 
     split.upcast()
+}
+
+/// Appends "Open emulator without game" to a play-button dropdown, but only
+/// when the game runs through an emulator that can be opened on its own.
+fn add_open_emulator_menu_item(
+    state: &SharedState,
+    db_id: i64,
+    actions: &gio::SimpleActionGroup,
+    menu: &gio::Menu,
+    sender: &ira_models::AppSender,
+) {
+    let opens_emulator = state
+        .borrow()
+        .games
+        .iter()
+        .find(|g| g.db_id == db_id)
+        .map(|g| g.kind.has_standalone_emulator())
+        .unwrap_or(false);
+    if !opens_emulator {
+        return;
+    }
+
+    let open_action = gio::SimpleAction::new("open_emulator", None);
+    let st_open = state.clone();
+    let sender_open = sender.clone();
+    open_action.connect_activate(move |_, _| {
+        if let Err(e) = open_emulator_no_game(&st_open, db_id) {
+            eprintln!("Failed to open emulator: {}", e);
+            let _ = sender_open.send(AppMessage::AddGameError(e));
+        }
+    });
+    actions.add_action(&open_action);
+
+    let section = gio::Menu::new();
+    section.append(
+        Some(&crate::tr!("Open emulator without game")),
+        Some("play.open_emulator"),
+    );
+    menu.append_section(None, &section);
 }
 
 #[cfg(test)]

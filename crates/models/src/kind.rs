@@ -79,6 +79,12 @@ impl GameKind {
             GameKind::Ps4 | GameKind::Ps3 | GameKind::PsVita | GameKind::WiiU | GameKind::ThreeDS
         )
     }
+
+    /// True when the game runs through an emulator that can also be opened
+    /// on its own, without loading a game.
+    pub fn has_standalone_emulator(self) -> bool {
+        self == GameKind::Retro || self.is_console_emulator()
+    }
 }
 
 impl std::fmt::Display for GameKind {
@@ -278,5 +284,27 @@ mod tests {
         assert!(!GameKind::Steam.is_console_emulator());
         assert!(!GameKind::Retro.is_console_emulator());
         assert!(!GameKind::Wine.is_console_emulator());
+    }
+
+    #[test]
+    fn test_has_standalone_emulator() {
+        assert!(GameKind::Retro.has_standalone_emulator());
+        for kind in [
+            GameKind::Ps4,
+            GameKind::Ps3,
+            GameKind::PsVita,
+            GameKind::WiiU,
+            GameKind::ThreeDS,
+        ] {
+            assert!(kind.has_standalone_emulator(), "{kind:?}");
+        }
+        for kind in [
+            GameKind::Steam,
+            GameKind::Wine,
+            GameKind::Linux,
+            GameKind::Other,
+        ] {
+            assert!(!kind.has_standalone_emulator(), "{kind:?}");
+        }
     }
 }

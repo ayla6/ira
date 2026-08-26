@@ -196,7 +196,7 @@ pub(super) fn register_console_pages(
         }
     }
     let result = Rc::new(RefCell::new(result));
-    connect_lazy_console_pages(&result, cfg, win, sidebar, stack, registry);
+    connect_lazy_console_pages(&result, cfg, win, sidebar, stack, registry, state);
     result
 }
 
@@ -226,16 +226,18 @@ fn connect_lazy_console_pages(
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
     registry: Arc<ira_input::ControllerRegistry>,
+    state: &SharedState,
 ) {
     let result = result.clone();
     let cfg = cfg.clone();
     let win = win.clone();
     let stack = stack.clone();
+    let state = state.clone();
     sidebar.connect_row_selected(move |_, row| {
         let Some(page_id) = row.map(|row| row.widget_name().to_string()) else {
             return;
         };
-        if load_special_console_page(&page_id, &cfg, &win, &stack, &registry, &result) {
+        if load_special_console_page(&page_id, &cfg, &win, &stack, &registry, &result, &state) {
             return;
         }
         let Some(def) = ira_models::all_consoles()
@@ -265,6 +267,17 @@ fn connect_lazy_console_pages(
             registry.clone(),
             &mut result.borrow_mut(),
         );
+        super::open_emulator_row::add_open_emulator_row(
+            &page,
+            &state,
+            def.display_name,
+            def.id.to_string(),
+            {
+                let exe_row = widgets.exe_row.clone();
+                move || exe_row.text().to_string()
+            },
+            &profile,
+        );
         let mut result = result.borrow_mut();
         result.console_profile_widgets.push(profile);
         result.console_widgets.push((def.id, widgets));
@@ -280,6 +293,7 @@ fn load_special_console_page(
     stack: &gtk4::Stack,
     registry: &Arc<ira_input::ControllerRegistry>,
     result: &SharedConsoleSettingsWidgets,
+    state: &SharedState,
 ) -> bool {
     if special_console_loaded(&result.borrow(), page_id) {
         return true;
@@ -288,6 +302,7 @@ fn load_special_console_page(
     else {
         return false;
     };
+    let exe_source = special_exe_source(&widgets, cfg);
 
     let mut result = result.borrow_mut();
     let profile = add_console_page_overrides(
@@ -299,11 +314,51 @@ fn load_special_console_page(
         registry.clone(),
         &mut result,
     );
+    super::open_emulator_row::add_open_emulator_row(
+        &page,
+        state,
+        &label,
+        console_id.to_string(),
+        exe_source,
+        &profile,
+    );
     result.console_profile_widgets.push(profile);
     store_special_console_widgets(&mut result, widgets);
     drop(result);
     replace_loading_page(stack, &page, console_id);
     true
+}
+
+/// Resolves the executable shown on the special page's widgets at click time.
+/// For shadPS4 the version dropdown decides: index 0 means the saved global
+/// default (resolved like `apply_emulator_settings` would save it).
+fn special_exe_source(widgets: &SpecialConsoleWidgets, cfg: &Config) -> Box<dyn Fn() -> String> {
+    match widgets {
+        SpecialConsoleWidgets::Ps4(_, version_dd) => {
+            let dd = version_dd.clone();
+            let saved_default = cfg.shadps4_executable.clone();
+            Box::new(move || {
+                let selected = dd.as_ref().map(|row| row.selected()).unwrap_or(0);
+                let chosen = if selected == 0 {
+                    saved_default.clone()
+                } else {
+                    ira_platforms::ps4::read_shadps4_launch_options()
+                        .into_iter()
+                        .nth(selected as usize - 1)
+                        .map(|version| version.launch_command)
+                        .unwrap_or_default()
+                };
+                ira_platforms::ps4::resolve_shadps4_executable("", &chosen)
+            })
+        }
+        SpecialConsoleWidgets::Ps3(_, exe_row)
+        | SpecialConsoleWidgets::Vita3k(_, exe_row)
+        | SpecialConsoleWidgets::Cemu(_, exe_row)
+        | SpecialConsoleWidgets::Azahar(_, exe_row) => {
+            let exe_row = exe_row.clone();
+            Box::new(move || exe_row.text().to_string())
+        }
+    }
 }
 
 enum SpecialConsoleWidgets {

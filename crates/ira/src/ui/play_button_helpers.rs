@@ -68,7 +68,7 @@ fn resolved_input_mode(
     })
 }
 
-fn console_input_mode(
+pub(super) fn console_input_mode(
     game_override: Option<ControllerInputMode>,
     console_override: Option<ControllerInputMode>,
     controller_default: ControllerInputMode,
@@ -87,7 +87,7 @@ fn console_input_mode(
 /// Resolve which layout file the broker should load. `Disabled` disables the
 /// broker entirely; an enabled mode without any layout runs on the broker's
 /// built-in default. The virtual backend is whatever the layout says.
-fn resolve_input_profile(
+pub(super) fn resolve_input_profile(
     mode: ControllerInputMode,
     selected_profile: Option<&str>,
     default_profile: Option<&str>,
@@ -203,42 +203,7 @@ fn build_emulator_env_and_wrap(
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<Vec<(String, String)>, String> {
-    let mut env: Vec<(String, String)> = std::env::vars()
-        .filter(|(k, _)| {
-            k != "CARGO"
-                && !k.starts_with("CARGO_")
-                && k != "RUSTUP"
-                && !k.starts_with("RUSTUP_")
-                && !k.starts_with("RUST_")
-                && k != "OUT_DIR"
-        })
-        .filter(|(k, v)| {
-            if k == "LD_LIBRARY_PATH" {
-                let filtered: Vec<&str> = v
-                    .split(':')
-                    .filter(|p| {
-                        !p.is_empty() && !p.contains("/.rustup/") && !p.contains("/target/")
-                    })
-                    .collect();
-                !filtered.is_empty()
-            } else {
-                true
-            }
-        })
-        .map(|(k, v)| {
-            if k == "LD_LIBRARY_PATH" {
-                let filtered: Vec<&str> = v
-                    .split(':')
-                    .filter(|p| {
-                        !p.is_empty() && !p.contains("/.rustup/") && !p.contains("/target/")
-                    })
-                    .collect();
-                (k, filtered.join(":"))
-            } else {
-                (k, v)
-            }
-        })
-        .collect();
+    let mut env = ira_launcher::env_builder::clean_parent_env();
 
     let (launch, wine, _profile_id) = ira_db::get_game_config(ctx.db, ctx.db_id)
         .ok()
@@ -582,6 +547,108 @@ pub(super) fn launch_azahar(
     spawn_and_monitor(ctx, &cmd, &env, "Azahar")
 }
 
+/// Per-game and integration-global emulator paths used to resolve which
+/// executable to open when launching with no game loaded.
+pub(super) struct EmulatorExes<'a> {
+    pub platform_id: &'a str,
+    pub per_game_version: &'a str,
+    pub per_game_emu: &'a str,
+    pub shadps4: &'a str,
+    pub rpcs3: &'a str,
+    pub vita3k: &'a str,
+    pub cemu: &'a str,
+    pub azahar: &'a str,
+}
+
+/// Spawn this game's emulator with no game loaded, keeping everything else
+/// from the game's launch configuration (per-game env vars, GPU choice,
+/// gamemode/mangohud/gamescope, overlay, controller layout). The emulator
+/// process is not tracked as a play session.
+pub(super) fn launch_emulator_no_game(
+    ctx: &LaunchCtx,
+    cfg: &Config,
+    exes: &EmulatorExes<'_>,
+) -> Result<(), String> {
+    let platform_id = exes.platform_id;
+    let per_game_emu = exes.per_game_emu;
+    if !ctx.game_kind.has_standalone_emulator() {
+        return Err(format!(
+            "'{}' does not run through an emulator that can be opened on its own",
+            ctx.game_name
+        ));
+    }
+
+    let exe = match ctx.game_kind {
+        ira_models::GameKind::Retro => {
+            let cc = cfg.console(platform_id);
+            if !per_game_emu.is_empty() {
+                per_game_emu.to_string()
+            } else if cc.executable.is_empty() {
+                return Err(format!("No emulator configured for {platform_id}"));
+            } else {
+                cc.executable.clone()
+            }
+        }
+        ira_models::GameKind::Ps4 => {
+            let exe = ira_platforms::ps4::resolve_shadps4_executable(
+                exes.per_game_version,
+                exes.shadps4,
+            );
+            if !ira_platforms::ps4::shadps4_executable_available(&exe) {
+                return Err(format!(
+                    "shadPS4 executable was not found: {exe}. Install shadPS4 or select an available version in Settings."
+                ));
+            }
+            exe
+        }
+        // Per-game overrides first, then the integration-wide default.
+        ira_models::GameKind::Ps3 => pick(per_game_emu, exes.rpcs3, "rpcs3"),
+        ira_models::GameKind::PsVita => pick("", exes.vita3k, "vita3k"),
+        ira_models::GameKind::WiiU => pick(per_game_emu, exes.cemu, "cemu"),
+        ira_models::GameKind::ThreeDS => pick(per_game_emu, exes.azahar, "azahar"),
+        _ => return Err("not an emulated game".to_string()),
+    };
+
+    // Retro games resolve their config key from the platform (e.g. "gc"),
+    // emulator-integrated games use GameKind::as_str(), which matches.
+    let console_id = if ctx.game_kind == ira_models::GameKind::Retro {
+        platform_id.to_string()
+    } else {
+        ctx.game_kind.as_str().to_string()
+    };
+    let input = console_controller_input(cfg, &console_id);
+
+    let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(&exe, &[], None);
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd, input.0, input.1.as_deref())?;
+    ira_launcher::wrapper::spawn_detached(
+        &cmd,
+        &env,
+        ctx.game_id,
+        format!("Started {} (no game)", ctx.game_name),
+    )
+}
+
+/// The console-wide controller override saved for `console_id`.
+fn console_controller_input(
+    cfg: &Config,
+    console_id: &str,
+) -> (Option<ControllerInputMode>, Option<String>) {
+    let cc = cfg.console(console_id);
+    (
+        cc.controller_mode,
+        (!cc.controller_profile.is_empty()).then_some(cc.controller_profile.clone()),
+    )
+}
+
+/// First non-empty of two candidates with a final fallback.
+fn pick(preferred: &str, secondary: &str, fallback: &str) -> String {
+    [preferred, secondary]
+        .into_iter()
+        .find(|candidate| !candidate.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
 pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<bool, String> {
     let mut cmd = vec![
         "steam".to_string(),
@@ -805,6 +872,13 @@ mod tests {
     };
     use ira_config::SystemDefaults;
     use ira_models::ControllerInputMode;
+
+    #[test]
+    fn test_pick_prefers_then_secondary_then_fallback() {
+        assert_eq!(super::pick("per-game", "global", "fallback"), "per-game");
+        assert_eq!(super::pick("", "global", "fallback"), "global");
+        assert_eq!(super::pick("", "", "fallback"), "fallback");
+    }
 
     #[test]
     fn test_console_input_mode_prioritizes_game_and_console_overrides() {

@@ -160,6 +160,70 @@ pub fn game_log_path(save_dir: &str, game_id: i64) -> String {
         .into_owned()
 }
 
+/// Drains one piped output stream of a spawned process into the shared game
+/// log buffer, one line at a time. Runs on its own thread so both pipes can
+/// be read live without deadlocking on a full pipe buffer.
+fn pipe_lines_to_log<R: Read + std::marker::Send + 'static>(pipe: Option<R>, log: GameLog) {
+    std::thread::spawn(move || {
+        let Some(mut reader) = pipe else { return };
+        let mut buf = [0u8; 4096];
+        let mut pending = String::new();
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => {
+                    if !pending.is_empty() {
+                        log.lock().unwrap().push(pending);
+                    }
+                    break;
+                }
+                Ok(n) => {
+                    pending.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    while let Some(pos) = pending.find('\n') {
+                        let line = pending[..pos].trim_end_matches('\r').to_string();
+                        log.lock().unwrap().push(line);
+                        pending = pending[pos + 1..].to_string();
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Spawns a process that is not tracked as a play session: nothing is
+/// recorded, no messages are sent, and the child is left running after Ira
+/// exits (aside from the subreaper). Its output is streamed into the log
+/// buffer for `log_key` so the in-app log viewer still shows it.
+pub fn spawn_detached(
+    command: &[String],
+    env: &[(String, String)],
+    log_key: i64,
+    header: String,
+) -> Result<(), String> {
+    let mut child = spawn_game(command, env, None, None)?;
+    clear_game_log(log_key);
+    let log = get_game_log(log_key);
+    log.lock().unwrap().push(header);
+
+    let stdout_log = log.clone();
+    pipe_lines_to_log(child.stdout.take(), stdout_log);
+    let stderr_log = log.clone();
+    pipe_lines_to_log(child.stderr.take(), stderr_log);
+
+    let exit_log = log.clone();
+    std::thread::spawn(move || match child.wait() {
+        Ok(status) => {
+            exit_log
+                .lock()
+                .unwrap()
+                .push(format!("Process exited with status {status}"));
+        }
+        Err(error) => {
+            eprintln!("launch: failed to read detached process status: {error}");
+        }
+    });
+    Ok(())
+}
+
 pub struct MonitorContext {
     pub sender: AppSender,
     pub game_id: i64,
@@ -200,58 +264,8 @@ pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
     // Spawn separate threads for stdout and stderr so both are read live.
     // Reading them sequentially would block stderr until stdout EOFs (i.e. never,
     // while the game is running), losing all shim/VK-layer diagnostic output.
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-
-    let log_buf_out = log_buf.clone();
-    std::thread::spawn(move || {
-        let Some(mut out) = stdout else { return };
-        let mut buf = [0u8; 4096];
-        let mut pending = String::new();
-        loop {
-            match out.read(&mut buf) {
-                Ok(0) | Err(_) => {
-                    if !pending.is_empty() {
-                        log_buf_out.lock().unwrap().push(pending);
-                    }
-                    break;
-                }
-                Ok(n) => {
-                    pending.push_str(&String::from_utf8_lossy(&buf[..n]));
-                    while let Some(pos) = pending.find('\n') {
-                        let line = pending[..pos].trim_end_matches('\r').to_string();
-                        log_buf_out.lock().unwrap().push(line);
-                        pending = pending[pos + 1..].to_string();
-                    }
-                }
-            }
-        }
-    });
-
-    let log_buf_err = log_buf.clone();
-    std::thread::spawn(move || {
-        let Some(mut err) = stderr else { return };
-        let mut buf = [0u8; 4096];
-        let mut pending = String::new();
-        loop {
-            match err.read(&mut buf) {
-                Ok(0) | Err(_) => {
-                    if !pending.is_empty() {
-                        log_buf_err.lock().unwrap().push(pending);
-                    }
-                    break;
-                }
-                Ok(n) => {
-                    pending.push_str(&String::from_utf8_lossy(&buf[..n]));
-                    while let Some(pos) = pending.find('\n') {
-                        let line = pending[..pos].trim_end_matches('\r').to_string();
-                        log_buf_err.lock().unwrap().push(line);
-                        pending = pending[pos + 1..].to_string();
-                    }
-                }
-            }
-        }
-    });
+    pipe_lines_to_log(child.stdout.take(), log_buf.clone());
+    pipe_lines_to_log(child.stderr.take(), log_buf.clone());
 
     loop {
         std::thread::sleep(Duration::from_secs(2));

@@ -88,6 +88,37 @@ fn overlay_paths() -> Option<(String, String)> {
     None
 }
 
+/// The parent process environment minus build/dev variables that must never
+/// reach a launched process (CARGO/RUST toolchain vars), with PATH and
+/// LD_LIBRARY_PATH stripped of dev directories. Wine-specific handling is up
+/// to callers.
+pub fn clean_parent_env() -> Vec<(String, String)> {
+    std::env::vars()
+        .filter(|(k, _)| {
+            // Filter out build/dev environment variables that shouldn't reach the game
+            k != "CARGO"
+                && !k.starts_with("CARGO_")
+                && k != "RUSTUP"
+                && !k.starts_with("RUSTUP_")
+                && !k.starts_with("RUST_")
+                && k != "OUT_DIR"
+        })
+        .filter(|(k, v)| match k.as_str() {
+            // For non-Proton launches: remove if only dev paths
+            // (cargo, rustup, target dirs); otherwise keep filtered below.
+            "LD_LIBRARY_PATH" | "PATH" => !filter_dev_paths(v).is_empty(),
+            _ => true,
+        })
+        .map(|(k, v)| {
+            if k == "LD_LIBRARY_PATH" || k == "PATH" {
+                (k, filter_dev_paths(&v).join(":"))
+            } else {
+                (k, v)
+            }
+        })
+        .collect()
+}
+
 pub fn build_env(
     launch: &GameLaunchConfig,
     wine: Option<&WineConfig>,
@@ -102,42 +133,13 @@ pub fn build_env(
         && (crate::wine_detect::is_proton_version(&wine.unwrap().version)
             || crate::wine_detect::is_proton_binary(wine_exe));
 
-    let mut env: Vec<(String, String)> = std::env::vars()
-        .filter(|(k, _)| {
-            // Filter out build/dev environment variables that shouldn't reach the game
-            k != "CARGO"
-                && !k.starts_with("CARGO_")
-                && k != "RUSTUP"
-                && !k.starts_with("RUSTUP_")
-                && !k.starts_with("RUST_")
-                && k != "OUT_DIR"
-        })
-        .filter(|(k, v)| {
-            if k == "LD_LIBRARY_PATH" {
-                if is_proton {
-                    // For Proton/umu, don't pass host LD_LIBRARY_PATH at all.
-                    // pressure-vessel builds its own STEAM_RUNTIME_LIBRARY_PATH
-                    // from this — host paths cause library conflicts in the container.
-                    return false;
-                }
-                // For non-Proton: remove if only dev paths (cargo, rustup, target dirs)
-                !filter_dev_paths(v).is_empty()
-            } else if k == "PATH" {
-                // Strip cargo/rustup dev directories from PATH so they never
-                // reach the game (e.g. /home/ayla/.cargo/bin under cargo run).
-                !filter_dev_paths(v).is_empty()
-            } else {
-                true
-            }
-        })
-        .map(|(k, v)| {
-            if k == "LD_LIBRARY_PATH" || k == "PATH" {
-                (k, filter_dev_paths(&v).join(":"))
-            } else {
-                (k, v)
-            }
-        })
-        .collect();
+    let mut env = clean_parent_env();
+    if is_proton {
+        // For Proton/umu, don't pass host LD_LIBRARY_PATH at all.
+        // pressure-vessel builds its own STEAM_RUNTIME_LIBRARY_PATH
+        // from this — host paths cause library conflicts in the container.
+        env.retain(|(k, _)| k != "LD_LIBRARY_PATH");
+    }
 
     if let Some(w) = wine {
         if w.enabled {

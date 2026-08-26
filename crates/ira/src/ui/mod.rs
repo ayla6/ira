@@ -15,6 +15,7 @@ mod image_budget;
 mod mass_match_dialog;
 mod message_handler;
 mod message_helpers;
+mod open_emulator_row;
 mod play_button;
 mod play_button_helpers;
 mod ra_match_dialog;

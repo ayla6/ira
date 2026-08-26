@@ -92,7 +92,6 @@ pub fn init_db(db_path: &str) -> DbConn {
                 cached_achievement_mtime INTEGER NOT NULL DEFAULT 0,
                 api_dll_folder TEXT NOT NULL DEFAULT '',
                 saves_centralized INTEGER NOT NULL DEFAULT 0,
-                rom_crc32 TEXT NOT NULL DEFAULT '',
                 rom_hash TEXT NOT NULL DEFAULT ''
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
@@ -136,7 +135,6 @@ pub fn init_db(db_path: &str) -> DbConn {
             CREATE INDEX IF NOT EXISTS idx_game_groups_group ON game_groups(group_id);",
         ).expect("failed to create tables");
         // Schema migrations for databases created before a column existed.
-        ensure_column(&conn, "games", "rom_crc32", "TEXT NOT NULL DEFAULT ''");
         ensure_column(&conn, "games", "rom_hash", "TEXT NOT NULL DEFAULT ''");
     }
 

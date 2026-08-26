@@ -475,10 +475,10 @@ fn build_ra_games_for_console(
     games
 }
 
-/// Extracts DS banner icons and identification hashes (No-Intro CRC32,
-/// RetroAchievements hash) for games that don't have them yet. Reading a
-/// ROM streams — and for containers, decompresses — its whole image, so
-/// the reads run concurrently while the cheap writes stay serial.
+/// Extracts DS banner icons and RetroAchievements hashes for games that
+/// don't have them yet. Reads stop once the hashed header ranges are in,
+/// so containers only decompress a few megabytes; the reads run
+/// concurrently while the cheap writes stay serial.
 /// Archives are handled by `read_rom_info`, which skips them unless
 /// `unpack_roms` is on.
 fn enrich_nds_roms(
@@ -515,8 +515,8 @@ fn enrich_nds_roms(
         let Some(info) = info else {
             continue;
         };
-        if let Err(e) = ira_db::set_rom_hashes(db, db_id, &info.rom_crc32, &info.rom_hash) {
-            eprintln!("Failed to store DS ROM hashes: {e}");
+        if let Err(e) = ira_db::set_rom_hash(db, db_id, &info.rom_hash) {
+            eprintln!("Failed to store DS ROM hash: {e}");
         }
         write_nds_icon(save_dir, db_id, &info.icon);
     }

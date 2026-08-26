@@ -17,8 +17,6 @@ pub struct DsRomInfo {
     /// 32×32 RGBA8 icon, decoded from the banner's 4bpp tile layout.
     /// Color 0 is transparent.
     pub icon: Vec<u8>,
-    /// No-Intro-style CRC32 of the whole ROM, lowercase hex.
-    pub rom_crc32: String,
     /// RetroAchievements hash (MD5 over header + arm9 + arm7 + icon/title).
     pub rom_hash: String,
 }
@@ -282,9 +280,11 @@ fn read_from_stream(reader: &mut dyn Read) -> Option<DsRomInfo> {
         (arm7_addr, arm7_size),
         (icon_addr, BANNER_LEN),
     ]);
+    // Stop decompressing once the hashed ranges are in: RetroAchievements
+    // identifies DS ROMs by these ranges alone, never by the whole file.
     capture.feed(&lead);
     let mut chunk = [0u8; 64 * 1024];
-    loop {
+    while !capture.all_filled() {
         let read = reader.read(&mut chunk).unwrap_or(0);
         if read == 0 {
             break;
@@ -299,7 +299,6 @@ fn read_from_stream(reader: &mut dyn Read) -> Option<DsRomInfo> {
     Some(DsRomInfo {
         title,
         icon,
-        rom_crc32: capture.crc32_hex(),
         rom_hash: format!("{:x}", md5.finalize()),
     })
 }
@@ -372,7 +371,6 @@ mod tests {
         assert_eq!(info.title, "Test DS Game");
         assert_eq!(&info.icon[0..4], &[247, 255, 255, 255]);
         assert_eq!(&info.icon[4..8], &[0, 0, 0, 255]);
-        assert_eq!(info.rom_crc32, format!("{:08x}", crc32fast::hash(&rom)));
     }
 
     #[test]

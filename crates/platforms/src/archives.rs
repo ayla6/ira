@@ -95,7 +95,6 @@ where
 pub struct RangeCapture {
     ranges: Vec<(u64, usize)>,
     buffers: Vec<Vec<u8>>,
-    crc: crc32fast::Hasher,
     pos: u64,
 }
 
@@ -105,13 +104,8 @@ impl RangeCapture {
         Self {
             ranges,
             buffers,
-            crc: crc32fast::Hasher::new(),
             pos: 0,
         }
-    }
-
-    pub fn crc32_hex(&self) -> String {
-        format!("{:08x}", self.crc.clone().finalize())
     }
 
     /// The captured bytes of range `index` (0-padded when the stream ended
@@ -140,7 +134,6 @@ impl RangeCapture {
     }
 
     pub fn feed(&mut self, data: &[u8]) {
-        self.crc.update(data);
         let data_start = self.pos;
         let data_end = self.pos + data.len() as u64;
         for (i, (range_start, range_len)) in self.ranges.iter().enumerate() {
@@ -230,13 +223,6 @@ mod tests {
         capture.feed(&[5, 6, 7, 8, 9, 10, 11]);
         assert_eq!(capture.captured(0), &[2, 3, 4]);
         assert_eq!(capture.captured(1), &[8, 9, 10, 11]);
-        assert_eq!(
-            capture.crc32_hex(),
-            format!(
-                "{:08x}",
-                crc32fast::hash(&[0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
-            )
-        );
         assert!(capture.all_filled());
     }
 

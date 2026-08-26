@@ -51,8 +51,6 @@ pub struct GameEntry {
     pub cached_total_count: i64,
     /// Mtime of achievement files at last cache write (0 = never cached).
     pub cached_achievement_mtime: i64,
-    /// No-Intro-style CRC32 of the ROM file (lowercase hex, empty = unknown).
-    pub rom_crc32: String,
     /// RetroAchievements identification hash (empty = unknown).
     pub rom_hash: String,
 }
@@ -97,7 +95,6 @@ impl GameEntry {
             cached_earned_count: 0,
             cached_total_count: 0,
             cached_achievement_mtime: 0,
-            rom_crc32: String::new(),
             rom_hash: String::new(),
         }
     }
@@ -140,7 +137,6 @@ impl GameEntry {
             cached_earned_count: g.earned_count as i64,
             cached_total_count: g.total_count as i64,
             cached_achievement_mtime: 0,
-            rom_crc32: String::new(),
             rom_hash: String::new(),
         }
     }

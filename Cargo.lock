@@ -2192,7 +2192,6 @@ dependencies = [
 name = "ira-platforms"
 version = "0.1.0"
 dependencies = [
- "crc32fast",
  "ira-api",
  "ira-config",
  "ira-db",

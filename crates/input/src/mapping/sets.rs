@@ -101,6 +101,15 @@ impl MappingEngine {
         self.release_all_activator_states();
     }
 
+    /// Switch to a set from outside the mapping flow — the cursor watcher
+    /// drives Steam Input's "action set when the cursor is shown/hidden".
+    /// Returns the outputs released by the switch so the caller can emit
+    /// them; targeting an unknown set or the active set is a no-op.
+    pub fn request_action_set(&mut self, index: usize) -> Vec<OutputEvent> {
+        self.switch_action_set(index);
+        self.take_pending_releases()
+    }
+
     /// Release every held activator output (set switch, layer change);
     /// released events land in `pending_releases`.
     pub(crate) fn release_all_activator_states(&mut self) {

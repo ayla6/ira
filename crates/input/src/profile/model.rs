@@ -103,6 +103,12 @@ pub struct ControllerCalibration {
     pub stick_deadzone_left: f32,
     #[serde(default)]
     pub stick_deadzone_right: f32,
+    /// Controller-level Nintendo button layout, like Steam's per-controller
+    /// toggle: face buttons swap so the physical A position reports as A and
+    /// X as X (A↔B and X↔Y on the positional standard). Off by default —
+    /// positional layout matches what every non-Nintendo game expects.
+    #[serde(default)]
+    pub nintendo_layout: bool,
 }
 
 /// Where a joystick's deadzone radii come from, mirroring Steam Input's
@@ -217,6 +223,12 @@ pub enum GyroOutput {
     Mouse,
     LeftStick,
     RightStick,
+    /// The mapping engine does not consume the gyro at all: the physical
+    /// controller itself is exposed to the game over uhid (see
+    /// [`InputProfile::wants_native_controller`]), so the sensors reach the
+    /// game through its own native driver. Only meaningful with a backend
+    /// that supports it (Switch Pro, DS4, DualSense) and a motion sensor.
+    NativeMotion,
 }
 
 /// How gyro rotation maps to output axes, mirroring Steam Input's
@@ -895,6 +907,13 @@ pub struct InputProfile {
     /// as broken.
     #[serde(default = "default_rumble_enabled")]
     pub rumble: bool,
+    /// Action set to switch to when the game shows the mouse cursor
+    /// (Steam Input's "action set when cursor shown"). `None` disables.
+    #[serde(default)]
+    pub action_set_when_cursor_shown: Option<usize>,
+    /// Action set to switch back to when the game hides the cursor again.
+    #[serde(default)]
+    pub action_set_when_cursor_hidden: Option<usize>,
 }
 
 fn default_rumble_enabled() -> bool {
@@ -914,6 +933,8 @@ impl Default for InputProfile {
             compatible_game_ids: Vec::new(),
             native_motion: false,
             rumble: true,
+            action_set_when_cursor_shown: None,
+            action_set_when_cursor_hidden: None,
         }
     }
 }
@@ -946,8 +967,31 @@ impl InputProfile {
             if set.name.trim().is_empty() {
                 return Err(format!("action set {set_index} needs a name"));
             }
+            // Layers are parented by name, so duplicate names would make
+            // "which set does this layer belong to" ambiguous.
+            if self.action_sets.iter().any(|other| {
+                other.name == set.name && !std::ptr::eq(other, set)
+            }) {
+                return Err(format!(
+                    "action set {set_index}: the name '{}' is used twice",
+                    set.name
+                ));
+            }
             for (input_index, input) in set.inputs.iter().enumerate() {
                 self.validate_input_mapping(&set.name, input_index, input)?;
+            }
+        }
+        for (label, target) in [
+            ("cursor shown", self.action_set_when_cursor_shown),
+            ("cursor hidden", self.action_set_when_cursor_hidden),
+        ] {
+            if let Some(target) = target {
+                if target >= self.action_sets.len() {
+                    return Err(format!(
+                        "action set when {label} points at set {target}, but only {} sets exist",
+                        self.action_sets.len()
+                    ));
+                }
             }
         }
         for (layer_index, layer) in self.action_layers.iter().enumerate() {

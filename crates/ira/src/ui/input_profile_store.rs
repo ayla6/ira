@@ -370,6 +370,7 @@ mod tests {
             z: 0.3,
             stick_deadzone_left: 0.0,
             stick_deadzone_right: 0.0,
+            nintendo_layout: false,
         };
         let path = super::controller_default_path(tmp.path().to_str().unwrap(), "pad");
         super::write_profile(

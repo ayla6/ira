@@ -9,12 +9,33 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::physical::DeviceInfo;
 use crate::profile::ControllerCalibration;
 
 /// `vendor:product` in lowercase hex, matching how controllers are identified
 /// everywhere else.
 pub fn device_key(vendor: u16, product: u16) -> String {
     format!("{vendor:04x}:{product:04x}")
+}
+
+/// The Nintendo button layout in effect for a controller: an explicitly
+/// stored choice always wins, and a controller with no entry yet defaults
+/// to its family's preference (on for Nintendo-family pads, off otherwise).
+pub fn resolved_nintendo_layout(path: &Path, device: &DeviceInfo) -> bool {
+    load_calibration(path, device.vendor, device.product)
+        .map(|calibration| calibration.nintendo_layout)
+        .unwrap_or_else(|| device.prefers_nintendo_layout())
+}
+
+/// A fresh calibration entry for a controller, seeded so that writing any
+/// other per-controller value does not clobber the family's layout default:
+/// an entry created implicitly carries the default the resolver would have
+/// picked had no entry existed.
+pub fn default_calibration_for(device: &DeviceInfo) -> ControllerCalibration {
+    ControllerCalibration {
+        nintendo_layout: device.prefers_nintendo_layout(),
+        ..ControllerCalibration::default()
+    }
 }
 
 /// The calibration file location for an app data directory.
@@ -69,6 +90,18 @@ pub fn remove_calibration(path: &Path, vendor: u16, product: u16) -> Result<(), 
 mod tests {
     use super::*;
 
+    fn device(vendor: u16, name: &str) -> crate::physical::DeviceInfo {
+        crate::physical::DeviceInfo {
+            path: std::path::PathBuf::from("/dev/input/event9"),
+            name: name.to_string(),
+            vendor,
+            product: 0x2009,
+            version: 0,
+            has_evdev_gyro: false,
+            supported_buttons: Vec::new(),
+        }
+    }
+
     fn write(path: &std::path::Path, vendor: u16, product: u16, bias: f32) {
         save_calibration(
             path,
@@ -80,6 +113,7 @@ mod tests {
                 z: 0.0,
                 stick_deadzone_left: 0.0,
                 stick_deadzone_right: 0.0,
+                nintendo_layout: false,
             },
         )
         .unwrap();
@@ -114,5 +148,47 @@ mod tests {
         write(&path, 1, 2, 0.1);
         assert!(remove_calibration(&path, 1, 2).is_ok());
         assert!(load_calibration(&path, 1, 2).is_none());
+    }
+
+    #[test]
+    fn test_resolved_layout_defaults_on_for_nintendo_family_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("cal.json");
+        let pro = device(0x057e, "Nintendo Switch Pro Controller");
+        let eight_bitdo = device(0x2dc8, "8BitDo Ultimate 2 Wireless Controller for PC");
+        assert!(resolved_nintendo_layout(&path, &pro));
+        assert!(!resolved_nintendo_layout(&path, &eight_bitdo));
+    }
+
+    #[test]
+    fn test_resolved_layout_stored_choice_overrides_the_family_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("cal.json");
+        let pro = device(0x057e, "Nintendo Switch Pro Controller");
+        let eight_bitdo = device(0x2dc8, "8BitDo Ultimate 2 Wireless Controller for PC");
+
+        // Explicitly off on a Nintendo pad stays off...
+        let mut entry = default_calibration_for(&pro);
+        entry.nintendo_layout = false;
+        save_calibration(&path, pro.vendor, pro.product, &entry).unwrap();
+        assert!(!resolved_nintendo_layout(&path, &pro));
+
+        // ...and explicitly on wins for a non-Nintendo pad.
+        let mut entry = default_calibration_for(&eight_bitdo);
+        entry.nintendo_layout = true;
+        save_calibration(&path, eight_bitdo.vendor, eight_bitdo.product, &entry).unwrap();
+        assert!(resolved_nintendo_layout(&path, &eight_bitdo));
+    }
+
+    #[test]
+    fn test_default_entry_seeds_the_family_preference() {
+        let pro = device(0x057e, "Nintendo Switch Pro Controller");
+        assert!(default_calibration_for(&pro).nintendo_layout);
+        let xbox = device(0x045e, "Xbox 360 Controller");
+        assert!(!default_calibration_for(&xbox).nintendo_layout);
+        // Seeding through the default keeps unrelated fields empty.
+        let seeded = default_calibration_for(&pro);
+        assert_eq!(seeded.stick_deadzone_left, 0.0);
+        assert_eq!(seeded.x, 0.0);
     }
 }

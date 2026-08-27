@@ -239,6 +239,7 @@ impl GyroProcessor {
             z: self.bias.z,
             stick_deadzone_left: 0.0,
             stick_deadzone_right: 0.0,
+            nintendo_layout: false,
         }
     }
 
@@ -511,6 +512,7 @@ mod tests {
             z: 0.03,
             stick_deadzone_left: 0.0,
             stick_deadzone_right: 0.0,
+            nintendo_layout: false,
         };
         let mut processor = GyroProcessor::new(
             bias,
@@ -698,6 +700,7 @@ mod tests {
             z: -0.05,
             stick_deadzone_left: 0.0,
             stick_deadzone_right: 0.0,
+            nintendo_layout: false,
         };
         let mut processor = GyroProcessor::new(
             bias,

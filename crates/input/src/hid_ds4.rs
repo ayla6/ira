@@ -14,6 +14,7 @@
 use std::io;
 
 use crate::motion_udp::{MotionSample, PadState};
+use crate::rumble::RumbleCommand;
 use crate::uhid::{UhidDevice, BUS_USB};
 
 /// Hori's PS4 mini pad identity: present in SDL's controller database as a
@@ -129,9 +130,11 @@ pub fn usb_state_report(
         sample.accel_ms2[2] / GRAVITY_MS2 * ACCEL_COUNTS_PER_G,
     );
 
-    // Byte 30: battery — level 5 of 10, discharging. Bytes 35/39: both touch
-    // points up (bit 7 set means released).
-    r[30] = 0x05;
+    // Byte 30: battery full plus the USB-plugged bit — games gate features
+    // (rumble patterns, report rates) on a wired connection, and the bus
+    // type alone is not what they all read. Bytes 35/39: both touch points
+    // up (bit 7 set means released).
+    r[30] = 0x1F;
     r[35] = 0x80;
     r[39] = 0x80;
     r
@@ -156,25 +159,30 @@ fn hat_value(pad: &PadState) -> u8 {
     }
 }
 
-/// A minimal gamepad report descriptor for the kernel's evdev twin. SDL's
-/// hidapi driver parses our raw report bytes directly and never consults
-/// this; it exists so hid parsing succeeds and non-hidapi consumers get a
-/// sane joystick node (sticks on X/Y/Z/Rz, hat on hat0, 13 buttons).
+/// The kernel's evdev twin descriptor, byte-for-byte the wire prefix of
+/// [`usb_state_report`]: report id 0x01, four stick axes, the hat plus face
+/// nibbles, the shoulder/system buttons, the guide bit, and the analog
+/// triggers on Rx/Ry — the Sony evdev layout SDL and RetroArch expect.
+/// Bytes past the triggers (sensor payload, touchpads) are undeclared; HID
+/// parsing stops at the last field, and SDL's hidapi driver reads the raw
+/// wire anyway, so the twin exposes exactly the controls a udev consumer
+/// needs. Faces use individual usages so they land on the standard evdev
+/// buttons despite the wire's west/south/east/north bit order.
 pub const REPORT_DESCRIPTOR: &[u8] = &[
     0x05, 0x01, // Usage Page (Generic Desktop)
     0x09, 0x05, // Usage (Gamepad)
     0xA1, 0x01, // Collection (Application)
-    0xA1, 0x00, //   Collection (Physical)
-    0x09, 0x30, //     Usage (X)
-    0x09, 0x31, //     Usage (Y)
-    0x09, 0x32, //     Usage (Z)
-    0x09, 0x35, //     Usage (Rz)
-    0x15, 0x00, //     Logical Minimum (0)
+    0x85, 0x01, //   Report ID (1)
+    0x09, 0x30, //   Usage (X)      — left stick x
+    0x09, 0x31, //   Usage (Y)      — left stick y
+    0x09, 0x32, //   Usage (Z)      — right stick x
+    0x09, 0x35, //   Usage (Rz)     — right stick y
+    0x15, 0x00, //   Logical Minimum (0)
     0x26, 0xFF, 0x00, // Logical Maximum (255)
-    0x75, 0x08, //     Report Size (8)
-    0x95, 0x04, //     Report Count (4)
-    0x81, 0x02, //     Input (Data, Variable, Absolute)
-    0xC0, //   End Collection
+    0x75, 0x08, //   Report Size (8)
+    0x95, 0x04, //   Report Count (4)
+    0x81, 0x02, //   Input (Data, Variable, Absolute)
+    0x05, 0x01, //   Usage Page (Generic Desktop)
     0x09, 0x39, //   Usage (Hat switch)
     0x15, 0x00, //   Logical Minimum (0)
     0x25, 0x07, //   Logical Maximum (7)
@@ -185,16 +193,44 @@ pub const REPORT_DESCRIPTOR: &[u8] = &[
     0x95, 0x01, //   Report Count (1)
     0x81, 0x42, //   Input (Data, Variable, Null State)
     0x05, 0x09, //   Usage Page (Button)
-    0x19, 0x01, //   Usage Minimum (Button 1)
-    0x29, 0x0D, //   Usage Maximum (Button 13)
+    0x09, 0x05, //   Usage (West) — square
     0x15, 0x00, //   Logical Minimum (0)
     0x25, 0x01, //   Logical Maximum (1)
     0x75, 0x01, //   Report Size (1)
-    0x95, 0x0D, //   Report Count (13)
+    0x95, 0x01, //   Report Count (1)
     0x81, 0x02, //   Input (Data, Variable, Absolute)
+    0x09, 0x01, //   Usage (South) — cross
+    0x81, 0x02, //   Input
+    0x09, 0x02, //   Usage (East) — circle
+    0x81, 0x02, //   Input
+    0x09, 0x04, //   Usage (North) — triangle
+    0x81, 0x02, //   Input
+    0x19, 0x07, //   Usage Minimum (TL)   — L1
+    0x29, 0x08, //   Usage Maximum (TR)   — R1
+    0x95, 0x02, //   Report Count (2)
+    0x81, 0x02, //   Input
+    0x19, 0x09, //   Usage Minimum (TL2)  — digital L2
+    0x29, 0x0A, //   Usage Maximum (TR2)  — digital R2
+    0x81, 0x02, //   Input
+    0x19, 0x0B, //   Usage Minimum (Select) — share
+    0x29, 0x0C, //   Usage Maximum (Start)  — options
+    0x81, 0x02, //   Input
+    0x19, 0x0E, //   Usage Minimum (Thumb L)
+    0x29, 0x0F, //   Usage Maximum (Thumb R)
+    0x81, 0x02, //   Input
+    0x09, 0x0D, //   Usage (Mode) — guide
+    0x81, 0x02, //   Input
     0x75, 0x01, //   Report Size (1)
-    0x95, 0x03, //   Report Count (3)
-    0x81, 0x03, //   Input (Constant) — pad to byte boundary
+    0x95, 0x07, //   Report Count (7)
+    0x81, 0x03, //   Input (Constant) — sequence counter bits
+    0x05, 0x01, //   Usage Page (Generic Desktop)
+    0x09, 0x33, //   Usage (Rx) — L2 analog
+    0x09, 0x34, //   Usage (Ry) — R2 analog
+    0x15, 0x00, //   Logical Minimum (0)
+    0x26, 0xFF, 0x00, // Logical Maximum (255)
+    0x75, 0x08, //   Report Size (8)
+    0x95, 0x02, //   Report Count (2)
+    0x81, 0x02, //   Input (Data, Variable, Absolute)
     0xC0, // End Collection
 ];
 
@@ -202,6 +238,9 @@ pub const REPORT_DESCRIPTOR: &[u8] = &[
 /// controller states as USB input reports.
 pub struct Ds4UhidDevice {
     device: UhidDevice,
+    /// Rumble the game played on this pad, drained by the daemon for replay
+    /// on the physical controller.
+    pending_rumble: Vec<RumbleCommand>,
 }
 
 impl Ds4UhidDevice {
@@ -217,7 +256,10 @@ impl Ds4UhidDevice {
             VENDOR_ID,
             PRODUCT_ID,
         )?;
-        Ok(Self { device })
+        Ok(Self {
+            device,
+            pending_rumble: Vec::new(),
+        })
     }
 
     /// Pushes one whole-controller state and drains kernel events. Reports
@@ -226,6 +268,14 @@ impl Ds4UhidDevice {
     pub fn send_state(&mut self, pad: &PadState, sample: &MotionSample) -> io::Result<()> {
         self.device
             .send_input_report(&usb_state_report(pad, sample, sample.timestamp_us))?;
+        self.service()
+    }
+
+    /// Drains kernel events and serves SDL's feature probes without sending
+    /// a state report. Run every daemon pass: probes arrive whenever a
+    /// reader opens the pad, including while the daemon considers itself
+    /// paused or between report-rate ticks.
+    pub fn service(&mut self) -> io::Result<()> {
         for event in self.device.poll()? {
             match event {
                 crate::uhid::UhidEvent::Open => {
@@ -249,6 +299,11 @@ impl Ds4UhidDevice {
                         let _ = self.device.reply_get_report(id, ENODATA, &[]);
                     }
                 }
+                crate::uhid::UhidEvent::OutputReport { data } => {
+                    if let Some(command) = rumble_command_from_output_report(&data) {
+                        self.pending_rumble.push(command);
+                    }
+                }
                 other => {
                     eprintln!("ira-input: virtual DS4 event: {other:?}");
                 }
@@ -256,13 +311,43 @@ impl Ds4UhidDevice {
         }
         Ok(())
     }
+
+    /// Rumble commands decoded since the last drain, in arrival order. A
+    /// zero-magnitude command stops the motors.
+    pub fn take_rumble(&mut self) -> Vec<RumbleCommand> {
+        std::mem::take(&mut self.pending_rumble)
+    }
+}
+
+/// DS4 output reports have no duration on the wire; drivers stop the motors
+/// with an explicit zeroed report, so the replayed effect only needs to
+/// outlive the gaps between reports.
+const DECODED_RUMBLE_MS: u16 = 250;
+
+/// Extracts the rumble request from a DS4 output report (id 0x05): byte 4
+/// is the right motor (small/weak), byte 5 the left motor (big/strong), on
+/// the 0..=255 HID scale.
+pub(crate) fn rumble_command_from_output_report(report: &[u8]) -> Option<RumbleCommand> {
+    if report.first() != Some(&0x05) || report.len() < 6 {
+        return None;
+    }
+    Some(RumbleCommand {
+        strong: hid_motor_scale(report[5]),
+        weak: hid_motor_scale(report[4]),
+        duration_ms: DECODED_RUMBLE_MS,
+    })
+}
+
+/// HID motor byte (0..=255) to the evdev magnitude scale (0..=65535).
+fn hid_motor_scale(byte: u8) -> u16 {
+    u16::from(byte) * 257
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         capabilities_report, hat_value, usb_state_report, ACCEL_COUNTS_PER_G, GRAVITY_MS2,
-        GYRO_COUNTS_PER_DPS, REPORT_DESCRIPTOR, USB_STATE_REPORT_LEN,
+        GYRO_COUNTS_PER_DPS, REPORT_DESCRIPTOR, REPORT_ID_USB_STATE, USB_STATE_REPORT_LEN,
     };
     use crate::motion_udp::{MotionSample, PadState};
 
@@ -280,7 +365,15 @@ mod tests {
         // item is two bytes or three for wide logical/physical maxima.
         assert_eq!(REPORT_DESCRIPTOR.first(), Some(&0x05));
         assert_eq!(REPORT_DESCRIPTOR.last(), Some(&0xC0));
-        assert_eq!(REPORT_DESCRIPTOR.iter().filter(|&&b| b == 0xC0).count(), 2);
+        assert_eq!(REPORT_DESCRIPTOR.iter().filter(|&&b| b == 0xC0).count(), 1);
+        // Numbered reports: the twin parses wire reports that start with
+        // the USB state report id.
+        assert_eq!(
+            REPORT_DESCRIPTOR
+                .windows(2)
+                .position(|item| item == [0x85, REPORT_ID_USB_STATE]),
+            Some(6)
+        );
     }
 
     #[test]
@@ -350,6 +443,23 @@ mod tests {
         assert_eq!(read_i16(23), 0);
         let tick = u16::from_le_bytes([report[10], report[11]]);
         assert_eq!(tick, 30_000);
+    }
+
+    #[test]
+    fn test_rumble_decoded_from_output_report() {
+        // Report 0x05: byte 4 right/weak motor, byte 5 left/strong motor.
+        let report = [0x05, 0x00, 0x00, 0x00, 0x40, 0xFF, 0x00];
+        let command = super::rumble_command_from_output_report(&report).expect("rumble report");
+        assert_eq!(command.strong, 255 * 257);
+        assert_eq!(command.weak, 64 * 257);
+        assert!(command.duration_ms > 0);
+        // Zeroed motors are a stop command.
+        let stop = super::rumble_command_from_output_report(&[0x05, 0, 0, 0, 0, 0, 0])
+            .expect("stop report");
+        assert_eq!((stop.strong, stop.weak), (0, 0));
+        // Everything else carries no motor data.
+        assert!(super::rumble_command_from_output_report(&[0x11, 0, 0, 0, 0, 0]).is_none());
+        assert!(super::rumble_command_from_output_report(&[0x05, 0]).is_none());
     }
 
     #[test]

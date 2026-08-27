@@ -14,7 +14,8 @@ mod virtual_keyboard;
 mod virtual_mouse;
 
 pub use calibration::{
-    calibration_store_path, device_key, load_calibration, remove_calibration, save_calibration,
+    calibration_store_path, default_calibration_for, device_key, load_calibration,
+    remove_calibration, resolved_nintendo_layout, save_calibration,
 };
 pub use gyro::{GyroProcessingOptions, GyroProcessor, GyroRates};
 pub use mapping::{InputEvent, MappingEngine, OutputEvent};
@@ -32,9 +33,16 @@ pub use profile::{
 pub use registry::ControllerRegistry;
 mod rumble;
 pub use report_rate::ReportRateEstimator;
-pub use rumble::{PhysicalRumble, RumbleCommand};
+pub use rumble::{rumble_report_8bitdo, PhysicalRumble, RumbleCommand, VENDOR_8BITDO};
+mod cursor;
+mod evdev_imu;
 mod focus;
+mod switch_hidraw;
+mod switch_rumble;
+pub use cursor::CursorWatcher;
+pub use evdev_imu::{discover_imu_node, sensor_node_names, EvdevImu};
 pub use focus::FocusWatcher;
+pub use switch_hidraw::SwitchHidrawPad;
 mod motion_udp;
 pub use motion_udp::{
     sensor_to_dsu_frame, sensor_to_motion, MotionSample, MotionServer, PadState, MOTION_PORT,

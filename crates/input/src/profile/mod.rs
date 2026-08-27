@@ -1,6 +1,7 @@
 //! Input profile model. `model.rs` holds the types; this module re-exports
 //! them and owns cross-cutting load-time normalization.
 
+mod action_sets;
 mod model;
 
 pub use model::{

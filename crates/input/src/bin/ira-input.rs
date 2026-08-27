@@ -29,6 +29,9 @@ const FOCUS_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const PROFILE_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const STEAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(250);
+/// How long a Switch-protocol takeover without any report may last before
+/// the daemon abandons it and returns to the evdev input path.
+const SWITCH_DRIVER_SILENCE_LIMIT: Duration = Duration::from_secs(3);
 const STEAM_START_TIMEOUT: Duration = Duration::from_secs(60);
 const STEAM_EXIT_GRACE: Duration = Duration::from_secs(2);
 
@@ -52,12 +55,25 @@ struct SteamSession {
     stop_sent: bool,
 }
 
+/// Which periodic work is live this pass; every entry earns a slot in the
+/// loop's wait timeout.
+struct LoopActivity {
+    tick: bool,
+    tick_interval: Duration,
+    child: bool,
+    profile: bool,
+    steam: bool,
+    disconnected: bool,
+    cursor: bool,
+}
+
 struct LoopSchedule {
     sensor: Instant,
     process: Instant,
     profile: Instant,
     steam: Instant,
     reconnect: Instant,
+    cursor: Instant,
 }
 
 impl LoopSchedule {
@@ -69,24 +85,18 @@ impl LoopSchedule {
             profile: now,
             steam: now,
             reconnect: now,
+            cursor: now,
         }
     }
 
-    fn timeout(
-        &self,
-        tick_active: bool,
-        tick_interval: Duration,
-        child_active: bool,
-        profile_active: bool,
-        steam_active: bool,
-        disconnected: bool,
-    ) -> Option<Duration> {
+    fn timeout(&self, activity: LoopActivity) -> Option<Duration> {
         [
-            tick_active.then(|| remaining(self.sensor, tick_interval)),
-            child_active.then(|| remaining(self.process, PROCESS_POLL_INTERVAL)),
-            profile_active.then(|| remaining(self.profile, PROFILE_POLL_INTERVAL)),
-            steam_active.then(|| remaining(self.steam, STEAM_POLL_INTERVAL)),
-            disconnected.then(|| remaining(self.reconnect, RECONNECT_INTERVAL)),
+            activity.tick.then(|| remaining(self.sensor, activity.tick_interval)),
+            activity.child.then(|| remaining(self.process, PROCESS_POLL_INTERVAL)),
+            activity.profile.then(|| remaining(self.profile, PROFILE_POLL_INTERVAL)),
+            activity.steam.then(|| remaining(self.steam, STEAM_POLL_INTERVAL)),
+            activity.disconnected.then(|| remaining(self.reconnect, RECONNECT_INTERVAL)),
+            activity.cursor.then(|| remaining(self.cursor, FOCUS_POLL_INTERVAL)),
         ]
         .into_iter()
         .flatten()
@@ -411,6 +421,9 @@ fn probe_sensors() {
     }
     for device in devices {
         println!("{}: {}", device.path.display(), device.name);
+        if ira_input::EvdevImu::open(&device).is_some() {
+            println!("  kernel IMU: available");
+        }
         match Sdl3SensorBackend::open(&device) {
             Ok(Some(mut sensor)) => {
                 println!("  SDL3 gyro: available");
@@ -470,20 +483,38 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let sensor = gamepad
         .as_ref()
         .and_then(|gamepad| open_sensor(gamepad.info()));
+    // Switch-protocol takeover: when neither the kernel's IMU node nor SDL
+    // sources motion, speak the pad's own protocol over hidraw — what SDL
+    // does for games, and the only gyro path for Switch-mode pads
+    // hid-nintendo has not claimed. It replaces evdev as the input source
+    // too, because switching the report mode invalidates what generic HID
+    // parses from the descriptor.
+    let mut switch_hidraw = sensor
+        .is_none()
+        .then(|| {
+            gamepad
+                .as_ref()
+                .and_then(|gamepad| ira_input::SwitchHidrawPad::open(gamepad.info()))
+        })
+        .flatten();    if let (Some(driver), Some(gamepad)) = (switch_hidraw.as_mut(), gamepad.as_ref()) {
+        driver.set_nintendo_layout(resolved_layout_for(
+            gamepad.info(),
+            arguments.calibration.as_deref(),
+        ));
+    }
     // When an experimental uhid controller owns the session (DS4 or the
     // hid-nintendo Switch Pro), the uinput pad must not exist too or games
     // see two controllers and often bind the motionless one. Outputs still
     // reach the pad shadow that the hidraw reports and the cemuhook stream
     // read from.
-    let native_ds4 = sensor.is_some()
-        && mapper.profile().native_motion
-        && mapper.profile().backend == ira_input::VirtualGamepadBackend::DualShock4;
-    let native_switch_pro = sensor.is_some()
-        && mapper.profile().native_motion
-        && mapper.profile().backend == ira_input::VirtualGamepadBackend::SwitchPro;
-    let native_dualsense = sensor.is_some()
-        && mapper.profile().native_motion
-        && mapper.profile().backend == ira_input::VirtualGamepadBackend::DualSense;
+    let motion_available = sensor.is_some() || switch_hidraw.is_some();
+    let native_transport = motion_available && mapper.profile().wants_native_controller();
+    let native_ds4 =
+        native_transport && mapper.profile().backend == ira_input::VirtualGamepadBackend::DualShock4;
+    let native_switch_pro =
+        native_transport && mapper.profile().backend == ira_input::VirtualGamepadBackend::SwitchPro;
+    let native_dualsense =
+        native_transport && mapper.profile().backend == ira_input::VirtualGamepadBackend::DualSense;
     let mut virtual_gamepad = if native_ds4 || native_switch_pro || native_dualsense {
         eprintln!("ira-input: uinput gamepad suppressed; the uhid controller is the controller");
         VirtualGamepad::shadow_only(mapper.profile().backend)
@@ -531,13 +562,21 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         pad_vendor,
         pad_product,
     );
+    apply_controller_layout(&mut gamepad, arguments.calibration.as_deref());
     // Game-side rumble replays on the physical controller unless the profile
-    // opts out; a controller without force feedback just stays silent.
-    let mut rumble_output = open_rumble(gamepad.as_ref(), mapper.profile().rumble);
+    // opts out; a controller without force feedback just stays silent. The
+    // Switch-protocol driver replays rumble itself, and its report mode
+    // makes the vendor DInput packet wrong for the pad, so it stays the
+    // only rumble path while active.
+    let mut rumble_output = if switch_hidraw.is_some() {
+        None
+    } else {
+        open_rumble(gamepad.as_ref(), mapper.profile().rumble)
+    };
     let last_sensor_us: Option<u64> = None;
     // The motion node must exist before the game opens the virtual pad:
     // SDL pairs sensor nodes with a pad at open time only.
-    let motion_device = if sensor.is_some() && mapper.profile().native_motion {
+    let motion_device = if motion_available && mapper.profile().native_motion {
         open_motion_node(mapper.profile().backend)
     } else {
         None
@@ -554,6 +593,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             Ok(device) => {
                 eprintln!("ira-input: experimental native-motion DS4 exposed over hidraw");
                 ds4_hid = Some(device);
+                imu_hid = spawn_paired_imu(&uniq);
             }
             Err(error) => {
                 eprintln!(
@@ -562,28 +602,20 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                 );
             }
         }
-        if ds4_hid.is_some() {
-            match ira_input::ImuUhidDevice::create(&uniq) {
-                Ok(device) => {
-                    eprintln!("ira-input: paired virtual IMU exposed over evdev");
-                    imu_hid = Some(device);
-                }
-                Err(error) => {
-                    eprintln!("ira-input: failed to create virtual IMU: {error}");
-                }
-            }
-        }
     }
-    let ever_had_sensor = sensor.is_some();
+    let ever_had_sensor = motion_available;
     // A virtual *real* Switch Pro: hid-nintendo claims it, completes its
-    // handshake against our answers and builds the paired IMU input node
-    // itself — so games, flatpaks included, see genuine hardware.
+    // handshake against our answers and builds an IMU input node itself.
+    // That kernel IMU carries no usable serial though, so SDL cannot pair
+    // it with anything — the paired twin below is what delivers gyro.
     let mut switch_pro_hid = None;
     if native_switch_pro {
-        match ira_input::SwitchProUhidDevice::create() {
+        let uniq = format!("ira-virtual-{}", std::process::id());
+        match ira_input::SwitchProUhidDevice::create(&uniq) {
             Ok(device) => {
                 eprintln!("ira-input: virtual Switch Pro claimed by hid-nintendo");
                 switch_pro_hid = Some(device);
+                imu_hid = spawn_paired_imu(&uniq);
             }
             Err(error) => {
                 eprintln!("ira-input: failed to create virtual Switch Pro: {error}");
@@ -600,6 +632,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             Ok(device) => {
                 eprintln!("ira-input: experimental native-motion DualSense exposed over hidraw");
                 dualsense_hid = Some(device);
+                imu_hid = spawn_paired_imu(&uniq);
             }
             Err(error) => {
                 eprintln!(
@@ -611,6 +644,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     }
     let mut pipeline = SensorPipeline {
         sensor,
+        switch_hidraw,
         gyro_processor,
         last_sensor_us,
         motion: motion_server,
@@ -624,7 +658,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     };
     // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
     // even when no sensor exists, as long as something consumes them.
-    let mut tick_needed = pipeline.sensor.is_some()
+    let mut tick_needed = pipeline.motion_alive()
         || mapper.has_continuous_outputs()
         || mapper.profile().backend == ira_input::VirtualGamepadBackend::Dsu
         || pipeline.ds4_hid.is_some();
@@ -687,6 +721,26 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     }
     let mut paused_for_focus = false;
     let mut focus_check = Instant::now();
+    // Cursor-driven set switching (Steam Input's "action set when the mouse
+    // cursor is shown/hidden"). Same X11 limits as focus tracking: without
+    // an X server the cursor always reads as visible and switching stays off.
+    let cursor_watcher = if mapper.profile().action_set_when_cursor_shown.is_some()
+        || mapper.profile().action_set_when_cursor_hidden.is_some()
+    {
+        match ira_input::CursorWatcher::create() {
+            Some(watcher) => Some(watcher),
+            None => {
+                eprintln!(
+                    "ira-input: no X server available for cursor tracking; \
+                     cursor set switching disabled"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let mut cursor_visible: Option<bool> = None;
     if let Some(gamepad) = gamepad.as_ref() {
         eprintln!(
             "ira-input: mapping {} through {}",
@@ -733,16 +787,69 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                 if let Some(rumble) = rumble_output.as_mut() {
                     rumble.stop();
                 }
+                if let Some(switch) = pipeline.switch_hidraw.as_mut() {
+                    switch.stop_rumble();
+                }
             } else if focused && paused_for_focus {
                 paused_for_focus = false;
                 eprintln!("ira-input: game window focused; resuming input");
             }
+        }
+        if let Some(watcher) = cursor_watcher.as_ref() {
+            if schedule.cursor.elapsed() >= FOCUS_POLL_INTERVAL {
+                schedule.cursor = Instant::now();
+                let targets = OutputTargets {
+                    gamepad: &mut virtual_gamepad,
+                    keyboard: keyboard.as_mut(),
+                    mouse: mouse.as_mut(),
+                    pad: &mut pad_state,
+                };
+                if let Err(error) = poll_cursor_switch(
+                    watcher,
+                    &mut cursor_visible,
+                    &mut mapper,
+                    targets,
+                    &mut trace,
+                ) {
+                    eprintln!("ira-input: cursor set switching failed: {error}");
+                }
+            }
+        }
+        // Keep every uhid twin's kernel conversation moving regardless of
+        // pause or tick gating: hid-nintendo's connect handshake fails the
+        // driver probe within seconds, SDL feature probes arrive whenever a
+        // reader opens a pad, and queued output events otherwise stall the
+        // rumble replay path.
+        service_twin_events(&mut pipeline);
+        // Fail-safe for the Switch hidraw takeover: a pad that streamed
+        // once and then went silent would otherwise starve the session of
+        // input entirely, since the takeover replaced the evdev path.
+        // Drop the driver, fall back to evdev, and let rumble take the
+        // ordinary path again.
+        if pipeline
+            .switch_hidraw
+            .as_ref()
+            .is_some_and(|driver| driver.silent_for() >= SWITCH_DRIVER_SILENCE_LIMIT)
+        {
+            eprintln!(
+                "ira-input: Switch hidraw driver went silent; \
+                 falling back to the evdev input path"
+            );
+            pipeline.switch_hidraw = None;
+            rumble_output = open_rumble(gamepad.as_ref(), mapper.profile().rumble);
+        }
+        // Vendor hidraw rumble has no kernel timer: check the deadline every
+        // pass so a game that stops replaying its effect cannot leave the
+        // motors running.
+        if let Some(rumble) = rumble_output.as_mut() {
+            rumble.service();
         }
         let result = if paused_for_focus {
             Ok(())
         } else {
             process_physical_inputs(
                 &mut gamepad,
+                &mut pipeline,
                 &mut mapper,
                 &mut report_rate,
                 OutputTargets {
@@ -773,9 +880,23 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         // overflows, even while paused — commands just land nowhere then.
         for command in virtual_gamepad.poll_rumble() {
             if !paused_for_focus {
-                if let Some(rumble) = rumble_output.as_mut() {
-                    rumble.play(command);
-                }
+                play_physical_rumble(&mut pipeline, &mut rumble_output, command);
+            }
+        }
+        // Native transports carry rumble inside HID output reports instead
+        // (the uinput pad does not exist then); drain them the same way.
+        let hid_rumble = if let Some(device) = pipeline.switch_pro_hid.as_mut() {
+            device.take_rumble()
+        } else if let Some(device) = pipeline.ds4_hid.as_mut() {
+            device.take_rumble()
+        } else if let Some(device) = pipeline.dualsense_hid.as_mut() {
+            device.take_rumble()
+        } else {
+            Vec::new()
+        };
+        for command in hid_rumble {
+            if !paused_for_focus {
+                play_physical_rumble(&mut pipeline, &mut rumble_output, command);
             }
         }
         if let Err(error) = result {
@@ -801,10 +922,15 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         if was_connected && !connected {
             pipeline.sensor = None;
             pipeline.last_sensor_us = None;
-            tick_needed = mapper.has_continuous_outputs();
+            // A lost sensor must not stop frame servicing: gyroless DSU
+            // sessions deliberately keep streaming whole-controller frames.
+            tick_needed = pipeline.ever_had_sensor || mapper.has_continuous_outputs();
             schedule.reconnect = Instant::now();
             if let Some(rumble) = rumble_output.as_mut() {
                 rumble.stop();
+            }
+            if let Some(switch) = pipeline.switch_hidraw.as_mut() {
+                switch.stop_rumble();
             }
             emit_outputs(
                 mapper.reset(),
@@ -856,22 +982,40 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         if !connected && schedule.reconnect.elapsed() >= RECONNECT_INTERVAL {
             schedule.reconnect = Instant::now();
             pipeline.sensor = None;
+            pipeline.switch_hidraw = None;
             match reconnect_gamepad(&mut gamepad) {
                 Ok(true) => {
+                    apply_controller_layout(&mut gamepad, arguments.calibration.as_deref());
                     if let Some(gamepad) = gamepad.as_ref() {
                         eprintln!(
                             "ira-input: controller connected through {}",
                             gamepad.info().path.display()
                         );
-                        rumble_output = open_rumble(Some(gamepad), mapper.profile().rumble);
                         pipeline.sensor = open_sensor(gamepad.info());
+                        if pipeline.sensor.is_none() {
+                            pipeline.switch_hidraw =
+                                ira_input::SwitchHidrawPad::open(gamepad.info());
+                            if let Some(driver) = pipeline.switch_hidraw.as_mut() {
+                                driver.set_nintendo_layout(resolved_layout_for(
+                                    gamepad.info(),
+                                    arguments.calibration.as_deref(),
+                                ));
+                            }
+                        }
+                        rumble_output = if pipeline.switch_hidraw.is_some() {
+                            None
+                        } else {
+                            open_rumble(Some(gamepad), mapper.profile().rumble)
+                        };
                         if pipeline.motion_device.is_none() && mapper.profile().native_motion {
                             // Best effort: if the game already opened the pad
                             // before this node appears, pairing waits for the
                             // next pad (re)open.
                             pipeline.motion_device = open_motion_node(mapper.profile().backend);
                         }
-                        if pipeline.sensor.is_some() && pipeline.motion.is_none() && motion_enabled
+                        if pipeline.motion_alive()
+                            && pipeline.motion.is_none()
+                            && motion_enabled
                         {
                             pipeline.motion = ira_input::MotionServer::bind();
                             if pipeline.motion.is_some() {
@@ -882,7 +1026,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             }
                         }
                         pipeline.last_sensor_us = None;
-                        tick_needed = pipeline.sensor.is_some() || mapper.has_continuous_outputs();
+                        tick_needed = pipeline.motion_alive() || mapper.has_continuous_outputs();
                         report_rate.reset();
                     }
                     schedule.sensor = Instant::now();
@@ -933,14 +1077,15 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                 }
             }
         }
-        let timeout = schedule.timeout(
-            tick_needed,
+        let timeout = schedule.timeout(LoopActivity {
+            tick: tick_needed,
             tick_interval,
-            child.is_some(),
-            profile_monitor.is_some(),
-            steam_session.is_some(),
-            !connected,
-        );
+            child: child.is_some(),
+            profile: profile_monitor.is_some(),
+            steam: steam_session.is_some(),
+            disconnected: !connected,
+            cursor: cursor_watcher.is_some(),
+        });
         wait_for_inputs(&gamepad, timeout)?;
     }
 }
@@ -1414,6 +1559,17 @@ fn reload_profile(
     if backend_changed {
         return Err("virtual gamepad backend changes require restarting the game".to_string());
     }
+    // Same class of problem as a backend change: the uhid controller is
+    // created once at startup, and the engine routes gyro output for the
+    // transport it was built with. Silently reloading a profile that flips
+    // native motion leaves the gyro writing to no device at all, so refuse
+    // instead — the running session keeps the previous profile.
+    if mapper.profile().wants_native_controller() != new_mapper.profile().wants_native_controller()
+    {
+        return Err(
+            "native motion transport changes require restarting the game".to_string(),
+        );
+    }
     let keycodes_changed =
         mapper.profile().keyboard_keycodes() != new_mapper.profile().keyboard_keycodes();
     let mouse_changed = mapper.profile().uses_mouse() != new_mapper.profile().uses_mouse();
@@ -1457,30 +1613,107 @@ fn reload_profile(
     Ok(())
 }
 
-fn open_sensor(device: &ira_input::DeviceInfo) -> Option<Sdl3SensorBackend> {
+fn open_sensor(device: &ira_input::DeviceInfo) -> Option<GyroSource> {
+    // The kernel IMU companion node is a hid-nintendo (or hid-sony)
+    // construct: only Nintendo-family pads can legitimately have one, and
+    // scanning other pads risks latching onto a same-identity six-axis
+    // node that is not a sensor companion — the DInput dongle's motion
+    // interface reads through SDL3, never this path.
+    if device.family() == ira_input::ControllerFamily::Nintendo {
+        // udev can publish the companion node a beat after the pad node; a
+        // short retry keeps a freshly connected pad from losing its gyro
+        // to that gap. Capped well under a second: this runs on the input
+        // loop, including right after a reconnect.
+        for attempt in 0..10 {
+            match ira_input::EvdevImu::open(device) {
+                Some(imu) => {
+                    eprintln!("ira-input: motion source: kernel IMU node");
+                    return Some(GyroSource::Kernel(imu));
+                }
+                None => {
+                    if attempt == 0 {
+                        eprintln!(
+                            "ira-input: no kernel IMU companion node for '{}' ({:04x}:{:04x}) yet",
+                            device.name, device.vendor, device.product
+                        );
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let candidates = ira_input::sensor_node_names(Path::new("/dev/input"));
+        if candidates.is_empty() {
+            eprintln!("ira-input: no sensor-like evdev node exists on this system");
+        } else {
+            eprintln!(
+                "ira-input: sensor-like evdev nodes seen: {}",
+                candidates.join("; ")
+            );
+        }
+    }
     match Sdl3SensorBackend::open(device) {
         Ok(Some(sensor)) => {
-            eprintln!("ira-input: SDL3 gyro backend active");
-            Some(sensor)
+            eprintln!("ira-input: motion source: SDL3");
+            Some(GyroSource::Sdl(sensor))
         }
         Ok(None) => {
-            eprintln!("ira-input: no gyro sensor available for this controller");
+            eprintln!("ira-input: motion source: none (SDL3 found no sensor)");
             None
         }
         Err(error) => {
-            eprintln!("ira-input: gyro backend unavailable: {error}");
+            eprintln!("ira-input: motion source: none (SDL3 failed: {error})");
             None
+        }
+    }
+}
+
+/// Where motion comes from: the kernel's sensor companion node when the pad's
+/// driver exposes one (hid-nintendo, hid-sony), else in-process SDL3 for
+/// pads whose protocol only SDL translates (8BitDo DInput).
+enum GyroSource {
+    Kernel(ira_input::EvdevImu),
+    Sdl(Sdl3SensorBackend),
+}
+
+impl GyroSource {
+    fn read(&mut self, fallback_timestamp_us: u64) -> Result<Option<ira_input::SensorSample>, String> {
+        match self {
+            Self::Kernel(imu) => imu.read(fallback_timestamp_us),
+            Self::Sdl(sdl) => sdl.read(fallback_timestamp_us),
         }
     }
 }
 
 fn process_physical_inputs(
     gamepad: &mut Option<PhysicalGamepad>,
+    pipeline: &mut SensorPipeline,
     mapper: &mut MappingEngine,
     report_rate: &mut ReportRateEstimator,
     mut targets: OutputTargets<'_>,
     trace: &mut TraceState,
 ) -> Result<(), String> {
+    // The Switch-protocol driver owns this pad's inputs: its report-mode
+    // switch makes whatever generic HID parses from evdev unreliable.
+    if let Some(switch) = pipeline.switch_hidraw.as_mut() {
+        let events = switch.take_events();
+        if !events.is_empty() {
+            report_rate.observe(Instant::now());
+        }
+        for event in events {
+            emit_mapped(
+                mapper,
+                OutputTargets {
+                    gamepad: targets.gamepad,
+                    keyboard: targets.keyboard.as_deref_mut(),
+                    mouse: targets.mouse.as_deref_mut(),
+                    pad: targets.pad,
+                },
+                event,
+                trace,
+            )?;
+        }
+        return Ok(());
+    }
     let Some(gamepad) = gamepad.as_mut() else {
         return Ok(());
     };
@@ -1525,6 +1758,43 @@ fn apply_controller_deadzone(
     mapper.set_controller_deadzones(left, right);
 }
 
+/// Routes one rumble command to whichever path owns the physical pad: the
+/// Switch-protocol driver when active, else the evdev/vendor backend.
+fn play_physical_rumble(
+    pipeline: &mut SensorPipeline,
+    rumble_output: &mut Option<ira_input::PhysicalRumble>,
+    command: ira_input::RumbleCommand,
+) {
+    if let Some(switch) = pipeline.switch_hidraw.as_mut() {
+        switch.play_rumble(command);
+    } else if let Some(rumble) = rumble_output.as_mut() {
+        rumble.play(command);
+    }
+}
+
+/// Applies the controller-level Nintendo button layout from the
+/// per-controller settings, the way Steam's per-controller toggle does:
+/// face buttons swap (A↔B, X↔Y) as they leave the physical pad. A stored
+/// choice wins; with no entry, Nintendo-family pads default to swapped.
+fn apply_controller_layout(
+    gamepad: &mut Option<PhysicalGamepad>,
+    calibration_store: Option<&Path>,
+) {
+    let Some(pad) = gamepad.as_mut() else {
+        return;
+    };
+    pad.set_nintendo_layout(resolved_layout_for(pad.info(), calibration_store));
+}
+
+/// The Nintendo layout in effect for a device: the stored per-controller
+/// choice wins, else the family default.
+fn resolved_layout_for(device: &ira_input::DeviceInfo, calibration_store: Option<&Path>) -> bool {
+    match calibration_store {
+        Some(path) => ira_input::resolved_nintendo_layout(path, device),
+        None => device.prefers_nintendo_layout(),
+    }
+}
+
 /// Opens the physical side of rumble passthrough. Failure reasons are logged
 /// exactly once here; a missing handle afterwards simply means "no rumble"
 /// and every forwarded command is skipped.
@@ -1535,14 +1805,70 @@ fn open_rumble(
     if !enabled {
         return None;
     }
-    let path = gamepad?.info().path.clone();
+    let info = gamepad?.info();
+    let path = info.path.clone();
     match ira_input::PhysicalRumble::open(&path) {
         Ok(rumble) => Some(rumble),
-        Err(error) => {
-            eprintln!("ira-input: {error}");
-            None
+        Err(primary_error) => match ff_sibling_node(info, &path) {
+            Some(sibling) => {
+                eprintln!(
+                    "ira-input: {primary_error}; using rumble on {} instead",
+                    sibling.display()
+                );
+                match ira_input::PhysicalRumble::open(&sibling) {
+                    Ok(rumble) => Some(rumble),
+                    Err(error) => {
+                        eprintln!("ira-input: {error}");
+                        None
+                    }
+                }
+            }
+            None => match ira_input::PhysicalRumble::open_vendor_hidraw(
+                &path,
+                info.vendor,
+                info.product,
+            ) {
+                Ok(rumble) => {
+                    eprintln!(
+                        "ira-input: {primary_error}; replaying rumble through the 8BitDo \
+                         hidraw protocol instead"
+                    );
+                    Some(rumble)
+                }
+                Err(error) => {
+                    eprintln!("{primary_error}");
+                    eprintln!("ira-input: {error}");
+                    None
+                }
+            },
+        },
+    }
+}
+
+/// Finds another evdev node of the same physical controller that does
+/// declare FF_RUMBLE. Pads with the classic Linux dual-node split often
+/// keep force feedback off the node SDL picks as the gamepad.
+fn ff_sibling_node(info: &ira_input::DeviceInfo, skip: &Path) -> Option<PathBuf> {
+    for entry in std::fs::read_dir("/dev/input").ok()?.flatten() {
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with("event") || entry.path() == skip {
+            continue;
+        }
+        let Ok(device) = evdev::Device::open(entry.path()) else {
+            continue;
+        };
+        let id = device.input_id();
+        if id.vendor() != info.vendor || id.product() != info.product {
+            continue;
+        }
+        let has_ff = device
+            .supported_ff()
+            .is_some_and(|effects| effects.contains(evdev::FFEffectCode::FF_RUMBLE));
+        if has_ff {
+            return Some(entry.path());
         }
     }
+    None
 }
 
 fn make_gyro_processor(
@@ -1578,7 +1904,10 @@ struct OutputTargets<'a> {
 
 /// Sensor-side state advanced by the tick loop.
 struct SensorPipeline {
-    sensor: Option<Sdl3SensorBackend>,
+    sensor: Option<GyroSource>,
+    /// A Switch-protocol pad driven directly over hidraw: motion source
+    /// and input source at once, replacing evdev for that pad.
+    switch_hidraw: Option<ira_input::SwitchHidrawPad>,
     gyro_processor: GyroProcessor,
     last_sensor_us: Option<u64>,
     motion: Option<ira_input::MotionServer>,
@@ -1611,6 +1940,56 @@ fn open_motion_node(
     }
 }
 
+/// Answers pending kernel events on every live uhid twin without
+/// streaming a state report. Runs unconditionally each daemon pass so
+/// handshakes and probes survive idle or paused stretches.
+impl SensorPipeline {
+    /// Whether any motion source is currently live.
+    fn motion_alive(&self) -> bool {
+        self.sensor.is_some() || self.switch_hidraw.is_some()
+    }
+}
+
+fn service_twin_events(pipeline: &mut SensorPipeline) {
+    if let Some(pad) = pipeline.switch_hidraw.as_mut() {
+        pad.service();
+    }
+    if pipeline.switch_pro_hid.is_some() {
+        if let Err(error) = pipeline.switch_pro_hid.as_mut().unwrap().service() {
+            eprintln!("ira-input: virtual Switch Pro stopped: {error}");
+            pipeline.switch_pro_hid = None;
+        }
+    }
+    if pipeline.ds4_hid.is_some() {
+        if let Err(error) = pipeline.ds4_hid.as_mut().unwrap().service() {
+            eprintln!("ira-input: virtual DS4 stopped: {error}");
+            pipeline.ds4_hid = None;
+        }
+    }
+    if pipeline.dualsense_hid.is_some() {
+        if let Err(error) = pipeline.dualsense_hid.as_mut().unwrap().service() {
+            eprintln!("ira-input: virtual DualSense stopped: {error}");
+            pipeline.dualsense_hid = None;
+        }
+    }
+}
+
+/// Creates the flatpak-visible motion half of a native twin: SDL pairs it
+/// with the pad by matching EVIOCGUNIQ serials — the same pairing the DS4
+/// flavor uses, and the gyro path that works everywhere today.
+fn spawn_paired_imu(uniq: &str) -> Option<ira_input::ImuUhidDevice> {
+    match ira_input::ImuUhidDevice::create(uniq) {
+        Ok(device) => {
+            eprintln!("ira-input: paired virtual IMU exposed over evdev");
+            Some(device)
+        }
+        Err(error) => {
+            eprintln!("ira-input: failed to create virtual IMU: {error}");
+            None
+        }
+    }
+}
+
 fn process_tick(
     pipeline: &mut SensorPipeline,
     mapper: &mut MappingEngine,
@@ -1623,46 +2002,53 @@ fn process_tick(
     }
     let mut sensor_failed = false;
     // The raw sensor reading, kept unconverted so each consumer can request
-    // its own frame below.
+    // its own frame below. Sources are tried in the daemon's priority
+    // order: the kernel IMU / SDL backend, else the Switch-protocol
+    // driver's newest sample.
     let mut latest: Option<([f32; 3], [f32; 3], u64)> = None;
-    if let Some(sensor) = pipeline.sensor.as_mut() {
+    let reading = if let Some(sensor) = pipeline.sensor.as_mut() {
         match sensor.read(now_us()) {
-            Ok(Some(sample)) => {
-                let dt = pipeline
-                    .last_sensor_us
-                    .map(|last| sample.timestamp_us.saturating_sub(last) as f32 / 1_000_000.0)
-                    .unwrap_or(1.0 / 250.0)
-                    .clamp(0.0005, 0.05);
-                pipeline.last_sensor_us = Some(sample.timestamp_us);
-                trace.record_gyro(sample.gyro);
-                if let Some(motion_device) = pipeline.motion_device.as_mut() {
-                    // Native passthrough: SDL-based emulators read the same
-                    // unfiltered sensor straight from the virtual pad.
-                    if let Err(error) = motion_device
-                        .emit_sample(sample.gyro, sample.accel.unwrap_or([0.0, 0.0, 0.0]))
-                    {
-                        eprintln!("ira-input: native motion node failed: {error}");
-                    }
-                }
-                // Raw passthrough: emulators consuming the DSU stream get
-                // the unfiltered sensor, independent of the mapping
-                // profile's gyro processing.
-                latest = Some((
-                    sample.gyro,
-                    sample.accel.unwrap_or([0.0, 0.0, 0.0]),
-                    sample.timestamp_us,
-                ));
-                let rates = pipeline
-                    .gyro_processor
-                    .process(sample.gyro, sample.accel, dt);
-                mapper.update_gyro(rates);
-            }
-            Ok(None) => {}
+            Ok(sample) => sample,
             Err(error) => {
                 eprintln!("ira-input: gyro backend stopped: {error}");
                 sensor_failed = true;
+                None
             }
         }
+    } else if let Some(switch) = pipeline.switch_hidraw.as_mut() {
+        switch.take_sample(now_us())
+    } else {
+        None
+    };
+    if let Some(sample) = reading {
+        let dt = pipeline
+            .last_sensor_us
+            .map(|last| sample.timestamp_us.saturating_sub(last) as f32 / 1_000_000.0)
+            .unwrap_or(1.0 / 250.0)
+            .clamp(0.0005, 0.05);
+        pipeline.last_sensor_us = Some(sample.timestamp_us);
+        trace.record_gyro(sample.gyro);
+        if let Some(motion_device) = pipeline.motion_device.as_mut() {
+            // Native passthrough: SDL-based emulators read the same
+            // unfiltered sensor straight from the virtual pad.
+            if let Err(error) = motion_device
+                .emit_sample(sample.gyro, sample.accel.unwrap_or([0.0, 0.0, 0.0]))
+            {
+                eprintln!("ira-input: native motion node failed: {error}");
+            }
+        }
+        // Raw passthrough: emulators consuming the DSU stream get
+        // the unfiltered sensor, independent of the mapping
+        // profile's gyro processing.
+        latest = Some((
+            sample.gyro,
+            sample.accel.unwrap_or([0.0, 0.0, 0.0]),
+            sample.timestamp_us,
+        ));
+        let rates = pipeline
+            .gyro_processor
+            .process(sample.gyro, sample.accel, dt);
+        mapper.update_gyro(rates);
     }
     if sensor_failed {
         pipeline.sensor = None;
@@ -1674,9 +2060,16 @@ fn process_tick(
     // frame, and ticks without a fresh sensor sample still carry state
     // with zeroed motion.
     let zero = ([0.0f32; 3], [0.0f32; 3], now_us());
+    // Native motion is not a raw relay: the profile's gyro shaping applies
+    // to the rates written on the wire. Sensitivity scales them and the
+    // invert flags flip SDL's yaw (index 1) and pitch (index 0); only the
+    // orientation math stays out — the game reads the sensor axes as the
+    // device reports them. One multiply per sample, nothing added to the
+    // per-sample path.
+    let shaped = native_gyro_shaping(mapper.profile());
     if pipeline.ds4_hid.is_some() {
         let (gyro, accel, timestamp_us) = latest.unwrap_or(zero);
-        let hid_frame = ira_input::sensor_to_motion(gyro, accel, timestamp_us);
+        let hid_frame = ira_input::sensor_to_motion(shaped(gyro), accel, timestamp_us);
         let ds4 = pipeline.ds4_hid.as_mut().unwrap();
         match ds4.send_state(targets.pad, &hid_frame) {
             Ok(()) => {}
@@ -1690,7 +2083,7 @@ fn process_tick(
         // SDL's PS5 driver passes axes through untouched like its DS4 one,
         // so the source SDL frame goes on the wire verbatim.
         let (gyro, accel, timestamp_us) = latest.unwrap_or(zero);
-        let hid_frame = ira_input::sensor_to_motion(gyro, accel, timestamp_us);
+        let hid_frame = ira_input::sensor_to_motion(shaped(gyro), accel, timestamp_us);
         let dualsense = pipeline.dualsense_hid.as_mut().unwrap();
         match dualsense.send_state(targets.pad, &hid_frame) {
             Ok(()) => {}
@@ -1704,11 +2097,7 @@ fn process_tick(
         let (gyro, accel, _) = latest.unwrap_or(zero);
         const GRAVITY: f32 = 9.80665;
         let accel_g = [accel[0] / GRAVITY, accel[1] / GRAVITY, accel[2] / GRAVITY];
-        let gyro_dps = [
-            gyro[0].to_degrees(),
-            gyro[1].to_degrees(),
-            gyro[2].to_degrees(),
-        ];
+        let gyro_dps = shaped([gyro[0].to_degrees(), gyro[1].to_degrees(), gyro[2].to_degrees()]);
         let switch_pro = pipeline.switch_pro_hid.as_mut().unwrap();
         if let Err(error) = switch_pro.tick(targets.pad, accel_g, gyro_dps) {
             eprintln!("ira-input: virtual Switch Pro stopped: {error}");
@@ -1719,11 +2108,7 @@ fn process_tick(
         let (gyro, accel, _) = latest.unwrap_or(zero);
         const GRAVITY: f32 = 9.80665;
         let accel_g = [accel[0] / GRAVITY, accel[1] / GRAVITY, accel[2] / GRAVITY];
-        let gyro_dps = [
-            gyro[0].to_degrees(),
-            gyro[1].to_degrees(),
-            gyro[2].to_degrees(),
-        ];
+        let gyro_dps = shaped([gyro[0].to_degrees(), gyro[1].to_degrees(), gyro[2].to_degrees()]);
         let imu = pipeline.imu_hid.as_mut().unwrap();
         if let Err(error) = imu.send_sample(accel_g, gyro_dps) {
             eprintln!("ira-input: virtual IMU stopped: {error}");
@@ -1767,6 +2152,66 @@ fn process_tick(
 /// sensor just died, so whole-controller state keeps flowing.
 fn should_send_dsu_frame(fresh_sample: bool, sensor_alive: bool, ever_had_sensor: bool) -> bool {
     fresh_sample || !sensor_alive || !ever_had_sensor
+}
+
+/// The rate shaping applied to motion written on the native transports:
+/// sensitivity and invert flags when the profile routes the gyro to native
+/// motion sensors, identity otherwise.
+fn native_gyro_shaping(
+    profile: &InputProfile,
+) -> impl Fn([f32; 3]) -> [f32; 3] + Send + 'static {
+    let gyro = &profile.gyro;
+    let active = gyro.enabled && gyro.output == ira_input::GyroOutput::NativeMotion;
+    let scale = if active { gyro.sensitivity } else { 1.0 };
+    let inverts = active.then_some((gyro.invert_x, gyro.invert_y));
+    move |mut rates: [f32; 3]| {
+        for rate in &mut rates {
+            *rate *= scale;
+        }
+        if let Some((invert_x, invert_y)) = inverts {
+            if invert_x {
+                rates[1] = -rates[1]; // yaw: horizontal output
+            }
+            if invert_y {
+                rates[0] = -rates[0]; // pitch: vertical output
+            }
+        }
+        rates
+    }
+}
+
+/// One cursor-visibility poll: when the shown/hidden state flipped and the
+/// profile maps that state to an action set, switch to it. Held outputs of
+/// the old set are released through the returned events.
+fn poll_cursor_switch(
+    watcher: &ira_input::CursorWatcher,
+    last_visible: &mut Option<bool>,
+    mapper: &mut MappingEngine,
+    targets: OutputTargets<'_>,
+    trace: &mut TraceState,
+) -> Result<(), String> {
+    let Some(visible) = watcher.cursor_visible() else {
+        return Ok(());
+    };
+    if *last_visible == Some(visible) {
+        return Ok(());
+    }
+    *last_visible = Some(visible);
+    let profile = mapper.profile();
+    let target = if visible {
+        profile.action_set_when_cursor_shown
+    } else {
+        profile.action_set_when_cursor_hidden
+    };
+    let Some(target) = target else {
+        return Ok(());
+    };
+    let releases = mapper.request_action_set(target);
+    eprintln!(
+        "ira-input: cursor {}; switching to action set {target}",
+        if visible { "shown" } else { "hidden" }
+    );
+    emit_outputs(releases, targets, trace)
 }
 
 fn stop_child(child: &mut Option<std::process::Child>) {
@@ -2003,10 +2448,49 @@ mod tests {
     }
 
     #[test]
+    fn test_native_gyro_shaping_scales_and_inverts_only_when_native() {
+        use ira_input::{GyroConfig, GyroOutput};
+        let mut profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                output: GyroOutput::NativeMotion,
+                sensitivity: 2.0,
+                invert_x: true,
+                invert_y: true,
+                ..GyroConfig::default()
+            },
+            ..InputProfile::default()
+        };
+        let shape = native_gyro_shaping(&profile);
+        // Pitch (index 0) and yaw (index 1) scale and flip; roll (index 2)
+        // only scales.
+        let shaped = shape([1.0, -3.0, 5.0]);
+        assert_eq!(shaped, [-2.0, 6.0, 10.0]);
+
+        // Any other output leaves the sensor untouched.
+        profile.gyro.output = GyroOutput::Mouse;
+        let shape = native_gyro_shaping(&profile);
+        assert_eq!(shape([1.0, -3.0, 5.0]), [1.0, -3.0, 5.0]);
+        // A disabled native gyro is identity too.
+        profile.gyro.output = GyroOutput::NativeMotion;
+        profile.gyro.enabled = false;
+        let shape = native_gyro_shaping(&profile);
+        assert_eq!(shape([1.0, -3.0, 5.0]), [1.0, -3.0, 5.0]);
+    }
+
+    #[test]
     fn test_loop_schedule_blocks_without_periodic_work() {
         let schedule = LoopSchedule::new();
         assert_eq!(
-            schedule.timeout(false, Duration::from_millis(1), false, false, false, false),
+            schedule.timeout(LoopActivity {
+                tick: false,
+                tick_interval: Duration::from_millis(1),
+                child: false,
+                profile: false,
+                steam: false,
+                disconnected: false,
+                cursor: false,
+            }),
             None
         );
     }
@@ -2015,7 +2499,15 @@ mod tests {
     fn test_loop_schedule_uses_earliest_active_deadline() {
         let schedule = LoopSchedule::new();
         let timeout = schedule
-            .timeout(true, Duration::from_millis(1), true, true, true, true)
+            .timeout(LoopActivity {
+                tick: true,
+                tick_interval: Duration::from_millis(1),
+                child: true,
+                profile: true,
+                steam: true,
+                disconnected: true,
+                cursor: true,
+            })
             .expect("active work must have a deadline");
         assert!(timeout <= Duration::from_millis(1));
     }

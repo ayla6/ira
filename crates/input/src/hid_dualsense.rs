@@ -9,6 +9,7 @@
 use std::io;
 
 use crate::motion_udp::{MotionSample, PadState};
+use crate::rumble::RumbleCommand;
 use crate::uhid::{UhidDevice, UhidEvent, BUS_USB};
 
 pub const VENDOR_ID: u32 = 0x0f0d;
@@ -28,28 +29,78 @@ const ENODATA: u16 = 61;
 const GYRO_COUNTS_PER_DPS: f32 = 16.0;
 /// Raw counts per g against SDL's ACCEL_RES_PER_G.
 const ACCEL_COUNTS_PER_G: f32 = 8192.0;
-/// SDL derives sample spacing from this counter in 1/3 microsecond units
-/// on USB; Cemu additionally drops any non-advancing timestamps.
-const SENSOR_TICKS_PER_US: u32 = 3;
-/// A battery/connection byte reading full on USB.
-const BATTERY_FULL_USB: u8 = 100;
 const GRAVITY_MS2: f32 = 9.80665;
 
 const USB_STATE_REPORT_LEN: usize = 64;
 
-/// Same rationale as the DS4 descriptor: SDL never consults it, but the
-/// kernel needs a parseable gamepad for its evdev twin. The lone constant
-/// input bit matters more than it looks: without any Input item the kernel
-/// registers no input report and drops every UHID_INPUT2 before hidraw.
+/// The kernel's evdev twin descriptor, byte-for-byte the wire prefix of
+/// [`usb_state_report`] (SDL's PS5 wire layout): report id 0x01, four stick
+/// axes, analog triggers on bytes 5/6, a reserved byte, the hat plus face
+/// nibbles, the shoulder/system buttons, and the guide bit. The previous
+/// stub declared a single constant input, so the twin had no controls at
+/// all and non-hidapi consumers (RetroArch's udev driver) saw an empty
+/// pad. Faces use individual usages so they land on the standard evdev
+/// buttons despite the wire's square/cross/circle/triangle bit order.
 pub const REPORT_DESCRIPTOR: &[u8] = &[
     0x05, 0x01, // Usage Page (Generic Desktop)
     0x09, 0x05, // Usage (Gamepad)
     0xA1, 0x01, // Collection (Application)
+    0x85, 0x01, //   Report ID (1)
+    0x09, 0x30, //   Usage (X)      — left stick x
+    0x09, 0x31, //   Usage (Y)      — left stick y
+    0x09, 0x32, //   Usage (Z)      — right stick x
+    0x09, 0x35, //   Usage (Rz)     — right stick y
+    0x09, 0x33, //   Usage (Rx)     — L2 analog
+    0x09, 0x34, //   Usage (Ry)     — R2 analog
+    0x15, 0x00, //   Logical Minimum (0)
+    0x26, 0xFF, 0x00, // Logical Maximum (255)
+    0x75, 0x08, //   Report Size (8)
+    0x95, 0x06, //   Report Count (6)
+    0x81, 0x02, //   Input (Data, Variable, Absolute)
+    0x75, 0x08, //   Report Size (8)
+    0x95, 0x01, //   Report Count (1)
+    0x81, 0x03, //   Input (Constant) — reserved report byte
+    0x05, 0x01, //   Usage Page (Generic Desktop)
+    0x09, 0x39, //   Usage (Hat switch)
+    0x15, 0x00, //   Logical Minimum (0)
+    0x25, 0x07, //   Logical Maximum (7)
+    0x35, 0x00, //   Physical Minimum (0)
+    0x46, 0x3B, 0x01, // Physical Maximum (315 degrees)
+    0x65, 0x14, //   Unit (Eng Rot: degrees)
+    0x75, 0x04, //   Report Size (4)
+    0x95, 0x01, //   Report Count (1)
+    0x81, 0x42, //   Input (Data, Variable, Null State)
+    0x05, 0x09, //   Usage Page (Button)
+    0x09, 0x05, //   Usage (West) — square
     0x15, 0x00, //   Logical Minimum (0)
     0x25, 0x01, //   Logical Maximum (1)
     0x75, 0x01, //   Report Size (1)
     0x95, 0x01, //   Report Count (1)
-    0x81, 0x03, //   Input (Constant)
+    0x81, 0x02, //   Input (Data, Variable, Absolute)
+    0x09, 0x01, //   Usage (South) — cross
+    0x81, 0x02, //   Input
+    0x09, 0x02, //   Usage (East) — circle
+    0x81, 0x02, //   Input
+    0x09, 0x04, //   Usage (North) — triangle
+    0x81, 0x02, //   Input
+    0x19, 0x07, //   Usage Minimum (TL)     — L1
+    0x29, 0x08, //   Usage Maximum (TR)     — R1
+    0x95, 0x02, //   Report Count (2)
+    0x81, 0x02, //   Input
+    0x19, 0x09, //   Usage Minimum (TL2)    — digital L2
+    0x29, 0x0A, //   Usage Maximum (TR2)    — digital R2
+    0x81, 0x02, //   Input
+    0x19, 0x0B, //   Usage Minimum (Select) — create
+    0x29, 0x0C, //   Usage Maximum (Start)  — options
+    0x81, 0x02, //   Input
+    0x19, 0x0E, //   Usage Minimum (Thumb L)
+    0x29, 0x0F, //   Usage Maximum (Thumb R)
+    0x81, 0x02, //   Input
+    0x09, 0x0D, //   Usage (Mode) — guide
+    0x81, 0x02, //   Input
+    0x75, 0x01, //   Report Size (1)
+    0x95, 0x07, //   Report Count (7)
+    0x81, 0x03, //   Input (Constant) — touchpad click and padding
     0xC0, // End Collection
 ];
 
@@ -58,6 +109,9 @@ pub const REPORT_DESCRIPTOR: &[u8] = &[
 pub struct DualsenseUhidDevice {
     device: UhidDevice,
     sequence: u32,
+    /// Rumble the game played on this pad, drained by the daemon for replay
+    /// on the physical controller.
+    pending_rumble: Vec<RumbleCommand>,
 }
 
 impl DualsenseUhidDevice {
@@ -75,6 +129,7 @@ impl DualsenseUhidDevice {
         Ok(Self {
             device,
             sequence: 0,
+            pending_rumble: Vec::new(),
         })
     }
 
@@ -85,21 +140,81 @@ impl DualsenseUhidDevice {
         let mut report = usb_state_report(pad, sample);
         report[12..16].copy_from_slice(&self.sequence.to_le_bytes());
         self.device.send_input_report(&report)?;
+        self.service()
+    }
+
+    /// Drains kernel events and serves SDL's feature probes without sending
+    /// a state report. Run every daemon pass: probes arrive whenever a
+    /// reader opens the pad, including while the daemon considers itself
+    /// paused or between report-rate ticks.
+    pub fn service(&mut self) -> io::Result<()> {
         for event in self.device.poll()? {
-            if let UhidEvent::GetReport { id, number, kind } = event {
-                if kind != crate::uhid::FEATURE_REPORT {
-                    let _ = self.device.reply_get_report(id, ENODATA, &[]);
-                } else if number == FEATURE_CAPABILITIES {
-                    let _ = self.device.reply_get_report(id, 0, &capabilities_report());
-                } else if number == FEATURE_CALIBRATION {
-                    let _ = self.device.reply_get_report(id, 0, &calibration_report());
-                } else {
-                    let _ = self.device.reply_get_report(id, ENODATA, &[]);
+            match event {
+                UhidEvent::GetReport { id, number, kind } => {
+                    if kind != crate::uhid::FEATURE_REPORT {
+                        let _ = self.device.reply_get_report(id, ENODATA, &[]);
+                    } else if number == FEATURE_CAPABILITIES {
+                        let _ = self.device.reply_get_report(id, 0, &capabilities_report());
+                    } else if number == FEATURE_CALIBRATION {
+                        let _ = self.device.reply_get_report(id, 0, &calibration_report());
+                    } else {
+                        let _ = self.device.reply_get_report(id, ENODATA, &[]);
+                    }
                 }
+                UhidEvent::OutputReport { data } => {
+                    if let Some(command) = rumble_command_from_output_report(&data) {
+                        self.pending_rumble.push(command);
+                    }
+                }
+                _ => {}
             }
         }
         Ok(())
     }
+
+    /// Rumble commands decoded since the last drain, in arrival order. A
+    /// zero-magnitude command stops the motors.
+    pub fn take_rumble(&mut self) -> Vec<RumbleCommand> {
+        std::mem::take(&mut self.pending_rumble)
+    }
+}
+
+/// DualSense output reports carry no duration; drivers stop the motors with
+/// an explicit zeroed report, so the replayed effect only needs to outlive
+/// the gaps between reports.
+const DECODED_RUMBLE_MS: u16 = 250;
+
+/// The effects-report enable bit that arms the emulated rumble motors.
+const RUMBLE_EMULATION_ENABLE: u8 = 0x01;
+
+/// Extracts the rumble request from a DualSense output report. SDL's USB
+/// effects report 0x02 gates both motors behind enableBits1 bit 0, with the
+/// right/weak magnitude at [3] and left/strong at [4]; Bluetooth drivers
+/// use the tagged 0x31 report where byte 1 flags each motor separately
+/// (bit 0 right/weak, bit 1 left/strong), bytes 2 and 3 the magnitudes.
+pub(crate) fn rumble_command_from_output_report(report: &[u8]) -> Option<RumbleCommand> {
+    match report.first()? {
+        0x02 if report.len() >= 5 => Some(RumbleCommand {
+            strong: dualsense_motor(report[1] & RUMBLE_EMULATION_ENABLE, report[4]),
+            weak: dualsense_motor(report[1] & RUMBLE_EMULATION_ENABLE, report[3]),
+            duration_ms: DECODED_RUMBLE_MS,
+        }),
+        0x31 if report.len() >= 4 => Some(RumbleCommand {
+            strong: dualsense_motor(report[1] & 0x02, report[3]),
+            weak: dualsense_motor(report[1] & 0x01, report[2]),
+            duration_ms: DECODED_RUMBLE_MS,
+        }),
+        _ => None,
+    }
+}
+
+/// HID motor byte (0..=255) to the evdev magnitude scale (0..=65535);
+/// unflagged motors read as off.
+fn dualsense_motor(flagged: u8, byte: u8) -> u16 {
+    if flagged == 0 {
+        return 0;
+    }
+    u16::from(byte) * 257
 }
 
 fn usb_state_report(pad: &PadState, sample: &MotionSample) -> Vec<u8> {
@@ -142,15 +257,20 @@ fn usb_state_report(pad: &PadState, sample: &MotionSample) -> Vec<u8> {
             sample.accel_ms2[axis] / GRAVITY_MS2 * ACCEL_COUNTS_PER_G,
         );
     }
-    let ticks =
-        (sample.timestamp_us.min(u32::MAX as u64 / 3) as u32).wrapping_mul(SENSOR_TICKS_PER_US);
-    r[28..32].copy_from_slice(&ticks.to_le_bytes());
+    // Third-party pads use SDL's alternate state layout: a 16-bit counter
+    // in plain microseconds here, sample spacing derived from its wrapped
+    // deltas. Cemu drops samples whose timestamp does not advance, so
+    // plain wrapping matches what real licensed hardware emits.
+    r[28..30].copy_from_slice(&(sample.timestamp_us as u16).to_le_bytes());
 
-    // Both touch points released (high bit set), full battery, USB link.
-    r[33] = 0x80;
-    r[37] = 0x80;
-    r[53] = BATTERY_FULL_USB;
-    r[54] = 0x08;
+    // Alternate-layout status bytes: the touchpad counters live at wire
+    // 32/36 (their high bit set means "finger up", so a zero there reads as
+    // a permanently pressed phantom finger), and the battery byte at 30
+    // packs status in the high nibble (2 = fully charged) with the level
+    // below it.
+    r[30] = 0x20 | 10;
+    r[32] = 0x80;
+    r[36] = 0x80;
     r
 }
 
@@ -272,10 +392,14 @@ mod tests {
         assert_eq!(read_i16(20), (-1024.0 * 16.0) as i16);
         assert_eq!(read_i16(22), 8192);
         assert_eq!(read_i16(24), -8192);
-        let ticks = u32::from_le_bytes([r[28], r[29], r[30], r[31]]);
-        assert_eq!(ticks, 90_000); // microseconds times three
-        assert_eq!(r[53], 100);
-        assert_eq!(r[54], 0x08);
+        let tick = u16::from_le_bytes([r[28], r[29]]);
+        assert_eq!(tick, 30_000); // microseconds, straight into the u16
+        // Alternate layout: touchpad counters at 32/36 with the released
+        // bit set, battery at 30 reading fully charged (status 2).
+        assert_eq!(r[32], 0x80);
+        assert_eq!(r[36], 0x80);
+        assert_eq!(r[33], 0);
+        assert_eq!(r[30] >> 4, 2);
     }
 
     #[test]
@@ -284,5 +408,37 @@ mod tests {
         assert_eq!(hat_value(&pad), 8);
         pad.dpad_left = true;
         assert_eq!(hat_value(&pad), 6);
+    }
+
+    #[test]
+    fn test_rumble_decoded_from_usb_effects_report() {
+        // SDL's USB effects packet: enableBits1 bit 0 arms both motors,
+        // [3] is right/weak, [4] left/strong.
+        let report = [0x02, 0x01, 0x00, 0x40, 0xFF, 0x00];
+        let command = super::rumble_command_from_output_report(&report).expect("effects");
+        assert_eq!(command.strong, 255 * 257);
+        assert_eq!(command.weak, 64 * 257);
+        // Without the emulation bit nothing vibrates despite magnitudes.
+        let disabled = super::rumble_command_from_output_report(&[0x02, 0x02, 0, 0x40, 0xFF])
+            .expect("effects packet still parses");
+        assert_eq!((disabled.strong, disabled.weak), (0, 0));
+    }
+
+    #[test]
+    fn test_rumble_decoded_from_output_report() {
+        // Report 0x31: flag bit 0 right/weak at [2], bit 1 left/strong at [3].
+        let report = [0x31, 0x03, 0x40, 0xFF, 0x00];
+        let command = super::rumble_command_from_output_report(&report).expect("rumble report");
+        assert_eq!(command.strong, 255 * 257);
+        assert_eq!(command.weak, 64 * 257);
+        // An unflagged motor reads as off even with a nonzero magnitude.
+        let one_sided = [0x31, 0x01, 0x40, 0xFF, 0x00];
+        let command = super::rumble_command_from_output_report(&one_sided).expect("rumble report");
+        assert_eq!((command.strong, command.weak), (0, 64 * 257));
+        // Zeroed motors are a stop command; other reports carry no motors.
+        let stop = super::rumble_command_from_output_report(&[0x31, 0x00, 0, 0]).expect("stop");
+        assert_eq!((stop.strong, stop.weak), (0, 0));
+        assert!(super::rumble_command_from_output_report(&[0x01, 0, 0, 0]).is_none());
+        assert!(super::rumble_command_from_output_report(&[0x31, 0x00]).is_none());
     }
 }

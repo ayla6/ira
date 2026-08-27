@@ -12,7 +12,7 @@ fn main() {
         .nth(1)
         .and_then(|v| v.parse().ok())
         .unwrap_or(6.0);
-    let mut device = match SwitchProUhidDevice::create() {
+    let mut device = match SwitchProUhidDevice::create("ira-probe-switch-pro") {
         Ok(device) => device,
         Err(error) => {
             eprintln!("switch_pro_probe: create failed: {error}");

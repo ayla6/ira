@@ -20,6 +20,7 @@
 use std::io;
 
 use crate::motion_udp::PadState;
+use crate::rumble::RumbleCommand;
 use crate::uhid::{UhidDevice, UhidEvent, BUS_USB};
 
 pub const VENDOR_ID: u32 = 0x057e;
@@ -66,19 +67,28 @@ const REPORT_DESCRIPTOR: &[u8] = &[
 pub struct SwitchProUhidDevice {
     device: UhidDevice,
     timer: u8,
+    /// Rumble the game played on this pad, decoded from output reports and
+    /// drained by the daemon for replay on the physical controller.
+    pending_rumble: Vec<RumbleCommand>,
 }
 
 impl SwitchProUhidDevice {
-    pub fn create() -> io::Result<Self> {
+    /// The uniq joins the pad to its paired IMU for SDL's evdev sensor
+    /// pairing; hid-nintendo's own IMU node cannot carry a usable serial.
+    pub fn create(uniq: &str) -> io::Result<Self> {
         let device = UhidDevice::create(
             DEVICE_NAME,
-            "",
+            uniq,
             REPORT_DESCRIPTOR,
             BUS_USB,
             VENDOR_ID,
             PRODUCT_ID,
         )?;
-        Ok(Self { device, timer: 0 })
+        Ok(Self {
+            device,
+            timer: 0,
+            pending_rumble: Vec::new(),
+        })
     }
 
     /// Answers kernel requests (the hid-nintendo handshake) and streams one
@@ -96,9 +106,24 @@ impl SwitchProUhidDevice {
         // device frame so the consumer's shuffle lands on the SDL frame.
         let accel_g = nintendo_device_frame(accel_g);
         let gyro_dps = nintendo_device_frame(gyro_dps);
+        self.service()?;
+        let report = standard_report(self.timer, pad, accel_g, gyro_dps);
+        self.timer = self.timer.wrapping_add(1);
+        self.device.send_input_report(&report)
+    }
+
+    /// Drains kernel events and answers them without sending a state
+    /// report. Must run every daemon pass regardless of pause or tick
+    /// cadence: hid-nintendo's connect handshake waits at most one or two
+    /// scheduling periods per step, and an unanswered step fails the probe
+    /// and takes force feedback down with it.
+    pub fn service(&mut self) -> io::Result<()> {
         for event in self.device.poll()? {
             match event {
                 UhidEvent::OutputReport { data } => {
+                    if let Some(command) = rumble_command_from_output_report(&data) {
+                        self.pending_rumble.push(command);
+                    }
                     let reply = handshake_reply(&data);
                     if !reply.is_empty() {
                         self.device.send_input_report(&reply)?;
@@ -110,10 +135,52 @@ impl SwitchProUhidDevice {
                 _ => {}
             }
         }
-        let report = standard_report(self.timer, pad, accel_g, gyro_dps);
-        self.timer = self.timer.wrapping_add(1);
-        self.device.send_input_report(&report)
+        Ok(())
     }
+
+    /// Rumble commands decoded since the last drain, in arrival order.
+    /// Zero-magnitude commands are real: the kernel stops motors by sending
+    /// zeroed rumble packets, and replaying that on the physical pad stops
+    /// it in turn.
+    pub fn take_rumble(&mut self) -> Vec<RumbleCommand> {
+        std::mem::take(&mut self.pending_rumble)
+    }
+}
+
+/// Nominal duration for decoded rumble: the wire format carries amplitudes
+/// only, and hid-nintendo signals the end with explicit zeroed packets, so
+/// the replayed effect just needs to outlive the gaps between packets.
+const DECODED_RUMBLE_MS: u16 = 250;
+
+/// Largest amplitude code the firmware tables define (`0xC8`), the scale the
+/// kernel maps the 0..=65535 evdev magnitude onto.
+const MAX_AMPLITUDE_CODE: u16 = 200;
+
+/// Extracts the rumble request from a kernel output report (subcommand
+/// report 0x01 and rumble-only 0x10 both carry it: id, packet counter, then
+/// two 4-byte motor commands — left/strong first, right/weak second). Each
+/// command packs its amplitude code in the second byte's upper 7 bits
+/// (`freq_low_byte + amp`, the freq byte being 0 or 1); the kernel scales
+/// evdev's 0..=65535 magnitude onto 0..=200. Reports without rumble data
+/// return `None`; zero amplitude still yields a zero command, which is the
+/// wire's way of saying "stop the motors".
+pub(crate) fn rumble_command_from_output_report(report: &[u8]) -> Option<RumbleCommand> {
+    match report.first()? {
+        0x01 | 0x10 if report.len() >= 10 => {}
+        _ => return None,
+    }
+    Some(RumbleCommand {
+        strong: decoded_amplitude(report[3]),
+        weak: decoded_amplitude(report[7]),
+        duration_ms: DECODED_RUMBLE_MS,
+    })
+}
+
+/// Amplitude code (even byte) back to the evdev magnitude the kernel
+/// received: `code / 200 * 65535`.
+fn decoded_amplitude(byte: u8) -> u16 {
+    let code = u16::from(byte & 0xFE);
+    ((code as u32) * 65_535 / (MAX_AMPLITUDE_CODE as u32)) as u16
 }
 
 /// SDL reshapes Nintendo sensor axes as `sdl = [-dev_y, dev_z, -dev_x]`;
@@ -429,6 +496,31 @@ mod tests {
         // SDL's Nintendo shuffle: [-dev_y, dev_z, -dev_x]
         let sdl = [-device[1], device[2], -device[0]];
         assert_eq!(sdl, [1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_rumble_decoded_from_rumble_only_report() {
+        // Kernel encoding for strong=65535 (left, code 200), weak=65535/2
+        // (right, code 100): id, counter, then two 4-byte halves.
+        let mut report = vec![0x10, 0x05, 0x20, 0xC8, 0x00, 0x40, 0x20, 0x64, 0x00, 0x40];
+        let command = super::rumble_command_from_output_report(&report).expect("rumble report");
+        assert_eq!(command.strong, 65_535);
+        assert_eq!(command.weak, 32_767);
+        assert!(command.duration_ms > 0);
+
+        // Everything zeroed is a stop command, not the absence of one.
+        report[3] = 0x00;
+        report[7] = 0x00;
+        let stop = super::rumble_command_from_output_report(&report).expect("stop report");
+        assert_eq!((stop.strong, stop.weak), (0, 0));
+    }
+
+    #[test]
+    fn test_rumble_ignores_non_rumble_reports() {
+        // USB handshake and short/unknown reports carry no motor data.
+        assert!(super::rumble_command_from_output_report(&[0x80, 0x02]).is_none());
+        assert!(super::rumble_command_from_output_report(&[0x01, 0x00]).is_none());
+        assert!(super::rumble_command_from_output_report(&[0x21, 0x00]).is_none());
     }
 
     #[test]

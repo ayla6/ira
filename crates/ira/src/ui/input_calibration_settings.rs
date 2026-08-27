@@ -35,6 +35,7 @@ pub(super) fn add_controller_calibration(
     let updating = Rc::new(Cell::new(false));
     let (left_scale, right_scale) = add_deadzone_rows(expander, &store_path, &device, &updating);
     add_low_deadzone_warning(expander, &left_scale, &right_scale);
+    add_layout_row(expander, &store_path, &device);
     add_gyro_rows(
         expander,
         &store_path,
@@ -101,6 +102,35 @@ fn add_low_deadzone_warning(
     expander.add_row(&warning);
 }
 
+/// The controller-level Nintendo button layout, Steam's per-controller
+/// toggle: face buttons swap (A↔B, X↔Y) so actions follow the labels
+/// printed on Nintendo-style pads. On by default for Nintendo-family
+/// controllers, off for everything else, and any explicit change is
+/// stored per controller. Takes effect the next time the input daemon
+/// starts for this controller.
+fn add_layout_row(expander: &adw::ExpanderRow, store_path: &Path, device: &DeviceInfo) {
+    let row = adw::SwitchRow::new();
+    row.set_title(&crate::tr!("Nintendo Button Layout"));
+    row.set_subtitle(&crate::tr!(
+        "Swap A/B and X/Y so buttons match Nintendo labeling. Enabled by default on Nintendo controllers"
+    ));
+    row.set_active(ira_input::resolved_nintendo_layout(store_path, device));
+    let store_path = store_path.to_path_buf();
+    let device = device.clone();
+    row.connect_active_notify(move |row| {
+        let mut calibration =
+            ira_input::load_calibration(&store_path, device.vendor, device.product)
+                .unwrap_or_default();
+        calibration.nintendo_layout = row.is_active();
+        if let Err(error) =
+            ira_input::save_calibration(&store_path, device.vendor, device.product, &calibration)
+        {
+            eprintln!("Could not save controller calibration: {error}");
+        }
+    });
+    expander.add_row(&row);
+}
+
 /// Gyro calibration rows: stored bias summary plus calibrate/reset.
 fn add_gyro_rows(
     expander: &adw::ExpanderRow,
@@ -145,8 +175,20 @@ fn add_gyro_rows(
         let bias_label = bias_label.clone();
         let updating = updating.clone();
         reset.connect_clicked(move |_| {
+            // Clear the measured values but keep controller-level choices:
+            // deleting the entry outright would also drop the Nintendo
+            // layout toggle stored beside them.
+            let stored =
+                ira_input::load_calibration(&store_path, device.vendor, device.product);
+            let mut cleared =
+                stored.unwrap_or_else(|| ira_input::default_calibration_for(&device));
+            cleared.x = 0.0;
+            cleared.y = 0.0;
+            cleared.z = 0.0;
+            cleared.stick_deadzone_left = 0.0;
+            cleared.stick_deadzone_right = 0.0;
             if let Err(error) =
-                ira_input::remove_calibration(&store_path, device.vendor, device.product)
+                ira_input::save_calibration(&store_path, device.vendor, device.product, &cleared)
             {
                 eprintln!("Could not clear controller calibration: {error}");
             }
@@ -221,7 +263,13 @@ fn save_gyro_bias(
     bias_label: &gtk4::Label,
 ) {
     let mut calibration =
-        ira_input::load_calibration(store_path, device.vendor, device.product).unwrap_or(bias);
+        ira_input::load_calibration(store_path, device.vendor, device.product).unwrap_or_else(
+            || {
+                let mut seeded = bias;
+                seeded.nintendo_layout = device.prefers_nintendo_layout();
+                seeded
+            },
+        );
     calibration.x = bias.x;
     calibration.y = bias.y;
     calibration.z = bias.z;
@@ -291,7 +339,7 @@ fn commit_deadzone(
         }
         let mut calibration =
             ira_input::load_calibration(&store_path, device.vendor, device.product)
-                .unwrap_or_default();
+                .unwrap_or_else(|| ira_input::default_calibration_for(&device));
         match tab {
             StickTab::Left => calibration.stick_deadzone_left = (percent / 100.0) as f32,
             StickTab::Right => calibration.stick_deadzone_right = (percent / 100.0) as f32,

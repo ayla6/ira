@@ -184,7 +184,9 @@ impl MappingEngine {
         let (x_axis, y_axis) = match gyro.output {
             GyroOutput::LeftStick => (GamepadAxis::LeftX, GamepadAxis::LeftY),
             GyroOutput::RightStick => (GamepadAxis::RightX, GamepadAxis::RightY),
-            GyroOutput::Mouse => return,
+            // Native motion flows through the uhid controller's own driver,
+            // never through the mapping engine.
+            GyroOutput::Mouse | GyroOutput::NativeMotion => return,
         };
         let scale = GYRO_STICK_RADS_PER_UNIT / gyro.sensitivity;
         let x = (self.gyro_effective.yaw / scale).clamp(-1.0, 1.0) * sign(gyro.invert_x);

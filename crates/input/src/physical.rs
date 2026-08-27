@@ -83,6 +83,13 @@ impl DeviceInfo {
         }
     }
 
+    /// Whether this pad should use the Nintendo face-button layout before
+    /// the user has chosen explicitly: Nintendo-family controllers default
+    /// to swapped A/B and X/Y, everything else to the positional standard.
+    pub fn prefers_nintendo_layout(&self) -> bool {
+        self.family() == ControllerFamily::Nintendo
+    }
+
     /// Linux does not expose a controller's physical mode switch directly.
     /// This is the input layout identified from the device it currently reports.
     pub fn reported_input_mode(&self) -> ReportedInputMode {
@@ -123,7 +130,7 @@ fn device_info(path: PathBuf, device: &Device) -> Option<DeviceInfo> {
         return None;
     }
     let id = device.input_id();
-    let ultimate_2 = is_ultimate_2(id.vendor(), id.product());
+    let layout = button_layout(id.vendor(), id.product(), device.name().unwrap_or_default());
     let mut supported_buttons = [
         KeyCode::BTN_SOUTH,
         KeyCode::BTN_EAST,
@@ -155,7 +162,7 @@ fn device_info(path: PathBuf, device: &Device) -> Option<DeviceInfo> {
     ]
     .into_iter()
     .filter(|code| keys.contains(*code))
-    .filter_map(|code| map_button_for_device(code, ultimate_2))
+    .filter_map(|code| map_button_for_device(code, layout))
     .collect::<Vec<_>>();
     let mut seen = HashSet::new();
     supported_buttons.retain(|button| seen.insert(*button));
@@ -198,6 +205,10 @@ pub struct PhysicalGamepad {
     z_axes_are_right_stick: bool,
     left_trigger_clicked: bool,
     right_trigger_clicked: bool,
+    /// Controller-level Nintendo layout: face buttons swap (A↔B, X↔Y) as
+    /// they enter the mapping engine, mirroring Steam's per-controller
+    /// toggle.
+    nintendo_layout: bool,
 }
 
 impl PhysicalGamepad {
@@ -227,7 +238,14 @@ impl PhysicalGamepad {
             z_axes_are_right_stick,
             left_trigger_clicked: false,
             right_trigger_clicked: false,
+            nintendo_layout: false,
         })
+    }
+
+    /// Toggles the controller-level Nintendo face-button layout. Applied at
+    /// session start and after reconnects from the per-controller settings.
+    pub fn set_nintendo_layout(&mut self, on: bool) {
+        self.nintendo_layout = on;
     }
 
     pub fn info(&self) -> &DeviceInfo {
@@ -336,9 +354,15 @@ impl PhysicalGamepad {
             .unwrap_or_default();
         match event.destructure() {
             EventSummary::Key(_, code, value) => {
-                if let Some(button) =
-                    map_button_for_device(code, is_ultimate_2(self.info.vendor, self.info.product))
-                {
+                let layout = button_layout(
+                    self.info.vendor,
+                    self.info.product,
+                    &self.info.name,
+                );
+                if let Some(mut button) = map_button_for_device(code, layout) {
+                    if self.nintendo_layout {
+                        button = swap_face_buttons(button);
+                    }
                     output.push(InputEvent {
                         source: InputSource::Button(button),
                         value: if value == 0 { 0.0 } else { 1.0 },
@@ -548,9 +572,59 @@ fn map_button(code: KeyCode) -> Option<GamepadButton> {
     })
 }
 
-fn map_button_for_device(code: KeyCode, ultimate_2: bool) -> Option<GamepadButton> {
-    if ultimate_2 {
-        return Some(match code {
+/// Which wire layout a device's evdev codes follow, deciding how raw
+/// key codes map to [`GamepadButton`]s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ButtonLayout {
+    /// evdev's positional standard shared by xpad, hid-sony, hid-nintendo.
+    Standard,
+    /// The 8BitDo Ultimate 2 in DInput mode, aligned with SDL's HIDAPI
+    /// driver: P1=R4, P2=L4, P3=PR, P4=PL.
+    Ultimate2DInput,
+    /// A controller speaking Nintendo's positional layout through
+    /// hid-nintendo, whose `BTN_Z` is the capture button, not a paddle.
+    Nintendo,
+}
+
+/// Picks the layout from device identity: the Ultimate 2's DInput dongle
+/// gets its paddle table, Nintendo-family pads get theirs, everything else
+/// the positional standard.
+fn button_layout(vendor: u16, product: u16, name: &str) -> ButtonLayout {
+    if is_ultimate_2(vendor, product) {
+        ButtonLayout::Ultimate2DInput
+    } else if is_nintendo(vendor, name) {
+        ButtonLayout::Nintendo
+    } else {
+        ButtonLayout::Standard
+    }
+}
+
+/// The vendor check mirrors `DeviceInfo::family`'s Nintendo arm.
+fn is_nintendo(vendor: u16, name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    vendor == 0x057e
+        || name.contains("nintendo")
+        || name.contains("switch")
+        || name.contains("joy-con")
+}
+
+/// Swaps face buttons for the controller-level Nintendo layout, matching
+/// Steam's per-controller toggle: physical A reports as A and X as X on a
+/// positional standard, i.e. A↔B and X↔Y trade places. Other buttons pass
+/// through untouched.
+pub fn swap_face_buttons(button: GamepadButton) -> GamepadButton {
+    match button {
+        GamepadButton::A => GamepadButton::B,
+        GamepadButton::B => GamepadButton::A,
+        GamepadButton::X => GamepadButton::Y,
+        GamepadButton::Y => GamepadButton::X,
+        other => other,
+    }
+}
+
+fn map_button_for_device(code: KeyCode, layout: ButtonLayout) -> Option<GamepadButton> {
+    match layout {
+        ButtonLayout::Ultimate2DInput => Some(match code {
             // Keep the Ultimate 2 mapping aligned with SDL's HIDAPI driver:
             // P1=R4, P2=L4, P3=PR, P4=PL.
             KeyCode::BTN_C => GamepadButton::Paddle3,
@@ -566,10 +640,15 @@ fn map_button_for_device(code: KeyCode, ultimate_2: bool) -> Option<GamepadButto
             KeyCode::BTN_NORTH => GamepadButton::X,
             KeyCode::BTN_WEST => GamepadButton::Y,
             code => map_button(code)?,
-        });
+        }),
+        ButtonLayout::Nintendo => match code {
+            // hid-nintendo reports the capture button as BTN_Z; there is no
+            // paddle hardware behind it, so it must not masquerade as one.
+            KeyCode::BTN_Z => None,
+            code => map_button(code),
+        },
+        ButtonLayout::Standard => map_button(code),
     }
-    let button = map_button(code)?;
-    Some(button)
 }
 
 fn is_ultimate_2(vendor: u16, product: u16) -> bool {
@@ -631,10 +710,10 @@ fn is_ira_virtual_device(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        device_gone, is_ira_virtual_device, is_ultimate_2, map_button, map_button_for_device,
-        normalize_signed, normalize_trigger, poll_timeout_ms, same_device,
-        synthesized_trigger_click, ControllerFamily, DeviceInfo, ReportedInputMode,
-        EIGHTBITDO_VENDOR, ULTIMATE_2_PRODUCT,
+        button_layout, device_gone, is_ira_virtual_device, is_ultimate_2, map_button,
+        map_button_for_device, normalize_signed, normalize_trigger, poll_timeout_ms,
+        same_device, swap_face_buttons, synthesized_trigger_click, ButtonLayout,
+        ControllerFamily, DeviceInfo, ReportedInputMode, EIGHTBITDO_VENDOR, ULTIMATE_2_PRODUCT,
     };
     use crate::GamepadButton;
     use std::path::PathBuf;
@@ -665,34 +744,105 @@ mod tests {
     fn test_map_ultimate_2_buttons() {
         assert!(is_ultimate_2(0x2dc8, 0x6012));
         assert_eq!(
-            map_button_for_device(evdev::KeyCode::BTN_NORTH, true),
+            map_button_for_device(evdev::KeyCode::BTN_NORTH, ButtonLayout::Ultimate2DInput),
             Some(GamepadButton::X)
         );
         assert_eq!(
-            map_button_for_device(evdev::KeyCode::BTN_WEST, true),
+            map_button_for_device(evdev::KeyCode::BTN_WEST, ButtonLayout::Ultimate2DInput),
             Some(GamepadButton::Y)
         );
         assert_eq!(
-            map_button_for_device(evdev::KeyCode::BTN_Z, true),
+            map_button_for_device(evdev::KeyCode::BTN_Z, ButtonLayout::Ultimate2DInput),
             Some(GamepadButton::Paddle4)
         );
         assert_eq!(
-            map_button_for_device(evdev::KeyCode::BTN_C, true),
+            map_button_for_device(evdev::KeyCode::BTN_C, ButtonLayout::Ultimate2DInput),
             Some(GamepadButton::Paddle3)
         );
         assert_eq!(
-            map_button_for_device(evdev::KeyCode::BTN_TRIGGER_HAPPY1, true),
+            map_button_for_device(
+                evdev::KeyCode::BTN_TRIGGER_HAPPY1,
+                ButtonLayout::Ultimate2DInput
+            ),
             Some(GamepadButton::Paddle2)
         );
         assert_eq!(
-            map_button_for_device(evdev::KeyCode::BTN_TRIGGER_HAPPY2, true),
+            map_button_for_device(
+                evdev::KeyCode::BTN_TRIGGER_HAPPY2,
+                ButtonLayout::Ultimate2DInput
+            ),
             Some(GamepadButton::Paddle1)
         );
         assert_eq!(
-            map_button_for_device(evdev::KeyCode::BTN_TRIGGER_HAPPY8, true),
+            map_button_for_device(
+                evdev::KeyCode::BTN_TRIGGER_HAPPY8,
+                ButtonLayout::Ultimate2DInput
+            ),
             None
         );
         assert!(!is_ultimate_2(0x2dc8, 0x310b));
+    }
+
+    #[test]
+    fn test_nintendo_layout_drops_capture_instead_of_faking_a_paddle() {
+        // hid-nintendo reports capture as BTN_Z; on Nintendo pads that must
+        // not surface as a phantom Paddle2 the hardware does not have.
+        assert_eq!(
+            map_button_for_device(evdev::KeyCode::BTN_Z, ButtonLayout::Nintendo),
+            None
+        );
+        // Standard positional buttons keep their usual meaning.
+        assert_eq!(
+            map_button_for_device(evdev::KeyCode::BTN_SOUTH, ButtonLayout::Nintendo),
+            Some(GamepadButton::A)
+        );
+        assert_eq!(
+            map_button_for_device(evdev::KeyCode::BTN_EAST, ButtonLayout::Nintendo),
+            Some(GamepadButton::B)
+        );
+    }
+
+    #[test]
+    fn test_button_layout_identifies_device_families() {
+        assert_eq!(
+            button_layout(0x2dc8, 0x6012, "8BitDo Ultimate 2 Wireless Controller"),
+            ButtonLayout::Ultimate2DInput
+        );
+        assert_eq!(
+            button_layout(0x057e, 0x2009, "Nintendo Switch Pro Controller"),
+            ButtonLayout::Nintendo
+        );
+        assert_eq!(
+            button_layout(0x045e, 0x028e, "Xbox 360 Controller"),
+            ButtonLayout::Standard
+        );
+        // A Switch-mode 8BitDo dongle impersonating a Pro Controller.
+        assert_eq!(
+            button_layout(0x057e, 0x2009, "8BitDo Ultimate 2 Wireless Controller"),
+            ButtonLayout::Nintendo
+        );
+    }
+
+    #[test]
+    fn test_swap_face_buttons_trades_ab_and_xy_only() {
+        assert_eq!(swap_face_buttons(GamepadButton::A), GamepadButton::B);
+        assert_eq!(swap_face_buttons(GamepadButton::B), GamepadButton::A);
+        assert_eq!(swap_face_buttons(GamepadButton::X), GamepadButton::Y);
+        assert_eq!(swap_face_buttons(GamepadButton::Y), GamepadButton::X);
+        assert_eq!(swap_face_buttons(GamepadButton::Start), GamepadButton::Start);
+        assert_eq!(
+            swap_face_buttons(GamepadButton::Paddle3),
+            GamepadButton::Paddle3
+        );
+        // Swapping twice restores the positional meaning.
+        for button in [
+            GamepadButton::A,
+            GamepadButton::B,
+            GamepadButton::X,
+            GamepadButton::Y,
+        ] {
+            assert_eq!(swap_face_buttons(swap_face_buttons(button)), button);
+        }
     }
 
     #[test]

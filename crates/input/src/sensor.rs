@@ -166,6 +166,7 @@ impl ControllerCalibration {
             z: sums[2] / count,
             stick_deadzone_left: 0.0,
             stick_deadzone_right: 0.0,
+            nintendo_layout: false,
         })
     }
 }

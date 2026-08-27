@@ -56,6 +56,7 @@ pub(super) struct PreviewRequest {
     pub steam: Arc<ira_api::SteamDataClient>,
     pub save_dir: String,
     pub attach_game_id: Option<i64>,
+    pub platform_id: Option<String>,
     pub layout: SteamLayout,
     pub on_imported: Rc<dyn Fn(PathBuf)>,
     pub search_status: SearchStatus,
@@ -71,6 +72,7 @@ impl PreviewRequest {
             steam,
             save_dir,
             attach_game_id,
+            platform_id,
             layout,
             on_imported,
             search_status,
@@ -105,6 +107,7 @@ impl PreviewRequest {
                         warnings,
                         &save_dir,
                         attach_game_id,
+                        platform_id,
                         on_imported,
                     ));
                 }
@@ -133,6 +136,7 @@ fn build_preview_page(
     warnings: Vec<String>,
     save_dir: &str,
     attach_game_id: Option<i64>,
+    platform_id: Option<String>,
     on_imported: Rc<dyn Fn(PathBuf)>,
 ) -> adw::NavigationPage {
     let toolbar = adw::ToolbarView::new();
@@ -181,6 +185,7 @@ fn build_preview_page(
         published_file_id: layout.published_file_id.clone(),
         save_dir: save_dir.to_string(),
         attach_game_id,
+        platform_id,
     };
     {
         let status = import_status.clone();
@@ -338,6 +343,7 @@ struct StoreJob {
     published_file_id: String,
     save_dir: String,
     attach_game_id: Option<i64>,
+    platform_id: Option<String>,
 }
 
 fn start_store(
@@ -382,6 +388,11 @@ fn store_profile(job: StoreJob) -> Result<PathBuf, String> {
     if let Some(game_id) = job.attach_game_id {
         if !profile.compatible_game_ids.contains(&game_id) {
             profile.compatible_game_ids.push(game_id);
+        }
+    }
+    if let Some(platform_id) = job.platform_id {
+        if !profile.compatible_platform_ids.contains(&platform_id) {
+            profile.compatible_platform_ids.push(platform_id);
         }
     }
     let path = new_managed_profile_path(&job.save_dir, &profile.name);

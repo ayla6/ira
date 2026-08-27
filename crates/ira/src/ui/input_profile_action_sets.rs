@@ -218,9 +218,14 @@ fn show_add_set_dialog(
     copy_labels.extend(set_names(&ctx.profile.borrow()));
     refill_combo(&copy, &copy_labels, 0);
 
+    let rows = gtk4::ListBox::new();
+    rows.set_selection_mode(gtk4::SelectionMode::None);
+    rows.add_css_class("boxed-list");
+    rows.append(&entry);
+    rows.append(&copy);
     let layout_box = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
-    layout_box.append(&entry);
-    layout_box.append(&copy);
+    layout_box.set_margin_top(8);
+    layout_box.append(&rows);
 
     let ctx = ctx.clone();
     let combo = combo.clone();

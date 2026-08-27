@@ -24,6 +24,7 @@ use std::sync::{mpsc, Arc};
 #[derive(Clone)]
 pub struct SteamLayoutSearchContext {
     pub game_id: i64,
+    pub platform_id: Option<String>,
     pub game_name: String,
     /// Non-empty for games with a known Steam app id.
     pub steam_app_id: String,
@@ -50,6 +51,8 @@ struct DialogContext {
     on_imported: Rc<dyn Fn(PathBuf)>,
     /// Steam app id scoping ("This game only"), when opened per-game.
     steam_app_id: Option<String>,
+    /// Platform scope attached to imported profiles, when opened per-game.
+    platform_id: Option<String>,
     nav: adw::NavigationView,
     list: gtk4::ListBox,
     entry: gtk4::SearchEntry,
@@ -110,6 +113,7 @@ pub fn show_steam_layout_search(
         steam: steam.clone(),
         save_dir: save_dir.to_string(),
         attach_game_id: context.as_ref().map(|context| context.game_id),
+        platform_id: context.as_ref().and_then(|context| context.platform_id.clone()),
         on_imported,
         steam_app_id: app_id,
         nav,
@@ -376,6 +380,7 @@ fn layout_row(ctx: &Rc<DialogContext>, layout: &SteamLayout) -> adw::ActionRow {
             steam: request_ctx.steam.clone(),
             save_dir: request_ctx.save_dir.clone(),
             attach_game_id: request_ctx.attach_game_id,
+            platform_id: request_ctx.platform_id.clone(),
             layout: row_layout.clone(),
             on_imported: request_ctx.on_imported.clone(),
             search_status: request_ctx.status.clone(),

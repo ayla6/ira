@@ -16,6 +16,9 @@ pub(crate) type Reopen = Rc<dyn Fn()>;
 /// its own reopen hook from this so any depth of rebuilds keeps working.
 #[derive(Clone)]
 pub(crate) struct SheetBase {
+    /// The editor's live gyro config, for settings shared with the Gyro
+    /// page (dots per 360°).
+    pub(crate) gyro: Rc<std::cell::RefCell<ira_input::GyroConfig>>,
     pub(crate) content: gtk4::Box,
     pub(crate) profile: ProfileRc,
     pub(crate) active_target: EditingTarget,

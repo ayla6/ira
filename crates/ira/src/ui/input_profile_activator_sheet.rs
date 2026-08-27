@@ -15,6 +15,7 @@ use std::rc::Rc;
 /// Everything one input's sheet needs; built by the region pages.
 pub(crate) struct InputSheetRequest {
     pub profile: ProfileRc,
+    pub gyro: Rc<std::cell::RefCell<ira_input::GyroConfig>>,
     pub active_target: super::input_profile_sheet_base::EditingTarget,
     pub source: InputSource,
     pub device: Option<ira_input::DeviceInfo>,
@@ -46,6 +47,7 @@ pub(crate) fn show_input_sheet(parent: &impl IsA<gtk4::Widget>, request: InputSh
     window.set_child(Some(&toolbar));
 
     let base = super::input_profile_sheet_base::SheetBase {
+        gyro: request.gyro.clone(),
         content,
         profile: request.profile,
         active_target: request.active_target,

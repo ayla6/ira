@@ -39,6 +39,10 @@ pub(crate) struct PagesCtx {
     pub indicator: Rc<super::input_profile_set_indicator::SetIndicator>,
     pub device: Option<ira_input::DeviceInfo>,
     pub on_dirty: Rc<dyn Fn()>,
+    /// The editor's live gyro config: per-input sheets that touch shared
+    /// calibration (the flick stick's dots per 360°) must write the same
+    /// store the Gyro page edits, or the next save stomps their value.
+    pub gyro: Rc<std::cell::RefCell<ira_input::GyroConfig>>,
 }
 
 /// Handle to the region page contents; the Gyro and Action Sets pages are
@@ -387,6 +391,7 @@ fn open_sheet(ctx: &PagesCtx, source: InputSource) {
         &ctx.window,
         InputSheetRequest {
             profile: ctx.profile.clone(),
+            gyro: ctx.gyro.clone(),
             active_target: ctx.active_target.get(),
             source,
             device: ctx.device.clone(),
@@ -530,6 +535,9 @@ mod gtk_repro {
             ),
             device: None,
             on_dirty: std::rc::Rc::new(|| {}),
+            gyro: std::rc::Rc::new(std::cell::RefCell::new(
+                InputProfile::default().gyro,
+            )),
         };
         let mut region_boxes = Vec::new();
         for region in Region::ALL {

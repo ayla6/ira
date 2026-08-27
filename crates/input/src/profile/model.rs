@@ -1017,6 +1017,12 @@ pub struct InputProfile {
     /// Empty means the profile is available to every game.
     #[serde(default)]
     pub compatible_game_ids: Vec<i64>,
+    /// Platforms this profile was made for ("wii", "ps1", ...). Empty means
+    /// the profile is offered on every platform; a profile created from a
+    /// console game's controller page carries that platform so it never
+    /// clutters unrelated games.
+    #[serde(default)]
+    pub compatible_platform_ids: Vec<String>,
     /// Whether the layout also exposes the physical motion sensors as
     /// standard evdev axes next to the virtual pad. Off by default: until
     /// the kernel grows UNIQ support for uinput and SDL falls back to its
@@ -1054,6 +1060,7 @@ impl Default for InputProfile {
             action_sets: Vec::new(),
             action_layers: Vec::new(),
             compatible_game_ids: Vec::new(),
+            compatible_platform_ids: Vec::new(),
             native_motion: false,
             rumble: true,
             action_set_when_cursor_shown: None,

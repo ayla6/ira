@@ -308,7 +308,7 @@ pub(crate) fn mode_setting_rows(
                 ),
                 |value| format!("{value:.0}px"),
                 move |value| {
-                    calibration_base.profile.borrow_mut().gyro.dots_per_360 = value as f32;
+                    calibration_base.gyro.borrow_mut().dots_per_360 = value as f32;
                     (calibration_base.on_changed)();
                 },
             )

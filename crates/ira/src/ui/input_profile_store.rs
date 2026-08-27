@@ -168,6 +168,21 @@ pub(super) fn profile_matches_game(profile: &InputProfile, game_id: i64) -> bool
     profile.compatible_game_ids.is_empty() || profile.compatible_game_ids.contains(&game_id)
 }
 
+/// A profile scoped to platforms shows only on those platforms; unscoped
+/// profiles stay global. PC games carry an empty platform id, so they see
+/// exactly the global pool.
+pub(super) fn profile_matches_platform(profile: &InputProfile, platform_id: &str) -> bool {
+    profile.compatible_platform_ids.is_empty()
+        || profile
+            .compatible_platform_ids
+            .iter()
+            .any(|candidate| candidate == platform_id)
+}
+
+pub(super) fn delete_profile(path: &Path) -> Result<(), String> {
+    std::fs::remove_file(path).map_err(|error| format!("Could not delete controller profile: {error}"))
+}
+
 pub(super) fn managed_profile_path(save_dir: &str, name: &str) -> PathBuf {
     profile_directory(save_dir).join(format!("{}.json", profile_slug(name)))
 }

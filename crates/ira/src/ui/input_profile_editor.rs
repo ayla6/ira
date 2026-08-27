@@ -27,6 +27,9 @@ pub(super) struct InputProfileEditorParams {
     pub save_dir: String,
     pub profile_path: Option<PathBuf>,
     pub game_id: Option<i64>,
+    /// The presenting game's platform, when it has one. New profiles are
+    /// scoped to it so a Wii layout never offers itself to a PS1 game.
+    pub platform_id: Option<String>,
     pub layout_name: Option<String>,
     pub registry: Arc<ira_input::ControllerRegistry>,
     pub device: Option<DeviceInfo>,
@@ -41,6 +44,7 @@ pub(super) fn show_input_profile_editor(
         save_dir,
         profile_path,
         game_id,
+        platform_id,
         layout_name,
         registry,
         device,
@@ -65,7 +69,15 @@ pub(super) fn show_input_profile_editor(
                 true,
             ),
         },
-        None => (InputProfile::default(), String::new(), false),
+        None => {
+            let mut profile = InputProfile::default();
+            if let Some(platform_id) = platform_id.as_deref() {
+                if !platform_id.is_empty() {
+                    profile.compatible_platform_ids.push(platform_id.to_string());
+                }
+            }
+            (profile, String::new(), false)
+        }
     };
     if let Some(layout_name) = layout_name
         .as_deref()
@@ -132,6 +144,7 @@ pub(super) fn show_input_profile_editor(
         indicator: indicator.clone(),
         device,
         on_dirty: on_dirty.clone(),
+        gyro: gyro.clone(),
     };
     let pages = build_pages(&layout, &ctx, &gyro, &profile_name);
 
@@ -168,13 +181,20 @@ pub(super) fn show_input_profile_editor(
             let apply = apply.clone();
             let rebuild_pending = rebuild_pending.clone();
             gtk4::glib::idle_add_local_once(move || {
-                rebuild_pending.set(false);
+                // Rebuilding the pages makes their widgets emit change
+                // signals during construction, and every one of those
+                // handlers calls on_dirty. Keep the coalescing flag held
+                // across the whole rebuild so those echoes never schedule
+                // another pass — rebuilding from inside a rebuild consumed
+                // memory without bound and took the session down.
+                rebuild_pending.set(true);
                 rebuild_region_pages(&ctx, &pages);
                 let dirty = build_profile(&form)
                     .map(|built| built != *baseline.borrow())
                     .unwrap_or(true);
                 save.set_sensitive(dirty);
                 apply.set_sensitive(dirty);
+                rebuild_pending.set(false);
             });
         }));
     }

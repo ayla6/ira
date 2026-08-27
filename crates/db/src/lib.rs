@@ -20,7 +20,7 @@ pub use lookup::*;
 pub use metadata::*;
 pub use profiles::*;
 pub use rom_serials::*;
-pub(crate) use row_mapping::{game_entry_from_row, lock_db, GAME_COLUMNS};
+pub(crate) use row_mapping::{err, game_entry_from_row, lock_db, GAME_COLUMNS};
 pub use sessions::*;
 pub use settings::*;
 pub use setup::{checkpoint, init_db, update_field};

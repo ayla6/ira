@@ -54,6 +54,38 @@ pub(crate) fn mode_label(mode: &Option<SourceMode>, is_trigger: bool) -> String 
     }
 }
 
+/// Steam-style explanation shown under the behavior dropdown for the
+/// currently selected mode.
+pub(crate) fn mode_description(mode: &Option<SourceMode>, is_trigger: bool) -> String {
+    match mode {
+        None => crate::tr!(
+            "The input is unused — the controller ignores it entirely"
+        )
+        .to_string(),
+        Some(SourceMode::Joystick(_)) => crate::tr!(
+            "Moves a joystick for camera or movement, with a tunable response curve"
+        )
+        .to_string(),
+        Some(SourceMode::Dpad { .. }) => crate::tr!(
+            "Emulates a d-pad in the direction the stick is pushed"
+        )
+        .to_string(),
+        Some(SourceMode::Mouse { .. }) => crate::tr!(
+            "Moves the mouse cursor — good for menus and mouse-look camera"
+        )
+        .to_string(),
+        Some(SourceMode::Flickstick { .. }) => crate::tr!(
+            "Flicks the view in the stick's direction, then turns while held — pair with gyro aiming"
+        )
+        .to_string(),
+        Some(SourceMode::Trigger { .. }) if is_trigger => crate::tr!(
+            "Analog trigger with an adjustable pull threshold"
+        )
+        .to_string(),
+        _ => String::new(),
+    }
+}
+
 pub(crate) fn same_mode(left: &Option<SourceMode>, right: &SourceMode) -> bool {
     match left {
         Some(a) => std::mem::discriminant(a) == std::mem::discriminant(right),
@@ -158,13 +190,14 @@ pub(crate) fn behavior_group(
 
     let dropdown = combo_row(&labels, selected as u32);
     dropdown.set_title(&crate::tr!("Behavior"));
-    dropdown.set_subtitle(&crate::tr!("What this stick or trigger does"));
+    dropdown.set_subtitle(&mode_description(&current, is_trigger));
     group.add(&dropdown);
 
     let base_for_change = base.clone();
     let reopen_for_change = reopen.clone();
     dropdown.connect_selected_notify(move |dropdown| {
         let mode = modes.get(dropdown.selected() as usize).cloned().flatten();
+        dropdown.set_subtitle(&mode_description(&mode, is_trigger));
         with_mapping(&base_for_change, |input| {
             input.mode = mode;
         });

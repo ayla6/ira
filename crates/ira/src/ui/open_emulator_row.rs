@@ -106,11 +106,14 @@ fn spawn_emulator_open(
     let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(exe, &[], None);
     if mode != ControllerInputMode::Disabled {
         let calibration = ira_input::calibration_store_path(save_dir);
+        // Never focus-pause here: a bare emulator often sits on a launcher
+        // or file dialog whose window does not match the focus watcher, and
+        // a paused daemon means dead input for the whole session.
         ira_launcher::env_builder::wrap_with_input(
             &mut cmd,
             layout.as_deref(),
             Some(calibration.to_str().unwrap_or_default()),
-            true,
+            false,
         )?;
     }
     let env = ira_launcher::env_builder::clean_parent_env();

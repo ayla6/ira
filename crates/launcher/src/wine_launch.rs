@@ -272,28 +272,6 @@ pub fn build_wine_reg_commands(wine: &WineConfig, wine_exe: &str) -> Vec<Vec<Str
         "/f".to_string(),
     ]);
 
-    // Virtual desktop removed — barely works on newer Wine versions.
-    // Always clean up any leftover Explorer registry keys from older configs.
-    let desktop_name = "Default";
-    commands.push(vec![
-        wine_exe.to_string(),
-        "reg".to_string(),
-        "delete".to_string(),
-        r"HKCU\Software\Wine\Explorer".to_string(),
-        "/v".to_string(),
-        "Desktop".to_string(),
-        "/f".to_string(),
-    ]);
-    commands.push(vec![
-        wine_exe.to_string(),
-        "reg".to_string(),
-        "delete".to_string(),
-        r"HKCU\Software\Wine\Explorer\Desktops".to_string(),
-        "/v".to_string(),
-        desktop_name.to_string(),
-        "/f".to_string(),
-    ]);
-
     if wine.dpi_enabled {
         commands.push(vec![
             wine_exe.to_string(),

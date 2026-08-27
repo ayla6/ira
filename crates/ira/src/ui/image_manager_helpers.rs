@@ -148,12 +148,12 @@ pub(super) fn make_refresh_closure(
 /// through the emulator's own configuration.
 pub(super) fn native_icon_bytes(
     game: &Game,
-    roms_folder: &str,
+    cfg: &ira_config::Config,
     azahar_executable: &str,
     cemu_executable: &str,
 ) -> Option<Vec<u8>> {
-    // Resolve ROM path: Retro games store it relative to the ROMs folder
-    // (e.g. "game.nds" or "game.zip"), while console games store an
+    // Resolve ROM path: Retro games store it relative to one of the ROM
+    // roots (e.g. "game.nds" or "game.zip"), while console games store an
     // absolute path.
     let game_root_owned;
     let game_root: &std::path::Path =
@@ -162,9 +162,7 @@ pub(super) fn native_icon_bytes(
             if p.is_absolute() {
                 p
             } else {
-                game_root_owned = std::path::Path::new(roms_folder)
-                    .join(&game.platform_id)
-                    .join(p);
+                game_root_owned = cfg.resolve_rom_path(&game.platform_id, &game.game_path)?;
                 &game_root_owned
             }
         } else {
@@ -283,7 +281,7 @@ mod tests {
         let save_dir = tmp.path().to_str().unwrap();
         let game = nds_game("missing.nds", 0);
 
-        let bytes = native_icon_bytes(&game, save_dir, "", "");
+        let bytes = native_icon_bytes(&game, &ira_config::Config::default(), "", "");
 
         assert!(bytes.is_none());
         let data_dir = ira_parser::retro_data_dir(save_dir, game.db_id);

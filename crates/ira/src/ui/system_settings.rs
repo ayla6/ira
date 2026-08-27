@@ -6,6 +6,7 @@ use glib::clone::Downgrade;
 
 use super::add_game_dialog::build_env_var_row;
 use super::css::CSS_BOXED_LIST;
+use super::helpers::string_list_from;
 use super::wine_config_helpers::make_revert_btn;
 
 pub(super) type OverrideState = Rc<RefCell<Option<bool>>>;
@@ -204,15 +205,13 @@ fn make_upscaling_row(
     default_upscaling: &str,
     override_val: Option<&str>,
 ) -> (adw::ComboRow, Rc<RefCell<Option<String>>>) {
-    let strings = [
+    let model = string_list_from(&[
         crate::tr!("Linear"),
         crate::tr!("FSR"),
         crate::tr!("NIS"),
         crate::tr!("Integer"),
         crate::tr!("Nearest"),
-    ];
-    let refs: Vec<&str> = strings.iter().map(String::as_str).collect();
-    let model = gtk4::StringList::new(&refs);
+    ]);
     let row = adw::ComboRow::new();
     row.set_title(&crate::tr!("Upscaling method"));
     row.set_model(Some(&model));

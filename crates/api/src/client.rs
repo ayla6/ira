@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use serde::de::DeserializeOwned;
+
 pub struct SteamDataClient {
     pub(crate) api_key: Mutex<String>,
     pub(crate) sgdb_api_key: Mutex<String>,
@@ -34,5 +36,42 @@ impl SteamDataClient {
 
     pub(crate) fn sgdb_api_key(&self) -> String {
         self.sgdb_api_key.lock().unwrap().clone()
+    }
+
+    /// GET `url` and return the response body as text. Errors include the URL
+    /// and HTTP status so callers can log without reassembling context.
+    pub(crate) fn http_get_text(&self, url: &str) -> Result<String, String> {
+        let _s = tracing::info_span!("http_get_text", url).entered();
+        let resp = self
+            .http
+            .get(url)
+            .send()
+            .map_err(|e| format!("GET {url} failed: {e}"))?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(format!("GET {url} failed: HTTP {status}"));
+        }
+        resp.text()
+            .map_err(|e| format!("GET {url} failed: read error: {e}"))
+    }
+
+    /// GET `url` and decode the body as JSON. Failures are logged with the
+    /// URL (and status where applicable); returns `None` on any failure.
+    pub(crate) fn http_get_json<T: DeserializeOwned>(&self, url: &str) -> Option<T> {
+        let _s = tracing::info_span!("http_get_json", url).entered();
+        let text = match self.http_get_text(url) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("{e}");
+                return None;
+            }
+        };
+        match serde_json::from_str(&text) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!("GET {url} failed: decode error: {e}");
+                None
+            }
+        }
     }
 }

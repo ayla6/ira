@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::css::*;
+use super::helpers::string_list_from;
 use super::wine_config_env_dll::{build_dll_override_row, collect_dll_overrides};
 use super::wine_config_helpers::{
     build_combo_row, build_switch_row, make_section, page_with_content, track_combo, track_spin,
@@ -395,8 +396,7 @@ fn build_wine_adv_page(
     let denuvo_versions = ira_platforms::api_emulators::list_denuvo_versions(save_dir);
     let mut denuvo_labels: Vec<String> = vec![crate::tr!("None")];
     denuvo_labels.extend(denuvo_versions.iter().cloned());
-    let denuvo_model =
-        gtk4::StringList::new(&denuvo_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+    let denuvo_model = string_list_from(&denuvo_labels);
     let denuvo_combo = adw::ComboRow::new();
     denuvo_combo.set_title(&crate::tr!("Denuvo API emulator"));
     denuvo_combo.set_subtitle(&crate::tr!(

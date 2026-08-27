@@ -22,8 +22,8 @@ pub fn show_add_game_dialog(state: &SharedState) {
         )
     };
 
-    let layout = super::helpers::dialog_layout(&window);
-    layout.window.set_title(Some(&crate::tr!("Add game")));
+    let layout = super::helpers::dialog_layout();
+    layout.window.set_title(&crate::tr!("Add game"));
     layout
         .header
         .set_title_widget(Some(&gtk4::Label::new(Some(&crate::tr!("Add game")))));
@@ -108,9 +108,15 @@ pub fn show_add_game_dialog(state: &SharedState) {
 
     let (cancel_btn, add_btn) = build_dialog_button_row(&content_area);
     let win_c = win.clone();
-    cancel_btn.connect_clicked(move |_| win_c.close());
+    cancel_btn.connect_clicked(move |_| {
+        win_c.close();
+    });
 
-    win.present();
+    // Natural height outgrew what a normal window offers as pages landed;
+    // libadwaita warns and clips floating sheets that ask for more than
+    // their presenter has.
+    super::helpers::fit_dialog_height(&win, &window, 720);
+    win.present(Some(&window));
 
     connect_add_handler(
         &add_btn,
@@ -219,7 +225,7 @@ struct AddGameWidgets<'a> {
     ra_username: &'a str,
     ra_web_api_key: &'a str,
     profiles: &'a [WineProfile],
-    win: &'a adw::Window,
+    win: &'a adw::Dialog,
     state: &'a SharedState,
 }
 

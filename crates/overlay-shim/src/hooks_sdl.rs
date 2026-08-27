@@ -16,7 +16,7 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::OnceLock;
 
-use ira_overlay_ipc::{gamepad_button_mask_from_evdev, InputEventRaw};
+use ira_overlay_ipc::{gamepad_button_mask_from_evdev, InputEventRaw, ShmHeader};
 
 use crate::state;
 
@@ -36,13 +36,14 @@ const BTN_DPAD_DOWN: u8 = 12;
 const BTN_DPAD_LEFT: u8 = 13;
 const BTN_DPAD_RIGHT: u8 = 14;
 
-// X11 keycodes (evdev + 8) — these are what shim_bridge::convert_and_forward
-// expects for navigation mapping.
-const KC_RETURN: u32 = 36;
-const KC_UP: u32 = 111;
-const KC_DOWN: u32 = 116;
-const KC_LEFT: u32 = 113;
-const KC_RIGHT: u32 = 114;
+// X11 navigation keycodes — what shim_bridge::convert_and_forward expects on
+// InputEventRaw.keycode. Single source of truth: ShmHeader::NAV_KEYCODES_X11,
+// order [Return, Up, Down, Left, Right].
+const KC_RETURN: u32 = ShmHeader::NAV_KEYCODES_X11[0];
+const KC_UP: u32 = ShmHeader::NAV_KEYCODES_X11[1];
+const KC_DOWN: u32 = ShmHeader::NAV_KEYCODES_X11[2];
+const KC_LEFT: u32 = ShmHeader::NAV_KEYCODES_X11[3];
+const KC_RIGHT: u32 = ShmHeader::NAV_KEYCODES_X11[4];
 
 // SDL2: SDL_ControllerButtonEvent button is at offset 12
 //   Uint32 type (0), Uint32 timestamp (4), Sint32 which (8), Uint8 button (12)

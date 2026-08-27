@@ -24,6 +24,35 @@ pub struct LaunchContext {
     pub overlay_font_family: Option<String>,
 }
 
+/// Attach the ira-overlay to a prepared command/environment pair.
+///
+/// Shared by the Wine and native launch branches. Gamescope commands wrap the
+/// standalone overlay process around the compositor and move game-only env
+/// vars onto its wrapper script (restoring them if wrapping fails); any other
+/// command injects the Vulkan layer directly into the game environment.
+fn attach_overlay(
+    enabled: bool,
+    cmd: &mut Vec<String>,
+    env: &mut Vec<(String, String)>,
+    overlay_shm: Option<&str>,
+    font_family: Option<&str>,
+) {
+    if !enabled {
+        return;
+    }
+    if super::env_builder::uses_gamescope(cmd) {
+        let game_env = super::env_builder::take_gamescope_game_env(env);
+        let mut capture_env = game_env.clone();
+        super::env_builder::add_overlay_env_without_ui(&mut capture_env, overlay_shm, font_family);
+        super::env_builder::add_overlay_env_standalone(env, overlay_shm, font_family);
+        if !super::env_builder::wrap_with_standalone_overlay(cmd, &capture_env) {
+            super::env_builder::restore_gamescope_game_env(env, game_env);
+        }
+    } else {
+        super::env_builder::add_overlay_env(env, overlay_shm, font_family);
+    }
+}
+
 pub fn launch_game(
     launch: &GameLaunchConfig,
     wine: Option<&WineConfig>,
@@ -114,31 +143,13 @@ pub fn launch_game(
             }
         }
 
-        if ctx.overlay_enabled {
-            if super::env_builder::uses_gamescope(&cmd) {
-                let game_env = super::env_builder::take_gamescope_game_env(&mut env);
-                let mut capture_env = game_env.clone();
-                super::env_builder::add_overlay_env_without_ui(
-                    &mut capture_env,
-                    ctx.overlay_shm.as_deref(),
-                    ctx.overlay_font_family.as_deref(),
-                );
-                super::env_builder::add_overlay_env_standalone(
-                    &mut env,
-                    ctx.overlay_shm.as_deref(),
-                    ctx.overlay_font_family.as_deref(),
-                );
-                if !super::env_builder::wrap_with_standalone_overlay(&mut cmd, &capture_env) {
-                    super::env_builder::restore_gamescope_game_env(&mut env, game_env);
-                }
-            } else {
-                super::env_builder::add_overlay_env(
-                    &mut env,
-                    ctx.overlay_shm.as_deref(),
-                    ctx.overlay_font_family.as_deref(),
-                );
-            }
-        }
+        attach_overlay(
+            ctx.overlay_enabled,
+            &mut cmd,
+            &mut env,
+            ctx.overlay_shm.as_deref(),
+            ctx.overlay_font_family.as_deref(),
+        );
 
         let pfx = super::wine_launch::wine_prefix(wine);
         let prefix_ready = std::path::Path::new(&pfx).join("system.reg").is_file();
@@ -197,31 +208,13 @@ pub fn launch_game(
             super::emulator_saves::setup_gbe_saves_native(&ctx.save_dir);
         }
 
-        if ctx.overlay_enabled {
-            if super::env_builder::uses_gamescope(&cmd) {
-                let game_env = super::env_builder::take_gamescope_game_env(&mut env);
-                let mut capture_env = game_env.clone();
-                super::env_builder::add_overlay_env_without_ui(
-                    &mut capture_env,
-                    ctx.overlay_shm.as_deref(),
-                    ctx.overlay_font_family.as_deref(),
-                );
-                super::env_builder::add_overlay_env_standalone(
-                    &mut env,
-                    ctx.overlay_shm.as_deref(),
-                    ctx.overlay_font_family.as_deref(),
-                );
-                if !super::env_builder::wrap_with_standalone_overlay(&mut cmd, &capture_env) {
-                    super::env_builder::restore_gamescope_game_env(&mut env, game_env);
-                }
-            } else {
-                super::env_builder::add_overlay_env(
-                    &mut env,
-                    ctx.overlay_shm.as_deref(),
-                    ctx.overlay_font_family.as_deref(),
-                );
-            }
-        }
+        attach_overlay(
+            ctx.overlay_enabled,
+            &mut cmd,
+            &mut env,
+            ctx.overlay_shm.as_deref(),
+            ctx.overlay_font_family.as_deref(),
+        );
         (cmd, env)
     };
 

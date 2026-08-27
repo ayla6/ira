@@ -1,4 +1,4 @@
-use crate::DbConn;
+use crate::{err, DbConn};
 use ira_models::{GameEntry, GameKind, TrophySource};
 use rusqlite::params;
 
@@ -19,13 +19,13 @@ pub fn add_game(
             "INSERT INTO games (kind, trophy_source, steam_id, game_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(steam_id) WHERE steam_id != '' DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
             params![kind, trophy_source, steam_id, game_id, platform_id, title],
-        ).map_err(|e| e.to_string())?;
+        ).map_err(err)?;
     } else {
         c.execute(
             "INSERT INTO games (kind, trophy_source, steam_id, game_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(game_id, platform_id) WHERE game_id != '' DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
             params![kind, trophy_source, steam_id, game_id, platform_id, title],
-        ).map_err(|e| e.to_string())?;
+        ).map_err(err)?;
     }
     Ok(c.last_insert_rowid())
 }
@@ -36,7 +36,7 @@ pub fn update_game_title(conn: &DbConn, id: i64, title: &str) -> Result<(), Stri
         "UPDATE games SET title = ?1 WHERE id = ?2",
         params![title, id],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }
 
@@ -52,7 +52,7 @@ pub fn update_game_ids(
     c.execute(
         "UPDATE games SET steam_id = ?1, game_id = ?2, trophy_source = ?3, platform_id = ?4 WHERE id = ?5",
         params![steam_id, game_id, trophy_source.as_str(), platform_id, id],
-    ).map_err(|e| e.to_string())?;
+    ).map_err(err)?;
     Ok(())
 }
 
@@ -62,7 +62,7 @@ pub fn update_sort_title(conn: &DbConn, id: i64, sort_title: &str) -> Result<(),
         "UPDATE games SET sort_title = ?1 WHERE id = ?2",
         params![sort_title, id],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }
 
@@ -72,7 +72,7 @@ pub fn update_game_folder(conn: &DbConn, id: i64, game_folder: &str) -> Result<(
         "UPDATE games SET game_folder = ?1 WHERE id = ?2",
         params![game_folder, id],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }
 
@@ -82,7 +82,7 @@ pub fn update_game_kind(conn: &DbConn, id: i64, kind: GameKind) -> Result<(), St
         "UPDATE games SET kind = ?1 WHERE id = ?2",
         params![kind.as_str(), id],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }
 
@@ -97,7 +97,7 @@ pub fn update_achievement_counts(
     c.execute(
         "UPDATE games SET cached_earned_count = ?1, cached_total_count = ?2, cached_achievement_mtime = ?3 WHERE id = ?4",
         params![earned, total, mtime, id],
-    ).map_err(|e| e.to_string())?;
+    ).map_err(err)?;
     Ok(())
 }
 
@@ -107,27 +107,55 @@ pub fn set_manual_unmatch(conn: &DbConn, id: i64, value: bool) -> Result<(), Str
         "UPDATE games SET manual_unmatch = ?1 WHERE id = ?2",
         params![value, id],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }
 
 pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c.prepare(&format!("SELECT {} FROM games ORDER BY CASE WHEN sort_title != '' THEN sort_title ELSE title END", crate::GAME_COLUMNS))
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
     let entries = stmt
         .query_map([], crate::game_entry_from_row)
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
 
-    entries
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+    entries.collect::<Result<Vec<_>, _>>().map_err(err)
 }
 
 pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.execute("DELETE FROM games WHERE id = ?1", params![id])
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
+    Ok(())
+}
+
+/// Copy-guarded UPDATE used when merging duplicates: moves child rows to the
+/// canonical game only if it has none yet, so its existing values win.
+/// Byte-identical to the literal it replaced (modulo table name).
+fn copy_guarded_update_sql(table: &str) -> String {
+    format!(
+        "UPDATE {table} SET game_id = ?1\n             WHERE game_id = ?2 AND NOT EXISTS (\n                 SELECT 1 FROM {table} WHERE game_id = ?1\n             )"
+    )
+}
+
+/// Reassigns one owned-child table from a duplicate game to the canonical
+/// game (copy-guarded) and then deletes any leftovers from the duplicate.
+fn reassign_child_rows(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+    canonical_id: i64,
+    duplicate_id: i64,
+) -> Result<(), String> {
+    tx.execute(
+        &copy_guarded_update_sql(table),
+        params![canonical_id, duplicate_id],
+    )
+    .map_err(err)?;
+    tx.execute(
+        &format!("DELETE FROM {table} WHERE game_id = ?1"),
+        params![duplicate_id],
+    )
+    .map_err(err)?;
     Ok(())
 }
 
@@ -138,7 +166,7 @@ pub fn merge_duplicate_games(
     duplicate_ids: &[i64],
 ) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    let tx = c.unchecked_transaction().map_err(|e| e.to_string())?;
+    let tx = c.unchecked_transaction().map_err(err)?;
 
     for &duplicate_id in duplicate_ids {
         if duplicate_id == canonical_id {
@@ -156,77 +184,41 @@ pub fn merge_duplicate_games(
              WHERE id = ?1",
             params![canonical_id, duplicate_id],
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
         tx.execute(
             "INSERT OR IGNORE INTO game_groups (game_id, group_id)
              SELECT ?1, group_id FROM game_groups WHERE game_id = ?2",
             params![canonical_id, duplicate_id],
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
         tx.execute(
             "DELETE FROM game_groups WHERE game_id = ?1",
             params![duplicate_id],
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
         tx.execute(
             "UPDATE game_variants SET game_id = ?1 WHERE game_id = ?2",
             params![canonical_id, duplicate_id],
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
         tx.execute(
             "UPDATE play_sessions SET game_id = ?1 WHERE game_id = ?2",
             params![canonical_id, duplicate_id],
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
         tx.execute(
             "UPDATE game_discs SET game_id = ?1 WHERE game_id = ?2",
             params![canonical_id, duplicate_id],
         )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "UPDATE game_configs SET game_id = ?1
-             WHERE game_id = ?2 AND NOT EXISTS (
-                 SELECT 1 FROM game_configs WHERE game_id = ?1
-             )",
-            params![canonical_id, duplicate_id],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "DELETE FROM game_configs WHERE game_id = ?1",
-            params![duplicate_id],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "UPDATE game_default_variant SET game_id = ?1
-             WHERE game_id = ?2 AND NOT EXISTS (
-                 SELECT 1 FROM game_default_variant WHERE game_id = ?1
-             )",
-            params![canonical_id, duplicate_id],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "DELETE FROM game_default_variant WHERE game_id = ?1",
-            params![duplicate_id],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "UPDATE game_default_disc SET game_id = ?1
-             WHERE game_id = ?2 AND NOT EXISTS (
-                 SELECT 1 FROM game_default_disc WHERE game_id = ?1
-             )",
-            params![canonical_id, duplicate_id],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "DELETE FROM game_default_disc WHERE game_id = ?1",
-            params![duplicate_id],
-        )
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
+        for table in ["game_configs", "game_default_variant", "game_default_disc"] {
+            reassign_child_rows(&tx, table, canonical_id, duplicate_id)?;
+        }
         tx.execute("DELETE FROM games WHERE id = ?1", params![duplicate_id])
-            .map_err(|e| e.to_string())?;
+            .map_err(err)?;
     }
 
-    tx.commit().map_err(|e| e.to_string())?;
+    tx.commit().map_err(err)?;
     Ok(())
 }
 
@@ -237,7 +229,7 @@ pub fn set_api_dll_folder(conn: &DbConn, id: i64, folder: &str) -> Result<(), St
         "UPDATE games SET api_dll_folder = ?1 WHERE id = ?2",
         params![folder, id],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }
 
@@ -248,7 +240,7 @@ pub fn set_saves_centralized(conn: &DbConn, id: i64, centralized: bool) -> Resul
         "UPDATE games SET saves_centralized = ?1 WHERE id = ?2",
         params![centralized as i64, id],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }
 
@@ -263,6 +255,14 @@ mod tests {
     use super::*;
     use ira_models::{GameDisc, GameKind, TrophySource};
     use tempfile::TempDir;
+
+    #[test]
+    fn test_copy_guarded_update_sql_byte_matches_previous_literal() {
+        assert_eq!(
+            copy_guarded_update_sql("game_default_variant"),
+            "UPDATE game_default_variant SET game_id = ?1\n             WHERE game_id = ?2 AND NOT EXISTS (\n                 SELECT 1 FROM game_default_variant WHERE game_id = ?1\n             )"
+        );
+    }
 
     fn setup_db() -> (DbConn, TempDir) {
         let tmp = TempDir::new().unwrap();

@@ -37,12 +37,10 @@ struct InstallerState {
 
 pub fn show_installer_add_dialog(state: &SharedState) {
     let parent = state.borrow().window.clone();
-    let win = adw::Window::new();
-    win.set_title(Some(&crate::tr!("Install from Installer")));
-    win.set_default_size(520, 580);
-    win.set_modal(true);
-    win.set_transient_for(Some(&parent));
-    win.set_destroy_with_parent(true);
+    let win = adw::Dialog::new();
+    win.set_title(&crate::tr!("Install from Installer"));
+    win.set_content_width(520);
+    win.set_content_height(580);
 
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header = adw::HeaderBar::new();
@@ -50,8 +48,8 @@ pub fn show_installer_add_dialog(state: &SharedState) {
     content.append(&header);
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     content.append(&page);
-    win.set_content(Some(&content));
-    win.present();
+    win.set_child(Some(&content));
+    win.present(Some(&parent));
 
     let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
     let wizard = Rc::new(RefCell::new(Wizard {
@@ -82,11 +80,6 @@ pub fn show_installer_add_dialog(state: &SharedState) {
 
     show_config_page(&wizard, &ist);
 
-    let win_close = win.clone();
-    win.connect_close_request(move |_| {
-        let _ = win_close;
-        glib::Propagation::Proceed
-    });
 }
 
 fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>) {
@@ -129,8 +122,11 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
         dialog.set_title(&crate::tr!("Select installer files"));
         let ist_c2 = ist_c.clone();
         let list_c2 = list_c.clone();
+        let Some(host) = super::helpers::hosting_window(&win_c) else {
+            return;
+        };
         dialog.open_multiple(
-            Some(&win_c),
+            Some(&host),
             None::<&gtk4::gio::Cancellable>,
             move |result| {
                 if let Ok(files) = result {
@@ -181,7 +177,7 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
     } else {
         let row = adw::ActionRow::new();
         row.set_title(&crate::tr!("Install to this folder"));
-        row.set_subtitle(&default_folder.to_string_lossy());
+        row.set_subtitle(&esc(&default_folder.to_string_lossy()));
         let open_btn = gtk4::Button::new();
         open_btn.set_icon_name("folder-open-symbolic");
         open_btn.set_valign(gtk4::Align::Center);
@@ -789,7 +785,10 @@ fn pick_install_folder(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerS
     super::helpers::set_initial_folder(&dialog, &default_folder.to_string_lossy());
     let wizard_c = wizard.clone();
     let ist_c = ist.clone();
-    dialog.select_folder(Some(&win), None::<&gtk4::gio::Cancellable>, move |result| {
+    let Some(host) = super::helpers::hosting_window(&win) else {
+        return;
+    };
+    dialog.select_folder(Some(&host), None::<&gtk4::gio::Cancellable>, move |result| {
         if let Ok(file) = result {
             if let Some(path) = file.path() {
                 ist_c.borrow_mut().detected_folder = Some(path.clone());

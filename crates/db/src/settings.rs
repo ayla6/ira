@@ -1,4 +1,4 @@
-use crate::{update_field, DbConn};
+use crate::{err, update_field, DbConn};
 use rusqlite::params;
 
 pub fn set_game_hidden(conn: &DbConn, id: i64, hidden: bool) -> Result<(), String> {
@@ -11,7 +11,7 @@ pub fn set_logo_settings(conn: &DbConn, id: i64, position: &str, size: i32) -> R
         "UPDATE games SET logo_position = ?1, logo_size = ?2 WHERE id = ?3",
         params![position, size, id],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }
 
@@ -28,7 +28,7 @@ pub fn set_sgdb_id(conn: &DbConn, id: i64, sgdb_id: &str) -> Result<(), String> 
             id
         ],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }
 

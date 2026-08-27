@@ -245,6 +245,22 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     connect_search_signals(state, &window, &search_entry);
 }
 
+/// Flat popover menu row: left-aligned label on a 36px-tall flat button with
+/// the standard popover-menu-row styling. Popping down and handling stay
+/// with `on_click`.
+fn popover_menu_row(label: &str, on_click: impl Fn() + 'static) -> gtk4::Button {
+    let btn = gtk4::Button::new();
+    let text = gtk4::Label::new(Some(label));
+    text.set_xalign(0.0);
+    btn.set_child(Some(&text));
+    btn.add_css_class(CSS_FLAT);
+    btn.set_halign(gtk4::Align::Fill);
+    btn.set_size_request(-1, 36);
+    btn.add_css_class(CSS_POPOVER_MENU_ROW);
+    btn.connect_clicked(move |_| on_click());
+    btn
+}
+
 fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
     let popover = gtk4::Popover::new();
     popover.set_size_request(300, -1);
@@ -254,75 +270,47 @@ fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
     popover_box.set_margin_top(8);
     popover_box.set_margin_bottom(8);
 
-    let popup_settings_btn = gtk4::Button::new();
-    let popup_settings_label = gtk4::Label::new(Some(&crate::tr!("Settings")));
-    popup_settings_label.set_xalign(0.0);
-    popup_settings_btn.set_child(Some(&popup_settings_label));
-    popup_settings_btn.add_css_class(CSS_FLAT);
-    popup_settings_btn.set_halign(gtk4::Align::Fill);
-    popup_settings_btn.set_size_request(-1, 36);
-    popup_settings_btn.add_css_class(CSS_POPOVER_MENU_ROW);
-    {
+    let popup_settings_btn = {
         let popover_clone = popover.clone();
         let state_clone = state.clone();
-        popup_settings_btn.connect_clicked(move |_| {
+        popover_menu_row(&crate::tr!("Settings"), move || {
             popover_clone.popdown();
             let (window, cfg, steam) = {
                 let s = state_clone.borrow();
                 (s.window.clone(), s.cfg.clone(), s.steam.clone())
             };
             show_settings_dialog(&window, cfg, steam, &state_clone);
-        });
-    }
+        })
+    };
     popover_box.append(&popup_settings_btn);
 
-    let match_btn = gtk4::Button::new();
-    let match_label = gtk4::Label::new(Some(&crate::tr!("Match unmatched games")));
-    match_label.set_xalign(0.0);
-    match_btn.set_child(Some(&match_label));
-    match_btn.add_css_class(CSS_FLAT);
-    match_btn.set_halign(gtk4::Align::Fill);
-    match_btn.set_size_request(-1, 36);
-    match_btn.add_css_class(CSS_POPOVER_MENU_ROW);
-
-    let state_clone2 = state.clone();
-    match_btn.connect_clicked(move |_| show_mass_match_dialog(&state_clone2));
-
+    let match_btn = {
+        let state_clone = state.clone();
+        popover_menu_row(&crate::tr!("Match unmatched games"), move || {
+            show_mass_match_dialog(&state_clone)
+        })
+    };
     popover_box.append(&match_btn);
 
-    let history_btn = gtk4::Button::new();
-    let history_label = gtk4::Label::new(Some(&crate::tr!("Play history")));
-    history_label.set_xalign(0.0);
-    history_btn.set_child(Some(&history_label));
-    history_btn.add_css_class(CSS_FLAT);
-    history_btn.set_halign(gtk4::Align::Fill);
-    history_btn.set_size_request(-1, 36);
-    history_btn.add_css_class(CSS_POPOVER_MENU_ROW);
-
-    let state_clone_hist = state.clone();
-    history_btn.connect_clicked(move |_| {
-        super::play_history::show_daily_history_dialog(&state_clone_hist)
-    });
-
+    let history_btn = {
+        let state_clone = state.clone();
+        popover_menu_row(&crate::tr!("Play history"), move || {
+            super::play_history::show_daily_history_dialog(&state_clone)
+        })
+    };
     popover_box.append(&history_btn);
 
-    let rescan_btn = gtk4::Button::new();
-    let rescan_label = gtk4::Label::new(Some(&crate::tr!("Rescan game library")));
-    rescan_label.set_xalign(0.0);
-    rescan_btn.set_child(Some(&rescan_label));
-    rescan_btn.add_css_class(CSS_FLAT);
-    rescan_btn.set_halign(gtk4::Align::Fill);
-    rescan_btn.set_size_request(-1, 36);
-    rescan_btn.add_css_class(CSS_POPOVER_MENU_ROW);
-    let popover_clone = popover.clone();
-    let state_clone = state.clone();
-    rescan_btn.connect_clicked(move |_| {
-        popover_clone.popdown();
-        let _ = state_clone
-            .borrow()
-            .sender
-            .send(crate::AppMessage::ReloadGames);
-    });
+    let rescan_btn = {
+        let popover_clone = popover.clone();
+        let state_clone = state.clone();
+        popover_menu_row(&crate::tr!("Rescan game library"), move || {
+            popover_clone.popdown();
+            let _ = state_clone
+                .borrow()
+                .sender
+                .send(crate::AppMessage::ReloadGames);
+        })
+    };
     popover_box.append(&rescan_btn);
 
     let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);

@@ -12,7 +12,9 @@ use super::discovery_helpers::{
 
 struct ActiveConsole {
     def: &'static ConsoleDef,
-    folder: String,
+    /// This console's folder inside every configured ROM root,
+    /// in root priority order.
+    folders: Vec<std::path::PathBuf>,
 }
 
 fn active_consoles(cfg: &Config) -> Vec<ActiveConsole> {
@@ -22,11 +24,18 @@ fn active_consoles(cfg: &Config) -> Vec<ActiveConsole> {
                 return None;
             }
             let cc = cfg.console(def.id);
-            let folder = cfg.rom_folder(def.id);
-            (cc.enabled && !folder.as_os_str().is_empty()).then_some(ActiveConsole {
-                def,
-                folder: folder.to_string_lossy().into_owned(),
-            })
+            if !cc.enabled {
+                return None;
+            }
+            let folders = cfg.all_rom_roots();
+            if folders.is_empty() {
+                return None;
+            }
+            let folders = folders
+                .iter()
+                .map(|root| root.join(def.id))
+                .collect::<Vec<_>>();
+            Some(ActiveConsole { def, folders })
         })
         .collect()
 }
@@ -103,25 +112,35 @@ fn build_ra_games_for_console(
 ) -> Vec<Game> {
     let mut games = Vec::new();
 
-    let scan_result = {
+    let scan_results = {
         let _s = tracing::info_span!("scan_roms").entered();
         progress(&format!("Scanning {} ROMs…", console.def.display_name));
-        scan_roms(&console.folder, console.def.extensions)
+        console
+            .folders
+            .iter()
+            .map(|folder| scan_roms(&folder.to_string_lossy(), console.def.extensions))
+            .collect::<Vec<_>>()
     };
-    let scan_succeeded = scan_result.is_some();
+    let scan_succeeded = scan_results.iter().any(Option::is_some);
     if !scan_succeeded {
         eprintln!(
-            "RA: ROM folder is missing or unreadable for {}: {}",
-            console.def.id, console.folder
+            "RA: no readable ROM folder for {} (tried {:?})",
+            console.def.id, console.folders
         );
     }
-    let roms = scan_result.unwrap_or_default();
+    let roms: Vec<(String, PathBuf)> = scan_results
+        .into_iter()
+        .flatten()
+        .flat_map(|roms| roms.into_iter())
+        .collect();
 
     let to_relative = |abs_path: &std::path::Path| -> String {
-        abs_path
-            .strip_prefix(&console.folder)
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| abs_path.to_string_lossy().into_owned())
+        for folder in &console.folders {
+            if let Ok(rel) = abs_path.strip_prefix(folder) {
+                return rel.to_string_lossy().into_owned();
+            }
+        }
+        abs_path.to_string_lossy().into_owned()
     };
 
     let existing_entries = {
@@ -478,7 +497,7 @@ fn build_ra_games_for_console(
         enrich_nds_roms(
             db,
             save_dir,
-            &console.folder,
+            &console.folders,
             unpack_roms,
             &existing_entries,
             &games,
@@ -487,6 +506,21 @@ fn build_ra_games_for_console(
     }
 
     games
+}
+
+/// Resolve a ROM path relative to the console folder against every
+/// configured root, preferring a root where the file exists.
+fn resolve_in_folders(folders: &[PathBuf], relative: &str) -> PathBuf {
+    for folder in folders {
+        let candidate = folder.join(relative);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    match folders.first() {
+        Some(folder) => folder.join(relative),
+        None => PathBuf::from(relative),
+    }
 }
 
 /// Hashes the first disc of every new ROM group up front on NDS so the
@@ -528,7 +562,7 @@ fn precompute_nds_infos(
 fn enrich_nds_roms(
     db: &ira_db::DbConn,
     save_dir: &str,
-    folder: &str,
+    folders: &[PathBuf],
     unpack_roms: bool,
     existing: &[ira_models::GameEntry],
     games: &[Game],
@@ -551,12 +585,7 @@ fn enrich_nds_roms(
                 && !already_hashed.contains(&game.db_id)
                 && !hashed_now.contains(&game.db_id)
         })
-        .map(|game| {
-            (
-                game.db_id,
-                std::path::Path::new(folder).join(&game.rom_path),
-            )
-        })
+        .map(|game| (game.db_id, resolve_in_folders(folders, &game.rom_path)))
         .collect();
 
     let infos: Vec<Option<crate::nds::DsRomInfo>> = targets

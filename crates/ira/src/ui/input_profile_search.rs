@@ -3,14 +3,16 @@
 //! `AdwNavigationView` whose preview page handles the actual import.
 //! Filter and sort options mirror steaminputdb's search form.
 
-use super::css::CSS_SUGGESTED_ACTION;
 use super::helpers::{
     clamped, clamped_boxed_list, clear_children, esc, poll_channel, status_row, SearchStatus,
 };
-use super::input_profile_preview::{layout_display_name, PreviewRequest};
+use super::input_profile_preview::{
+    community_stats, layout_display_name, updated_date, PreviewRequest,
+};
 use super::input_profile_search_filters::{
     build_filter_card, controller_display_label, controller_filter_options, FeatureRow,
 };
+use super::steam_search_dialog::build_search_row;
 use adw::prelude::*;
 use ira_api::steam_input::{SteamLayout, SteamLayoutQuery, SteamLayoutSort};
 use std::cell::{Cell, RefCell};
@@ -132,7 +134,9 @@ pub fn show_steam_layout_search(
     });
     {
         let ctx = ctx.clone();
-        widgets.search_btn.connect_clicked(move |_| run_search(&ctx));
+        widgets
+            .search_btn
+            .connect_clicked(move |_| run_search(&ctx));
     }
     for changed in [&ctx.sort_row, &ctx.controller_row] {
         let ctx = ctx.clone();
@@ -162,17 +166,12 @@ fn build_search_ui(context: &Option<SteamLayoutSearchContext>) -> SearchWidgets 
     // Search row plus filter card, clamped together like the other dialogs.
     let query_column = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
-    let search_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    let entry = gtk4::SearchEntry::new();
-    entry.set_hexpand(true);
-    entry.set_placeholder_text(Some(&crate::tr!("Search community layouts…")));
-    if let Some(context) = context {
-        entry.set_text(&context.game_name);
-    }
-    search_row.append(&entry);
-    let search_btn = gtk4::Button::with_label(&crate::tr!("Search"));
-    search_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    search_row.append(&search_btn);
+    let entry_text = context
+        .as_ref()
+        .map(|context| context.game_name.as_str())
+        .unwrap_or_default();
+    let (search_row, entry, search_btn) =
+        build_search_row(entry_text, Some(&crate::tr!("Search community layouts…")));
     query_column.append(&search_row);
 
     // A known Steam app id scopes the query to that game's pool; everything
@@ -214,8 +213,11 @@ fn build_search_ui(context: &Option<SteamLayoutSearchContext>) -> SearchWidgets 
 
 fn run_search(ctx: &Rc<DialogContext>) {
     ctx.page.set(1);
-    clear_children(&ctx.list);
+    // Detach the pager before clearing: removing a row the clear already
+    // took makes GTK warn "Tried to remove non-child" and trips a
+    // g_sequence_iter critical.
     remove_pager(ctx);
+    clear_children(&ctx.list);
     ctx.status.show(&crate::tr!("Searching…"));
     fetch_page(ctx, 1);
 }
@@ -288,9 +290,13 @@ fn populate_results(
     }
     match outcome {
         Err(error) if error.contains("no Steam Web API key") => {
-            fail_results(ctx, page, &crate::tr!(
+            fail_results(
+                ctx,
+                page,
+                &crate::tr!(
                 "A Steam Web API key is needed to browse community layouts. Add one under Settings."
-            ));
+            ),
+            );
         }
         Err(error) => {
             fail_results(
@@ -348,7 +354,10 @@ fn append_pager(ctx: &Rc<DialogContext>) {
 
 fn remove_pager(ctx: &Rc<DialogContext>) {
     if let Some(row) = ctx.pager.borrow_mut().take() {
-        ctx.list.remove(&row);
+        // A list clear elsewhere may already have removed it.
+        if row.parent().is_some() {
+            ctx.list.remove(&row);
+        }
     }
 }
 
@@ -382,17 +391,9 @@ fn layout_subtitle(layout: &SteamLayout) -> String {
     if !layout.controller_type.is_empty() {
         parts.push(controller_display_label(&layout.controller_type));
     }
-    if layout.lifetime_subscriptions > 0 {
-        parts.push(
-            crate::tr!("{} subscribers")
-                .replacen("{}", &layout.lifetime_subscriptions.to_string(), 1),
-        );
-    }
-    if layout.votes_up > 0 {
-        parts.push(crate::tr!("{} upvotes").replacen("{}", &layout.votes_up.to_string(), 1));
-    }
-    if let Some(date) = chrono::DateTime::from_timestamp(layout.time_updated, 0) {
-        parts.push(date.format("%Y-%m-%d").to_string());
+    parts.extend(community_stats(layout));
+    if let Some(date) = updated_date(layout.time_updated) {
+        parts.push(date);
     }
     if layout.description.trim().is_empty() {
         return parts.join(" · ");

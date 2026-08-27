@@ -1,4 +1,4 @@
-use crate::DbConn;
+use crate::{err, DbConn};
 use ira_models::{GameLaunchConfig, WineConfig};
 use rusqlite::params;
 
@@ -11,7 +11,7 @@ pub fn get_game_config(
         .prepare(
             "SELECT launch_config, wine_config, profile_id FROM game_configs WHERE game_id = ?1",
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
     let mut rows = stmt
         .query_map(params![game_id], |row| {
             let launch_str: String = row.get(0)?;
@@ -19,23 +19,17 @@ pub fn get_game_config(
             let profile_id: Option<i64> = row.get(2)?;
             Ok((launch_str, wine_str, profile_id))
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
 
     match rows.next() {
         Some(Ok((launch_str, wine_str, profile_id))) => {
-            let launch: GameLaunchConfig = if launch_str.is_empty() {
-                GameLaunchConfig::default()
-            } else {
-                serde_json::from_str(&launch_str).map_err(|e| e.to_string())?
-            };
-            let wine: WineConfig = if wine_str.is_empty() {
-                WineConfig::default()
-            } else {
-                serde_json::from_str(&wine_str).map_err(|e| e.to_string())?
-            };
+            // The only writer (save_game_config) always stores full JSON; an
+            // empty column can only come from pre-release app versions.
+            let launch: GameLaunchConfig = serde_json::from_str(&launch_str).map_err(err)?;
+            let wine: WineConfig = serde_json::from_str(&wine_str).map_err(err)?;
             Ok(Some((launch, wine, profile_id)))
         }
-        Some(Err(e)) => Err(e.to_string()),
+        Some(Err(e)) => Err(err(e)),
         None => Ok(None),
     }
 }
@@ -47,15 +41,15 @@ pub fn save_game_config(
     wine: &WineConfig,
     profile_id: Option<i64>,
 ) -> Result<(), String> {
-    let launch_str = serde_json::to_string(launch).map_err(|e| e.to_string())?;
-    let wine_str = serde_json::to_string(wine).map_err(|e| e.to_string())?;
+    let launch_str = serde_json::to_string(launch).map_err(err)?;
+    let wine_str = serde_json::to_string(wine).map_err(err)?;
     let c = crate::lock_db(conn)?;
     c.execute(
         "INSERT INTO game_configs (game_id, launch_config, wine_config, profile_id) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(game_id) DO UPDATE SET launch_config = excluded.launch_config, wine_config = excluded.wine_config, profile_id = excluded.profile_id",
         params![game_id, launch_str, wine_str, profile_id],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }
 
@@ -65,7 +59,7 @@ pub fn delete_game_config(conn: &DbConn, game_id: i64) -> Result<(), String> {
         "DELETE FROM game_configs WHERE game_id = ?1",
         params![game_id],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }
 

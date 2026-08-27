@@ -15,7 +15,7 @@ use std::rc::Rc;
 pub fn build_image_manager_content(
     state: &SharedState,
     game: &Game,
-    parent_win: &adw::Window,
+    parent_win: &adw::Dialog,
 ) -> gtk4::Box {
     build_image_manager_content_with_drafts(state, game, parent_win, None, None)
 }
@@ -23,7 +23,7 @@ pub fn build_image_manager_content(
 pub fn build_image_manager_content_with_drafts(
     state: &SharedState,
     game: &Game,
-    parent_win: &adw::Window,
+    parent_win: &adw::Dialog,
     pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     sgdb_cache: Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
 ) -> gtk4::Box {
@@ -122,7 +122,7 @@ struct BuildImageSectionParams<'a> {
     dims: &'a [&'static str],
     game: &'a Game,
     state: &'a SharedState,
-    parent_win: &'a adw::Window,
+    parent_win: &'a adw::Dialog,
     pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     sgdb_cache: Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
 }
@@ -315,7 +315,7 @@ fn build_steam_icon_button(
 struct SgdbPickerCtx<'a> {
     state: &'a SharedState,
     asset_type: &'a str,
-    parent_win: &'a adw::Window,
+    parent_win: &'a adw::Dialog,
     refresh_images: &'a Rc<dyn Fn()>,
     dims: &'a [&'static str],
     pending_copies: &'a Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
@@ -397,10 +397,10 @@ fn build_reset_icon_button(
     let pending_copies_reset = pending_copies.clone();
     let asset_reset = asset_type.to_string();
     let save_dir_c2 = save_dir.to_string();
-    let (roms_folder, azahar_exe, cemu_exe) = {
+    let (cfg, azahar_exe, cemu_exe) = {
         let s = state.borrow();
         (
-            s.cfg.roms_folder.clone(),
+            s.cfg.clone(),
             s.cfg.azahar_executable.clone(),
             s.cfg.cemu_executable.clone(),
         )
@@ -409,12 +409,9 @@ fn build_reset_icon_button(
         // Decode only: like Browse and SGDB picks, the restored icon is
         // staged as a pending image and applied by the Save button, never
         // written behind it.
-        let Some(bytes) = super::image_manager_helpers::native_icon_bytes(
-            &gc,
-            &roms_folder,
-            &azahar_exe,
-            &cemu_exe,
-        ) else {
+        let Some(bytes) =
+            super::image_manager_helpers::native_icon_bytes(&gc, &cfg, &azahar_exe, &cemu_exe)
+        else {
             refresh();
             return;
         };
@@ -665,7 +662,7 @@ pub struct VariantImageSectionParams<'a> {
     pub max_h: i32,
     pub state: &'a SharedState,
     pub entry: &'a ira_models::GameEntry,
-    pub parent_win: &'a adw::Window,
+    pub parent_win: &'a adw::Dialog,
 }
 
 fn setup_dir_preview(
@@ -702,7 +699,7 @@ struct DirButtonsCtx<'a> {
 }
 
 fn build_dir_buttons(
-    parent_win: &adw::Window,
+    parent_win: &adw::Dialog,
     target_dir: &std::path::Path,
     file_base: &str,
     entry: &ira_models::GameEntry,

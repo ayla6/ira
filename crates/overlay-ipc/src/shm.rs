@@ -198,6 +198,47 @@ impl Drop for MappedShm {
     }
 }
 
+impl ShmHeader {
+    /// Cross-process toggle debounce window in milliseconds.
+    const TOGGLE_DEBOUNCE_MS: u32 = 300;
+
+    /// Wall-clock milliseconds since the UNIX epoch, truncated to u32.
+    /// This is the only clock allowed to write [`ShmHeader::last_toggle_ms`]
+    /// (which is a u32 field), so truncation semantics stay consistent.
+    pub fn now_ms() -> u32 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u32)
+            .unwrap_or(0)
+    }
+
+    /// Atomically toggles [`ShmHeader::overlay_visible`] with a
+    /// cross-process debounce: toggles within
+    /// [`Self::TOGGLE_DEBOUNCE_MS`] of the last committed toggle are
+    /// dropped, and a lost compare_exchange race (another process toggled
+    /// first) is reported as "not toggled".
+    ///
+    /// Returns `Some(new_visible)` when this call flipped the flag and
+    /// stamped `last_toggle_ms`; `None` when debounced or raced.
+    pub fn toggle_visible(&self) -> Option<bool> {
+        let now = Self::now_ms();
+        let last = self.last_toggle_ms.load(Ordering::SeqCst);
+        if now.wrapping_sub(last) < Self::TOGGLE_DEBOUNCE_MS {
+            return None;
+        }
+        let current = self.overlay_visible.load(Ordering::SeqCst);
+        let new_visible = current == 0;
+        let new_value = u32::from(new_visible);
+        self.overlay_visible
+            .compare_exchange(current, new_value, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()?;
+        // Stamp only after a successful flip — matches historical behavior:
+        // a lost race must not refresh the debounce window.
+        self.last_toggle_ms.store(now, Ordering::SeqCst);
+        Some(new_visible)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,5 +325,31 @@ mod tests {
     fn cstr_to_string(bytes: &[u8]) -> String {
         let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
         String::from_utf8_lossy(&bytes[..end]).to_string()
+    }
+
+    #[test]
+    fn test_now_ms_is_positive() {
+        assert!(ShmHeader::now_ms() > 0);
+    }
+
+    #[test]
+    fn test_toggle_visible_flips_then_debounces_then_flips_back() {
+        let hdr = crate::hotkey::zeroed_header();
+        // Flip up.
+        assert_eq!(hdr.toggle_visible(), Some(true));
+        assert_eq!(hdr.overlay_visible.load(Ordering::SeqCst), 1);
+
+        // Immediately after: debounced (last_toggle_ms was stamped on flip).
+        assert_eq!(hdr.toggle_visible(), None);
+        assert_eq!(hdr.overlay_visible.load(Ordering::SeqCst), 1);
+
+        // Once outside the debounce window: flips back down.
+        let now = ShmHeader::now_ms();
+        hdr.last_toggle_ms.store(
+            now.wrapping_sub(ShmHeader::TOGGLE_DEBOUNCE_MS + 1),
+            Ordering::SeqCst,
+        );
+        assert_eq!(hdr.toggle_visible(), Some(false));
+        assert_eq!(hdr.overlay_visible.load(Ordering::SeqCst), 0);
     }
 }

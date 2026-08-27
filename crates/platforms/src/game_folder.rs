@@ -3,49 +3,58 @@ use std::path::{Path, PathBuf};
 /// Try to detect the game folder from the executable path, steamcmd
 /// install_dir, and game title. Returns the detected folder or None.
 ///
+/// `game_folders` are the configured PC games roots, primary first.
+///
 /// Strategies (tried in order):
-/// 1. If exe is inside `default_game_folder`, use the first subdirectory.
+/// 1. If exe is inside one of `game_folders`, use the first subdirectory.
 /// 2. Walk up from exe looking for game root markers.
-/// 3. Match `install_dir` in `default_game_folder`.
-/// 4. Match `title` (normalized) in `default_game_folder`.
+/// 3. Match `install_dir` in any of `game_folders`.
+/// 4. Match `title` (normalized) in any of `game_folders`.
 pub fn detect_game_folder(
     exe_path: &str,
-    default_game_folder: &str,
+    game_folders: &[PathBuf],
     install_dir: &str,
     title: &str,
 ) -> Option<PathBuf> {
     if !exe_path.is_empty() {
-        if let Some(folder) = detect_from_exe(exe_path, default_game_folder) {
+        if let Some(folder) = detect_from_exe(exe_path, game_folders) {
             return Some(folder);
         }
     }
-    if !install_dir.is_empty() && !default_game_folder.is_empty() {
-        let candidate = Path::new(default_game_folder).join(install_dir);
-        if candidate.is_dir() {
-            return Some(candidate);
+    if !install_dir.is_empty() {
+        for base in game_folders {
+            let candidate = base.join(install_dir);
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
         }
     }
-    if !title.is_empty() && !default_game_folder.is_empty() {
-        if let Some(folder) = match_by_title(default_game_folder, title) {
-            return Some(folder);
+    if !title.is_empty() {
+        for base in game_folders {
+            if let Some(folder) = match_by_title(base, title) {
+                return Some(folder);
+            }
         }
     }
     None
 }
 
-/// If the exe is inside `default_game_folder`, the game folder is the
-/// first subdirectory after `default_game_folder`.
+/// If the exe is inside one of `game_folders`, the game folder is the
+/// first subdirectory after that root.
 /// Otherwise, walk up from the exe looking for game root markers.
-fn detect_from_exe(exe_path: &str, default_game_folder: &str) -> Option<PathBuf> {
+fn detect_from_exe(exe_path: &str, game_folders: &[PathBuf]) -> Option<PathBuf> {
     let exe = Path::new(exe_path);
-    let default_dir = Path::new(default_game_folder);
 
-    if !default_game_folder.is_empty() && exe.starts_with(default_dir) {
-        let rel = exe.strip_prefix(default_dir).ok()?;
-        let first = rel.components().next()?;
-        let folder = default_dir.join(first);
-        if folder.is_dir() {
-            return Some(folder);
+    for base in game_folders {
+        if exe.starts_with(base) {
+            if let Ok(rel) = exe.strip_prefix(base) {
+                if let Some(first) = rel.components().next() {
+                    let folder = base.join(first);
+                    if folder.is_dir() {
+                        return Some(folder);
+                    }
+                }
+            }
         }
     }
 
@@ -89,10 +98,9 @@ fn is_game_root(dir: &Path) -> bool {
     false
 }
 
-/// Match a game title against directories in `default_game_folder`.
+/// Match a game title against directories in one games root.
 /// Tries exact (case-insensitive), normalized, and acronym matching.
-fn match_by_title(default_game_folder: &str, title: &str) -> Option<PathBuf> {
-    let base = Path::new(default_game_folder);
+fn match_by_title(base: &Path, title: &str) -> Option<PathBuf> {
     let entries = std::fs::read_dir(base).ok()?;
     let dirs: Vec<String> = entries
         .flatten()
@@ -148,6 +156,10 @@ mod tests {
     use super::*;
     use std::fs;
 
+    fn folders(paths: &[&Path]) -> Vec<PathBuf> {
+        paths.iter().map(|p| p.to_path_buf()).collect()
+    }
+
     #[test]
     fn test_detect_from_exe_in_default_folder() {
         let tmp = tempfile::tempdir().unwrap();
@@ -157,7 +169,22 @@ mod tests {
         let exe = game_dir.join("bin").join("game.exe");
         fs::write(&exe, b"x").unwrap();
 
-        let detected = detect_from_exe(&exe.to_string_lossy(), &games.to_string_lossy());
+        let detected = detect_from_exe(&exe.to_string_lossy(), &folders(&[&games]));
+        assert_eq!(detected, Some(game_dir));
+    }
+
+    #[test]
+    fn test_detect_from_exe_in_extra_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let primary = tmp.path().join("primary");
+        let extra = tmp.path().join("extra");
+        let game_dir = extra.join("MyGame");
+        fs::create_dir_all(game_dir.join("bin")).unwrap();
+        fs::create_dir_all(&primary).unwrap();
+        let exe = game_dir.join("bin").join("game.exe");
+        fs::write(&exe, b"x").unwrap();
+
+        let detected = detect_from_exe(&exe.to_string_lossy(), &folders(&[&primary, &extra]));
         assert_eq!(detected, Some(game_dir));
     }
 
@@ -170,7 +197,7 @@ mod tests {
         let exe = game_dir.join("bin").join("game.exe");
         fs::write(&exe, b"x").unwrap();
 
-        let detected = detect_from_exe(&exe.to_string_lossy(), "");
+        let detected = detect_from_exe(&exe.to_string_lossy(), &[]);
         assert_eq!(detected, Some(game_dir));
     }
 
@@ -183,7 +210,7 @@ mod tests {
         let exe = game_dir.join("sub").join("game.exe");
         fs::write(&exe, b"x").unwrap();
 
-        let detected = detect_from_exe(&exe.to_string_lossy(), "");
+        let detected = detect_from_exe(&exe.to_string_lossy(), &[]);
         assert_eq!(detected, Some(game_dir));
     }
 
@@ -193,7 +220,7 @@ mod tests {
         let games = tmp.path().join("games");
         fs::create_dir_all(games.join("Hotline Miami")).unwrap();
 
-        let detected = match_by_title(&games.to_string_lossy(), "Hotline Miami");
+        let detected = match_by_title(&games, "Hotline Miami");
         assert_eq!(detected, Some(games.join("Hotline Miami")));
     }
 
@@ -203,7 +230,7 @@ mod tests {
         let games = tmp.path().join("games");
         fs::create_dir_all(games.join("hotline miami")).unwrap();
 
-        let detected = match_by_title(&games.to_string_lossy(), "Hotline Miami");
+        let detected = match_by_title(&games, "Hotline Miami");
         assert_eq!(detected, Some(games.join("hotline miami")));
     }
 
@@ -213,7 +240,7 @@ mod tests {
         let games = tmp.path().join("games");
         fs::create_dir_all(games.join("DanganronpaTriggerHappyHavoc")).unwrap();
 
-        let detected = match_by_title(&games.to_string_lossy(), "Danganronpa: Trigger Happy Havoc");
+        let detected = match_by_title(&games, "Danganronpa: Trigger Happy Havoc");
         assert_eq!(detected, Some(games.join("DanganronpaTriggerHappyHavoc")));
     }
 
@@ -223,7 +250,7 @@ mod tests {
         let games = tmp.path().join("games");
         fs::create_dir_all(games.join("OtherGame")).unwrap();
 
-        let detected = match_by_title(&games.to_string_lossy(), "MyGame");
+        let detected = match_by_title(&games, "MyGame");
         assert!(detected.is_none());
     }
 
@@ -233,13 +260,13 @@ mod tests {
         let games = tmp.path().join("games");
         fs::create_dir_all(games.join("P5R")).unwrap();
 
-        let detected = detect_game_folder("", &games.to_string_lossy(), "P5R", "");
+        let detected = detect_game_folder("", &folders(&[&games]), "P5R", "");
         assert_eq!(detected, Some(games.join("P5R")));
     }
 
     #[test]
     fn test_detect_game_folder_empty() {
-        assert!(detect_game_folder("", "", "", "").is_none());
+        assert!(detect_game_folder("", &[], "", "").is_none());
     }
 
     #[test]

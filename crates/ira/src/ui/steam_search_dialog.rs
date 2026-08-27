@@ -12,6 +12,74 @@ use super::state::SharedState;
 
 type MatchCallback = Rc<dyn Fn(&str, &str)>;
 
+/// A prefilled, hexpanding `gtk::SearchEntry` beside a suggested-action
+/// "Search" button — the input strip every search dialog opens with.
+/// Returns `(row, entry, search_button)` so callers can wire signals.
+pub(crate) fn build_search_row(
+    entry_text: &str,
+    placeholder: Option<&str>,
+) -> (gtk4::Box, gtk4::SearchEntry, gtk4::Button) {
+    let search_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    let entry = gtk4::SearchEntry::new();
+    entry.set_hexpand(true);
+    if let Some(placeholder) = placeholder {
+        entry.set_placeholder_text(Some(placeholder));
+    }
+    entry.set_text(entry_text);
+    search_row.append(&entry);
+    let search_btn = gtk4::Button::with_label(&crate::tr!("Search"));
+    search_btn.add_css_class(CSS_SUGGESTED_ACTION);
+    search_row.append(&search_btn);
+    (search_row, entry, search_btn)
+}
+
+/// The widgets a caller needs from [`build_search_dialog`] to wire its
+/// search behavior; toolbar and content column stay internal.
+pub(crate) struct SearchDialogWidgets {
+    pub dialog: adw::Dialog,
+    pub entry: gtk4::SearchEntry,
+    pub search_btn: gtk4::Button,
+    pub list: gtk4::ListBox,
+}
+
+/// Skeleton shared by every modal search dialog: a titled `adw::Dialog`
+/// carrying a HeaderBar toolbar, a clamped search row and a clamped boxed
+/// result list. Signal wiring and result population stay at the call sites.
+pub(crate) fn build_search_dialog(
+    title: &str,
+    width: i32,
+    height: i32,
+    max_width: i32,
+    entry_text: &str,
+    placeholder: Option<&str>,
+) -> SearchDialogWidgets {
+    let dialog = adw::Dialog::new();
+    dialog.set_title(title);
+    dialog.set_content_width(width);
+    dialog.set_content_height(height);
+
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&adw::HeaderBar::new());
+
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+
+    let (search_row, entry, search_btn) = build_search_row(entry_text, placeholder);
+    content.append(&clamped(&search_row, max_width, (12, 12, 12, 12)));
+
+    let (scrolled, list) = clamped_boxed_list(max_width);
+    content.append(&scrolled);
+
+    toolbar.set_content(Some(&content));
+    dialog.set_child(Some(&toolbar));
+
+    SearchDialogWidgets {
+        dialog,
+        entry,
+        search_btn,
+        list,
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum SearchSource {
     Steam,
@@ -149,31 +217,19 @@ pub fn show_search_results_dialog<P: IsA<gtk4::Widget>>(params: SearchResultsDia
         match_in_db,
     } = params;
 
-    let dialog = adw::Dialog::new();
-    dialog.set_title(&crate::tr!("Search {}").replacen("{}", source_name, 1));
-    dialog.set_content_width(450);
-    dialog.set_content_height(400);
-
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
-
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-
-    let search_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    let entry = gtk4::SearchEntry::new();
-    entry.set_text(game_name);
-    entry.set_hexpand(true);
-    search_row.append(&entry);
-    let search_btn = gtk4::Button::with_label(&crate::tr!("Search"));
-    search_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    search_row.append(&search_btn);
-    content.append(&clamped(&search_row, 400, (12, 12, 12, 12)));
-
-    let (scrolled, list) = clamped_boxed_list(400);
-    content.append(&scrolled);
-
-    toolbar.set_content(Some(&content));
-    dialog.set_child(Some(&toolbar));
+    let SearchDialogWidgets {
+        dialog,
+        entry,
+        search_btn,
+        list,
+    } = build_search_dialog(
+        &crate::tr!("Search {}").replacen("{}", source_name, 1),
+        450,
+        400,
+        400,
+        game_name,
+        None,
+    );
 
     let ctx = MatchContext {
         state: state.clone(),
@@ -242,30 +298,45 @@ struct MatchContext {
     dialog: adw::Dialog,
 }
 
-/// One store hit: name + app id with a suggested Match button.
-fn search_result_row(ctx: &MatchContext, app_id: &str, result_name: &str) -> adw::ActionRow {
+/// One search hit rendered as an ActionRow: escaped title, id subtitle and a
+/// suggested Match button (centered) that runs `on_match`. Persisting,
+/// closing and reporting stay with the caller's closure.
+pub(crate) fn match_result_row(
+    title: &str,
+    subtitle: &str,
+    on_match: impl Fn() + 'static,
+) -> adw::ActionRow {
     let row = adw::ActionRow::new();
-    row.set_title(&esc(result_name));
-    row.set_subtitle(&crate::tr!("App ID: {}").replacen("{}", app_id, 1));
+    row.set_title(&esc(title));
+    row.set_subtitle(subtitle);
 
     let match_btn = gtk4::Button::with_label(&crate::tr!("Match"));
     match_btn.add_css_class(CSS_SUGGESTED_ACTION);
     match_btn.set_valign(gtk4::Align::Center);
+    match_btn.connect_clicked(move |_| on_match());
+    row.add_suffix(&match_btn);
+    row
+}
+
+/// One store hit: name + app id with a suggested Match button.
+fn search_result_row(ctx: &MatchContext, app_id: &str, result_name: &str) -> adw::ActionRow {
     let ctx = ctx.clone();
     let sid = app_id.to_string();
     let name = result_name.to_string();
-    match_btn.connect_clicked(move |_| {
-        if ctx.match_in_db {
-            match ctx.source {
-                SearchSource::Steam => {
-                    match_game_to_steam(&ctx.state, ctx.db_id, sid.clone(), name.clone())
+    match_result_row(
+        result_name,
+        &crate::tr!("App ID: {}").replacen("{}", app_id, 1),
+        move || {
+            if ctx.match_in_db {
+                match ctx.source {
+                    SearchSource::Steam => {
+                        match_game_to_steam(&ctx.state, ctx.db_id, sid.clone(), name.clone())
+                    }
+                    SearchSource::Sgdb => match_game_to_sgdb(&ctx.state, ctx.db_id, sid.clone()),
                 }
-                SearchSource::Sgdb => match_game_to_sgdb(&ctx.state, ctx.db_id, sid.clone()),
             }
-        }
-        (ctx.on_match)(&sid, &name);
-        ctx.dialog.close();
-    });
-    row.add_suffix(&match_btn);
-    row
+            (ctx.on_match)(&sid, &name);
+            ctx.dialog.close();
+        },
+    )
 }

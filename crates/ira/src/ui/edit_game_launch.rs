@@ -15,7 +15,7 @@ pub(super) struct LaunchConfigWidgets {
 
 pub(super) struct LaunchConfigParams<'a> {
     pub launch: &'a GameLaunchConfig,
-    pub win: &'a adw::Window,
+    pub win: &'a adw::Dialog,
     pub sidebar: &'a gtk4::ListBox,
     pub stack: &'a gtk4::Stack,
     pub has_config: bool,

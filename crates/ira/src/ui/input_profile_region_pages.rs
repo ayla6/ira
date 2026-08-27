@@ -19,28 +19,33 @@ use ira_input::{
     ActivatorKind, GamepadAxis, GamepadButton, InputMapping, InputProfile, InputSource,
     OutputAction, SourceMode, StickOutput,
 };
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 pub(crate) type ProfileRc = Rc<RefCell<InputProfile>>;
 
+pub(crate) use super::input_profile_sheet_base::EditingTarget;
+
 /// Everything the region pages and the sheet hooks need.
 #[derive(Clone)]
 pub(crate) struct PagesCtx {
-    pub window: adw::Window,
+    pub window: adw::Dialog,
     pub profile: ProfileRc,
-    pub active_set: Rc<Cell<usize>>,
+    /// The action set — or layer — whose bindings the region pages show and
+    /// edit; mirrored by the set/layer indicator above the sidebar.
+    pub active_target: Rc<std::cell::Cell<EditingTarget>>,
+    /// The editor's top-left set/layer display, refreshed by every page
+    /// that moves the editing target.
+    pub indicator: Rc<super::input_profile_set_indicator::SetIndicator>,
     pub device: Option<ira_input::DeviceInfo>,
     pub on_dirty: Rc<dyn Fn()>,
 }
 
 /// Handle to the region page contents; the Gyro and Action Sets pages are
-/// static and stay inside the editor shell. `motion_rows` is refreshed from
-/// here because its visibility follows the profile's output mode.
+/// static and stay inside the editor shell.
 #[derive(Clone)]
 pub(crate) struct RegionPages {
     pub region_boxes: Vec<gtk4::Box>,
-    pub motion_rows: super::input_profile_controller_page::MotionRows,
 }
 
 /// Rebuild every region page from the profile's active action set.
@@ -50,7 +55,7 @@ pub(crate) fn rebuild_region_pages(ctx: &PagesCtx, pages: &RegionPages) {
         .as_ref()
         .map(ira_input::DeviceInfo::family)
         .unwrap_or_default();
-    let mappings = active_mappings(&ctx.profile, ctx.active_set.get());
+    let mappings = active_mappings(&ctx.profile, ctx.active_target.get());
     for (index, region) in Region::ALL.into_iter().enumerate() {
         let page = &pages.region_boxes[index];
         super::helpers::clear_children(page);
@@ -64,19 +69,22 @@ pub(crate) fn rebuild_region_pages(ctx: &PagesCtx, pages: &RegionPages) {
             page.append(&widget);
         }
     }
-    super::input_profile_controller_page::refresh_motion_rows(
-        &pages.motion_rows,
-        ctx.profile.borrow().backend,
-    );
 }
 
-fn active_mappings(profile: &ProfileRc, active_set: usize) -> Vec<InputMapping> {
-    profile
-        .borrow()
-        .action_sets
-        .get(active_set)
-        .map(|set| set.inputs.clone())
-        .unwrap_or_default()
+fn active_mappings(profile: &ProfileRc, target: EditingTarget) -> Vec<InputMapping> {
+    let borrow = profile.borrow();
+    match target {
+        EditingTarget::Set(index) => borrow
+            .action_sets
+            .get(index)
+            .map(|set| set.inputs.clone())
+            .unwrap_or_default(),
+        EditingTarget::Layer(index) => borrow
+            .action_layers
+            .get(index)
+            .map(|layer| layer.inputs.clone())
+            .unwrap_or_default(),
+    }
 }
 
 fn region_source_row(
@@ -272,16 +280,16 @@ fn behavior_choices(source: InputSource) -> Vec<OptionChoice> {
 /// Behavior picks write the mode onto the mapping, creating the mapping
 /// from the identity default when the input was unmapped.
 fn set_mode(ctx: &PagesCtx, source: InputSource, mode: Option<SourceMode>) {
-    let set = ctx.active_set.get();
+    let target = ctx.active_target.get();
     let mut profile = ctx.profile.borrow_mut();
-    if let Some(set) = profile.action_sets.get_mut(set) {
-        match set.inputs.iter_mut().find(|input| input.source == source) {
+    if let Some(inputs) = target.inputs_mut(&mut profile) {
+        match inputs.iter_mut().find(|input| input.source == source) {
             Some(input) => input.mode = mode,
             None => {
                 if mode.is_some() {
                     let mut mapping = default_mapping(source);
                     mapping.mode = mode;
-                    set.inputs.push(mapping);
+                    inputs.push(mapping);
                 }
             }
         }
@@ -311,7 +319,7 @@ fn primary_output(mapping: &InputMapping) -> Option<OutputAction> {
 /// output. Rarer activators (double press, soft pull, shifts) keep their
 /// outputs; those stay in the advanced sheet.
 fn open_rebind_picker(ctx: &PagesCtx, source: InputSource) {
-    let current = active_mappings(&ctx.profile, ctx.active_set.get())
+    let current = active_mappings(&ctx.profile, ctx.active_target.get())
         .iter()
         .find(|mapping| mapping.source == source)
         .and_then(primary_output);
@@ -333,7 +341,7 @@ fn open_rebind_picker(ctx: &PagesCtx, source: InputSource) {
     let title = crate::tr!("Bind {}").replacen("{}", &source_label(source), 1);
     let ctx_for_pick = ctx.clone();
     show_output_picker(
-        ctx.window.upcast_ref::<gtk4::Window>(),
+        &ctx.window,
         &title,
         &scope,
         current.as_ref(),
@@ -345,24 +353,25 @@ fn open_rebind_picker(ctx: &PagesCtx, source: InputSource) {
 
 fn apply_quick_rebind(ctx: &PagesCtx, source: InputSource, output: OutputAction) {
     {
-        let set_index = ctx.active_set.get();
+        let target = ctx.active_target.get();
         let mut profile = ctx.profile.borrow_mut();
-        if let Some(set) = profile.action_sets.get_mut(set_index) {
-            match set.inputs.iter_mut().find(|input| input.source == source) {
-                Some(input) => {
-                    match input
+        let Some(inputs) = target.inputs_mut(&mut profile) else {
+            return;
+        };
+        match inputs.iter_mut().find(|input| input.source == source) {
+            Some(input) => {
+                match input
+                    .activators
+                    .iter_mut()
+                    .find(|activator| matches!(activator.kind, ActivatorKind::FullPress))
+                {
+                    Some(activator) => activator.outputs = vec![output],
+                    None => input
                         .activators
-                        .iter_mut()
-                        .find(|activator| matches!(activator.kind, ActivatorKind::FullPress))
-                    {
-                        Some(activator) => activator.outputs = vec![output],
-                        None => input
-                            .activators
-                            .push(ira_input::Activator::full_press(vec![output])),
-                    }
+                        .push(ira_input::Activator::full_press(vec![output])),
                 }
-                None => set.inputs.push(InputMapping::simple(source, output)),
             }
+            None => inputs.push(InputMapping::simple(source, output)),
         }
     }
     (ctx.on_dirty)();
@@ -378,7 +387,7 @@ fn open_sheet(ctx: &PagesCtx, source: InputSource) {
         &ctx.window,
         InputSheetRequest {
             profile: ctx.profile.clone(),
-            active_set: ctx.active_set.get(),
+            active_target: ctx.active_target.get(),
             source,
             device: ctx.device.clone(),
             backend,
@@ -491,8 +500,9 @@ mod gtk_repro {
     fn repro_region_rebuild_criticals() {
         let _ = gtk4::init();
         let _ = adw::init();
-        let window = adw::Window::new();
-        window.set_default_size(980, 740);
+        let window = adw::Dialog::new();
+        window.set_content_width(980);
+        window.set_content_height(740);
         let header = adw::HeaderBar::new();
         let sidebar_scroll = gtk4::ScrolledWindow::new();
         let sidebar = gtk4::ListBox::new();
@@ -507,12 +517,17 @@ mod gtk_repro {
         let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
         root.append(&header);
         root.append(&layout);
-        window.set_content(Some(&root));
+        window.set_child(Some(&root));
 
         let ctx = PagesCtx {
             window: window.clone(),
             profile: std::rc::Rc::new(std::cell::RefCell::new(InputProfile::default())),
-            active_set: std::rc::Rc::new(std::cell::Cell::new(0usize)),
+            active_target: std::rc::Rc::new(std::cell::Cell::new(
+                EditingTarget::Set(0),
+            )),
+            indicator: std::rc::Rc::new(
+                super::super::input_profile_set_indicator::SetIndicator::new(),
+            ),
             device: None,
             on_dirty: std::rc::Rc::new(|| {}),
         };
@@ -530,14 +545,8 @@ mod gtk_repro {
             ));
             region_boxes.push(content);
         }
-        let motion_rows = super::super::input_profile_controller_page::MotionRows {
-            native: adw::SwitchRow::default(),
-        };
-        let pages = RegionPages {
-            region_boxes,
-            motion_rows,
-        };
-        window.present();
+        let pages = RegionPages { region_boxes };
+        window.present(None::<&gtk4::Widget>);
         let main = gtk4::glib::MainContext::default();
         for _ in 0..3 {
             let ctx = ctx.clone();

@@ -157,7 +157,7 @@ pub(super) struct ApiEmuPageParams<'a> {
     pub emu_trophy_source: ira_models::TrophySource,
     pub emu_app_id: &'a str,
     pub save_dir: &'a str,
-    pub win: &'a adw::Window,
+    pub win: &'a adw::Dialog,
     /// Shared pending-uninstall flag. Reused across page rebuilds so the
     /// dialog's save handler keeps observing the same cell.
     pub emu_pending_uninstall: Option<Rc<RefCell<bool>>>,
@@ -526,7 +526,7 @@ pub(super) struct ProfileDropdownParams<'a> {
     pub profiles: &'a [WineProfile],
     pub page: &'a gtk4::Box,
     pub state: &'a SharedState,
-    pub win: &'a adw::Window,
+    pub win: &'a adw::Dialog,
     pub game_slug: &'a str,
 }
 

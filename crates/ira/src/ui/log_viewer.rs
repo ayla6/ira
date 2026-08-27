@@ -14,11 +14,10 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
             .unwrap_or_else(|| format!("Game {}", db_id))
     };
 
-    let window = adw::Window::new();
-    window.set_title(Some(&crate::tr!("{} — Log").replacen("{}", &game_name, 1)));
-    window.set_default_size(700, 500);
-    window.set_transient_for(Some(&state.borrow().window));
-    window.set_destroy_with_parent(true);
+    let window = adw::Dialog::new();
+    window.set_title(&crate::tr!("{} — Log").replacen("{}", &game_name, 1));
+    window.set_content_width(700);
+    window.set_content_height(500);
 
     let header = adw::HeaderBar::new();
 
@@ -61,12 +60,13 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
 
     scrolled.set_child(Some(&text_view));
 
-    let box_ = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    box_.append(&header);
-    box_.append(&scrolled);
-    window.set_content(Some(&box_));
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&header);
+    toolbar.set_content(Some(&scrolled));
+    window.set_child(Some(&toolbar));
 
-    window.present();
+    let main_window = state.borrow().window.clone();
+    window.present(Some(&main_window));
 
     let search_state: Rc<RefCell<SearchState>> = Rc::new(RefCell::new(SearchState::new()));
     if let Some(ref tag) = buffer.create_tag(Some("search-highlight"), &[]) {

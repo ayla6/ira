@@ -15,21 +15,20 @@ use std::rc::Rc;
 /// Everything one input's sheet needs; built by the region pages.
 pub(crate) struct InputSheetRequest {
     pub profile: ProfileRc,
-    pub active_set: usize,
+    pub active_target: super::input_profile_sheet_base::EditingTarget,
     pub source: InputSource,
     pub device: Option<ira_input::DeviceInfo>,
     pub backend: ira_input::VirtualGamepadBackend,
     pub on_changed: OnChanged,
 }
 
-pub(crate) fn show_input_sheet(parent: &adw::Window, request: InputSheetRequest) {
-    let window = adw::Window::new();
-    window.set_modal(true);
-    window.set_transient_for(Some(parent));
-    window.set_destroy_with_parent(true);
-    window.set_hide_on_close(false);
-    window.set_default_size(560, 700);
-    window.set_title(Some(&sheet_title(&request)));
+pub(crate) fn show_input_sheet(parent: &impl IsA<gtk4::Widget>, request: InputSheetRequest) {
+    let window = adw::Dialog::new();
+    window.set_content_width(560);
+    // This sheet floats inside the profile editor, which itself caps at
+    // 640 px — the sheet must fit under that with its own chrome.
+    super::helpers::fit_dialog_height(&window, parent, 590);
+    window.set_title(&sheet_title(&request));
 
     let header_bar = adw::HeaderBar::new();
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -41,15 +40,15 @@ pub(crate) fn show_input_sheet(parent: &adw::Window, request: InputSheetRequest)
     scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
     scroll.set_vexpand(true);
     scroll.set_child(Some(&content));
-    let root = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    root.append(&header_bar);
-    root.append(&scroll);
-    window.set_content(Some(&root));
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&header_bar);
+    toolbar.set_content(Some(&scroll));
+    window.set_child(Some(&toolbar));
 
     let base = super::input_profile_sheet_base::SheetBase {
         content,
         profile: request.profile,
-        active_set: request.active_set,
+        active_target: request.active_target,
         source: request.source,
         device: request.device,
         backend: request.backend,
@@ -57,7 +56,7 @@ pub(crate) fn show_input_sheet(parent: &adw::Window, request: InputSheetRequest)
         rebuild_pending: Rc::new(std::cell::Cell::new(false)),
     };
     fill_sheet(&base);
-    window.present();
+    window.present(Some(parent));
 }
 
 fn sheet_title(request: &InputSheetRequest) -> String {

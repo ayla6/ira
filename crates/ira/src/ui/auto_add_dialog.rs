@@ -160,7 +160,7 @@ fn is_elf(path: &Path) -> bool {
 
 /// Wizard state shared between the main-thread poll closure and signal handlers.
 pub(super) struct Wizard {
-    pub win: adw::Window,
+    pub win: adw::Dialog,
     pub content: gtk4::Box,
     pub state: SharedState,
     pub profiles: Vec<WineProfile>,
@@ -174,12 +174,10 @@ pub(super) struct Wizard {
 
 pub fn show_auto_add_dialog(state: &SharedState) {
     let parent = state.borrow().window.clone();
-    let win = adw::Window::new();
-    win.set_title(Some(&crate::tr!("Auto add game")));
-    win.set_default_size(480, 420);
-    win.set_modal(true);
-    win.set_transient_for(Some(&parent));
-    win.set_destroy_with_parent(true);
+    let win = adw::Dialog::new();
+    win.set_title(&crate::tr!("Auto add game"));
+    win.set_content_width(480);
+    win.set_content_height(420);
 
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header = adw::HeaderBar::new();
@@ -187,8 +185,8 @@ pub fn show_auto_add_dialog(state: &SharedState) {
     content.append(&header);
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     content.append(&page);
-    win.set_content(Some(&content));
-    win.present();
+    win.set_child(Some(&content));
+    win.present(Some(&parent));
 
     let wizard = Rc::new(RefCell::new(Wizard {
         win: win.clone(),
@@ -204,12 +202,6 @@ pub fn show_auto_add_dialog(state: &SharedState) {
     }));
 
     show_pick_page(&wizard);
-
-    let win_close = win.clone();
-    win.connect_close_request(move |_| {
-        let _ = win_close;
-        glib::Propagation::Proceed
-    });
 }
 
 fn show_pick_page(wizard: &Rc<RefCell<Wizard>>) {
@@ -239,7 +231,7 @@ fn show_pick_page(wizard: &Rc<RefCell<Wizard>>) {
     content.append(&status);
 }
 
-fn pick_folder_and_start(win: &adw::Window, state: &SharedState, wizard: &Rc<RefCell<Wizard>>) {
+fn pick_folder_and_start(win: &adw::Dialog, state: &SharedState, wizard: &Rc<RefCell<Wizard>>) {
     let default_folder = state.borrow().cfg.default_game_folder.clone();
     let dialog = gtk4::FileDialog::new();
     dialog.set_title(&crate::tr!("Select game folder"));
@@ -247,63 +239,108 @@ fn pick_folder_and_start(win: &adw::Window, state: &SharedState, wizard: &Rc<Ref
     let state_c = state.clone();
     let win_c = win.clone();
     let wizard_c = wizard.clone();
-    dialog.select_folder(Some(win), None::<&gtk4::gio::Cancellable>, move |result| {
-        if let Ok(file) = result {
-            if let Some(path) = file.path() {
-                on_folder_picked(&path, &state_c, &win_c, &wizard_c);
+    let Some(host) = super::helpers::hosting_window(win) else {
+        return;
+    };
+    dialog.select_folder(
+        Some(&host),
+        None::<&gtk4::gio::Cancellable>,
+        move |result| {
+            if let Ok(file) = result {
+                if let Some(path) = file.path() {
+                    on_folder_picked(&path, &state_c, &win_c, &wizard_c);
+                }
             }
-        }
-    });
+        },
+    );
 }
 
 fn on_folder_picked(
     path: &Path,
     state: &SharedState,
-    win: &adw::Window,
+    win: &adw::Dialog,
     wizard: &Rc<RefCell<Wizard>>,
 ) {
-    let default_game_folder = state.borrow().cfg.default_game_folder.clone();
+    let folders = state.borrow().cfg.all_game_folders();
 
-    let inside_games = !default_game_folder.is_empty() && path.starts_with(&default_game_folder);
+    // Already living in a managed games folder (or none configured): no move.
+    if folders.is_empty() || folders.iter().any(|folder| path.starts_with(folder)) {
+        start_identify(path.to_path_buf(), None, wizard);
+        return;
+    }
+
+    show_move_target_chooser(path, &folders, win, wizard);
+}
+
+/// The picked folder is outside every configured games root: offer to move
+/// it into one of them, listing each root with its free space.
+fn show_move_target_chooser(
+    path: &Path,
+    folders: &[std::path::PathBuf],
+    win: &adw::Dialog,
+    wizard: &Rc<RefCell<Wizard>>,
+) {
     let basename = path.file_name().and_then(|n| n.to_str()).unwrap_or("game");
-
-    if inside_games {
-        start_identify(path.to_path_buf(), None, wizard);
-        return;
-    }
-
-    if default_game_folder.is_empty() {
-        start_identify(path.to_path_buf(), None, wizard);
-        return;
-    }
-
-    let dest = Path::new(&default_game_folder).join(basename);
     let picked = path.to_path_buf();
-    let alert = adw::AlertDialog::new(
-        Some(&crate::tr!("Move to games folder?")),
-        Some(&crate::tr!(
-            "This folder is outside your PC games folder. Move it there now?"
-        )),
-    );
-    alert.add_response("no", &crate::tr!("No"));
-    alert.add_response("yes", &crate::tr!("Yes"));
-    alert.set_response_appearance("yes", adw::ResponseAppearance::Suggested);
-    alert.set_default_response(Some("yes"));
-    alert.set_close_response("no");
 
-    let wizard_c = wizard.clone();
-    alert.choose(
-        Some(win),
-        None::<&gtk4::gio::Cancellable>,
-        move |response| {
-            let move_to = if response == "yes" {
-                Some(dest.clone())
-            } else {
-                None
-            };
-            start_identify(picked.clone(), move_to, &wizard_c);
-        },
-    );
+    let dialog = adw::Dialog::new();
+    dialog.set_title(&crate::tr!("Move to games folder?"));
+    dialog.set_content_width(520);
+
+    let header = adw::HeaderBar::new();
+    let title = adw::WindowTitle::new(&crate::tr!("Move to games folder?"), "");
+    header.set_title_widget(Some(&title));
+
+    let list = gtk4::ListBox::new();
+    list.set_selection_mode(gtk4::SelectionMode::None);
+    list.add_css_class("boxed-list");
+
+    for folder in folders {
+        let row = adw::ActionRow::new();
+        row.set_title(&super::helpers::esc(&folder.to_string_lossy()));
+        if let Some(free) = super::disk_space::available_bytes(folder) {
+            row.set_subtitle(&crate::tr!("{} free").replacen(
+                "{}",
+                &super::disk_space::format_size(free),
+                1,
+            ));
+        }
+        row.set_activatable(true);
+        let dest = folder.join(basename);
+        let chosen = dialog.clone();
+        let move_wizard = wizard.clone();
+        let source = picked.clone();
+        row.connect_activated(move |_| {
+            chosen.close();
+            start_identify(source.clone(), Some(dest.clone()), &move_wizard);
+        });
+        list.append(&row);
+    }
+
+    let keep_row = adw::ActionRow::new();
+    keep_row.set_title(&crate::tr!("Keep where it is"));
+    keep_row.set_activatable(true);
+    let keep_wizard = wizard.clone();
+    let keep_source = picked.clone();
+    keep_row.connect_activated(move |_| {
+        start_identify(keep_source.clone(), None, &keep_wizard);
+    });
+    list.append(&keep_row);
+
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_child(Some(&list));
+    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroll.set_vexpand(true);
+
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&header);
+    toolbar.set_content(Some(&scroll));
+    dialog.set_child(Some(&toolbar));
+
+    match super::helpers::hosting_window(win) {
+        Some(host) => dialog.present(Some(&host)),
+        None => eprintln!("Cannot present move-target chooser without a parent window"),
+    }
 }
 
 pub(super) fn start_identify(
@@ -549,7 +586,7 @@ fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf) {
                     continue_identify(folder_c.clone(), app_id.to_string(), &wizard_c);
                 })
             },
-            parent: win_c.upcast_ref(),
+            parent: &win_c,
             match_in_db: false,
         });
     });
@@ -1240,13 +1277,10 @@ fn prompt_install_emulator(
         ),
     };
 
-    let dialog = adw::Window::new();
-    dialog.set_title(Some(&title));
-    dialog.set_default_size(380, 240);
-    dialog.set_modal(true);
-    dialog.set_transient_for(Some(&win));
-    dialog.set_destroy_with_parent(true);
-    dialog.set_transient_for(Some(&win));
+    let dialog = adw::Dialog::new();
+    dialog.set_title(&title);
+    dialog.set_content_width(380);
+    dialog.set_content_height(240);
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     outer.set_margin_start(20);
@@ -1302,8 +1336,8 @@ fn prompt_install_emulator(
     btn_row.append(&yes_btn);
     outer.append(&btn_row);
 
-    dialog.set_content(Some(&outer));
-    dialog.present();
+    dialog.set_child(Some(&outer));
+    dialog.present(Some(&win));
 
     let resolved = Rc::new(Cell::new(false));
     let wizard_c = wizard.clone();
@@ -1347,11 +1381,10 @@ fn prompt_install_emulator(
         finalize(&wizard_c2, db_id);
     });
     let wizard_for_close = wizard.clone();
-    dialog.connect_close_request(move |_| {
+    dialog.connect_closed(move |_| {
         if !resolved.get() {
             finalize(&wizard_for_close, db_id);
         }
-        glib::Propagation::Proceed
     });
 }
 

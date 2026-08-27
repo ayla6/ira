@@ -1,3 +1,4 @@
+use super::helpers::string_list_from;
 use super::settings_dialog;
 use super::system_settings::{build_override_switch_row, OverrideState};
 use adw::prelude::*;
@@ -33,12 +34,12 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
     let overlay_cfg_group = adw::PreferencesGroup::new();
     overlay_cfg_group.set_title(&crate::tr!("Overlay"));
 
-    let encoder_model = gtk4::StringList::new(&[
-        &crate::tr!("Default"),
-        &crate::tr!("Auto"),
-        &crate::tr!("VAAPI (AMD/Intel)"),
-        &crate::tr!("NVENC (NVIDIA)"),
-        &crate::tr!("Software (CPU)"),
+    let encoder_model = string_list_from(&[
+        crate::tr!("Default"),
+        crate::tr!("Auto"),
+        crate::tr!("VAAPI (AMD/Intel)"),
+        crate::tr!("NVENC (NVIDIA)"),
+        crate::tr!("Software (CPU)"),
     ]);
     let encoder_row = adw::ComboRow::new();
     encoder_row.set_title(&crate::tr!("Video encoder"));
@@ -46,11 +47,11 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
     encoder_row.set_selected(params.launch.overlay_encoder.map(|v| v + 1).unwrap_or(0));
     overlay_cfg_group.add(&encoder_row);
 
-    let quality_model = gtk4::StringList::new(&[
-        &crate::tr!("Default"),
-        &crate::tr!("Low (720p 30fps)"),
-        &crate::tr!("Medium (1080p 30fps)"),
-        &crate::tr!("High (1080p 60fps)"),
+    let quality_model = string_list_from(&[
+        crate::tr!("Default"),
+        crate::tr!("Low (720p 30fps)"),
+        crate::tr!("Medium (1080p 30fps)"),
+        crate::tr!("High (1080p 60fps)"),
     ]);
     let quality_row = adw::ComboRow::new();
     quality_row.set_title(&crate::tr!("Recording quality"));

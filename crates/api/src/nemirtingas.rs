@@ -8,11 +8,7 @@ impl SteamDataClient {
         app_id: &str,
     ) -> Option<Vec<NemirtingasAchievement>> {
         let url = format!("{}/{}/achievements_db.json", NEMIRTINGAS_BASE_URL, app_id);
-        let resp = self.http.get(&url).send().ok()?;
-        if !resp.status().is_success() {
-            return None;
-        }
-        let achs: Vec<NemirtingasAchievement> = resp.json().ok()?;
+        let achs: Vec<NemirtingasAchievement> = self.http_get_json(&url)?;
         if achs.is_empty() {
             None
         } else {

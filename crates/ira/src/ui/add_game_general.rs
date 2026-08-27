@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 pub(super) fn build_general_page(
-    win: &adw::Window,
+    win: &adw::Dialog,
     profiles: &[ira_models::WineProfile],
     state: &SharedState,
 ) -> (

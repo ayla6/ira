@@ -113,7 +113,7 @@ fn key_label(raw: &str) -> String {
 pub(crate) fn build_keyboard_page(
     content: &gtk4::Box,
     on_pick: &Rc<dyn Fn(OutputAction)>,
-    window: &adw::Window,
+    window: &adw::Dialog,
 ) {
     for row in KEY_ROWS {
         let strip = gtk4::Box::new(gtk4::Orientation::Horizontal, 2);
@@ -162,7 +162,7 @@ pub(crate) fn build_keyboard_page(
 pub(crate) fn build_numpad_page(
     content: &gtk4::Box,
     on_pick: &Rc<dyn Fn(OutputAction)>,
-    window: &adw::Window,
+    window: &adw::Dialog,
 ) {
     let navigation = [
         (crate::tr!("Insert"), 110),

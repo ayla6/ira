@@ -36,7 +36,7 @@ pub(super) fn add_pc_profile_group(
     cfg: &Config,
     config_id: &str,
     label: &str,
-    parent: &adw::Window,
+    parent: &adw::Dialog,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
 ) -> ConsoleProfileWidgets {
     let group = adw::PreferencesGroup::new();
@@ -73,7 +73,7 @@ struct ControllerDefaultState {
 #[derive(Clone)]
 struct ControllerRowsParams {
     group: adw::PreferencesGroup,
-    parent: adw::Window,
+    parent: adw::Dialog,
     save_dir: String,
     configured_defaults: HashMap<String, ControllerInputConfig>,
     widgets: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
@@ -82,7 +82,7 @@ struct ControllerRowsParams {
 }
 
 pub(super) fn build_input_settings_page(
-    parent: &adw::Window,
+    parent: &adw::Dialog,
     save_dir: &str,
     cfg: &Config,
     steam: std::sync::Arc<ira_api::SteamDataClient>,
@@ -142,7 +142,7 @@ pub(super) fn build_input_settings_page(
 
 pub(super) fn add_console_profile_group(
     page: &gtk4::Box,
-    parent: &adw::Window,
+    parent: &adw::Dialog,
     cfg: &Config,
     save_dir: &str,
     console_id: &str,
@@ -169,7 +169,7 @@ fn add_console_remapping_rows(
     cfg: &Config,
     console_id: String,
     label: String,
-    parent: &adw::Window,
+    parent: &adw::Dialog,
     save_dir: &str,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
 ) -> ConsoleProfileWidgets {
@@ -241,7 +241,7 @@ fn add_console_remapping_rows(
         let save_dir = save_dir_for_edit.clone();
         let last_real = last_real_for_edit.clone();
         super::input_profile_editor::show_input_profile_editor(
-            parent_for_edit.upcast_ref(),
+            &parent_for_edit,
             super::input_profile_editor::InputProfileEditorParams {
                 save_dir: save_dir.clone(),
                 profile_path: Some(path),
@@ -276,7 +276,7 @@ fn add_console_remapping_rows(
                     let save_dir_for_saved = save_dir.clone();
                     let last_real_for_saved = last_real.clone();
                     super::input_profile_editor::show_input_profile_editor(
-                        parent.upcast_ref(),
+                        &parent,
                         super::input_profile_editor::InputProfileEditorParams {
                             save_dir: save_dir.clone(),
                             profile_path: None,
@@ -470,7 +470,7 @@ fn clear_controller_rows(
 
 fn add_controller_row(
     group: &adw::PreferencesGroup,
-    parent: &adw::Window,
+    parent: &adw::Dialog,
     save_dir: &str,
     device: ira_input::DeviceInfo,
     state: ControllerDefaultState,
@@ -566,7 +566,7 @@ fn add_controller_row(
             }
         };
         super::input_profile_editor::show_input_profile_editor(
-            parent_for_edit.upcast_ref(),
+            &parent_for_edit,
             super::input_profile_editor::InputProfileEditorParams {
                 save_dir: save_dir_for_edit.clone(),
                 profile_path: Some(path),
@@ -615,7 +615,7 @@ fn update_controller_subtitle(
 }
 
 fn start_controller_registry_refresh(
-    parent: &adw::Window,
+    parent: &adw::Dialog,
     group: &adw::PreferencesGroup,
     save_dir: &str,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
@@ -627,9 +627,8 @@ fn start_controller_registry_refresh(
     let parent_weak = parent.downgrade();
     let closing = Rc::new(Cell::new(false));
     let closing_for_parent = closing.clone();
-    parent.connect_close_request(move |_| {
+    parent.connect_closed(move |_| {
         closing_for_parent.set(true);
-        glib::Propagation::Proceed
     });
     let save_dir_for_refresh = save_dir.to_string();
     let widgets_for_refresh = widgets;
@@ -703,7 +702,7 @@ pub(super) fn backend_for_selection(selection: u32) -> Option<ira_input::Virtual
 
 fn rebuild_profile_rows(
     group: &adw::PreferencesGroup,
-    parent: &adw::Window,
+    parent: &adw::Dialog,
     save_dir: &str,
     steam: std::sync::Arc<ira_api::SteamDataClient>,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
@@ -781,7 +780,7 @@ fn rebuild_profile_rows(
         let registry_for_saved = create_registry.clone();
         let rows = create_rows.clone();
         super::input_profile_editor::show_input_profile_editor(
-            create_parent.upcast_ref(),
+            &create_parent,
             super::input_profile_editor::InputProfileEditorParams {
                 save_dir: save_dir.clone(),
                 profile_path: None,
@@ -808,7 +807,7 @@ fn rebuild_profile_rows(
 
 fn add_profile_row(
     group: &adw::PreferencesGroup,
-    parent: &adw::Window,
+    parent: &adw::Dialog,
     save_dir: &str,
     steam: std::sync::Arc<ira_api::SteamDataClient>,
     stored: StoredProfile,
@@ -831,7 +830,7 @@ fn add_profile_row(
     edit.connect_clicked(move |_| {
         let rows_for_saved = rows_for_edit.clone();
         super::input_profile_editor::show_input_profile_editor(
-            parent_for_edit.upcast_ref(),
+            &parent_for_edit,
             super::input_profile_editor::InputProfileEditorParams {
                 save_dir: save_dir_for_edit.clone(),
                 profile_path: Some(path_for_edit.clone()),

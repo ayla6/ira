@@ -1,131 +1,94 @@
 use super::css::*;
-use super::helpers::{clear_children, esc};
+use super::helpers::{clamped, clamped_boxed_list, clear_children, esc, poll_channel, status_row};
 use super::state::SharedState;
 use adw::prelude::*;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::mpsc;
 
 type SelectCallback = Rc<dyn Fn(&str, &str)>;
 
 pub(super) fn show_steam_id_search_popup(
     state: &SharedState,
     game_name: &str,
-    parent: &adw::Window,
+    parent: &impl IsA<gtk4::Widget>,
     app_id_row: &adw::EntryRow,
     button_label: &str,
     on_select: SelectCallback,
 ) {
-    let dialog = adw::Window::new();
-    dialog.set_default_width(500);
-    dialog.set_default_height(400);
-    dialog.set_modal(true);
-    dialog.set_transient_for(Some(parent));
-    dialog.set_title(Some(&crate::tr!("Search Steam store")));
+    let dialog = adw::Dialog::new();
+    dialog.set_title(&crate::tr!("Search Steam store"));
+    dialog.set_content_width(500);
+    dialog.set_content_height(400);
 
-    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    let header = adw::HeaderBar::new();
-    outer.append(&header);
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&adw::HeaderBar::new());
 
-    let search_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    search_box.set_margin_start(12);
-    search_box.set_margin_end(12);
-    search_box.set_margin_top(8);
-    let entry = gtk4::Entry::new();
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+
+    let search_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    let entry = gtk4::SearchEntry::new();
     entry.set_placeholder_text(Some(&crate::tr!("Game name…")));
     entry.set_text(game_name);
     entry.set_hexpand(true);
+    search_row.append(&entry);
     let search_btn = gtk4::Button::with_label(&crate::tr!("Search"));
     search_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    search_box.append(&entry);
-    search_box.append(&search_btn);
-    outer.append(&search_box);
+    search_row.append(&search_btn);
+    content.append(&clamped(&search_row, 500, (12, 12, 12, 12)));
 
-    let scrolled = gtk4::ScrolledWindow::new();
-    scrolled.set_vexpand(true);
-    scrolled.set_margin_top(8);
-    let list = gtk4::ListBox::new();
-    list.set_margin_start(12);
-    list.set_margin_end(12);
-    list.set_margin_top(8);
-    list.set_margin_bottom(12);
-    list.set_valign(gtk4::Align::Start);
-    list.add_css_class(CSS_BOXED_LIST);
-    scrolled.set_child(Some(&list));
-    outer.append(&scrolled);
+    let (scrolled, list) = clamped_boxed_list(500);
+    content.append(&scrolled);
 
-    let close_btn = gtk4::Button::with_label(&crate::tr!("Close"));
-    close_btn.set_halign(gtk4::Align::End);
-    close_btn.set_margin_start(12);
-    close_btn.set_margin_end(12);
-    close_btn.set_margin_bottom(12);
-    let win_c = dialog.clone();
-    close_btn.connect_clicked(move |_| win_c.close());
-    outer.append(&close_btn);
-
-    dialog.set_content(Some(&outer));
+    toolbar.set_content(Some(&content));
+    dialog.set_child(Some(&toolbar));
 
     let state_c = state.clone();
-    let list_c = list;
+    let button_label_s = button_label.to_string();
+    let entry_c = entry.clone();
     let dialog_c = dialog.clone();
     let row_c = app_id_row.clone();
     let on_select_c = on_select.clone();
 
-    let entry_s = entry.clone();
-    let button_label_s = button_label.to_string();
     let do_search = move || {
-        let term = entry_s.text().to_string();
+        let term = entry_c.text().trim().to_string();
         if term.is_empty() {
             return;
         }
         let steam = state_c.borrow().steam.clone();
-        let results_shared = Arc::new(std::sync::Mutex::new(None::<Vec<(String, String)>>));
-        let results_thread = results_shared.clone();
+        let (tx, rx) = mpsc::channel::<Vec<(String, String)>>();
         std::thread::spawn(move || {
-            let r = steam.search_steam_store(&term);
-            *results_thread.lock().unwrap() = Some(r);
+            let _ = tx.send(steam.search_steam_store(&term));
         });
-        let results_poll = results_shared;
-        let list_c2 = list_c.clone();
-        let dialog_c2 = dialog_c.clone();
+        let list_c2 = list.clone();
         let row_c2 = row_c.clone();
         let on_select_c2 = on_select_c.clone();
+        let dialog_c2 = dialog_c.clone();
         let btn_label = button_label_s.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-            if !dialog_c2.is_visible() {
-                return glib::ControlFlow::Break;
+        poll_channel(rx, move |results| {
+            clear_children(&list_c2);
+            if results.is_empty() {
+                list_c2.append(&status_row(&crate::tr!("No results found")));
+                return;
             }
-            if let Some(results) = results_poll.lock().unwrap().take() {
-                clear_children(&list_c2);
-                if results.is_empty() {
-                    let row = adw::ActionRow::new();
-                    row.set_title(&crate::tr!("No results found"));
-                    row.set_sensitive(false);
-                    list_c2.append(&row);
-                } else {
-                    for (app_id, name) in &results {
-                        let row = adw::ActionRow::new();
-                        row.set_title(&esc(name));
-                        row.set_subtitle(&crate::tr!("App ID: {}").replacen("{}", app_id, 1));
-                        let match_btn = gtk4::Button::with_label(&btn_label);
-                        match_btn.add_css_class(CSS_SUGGESTED_ACTION);
-                        match_btn.set_valign(gtk4::Align::Center);
-                        let sid = app_id.clone();
-                        let matched_name = name.clone();
-                        let on_select_c3 = on_select_c2.clone();
-                        let row_update = row_c2.clone();
-                        let dlg = dialog_c2.clone();
-                        match_btn.connect_clicked(move |_| {
-                            on_select_c3(&sid, &matched_name);
-                            row_update.set_text(&sid);
-                            dlg.close();
-                        });
-                        row.add_suffix(&match_btn);
-                        list_c2.append(&row);
-                    }
-                }
-                glib::ControlFlow::Break
-            } else {
-                glib::ControlFlow::Continue
+            for (app_id, name) in results {
+                let row = adw::ActionRow::new();
+                row.set_title(&esc(&name));
+                row.set_subtitle(&crate::tr!("App ID: {}").replacen("{}", &app_id, 1));
+                let match_btn = gtk4::Button::with_label(&btn_label);
+                match_btn.add_css_class(CSS_SUGGESTED_ACTION);
+                match_btn.set_valign(gtk4::Align::Center);
+                let sid = app_id.clone();
+                let matched_name = name.clone();
+                let on_select_c3 = on_select_c2.clone();
+                let row_update = row_c2.clone();
+                let dlg = dialog_c2.clone();
+                match_btn.connect_clicked(move |_| {
+                    on_select_c3(&sid, &matched_name);
+                    row_update.set_text(&sid);
+                    dlg.close();
+                });
+                row.add_suffix(&match_btn);
+                list_c2.append(&row);
             }
         });
     };
@@ -135,6 +98,6 @@ pub(super) fn show_steam_id_search_popup(
     let ds2 = do_search.clone();
     search_btn.connect_clicked(move |_| ds2());
 
-    dialog.present();
+    dialog.present(Some(parent));
     do_search();
 }

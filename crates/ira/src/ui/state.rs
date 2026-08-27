@@ -31,12 +31,12 @@ pub struct SgdbAssetsCacheEntry {
     pub assets: Vec<SgdbAsset>,
     pub has_more: bool,
     pub next_page: u32,
-    pub picker: glib::WeakRef<adw::Window>,
+    pub picker: glib::WeakRef<adw::Dialog>,
 }
 
 #[derive(Clone)]
 pub struct SettingsData {
-    pub window: adw::Window,
+    pub window: adw::Dialog,
     pub stack: gtk4::Stack,
     pub db_id: i64,
     pub pending_copies: Rc<RefCell<HashMap<String, PendingImage>>>,

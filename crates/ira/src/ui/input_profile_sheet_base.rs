@@ -18,7 +18,7 @@ pub(crate) type Reopen = Rc<dyn Fn()>;
 pub(crate) struct SheetBase {
     pub(crate) content: gtk4::Box,
     pub(crate) profile: ProfileRc,
-    pub(crate) active_set: usize,
+    pub(crate) active_target: EditingTarget,
     pub(crate) source: InputSource,
     pub(crate) device: Option<ira_input::DeviceInfo>,
     pub(crate) backend: ira_input::VirtualGamepadBackend,
@@ -28,28 +28,94 @@ pub(crate) struct SheetBase {
     pub(crate) rebuild_pending: Rc<std::cell::Cell<bool>>,
 }
 
-pub(crate) fn find_mapping(base: &SheetBase) -> Option<InputMapping> {
-    base.profile
-        .borrow()
-        .action_sets
-        .get(base.active_set)?
-        .inputs
-        .iter()
-        .find(|input| input.source == base.source)
-        .cloned()
+/// What the region pages and per-input sheets are editing: an action set,
+/// or one of its layers. Layers are first-class binding targets — Steam
+/// Input lets you open a layer and bind inputs exactly like a set.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum EditingTarget {
+    Set(usize),
+    Layer(usize),
 }
 
-pub(crate) fn with_mapping(base: &SheetBase, apply: impl FnOnce(&mut InputMapping)) {
-    let mut borrow = base.profile.borrow_mut();
-    if let Some(set) = borrow.action_sets.get_mut(base.active_set) {
-        if let Some(input) = set
-            .inputs
-            .iter_mut()
-            .find(|input| input.source == base.source)
+impl EditingTarget {
+    /// The binding list this target edits, if it still exists (indices can
+    /// go stale after structural edits elsewhere).
+    pub(crate) fn inputs_mut(
+        self,
+        profile: &mut ira_input::InputProfile,
+    ) -> Option<&mut Vec<InputMapping>> {
+        match self {
+            Self::Set(index) => profile.action_sets.get_mut(index).map(|set| &mut set.inputs),
+            Self::Layer(index) => profile
+                .action_layers
+                .get_mut(index)
+                .map(|layer| &mut layer.inputs),
+        }
+    }
+
+    /// The mapping bound to `source` inside this target, if any.
+    pub(crate) fn find_mapping(
+        self,
+        profile: &ira_input::InputProfile,
+        source: InputSource,
+    ) -> Option<InputMapping> {
+        let inputs = match self {
+            Self::Set(index) => profile.action_sets.get(index)?.inputs.as_slice(),
+            Self::Layer(index) => profile.action_layers.get(index)?.inputs.as_slice(),
+        };
+        inputs.iter().find(|input| input.source == source).cloned()
+    }
+
+    pub(crate) fn with_mapping(
+        self,
+        profile: &mut ira_input::InputProfile,
+        source: InputSource,
+        apply: impl FnOnce(&mut InputMapping),
+    ) {
+        let inputs = self.inputs_mut(profile);
+        if let Some(input) = inputs
+            .and_then(|inputs| inputs.iter_mut().find(|input| input.source == source))
         {
             apply(input);
         }
     }
+
+    /// Name of this target for labels and the editor's set/layer indicator.
+    pub(crate) fn name(self, profile: &ira_input::InputProfile) -> String {
+        match self {
+            Self::Set(index) => profile
+                .action_sets
+                .get(index)
+                .map(|set| set.name.clone())
+                .unwrap_or_default(),
+            Self::Layer(index) => profile
+                .action_layers
+                .get(index)
+                .map(|layer| layer.name.clone())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Parent set name of a layer target; `None` for sets.
+    pub(crate) fn parent_name(self, profile: &ira_input::InputProfile) -> Option<String> {
+        match self {
+            Self::Set(_) => None,
+            Self::Layer(index) => profile
+                .action_layers
+                .get(index)
+                .map(|layer| layer.parent_set.clone()),
+        }
+    }
+}
+
+pub(crate) fn find_mapping(base: &SheetBase) -> Option<InputMapping> {
+    base.active_target
+        .find_mapping(&base.profile.borrow(), base.source)
+}
+
+pub(crate) fn with_mapping(base: &SheetBase, apply: impl FnOnce(&mut InputMapping)) {
+    let mut borrow = base.profile.borrow_mut();
+    base.active_target.with_mapping(&mut borrow, base.source, apply);
 }
 
 /// Trigger axes are the one analog source with dual-stage activators.

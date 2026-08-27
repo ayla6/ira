@@ -5,12 +5,44 @@ use std::sync::mpsc;
 use super::css::*;
 use super::game_display::display_game;
 use super::grid_view::show_grid_view;
-use super::helpers::{
-    clamped, clamped_boxed_list, clear_children, esc, poll_channel, refresh_settings_images_page,
-    status_row,
-};
+use super::helpers::{clear_children, poll_channel, refresh_settings_images_page, status_row};
 use super::image_manager::build_image_manager_content_with_drafts;
+use super::matching::{fetch_and_report_sgdb_assets, persist_sgdb_match};
 use super::state::SharedState;
+use super::steam_search_dialog::{build_search_dialog, match_result_row, SearchDialogWidgets};
+
+/// A "Search SGDB…" button that reopens the SGDB search for this game and,
+/// once a new match is accepted, repaints the action box with the green
+/// "Matched to SGDB" label.
+fn manual_sgdb_search_button(
+    state: &SharedState,
+    action_box: &gtk4::Box,
+    parent_dialog: &adw::Dialog,
+    db_id: i64,
+    game_name: &str,
+) -> gtk4::Button {
+    let state = state.clone();
+    let action_box = action_box.clone();
+    let parent_dialog = parent_dialog.clone();
+    let game_name = game_name.to_string();
+    let btn = gtk4::Button::with_label(&crate::tr!("Search SGDB…"));
+    btn.connect_clicked(move |_| {
+        let cb: Rc<dyn Fn()> = Rc::new({
+            let action_box = action_box.clone();
+            let game_name = game_name.clone();
+            move || {
+                clear_children(&action_box);
+                let label = gtk4::Label::new(Some(
+                    &crate::tr!("Matched to SGDB: {}").replacen("{}", &game_name, 1),
+                ));
+                label.add_css_class(CSS_SUCCESS_LABEL);
+                action_box.append(&label);
+            }
+        });
+        show_sgdb_search_dialog(&state, db_id, &game_name, &parent_dialog, Some(cb));
+    });
+    btn
+}
 
 pub(super) fn handle_unified_sgdb_result(
     state: &SharedState,
@@ -38,9 +70,7 @@ pub(super) fn handle_unified_sgdb_result(
     clear_children(action_box);
 
     if let Some((sgdb_id, matched_name)) = matched {
-        if let Err(e) = ira_db::set_sgdb_id(&state.borrow().db, db_id, &sgdb_id) {
-            eprintln!("Failed to set SGDB ID: {}", e);
-        }
+        persist_sgdb_match(&state.borrow().db, db_id, &sgdb_id, false);
         if let Some(g) = state
             .borrow_mut()
             .games
@@ -51,7 +81,6 @@ pub(super) fn handle_unified_sgdb_result(
         }
         let steam_dl = state.borrow().steam.clone();
         let sender = state.borrow().sender.clone();
-        let sgdb_id_dl = sgdb_id;
         let save_dir = state.borrow().save_dir.clone();
         let game_for_dir = state
             .borrow()
@@ -60,23 +89,16 @@ pub(super) fn handle_unified_sgdb_result(
             .find(|g| g.db_id == db_id)
             .cloned();
         std::thread::spawn(move || {
-            let _s = tracing::info_span!("handle_unified_sgdb_result", db_id = db_id, sgdb_id = %sgdb_id_dl).entered();
+            let _s = tracing::info_span!("handle_unified_sgdb_result", db_id = db_id, sgdb_id = %sgdb_id).entered();
             std::thread::sleep(std::time::Duration::from_millis(100));
-            let dir = match &game_for_dir {
-                Some(g) => ira_parser::game_data_dir(&save_dir, g),
-                None => ira_parser::sgdb_data_dir(&save_dir, &sgdb_id_dl),
-            };
-            let (icon, hero, grid, logo, header) =
-                steam_dl.ensure_sgdb_assets_in_dir(&dir, &sgdb_id_dl);
-            let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
+            fetch_and_report_sgdb_assets(
+                &steam_dl,
+                &sender,
+                &save_dir,
+                game_for_dir.as_ref(),
                 db_id,
-                sgdb_id: sgdb_id_dl,
-                icon,
-                hero,
-                grid,
-                logo,
-                header,
-            });
+                sgdb_id,
+            );
         });
 
         let label = gtk4::Label::new(Some(&crate::tr!("SGDB: {}").replacen(
@@ -151,27 +173,13 @@ pub(super) fn handle_unified_sgdb_result(
             let label = gtk4::Label::new(Some(&crate::tr!("SGDB: unmatched")));
             label.add_css_class(CSS_DIM_LABEL);
             action_box_c.append(&label);
-            let sgdb_btn = gtk4::Button::with_label(&crate::tr!("Search SGDB…"));
-            let sc2 = sc.clone();
-            let gn = game_name_c.clone();
-            let dlg = parent_c.clone();
-            let ab = action_box_c.clone();
-            sgdb_btn.connect_clicked(move |_| {
-                let cb: Rc<dyn Fn()> = Rc::new({
-                    let ab = ab.clone();
-                    let name = gn.clone();
-                    move || {
-                        clear_children(&ab);
-                        let label = gtk4::Label::new(Some(
-                            &crate::tr!("Matched to SGDB: {}").replacen("{}", &name, 1),
-                        ));
-                        label.add_css_class(CSS_SUCCESS_LABEL);
-                        ab.append(&label);
-                    }
-                });
-                show_sgdb_search_dialog(&sc2, db_id, &gn, &dlg, Some(cb));
-            });
-            action_box_c.append(&sgdb_btn);
+            action_box_c.append(&manual_sgdb_search_button(
+                &sc,
+                &action_box_c,
+                &parent_c,
+                db_id,
+                &game_name_c,
+            ));
         });
         action_box.append(&undo_btn);
     } else {
@@ -179,28 +187,13 @@ pub(super) fn handle_unified_sgdb_result(
         label.add_css_class(CSS_DIM_LABEL);
         action_box.append(&label);
 
-        let sgdb_btn = gtk4::Button::with_label(&crate::tr!("Search SGDB…"));
-        let sc = state.clone();
-        let gn = game_name.to_string();
-        let did = db_id;
-        let dlg = parent_dialog.clone();
-        let ab = action_box.clone();
-        sgdb_btn.connect_clicked(move |_| {
-            let cb: Rc<dyn Fn()> = Rc::new({
-                let ab = ab.clone();
-                let name = gn.clone();
-                move || {
-                    clear_children(&ab);
-                    let label = gtk4::Label::new(Some(
-                        &crate::tr!("Matched to SGDB: {}").replacen("{}", &name, 1),
-                    ));
-                    label.add_css_class(CSS_SUCCESS_LABEL);
-                    ab.append(&label);
-                }
-            });
-            show_sgdb_search_dialog(&sc, did, &gn, &dlg, Some(cb));
-        });
-        action_box.append(&sgdb_btn);
+        action_box.append(&manual_sgdb_search_button(
+            state,
+            action_box,
+            parent_dialog,
+            db_id,
+            game_name,
+        ));
     }
 }
 
@@ -211,32 +204,19 @@ pub fn show_sgdb_search_dialog(
     parent: &impl IsA<gtk4::Widget>,
     on_match: Option<Rc<dyn Fn()>>,
 ) {
-    let dialog = adw::Dialog::new();
-    dialog.set_title(&crate::tr!("Match to SteamGridDB"));
-    dialog.set_content_width(500);
-    dialog.set_content_height(400);
-
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
-
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-
-    let search_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    let entry = gtk4::SearchEntry::new();
-    entry.set_placeholder_text(Some(&crate::tr!("Game name…")));
-    entry.set_text(game_name);
-    entry.set_hexpand(true);
-    search_row.append(&entry);
-    let search_btn = gtk4::Button::with_label(&crate::tr!("Search"));
-    search_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    search_row.append(&search_btn);
-    content.append(&clamped(&search_row, 500, (12, 12, 12, 12)));
-
-    let (scrolled, list) = clamped_boxed_list(500);
-    content.append(&scrolled);
-
-    toolbar.set_content(Some(&content));
-    dialog.set_child(Some(&toolbar));
+    let SearchDialogWidgets {
+        dialog,
+        entry,
+        search_btn,
+        list,
+    } = build_search_dialog(
+        &crate::tr!("Match to SteamGridDB"),
+        500,
+        400,
+        500,
+        game_name,
+        Some(&crate::tr!("Game name…")),
+    );
 
     let entry_c = entry.clone();
     let dialog_c = dialog.clone();
@@ -292,37 +272,27 @@ fn sgdb_result_row(
     on_match: &Option<Rc<dyn Fn()>>,
     dialog: &adw::Dialog,
 ) -> adw::ActionRow {
-    let row = adw::ActionRow::new();
-    row.set_title(&esc(name));
-    row.set_subtitle(&crate::tr!("SGDB ID: {}").replacen("{}", sgdb_id, 1));
-
-    let match_btn = gtk4::Button::with_label(&crate::tr!("Match"));
-    match_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    match_btn.set_valign(gtk4::Align::Center);
     let sc = state.clone();
     let sid = sgdb_id.to_string();
     let cb = on_match.clone();
     let dlg = dialog.clone();
-    match_btn.connect_clicked(move |_| {
-        apply_sgdb_match(&sc, db_id, &sid);
-        dlg.close();
-        if let Some(ref cb) = cb {
-            cb();
-        }
-    });
-    row.add_suffix(&match_btn);
-    row
+    match_result_row(
+        name,
+        &crate::tr!("SGDB ID: {}").replacen("{}", sgdb_id, 1),
+        move || {
+            apply_sgdb_match(&sc, db_id, &sid);
+            dlg.close();
+            if let Some(ref cb) = cb {
+                cb();
+            }
+        },
+    )
 }
 
 /// Persist an SGDB match: DB ids, in-memory state, asset download and a
 /// refresh of the settings images page when it is showing this game.
 fn apply_sgdb_match(state: &SharedState, db_id: i64, sgdb_id: &str) {
-    if let Err(e) = ira_db::set_sgdb_id(&state.borrow().db, db_id, sgdb_id) {
-        eprintln!("Failed to set SGDB ID: {}", e);
-    }
-    if let Err(e) = ira_db::set_manual_unmatch(&state.borrow().db, db_id, false) {
-        eprintln!("Failed to clear manual unmatch: {}", e);
-    }
+    persist_sgdb_match(&state.borrow().db, db_id, sgdb_id, true);
     if let Some(g) = state
         .borrow_mut()
         .games
@@ -355,19 +325,13 @@ fn apply_sgdb_match(state: &SharedState, db_id: i64, sgdb_id: &str) {
         let _s =
             tracing::info_span!("sgdb_search_result_match", db_id = db_id, sgdb_id = %sgdb_id_d)
                 .entered();
-        let dir = match &game_for_dir {
-            Some(g) => ira_parser::game_data_dir(&save_dir, g),
-            None => ira_parser::sgdb_data_dir(&save_dir, &sgdb_id_d),
-        };
-        let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id_d);
-        let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
+        fetch_and_report_sgdb_assets(
+            &steam,
+            &sender,
+            &save_dir,
+            game_for_dir.as_ref(),
             db_id,
-            sgdb_id: sgdb_id_d,
-            icon,
-            hero,
-            grid,
-            logo,
-            header,
-        });
+            sgdb_id_d,
+        );
     });
 }

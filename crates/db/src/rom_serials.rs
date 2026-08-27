@@ -1,4 +1,4 @@
-use crate::{lock_db, DbConn};
+use crate::{err, lock_db, DbConn};
 use rusqlite::params;
 
 /// Creates the disc-serial cache table; rows are keyed by ROM path and
@@ -62,7 +62,7 @@ pub fn store_rom_serial(
              serial = excluded.serial, title = excluded.title",
         params![path, size, mtime, serial, title],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }
 

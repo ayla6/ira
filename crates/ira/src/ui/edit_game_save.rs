@@ -19,7 +19,7 @@ use std::sync::mpsc;
 
 pub(super) struct SaveGameSettingsParams {
     pub state: SharedState,
-    pub win: adw::Window,
+    pub win: adw::Dialog,
     pub db_id: i64,
     pub app_id: String,
     pub trophy_source: TrophySource,
@@ -817,9 +817,10 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
             let cfg = params.state.borrow().cfg.clone();
             let title = params.title_entry.text().to_string();
             let install_dir = String::new();
+            let game_folders = cfg.all_game_folders();
             if let Some(detected) = ira_platforms::game_folder::detect_game_folder(
                 &launch.exe,
-                &cfg.default_game_folder,
+                &game_folders,
                 &install_dir,
                 &title,
             ) {

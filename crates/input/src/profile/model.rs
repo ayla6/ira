@@ -65,6 +65,37 @@ impl GamepadButton {
                 | Self::Paddle8
         )
     }
+
+    /// Human-readable name for messages that surface in the editor.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::A => "A (bottom face button)",
+            Self::B => "B (right face button)",
+            Self::X => "X (left face button)",
+            Self::Y => "Y (top face button)",
+            Self::LeftShoulder => "left shoulder button",
+            Self::RightShoulder => "right shoulder button",
+            Self::LeftTrigger => "left trigger",
+            Self::RightTrigger => "right trigger",
+            Self::Back => "select / back button",
+            Self::Start => "start / options button",
+            Self::Guide => "guide / home button",
+            Self::LeftStick => "left stick click",
+            Self::RightStick => "right stick click",
+            Self::DpadUp => "d-pad up",
+            Self::DpadDown => "d-pad down",
+            Self::DpadLeft => "d-pad left",
+            Self::DpadRight => "d-pad right",
+            Self::Paddle1 => "back paddle 1",
+            Self::Paddle2 => "back paddle 2",
+            Self::Paddle3 => "back paddle 3",
+            Self::Paddle4 => "back paddle 4",
+            Self::Paddle5 => "back paddle 5",
+            Self::Paddle6 => "back paddle 6",
+            Self::Paddle7 => "back paddle 7",
+            Self::Paddle8 => "back paddle 8",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -76,6 +107,38 @@ pub enum GamepadAxis {
     RightY,
     LeftTrigger,
     RightTrigger,
+}
+
+impl GamepadAxis {
+    /// Human-readable name for messages that surface in the editor.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::LeftX => "left stick horizontal",
+            Self::LeftY => "left stick vertical",
+            Self::RightX => "right stick horizontal",
+            Self::RightY => "right stick vertical",
+            Self::LeftTrigger => "left trigger axis",
+            Self::RightTrigger => "right trigger axis",
+        }
+    }
+}
+
+impl InputSource {
+    /// Human-readable name for messages that surface in the editor.
+    pub fn display_name(self) -> String {
+        match self {
+            Self::Button(button) => button.display_name().to_string(),
+            Self::Axis(axis) => axis.display_name().to_string(),
+            Self::AxisDirection { axis, direction } => match direction {
+                AxisDirection::Negative => {
+                    format!("{} (pushed left/up)", axis.display_name())
+                }
+                AxisDirection::Positive => {
+                    format!("{} (pushed right/down)", axis.display_name())
+                }
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -977,8 +1040,8 @@ impl InputProfile {
                     set.name
                 ));
             }
-            for (input_index, input) in set.inputs.iter().enumerate() {
-                self.validate_input_mapping(&set.name, input_index, input)?;
+            for input in &set.inputs {
+                self.validate_input_mapping(&set.name, input)?;
             }
         }
         for (label, target) in [
@@ -1005,8 +1068,8 @@ impl InputProfile {
                     layer.parent_set
                 ));
             }
-            for (input_index, input) in layer.inputs.iter().enumerate() {
-                self.validate_input_mapping(&layer.name, input_index, input)?;
+            for input in &layer.inputs {
+                self.validate_input_mapping(&layer.name, input)?;
             }
         }
         Ok(())
@@ -1015,18 +1078,32 @@ impl InputProfile {
     fn validate_input_mapping(
         &self,
         context: &str,
-        input_index: usize,
         input: &InputMapping,
     ) -> Result<(), String> {
-        let label = format!("{context} input {input_index}");
+        let label = format!(
+            "{context}: {source}",
+            source = input.source.display_name()
+        );
         if let Some(mode) = &input.mode {
             mode.validate()
                 .map_err(|error| format!("{label}: {error}"))?;
         }
-        // Button inputs express everything through activators; mode-driven
-        // analog inputs (sticks, triggers) work without any.
-        if input.mode.is_none() && input.activators.is_empty() {
-            return Err(format!("{label}: needs at least one activator"));
+        // Button inputs express everything through activators; analog
+        // inputs (sticks, triggers) may legitimately have no mode — that
+        // is Steam's "None" behavior, an inert input the user chose to
+        // leave unbound.
+        if matches!(input.source, InputSource::Button(_))
+            && input.mode.is_none()
+            && input.activators.is_empty()
+        {
+            return Err(format!(
+                "{context}: the {source} has nothing bound to it. Every button \
+                 input needs at least one activator — a press or release that \
+                 triggers it. Open this input in the controller editor and add \
+                 an activator under it, or remove the input if it is unused.",
+                context = context,
+                source = input.source.display_name(),
+            ));
         }
         for activator in &input.activators {
             if activator.outputs.is_empty() {
@@ -1813,7 +1890,50 @@ mod tests {
             }],
             ..InputProfile::default()
         };
-        assert!(empty_activators.validate().is_err());
+        let error = empty_activators.validate().unwrap_err();
+        // The message must name the input in plain language and say what to
+        // do about it — "Default input 21: needs at least one activator"
+        // was unreadable.
+        assert!(error.contains("Default"), "{error}");
+        assert!(error.contains("A (bottom face button)"), "{error}");
+        assert!(error.contains("activator"), "{error}");
+        assert!(error.contains("controller editor"), "{error}");
+    }
+
+    #[test]
+    fn test_analog_input_without_mode_is_a_valid_none_behavior() {
+        // Steam's "None": an unbound axis is inert by choice, not an error.
+        // This is what blocked setting trigger behavior to None before.
+        let unbound_trigger = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping::new(InputSource::Axis(
+                    GamepadAxis::LeftTrigger,
+                ))],
+            }],
+            ..InputProfile::default()
+        };
+        assert!(unbound_trigger.validate().is_ok());
+    }
+
+    #[test]
+    fn test_source_display_names_are_plain_language() {
+        assert_eq!(
+            GamepadButton::LeftTrigger.display_name(),
+            "left trigger"
+        );
+        assert_eq!(
+            GamepadAxis::RightY.display_name(),
+            "right stick vertical"
+        );
+        assert_eq!(
+            InputSource::AxisDirection {
+                axis: GamepadAxis::LeftX,
+                direction: AxisDirection::Negative,
+            }
+            .display_name(),
+            "left stick horizontal (pushed left/up)"
+        );
     }
 
     #[test]

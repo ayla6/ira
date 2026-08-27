@@ -24,6 +24,31 @@ pub(super) fn layout_display_name(layout: &SteamLayout) -> String {
     }
 }
 
+/// Subscriber and upvote strings shown with a workshop layout, each present
+/// only when its counter has a value; shared by the search-result subtitle
+/// and the preview summary's Community row.
+pub(super) fn community_stats(layout: &SteamLayout) -> Vec<String> {
+    let mut parts: Vec<String> = Vec::new();
+    if layout.lifetime_subscriptions > 0 {
+        parts.push(crate::tr!("{} subscribers").replacen(
+            "{}",
+            &layout.lifetime_subscriptions.to_string(),
+            1,
+        ));
+    }
+    if layout.votes_up > 0 {
+        parts.push(crate::tr!("{} upvotes").replacen("{}", &layout.votes_up.to_string(), 1));
+    }
+    parts
+}
+
+/// `%Y-%m-%d` stamp of the layout's last update, `None` outside
+/// representable timestamps; the search subtitle hides the part while the
+/// preview keeps its Updated row with a blank date.
+pub(super) fn updated_date(time_updated: i64) -> Option<String> {
+    chrono::DateTime::from_timestamp(time_updated, 0).map(|dt| dt.format("%Y-%m-%d").to_string())
+}
+
 /// Everything needed to open a layout's preview page; fully owned so it can
 /// be built on row activation and consumed by the worker hand-off.
 pub(super) struct PreviewRequest {
@@ -181,17 +206,7 @@ fn summary_group(layout: &SteamLayout, profile: &InputProfile) -> adw::Preferenc
         row.set_subtitle(&controller_display_label(&layout.controller_type));
         group.add(&row);
     }
-    let mut community = Vec::new();
-    if layout.lifetime_subscriptions > 0 {
-        community.push(crate::tr!("{} subscribers").replacen(
-            "{}",
-            &layout.lifetime_subscriptions.to_string(),
-            1,
-        ));
-    }
-    if layout.votes_up > 0 {
-        community.push(crate::tr!("{} upvotes").replacen("{}", &layout.votes_up.to_string(), 1));
-    }
+    let community = community_stats(layout);
     if !community.is_empty() {
         let row = adw::ActionRow::new();
         row.set_title(&crate::tr!("Community"));
@@ -203,10 +218,7 @@ fn summary_group(layout: &SteamLayout, profile: &InputProfile) -> adw::Preferenc
         let row = adw::ActionRow::new();
         row.set_title(&crate::tr!("Updated"));
         row.add_css_class(CSS_DIM_LABEL);
-        let date = chrono::DateTime::from_timestamp(layout.time_updated, 0)
-            .map(|dt| dt.format("%Y-%m-%d").to_string())
-            .unwrap_or_default();
-        row.set_subtitle(&date);
+        row.set_subtitle(&updated_date(layout.time_updated).unwrap_or_default());
         group.add(&row);
     }
     let sets = profile.action_sets.len();

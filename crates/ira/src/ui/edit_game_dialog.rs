@@ -11,7 +11,6 @@ use super::wine_config_widget::{build_wine_config_pages, WineConfigWidgets};
 use crate::Game;
 use adw::prelude::*;
 use glib::clone::Downgrade;
-use gtk4::prelude::IsA;
 use ira_models::{AppDetails, GameLaunchConfig, WineConfig, WineProfile};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -72,11 +71,9 @@ fn extract_game_and_config(
 }
 
 fn create_dialog_window(
-    parent: &impl IsA<gtk4::Window>,
     game: &Game,
-) -> (adw::Window, gtk4::ListBox, gtk4::Stack, gtk4::Box) {
-    let layout = super::helpers::dialog_layout(parent);
-    layout.window.set_deletable(false);
+) -> (adw::Dialog, gtk4::ListBox, gtk4::Stack, gtk4::Box) {
+    let layout = super::helpers::dialog_layout();
     layout.stack.set_hexpand(true);
     layout
         .header
@@ -93,7 +90,7 @@ fn build_launch_wine_advanced_pages(
     state: &SharedState,
     game: &Game,
     params: &LaunchWineParams,
-    win: &adw::Window,
+    win: &adw::Dialog,
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
 ) -> LaunchWineAdvancedCtx {
@@ -253,7 +250,7 @@ fn setup_sidebar_navigation(sidebar: &gtk4::ListBox, stack: &gtk4::Stack) {
 
 struct DialogContent {
     game: Game,
-    win: adw::Window,
+    win: adw::Dialog,
     sidebar: gtk4::ListBox,
     stack: gtk4::Stack,
     content_area: gtk4::Box,
@@ -620,7 +617,7 @@ fn build_dialog_contents(
         });
     }
     let state_close_w = Rc::downgrade(&state);
-    win.connect_close_request(move |_| {
+    win.connect_closed(move |_| {
         if let Some(state) = state_close_w.upgrade() {
             // Defer dropping the bookkeeping refs: SettingsData owns the
             // window itself, and finalizing it (with its whole page tree)
@@ -633,7 +630,6 @@ fn build_dialog_contents(
                 }
             });
         }
-        glib::Propagation::Proceed
     });
 }
 
@@ -646,7 +642,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
     let parent = state.borrow().window.clone();
     let save_dir = state.borrow().save_dir.clone();
-    let (win, sidebar, stack, content_area) = create_dialog_window(&parent, &game);
+    let (win, sidebar, stack, content_area) = create_dialog_window(&game);
 
     let app_details = crate::game_loader::read_app_details(&save_dir, &game.app_id);
     let win_clone = win.clone();
@@ -670,5 +666,9 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         },
         db_id,
     );
-    win_clone.present();
+    // Natural height outgrew what a normal window offers after the newer
+    // pages landed; libadwaita warns and clips floating sheets that ask
+    // for more than their presenter has.
+    super::helpers::fit_dialog_height(&win_clone, &parent, 720);
+    win_clone.present(Some(&parent));
 }

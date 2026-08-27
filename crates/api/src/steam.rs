@@ -7,6 +7,24 @@ use crate::types::{
 use crate::util::{pick_lang, urlencode};
 use crate::SteamDataClient;
 
+/// One achievement icon to download into the achievements image directory.
+struct IconJob {
+    url: String,
+    dest: std::path::PathBuf,
+}
+
+/// Achievement source-normalized for settings generation
+/// (Nemirtingas DB entries and Steam schema entries differ only in
+/// how their fields arrive).
+struct AchEntry {
+    name: String,
+    display_name: String,
+    description: String,
+    hidden: bool,
+    icon: String,
+    icon_gray: String,
+}
+
 impl SteamDataClient {
     pub fn fetch_global_achievements(
         &self,
@@ -23,18 +41,10 @@ impl SteamDataClient {
             "https://api.steampowered.com/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v0002/?gameid={}&format=json",
             app_id
         );
-        let resp = match self.http.get(&url).send() {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Global achievements unavailable for {}: {}", app_id, e);
-                return None;
-            }
-        };
-
-        let text = match resp.text() {
+        let text = match self.http_get_text(&url) {
             Ok(t) => t,
             Err(e) => {
-                eprintln!("Global achievements read error for {}: {}", app_id, e);
+                eprintln!("Global achievements unavailable for {}: {}", app_id, e);
                 return None;
             }
         };
@@ -66,20 +76,7 @@ impl SteamDataClient {
             "https://store.steampowered.com/appreviews/{}?json=1&num_per_page=0&purchase_type=all&language=all",
             app_id
         );
-        let resp = match self.http.get(&url).send() {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Steam reviews unavailable for {}: {}", app_id, e);
-                return None;
-            }
-        };
-        let raw: SteamReviewsResponse = match resp.json() {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Steam reviews decode error for {}: {}", app_id, e);
-                return None;
-            }
-        };
+        let raw: SteamReviewsResponse = self.http_get_json(&url)?;
         if raw.success != 1 {
             eprintln!("Steam reviews returned success=0 for {}", app_id);
             return None;
@@ -89,7 +86,7 @@ impl SteamDataClient {
 
     pub fn fetch_app_details(&self, app_id: &str) -> Option<AppDetails> {
         let raw = self.ensure_steamcmd_raw(app_id)?;
-        let mut details = Self::extract_app_details(&raw, app_id)?;
+        let mut details = extract_app_details(&raw, app_id)?;
         self.fill_dlc_names(&mut details);
         Some(details)
     }
@@ -118,38 +115,25 @@ impl SteamDataClient {
             "https://store.steampowered.com/api/storesearch/?term={}&l=en&cc=US",
             urlencode(term)
         );
-        match self.http.get(&url).send() {
-            Ok(resp) => {
-                if let Ok(json) = resp.json::<serde_json::Value>() {
-                    json.get("items")
-                        .and_then(|items| items.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|item| {
-                                    let id = item.get("id")?.as_i64()?.to_string();
-                                    let name = item.get("name")?.as_str()?.to_string();
-                                    Some((id, name))
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default()
-                } else {
-                    Vec::new()
-                }
-            }
-            Err(e) => {
-                eprintln!("Steam Store search failed: {}", e);
-                Vec::new()
-            }
-        }
+        let json = self
+            .http_get_json::<serde_json::Value>(&url)
+            .unwrap_or_default();
+        json.get("items")
+            .and_then(|items| items.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| {
+                        let id = item.get("id")?.as_i64()?.to_string();
+                        let name = item.get("name")?.as_str()?.to_string();
+                        Some((id, name))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn generate_steam_settings(&self, app_id: &str) -> Result<(), String> {
         let _s = tracing::info_span!("generate_steam_settings", app_id).entered();
-        struct IconJob {
-            url: String,
-            dest: std::path::PathBuf,
-        }
 
         let settings_dir = self.game_dir(app_id).join("achievements");
         let img_dir = settings_dir.join("achievement_images");
@@ -169,88 +153,88 @@ impl SteamDataClient {
                 .map_err(|e| format!("could not create achievements dir: {}", e))?;
         }
 
+        let entries: Vec<AchEntry> = match self.fetch_nemirtingas_achievements(app_id) {
+            Some(nem_achs) => nem_achs
+                .into_iter()
+                .map(|a| AchEntry {
+                    name: a.name,
+                    display_name: pick_lang(&a.display_name),
+                    description: pick_lang(&a.description),
+                    hidden: a.hidden,
+                    icon: a.icon,
+                    icon_gray: a.icon_gray,
+                })
+                .collect(),
+            None => {
+                eprintln!(
+                    "games-infos-datas unavailable for {}, falling back to Steam schema",
+                    app_id
+                );
+                self.fetch_steam_schema_achievements(app_id)?
+                    .into_iter()
+                    .map(|a| AchEntry {
+                        name: a.name,
+                        display_name: a.display_name,
+                        description: a.description,
+                        hidden: a.hidden != 0,
+                        icon: a.icon,
+                        icon_gray: a.icon_gray,
+                    })
+                    .collect()
+            }
+        };
+
         let mut jobs: Vec<IconJob> = Vec::new();
         let mut out: Vec<serde_json::Value> = Vec::new();
-
-        if let Some(nem_achs) = self.fetch_nemirtingas_achievements(app_id) {
-            for a in nem_achs {
-                let hidden = if a.hidden { "1" } else { "0" };
-                let icon_base = Path::new(&a.icon)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
-                let icon_gray_base = Path::new(&a.icon_gray)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
-                out.push(serde_json::json!({
-                    "name": a.name,
-                    "displayName": pick_lang(&a.display_name),
-                    "description": pick_lang(&a.description),
-                    "hidden": hidden,
-                    "icon": format!("achievement_images/{}", icon_base),
-                    "icon_gray": format!("achievement_images/{}", icon_gray_base),
-                }));
-                if !a.icon.is_empty() {
-                    jobs.push(IconJob {
-                        url: a.icon.clone(),
-                        dest: img_dir.join(&icon_base),
-                    });
-                }
-                if !a.icon_gray.is_empty() {
-                    jobs.push(IconJob {
-                        url: a.icon_gray.clone(),
-                        dest: img_dir.join(&icon_gray_base),
-                    });
-                }
+        for a in entries {
+            let icon_base = Path::new(&a.icon)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let icon_gray_base = Path::new(&a.icon_gray)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            out.push(serde_json::json!({
+                "name": a.name,
+                "displayName": a.display_name,
+                "description": a.description,
+                "hidden": if a.hidden { "1" } else { "0" },
+                "icon": format!("achievement_images/{}", icon_base),
+                "icon_gray": format!("achievement_images/{}", icon_gray_base),
+            }));
+            if !a.icon.is_empty() {
+                jobs.push(IconJob {
+                    url: a.icon,
+                    dest: img_dir.join(&icon_base),
+                });
             }
-        } else {
-            eprintln!(
-                "games-infos-datas unavailable for {}, falling back to Steam schema",
-                app_id
-            );
-            let achs = self.fetch_steam_schema_achievements(app_id)?;
-            for a in achs {
-                let hidden = if a.hidden != 0 { "1" } else { "0" };
-                let icon_base = Path::new(&a.icon)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
-                let icon_gray_base = Path::new(&a.icon_gray)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
-                out.push(serde_json::json!({
-                    "name": a.name,
-                    "displayName": a.display_name,
-                    "description": a.description,
-                    "hidden": hidden,
-                    "icon": format!("achievement_images/{}", icon_base),
-                    "icon_gray": format!("achievement_images/{}", icon_gray_base),
-                }));
-                if !a.icon.is_empty() {
-                    jobs.push(IconJob {
-                        url: a.icon.clone(),
-                        dest: img_dir.join(&icon_base),
-                    });
-                }
-                if !a.icon_gray.is_empty() {
-                    jobs.push(IconJob {
-                        url: a.icon_gray.clone(),
-                        dest: img_dir.join(&icon_gray_base),
-                    });
-                }
+            if !a.icon_gray.is_empty() {
+                jobs.push(IconJob {
+                    url: a.icon_gray,
+                    dest: img_dir.join(&icon_gray_base),
+                });
             }
         }
 
         let b = serde_json::to_string_pretty(&out).map_err(|e| e.to_string())?;
         std::fs::write(settings_dir.join("achievements.json"), b).map_err(|e| e.to_string())?;
 
-        for j in &jobs {
+        self.download_icon_files(&jobs);
+
+        eprintln!(
+            "Generated achievements for app {}: {} achievements",
+            app_id,
+            out.len()
+        );
+        Ok(())
+    }
+
+    /// Download missing achievement icons, logging per-file failures.
+    fn download_icon_files(&self, jobs: &[IconJob]) {
+        for j in jobs {
             if j.dest.exists() {
                 continue;
             }
@@ -267,47 +251,42 @@ impl SteamDataClient {
                 Err(e) => eprintln!("  icon download failed {}: {}", j.url, e),
             }
         }
+    }
 
-        eprintln!(
-            "Generated achievements for app {}: {} achievements",
-            app_id,
-            out.len()
-        );
-        Ok(())
+    /// Read the cached steamcmd.net response for an app. Rejects unreadable
+    /// files, payloads that fail to parse, and non-"success" responses —
+    /// callers can treat `None` as "no usable cache".
+    fn load_appdetails_cache(&self, app_id: &str) -> Option<SteamCmdResponse> {
+        let data = std::fs::read(self.game_dir(app_id).join("appdetails.json")).ok()?;
+        parse_appdetails_response(&data)
     }
 
     /// Resolve the clienticon hash for a Steam app from cached steamcmd.net data.
-    /// Returns `None` if no cached data is available.
+    /// Returns `None` if no valid cached data is available.
     pub fn cached_clienticon(&self, app_id: &str) -> Option<String> {
-        let cached = self.game_dir(app_id).join("appdetails.json");
-        let data = std::fs::read(&cached).ok()?;
-        let raw: SteamCmdResponse = serde_json::from_slice(&data).ok()?;
-        let entry = raw.data.get(app_id)?;
-        if entry.common.clienticon.is_empty() {
+        let raw = self.load_appdetails_cache(app_id)?;
+        let hash = raw.data.get(app_id)?.common.clienticon.clone();
+        if hash.is_empty() {
             None
         } else {
-            Some(entry.common.clienticon.clone())
+            Some(hash)
         }
     }
 
     pub fn cached_icon_hash(&self, app_id: &str) -> Option<String> {
-        let cached = self.game_dir(app_id).join("appdetails.json");
-        let data = std::fs::read(&cached).ok()?;
-        let raw: SteamCmdResponse = serde_json::from_slice(&data).ok()?;
-        let entry = raw.data.get(app_id)?;
-        if entry.common.icon.is_empty() {
+        let raw = self.load_appdetails_cache(app_id)?;
+        let hash = raw.data.get(app_id)?.common.icon.clone();
+        if hash.is_empty() {
             None
         } else {
-            Some(entry.common.icon.clone())
+            Some(hash)
         }
     }
 
+    /// True when a usable (parseable, "success") appdetails cache exists,
+    /// refreshing it from steamcmd.net otherwise.
     pub fn ensure_steamcmd_cache(&self, app_id: &str) -> bool {
-        let cache_path = self.game_dir(app_id).join("appdetails.json");
-        if cache_path.is_file() {
-            return true;
-        }
-        self.fetch_steamcmd_info(app_id).is_some()
+        self.ensure_steamcmd_raw(app_id).is_some()
     }
 
     pub fn fetch_steamcmd_info(&self, app_id: &str) -> Option<SteamCmdInfo> {
@@ -316,29 +295,15 @@ impl SteamDataClient {
     }
 
     fn ensure_steamcmd_raw(&self, app_id: &str) -> Option<SteamCmdResponse> {
-        let cache_path = self.game_dir(app_id).join("appdetails.json");
-
-        if let Ok(data) = std::fs::read(&cache_path) {
-            if let Ok(raw) = serde_json::from_slice::<SteamCmdResponse>(&data) {
-                if raw.status == "success" {
-                    return Some(raw);
-                }
-            }
+        if let Some(raw) = self.load_appdetails_cache(app_id) {
+            return Some(raw);
         }
 
         let url = format!("https://api.steamcmd.net/v1/info/{}", app_id);
-        let resp = match self.http.get(&url).send() {
-            Ok(r) => r,
+        let raw_bytes = match self.download_bytes(&url) {
+            Ok(b) => b,
             Err(e) => {
-                eprintln!("steamcmd.net unavailable for {}: {}", app_id, e);
-                return None;
-            }
-        };
-
-        let raw_bytes = match resp.bytes() {
-            Ok(b) => b.to_vec(),
-            Err(e) => {
-                eprintln!("steamcmd.net read error for {}: {}", app_id, e);
+                eprintln!("steamcmd.net unavailable for {}: {}", url, e);
                 return None;
             }
         };
@@ -357,9 +322,9 @@ impl SteamDataClient {
         }
 
         let _ = std::fs::create_dir_all(self.game_dir(app_id));
-        let _ = std::fs::write(&cache_path, &raw_bytes);
+        let _ = std::fs::write(self.game_dir(app_id).join("appdetails.json"), &raw_bytes);
 
-        serde_json::from_slice(&raw_bytes).ok()
+        Some(raw)
     }
 
     fn parse_steamcmd_app(raw: &SteamCmdResponse, app_id: &str) -> Option<SteamCmdInfo> {
@@ -391,9 +356,16 @@ impl SteamDataClient {
                 .round() as i32,
         })
     }
+}
 
-    fn extract_app_details(raw: &SteamCmdResponse, app_id: &str) -> Option<AppDetails> {
-        extract_app_details(raw, app_id)
+/// Parse steamcmd.net JSON bytes, rejecting anything that fails to parse or
+/// doesn't report `"success"` status. Single gate for every cache consumer.
+fn parse_appdetails_response(data: &[u8]) -> Option<SteamCmdResponse> {
+    let raw: SteamCmdResponse = serde_json::from_slice(data).ok()?;
+    if raw.status == "success" {
+        Some(raw)
+    } else {
+        None
     }
 }
 
@@ -515,7 +487,7 @@ fn extract_app_details(raw: &SteamCmdResponse, app_id: &str) -> Option<AppDetail
 
 pub fn read_app_details_from_cache(path: &Path) -> Option<AppDetails> {
     let data = std::fs::read(path).ok()?;
-    let raw: SteamCmdResponse = serde_json::from_slice(&data).ok()?;
+    let raw = parse_appdetails_response(&data)?;
     let app_id = raw.data.keys().next()?.clone();
     extract_app_details(&raw, &app_id)
 }

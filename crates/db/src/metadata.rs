@@ -1,4 +1,4 @@
-use crate::DbConn;
+use crate::{err, DbConn};
 use rusqlite::params;
 
 pub fn store_game_metadata(
@@ -28,6 +28,6 @@ pub fn store_game_metadata(
             game_id
         ],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }

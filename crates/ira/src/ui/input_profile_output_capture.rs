@@ -4,11 +4,10 @@ use std::rc::Rc;
 const XKB_EVDEV_OFFSET: u32 = 8;
 
 pub(super) fn show_keyboard_output_capture(
-    parent: &gtk4::Window,
+    parent: &impl IsA<gtk4::Widget>,
     on_capture: impl Fn(u16) + 'static,
 ) {
     let (dialog, status, content) = capture_dialog(
-        parent,
         &crate::tr!("Capture keyboard output"),
         &crate::tr!("Press one key to assign it. Escape cancels."),
     );
@@ -32,7 +31,7 @@ pub(super) fn show_keyboard_output_capture(
         gtk4::glib::Propagation::Stop
     });
     dialog.add_controller(key);
-    present_dialog(&dialog, &content);
+    present_dialog(&dialog, parent, &content);
 }
 
 pub(super) fn evdev_keycode(hardware_keycode: u32) -> Option<u16> {
@@ -42,20 +41,20 @@ pub(super) fn evdev_keycode(hardware_keycode: u32) -> Option<u16> {
 }
 
 fn capture_dialog(
-    parent: &gtk4::Window,
     title: &str,
     instruction: &str,
-) -> (adw::Window, gtk4::Label, gtk4::Box) {
-    let dialog = adw::Window::new();
-    dialog.set_title(Some(title));
-    dialog.set_transient_for(Some(parent));
-    dialog.set_modal(true);
-    dialog.set_default_size(360, 160);
+) -> (adw::Dialog, gtk4::Label, gtk4::Box) {
+    let dialog = adw::Dialog::new();
+    dialog.set_title(title);
+    dialog.set_content_width(360);
+    dialog.set_content_height(160);
 
     let header = adw::HeaderBar::new();
     let cancel = gtk4::Button::with_label(&crate::tr!("Cancel"));
     let dialog_for_cancel = dialog.clone();
-    cancel.connect_clicked(move |_| dialog_for_cancel.close());
+    cancel.connect_clicked(move |_| {
+        dialog_for_cancel.close();
+    });
     header.pack_end(&cancel);
 
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -76,12 +75,12 @@ fn capture_dialog(
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&content));
-    dialog.set_content(Some(&toolbar));
+    dialog.set_child(Some(&toolbar));
     (dialog, status, content)
 }
 
-fn present_dialog(dialog: &adw::Window, content: &gtk4::Box) {
-    dialog.present();
+fn present_dialog<P: IsA<gtk4::Widget>>(dialog: &adw::Dialog, parent: &P, content: &gtk4::Box) {
+    dialog.present(Some(parent));
     content.grab_focus();
 }
 

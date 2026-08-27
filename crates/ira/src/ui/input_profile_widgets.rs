@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 /// A titled group of setting rows drawn as one boxed list. Equivalent to
 /// `adw::PreferencesGroup`, but it also accepts custom rows such as sliders.
+#[derive(Clone)]
 pub(crate) struct SettingGroup {
     pub root: gtk4::Box,
     list: gtk4::ListBox,
@@ -39,6 +40,10 @@ impl SettingGroup {
 
     pub(crate) fn add(&self, row: &impl IsA<gtk4::Widget>) {
         self.list.append(row);
+    }
+
+    pub(crate) fn remove(&self, row: &impl IsA<gtk4::Widget>) {
+        self.list.remove(row);
     }
 }
 
@@ -115,6 +120,71 @@ pub(crate) fn slider_row_with_scale(
         on_change(scale.value());
     });
     (row, scale)
+}
+
+/// [`slider_row`] with a manual entry: the header's value is an editable
+/// spin button synced both ways with the scale, for precise values the
+/// slider cannot comfortably reach.
+pub(crate) fn slider_entry_row(
+    title: &str,
+    subtitle: Option<&str>,
+    spec: &SliderSpec,
+    on_change: impl Fn(f64) + 'static,
+) -> gtk4::ListBoxRow {
+    let SliderSpec(min, max, step, value) = *spec;
+    let row = gtk4::ListBoxRow::new();
+    row.set_selectable(false);
+    row.set_activatable(false);
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+    content.set_margin_top(12);
+    content.set_margin_bottom(12);
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+
+    let header = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    let title_label = gtk4::Label::new(Some(title));
+    title_label.set_xalign(0.0);
+    title_label.set_wrap(true);
+    title_label.set_hexpand(true);
+    let entry = gtk4::SpinButton::with_range(min, max, step);
+    entry.set_value(value);
+    entry.set_digits(step_digits(step).max(0) as u32);
+    entry.set_valign(gtk4::Align::Center);
+    entry.set_width_chars(7);
+    header.append(&title_label);
+    header.append(&entry);
+
+    let scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, min, max, step);
+    scale.set_draw_value(false);
+    scale.set_round_digits(step_digits(step));
+    scale.set_value(value);
+
+    content.append(&header);
+    content.append(&scale);
+    if let Some(subtitle) = subtitle {
+        let subtitle_label = gtk4::Label::new(Some(subtitle));
+        subtitle_label.set_xalign(0.0);
+        subtitle_label.set_wrap(true);
+        subtitle_label.add_css_class(CSS_DIM_LABEL);
+        content.append(&subtitle_label);
+    }
+    row.set_child(Some(&content));
+
+    // Typing drives the scale; the scale's own signal is the single place
+    // that reports changes, so the two never feed back into each other.
+    {
+        let scale = scale.clone();
+        entry.connect_value_changed(move |entry| scale.set_value(entry.value()));
+    }
+    {
+        let entry = entry.clone();
+        scale.connect_value_changed(move |scale| {
+            // Writing the same value back does not re-emit the spin button.
+            entry.set_value(scale.value());
+            on_change(scale.value());
+        });
+    }
+    row
 }
 
 /// One choice in an [`option_picker_popover`].

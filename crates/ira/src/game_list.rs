@@ -430,41 +430,31 @@ fn build_game_list_with_mode(
             }
         };
 
-        if let Some(h) = ps4_handle {
-            match h.join() {
-                Ok(g) => append_source_games(&mut games, g, merge_discovered_games),
-                Err(_) => eprintln!("PS4 games thread panicked"),
-            }
-        }
-        if let Some(h) = ps3_handle {
-            match h.join() {
-                Ok(g) => append_source_games(&mut games, g, merge_discovered_games),
-                Err(_) => eprintln!("PS3 games thread panicked"),
-            }
-        }
-        if let Some(h) = vita3k_handle {
-            match h.join() {
-                Ok(g) => append_source_games(&mut games, g, merge_discovered_games),
-                Err(_) => eprintln!("Vita3K games thread panicked"),
-            }
-        }
-        if let Some(h) = cemu_handle {
-            match h.join() {
-                Ok(g) => append_source_games(&mut games, g, merge_discovered_games),
-                Err(_) => eprintln!("Cemu games thread panicked"),
-            }
-        }
-        if let Some(h) = azahar_handle {
-            match h.join() {
-                Ok(g) => append_source_games(&mut games, g, merge_discovered_games),
-                Err(_) => eprintln!("Azahar games thread panicked"),
-            }
-        }
-        append_source_games(&mut games, steam_games, merge_discovered_games);
-        if let Some(h) = ra_handle {
-            match h.join() {
-                Ok(g) => append_source_games(&mut games, g, merge_discovered_games),
-                Err(_) => eprintln!("RA games thread panicked"),
+        // Drain every source in declaration order so the pre-sort entry
+        // order stays stable across runs; Steam was materialized earlier
+        // and lands between the emulator scans and the ROM library.
+        for source in [
+            PendingSource::Thread("PS4", ps4_handle),
+            PendingSource::Thread("PS3", ps3_handle),
+            PendingSource::Thread("Vita3K", vita3k_handle),
+            PendingSource::Thread("Cemu", cemu_handle),
+            PendingSource::Thread("Azahar", azahar_handle),
+            PendingSource::Ready(steam_games),
+            PendingSource::Thread("RA", ra_handle),
+        ] {
+            match source {
+                PendingSource::Ready(source_games) => {
+                    append_source_games(&mut games, source_games, merge_discovered_games);
+                }
+                PendingSource::Thread(name, handle) => {
+                    let Some(handle) = handle else { continue };
+                    match handle.join() {
+                        Ok(source_games) => {
+                            append_source_games(&mut games, source_games, merge_discovered_games)
+                        }
+                        Err(_) => eprintln!("{name} games thread panicked"),
+                    }
+                }
             }
         }
 
@@ -493,6 +483,17 @@ fn append_source_games(games: &mut Vec<Game>, discovered: Vec<Game>, merge: bool
         }
         games.push(game);
     }
+}
+
+/// One pending discovery source to drain after the parallel scans: either a
+/// scan thread still waiting to be joined, or games that were materialized
+/// earlier (Steam enriches its discovery results right after joining).
+enum PendingSource<'scope> {
+    Thread(
+        &'static str,
+        Option<std::thread::ScopedJoinHandle<'scope, Vec<Game>>>,
+    ),
+    Ready(Vec<Game>),
 }
 
 fn cleanup_stale_rom_entries(db: &db::DbConn, cfg: &Config) {
@@ -562,7 +563,7 @@ fn rom_entry_has_file(db: &db::DbConn, cfg: &Config, entry: &GameEntry) -> bool 
 
     let mut checked_path = false;
     for path in paths {
-        let Some(path) = resolve_rom_path(cfg, &entry.platform_id, &path) else {
+        let Some(path) = cfg.resolve_rom_path(&entry.platform_id, &path) else {
             continue;
         };
         checked_path = true;
@@ -572,20 +573,6 @@ fn rom_entry_has_file(db: &db::DbConn, cfg: &Config, entry: &GameEntry) -> bool 
     }
 
     !checked_path
-}
-
-fn resolve_rom_path(cfg: &Config, platform_id: &str, path: &str) -> Option<std::path::PathBuf> {
-    let path = std::path::Path::new(path);
-    if path.is_absolute() {
-        return Some(path.to_path_buf());
-    }
-
-    let root = cfg.rom_folder(platform_id);
-    if root.is_dir() {
-        Some(root.join(path))
-    } else {
-        None
-    }
 }
 
 /// Fields from a DB entry needed to build console game metadata.
@@ -633,11 +620,40 @@ impl ConsoleDbMeta {
             last_played: 0,
         }
     }
+
+    fn into_shadps4_meta(self) -> ShadPS4GameMeta {
+        ShadPS4GameMeta {
+            title: self.title,
+            hidden: self.hidden,
+            logo_position: self.logo_position,
+            logo_size: self.logo_size,
+            sort_title: self.sort_title,
+            sgdb_id: self.sgdb_id,
+            shadps4_version: self.shadps4_version,
+            last_played: self.last_played,
+        }
+    }
+
+    fn into_rpcs3_meta(self) -> Rpcs3GameMeta {
+        Rpcs3GameMeta {
+            title: self.title,
+            hidden: self.hidden,
+            logo_position: self.logo_position,
+            logo_size: self.logo_size,
+            sort_title: self.sort_title,
+            sgdb_id: self.sgdb_id,
+            last_played: self.last_played,
+        }
+    }
 }
 
 /// Look up or create a DB entry for a discovered console game.
-/// Tries `find_by_game_id` first, then `find_by_kind_platform` as fallback.
-/// Logs DB errors instead of silently swallowing them.
+/// Resolution goes through `find_by_game_id(npwr_id, serial)` only; the
+/// historical kind/platform fallback served rows predating npwr_id storage
+/// and was removed pre-release — upgraded installs may see one-time
+/// duplicate library entries for such rows, which the user-level
+/// duplicate-game merge tooling reconciles. Logs DB errors instead of
+/// silently swallowing them.
 fn find_or_create_console_entry(
     db: &db::DbConn,
     kind: GameKind,
@@ -652,17 +668,6 @@ fn find_or_create_console_entry(
             eprintln!("DB error looking up {kind} game {serial}: {e}");
             None
         }
-    };
-    let entry = match entry {
-        Some(e) => Some(e),
-        None => match db::find_by_kind_platform(db, kind, serial) {
-            Ok(Some(e)) => Some(e),
-            Ok(None) => None,
-            Err(e) => {
-                eprintln!("DB error looking up {kind} game {serial} by kind/platform: {e}");
-                None
-            }
-        },
     };
 
     match entry {
@@ -721,77 +726,63 @@ fn spawn_source_scan<'scope>(
     }))
 }
 
+/// Shared body of the shadPS4/RPCS3 scans: run `discover` over the emulator
+/// executable, reconcile each hit against the DB, then hand the hit plus its
+/// DB metadata to `into_game`.
+fn scan_console_games<D>(
+    db: &db::DbConn,
+    kind: GameKind,
+    include_version: bool,
+    discover: impl FnOnce(&str) -> Vec<D>,
+    identity: impl Fn(&D) -> (&str, &str, &str),
+    into_game: impl Fn(&D, ConsoleDbMeta) -> Game,
+    executable: &str,
+) -> Vec<Game> {
+    discover(executable)
+        .iter()
+        .filter_map(|item| {
+            let (npwr_id, serial, title) = identity(item);
+            let meta =
+                find_or_create_console_entry(db, kind, npwr_id, serial, title, include_version)?;
+            Some(into_game(item, meta))
+        })
+        .collect()
+}
+
 fn build_shadps4_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Game> {
-    let shad_games = discover_games_for_executable(executable);
-    let mut games = Vec::new();
-
-    for shad in &shad_games {
-        let Some(meta) = find_or_create_console_entry(
-            db,
-            GameKind::Ps4,
-            &shad.npwr_id,
-            &shad.serial,
-            &shad.title,
-            true,
-        ) else {
-            continue;
-        };
-
-        let game = load_shadps4_game(
-            shad,
-            meta.db_id,
-            &ShadPS4GameMeta {
-                title: meta.title,
-                hidden: meta.hidden,
-                logo_position: meta.logo_position,
-                logo_size: meta.logo_size,
-                sort_title: meta.sort_title,
-                sgdb_id: meta.sgdb_id,
-                shadps4_version: meta.shadps4_version,
-                last_played: meta.last_played,
-            },
-            save_dir,
-        );
-        games.push(game);
-    }
-
-    games
+    scan_console_games(
+        db,
+        GameKind::Ps4,
+        true,
+        discover_games_for_executable,
+        |shad| {
+            (
+                shad.npwr_id.as_str(),
+                shad.serial.as_str(),
+                shad.title.as_str(),
+            )
+        },
+        |shad, meta| load_shadps4_game(shad, meta.db_id, &meta.into_shadps4_meta(), save_dir),
+        executable,
+    )
 }
 
 fn build_rpcs3_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Game> {
-    let ps3_games = discover_rpcs3_games_for_executable(executable);
-    let mut games = Vec::new();
-
-    for ps3_game in &ps3_games {
-        let Some(meta) = find_or_create_console_entry(
-            db,
-            GameKind::Ps3,
-            &ps3_game.npwr_id,
-            &ps3_game.serial,
-            &ps3_game.title,
-            false,
-        ) else {
-            continue;
-        };
-
-        let game = load_rpcs3_game(
-            ps3_game,
-            meta.db_id,
-            &Rpcs3GameMeta {
-                title: meta.title,
-                hidden: meta.hidden,
-                logo_position: meta.logo_position,
-                logo_size: meta.logo_size,
-                sort_title: meta.sort_title,
-                sgdb_id: meta.sgdb_id,
-                last_played: meta.last_played,
-            },
-            save_dir,
-        );
-        games.push(game);
-    }
-
-    games
+    scan_console_games(
+        db,
+        GameKind::Ps3,
+        false,
+        discover_rpcs3_games_for_executable,
+        |ps3_game| {
+            (
+                ps3_game.npwr_id.as_str(),
+                ps3_game.serial.as_str(),
+                ps3_game.title.as_str(),
+            )
+        },
+        |ps3_game, meta| load_rpcs3_game(ps3_game, meta.db_id, &meta.into_rpcs3_meta(), save_dir),
+        executable,
+    )
 }
 
 fn load_special_game(
@@ -806,7 +797,7 @@ fn load_special_game(
     let meta = find_or_create_console_entry(db, kind, game_id, game_id, title, false)?;
     let entry = db::find_by_db_id(db, meta.db_id).ok().flatten()?;
     let mut game = game_loader::load_game_fast(&entry, save_dir).ok()?;
-    if (game.name.is_empty() || game.name.starts_with("App ID:")) && !title.is_empty() {
+    if (game.name.is_empty() || game_loader::is_placeholder_name(&game.name)) && !title.is_empty() {
         game.set_name(title);
     }
     // Persist the discovered location: everything built later straight from
@@ -1000,7 +991,8 @@ fn build_steam_games(
 
         match game_loader::load_game_fast(&entry, save_dir) {
             Ok(mut game) => {
-                if (game.name.is_empty() || game.name.starts_with("App ID:")) && !sg.name.is_empty()
+                if (game.name.is_empty() || game_loader::is_placeholder_name(&game.name))
+                    && !sg.name.is_empty()
                 {
                     game.set_name(&sg.name);
                 }

@@ -66,7 +66,7 @@ fn build_variant_name_entry_buttons(
     group: &adw::PreferencesGroup,
     var_widgets: &Rc<RefCell<Vec<VarW>>>,
     container: &gtk4::Box,
-    main_win: &adw::Window,
+    main_win: &adw::Dialog,
 ) {
     let up_btn = gtk4::Button::from_icon_name("go-up-symbolic");
     up_btn.set_tooltip_text(Some(&crate::tr!("Move up")));
@@ -162,7 +162,7 @@ fn build_variant_images_and_logo_section(
     v: &GameVariant,
     state: &SharedState,
     db_id: i64,
-    win: &adw::Window,
+    win: &adw::Dialog,
 ) -> VariantImagesSectionResult {
     let mut logo_position_cell: Option<Rc<RefCell<String>>> = None;
     let mut logo_size_adj_cell: Option<gtk4::Adjustment> = None;
@@ -268,7 +268,7 @@ fn build_variant_card(
     container: &gtk4::Box,
     state: &SharedState,
     db_id: i64,
-    win: &adw::Window,
+    win: &adw::Dialog,
 ) -> VarW {
     let group = adw::PreferencesGroup::new();
 
@@ -284,7 +284,7 @@ fn build_variant_card(
     exe_entry.set_title(&crate::tr!("Executable"));
     exe_entry.set_text(&v.exe);
     let browse = helpers::make_browse_button(
-        None,
+        None::<&gtk4::Window>,
         &crate::tr!("Select executable"),
         false,
         Some((&crate::tr!("Executable"), &["application/x-executable"])),
@@ -306,7 +306,7 @@ fn build_variant_card(
     wd_entry.set_title(&crate::tr!("Working directory"));
     wd_entry.set_text(&v.working_dir);
     let wd_browse = helpers::make_browse_button(
-        None,
+        None::<&gtk4::Window>,
         &crate::tr!("Select working directory"),
         true,
         None,
@@ -411,7 +411,7 @@ pub(super) fn build_variants_page(
     _has_config: bool,
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
-    win: &adw::Window,
+    win: &adw::Dialog,
 ) -> Rc<RefCell<Vec<VarW>>> {
     let variants: Vec<GameVariant> =
         ira_db::get_variants(&state.borrow().db, db_id).unwrap_or_default();

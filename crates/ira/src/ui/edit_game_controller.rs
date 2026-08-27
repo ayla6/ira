@@ -45,7 +45,7 @@ pub(super) fn open_controller_settings(state: &SharedState, game: &Game) {
     let state_for_saved = state.clone();
     let game_for_saved = game.clone();
     super::input_profile_editor::show_input_profile_editor(
-        window.upcast_ref(),
+        &window,
         super::input_profile_editor::InputProfileEditorParams {
             save_dir,
             profile_path,
@@ -361,9 +361,11 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
             let Some(stack) = stack_for_search.upgrade() else {
                 return;
             };
+            // The editor is an AdwDialog presented inside the main window,
+            // so root() is the window — the dialog itself is an ancestor.
             let Some(window) = stack
-                .root()
-                .and_then(|root| root.downcast::<adw::Window>().ok())
+                .ancestor(adw::Dialog::static_type())
+                .and_then(|w| w.downcast::<adw::Dialog>().ok())
             else {
                 return;
             };

@@ -16,7 +16,7 @@ pub fn setup_gbe_saves(wine_prefix: &str, save_dir: &str) {
     let centralized = Path::new(save_dir).join("emulator_saves").join("gbe");
     let _ = std::fs::create_dir_all(&centralized);
 
-    for user_dir in prefix_user_dirs(wine_prefix) {
+    for user_dir in crate::game_saves::prefix_user_dirs(wine_prefix) {
         create_roaming_symlink(&user_dir, &centralized, "GSE Saves");
         create_roaming_symlink(&user_dir, &centralized, "Goldberg SteamEmu Saves");
     }
@@ -32,74 +32,9 @@ pub fn setup_nge_saves(wine_prefix: &str, save_dir: &str) {
     let centralized = Path::new(save_dir).join("emulator_saves").join("nge");
     let _ = std::fs::create_dir_all(&centralized);
 
-    for user_dir in prefix_user_dirs(wine_prefix) {
+    for user_dir in crate::game_saves::prefix_user_dirs(wine_prefix) {
         create_roaming_symlink(&user_dir, &centralized, "NemirtingasGalaxyEmu");
     }
-}
-
-/// Resolve the user directories to place save symlinks in, creating a
-/// `steamuser` dir when the prefix has none yet.
-///
-/// Returns an empty vec for an empty `wine_prefix` — an empty string would
-/// resolve to the current working directory (`Path::new("").join("drive_c")`),
-/// which could create a stray `drive_c/` wherever the app is running from.
-fn prefix_user_dirs(wine_prefix: &str) -> Vec<PathBuf> {
-    if wine_prefix.is_empty() {
-        return Vec::new();
-    }
-    let users_dir = Path::new(wine_prefix).join("drive_c").join("users");
-    let user_dirs = list_wine_users(&users_dir);
-
-    if user_dirs.is_empty() {
-        let steamuser = users_dir.join("steamuser");
-        let _ = std::fs::create_dir_all(steamuser.join("AppData").join("Roaming"));
-        vec![steamuser]
-    } else {
-        user_dirs
-    }
-}
-
-/// List real user directories under `drive_c/users/`.
-///
-/// If `$USER` is a symlink to `steamuser` (common Proton behavior), it is
-/// skipped — `steamuser` already covers it. Only `steamuser` and real (non-
-/// symlinked) user directories are returned.
-fn list_wine_users(users_dir: &Path) -> Vec<PathBuf> {
-    let mut result = Vec::new();
-    let entries = match std::fs::read_dir(users_dir) {
-        Ok(e) => e,
-        Err(_) => return result,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let Some(name) = entry.file_name().to_str().map(|s| s.to_string()) else {
-            continue;
-        };
-
-        if name == "steamuser" {
-            result.push(path);
-            continue;
-        }
-
-        // Skip symlinks to steamuser (Proton redirects $USER → steamuser)
-        if let Ok(meta) = std::fs::symlink_metadata(&path) {
-            if meta.file_type().is_symlink() {
-                if let Ok(target) = std::fs::read_link(&path) {
-                    if target.ends_with("steamuser") || target == Path::new("steamuser") {
-                        continue;
-                    }
-                }
-            }
-        }
-
-        result.push(path);
-    }
-
-    result
 }
 
 /// Create a symlink `<user_dir>/AppData/Roaming/<name>` → `centralized`.
@@ -166,48 +101,6 @@ pub fn setup_gbe_saves_native(save_dir: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_list_wine_users_empty_dir() {
-        let tmp = tempfile::tempdir().unwrap();
-        let users = tmp.path().join("users");
-        std::fs::create_dir_all(&users).unwrap();
-        assert!(list_wine_users(&users).is_empty());
-    }
-
-    #[test]
-    fn test_list_wine_users_steamuser_only() {
-        let tmp = tempfile::tempdir().unwrap();
-        let users = tmp.path().join("users");
-        std::fs::create_dir_all(users.join("steamuser")).unwrap();
-        let result = list_wine_users(&users);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0], users.join("steamuser"));
-    }
-
-    #[test]
-    fn test_list_wine_users_skips_symlink_to_steamuser() {
-        let tmp = tempfile::tempdir().unwrap();
-        let users = tmp.path().join("users");
-        std::fs::create_dir_all(users.join("steamuser")).unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink("steamuser", users.join("myuser")).unwrap();
-
-        let result = list_wine_users(&users);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0], users.join("steamuser"));
-    }
-
-    #[test]
-    fn test_list_wine_users_includes_real_user() {
-        let tmp = tempfile::tempdir().unwrap();
-        let users = tmp.path().join("users");
-        std::fs::create_dir_all(users.join("steamuser")).unwrap();
-        std::fs::create_dir_all(users.join("myuser")).unwrap();
-
-        let result = list_wine_users(&users);
-        assert_eq!(result.len(), 2);
-    }
 
     #[test]
     fn test_create_roaming_symlink_creates_when_missing() {
@@ -316,14 +209,6 @@ mod tests {
             std::fs::read_link(roaming.join("GSE Saves")).unwrap(),
             manual
         );
-    }
-
-    #[test]
-    fn test_prefix_user_dirs_empty_prefix_creates_nothing() {
-        let cwd = std::env::current_dir().unwrap();
-        let users = prefix_user_dirs("");
-        assert!(users.is_empty());
-        assert!(!cwd.join("drive_c").exists());
     }
 
     #[test]

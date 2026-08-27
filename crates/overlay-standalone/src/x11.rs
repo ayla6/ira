@@ -26,7 +26,7 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use ira_overlay::ui::{push_event, Event};
-use ira_overlay_ipc::X11_KEYCODE_OFFSET;
+use ira_overlay_ipc::{ShmHeader, X11_KEYCODE_OFFSET};
 
 // ─── XCB constants ───
 
@@ -49,12 +49,13 @@ const OFF_STATE: usize = 28;
 // Modifier masks (same as Xlib)
 const MOD_SHIFT: u16 = 0x01;
 
-// Evdev keycodes for navigation
-const KC_UP: u8 = 111;
-const KC_DOWN: u8 = 116;
-const KC_LEFT: u8 = 113;
-const KC_RIGHT: u8 = 114;
-const KC_RETURN: u8 = 36;
+// Navigation keys — X11-domain codes, ordered like
+// ShmHeader::NAV_KEYCODES_X11 ([Return, Up, Down, Left, Right]).
+const KC_UP: u8 = ShmHeader::NAV_KEYCODES_X11[1] as u8;
+const KC_DOWN: u8 = ShmHeader::NAV_KEYCODES_X11[2] as u8;
+const KC_LEFT: u8 = ShmHeader::NAV_KEYCODES_X11[3] as u8;
+const KC_RIGHT: u8 = ShmHeader::NAV_KEYCODES_X11[4] as u8;
+const KC_RETURN: u8 = ShmHeader::NAV_KEYCODES_X11[0] as u8;
 
 // ─── XCB FFI types ───
 
@@ -257,7 +258,10 @@ unsafe impl Send for X11State {}
 
 impl X11State {
     pub fn new() -> Result<Self, String> {
-        let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":2".to_string());
+        let display = match std::env::var("DISPLAY") {
+            Ok(d) => d,
+            Err(e) => return Err(format!("failed to read DISPLAY: {e}")),
+        };
         let display_c =
             CString::new(display.as_str()).map_err(|e| format!("invalid DISPLAY: {e}"))?;
 

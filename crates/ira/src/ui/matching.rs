@@ -2,9 +2,12 @@ use super::enrichment::enrich_game_async;
 use super::helpers::confirm_dialog;
 use super::state::SharedState;
 use crate::AppMessage;
+use crate::AppSender;
 use crate::Game;
 use crate::MergedAchievement;
+use ira_api::SteamDataClient;
 use ira_parser::set_achievement_earned;
+use std::sync::Arc;
 
 pub fn match_game_to_steam(
     state: &SharedState,
@@ -141,6 +144,54 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
             };
             let _ = sender.send(AppMessage::NewGame(game));
         }
+    });
+}
+
+/// Persist accepting an SGDB match on the DB side: store the SGDB id and,
+/// when `clear_manual_unmatch` is set, drop any prior manual-unmatch flag.
+/// Failures are logged, never propagated — callers keep going either way.
+pub(crate) fn persist_sgdb_match(
+    db: &ira_db::DbConn,
+    db_id: i64,
+    sgdb_id: &str,
+    clear_manual_unmatch: bool,
+) {
+    if let Err(e) = ira_db::set_sgdb_id(db, db_id, sgdb_id) {
+        eprintln!("Failed to set SGDB ID: {}", e);
+    }
+    if clear_manual_unmatch {
+        if let Err(e) = ira_db::set_manual_unmatch(db, db_id, false) {
+            eprintln!("Failed to clear manual unmatch: {}", e);
+        }
+    }
+}
+
+/// Worker-thread tail shared by the SGDB-match flows: resolve the asset
+/// directory (the matched game's own kind-aware directory when known, else
+/// the bare SGDB-id pool), download the asset set into it, and announce the
+/// resulting paths to the UI. Purely blocking work — call from a spawned
+/// thread; each caller keeps its own tracing span and any stagger sleep.
+pub(crate) fn fetch_and_report_sgdb_assets(
+    steam: &Arc<SteamDataClient>,
+    sender: &AppSender,
+    save_dir: &str,
+    game_for_dir: Option<&Game>,
+    db_id: i64,
+    sgdb_id: String,
+) {
+    let dir = match game_for_dir {
+        Some(g) => ira_parser::game_data_dir(save_dir, g),
+        None => ira_parser::sgdb_data_dir(save_dir, &sgdb_id),
+    };
+    let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id);
+    let _ = sender.send(AppMessage::SgdbAssetsDownloaded {
+        db_id,
+        sgdb_id,
+        icon,
+        hero,
+        grid,
+        logo,
+        header,
     });
 }
 

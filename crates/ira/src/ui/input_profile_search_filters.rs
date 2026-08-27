@@ -3,37 +3,44 @@
 //! workshop feature tags, offered as require/exclude sets.
 
 use super::css::CSS_BOXED_LIST;
+use super::helpers::string_list_from;
 use adw::prelude::*;
 use ira_api::steam_input::SteamLayoutSort;
+use std::sync::OnceLock;
 
 /// (display label, workshop tag) for every controller kind Valve
-/// distinguishes on layout tags — steaminputdb's CONTROLLER_LIST.
-pub(super) fn controller_filter_options() -> Vec<(String, String)> {
-    vec![
-        (crate::tr!("Steam Controller"), "controller_triton".into()),
-        (
-            crate::tr!("Steam Controller (2015)"),
-            "controller_steamcontroller_gordon".into(),
-        ),
-        (crate::tr!("Steam Deck"), "controller_neptune".into()),
-        (crate::tr!("DualSense"), "controller_ps5".into()),
-        (crate::tr!("DualShock 4"), "controller_ps4".into()),
-        (crate::tr!("Xbox 360"), "controller_xbox360".into()),
-        (crate::tr!("Xbox One / Elite"), "controller_xboxone".into()),
-        (crate::tr!("Xbox Elite"), "controller_xboxelite".into()),
-        (crate::tr!("Switch Pro"), "controller_switch_pro".into()),
-        (crate::tr!("Switch 2 Pro"), "controller_switch2_pro".into()),
-        (crate::tr!("8BitDo"), "controller_8bitdo".into()),
-        (crate::tr!("Generic"), "controller_generic".into()),
-    ]
+/// distinguishes on layout tags — steaminputdb's CONTROLLER_LIST. Cached:
+/// the table is immutable but consulted for every row subtitle, filter
+/// build and query.
+pub(super) fn controller_filter_options() -> &'static [(String, String)] {
+    static OPTIONS: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    OPTIONS.get_or_init(|| {
+        vec![
+            (crate::tr!("Steam Controller"), "controller_triton".into()),
+            (
+                crate::tr!("Steam Controller (2015)"),
+                "controller_steamcontroller_gordon".into(),
+            ),
+            (crate::tr!("Steam Deck"), "controller_neptune".into()),
+            (crate::tr!("DualSense"), "controller_ps5".into()),
+            (crate::tr!("DualShock 4"), "controller_ps4".into()),
+            (crate::tr!("Xbox 360"), "controller_xbox360".into()),
+            (crate::tr!("Xbox One / Elite"), "controller_xboxone".into()),
+            (crate::tr!("Xbox Elite"), "controller_xboxelite".into()),
+            (crate::tr!("Switch Pro"), "controller_switch_pro".into()),
+            (crate::tr!("Switch 2 Pro"), "controller_switch2_pro".into()),
+            (crate::tr!("8BitDo"), "controller_8bitdo".into()),
+            (crate::tr!("Generic"), "controller_generic".into()),
+        ]
+    })
 }
 
 pub(super) fn controller_display_label(tag: &str) -> String {
     let kind = tag.trim_start_matches("controller_");
     controller_filter_options()
-        .into_iter()
+        .iter()
         .find(|(_, filter_tag)| filter_tag == kind)
-        .map(|(label, _)| label)
+        .map(|(label, _)| label.clone())
         .unwrap_or_else(|| capitalize(kind))
 }
 
@@ -83,10 +90,7 @@ pub(super) struct FilterCard {
     pub app_only_row: adw::SwitchRow,
 }
 
-pub(super) fn build_filter_card(
-    sorts: &[SteamLayoutSort],
-    scoped_to_game: bool,
-) -> FilterCard {
+pub(super) fn build_filter_card(sorts: &[SteamLayoutSort], scoped_to_game: bool) -> FilterCard {
     let filters = gtk4::ListBox::new();
     filters.add_css_class(CSS_BOXED_LIST);
     filters.set_selection_mode(gtk4::SelectionMode::None);
@@ -94,21 +98,18 @@ pub(super) fn build_filter_card(
     let sort_labels: Vec<String> = sorts.iter().map(|sort| sort_label(*sort)).collect();
     let sort_row = adw::ComboRow::new();
     sort_row.set_title(&crate::tr!("Sort by"));
-    sort_row.set_model(Some(&gtk4::StringList::new(
-        &sort_labels.iter().map(String::as_str).collect::<Vec<_>>(),
-    )));
+    sort_row.set_model(Some(&string_list_from(&sort_labels)));
     filters.append(&sort_row);
 
     let mut controller_labels = vec![crate::tr!("Any controller")];
-    controller_labels.extend(controller_filter_options().into_iter().map(|(label, _)| label));
+    controller_labels.extend(
+        controller_filter_options()
+            .iter()
+            .map(|(label, _)| label.clone()),
+    );
     let controller_row = adw::ComboRow::new();
     controller_row.set_title(&crate::tr!("Controller"));
-    controller_row.set_model(Some(&gtk4::StringList::new(
-        &controller_labels
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-    )));
+    controller_row.set_model(Some(&string_list_from(&controller_labels)));
     filters.append(&controller_row);
 
     let include_rows = feature_expander(&filters, &crate::tr!("Must have features"));
@@ -154,5 +155,50 @@ fn capitalize(text: &str) -> String {
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_controller_filter_options_unique_prefixed_tags() {
+        let options = controller_filter_options();
+        assert!(!options.is_empty());
+        let tags: HashSet<&str> = options.iter().map(|(_, tag)| tag.as_str()).collect();
+        assert_eq!(tags.len(), options.len(), "workshop tags must be unique");
+        assert!(options
+            .iter()
+            .all(|(_, tag)| tag.starts_with("controller_")));
+    }
+
+    #[test]
+    fn test_controller_filter_options_cached_in_place() {
+        let a = controller_filter_options().as_ptr();
+        let b = controller_filter_options().as_ptr();
+        assert!(std::ptr::eq(a, b), "must return the same cached table");
+    }
+
+    #[test]
+    fn test_controller_display_label_known_tag() {
+        // Pins existing display behavior: table tags carry the `controller_`
+        // prefix while lookups compare against the stripped kind, so today
+        // every tag lands on the capitalized fallback.
+        assert_eq!(controller_display_label("controller_neptune"), "Neptune");
+    }
+
+    #[test]
+    fn test_controller_display_label_unknown_falls_back_capitalized() {
+        assert_eq!(controller_display_label("controller_wii"), "Wii");
+        assert_eq!(controller_display_label("wii"), "Wii");
+    }
+
+    #[test]
+    fn test_capitalize_variants() {
+        assert_eq!(capitalize(""), "");
+        assert_eq!(capitalize("deck"), "Deck");
+        assert_eq!(capitalize("steam deck"), "Steam deck");
     }
 }

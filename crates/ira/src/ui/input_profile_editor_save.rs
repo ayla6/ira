@@ -41,7 +41,7 @@ pub(super) struct SaveOutcome {
     pub(super) baseline: Rc<RefCell<InputProfile>>,
     pub(super) status: gtk4::Label,
     pub(super) button: gtk4::Button,
-    pub(super) window: adw::Window,
+    pub(super) window: adw::Dialog,
     pub(super) on_saved: Rc<dyn Fn(PathBuf)>,
     pub(super) close_on_success: bool,
 }
@@ -81,7 +81,7 @@ pub(super) fn connect_persist(button: &gtk4::Button, persist: Rc<dyn Fn()>) {
 /// Cancel button sets `force_close` first: pressing Cancel means discard and
 /// close, never another prompt.
 pub(super) fn connect_unsaved_guard(
-    window: &adw::Window,
+    window: &adw::Dialog,
     save: &gtk4::Button,
     persist: &Rc<dyn Fn()>,
     baseline: &Rc<RefCell<InputProfile>>,
@@ -93,9 +93,10 @@ pub(super) fn connect_unsaved_guard(
     let baseline_for_guard = baseline.clone();
     let form_for_guard = form.clone();
     let force_close_for_guard = force_close.clone();
-    window.connect_close_request(move |win| {
+    window.connect_close_attempt(move |win| {
         if !save_for_guard.is_sensitive() || force_close_for_guard.get() {
-            return gtk4::glib::Propagation::Proceed;
+            win.force_close();
+            return;
         }
         let dialog = adw::AlertDialog::new(
             Some(&crate::tr!("Unsaved changes")),
@@ -121,12 +122,11 @@ pub(super) fn connect_unsaved_guard(
                     *baseline.borrow_mut() = built;
                 }
                 save.set_sensitive(false);
-                win_for_response.close();
+                win_for_response.force_close();
             }
             _ => {}
         });
         dialog.present(Some(win));
-        gtk4::glib::Propagation::Stop
     });
 }
 pub(super) fn profile_path_for_save(

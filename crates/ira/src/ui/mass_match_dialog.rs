@@ -146,6 +146,61 @@ fn populate_match_list(
     row_action_boxes
 }
 
+/// One queued batch candidate: the game to match plus which list row its
+/// result belongs to.
+struct BatchItem {
+    name: String,
+    db_id: i64,
+    row_idx: usize,
+}
+
+/// A finished candidate handed from the worker thread back to the UI loop.
+struct BatchHit {
+    row_idx: usize,
+    db_id: i64,
+    name: String,
+    matched: Option<(String, String)>,
+}
+
+/// Shared shape of both batch passes: one sequential worker thread computes
+/// matches over `queue`, and results are applied on the UI loop every
+/// `interval_ms` until the queue drains. `worker` runs off-thread and must
+/// not touch GTK; `on_result` runs on the main loop.
+fn run_batch(
+    queue: Vec<BatchItem>,
+    interval_ms: u64,
+    worker: impl Fn(&BatchItem) -> Option<(String, String)> + Send + 'static,
+    on_result: impl Fn(BatchHit) + 'static,
+) {
+    let total = queue.len();
+    let (tx, rx) = std::sync::mpsc::channel::<BatchHit>();
+    std::thread::spawn(move || {
+        for item in &queue {
+            let matched = worker(item);
+            let _ = tx.send(BatchHit {
+                row_idx: item.row_idx,
+                db_id: item.db_id,
+                name: item.name.clone(),
+                matched,
+            });
+        }
+    });
+
+    let rx = std::cell::RefCell::new(rx);
+    let remaining = Cell::new(total);
+    glib::timeout_add_local(std::time::Duration::from_millis(interval_ms), move || {
+        if let Ok(hit) = rx.borrow_mut().try_recv() {
+            on_result(hit);
+            let left = remaining.get();
+            if left <= 1 {
+                return glib::ControlFlow::Break;
+            }
+            remaining.set(left - 1);
+        }
+        glib::ControlFlow::Continue
+    });
+}
+
 fn start_steam_batch_matching(
     state: &SharedState,
     needs_matching: &[Game],
@@ -153,36 +208,30 @@ fn start_steam_batch_matching(
     row_action_boxes: &[gtk4::Box],
     dialog: &adw::Dialog,
 ) {
-    let steam_games: Vec<(String, i64, ira_models::GameKind)> = needs_matching
-        .iter()
-        .filter(|g| needs_steam_match(g))
-        .map(|g| (g.name.clone(), g.db_id, g.kind))
-        .collect();
-    let steam_row_indices: Vec<usize> = needs_matching
+    let queue: Vec<BatchItem> = needs_matching
         .iter()
         .enumerate()
         .filter(|(_, g)| needs_steam_match(g))
-        .map(|(i, _)| i)
+        .map(|(i, g)| BatchItem {
+            name: g.name.clone(),
+            db_id: g.db_id,
+            row_idx: i,
+        })
         .collect();
 
-    if steam_games.is_empty() {
+    if queue.is_empty() {
         return;
     }
 
-    let (steam_tx, steam_rx) =
-        std::sync::mpsc::channel::<(usize, Option<(String, String)>, String, i64)>();
-    let steam_rx = std::cell::RefCell::new(steam_rx);
-    let steam_remaining = Cell::new(steam_games.len());
-
     let steam = state.borrow().steam.clone();
-
-    {
-        let steam = steam.clone();
-        std::thread::spawn(move || {
-            for (i, (game_name, db_id, _kind)) in steam_games.iter().enumerate() {
-                let norm = normalize_title(game_name);
-
-                let matched: Option<(String, String)> = if norm.is_empty() {
+    run_batch(
+        queue,
+        50,
+        {
+            let steam = steam.clone();
+            move |item| {
+                let norm = normalize_title(&item.name);
+                let matched = if norm.is_empty() {
                     None
                 } else {
                     title_map
@@ -190,53 +239,36 @@ fn start_steam_batch_matching(
                         .find(|(t, _, _)| t == &norm)
                         .map(|(_, id, name)| (id.clone(), name.clone()))
                 };
-
-                let final_match = if matched.is_some() {
-                    matched
-                } else {
-                    let results = steam.search_steam_store(game_name);
-                    if results.is_empty() {
-                        None
-                    } else {
-                        results
-                            .iter()
-                            .find(|(_, name)| normalize_title(name) == norm)
-                            .map(|(id, name)| (id.clone(), name.clone()))
-                    }
-                };
-
-                let _ = steam_tx.send((i, final_match, game_name.clone(), *db_id));
+                if matched.is_some() {
+                    return matched;
+                }
+                let results = steam.search_steam_store(&item.name);
+                results
+                    .iter()
+                    .find(|(_, name)| normalize_title(name) == norm)
+                    .map(|(id, name)| (id.clone(), name.clone()))
             }
-        });
-    }
-
-    let state_rx = state.clone();
-    let steam_rx_steam = steam;
-    let row_boxes = row_action_boxes.to_vec();
-    let parent_dialog = dialog.clone();
-    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        if let Ok((idx, matched, game_name, db_id)) = steam_rx.borrow_mut().try_recv() {
-            if let Some(&row_idx) = steam_row_indices.get(idx) {
-                if row_idx < row_boxes.len() {
+        },
+        {
+            let state = state.clone();
+            let steam = steam;
+            let row_boxes = row_action_boxes.to_vec();
+            let parent_dialog = dialog.clone();
+            move |hit| {
+                if hit.row_idx < row_boxes.len() {
                     handle_steam_search_result(
-                        &state_rx,
-                        &row_boxes[row_idx],
-                        &steam_rx_steam,
-                        &game_name,
-                        db_id,
-                        matched,
+                        &state,
+                        &row_boxes[hit.row_idx],
+                        &steam,
+                        &hit.name,
+                        hit.db_id,
+                        hit.matched,
                         &parent_dialog,
                     );
                 }
             }
-            let left = steam_remaining.get();
-            if left <= 1 {
-                return glib::ControlFlow::Break;
-            }
-            steam_remaining.set(left - 1);
-        }
-        glib::ControlFlow::Continue
-    });
+        },
+    );
 }
 
 fn start_sgdb_batch_matching(
@@ -245,61 +277,52 @@ fn start_sgdb_batch_matching(
     row_action_boxes: &[gtk4::Box],
     dialog: &adw::Dialog,
 ) {
-    let sgdb_games: Vec<(String, i64, usize)> = needs_matching
+    let queue: Vec<BatchItem> = needs_matching
         .iter()
         .enumerate()
         .filter(|(_, g)| needs_sgdb_match(g))
-        .map(|(row_idx, g)| (g.name.clone(), g.db_id, row_idx))
+        .map(|(row_idx, g)| BatchItem {
+            name: g.name.clone(),
+            db_id: g.db_id,
+            row_idx,
+        })
         .collect();
 
-    if sgdb_games.is_empty() {
+    if queue.is_empty() {
         return;
     }
 
-    let (sgdb_tx, sgdb_rx) =
-        std::sync::mpsc::channel::<(usize, Option<(String, String)>, i64, String)>();
-    let sgdb_rx = std::cell::RefCell::new(sgdb_rx);
-    let sgdb_remaining = Cell::new(sgdb_games.len());
-
-    {
-        let sgdb_games = sgdb_games.clone();
-        let steam_sgdb = state.borrow().steam.clone();
-        std::thread::spawn(move || {
-            for (i, (game_name, db_id, _row_idx)) in sgdb_games.iter().enumerate() {
-                let results = steam_sgdb.search_sgdb(game_name);
-                let matched = results
+    let steam = state.borrow().steam.clone();
+    run_batch(
+        queue,
+        150,
+        {
+            let steam = steam.clone();
+            move |item| {
+                steam
+                    .search_sgdb(&item.name)
                     .first()
-                    .map(|(sid, name)| (sid.clone(), name.clone()));
-                let _ = sgdb_tx.send((i, matched, *db_id, game_name.clone()));
+                    .map(|(sid, name)| (sid.clone(), name.clone()))
             }
-        });
-    }
-
-    let state_sgdb = state.clone();
-    let parent_dialog_sgdb = dialog.clone();
-    let sgdb_row_boxes = row_action_boxes.to_vec();
-    glib::timeout_add_local(std::time::Duration::from_millis(150), move || {
-        if let Ok((idx, matched, db_id, game_name)) = sgdb_rx.borrow_mut().try_recv() {
-            if let Some(row_idx) = sgdb_games.get(idx).map(|(_, _, r)| *r) {
-                if row_idx < sgdb_row_boxes.len() {
+        },
+        {
+            let state = state.clone();
+            let row_boxes = row_action_boxes.to_vec();
+            let parent_dialog = dialog.clone();
+            move |hit| {
+                if hit.row_idx < row_boxes.len() {
                     handle_unified_sgdb_result(
-                        &state_sgdb,
-                        &sgdb_row_boxes[row_idx],
-                        db_id,
-                        &game_name,
-                        matched,
-                        &parent_dialog_sgdb,
+                        &state,
+                        &row_boxes[hit.row_idx],
+                        hit.db_id,
+                        &hit.name,
+                        hit.matched,
+                        &parent_dialog,
                     );
                 }
             }
-            let left = sgdb_remaining.get();
-            if left <= 1 {
-                return glib::ControlFlow::Break;
-            }
-            sgdb_remaining.set(left - 1);
-        }
-        glib::ControlFlow::Continue
-    });
+        },
+    );
 }
 
 pub fn show_mass_match_dialog(state: &SharedState) {

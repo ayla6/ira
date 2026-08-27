@@ -1,4 +1,4 @@
-use crate::DbConn;
+use crate::{err, DbConn};
 use ira_models::GameDisc;
 use rusqlite::params;
 
@@ -26,15 +26,15 @@ pub fn get_disc_owners_for_platform(
          JOIN games g ON gd.game_id = g.id
          WHERE g.kind = 'retro' AND g.platform_id = ?1",
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
     let rows = stmt
         .query_map(params![platform_id], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
     let mut result = std::collections::HashMap::new();
     for row in rows {
-        let (path, game_id) = row.map_err(|e| e.to_string())?;
+        let (path, game_id) = row.map_err(err)?;
         result.insert(path, game_id);
     }
     Ok(result)
@@ -58,7 +58,7 @@ pub fn get_discs(conn: &DbConn, game_id: i64) -> Result<Vec<GameDisc>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c.prepare(
         "SELECT id, game_id, disc_number, rom_path, label FROM game_discs WHERE game_id = ?1 ORDER BY disc_number"
-    ).map_err(|e| e.to_string())?;
+    ).map_err(err)?;
     let rows = stmt
         .query_map(params![game_id], |row| {
             Ok(GameDisc {
@@ -69,10 +69,9 @@ pub fn get_discs(conn: &DbConn, game_id: i64) -> Result<Vec<GameDisc>, String> {
                 label: row.get(4)?,
             })
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
 
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>().map_err(err)
 }
 
 pub fn add_disc(conn: &DbConn, disc: &GameDisc) -> Result<i64, String> {
@@ -81,7 +80,7 @@ pub fn add_disc(conn: &DbConn, disc: &GameDisc) -> Result<i64, String> {
         "INSERT INTO game_discs (game_id, disc_number, rom_path, label) VALUES (?1, ?2, ?3, ?4)",
         params![disc.game_id, disc.disc_number, disc.rom_path, disc.label],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(c.last_insert_rowid())
 }
 
@@ -91,7 +90,7 @@ pub fn delete_discs(conn: &DbConn, game_id: i64) -> Result<(), String> {
         "DELETE FROM game_discs WHERE game_id = ?1",
         params![game_id],
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(err)?;
     Ok(())
 }
 
@@ -104,7 +103,7 @@ pub fn get_default_disc(conn: &DbConn, game_id: i64) -> Result<Option<i64>, Stri
     ) {
         Ok(did) => Ok(Some(did)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err(err(e)),
     }
 }
 
@@ -116,13 +115,13 @@ pub fn set_default_disc(conn: &DbConn, game_id: i64, disc_id: Option<i64>) -> Re
              ON CONFLICT(game_id) DO UPDATE SET disc_id = excluded.disc_id",
             params![game_id, did],
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
     } else {
         c.execute(
             "DELETE FROM game_default_disc WHERE game_id = ?1",
             params![game_id],
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
     }
     Ok(())
 }

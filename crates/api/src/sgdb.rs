@@ -22,60 +22,25 @@ impl SteamDataClient {
         resp.json().ok()
     }
 
-    pub(super) fn fetch_sgdb_icon_url(&self, app_id: &str) -> Option<String> {
-        let json = self.sgdb_get_json(&format!(
-            "https://www.steamgriddb.com/api/v2/icons/steam/{}",
-            app_id
-        ))?;
-        let data = json.get("data")?.as_array()?;
-        if data.is_empty() {
-            return None;
-        }
-        let mut best: Option<(&serde_json::Value, i64)> = None;
-        for item in data {
-            let w = item.get("width").and_then(|v| v.as_i64()).unwrap_or(9999);
-            if w <= 128 {
-                if best.is_none() || w < best.unwrap().1 {
-                    best = Some((item, w));
-                }
-            } else if best.is_none() {
-                best = Some((item, w));
-            }
-        }
-        let chosen = best.map(|(item, _)| item).unwrap_or(&data[0]);
-        chosen.get("url")?.as_str().map(|s| s.to_string())
-    }
-
     pub(super) fn fetch_sgdb_endpoint(
         &self,
         endpoint: &str,
         dimensions: &[&str],
     ) -> Option<String> {
-        let sgdb_key = self.sgdb_api_key();
-        if sgdb_key.is_empty() {
-            return None;
-        }
         let base = format!("https://www.steamgriddb.com/api/v2/{}", endpoint);
         let url = if dimensions.is_empty() {
             base
         } else {
             format!("{}?dimensions={}", base, dimensions.join(","))
         };
-        let resp = self
-            .http
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", sgdb_key))
-            .send()
-            .ok()?;
-        if !resp.status().is_success() {
-            return None;
-        }
-        let raw: serde_json::Value = resp.json().ok()?;
-        let data = raw.get("data")?.as_array()?;
+        let json = self.sgdb_get_json(&url)?;
+        let data = json.get("data")?.as_array()?;
         if data.is_empty() {
             return None;
         }
         if endpoint.starts_with("icons") {
+            // Best-icon rule: prefer the narrowest candidate at most 128px
+            // wide; fall back to the first entry otherwise.
             let mut best: Option<(&serde_json::Value, i64)> = None;
             for item in data {
                 let w = item.get("width").and_then(|v| v.as_i64()).unwrap_or(9999);

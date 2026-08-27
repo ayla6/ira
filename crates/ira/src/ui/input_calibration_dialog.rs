@@ -18,23 +18,21 @@ enum Update {
 
 #[derive(Clone)]
 struct CalibrationWidgets {
-    window: adw::Window,
+    window: adw::Dialog,
     status: gtk4::Label,
     progress: gtk4::ProgressBar,
     start: gtk4::Button,
 }
 
 pub(super) fn show_input_calibration_dialog(
-    parent: &gtk4::Window,
+    parent: &impl IsA<gtk4::Widget>,
     registry: Arc<ira_input::ControllerRegistry>,
     device: ira_input::DeviceInfo,
     on_complete: impl FnOnce(Result<ControllerCalibration, String>) + 'static,
 ) {
-    let window = adw::Window::new();
-    window.set_default_size(460, 190);
-    window.set_resizable(false);
-    window.set_transient_for(Some(parent));
-    window.set_modal(true);
+    let window = adw::Dialog::new();
+    window.set_content_width(460);
+    window.set_content_height(190);
 
     let status = gtk4::Label::new(Some(&crate::tr!(
         "Place the controller flat on a stable surface. Keep it still during calibration."
@@ -62,13 +60,12 @@ pub(super) fn show_input_calibration_dialog(
     header.set_title_widget(Some(&gtk4::Label::new(Some(&crate::tr!("Calibrate Gyro")))));
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&content));
-    window.set_content(Some(&toolbar));
+    window.set_child(Some(&toolbar));
 
     let cancelled = Arc::new(AtomicBool::new(false));
     let cancelled_for_request = cancelled.clone();
-    window.connect_close_request(move |_| {
+    window.connect_close_attempt(move |_| {
         cancelled_for_request.store(true, Ordering::Release);
-        glib::Propagation::Proceed
     });
     connect_start(
         CalibrationWidgets {
@@ -82,7 +79,7 @@ pub(super) fn show_input_calibration_dialog(
         cancelled,
         Box::new(on_complete),
     );
-    window.present();
+    window.present(Some(parent));
 }
 
 fn connect_start(

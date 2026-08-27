@@ -134,7 +134,7 @@ pub(super) fn apply_console_settings(cfg: &mut Config, pages: &ConsoleSettingsWi
 
 pub(super) fn register_console_pages(
     cfg: &Config,
-    win: &adw::Window,
+    win: &adw::Dialog,
     state: &SharedState,
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
@@ -222,7 +222,7 @@ fn add_console_loading_page(stack: &gtk4::Stack, page_id: &str) {
 fn connect_lazy_console_pages(
     result: &SharedConsoleSettingsWidgets,
     cfg: &Config,
-    win: &adw::Window,
+    win: &adw::Dialog,
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
     registry: Arc<ira_input::ControllerRegistry>,
@@ -289,7 +289,7 @@ fn connect_lazy_console_pages(
 fn load_special_console_page(
     page_id: &str,
     cfg: &Config,
-    win: &adw::Window,
+    win: &adw::Dialog,
     stack: &gtk4::Stack,
     registry: &Arc<ira_input::ControllerRegistry>,
     result: &SharedConsoleSettingsWidgets,
@@ -372,7 +372,7 @@ enum SpecialConsoleWidgets {
 fn build_special_console_page(
     page_id: &str,
     cfg: &Config,
-    win: &adw::Window,
+    win: &adw::Dialog,
 ) -> Option<(&'static str, String, gtk4::Box, SpecialConsoleWidgets)> {
     match page_id {
         "ps3" => {
@@ -483,7 +483,7 @@ fn wrap_console_page(stack: &gtk4::Stack, page: &gtk4::Box, page_id: &str) {
 fn add_console_page_overrides(
     page: &gtk4::Box,
     cfg: &Config,
-    win: &adw::Window,
+    win: &adw::Dialog,
     console_id: &str,
     label: &str,
     registry: Arc<ira_input::ControllerRegistry>,
@@ -527,6 +527,7 @@ pub(super) fn discovery_settings_changed(before: &Config, after: &Config) -> boo
         || before.azahar_enabled != after.azahar_enabled
         || before.azahar_executable != after.azahar_executable
         || before.roms_folder != after.roms_folder
+        || before.extra_roms_folders != after.extra_roms_folders
         || ira_models::all_consoles().any(|def| {
             let before_console = before.console(def.id);
             let after_console = after.console(def.id);

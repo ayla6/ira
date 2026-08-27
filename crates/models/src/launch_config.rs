@@ -1,4 +1,4 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 /// Whether Ira's input broker runs for a game. Which virtual controller the
 /// game sees is an attribute of the selected controller profile, not of the
@@ -9,44 +9,6 @@ pub enum ControllerInputMode {
     #[default]
     Disabled,
     Enabled,
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum ControllerInputModeCompat {
-    Mode(ControllerInputMode),
-    Legacy(bool),
-    /// Pre-rework configs named the virtual backend here; the backend now
-    /// lives in the profile, so any of those values just means "enabled".
-    LegacyBackend(String),
-}
-
-fn deserialize_optional_controller_input_mode<'de, D>(
-    deserializer: D,
-) -> Result<Option<ControllerInputMode>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Option::<ControllerInputModeCompat>::deserialize(deserializer).map(|mode| {
-        mode.map(|mode| match mode {
-            ControllerInputModeCompat::Mode(mode) => mode,
-            ControllerInputModeCompat::Legacy(enabled) => {
-                if enabled {
-                    ControllerInputMode::Enabled
-                } else {
-                    ControllerInputMode::Disabled
-                }
-            }
-            ControllerInputModeCompat::LegacyBackend(backend) => {
-                if backend.starts_with("virtual_") {
-                    ControllerInputMode::Enabled
-                } else {
-                    eprintln!("Unknown controller input mode \"{backend}\"; treating as disabled");
-                    ControllerInputMode::Disabled
-                }
-            }
-        })
-    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -61,12 +23,7 @@ pub struct GameLaunchConfig {
     pub pre_launch: String,
     #[serde(default)]
     pub overlay_enabled: Option<bool>,
-    #[serde(
-        default,
-        alias = "input_enabled",
-        deserialize_with = "deserialize_optional_controller_input_mode",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_mode: Option<ControllerInputMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_profile: Option<String>,
@@ -348,37 +305,18 @@ mod tests {
     }
 
     #[test]
-    fn test_controller_input_mode_legacy_and_new_json() {
-        let legacy: GameLaunchConfig = serde_json::from_str(r#"{"exe":"","args":"","working_dir":"","env_vars":[],"ld_preload":"","ld_library_path":"","input_enabled":true}"#).unwrap();
-        assert_eq!(legacy.input_mode, Some(ControllerInputMode::Enabled));
+    fn test_controller_input_mode_json_roundtrip() {
+        for mode in [ControllerInputMode::Disabled, ControllerInputMode::Enabled] {
+            let cfg = GameLaunchConfig {
+                input_mode: Some(mode),
+                ..Default::default()
+            };
+            let json = serde_json::to_value(&cfg).unwrap();
+            assert_eq!(json["input_mode"], serde_json::to_value(mode).unwrap());
 
-        let disabled: GameLaunchConfig = serde_json::from_str(
-            r#"{"exe":"","args":"","working_dir":"","env_vars":[],"ld_preload":"","ld_library_path":"","input_enabled":false}"#,
-        )
-        .unwrap();
-        assert_eq!(disabled.input_mode, Some(ControllerInputMode::Disabled));
-
-        let direct: GameLaunchConfig = serde_json::from_str(
-            r#"{"exe":"","args":"","working_dir":"","env_vars":[],"ld_preload":"","ld_library_path":"","input_mode":"virtual_direct_input"}"#,
-        )
-        .unwrap();
-        assert_eq!(direct.input_mode, Some(ControllerInputMode::Enabled));
-        let switch_pro: GameLaunchConfig = serde_json::from_str(
-            r#"{"exe":"","args":"","working_dir":"","env_vars":[],"ld_preload":"","ld_library_path":"","input_mode":"virtual_switch_pro"}"#,
-        )
-        .unwrap();
-        assert_eq!(switch_pro.input_mode, Some(ControllerInputMode::Enabled));
-    }
-
-    #[test]
-    fn test_controller_input_mode_serializes_new_field_only() {
-        let cfg = GameLaunchConfig {
-            input_mode: Some(ControllerInputMode::Enabled),
-            ..Default::default()
-        };
-        let json = serde_json::to_value(cfg).unwrap();
-        assert_eq!(json["input_mode"], "enabled");
-        assert!(json.get("input_enabled").is_none());
+            let deserialized: GameLaunchConfig = serde_json::from_value(json).unwrap();
+            assert_eq!(deserialized.input_mode, Some(mode));
+        }
     }
 
     #[test]

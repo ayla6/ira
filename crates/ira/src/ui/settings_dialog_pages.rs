@@ -37,7 +37,7 @@ pub(super) struct SettingsPageWidgets {
     pub(super) saves_row: adw::SwitchRow,
     pub(super) auto_reload_widgets: AutoReloadWidgets,
     pub(super) controller_default_widgets: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
-    pub(super) default_game_folder_row: adw::EntryRow,
+    pub(super) game_folders: super::folder_list::FolderListWidgets,
     pub(super) steam_enable_row: adw::SwitchRow,
     pub(super) emu_version_row: adw::ComboRow,
     pub(super) emu_version_model: gtk4::StringList,
@@ -48,7 +48,7 @@ pub(super) struct SettingsPageWidgets {
     pub(super) ra_enable_row: adw::SwitchRow,
     pub(super) ra_username_row: adw::EntryRow,
     pub(super) ra_web_api_key_row: adw::EntryRow,
-    pub(super) roms_folder_row: adw::EntryRow,
+    pub(super) rom_roots: super::folder_list::FolderListWidgets,
     pub(super) overlay_widgets: OverlayPageWidgets,
     pub(super) system_defaults_widgets: SystemDefaultsWidgets,
     pub(super) linux_controller_profile: ConsoleProfileWidgets,
@@ -57,7 +57,7 @@ pub(super) struct SettingsPageWidgets {
 
 pub(super) fn build_settings_pages(
     cfg: &Config,
-    win: &adw::Window,
+    win: &adw::Dialog,
     state: &SharedState,
 ) -> SettingsPageWidgets {
     let (
@@ -82,7 +82,7 @@ pub(super) fn build_settings_pages(
     );
     let controller_default_widgets = input_widgets.controller_defaults;
     let (system_page, system_defaults_widgets) = build_system_defaults_page(cfg);
-    let (computer_games_page, default_game_folder_row) = build_computer_games_page(win, cfg);
+    let (computer_games_page, game_folders) = build_computer_games_page(cfg);
     let (linux_controller_profile, wine_controller_profile) =
         build_pc_controller_profiles(&computer_games_page, cfg, win, state);
     let (steam_page, steam_enable_row) = build_steam_settings_page(cfg);
@@ -93,7 +93,7 @@ pub(super) fn build_settings_pages(
     let (profiles_page, prefix_base_row, default_version_row, default_version_values) =
         build_profiles_page(state, win);
     let (ra_page, ra_enable_row, ra_username_row, ra_web_api_key_row) = build_ra_settings_page(cfg);
-    let (rom_page, roms_folder_row) = build_rom_settings_page(win, cfg);
+    let (rom_page, rom_roots) = build_rom_settings_page(cfg);
     SettingsPageWidgets {
         general_page,
         overlay_page,
@@ -116,7 +116,7 @@ pub(super) fn build_settings_pages(
         saves_row,
         auto_reload_widgets,
         controller_default_widgets,
-        default_game_folder_row,
+        game_folders,
         steam_enable_row,
         emu_version_row,
         emu_version_model,
@@ -127,7 +127,7 @@ pub(super) fn build_settings_pages(
         ra_enable_row,
         ra_username_row,
         ra_web_api_key_row,
-        roms_folder_row,
+        rom_roots,
         overlay_widgets,
         system_defaults_widgets,
         linux_controller_profile,
@@ -285,7 +285,7 @@ fn register_existing_scrolled_page(
 fn build_pc_controller_profiles(
     page: &gtk4::Box,
     cfg: &Config,
-    win: &adw::Window,
+    win: &adw::Dialog,
     state: &SharedState,
 ) -> (ConsoleProfileWidgets, ConsoleProfileWidgets) {
     let mut pc_controller_cfg = cfg.clone();

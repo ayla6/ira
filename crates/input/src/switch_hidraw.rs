@@ -5,8 +5,8 @@
 //! keep their own vendor id, so generic HID maps their buttons but
 //! nothing ever parses the IMU.
 //!
-//! KNOWN LIMITATION (as of 2026-08): gyro on the 8BitDo Ultimate 2
-//! dongle's Switch mode does not work yet. Three approaches were built
+//! TODO(switch-gyro): gyro on the 8BitDo Ultimate 2 dongle's Switch mode
+//! does not work yet — grep this marker for the full history. Three approaches were built
 //! and verified against a real kernel; none delivered motion on the real
 //! dongle:
 //! 1. The kernel's IMU companion node — never exists, because

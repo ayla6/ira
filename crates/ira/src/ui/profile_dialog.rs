@@ -9,7 +9,7 @@ type ListRef = Rc<RefCell<gtk4::ListBox>>;
 
 pub fn build_profiles_page(
     state: &SharedState,
-    settings_win: &adw::Window,
+    settings_win: &adw::Dialog,
 ) -> (
     gtk4::ScrolledWindow,
     adw::EntryRow,
@@ -132,7 +132,7 @@ fn repopulate_profiles(
     db: &ira_db::DbConn,
     window: &adw::ApplicationWindow,
     state: &SharedState,
-    settings_win: &adw::Window,
+    settings_win: &adw::Dialog,
 ) {
     let list = list_rc.borrow().clone();
     super::helpers::clear_children(&list);
@@ -229,16 +229,13 @@ pub fn show_profile_dialog(
     db: &ira_db::DbConn,
     existing: Option<ira_models::WineProfile>,
     state: &SharedState,
-    settings_win: &adw::Window,
+    settings_win: &adw::Dialog,
     game_slug: Option<&str>,
     callbacks: ProfileDialogCallbacks,
 ) {
-    let win = adw::Window::new();
-    win.set_default_width(450);
-    win.set_default_height(400);
-    win.set_transient_for(Some(parent));
-    win.set_modal(true);
-    win.set_deletable(false);
+    let win = adw::Dialog::new();
+    win.set_content_width(450);
+    win.set_content_height(400);
 
     let toolbar = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
@@ -433,7 +430,9 @@ pub fn show_profile_dialog(
 
     let cancel_btn = gtk4::Button::with_label(&crate::tr!("Cancel"));
     let win_c = win.clone();
-    cancel_btn.connect_clicked(move |_| win_c.close());
+    cancel_btn.connect_clicked(move |_| {
+        win_c.close();
+    });
 
     let save_btn = gtk4::Button::with_label(&crate::tr!("Save"));
     save_btn.add_css_class(CSS_SUGGESTED_ACTION);
@@ -443,8 +442,8 @@ pub fn show_profile_dialog(
     content.append(&btn_row);
 
     toolbar.set_content(Some(&content));
-    win.set_content(Some(&toolbar));
-    win.present();
+    win.set_child(Some(&toolbar));
+    win.present(Some(settings_win));
 
     let name_c = name_entry;
     let version_row_c = version_row;

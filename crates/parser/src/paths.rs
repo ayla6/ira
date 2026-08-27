@@ -40,58 +40,59 @@ pub fn retro_data_dir(save_dir: &str, db_id: i64) -> PathBuf {
         .join(db_id.to_string())
 }
 
+/// Core kind-ladder shared by `game_data_dir` / `entry_data_dir`. Arm order
+/// mirrors the original precedence: platform kinds first, then steam
+/// enrichment, then SGDB-only, then the plain steam fallback.
+fn data_dir_for(
+    save_dir: &str,
+    kind: ira_models::GameKind,
+    id: &str,
+    db_id: i64,
+    sgdb_id: &str,
+    enriched: bool,
+) -> PathBuf {
+    match kind {
+        ira_models::GameKind::Retro => retro_data_dir(save_dir, db_id),
+        ira_models::GameKind::Ps4 => ps4_data_dir(save_dir, id),
+        ira_models::GameKind::Ps3 => ps3_data_dir(save_dir, id),
+        ira_models::GameKind::PsVita => vita_data_dir(save_dir, id),
+        ira_models::GameKind::WiiU => wiiu_data_dir(save_dir, id),
+        ira_models::GameKind::ThreeDS => three_ds_data_dir(save_dir, id),
+        _ if enriched => data_dir(save_dir, id),
+        _ if !sgdb_id.is_empty() => sgdb_data_dir(save_dir, sgdb_id),
+        _ => data_dir(save_dir, id),
+    }
+}
+
 /// Returns the data directory for a game based on its kind, trophy source,
 /// and SGDB ID. Centralizes the branching logic that was duplicated across
 /// game_loader, edit_game_dialog, image_manager, and context_menu.
 pub fn game_data_dir(save_dir: &str, game: &ira_models::Game) -> PathBuf {
-    if game.kind == ira_models::GameKind::Retro {
-        retro_data_dir(save_dir, game.db_id)
-    } else if game.kind == ira_models::GameKind::Ps4 {
-        ps4_data_dir(save_dir, &game.app_id)
-    } else if game.kind == ira_models::GameKind::Ps3 {
-        ps3_data_dir(save_dir, &game.app_id)
-    } else if game.kind == ira_models::GameKind::PsVita {
-        vita_data_dir(save_dir, &game.app_id)
-    } else if game.kind == ira_models::GameKind::WiiU {
-        wiiu_data_dir(save_dir, &game.app_id)
-    } else if game.kind == ira_models::GameKind::ThreeDS {
-        three_ds_data_dir(save_dir, &game.app_id)
-    } else if game.trophy_source.has_steam_enrichment() {
-        data_dir(save_dir, &game.app_id)
-    } else if !game.sgdb_id.is_empty() {
-        sgdb_data_dir(save_dir, &game.sgdb_id)
-    } else {
-        data_dir(save_dir, &game.app_id)
-    }
+    data_dir_for(
+        save_dir,
+        game.kind,
+        &game.app_id,
+        game.db_id,
+        &game.sgdb_id,
+        game.trophy_source.has_steam_enrichment(),
+    )
 }
 
 /// Same as `game_data_dir` but takes a `GameEntry` (DB row) instead of a `Game`.
 pub fn entry_data_dir(save_dir: &str, entry: &ira_models::GameEntry) -> PathBuf {
-    let app_id = if !entry.steam_id.is_empty() {
+    let id = if !entry.steam_id.is_empty() {
         &entry.steam_id
     } else {
         &entry.game_id
     };
-    let sgdb_id = entry.sgdb_id.as_deref().unwrap_or("");
-    if entry.kind == ira_models::GameKind::Retro {
-        retro_data_dir(save_dir, entry.id)
-    } else if entry.kind == ira_models::GameKind::Ps4 {
-        ps4_data_dir(save_dir, app_id)
-    } else if entry.kind == ira_models::GameKind::Ps3 {
-        ps3_data_dir(save_dir, app_id)
-    } else if entry.kind == ira_models::GameKind::PsVita {
-        vita_data_dir(save_dir, app_id)
-    } else if entry.kind == ira_models::GameKind::WiiU {
-        wiiu_data_dir(save_dir, app_id)
-    } else if entry.kind == ira_models::GameKind::ThreeDS {
-        three_ds_data_dir(save_dir, app_id)
-    } else if entry.trophy_source.has_steam_enrichment() {
-        data_dir(save_dir, app_id)
-    } else if !sgdb_id.is_empty() {
-        sgdb_data_dir(save_dir, sgdb_id)
-    } else {
-        data_dir(save_dir, app_id)
-    }
+    data_dir_for(
+        save_dir,
+        entry.kind,
+        id,
+        entry.id,
+        entry.sgdb_id.as_deref().unwrap_or(""),
+        entry.trophy_source.has_steam_enrichment(),
+    )
 }
 
 pub fn find_image_file(dir: &Path, base_name: &str) -> Option<PathBuf> {
@@ -128,9 +129,6 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
         return;
     }
     let small_name = format!("{}_small", base_name);
-    for ext in &["png", "jpeg", "ico"] {
-        let _ = std::fs::remove_file(dir.join(format!("{}.{}", small_name, ext)));
-    }
     let Some(source) = find_image_file(dir, base_name) else {
         return;
     };
@@ -222,18 +220,13 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     } else {
         let lossless = webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode_lossless();
         let lossy = webp::Encoder::from_rgba(data.as_raw(), fw, fh).encode(95.0);
-        let mode = if lossless.len() <= lossy.len() {
-            "lossless"
+        let (mode, chosen) = if lossless.len() <= lossy.len() {
+            ("lossless", lossless)
         } else {
-            "lossy"
+            ("lossy", lossy)
         };
         let _s =
             tracing::info_span!("ensure_small_encode", base_name, w = fw, h = fh, mode).entered();
-        let chosen = if lossless.len() <= lossy.len() {
-            lossless
-        } else {
-            lossy
-        };
         let _ = std::fs::write(&dest, &*chosen);
     }
 }
@@ -243,7 +236,10 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
 /// image to avoid stale files with different extensions.
 pub fn remove_image_variants(dir: &Path, base_name: &str) {
     let _s = tracing::info_span!("remove_image_variants", base_name).entered();
-    for ext in &["png", "jpg", "jpeg", "webp", "ico", "tmp"] {
+    // "ico" stays: edit_game_save.rs still stages picked ICO-content files as
+    // transient `{base}.ico` before converting them; a failed conversion is
+    // only ever cleaned up by this sweep.
+    for ext in &["png", "jpg", "jpeg", "webp", "ico"] {
         let p = dir.join(format!("{}.{}", base_name, ext));
         let _ = std::fs::remove_file(&p);
     }
@@ -345,20 +341,6 @@ pub fn convert_to_lossless_webp(path: &Path) {
 pub fn url_extension(url: &str) -> &str {
     let path = Path::new(url.split(['?', '#']).next().unwrap_or(url));
     path.extension().and_then(|e| e.to_str()).unwrap_or("png")
-}
-
-/// Convert a leftover `.ico` variant of `base` to WebP. Undecodable files
-/// are removed rather than kept: they came from downloads that failed to
-/// convert, and leaving them around pins the broken asset forever.
-pub fn heal_ico_variant(dir: &Path, base: &str) {
-    let ico = dir.join(format!("{base}.ico"));
-    if !ico.is_file() {
-        return;
-    }
-    convert_to_lossless_webp(&ico);
-    if ico.is_file() {
-        let _ = std::fs::remove_file(&ico);
-    }
 }
 
 /// Decode an image file to raw RGBA8 pixels suitable for `gdk::MemoryTexture`.
@@ -670,26 +652,6 @@ mod tests {
             webp_is_lossless(&small),
             "already-small source should stay lossless WebP"
         );
-    }
-
-    #[test]
-    fn test_heal_ico_variant_converts_decodable_ico() {
-        let tmp = tempfile::tempdir().unwrap();
-        let ico = tmp.path().join("icon.ico");
-        let img = image::DynamicImage::new_rgba8(4, 4);
-        img.save(&ico).unwrap();
-        heal_ico_variant(tmp.path(), "icon");
-        assert!(tmp.path().join("icon.webp").is_file());
-        assert!(!ico.exists());
-    }
-
-    #[test]
-    fn test_heal_ico_variant_drops_undecodable_ico() {
-        let tmp = tempfile::tempdir().unwrap();
-        let ico = tmp.path().join("icon.ico");
-        std::fs::write(&ico, b"not an image").unwrap();
-        heal_ico_variant(tmp.path(), "icon");
-        assert!(!ico.exists(), "junk .ico must not pin the asset forever");
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::Game;
-use adw::prelude::{AdwDialogExt, AdwWindowExt, AlertDialogExt, PreferencesRowExt};
+use adw::prelude::{AdwDialogExt, AlertDialogExt, PreferencesRowExt};
 use gtk4::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -10,7 +10,7 @@ use super::game_item::GameItem;
 use super::state::{PendingImage, SgdbAssetsCacheEntry, SharedState};
 
 pub struct DialogLayout {
-    pub window: adw::Window,
+    pub window: adw::Dialog,
     pub sidebar: gtk4::ListBox,
     pub stack: gtk4::Stack,
     pub header: adw::HeaderBar,
@@ -18,13 +18,10 @@ pub struct DialogLayout {
     pub sidebar_area: gtk4::Box,
 }
 
-pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
-    let win = adw::Window::new();
-    win.set_default_size(800, 720);
-    win.set_modal(true);
-    win.set_transient_for(Some(parent));
-    win.set_destroy_with_parent(true);
-    win.set_hide_on_close(false);
+pub fn dialog_layout() -> DialogLayout {
+    let win = adw::Dialog::new();
+    win.set_content_width(800);
+    win.set_content_height(720);
 
     let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
 
@@ -65,9 +62,17 @@ pub fn dialog_layout(parent: &impl IsA<gtk4::Window>) -> DialogLayout {
     stack.set_margin_top(16);
     stack.set_margin_bottom(16);
 
-    content_area.append(&stack);
+    // Pages are plain boxes that demand their full natural height; without
+    // this viewport a tall page would grow the sheet past the presenting
+    // window and libadwaita would warn and clip it. Scrolling keeps every
+    // page reachable at whatever height the dialog ends up with.
+    let stack_scroll = gtk4::ScrolledWindow::new();
+    stack_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    stack_scroll.set_child(Some(&stack));
+
+    content_area.append(&stack_scroll);
     outer.append(&content_area);
-    win.set_content(Some(&outer));
+    win.set_child(Some(&outer));
 
     DialogLayout {
         window: win,
@@ -131,8 +136,15 @@ pub fn set_initial_folder(dialog: &gtk4::FileDialog, path_str: &str) {
     }
 }
 
+/// The hosting `gtk4::Window` for any widget: `AdwDialog` content resolves
+/// to the window presenting the dialog. Needed by window-transient APIs
+/// (FileDialog, AlertDialog parents...).
+pub fn hosting_window(w: &impl IsA<gtk4::Widget>) -> Option<gtk4::Window> {
+    w.root().and_then(|root| root.downcast::<gtk4::Window>().ok())
+}
+
 pub fn make_browse_button(
-    parent: Option<&adw::Window>,
+    parent: Option<&impl IsA<gtk4::Widget>>,
     title: &str,
     select_folder: bool,
     filter: Option<(&str, &[&str])>,
@@ -175,7 +187,12 @@ pub fn make_browse_button(
                 }
             }
         };
-        let parent = parent.as_ref().and_then(|w| w.upgrade());
+        // File dialogs must be transient over a real window; any widget
+        // (dialog content included) resolves to its hosting window.
+        let parent = parent
+            .as_ref()
+            .and_then(|w| w.upgrade())
+            .and_then(|w| hosting_window(&w));
         if select_folder {
             dialog.select_folder(parent.as_ref(), None::<&gio::Cancellable>, cb);
         } else {
@@ -186,7 +203,7 @@ pub fn make_browse_button(
 }
 
 pub fn make_browse_icon_button(
-    parent: Option<&adw::Window>,
+    parent: Option<&impl IsA<gtk4::Widget>>,
     title: &str,
     select_folder: bool,
     filter: Option<(&str, &[&str])>,
@@ -513,7 +530,7 @@ pub fn refresh_settings_images_page(
     build_page: impl Fn(
         &SharedState,
         &Game,
-        &adw::Window,
+        &adw::Dialog,
         Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
         Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
     ) -> gtk4::Widget,
@@ -603,6 +620,60 @@ pub fn spawn_terminal(env: &[(String, String)]) {
         }
     }
     eprintln!("No terminal emulator found. Set $TERMINAL or install gnome-terminal/konsole/xterm.");
+}
+
+
+/// A small confirm/cancel prompt with one extra widget (usually an entry
+/// row). `on_confirm` fires only for the confirm response; the dialog
+/// closes either way.
+pub(crate) fn confirm_dialog_with_extra(
+    parent: &adw::Dialog,
+    title: &str,
+    body: &str,
+    extra_child: &impl IsA<gtk4::Widget>,
+    on_confirm: impl Fn() + 'static,
+) {
+    let dialog = adw::AlertDialog::new(Some(title), Some(body));
+    dialog.set_extra_child(Some(extra_child));
+    dialog.add_response("cancel", &crate::tr!("Cancel"));
+    dialog.add_response("confirm", &crate::tr!("Confirm"));
+    dialog.set_response_appearance("confirm", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("confirm"));
+    dialog.set_close_response("cancel");
+    dialog.connect_response(None, move |_, response| {
+        if response == "confirm" {
+            on_confirm();
+        }
+    });
+    dialog.present(Some(parent));
+}
+
+
+/// Caps a floating dialog's preferred height to the window it is presented
+/// over. A floating sheet adds its own chrome around the content, so a
+/// dialog whose preferred height merely meets the parent's measures larger
+/// than what the parent offers — libadwaita then warns (and clips) on every
+/// relayout. Callers pass a `preferred` size that already fits the common
+/// presenting windows; the parent clamp is a further shrink for smaller
+/// ones. Unmapped parents report height 0, in which case `preferred`
+/// stands.
+pub(crate) fn fit_dialog_height(
+    dialog: &adw::Dialog,
+    parent: &impl IsA<gtk4::Widget>,
+    preferred: i32,
+) {
+    dialog.set_content_height(fitted_height(preferred, parent.height()));
+}
+
+/// Pure part of [`fit_dialog_height`]: 72 px covers the sheet chrome plus
+/// breathing room; below that threshold a parent height of 0 (unmapped)
+/// or a tiny stale allocation is ignored.
+fn fitted_height(preferred: i32, available: i32) -> i32 {
+    if available > 300 {
+        preferred.min(available - 72)
+    } else {
+        preferred
+    }
 }
 
 #[cfg(test)]
@@ -755,4 +826,17 @@ mod tests {
 
         assert_eq!(result.name, "Real Game Name");
     }
+
+    #[test]
+    fn test_fitted_height_caps_to_parent_and_ignores_unmapped() {
+        // Mapped parents get the preferred size only when it fits.
+        assert_eq!(super::fitted_height(740, 1080), 740);
+        assert_eq!(super::fitted_height(740, 720), 648);
+        assert_eq!(super::fitted_height(500, 720), 500);
+        // Unmapped (0) and absurdly small allocations keep the preference;
+        // libadwaita falls back to covering the window then.
+        assert_eq!(super::fitted_height(740, 0), 740);
+        assert_eq!(super::fitted_height(740, 100), 740);
+    }
 }
+

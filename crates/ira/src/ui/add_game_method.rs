@@ -9,17 +9,17 @@ use adw::prelude::*;
 /// choose how to add a game: manually or via the auto-add wizard.
 pub fn show_add_game_method(state: &SharedState) {
     let parent = state.borrow().window.clone();
-    let win = adw::Window::new();
-    win.set_title(Some(&crate::tr!("Add game")));
-    win.set_default_size(420, 260);
-    win.set_modal(true);
-    win.set_transient_for(Some(&parent));
-    win.set_destroy_with_parent(true);
+    let win = adw::Dialog::new();
+    win.set_title(&crate::tr!("Add game"));
+    win.set_content_width(420);
+    win.set_content_height(260);
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header = adw::HeaderBar::new();
     header.add_css_class(CSS_FLAT);
-    outer.append(&header);
+    let body_wrapper = adw::ToolbarView::new();
+    body_wrapper.add_top_bar(&header);
+    body_wrapper.set_content(Some(&outer));
 
     let body = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
     body.set_margin_start(24);
@@ -71,6 +71,6 @@ pub fn show_add_game_method(state: &SharedState) {
     body.append(&installer_btn);
 
     outer.append(&body);
-    win.set_content(Some(&outer));
-    win.present();
+    win.set_child(Some(&body_wrapper));
+    win.present(Some(&parent));
 }

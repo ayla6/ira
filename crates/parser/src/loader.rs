@@ -58,30 +58,22 @@ pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
         None
     };
 
-    if let Some(p) = find(&format!("{}_small", AssetType::Icon.file_base()))
-        .or_else(|| find(AssetType::Icon.file_base()))
-    {
-        game.icon_path = p.to_string_lossy().into_owned();
-    }
-    if let Some(p) = find(&format!("{}_small", AssetType::Grid.file_base()))
-        .or_else(|| find(AssetType::Grid.file_base()))
-    {
-        game.grid_path = p.to_string_lossy().into_owned();
-    }
-    if let Some(p) = find(&format!("{}_small", AssetType::Header.file_base()))
-        .or_else(|| find(AssetType::Header.file_base()))
-    {
-        game.header_path = p.to_string_lossy().into_owned();
-    }
-    if let Some(p) = find(&format!("{}_small", AssetType::Hero.file_base()))
-        .or_else(|| find(AssetType::Hero.file_base()))
-    {
-        game.hero_image_path = p.to_string_lossy().into_owned();
-    }
-    if let Some(p) = find(&format!("{}_small", AssetType::Logo.file_base()))
-        .or_else(|| find(AssetType::Logo.file_base()))
-    {
-        game.logo_path = p.to_string_lossy().into_owned();
+    let found: Vec<(AssetType, String)> = AssetType::all()
+        .iter()
+        .filter_map(|&at| {
+            find(&format!("{}_small", at.file_base()))
+                .or_else(|| find(at.file_base()))
+                .map(|p| (at, p.to_string_lossy().into_owned()))
+        })
+        .collect();
+    for (at, p) in found {
+        match at {
+            AssetType::Icon => game.icon_path = p,
+            AssetType::Hero => game.hero_image_path = p,
+            AssetType::Grid => game.grid_path = p,
+            AssetType::Header => game.header_path = p,
+            AssetType::Logo => game.logo_path = p,
+        }
     }
 }
 

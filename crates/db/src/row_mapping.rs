@@ -41,5 +41,11 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameE
 pub(crate) fn lock_db(
     conn: &DbConn,
 ) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, String> {
-    conn.get().map_err(|e| e.to_string())
+    conn.get().map_err(err)
+}
+
+/// Maps any error type onto the crate-wide `String` error channel, so call
+/// sites can write `.map_err(err)?` instead of repeating `|e| e.to_string()`.
+pub(crate) fn err<E: std::fmt::Display>(e: E) -> String {
+    e.to_string()
 }

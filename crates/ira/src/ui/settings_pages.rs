@@ -1,4 +1,5 @@
 use super::css::*;
+use super::helpers::esc;
 use super::helpers::string_list_from;
 use super::settings_dialog::settings_page_container;
 use adw::prelude::*;
@@ -412,7 +413,7 @@ fn start_gpu_detection(
 
 pub(super) fn build_lutris_settings_page(
     state: &super::state::SharedState,
-    settings_win: &adw::Window,
+    settings_win: &adw::Dialog,
 ) -> gtk4::Box {
     let page = settings_page_container();
 
@@ -424,7 +425,7 @@ pub(super) fn build_lutris_settings_page(
     let dir_row = adw::ActionRow::new();
     dir_row.set_title(&crate::tr!("Lutris data directory"));
     if lutris_dir.is_dir() {
-        dir_row.set_subtitle(&lutris_dir.display().to_string());
+        dir_row.set_subtitle(&esc(&lutris_dir.display().to_string()));
     } else {
         dir_row.set_subtitle(&crate::tr!("Lutris not found"));
         dir_row.set_sensitive(false);
@@ -565,7 +566,7 @@ pub(super) fn build_steam_settings_page(cfg: &Config) -> (gtk4::Box, adw::Switch
     let dir_row = adw::ActionRow::new();
     dir_row.set_title(&crate::tr!("Steam directory"));
     match &steam_dir {
-        Some(path) => dir_row.set_subtitle(&path.display().to_string()),
+        Some(path) => dir_row.set_subtitle(&esc(&path.display().to_string())),
         None => {
             dir_row.set_subtitle(&crate::tr!("Steam not found"));
             dir_row.set_sensitive(false);
@@ -589,81 +590,64 @@ pub(super) fn build_steam_settings_page(cfg: &Config) -> (gtk4::Box, adw::Switch
 }
 
 pub(super) fn build_computer_games_page(
-    win: &adw::Window,
     cfg: &Config,
-) -> (gtk4::Box, adw::EntryRow) {
+) -> (gtk4::Box, super::folder_list::FolderListWidgets) {
     let page = settings_page_container();
 
-    let group = adw::PreferencesGroup::new();
-    group.set_title(&crate::tr!("Default game folder"));
-
-    let folder_row = adw::EntryRow::new();
-    folder_row.set_title(&crate::tr!("Game folder"));
-    folder_row.set_text(&cfg.default_game_folder);
-
-    let folder_browse = super::helpers::make_browse_button(
-        Some(win),
-        &crate::tr!("Select default game folder"),
-        true,
-        None,
-        super::helpers::entry_path_closure(&folder_row),
-        {
-            let row = folder_row.clone();
-            move |path| row.set_text(&path.to_string_lossy())
-        },
+    let mut initial = vec![cfg.default_game_folder.clone()];
+    initial.extend(cfg.extra_game_folders.iter().cloned());
+    let list = super::folder_list::build_folder_list(
+        &crate::tr!("PC games folders"),
+        &crate::tr!("Add games folder…"),
+        &crate::tr!("Select games folder"),
+        initial,
     );
-    folder_row.add_suffix(&folder_browse);
-    group.add(&folder_row);
-    page.append(&group);
+    list.group.set_description(Some(&crate::tr!(
+        "New downloads and installs go to the first folder; all of them are scanned for games."
+    )));
+    page.append(&list.group);
 
-    (page, folder_row)
+    (page, list)
 }
 
 pub(super) fn build_rom_settings_page(
-    win: &adw::Window,
     cfg: &Config,
-) -> (gtk4::Box, adw::EntryRow) {
+) -> (gtk4::Box, super::folder_list::FolderListWidgets) {
     let page = settings_page_container();
-    let rom_group = adw::PreferencesGroup::new();
-    rom_group.set_title(&crate::tr!("ROM library"));
+
+    let roots = cfg.all_rom_roots();
     let missing_systems: Vec<&str> = ira_models::all_consoles()
         .filter(|def| def.uses_rom_folder())
-        .filter(|def| cfg.console(def.id).enabled && !cfg.rom_folder(def.id).is_dir())
+        .filter(|def| {
+            cfg.console(def.id).enabled && !roots.iter().any(|root| root.join(def.id).is_dir())
+        })
         .map(|def| def.id)
         .collect();
-    if !cfg.roms_folder.is_empty() && !std::path::Path::new(&cfg.roms_folder).is_dir() {
-        rom_group.set_description(Some(&crate::tr!(
-            "The ROM root is missing. Choose a new location; game metadata and relative paths will be kept."
+
+    let mut initial: Vec<String> = vec![cfg.roms_folder.clone()];
+    initial.extend(cfg.extra_roms_folders.iter().cloned());
+    let list = super::folder_list::build_folder_list(
+        &crate::tr!("ROM library"),
+        &crate::tr!("Add ROM root…"),
+        &crate::tr!("Select base ROM folder"),
+        initial,
+    );
+    if !roots.is_empty() && !std::path::Path::new(roots[0].as_os_str()).is_dir() {
+        list.group.set_description(Some(&crate::tr!(
+            "The primary ROM root is missing. Choose a new location; game metadata and relative paths will be kept."
         )));
     } else if !missing_systems.is_empty() {
-        rom_group.set_description(Some(&crate::tr!(
-            "Missing system folders: {}. Choose another base folder if these games were moved; metadata is retained."
+        list.group.set_description(Some(&crate::tr!(
+            "Missing system folders: {}. Adjust your ROM roots if these games were moved; metadata is retained."
         ).replacen("{}", &missing_systems.join(", "), 1)));
     } else {
-        rom_group.set_description(Some(&crate::tr!(
-            "ROMs are stored in one folder with a subfolder for each system, such as gba, psx, and ps2."
+        list.group.set_description(Some(&crate::tr!(
+            "Each root stores a subfolder per system, such as gba, psx, and ps2. All roots are scanned."
         )));
     }
+    page.append(&list.group);
 
-    let roms_folder_row = adw::EntryRow::new();
-    roms_folder_row.set_title(&crate::tr!("Base ROM folder"));
-    roms_folder_row.set_text(&cfg.roms_folder);
-    let roms_browse = super::helpers::make_browse_button(
-        Some(win),
-        &crate::tr!("Select base ROM folder"),
-        true,
-        None,
-        super::helpers::entry_path_closure(&roms_folder_row),
-        {
-            let row = roms_folder_row.clone();
-            move |path| row.set_text(&path.to_string_lossy())
-        },
-    );
-    roms_folder_row.add_suffix(&roms_browse);
-    rom_group.add(&roms_folder_row);
-    page.append(&rom_group);
-
-    (page, roms_folder_row)
+    (page, list)
 }
 
 pub(super) fn build_ra_settings_page(
@@ -717,7 +701,7 @@ pub(super) fn build_api_emulators_page(
 
     let dir_row = adw::ActionRow::new();
     dir_row.set_title(&crate::tr!("Directory"));
-    dir_row.set_subtitle(&emu_dir.to_string_lossy());
+    dir_row.set_subtitle(&esc(&emu_dir.to_string_lossy()));
     dir_row.set_sensitive(false);
 
     let open_btn = gtk4::Button::with_label(&crate::tr!("Open"));

@@ -6,12 +6,15 @@
 use super::css::{CSS_ERROR, CSS_SUGGESTED_ACTION};
 use super::helpers::DialogLayout;
 use super::input_profile_action_sets::build_sets_page;
+use super::input_profile_set_indicator::SetIndicator;
 use super::input_profile_editor_regions::Region;
 use super::input_profile_editor_save::{
     build_profile, connect_persist, connect_unsaved_guard, persist_closure, EditorForm, SaveOutcome,
 };
 use super::input_profile_gyro_card::add_gyro_group;
-use super::input_profile_region_pages::{rebuild_region_pages, PagesCtx, RegionPages};
+use super::input_profile_region_pages::{
+    rebuild_region_pages, EditingTarget, PagesCtx, RegionPages,
+};
 use super::input_profile_store::read_profile;
 use adw::prelude::*;
 use ira_input::{ActionSet, DeviceInfo, GyroConfig, InputProfile, VirtualGamepadBackend};
@@ -30,7 +33,7 @@ pub(super) struct InputProfileEditorParams {
 }
 
 pub(super) fn show_input_profile_editor(
-    parent: &gtk4::Window,
+    parent: &impl IsA<gtk4::Widget>,
     params: InputProfileEditorParams,
     on_saved: impl Fn(PathBuf) + 'static,
 ) {
@@ -42,8 +45,14 @@ pub(super) fn show_input_profile_editor(
         registry,
         device,
     } = params;
-    let layout = super::helpers::dialog_layout(parent);
-    layout.window.set_default_size(980, 740);
+    let layout = super::helpers::dialog_layout();
+    layout.window.set_content_width(980);
+    // The editor floats inside other dialogs (the game settings, at their
+    // default 720 px height) and a floating sheet adds its own chrome, so
+    // anything above ~680 px overflows and spams layout warnings. 640 fits
+    // with room to spare; the pages scroll, and fit_dialog_height shrinks
+    // further when the presenting parent reports a smaller allocation.
+    super::helpers::fit_dialog_height(&layout.window, parent, 640);
     layout.stack.set_hexpand(true);
     layout.stack.set_vexpand(true);
 
@@ -75,7 +84,7 @@ pub(super) fn show_input_profile_editor(
     }
 
     let profile_rc = Rc::new(RefCell::new(profile.clone()));
-    let active_set = Rc::new(Cell::new(0usize));
+    let active_target = Rc::new(Cell::new(EditingTarget::Set(0)));
     // Dirty baseline: the on-disk form with this game attached, the same
     // canonical shape build_profile produces.
     let baseline = Rc::new(RefCell::new(with_game(profile.clone(), game_id)));
@@ -110,10 +119,17 @@ pub(super) fn show_input_profile_editor(
         })
     };
 
+    // Steam-style top-left display of the set (or layer) being edited.
+    let indicator = Rc::new(SetIndicator::new());
+    layout
+        .sidebar_area
+        .insert_child_after(&indicator.root, None::<&gtk4::Widget>);
+
     let ctx = PagesCtx {
         window: layout.window.clone(),
         profile: profile_rc.clone(),
-        active_set: active_set.clone(),
+        active_target: active_target.clone(),
+        indicator: indicator.clone(),
         device,
         on_dirty: on_dirty.clone(),
     };
@@ -202,7 +218,7 @@ pub(super) fn show_input_profile_editor(
         &force_close,
     );
 
-    layout.window.present();
+    layout.window.present(Some(parent));
 }
 
 fn build_pages(
@@ -276,11 +292,6 @@ fn build_pages(
             &crate::tr!("Gyro"),
             "gyro",
         ));
-    let motion_rows = super::input_profile_controller_page::add_native_motion_group(
-        &gyro_box,
-        &ctx.profile,
-        &ctx.on_dirty,
-    );
     add_gyro_group(&gyro_box, gyro, ctx.device.as_ref(), &ctx.on_dirty);
     super::input_profile_gyro_motion::add_gyro_motion_groups(&gyro_box, gyro, &ctx.on_dirty);
 
@@ -295,10 +306,7 @@ fn build_pages(
         ));
     sets_box.append(&build_sets_page(ctx, &ctx.on_dirty));
 
-    RegionPages {
-        region_boxes,
-        motion_rows,
-    }
+    RegionPages { region_boxes }
 }
 
 fn scrolling_page() -> (gtk4::ScrolledWindow, gtk4::Box) {

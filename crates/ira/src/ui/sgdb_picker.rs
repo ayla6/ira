@@ -153,7 +153,7 @@ struct SgdbPickerCtx {
     steam: Arc<SteamDataClient>,
     asset: String,
     is_steam_id: bool,
-    picker: glib::WeakRef<adw::Window>,
+    picker: glib::WeakRef<adw::Dialog>,
     on_done: Rc<dyn Fn()>,
     pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     dest_dir: Option<String>,
@@ -390,7 +390,7 @@ pub(crate) struct ShowSgdbPickerParams<'a> {
     pub asset: &'a str,
     pub is_steam_id: bool,
     pub dimensions: &'a [&'a str],
-    pub parent: &'a adw::Window,
+    pub parent: &'a adw::Dialog,
     pub on_done: Rc<dyn Fn()>,
     pub pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     pub sgdb_cache: Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
@@ -424,18 +424,16 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     if let Some(c) = sgdb_cache.as_ref() {
         if let Some(entry) = c.borrow().get(&cache_key) {
             if let Some(w) = entry.picker.upgrade() {
-                w.present();
+                super::helpers::fit_dialog_height(&w, parent, 700);
+                w.present(Some(parent));
             }
             return;
         }
     }
 
-    let picker = adw::Window::new();
-    picker.set_default_width(900);
-    picker.set_default_height(700);
-    picker.set_transient_for(Some(parent));
-    picker.set_destroy_with_parent(true);
-    picker.set_modal(true);
+    let picker = adw::Dialog::new();
+    picker.set_content_width(900);
+    picker.set_content_height(700);
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header_bar = adw::HeaderBar::new();
@@ -510,20 +508,15 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     });
     outer.append(&close_btn);
 
-    picker.set_content(Some(&outer));
-    picker.present();
+    picker.set_child(Some(&outer));
+    // 700 content + sheet chrome overflows shorter windows; libadwaita
+    // warns and clips floating sheets that ask for more than their
+    // presenter has.
+    super::helpers::fit_dialog_height(&picker, parent, 700);
+    picker.present(Some(parent));
 
-    // Keep the picker alive while the settings screen is open: closing it
-    // hides the window instead of destroying it, so its loaded thumbnails and
-    // scroll position survive. It is torn down only when the settings window
-    // closes (set_destroy_with_parent above destroys it with its parent).
-    let picker_hide = picker.downgrade();
-    picker.connect_close_request(move |_| {
-        if let Some(win) = picker_hide.upgrade() {
-            win.set_visible(false);
-        }
-        glib::Propagation::Stop
-    });
+    // Closing an AdwDialog only unmaps it, so the picker object — and its
+    // loaded thumbnails — survive until the settings screen tears down.
 
     // Register the live window in the settings-screen cache immediately so a
     // reopen (even before the first fetch lands) can re-present it instead of

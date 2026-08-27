@@ -7,8 +7,7 @@
 use super::input_profile_options::source_options_for_device;
 use super::input_profile_sheet_base::combo_row;
 use super::input_profile_widgets::{
-    format_number, option_picker_popover, picker_button, slider_row, switch_row, OptionChoice,
-    SettingGroup, SliderSpec,
+    slider_entry_row, switch_row, OptionChoice, SettingGroup, SliderSpec,
 };
 use adw::prelude::*;
 use ira_input::{
@@ -24,7 +23,7 @@ struct GyroWidgets {
     activation: adw::ComboRow,
     button: adw::ComboRow,
     output: adw::ComboRow,
-    orientation: gtk4::ListBoxRow,
+    orientation: adw::ComboRow,
     sensitivity: gtk4::ListBoxRow,
     invert_x: adw::SwitchRow,
     invert_y: adw::SwitchRow,
@@ -57,6 +56,13 @@ pub(super) fn add_gyro_group(
     button.set_title(&crate::tr!("Button"));
     let output = combo_row(&output_labels(), output_index(gyro.borrow().output));
     output.set_title(&crate::tr!("Output"));
+    output.set_subtitle(
+        crate::tr!(
+            "Native motion sensors pass the controller's real sensor on to the game \
+             (Switch Pro, DualShock 4 and DualSense with a motion sensor)"
+        )
+        .as_str(),
+    );
     let widgets = GyroWidgets {
         enable: switch_row(&crate::tr!("Enable gyro"), None, gyro.borrow().enabled, {
             let gyro = gyro.clone();
@@ -74,11 +80,10 @@ pub(super) fn add_gyro_group(
             let gyro = gyro.clone();
             let on_dirty = on_dirty.clone();
             let initial = f64::from(gyro.borrow().sensitivity);
-            slider_row(
+            slider_entry_row(
                 &crate::tr!("Sensitivity"),
-                Some(&crate::tr!("Multiplier applied to gyro motion")),
+                Some(&crate::tr!("Multiplier applied to gyro motion; type for precise values")),
                 &SliderSpec(0.05, 20.0, 0.05, initial),
-                format_number,
                 move |value| {
                     gyro.borrow_mut().sensitivity = value as f32;
                     on_dirty();
@@ -127,7 +132,7 @@ pub(super) fn add_gyro_group(
             },
         ),
     };
-    update_dependency_rows(&widgets, gyro.borrow().enabled);
+    update_dependency_rows(&widgets, &gyro.borrow());
 
     group.add(&widgets.enable);
     group.add(&widgets.activation);
@@ -148,21 +153,25 @@ fn connect_gyro_changes(
     gyro: &Rc<RefCell<GyroConfig>>,
     on_dirty: &Rc<dyn Fn()>,
 ) {
-    // The enable switch writes the config through its own construction
-    // closure; this second connection just refreshes dependent rows.
+    // The enable switch and output write the config through their own
+    // construction closures; these connections just refresh dependent rows.
     let widgets_for_enable = widgets.clone();
-    widgets.enable.connect_active_notify(move |row| {
-        update_dependency_rows(&widgets_for_enable, row.is_active());
+    let gyro_for_enable = gyro.clone();
+    widgets.enable.connect_active_notify(move |_| {
+        update_dependency_rows(&widgets_for_enable, &gyro_for_enable.borrow());
     });
 
     let gyro_for_output = gyro.clone();
     let on_dirty_for_output = on_dirty.clone();
+    let widgets_for_output = widgets.clone();
     widgets.output.connect_selected_notify(move |dropdown| {
         gyro_for_output.borrow_mut().output = match dropdown.selected() {
             1 => GyroOutput::LeftStick,
             2 => GyroOutput::RightStick,
+            3 => GyroOutput::NativeMotion,
             _ => GyroOutput::Mouse,
         };
+        update_dependency_rows(&widgets_for_output, &gyro_for_output.borrow());
         on_dirty_for_output();
     });
 
@@ -234,11 +243,24 @@ fn apply_activation_selection(
     on_dirty();
 }
 
-fn update_dependency_rows(widgets: &GyroWidgets, enabled: bool) {
+fn update_dependency_rows(widgets: &GyroWidgets, gyro: &GyroConfig) {
+    let enabled = gyro.enabled;
+    let native = gyro.output == GyroOutput::NativeMotion;
     widgets.activation.set_sensitive(enabled);
     widgets.button.set_sensitive(enabled);
     widgets.output.set_sensitive(enabled);
-    widgets.orientation.set_sensitive(enabled);
+    // Native motion skips the orientation math entirely: the game reads the
+    // sensor axes as the device reports them. The invert flags still apply
+    // there — they flip the wire's yaw and pitch — so they switch to the
+    // axis names instead of greying out.
+    widgets.orientation.set_sensitive(enabled && !native);
+    if native {
+        widgets.invert_x.set_title(&crate::tr!("Invert yaw"));
+        widgets.invert_y.set_title(&crate::tr!("Invert pitch"));
+    } else {
+        widgets.invert_x.set_title(&crate::tr!("Invert horizontal"));
+        widgets.invert_y.set_title(&crate::tr!("Invert vertical"));
+    }
     widgets.sensitivity.set_sensitive(enabled);
     widgets.invert_x.set_sensitive(enabled);
     widgets.invert_y.set_sensitive(enabled);
@@ -322,34 +344,32 @@ fn orientation_row(
     gyro: &Rc<RefCell<GyroConfig>>,
     on_dirty: &Rc<dyn Fn()>,
     orientation: GyroOrientation,
-) -> gtk4::ListBoxRow {
+) -> adw::ComboRow {
     let choices = orientation_choices();
     let current = choices
         .iter()
         .position(|(candidate, _)| *candidate == orientation)
         .unwrap_or(0);
-    let row = adw::ActionRow::new();
-    row.set_title(&crate::tr!("Orientation"));
-    row.set_subtitle(&crate::tr!(
-        "How the controller's rotation maps to horizontal and vertical output"
-    ));
-    let button = picker_button(&choices[current].1.title, &gtk4::Popover::new());
-    let options: Vec<OptionChoice> = choices.iter().map(|entry| entry.1.clone()).collect();
-    let picker = option_picker_popover(&options, current, {
-        let gyro = gyro.clone();
-        let on_dirty = on_dirty.clone();
-        let button = button.clone();
-        move |index| {
-            if let Some((orientation, choice)) = choices.get(index) {
-                gyro.borrow_mut().orientation = *orientation;
-                button.set_label(&choice.title);
-                on_dirty();
-            }
-        }
+    let combo = combo_row(
+        &choices.iter().map(|(_, choice)| choice.title.clone()).collect::<Vec<_>>(),
+        current as u32,
+    );
+    combo.set_title(&crate::tr!("Orientation"));
+    let description = choices[current].1.description.clone().unwrap_or_default();
+    combo.set_subtitle(description.as_str());
+    let gyro = gyro.clone();
+    let on_dirty = on_dirty.clone();
+    let choices_for_signal = choices.clone();
+    combo.connect_selected_notify(move |combo| {
+        let Some((orientation, choice)) = choices_for_signal.get(combo.selected() as usize) else {
+            return;
+        };
+        gyro.borrow_mut().orientation = *orientation;
+        let description = choice.description.clone().unwrap_or_default();
+        combo.set_subtitle(description.as_str());
+        on_dirty();
     });
-    button.set_popover(Some(&picker));
-    row.add_suffix(&button);
-    row.upcast()
+    combo
 }
 
 fn activation_labels() -> Vec<String> {
@@ -367,6 +387,7 @@ fn output_labels() -> Vec<String> {
         crate::tr!("Mouse"),
         crate::tr!("Left stick"),
         crate::tr!("Right stick"),
+        crate::tr!("Native motion sensors"),
     ]
     .into_iter()
     .collect()
@@ -385,6 +406,7 @@ fn output_index(output: GyroOutput) -> u32 {
         GyroOutput::Mouse => 0,
         GyroOutput::LeftStick => 1,
         GyroOutput::RightStick => 2,
+        GyroOutput::NativeMotion => 3,
     }
 }
 

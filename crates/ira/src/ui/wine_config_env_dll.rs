@@ -1,4 +1,5 @@
 use super::css::*;
+use super::helpers::string_list_from;
 use adw::prelude::*;
 
 pub(super) fn collect_env_vars(box_: &gtk4::ListBox) -> Vec<(String, String)> {
@@ -48,12 +49,13 @@ pub(super) fn build_dll_override_row(name: &str, value: &str) -> gtk4::ListBoxRo
     name_entry.set_hexpand(true);
     hbox.append(&name_entry);
 
-    let model = gtk4::StringList::new(&[
-        "native,builtin",
-        "builtin,native",
-        "native",
-        "builtin",
-        "disabled",
+    // Closed load-order set, shown verbatim; never translated.
+    let model = string_list_from(&[
+        "native,builtin".to_string(),
+        "builtin,native".to_string(),
+        "native".to_string(),
+        "builtin".to_string(),
+        "disabled".to_string(),
     ]);
     let value_combo = gtk4::DropDown::new(Some(model), None::<&gtk4::PropertyExpression>);
     {

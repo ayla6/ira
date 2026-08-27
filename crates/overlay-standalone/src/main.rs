@@ -26,10 +26,7 @@ mod vulkan;
 mod x11;
 
 use ira_overlay::ui;
-use ira_overlay_ipc::{
-    MappedShm, DEFAULT_RECORD_GAMEPAD_HOTKEY, DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY,
-    DEFAULT_TOGGLE_GAMEPAD_HOTKEY,
-};
+use ira_overlay_ipc::MappedShm;
 
 fn main() {
     ira_overlay::i18n::init();
@@ -65,15 +62,16 @@ fn main() {
     };
 
     // Read hotkey config from SHM (written by Ira app before launch).
+    // X11 grabs X11 keycodes (evdev + X11_KEYCODE_OFFSET); the canonical
+    // decoder fills in the default chord when the header carries zeros.
     {
         let hdr = shm.header();
-        if hdr.toggle_keysym != 0 {
-            x11::TOGGLE_KEYCODE.store(
-                hdr.toggle_keysym + ira_overlay_ipc::X11_KEYCODE_OFFSET,
-                Ordering::Relaxed,
-            );
-            x11::TOGGLE_MODS.store(hdr.toggle_mods, Ordering::Relaxed);
-        }
+        let (tog_kc, tog_mods, ..) = hdr.hotkeys();
+        x11::TOGGLE_KEYCODE.store(
+            tog_kc + ira_overlay_ipc::X11_KEYCODE_OFFSET,
+            Ordering::Relaxed,
+        );
+        x11::TOGGLE_MODS.store(tog_mods, Ordering::Relaxed);
     }
 
     let x11_state = match x11::X11State::new() {
@@ -127,7 +125,8 @@ fn main() {
         let toggle_pressed = x11_state.poll_events();
 
         if toggle_pressed {
-            toggle_visibility(&shm);
+            // Outcome is picked up below via the SHM visibility load.
+            let _ = shm.header().toggle_visible();
         }
 
         let ready = shm.header().direct_capture_ready.load(Ordering::SeqCst) != 0;
@@ -136,15 +135,8 @@ fn main() {
             direct_capture_ready = ready;
         }
 
-        let (toggle_gamepad, screenshot_gamepad, record_gamepad, overlay_visible) = {
-            let header = shm.header();
-            (
-                nonzero_or(header.toggle_gamepad, DEFAULT_TOGGLE_GAMEPAD_HOTKEY),
-                nonzero_or(header.screenshot_gamepad, DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY),
-                nonzero_or(header.record_gamepad, DEFAULT_RECORD_GAMEPAD_HOTKEY),
-                header.overlay_visible.load(Ordering::SeqCst) != 0,
-            )
-        };
+        let (toggle_gamepad, screenshot_gamepad, record_gamepad) = shm.header().gamepad_hotkeys();
+        let overlay_visible = shm.header().overlay_visible.load(Ordering::SeqCst) != 0;
         for event in gamepad.poll(
             toggle_gamepad,
             screenshot_gamepad,
@@ -181,50 +173,19 @@ fn main() {
     }
 }
 
-fn toggle_visibility(shm: &MappedShm) {
-    let now = now_ms();
-    let header = shm.header();
-    let last = header.last_toggle_ms.load(Ordering::SeqCst);
-    if now.wrapping_sub(last) < 300 {
-        return;
-    }
-    let current = header.overlay_visible.load(Ordering::SeqCst);
-    let new_value = u32::from(current == 0);
-    if header
-        .overlay_visible
-        .compare_exchange(current, new_value, Ordering::SeqCst, Ordering::SeqCst)
-        .is_ok()
-    {
-        header.last_toggle_ms.store(now, Ordering::SeqCst);
-    }
-}
-
 fn handle_gamepad_event(
     shm: &MappedShm,
     capture: &capture::CaptureController,
     event: gamepad::GamepadEvent,
 ) {
     match event {
-        gamepad::GamepadEvent::Toggle => toggle_visibility(shm),
+        gamepad::GamepadEvent::Toggle => {
+            let _ = shm.header().toggle_visible();
+        }
         gamepad::GamepadEvent::Ui(event) => ui::push_event(event),
         gamepad::GamepadEvent::Screenshot => capture.request_screenshot(),
         gamepad::GamepadEvent::Record => {
             capture.toggle_recording(capture::RecordingSettings::from_shm(shm));
         }
-    }
-}
-
-fn now_ms() -> u32 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u32)
-        .unwrap_or(0)
-}
-
-fn nonzero_or(value: u32, default: u32) -> u32 {
-    if value == 0 {
-        default
-    } else {
-        value
     }
 }

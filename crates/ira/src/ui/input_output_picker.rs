@@ -20,18 +20,17 @@ pub(crate) struct OutputPickerScope {
 }
 
 pub(crate) fn show_output_picker(
-    parent: &gtk4::Window,
+    parent: &impl IsA<gtk4::Widget>,
     input_title: &str,
     scope: &OutputPickerScope,
     current: Option<&OutputAction>,
     on_pick: impl Fn(OutputAction) + 'static,
 ) {
     let on_pick: Rc<dyn Fn(OutputAction)> = Rc::new(on_pick);
-    let window = adw::Window::new();
-    window.set_transient_for(Some(parent));
-    window.set_modal(true);
-    window.set_default_size(780, 560);
-    window.set_title(Some(input_title));
+    let window = adw::Dialog::new();
+    window.set_content_width(780);
+    window.set_content_height(560);
+    window.set_title(input_title);
 
     let stack = adw::ViewStack::new();
     let pages = [
@@ -78,8 +77,8 @@ pub(crate) fn show_output_picker(
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
     toolbar.set_content(Some(&stack));
-    window.set_content(Some(&toolbar));
-    window.present();
+    window.set_child(Some(&toolbar));
+    window.present(Some(parent));
 }
 
 pub(crate) fn section(parent: &gtk4::Box, title: &str) -> gtk4::FlowBox {
@@ -103,7 +102,7 @@ pub(crate) fn tile(
     action: Option<OutputAction>,
     current: Option<&OutputAction>,
     on_pick: &Rc<dyn Fn(OutputAction)>,
-    window: &adw::Window,
+    window: &adw::Dialog,
 ) {
     let button = gtk4::Button::new();
     button.add_css_class(CSS_COMMAND_TILE);
@@ -136,7 +135,7 @@ fn build_gamepad_page(
     scope: &OutputPickerScope,
     current: Option<&OutputAction>,
     on_pick: &Rc<dyn Fn(OutputAction)>,
-    window: &adw::Window,
+    window: &adw::Dialog,
 ) {
     let buttons = [
         GamepadButton::A,
@@ -260,7 +259,7 @@ fn build_mouse_page(
     content: &gtk4::Box,
     current: Option<&OutputAction>,
     on_pick: &Rc<dyn Fn(OutputAction)>,
-    window: &adw::Window,
+    window: &adw::Dialog,
 ) {
     let clicks = [
         (MouseButton::Left, crate::tr!("Left Mouse Click")),
@@ -321,7 +320,7 @@ fn build_sets_page(
     scope: &OutputPickerScope,
     current: Option<&OutputAction>,
     on_pick: &Rc<dyn Fn(OutputAction)>,
-    window: &adw::Window,
+    window: &adw::Dialog,
 ) {
     if scope.set_names.len() < 2 && scope.layer_names.is_empty() {
         let note = gtk4::Label::new(Some(&crate::tr!(

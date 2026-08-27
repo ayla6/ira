@@ -12,12 +12,7 @@ use std::ffi::c_int;
 use std::sync::{Mutex, OnceLock};
 
 use ira_overlay::ui::{capture, push_event, Event};
-use ira_overlay_ipc::InputEventRaw;
-use ira_overlay_ipc::{
-    MappedShm, DEFAULT_RECORD_GAMEPAD_HOTKEY, DEFAULT_RECORD_KEYCODE, DEFAULT_RECORD_MODS,
-    DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY, DEFAULT_SCREENSHOT_KEYCODE, DEFAULT_SCREENSHOT_MODS,
-    DEFAULT_TOGGLE_GAMEPAD_HOTKEY, DEFAULT_TOGGLE_KEYCODE, DEFAULT_TOGGLE_MODS,
-};
+use ira_overlay_ipc::{InputEventRaw, MappedShm, ShmHeader};
 
 type PollEventsFn = unsafe extern "C" fn(*mut InputEventRaw, usize) -> usize;
 type IsVisibleFn = unsafe extern "C" fn() -> c_int;
@@ -147,63 +142,16 @@ fn shm() -> Option<&'static Mutex<MappedShm>> {
 /// Returns (toggle_kc, toggle_mods, screenshot_kc, screenshot_mods, record_kc, record_mods).
 pub fn hotkeys() -> (u32, u32, u32, u32, u32, u32) {
     let Some(shm) = shm().and_then(|m| m.lock().ok()) else {
-        return (
-            DEFAULT_TOGGLE_KEYCODE,
-            DEFAULT_TOGGLE_MODS,
-            DEFAULT_SCREENSHOT_KEYCODE,
-            DEFAULT_SCREENSHOT_MODS,
-            DEFAULT_RECORD_KEYCODE,
-            DEFAULT_RECORD_MODS,
-        );
+        return ShmHeader::default_hotkeys();
     };
-    let hdr = shm.header();
-    let tog_kc = if hdr.toggle_keysym == 0 {
-        DEFAULT_TOGGLE_KEYCODE
-    } else {
-        hdr.toggle_keysym
-    };
-    let tog_mods = if hdr.toggle_keysym == 0 {
-        DEFAULT_TOGGLE_MODS
-    } else {
-        hdr.toggle_mods
-    };
-    let ss_kc = if hdr.screenshot_keysym == 0 {
-        DEFAULT_SCREENSHOT_KEYCODE
-    } else {
-        hdr.screenshot_keysym
-    };
-    let ss_mods = if hdr.screenshot_keysym == 0 {
-        DEFAULT_SCREENSHOT_MODS
-    } else {
-        hdr.screenshot_mods
-    };
-    let rec_kc = if hdr.record_keysym == 0 {
-        DEFAULT_RECORD_KEYCODE
-    } else {
-        hdr.record_keysym
-    };
-    let rec_mods = if hdr.record_keysym == 0 {
-        DEFAULT_RECORD_MODS
-    } else {
-        hdr.record_mods
-    };
-    (tog_kc, tog_mods, ss_kc, ss_mods, rec_kc, rec_mods)
+    shm.header().hotkeys()
 }
 
 pub fn gamepad_hotkeys() -> (u32, u32, u32) {
-    let Some(shm) = shm().and_then(|mapping| mapping.lock().ok()) else {
-        return (
-            DEFAULT_TOGGLE_GAMEPAD_HOTKEY,
-            DEFAULT_SCREENSHOT_GAMEPAD_HOTKEY,
-            DEFAULT_RECORD_GAMEPAD_HOTKEY,
-        );
+    let Some(shm) = shm().and_then(|m| m.lock().ok()) else {
+        return ShmHeader::default_gamepad_hotkeys();
     };
-    let header = shm.header();
-    (
-        header.toggle_gamepad,
-        header.screenshot_gamepad,
-        header.record_gamepad,
-    )
+    shm.header().gamepad_hotkeys()
 }
 
 /// Polls input events from the shim and forwards them to the overlay UI.
@@ -219,12 +167,14 @@ pub fn poll_and_forward() {
     }
 }
 
-// X11 keycodes (evdev) used for navigation.
-const KC_RETURN: u32 = 36;
-const KC_UP: u32 = 111;
-const KC_DOWN: u32 = 116;
-const KC_LEFT: u32 = 113;
-const KC_RIGHT: u32 = 114;
+// X11 navigation keycodes — what the shim puts on InputEventRaw.keycode.
+// Single source of truth: ShmHeader::NAV_KEYCODES_X11, order
+// [Return, Up, Down, Left, Right].
+const KC_RETURN: u32 = ShmHeader::NAV_KEYCODES_X11[0];
+const KC_UP: u32 = ShmHeader::NAV_KEYCODES_X11[1];
+const KC_DOWN: u32 = ShmHeader::NAV_KEYCODES_X11[2];
+const KC_LEFT: u32 = ShmHeader::NAV_KEYCODES_X11[3];
+const KC_RIGHT: u32 = ShmHeader::NAV_KEYCODES_X11[4];
 
 fn convert_and_forward(raw: &InputEventRaw) {
     match raw.event_type {

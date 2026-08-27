@@ -398,13 +398,12 @@ pub(super) fn launch_retro(
             .find(|d| Some(d.id) == default_disc_id)
             .map(|d| d.rom_path.clone())
             .unwrap_or_else(|| game_path.to_string());
-        if raw.is_empty() || std::path::Path::new(&raw).is_absolute() {
+        if raw.is_empty() {
             raw
         } else {
-            cfg.rom_folder(platform_id)
-                .join(raw)
-                .to_string_lossy()
-                .into_owned()
+            cfg.resolve_rom_path(platform_id, &raw)
+                .map(|resolved| resolved.to_string_lossy().into_owned())
+                .unwrap_or(raw)
         }
     };
     let rom_root = std::path::Path::new(&rom_path).parent();
@@ -590,10 +589,8 @@ pub(super) fn launch_emulator_no_game(
             }
         }
         ira_models::GameKind::Ps4 => {
-            let exe = ira_platforms::ps4::resolve_shadps4_executable(
-                exes.per_game_version,
-                exes.shadps4,
-            );
+            let exe =
+                ira_platforms::ps4::resolve_shadps4_executable(exes.per_game_version, exes.shadps4);
             if !ira_platforms::ps4::shadps4_executable_available(&exe) {
                 return Err(format!(
                     "shadPS4 executable was not found: {exe}. Install shadPS4 or select an available version in Settings."

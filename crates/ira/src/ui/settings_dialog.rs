@@ -42,8 +42,8 @@ struct SavedSettingsWidgets {
     saves_row: adw::SwitchRow,
     auto_reload_widgets: AutoReloadWidgets,
     steam_enable_row: adw::SwitchRow,
-    default_game_folder_row: adw::EntryRow,
-    roms_folder_row: adw::EntryRow,
+    game_folders: super::folder_list::FolderListWidgets,
+    rom_roots: super::folder_list::FolderListWidgets,
     lang_list: gtk4::ListBox,
     ra_enable_row: adw::SwitchRow,
     ra_username_row: adw::EntryRow,
@@ -63,7 +63,7 @@ struct SavedSettingsWidgets {
 }
 
 struct SettingsDialogParams {
-    win: adw::Window,
+    win: adw::Dialog,
     sidebar: gtk4::ListBox,
     stack: gtk4::Stack,
     content_area: gtk4::Box,
@@ -79,8 +79,7 @@ pub fn show_settings_dialog(
     steam: Arc<SteamDataClient>,
     state: &SharedState,
 ) {
-    let layout = dialog_layout(parent);
-    layout.window.set_deletable(false);
+    let layout = dialog_layout();
     layout.sidebar_area.set_size_request(180, -1);
 
     let loading = adw::StatusPage::new();
@@ -93,7 +92,11 @@ pub fn show_settings_dialog(
     loading.set_child(Some(&spinner));
     layout.stack.add_named(&loading, Some("loading"));
     layout.stack.set_visible_child_name("loading");
-    layout.window.present();
+    // Natural height outgrew what a normal window offers after the newer
+    // settings pages landed; libadwaita warns and clips floating sheets
+    // that ask for more than their presenter has.
+    super::helpers::fit_dialog_height(&layout.window, parent, 720);
+    layout.window.present(Some(parent));
 
     let rom_platforms_with_games = {
         let state = state.borrow();
@@ -205,8 +208,8 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         saves_row: pages.saves_row,
         auto_reload_widgets: pages.auto_reload_widgets,
         steam_enable_row: pages.steam_enable_row,
-        default_game_folder_row: pages.default_game_folder_row,
-        roms_folder_row: pages.roms_folder_row,
+        game_folders: pages.game_folders.clone(),
+        rom_roots: pages.rom_roots.clone(),
         lang_list: pages.lang_list,
         ra_enable_row: pages.ra_enable_row,
         ra_username_row: pages.ra_username_row,
@@ -246,7 +249,9 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
 
     let cancel_btn = gtk4::Button::with_label(&crate::tr!("Cancel"));
     let win_c = win.clone();
-    cancel_btn.connect_clicked(move |_| win_c.close());
+    cancel_btn.connect_clicked(move |_| {
+        win_c.close();
+    });
     let win_c = win.clone();
     let cancel_shortcut = gtk4::EventControllerKey::new();
     cancel_shortcut.connect_key_pressed(move |_, key, _, _| {
@@ -336,8 +341,12 @@ fn apply_general_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
     cfg.auto_reload_cemu = widgets.auto_reload_widgets.cemu.is_active();
     cfg.auto_reload_azahar = widgets.auto_reload_widgets.azahar.is_active();
     cfg.steam_enabled = widgets.steam_enable_row.is_active();
-    cfg.default_game_folder = widgets.default_game_folder_row.text().to_string();
-    cfg.roms_folder = widgets.roms_folder_row.text().to_string();
+    let game_folders = widgets.game_folders.get();
+    cfg.default_game_folder = game_folders.first().cloned().unwrap_or_default();
+    cfg.extra_game_folders = game_folders.into_iter().skip(1).collect();
+    let rom_roots = widgets.rom_roots.get();
+    cfg.roms_folder = rom_roots.first().cloned().unwrap_or_default();
+    cfg.extra_roms_folders = rom_roots.into_iter().skip(1).collect();
     cfg.language_preferences = super::settings_pages::read_language_preferences(&widgets.lang_list);
     cfg.ra_enabled = widgets.ra_enable_row.is_active();
     cfg.ra_username = widgets.ra_username_row.text().to_string();

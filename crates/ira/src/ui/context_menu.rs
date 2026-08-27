@@ -115,22 +115,16 @@ pub fn show_game_context_menu(
             }
         }
         wine = wine.merge_with_default(&app_default);
-        let console_folder = if game.kind == ira_models::GameKind::Retro {
-            s.cfg
-                .rom_folder(&game.platform_id)
-                .to_string_lossy()
-                .into_owned()
-        } else {
-            String::new()
-        };
-        let resolve_path = |p: &str| -> String {
-            if p.is_empty() || std::path::Path::new(p).is_absolute() {
-                p.to_string()
-            } else {
-                format!("{}/{}", console_folder.trim_end_matches('/'), p)
+        let resolve_rom = |p: &str| -> String {
+            if game.kind != ira_models::GameKind::Retro || p.is_empty() {
+                return p.to_string();
             }
+            s.cfg
+                .resolve_rom_path(&game.platform_id, p)
+                .map(|resolved| resolved.to_string_lossy().into_owned())
+                .unwrap_or_else(|| p.to_string())
         };
-        let resolved_game_path = resolve_path(&game.game_path);
+        let resolved_game_path = resolve_rom(&game.game_path);
         let game_dir = if !launch.working_dir.is_empty() {
             Some(launch.working_dir)
         } else if !launch.exe.is_empty() {

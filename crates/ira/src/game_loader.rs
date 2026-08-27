@@ -23,67 +23,71 @@ pub fn read_app_details(save_dir: &str, app_id: &str) -> Option<AppDetails> {
 
 pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
     let _span = tracing::info_span!("load_games").entered();
-    let entries = match ira_db::load_all_games(conn) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("Failed to load games from DB: {}", e);
-            return Vec::new();
-        }
-    };
-
-    let mut games = Vec::new();
-    for entry in entries {
-        if entry.kind != ira_models::GameKind::Linux && entry.kind != ira_models::GameKind::Wine {
-            continue;
-        }
-        match load_game_fast(&entry, save_dir) {
-            Ok(game) => {
-                let variant_entries = build_variant_entries(conn, save_dir, &game);
-                games.push(game);
-                games.extend(variant_entries);
-            }
-            Err(e) => eprintln!(
-                "Skipping game {} ({}): {}",
-                if !entry.steam_id.is_empty() {
-                    &entry.steam_id
-                } else {
-                    &entry.game_id
-                },
-                entry.kind,
-                e
-            ),
-        }
-    }
-    games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
-    games
+    load_selected_games(
+        conn,
+        save_dir,
+        "Failed to load games from DB",
+        |entry| {
+            entry.kind != ira_models::GameKind::Linux && entry.kind != ira_models::GameKind::Wine
+        },
+        |entry| {
+            let id = if !entry.steam_id.is_empty() {
+                &entry.steam_id
+            } else {
+                &entry.game_id
+            };
+            format!("Skipping game {} ({})", id, entry.kind)
+        },
+    )
 }
 
 /// Load every saved game from the database without probing external sources.
 /// Use this during startup; explicit rescans can refresh source-specific data.
 pub fn load_saved_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
     let _span = tracing::info_span!("load_saved_games").entered();
+    load_selected_games(
+        conn,
+        save_dir,
+        "Failed to load saved games from DB",
+        |entry| entry.kind == ira_models::GameKind::Retro && entry.rom_path.is_empty(),
+        |entry| format!("Skipping saved game {}", entry.id),
+    )
+}
+
+/// Shared implementation behind `load_games` and `load_saved_games`.
+/// `skip` filters out entries this caller must not process and `describe`
+/// renders one entry in the per-failure diagnostic.
+fn load_selected_games(
+    conn: &DbConn,
+    save_dir: &str,
+    db_error_context: &str,
+    skip: impl Fn(&GameEntry) -> bool,
+    describe: impl Fn(&GameEntry) -> String,
+) -> Vec<Game> {
     let entries = match ira_db::load_all_games(conn) {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("Failed to load saved games from DB: {}", e);
+            eprintln!("{}: {}", db_error_context, e);
             return Vec::new();
         }
     };
 
-    let mut games = Vec::new();
-    for entry in entries {
-        if entry.kind == ira_models::GameKind::Retro && entry.rom_path.is_empty() {
-            continue;
-        }
-        match load_game_fast(&entry, save_dir) {
+    let mut games: Vec<Game> = entries
+        .iter()
+        .filter(|entry| !skip(entry))
+        .flat_map(|entry| match load_game_fast(entry, save_dir) {
             Ok(game) => {
                 let variant_entries = build_variant_entries(conn, save_dir, &game);
-                games.push(game);
-                games.extend(variant_entries);
+                std::iter::once(game)
+                    .chain(variant_entries)
+                    .collect::<Vec<_>>()
             }
-            Err(e) => eprintln!("Skipping saved game {}: {}", entry.id, e),
-        }
-    }
+            Err(e) => {
+                eprintln!("{}: {}", describe(entry), e);
+                Vec::new()
+            }
+        })
+        .collect();
     games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
     games
 }
@@ -169,6 +173,28 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
     ira_parser::populate_image_paths(&image_dir, &mut game);
 
     game
+}
+
+/// True when `name` is still the synthesized "App ID: …" placeholder shown
+/// for DB rows whose real title was never learned. Mirrors how
+/// `build_game_base` builds that name from the localized template, so it
+/// stays correct whatever the current language does to the prefix.
+pub fn is_placeholder_name(name: &str) -> bool {
+    matches_placeholder(name, &crate::tr!("App ID: {}"))
+}
+
+/// Structural inverse of `<template>.replacen("{}", value, 1)`: the name
+/// must be `<prefix><non-empty value><suffix>` around the template's `{}`
+/// slot.
+fn matches_placeholder(name: &str, template: &str) -> bool {
+    match template.split_once("{}") {
+        Some((pre, post)) => {
+            name.len() > pre.len() + post.len() && name.starts_with(pre) && name.ends_with(post)
+        }
+        // Degenerate template without a slot: the generator's replacen is
+        // then an identity, so only the bare template counts.
+        None => name == template,
+    }
 }
 
 pub fn load_game_fast(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
@@ -367,6 +393,25 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     Ok(game)
 }
 
+/// Copy every non-empty asset path from `from` over `to`.
+fn apply_non_empty_images(from: &Game, to: &mut Game) {
+    if !from.icon_path.is_empty() {
+        to.icon_path = from.icon_path.clone();
+    }
+    if !from.hero_image_path.is_empty() {
+        to.hero_image_path = from.hero_image_path.clone();
+    }
+    if !from.grid_path.is_empty() {
+        to.grid_path = from.grid_path.clone();
+    }
+    if !from.header_path.is_empty() {
+        to.header_path = from.header_path.clone();
+    }
+    if !from.logo_path.is_empty() {
+        to.logo_path = from.logo_path.clone();
+    }
+}
+
 /// Apply a specific variant's images to the base game.
 /// Only applies if the variant has `custom_images=true` and `show_as_entry=false`.
 /// Called when the user selects a variant on the base game's play button.
@@ -395,21 +440,7 @@ pub fn apply_variant_images_for(
 
     let mut var_game = Game::default();
     ira_parser::populate_image_paths(&var_dir, &mut var_game);
-    if !var_game.icon_path.is_empty() {
-        game.icon_path = var_game.icon_path;
-    }
-    if !var_game.hero_image_path.is_empty() {
-        game.hero_image_path = var_game.hero_image_path;
-    }
-    if !var_game.grid_path.is_empty() {
-        game.grid_path = var_game.grid_path;
-    }
-    if !var_game.header_path.is_empty() {
-        game.header_path = var_game.header_path;
-    }
-    if !var_game.logo_path.is_empty() {
-        game.logo_path = var_game.logo_path;
-    }
+    apply_non_empty_images(&var_game, game);
 
     if !var.logo_position.is_empty() {
         game.logo_position = var.logo_position.clone();
@@ -452,21 +483,7 @@ pub fn build_variant_entries(db: &DbConn, save_dir: &str, game: &Game) -> Vec<Ga
             if var_dir.is_dir() {
                 let mut var_game = Game::default();
                 ira_parser::populate_image_paths(&var_dir, &mut var_game);
-                if !var_game.icon_path.is_empty() {
-                    entry.icon_path = var_game.icon_path;
-                }
-                if !var_game.hero_image_path.is_empty() {
-                    entry.hero_image_path = var_game.hero_image_path;
-                }
-                if !var_game.grid_path.is_empty() {
-                    entry.grid_path = var_game.grid_path;
-                }
-                if !var_game.header_path.is_empty() {
-                    entry.header_path = var_game.header_path;
-                }
-                if !var_game.logo_path.is_empty() {
-                    entry.logo_path = var_game.logo_path;
-                }
+                apply_non_empty_images(&var_game, &mut entry);
             }
 
             entry
@@ -524,5 +541,35 @@ mod tests {
         assert!(build_game_base(&entry, "/tmp/ira-test-save")
             .game_path
             .is_empty());
+    }
+
+    /// Generated placeholder names are recognized through the same
+    /// localized template that produced them (gettext stays untranslated
+    /// in unit tests, so this exercises the English path).
+    #[test]
+    fn test_is_placeholder_name_matches_generated_name() {
+        let generated = crate::tr!("App ID: {}").replacen("{}", "1234567", 1);
+        assert!(is_placeholder_name(&generated));
+        assert!(is_placeholder_name("App ID: 42"));
+        assert!(!is_placeholder_name("Pillars of Eternity"));
+        // An empty id is never generated, so a bare prefix is not one.
+        assert!(!is_placeholder_name("App ID: "));
+    }
+
+    /// Locale injection needs an installed gettext catalog and is not
+    /// available in unit tests; translation robustness is therefore pinned
+    /// on the structural check with synthetic templates: even when a
+    /// translation moves the `{}` slot around, the captured prefix/suffix
+    /// still recognizes exactly what the generator would produce.
+    #[test]
+    fn test_matches_placeholder_handles_translated_templates() {
+        assert!(matches_placeholder("42 – App-ID", "{} – App-ID"));
+        assert!(matches_placeholder("Aplicación 99", "Aplicación {}"));
+        assert!(!matches_placeholder("Real Game", "{} – App-ID"));
+        assert!(!matches_placeholder("", "{}"));
+        assert!(matches_placeholder(
+            &"{} – App-ID".replacen("{}", "7", 1),
+            "{} – App-ID"
+        ));
     }
 }

@@ -2,10 +2,10 @@ use adw::prelude::*;
 use std::rc::Rc;
 use std::sync::mpsc;
 
-use super::css::*;
 use super::enrichment::{enrich_game_async, EnrichGameParams};
-use super::helpers::{clamped, clamped_boxed_list, clear_children, esc, poll_channel, status_row};
+use super::helpers::{clear_children, poll_channel, status_row};
 use super::state::SharedState;
+use super::steam_search_dialog::{build_search_dialog, match_result_row, SearchDialogWidgets};
 use ira_platforms::retroachievements::api::{RaClient, RaGameEntry};
 
 fn apply_ra_match(
@@ -124,8 +124,6 @@ fn populate_results(
         return;
     }
     for (game, exact_hash) in rows {
-        let row = adw::ActionRow::new();
-        row.set_title(&esc(&game.title));
         let tag = if exact_hash {
             crate::tr!("Exact hash match")
         } else if game.num_achievements == 0 {
@@ -133,20 +131,17 @@ fn populate_results(
         } else {
             crate::tr!("{} achievements").replacen("{}", &game.num_achievements.to_string(), 1)
         };
-        row.set_subtitle(&format!("RA ID: {} · {}", game.id, tag));
-        let match_btn = gtk4::Button::with_label(&crate::tr!("Match"));
-        match_btn.add_css_class(CSS_SUGGESTED_ACTION);
-        match_btn.set_valign(gtk4::Align::Center);
         let sc = state.clone();
         let dc = dialog.clone();
         let ra_id = game.id;
         let ra_title = game.title.clone();
         let on_match_c = on_match.clone();
         let pid = platform_id.to_string();
-        match_btn.connect_clicked(move |_| {
-            apply_ra_match(&sc, db_id, &pid, ra_id, &ra_title, &on_match_c, &dc);
-        });
-        row.add_suffix(&match_btn);
+        let row = match_result_row(
+            &game.title,
+            &format!("RA ID: {} · {}", game.id, tag),
+            move || apply_ra_match(&sc, db_id, &pid, ra_id, &ra_title, &on_match_c, &dc),
+        );
         list.append(&row);
     }
 }
@@ -172,32 +167,19 @@ pub fn show_ra_search_dialog(
             .unwrap_or_default()
     };
 
-    let dialog = adw::Dialog::new();
-    dialog.set_title(&crate::tr!("Match to RetroAchievements"));
-    dialog.set_content_width(500);
-    dialog.set_content_height(400);
-
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
-
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-
-    let search_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    let entry = gtk4::SearchEntry::new();
-    entry.set_placeholder_text(Some(&crate::tr!("Game name…")));
-    entry.set_text(game_name);
-    entry.set_hexpand(true);
-    search_row.append(&entry);
-    let search_btn = gtk4::Button::with_label(&crate::tr!("Search"));
-    search_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    search_row.append(&search_btn);
-    content.append(&clamped(&search_row, 500, (12, 12, 12, 12)));
-
-    let (scrolled, list) = clamped_boxed_list(500);
-    content.append(&scrolled);
-
-    toolbar.set_content(Some(&content));
-    dialog.set_child(Some(&toolbar));
+    let SearchDialogWidgets {
+        dialog,
+        entry,
+        search_btn,
+        list,
+    } = build_search_dialog(
+        &crate::tr!("Match to RetroAchievements"),
+        500,
+        400,
+        500,
+        game_name,
+        Some(&crate::tr!("Game name…")),
+    );
 
     let state_c = state.clone();
     let platform_id = platform_id.to_string();

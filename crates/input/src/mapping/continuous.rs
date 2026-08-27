@@ -24,9 +24,10 @@ const GYRO_MOUSE_COUNTS_PER_RADIAN: f32 = 1718.87;
 pub(crate) const STICK_MOUSE_COUNTS_PER_SECOND: f32 = 2000.0;
 /// Stick-to-wheel velocity at full deflection, in detents per second.
 /// Gyro-to-stick scaling: rotation rate (rad/s) that drives the stick to full
-/// deflection at sensitivity 1.0. Without scaling, an ordinary hand turn
-/// (1-3 rad/s) would slam the stick to its rail.
-const GYRO_STICK_RADS_PER_UNIT: f32 = 4.0;
+/// deflection at sensitivity 1.0. Steam's camera feel lands near a
+/// moderate hand turn (~85 deg/s) reaching full deflection; the previous
+/// 4.0 made ordinary turns crawl ("barely moves").
+const GYRO_STICK_RADS_PER_UNIT: f32 = 1.5;
 /// Trigger travel that counts as a soft pull for trigger dampening.
 const DAMPENING_SOFT_PULL: f32 = 0.5;
 /// Trigger travel that counts as a full pull: physical triggers report ~1.0
@@ -408,17 +409,17 @@ mod tests {
         };
         let mut engine = MappingEngine::new(profile).unwrap();
         engine.update_gyro(GyroRates {
-            yaw: 2.0,
-            pitch: -8.0,
+            yaw: 0.75,
+            pitch: -3.0,
             gravity_locked: true,
         });
         let events = engine.tick(4_000);
-        // 2 rad/s over 4 rad/s-per-unit = half deflection.
+        // 0.75 rad/s over 1.5 rad/s-per-unit = half deflection.
         assert!(events.iter().any(|event| matches!(
             event,
             OutputEvent::GamepadAxis { axis: GamepadAxis::RightX, value } if (value - 0.5).abs() < 0.001
         )));
-        // 8 rad/s clamps to full deflection.
+        // 3 rad/s is double the full-deflection rate and clamps.
         assert!(events.iter().any(|event| matches!(
             event,
             OutputEvent::GamepadAxis { axis: GamepadAxis::RightY, value } if (value + 1.0).abs() < 0.001
@@ -439,7 +440,7 @@ mod tests {
         let mut engine = MappingEngine::new(profile).unwrap();
         engine.process(event(InputSource::Axis(GamepadAxis::RightX), 0.25));
         engine.update_gyro(GyroRates {
-            yaw: 2.0,
+            yaw: 0.75,
             pitch: 0.0,
             gravity_locked: true,
         });
@@ -610,7 +611,7 @@ mod tests {
         };
         let mut engine = MappingEngine::new(profile).unwrap();
         engine.update_gyro(GyroRates {
-            yaw: 2.0,
+            yaw: 0.75,
             pitch: 0.0,
             gravity_locked: true,
         });

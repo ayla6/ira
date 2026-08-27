@@ -3,6 +3,20 @@ use std::path::Path;
 use crate::SteamDataClient;
 use ira_models::{AssetType, DlcInfo};
 
+/// Steam CDN base URL for app asset images.
+fn steam_cdn_url(app_id: &str, suffix: &str) -> String {
+    format!(
+        "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/{}",
+        app_id, suffix
+    )
+}
+
+/// Generate the `{base}_small` thumbnail variant for an asset.
+fn shrink(dir: &Path, asset: AssetType) {
+    let (w, h) = asset.thumb_dims();
+    ira_parser::ensure_small_image(dir, asset.file_base(), w, h);
+}
+
 impl SteamDataClient {
     pub fn ensure_sgdb_assets(&self, sgdb_id: &str) -> (String, String, String, String, String) {
         let dir = self.sgdb_dir(sgdb_id);
@@ -30,18 +44,10 @@ impl SteamDataClient {
             (AssetType::Logo, &mut logo_path),
             (AssetType::Header, &mut header_path),
         ] {
-            // Older icon downloads could leave an undecoded .ico behind;
-            // convert or drop it so it stops shadowing fresh downloads.
-            ira_parser::heal_ico_variant(dir, asset_type.file_base());
             *path = if let Some(existing) = ira_parser::find_image_file(dir, asset_type.file_base())
             {
                 let p = existing.to_string_lossy().into_owned();
-                ira_parser::ensure_small_image(
-                    dir,
-                    asset_type.file_base(),
-                    asset_type.thumb_dims().0,
-                    asset_type.thumb_dims().1,
-                );
+                shrink(dir, asset_type);
                 p
             } else {
                 self.force_download_sgdb(dir, sgdb_id, asset_type, false)
@@ -58,164 +64,66 @@ impl SteamDataClient {
         let icon_path = if has_local_icon {
             String::new()
         } else {
-            let mut found = String::new();
-            ira_parser::heal_ico_variant(&dir, AssetType::Icon.file_base());
-            if let Some(cached) = self.find_cached_icon(app_id) {
-                found = cached.to_string_lossy().into_owned();
-            }
-            if found.is_empty() {
-                if let Some(url) = self.fetch_sgdb_icon_url(app_id) {
-                    ira_parser::remove_image_variants(&dir, AssetType::Icon.file_base());
-                    // Download as bytes and decode before anything touches
-                    // disk: an icon URL can serve anything, and a raw dump
-                    // used to strand icon.ico files that never converted.
-                    let dest_webp = dir.join(format!("{}.webp", AssetType::Icon.file_base()));
-                    if let Some(webp) = self
-                        .download_bytes(&url)
-                        .ok()
-                        .filter(|bytes| ira_parser::is_decodable_image(bytes))
-                        .and_then(|bytes| ira_parser::convert_bytes_to_lossless_webp(&bytes))
-                    {
-                        if std::fs::write(&dest_webp, &webp).is_ok() {
-                            found = dest_webp.to_string_lossy().into_owned();
-                        }
-                    }
-                }
-            }
-            found
+            self.cached_or_fresh_icon(app_id, &dir)
         };
-
-        let hero_path = if let Some(cached) = self.find_cached_hero(app_id) {
-            cached.to_string_lossy().into_owned()
-        } else {
-            let dest = dir.join(format!("{}.jpg", AssetType::Hero.file_base()));
-            let r = self.fetch_image_fallback(
-                &format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_hero_2x.jpg", app_id),
-                &format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_hero.jpg", app_id),
-                &dest,
-            );
-            if !r.is_empty() {
-                ira_parser::convert_to_lossless_webp(&dest);
-            }
-            let webp = dir.join(format!("{}.webp", AssetType::Hero.file_base()));
-            if webp.is_file() {
-                webp.to_string_lossy().into_owned()
-            } else {
-                r
-            }
-        };
+        let hero_path = self.cached_steam_asset(
+            app_id,
+            &dir,
+            AssetType::Hero,
+            "jpg",
+            &["library_hero_2x.jpg", "library_hero.jpg"],
+        );
 
         if !icon_path.is_empty() {
-            ira_parser::ensure_small_image(
-                &dir,
-                AssetType::Icon.file_base(),
-                AssetType::Icon.thumb_dims().0,
-                AssetType::Icon.thumb_dims().1,
-            );
+            shrink(&dir, AssetType::Icon);
         }
         if !hero_path.is_empty() {
-            ira_parser::ensure_small_image(
-                &dir,
-                AssetType::Hero.file_base(),
-                AssetType::Hero.thumb_dims().0,
-                AssetType::Hero.thumb_dims().1,
-            );
+            shrink(&dir, AssetType::Hero);
         }
 
         (icon_path, hero_path)
     }
 
+    /// Serve the cached icon if present, else pull from SGDB. SGDB icon URLs
+    /// can be any format (.ico included), so bytes are decoded fully in
+    /// memory before anything touches disk.
+    fn cached_or_fresh_icon(&self, app_id: &str, dir: &Path) -> String {
+        if let Some(cached) = self.find_cached_icon(app_id) {
+            return cached.to_string_lossy().into_owned();
+        }
+        let Some(url) = crate::sgdb::sgdb_endpoint(AssetType::Icon, true, app_id)
+            .and_then(|endpoint| self.fetch_sgdb_endpoint(&endpoint, &[]))
+        else {
+            return String::new();
+        };
+        ira_parser::remove_image_variants(dir, AssetType::Icon.file_base());
+        self.download_webp(dir, AssetType::Icon.file_base(), &url)
+    }
+
     pub fn ensure_grids(&self, app_id: &str) -> (String, String, String) {
         let _s = tracing::info_span!("ensure_grids", app_id).entered();
         let dir = self.game_dir(app_id);
-        let cdn = |suffix: &str| {
-            format!(
-                "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/{}",
-                app_id, suffix
-            )
-        };
 
-        let grid_path = if let Some(existing) =
-            ira_parser::find_image_file(&dir, AssetType::Grid.file_base())
-        {
-            existing.to_string_lossy().into_owned()
-        } else {
-            let dest = dir.join(format!("{}.jpg", AssetType::Grid.file_base()));
-            let r = self.fetch_image_fallback(
-                &cdn("library_600x900_2x.jpg"),
-                &cdn("library_600x900.jpg"),
-                &dest,
-            );
-            if !r.is_empty() {
-                ira_parser::convert_to_lossless_webp(&dest);
-            }
-            let webp = dir.join(format!("{}.webp", AssetType::Grid.file_base()));
-            if webp.is_file() {
-                webp.to_string_lossy().into_owned()
-            } else {
-                r
-            }
-        };
+        let grid_path = self.cached_steam_asset(
+            app_id,
+            &dir,
+            AssetType::Grid,
+            "jpg",
+            &["library_600x900_2x.jpg", "library_600x900.jpg"],
+        );
+        let header_path =
+            self.cached_steam_asset(app_id, &dir, AssetType::Header, "jpg", &["header.jpg"]);
+        let logo_path =
+            self.cached_steam_asset(app_id, &dir, AssetType::Logo, "png", &["logo.png"]);
 
-        let header_path = if let Some(existing) =
-            ira_parser::find_image_file(&dir, AssetType::Header.file_base())
-        {
-            existing.to_string_lossy().into_owned()
-        } else {
-            let dest = dir.join(format!("{}.jpg", AssetType::Header.file_base()));
-            let r = self.fetch_image_fallback(&cdn("header.jpg"), "", &dest);
-            if !r.is_empty() {
-                ira_parser::convert_to_lossless_webp(&dest);
+        for (asset, path) in [
+            (AssetType::Grid, &grid_path),
+            (AssetType::Header, &header_path),
+            (AssetType::Logo, &logo_path),
+        ] {
+            if !path.is_empty() {
+                shrink(&dir, asset);
             }
-            let webp = dir.join(format!("{}.webp", AssetType::Header.file_base()));
-            if webp.is_file() {
-                webp.to_string_lossy().into_owned()
-            } else {
-                r
-            }
-        };
-
-        let logo_path = if let Some(existing) =
-            ira_parser::find_image_file(&dir, AssetType::Logo.file_base())
-        {
-            existing.to_string_lossy().into_owned()
-        } else {
-            let dest = dir.join(format!("{}.png", AssetType::Logo.file_base()));
-            let r = self.fetch_image_fallback(&cdn("logo.png"), "", &dest);
-            if !r.is_empty() {
-                ira_parser::convert_to_lossless_webp(&dest);
-            }
-            let webp = dir.join(format!("{}.webp", AssetType::Logo.file_base()));
-            if webp.is_file() {
-                webp.to_string_lossy().into_owned()
-            } else {
-                r
-            }
-        };
-
-        if !grid_path.is_empty() {
-            ira_parser::ensure_small_image(
-                &dir,
-                AssetType::Grid.file_base(),
-                AssetType::Grid.thumb_dims().0,
-                AssetType::Grid.thumb_dims().1,
-            );
-        }
-        if !header_path.is_empty() {
-            ira_parser::ensure_small_image(
-                &dir,
-                AssetType::Header.file_base(),
-                AssetType::Header.thumb_dims().0,
-                AssetType::Header.thumb_dims().1,
-            );
-        }
-        if !logo_path.is_empty() {
-            ira_parser::ensure_small_image(
-                &dir,
-                AssetType::Logo.file_base(),
-                AssetType::Logo.thumb_dims().0,
-                AssetType::Logo.thumb_dims().1,
-            );
         }
 
         (grid_path, header_path, logo_path)
@@ -252,115 +160,25 @@ impl SteamDataClient {
     pub fn force_download_steam(&self, app_id: &str, asset: AssetType) -> String {
         let _s = tracing::info_span!("force_download_steam", app_id, asset = %asset).entered();
         let dir = self.game_dir(app_id);
-        let cdn = |suffix: &str| {
-            format!(
-                "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/{}",
-                app_id, suffix
-            )
-        };
         match asset {
-            AssetType::Hero => {
-                ira_parser::remove_image_variants(&dir, AssetType::Hero.file_base());
-                let dest = dir.join("hero.jpg");
-                let r = self.fetch_image(&cdn("library_hero_2x.jpg"), &dest);
-                let r = if r.is_empty() {
-                    self.fetch_image(&cdn("library_hero.jpg"), &dest)
-                } else {
-                    r
-                };
-                if !r.is_empty() {
-                    ira_parser::convert_to_lossless_webp(&dest);
-                    let webp = dir.join("hero.webp");
-                    let r = if webp.is_file() {
-                        webp.to_string_lossy().into_owned()
-                    } else {
-                        r
-                    };
-                    ira_parser::ensure_small_image(
-                        &dir,
-                        AssetType::Hero.file_base(),
-                        AssetType::Hero.thumb_dims().0,
-                        AssetType::Hero.thumb_dims().1,
-                    );
-                    r
-                } else {
-                    r
-                }
-            }
-            AssetType::Grid => {
-                ira_parser::remove_image_variants(&dir, AssetType::Grid.file_base());
-                let dest = dir.join("vertical.jpg");
-                let r = self.fetch_image(&cdn("library_600x900_2x.jpg"), &dest);
-                let r = if r.is_empty() {
-                    self.fetch_image(&cdn("library_600x900.jpg"), &dest)
-                } else {
-                    r
-                };
-                if !r.is_empty() {
-                    ira_parser::convert_to_lossless_webp(&dest);
-                    let webp = dir.join("vertical.webp");
-                    let r = if webp.is_file() {
-                        webp.to_string_lossy().into_owned()
-                    } else {
-                        r
-                    };
-                    ira_parser::ensure_small_image(
-                        &dir,
-                        AssetType::Grid.file_base(),
-                        AssetType::Grid.thumb_dims().0,
-                        AssetType::Grid.thumb_dims().1,
-                    );
-                    r
-                } else {
-                    r
-                }
-            }
+            AssetType::Hero => self.forced_steam_asset(
+                app_id,
+                &dir,
+                asset,
+                "jpg",
+                &["library_hero_2x.jpg", "library_hero.jpg"],
+            ),
+            AssetType::Grid => self.forced_steam_asset(
+                app_id,
+                &dir,
+                asset,
+                "jpg",
+                &["library_600x900_2x.jpg", "library_600x900.jpg"],
+            ),
             AssetType::Header => {
-                ira_parser::remove_image_variants(&dir, AssetType::Header.file_base());
-                let dest = dir.join("header.jpg");
-                let r = self.fetch_image(&cdn("header.jpg"), &dest);
-                if !r.is_empty() {
-                    ira_parser::convert_to_lossless_webp(&dest);
-                    let webp = dir.join("header.webp");
-                    let r = if webp.is_file() {
-                        webp.to_string_lossy().into_owned()
-                    } else {
-                        r
-                    };
-                    ira_parser::ensure_small_image(
-                        &dir,
-                        AssetType::Header.file_base(),
-                        AssetType::Header.thumb_dims().0,
-                        AssetType::Header.thumb_dims().1,
-                    );
-                    r
-                } else {
-                    r
-                }
+                self.forced_steam_asset(app_id, &dir, asset, "jpg", &["header.jpg"])
             }
-            AssetType::Logo => {
-                ira_parser::remove_image_variants(&dir, AssetType::Logo.file_base());
-                let dest = dir.join("logo.png");
-                let r = self.fetch_image(&cdn("logo.png"), &dest);
-                if !r.is_empty() {
-                    ira_parser::convert_to_lossless_webp(&dest);
-                    let webp = dir.join("logo.webp");
-                    let r = if webp.is_file() {
-                        webp.to_string_lossy().into_owned()
-                    } else {
-                        r
-                    };
-                    ira_parser::ensure_small_image(
-                        &dir,
-                        AssetType::Logo.file_base(),
-                        AssetType::Logo.thumb_dims().0,
-                        AssetType::Logo.thumb_dims().1,
-                    );
-                    r
-                } else {
-                    r
-                }
-            }
+            AssetType::Logo => self.forced_steam_asset(app_id, &dir, asset, "png", &["logo.png"]),
             _ => String::new(),
         }
     }
@@ -378,12 +196,7 @@ impl SteamDataClient {
             Some(e) => e,
             None => return String::new(),
         };
-        let dims: &[&str] = match asset {
-            AssetType::Grid => &["600x900"],
-            AssetType::Header => &["460x215", "920x430"],
-            _ => &[],
-        };
-        let url = match self.fetch_sgdb_endpoint(&endpoint, dims) {
+        let url = match self.fetch_sgdb_endpoint(&endpoint, asset.sgdb_dimensions()) {
             Some(u) => u,
             None => return String::new(),
         };
@@ -392,21 +205,9 @@ impl SteamDataClient {
         ira_parser::remove_image_variants(dir, base_name);
 
         let r = if asset == AssetType::Icon {
-            // Icons: decode in memory and write WebP directly. Icon URLs
-            // frequently end in .ico and a raw dump used to strand files
-            // that never converted.
-            let dest_webp = dir.join(format!("{base_name}.webp"));
-            match self
-                .download_bytes(&url)
-                .ok()
-                .filter(|bytes| ira_parser::is_decodable_image(bytes))
-                .and_then(|bytes| ira_parser::convert_bytes_to_lossless_webp(&bytes))
-            {
-                Some(webp) if std::fs::write(&dest_webp, &webp).is_ok() => {
-                    dest_webp.to_string_lossy().into_owned()
-                }
-                _ => String::new(),
-            }
+            // Icon URLs frequently end in .ico; download_webp decodes fully
+            // in memory so a bad dump never lands on disk.
+            self.download_webp(dir, base_name, &url)
         } else {
             let ext = Path::new(&url)
                 .extension()
@@ -437,9 +238,99 @@ impl SteamDataClient {
         };
 
         if !r.is_empty() {
-            let (sw, sh) = asset.thumb_dims();
-            ira_parser::ensure_small_image(dir, base_name, sw, sh);
+            shrink(dir, asset);
         }
         r
+    }
+
+    // ── shared Steam CDN / WebP flows ───────────────────────────────────
+
+    /// Cached-first variant of [`Self::forced_steam_asset`]: returns the
+    /// existing image variant for the asset's file base when one exists.
+    fn cached_steam_asset(
+        &self,
+        app_id: &str,
+        dir: &Path,
+        asset: AssetType,
+        dest_ext: &str,
+        cdn_suffixes: &[&str],
+    ) -> String {
+        if let Some(existing) = ira_parser::find_image_file(dir, asset.file_base()) {
+            return existing.to_string_lossy().into_owned();
+        }
+        self.fetch_steam_cdn_asset(app_id, dir, asset, dest_ext, cdn_suffixes)
+    }
+
+    /// Force a fresh download by removing existing variants first, then
+    /// delegating to [`Self::fetch_steam_cdn_asset`].
+    fn forced_steam_asset(
+        &self,
+        app_id: &str,
+        dir: &Path,
+        asset: AssetType,
+        dest_ext: &str,
+        cdn_suffixes: &[&str],
+    ) -> String {
+        ira_parser::remove_image_variants(dir, asset.file_base());
+        self.fetch_steam_cdn_asset(app_id, dir, asset, dest_ext, cdn_suffixes)
+    }
+
+    /// Download from the Steam CDN onto `{file_base}.{dest_ext}`, trying each
+    /// CDN suffix in order; convert to lossless WebP when possible, prefer the
+    /// WebP result, and generate the thumbnail variant. Returns "" on total
+    /// failure.
+    fn fetch_steam_cdn_asset(
+        &self,
+        app_id: &str,
+        dir: &Path,
+        asset: AssetType,
+        dest_ext: &str,
+        cdn_suffixes: &[&str],
+    ) -> String {
+        let base = asset.file_base();
+        let dest = dir.join(format!("{}.{}", base, dest_ext));
+
+        let mut found = String::new();
+        if dest.is_file() {
+            found = dest.to_string_lossy().into_owned();
+        } else {
+            for suffix in cdn_suffixes {
+                found = self.fetch_image(&steam_cdn_url(app_id, suffix), &dest);
+                if !found.is_empty() {
+                    break;
+                }
+            }
+        }
+
+        if found.is_empty() {
+            return String::new();
+        }
+        ira_parser::convert_to_lossless_webp(&dest);
+
+        let webp = dir.join(format!("{}.webp", base));
+        let path = if webp.is_file() {
+            webp.to_string_lossy().into_owned()
+        } else {
+            found
+        };
+        shrink(dir, asset);
+        path
+    }
+
+    /// Download `url`, decode it fully in memory, and persist as lossless
+    /// WebP at `{base_name}.webp`. Returns "" on any failure.
+    fn download_webp(&self, dir: &Path, base_name: &str, url: &str) -> String {
+        let dest_webp = dir.join(format!("{base_name}.webp"));
+        match self
+            .download_bytes(url)
+            .ok()
+            .filter(|bytes| ira_parser::is_decodable_image(bytes))
+            .and_then(|bytes| ira_parser::convert_bytes_to_lossless_webp(&bytes))
+        {
+            Some(webp) if std::fs::write(&dest_webp, &webp).is_ok() => {
+                dest_webp.to_string_lossy().into_owned()
+            }
+            _ => String::new(),
+        }
     }
 }

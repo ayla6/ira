@@ -18,7 +18,7 @@ pub fn build_wine_profile_picker(
     saved_profile_id: Option<i64>,
     game_slug: Option<&str>,
     state: &SharedState,
-    win: &adw::Window,
+    win: &adw::Dialog,
 ) -> adw::ComboRow {
     let labels: Vec<String> = std::iter::once(crate::tr!("New prefix"))
         .chain(profiles.iter().map(|p| p.name.clone()))

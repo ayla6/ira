@@ -31,7 +31,7 @@ type GameGeneralPageResult = (
 fn build_ra_section(
     state: &SharedState,
     game: &Game,
-    win: &adw::Window,
+    win: &adw::Dialog,
     pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>,
 ) -> adw::PreferencesGroup {
     let ra_group = adw::PreferencesGroup::new();
@@ -177,7 +177,7 @@ fn game_file_path_for_display(game: &Game) -> String {
 fn build_game_folder_row(
     parent: &adw::PreferencesGroup,
     game: &Game,
-    win: &adw::Window,
+    win: &adw::Dialog,
 ) -> Option<adw::EntryRow> {
     if game.kind != ira_models::GameKind::Wine && game.kind != ira_models::GameKind::Linux {
         return None;
@@ -395,7 +395,7 @@ fn build_ra_container(
     page: &gtk4::Box,
     state: &SharedState,
     game: &Game,
-    win: &adw::Window,
+    win: &adw::Dialog,
     pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>,
 ) -> gtk4::Box {
     let ra_group = build_ra_section(state, game, win, pending_copies);
@@ -409,7 +409,7 @@ fn build_retro_emulator_and_ra(
     page: &gtk4::Box,
     state: &SharedState,
     game: &Game,
-    win: &adw::Window,
+    win: &adw::Dialog,
     pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>,
 ) -> (PendingCell, PendingCell, Option<gtk4::Box>) {
     let pending_ra_core: Rc<RefCell<Option<String>>> = Default::default();
@@ -441,7 +441,7 @@ fn build_service_ids_section(
     parent: &adw::PreferencesGroup,
     game: &Game,
     state: &SharedState,
-    win: &adw::Window,
+    win: &adw::Dialog,
 ) -> (bool, Option<adw::EntryRow>) {
     let mut app_id_entry: Option<adw::EntryRow> = None;
     let add_id_row = |title: &str, value: &str| {
@@ -666,7 +666,7 @@ fn build_save_migration_section(
 pub(super) fn build_game_general_page(
     state: &SharedState,
     game: &Game,
-    win: &adw::Window,
+    win: &adw::Dialog,
     languages: &[String],
     pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>,
 ) -> GameGeneralPageResult {

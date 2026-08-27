@@ -15,58 +15,6 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum ControllerInputModeCompat {
-    Mode(ControllerInputMode),
-    Legacy(bool),
-    /// Pre-rework configs named the virtual backend here; the backend now
-    /// lives in the profile, so any of those values just means "enabled".
-    LegacyBackend(String),
-}
-
-fn mode_from_compat(mode: ControllerInputModeCompat) -> ControllerInputMode {
-    match mode {
-        ControllerInputModeCompat::Mode(mode) => mode,
-        ControllerInputModeCompat::Legacy(enabled) => {
-            if enabled {
-                ControllerInputMode::Enabled
-            } else {
-                ControllerInputMode::Disabled
-            }
-        }
-        // Pre-rework configs named the virtual backend; the backend now
-        // lives in the profile, so those values just mean "enabled".
-        ControllerInputModeCompat::LegacyBackend(backend) => {
-            if backend.starts_with("virtual_") {
-                ControllerInputMode::Enabled
-            } else {
-                eprintln!("Unknown controller input mode \"{backend}\"; treating as disabled");
-                ControllerInputMode::Disabled
-            }
-        }
-    }
-}
-
-fn deserialize_controller_input_mode<'de, D>(
-    deserializer: D,
-) -> Result<ControllerInputMode, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    ControllerInputModeCompat::deserialize(deserializer).map(mode_from_compat)
-}
-
-fn deserialize_optional_controller_input_mode<'de, D>(
-    deserializer: D,
-) -> Result<Option<ControllerInputMode>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Option::<ControllerInputModeCompat>::deserialize(deserializer)
-        .map(|mode| mode.map(mode_from_compat))
-}
-
 fn default_language_preferences() -> Vec<String> {
     vec!["english".to_string()]
 }
@@ -81,11 +29,6 @@ fn default_save_dir() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControllerInputConfig {
     /// Controller bridge to use when no per-game override is set.
-    #[serde(
-        default,
-        alias = "always_on",
-        deserialize_with = "deserialize_controller_input_mode"
-    )]
     pub mode: ControllerInputMode,
     /// Managed profile path to use when no per-game profile is selected.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -113,11 +56,7 @@ pub struct ConsoleConfig {
     pub ra_core: String,
     pub fullscreen: bool,
     /// Optional console-wide remapping override before controller defaults.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_controller_input_mode"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub controller_mode: Option<ControllerInputMode>,
     /// Shared layout used for this console before a game-specific layout.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -228,29 +167,30 @@ pub struct Config {
     pub default_system: SystemDefaults,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub prefix_base_dir: String,
+    /// Primary PC games folder: install destination and detection root.
+    /// Additional roots live in `extra_game_folders`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub default_game_folder: String,
-    /// Shared ROM root. Each console uses <roms_folder>/<console id>.
+    /// Additional PC games folders scanned alongside `default_game_folder`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_game_folders: Vec<String>,
+    /// Primary ROM root. Each console uses <roms_folder>/<console id>.
     /// Empty means ROM discovery is disabled until a root is selected.
+    /// Additional roots live in `extra_roms_folders`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub roms_folder: String,
+    /// Additional ROM roots, each with per-console subfolders.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_roms_folders: Vec<String>,
     #[serde(default)]
     pub default_native_env_vars: Vec<(String, String)>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub linux_controller_profile: String,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_controller_input_mode"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linux_controller_mode: Option<ControllerInputMode>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub wine_controller_profile: String,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_controller_input_mode"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wine_controller_mode: Option<ControllerInputMode>,
     #[serde(default)]
     pub default_api_emu_version: String,
@@ -329,7 +269,9 @@ impl Default for Config {
             default_system: SystemDefaults::default(),
             prefix_base_dir: String::new(),
             default_game_folder: String::new(),
+            extra_game_folders: Vec::new(),
             roms_folder: String::new(),
+            extra_roms_folders: Vec::new(),
             default_native_env_vars: Vec::new(),
             linux_controller_profile: String::new(),
             linux_controller_mode: None,
@@ -378,14 +320,48 @@ impl Config {
         }
     }
 
-    pub fn ensure_rom_folders(&self) -> Result<(), String> {
-        if self.roms_folder.trim().is_empty() {
-            return Ok(());
+    /// All PC games folders in priority order: the primary folder first,
+    /// then extras. Empty and duplicate entries are dropped.
+    pub fn all_game_folders(&self) -> Vec<std::path::PathBuf> {
+        let mut entries = vec![self.default_game_folder.clone()];
+        entries.extend(self.extra_game_folders.iter().cloned());
+        trimmed_unique_paths(entries)
+    }
+
+    /// All ROM roots in priority order: the primary root first, then extras.
+    pub fn all_rom_roots(&self) -> Vec<std::path::PathBuf> {
+        let mut entries = vec![self.roms_folder.clone()];
+        entries.extend(self.extra_roms_folders.iter().cloned());
+        trimmed_unique_paths(entries)
+    }
+
+    /// Resolve a stored ROM path to an absolute path. Absolute paths pass
+    /// through; relative paths live under <root>/<platform>/ and are looked
+    /// up in every configured root before falling back to the primary one.
+    pub fn resolve_rom_path(&self, platform_id: &str, path: &str) -> Option<std::path::PathBuf> {
+        let path = std::path::Path::new(path);
+        if path.is_absolute() {
+            return Some(path.to_path_buf());
         }
-        let root = std::path::Path::new(self.roms_folder.trim());
-        std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
-        for console in ira_models::all_consoles().filter(|def| def.uses_rom_folder()) {
-            std::fs::create_dir_all(root.join(console.id)).map_err(|e| e.to_string())?;
+        let roots = self.all_rom_roots();
+        if roots.is_empty() {
+            return None;
+        }
+        for root in &roots {
+            let candidate = root.join(platform_id).join(path);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+        Some(roots[0].join(platform_id).join(path))
+    }
+
+    pub fn ensure_rom_folders(&self) -> Result<(), String> {
+        for root in self.all_rom_roots() {
+            std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+            for console in ira_models::all_consoles().filter(|def| def.uses_rom_folder()) {
+                std::fs::create_dir_all(root.join(console.id)).map_err(|e| e.to_string())?;
+            }
         }
         Ok(())
     }
@@ -394,61 +370,10 @@ impl Config {
         let steam_err = secrets::set_secret("steam", &self.steam_api_key);
         let sgdb_err = secrets::set_secret("steamgriddb", &self.steam_griddb_api_key);
         let ra_web_err = secrets::set_secret("ra_web_api_key", &self.ra_web_api_key);
-        // Pre-migration login/token keys are gone; clear any leftover keyring
-        // entries so the accounts page reflects the Web API key only.
-        let _ = secrets::set_secret("ra_token", "");
-        let _ = secrets::set_secret("ra_password", "");
-
-        let mut plaintext = Config {
-            steam_api_key: String::new(),
-            steam_griddb_api_key: String::new(),
-            ra_web_api_key: String::new(),
-            notifications_enabled: self.notifications_enabled,
-            close_to_background: self.close_to_background,
-            show_hidden_games: self.show_hidden_games,
-            grid_cover_width: self.grid_cover_width,
-            shadps4_enabled: self.shadps4_enabled,
-            shadps4_executable: self.shadps4_executable.clone(),
-            rpcs3_enabled: self.rpcs3_enabled,
-            rpcs3_executable: self.rpcs3_executable.clone(),
-            vita3k_enabled: self.vita3k_enabled,
-            vita3k_executable: self.vita3k_executable.clone(),
-            cemu_enabled: self.cemu_enabled,
-            cemu_executable: self.cemu_executable.clone(),
-            azahar_enabled: self.azahar_enabled,
-            azahar_executable: self.azahar_executable.clone(),
-            steam_enabled: self.steam_enabled,
-            auto_reload_steam: self.auto_reload_steam,
-            auto_reload_roms: self.auto_reload_roms,
-            auto_reload_shadps4: self.auto_reload_shadps4,
-            auto_reload_rpcs3: self.auto_reload_rpcs3,
-            auto_reload_vita3k: self.auto_reload_vita3k,
-            auto_reload_cemu: self.auto_reload_cemu,
-            auto_reload_azahar: self.auto_reload_azahar,
-            unpack_roms: self.unpack_roms,
-            save_dir: self.save_dir.clone(),
-            default_wine_config: self.default_wine_config.clone(),
-            default_system: self.default_system.clone(),
-            prefix_base_dir: self.prefix_base_dir.clone(),
-            default_game_folder: self.default_game_folder.clone(),
-            roms_folder: self.roms_folder.clone(),
-            default_native_env_vars: self.default_native_env_vars.clone(),
-            linux_controller_profile: self.linux_controller_profile.clone(),
-            linux_controller_mode: self.linux_controller_mode,
-            wine_controller_profile: self.wine_controller_profile.clone(),
-            wine_controller_mode: self.wine_controller_mode,
-            default_api_emu_version: self.default_api_emu_version.clone(),
-            auto_emu_install: self.auto_emu_install,
-            centralize_game_saves: self.centralize_game_saves,
-            language_preferences: self.language_preferences.clone(),
-            sort_mode: self.sort_mode,
-            sort_descending: self.sort_descending,
-            ra_enabled: self.ra_enabled,
-            ra_username: self.ra_username.clone(),
-            consoles: self.consoles.clone(),
-            overlay: self.overlay.clone(),
-            controller_defaults: self.controller_defaults.clone(),
-        };
+        let mut plaintext = self.clone();
+        plaintext.steam_api_key = String::new();
+        plaintext.steam_griddb_api_key = String::new();
+        plaintext.ra_web_api_key = String::new();
         if steam_err.is_err() {
             plaintext.steam_api_key = self.steam_api_key.clone();
         }
@@ -477,6 +402,19 @@ static EMPTY_CONSOLE: ConsoleConfig = ConsoleConfig {
     controller_mode: None,
     controller_profile: String::new(),
 };
+
+/// Trim whitespace, drop empties, dedupe, and convert to paths in order.
+fn trimmed_unique_paths(entries: Vec<String>) -> Vec<std::path::PathBuf> {
+    let mut out: Vec<std::path::PathBuf> = Vec::new();
+    for e in entries {
+        let trimmed = e.trim().to_string();
+        if trimmed.is_empty() || out.contains(&std::path::PathBuf::from(&trimmed)) {
+            continue;
+        }
+        out.push(std::path::PathBuf::from(trimmed));
+    }
+    out
+}
 
 #[cfg(test)]
 mod tests {
@@ -515,31 +453,18 @@ mod tests {
     }
 
     #[test]
-    fn test_controller_input_config_accepts_legacy_and_new_modes() {
-        let legacy: ControllerInputConfig =
-            serde_json::from_str(r#"{"always_on":true,"profile":"x"}"#).unwrap();
-        assert_eq!(legacy.mode, ControllerInputMode::Enabled);
-        assert_eq!(legacy.profile, "x");
-
-        let disabled: ControllerInputConfig =
-            serde_json::from_str(r#"{"always_on":false}"#).unwrap();
-        assert_eq!(disabled.mode, ControllerInputMode::Disabled);
-
-        let direct: ControllerInputConfig =
-            serde_json::from_str(r#"{"mode":"virtual_direct_input"}"#).unwrap();
-        assert_eq!(direct.mode, ControllerInputMode::Enabled);
-    }
-
-    #[test]
-    fn test_controller_input_config_serializes_new_fields_only() {
+    fn test_controller_input_config_json_roundtrip() {
         let cfg = ControllerInputConfig {
             mode: ControllerInputMode::Enabled,
             profile: "x".to_string(),
         };
-        let json = serde_json::to_value(cfg).unwrap();
+        let json = serde_json::to_value(&cfg).unwrap();
         assert_eq!(json["mode"], "enabled");
         assert_eq!(json["profile"], "x");
-        assert!(json.get("always_on").is_none());
+
+        let deserialized: ControllerInputConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized.mode, ControllerInputMode::Enabled);
+        assert_eq!(deserialized.profile, "x");
     }
 
     #[test]
@@ -555,6 +480,9 @@ mod tests {
             sort_descending: true,
             save_dir: "/tmp/test_save_dir".to_string(),
             roms_folder: "/tmp/roms".to_string(),
+            extra_roms_folders: vec!["/mnt/hdd/roms".to_string()],
+            default_game_folder: "/games/pc".to_string(),
+            extra_game_folders: vec!["/mnt/hdd/games".to_string()],
             ..Default::default()
         };
         let json = serde_json::to_string_pretty(&cfg).unwrap();
@@ -569,6 +497,9 @@ mod tests {
         assert_eq!(loaded.sort_descending, cfg.sort_descending);
         assert_eq!(loaded.save_dir, cfg.save_dir);
         assert_eq!(loaded.roms_folder, cfg.roms_folder);
+        assert_eq!(loaded.extra_roms_folders, cfg.extra_roms_folders);
+        assert_eq!(loaded.default_game_folder, cfg.default_game_folder);
+        assert_eq!(loaded.extra_game_folders, cfg.extra_game_folders);
         assert_eq!(loaded.console("n64").enabled, cfg.console("n64").enabled);
 
         match prev {
@@ -631,41 +562,92 @@ mod tests {
     }
 
     #[test]
+    fn test_config_level_controller_modes_json_roundtrip() {
+        let cfg = Config {
+            linux_controller_mode: Some(ControllerInputMode::Enabled),
+            wine_controller_mode: Some(ControllerInputMode::Disabled),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(json["linux_controller_mode"], "enabled");
+        assert_eq!(json["wine_controller_mode"], "disabled");
+
+        let deserialized: Config = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            deserialized.linux_controller_mode,
+            Some(ControllerInputMode::Enabled)
+        );
+        assert_eq!(
+            deserialized.wine_controller_mode,
+            Some(ControllerInputMode::Disabled)
+        );
+    }
+
+    #[test]
     fn test_rom_folder_is_empty_without_shared_root() {
         assert!(Config::default().rom_folder("gba").as_os_str().is_empty());
     }
-}
-
-#[cfg(test)]
-mod controller_mode_compat_tests {
-    use super::{ConsoleConfig, ControllerInputMode};
 
     #[test]
-    fn test_console_controller_mode_accepts_legacy_backend_names() {
-        let console: ConsoleConfig = serde_json::from_str(
-            r#"{"enabled":false,"executable":"","ra_core":"","fullscreen":false,
-                "controller_mode":"virtual_switch_pro",
-                "controller_profile":"/x/wii-u.json"}"#,
-        )
-        .unwrap();
-        assert_eq!(console.controller_mode, Some(ControllerInputMode::Enabled));
-        assert_eq!(console.controller_profile, "/x/wii-u.json");
+    fn test_all_game_folders_primary_first_then_extras() {
+        let cfg = Config {
+            default_game_folder: "/games/pc".to_string(),
+            extra_game_folders: vec![
+                "/mnt/hdd/games".to_string(),
+                "  ".to_string(),
+                "/games/pc".to_string(),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.all_game_folders(),
+            vec![
+                std::path::PathBuf::from("/games/pc"),
+                std::path::PathBuf::from("/mnt/hdd/games"),
+            ]
+        );
     }
 
     #[test]
-    fn test_config_level_modes_accept_legacy_backend_names() {
-        let config: super::Config = serde_json::from_str(
-            r#"{"linux_controller_mode":"virtual_dualsense",
-                "wine_controller_mode":"virtual_xinput"}"#,
-        )
-        .unwrap();
+    fn test_all_rom_roots_empty_without_any_root() {
+        assert!(Config::default().all_rom_roots().is_empty());
+    }
+
+    #[test]
+    fn test_resolve_rom_path_prefers_existing_root() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let primary = tmp.path().join("roms1");
+        let extra = tmp.path().join("roms2");
+        std::fs::create_dir_all(primary.join("gba")).unwrap();
+        std::fs::create_dir_all(extra.join("gba")).unwrap();
+        std::fs::write(extra.join("gba").join("mario.gba"), b"x").unwrap();
+
+        let cfg = Config {
+            roms_folder: primary.to_string_lossy().into_owned(),
+            extra_roms_folders: vec![extra.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
+        let resolved = cfg.resolve_rom_path("gba", "mario.gba").unwrap();
+        assert_eq!(resolved, extra.join("gba").join("mario.gba"));
+        // Missing files fall back to the primary root.
+        let missing = cfg.resolve_rom_path("gba", "nope.gba").unwrap();
+        assert_eq!(missing, primary.join("gba").join("nope.gba"));
+    }
+
+    #[test]
+    fn test_resolve_rom_path_absolute_passes_through() {
+        let cfg = Config {
+            roms_folder: "/games/roms".to_string(),
+            ..Default::default()
+        };
         assert_eq!(
-            config.linux_controller_mode,
-            Some(ControllerInputMode::Enabled)
+            cfg.resolve_rom_path("gba", "/other/x.gba"),
+            Some(std::path::PathBuf::from("/other/x.gba"))
         );
-        assert_eq!(
-            config.wine_controller_mode,
-            Some(ControllerInputMode::Enabled)
-        );
+    }
+
+    #[test]
+    fn test_resolve_rom_path_none_without_roots() {
+        assert!(Config::default().resolve_rom_path("gba", "x.gba").is_none());
     }
 }

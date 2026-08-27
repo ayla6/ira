@@ -1,29 +1,6 @@
-use crate::{lock_db, DbConn};
+use crate::{err, lock_db, DbConn};
 use ira_models::{GameEntry, GameKind};
 use rusqlite::params;
-
-fn find_game_by(
-    conn: &DbConn,
-    where_clause: &str,
-    params: &[&dyn rusqlite::ToSql],
-) -> Result<Option<GameEntry>, String> {
-    let c = lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
-            "SELECT {} FROM games WHERE {}",
-            crate::GAME_COLUMNS,
-            where_clause
-        ))
-        .map_err(|e| e.to_string())?;
-    let mut entries = stmt
-        .query_map(params, crate::game_entry_from_row)
-        .map_err(|e| e.to_string())?;
-    match entries.next() {
-        Some(Ok(entry)) => Ok(Some(entry)),
-        Some(Err(e)) => Err(e.to_string()),
-        None => Ok(None),
-    }
-}
 
 fn find_all_games_by(
     conn: &DbConn,
@@ -37,13 +14,21 @@ fn find_all_games_by(
             crate::GAME_COLUMNS,
             where_clause
         ))
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
     let entries = stmt
         .query_map(params, crate::game_entry_from_row)
-        .map_err(|e| e.to_string())?;
-    entries
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        .map_err(err)?;
+    entries.collect::<Result<Vec<_>, _>>().map_err(err)
+}
+
+fn find_game_by(
+    conn: &DbConn,
+    where_clause: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> Result<Option<GameEntry>, String> {
+    Ok(find_all_games_by(conn, where_clause, params)?
+        .into_iter()
+        .next())
 }
 
 pub fn find_by_steam_id(conn: &DbConn, steam_id: &str) -> Result<Option<GameEntry>, String> {
@@ -117,7 +102,7 @@ pub fn get_api_dll_folder(conn: &DbConn, game_id: i64) -> Result<String, String>
         params![game_id],
         |r| r.get(0),
     )
-    .map_err(|e| e.to_string())
+    .map_err(err)
 }
 
 /// Whether the game's UFS saves are known to be centralized.
@@ -129,7 +114,7 @@ pub fn get_saves_centralized(conn: &DbConn, game_id: i64) -> Result<bool, String
         |r| r.get::<_, i64>(0),
     )
     .map(|v| v != 0)
-    .map_err(|e| e.to_string())
+    .map_err(err)
 }
 
 #[cfg(test)]

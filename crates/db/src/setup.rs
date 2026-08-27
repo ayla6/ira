@@ -1,4 +1,4 @@
-use crate::DbConn;
+use crate::{err, DbConn};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
@@ -6,7 +6,7 @@ use rusqlite::Connection;
 pub fn checkpoint(conn: &DbConn) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.pragma_update(None, "wal_checkpoint", "TRUNCATE")
-        .map_err(|e| e.to_string())?;
+        .map_err(err)?;
     Ok(())
 }
 
@@ -18,8 +18,7 @@ pub fn update_field(
 ) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     let sql = format!("UPDATE games SET {} = ?1 WHERE id = ?2", column);
-    c.execute(&sql, rusqlite::params![value, id])
-        .map_err(|e| e.to_string())?;
+    c.execute(&sql, rusqlite::params![value, id]).map_err(err)?;
     Ok(())
 }
 

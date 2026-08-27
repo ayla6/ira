@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use std::sync::OnceLock;
 
 use ira_overlay::ui::{capture, push_event, Event};
+use ira_overlay_ipc::ShmHeader;
 
 pub static HAS_FOCUS: AtomicBool = AtomicBool::new(false);
 
@@ -31,14 +32,15 @@ static MOUSE_SY: AtomicI32 = AtomicI32::new(0);
 static POINTER: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
 // --- Evdev keycodes (Wayland uses evdev directly, no +8 offset like X11) ---
-
-const KC_RETURN: u32 = 28;
+// Navigation order matches ShmHeader::NAV_KEYCODES_EVDEV:
+// [Return, Up, Down, Left, Right].
+const KC_RETURN: u32 = ShmHeader::NAV_KEYCODES_EVDEV[0];
 #[cfg(debug_assertions)]
 const KC_F10: u32 = 68;
-const KC_UP: u32 = 103;
-const KC_DOWN: u32 = 108;
-const KC_LEFT: u32 = 105;
-const KC_RIGHT: u32 = 106;
+const KC_UP: u32 = ShmHeader::NAV_KEYCODES_EVDEV[1];
+const KC_DOWN: u32 = ShmHeader::NAV_KEYCODES_EVDEV[2];
+const KC_LEFT: u32 = ShmHeader::NAV_KEYCODES_EVDEV[3];
+const KC_RIGHT: u32 = ShmHeader::NAV_KEYCODES_EVDEV[4];
 
 // Wayland key/button state values.
 const KEY_PRESSED: u32 = 1;

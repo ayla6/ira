@@ -25,7 +25,8 @@ pub use physical::{
 pub use profile::{
     ActionSet, ActionSetLayer, Activation, Activator, ActivatorKind, ActivatorSettings,
     AnalogCondition, AxisDirection, ChordMode, ControllerCalibration, GamepadAxis, GamepadButton,
-    GyroActivation, GyroConfig, GyroMomentum, GyroOrientation, GyroOutput, InputCategory,
+    GyroActivation, GyroConfig, GyroMomentum, GyroOrientation, GyroOutput, GyroStickResponseStyle,
+    GyroStickSettings, InputCategory,
     InputMapping, InputProfile, InputSource, JoystickSettings, ModeShift, MouseAxis, MouseButton,
     OuterRingCommand, OutputAction, ResponseAxisStyle, SourceMode, StickDeadzone, StickOutput,
     StickOutputAxis, StickProcessing, TriggerDampening, VirtualGamepadBackend, PROFILE_VERSION,

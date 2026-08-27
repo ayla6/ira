@@ -8,6 +8,7 @@ use super::input_profile_sheet_base::{
     combo_row, find_mapping, is_trigger_axis, with_mapping, Reopen, SheetBase,
 };
 use super::input_profile_widgets::{
+    slider_row_with_scale,
     format_ms, format_number, format_percent, option_picker_popover, picker_button, slider_row,
     OptionChoice, SettingGroup, SliderSpec,
 };
@@ -291,15 +292,36 @@ pub(crate) fn mode_setting_rows(
             rotation_sensitivity,
             flick_duration_ms,
         } => {
+            // Steam's shared angle calibration: pixels per full 360° sweep
+            // at 1x. Lives on the profile so the gyro edits the same value.
+            let calibration_base = base.clone();
+            rows.push(slider_row_with_scale(
+                &crate::tr!("Flick Stick ° to Mouse Pixels (Dots Per 360°)"),
+                Some(&crate::tr!(
+                    "One full 360° sweep of the stick turns the camera this many pixels of mouse movement at 1x sweep sensitivity. Shared with the Gyro's Dots Per 360°."
+                )),
+                &SliderSpec(
+                    500.0,
+                    30_000.0,
+                    5.0,
+                    f64::from(base.profile.borrow().gyro.dots_per_360),
+                ),
+                |value| format!("{value:.0}px"),
+                move |value| {
+                    calibration_base.profile.borrow_mut().gyro.dots_per_360 = value as f32;
+                    (calibration_base.on_changed)();
+                },
+            )
+            .0);
             rows.push(mode_slider_row(
                 base,
                 target,
-                &crate::tr!("Rotation sensitivity"),
+                &crate::tr!("Flick Stick ° Sweep Sensitivity"),
                 Some(&crate::tr!(
                     "How far a flick turns per degree of stick rotation"
                 )),
                 &SliderSpec(0.1, 10.0, 0.1, f64::from(*rotation_sensitivity)),
-                format_number,
+                |value| format!("{value:.1}x"),
                 |mode, value| {
                     if let SourceMode::Flickstick {
                         rotation_sensitivity,

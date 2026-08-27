@@ -7,7 +7,8 @@
 use super::input_profile_options::source_options_for_device;
 use super::input_profile_sheet_base::combo_row;
 use super::input_profile_widgets::{
-    slider_entry_row, switch_row, OptionChoice, SettingGroup, SliderSpec,
+    format_percent, slider_entry_row, slider_row_with_scale, switch_row, OptionChoice,
+    SettingGroup, SliderSpec,
 };
 use adw::prelude::*;
 use ira_input::{
@@ -28,6 +29,18 @@ struct GyroWidgets {
     invert_x: adw::SwitchRow,
     invert_y: adw::SwitchRow,
     smoothing: adw::SwitchRow,
+    /// Steam's "Dots Per 360°" — pixels per full physical turn at 1x,
+    /// shared with the flick stick.
+    dots_per_360: gtk4::ListBoxRow,
+    /// Clockwise rotation of the 2D gyro output (Steam's "Rotate Output").
+    rotate_output: gtk4::ListBoxRow,
+    /// Gyro-to-stick shaping rows, sensitive only when the output is a
+    /// stick (Steam's "Gyro To Joystick" page).
+    stick_max_output: gtk4::ListBoxRow,
+    stick_response_style: adw::ComboRow,
+    stick_power_curve: gtk4::ListBoxRow,
+    stick_lock_edges: adw::SwitchRow,
+    stick_deadzone: gtk4::ListBoxRow,
 }
 
 pub(super) fn add_gyro_group(
@@ -48,7 +61,8 @@ pub(super) fn add_gyro_group(
         &activation_labels(),
         activation_index(&gyro.borrow().activation),
     );
-    activation.set_title(&crate::tr!("Activation"));
+    activation.set_title(&crate::tr!("Choose Gyro Button(s)"));
+    activation.set_subtitle(&activation_description(activation_index(&gyro.borrow().activation)));
     let button = combo_row(
         &button_option_labels(&button_options),
         activation_button_index(&button_options, &gyro.borrow().activation),
@@ -63,6 +77,129 @@ pub(super) fn add_gyro_group(
         )
         .as_str(),
     );
+    let stick = gyro.borrow().stick;
+    let initial_dots = f64::from(gyro.borrow().dots_per_360);
+    let initial_rotate = f64::from(gyro.borrow().rotate_output);
+    let dots_per_360 = {
+        let gyro = gyro.clone();
+        let on_dirty = on_dirty.clone();
+        slider_entry_row(
+            &crate::tr!("Gyro Angles to Mouse Pixels (Dots Per 360°)"),
+            Some(&crate::tr!(
+                "One full 360° turn of the gyro moves the mouse this many pixels at 1x sensitivity. Shared with the Flick Stick so both calibrate against the same in-game angle."
+            )),
+            &SliderSpec(500.0, 30_000.0, 5.0, initial_dots),
+            move |value| {
+                gyro.borrow_mut().dots_per_360 = value as f32;
+                on_dirty();
+            },
+        )
+    };
+    let rotate_output = {
+        let gyro = gyro.clone();
+        let on_dirty = on_dirty.clone();
+        slider_row_with_scale(
+            &crate::tr!("Rotate Output"),
+            Some(&crate::tr!(
+                "Adjust the 2D output of the gyroscope clockwise/counter clockwise"
+            )),
+            &SliderSpec(0.0, 360.0, 1.0, initial_rotate),
+            |value| format!("{value:.0}°"),
+            move |value| {
+                gyro.borrow_mut().rotate_output = value as f32;
+                on_dirty();
+            },
+        )
+        .0
+    };
+    let stick_max_output = {
+        let gyro = gyro.clone();
+        let on_dirty = on_dirty.clone();
+        slider_row_with_scale(
+            &crate::tr!("Maximum Joystick Output"),
+            Some(&crate::tr!(
+                "Maximum gyro input speed maps to this joystick output. Decrease it to avoid triggering a game's \"Extra Yaw\" setting."
+            )),
+            &SliderSpec(0.1, 1.0, 0.01, f64::from(stick.max_output)),
+            format_percent,
+            move |value| {
+                gyro.borrow_mut().stick.max_output = value as f32;
+                on_dirty();
+            },
+        )
+        .0
+    };
+    let stick_response_style = {
+        let styles = [
+            crate::tr!("Circular"),
+            crate::tr!("Per Axis"),
+        ];
+        let gyro = gyro.clone();
+        let on_dirty = on_dirty.clone();
+        let combo = combo_row(&styles, response_style_index(&stick.response_style));
+        combo.set_title(&crate::tr!("Response Axis Style"));
+        combo.set_subtitle(&crate::tr!(
+            "Apply the response curve per axis, or based on the distance from the center"
+        ));
+        combo.connect_selected_notify(move |combo| {
+            gyro.borrow_mut().stick.response_style = match combo.selected() {
+                1 => ira_input::GyroStickResponseStyle::PerAxis,
+                _ => ira_input::GyroStickResponseStyle::Circular,
+            };
+            on_dirty();
+        });
+        combo
+    };
+    let stick_power_curve = {
+        let gyro = gyro.clone();
+        let on_dirty = on_dirty.clone();
+        slider_row_with_scale(
+            &crate::tr!("Joystick Power Curve"),
+            Some(&crate::tr!(
+                "How aggressively the joystick output deflects: 0.1 extremely aggressive, 1 linear, 4 extremely relaxed"
+            )),
+            &SliderSpec(0.1, 4.0, 0.1, f64::from(stick.power_curve)),
+            |value| format!("{value:.1}"),
+            move |value| {
+                gyro.borrow_mut().stick.power_curve = value as f32;
+                on_dirty();
+            },
+        )
+        .0
+    };
+    let stick_lock_edges = switch_row(
+        &crate::tr!("Lock at Edges"),
+        Some(&crate::tr!(
+            "Locks joystick output to the maximum deflection angle; off lets diagonals use the full output range"
+        )),
+        stick.lock_at_edges,
+        {
+            let gyro = gyro.clone();
+            let on_dirty = on_dirty.clone();
+            move |active| {
+                gyro.borrow_mut().stick.lock_at_edges = active;
+                on_dirty();
+            }
+        },
+    );
+    let stick_deadzone = {
+        let gyro = gyro.clone();
+        let on_dirty = on_dirty.clone();
+        slider_row_with_scale(
+            &crate::tr!("Gyro Speed Deadzone"),
+            Some(&crate::tr!(
+                "The minimum speed the gyro must move before there is a reaction. Combats hand shake; rotation lost to the deadzone is recovered when moving fast."
+            )),
+            &SliderSpec(0.0, 20.0, 0.1, f64::from(stick.deadzone_dps)),
+            |value| format!("{value:.1}°/s"),
+            move |value| {
+                gyro.borrow_mut().stick.deadzone_dps = value as f32;
+                on_dirty();
+            },
+        )
+        .0
+    };
+
     let widgets = GyroWidgets {
         enable: switch_row(&crate::tr!("Enable gyro"), None, gyro.borrow().enabled, {
             let gyro = gyro.clone();
@@ -131,6 +268,13 @@ pub(super) fn add_gyro_group(
                 }
             },
         ),
+        dots_per_360,
+        rotate_output,
+        stick_max_output,
+        stick_response_style,
+        stick_power_curve,
+        stick_lock_edges,
+        stick_deadzone,
     };
     update_dependency_rows(&widgets, &gyro.borrow());
 
@@ -139,12 +283,26 @@ pub(super) fn add_gyro_group(
     group.add(&widgets.button);
     group.add(&widgets.output);
     group.add(&widgets.orientation);
+    group.add(&widgets.dots_per_360);
     group.add(&widgets.sensitivity);
     group.add(&widgets.invert_x);
     group.add(&widgets.invert_y);
     group.add(&widgets.smoothing);
+    group.add(&widgets.rotate_output);
+    group.add(&widgets.stick_max_output);
+    group.add(&widgets.stick_response_style);
+    group.add(&widgets.stick_power_curve);
+    group.add(&widgets.stick_lock_edges);
+    group.add(&widgets.stick_deadzone);
     page.append(&group.root);
     connect_gyro_changes(&widgets, &button_options, gyro, on_dirty);
+}
+
+fn response_style_index(style: &ira_input::GyroStickResponseStyle) -> u32 {
+    match style {
+        ira_input::GyroStickResponseStyle::Circular => 0,
+        ira_input::GyroStickResponseStyle::PerAxis => 1,
+    }
 }
 
 fn connect_gyro_changes(
@@ -212,7 +370,8 @@ fn connect_activation_changes(
         let mut gyro = gyro_for_button.borrow_mut();
         gyro.activation = match (gyro.activation, activation_for_button.selected()) {
             (GyroActivation::Hold(_), 1) => GyroActivation::Hold(button),
-            (GyroActivation::Toggle(_), 2) => GyroActivation::Toggle(button),
+            (GyroActivation::Suppress(_), 2) => GyroActivation::Suppress(button),
+            (GyroActivation::Toggle(_), 3) => GyroActivation::Toggle(button),
             (current, _) => current,
         };
         drop(gyro);
@@ -236,10 +395,14 @@ fn apply_activation_selection(
         .unwrap_or(GamepadButton::LeftTrigger);
     gyro.borrow_mut().activation = match selected {
         1 => GyroActivation::Hold(fallback_button),
-        2 => GyroActivation::Toggle(fallback_button),
+        2 => GyroActivation::Suppress(fallback_button),
+        3 => GyroActivation::Toggle(fallback_button),
         _ => GyroActivation::Always,
     };
     widgets.button.set_visible(selected != 0);
+    widgets
+        .activation
+        .set_subtitle(&activation_description(selected));
     on_dirty();
 }
 
@@ -265,6 +428,13 @@ fn update_dependency_rows(widgets: &GyroWidgets, gyro: &GyroConfig) {
     widgets.invert_x.set_sensitive(enabled);
     widgets.invert_y.set_sensitive(enabled);
     widgets.smoothing.set_sensitive(enabled);
+    let stick_output =
+        enabled && matches!(gyro.output, GyroOutput::LeftStick | GyroOutput::RightStick);
+    widgets.stick_max_output.set_sensitive(stick_output);
+    widgets.stick_response_style.set_sensitive(stick_output);
+    widgets.stick_power_curve.set_sensitive(stick_output);
+    widgets.stick_lock_edges.set_sensitive(stick_output);
+    widgets.stick_deadzone.set_sensitive(stick_output);
     widgets
         .button
         .set_visible(enabled && widgets.activation.selected() != 0);
@@ -274,15 +444,6 @@ fn update_dependency_rows(widgets: &GyroWidgets, gyro: &GyroConfig) {
 /// to horizontal and vertical output.
 fn orientation_choices() -> Vec<(GyroOrientation, OptionChoice)> {
     vec![
-        (
-            GyroOrientation::Local,
-            OptionChoice {
-                title: crate::tr!("Passthrough"),
-                description: Some(crate::tr!(
-                    "Raw controller axes with no gravity math: reported yaw drives horizontal output and reported pitch drives vertical output exactly as the sensor delivers them."
-                )),
-            },
-        ),
         (
             GyroOrientation::Yaw,
             OptionChoice {
@@ -374,12 +535,24 @@ fn orientation_row(
 
 fn activation_labels() -> Vec<String> {
     [
-        crate::tr!("Always on"),
-        crate::tr!("While button held"),
-        crate::tr!("Button toggle"),
+        crate::tr!("None (Gyro Always On)"),
+        crate::tr!("Hold to Enable Gyro"),
+        crate::tr!("Hold to Suppress Gyro"),
+        crate::tr!("Toggle Gyro On/Off"),
     ]
     .into_iter()
     .collect()
+}
+
+/// Steam's described activation popup.
+fn activation_description(selected: u32) -> String {
+    match selected {
+        0 => crate::tr!("The gyro is always on").to_string(),
+        1 => crate::tr!("Gyro is off unless any assigned button is held.").to_string(),
+        2 => crate::tr!("Gyro is on unless any assigned button is held.").to_string(),
+        3 => crate::tr!("Gyro will toggle on or off any time an assigned button is pressed.").to_string(),
+        _ => String::new(),
+    }
 }
 
 fn output_labels() -> Vec<String> {
@@ -397,7 +570,8 @@ fn activation_index(activation: &GyroActivation) -> u32 {
     match activation {
         GyroActivation::Always => 0,
         GyroActivation::Hold(_) => 1,
-        GyroActivation::Toggle(_) => 2,
+        GyroActivation::Suppress(_) => 2,
+        GyroActivation::Toggle(_) => 3,
     }
 }
 

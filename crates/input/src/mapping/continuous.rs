@@ -12,13 +12,13 @@ use std::collections::HashMap;
 use super::{MappingEngine, DEFAULT_TICK_INTERVAL};
 use crate::gyro::GyroRates;
 use crate::profile::{
-    GamepadAxis, GyroActivation, GyroOutput, InputProfile, InputSource, MouseAxis, TriggerDampening,
+    GamepadAxis, GyroActivation, GyroOutput, GyroStickResponseStyle, GyroStickSettings,
+    InputProfile, InputSource, MouseAxis, TriggerDampening,
 };
 use crate::OutputEvent;
 
 /// Gyro-to-mouse conversion at sensitivity 1.0: relative counts per radian of
 /// rotation (≈30 counts per degree, a medium-sensitivity mouse feel).
-const GYRO_MOUSE_COUNTS_PER_RADIAN: f32 = 1718.87;
 /// Stick-to-mouse velocity at full deflection and sensitivity 1.0, in counts
 /// per second.
 pub(crate) const STICK_MOUSE_COUNTS_PER_SECOND: f32 = 2000.0;
@@ -91,6 +91,10 @@ impl MappingEngine {
             GyroActivation::Hold(button) => {
                 self.source_value(InputSource::Button(button)) > super::BUTTON_THRESHOLD
             }
+            // Steam's "Hold to Suppress": on unless the button is held.
+            GyroActivation::Suppress(button) => {
+                self.source_value(InputSource::Button(button)) <= super::BUTTON_THRESHOLD
+            }
             GyroActivation::Toggle(button) => self
                 .toggles
                 .get(&InputSource::Button(button))
@@ -129,19 +133,19 @@ impl MappingEngine {
     fn emit_mouse_motion(&self, dt: f32, output: &mut Vec<OutputEvent>) {
         let gyro = &self.profile.gyro;
         if gyro.enabled && gyro.output == GyroOutput::Mouse {
+            // Steam's "Dots Per 360°": one full physical turn produces this
+            // many mouse pixels at 1x sensitivity.
+            let counts_per_radian = gyro.dots_per_360 / std::f32::consts::TAU;
             let scale =
-                GYRO_MOUSE_COUNTS_PER_RADIAN * gyro.sensitivity * dt * self.gyro_dampening_scale();
-            push_mouse(
-                output,
-                MouseAxis::X,
-                self.gyro_effective.yaw * scale * sign(gyro.invert_x),
+                counts_per_radian * gyro.sensitivity * dt * self.gyro_dampening_scale();
+            let (yaw, pitch) = rotate_gyro_output(
+                self.gyro_effective.yaw,
+                self.gyro_effective.pitch,
+                gyro.rotate_output,
             );
+            push_mouse(output, MouseAxis::X, yaw * scale * sign(gyro.invert_x));
             // Screen Y grows downward while positive pitch aims up.
-            push_mouse(
-                output,
-                MouseAxis::Y,
-                -self.gyro_effective.pitch * scale * sign(gyro.invert_y),
-            );
+            push_mouse(output, MouseAxis::Y, -pitch * scale * sign(gyro.invert_y));
         }
     }
 
@@ -189,9 +193,14 @@ impl MappingEngine {
             // never through the mapping engine.
             GyroOutput::Mouse | GyroOutput::NativeMotion => return,
         };
-        let scale = GYRO_STICK_RADS_PER_UNIT / gyro.sensitivity;
-        let x = (self.gyro_effective.yaw / scale).clamp(-1.0, 1.0) * sign(gyro.invert_x);
-        let y = (self.gyro_effective.pitch / scale).clamp(-1.0, 1.0) * sign(gyro.invert_y);
+        let (yaw, pitch) = rotate_gyro_output(
+            self.gyro_effective.yaw,
+            self.gyro_effective.pitch,
+            gyro.rotate_output,
+        );
+        let (x, y) = gyro_stick_deflection(yaw, pitch, &gyro.stick, gyro.sensitivity);
+        let x = x * sign(gyro.invert_x);
+        let y = y * sign(gyro.invert_y);
         for (axis, value) in [(x_axis, x), (y_axis, y)] {
             if !totals.contains_key(&axis) {
                 order.push(axis);
@@ -199,6 +208,73 @@ impl MappingEngine {
             *totals.entry(axis).or_insert(0.0) += value;
         }
     }
+}
+
+/// Steam's Gyro-To-Joystick pipeline. `yaw`/`pitch` are the desired camera
+/// turn rates in rad/s; the output is stick deflection in −1..=1.
+///
+/// Speeds below the deadzone output nothing (with recovery: the cutoff
+/// scales the surviving rate so fast motions lose nothing overall).
+/// Surviving rates are normalized against the full-deflection turn rate,
+/// shaped by the power curve (per axis or on the deflection magnitude),
+/// scaled to the maximum output, and optionally locked inside the unit
+/// circle.
+fn gyro_stick_deflection(
+    yaw: f32,
+    pitch: f32,
+    settings: &GyroStickSettings,
+    sensitivity: f32,
+) -> (f32, f32) {
+    const MAX_TURN_RATE: f32 = GYRO_STICK_RADS_PER_UNIT;
+    let deadzone = settings.deadzone_dps.to_radians();
+    let recover = |rate: f32| -> f32 {
+        let magnitude = rate.abs();
+        if magnitude <= deadzone || magnitude <= f32::EPSILON {
+            return 0.0;
+        }
+        // Recover what the deadzone removed: scale by in/(in − dz) so a
+        // rate far above the cutoff passes nearly untouched.
+        rate * (magnitude / (magnitude - deadzone))
+    };
+    let yaw = recover(yaw) * sensitivity;
+    let pitch = recover(pitch) * sensitivity;
+
+    let curve = |normalized: f32| -> f32 {
+        normalized.clamp(0.0, 1.0).powf(settings.power_curve) * settings.max_output
+    };
+    let (x, y) = match settings.response_style {
+        GyroStickResponseStyle::PerAxis => (
+            curve(yaw / MAX_TURN_RATE),
+            curve(pitch / MAX_TURN_RATE),
+        ),
+        GyroStickResponseStyle::Circular => {
+            let magnitude = (yaw * yaw + pitch * pitch).sqrt();
+            if magnitude <= f32::EPSILON {
+                (0.0, 0.0)
+            } else {
+                let shaped = curve(magnitude / MAX_TURN_RATE) / magnitude;
+                (yaw * shaped, pitch * shaped)
+            }
+        }
+    };
+    if settings.lock_at_edges {
+        let magnitude = (x * x + y * y).sqrt();
+        if magnitude > settings.max_output && magnitude > f32::EPSILON {
+            return (x / magnitude * settings.max_output, y / magnitude * settings.max_output);
+        }
+    }
+    (x.clamp(-1.0, 1.0), y.clamp(-1.0, 1.0))
+}
+
+/// Rotates the gyro's 2D output clockwise by `degrees`, Steam's "Rotate
+/// Output": a favorite diagonal hold angle can be straightened without
+/// changing how the pad is held.
+fn rotate_gyro_output(yaw: f32, pitch: f32, degrees: f32) -> (f32, f32) {
+    if degrees.abs() < 0.01 {
+        return (yaw, pitch);
+    }
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    (yaw * cos - pitch * sin, yaw * sin + pitch * cos)
 }
 
 fn sign(inverted: bool) -> f32 {
@@ -318,11 +394,11 @@ mod tests {
         let events = engine.tick(4_000);
         let dt = 0.004;
         assert!(
-            (motion(&events, MouseAxis::X) - 2.0 * GYRO_MOUSE_COUNTS_PER_RADIAN * dt).abs() < 0.5
+            (motion(&events, MouseAxis::X) - 2.0 * (6545.0 / std::f32::consts::TAU) * dt).abs() < 0.5
         );
         // Positive pitch aims up, which is negative screen Y.
         assert!(
-            (motion(&events, MouseAxis::Y) - 1.0 * GYRO_MOUSE_COUNTS_PER_RADIAN * dt).abs() < 0.5
+            (motion(&events, MouseAxis::Y) - 1.0 * (6545.0 / std::f32::consts::TAU) * dt).abs() < 0.5
         );
     }
 
@@ -410,7 +486,7 @@ mod tests {
         let mut engine = MappingEngine::new(profile).unwrap();
         engine.update_gyro(GyroRates {
             yaw: 0.75,
-            pitch: -3.0,
+            pitch: 0.0,
             gravity_locked: true,
         });
         let events = engine.tick(4_000);
@@ -420,6 +496,12 @@ mod tests {
             OutputEvent::GamepadAxis { axis: GamepadAxis::RightX, value } if (value - 0.5).abs() < 0.001
         )));
         // 3 rad/s is double the full-deflection rate and clamps.
+        engine.update_gyro(GyroRates {
+            yaw: 0.0,
+            pitch: -3.0,
+            gravity_locked: true,
+        });
+        let events = engine.tick(8_000);
         assert!(events.iter().any(|event| matches!(
             event,
             OutputEvent::GamepadAxis { axis: GamepadAxis::RightY, value } if (value + 1.0).abs() < 0.001
@@ -449,6 +531,55 @@ mod tests {
             event,
             OutputEvent::GamepadAxis { axis: GamepadAxis::RightX, value } if (value - 0.75).abs() < 0.001
         )));
+    }
+
+    #[test]
+    fn test_gyro_stick_pipeline_deadzone_curve_and_clamp() {
+        use crate::profile::GyroStickSettings;
+        // Deadzone: a rate under the cutoff outputs nothing...
+        let (x, _) = super::gyro_stick_deflection(
+            0.1,
+            0.0,
+            &GyroStickSettings {
+                deadzone_dps: 10.0, // ~0.17 rad/s
+                ..GyroStickSettings::default()
+            },
+            1.0,
+        );
+        assert_eq!(x, 0.0);
+        // ...but recovery preserves rotation far above the cutoff.
+        let (x, _) = super::gyro_stick_deflection(
+            1.5,
+            0.0,
+            &GyroStickSettings {
+                deadzone_dps: 10.0,
+                ..GyroStickSettings::default()
+            },
+            1.0,
+        );
+        assert!((x - 1.0).abs() < 0.001, "{x}");
+        // Relaxed curve: half-rate input deflects much less than half.
+        let (relaxed, _) = super::gyro_stick_deflection(
+            0.75,
+            0.0,
+            &GyroStickSettings {
+                power_curve: 4.0,
+                ..GyroStickSettings::default()
+            },
+            1.0,
+        );
+        assert!(relaxed < 0.1, "relaxed {relaxed}");
+        // Maximum output caps full deflection.
+        let (capped, _) = super::gyro_stick_deflection(
+            3.0,
+            0.0,
+            &GyroStickSettings {
+                max_output: 0.4,
+                ..GyroStickSettings::default()
+            },
+            1.0,
+        );
+        assert!((capped - 0.4).abs() < 0.001, "{capped}");
     }
 
     #[test]
@@ -490,7 +621,7 @@ mod tests {
         let dt = 0.004f32;
         let held = motion(&engine.tick(4_000), MouseAxis::X);
         assert!(
-            (held - 4.0 * GYRO_MOUSE_COUNTS_PER_RADIAN * dt).abs() < 1.0,
+            (held - 4.0 * (6545.0 / std::f32::consts::TAU) * dt).abs() < 1.0,
             "held: {held}"
         );
 
@@ -498,7 +629,7 @@ mod tests {
         // first tick after release outputs the friction-decayed rate.
         engine.process(event(InputSource::Button(GamepadButton::LeftShoulder), 0.0));
         let glide = motion(&engine.tick(8_000), MouseAxis::X);
-        let expected = 4.0 * (-2.0 * dt).exp() * GYRO_MOUSE_COUNTS_PER_RADIAN * dt;
+        let expected = 4.0 * (-2.0 * dt).exp() * (6545.0 / std::f32::consts::TAU) * dt;
         assert!((glide - expected).abs() < 1.0, "glide: {glide}");
 
         // After a few time constants the glide is spent and output stops.

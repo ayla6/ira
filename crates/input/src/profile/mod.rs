@@ -7,7 +7,8 @@ mod model;
 pub use model::{
     ActionSet, ActionSetLayer, Activation, Activator, ActivatorKind, ActivatorSettings,
     AnalogCondition, AxisDirection, ChordMode, ControllerCalibration, GamepadAxis, GamepadButton,
-    GyroActivation, GyroConfig, GyroMomentum, GyroOrientation, GyroOutput, InputCategory,
+    GyroActivation, GyroConfig, GyroMomentum, GyroOrientation, GyroOutput, GyroStickResponseStyle,
+    GyroStickSettings, InputCategory,
     InputMapping, InputProfile, InputSource, JoystickSettings, ModeShift, MouseAxis, MouseButton,
     OuterRingCommand, OutputAction, ResponseAxisStyle, SourceMode, StickDeadzone, StickOutput,
     StickOutputAxis, StickProcessing, TriggerDampening, VirtualGamepadBackend, PROFILE_VERSION,
@@ -22,7 +23,17 @@ impl InputProfile {
         let mut profile: InputProfile =
             serde_json::from_str(json).map_err(|error| format!("invalid profile: {error}"))?;
         normalize_stick_mappings(&mut profile);
+        normalize_gyro_orientation(&mut profile);
         Ok(profile)
+    }
+}
+
+/// "Passthrough" (raw local axes) was a failed native-gyro experiment and
+/// is no longer offered: profiles carrying it load as Player Space, the
+/// gravity-corrected default that behaves at any hold angle.
+fn normalize_gyro_orientation(profile: &mut InputProfile) {
+    if profile.gyro.orientation == GyroOrientation::Local {
+        profile.gyro.orientation = GyroOrientation::PlayerSpace;
     }
 }
 

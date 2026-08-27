@@ -8,9 +8,6 @@ use crate::profile::{GamepadAxis, InputSource, MouseAxis, SourceMode};
 /// Stick deflection that counts as "pointing" (below this the stick is
 /// centered and no flick or rotation happens).
 const FLICK_ENGAGE: f32 = 0.85;
-/// Base camera turn for a full 180° flick, in relative mouse counts at
-/// sensitivity 1.0 (tuned like Steam's default; sensitivity scales it).
-const FLICK_COUNTS_PER_360: f32 = 7200.0;
 /// How long a full flick takes, in seconds, at flick_duration_ms = 100.
 const FLICK_BASE_SECONDS: f32 = 0.1;
 
@@ -49,7 +46,10 @@ impl MappingEngine {
                 continue;
             };
             let state = self.flick_states.entry(source).or_default();
-            emit_flick_for_stick(state, x, y, dt, rotation_sensitivity, &mut output);
+            // Steam's shared calibration: one 360° sweep moves this many
+            // mouse pixels at 1x sweep sensitivity.
+            let dots_per_360 = self.profile.gyro.dots_per_360;
+            emit_flick_for_stick(state, x, y, dt, rotation_sensitivity, dots_per_360, &mut output);
         }
         output
     }
@@ -81,6 +81,7 @@ fn emit_flick_for_stick(
     y: f32,
     dt: f32,
     sensitivity: f32,
+    dots_per_360: f32,
     output: &mut Vec<OutputEvent>,
 ) {
     let magnitude = (x * x + y * y).sqrt();
@@ -103,7 +104,7 @@ fn emit_flick_for_stick(
     if state.flick_remaining > VALUE_EPSILON {
         // Emit the in-flight flick burst.
         let step = state.flick_remaining.min(dt / FLICK_BASE_SECONDS);
-        let counts = step * FLICK_COUNTS_PER_360 * sensitivity * state.flick_direction;
+        let counts = step * dots_per_360 * sensitivity * state.flick_direction;
         push_yaw(output, counts);
         state.flick_remaining -= step;
     }
@@ -113,7 +114,7 @@ fn emit_flick_for_stick(
         if delta.abs() > VALUE_EPSILON {
             // Continuous rotation proportional to how fast the player
             // swings the stick.
-            push_yaw(output, delta * FLICK_COUNTS_PER_360 / std::f32::consts::TAU);
+            push_yaw(output, delta * dots_per_360 / std::f32::consts::TAU);
             state.last_angle = Some(angle);
         }
     }
@@ -203,6 +204,7 @@ mod tests {
     #[test]
     fn test_flick_up_to_down_turns_180_degrees_over_time() {
         let profile = flick_profile();
+        let dots = profile.gyro.dots_per_360;
         let mut engine = MappingEngine::new(profile).unwrap();
         stick(&mut engine, 0.0, -1.0); // up
         assert!(yaw_total(&engine.tick(4_000)).abs() < 1.0);
@@ -215,8 +217,8 @@ mod tests {
         for i in 1..20 {
             total += yaw_total(&engine.tick(5_000 + i * 4_000));
         }
-        // A full half turn is FLICK_COUNTS_PER_360 / 2.
-        let expected = FLICK_COUNTS_PER_360 / 2.0;
+        // A full half turn is dots_per_360 / 2.
+        let expected = dots / 2.0;
         assert!(
             (total.abs() - expected).abs() < expected * 0.2,
             "total {total} vs expected ~{expected}"
@@ -241,6 +243,7 @@ mod tests {
     #[test]
     fn test_swinging_the_stick_rotates_continuously() {
         let profile = flick_profile();
+        let dots = profile.gyro.dots_per_360;
         let mut engine = MappingEngine::new(profile).unwrap();
         stick(&mut engine, 0.0, -1.0); // engage pointing up
         engine.tick(4_000);
@@ -251,7 +254,7 @@ mod tests {
             stick(&mut engine, angle.sin(), -angle.cos());
             total += yaw_total(&engine.tick(4_000 + step * 4_000));
         }
-        let expected = FLICK_COUNTS_PER_360 / 4.0; // quarter turn
+        let expected = dots / 4.0; // quarter turn
         assert!(
             (total - expected).abs() < expected * 0.25,
             "total {total} vs expected ~{expected}"

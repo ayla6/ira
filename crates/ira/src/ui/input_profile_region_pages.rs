@@ -7,7 +7,7 @@
 use super::css::{CSS_DIM_LABEL, CSS_FLAT, CSS_SOURCE_BADGE, CSS_SQUARE_BUTTON};
 use super::helpers::esc;
 use super::input_output_picker::{show_output_picker, OutputPickerScope};
-use super::input_profile_activator_sheet::{show_input_sheet, InputSheetRequest};
+use super::input_profile_activator_sheet::{build_inline_input_sheet, InputSheetRequest};
 use super::input_profile_assets::{set_source_asset, source_badge};
 use super::input_profile_editor_regions::{region_groups, source_label, Region};
 use super::input_profile_options::output_display_label;
@@ -68,7 +68,12 @@ pub(crate) fn rebuild_region_pages(ctx: &PagesCtx, pages: &RegionPages) {
             widget.set_title(&group.title);
             for source in &group.sources {
                 let mapping = mappings.iter().find(|mapping| mapping.source == *source);
-                widget.add(&region_source_row(ctx, *source, mapping, family));
+                let (row, sheet) = region_source_row(ctx, *source, mapping, family);
+                widget.add(&row);
+                // The input's settings expand right beneath its row.
+                if let Some(sheet) = sheet {
+                    widget.add(&sheet);
+                }
             }
             page.append(&widget);
         }
@@ -96,11 +101,12 @@ fn region_source_row(
     source: InputSource,
     mapping: Option<&InputMapping>,
     family: ira_input::ControllerFamily,
-) -> gtk4::Widget {
+) -> (gtk4::Widget, Option<gtk4::Revealer>) {
     if is_stick_source(source) || is_trigger_axis(source) {
-        analog_row(ctx, source, mapping, family).upcast()
+        let (row, sheet) = analog_row(ctx, source, mapping, family);
+        (row.upcast(), sheet)
     } else {
-        command_row(ctx, source, mapping, family).upcast()
+        command_row(ctx, source, mapping, family)
     }
 }
 
@@ -121,7 +127,7 @@ fn command_row(
     source: InputSource,
     mapping: Option<&InputMapping>,
     family: ira_input::ControllerFamily,
-) -> adw::ActionRow {
+) -> (gtk4::Widget, Option<gtk4::Revealer>) {
     let row = adw::ActionRow::new();
     let unmapped = mapping.is_none();
     add_source_prefix(&row, source, family, unmapped);
@@ -135,13 +141,15 @@ fn command_row(
     value_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     value_label.set_valign(gtk4::Align::Center);
     row.add_suffix(&value_label);
-    if !unmapped {
-        row.add_suffix(&gear_button(ctx, source));
-    }
     let on_rebind = rebind_hook(ctx, source);
     row.set_activatable(true);
     row.connect_activated(move |_| on_rebind());
-    row
+    if unmapped {
+        return (row.upcast(), None);
+    }
+    let (gear, revealer) = gear_button(ctx, source);
+    row.add_suffix(&gear);
+    (row.upcast(), Some(revealer))
 }
 
 /// Steam's analog row as a native combo: the behavior is the row's own
@@ -153,7 +161,7 @@ fn analog_row(
     source: InputSource,
     mapping: Option<&InputMapping>,
     family: ira_input::ControllerFamily,
-) -> adw::ComboRow {
+) -> (gtk4::Widget, Option<gtk4::Revealer>) {
     let row = adw::ComboRow::new();
     add_source_prefix(&row, source, family, false);
     row.set_title(&crate::tr!("Behavior"));
@@ -197,10 +205,12 @@ fn analog_row(
         (ctx_for_pick.on_dirty)();
     });
 
-    if mapping.is_some() {
-        row.add_suffix(&gear_button(ctx, source));
+    if mapping.is_none() {
+        return (row.upcast(), None);
     }
-    row
+    let (gear, revealer) = gear_button(ctx, source);
+    row.add_suffix(&gear);
+    (row.upcast(), Some(revealer))
 }
 
 fn add_source_prefix(
@@ -222,17 +232,32 @@ fn add_source_prefix(
     row.add_prefix(&badge);
 }
 
-/// The gear every Steam binding row carries: it opens the per-input sheet
-/// with activators, mode shifts, and the analog settings.
-fn gear_button(ctx: &PagesCtx, source: InputSource) -> gtk4::Button {
+/// The gear every Steam binding row carries: it toggles the input's
+/// settings inline — the sheet's groups expand beneath the row instead of
+/// a floating window. Content is built lazily on first expansion.
+fn gear_button(ctx: &PagesCtx, source: InputSource) -> (gtk4::Button, gtk4::Revealer) {
     let gear = gtk4::Button::from_icon_name("emblem-system-symbolic");
     gear.add_css_class(CSS_FLAT);
     gear.add_css_class(CSS_SQUARE_BUTTON);
     gear.set_valign(gtk4::Align::Center);
     gear.set_tooltip_text(Some(&crate::tr!("Edit")));
+    let revealer = gtk4::Revealer::new();
+    revealer.set_transition_type(gtk4::RevealerTransitionType::SlideDown);
+    revealer.set_visible(false);
+    let built = std::rc::Rc::new(std::cell::Cell::new(false));
     let ctx = ctx.clone();
-    gear.connect_clicked(move |_| open_sheet(&ctx, source));
-    gear
+    let revealer_for_toggle = revealer.clone();
+    gear.connect_clicked(move |gear| {
+        let reveal = !revealer_for_toggle.reveals_child();
+        if reveal && !built.replace(true) {
+            revealer_for_toggle
+                .set_child(Some(&inline_sheet_content(&ctx, source)));
+            revealer_for_toggle.set_visible(true);
+        }
+        revealer_for_toggle.set_reveal_child(reveal);
+        gear.set_tooltip_text(Some(&crate::tr!("Collapse")));
+    });
+    (gear, revealer)
 }
 
 /// Steam's behavior list for an analog source: the modes it can take, each
@@ -381,24 +406,21 @@ fn apply_quick_rebind(ctx: &PagesCtx, source: InputSource, output: OutputAction)
     (ctx.on_dirty)();
 }
 
-fn open_sheet(ctx: &PagesCtx, source: InputSource) {
+fn inline_sheet_content(ctx: &PagesCtx, source: InputSource) -> gtk4::Box {
     let backend = ctx.profile.borrow().backend;
     // The sheet mutates the profile directly; refresh summaries + dirty
     // state after every change it reports.
     let ctx_for_changes = ctx.clone();
     let on_changed: Rc<dyn Fn()> = Rc::new(move || (ctx_for_changes.on_dirty)());
-    show_input_sheet(
-        &ctx.window,
-        InputSheetRequest {
-            profile: ctx.profile.clone(),
-            gyro: ctx.gyro.clone(),
-            active_target: ctx.active_target.get(),
-            source,
-            device: ctx.device.clone(),
-            backend,
-            on_changed,
-        },
-    )
+    build_inline_input_sheet(InputSheetRequest {
+        profile: ctx.profile.clone(),
+        gyro: ctx.gyro.clone(),
+        active_target: ctx.active_target.get(),
+        source,
+        device: ctx.device.clone(),
+        backend,
+        on_changed,
+    })
 }
 
 /// Identity mapping for a freshly added input: buttons passthrough to their

@@ -4,7 +4,6 @@
 //! apply straight to the profile; `on_changed` fires after each one so
 //! the region pages can refresh their summaries.
 
-use super::input_profile_editor_regions::source_label;
 use super::input_profile_mode_shifts::shifts_group;
 use super::input_profile_sheet_base::{find_mapping, is_trigger_axis, OnChanged, ProfileRc};
 use super::input_profile_source_modes::{behavior_group, mode_settings_group, modes_for};
@@ -23,32 +22,19 @@ pub(crate) struct InputSheetRequest {
     pub on_changed: OnChanged,
 }
 
-pub(crate) fn show_input_sheet(parent: &impl IsA<gtk4::Widget>, request: InputSheetRequest) {
-    let window = adw::Dialog::new();
-    window.set_content_width(560);
-    // This sheet floats inside the profile editor, which itself caps at
-    // 640 px — the sheet must fit under that with its own chrome.
-    super::helpers::fit_dialog_height(&window, parent, 590);
-    window.set_title(&sheet_title(&request));
-
-    let header_bar = adw::HeaderBar::new();
+/// Builds the per-input settings as an inline content box for the region
+/// rows' expanders — same groups the floating sheet used (behavior, analog
+/// response, activators, mode shifts), no window chrome.
+pub(crate) fn build_inline_input_sheet(request: InputSheetRequest) -> gtk4::Box {
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    content.set_margin_top(12);
-    content.set_margin_bottom(16);
-    content.set_margin_start(16);
-    content.set_margin_end(16);
-    let scroll = gtk4::ScrolledWindow::new();
-    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    scroll.set_vexpand(true);
-    scroll.set_child(Some(&content));
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&header_bar);
-    toolbar.set_content(Some(&scroll));
-    window.set_child(Some(&toolbar));
+    content.set_margin_top(4);
+    content.set_margin_bottom(12);
+    content.set_margin_start(12);
+    content.set_margin_end(12);
 
     let base = super::input_profile_sheet_base::SheetBase {
         gyro: request.gyro.clone(),
-        content,
+        content: content.clone(),
         profile: request.profile,
         active_target: request.active_target,
         source: request.source,
@@ -57,12 +43,8 @@ pub(crate) fn show_input_sheet(parent: &impl IsA<gtk4::Widget>, request: InputSh
         on_changed: request.on_changed,
         rebuild_pending: Rc::new(std::cell::Cell::new(false)),
     };
-    fill_sheet(&base);
-    window.present(Some(parent));
-}
-
-fn sheet_title(request: &InputSheetRequest) -> String {
-    crate::tr!("Edit {input}").replace("{input}", &source_label(request.source))
+    rebuild_sheet(&base);
+    content
 }
 
 /// Rebuild the whole sheet after every structural change (mode or activator

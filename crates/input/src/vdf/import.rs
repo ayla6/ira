@@ -47,14 +47,29 @@ pub fn import_vdf(text: &str) -> Result<(InputProfile, ImportReport), String> {
         }
     }
 
+    // The actions block carries human titles for presets ("Camera"); the
+    // preset entries themselves only carry Steam's Preset_1000001 names.
+    let mut action_titles: HashMap<String, String> = HashMap::new();
+    for actions in find_all(children, "actions") {
+        for action in actions.children() {
+            if let Some(title) = action.str("title") {
+                action_titles.insert(action.key.clone(), title.to_string());
+            }
+        }
+    }
+
     // Presets become action sets; the first is the default layout.
     let mut sets: Vec<ActionSet> = Vec::new();
     for preset in find_all(children, "preset") {
         let Some(bindings) = preset.obj("group_source_bindings") else {
             continue;
         };
+        let preset_name = preset.str("name").unwrap_or("Set");
         let mut set = ActionSet {
-            name: preset.str("name").unwrap_or("Set").to_string(),
+            name: action_titles
+                .get(preset_name)
+                .cloned()
+                .unwrap_or_else(|| preset_name.to_string()),
             inputs: Vec::new(),
         };
         for entry in bindings {
@@ -84,8 +99,16 @@ pub fn import_vdf(text: &str) -> Result<(InputProfile, ImportReport), String> {
     }
     profile.action_sets = sets;
 
-    if !find_all(children, "action_layers").is_empty() {
+    if find_all(children, "action_layers")
+        .iter()
+        .any(|layers| !layers.children().is_empty())
+    {
         report.warn("action layers are not imported yet");
+    }
+    // Passthrough (raw local axes) is no longer offered; imported profiles
+    // get the gravity-corrected default.
+    if profile.gyro.orientation == GyroOrientation::Local {
+        profile.gyro.orientation = GyroOrientation::PlayerSpace;
     }
     if profile.action_sets.len() == 1 {
         // A single set cannot target other sets; drop internal outputs so
@@ -189,7 +212,7 @@ fn import_group(
             import_trigger(group, region, set, report);
         }
         "joystick_move" | "joystick_mouse" | "mouse_joystick" | "flickstick" | "absolute_mouse" => {
-            import_stick(group, region, mode, set);
+            import_stick(group, region, mode, set, report);
         }
         "gyro_to_mouse" | "gyro_to_joystick" => {
             import_gyro(group, mode, gyro, report);
@@ -207,6 +230,10 @@ fn button_sources(mode: &str) -> &'static [(&'static str, GamepadButton)] {
             ("dpad_west", GamepadButton::DpadLeft),
         ],
         "switches" => &[
+            ("button_escape", GamepadButton::Start),
+            ("button_menu", GamepadButton::Back),
+            ("left_bumper", GamepadButton::LeftShoulder),
+            ("right_bumper", GamepadButton::RightShoulder),
             ("click", GamepadButton::Start),
             ("escape", GamepadButton::Back),
         ],
@@ -271,7 +298,12 @@ fn import_trigger(group: &Node, region: &str, set: &mut ActionSet, report: &mut 
     let mut click_activators = Vec::new();
     let mut shifts = Vec::new();
     if let Some(inputs) = group.obj("inputs") {
-        if let Some(click) = inputs.iter().find(|node| node.key == "click") {
+        // Newer profiles bind the full pull under "edge"; older ones "click".
+        let click = inputs
+            .iter()
+            .find(|node| node.key == "edge")
+            .or_else(|| inputs.iter().find(|node| node.key == "click"));
+        if let Some(click) = click {
             collect_activators(click, &mut click_activators, &mut shifts);
         }
     }
@@ -283,22 +315,49 @@ fn import_trigger(group: &Node, region: &str, set: &mut ActionSet, report: &mut 
     set.inputs.push(click_mapping);
 }
 
-fn import_stick(group: &Node, region: &str, mode: &str, set: &mut ActionSet) {
+fn import_stick(
+    group: &Node,
+    region: &str,
+    mode: &str,
+    set: &mut ActionSet,
+    report: &mut ImportReport,
+) {
     let (axis, output) = match region {
         "right_joystick" | "right_trackpad" => (GamepadAxis::RightX, StickOutput::Right),
         _ => (GamepadAxis::LeftX, StickOutput::Left),
     };
+    // joystick_mouse with output_joystick 1/2 drives a joystick (the
+    // camera-stick preset), not the mouse.
+    if mode == "joystick_mouse" {
+        if let Some(target) = group_setting(group, "output_joystick") {
+            if target > 0.5 {
+                set.inputs.push(InputMapping {
+                    mode: Some(SourceMode::Joystick(JoystickSettings::new(
+                        if target > 1.5 {
+                            StickOutput::Right
+                        } else {
+                            StickOutput::Left
+                        },
+                    ))),
+                    ..InputMapping::new(InputSource::Axis(axis))
+                });
+                return;
+            }
+        }
+    }
     let stick_mode = match mode {
         "joystick_move" => {
             // Steam encodes the deadzone either as a fraction or as raw
             // counts out of 32767; anything above 1 is counts.
-            let deadzone = group_setting(group, "deadzone").map(|raw| {
-                if raw > 1.0 {
-                    (raw / 32767.0).clamp(0.0, 0.9)
-                } else {
-                    raw.clamp(0.0, 0.9)
-                }
-            });
+            let deadzone = group_setting(group, "deadzone")
+                .or_else(|| group_setting(group, "deadzone_inner_radius"))
+                .map(|raw| {
+                    if raw > 1.0 {
+                        (raw / 32767.0).clamp(0.0, 0.9)
+                    } else {
+                        raw.clamp(0.0, 0.9)
+                    }
+                });
             SourceMode::Joystick(JoystickSettings {
                 processing: StickProcessing {
                     deadzone: if deadzone.is_some() {
@@ -326,6 +385,26 @@ fn import_stick(group: &Node, region: &str, mode: &str, set: &mut ActionSet) {
         mode: Some(stick_mode),
         ..InputMapping::new(InputSource::Axis(axis))
     });
+    // Stick clicks carry their own bindings (Soft_Press or Full_Press on
+    // the "click" input).
+    let click_button = match output {
+        StickOutput::Right => GamepadButton::RightStick,
+        _ => GamepadButton::LeftStick,
+    };
+    let mut click_activators = Vec::new();
+    let mut shifts = Vec::new();
+    if let Some(inputs) = group.obj("inputs") {
+        if let Some(click) = inputs.iter().find(|node| node.key == "click") {
+            collect_activators(click, &mut click_activators, &mut shifts);
+        }
+    }
+    if click_activators.is_empty() {
+        return;
+    }
+    let mut click_mapping = InputMapping::new(InputSource::Button(click_button));
+    click_mapping.activators = click_activators;
+    attach_shifts(&mut click_mapping, shifts, report);
+    set.inputs.push(click_mapping);
 }
 
 fn import_gyro(group: &Node, mode: &str, gyro: &mut GyroConfig, report: &mut ImportReport) {
@@ -341,6 +420,12 @@ fn import_gyro(group: &Node, mode: &str, gyro: &mut GyroConfig, report: &mut Imp
     };
     if let Some(sensitivity) = group_setting(group, "sensitivity") {
         gyro.sensitivity = (sensitivity / 100.0).clamp(0.05, 20.0);
+    }
+    if let Some(natural) = group_setting(group, "gyro_natural_sensitivity") {
+        gyro.sensitivity = (natural / 100.0).clamp(0.05, 20.0);
+    }
+    if let Some(dots) = group_setting(group, "flickstick_rotation_sensitivity") {
+        gyro.dots_per_360 = dots.clamp(500.0, 30_000.0);
     }
     if let Some(dampening) = group_setting_str(group, "mouse_dampening") {
         gyro.trigger_dampening = match dampening {
@@ -435,7 +520,7 @@ fn activator_kind(block: &Node) -> Option<ActivatorKind> {
         }),
         "Start_Press" => Some(ActivatorKind::StartPress),
         "Release" => Some(ActivatorKind::Release),
-        "Full_Press" | "full_press" => Some(ActivatorKind::FullPress),
+        "Full_Press" | "full_press" | "Soft_Press" => Some(ActivatorKind::FullPress),
         _ => None,
     }
 }
@@ -602,4 +687,149 @@ fn evdev_keycode(name: &str) -> Option<u16> {
         _ => return None,
     };
     Some(code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::import_vdf;
+
+    /// A trimmed slice of the user's real Persona 5 config: switches group
+    /// carrying bumper bindings, trigger on "edge", Soft_Press stick click,
+    /// preset titled via the actions block, and Steam's gyro calibration
+    /// settings.
+    const VDF: &str = r#"
+"controller_mappings"
+{
+    "title"     "Persona 5 with flickstick"
+    "controller_type"   "controller_neptune"
+    "actions"
+    {
+        "Default"    { "title" "Default" "legacy_set" "1" }
+        "Preset_1000001" { "title" "Camera" "legacy_set" "1" }
+    }
+    "action_layers" { }
+    "group"
+    {
+        "id"  "7"
+        "mode" "switches"
+        "inputs"
+        {
+            "button_escape" { "activators" { "Full_Press" { "bindings" { "binding" "xinput_button start, , " } } } }
+            "left_bumper"  { "activators" { "Full_Press" { "bindings" { "binding" "xinput_button shoulder_left, , " } } } }
+        }
+    }
+    "group"
+    {
+        "id"  "4"
+        "mode" "trigger"
+        "inputs"
+        {
+            "edge" { "activators" { "Full_Press" { "bindings" { "binding" "xinput_button TRIGGER_LEFT, , " } } } }
+        }
+    }
+    "group"
+    {
+        "id"  "3"
+        "mode" "joystick_move"
+        "inputs"
+        {
+            "click" { "activators" { "Soft_Press" { "bindings" { "binding" "xinput_button JOYSTICK_LEFT, , " } } } }
+        }
+        "settings" { "deadzone_inner_radius" "7199" }
+    }
+    "group"
+    {
+        "id"  "16"
+        "mode" "gyro_to_mouse"
+        "inputs" { }
+        "settings"
+        {
+            "gyro_natural_sensitivity"    "550"
+            "flickstick_rotation_sensitivity" "9800"
+        }
+    }
+    "preset"
+    {
+        "id"  "0"
+        "name" "Default"
+        "group_source_bindings"
+        {
+            "7" "switch active"
+            "4" "left_trigger active"
+            "3" "joystick active"
+            "16" "gyro active"
+        }
+    }
+}
+"#;
+
+    fn sources(profile: &crate::profile::InputProfile) -> Vec<String> {
+        profile.action_sets[0]
+            .inputs
+            .iter()
+            .map(|input| match input.source {
+                crate::profile::InputSource::Button(button) => format!("button:{button:?}"),
+                crate::profile::InputSource::Axis(axis) => format!("axis:{axis:?}"),
+                _ => "other".to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_switches_group_imports_bumpers_and_menu_cluster() {
+        let (profile, report) = import_vdf(VDF).unwrap();
+        let found = sources(&profile);
+        assert!(found.contains(&"button:LeftShoulder".to_string()), "{found:?}");
+        assert!(found.contains(&"button:Start".to_string()), "{found:?}");
+        assert!(report.warnings.is_empty() || !report.warnings.iter().any(|w| w.contains("switches")));
+    }
+
+    #[test]
+    fn test_trigger_edge_binding_imports() {
+        let (profile, _) = import_vdf(VDF).unwrap();
+        // The digital full-pull side rides the trigger button source.
+        let found = sources(&profile);
+        assert!(found.contains(&"button:LeftTrigger".to_string()), "{found:?}");
+    }
+
+    #[test]
+    fn test_soft_press_activator_imports_as_full_press() {
+        let (profile, _) = import_vdf(VDF).unwrap();
+        let stick_click = profile.action_sets[0]
+            .inputs
+            .iter()
+            .find(|input| input.source == crate::profile::InputSource::Button(crate::profile::GamepadButton::LeftStick))
+            .expect("stick click mapping");
+        assert!(!stick_click.activators.is_empty());
+    }
+
+    #[test]
+    fn test_preset_titled_from_actions_block() {
+        let (profile, _) = import_vdf(VDF).unwrap();
+        assert_eq!(profile.action_sets[0].name, "Default");
+    }
+
+    #[test]
+    fn test_gyro_calibration_settings_import() {
+        let (profile, _) = import_vdf(VDF).unwrap();
+        assert!((profile.gyro.sensitivity - 5.5).abs() < 0.01, "{:?}", profile.gyro.sensitivity);
+        assert!((profile.gyro.dots_per_360 - 9800.0).abs() < 0.1);
+        // Passthrough never survives an import.
+        assert_ne!(profile.gyro.orientation, crate::profile::GyroOrientation::Local);
+    }
+
+    #[test]
+    fn test_stick_inner_deadzone_imports_from_counts() {
+        let (profile, _) = import_vdf(VDF).unwrap();
+        let stick = profile.action_sets[0]
+            .inputs
+            .iter()
+            .find(|input| input.source == crate::profile::InputSource::Axis(crate::profile::GamepadAxis::LeftX))
+            .expect("left stick mapping");
+        let Some(crate::profile::SourceMode::Joystick(settings)) = &stick.mode else {
+            panic!("joystick mode expected");
+        };
+        assert!((settings.processing.deadzone_inner - 7199.0 / 32767.0).abs() < 0.001);
+        assert_eq!(settings.processing.deadzone, crate::profile::StickDeadzone::Custom);
+    }
 }

@@ -11,6 +11,21 @@ use std::time::Duration;
 
 const PR_SET_CHILD_SUBREAPER: i32 = 36;
 
+/// Asks the kernel to SIGKILL this child when its direct parent dies.
+/// Without it an input daemon keeps running after Ira exits — stale virtual
+/// pads that hijack bindings and squat udp/26760 are exactly what that
+/// stray produced.
+fn die_with_parent(cmd: &mut Command) {
+    // prctl(PR_SET_PDEATHSIG, SIGKILL): runs between fork and exec, where
+    // the async-signal-safe prctl call is permitted.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+            Ok(())
+        });
+    }
+}
+
 const WINE_BG_PROCESSES: &[&str] = &[
     "wineserver",
     "services.exe",
@@ -93,6 +108,7 @@ pub fn spawn_game(
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     cmd.process_group(0);
+    die_with_parent(&mut cmd);
 
     match cmd.spawn() {
         Ok(child) => Ok(child),

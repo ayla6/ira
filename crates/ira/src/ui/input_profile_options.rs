@@ -181,7 +181,7 @@ pub(super) fn activation_index(activation: &Activation) -> u32 {
     }
 }
 
-pub(super) fn output_display_label(output: &OutputAction) -> String {
+pub(crate) fn output_display_label(output: &OutputAction) -> String {
     match output {
         OutputAction::GamepadButton(button) => button_label(*button),
         OutputAction::GamepadAxis(axis) => axis_label(*axis),

@@ -15,7 +15,7 @@ use super::input_profile_stick_indices::{
     format_degrees, output_axis_from_index, output_axis_index, output_from_index, output_index,
 };
 use super::input_profile_widgets::{
-    format_percent, option_picker_popover, picker_button, switch_row, OptionChoice, SettingGroup,
+    format_percent, option_picker_popover, picker_button, switch_row, OptionChoice,
     SliderSpec,
 };
 use adw::prelude::*;
@@ -24,19 +24,21 @@ use ira_input::{ResponseAxisStyle, SourceMode, StickDeadzone, StickOutput, Stick
 /// The stick sheet's behavior groups: Steam's full layout for the Joystick
 /// and Joystick Mouse behaviors, the generic response rows for every other
 /// behavior.
-pub(crate) fn stick_mode_groups(
+/// Flat, titled sections for one stick mode — the expander children on the
+/// region page. Each entry is a section heading plus its rows.
+pub(crate) fn stick_setting_sections(
     base: &SheetBase,
     mode: &SourceMode,
     reopen: &Reopen,
-) -> Vec<gtk4::Box> {
+) -> Vec<(String, Vec<gtk4::ListBoxRow>)> {
     match mode {
         SourceMode::Joystick(settings) => vec![
-            rows_group(
-                &crate::tr!("Sensitivity"),
+            (
+                crate::tr!("Sensitivity"),
                 sensitivity_rows(base, ModeTarget::Base, reopen, &settings.processing),
             ),
-            rows_group(
-                &crate::tr!("Output"),
+            (
+                crate::tr!("Output"),
                 output_rows(
                     base,
                     ModeTarget::Base,
@@ -44,12 +46,12 @@ pub(crate) fn stick_mode_groups(
                     Some(settings.output),
                 ),
             ),
-            rows_group(
-                &crate::tr!("Deadzones"),
+            (
+                crate::tr!("Deadzones"),
                 deadzone_rows(base, ModeTarget::Base, reopen, &settings.processing),
             ),
-            rows_group(
-                &crate::tr!("Outer Ring"),
+            (
+                crate::tr!("Outer Ring"),
                 super::input_profile_stick_ring::outer_ring_rows(
                     base,
                     ModeTarget::Base,
@@ -59,20 +61,14 @@ pub(crate) fn stick_mode_groups(
             ),
         ],
         SourceMode::Mouse { sensitivity, stick } => vec![
-            rows_group(
-                &crate::tr!("General"),
+            (
+                crate::tr!("General"),
                 mouse_general_rows(base, ModeTarget::Base, reopen, *sensitivity, stick),
             ),
-            rows_group(
-                &crate::tr!("Output"),
-                output_rows(base, ModeTarget::Base, stick, None),
-            ),
-            rows_group(
-                &crate::tr!("Deadzones"),
-                deadzone_rows(base, ModeTarget::Base, reopen, stick),
-            ),
-            rows_group(
-                &crate::tr!("Outer Ring"),
+            (crate::tr!("Output"), output_rows(base, ModeTarget::Base, stick, None)),
+            (crate::tr!("Deadzones"), deadzone_rows(base, ModeTarget::Base, reopen, stick)),
+            (
+                crate::tr!("Outer Ring"),
                 super::input_profile_stick_ring::outer_ring_rows(
                     base,
                     ModeTarget::Base,
@@ -81,8 +77,14 @@ pub(crate) fn stick_mode_groups(
                 ),
             ),
         ],
-        other => vec![super::input_profile_source_modes::mode_settings_group(
-            base, other, reopen,
+        other => vec![(
+            crate::tr!("Response"),
+            super::input_profile_source_modes::mode_setting_rows(
+                base,
+                ModeTarget::Base,
+                other,
+                reopen,
+            ),
         )],
     }
 }
@@ -103,14 +105,6 @@ pub(crate) fn joystick_rows(
             base, target, reopen, processing,
         ))
         .collect()
-}
-
-fn rows_group(title: &str, rows: Vec<gtk4::ListBoxRow>) -> gtk4::Box {
-    let group = SettingGroup::new(Some(title), None);
-    for row in &rows {
-        group.add(row);
-    }
-    group.root
 }
 
 /// The processing settings a mode carries, whichever behavior they belong

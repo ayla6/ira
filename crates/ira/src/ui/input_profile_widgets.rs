@@ -289,6 +289,20 @@ pub(crate) fn switch_row(
 }
 
 /// "42 %" — slider format for 0..1 fractions.
+/// A section heading inside an expander child list: dim, small, not
+/// selectable — the hierarchy marker for flattened settings.
+pub(crate) fn section_title_row(text: &str) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    row.set_selectable(false);
+    row.set_activatable(false);
+    let label = gtk4::Label::new(Some(text));
+    label.add_css_class("heading");
+    label.add_css_class(CSS_DIM_LABEL);
+    label.set_xalign(0.0);
+    row.set_child(Some(&label));
+    row
+}
+
 pub(crate) fn format_percent(value: f64) -> String {
     format!("{:.0} %", value * 100.0)
 }

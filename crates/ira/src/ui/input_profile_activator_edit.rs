@@ -11,7 +11,7 @@ use super::input_profile_options::output_display_label;
 use super::input_profile_sheet_base::{is_trigger_axis, with_mapping, Reopen, SheetBase};
 use super::input_profile_widgets::{
     format_ms, format_percent, option_picker_popover, picker_button, slider_row, OptionChoice,
-    SettingGroup, SliderSpec,
+    SliderSpec,
 };
 use adw::prelude::*;
 use ira_input::{Activator, ActivatorKind, GamepadButton, InputMapping, OutputAction};
@@ -84,19 +84,19 @@ fn kind_choices(soft_pull: bool) -> Vec<OptionChoice> {
     choices
 }
 
-pub(crate) fn activators_group(
+/// The activator expanders plus the add row — the expander children of an
+/// input row. Buttons and triggers carry these; plain analog modes do not.
+pub(crate) fn activator_rows(
     base: &SheetBase,
     reopen: &Reopen,
     mapping: &InputMapping,
-) -> gtk4::Box {
-    let group = SettingGroup::new(
-        Some(&crate::tr!("Activators")),
-        Some(&crate::tr!("Different actions by how the input is pressed")),
-    );
-
-    for (index, activator) in mapping.activators.iter().enumerate() {
-        group.add(&activator_expander(base, reopen, index, activator));
-    }
+) -> Vec<gtk4::Widget> {
+    let mut rows: Vec<gtk4::Widget> = mapping
+        .activators
+        .iter()
+        .enumerate()
+        .map(|(index, activator)| activator_expander(base, reopen, index, activator).upcast())
+        .collect();
 
     // Full-width row rather than a floating button: a raw button as a
     // direct child of a preferences group looks wrong and trips GTK
@@ -105,7 +105,7 @@ pub(crate) fn activators_group(
     let add = super::helpers::icon_label_button("list-add-symbolic", &crate::tr!("Add activator"));
     add_row.add_suffix(&add);
     add_row.set_activatable(true);
-    group.add(&add_row);
+    rows.push(add_row.clone().upcast());
     {
         let base = base.clone();
         let reopen = reopen.clone();
@@ -121,7 +121,7 @@ pub(crate) fn activators_group(
             reopen();
         });
     }
-    group.root
+    rows
 }
 
 fn activator_expander(

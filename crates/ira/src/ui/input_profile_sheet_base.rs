@@ -19,7 +19,9 @@ pub(crate) struct SheetBase {
     /// The editor's live gyro config, for settings shared with the Gyro
     /// page (dots per 360°).
     pub(crate) gyro: Rc<std::cell::RefCell<ira_input::GyroConfig>>,
-    pub(crate) content: gtk4::Box,
+    /// The expanded settings list this base's rows live in; set right after
+    /// construction so deferred rebuilds can repopulate it.
+    pub(crate) child_list: Option<gtk4::ListBox>,
     pub(crate) profile: ProfileRc,
     pub(crate) active_target: EditingTarget,
     pub(crate) source: InputSource,

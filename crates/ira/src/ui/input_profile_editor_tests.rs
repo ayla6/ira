@@ -50,7 +50,7 @@ fn test_default_mapping_gives_axes_their_natural_modes() {
         test_default_output(InputSource::Button(GamepadButton::B)),
         OutputAction::GamepadButton(GamepadButton::B)
     );
-    let stick = super::super::input_profile_region_pages::default_mapping(InputSource::Axis(
+    let stick = super::super::input_profile_input_rows::default_mapping(InputSource::Axis(
         GamepadAxis::RightX,
     ));
     let Some(SourceMode::Joystick(settings)) = stick.mode.as_ref() else {
@@ -60,7 +60,7 @@ fn test_default_mapping_gives_axes_their_natural_modes() {
     // Fresh sticks start with no deadzone: raw input passes through.
     assert_eq!(settings.processing.deadzone, ira_input::StickDeadzone::None);
     assert!(stick.activators.is_empty());
-    let trigger = super::super::input_profile_region_pages::default_mapping(InputSource::Axis(
+    let trigger = super::super::input_profile_input_rows::default_mapping(InputSource::Axis(
         GamepadAxis::LeftTrigger,
     ));
     assert!(matches!(trigger.mode, Some(SourceMode::Trigger { .. })));

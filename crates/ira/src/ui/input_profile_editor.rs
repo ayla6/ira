@@ -145,6 +145,7 @@ pub(super) fn show_input_profile_editor(
         device,
         on_dirty: on_dirty.clone(),
         gyro: gyro.clone(),
+        expansion: std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new())),
     };
     let pages = build_pages(&layout, &ctx, &gyro, &profile_name);
 
@@ -262,6 +263,13 @@ fn build_pages(
     general_box.append(&super::input_profile_general_page::build_general_page(
         ctx, name,
     ));
+    // The Controller page was one lonely haptics group; it lives on General
+    // now instead of its own near-empty page.
+    super::input_profile_controller_page::add_controller_groups(
+        &general_box,
+        &ctx.profile,
+        &ctx.on_dirty,
+    );
 
     layout
         .sidebar
@@ -280,28 +288,6 @@ fn build_pages(
             ));
         region_boxes.push(content);
     }
-
-    layout
-        .sidebar
-        .append(&super::settings_dialog::sidebar_section_title(&crate::tr!(
-            "Controller"
-        )));
-    let (controller_scroll, controller_box) = scrolling_page();
-    layout
-        .stack
-        .add_named(&controller_scroll, Some("controller"));
-    layout
-        .sidebar
-        .append(&super::settings_dialog::settings_sidebar_row(
-            "emblem-system-symbolic",
-            &crate::tr!("Controller"),
-            "controller",
-        ));
-    super::input_profile_controller_page::add_controller_groups(
-        &controller_box,
-        &ctx.profile,
-        &ctx.on_dirty,
-    );
 
     let (gyro_scroll, gyro_box) = scrolling_page();
     layout.stack.add_named(&gyro_scroll, Some("gyro"));
@@ -414,7 +400,7 @@ fn add_editor_footer(
 /// Used by tests through the region module's default mapping.
 #[cfg(test)]
 pub(super) fn test_default_output(source: ira_input::InputSource) -> ira_input::OutputAction {
-    super::input_profile_region_pages::default_mapping(source)
+    super::input_profile_input_rows::default_mapping(source)
         .activators
         .first()
         .and_then(|activator| activator.outputs.first().cloned())

@@ -5,12 +5,12 @@
 //! of its mode shifts.
 
 use super::input_profile_sheet_base::{
-    combo_row, find_mapping, is_trigger_axis, with_mapping, Reopen, SheetBase,
+    is_trigger_axis, with_mapping, Reopen, SheetBase,
 };
 use super::input_profile_widgets::{
     slider_row_with_scale,
     format_ms, format_number, format_percent, option_picker_popover, picker_button, slider_row,
-    OptionChoice, SettingGroup, SliderSpec,
+    OptionChoice, SliderSpec,
 };
 use adw::prelude::*;
 use ira_input::{GamepadAxis, InputSource, SourceMode, StickOutput, StickProcessing};
@@ -52,38 +52,6 @@ pub(crate) fn mode_label(mode: &Option<SourceMode>, is_trigger: bool) -> String 
         Some(SourceMode::Flickstick { .. }) => crate::tr!("Flick Stick"),
         Some(SourceMode::Trigger { .. }) if is_trigger => crate::tr!("Trigger"),
         _ => crate::tr!("Other"),
-    }
-}
-
-/// Steam-style explanation shown under the behavior dropdown for the
-/// currently selected mode.
-pub(crate) fn mode_description(mode: &Option<SourceMode>, is_trigger: bool) -> String {
-    match mode {
-        None => crate::tr!(
-            "The input is unused — the controller ignores it entirely"
-        )
-        .to_string(),
-        Some(SourceMode::Joystick(_)) => crate::tr!(
-            "Moves a joystick for camera or movement, with a tunable response curve"
-        )
-        .to_string(),
-        Some(SourceMode::Dpad { .. }) => crate::tr!(
-            "Emulates a d-pad in the direction the stick is pushed"
-        )
-        .to_string(),
-        Some(SourceMode::Mouse { .. }) => crate::tr!(
-            "Moves the mouse cursor — good for menus and mouse-look camera"
-        )
-        .to_string(),
-        Some(SourceMode::Flickstick { .. }) => crate::tr!(
-            "Flicks the view in the stick's direction, then turns while held — pair with gyro aiming"
-        )
-        .to_string(),
-        Some(SourceMode::Trigger { .. }) if is_trigger => crate::tr!(
-            "Analog trigger with an adjustable pull threshold"
-        )
-        .to_string(),
-        _ => String::new(),
     }
 }
 
@@ -162,63 +130,6 @@ pub(crate) fn curve_preset_index(curve: f32) -> usize {
         }
     }
     CURVE_CUSTOM_INDEX
-}
-
-pub(crate) fn behavior_group(
-    base: &SheetBase,
-    reopen: &Reopen,
-    modes: Vec<Option<SourceMode>>,
-) -> gtk4::Box {
-    let group = SettingGroup::new(
-        Some(&crate::tr!("Behavior")),
-        Some(&crate::tr!("What this stick or trigger does")),
-    );
-
-    let is_trigger = is_trigger_axis(base.source);
-    let current = find_mapping(base).and_then(|mapping| mapping.mode);
-    let selected = current
-        .as_ref()
-        .and_then(|mode| {
-            modes
-                .iter()
-                .position(|candidate| same_mode(candidate, mode))
-        })
-        .unwrap_or(0);
-    let labels: Vec<String> = modes
-        .iter()
-        .map(|mode| mode_label(mode, is_trigger))
-        .collect();
-
-    let dropdown = combo_row(&labels, selected as u32);
-    dropdown.set_title(&crate::tr!("Behavior"));
-    dropdown.set_subtitle(&mode_description(&current, is_trigger));
-    group.add(&dropdown);
-
-    let base_for_change = base.clone();
-    let reopen_for_change = reopen.clone();
-    dropdown.connect_selected_notify(move |dropdown| {
-        let mode = modes.get(dropdown.selected() as usize).cloned().flatten();
-        dropdown.set_subtitle(&mode_description(&mode, is_trigger));
-        with_mapping(&base_for_change, |input| {
-            input.mode = mode;
-        });
-        (base_for_change.on_changed)();
-        reopen_for_change();
-    });
-
-    group.root
-}
-
-pub(crate) fn mode_settings_group(
-    base: &SheetBase,
-    mode: &SourceMode,
-    reopen: &Reopen,
-) -> gtk4::Box {
-    let group = SettingGroup::new(Some(&crate::tr!("Response")), None);
-    for row in mode_setting_rows(base, ModeTarget::Base, mode, reopen) {
-        group.add(&row);
-    }
-    group.root
 }
 
 /// Response rows for a mode, shared by the base behavior group and by the

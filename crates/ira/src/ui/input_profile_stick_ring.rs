@@ -126,9 +126,13 @@ fn pick_outer_ring_command(
     reopen: &Reopen,
 ) {
     let Some(window) = base
-        .content
-        .root()
-        .and_then(|root| root.downcast::<gtk4::Window>().ok())
+        .child_list
+        .as_ref()
+        .and_then(|list| {
+            list.upcast_ref::<gtk4::Widget>()
+                .root()
+                .and_then(|root| root.downcast::<gtk4::Window>().ok())
+        })
     else {
         return;
     };

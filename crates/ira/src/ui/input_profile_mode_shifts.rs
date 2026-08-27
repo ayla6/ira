@@ -12,21 +12,16 @@ use super::input_profile_sheet_base::{
 use super::input_profile_source_modes::{
     mode_label, mode_setting_rows, modes_for, same_mode, ModeTarget,
 };
-use super::input_profile_widgets::SettingGroup;
 use adw::prelude::*;
 use ira_input::{InputSource, ModeShift};
 
-pub(crate) fn shifts_group(base: &SheetBase, reopen: &Reopen) -> gtk4::Box {
-    let group = SettingGroup::new(
-        Some(&crate::tr!("Mode shifts")),
-        Some(&crate::tr!(
-            "While the shift button is held, this input uses the shifted behavior"
-        )),
-    );
+/// The mode-shift rows — the expander children of an input row.
+pub(crate) fn shift_rows(base: &SheetBase, reopen: &Reopen) -> Vec<gtk4::Widget> {
+    let mut rows: Vec<gtk4::Widget> = Vec::new();
 
     if let Some(mapping) = find_mapping(base) {
         for (shift_index, shift) in mapping.mode_shifts.iter().enumerate() {
-            group.add(&shift_row(base, reopen, shift_index, shift));
+            rows.push(shift_row(base, reopen, shift_index, shift));
         }
     }
 
@@ -42,7 +37,7 @@ pub(crate) fn shifts_group(base: &SheetBase, reopen: &Reopen) -> gtk4::Box {
     add.add_css_class(CSS_FLAT);
     add.set_valign(gtk4::Align::Center);
     picker.add_suffix(&add);
-    group.add(&picker);
+    rows.push(picker.clone().upcast());
     let base = base.clone();
     let reopen = reopen.clone();
     add.connect_clicked(move |_| {
@@ -60,7 +55,7 @@ pub(crate) fn shifts_group(base: &SheetBase, reopen: &Reopen) -> gtk4::Box {
         }
     });
 
-    group.root
+    rows
 }
 
 fn shift_row(

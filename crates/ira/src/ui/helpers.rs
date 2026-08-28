@@ -151,9 +151,11 @@ pub fn make_browse_button(
     initial_path: impl Fn() -> Option<String> + 'static,
     on_select: impl Fn(&std::path::Path) + 'static,
 ) -> gtk4::Button {
-    let browse = gtk4::Button::with_label(&crate::tr!("Browse…"));
+    let browse = gtk4::Button::from_icon_name("folder-open-symbolic");
     browse.add_css_class(CSS_FLAT);
+    browse.add_css_class(CSS_SQUARE_BUTTON);
     browse.set_valign(gtk4::Align::Center);
+    browse.set_tooltip_text(Some(title));
     let parent = parent.map(|w| w.downgrade());
     let title = title.to_string();
     let filter = filter.map(|(name, mimes)| {
@@ -199,29 +201,6 @@ pub fn make_browse_button(
             dialog.open(parent.as_ref(), None::<&gio::Cancellable>, cb);
         }
     });
-    browse
-}
-
-pub fn make_browse_icon_button(
-    parent: Option<&impl IsA<gtk4::Widget>>,
-    title: &str,
-    select_folder: bool,
-    filter: Option<(&str, &[&str])>,
-    initial_path: impl Fn() -> Option<String> + 'static,
-    on_select: impl Fn(&std::path::Path) + 'static,
-) -> gtk4::Button {
-    let browse = make_browse_button(
-        parent,
-        title,
-        select_folder,
-        filter,
-        initial_path,
-        on_select,
-    );
-    browse.set_label("");
-    browse.set_icon_name("folder-open-symbolic");
-    browse.add_css_class(CSS_SQUARE_BUTTON);
-    browse.set_tooltip_text(Some(title));
     browse
 }
 

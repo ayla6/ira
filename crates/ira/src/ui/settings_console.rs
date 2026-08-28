@@ -1,5 +1,5 @@
 use super::css::*;
-use super::helpers::{entry_path_closure, esc, make_browse_icon_button, string_list_from};
+use super::helpers::{entry_path_closure, esc, make_browse_button, string_list_from};
 use super::settings_dialog::settings_page_container;
 use adw::prelude::*;
 use ira_config::{Config, ConsoleConfig};
@@ -423,9 +423,9 @@ fn add_executable_actions(
         });
         row.add_suffix(&auto_detect);
     }
-    let browse = make_browse_icon_button(
-        Some(parent),
-        browse_title,
+        let browse = make_browse_button(
+            Some(parent),
+            browse_title,
         false,
         Some(("Executable", &["application/x-executable"])),
         entry_path_closure(row),
@@ -519,7 +519,7 @@ pub(super) fn build_console_settings_page(
         let core_path = adw::EntryRow::new();
         core_path.set_title(&crate::tr!("Custom core file"));
         core_path.set_text(selected_core.as_deref().unwrap_or_default());
-        let browse = make_browse_icon_button(
+        let browse = make_browse_button(
             Some(win),
             &crate::tr!("Select RetroArch core"),
             false,

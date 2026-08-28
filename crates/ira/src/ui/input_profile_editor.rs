@@ -271,11 +271,6 @@ fn build_pages(
         &ctx.on_dirty,
     );
 
-    layout
-        .sidebar
-        .append(&super::settings_dialog::sidebar_section_title(&crate::tr!(
-            "Bindings"
-        )));
     for region in Region::ALL {
         let (scroll, content) = scrolling_page();
         layout.stack.add_named(&scroll, Some(region.id()));

@@ -4,7 +4,7 @@
 
 use super::input_profile_sheet_base::combo_row;
 use super::input_profile_widgets::{
-    format_number, format_percent, slider_row, switch_row, SettingGroup, SliderSpec,
+    slider_row, switch_row, SettingGroup, SliderSpec,
 };
 use adw::prelude::*;
 use ira_input::{GyroConfig, TriggerDampening};
@@ -40,7 +40,6 @@ fn momentum_group(gyro: &Rc<RefCell<GyroConfig>>, on_dirty: &Rc<dyn Fn()>) -> gt
             "How quickly the glide slows down; higher stops sooner"
         )),
         &SliderSpec(0.5, 10.0, 0.1, f64::from(initial_friction)),
-        format_number,
         {
             let gyro = gyro.clone();
             let on_dirty = on_dirty.clone();
@@ -48,8 +47,7 @@ fn momentum_group(gyro: &Rc<RefCell<GyroConfig>>, on_dirty: &Rc<dyn Fn()>) -> gt
                 gyro.borrow_mut().momentum.friction = value as f32;
                 on_dirty();
             }
-        },
-    );
+        });
     let enable = switch_row(
         &crate::tr!("Enable momentum"),
         Some(&crate::tr!(
@@ -96,7 +94,6 @@ fn dampening_group(gyro: &Rc<RefCell<GyroConfig>>, on_dirty: &Rc<dyn Fn()>) -> g
             "How much gyro output is removed while the trigger is held"
         )),
         &SliderSpec(0.0, 1.0, 0.05, f64::from(gyro.borrow().dampening_amount)),
-        format_percent,
         {
             let gyro = gyro.clone();
             let on_dirty = on_dirty.clone();
@@ -104,8 +101,7 @@ fn dampening_group(gyro: &Rc<RefCell<GyroConfig>>, on_dirty: &Rc<dyn Fn()>) -> g
                 gyro.borrow_mut().dampening_amount = value as f32;
                 on_dirty();
             }
-        },
-    );
+        });
     amount.set_sensitive(gyro.borrow().trigger_dampening != TriggerDampening::Off);
 
     let gyro_for_mode = gyro.clone();

@@ -292,9 +292,7 @@ fn deadzone_row(
         title,
         Some(subtitle),
         &SliderSpec(0.0, 50.0, 1.0, f64::from(initial_percent) * 100.0),
-        |value| format!("{value:.0} %"),
-        |_| {},
-    );
+        |_| {});
     // Coalesce the load-modify-store cycle until the slider settles.
     // Programmatic updates (reset, post-calibration sync) run while the
     // updating guard is held and must not schedule a write at all.

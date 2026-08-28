@@ -10,7 +10,7 @@ use super::input_profile_editor_regions::{activator_kind_label, source_label};
 use super::input_profile_options::output_display_label;
 use super::input_profile_sheet_base::{is_trigger_axis, with_mapping, Reopen, SheetBase};
 use super::input_profile_widgets::{
-    format_ms, format_percent, option_picker_popover, picker_button, slider_row, OptionChoice,
+    option_picker_popover, picker_button, slider_row, OptionChoice,
     SliderSpec,
 };
 use adw::prelude::*;
@@ -242,9 +242,7 @@ fn activator_kind_controls(
             &crate::tr!("Soft pull threshold"),
             Some(&crate::tr!("Trigger travel that fires the soft pull")),
             &SliderSpec(0.05, 0.95, 0.05, f64::from(*threshold)),
-            format_percent,
-            move |value| write_kind_value(&base, index, value, set_soft_pull_threshold),
-        ));
+            move |value| write_kind_value(&base, index, value, set_soft_pull_threshold)));
     }
 }
 
@@ -254,7 +252,7 @@ fn timing_slider(
     spec: &SliderSpec,
     on_change: impl Fn(f64) + 'static,
 ) -> gtk4::ListBoxRow {
-    slider_row(title, subtitle, spec, format_ms, on_change)
+    slider_row(title, subtitle, spec, on_change)
 }
 
 fn set_double_press_window(kind: &mut ActivatorKind, value: f64) {
@@ -405,13 +403,6 @@ fn activator_setting_controls(
             &crate::tr!("Repeat every"),
             Some(&crate::tr!("Re-fires the outputs while the input is held")),
             &SliderSpec(0.0, 1000.0, 50.0, repeat_ms),
-            |value| {
-                if value < 50.0 {
-                    crate::tr!("Off")
-                } else {
-                    format_ms(value)
-                }
-            },
             move |value| {
                 with_mapping(&base_for_repeat, |input| {
                     if let Some(activator) = input.activators.get_mut(index) {
@@ -423,7 +414,6 @@ fn activator_setting_controls(
                     }
                 });
                 (base_for_repeat.on_changed)();
-            },
-        ));
+            }));
     }
 }

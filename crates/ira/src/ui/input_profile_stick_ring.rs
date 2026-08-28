@@ -7,7 +7,7 @@ use super::input_profile_sheet_base::{Reopen, SheetBase};
 use super::input_profile_source_modes::mode_slider_row;
 use super::input_profile_source_modes::ModeTarget;
 use super::input_profile_stick_settings::{mode_switch_row, processing_of, write_processing};
-use super::input_profile_widgets::{format_percent, SliderSpec};
+use super::input_profile_widgets::SliderSpec;
 use adw::prelude::*;
 use ira_input::{OutputAction, SourceMode, StickProcessing};
 
@@ -66,7 +66,7 @@ pub(super) fn outer_ring_rows(
                 "The slider can be visualized as extending a radius from the center outward, with the point being where the outer ring begins"
             )),
             &SliderSpec(0.05, 1.0, 0.01, f64::from(ring.radius)),
-            format_percent,
+
             |mode, value| {
                 if let Some(ring) = outer_ring_of(mode) {
                     ring.radius = value as f32;
@@ -126,10 +126,12 @@ fn pick_outer_ring_command(
     reopen: &Reopen,
 ) {
     let Some(window) = base
-        .child_list
+        .child_expander
+        .borrow()
         .as_ref()
-        .and_then(|list| {
-            list.upcast_ref::<gtk4::Widget>()
+        .and_then(|expander| {
+            expander
+                .upcast_ref::<gtk4::Widget>()
                 .root()
                 .and_then(|root| root.downcast::<gtk4::Window>().ok())
         })

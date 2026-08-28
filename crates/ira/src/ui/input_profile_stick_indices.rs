@@ -63,11 +63,6 @@ pub(super) fn axis_style_from_index(index: usize) -> ResponseAxisStyle {
     }
 }
 
-/// "90°" — slider format for rotation angles.
-pub(super) fn format_degrees(value: f64) -> String {
-    format!("{:.0}°", value)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,9 +107,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_format_degrees_shows_whole_angles() {
-        assert_eq!(format_degrees(90.0), "90°");
-        assert_eq!(format_degrees(0.0), "0°");
-    }
 }

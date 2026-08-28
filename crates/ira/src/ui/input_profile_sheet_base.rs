@@ -4,7 +4,7 @@
 
 use adw::prelude::*;
 use ira_input::{GamepadAxis, InputMapping, InputSource};
-use std::cell::RefCell;
+use std::cell::{RefCell};
 use std::rc::Rc;
 
 pub(crate) type ProfileRc = Rc<RefCell<ira_input::InputProfile>>;
@@ -19,9 +19,13 @@ pub(crate) struct SheetBase {
     /// The editor's live gyro config, for settings shared with the Gyro
     /// page (dots per 360°).
     pub(crate) gyro: Rc<std::cell::RefCell<ira_input::GyroConfig>>,
-    /// The expanded settings list this base's rows live in; set right after
-    /// construction so deferred rebuilds can repopulate it.
-    pub(crate) child_list: Option<gtk4::ListBox>,
+    /// The expander whose children this base owns; set right after
+    /// construction so deferred rebuilds can replace its rows. Children are
+    /// added with the expander.s own add_row so libadwaita styles them as
+    /// part of the row — never a nested list box.
+    pub(crate) child_expander: RefCell<Option<adw::ExpanderRow>>,
+    /// The rows currently added to the expander, for removal on rebuild.
+    pub(crate) live_children: RefCell<Vec<gtk4::Widget>>,
     pub(crate) profile: ProfileRc,
     pub(crate) active_target: EditingTarget,
     pub(crate) source: InputSource,

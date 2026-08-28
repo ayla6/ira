@@ -9,7 +9,7 @@ use super::input_profile_sheet_base::{
 };
 use super::input_profile_widgets::{
     slider_row_with_scale,
-    format_ms, format_number, format_percent, option_picker_popover, picker_button, slider_row,
+    option_picker_popover, picker_button, slider_row,
     OptionChoice, SliderSpec,
 };
 use adw::prelude::*;
@@ -157,7 +157,6 @@ pub(crate) fn mode_setting_rows(
                 &crate::tr!("Sensitivity"),
                 Some(&crate::tr!("How fast the pointer moves per stick motion")),
                 &SliderSpec(0.05, 20.0, 0.05, f64::from(*sensitivity)),
-                format_number,
                 |mode, value| {
                     if let SourceMode::Mouse { sensitivity, .. } = mode {
                         *sensitivity = value as f32;
@@ -174,7 +173,6 @@ pub(crate) fn mode_setting_rows(
                     "How far the stick must move before a direction registers"
                 )),
                 &SliderSpec(0.2, 0.95, 0.05, f64::from(*threshold)),
-                format_percent,
                 |mode, value| {
                     if let SourceMode::Dpad { threshold } = mode {
                         *threshold = value as f32;
@@ -191,7 +189,6 @@ pub(crate) fn mode_setting_rows(
                     "How far the trigger must be pulled for the full-pull activator"
                 )),
                 &SliderSpec(0.1, 1.0, 0.05, f64::from(*threshold)),
-                format_percent,
                 |mode, value| {
                     if let SourceMode::Trigger { threshold } = mode {
                         *threshold = value as f32;
@@ -217,12 +214,10 @@ pub(crate) fn mode_setting_rows(
                     5.0,
                     f64::from(base.profile.borrow().gyro.dots_per_360),
                 ),
-                |value| format!("{value:.0}px"),
                 move |value| {
                     calibration_base.gyro.borrow_mut().dots_per_360 = value as f32;
                     (calibration_base.on_changed)();
-                },
-            )
+                })
             .0);
             rows.push(mode_slider_row(
                 base,
@@ -232,7 +227,6 @@ pub(crate) fn mode_setting_rows(
                     "How far a flick turns per degree of stick rotation"
                 )),
                 &SliderSpec(0.1, 10.0, 0.1, f64::from(*rotation_sensitivity)),
-                |value| format!("{value:.1}x"),
                 |mode, value| {
                     if let SourceMode::Flickstick {
                         rotation_sensitivity,
@@ -249,7 +243,6 @@ pub(crate) fn mode_setting_rows(
                 &crate::tr!("Flick duration"),
                 Some(&crate::tr!("How long the turn input of a flick lasts")),
                 &SliderSpec(40.0, 400.0, 10.0, f64::from(*flick_duration_ms)),
-                format_ms,
                 |mode, value| {
                     if let SourceMode::Flickstick {
                         flick_duration_ms, ..
@@ -309,7 +302,6 @@ pub(crate) fn curve_slider_row(
         &crate::tr!("Custom curve"),
         None,
         &SliderSpec(0.2, 3.0, 0.05, f64::from(curve)),
-        format_number,
         move |value| {
             let write = mode_writer(&base_for_change, target);
             write(&mut |mode| {
@@ -318,8 +310,7 @@ pub(crate) fn curve_slider_row(
                 }
             });
             (base_for_change.on_changed)();
-        },
-    )
+        })
 }
 
 /// Returns a closure that mutates the targeted mode in place, if any.
@@ -351,11 +342,10 @@ pub(crate) fn mode_slider_row(
     title: &str,
     subtitle: Option<&str>,
     spec: &SliderSpec,
-    format: impl Fn(f64) -> String + 'static,
     mutate: fn(&mut SourceMode, f64),
 ) -> gtk4::ListBoxRow {
     let base = base.clone();
-    slider_row(title, subtitle, spec, format, move |value| {
+    slider_row(title, subtitle, spec, move |value| {
         let write = mode_writer(&base, target);
         write(&mut |mode| mutate(mode, value));
         (base.on_changed)();

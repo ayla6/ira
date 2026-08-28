@@ -7,7 +7,7 @@
 use super::input_profile_options::source_options_for_device;
 use super::input_profile_sheet_base::combo_row;
 use super::input_profile_widgets::{
-    format_percent, slider_entry_row, slider_row_with_scale, switch_row, OptionChoice,
+    slider_entry_row, slider_row_with_scale, switch_row, OptionChoice,
     SettingGroup, SliderSpec,
 };
 use adw::prelude::*;
@@ -104,12 +104,10 @@ pub(super) fn add_gyro_group(
                 "Adjust the 2D output of the gyroscope clockwise/counter clockwise"
             )),
             &SliderSpec(0.0, 360.0, 1.0, initial_rotate),
-            |value| format!("{value:.0}°"),
             move |value| {
                 gyro.borrow_mut().rotate_output = value as f32;
                 on_dirty();
-            },
-        )
+            })
         .0
     };
     let stick_max_output = {
@@ -121,12 +119,10 @@ pub(super) fn add_gyro_group(
                 "Maximum gyro input speed maps to this joystick output. Decrease it to avoid triggering a game's \"Extra Yaw\" setting."
             )),
             &SliderSpec(0.1, 1.0, 0.01, f64::from(stick.max_output)),
-            format_percent,
             move |value| {
                 gyro.borrow_mut().stick.max_output = value as f32;
                 on_dirty();
-            },
-        )
+            })
         .0
     };
     let stick_response_style = {
@@ -159,12 +155,10 @@ pub(super) fn add_gyro_group(
                 "How aggressively the joystick output deflects: 0.1 extremely aggressive, 1 linear, 4 extremely relaxed"
             )),
             &SliderSpec(0.1, 4.0, 0.1, f64::from(stick.power_curve)),
-            |value| format!("{value:.1}"),
             move |value| {
                 gyro.borrow_mut().stick.power_curve = value as f32;
                 on_dirty();
-            },
-        )
+            })
         .0
     };
     let stick_lock_edges = switch_row(
@@ -191,12 +185,10 @@ pub(super) fn add_gyro_group(
                 "The minimum speed the gyro must move before there is a reaction. Combats hand shake; rotation lost to the deadzone is recovered when moving fast."
             )),
             &SliderSpec(0.0, 20.0, 0.1, f64::from(stick.deadzone_dps)),
-            |value| format!("{value:.1}°/s"),
             move |value| {
                 gyro.borrow_mut().stick.deadzone_dps = value as f32;
                 on_dirty();
-            },
-        )
+            })
         .0
     };
 

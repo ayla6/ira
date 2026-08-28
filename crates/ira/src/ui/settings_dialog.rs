@@ -30,7 +30,7 @@ pub(super) fn settings_page_container() -> gtk4::Box {
 
 // Re-exports for backward compatibility with files that use super::settings_dialog::*
 pub(super) use super::settings_pages::{
-    settings_sidebar_row, sidebar_section_title, sidebar_separator,
+    settings_sidebar_row, sidebar_separator,
 };
 
 struct SavedSettingsWidgets {

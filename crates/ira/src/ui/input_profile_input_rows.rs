@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 
-use super::css::{CSS_BOXED_LIST, CSS_DIM_LABEL, CSS_SOURCE_BADGE};
+use super::css::{CSS_DIM_LABEL, CSS_SOURCE_BADGE};
 use super::input_profile_assets::{set_source_asset, source_badge};
 use super::input_profile_editor_regions::source_label;
 use super::input_profile_options::output_display_label;
@@ -25,7 +25,7 @@ use ira_input::{GamepadAxis, InputMapping, InputSource, SourceMode};
 pub(crate) type ExpansionState = Rc<RefCell<HashMap<InputSource, bool>>>;
 
 /// Structural edits rebuild the expanded content through the same deferred,
-/// coalesced pass the floating sheet used: clearing children mid-signal
+/// coalesced pass the floating sheet used: removing rows mid-signal
 /// unwinding finalizes widgets GTK still touches.
 fn refill(base: &SheetBase, ctx: &PagesCtx) {
     if base.rebuild_pending.replace(true) {
@@ -40,17 +40,20 @@ fn refill(base: &SheetBase, ctx: &PagesCtx) {
 }
 
 fn fill_children(base: &SheetBase, ctx: &PagesCtx) {
-    let Some(list) = base.child_list.as_ref() else {
+    let Some(expander) = base.child_expander.borrow().as_ref().cloned() else {
         return;
     };
-    super::helpers::clear_children(list);
+    for stale in base.live_children.borrow_mut().drain(..) {
+        expander.remove(&stale);
+    }
     let reopen: Reopen = {
         let base = base.clone();
         let ctx = ctx.clone();
         Rc::new(move || refill(&base, &ctx))
     };
     for child in child_rows(ctx, base, &reopen) {
-        list.append(&child);
+        expander.add_row(&child);
+        base.live_children.borrow_mut().push(child);
     }
 }
 
@@ -191,17 +194,10 @@ pub(crate) fn input_expander_row(
     expander.set_title(&source_label(source));
     expander.set_subtitle(&summary_text(source, mapping));
 
-    let list = gtk4::ListBox::new();
-    list.set_selection_mode(gtk4::SelectionMode::None);
-    list.add_css_class(CSS_BOXED_LIST);
-    list.set_valign(gtk4::Align::Center);
-    list.set_margin_top(6);
-    list.set_margin_bottom(6);
-    list.set_margin_start(12);
-    list.set_margin_end(12);
     let base = SheetBase {
         gyro: ctx.gyro.clone(),
-        child_list: Some(list.clone()),
+        child_expander: RefCell::new(Some(expander.clone())),
+        live_children: RefCell::new(Vec::new()),
         profile: ctx.profile.clone(),
         active_target: ctx.active_target.get(),
         source,
@@ -219,11 +215,9 @@ pub(crate) fn input_expander_row(
         Rc::new(move || refill(&base, &ctx))
     };
     for child in child_rows(ctx, &base, &reopen) {
-        list.append(&child);
+        expander.add_row(&child);
+        base.live_children.borrow_mut().push(child);
     }
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    content.append(&list);
-    expander.add_row(&content);
 
     let state = ctx.expansion.clone();
     if state.borrow().get(&source).copied().unwrap_or(false) {

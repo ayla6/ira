@@ -12,10 +12,10 @@ use super::input_profile_source_modes::{
 };
 use super::input_profile_stick_indices::{
     axis_style_from_index, axis_style_index, deadzone_from_index, deadzone_source_index,
-    format_degrees, output_axis_from_index, output_axis_index, output_from_index, output_index,
+    output_axis_from_index, output_axis_index, output_from_index, output_index,
 };
 use super::input_profile_widgets::{
-    format_percent, option_picker_popover, picker_button, switch_row, OptionChoice,
+    option_picker_popover, picker_button, switch_row, OptionChoice,
     SliderSpec,
 };
 use adw::prelude::*;
@@ -132,7 +132,6 @@ fn mouse_general_rows(
         &crate::tr!("Mouse Sensitivity"),
         Some(&crate::tr!("How fast the pointer moves per stick motion")),
         &SliderSpec(0.05, 20.0, 0.05, f64::from(sensitivity)),
-        format_percent,
         |mode, value| {
             if let SourceMode::Mouse { sensitivity, .. } = mode {
                 *sensitivity = value as f32;
@@ -156,7 +155,6 @@ fn sensitivity_rows(
             &crate::tr!("Horizontal Scale"),
             Some(&crate::tr!("Scales the stick's horizontal output")),
             &SliderSpec(0.0, 2.0, 0.05, f64::from(processing.sensitivity_x)),
-            format_percent,
             |mode, value| {
                 if let Some(processing) = processing_of(mode) {
                     processing.sensitivity_x = value as f32;
@@ -169,7 +167,6 @@ fn sensitivity_rows(
             &crate::tr!("Vertical Scale"),
             Some(&crate::tr!("Scales the stick's vertical output")),
             &SliderSpec(0.0, 2.0, 0.05, f64::from(processing.sensitivity_y)),
-            format_percent,
             |mode, value| {
                 if let Some(processing) = processing_of(mode) {
                     processing.sensitivity_y = value as f32;
@@ -292,7 +289,6 @@ fn output_rows(
             "Rotates the output, such that pushing the physical stick \"North\" results in an output of \"East\", when set to 90°"
         )),
         &SliderSpec(0.0, 360.0, 5.0, f64::from(processing.rotation)),
-        format_degrees,
         |mode, value| {
             if let Some(processing) = processing_of(mode) {
                 processing.rotation = value as f32;
@@ -318,7 +314,6 @@ fn deadzone_rows(
                 "Push the stick as far as this threshold before input is sent"
             )),
             &SliderSpec(0.0, 0.9, 0.01, f64::from(processing.deadzone_inner)),
-            format_percent,
             |mode, value| {
                 if let Some(processing) = processing_of(mode) {
                     processing.deadzone_inner = value as f32;
@@ -333,7 +328,6 @@ fn deadzone_rows(
                 "Push the stick this far to get the maximum output"
             )),
             &SliderSpec(0.1, 1.0, 0.01, f64::from(processing.deadzone_outer)),
-            format_percent,
             |mode, value| {
                 if let Some(processing) = processing_of(mode) {
                     processing.deadzone_outer = value as f32;

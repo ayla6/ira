@@ -108,19 +108,29 @@ pub(crate) fn format_last_played(ts: i64) -> String {
         .unwrap_or_else(|| crate::tr!("Never"))
 }
 
-/// The Steam client library hero reserves a fixed inset around the logo area
-/// (26px left/right, 16px top/bottom in its `BoxSizerContainer`), and the
-/// logo percentage sizes the logo relative to that inset region — never the
-/// raw hero — so a 100% logo always fits inside the hero.
-pub(crate) const LOGO_MARGIN_X: f64 = 26.0;
-pub(crate) const LOGO_MARGIN_Y: f64 = 16.0;
+/// The Steam client library hero reserves an inset around the logo area (26px
+/// left/right, 16px top/bottom in its `BoxSizerContainer` at the reference
+/// 1920×620 hero size), and the logo percentage sizes the logo relative to
+/// that inset region — never the raw hero — so a 100% logo always fits inside
+/// the hero.
+const REF_HERO_W: f64 = 1920.0;
+const REF_HERO_H: f64 = 620.0;
+const REF_MARGIN_X: f64 = 26.0;
+const REF_MARGIN_Y: f64 = 16.0;
+
+/// Margins scale with the hero so the inset keeps its proportion at any
+/// rendered size instead of eating a fixed pixel bite out of small heroes.
+fn logo_margins(hero_w: f64, hero_h: f64) -> (f64, f64) {
+    (
+        hero_w * (REF_MARGIN_X / REF_HERO_W),
+        hero_h * (REF_MARGIN_Y / REF_HERO_H),
+    )
+}
 
 /// Size of the margin-inset logo region inside a hero of the given size.
 fn logo_region_size(hero_w: f64, hero_h: f64) -> (f64, f64) {
-    (
-        (hero_w - 2.0 * LOGO_MARGIN_X).max(1.0),
-        (hero_h - 2.0 * LOGO_MARGIN_Y).max(1.0),
-    )
+    let (mx, my) = logo_margins(hero_w, hero_h);
+    ((hero_w - 2.0 * mx).max(1.0), (hero_h - 2.0 * my).max(1.0))
 }
 
 /// Scale a logo to fit inside a box that is `logo_pct`% of the hero's
@@ -155,15 +165,16 @@ pub(crate) fn logo_rect(
 ) -> (f64, f64, f64, f64) {
     let (lw, lh) = logo_scaled_dims(hero_w, hero_h, src_w, src_h, logo_pct);
     let (region_w, region_h) = logo_region_size(hero_w, hero_h);
+    let (mx, my) = logo_margins(hero_w, hero_h);
     let x = match halign {
-        gtk4::Align::Start => LOGO_MARGIN_X,
-        gtk4::Align::End => hero_w - LOGO_MARGIN_X - lw,
-        _ => LOGO_MARGIN_X + (region_w - lw) / 2.0,
+        gtk4::Align::Start => mx,
+        gtk4::Align::End => hero_w - mx - lw,
+        _ => mx + (region_w - lw) / 2.0,
     };
     let y = match valign {
-        gtk4::Align::Start => LOGO_MARGIN_Y,
-        gtk4::Align::End => hero_h - LOGO_MARGIN_Y - lh,
-        _ => LOGO_MARGIN_Y + (region_h - lh) / 2.0,
+        gtk4::Align::Start => my,
+        gtk4::Align::End => hero_h - my - lh,
+        _ => my + (region_h - lh) / 2.0,
     };
     (x, y, lw, lh)
 }
@@ -196,6 +207,18 @@ fn test_logo_scaled_dims_wide_logo_at_half_percent() {
 }
 
 #[test]
+fn test_logo_margins_scale_with_hero_size() {
+    // At the reference size the margins are Steam's 26/16; a quarter-size
+    // hero gets quarter margins, keeping the inset proportional.
+    let (mx, my) = logo_margins(1920.0, 620.0);
+    assert!((mx - 26.0).abs() < 0.001);
+    assert!((my - 16.0).abs() < 0.001);
+    let (mx, my) = logo_margins(480.0, 155.0);
+    assert!((mx - 6.5).abs() < 0.001);
+    assert!((my - 4.0).abs() < 0.001);
+}
+
+#[test]
 fn test_logo_scaled_dims_tall_logo_bounded_by_height() {
     // Square logo on a wide hero → height binds, logo is half the region
     // height (588 / 2 = 294).
@@ -209,15 +232,15 @@ fn test_logo_scaled_dims_full_percent_fills_region_exactly() {
     // 100% must fill the inset region, never the raw hero — this is the
     // overflow regression: the logo must not eat into the margins.
     let (lw, lh) = logo_scaled_dims(1920.0, 620.0, 4000.0, 1200.0, 100);
-    assert!(lw <= 1920.0 - 2.0 * LOGO_MARGIN_X + 0.001);
-    assert!(lh <= 620.0 - 2.0 * LOGO_MARGIN_Y + 0.001);
+    assert!(lw <= 1920.0 - 2.0 * 26.0 + 0.001);
+    assert!(lh <= 620.0 - 2.0 * 16.0 + 0.001);
 }
 
 #[test]
 fn test_logo_scaled_dims_stays_inside_region_at_min_percent() {
     // Extreme aspect at 5%: both axes stay inside the percentage box.
-    let region_w = 1920.0 - 2.0 * LOGO_MARGIN_X;
-    let region_h = 620.0 - 2.0 * LOGO_MARGIN_Y;
+    let region_w = 1920.0 - 2.0 * 26.0;
+    let region_h = 620.0 - 2.0 * 16.0;
     let (lw, lh) = logo_scaled_dims(1920.0, 620.0, 2000.0, 40.0, 5);
     assert!(lw <= region_w * 0.05 + 0.001);
     assert!(lh <= region_h * 0.05 + 0.001);
@@ -236,9 +259,9 @@ fn test_logo_rect_bottom_left_flush_with_inset_region() {
         gtk4::Align::Start,
         gtk4::Align::End,
     );
-    assert!((x - LOGO_MARGIN_X).abs() < 0.001);
-    assert!((x + lw - (1920.0 - LOGO_MARGIN_X)).abs() < 0.001);
-    assert!((y + lh - (620.0 - LOGO_MARGIN_Y)).abs() < 0.001);
+    assert!((x - 26.0).abs() < 0.001);
+    assert!((x + lw - (1920.0 - 26.0)).abs() < 0.001);
+    assert!((y + lh - (620.0 - 16.0)).abs() < 0.001);
 }
 
 #[test]

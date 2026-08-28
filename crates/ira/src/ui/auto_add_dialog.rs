@@ -758,7 +758,7 @@ pub(super) fn show_identified_form(
                 let profile_id = if game.is_windows {
                     w.profile_row
                         .as_ref()
-                        .and_then(|r| selected_profile_id(r, &w.profiles))
+                        .and_then(|r| selected_profile_id(r, &w.state.borrow().db))
                 } else {
                     None
                 };

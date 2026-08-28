@@ -6,7 +6,7 @@ use super::state::SharedState;
 use super::wine_config_widget::WineConfigWidgets;
 use crate::AppMessage;
 use adw::prelude::*;
-use ira_models::{GameLaunchConfig, WineConfig, WineProfile};
+use ira_models::{GameLaunchConfig, WineConfig};
 
 pub fn show_add_game_dialog(state: &SharedState) {
     let (window, db, sender, steam, save_dir, ra_username, ra_web_api_key) = {
@@ -140,7 +140,6 @@ pub fn show_add_game_dialog(state: &SharedState) {
             save_dir: &save_dir,
             ra_username: &ra_username,
             ra_web_api_key: &ra_web_api_key,
-            profiles: &profiles,
             win: &win,
             state,
         },
@@ -224,7 +223,6 @@ struct AddGameWidgets<'a> {
     save_dir: &'a str,
     ra_username: &'a str,
     ra_web_api_key: &'a str,
-    profiles: &'a [WineProfile],
     win: &'a adw::Dialog,
     state: &'a SharedState,
 }
@@ -250,7 +248,6 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
         save_dir,
         ra_username,
         ra_web_api_key,
-        profiles,
         win,
         state,
     } = widgets;
@@ -274,7 +271,6 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
     let save_dir = save_dir.to_string();
     let ra_username = ra_username.to_string();
     let ra_web_api_key = ra_web_api_key.to_string();
-    let profiles = profiles.to_vec();
     let win = win.clone();
     let state_c = state.clone();
 
@@ -328,7 +324,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
         };
 
         let selected_profile_id = if is_wine {
-            super::wine_profile_picker::selected_profile_id(&profile_row, &profiles)
+            super::wine_profile_picker::selected_profile_id(&profile_row, &db)
         } else {
             None
         };

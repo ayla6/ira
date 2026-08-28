@@ -232,7 +232,7 @@ pub fn show_profile_dialog(
     settings_win: &adw::Dialog,
     game_slug: Option<&str>,
     callbacks: ProfileDialogCallbacks,
-) {
+) -> adw::Dialog {
     let win = adw::Dialog::new();
     win.set_content_width(450);
     win.set_content_height(400);
@@ -463,6 +463,7 @@ pub fn show_profile_dialog(
     let prefix_c = prefix_entry;
     let arch_row_c = arch_row;
     let umu_row_c = umu_row;
+    let win_return = win.clone();
     let win_c2 = win;
     let db_c = db.clone();
     let versions_c = versions;
@@ -533,4 +534,5 @@ pub fn show_profile_dialog(
             cb(id);
         }
     });
+    win_return
 }

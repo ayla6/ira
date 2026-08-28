@@ -200,7 +200,7 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
     let profile_row_c = profile_row;
     let wow64_row_c = wow64_row;
     let gamescope_row_c = gamescope_row;
-    let profiles_c = wizard.borrow().profiles.clone();
+    let db_c = state.borrow().db.clone();
     start_btn.connect_clicked(move |_| {
         let installers = ist_c.borrow().installers.clone();
         if installers.is_empty() {
@@ -214,7 +214,7 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
 
         {
             let mut ist = ist_c.borrow_mut();
-            ist.profile_id = selected_profile_id(&profile_row_c, &profiles_c);
+            ist.profile_id = selected_profile_id(&profile_row_c, &db_c);
             ist.wow64 = wow64_row_c.is_active();
             ist.gamescope = gamescope_row_c.is_active();
             ist.game_platform = game_platform;

@@ -96,21 +96,10 @@ pub(super) fn build_game_logo_page(
                 return;
             }
             let pct = adj_for_draw.value() as i32;
-            let (lw, lh) = super::game_display::logo_scaled_dims(w, h, pb_w, pb_h, pct);
             let pos = pos_for_draw.borrow().clone();
             let (halign, valign) = super::game_display::logo_position_align(&pos);
-            let x = match halign {
-                gtk4::Align::Start => 12.0,
-                gtk4::Align::Center => (w - lw) / 2.0,
-                gtk4::Align::End => w - lw - 12.0,
-                _ => 12.0,
-            };
-            let y = match valign {
-                gtk4::Align::Start => 12.0,
-                gtk4::Align::Center => (h - lh) / 2.0,
-                gtk4::Align::End => h - lh - 12.0,
-                _ => h - 12.0,
-            };
+            let (x, y, lw, lh) =
+                super::game_display::logo_rect(w, h, pb_w, pb_h, pct, halign, valign);
             let _ = cr.save();
             cr.translate(x, y);
             cr.scale(lw / pb_w, lh / pb_h);

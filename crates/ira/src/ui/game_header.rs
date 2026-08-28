@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use super::css::*;
 use super::game_display::{
-    format_last_played, format_playtime, logo_position_align, logo_scaled_dims,
+    format_last_played, format_playtime, logo_position_align, logo_rect,
 };
 use super::play_button::play_button;
 use super::state::SharedState;
@@ -321,6 +321,19 @@ fn build_controller_button(state: &SharedState, game: &Game) -> gtk4::Widget {
 
 fn build_settings_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
     let menu = gio::Menu::new();
+    let opens_emulator = state
+        .borrow()
+        .games
+        .iter()
+        .find(|game| game.db_id == db_id)
+        .map(|game| game.kind.has_standalone_emulator())
+        .unwrap_or(false);
+    if opens_emulator {
+        menu.append(
+            Some(&crate::tr!("Open emulator without game")),
+            Some("game.open_emulator"),
+        );
+    }
     menu.append(Some(&crate::tr!("View log")), Some("game.view_log"));
 
     let btn = adw::SplitButton::new();
@@ -336,6 +349,18 @@ fn build_settings_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
     });
 
     let actions = gio::SimpleActionGroup::new();
+    if opens_emulator {
+        let st_open = state.clone();
+        let open_action = gio::SimpleAction::new("open_emulator", None);
+        open_action.connect_activate(move |_, _| {
+            if let Err(e) =
+                super::play_button::open_emulator_no_game(&st_open, db_id)
+            {
+                eprintln!("Failed to open emulator: {}", e);
+            }
+        });
+        actions.add_action(&open_action);
+    }
     let st_log = state.clone();
     let log_action = gio::SimpleAction::new("view_log", None);
     log_action.connect_activate(move |_, _| {
@@ -426,22 +451,8 @@ fn build_hero_overlay(
                 return;
             }
 
-            let (lw, lh) = logo_scaled_dims(w, h, pb_w, pb_h, logo_pct);
-
             let (halign, valign) = logo_position_align(&logo_pos);
-
-            let x = match halign {
-                gtk4::Align::Start => 24.0,
-                gtk4::Align::Center => (w - lw) / 2.0,
-                gtk4::Align::End => w - lw - 24.0,
-                _ => 24.0,
-            };
-            let y = match valign {
-                gtk4::Align::Start => 24.0,
-                gtk4::Align::Center => (h - lh) / 2.0,
-                gtk4::Align::End => h - lh - 24.0,
-                _ => h - lh - 24.0,
-            };
+            let (x, y, lw, lh) = logo_rect(w, h, pb_w, pb_h, logo_pct, halign, valign);
 
             let _ = cr.save();
             cr.translate(x, y);

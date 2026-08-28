@@ -2,7 +2,7 @@ use super::css::*;
 use super::helpers::esc;
 use super::state::SharedState;
 use adw::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 type ListRef = Rc<RefCell<gtk4::ListBox>>;
@@ -293,6 +293,10 @@ pub fn show_profile_dialog(
     // Track whether the user has manually modified the prefix field.
     // When false, the prefix auto-updates from the profile name.
     let prefix_manually_edited = Rc::new(RefCell::new(existing.is_some()));
+    // `set_text` emits `changed` even when the app writes the field itself,
+    // so programmatic rewrites set this guard around them; only edits that
+    // happen while it is clear count as manual.
+    let prefix_programmatic = Rc::new(Cell::new(false));
 
     if let Some(p) = existing.as_ref() {
         prefix_entry.set_text(&p.prefix);
@@ -307,6 +311,7 @@ pub fn show_profile_dialog(
     // Auto-update prefix from name when not manually edited
     let prefix_entry_for_name = prefix_entry.clone();
     let prefix_me_for_name = prefix_manually_edited.clone();
+    let prefix_programmatic_for_name = prefix_programmatic.clone();
     let state_for_name = state.clone();
     name_entry.connect_changed(move |entry| {
         if *prefix_me_for_name.borrow() {
@@ -318,13 +323,18 @@ pub fn show_profile_dialog(
         }
         let base = state_for_name.borrow().cfg.prefix_base_dir.clone();
         let generated = ira_launcher::wine_launch::generate_prefix_path(&base, &name);
+        prefix_programmatic_for_name.set(true);
         prefix_entry_for_name.set_text(&generated);
+        prefix_programmatic_for_name.set(false);
     });
 
     // Mark as manually edited when the user types in the prefix field
     let prefix_me_for_edit = prefix_manually_edited.clone();
+    let prefix_programmatic_for_edit = prefix_programmatic.clone();
     prefix_entry.connect_changed(move |_| {
-        *prefix_me_for_edit.borrow_mut() = true;
+        if !prefix_programmatic_for_edit.get() {
+            *prefix_me_for_edit.borrow_mut() = true;
+        }
     });
 
     let prefix_browse = super::helpers::make_browse_button(
@@ -352,6 +362,7 @@ pub fn show_profile_dialog(
     let prefix_entry_for_reset = prefix_entry.clone();
     let name_entry_for_reset = name_entry.clone();
     let me_for_reset = prefix_manually_edited;
+    let programmatic_for_reset = prefix_programmatic;
     let state_for_reset = state.clone();
     prefix_reset.connect_clicked(move |_| {
         let name = name_entry_for_reset.text().to_string();
@@ -360,7 +371,9 @@ pub fn show_profile_dialog(
         }
         let base = state_for_reset.borrow().cfg.prefix_base_dir.clone();
         let generated = ira_launcher::wine_launch::generate_prefix_path(&base, &name);
+        programmatic_for_reset.set(true);
         prefix_entry_for_reset.set_text(&generated);
+        programmatic_for_reset.set(false);
         *me_for_reset.borrow_mut() = false;
     });
     prefix_entry.add_suffix(&prefix_reset);

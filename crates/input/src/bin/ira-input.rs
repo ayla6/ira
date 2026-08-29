@@ -260,6 +260,7 @@ struct LoopActivity {
     profile: bool,
     disconnected: bool,
     cursor: bool,
+    focus: bool,
 }
 
 struct LoopSchedule {
@@ -268,6 +269,7 @@ struct LoopSchedule {
     profile: Instant,
     reconnect: Instant,
     cursor: Instant,
+    focus: Instant,
 }
 
 impl LoopSchedule {
@@ -279,6 +281,7 @@ impl LoopSchedule {
             profile: now,
             reconnect: now,
             cursor: now,
+            focus: now,
         }
     }
 
@@ -289,6 +292,7 @@ impl LoopSchedule {
             activity.profile.then(|| remaining(self.profile, PROFILE_POLL_INTERVAL)),
             activity.disconnected.then(|| remaining(self.reconnect, RECONNECT_INTERVAL)),
             activity.cursor.then(|| remaining(self.cursor, FOCUS_POLL_INTERVAL)),
+            activity.focus.then(|| remaining(self.focus, FOCUS_POLL_INTERVAL)),
         ]
         .into_iter()
         .flatten()
@@ -917,7 +921,6 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         );
     }
     let mut paused_for_focus = false;
-    let mut focus_check = Instant::now();
     // Cursor-driven set switching (Steam Input's "action set when the mouse
     // cursor is shown/hidden"). Same X11 limits as focus tracking: without
     // an X server the cursor always reads as visible and switching stays off.
@@ -961,8 +964,8 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         if run_tick {
             schedule.sensor = Instant::now();
         }
-        if focus.is_some() && focus_check.elapsed() >= FOCUS_POLL_INTERVAL {
-            focus_check = Instant::now();
+        if focus.is_some() && schedule.focus.elapsed() >= FOCUS_POLL_INTERVAL {
+            schedule.focus = Instant::now();
             let focused = focus
                 .as_ref()
                 .is_some_and(ira_input::FocusWatcher::game_is_focused);
@@ -1042,6 +1045,20 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             rumble.service();
         }
         let result = if paused_for_focus {
+            // The pad keeps streaming while its events are ignored. If those
+            // reports stayed queued, the fd would read POLLIN forever and
+            // poll would return instantly on every pass — the loop would
+            // free-run at full speed doing nothing (one core at 100%). Drain
+            // and discard instead; mapping state stays in sync for the
+            // unpause.
+            if let Some(gamepad) = gamepad.as_mut() {
+                if let Err(error) = gamepad.fetch_events() {
+                    eprintln!("ira-input: failed draining paused controller: {error}");
+                }
+            }
+            if let Some(switch) = pipeline.switch_hidraw.as_mut() {
+                let _ = switch.take_events();
+            }
             Ok(())
         } else {
             process_physical_inputs(
@@ -1278,13 +1295,17 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                 }
             }
         }
+        // While paused the ticks are skipped, so their deadline must not
+        // drive the wakeup rate; the focus entry keeps unpause latency at
+        // one poll interval.
         let timeout = floor_poll_timeout(schedule.timeout(LoopActivity {
-            tick: tick_needed,
+            tick: tick_needed && !paused_for_focus,
             tick_interval,
             child: child.is_some(),
             profile: profile_monitor.is_some(),
             disconnected: !connected,
             cursor: cursor_watcher.is_some(),
+            focus: focus.is_some(),
         }));
         wait_for_inputs(&gamepad, timeout)?;
     }
@@ -2661,6 +2682,7 @@ mod tests {
                 profile: false,
                 disconnected: false,
                 cursor: false,
+                focus: false,
             }),
             None
         );
@@ -2687,6 +2709,26 @@ mod tests {
     }
 
     #[test]
+    fn test_loop_schedule_wakes_for_focus_while_ticks_pause() {
+        // Paused sessions skip ticks: the focus deadline must keep the loop
+        // waking so input can resume, and it stays one poll interval out.
+        let schedule = LoopSchedule::new();
+        thread::sleep(Duration::from_millis(5));
+        let timeout = schedule
+            .timeout(LoopActivity {
+                tick: false,
+                tick_interval: Duration::from_millis(1),
+                child: false,
+                profile: false,
+                disconnected: false,
+                cursor: false,
+                focus: true,
+            })
+            .expect("focus tracking must have a deadline while paused");
+        assert!(timeout <= Duration::from_millis(250));
+    }
+
+    #[test]
     fn test_loop_schedule_uses_earliest_active_deadline() {
         let schedule = LoopSchedule::new();
         let timeout = schedule
@@ -2697,6 +2739,7 @@ mod tests {
                 profile: true,
                 disconnected: true,
                 cursor: true,
+                focus: true,
             })
             .expect("active work must have a deadline");
         assert!(timeout <= Duration::from_millis(1));

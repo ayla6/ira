@@ -107,6 +107,7 @@ mod wine_config_env_dll;
 mod wine_config_helpers;
 mod wine_config_widget;
 mod wine_profile_picker;
+mod wizard_window;
 
 pub use background::{hide_to_background, restore_content};
 pub use enrichment::enrich_game_async;

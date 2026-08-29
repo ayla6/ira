@@ -22,6 +22,7 @@ use super::css::*;
 use super::helpers::esc;
 use super::state::SharedState;
 use super::wine_profile_picker::{build_wine_profile_picker, selected_profile_id};
+use super::wizard_window::WizardWindow;
 
 struct InstallerState {
     installers: Vec<PathBuf>,
@@ -37,10 +38,15 @@ struct InstallerState {
 
 pub fn show_installer_add_dialog(state: &SharedState) {
     let parent = state.borrow().window.clone();
-    let win = adw::Dialog::new();
-    win.set_title(&crate::tr!("Install from Installer"));
-    win.set_content_width(520);
-    win.set_content_height(580);
+    // A separate window instead of an in-window dialog so the library stays
+    // usable while installers run.
+    let win = adw::Window::new();
+    win.set_title(Some(&crate::tr!("Install from Installer")));
+    win.set_default_size(520, 580);
+    win.set_transient_for(Some(&parent));
+    // Closing mid-install only hides the window; the run keeps going and
+    // can present its result prompt on it again.
+    win.set_hide_on_close(true);
 
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header = adw::HeaderBar::new();
@@ -48,12 +54,13 @@ pub fn show_installer_add_dialog(state: &SharedState) {
     content.append(&header);
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     content.append(&page);
-    win.set_child(Some(&content));
-    win.present(Some(&parent));
+    // AdwWindow only accepts set_content; gtk_window_set_child aborts.
+    win.set_content(Some(&content));
+    win.present();
 
     let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
     let wizard = Rc::new(RefCell::new(Wizard {
-        win: win.clone(),
+        win: WizardWindow::Window(win.clone()),
         content: page,
         state: state.clone(),
         profiles,
@@ -122,7 +129,7 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
         dialog.set_title(&crate::tr!("Select installer files"));
         let ist_c2 = ist_c.clone();
         let list_c2 = list_c.clone();
-        let Some(host) = super::helpers::hosting_window(&win_c) else {
+        let Some(host) = super::helpers::hosting_window(win_c.as_widget()) else {
             return;
         };
         dialog.open_multiple(
@@ -151,7 +158,7 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
 
     let wine_group = adw::PreferencesGroup::new();
     wine_group.set_title(&crate::tr!("Wine"));
-    let profile_row = build_wine_profile_picker(&profiles, None, None, &state, &win);
+    let profile_row = build_wine_profile_picker(&profiles, None, None, &state, win.as_widget());
     wine_group.add(&profile_row);
     let wow64_row = adw::SwitchRow::new();
     wow64_row.set_title(&crate::tr!("Use WOW64"));
@@ -600,7 +607,7 @@ fn on_installer_complete(
     index: usize,
     success: bool,
 ) {
-    let win = wizard.borrow().win.clone();
+    let content = wizard.borrow().content.clone();
     let total = ist.borrow().installers.len();
     let is_last = index + 1 >= total;
     let installer_name = ist.borrow().installers[index]
@@ -618,53 +625,88 @@ fn on_installer_complete(
     } else {
         crate::tr!("Installer failed")
     };
-    let body = crate::tr!("{} ({} of {})\n\nWhat do you want to do?")
-        .replacen("{}", &installer_name, 1)
-        .replacen("{}", &(index + 1).to_string(), 1)
-        .replacen("{}", &total.to_string(), 1);
 
-    let alert = adw::AlertDialog::new(Some(&title), Some(&body));
-    if !success {
-        alert.add_response("retry", &crate::tr!("Retry"));
-        alert.set_response_appearance("retry", adw::ResponseAppearance::Suggested);
-        alert.add_response("skip", &crate::tr!("Skip"));
-    }
-    if !is_last {
-        alert.add_response("next", &crate::tr!("Next"));
-        if success {
-            alert.set_response_appearance("next", adw::ResponseAppearance::Suggested);
-        }
-    } else {
-        alert.add_response("done", &crate::tr!("Continue"));
-        if success {
-            alert.set_response_appearance("done", adw::ResponseAppearance::Suggested);
-        }
-    }
-    alert.add_response("cancel", &crate::tr!("Cancel"));
-    alert.set_close_response("cancel");
-
-    let wizard_c = wizard.clone();
-    let ist_c = ist.clone();
-    alert.choose(
-        Some(&win),
-        None::<&gtk4::gio::Cancellable>,
-        move |response| match response.as_str() {
-            "retry" => run_installer(&wizard_c, &ist_c, index),
-            "skip" => {
-                if is_last {
-                    start_post_install(&wizard_c, &ist_c);
-                } else {
-                    run_installer(&wizard_c, &ist_c, index + 1);
-                }
-            }
-            "next" => run_installer(&wizard_c, &ist_c, index + 1),
-            "done" => start_post_install(&wizard_c, &ist_c),
-            "cancel" => {
-                wizard_c.borrow().win.close();
-            }
-            _ => {}
-        },
+    clear_children(&content);
+    let status = adw::StatusPage::new();
+    status.set_title(&title);
+    status.set_description(
+        Some(
+            &crate::tr!("{} ({} of {})")
+                .replacen("{}", &installer_name, 1)
+                .replacen("{}", &(index + 1).to_string(), 1)
+                .replacen("{}", &total.to_string(), 1),
+        ),
     );
+    status.set_icon_name(Some("system-software-install-symbolic"));
+
+    let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    btn_row.set_halign(gtk4::Align::Center);
+
+    let cancel_btn = gtk4::Button::with_label(&crate::tr!("Cancel"));
+    cancel_btn.add_css_class(CSS_FLAT);
+    {
+        let wizard_c = wizard.clone();
+        cancel_btn.connect_clicked(move |_| wizard_c.borrow().win.close());
+    }
+    btn_row.append(&cancel_btn);
+
+    if !success {
+        let retry_btn = gtk4::Button::with_label(&crate::tr!("Retry"));
+        retry_btn.add_css_class(CSS_SUGGESTED_ACTION);
+        {
+            let wizard_c = wizard.clone();
+            let ist_c = ist.clone();
+            retry_btn.connect_clicked(move |_| run_installer(&wizard_c, &ist_c, index));
+        }
+        btn_row.append(&retry_btn);
+
+        let skip_btn = gtk4::Button::with_label(&crate::tr!("Skip"));
+        skip_btn.add_css_class(CSS_FLAT);
+        {
+            let wizard_c = wizard.clone();
+            let ist_c = ist.clone();
+            skip_btn
+                .connect_clicked(move |_| advance_after_complete(&wizard_c, &ist_c, index, is_last));
+        }
+        btn_row.append(&skip_btn);
+    }
+
+    let (advance_label, next_index) = if is_last {
+        (crate::tr!("Continue"), None)
+    } else {
+        (crate::tr!("Next"), Some(index + 1))
+    };
+    let advance_btn = gtk4::Button::with_label(&advance_label);
+    if success {
+        advance_btn.add_css_class(CSS_SUGGESTED_ACTION);
+    }
+    {
+        let wizard_c = wizard.clone();
+        let ist_c = ist.clone();
+        advance_btn.connect_clicked(move |_| match next_index {
+            Some(next) => run_installer(&wizard_c, &ist_c, next),
+            None => start_post_install(&wizard_c, &ist_c),
+        });
+    }
+    btn_row.append(&advance_btn);
+
+    status.set_child(Some(&btn_row));
+    content.append(&status);
+}
+
+/// Skip/Next/Continue all move past the finished installer: on to the next
+/// one, or to install detection when it was the last.
+fn advance_after_complete(
+    wizard: &Rc<RefCell<Wizard>>,
+    ist: &Rc<RefCell<InstallerState>>,
+    index: usize,
+    is_last: bool,
+) {
+    if is_last {
+        start_post_install(wizard, ist);
+    } else {
+        run_installer(wizard, ist, index + 1);
+    }
 }
 
 fn start_post_install(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>) {
@@ -763,7 +805,7 @@ fn flatten_linuxrulez_if_needed(wizard: &Rc<RefCell<Wizard>>, folder: &Path) -> 
 
     let lrz_dir_c = lrz_dir;
     alert.choose(
-        Some(&win),
+        Some(win.as_widget()),
         None::<&gtk4::gio::Cancellable>,
         move |response| {
             if response == "delete" {
@@ -785,7 +827,7 @@ fn pick_install_folder(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerS
     super::helpers::set_initial_folder(&dialog, &default_folder.to_string_lossy());
     let wizard_c = wizard.clone();
     let ist_c = ist.clone();
-    let Some(host) = super::helpers::hosting_window(&win) else {
+    let Some(host) = super::helpers::hosting_window(win.as_widget()) else {
         return;
     };
     dialog.select_folder(Some(&host), None::<&gtk4::gio::Cancellable>, move |result| {

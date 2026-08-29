@@ -15,6 +15,7 @@ use super::steam_search_dialog::{
     show_search_results_dialog, SearchResultsDialogParams, SearchSource,
 };
 use super::wine_profile_picker::{build_wine_profile_picker, selected_profile_id};
+use super::wizard_window::WizardWindow;
 use crate::{AppMessage, AppSender, Game};
 
 /// Which API emulator to install (GOG checked first — a GOG game may ship Steam
@@ -160,7 +161,7 @@ fn is_elf(path: &Path) -> bool {
 
 /// Wizard state shared between the main-thread poll closure and signal handlers.
 pub(super) struct Wizard {
-    pub win: adw::Dialog,
+    pub win: WizardWindow,
     pub content: gtk4::Box,
     pub state: SharedState,
     pub profiles: Vec<WineProfile>,
@@ -189,7 +190,7 @@ pub fn show_auto_add_dialog(state: &SharedState) {
     win.present(Some(&parent));
 
     let wizard = Rc::new(RefCell::new(Wizard {
-        win: win.clone(),
+        win: WizardWindow::Dialog(win.clone()),
         content: page,
         state: state.clone(),
         profiles: ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default(),
@@ -225,13 +226,13 @@ fn show_pick_page(wizard: &Rc<RefCell<Wizard>>) {
 
     let wizard_c = wizard.clone();
     pick_btn.connect_clicked(move |_| {
-        pick_folder_and_start(&win, &state, &wizard_c);
+        pick_folder_and_start(win.as_widget(), &state, &wizard_c);
     });
     status.set_child(Some(&pick_btn));
     content.append(&status);
 }
 
-fn pick_folder_and_start(win: &adw::Dialog, state: &SharedState, wizard: &Rc<RefCell<Wizard>>) {
+fn pick_folder_and_start(win: &gtk4::Widget, state: &SharedState, wizard: &Rc<RefCell<Wizard>>) {
     let default_folder = state.borrow().cfg.default_game_folder.clone();
     let dialog = gtk4::FileDialog::new();
     dialog.set_title(&crate::tr!("Select game folder"));
@@ -258,7 +259,7 @@ fn pick_folder_and_start(win: &adw::Dialog, state: &SharedState, wizard: &Rc<Ref
 fn on_folder_picked(
     path: &Path,
     state: &SharedState,
-    win: &adw::Dialog,
+    win: &gtk4::Widget,
     wizard: &Rc<RefCell<Wizard>>,
 ) {
     let folders = state.borrow().cfg.all_game_folders();
@@ -277,7 +278,7 @@ fn on_folder_picked(
 fn show_move_target_chooser(
     path: &Path,
     folders: &[std::path::PathBuf],
-    win: &adw::Dialog,
+    win: &gtk4::Widget,
     wizard: &Rc<RefCell<Wizard>>,
 ) {
     let basename = path.file_name().and_then(|n| n.to_str()).unwrap_or("game");
@@ -586,7 +587,7 @@ fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf) {
                     continue_identify(folder_c.clone(), app_id.to_string(), &wizard_c);
                 })
             },
-            parent: &win_c,
+            parent: win_c.as_widget(),
             match_in_db: false,
         });
     });
@@ -668,7 +669,7 @@ pub(super) fn show_identified_form(
             super::steam_search::show_steam_id_search_popup(
                 &state_c,
                 &search_text,
-                &win_c,
+                win_c.as_widget(),
                 &appid_c,
                 &crate::tr!("Select"),
                 Rc::new(move |_app_id: &str, matched_name: &str| {
@@ -695,7 +696,7 @@ pub(super) fn show_identified_form(
     exe_entry.set_title(&crate::tr!("Executable"));
     exe_entry.set_text(&game.exe);
     let exe_browse = super::helpers::make_browse_button(
-        Some(&win),
+        Some(win.as_widget()),
         &crate::tr!("Select executable"),
         false,
         Some((
@@ -712,7 +713,7 @@ pub(super) fn show_identified_form(
     group.add(&exe_entry);
 
     let profile_row =
-        build_wine_profile_picker(&profiles, preselected_profile_id, None, &state, &win);
+        build_wine_profile_picker(&profiles, preselected_profile_id, None, &state, win.as_widget());
     profile_row.set_visible(is_windows);
     group.add(&profile_row);
     let profile_row_c = profile_row.clone();
@@ -1337,7 +1338,7 @@ fn prompt_install_emulator(
     outer.append(&btn_row);
 
     dialog.set_child(Some(&outer));
-    dialog.present(Some(&win));
+    dialog.present(Some(win.as_widget()));
 
     let resolved = Rc::new(Cell::new(false));
     let wizard_c = wizard.clone();
@@ -1506,7 +1507,7 @@ pub(super) fn prompt_redists(
 
     let wizard_c = wizard.clone();
     alert.choose(
-        Some(&win),
+        Some(win.as_widget()),
         None::<&gtk4::gio::Cancellable>,
         move |response| {
             if response == "install" {
@@ -1641,7 +1642,7 @@ pub(super) fn show_error(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
     alert.add_response("ok", &crate::tr!("OK"));
     alert.set_default_response(Some("ok"));
     alert.set_close_response("ok");
-    alert.present(Some(&win));
+    alert.present(Some(win.as_widget()));
 }
 
 pub(super) fn clear_children(container: &gtk4::Box) {

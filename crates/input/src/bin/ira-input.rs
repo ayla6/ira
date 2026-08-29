@@ -1,8 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -27,7 +28,11 @@ const DUAL_SENSE_PRODUCT: u16 = 0x0ce6;
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const FOCUS_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const PROFILE_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const STEAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// Steam session poll cadence. Off the input loop, the scan's /proc walks
+/// are the only cost, and nothing user-facing waits on it: game-exit
+/// detection already tolerates the 2 s exit grace, so a relaxed interval
+/// keeps the watcher near-idle.
+const STEAM_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(250);
 /// How long a Switch-protocol takeover without any report may last before
 /// the daemon abandons it and returns to the evdev input path.
@@ -46,6 +51,101 @@ struct SteamProcessSnapshot {
     complete: bool,
 }
 
+/// Classifies each user process against the Steam app id exactly once: an
+/// environment never changes after exec, so re-reading it on every poll only
+/// re-pays the read's cost — and /proc/<pid>/environ serializes on the
+/// target's mmap lock, which a running game holds constantly. Pids are
+/// re-stat'd every poll (cheap, no mmap lock); only pids born since the
+/// last poll — or recycled ones whose start_time moved — get their
+/// environment read.
+#[derive(Default)]
+struct SteamProcessScanner {
+    /// The app id the classifications were made against; a different one
+    /// invalidates the whole cache.
+    app_id: String,
+    /// pid -> (start_time at classification, matches the app id).
+    classified: HashMap<i32, (u64, bool)>,
+}
+
+impl SteamProcessScanner {
+    fn scan(&mut self, app_id: &str) -> SteamProcessSnapshot {
+        if self.app_id != app_id {
+            self.app_id = app_id.to_string();
+            self.classified.clear();
+        }
+        let uid = unsafe { libc::geteuid() };
+        let mut processes = HashSet::new();
+        let mut complete = true;
+        let entries = std::fs::read_dir("/proc");
+        for pid in entries
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse::<i32>().ok())
+            .filter(|pid| *pid != std::process::id() as i32)
+        {
+            // Known pids need only the start_time check (pid recycling);
+            // the uid lookup and environ read happen on classification.
+            let Some(start_time) = process_start_time(pid) else {
+                // Dead before we could stat it: not an incomplete scan, it
+                // simply will not be in this snapshot.
+                continue;
+            };
+            let known = self.classified.get(&pid).copied();
+            if let Some((seen_start, matches)) = known {
+                if seen_start == start_time {
+                    if matches {
+                        processes.insert(ProcessIdentity { pid, start_time });
+                    }
+                    continue;
+                }
+            }
+            let owned = std::fs::metadata(format!("/proc/{pid}"))
+                .map(|metadata| metadata.uid() == uid)
+                .unwrap_or(false);
+            if !owned {
+                self.classified.insert(pid, (start_time, false));
+                continue;
+            }
+            match std::fs::read(format!("/proc/{pid}/environ")) {
+                Ok(environment) => {
+                    if environment_has_steam_app(&environment, app_id) {
+                        self.classified.insert(pid, (start_time, true));
+                        processes.insert(ProcessIdentity { pid, start_time });
+                    } else {
+                        self.classified.insert(pid, (start_time, false));
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    self.classified.insert(pid, (start_time, false));
+                }
+                // Non-dumpable processes (keyring and ssh agents set
+                // PR_SET_DUMPABLE=0) stay unreadable for life: classify
+                // them once instead of re-attempting — and never letting
+                // the scan complete — on every poll.
+                Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                    self.classified.insert(pid, (start_time, false));
+                }
+                Err(_) => {
+                    // Transiently unreadable; retry next poll.
+                    complete = false;
+                }
+            }
+        }
+        SteamProcessSnapshot {
+            processes,
+            complete,
+        }
+    }
+}
+
+/// start_time of a live process from /proc/<pid>/stat — a read that never
+/// takes the target's mmap lock, so polling every pid every cycle stays
+/// cheap even while a game churns memory.
+fn process_start_time(pid: i32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    parse_process_start_time(&stat)
+}
+
 struct SteamSession {
     app_id: String,
     baseline: HashSet<ProcessIdentity>,
@@ -55,6 +155,102 @@ struct SteamSession {
     stop_sent: bool,
 }
 
+/// Steam session supervision on its own thread. Every poll walks /proc, and
+/// even the incremental scan can stall behind a game's mmap lock — running
+/// it on the input loop both burns core time at 10 Hz and freezes input
+/// during game loading. The loop only reads the shared flags.
+struct SteamWatcher {
+    finished: Arc<AtomicBool>,
+    launcher_exited: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    /// Set only on daemon shutdown-by-signal, matching the previous
+    /// behavior: a natural end (or a daemon error) never stops the game.
+    request_stop: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl SteamWatcher {
+    fn spawn(app_id: &str) -> Self {
+        let finished = Arc::new(AtomicBool::new(false));
+        let launcher_exited = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let request_stop = Arc::new(AtomicBool::new(false));
+        let flags = SteamFlags {
+            finished: Arc::clone(&finished),
+            launcher_exited: Arc::clone(&launcher_exited),
+            stop: Arc::clone(&stop),
+            request_stop: Arc::clone(&request_stop),
+        };
+        let app_id = app_id.to_string();
+        let handle = thread::Builder::new()
+            .name("ira-steam-watch".to_string())
+            .spawn(move || watch_steam_session(app_id, flags))
+            .ok();
+        Self {
+            finished,
+            launcher_exited,
+            stop,
+            request_stop,
+            handle,
+        }
+    }
+
+    fn game_session_over(&self) -> bool {
+        self.finished.load(Ordering::Acquire)
+    }
+
+    fn launcher_exited(&self) {
+        self.launcher_exited.store(true, Ordering::Release);
+    }
+
+    /// Shutdown-by-signal: ask the watcher to stop the game through Steam
+    /// on its way out.
+    fn request_stop_and_join(&mut self) {
+        self.request_stop.store(true, Ordering::Release);
+        self.join();
+    }
+
+    fn join(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for SteamWatcher {
+    fn drop(&mut self) {
+        self.join();
+    }
+}
+
+struct SteamFlags {
+    finished: Arc<AtomicBool>,
+    launcher_exited: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    request_stop: Arc<AtomicBool>,
+}
+
+fn watch_steam_session(app_id: String, flags: SteamFlags) {
+    let mut scanner = SteamProcessScanner::default();
+    let mut session = SteamSession::new_with(&app_id, &mut scanner);
+    loop {
+        if flags.stop.load(Ordering::Acquire) {
+            if flags.request_stop.load(Ordering::Acquire) {
+                session.request_stop();
+            }
+            return;
+        }
+        thread::sleep(STEAM_POLL_INTERVAL);
+        if session.poll(&mut scanner, flags.launcher_exited.load(Ordering::Acquire)) {
+            // Natural end: the game session is over, the game itself keeps
+            // running as far as Steam is concerned.
+            break;
+        }
+    }
+    flags.finished.store(true, Ordering::Release);
+}
+
 /// Which periodic work is live this pass; every entry earns a slot in the
 /// loop's wait timeout.
 struct LoopActivity {
@@ -62,7 +258,6 @@ struct LoopActivity {
     tick_interval: Duration,
     child: bool,
     profile: bool,
-    steam: bool,
     disconnected: bool,
     cursor: bool,
 }
@@ -71,7 +266,6 @@ struct LoopSchedule {
     sensor: Instant,
     process: Instant,
     profile: Instant,
-    steam: Instant,
     reconnect: Instant,
     cursor: Instant,
 }
@@ -83,7 +277,6 @@ impl LoopSchedule {
             sensor: now,
             process: now,
             profile: now,
-            steam: now,
             reconnect: now,
             cursor: now,
         }
@@ -94,7 +287,6 @@ impl LoopSchedule {
             activity.tick.then(|| remaining(self.sensor, activity.tick_interval)),
             activity.child.then(|| remaining(self.process, PROCESS_POLL_INTERVAL)),
             activity.profile.then(|| remaining(self.profile, PROFILE_POLL_INTERVAL)),
-            activity.steam.then(|| remaining(self.steam, STEAM_POLL_INTERVAL)),
             activity.disconnected.then(|| remaining(self.reconnect, RECONNECT_INTERVAL)),
             activity.cursor.then(|| remaining(self.cursor, FOCUS_POLL_INTERVAL)),
         ]
@@ -109,10 +301,10 @@ fn remaining(last_run: Instant, interval: Duration) -> Duration {
 }
 
 impl SteamSession {
-    fn new(app_id: &str) -> Self {
+    fn new_with(app_id: &str, scanner: &mut SteamProcessScanner) -> Self {
         Self {
             app_id: app_id.to_string(),
-            baseline: steam_processes(app_id).processes,
+            baseline: scanner.scan(app_id).processes,
             started_at: Instant::now(),
             seen: false,
             empty_since: None,
@@ -127,8 +319,8 @@ impl SteamSession {
         }
     }
 
-    fn poll(&mut self, launcher_exited: bool) -> bool {
-        let snapshot = steam_processes(&self.app_id);
+    fn poll(&mut self, scanner: &mut SteamProcessScanner, launcher_exited: bool) -> bool {
+        let snapshot = scanner.scan(&self.app_id);
         if !snapshot.complete {
             self.empty_since = None;
             return false;
@@ -661,6 +853,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     let mut tick_needed = pipeline.motion_alive()
         || mapper.has_continuous_outputs()
         || mapper.profile().backend == ira_input::VirtualGamepadBackend::Dsu
+        || pipeline.motion.is_some()
         || pipeline.ds4_hid.is_some();
     let mut report_rate = ReportRateEstimator::default();
     if let Some(gamepad) = gamepad.as_mut() {
@@ -668,7 +861,7 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             eprintln!("ira-input: {error}; continuing without exclusive grab");
         }
     }
-    let mut steam_session = arguments.steam_app_id.as_deref().map(SteamSession::new);
+    let mut steam_watch = arguments.steam_app_id.as_deref().map(SteamWatcher::spawn);
     let mut launcher_exit_code = None;
     let mut child = if arguments.command.is_empty() {
         None
@@ -944,8 +1137,8 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             )?;
         }
         if STOP_REQUESTED.load(Ordering::Relaxed) {
-            if let Some(session) = steam_session.as_mut() {
-                session.request_stop();
+            if let Some(watcher) = steam_watch.as_mut() {
+                watcher.request_stop_and_join();
             }
             stop_child(&mut child);
             return Ok(130);
@@ -969,15 +1162,15 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                 return Ok(code);
             }
             launcher_exit_code = Some(code);
-        }
-        if steam_session.is_some() && schedule.steam.elapsed() >= STEAM_POLL_INTERVAL {
-            schedule.steam = Instant::now();
-            if steam_session
-                .as_mut()
-                .is_some_and(|session| session.poll(launcher_exit_code.is_some()))
-            {
-                return Ok(launcher_exit_code.unwrap_or(0));
+            if let Some(watcher) = steam_watch.as_ref() {
+                watcher.launcher_exited();
             }
+        }
+        if steam_watch
+            .as_ref()
+            .is_some_and(SteamWatcher::game_session_over)
+        {
+            return Ok(launcher_exit_code.unwrap_or(0));
         }
         if !connected && schedule.reconnect.elapsed() >= RECONNECT_INTERVAL {
             schedule.reconnect = Instant::now();
@@ -1026,7 +1219,9 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             }
                         }
                         pipeline.last_sensor_us = None;
-                        tick_needed = pipeline.motion_alive() || mapper.has_continuous_outputs();
+                        tick_needed = pipeline.motion_alive()
+                            || pipeline.motion.is_some()
+                            || mapper.has_continuous_outputs();
                         report_rate.reset();
                     }
                     schedule.sensor = Instant::now();
@@ -1071,23 +1266,36 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
                             pad_product,
                         );
                         pipeline.last_sensor_us = None;
-                        tick_needed = pipeline.sensor.is_some() || mapper.has_continuous_outputs();
+                        tick_needed = pipeline.sensor.is_some()
+                            || pipeline.motion.is_some()
+                            || mapper.has_continuous_outputs();
                         rumble_output = open_rumble(gamepad.as_ref(), mapper.profile().rumble);
                     }
                 }
             }
         }
-        let timeout = schedule.timeout(LoopActivity {
+        let timeout = floor_poll_timeout(schedule.timeout(LoopActivity {
             tick: tick_needed,
             tick_interval,
             child: child.is_some(),
             profile: profile_monitor.is_some(),
-            steam: steam_session.is_some(),
             disconnected: !connected,
             cursor: cursor_watcher.is_some(),
-        });
+        }));
         wait_for_inputs(&gamepad, timeout)?;
     }
+}
+
+/// The minimum time the loop parks between passes when scheduled work is due.
+/// A pass that outlasts the tick interval leaves its deadline already
+/// elapsed, and polling on a due deadline returns instantly — the loop would
+/// re-run the tick, miss the deadline again, and busy-spin one core. One
+/// poll quantum is free: `poll_timeout_ms` rounds every shorter wait up to
+/// 1 ms anyway.
+const POLL_FLOOR: Duration = Duration::from_millis(1);
+
+fn floor_poll_timeout(timeout: Option<Duration>) -> Option<Duration> {
+    timeout.map(|timeout| timeout.max(POLL_FLOOR))
 }
 
 /// Open the initially detected controller. Returns `None` (no error) when no
@@ -1159,57 +1367,6 @@ fn wait_for_inputs(
         ));
     }
     Ok(())
-}
-
-fn steam_processes(app_id: &str) -> SteamProcessSnapshot {
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return SteamProcessSnapshot {
-            processes: HashSet::new(),
-            complete: false,
-        };
-    };
-    let uid = unsafe { libc::geteuid() };
-    let mut processes = HashSet::new();
-    let mut complete = true;
-    for pid in entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| entry.file_name().to_str()?.parse::<i32>().ok())
-        .filter(|pid| *pid != std::process::id() as i32)
-    {
-        let proc_path = format!("/proc/{pid}");
-        let Ok(metadata) = std::fs::metadata(&proc_path) else {
-            continue;
-        };
-        if metadata.uid() != uid {
-            continue;
-        }
-        let environment = match std::fs::read(format!("{proc_path}/environ")) {
-            Ok(environment) => environment,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(_) => {
-                complete = false;
-                continue;
-            }
-        };
-        if !environment_has_steam_app(&environment, app_id) {
-            continue;
-        }
-        match process_start_time(pid) {
-            Some(start_time) => {
-                processes.insert(ProcessIdentity { pid, start_time });
-            }
-            None => complete = false,
-        }
-    }
-    SteamProcessSnapshot {
-        processes,
-        complete,
-    }
-}
-
-fn process_start_time(pid: i32) -> Option<u64> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    parse_process_start_time(&stat)
 }
 
 fn parse_process_start_time(stat: &str) -> Option<u64> {
@@ -2254,6 +2411,10 @@ fn emit_outputs(
                 .map_err(|error| format!("failed to emit virtual mouse input: {error}"))?;
         }
     }
+    targets
+        .gamepad
+        .flush()
+        .map_err(|error| format!("failed to emit virtual input: {error}"))?;
     if let Some(mouse) = targets.mouse {
         mouse
             .flush()
@@ -2487,12 +2648,31 @@ mod tests {
                 tick_interval: Duration::from_millis(1),
                 child: false,
                 profile: false,
-                steam: false,
                 disconnected: false,
                 cursor: false,
             }),
             None
         );
+    }
+
+    #[test]
+    fn test_floor_poll_timeout_bumps_due_deadline_to_one_quantum() {
+        // A due deadline must still park the loop for one poll quantum, or a
+        // pass that outlasts its tick interval busy-spins the core.
+        assert_eq!(
+            floor_poll_timeout(Some(Duration::ZERO)),
+            Some(POLL_FLOOR)
+        );
+        assert_eq!(
+            floor_poll_timeout(Some(Duration::from_nanos(500))),
+            Some(POLL_FLOOR)
+        );
+        assert_eq!(
+            floor_poll_timeout(Some(Duration::from_millis(5))),
+            Some(Duration::from_millis(5))
+        );
+        // No periodic work still means "block until an input event".
+        assert_eq!(floor_poll_timeout(None), None);
     }
 
     #[test]
@@ -2504,12 +2684,44 @@ mod tests {
                 tick_interval: Duration::from_millis(1),
                 child: true,
                 profile: true,
-                steam: true,
                 disconnected: true,
                 cursor: true,
             })
             .expect("active work must have a deadline");
         assert!(timeout <= Duration::from_millis(1));
+    }
+
+    #[test]
+    fn test_scanner_classifies_steam_process_across_scans() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .env("SteamAppId", "123456789")
+            .spawn()
+            .unwrap();
+        let mut scanner = SteamProcessScanner::default();
+        let snapshot = scanner.scan("123456789");
+        assert!(snapshot.complete);
+        assert!(
+            snapshot
+                .processes
+                .iter()
+                .any(|identity| identity.pid == child.id() as i32),
+            "a process carrying SteamAppId must be detected"
+        );
+        // Steady state: the cached classification keeps reporting it, and a
+        // different app id never matches it.
+        assert!(scanner
+            .scan("123456789")
+            .processes
+            .iter()
+            .any(|identity| identity.pid == child.id() as i32));
+        assert!(scanner
+            .scan("999")
+            .processes
+            .iter()
+            .all(|identity| identity.pid != child.id() as i32));
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     fn make_event(mask: u32, name: &str) -> Vec<u8> {

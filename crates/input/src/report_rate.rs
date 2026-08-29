@@ -6,9 +6,12 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-/// Candidate intervals matching common controller report rates, from 8000 Hz
-/// overclocked pads down to 125 Hz Bluetooth mode.
-const COMMON_INTERVALS_MS: [f32; 7] = [0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0];
+/// Candidate intervals matching common controller report rates, from 1000 Hz
+/// pads down to 125 Hz Bluetooth mode. Faster sources clamp to 1 ms: the
+/// daemon parks on `poll`, whose timeout granularity is one millisecond, so
+/// a sub-millisecond interval could never be honored — it would only leave
+/// every tick deadline already elapsed.
+const COMMON_INTERVALS_MS: [f32; 4] = [1.0, 2.0, 4.0, 8.0];
 /// Gaps longer than this mean the controller went quiet (many pads only
 /// report changes); they say nothing about the report rate.
 const IDLE_GAP: Duration = Duration::from_millis(100);
@@ -124,10 +127,13 @@ mod tests {
     }
 
     #[test]
-    fn test_8000hz_controller_gets_sub_millisecond_pipeline() {
+    fn test_8000hz_controller_clamps_to_1ms_pipeline() {
+        // Poll granularity is one millisecond; faster pads cannot be followed
+        // faster, and a sub-millisecond interval would leave every tick
+        // deadline already elapsed.
         let mut estimator = ReportRateEstimator::default();
         settle(&mut estimator, Duration::from_micros(125), 32);
-        assert_eq!(estimator.interval(), Duration::from_micros(125));
+        assert_eq!(estimator.interval(), Duration::from_millis(1));
     }
 
     #[test]

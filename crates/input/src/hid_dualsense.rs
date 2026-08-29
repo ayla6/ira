@@ -112,6 +112,9 @@ pub struct DualsenseUhidDevice {
     /// Rumble the game played on this pad, drained by the daemon for replay
     /// on the physical controller.
     pending_rumble: Vec<RumbleCommand>,
+    /// Last sent report with the volatile fields (sequence, timestamp,
+    /// touchpad counters) zeroed, so idle ticks skip the wire write.
+    last_state: Option<[u8; USB_STATE_REPORT_LEN]>,
 }
 
 impl DualsenseUhidDevice {
@@ -130,6 +133,7 @@ impl DualsenseUhidDevice {
             device,
             sequence: 0,
             pending_rumble: Vec::new(),
+            last_state: None,
         })
     }
 
@@ -139,6 +143,17 @@ impl DualsenseUhidDevice {
         self.sequence = self.sequence.wrapping_add(1);
         let mut report = usb_state_report(pad, sample);
         report[12..16].copy_from_slice(&self.sequence.to_le_bytes());
+        let mut stable = report.clone();
+        stable[12..16].fill(0); // sequence
+        stable[28..30].fill(0); // sensor timestamp
+        stable[32] = 0; // touchpad counters count up
+        stable[36] = 0;
+        let stable: [u8; USB_STATE_REPORT_LEN] =
+            stable.try_into().expect("fixed report length");
+        if self.last_state == Some(stable) {
+            return self.service();
+        }
+        self.last_state = Some(stable);
         self.device.send_input_report(&report)?;
         self.service()
     }

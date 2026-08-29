@@ -58,6 +58,10 @@ pub struct VirtualGamepad {
     device: Option<VirtualDevice>,
     backend: VirtualGamepadBackend,
     hat_dpad: [bool; 4],
+    /// Events collected by `emit`, written to the kernel in one syscall by
+    /// `flush`. The pipeline runs at the controller's report rate, where one
+    /// write per output event dominated the daemon's idle cost.
+    pending: Vec<InputEvent>,
 }
 
 impl VirtualGamepad {
@@ -73,6 +77,7 @@ impl VirtualGamepad {
             device: None,
             backend,
             hat_dpad: [false; 4],
+            pending: Vec::new(),
         }
     }
 
@@ -101,6 +106,7 @@ impl VirtualGamepad {
             device: Some(device),
             backend,
             hat_dpad: [false; 4],
+            pending: Vec::new(),
         })
     }
 
@@ -149,6 +155,8 @@ impl VirtualGamepad {
         commands
     }
 
+    /// Queues one output event. The kernel write happens in `flush`, once
+    /// per loop pass, so a full report batch costs a single syscall.
     pub fn emit(&mut self, event: &OutputEvent) -> io::Result<()> {
         let input = match event {
             OutputEvent::GamepadButton { button, pressed } => {
@@ -169,17 +177,22 @@ impl VirtualGamepad {
             }
             _ => return Ok(()),
         };
+        self.pending.push(input);
+        Ok(())
+    }
+
+    /// Writes the events queued by `emit` as one report. A failed write
+    /// drops the batch exactly as the per-event writes dropped the failing
+    /// event; the error surfaces so the session can decide to shut down.
+    pub fn flush(&mut self) -> io::Result<()> {
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+        let events = std::mem::take(&mut self.pending);
         let Some(device) = self.device.as_mut() else {
             return Ok(());
         };
-        device.emit(&[input])
-    }
-
-    pub fn emit_all(&mut self, events: &[OutputEvent]) -> io::Result<()> {
-        for event in events {
-            self.emit(event)?;
-        }
-        Ok(())
+        device.emit(&events)
     }
 
     pub fn direct_input_sdl_mapping() -> String {
@@ -562,8 +575,28 @@ mod tests {
         DIRECT_INPUT_VERSION,
     };
     use crate::VirtualGamepadBackend::{DirectInput, DualSense, DualShock4, SwitchPro, XInput};
-    use crate::{GamepadAxis, GamepadButton};
+    use crate::{GamepadAxis, GamepadButton, OutputEvent};
     use evdev::{InputId, KeyCode};
+
+    #[test]
+    fn test_emit_queues_and_flush_drains() {
+        let mut pad = VirtualGamepad::shadow_only(XInput);
+        pad.emit(&OutputEvent::GamepadAxis {
+            axis: GamepadAxis::LeftX,
+            value: 0.5,
+        })
+        .unwrap();
+        pad.emit(&OutputEvent::GamepadAxis {
+            axis: GamepadAxis::LeftX,
+            value: 0.5,
+        })
+        .unwrap();
+        assert_eq!(pad.pending.len(), 2, "emit queues instead of writing");
+        pad.flush().unwrap();
+        assert!(pad.pending.is_empty(), "flush drains the queue");
+        // A second flush with nothing queued stays a no-op.
+        pad.flush().unwrap();
+    }
 
     #[test]
     fn test_button_code_uses_virtual_xbox_positions() {

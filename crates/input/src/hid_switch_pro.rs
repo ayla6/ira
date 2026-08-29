@@ -70,6 +70,10 @@ pub struct SwitchProUhidDevice {
     /// Rumble the game played on this pad, decoded from output reports and
     /// drained by the daemon for replay on the physical controller.
     pending_rumble: Vec<RumbleCommand>,
+    /// The last report sent, minus the always-different timer byte: a tick
+    /// whose state is identical to the last one skips the wire write. Pads
+    /// stream at up to 1000 Hz and idle state resends are pure waste.
+    last_report: Option<[u8; 49]>,
 }
 
 impl SwitchProUhidDevice {
@@ -88,6 +92,7 @@ impl SwitchProUhidDevice {
             device,
             timer: 0,
             pending_rumble: Vec::new(),
+            last_report: None,
         })
     }
 
@@ -109,6 +114,18 @@ impl SwitchProUhidDevice {
         self.service()?;
         let report = standard_report(self.timer, pad, accel_g, gyro_dps);
         self.timer = self.timer.wrapping_add(1);
+        // The timer byte (offset 1) differs on every tick; everything else
+        // equal means nothing changed on the pad or the sensors.
+        let unchanged = self
+            .last_report
+            .is_some_and(|last| {
+                last[0] == report[0]
+                    && last[2..] == report[2..]
+            });
+        if unchanged {
+            return Ok(());
+        }
+        self.last_report = Some(report.clone().try_into().expect("49 bytes"));
         self.device.send_input_report(&report)
     }
 

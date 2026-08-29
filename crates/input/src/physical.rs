@@ -202,6 +202,11 @@ pub struct PhysicalGamepad {
     hat_x: i32,
     hat_y: i32,
     axis_ranges: HashMap<AbsoluteAxisCode, (i32, i32)>,
+    /// Last raw value seen per axis. Wireless pads re-send their full state
+    /// every report even when nothing moved; suppressing repeats keeps the
+    /// mapping engine and the virtual pad from churning on identical data.
+    /// Cleared with the device on reconnect.
+    last_axis_values: HashMap<AbsoluteAxisCode, i32>,
     z_axes_are_right_stick: bool,
     left_trigger_clicked: bool,
     right_trigger_clicked: bool,
@@ -235,6 +240,7 @@ impl PhysicalGamepad {
             hat_x: 0,
             hat_y: 0,
             axis_ranges,
+            last_axis_values: HashMap::new(),
             z_axes_are_right_stick,
             left_trigger_clicked: false,
             right_trigger_clicked: false,
@@ -315,33 +321,51 @@ impl PhysicalGamepad {
     }
 
     pub fn fetch_events(&mut self) -> Result<Vec<InputEvent>, String> {
-        let fetch_result = match self.device.as_mut() {
-            Some(device) => device.fetch_events().map(|events| events.collect()),
-            None => return Ok(Vec::new()),
+        // Taken so the event iterator can be drained while `convert_event`
+        // mutates the pad state; every path puts the device back except the
+        // one where the kernel says it is gone.
+        let Some(mut device) = self.device.take() else {
+            return Ok(Vec::new());
         };
-        let events = match fetch_result {
-            Ok(events) => events,
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Vec::new(),
-            Err(error) if device_gone(&error) => {
+        let mut result = Vec::new();
+        // The event iterator borrows the device, so its lifetime must end
+        // before the device is moved back or dropped — hence the two-step
+        // match instead of putting the device back inside each arm.
+        enum FetchOutcome {
+            Drained,
+            WouldBlock,
+            Gone,
+            Failed(String),
+        }
+        let outcome = match device.fetch_events() {
+            Ok(events) => {
+                for event in events {
+                    self.convert_event(event, &mut result);
+                }
+                FetchOutcome::Drained
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                FetchOutcome::WouldBlock
+            }
+            Err(ref error) if device_gone(error) => FetchOutcome::Gone,
+            Err(error) => FetchOutcome::Failed(error.to_string()),
+        };
+        match outcome {
+            FetchOutcome::Drained | FetchOutcome::WouldBlock => self.device = Some(device),
+            FetchOutcome::Gone => {
                 eprintln!(
                     "ira-input: controller {} disconnected; continuing without physical input",
                     self.info.path.display()
                 );
-                if let Some(device) = self.device.take() {
-                    close_disconnected_device(device);
-                }
-                Vec::new()
+                close_disconnected_device(device);
             }
-            Err(error) => {
+            FetchOutcome::Failed(error) => {
+                self.device = Some(device);
                 return Err(format!(
                     "failed reading {}: {error}",
                     self.info.path.display()
                 ));
             }
-        };
-        let mut result = Vec::new();
-        for event in events {
-            self.convert_event(event, &mut result);
         }
         Ok(result)
     }
@@ -384,6 +408,14 @@ impl PhysicalGamepad {
         timestamp_us: u64,
         output: &mut Vec<InputEvent>,
     ) {
+        // Identical axis reports carry no information: the same raw value
+        // normalizes to the same output and moves no trigger-click edge.
+        // Skipping them keeps full-state report bursts from re-processing
+        // (and re-emitting) unchanged sticks several hundred times a second.
+        if self.last_axis_values.get(&code) == Some(&value) {
+            return;
+        }
+        self.last_axis_values.insert(code, value);
         let source = match code {
             AbsoluteAxisCode::ABS_X => {
                 Some((GamepadAxis::LeftX, self.normalize_signed(code, value)))
@@ -718,6 +750,67 @@ mod tests {
     use crate::GamepadButton;
     use std::path::PathBuf;
     use std::time::Duration;
+
+    fn test_pad() -> super::PhysicalGamepad {
+        super::PhysicalGamepad {
+            info: DeviceInfo {
+                path: PathBuf::from("/dev/input/eventtest"),
+                name: "Test Bench Pad".to_string(),
+                vendor: 0x1234,
+                product: 0x5678,
+                version: 0,
+                has_evdev_gyro: false,
+                supported_buttons: Vec::new(),
+            },
+            device: None,
+            hat_x: 0,
+            hat_y: 0,
+            axis_ranges: {
+                let mut ranges = std::collections::HashMap::new();
+                ranges.insert(evdev::AbsoluteAxisCode::ABS_X, (-32768, 32767));
+                ranges.insert(evdev::AbsoluteAxisCode::ABS_Y, (-32768, 32767));
+                ranges.insert(evdev::AbsoluteAxisCode::ABS_Z, (0, 255));
+                ranges
+            },
+            last_axis_values: std::collections::HashMap::new(),
+            z_axes_are_right_stick: false,
+            left_trigger_clicked: false,
+            right_trigger_clicked: false,
+            nintendo_layout: false,
+        }
+    }
+
+    #[test]
+    fn test_convert_axis_suppresses_repeated_values() {
+        let mut pad = test_pad();
+        let mut out = Vec::new();
+        pad.convert_axis(evdev::AbsoluteAxisCode::ABS_X, 1000, 1, &mut out);
+        assert_eq!(out.len(), 1, "first report emits");
+        pad.convert_axis(evdev::AbsoluteAxisCode::ABS_X, 1000, 2, &mut out);
+        assert_eq!(out.len(), 1, "identical report is suppressed");
+        pad.convert_axis(evdev::AbsoluteAxisCode::ABS_X, -2000, 3, &mut out);
+        assert_eq!(out.len(), 2, "a real change emits again");
+        // Other axes keep their own last-seen value.
+        pad.convert_axis(evdev::AbsoluteAxisCode::ABS_Y, 1000, 4, &mut out);
+        assert_eq!(out.len(), 3);
+    }
+
+    #[test]
+    fn test_convert_axis_suppression_does_not_block_trigger_clicks() {
+        let mut pad = test_pad();
+        let mut out = Vec::new();
+        // Full pull, hold (suppressed repeat), release: the click edge is
+        // synthesized from the values that DO change, so the hold must not
+        // swallow the release edge.
+        pad.convert_axis(evdev::AbsoluteAxisCode::ABS_Z, 255, 1, &mut out);
+        pad.convert_axis(evdev::AbsoluteAxisCode::ABS_Z, 255, 2, &mut out);
+        pad.convert_axis(evdev::AbsoluteAxisCode::ABS_Z, 0, 3, &mut out);
+        let buttons = out
+            .iter()
+            .filter(|event| matches!(event.source, crate::InputSource::Button(_)))
+            .count();
+        assert_eq!(buttons, 2, "press and release click edges both fire");
+    }
 
     #[test]
     fn test_map_extra_grip_buttons() {

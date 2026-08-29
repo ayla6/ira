@@ -241,6 +241,9 @@ pub struct Ds4UhidDevice {
     /// Rumble the game played on this pad, drained by the daemon for replay
     /// on the physical controller.
     pending_rumble: Vec<RumbleCommand>,
+    /// Last sent report with the volatile fields (timestamp, touchpad
+    /// counters) zeroed, so idle ticks skip the wire write.
+    last_state: Option<[u8; USB_STATE_REPORT_LEN]>,
 }
 
 impl Ds4UhidDevice {
@@ -259,6 +262,7 @@ impl Ds4UhidDevice {
         Ok(Self {
             device,
             pending_rumble: Vec::new(),
+            last_state: None,
         })
     }
 
@@ -266,6 +270,18 @@ impl Ds4UhidDevice {
     /// before any hidraw reader opened the node are simply discarded by the
     /// kernel, so polling is best-effort logging only.
     pub fn send_state(&mut self, pad: &PadState, sample: &MotionSample) -> io::Result<()> {
+        let report = usb_state_report(pad, sample, sample.timestamp_us);
+        let stable = {
+            let mut stable = report;
+            stable[10..12].fill(0); // sensor timestamp ticks
+            stable[35] = 0; // touchpad counters count up
+            stable[39] = 0;
+            stable
+        };
+        if self.last_state == Some(stable) {
+            return self.service();
+        }
+        self.last_state = Some(stable);
         self.device
             .send_input_report(&usb_state_report(pad, sample, sample.timestamp_us))?;
         self.service()

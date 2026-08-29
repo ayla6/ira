@@ -120,6 +120,16 @@ pub struct CemuGame {
     pub icon_path: PathBuf,
 }
 
+/// Wii U title IDs carry their category in the top 32 bits: `00050000`
+/// applications and `00050002` demos are launchable titles, while the
+/// other categories are content attached to a base title (updates
+/// `0005000e`, DLC `0005000c`) or system firmware. Attached content ships
+/// its own `meta.xml` with the base title's display name, so scanning it
+/// would list the same game twice.
+fn is_game_title_id(title_id: &str) -> bool {
+    matches!(title_id.get(..8), Some("00050000") | Some("00050002"))
+}
+
 fn parse_title_xml(path: &Path) -> Option<(String, String)> {
     let data = std::fs::read_to_string(path).ok()?;
     let document = roxmltree::Document::parse(&data).ok()?;
@@ -147,6 +157,9 @@ fn scan_title(path: &Path) -> Option<CemuGame> {
     let meta_path = path.join("meta/meta.xml");
     let app_path = path.join("code/app.xml");
     let (title_id, title) = parse_title_xml(&meta_path).or_else(|| parse_title_xml(&app_path))?;
+    if !is_game_title_id(&title_id) {
+        return None;
+    }
     Some(CemuGame {
         title_id,
         title,
@@ -195,12 +208,13 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<CemuGame> {
         );
     }
     let mlc = mlc_path_for(executable);
-    let mut roots = configured_game_paths_for(executable);
-    roots.extend([
-        mlc.join("usr/title"),
-        mlc.join("sys/title/00050010"),
-        mlc.join("sys/title/00050030"),
-    ]);
+    // usr/title stores every category, but scan_title keeps only launchable
+    // titles; system categories live under sys/title and are never games.
+    let roots = {
+        let mut roots = configured_game_paths_for(executable);
+        roots.push(mlc.join("usr/title"));
+        roots
+    };
 
     let mut games = Vec::new();
     for root in roots {
@@ -454,10 +468,54 @@ mod tests {
     #[test]
     fn test_discover_cemu_keeps_distinct_titles_across_roots() {
         let (tmp, exe) = cemu_fixture_with_duplicated_title();
-        write_title(&tmp.path().join("games/OtherGame"), "00050000101CD00");
+        write_title(&tmp.path().join("games/OtherGame"), "0005000010101E00");
 
         let games = discover_games_for_executable(&exe);
 
         assert_eq!(games.len(), 2);
+    }
+
+    /// BotW's DLC (`0005000c…`) sits in mlc/usr/title next to the base game
+    /// and carries the same display name; discovery must keep only the base
+    /// title or the library lists the game twice.
+    #[test]
+    fn test_discover_cemu_skips_dlc_next_to_base_game() {
+        let (tmp, exe) = cemu_fixture_with_duplicated_title();
+        write_title(
+            &tmp.path()
+                .join("portable/mlc01/usr/title/0005000c/10101d00"),
+            "0005000C10101D00",
+        );
+
+        let games = discover_games_for_executable(&exe);
+
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].title_id, "0005000010101d00");
+    }
+
+    #[test]
+    fn test_scan_title_rejects_attached_content_and_system_titles() {
+        for id in [
+            "0005000E101C9500", // update
+            "0005000C101C9400", // DLC
+            "0005001B10059000", // system data archive
+            "short",            // not even a full title ID
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            write_title(&tmp.path().join("title"), id);
+            let mut games = Vec::new();
+            scan_dir(tmp.path(), 0, &mut games);
+            assert!(games.is_empty(), "{id} must not be discovered");
+        }
+    }
+
+    #[test]
+    fn test_scan_title_accepts_demo_titles() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_title(&tmp.path().join("title"), "0005000210143000");
+        let mut games = Vec::new();
+        scan_dir(tmp.path(), 0, &mut games);
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].title_id, "0005000210143000");
     }
 }

@@ -46,7 +46,7 @@ fn apply_ra_match(
             sd.pending_copies.borrow_mut().remove(&key);
         }
     }
-    let (ra_username, ra_web_api_key, steam, sender, save_dir, db) = {
+    let (ra_username, ra_web_api_key, steam, sender, save_dir, db, cfg) = {
         let s = sc.borrow();
         (
             s.cfg.ra_username.clone(),
@@ -55,6 +55,7 @@ fn apply_ra_match(
             s.sender.clone(),
             s.save_dir.clone(),
             s.db.clone(),
+            s.cfg.clone(),
         )
     };
     let g = sc.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
@@ -71,6 +72,7 @@ fn apply_ra_match(
             db,
             ra_username,
             ra_web_api_key,
+            cfg,
             game: None,
         });
     }

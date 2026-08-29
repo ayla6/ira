@@ -177,6 +177,7 @@ fn start_background_enrichment(state: &SharedState) {
         save_dir,
         ra_username,
         ra_web_api_key,
+        cfg,
         enrich_targets,
         ra_games,
         sgdb_games,
@@ -189,6 +190,9 @@ fn start_background_enrichment(state: &SharedState) {
             s.save_dir.clone(),
             s.cfg.ra_username.clone(),
             s.cfg.ra_web_api_key.clone(),
+            s.cfg.clone(),
+            // Retro games join enrichment only while icon-less, so the
+            // RA → native → SGDB default icon chain can fill them in.
             s.games
                 .iter()
                 .filter(|g| {
@@ -196,7 +200,7 @@ fn start_background_enrichment(state: &SharedState) {
                         && g.variant_id.is_none()
                         && g.kind != ira_models::GameKind::Ps4
                         && g.kind != ira_models::GameKind::Ps3
-                        && g.kind != ira_models::GameKind::Retro
+                        && (g.kind != ira_models::GameKind::Retro || g.icon_path.is_empty())
                 })
                 .map(|g| {
                     (
@@ -254,6 +258,7 @@ fn start_background_enrichment(state: &SharedState) {
         let sender = sender.clone();
         let db = db.clone();
         let save_dir = save_dir.clone();
+        let cfg = cfg.clone();
         std::thread::spawn(move || {
             let _s =
                 tracing::info_span!("background_enrich", count = enrich_targets.len()).entered();
@@ -267,6 +272,7 @@ fn start_background_enrichment(state: &SharedState) {
                         let save_dir = &save_dir;
                         let ra_username = &ra_username;
                         let ra_web_api_key = &ra_web_api_key;
+                        let cfg = &cfg;
                         s.spawn(move || {
                             for (app_id, trophy_source, platform_id, db_id, title, game) in chunk {
                                 let _ =
@@ -284,6 +290,7 @@ fn start_background_enrichment(state: &SharedState) {
                                                 db: db.clone(),
                                                 ra_username: ra_username.clone(),
                                                 ra_web_api_key: ra_web_api_key.clone(),
+                                                cfg: cfg.clone(),
                                                 game: Some(game.clone()),
                                             },
                                         );
@@ -605,7 +612,7 @@ pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) 
             && !game.app_id.is_empty()
             && game.trophy_source != ira_models::TrophySource::Empty
         {
-            let (ra_username, ra_web_api_key, steam, sender, save_dir, db) = {
+            let (ra_username, ra_web_api_key, steam, sender, save_dir, db, cfg) = {
                 let s = state.borrow();
                 (
                     s.cfg.ra_username.clone(),
@@ -614,6 +621,7 @@ pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) 
                     s.sender.clone(),
                     s.save_dir.clone(),
                     s.db.clone(),
+                    s.cfg.clone(),
                 )
             };
             enrich_game_async(crate::ui::enrichment::EnrichGameParams {
@@ -628,6 +636,7 @@ pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) 
                 db,
                 ra_username,
                 ra_web_api_key,
+                cfg,
                 game: None,
             });
         } else if game.kind == ira_models::GameKind::Retro

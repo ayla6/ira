@@ -789,7 +789,7 @@ pub(super) fn start_add(
     profile_id: Option<i64>,
     skip_emu_prompt: bool,
 ) {
-    let (db, steam, save_dir, sender, profiles, language_preferences) = {
+    let (db, steam, save_dir, sender, profiles, language_preferences, cfg) = {
         let w = wizard.borrow();
         let s = w.state.borrow();
         (
@@ -799,6 +799,7 @@ pub(super) fn start_add(
             s.sender.clone(),
             w.profiles.clone(),
             s.cfg.language_preferences.clone(),
+            s.cfg.clone(),
         )
     };
     set_status(&wizard, &crate::tr!("Adding game and downloading assets…"));
@@ -819,6 +820,7 @@ pub(super) fn start_add(
             profiles,
             skip_emu_prompt,
             language_preferences,
+            cfg,
         },
     );
 
@@ -852,6 +854,7 @@ pub(super) struct AddParams {
     pub profiles: Vec<WineProfile>,
     pub skip_emu_prompt: bool,
     pub language_preferences: Vec<String>,
+    pub cfg: ira_config::Config,
 }
 
 struct AddGameSetup {
@@ -885,6 +888,7 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
             profiles,
             skip_emu_prompt,
             language_preferences,
+            cfg,
         } = params;
         let setup = build_add_game_setup(&game, &profiles, profile_id);
         let db_id = match add_game_record(AddGameRecordParams {
@@ -921,7 +925,7 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
 
         let save_dir_for_lang = save_dir.clone();
         let db_for_cache = db.clone();
-        enrich_added_game(db, steam, sender, save_dir, &game_obj, name);
+        enrich_added_game(db, steam, sender, save_dir, cfg, &game_obj, name);
         apply_language_preference(
             &game,
             &game_obj,
@@ -1069,6 +1073,7 @@ fn enrich_added_game(
     steam: std::sync::Arc<ira_api::SteamDataClient>,
     sender: AppSender,
     save_dir: String,
+    cfg: ira_config::Config,
     game: &Game,
     title: String,
 ) {
@@ -1085,6 +1090,7 @@ fn enrich_added_game(
         game: None,
         ra_username: String::new(),
         ra_web_api_key: String::new(),
+        cfg,
     });
 }
 

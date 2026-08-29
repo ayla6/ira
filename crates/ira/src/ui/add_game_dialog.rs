@@ -254,6 +254,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
         win,
         state,
     } = widgets;
+    let cfg = state.borrow().cfg.clone();
 
     let name_entry = name_entry.clone();
     let kind_row = kind_row.clone();
@@ -360,6 +361,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
         let save_dir_c = save_dir.clone();
         let ra_username_c = ra_username.clone();
         let ra_web_api_key_c = ra_web_api_key.clone();
+        let cfg_c = cfg.clone();
 
         std::thread::spawn(move || {
             match add_game_to_db(AddGameToDbParams {
@@ -432,6 +434,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
                                     db: db_c,
                                     ra_username: ra_username_c,
                                     ra_web_api_key: ra_web_api_key_c,
+                                    cfg: cfg_c,
                                     game: None,
                                 },
                             );

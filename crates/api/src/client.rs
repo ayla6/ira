@@ -38,6 +38,12 @@ impl SteamDataClient {
         self.sgdb_api_key.lock().unwrap().clone()
     }
 
+    /// True when a SteamGridDB key is configured, so SGDB flows can skip
+    /// pointless network calls.
+    pub fn has_sgdb_key(&self) -> bool {
+        !self.sgdb_api_key().is_empty()
+    }
+
     /// GET `url` and return the response body as text. Errors include the URL
     /// and HTTP status so callers can log without reassembling context.
     pub(crate) fn http_get_text(&self, url: &str) -> Result<String, String> {

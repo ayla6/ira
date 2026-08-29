@@ -1,9 +1,10 @@
 //! Reusable editor for a user-configured list of folders.
 //!
 //! Used for the PC games folders and ROM roots in Settings. Each folder is
-//! an `ActionRow` showing its free space plus change/remove buttons; a
-//! trailing button appends new folders. The live `Vec<String>` is shared
-//! with the caller so the Save handler can read the final list back.
+//! an `ActionRow` in the group's boxed list showing its free space plus
+//! change/remove buttons, and a `ButtonRow` appends new folders. The live
+//! `Vec<String>` is shared with the caller so the Save handler can read the
+//! final list back.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -13,9 +14,9 @@ use adw::prelude::*;
 use gtk4::gio;
 use gtk4::glib;
 
-use super::css::{CSS_FLAT, CSS_SUGGESTED_ACTION};
+use super::css::CSS_FLAT;
 use super::disk_space;
-use super::helpers::{clear_children, esc, set_initial_folder};
+use super::helpers::{esc, set_initial_folder};
 
 /// Owns one editable folder list inside a `PreferencesGroup`.
 /// Cheap to clone; every row callback captures the same shared state.
@@ -23,11 +24,9 @@ use super::helpers::{clear_children, esc, set_initial_folder};
 pub(super) struct FolderListWidgets {
     /// The preferences group this list renders into, for the page to append.
     pub(super) group: adw::PreferencesGroup,
-    rows_box: gtk4::Box,
+    rows: Rc<RefCell<Vec<adw::ActionRow>>>,
+    add_row: adw::ButtonRow,
     pub(super) folders: Rc<RefCell<Vec<String>>>,
-    /// Any widget inside the settings dialog; resolves to its host window
-    /// at picker time, which folder dialogs require as a transient parent.
-    anchor: gtk4::Box,
     select_label: String,
 }
 
@@ -38,10 +37,18 @@ impl FolderListWidgets {
     }
 
     fn rebuild(&self) {
-        clear_children(&self.rows_box);
-        for index in 0..self.folders.borrow().len() {
-            self.rows_box.append(&self.build_folder_row(index));
+        for row in self.rows.borrow_mut().drain(..) {
+            self.group.remove(&row);
         }
+        for index in 0..self.folders.borrow().len() {
+            let row = self.build_folder_row(index);
+            self.group.add(&row);
+            self.rows.borrow_mut().push(row);
+        }
+        // Re-append so the add row stays below the folder rows after every
+        // rebuild; group.add() always inserts at the end of the list.
+        self.group.remove(&self.add_row);
+        self.group.add(&self.add_row);
     }
 
     fn build_folder_row(&self, index: usize) -> adw::ActionRow {
@@ -124,9 +131,9 @@ impl FolderListWidgets {
                 }
             }
         };
-        // File dialogs must be transient over a real window; any widget
-        // inside the settings dialog resolves to it at click time.
-        match super::helpers::hosting_window(&self.anchor) {
+        // File dialogs must be transient over a real window; the group
+        // resolves to the settings dialog at click time.
+        match super::helpers::hosting_window(&self.group) {
             Some(window) => dialog.select_folder(Some(&window), None::<&gio::Cancellable>, cb),
             None => eprintln!("Cannot open folder picker without a parent window"),
         }
@@ -142,19 +149,15 @@ pub(super) fn build_folder_list(
     let group = adw::PreferencesGroup::new();
     group.set_title(title);
 
-    let rows_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    group.add(&rows_box);
-
-    let add_btn = gtk4::Button::with_label(add_label);
-    add_btn.add_css_class(CSS_FLAT);
-    add_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    add_btn.set_halign(gtk4::Align::Start);
-    group.add(&add_btn);
+    let add_row = adw::ButtonRow::new();
+    add_row.set_title(add_label);
+    add_row.set_start_icon_name(Some("list-add-symbolic"));
+    group.add(&add_row);
 
     let widgets = FolderListWidgets {
-        group,
-        anchor: rows_box.clone(),
-        rows_box,
+        group: group.clone(),
+        rows: Rc::new(RefCell::new(Vec::new())),
+        add_row,
         folders: Rc::new(RefCell::new(initial)),
         select_label: select_label.to_string(),
     };
@@ -162,7 +165,7 @@ pub(super) fn build_folder_list(
     widgets.rebuild();
 
     let clicked_ctx = widgets.clone();
-    add_btn.connect_clicked(move |_| {
+    widgets.add_row.connect_activated(move |_| {
         clicked_ctx.pick_folder(None, |picked_widgets, path| {
             picked_widgets
                 .folders

@@ -181,14 +181,15 @@ fn add_console_remapping_rows(
     let mode = Rc::new(RefCell::new(cfg.console(&console_id).controller_mode));
     let mode_row = adw::ComboRow::new();
     mode_row.set_title(&crate::tr!("Input remapping"));
+    // Same three-entry gate as the game controller page: which virtual
+    // controller the emulator sees is decided by the selected layout itself.
+    mode_row.set_subtitle(&crate::tr!(
+        "Whether the input broker runs; the virtual controller type comes from the selected layout"
+    ));
     let mode_strings = [
         crate::tr!("Inherit"),
         crate::tr!("Disabled"),
-        crate::tr!("Virtual XInput"),
-        crate::tr!("Virtual DirectInput"),
-        crate::tr!("Nintendo Switch Pro Controller"),
-        crate::tr!("DualShock 4 Controller"),
-        crate::tr!("DualSense Controller"),
+        crate::tr!("Enabled"),
     ];
     let mode_refs: Vec<&str> = mode_strings.iter().map(String::as_str).collect();
     mode_row.set_model(Some(&gtk4::StringList::new(&mode_refs)));
@@ -932,7 +933,8 @@ fn profile_label(stored: &StoredProfile) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        backend_for_selection, input_mode_from_index, selection_for_backend, stored_selection,
+        backend_for_selection, input_mode_from_index, input_mode_index, selection_for_backend,
+        stored_selection,
     };
     use ira_input::VirtualGamepadBackend;
     use ira_models::ControllerInputMode;
@@ -971,5 +973,25 @@ mod tests {
             Some(ControllerInputMode::Disabled)
         );
         assert_eq!(input_mode_from_index(2), Some(ControllerInputMode::Enabled));
+    }
+
+    #[test]
+    fn test_input_mode_index_round_trip_all_three_entries() {
+        for mode in [
+            None,
+            Some(ControllerInputMode::Disabled),
+            Some(ControllerInputMode::Enabled),
+        ] {
+            assert_eq!(input_mode_from_index(input_mode_index(mode)), mode);
+        }
+    }
+
+    #[test]
+    fn test_input_mode_from_index_out_of_range_falls_back_to_inherit() {
+        // The old dropdown offered controller types at indices 3-6; those
+        // selections always behaved as Inherit and now cannot be produced.
+        for index in [3u32, 4, 5, 6, 99] {
+            assert_eq!(input_mode_from_index(index), None);
+        }
     }
 }

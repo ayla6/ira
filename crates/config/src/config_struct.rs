@@ -55,7 +55,9 @@ pub struct ConsoleConfig {
     pub executable: String,
     pub ra_core: String,
     pub fullscreen: bool,
-    /// Optional console-wide remapping override before controller defaults.
+    /// Optional console-wide input-remapping gate before controller defaults
+    /// (`None` = inherit). The virtual controller type comes from the
+    /// selected layout, not from this setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub controller_mode: Option<ControllerInputMode>,
     /// Shared layout used for this console before a game-specific layout.
@@ -191,10 +193,14 @@ pub struct Config {
     pub default_native_env_vars: Vec<(String, String)>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub linux_controller_profile: String,
+    /// Input-remapping gate for native Linux games (`None` = inherit).
+    /// The virtual controller type comes from the selected layout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linux_controller_mode: Option<ControllerInputMode>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub wine_controller_profile: String,
+    /// Input-remapping gate for Wine games (`None` = inherit).
+    /// The virtual controller type comes from the selected layout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wine_controller_mode: Option<ControllerInputMode>,
     #[serde(default)]

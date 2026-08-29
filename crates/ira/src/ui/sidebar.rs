@@ -101,6 +101,18 @@ pub fn set_sidebar_playing(state: &SharedState, db_id: i64, playing: bool) {
         let max = (adj.upper() - adj.page_size()).max(0.0);
         adj.set_value(saved_scroll.min(max));
     });
+
+    // Splicing drops the selection on the replaced row; only restore when
+    // something was actually selected, otherwise leave the sidebar unselected.
+    let has_selection = {
+        let s = state.borrow();
+        !s.selected_id.is_empty()
+            || !s.multi_selected_ids.is_empty()
+            || s.selected_group != GroupSelection::AllGames
+    };
+    if has_selection {
+        restore_selection(state);
+    }
 }
 
 pub fn rebuild_sidebar(state: &SharedState) {

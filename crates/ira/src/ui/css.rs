@@ -48,8 +48,8 @@ pub const APP_CSS: &str = "
  listview.navigation-sidebar > row { padding: 0; }
  listview.navigation-sidebar row:selected { background-color: transparent; }
  listview.navigation-sidebar row:selected > box { background-color: alpha(@theme_fg_color, 0.07); border-radius: 9px; }
- listview.navigation-sidebar row:selected > box.playing-game { background-color: alpha(@accent_color, 0.18); }
- .playing-game { color: @accent_color; background-color: alpha(@accent_color, 0.18); border-radius: 9px; }
+ listview.navigation-sidebar row:selected > box.playing-game { background-color: alpha(@accent_color, 0.22); }
+ .playing-game { color: @accent_color; background-color: alpha(@accent_color, 0.08); border-radius: 9px; }
  .sidebar-row-pad-game { padding: 4px 10px 4px 24px; }
  .sidebar-row-pad-header { padding: 4px 10px 4px 4px; }
 .play-btn-label { font-size: 1.15em; }

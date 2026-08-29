@@ -8,7 +8,7 @@ use super::helpers::clear_children;
 use super::ra_match_dialog::show_ra_search_dialog;
 use super::sgdb_match_dialog::handle_unified_sgdb_result;
 use super::state::SharedState;
-use super::steam_search_dialog::handle_steam_search_result;
+use super::steam_search_dialog::{handle_steam_search_result, status_label};
 
 pub fn normalize_title(s: &str) -> String {
     let lower = s.to_lowercase();
@@ -125,8 +125,7 @@ fn populate_match_list(
                     &dlg2,
                     Some(Rc::new(move || {
                         clear_children(&inner_update);
-                        let label = gtk4::Label::new(Some(&crate::tr!("RA: matched")));
-                        label.add_css_class(CSS_SUCCESS_LABEL);
+                        let label = status_label(&crate::tr!("RA: matched"), CSS_SUCCESS_LABEL);
                         inner_update.append(&label);
                     })),
                 );
@@ -386,12 +385,13 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 fn create_match_row(list: &gtk4::ListBox, name: &str, searching_text: &str) -> gtk4::Box {
     let row = adw::ActionRow::new();
     row.set_title(name);
+    // Long local names wrap to two lines at most, then ellipsize, so the
+    // suffix status label and buttons keep a usable share of the row width.
+    row.set_title_lines(2);
 
     let action_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     action_box.set_valign(gtk4::Align::Center);
-    let searching = gtk4::Label::new(Some(searching_text));
-    searching.add_css_class(CSS_DIM_LABEL);
-    action_box.append(&searching);
+    action_box.append(&status_label(searching_text, CSS_DIM_LABEL));
     row.add_suffix(&action_box);
 
     list.append(&row);

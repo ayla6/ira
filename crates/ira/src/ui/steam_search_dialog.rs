@@ -10,7 +10,35 @@ use super::helpers::{clamped, clamped_boxed_list, clear_children, esc, poll_chan
 use super::matching::{match_game_to_sgdb, match_game_to_steam};
 use super::state::SharedState;
 
-type MatchCallback = Rc<dyn Fn(&str, &str)>;
+/// Success callback for an accepted match: `(store_id, matched_name)`.
+/// Shared by the Steam and SGDB match flows so success labels can show the
+/// matched store title instead of the local game's name.
+pub(super) type MatchCallback = Rc<dyn Fn(&str, &str)>;
+
+/// Max natural width, in characters, of a status label in a row suffix.
+/// Long match results ellipsize at this width instead of demanding their
+/// full natural width and squeezing the row title to one character per line.
+const STATUS_MAX_WIDTH_CHARS: i32 = 24;
+
+/// A one-line, end-ellipsized status label for match-row suffix areas
+/// ("Searching...", "Matched: ...", ...). Width-capped so a long result
+/// never destroys the row layout; `css_class` styles it, e.g.
+/// CSS_SUCCESS_LABEL or CSS_DIM_LABEL.
+pub(super) fn status_label(text: &str, css_class: &str) -> gtk4::Label {
+    let label = gtk4::Label::new(Some(text));
+    label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    label.set_single_line_mode(true);
+    label.set_max_width_chars(STATUS_MAX_WIDTH_CHARS);
+    label.add_css_class(css_class);
+    label
+}
+
+/// Text for the Steam match success label: matched store name first, id second.
+fn matched_text(sid: &str, name: &str) -> String {
+    crate::tr!("Matched: {} ({})")
+        .replacen("{}", name, 1)
+        .replacen("{}", sid, 1)
+}
 
 /// A prefilled, hexpanding `gtk::SearchEntry` beside a suggested-action
 /// "Search" button — the input strip every search dialog opens with.
@@ -115,17 +143,10 @@ pub(super) fn handle_steam_search_result(
     if let Some((sid, matched_name)) = matched {
         match_game_to_steam(state, db_id, sid.clone(), game_name.to_string());
 
-        let label = gtk4::Label::new(Some(
-            &crate::tr!("Matched: {} ({})")
-                .replacen("{}", &matched_name, 1)
-                .replacen("{}", &sid, 1),
-        ));
-        label.add_css_class(CSS_SUCCESS_LABEL);
+        let label = status_label(&matched_text(&sid, &matched_name), CSS_SUCCESS_LABEL);
         action_box.append(&label);
     } else {
-        let label = gtk4::Label::new(Some(&crate::tr!("Not found")));
-        label.add_css_class(CSS_DIM_LABEL);
-        action_box.append(&label);
+        action_box.append(&status_label(&crate::tr!("Not found"), CSS_DIM_LABEL));
 
         let ab = action_box.clone();
         let on_match: MatchCallback = Rc::new(move |sid, name| {
@@ -133,13 +154,9 @@ pub(super) fn handle_steam_search_result(
             let text = if name.is_empty() {
                 crate::tr!("Matched: {}").replacen("{}", sid, 1)
             } else {
-                crate::tr!("Matched: {} ({})")
-                    .replacen("{}", name, 1)
-                    .replacen("{}", sid, 1)
+                matched_text(sid, name)
             };
-            let l = gtk4::Label::new(Some(&text));
-            l.add_css_class(CSS_SUCCESS_LABEL);
-            ab.append(&l);
+            ab.append(&status_label(&text, CSS_SUCCESS_LABEL));
         });
 
         let id_btn = gtk4::Button::with_label(&crate::tr!("Enter ID"));
@@ -339,4 +356,14 @@ fn search_result_row(ctx: &MatchContext, app_id: &str, result_name: &str) -> adw
             ctx.dialog.close();
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_matched_text_shows_name_then_id() {
+        assert_eq!(matched_text("42", "Portal"), "Matched: Portal (42)");
+    }
 }

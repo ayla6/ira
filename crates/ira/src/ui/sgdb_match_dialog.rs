@@ -9,7 +9,15 @@ use super::helpers::{clear_children, poll_channel, refresh_settings_images_page,
 use super::image_manager::build_image_manager_content_with_drafts;
 use super::matching::{fetch_and_report_sgdb_assets, persist_sgdb_match};
 use super::state::SharedState;
-use super::steam_search_dialog::{build_search_dialog, match_result_row, SearchDialogWidgets};
+use super::steam_search_dialog::{
+    build_search_dialog, match_result_row, status_label, MatchCallback, SearchDialogWidgets,
+};
+
+/// Text for the manual "Search SGDB…" success label: shows the matched SGDB
+/// title, not the local game's name.
+fn matched_sgdb_text(matched_name: &str) -> String {
+    crate::tr!("Matched to SGDB: {}").replacen("{}", matched_name, 1)
+}
 
 /// A "Search SGDB…" button that reopens the SGDB search for this game and,
 /// once a new match is accepted, repaints the action box with the green
@@ -27,16 +35,12 @@ fn manual_sgdb_search_button(
     let game_name = game_name.to_string();
     let btn = gtk4::Button::with_label(&crate::tr!("Search SGDB…"));
     btn.connect_clicked(move |_| {
-        let cb: Rc<dyn Fn()> = Rc::new({
+        let cb: MatchCallback = Rc::new({
             let action_box = action_box.clone();
-            let game_name = game_name.clone();
-            move || {
+            move |_sgdb_id, matched_name| {
                 clear_children(&action_box);
-                let label = gtk4::Label::new(Some(
-                    &crate::tr!("Matched to SGDB: {}").replacen("{}", &game_name, 1),
-                ));
-                label.add_css_class(CSS_SUCCESS_LABEL);
-                action_box.append(&label);
+                let text = matched_sgdb_text(matched_name);
+                action_box.append(&status_label(&text, CSS_SUCCESS_LABEL));
             }
         });
         show_sgdb_search_dialog(&state, db_id, &game_name, &parent_dialog, Some(cb));
@@ -101,13 +105,8 @@ pub(super) fn handle_unified_sgdb_result(
             );
         });
 
-        let label = gtk4::Label::new(Some(&crate::tr!("SGDB: {}").replacen(
-            "{}",
-            &matched_name,
-            1,
-        )));
-        label.add_css_class(CSS_SUCCESS_LABEL);
-        action_box.append(&label);
+        let text = crate::tr!("SGDB: {}").replacen("{}", &matched_name, 1);
+        action_box.append(&status_label(&text, CSS_SUCCESS_LABEL));
 
         let undo_btn = gtk4::Button::with_label(&crate::tr!("Undo SGDB"));
         let sc = state.clone();
@@ -170,8 +169,7 @@ pub(super) fn handle_unified_sgdb_result(
             }
             // Update the mass match row to show unmatched state with manual search
             clear_children(&action_box_c);
-            let label = gtk4::Label::new(Some(&crate::tr!("SGDB: unmatched")));
-            label.add_css_class(CSS_DIM_LABEL);
+            let label = status_label(&crate::tr!("SGDB: unmatched"), CSS_DIM_LABEL);
             action_box_c.append(&label);
             action_box_c.append(&manual_sgdb_search_button(
                 &sc,
@@ -183,9 +181,7 @@ pub(super) fn handle_unified_sgdb_result(
         });
         action_box.append(&undo_btn);
     } else {
-        let label = gtk4::Label::new(Some(&crate::tr!("SGDB: not found")));
-        label.add_css_class(CSS_DIM_LABEL);
-        action_box.append(&label);
+        action_box.append(&status_label(&crate::tr!("SGDB: not found"), CSS_DIM_LABEL));
 
         action_box.append(&manual_sgdb_search_button(
             state,
@@ -202,7 +198,7 @@ pub fn show_sgdb_search_dialog(
     db_id: i64,
     game_name: &str,
     parent: &impl IsA<gtk4::Widget>,
-    on_match: Option<Rc<dyn Fn()>>,
+    on_match: Option<MatchCallback>,
 ) {
     let SearchDialogWidgets {
         dialog,
@@ -269,11 +265,12 @@ fn sgdb_result_row(
     db_id: i64,
     sgdb_id: &str,
     name: &str,
-    on_match: &Option<Rc<dyn Fn()>>,
+    on_match: &Option<MatchCallback>,
     dialog: &adw::Dialog,
 ) -> adw::ActionRow {
     let sc = state.clone();
     let sid = sgdb_id.to_string();
+    let name_owned = name.to_string();
     let cb = on_match.clone();
     let dlg = dialog.clone();
     match_result_row(
@@ -283,7 +280,7 @@ fn sgdb_result_row(
             apply_sgdb_match(&sc, db_id, &sid);
             dlg.close();
             if let Some(ref cb) = cb {
-                cb();
+                cb(&sid, &name_owned);
             }
         },
     )
@@ -334,4 +331,14 @@ fn apply_sgdb_match(state: &SharedState, db_id: i64, sgdb_id: &str) {
             sgdb_id_d,
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_matched_sgdb_text_shows_matched_name() {
+        assert_eq!(matched_sgdb_text("Portal 2"), "Matched to SGDB: Portal 2");
+    }
 }

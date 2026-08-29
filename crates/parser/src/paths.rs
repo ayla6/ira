@@ -287,6 +287,13 @@ pub fn convert_bytes_to_lossless_webp(data: &[u8]) -> Option<Vec<u8>> {
             return Some(data.to_vec());
         }
     }
+    encode_bytes_to_lossless_webp(data)
+}
+
+/// Always decodes raw image bytes and re-encodes them as lossless WebP,
+/// whatever the source format — a JPEG input yields real WebP bytes.
+/// Returns `None` when the bytes do not decode as an image.
+pub fn encode_bytes_to_lossless_webp(data: &[u8]) -> Option<Vec<u8>> {
     let img = load_image_bytes(data)?;
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();

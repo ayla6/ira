@@ -154,6 +154,11 @@ pub struct Config {
     pub auto_reload_cemu: bool,
     #[serde(default = "default_true")]
     pub auto_reload_azahar: bool,
+    /// Installed-title scanning spans every detected yuzu-like and
+    /// Ryujinx-like at once, so it is gated per family of emulators, not
+    /// per executable.
+    #[serde(default = "default_true")]
+    pub auto_reload_switch: bool,
     /// Stream .zip/.7z/.zst DS ROMs in memory to read icons and hashes.
     /// Off by default: unpacking is slower than plain-file reads.
     #[serde(default)]
@@ -262,6 +267,7 @@ impl Default for Config {
             auto_reload_vita3k: true,
             auto_reload_cemu: true,
             auto_reload_azahar: true,
+            auto_reload_switch: true,
             unpack_roms: true,
 
             save_dir: default_save_dir(),
@@ -444,6 +450,7 @@ mod tests {
         assert!(cfg.auto_reload_vita3k);
         assert!(cfg.auto_reload_cemu);
         assert!(cfg.auto_reload_azahar);
+        assert!(cfg.auto_reload_switch);
         assert!(cfg.unpack_roms);
     }
 

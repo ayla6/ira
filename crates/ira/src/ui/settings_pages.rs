@@ -69,6 +69,7 @@ pub(super) struct AutoReloadWidgets {
     pub vita3k: adw::SwitchRow,
     pub cemu: adw::SwitchRow,
     pub azahar: adw::SwitchRow,
+    pub switch: adw::SwitchRow,
 }
 
 pub(super) fn build_general_settings_page(
@@ -168,6 +169,14 @@ pub(super) fn build_general_settings_page(
         &crate::tr!("Scan Azahar games when Ira starts"),
         cfg.auto_reload_azahar,
     );
+    // Switch is a multi-emulator source: every detected yuzu-like and
+    // Ryujinx-like is scanned at once, so the row names the console
+    // rather than one emulator.
+    let auto_reload_switch = auto_reload_row(
+        &crate::tr!("Switch"),
+        &crate::tr!("Scan installed Switch titles when Ira starts"),
+        cfg.auto_reload_switch,
+    );
     for row in [
         &auto_reload_steam,
         &auto_reload_roms,
@@ -177,6 +186,7 @@ pub(super) fn build_general_settings_page(
         &auto_reload_vita3k,
         &auto_reload_cemu,
         &auto_reload_azahar,
+        &auto_reload_switch,
     ] {
         reload_group.add(row);
     }
@@ -230,6 +240,7 @@ pub(super) fn build_general_settings_page(
             vita3k: auto_reload_vita3k,
             cemu: auto_reload_cemu,
             azahar: auto_reload_azahar,
+            switch: auto_reload_switch,
         },
     )
 }

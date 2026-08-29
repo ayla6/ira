@@ -11,6 +11,7 @@ use ira_platforms::ps3::{
 use ira_platforms::ps4::{discover_games_for_executable, load_shadps4_game, ShadPS4GameMeta};
 use ira_platforms::retroachievements;
 use ira_platforms::steam;
+use ira_platforms::switch::discover_installed_games as discover_switch_installed_games;
 use ira_platforms::vita3k::discover_games_for_executable as discover_vita3k_games_for_executable;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -132,6 +133,8 @@ pub struct GameListOptions {
     pub cemu_executable: String,
     pub azahar_enabled: bool,
     pub azahar_executable: String,
+    pub switch_installed_enabled: bool,
+    pub switch_executable: String,
     pub steam_enabled: bool,
     pub auto_reload_steam: bool,
     pub auto_reload_roms: bool,
@@ -140,6 +143,7 @@ pub struct GameListOptions {
     pub auto_reload_vita3k: bool,
     pub auto_reload_cemu: bool,
     pub auto_reload_azahar: bool,
+    pub auto_reload_switch: bool,
     pub ra_enabled: bool,
     pub sort_mode: SortMode,
     pub sort_descending: bool,
@@ -158,6 +162,8 @@ impl GameListOptions {
             cemu_executable: cfg.cemu_executable.clone(),
             azahar_enabled: cfg.azahar_enabled,
             azahar_executable: cfg.azahar_executable.clone(),
+            switch_installed_enabled: cfg.console("switch").enabled,
+            switch_executable: cfg.console("switch").executable.clone(),
             steam_enabled: cfg.steam_enabled,
             auto_reload_steam: cfg.auto_reload_steam,
             auto_reload_roms: cfg.auto_reload_roms,
@@ -166,6 +172,7 @@ impl GameListOptions {
             auto_reload_vita3k: cfg.auto_reload_vita3k,
             auto_reload_cemu: cfg.auto_reload_cemu,
             auto_reload_azahar: cfg.auto_reload_azahar,
+            auto_reload_switch: cfg.auto_reload_switch,
             ra_enabled: cfg.ra_enabled,
             sort_mode: cfg.sort_mode,
             sort_descending: cfg.sort_descending,
@@ -180,6 +187,7 @@ impl GameListOptions {
         options.vita3k_enabled &= options.auto_reload_vita3k;
         options.cemu_enabled &= options.auto_reload_cemu;
         options.azahar_enabled &= options.auto_reload_azahar;
+        options.switch_installed_enabled &= options.auto_reload_switch;
         options.ra_enabled &= options.auto_reload_roms;
         options
     }
@@ -276,6 +284,7 @@ fn build_game_list_with_mode(
         + usize::from(options.vita3k_enabled)
         + usize::from(options.cemu_enabled)
         + usize::from(options.azahar_enabled)
+        + usize::from(options.switch_installed_enabled)
         + usize::from(ra_any_console);
     let reporter = ProgressReporter::new(progress, total_sources);
     reporter.status(crate::tr!("Preparing game library…"));
@@ -384,6 +393,22 @@ fn build_game_list_with_mode(
             move |db, save_dir| build_azahar_games(db, save_dir, &options.azahar_executable),
         );
 
+        let switch_installed_handle = spawn_source_scan(
+            s,
+            SourceScan {
+                enabled: options.switch_installed_enabled,
+                source: "build_switch_installed_games",
+                scanning: crate::tr!("Scanning installed Switch titles…"),
+                loaded: crate::tr!("Loaded installed Switch titles"),
+            },
+            &db,
+            &save_dir,
+            &reporter,
+            move |db, save_dir| {
+                build_switch_installed_games(db, save_dir, &options.switch_executable)
+            },
+        );
+
         let ra_handle = if ra_any_console {
             let db_ra = db.clone();
             let save_dir_ra = save_dir.clone();
@@ -439,6 +464,7 @@ fn build_game_list_with_mode(
             PendingSource::Thread("Vita3K", vita3k_handle),
             PendingSource::Thread("Cemu", cemu_handle),
             PendingSource::Thread("Azahar", azahar_handle),
+            PendingSource::Thread("Switch", switch_installed_handle),
             PendingSource::Ready(steam_games),
             PendingSource::Thread("RA", ra_handle),
         ] {
@@ -508,6 +534,14 @@ fn cleanup_stale_rom_entries(db: &db::DbConn, cfg: &Config) {
     for entry in entries
         .iter()
         .filter(|entry| entry.kind == GameKind::Retro)
+        // Installed Switch titles have no ROM file by design — their
+        // identity is the emulator's title id — so the stale-ROM cleanup
+        // must never treat them as vanished ROMs.
+        .filter(|entry| {
+            !(entry.platform_id == "switch"
+                && entry.rom_path.is_empty()
+                && ira_platforms::switch::is_title_id(&entry.game_id))
+        })
         .filter(|entry| !rom_entry_has_file(db, cfg, entry))
     {
         if migration_playtime_seconds(db, entry) > ROM_MIGRATION_THRESHOLD_SECONDS {
@@ -914,6 +948,114 @@ fn default_azahar_icon(save_dir: &str, title_id: &str, icon: Option<&[u8]>) -> s
     }
 }
 
+/// Builds games for the titles installed in the user's yuzu-family and
+/// Ryujinx-family Switch emulators — both families at once, regardless of
+/// which emulator is configured to launch ROM files. Installed titles
+/// have no ROM file: their identity is the title id, so a game also
+/// present as a ROM file keeps its single entry and only gains the
+/// emulator's clean title and icon.
+fn build_switch_installed_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Game> {
+    discover_switch_installed_games(executable)
+        .iter()
+        .filter_map(|installed| {
+            let meta = find_or_create_console_entry(
+                db,
+                GameKind::Retro,
+                &installed.title_id,
+                "switch",
+                &installed.title,
+                false,
+            )?;
+            let entry = db::find_by_db_id(db, meta.db_id).ok().flatten()?;
+            let rename = switch_title_should_rename(&entry.title, &entry.rom_path);
+            if rename && entry.title != installed.title {
+                if let Err(e) = db::update_game_title(db, meta.db_id, &installed.title) {
+                    eprintln!("Failed to set Switch title for game {}: {e}", meta.db_id);
+                }
+            }
+            let mut game = game_loader::load_game_fast(&entry, save_dir).ok()?;
+            if rename
+                || game.name.is_empty()
+                || game_loader::is_placeholder_name(&game.name)
+            {
+                game.set_name(&installed.title);
+            }
+            // The icon comes from the source: installed NCAs are decrypted
+            // with the user's keys, the emulator's cached JPEG only fills
+            // in when that fails. SteamGridDB enrichment can still
+            // override both later.
+            let data_dir = ira_parser::retro_data_dir(save_dir, meta.db_id);
+            let nand_icon = if installed.icon.is_none()
+                && ira_parser::find_image_file(&data_dir, "icon").is_none()
+            {
+                ira_platforms::switch::extract_installed_icon(executable, &installed.title_id)
+            } else {
+                None
+            };
+            default_switch_icon(
+                save_dir,
+                meta.db_id,
+                installed.icon.as_deref(),
+                nand_icon.as_deref(),
+            );
+            if let Some(path) =
+                ira_parser::find_image_file(&data_dir, "icon")
+            {
+                game.icon_path = path.to_string_lossy().into_owned();
+            }
+            Some(game)
+        })
+        .collect()
+}
+
+/// True when the entry only carries a file-name-derived title: empty, a
+/// placeholder, or exactly the ROM file's stem — the same rule the ROM
+/// scan's Switch backfill uses.
+fn switch_title_should_rename(current: &str, rom_path: &str) -> bool {
+    let stem = std::path::Path::new(rom_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    current.is_empty()
+        || game_loader::is_placeholder_name(current)
+        || (!stem.is_empty() && current == stem)
+}
+
+/// Writes the title's default icon into its data dir unless one is
+/// already present: first the NAND-decrypted icon bytes, then the
+/// emulator's cached icon JPEG. SteamGridDB enrichment can still
+/// override both later.
+fn default_switch_icon(
+    save_dir: &str,
+    db_id: i64,
+    cached: Option<&std::path::Path>,
+    nand: Option<&[u8]>,
+) {
+    let data_dir = ira_parser::retro_data_dir(save_dir, db_id);
+    if ira_parser::find_image_file(&data_dir, "icon").is_some() {
+        return;
+    }
+    if let Some(bytes) = nand {
+        match ira_parser::encode_bytes_to_lossless_webp(bytes) {
+            Some(webp) => {
+                if std::fs::create_dir_all(&data_dir).is_ok()
+                    && std::fs::write(data_dir.join("icon.webp"), webp).is_err()
+                {
+                    eprintln!("Failed to write Switch icon for game {db_id}");
+                }
+                return;
+            }
+            None => eprintln!("Failed to decode installed Switch icon for game {db_id}"),
+        }
+    }
+    let Some(cached) = cached else {
+        return;
+    };
+    if ira_parser::import_image_as_webp(cached, &data_dir, "icon").is_none() {
+        eprintln!("Failed to import Switch icon for game {db_id}");
+    }
+}
+
 fn cleanup_steam_entries(db: &db::DbConn, discovered: &[steam::SteamGame]) {
     let discovered_ids: std::collections::HashSet<String> =
         discovered.iter().map(|g| g.app_id.clone()).collect();
@@ -1235,11 +1377,14 @@ mod tests {
         let progress: Arc<dyn Fn(GameListProgress) + Send + Sync> = Arc::new(move |update| {
             updates_clone.lock().unwrap().push(update);
         });
-        let cfg = Config {
+        let mut cfg = Config {
             save_dir: tmp.path().to_string_lossy().into_owned(),
             roms_folder: tmp.path().join("roms").to_string_lossy().into_owned(),
             ..Config::default()
         };
+        // The machine's real installed Switch titles must not leak into
+        // this test's library.
+        cfg.console_mut("switch").enabled = false;
         let options = GameListOptions::from_config(&cfg);
 
         let games = build_game_list_with_mode(

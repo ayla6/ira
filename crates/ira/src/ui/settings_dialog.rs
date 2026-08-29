@@ -340,6 +340,7 @@ fn apply_general_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
     cfg.auto_reload_vita3k = widgets.auto_reload_widgets.vita3k.is_active();
     cfg.auto_reload_cemu = widgets.auto_reload_widgets.cemu.is_active();
     cfg.auto_reload_azahar = widgets.auto_reload_widgets.azahar.is_active();
+    cfg.auto_reload_switch = widgets.auto_reload_widgets.switch.is_active();
     cfg.steam_enabled = widgets.steam_enable_row.is_active();
     let game_folders = widgets.game_folders.get();
     cfg.default_game_folder = game_folders.first().cloned().unwrap_or_default();

@@ -715,11 +715,15 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
             .map_err(|error| format!("failed to create virtual gamepad: {error}"))?
     };
     // The cemuhook stream is the DSU backend itself: picking that output
-    // mode always streams, nothing toggles it. The per-game launcher flag
-    // (--motion-port 0) remains the harder kill switch. It works even when
-    // no gyro exists (motion just reads zero).
+    // mode always streams, nothing toggles it. A profile on any other
+    // backend can opt into a motion-only companion stream (`dsu_motion`)
+    // for emulators that bind the DSU provider purely as a motion source;
+    // its frames read neutral to a client that wants buttons. The
+    // per-game launcher flag (--motion-port 0) remains the harder kill
+    // switch. It works even when no gyro exists (motion just reads zero).
     let motion_enabled = arguments.motion_port != Some(0)
-        && mapper.profile().backend == ira_input::VirtualGamepadBackend::Dsu;
+        && (mapper.profile().backend == ira_input::VirtualGamepadBackend::Dsu
+            || mapper.profile().dsu_motion);
     let motion_server = if motion_enabled {
         ira_input::MotionServer::bind()
     } else {
@@ -2297,7 +2301,14 @@ fn process_tick(
             pipeline.last_dsu_ts = ts;
             let dsu_frame = ira_input::sensor_to_dsu_frame(gyro, accel, ts);
             motion.poll_clients(true);
-            motion.send_sample(&dsu_frame, targets.pad);
+            if mapper.profile().backend == ira_input::VirtualGamepadBackend::Dsu {
+                motion.send_sample(&dsu_frame, targets.pad);
+            } else {
+                // Companion stream next to a real virtual pad: the game
+                // already reads that pad's buttons, so the stream's own
+                // state stays neutral and only motion carries data.
+                motion.send_motion_only(&dsu_frame);
+            }
         }
     }
     let outputs = mapper.tick(now_us());

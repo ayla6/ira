@@ -1031,6 +1031,12 @@ pub struct InputProfile {
     /// future SDL versions or raw evdev readers.
     #[serde(default)]
     pub native_motion: bool,
+    /// Also run the cemuhook (DSU) motion server when the backend is not
+    /// Dsu. The stream then carries motion only — its controller state
+    /// reads neutral — so emulators can bind it as a pure motion source
+    /// while input keeps flowing through the virtual controller.
+    #[serde(default)]
+    pub dsu_motion: bool,
     /// Forward rumble the game plays on the virtual pad to the physical
     /// controller. On by default — a controller that never rumbles reads
     /// as broken.
@@ -1062,6 +1068,7 @@ impl Default for InputProfile {
             compatible_game_ids: Vec::new(),
             compatible_platform_ids: Vec::new(),
             native_motion: false,
+            dsu_motion: false,
             rumble: true,
             action_set_when_cursor_shown: None,
             action_set_when_cursor_hidden: None,
@@ -1534,6 +1541,23 @@ mod tests {
     fn test_profile_missing_backend_defaults_to_xinput() {
         let profile: InputProfile = serde_json::from_str("{}").unwrap();
         assert_eq!(profile.backend, VirtualGamepadBackend::XInput);
+    }
+
+    #[test]
+    fn test_profile_missing_dsu_motion_defaults_to_off() {
+        let profile: InputProfile = serde_json::from_str("{}").unwrap();
+        assert!(!profile.dsu_motion);
+    }
+
+    #[test]
+    fn test_profile_serde_roundtrip_preserves_dsu_motion() {
+        let profile = InputProfile {
+            dsu_motion: true,
+            ..InputProfile::default()
+        };
+        let encoded = serde_json::to_string(&profile).unwrap();
+        let decoded: InputProfile = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, profile);
     }
 
     #[test]

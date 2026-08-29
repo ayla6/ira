@@ -2,6 +2,7 @@
 //! gamepad backend — the identity settings every other page builds on.
 
 use super::input_profile_region_pages::PagesCtx;
+use super::input_profile_widgets::switch_row;
 use adw::prelude::*;
 use ira_input::VirtualGamepadBackend;
 use std::cell::RefCell;
@@ -50,7 +51,29 @@ fn backend_group(ctx: &PagesCtx) -> adw::PreferencesGroup {
     combo.set_title(&crate::tr!("Backend"));
     group.add(&combo);
 
+    // A DSU layout is the cemuhook stream itself and always carries the
+    // whole controller, so the motion-only companion switch only applies
+    // to the other backends.
+    let dsu_motion_row = switch_row(
+        &crate::tr!("Also stream motion over cemuhook"),
+        Some(&crate::tr!(
+            "Runs the cemuhook motion server (udp/26760) for emulators while input \
+             goes through the selected virtual controller; the stream carries no buttons"
+        )),
+        ctx.profile.borrow().dsu_motion,
+        {
+            let ctx = ctx.clone();
+            move |active| {
+                ctx.profile.borrow_mut().dsu_motion = active;
+                (ctx.on_dirty)();
+            }
+        },
+    );
+    dsu_motion_row.set_visible(ctx.profile.borrow().backend != VirtualGamepadBackend::Dsu);
+    group.add(&dsu_motion_row);
+
     let ctx_for_backend = ctx.clone();
+    let dsu_motion_for_backend = dsu_motion_row.clone();
     combo.connect_selected_notify(move |combo| {
         let backend = match combo.selected() {
             1 => VirtualGamepadBackend::DirectInput,
@@ -61,6 +84,7 @@ fn backend_group(ctx: &PagesCtx) -> adw::PreferencesGroup {
             _ => VirtualGamepadBackend::XInput,
         };
         ctx_for_backend.profile.borrow_mut().backend = backend;
+        dsu_motion_for_backend.set_visible(backend != VirtualGamepadBackend::Dsu);
         (ctx_for_backend.on_dirty)();
     });
 

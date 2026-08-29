@@ -207,6 +207,15 @@ impl MotionServer {
         });
     }
 
+    /// Broadcast motion only: the controller shadow reads neutral, so a
+    /// client that binds this stream as its input device sees no buttons.
+    /// Companion mode for profiles whose backend is a real virtual pad —
+    /// input goes through that pad, this stream only feeds the emulator's
+    /// motion source.
+    pub fn send_motion_only(&mut self, sample: &MotionSample) {
+        self.send_sample(sample, &PadState::default());
+    }
+
     fn subscribe(&mut self, client: SocketAddr) {
         match self.clients.iter_mut().find(|(known, _)| *known == client) {
             Some(entry) => entry.1 = Instant::now(),

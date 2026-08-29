@@ -389,6 +389,7 @@ fn build_reset_icon_button(
         ira_models::GameKind::ThreeDS => crate::tr!("3DS"),
         ira_models::GameKind::WiiU => crate::tr!("Wii U"),
         ira_models::GameKind::Retro if game.platform_id == "nds" => crate::tr!("NDS"),
+        ira_models::GameKind::Retro if game.platform_id == "switch" => crate::tr!("Switch"),
         _ => return None,
     };
     let reset_btn = gtk4::Button::with_label(&label);
@@ -397,22 +398,23 @@ fn build_reset_icon_button(
     let pending_copies_reset = pending_copies.clone();
     let asset_reset = asset_type.to_string();
     let save_dir_c2 = save_dir.to_string();
-    let (cfg, azahar_exe, cemu_exe) = {
+    let (cfg, azahar_exe, cemu_exe, switch_exe) = {
         let s = state.borrow();
         (
             s.cfg.clone(),
             s.cfg.azahar_executable.clone(),
             s.cfg.cemu_executable.clone(),
+            s.cfg.console("switch").executable.clone(),
         )
     };
     reset_btn.connect_clicked(move |_| {
         // Decode only: like Browse and SGDB picks, the restored icon is
         // staged as a pending image and applied by the Save button, never
-        // written behind it.
-        let Some(bytes) =
-            super::image_manager_helpers::native_icon_bytes(&gc, &cfg, &azahar_exe, &cemu_exe)
-        else {
-            refresh();
+        // written behind it. A miss changes nothing, so the page is left
+        // alone — rebuilding it here made the floating sheet grow.
+        let Some(bytes) = super::image_manager_helpers::native_icon_bytes(
+            &gc, &cfg, &azahar_exe, &cemu_exe, &switch_exe,
+        ) else {
             return;
         };
         if let Some(pc) = &pending_copies_reset {

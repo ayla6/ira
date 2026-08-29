@@ -151,13 +151,17 @@ pub(super) fn native_icon_bytes(
     cfg: &ira_config::Config,
     azahar_executable: &str,
     cemu_executable: &str,
+    switch_executable: &str,
 ) -> Option<Vec<u8>> {
     // Resolve ROM path: Retro games store it relative to one of the ROM
     // roots (e.g. "game.nds" or "game.zip"), while console games store an
     // absolute path.
     let game_root_owned;
     let game_root: &std::path::Path =
-        if game.kind == ira_models::GameKind::Retro && game.platform_id == "nds" {
+        if matches!(
+            (game.kind, game.platform_id.as_str()),
+            (ira_models::GameKind::Retro, "nds" | "switch")
+        ) {
             let p = std::path::Path::new(&game.game_path);
             if p.is_absolute() {
                 p
@@ -170,6 +174,9 @@ pub(super) fn native_icon_bytes(
         };
     match game.kind {
         ira_models::GameKind::Retro if game.platform_id == "nds" => decode_nds_icon(game_root),
+        ira_models::GameKind::Retro if game.platform_id == "switch" => {
+            decode_switch_icon(game_root, switch_executable)
+        }
         ira_models::GameKind::ThreeDS => decode_smdh_icon(game_root).or_else(|| {
             ira_platforms::azahar::find_title_path_for(azahar_executable, &game.platform_id)
                 .and_then(|path| decode_smdh_icon(&path))
@@ -258,6 +265,23 @@ fn decode_nds_icon(game_root: &std::path::Path) -> Option<Vec<u8>> {
     ira_parser::convert_bytes_to_lossless_webp(&data)
 }
 
+/// Reads a Switch ROM's native icon and re-encodes it as lossless WebP:
+/// an emulator-cached JPEG, the ROM's decrypted control-NCA icon (JPEG or
+/// PNG — the decoder sniffs the bytes), or a homebrew NRO's embedded PNG.
+fn decode_switch_icon(game_root: &std::path::Path, switch_executable: &str) -> Option<Vec<u8>> {
+    let cache = ira_platforms::switch::SwitchCaches::load(switch_executable);
+    match ira_platforms::switch::native_icon(game_root, &cache, switch_executable) {
+        ira_platforms::switch::SwitchIcon::Bytes(raw) => {
+            ira_parser::encode_bytes_to_lossless_webp(&raw)
+        }
+        ira_platforms::switch::SwitchIcon::File(icon) => {
+            let data = std::fs::read(icon).ok()?;
+            ira_parser::encode_bytes_to_lossless_webp(&data)
+        }
+        ira_platforms::switch::SwitchIcon::None => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,7 +305,7 @@ mod tests {
         let save_dir = tmp.path().to_str().unwrap();
         let game = nds_game("missing.nds", 0);
 
-        let bytes = native_icon_bytes(&game, &ira_config::Config::default(), "", "");
+        let bytes = native_icon_bytes(&game, &ira_config::Config::default(), "", "", "");
 
         assert!(bytes.is_none());
         let data_dir = ira_parser::retro_data_dir(save_dir, game.db_id);

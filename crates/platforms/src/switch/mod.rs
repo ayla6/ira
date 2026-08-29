@@ -10,14 +10,19 @@
 //!
 //! ROM files map onto these entries by file-name title id, NSP ticket
 //! names, or clean-name match; homebrew NROs carry icon and title inside
-//! their asset block.
+//! their asset block. With the user's dumped keys, the ROM's own control
+//! NCA is decrypted for its icon and `control.nacp` application title —
+//! no emulator cache involved.
 
 mod config;
 mod keys;
+mod nacp;
 mod nca;
 mod registered;
 mod rom;
 mod ryujinx;
+
+pub use nca::ControlMeta;
 
 /// Synthetic encrypted NCA fixtures shared across the switch tests.
 #[cfg(test)]
@@ -40,8 +45,9 @@ pub enum SwitchIcon {
 pub struct SwitchRomMeta {
     /// 16 lowercase hex digits, or empty when the file carries none.
     pub title_id: String,
-    /// Application title from an emulator cache or the NRO NACP; empty
-    /// when unknown (the clean file name is the fallback).
+    /// Application title from an emulator cache, the NRO NACP, or the
+    /// ROM's own control NACP (`rom_meta_deep`); empty when unknown (the
+    /// clean file name is the fallback).
     pub title: String,
     pub icon: SwitchIcon,
 }
@@ -271,12 +277,21 @@ pub fn rom_meta(rom: &Path, caches: &SwitchCaches) -> SwitchRomMeta {
     SwitchRomMeta::empty()
 }
 
-/// Resolves a ROM file's native metadata with the icon decrypted straight
-/// from the ROM's control NCA (see `native_icon`); titles and ids still
-/// come from the emulator caches.
+/// Resolves a ROM file's native metadata with the icon and application
+/// title decrypted straight from the ROM's control NCA (see
+/// `native_control_meta`); the emulator caches fill in whatever the ROM
+/// does not carry.
 pub fn rom_meta_deep(rom: &Path, caches: &SwitchCaches, executable: &str) -> SwitchRomMeta {
     let mut meta = rom_meta(rom, caches);
-    meta.icon = native_icon(rom, caches, executable);
+    let control = native_control_meta(rom, executable);
+    if let Some(icon) = control.as_ref().and_then(|m| m.icon.clone()) {
+        meta.icon = SwitchIcon::Bytes(icon);
+    }
+    if meta.title.is_empty() {
+        if let Some(title) = control.and_then(|m| m.title) {
+            meta.title = title;
+        }
+    }
     meta
 }
 
@@ -286,18 +301,25 @@ pub fn rom_meta_deep(rom: &Path, caches: &SwitchCaches, executable: &str) -> Swi
 /// fallback for containers Ira cannot decrypt (XCI) or when no keys are
 /// installed.
 pub fn native_icon(rom: &Path, caches: &SwitchCaches, executable: &str) -> SwitchIcon {
-    if let Some(keys) = keys::SwitchKeys::load(executable) {
-        if let Some(bytes) = nca::extract_icon(rom, &keys) {
-            return SwitchIcon::Bytes(bytes);
-        }
+    if let Some(icon) = native_control_meta(rom, executable).and_then(|meta| meta.icon) {
+        return SwitchIcon::Bytes(icon);
     }
     rom_meta(rom, caches).icon
 }
 
-/// The icon of a NAND-installed title, decrypted from the emulator's own
-/// `Contents/Registered` NCAs — no emulator cache involved.
-pub fn extract_installed_icon(executable: &str, title_id: &str) -> Option<Vec<u8>> {
-    registered::installed_icon(executable, title_id)
+/// The ROM's control NCA metadata (application title and icon), decoded
+/// in one pass when the user's dumped keys are available. `None` for
+/// containers Ira cannot decrypt (XCI) or without keys.
+fn native_control_meta(rom: &Path, executable: &str) -> Option<nca::ControlMeta> {
+    let keys = keys::SwitchKeys::load(executable)?;
+    nca::extract_control_meta(rom, &keys)
+}
+
+/// The application title and icon of a NAND-installed title, decrypted
+/// from the emulator's own `Contents/Registered` NCAs — no emulator
+/// cache involved.
+pub fn extract_installed_meta(executable: &str, title_id: &str) -> Option<ControlMeta> {
+    registered::installed_meta(executable, title_id)
 }
 
 /// Removes bracketed tags and a leading bare title id from a dump file

@@ -11,24 +11,35 @@ pub(crate) const TEST_HEADER_KEY: [u8; 32] = [0x42; 32];
 pub(crate) const TEST_KAEK: [u8; 16] = [0x57; 16];
 /// The per-section key planted in key-area slot 2.
 pub(crate) const TEST_BODY_KEY: [u8; 16] = [0x99; 16];
+/// The application title planted in the fixture's `control.nacp`.
+pub(crate) const SYNTH_TITLE: &str = "Synthetic Title";
 
-/// Builds a RomFS image whose root holds one `icon_en.dat`.
+/// Builds a RomFS image whose root holds one `icon_en.dat` (= `icon`)
+/// and one `control.nacp` (a NACP titled `SYNTH_TITLE`).
 pub(crate) fn romfs_fixture(icon: &[u8]) -> Vec<u8> {
-    let name = b"icon_en.dat";
-    let padded = name.len().div_ceil(4) * 4;
-    let meta_size = 0x20 + padded;
-    let data_at = 0x50 + meta_size;
-    let mut romfs = vec![0u8; data_at + icon.len()];
+    let nacp = super::nacp::test_table(&[(0, SYNTH_TITLE)]);
+    let files: [(&[u8], &[u8]); 2] = [(b"icon_en.dat", icon), (b"control.nacp", &nacp)];
+    let mut meta = Vec::new();
+    let mut data = Vec::new();
+    for (name, contents) in files {
+        let mut entry = [0u8; 0x20];
+        entry[8..16].copy_from_slice(&(data.len() as u64).to_le_bytes());
+        entry[16..24].copy_from_slice(&(contents.len() as u64).to_le_bytes());
+        entry[28..32].copy_from_slice(&(name.len() as u32).to_le_bytes());
+        meta.extend_from_slice(&entry);
+        meta.extend_from_slice(name);
+        while meta.len() % 4 != 0 {
+            meta.push(0);
+        }
+        data.extend_from_slice(contents);
+    }
+    let mut romfs = vec![0u8; 0x50 + meta.len() + data.len()];
     romfs[0..8].copy_from_slice(&0x50u64.to_le_bytes());
     romfs[0x38..0x40].copy_from_slice(&0x50u64.to_le_bytes()); // meta table
-    romfs[0x40..0x48].copy_from_slice(&(meta_size as u64).to_le_bytes());
-    romfs[0x48..0x50].copy_from_slice(&(data_at as u64).to_le_bytes());
-    romfs[0x50 + 8..0x50 + 16].copy_from_slice(&0u64.to_le_bytes()); // data offset
-    romfs[0x50 + 16..0x50 + 24].copy_from_slice(&(icon.len() as u64).to_le_bytes());
-    romfs[0x50 + 24..0x50 + 28].copy_from_slice(&0u32.to_le_bytes()); // next hash
-    romfs[0x50 + 28..0x50 + 32].copy_from_slice(&(name.len() as u32).to_le_bytes());
-    romfs[0x70..0x70 + name.len()].copy_from_slice(name);
-    romfs[data_at..].copy_from_slice(icon);
+    romfs[0x40..0x48].copy_from_slice(&(meta.len() as u64).to_le_bytes());
+    romfs[0x48..0x50].copy_from_slice(&((0x50 + meta.len()) as u64).to_le_bytes());
+    romfs[0x50..0x50 + meta.len()].copy_from_slice(&meta);
+    romfs[0x50 + meta.len()..].copy_from_slice(&data);
     romfs
 }
 
@@ -42,9 +53,10 @@ pub(crate) fn test_keys_text() -> String {
 }
 
 /// Builds a control NCA's bytes (header + encrypted section) whose
-/// section 0 carries a RomFS with one `icon_en.dat` = `JPEGDATA`,
-/// encrypted exactly the way a retail dump is: header under AES-XTS,
-/// section body under AES-CTR with the key-area slot 2 key.
+/// section 0 carries a RomFS with one `icon_en.dat` = `JPEGDATA` and one
+/// `control.nacp` titled `SYNTH_TITLE`, encrypted exactly the way a
+/// retail dump is: header under AES-XTS, section body under AES-CTR
+/// with the key-area slot 2 key.
 pub(crate) fn synthetic_control_nca(title_id: u64) -> Vec<u8> {
     let section_start = 0x4000u64;
     let romfs = romfs_fixture(b"JPEGDATA");

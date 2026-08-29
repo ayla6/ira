@@ -957,7 +957,8 @@ fn default_azahar_icon(save_dir: &str, title_id: &str, icon: Option<&[u8]>) -> s
 /// which emulator is configured to launch ROM files. Installed titles
 /// have no ROM file: their identity is the title id, so a game also
 /// present as a ROM file keeps its single entry and only gains the
-/// emulator's clean title and icon.
+/// emulator's clean title and icon — or, when the cache has none, the
+/// title and icon decrypted from the installed control NCA.
 fn build_switch_installed_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Game> {
     discover_switch_installed_games(executable)
         .iter()
@@ -971,36 +972,48 @@ fn build_switch_installed_games(db: &db::DbConn, save_dir: &str, executable: &st
                 false,
             )?;
             let entry = db::find_by_db_id(db, meta.db_id).ok().flatten()?;
+            let data_dir = ira_parser::retro_data_dir(save_dir, meta.db_id);
+            // Cache-miss fallback: the NAND-installed control NCA is
+            // decrypted when the emulator cached no icon; its NACP also
+            // supplies the application title when the cache had none.
+            let nand = if installed.icon.is_none()
+                && ira_parser::find_image_file(&data_dir, "icon").is_none()
+            {
+                ira_platforms::switch::extract_installed_meta(executable, &installed.title_id)
+            } else {
+                None
+            };
+            let native_title = if installed.title.is_empty() {
+                nand.as_ref().and_then(|control| control.title.clone())
+            } else {
+                Some(installed.title.clone())
+            };
             let rename = switch_title_should_rename(&entry.title, &entry.rom_path);
-            if rename && entry.title != installed.title {
-                if let Err(e) = db::update_game_title(db, meta.db_id, &installed.title) {
-                    eprintln!("Failed to set Switch title for game {}: {e}", meta.db_id);
+            if let Some(native) = &native_title {
+                if rename && entry.title != *native {
+                    if let Err(e) = db::update_game_title(db, meta.db_id, native) {
+                        eprintln!("Failed to set Switch title for game {}: {e}", meta.db_id);
+                    }
                 }
             }
             let mut game = game_loader::load_game_fast(&entry, save_dir).ok()?;
-            if rename
-                || game.name.is_empty()
-                || game_loader::is_placeholder_name(&game.name)
-            {
-                game.set_name(&installed.title);
+            if let Some(native) = &native_title {
+                if rename
+                    || game.name.is_empty()
+                    || game_loader::is_placeholder_name(&game.name)
+                {
+                    game.set_name(native);
+                }
             }
             // The icon comes from the source: installed NCAs are decrypted
             // with the user's keys, the emulator's cached JPEG only fills
             // in when that fails. SteamGridDB enrichment can still
             // override both later.
-            let data_dir = ira_parser::retro_data_dir(save_dir, meta.db_id);
-            let nand_icon = if installed.icon.is_none()
-                && ira_parser::find_image_file(&data_dir, "icon").is_none()
-            {
-                ira_platforms::switch::extract_installed_icon(executable, &installed.title_id)
-            } else {
-                None
-            };
             default_switch_icon(
                 save_dir,
                 meta.db_id,
                 installed.icon.as_deref(),
-                nand_icon.as_deref(),
+                nand.as_ref().and_then(|control| control.icon.as_deref()),
             );
             if let Some(path) =
                 ira_parser::find_image_file(&data_dir, "icon")

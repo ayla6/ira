@@ -354,7 +354,9 @@ fn build_ra_games_for_console(
                 }
                 None => {
                     // Switch: native title id and application title from
-                    // Eden's cache; the file name stays the fallback.
+                    // the emulator caches or, with keys installed, the
+                    // ROM's own control NACP; the file name stays the
+                    // final fallback.
                     let meta = switch_metas.get(&rom_path_str);
                     let native_id = meta
                         .and_then(|m| (!m.title_id.is_empty()).then(|| m.title_id.clone()));
@@ -653,7 +655,8 @@ fn write_nds_icon(save_dir: &str, db_id: i64, icon_rgba: &[u8]) {
     ira_parser::convert_to_lossless_webp(&png);
 }
 
-/// Resolves Eden's cached metadata for every new Switch ROM up front;
+/// Resolves cached and ROM-native metadata (control-NCA icon and NACP
+/// title, see `switch::rom_meta_deep`) for every new Switch ROM up front;
 /// keyed by the ROM path relative to the console folder. Always empty for
 /// other consoles.
 fn precompute_switch_metas(
@@ -719,9 +722,10 @@ fn write_switch_icon(save_dir: &str, db_id: i64, icon: &crate::switch::SwitchIco
 
 /// Backfills native Switch metadata onto games first scanned before the
 /// Switch integration existed: the title id becomes the game id, the
-/// emulators' application title replaces the file-name-derived one, and
-/// the native icon (cache or decrypted NCA) is imported. Games already
-/// carrying a title id are left alone.
+/// native application title (emulator cache or the ROM's control NACP)
+/// replaces the file-name-derived one, and the native icon (cache or
+/// decrypted NCA) is imported. Games already carrying a title id are
+/// left alone.
 fn enrich_switch_roms(
     db: &ira_db::DbConn,
     save_dir: &str,

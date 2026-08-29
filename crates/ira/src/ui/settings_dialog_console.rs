@@ -134,7 +134,7 @@ pub(super) fn apply_console_settings(cfg: &mut Config, pages: &ConsoleSettingsWi
 
 pub(super) fn register_console_pages(
     cfg: &Config,
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
     state: &SharedState,
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
@@ -222,7 +222,7 @@ fn add_console_loading_page(stack: &gtk4::Stack, page_id: &str) {
 fn connect_lazy_console_pages(
     result: &SharedConsoleSettingsWidgets,
     cfg: &Config,
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
     registry: Arc<ira_input::ControllerRegistry>,
@@ -289,7 +289,7 @@ fn connect_lazy_console_pages(
 fn load_special_console_page(
     page_id: &str,
     cfg: &Config,
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
     stack: &gtk4::Stack,
     registry: &Arc<ira_input::ControllerRegistry>,
     result: &SharedConsoleSettingsWidgets,
@@ -372,7 +372,7 @@ enum SpecialConsoleWidgets {
 fn build_special_console_page(
     page_id: &str,
     cfg: &Config,
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
 ) -> Option<(&'static str, String, gtk4::Box, SpecialConsoleWidgets)> {
     match page_id {
         "ps3" => {
@@ -472,18 +472,14 @@ fn replace_loading_page(stack: &gtk4::Stack, page: &gtk4::Box, page_id: &str) {
 }
 
 fn wrap_console_page(stack: &gtk4::Stack, page: &gtk4::Box, page_id: &str) {
-    let scroll = gtk4::ScrolledWindow::new();
-    scroll.set_hexpand(true);
-    scroll.set_vexpand(true);
-    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    scroll.set_child(Some(page));
+    let scroll = super::helpers::scrolled_page(page);
     stack.add_named(&scroll, Some(page_id));
 }
 
 fn add_console_page_overrides(
     page: &gtk4::Box,
     cfg: &Config,
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
     console_id: &str,
     label: &str,
     registry: Arc<ira_input::ControllerRegistry>,

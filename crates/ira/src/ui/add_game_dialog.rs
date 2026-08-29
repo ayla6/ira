@@ -53,7 +53,10 @@ pub fn show_add_game_dialog(state: &SharedState) {
         &crate::tr!("General"),
         "general",
     ));
-    stack.add_named(&general_page, Some("general"));
+    stack.add_named(
+        &super::helpers::scrolled_page(&general_page),
+        Some("general"),
+    );
 
     let (wine_pages, wine_widgets) = {
         let dft = state.borrow().cfg.default_wine_config.clone();
@@ -90,7 +93,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
         &crate::tr!("Environment"),
         "env",
     ));
-    stack.add_named(&env_page, Some("env"));
+    stack.add_named(&super::helpers::scrolled_page(&env_page), Some("env"));
 
     let detect_group = adw::PreferencesGroup::new();
     detect_group.set_title(&crate::tr!("Quick detect"));

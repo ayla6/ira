@@ -31,14 +31,17 @@ pub(super) struct ConsoleProfileWidgets {
     pub profile_path: Rc<RefCell<Option<std::path::PathBuf>>>,
 }
 
+/// The settings host (an `adw::Window` since the settings dialog became
+/// resizable), accepted as any widget so sub-dialogs can present over it.
 pub(super) fn add_pc_profile_group(
     page: &gtk4::Box,
     cfg: &Config,
     config_id: &str,
     label: &str,
-    parent: &adw::Dialog,
+    parent: &impl IsA<gtk4::Widget>,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
 ) -> ConsoleProfileWidgets {
+    let parent = parent.clone().upcast();
     let group = adw::PreferencesGroup::new();
     group.set_title(label);
     let widget = add_console_remapping_rows(
@@ -46,7 +49,7 @@ pub(super) fn add_pc_profile_group(
         cfg,
         config_id.to_string(),
         label.to_string(),
-        parent,
+        &parent,
         &cfg.save_dir,
         registry,
     );
@@ -73,7 +76,7 @@ struct ControllerDefaultState {
 #[derive(Clone)]
 struct ControllerRowsParams {
     group: adw::PreferencesGroup,
-    parent: adw::Dialog,
+    parent: gtk4::Widget,
     save_dir: String,
     configured_defaults: HashMap<String, ControllerInputConfig>,
     widgets: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
@@ -82,19 +85,20 @@ struct ControllerRowsParams {
 }
 
 pub(super) fn build_input_settings_page(
-    parent: &adw::Dialog,
+    parent: &impl IsA<gtk4::Widget>,
     save_dir: &str,
     cfg: &Config,
     steam: std::sync::Arc<ira_api::SteamDataClient>,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
 ) -> (gtk4::Box, InputPageWidgets) {
+    let parent = parent.clone().upcast();
     let page = settings_page_container();
     let profiles_group = adw::PreferencesGroup::new();
     profiles_group.set_title(&crate::tr!("Profiles"));
     let profile_rows = Rc::new(RefCell::new(Vec::new()));
     rebuild_profile_rows(
         &profiles_group,
-        parent,
+        &parent,
         save_dir,
         steam.clone(),
         registry.clone(),
@@ -121,7 +125,7 @@ pub(super) fn build_input_settings_page(
     };
     rebuild_controller_rows(&controller_rows_params, &registry.snapshot());
     start_controller_registry_refresh(
-        parent,
+        &parent,
         &controller_group,
         save_dir,
         registry.clone(),
@@ -142,13 +146,14 @@ pub(super) fn build_input_settings_page(
 
 pub(super) fn add_console_profile_group(
     page: &gtk4::Box,
-    parent: &adw::Dialog,
+    parent: &impl IsA<gtk4::Widget>,
     cfg: &Config,
     save_dir: &str,
     console_id: &str,
     label: &str,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
 ) -> ConsoleProfileWidgets {
+    let parent = parent.clone().upcast();
     let group = adw::PreferencesGroup::new();
     group.set_title(&crate::tr!("Controller"));
     let widget = add_console_remapping_rows(
@@ -156,7 +161,7 @@ pub(super) fn add_console_profile_group(
         cfg,
         console_id.to_string(),
         label.to_string(),
-        parent,
+        &parent,
         save_dir,
         registry,
     );
@@ -169,7 +174,7 @@ fn add_console_remapping_rows(
     cfg: &Config,
     console_id: String,
     label: String,
-    parent: &adw::Dialog,
+    parent: &gtk4::Widget,
     save_dir: &str,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
 ) -> ConsoleProfileWidgets {
@@ -472,7 +477,7 @@ fn clear_controller_rows(
 
 fn add_controller_row(
     group: &adw::PreferencesGroup,
-    parent: &adw::Dialog,
+    parent: &gtk4::Widget,
     save_dir: &str,
     device: ira_input::DeviceInfo,
     state: ControllerDefaultState,
@@ -618,7 +623,7 @@ fn update_controller_subtitle(
 }
 
 fn start_controller_registry_refresh(
-    parent: &adw::Dialog,
+    parent: &gtk4::Widget,
     group: &adw::PreferencesGroup,
     save_dir: &str,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
@@ -628,23 +633,17 @@ fn start_controller_registry_refresh(
 ) {
     let group_for_refresh = group.clone();
     let parent_weak = parent.downgrade();
-    let closing = Rc::new(Cell::new(false));
-    let closing_for_parent = closing.clone();
-    parent.connect_closed(move |_| {
-        closing_for_parent.set(true);
-    });
     let save_dir_for_refresh = save_dir.to_string();
     let widgets_for_refresh = widgets;
     let generation = Rc::new(Cell::new(registry.generation()));
     let generation_for_refresh = generation;
     glib::timeout_add_local(Duration::from_millis(100), move || {
-        if closing.get() {
-            return glib::ControlFlow::Break;
-        }
         let Some(parent) = parent_weak.upgrade() else {
             return glib::ControlFlow::Break;
         };
-        if !parent.is_visible() {
+        // A closed settings window stays "visible" until destroyed, but it
+        // stops being mapped, which ends the poll.
+        if !parent.is_mapped() {
             return glib::ControlFlow::Break;
         }
         if registry.generation() != generation_for_refresh.get() {
@@ -705,7 +704,7 @@ pub(super) fn backend_for_selection(selection: u32) -> Option<ira_input::Virtual
 
 fn rebuild_profile_rows(
     group: &adw::PreferencesGroup,
-    parent: &adw::Dialog,
+    parent: &gtk4::Widget,
     save_dir: &str,
     steam: std::sync::Arc<ira_api::SteamDataClient>,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
@@ -811,7 +810,7 @@ fn rebuild_profile_rows(
 
 fn add_profile_row(
     group: &adw::PreferencesGroup,
-    parent: &adw::Dialog,
+    parent: &gtk4::Widget,
     save_dir: &str,
     steam: std::sync::Arc<ira_api::SteamDataClient>,
     stored: StoredProfile,

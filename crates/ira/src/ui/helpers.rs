@@ -1,5 +1,5 @@
 use crate::Game;
-use adw::prelude::{AdwDialogExt, AlertDialogExt, PreferencesRowExt};
+use adw::prelude::{AdwDialogExt, AlertDialogExt, AdwWindowExt, PreferencesRowExt};
 use chrono::TimeZone;
 use gtk4::prelude::*;
 use std::cell::RefCell;
@@ -24,6 +24,100 @@ pub fn dialog_layout() -> DialogLayout {
     win.set_content_width(800);
     win.set_content_height(720);
 
+    let DialogWidgets {
+        outer,
+        sidebar_area,
+        sidebar,
+        content_area,
+        header,
+        stack,
+    } = dialog_widgets();
+    win.set_child(Some(&outer));
+
+    DialogLayout {
+        window: win,
+        sidebar,
+        stack,
+        header,
+        content_area,
+        sidebar_area,
+    }
+}
+
+/// The resizable settings window: a normal window (unlike the `adw::Dialog`
+/// sheets, which the user cannot resize) sized like the game images picker by
+/// default and clamped to the presenting window.
+pub struct SettingsWindowLayout {
+    pub window: adw::Window,
+    pub sidebar: gtk4::ListBox,
+    pub stack: gtk4::Stack,
+    pub content_area: gtk4::Box,
+    pub sidebar_area: gtk4::Box,
+}
+
+pub fn settings_window_layout(parent: &adw::ApplicationWindow) -> SettingsWindowLayout {
+    let win = adw::Window::new();
+    win.set_modal(true);
+    win.set_transient_for(Some(parent));
+    win.set_destroy_with_parent(true);
+    win.set_title(Some(&crate::tr!("Settings")));
+
+    let (width, height) = fitted_window_size(
+        (SETTINGS_WINDOW_WIDTH, SETTINGS_WINDOW_HEIGHT),
+        (parent.width(), parent.height()),
+    );
+    win.set_default_size(width, height);
+
+    let DialogWidgets {
+        outer,
+        sidebar_area,
+        sidebar,
+        content_area,
+        header,
+        stack,
+    } = dialog_widgets();
+    header.set_title_widget(Some(&gtk4::Label::new(Some(&crate::tr!("Settings")))));
+    // AdwWindow only accepts set_content; gtk_window_set_child aborts.
+    win.set_content(Some(&outer));
+
+    SettingsWindowLayout {
+        window: win,
+        sidebar,
+        stack,
+        content_area,
+        sidebar_area,
+    }
+}
+
+/// Default settings window size, matching the game images picker.
+const SETTINGS_WINDOW_WIDTH: i32 = 900;
+const SETTINGS_WINDOW_HEIGHT: i32 = 700;
+
+/// Pure part of [`settings_window_layout`]: keeps the window within the
+/// presenting window when that one is mapped; unmapped parents (height 0)
+/// leave the preferred size untouched.
+fn fitted_window_size(preferred: (i32, i32), parent: (i32, i32)) -> (i32, i32) {
+    let fit = |size: i32, available: i32| {
+        if available > 300 {
+            size.min(available - 40)
+        } else {
+            size
+        }
+    };
+    (fit(preferred.0, parent.0), fit(preferred.1, parent.1))
+}
+
+/// Widget tree shared by the dialog sheet and the settings window layouts.
+struct DialogWidgets {
+    outer: gtk4::Box,
+    sidebar_area: gtk4::Box,
+    sidebar: gtk4::ListBox,
+    content_area: gtk4::Box,
+    header: adw::HeaderBar,
+    stack: gtk4::Stack,
+}
+
+fn dialog_widgets() -> DialogWidgets {
     let outer = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
 
     let sidebar_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -63,26 +157,34 @@ pub fn dialog_layout() -> DialogLayout {
     stack.set_margin_top(16);
     stack.set_margin_bottom(16);
 
-    // Pages are plain boxes that demand their full natural height; without
-    // this viewport a tall page would grow the sheet past the presenting
-    // window and libadwaita would warn and clip it. Scrolling keeps every
-    // page reachable at whatever height the dialog ends up with.
-    let stack_scroll = gtk4::ScrolledWindow::new();
-    stack_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    stack_scroll.set_child(Some(&stack));
-
-    content_area.append(&stack_scroll);
+    // Every page wraps itself in a `ScrolledWindow` (see `scrolled_page`),
+    // so scrolling happens per page and only by that page's own content
+    // overflow: short pages can't be overscrolled and tall pages never grow
+    // the window past its configured size.
+    content_area.append(&stack);
     outer.append(&content_area);
-    win.set_child(Some(&outer));
 
-    DialogLayout {
-        window: win,
-        sidebar,
-        stack,
-        header,
-        content_area,
+    DialogWidgets {
+        outer,
         sidebar_area,
+        sidebar,
+        content_area,
+        header,
+        stack,
     }
+}
+
+/// Wrap a page's content in the standard per-page `ScrolledWindow`.
+///
+/// Settings-style dialog pages must scroll independently of the stack so a
+/// page's scroll range is exactly its own content overflow.
+pub(crate) fn scrolled_page(content: &impl IsA<gtk4::Widget>) -> gtk4::ScrolledWindow {
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_hexpand(true);
+    scroll.set_vexpand(true);
+    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroll.set_child(Some(content));
+    scroll
 }
 
 /// Create a closure that returns the current text of an EntryRow as
@@ -724,6 +826,18 @@ mod tests {
     #[test]
     fn test_local_datetime_out_of_range_is_none() {
         assert!(local_datetime(i64::MAX).is_none());
+    }
+
+    #[test]
+    fn test_fitted_window_size_clamps_to_parent() {
+        assert_eq!(fitted_window_size((900, 700), (1000, 800)), (900, 700));
+        assert_eq!(fitted_window_size((900, 700), (800, 600)), (760, 560));
+    }
+
+    #[test]
+    fn test_fitted_window_size_ignores_unmapped_parent() {
+        assert_eq!(fitted_window_size((900, 700), (0, 0)), (900, 700));
+        assert_eq!(fitted_window_size((900, 700), (1200, 250)), (900, 700));
     }
 
     #[test]

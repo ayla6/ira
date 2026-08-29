@@ -111,7 +111,9 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
             &crate::tr!("Launch config"),
             "launch",
         ));
-    params.stack.add_named(&page, Some("launch"));
+    params
+        .stack
+        .add_named(&super::helpers::scrolled_page(&page), Some("launch"));
 
     Some(LaunchConfigWidgets {
         exe_entry,

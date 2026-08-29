@@ -10,7 +10,7 @@ use super::settings_pages::{
 };
 use super::state::SharedState;
 use super::wine_config_widget::{build_wine_config_pages, WineConfigWidgets, WinePage};
-use adw::prelude::*;
+use glib::object::IsA;
 use ira_config::Config;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -57,7 +57,7 @@ pub(super) struct SettingsPageWidgets {
 
 pub(super) fn build_settings_pages(
     cfg: &Config,
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
     state: &SharedState,
 ) -> SettingsPageWidgets {
     let (
@@ -260,11 +260,7 @@ fn register_page(
     sidebar.append(&super::settings_pages::settings_sidebar_row(
         icon, label, page_id,
     ));
-    let scroll = gtk4::ScrolledWindow::new();
-    scroll.set_hexpand(true);
-    scroll.set_vexpand(true);
-    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    scroll.set_child(Some(page));
+    let scroll = super::helpers::scrolled_page(page);
     stack.add_named(&scroll, Some(page_id));
 }
 
@@ -285,7 +281,7 @@ fn register_existing_scrolled_page(
 fn build_pc_controller_profiles(
     page: &gtk4::Box,
     cfg: &Config,
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
     state: &SharedState,
 ) -> (ConsoleProfileWidgets, ConsoleProfileWidgets) {
     let mut pc_controller_cfg = cfg.clone();

@@ -20,8 +20,9 @@ pub fn build_wine_profile_picker(
     saved_profile_id: Option<i64>,
     game_slug: Option<&str>,
     state: &SharedState,
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
 ) -> adw::ComboRow {
+    let win: &gtk4::Widget = win.upcast_ref();
     let row = adw::ComboRow::new();
     row.set_title(&crate::tr!("Wine profile"));
     row.set_subtitle(&crate::tr!("Links wine version + prefix together"));
@@ -99,7 +100,7 @@ fn profile_labels(profiles: &[WineProfile]) -> Vec<String> {
 fn open_profile_editor(
     row: &adw::ComboRow,
     state: &SharedState,
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
     game_slug: Option<&str>,
     rebuilding: &Rc<Cell<bool>>,
     previous: &Rc<Cell<u32>>,

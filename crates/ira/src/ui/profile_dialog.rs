@@ -9,7 +9,7 @@ type ListRef = Rc<RefCell<gtk4::ListBox>>;
 
 pub fn build_profiles_page(
     state: &SharedState,
-    settings_win: &adw::Dialog,
+    settings_win: &impl IsA<gtk4::Widget>,
 ) -> (
     gtk4::ScrolledWindow,
     adw::EntryRow,
@@ -132,8 +132,9 @@ fn repopulate_profiles(
     db: &ira_db::DbConn,
     window: &adw::ApplicationWindow,
     state: &SharedState,
-    settings_win: &adw::Dialog,
+    settings_win: &impl IsA<gtk4::Widget>,
 ) {
+    let settings_win: &gtk4::Widget = settings_win.upcast_ref();
     let list = list_rc.borrow().clone();
     super::helpers::clear_children(&list);
 
@@ -229,10 +230,11 @@ pub fn show_profile_dialog(
     db: &ira_db::DbConn,
     existing: Option<ira_models::WineProfile>,
     state: &SharedState,
-    settings_win: &adw::Dialog,
+    settings_win: &impl IsA<gtk4::Widget>,
     game_slug: Option<&str>,
     callbacks: ProfileDialogCallbacks,
 ) -> adw::Dialog {
+    let settings_win: &gtk4::Widget = settings_win.upcast_ref();
     let win = adw::Dialog::new();
     win.set_content_width(450);
     win.set_content_height(400);

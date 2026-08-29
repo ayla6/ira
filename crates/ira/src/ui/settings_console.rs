@@ -98,7 +98,7 @@ pub(super) fn build_shadps4_settings_page(
 
 pub(super) fn build_rpcs3_settings_page(
     cfg: &Config,
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
 ) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
     let page = settings_page_container();
 
@@ -152,7 +152,7 @@ pub(super) fn build_rpcs3_settings_page(
 
 pub(super) fn build_vita3k_settings_page(
     cfg: &Config,
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
 ) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
     let page = settings_page_container();
 
@@ -208,7 +208,7 @@ pub(super) fn build_vita3k_settings_page(
 
 pub(super) fn build_cemu_settings_page(
     cfg: &Config,
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
 ) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
     let page = settings_page_container();
 
@@ -265,7 +265,7 @@ pub(super) fn build_cemu_settings_page(
 
 pub(super) fn build_azahar_settings_page(
     cfg: &Config,
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
 ) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
     let page = settings_page_container();
 
@@ -402,7 +402,7 @@ fn selection_index_for_text(
 
 fn add_executable_actions(
     row: &adw::EntryRow,
-    parent: &adw::Dialog,
+    parent: &impl IsA<gtk4::Widget>,
     detected: &[ira_platforms::emulator_detect::DetectedEmulator],
     browse_title: &str,
 ) {
@@ -457,7 +457,7 @@ pub(super) struct ConsolePageWidgets {
 }
 
 pub(super) fn build_console_settings_page(
-    win: &adw::Dialog,
+    win: &impl IsA<gtk4::Widget>,
     def: &ConsoleDef,
     cc: &ConsoleConfig,
 ) -> (gtk4::Box, ConsolePageWidgets) {

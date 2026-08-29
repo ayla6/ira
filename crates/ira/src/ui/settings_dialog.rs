@@ -1,5 +1,5 @@
 use super::css::*;
-use super::helpers::dialog_layout;
+use super::helpers::settings_window_layout;
 use super::input_profile_settings::{ConsoleProfileWidgets, ControllerDefaultWidgets};
 use super::input_profile_store::ensure_controller_default_profile;
 use super::settings_dialog_console::{
@@ -63,7 +63,7 @@ struct SavedSettingsWidgets {
 }
 
 struct SettingsDialogParams {
-    win: adw::Dialog,
+    win: adw::Window,
     sidebar: gtk4::ListBox,
     stack: gtk4::Stack,
     content_area: gtk4::Box,
@@ -79,7 +79,7 @@ pub fn show_settings_dialog(
     steam: Arc<SteamDataClient>,
     state: &SharedState,
 ) {
-    let layout = dialog_layout();
+    let layout = settings_window_layout(parent);
     layout.sidebar_area.set_size_request(180, -1);
 
     let loading = adw::StatusPage::new();
@@ -92,11 +92,7 @@ pub fn show_settings_dialog(
     loading.set_child(Some(&spinner));
     layout.stack.add_named(&loading, Some("loading"));
     layout.stack.set_visible_child_name("loading");
-    // Natural height outgrew what a normal window offers after the newer
-    // settings pages landed; libadwaita warns and clips floating sheets
-    // that ask for more than their presenter has.
-    super::helpers::fit_dialog_height(&layout.window, parent, 720);
-    layout.window.present(Some(parent));
+    layout.window.present();
 
     let rom_platforms_with_games = {
         let state = state.borrow();

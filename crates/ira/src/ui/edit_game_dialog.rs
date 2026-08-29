@@ -321,7 +321,10 @@ fn build_dialog_contents(
         "General",
         "general",
     ));
-    stack.add_named(&general_page, Some("general"));
+    stack.add_named(
+        &super::helpers::scrolled_page(&general_page),
+        Some("general"),
+    );
 
     let lwa = build_launch_wine_advanced_pages(
         &state,
@@ -351,7 +354,10 @@ fn build_dialog_contents(
             &crate::tr!("Images"),
             "images",
         ));
-        stack.add_named(&images_page, Some("images"));
+        stack.add_named(
+            &super::helpers::scrolled_page(&images_page),
+            Some("images"),
+        );
     }
 
     let logo_controls: Option<(Rc<RefCell<String>>, gtk4::Adjustment)> = {
@@ -374,7 +380,10 @@ fn build_dialog_contents(
                 "Logo",
                 "logo",
             ));
-            stack.add_named(&logo_page, Some("logo"));
+            stack.add_named(
+                &super::helpers::scrolled_page(&logo_page),
+                Some("logo"),
+            );
             Some((selected_pos, size_adj))
         } else {
             None

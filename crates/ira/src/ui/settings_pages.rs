@@ -424,7 +424,7 @@ fn start_gpu_detection(
 
 pub(super) fn build_lutris_settings_page(
     state: &super::state::SharedState,
-    settings_win: &adw::Dialog,
+    settings_win: &impl IsA<gtk4::Widget>,
 ) -> gtk4::Box {
     let page = settings_page_container();
 

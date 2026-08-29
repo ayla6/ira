@@ -15,6 +15,9 @@ struct ActiveConsole {
     /// This console's folder inside every configured ROM root,
     /// in root priority order.
     folders: Vec<std::path::PathBuf>,
+    /// The configured emulator executable, used to locate per-emulator
+    /// metadata caches (Eden's Switch game list cache).
+    executable: String,
 }
 
 fn active_consoles(cfg: &Config) -> Vec<ActiveConsole> {
@@ -35,7 +38,11 @@ fn active_consoles(cfg: &Config) -> Vec<ActiveConsole> {
                 .iter()
                 .map(|root| root.join(def.id))
                 .collect::<Vec<_>>();
-            Some(ActiveConsole { def, folders })
+            Some(ActiveConsole {
+                def,
+                folders,
+                executable: cc.executable.clone(),
+            })
         })
         .collect()
 }
@@ -230,6 +237,13 @@ fn build_ra_games_for_console(
     };
     let ra_index = RaMatchIndex::new(&ra_games);
 
+    // Switch titles carry their native metadata in Eden's game list cache
+    // instead of an RA list; resolve it once per scan.
+    let eden_cache = (console.def.id == "switch")
+        .then(|| crate::switch::SwitchCaches::load(&console.executable));
+    let switch_metas =
+        precompute_switch_metas(console, eden_cache.as_ref(), &new_roms, &to_relative);
+
     {
         let _s = tracing::info_span!("load_known_games", count = existing_by_path.len()).entered();
         for (rom_path_str, entry) in &existing_by_path {
@@ -338,11 +352,20 @@ fn build_ra_games_for_console(
                         .unwrap_or_else(|| rom_name.clone());
                     (id.to_string(), t, TrophySource::Ra)
                 }
-                None => (
-                    serial.clone().unwrap_or_else(|| rom_name.clone()),
-                    rom_name.clone(),
-                    TrophySource::Empty,
-                ),
+                None => {
+                    // Switch: native title id and application title from
+                    // Eden's cache; the file name stays the fallback.
+                    let meta = switch_metas.get(&rom_path_str);
+                    let native_id = meta
+                        .and_then(|m| (!m.title_id.is_empty()).then(|| m.title_id.clone()));
+                    let native_title =
+                        meta.and_then(|m| (!m.title.is_empty()).then(|| m.title.clone()));
+                    (
+                        native_id.or(serial.clone()).unwrap_or_else(|| rom_name.clone()),
+                        native_title.unwrap_or_else(|| rom_name.clone()),
+                        TrophySource::Empty,
+                    )
+                }
             };
 
             let mut candidate_ids: Vec<i64> = group
@@ -396,6 +419,7 @@ fn build_ra_games_for_console(
             } else {
                 nds_infos.get(&rom_path_str)
             };
+            let switch_meta = switch_metas.get(&rom_path_str);
             let game = match existing_by_id {
                 Some(e) => {
                     if e.rom_path.is_empty() || group.roms.len() > 1 {
@@ -466,6 +490,10 @@ fn build_ra_games_for_console(
                 hashed_now.insert(game.db_id);
             }
 
+            if let Some(meta) = switch_meta {
+                write_switch_icon(save_dir, game.db_id, &meta.icon);
+            }
+
             if let Err(e) = ira_db::delete_discs(db, game.db_id) {
                 eprintln!("Failed to delete discs: {}", e);
             }
@@ -503,6 +531,10 @@ fn build_ra_games_for_console(
             &games,
             &hashed_now,
         );
+    }
+
+    if console.def.id == "switch" {
+        enrich_switch_roms(db, save_dir, console, eden_cache.as_ref(), &mut games);
     }
 
     games
@@ -619,6 +651,123 @@ fn write_nds_icon(save_dir: &str, db_id: i64, icon_rgba: &[u8]) {
         return;
     }
     ira_parser::convert_to_lossless_webp(&png);
+}
+
+/// Resolves Eden's cached metadata for every new Switch ROM up front;
+/// keyed by the ROM path relative to the console folder. Always empty for
+/// other consoles.
+fn precompute_switch_metas(
+    console: &ActiveConsole,
+    cache: Option<&crate::switch::SwitchCaches>,
+    new_roms: &[(String, PathBuf)],
+    to_relative: &dyn Fn(&std::path::Path) -> String,
+) -> HashMap<String, crate::switch::SwitchRomMeta> {
+    if console.def.id != "switch" {
+        return HashMap::new();
+    }
+    let Some(cache) = cache else {
+        return HashMap::new();
+    };
+    use rayon::prelude::*;
+
+    let metas: Vec<crate::switch::SwitchRomMeta> = new_roms
+        .par_iter()
+        .map(|(_, abs)| crate::switch::rom_meta_deep(abs, cache, &console.executable))
+        .collect();
+    new_roms
+        .iter()
+        .map(|(_, abs)| to_relative(abs))
+        .zip(metas)
+        .collect()
+}
+
+/// Saves a Switch title's native icon (an emulator-cached JPEG, the
+/// ROM's decrypted control-NCA icon, or a homebrew NRO's embedded PNG)
+/// into the game's retro data dir as lossless WebP unless one already
+/// exists, so downloaded or user-chosen icons always win.
+fn write_switch_icon(save_dir: &str, db_id: i64, icon: &crate::switch::SwitchIcon) {
+    let data_dir = ira_parser::retro_data_dir(save_dir, db_id);
+    if ira_parser::find_image_file(&data_dir, "icon").is_some() {
+        return;
+    }
+    match icon {
+        crate::switch::SwitchIcon::File(cached) => {
+            if let Err(e) = std::fs::create_dir_all(&data_dir) {
+                eprintln!("Failed to create data dir for game {db_id}: {e}");
+                return;
+            }
+            if ira_parser::import_image_as_webp(cached, &data_dir, "icon").is_none() {
+                eprintln!("Failed to import Switch icon for game {db_id}");
+            }
+        }
+        crate::switch::SwitchIcon::Bytes(raw) => {
+            if std::fs::create_dir_all(&data_dir).is_err() {
+                return;
+            }
+            match ira_parser::encode_bytes_to_lossless_webp(raw) {
+                Some(webp) => {
+                    if std::fs::write(data_dir.join("icon.webp"), webp).is_err() {
+                        eprintln!("Failed to write Switch icon for game {db_id}");
+                    }
+                }
+                None => eprintln!("Failed to decode Switch icon for game {db_id}"),
+            }
+        }
+        crate::switch::SwitchIcon::None => {}
+    }
+}
+
+/// Backfills native Switch metadata onto games first scanned before the
+/// Switch integration existed: the title id becomes the game id, the
+/// emulators' application title replaces the file-name-derived one, and
+/// the native icon (cache or decrypted NCA) is imported. Games already
+/// carrying a title id are left alone.
+fn enrich_switch_roms(
+    db: &ira_db::DbConn,
+    save_dir: &str,
+    console: &ActiveConsole,
+    cache: Option<&crate::switch::SwitchCaches>,
+    games: &mut [Game],
+) {
+    let Some(cache) = cache else {
+        return;
+    };
+    for game in games.iter_mut() {
+        if game.rom_path.is_empty() {
+            continue;
+        }
+        let rom = resolve_in_folders(&console.folders, &game.rom_path);
+        let meta = crate::switch::rom_meta_deep(&rom, cache, &console.executable);
+
+        if !meta.title_id.is_empty() && !crate::switch::is_title_id(&game.app_id) {
+            if let Err(e) = ira_db::update_game_ids(
+                db,
+                game.db_id,
+                "",
+                &meta.title_id,
+                game.trophy_source,
+                console.def.id,
+            ) {
+                eprintln!("Failed to set Switch title id for game {}: {e}", game.db_id);
+            } else {
+                game.app_id = meta.title_id.clone();
+            }
+        }
+
+        let file_title = std::path::Path::new(&game.rom_path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !meta.title.is_empty() && (game.name.is_empty() || game.name == file_title) {
+            if let Err(e) = ira_db::update_game_title(db, game.db_id, &meta.title) {
+                eprintln!("Failed to set Switch title for game {}: {e}", game.db_id);
+            } else {
+                game.set_name(&meta.title);
+            }
+        }
+
+        write_switch_icon(save_dir, game.db_id, &meta.icon);
+    }
 }
 
 fn rom_path_is_present(scan_succeeded: bool, seen_paths: &HashSet<String>, rom_path: &str) -> bool {
@@ -764,5 +913,111 @@ mod tests {
         let conn = ira_db::init_db(tmp.path().join("ira.db").to_str().unwrap());
         std::mem::forget(tmp);
         conn
+    }
+
+    /// A portable Eden cache with one title, and a `Game` row whose id and
+    /// title still come from the ROM file name (pre-integration shape).
+    fn switch_backfill_fixture()
+    -> (tempfile::TempDir, ira_db::DbConn, ira_models::Game, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = tmp.path().join("eden.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let cache_dir = tmp.path().join("user/cache/game_list");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+        std::fs::write(
+            cache_dir.join("01007EF00011E000.appname.txt"),
+            "The Legend of Zelda",
+        )
+        .unwrap();
+        // PNG payload with a .jpeg name: imports decode by content.
+        let probe = tmp.path().join("probe.png");
+        ira_parser::save_rgba_png(&probe, 2, 2, &[7u8; 2 * 2 * 4]).unwrap();
+        let png = std::fs::read(&probe).unwrap();
+        std::fs::write(cache_dir.join("01007EF00011E000.jpeg"), png).unwrap();
+
+        let rom_dir = tmp.path().join("roms/switch");
+        std::fs::create_dir_all(&rom_dir).unwrap();
+        let rom = rom_dir.join("The Legend of Zelda [01007EF00011E000].xci");
+        std::fs::write(&rom, b"fake rom").unwrap();
+
+        let db = test_db();
+        let db_id = ira_db::add_game(
+            &db,
+            ira_models::GameKind::Retro,
+            ira_models::TrophySource::Empty,
+            "",
+            "The Legend of Zelda [01007EF00011E000]",
+            "switch",
+            "The Legend of Zelda [01007EF00011E000]",
+        )
+        .unwrap();
+        ira_db::set_rom_path(&db, db_id, "The Legend of Zelda [01007EF00011E000].xci").unwrap();
+
+        let game = ira_models::Game {
+            app_id: "The Legend of Zelda [01007EF00011E000]".into(),
+            kind: ira_models::GameKind::Retro,
+            trophy_source: ira_models::TrophySource::Empty,
+            platform_id: "switch".into(),
+            db_id,
+            name: "The Legend of Zelda [01007EF00011E000]".into(),
+            rom_path: "The Legend of Zelda [01007EF00011E000].xci".into(),
+            ..Default::default()
+        };
+        (tmp, db, game, exe)
+    }
+
+    #[test]
+    fn test_enrich_switch_roms_backfills_id_title_and_icon() {
+        let (tmp, db, mut game, exe) = switch_backfill_fixture();
+        let save_dir = tmp.path().join("save").to_str().unwrap().to_string();
+
+        let console = super::ActiveConsole {
+            def: ira_models::find_console("switch").unwrap(),
+            folders: vec![tmp.path().join("roms/switch")],
+            executable: exe.to_string_lossy().into_owned(),
+        };
+        let cache = crate::switch::SwitchCaches::load(&console.executable);
+        super::enrich_switch_roms(&db, &save_dir, &console, Some(&cache), std::slice::from_mut(&mut game));
+
+        // Game id and title now come from Eden's cache…
+        assert_eq!(game.app_id, "01007ef00011e000");
+        assert_eq!(game.name, "The Legend of Zelda");
+        let entry = ira_db::find_by_db_id(&db, game.db_id).unwrap().unwrap();
+        assert_eq!(entry.game_id, "01007ef00011e000");
+
+        // …and the cached icon landed in the retro data dir.
+        let data_dir = ira_parser::retro_data_dir(&save_dir, game.db_id);
+        assert!(ira_parser::find_image_file(&data_dir, "icon").is_some());
+    }
+
+    #[test]
+    fn test_enrich_switch_roms_keeps_title_ids_and_custom_titles() {
+        let (tmp, db, mut game, exe) = switch_backfill_fixture();
+        let save_dir = tmp.path().join("save").to_str().unwrap().to_string();
+
+        // A game already carrying a title id and a custom title is untouched.
+        ira_db::update_game_ids(
+            &db,
+            game.db_id,
+            "",
+            "01007ef00011e000",
+            game.trophy_source,
+            "switch",
+        )
+        .unwrap();
+        game.app_id = "01007ef00011e000".into();
+        game.set_name("My own name");
+
+        let console = super::ActiveConsole {
+            def: ira_models::find_console("switch").unwrap(),
+            folders: vec![tmp.path().join("roms/switch")],
+            executable: exe.to_string_lossy().into_owned(),
+        };
+        let cache = crate::switch::SwitchCaches::load(&console.executable);
+        super::enrich_switch_roms(&db, &save_dir, &console, Some(&cache), std::slice::from_mut(&mut game));
+
+        assert_eq!(game.name, "My own name");
+        let entry = ira_db::find_by_db_id(&db, game.db_id).unwrap().unwrap();
+        assert_eq!(entry.game_id, "01007ef00011e000");
     }
 }

@@ -328,13 +328,13 @@ fn build_settings_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
         .find(|game| game.db_id == db_id)
         .map(|game| game.kind.has_standalone_emulator())
         .unwrap_or(false);
+    menu.append(Some(&crate::tr!("View log")), Some("game.view_log"));
     if opens_emulator {
         menu.append(
             Some(&crate::tr!("Open emulator without game")),
             Some("game.open_emulator"),
         );
     }
-    menu.append(Some(&crate::tr!("View log")), Some("game.view_log"));
 
     let btn = adw::SplitButton::new();
     btn.set_icon_name("emblem-system-symbolic");

@@ -15,7 +15,7 @@ use std::rc::Rc;
 pub fn build_image_manager_content(
     state: &SharedState,
     game: &Game,
-    parent_win: &adw::Dialog,
+    parent_win: &adw::Window,
 ) -> gtk4::Box {
     build_image_manager_content_with_drafts(state, game, parent_win, None, None)
 }
@@ -23,7 +23,7 @@ pub fn build_image_manager_content(
 pub fn build_image_manager_content_with_drafts(
     state: &SharedState,
     game: &Game,
-    parent_win: &adw::Dialog,
+    parent_win: &adw::Window,
     pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     sgdb_cache: Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
 ) -> gtk4::Box {
@@ -122,7 +122,7 @@ struct BuildImageSectionParams<'a> {
     dims: &'a [&'static str],
     game: &'a Game,
     state: &'a SharedState,
-    parent_win: &'a adw::Dialog,
+    parent_win: &'a adw::Window,
     pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     sgdb_cache: Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
 }
@@ -162,8 +162,14 @@ fn build_image_preview(source: Option<&PendingImage>, max_h: i32) -> gtk4::Box {
             true
         }
         Some(PendingImage::Bytes(b)) if !b.is_empty() => {
-            if let Ok(texture) = gdk4::Texture::from_bytes(&glib::Bytes::from_owned(b.clone())) {
+            if let Ok(texture) = gdk4::Texture::from_bytes(b) {
+                // Same bounding as the Path branch: an unbounded paintable
+                // renders at natural size and pushes the window minimum.
                 preview.set_paintable(Some(&texture));
+                preview.set_content_fit(gtk4::ContentFit::Contain);
+                preview.set_halign(gtk4::Align::Start);
+                preview.set_valign(gtk4::Align::Center);
+                preview.set_height_request(max_h);
                 true
             } else {
                 false
@@ -315,7 +321,7 @@ fn build_steam_icon_button(
 struct SgdbPickerCtx<'a> {
     state: &'a SharedState,
     asset_type: &'a str,
-    parent_win: &'a adw::Dialog,
+    parent_win: &'a adw::Window,
     refresh_images: &'a Rc<dyn Fn()>,
     dims: &'a [&'static str],
     pending_copies: &'a Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
@@ -664,7 +670,7 @@ pub struct VariantImageSectionParams<'a> {
     pub max_h: i32,
     pub state: &'a SharedState,
     pub entry: &'a ira_models::GameEntry,
-    pub parent_win: &'a adw::Dialog,
+    pub parent_win: &'a adw::Window,
 }
 
 fn setup_dir_preview(
@@ -701,7 +707,7 @@ struct DirButtonsCtx<'a> {
 }
 
 fn build_dir_buttons(
-    parent_win: &adw::Dialog,
+    parent_win: &adw::Window,
     target_dir: &std::path::Path,
     file_base: &str,
     entry: &ira_models::GameEntry,

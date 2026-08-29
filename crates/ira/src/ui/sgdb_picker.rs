@@ -390,7 +390,7 @@ pub(crate) struct ShowSgdbPickerParams<'a> {
     pub asset: &'a str,
     pub is_steam_id: bool,
     pub dimensions: &'a [&'a str],
-    pub parent: &'a adw::Dialog,
+    pub parent: &'a adw::Window,
     pub on_done: Rc<dyn Fn()>,
     pub pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     pub sgdb_cache: Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,

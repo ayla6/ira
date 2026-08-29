@@ -436,12 +436,9 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
             let Some(stack) = stack_for_search.upgrade() else {
                 return;
             };
-            // The editor is an AdwDialog presented inside the main window,
-            // so root() is the window — the dialog itself is an ancestor.
-            let Some(window) = stack
-                .ancestor(adw::Dialog::static_type())
-                .and_then(|w| w.downcast::<adw::Dialog>().ok())
-            else {
+            // The editor is a plain adw::Window, so the stack's root is
+            // that window.
+            let Some(window) = stack.root().and_then(|w| w.downcast::<gtk4::Window>().ok()) else {
                 return;
             };
             super::input_profile_search::show_steam_layout_search(

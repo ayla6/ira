@@ -66,7 +66,7 @@ fn build_variant_name_entry_buttons(
     group: &adw::PreferencesGroup,
     var_widgets: &Rc<RefCell<Vec<VarW>>>,
     container: &gtk4::Box,
-    main_win: &adw::Dialog,
+    main_win: &adw::Window,
 ) {
     let up_btn = gtk4::Button::from_icon_name("go-up-symbolic");
     up_btn.set_tooltip_text(Some(&crate::tr!("Move up")));
@@ -162,7 +162,7 @@ fn build_variant_images_and_logo_section(
     v: &GameVariant,
     state: &SharedState,
     db_id: i64,
-    win: &adw::Dialog,
+    win: &adw::Window,
 ) -> VariantImagesSectionResult {
     let mut logo_position_cell: Option<Rc<RefCell<String>>> = None;
     let mut logo_size_adj_cell: Option<gtk4::Adjustment> = None;
@@ -268,7 +268,7 @@ fn build_variant_card(
     container: &gtk4::Box,
     state: &SharedState,
     db_id: i64,
-    win: &adw::Dialog,
+    win: &adw::Window,
 ) -> VarW {
     let group = adw::PreferencesGroup::new();
 
@@ -411,7 +411,7 @@ pub(super) fn build_variants_page(
     _has_config: bool,
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
-    win: &adw::Dialog,
+    win: &adw::Window,
 ) -> Rc<RefCell<Vec<VarW>>> {
     let variants: Vec<GameVariant> =
         ira_db::get_variants(&state.borrow().db, db_id).unwrap_or_default();

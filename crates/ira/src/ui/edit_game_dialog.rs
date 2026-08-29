@@ -72,12 +72,12 @@ fn extract_game_and_config(
 
 fn create_dialog_window(
     game: &Game,
-) -> (adw::Dialog, gtk4::ListBox, gtk4::Stack, gtk4::Box) {
-    let layout = super::helpers::dialog_layout();
+    parent: &adw::ApplicationWindow,
+) -> (adw::Window, gtk4::ListBox, gtk4::Stack, gtk4::Box) {
+    // A plain, freely resizable window like the app settings screen — an
+    // `adw::Dialog` sheet can never be resized by the user.
+    let layout = super::helpers::settings_window_layout_sized(parent, &game.name, (800, 720));
     layout.stack.set_hexpand(true);
-    layout
-        .header
-        .set_title_widget(Some(&gtk4::Label::new(Some(&game.name))));
     (
         layout.window,
         layout.sidebar,
@@ -90,7 +90,7 @@ fn build_launch_wine_advanced_pages(
     state: &SharedState,
     game: &Game,
     params: &LaunchWineParams,
-    win: &adw::Dialog,
+    win: &adw::Window,
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
 ) -> LaunchWineAdvancedCtx {
@@ -250,7 +250,7 @@ fn setup_sidebar_navigation(sidebar: &gtk4::ListBox, stack: &gtk4::Stack) {
 
 struct DialogContent {
     game: Game,
-    win: adw::Dialog,
+    win: adw::Window,
     sidebar: gtk4::ListBox,
     stack: gtk4::Stack,
     content_area: gtk4::Box,
@@ -433,6 +433,23 @@ fn build_dialog_contents(
             win.close();
         }
     });
+    // Unlike `adw::Dialog` sheets, plain windows don't close on Escape;
+    // mirror the app settings window's Escape-to-cancel shortcut.
+    let escape_close = gtk4::EventControllerKey::new();
+    {
+        let win_c = Downgrade::downgrade(&win);
+        escape_close.connect_key_pressed(move |_, key, _, _| {
+            if key == gtk4::gdk::Key::Escape {
+                if let Some(win) = win_c.upgrade() {
+                    win.close();
+                }
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+    }
+    win.add_controller(escape_close);
 
     if let Some(btn) = &migrate_btn {
         let state_w = Rc::downgrade(&state);
@@ -626,7 +643,7 @@ fn build_dialog_contents(
         });
     }
     let state_close_w = Rc::downgrade(&state);
-    win.connect_closed(move |_| {
+    win.connect_close_request(move |_| {
         if let Some(state) = state_close_w.upgrade() {
             // Defer dropping the bookkeeping refs: SettingsData owns the
             // window itself, and finalizing it (with its whole page tree)
@@ -639,6 +656,7 @@ fn build_dialog_contents(
                 }
             });
         }
+        glib::Propagation::Proceed
     });
 }
 
@@ -651,7 +669,7 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
 
     let parent = state.borrow().window.clone();
     let save_dir = state.borrow().save_dir.clone();
-    let (win, sidebar, stack, content_area) = create_dialog_window(&game);
+    let (win, sidebar, stack, content_area) = create_dialog_window(&game, &parent);
 
     let app_details = crate::game_loader::read_app_details(&save_dir, &game.app_id);
     let win_clone = win.clone();
@@ -675,9 +693,5 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         },
         db_id,
     );
-    // Natural height outgrew what a normal window offers after the newer
-    // pages landed; libadwaita warns and clips floating sheets that ask
-    // for more than their presenter has.
-    super::helpers::fit_dialog_height(&win_clone, &parent, 720);
-    win_clone.present(Some(&parent));
+    win_clone.present();
 }

@@ -19,7 +19,7 @@ use std::sync::mpsc;
 
 pub(super) struct SaveGameSettingsParams {
     pub state: SharedState,
-    pub win: adw::Dialog,
+    pub win: adw::Window,
     pub db_id: i64,
     pub app_id: String,
     pub trophy_source: TrophySource,

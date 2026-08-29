@@ -56,16 +56,29 @@ pub struct SettingsWindowLayout {
 }
 
 pub fn settings_window_layout(parent: &adw::ApplicationWindow) -> SettingsWindowLayout {
+    settings_window_layout_sized(
+        parent,
+        &crate::tr!("Settings"),
+        (SETTINGS_WINDOW_WIDTH, SETTINGS_WINDOW_HEIGHT),
+    )
+}
+
+/// [`settings_window_layout`] with a custom title and preferred size: still
+/// modal over the presenting window and clamped to its size. The game
+/// settings screen uses this to open at its own size under the game's name
+/// while staying freely resizable like the app settings window.
+pub fn settings_window_layout_sized(
+    parent: &adw::ApplicationWindow,
+    title: &str,
+    preferred: (i32, i32),
+) -> SettingsWindowLayout {
     let win = adw::Window::new();
     win.set_modal(true);
     win.set_transient_for(Some(parent));
     win.set_destroy_with_parent(true);
-    win.set_title(Some(&crate::tr!("Settings")));
+    win.set_title(Some(title));
 
-    let (width, height) = fitted_window_size(
-        (SETTINGS_WINDOW_WIDTH, SETTINGS_WINDOW_HEIGHT),
-        (parent.width(), parent.height()),
-    );
+    let (width, height) = fitted_window_size(preferred, (parent.width(), parent.height()));
     win.set_default_size(width, height);
 
     let DialogWidgets {
@@ -76,7 +89,7 @@ pub fn settings_window_layout(parent: &adw::ApplicationWindow) -> SettingsWindow
         header,
         stack,
     } = dialog_widgets();
-    header.set_title_widget(Some(&gtk4::Label::new(Some(&crate::tr!("Settings")))));
+    header.set_title_widget(Some(&gtk4::Label::new(Some(title))));
     // AdwWindow only accepts set_content; gtk_window_set_child aborts.
     win.set_content(Some(&outer));
 
@@ -612,7 +625,7 @@ pub fn refresh_settings_images_page(
     build_page: impl Fn(
         &SharedState,
         &Game,
-        &adw::Dialog,
+        &adw::Window,
         Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
         Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
     ) -> gtk4::Widget,
@@ -622,6 +635,10 @@ pub fn refresh_settings_images_page(
         None => return,
     };
     if sd.db_id == db_id && sd.window.is_visible() {
+        let images_was_visible = sd
+            .stack
+            .visible_child_name()
+            .is_some_and(|name| name == "images");
         if let Some(old) = sd.stack.child_by_name("images") {
             sd.stack.remove(&old);
         }
@@ -639,7 +656,13 @@ pub fn refresh_settings_images_page(
                 Some(sd.pending_copies.clone()),
                 Some(sd.sgdb_cache.clone()),
             );
-            sd.stack.add_named(&new_page, Some("images"));
+            // Same wrapper as the initial build: the raw page's natural
+            // height would become the window minimum and force the settings
+            // window to grow past its size.
+            sd.stack.add_named(&scrolled_page(&new_page), Some("images"));
+            if images_was_visible {
+                sd.stack.set_visible_child_name("images");
+            }
         }
     }
 }

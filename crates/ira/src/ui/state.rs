@@ -36,7 +36,7 @@ pub struct SgdbAssetsCacheEntry {
 
 #[derive(Clone)]
 pub struct SettingsData {
-    pub window: adw::Dialog,
+    pub window: adw::Window,
     pub stack: gtk4::Stack,
     pub db_id: i64,
     pub pending_copies: Rc<RefCell<HashMap<String, PendingImage>>>,

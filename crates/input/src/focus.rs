@@ -16,6 +16,11 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+/// WM_STATE's "not managed by the window manager" value: the window exists
+/// but was never mapped (or was withdrawn). Vestigial XWayland windows of
+/// Wayland-native games carry this — or no WM_STATE at all.
+const WITHDRAWN_STATE: u32 = 0;
+
 use x11rb::connection::Connection;
 use x11rb::protocol::res::ConnectionExt as ResExt;
 use x11rb::protocol::res::{ClientIdMask, ClientIdSpec};
@@ -38,6 +43,7 @@ pub struct FocusWatcher {
     pid_atom: u32,
     transient_atom: u32,
     client_list_atom: u32,
+    wm_state_atom: u32,
     /// Whether the X-Resource extension answered its version handshake.
     /// RetroArch and other raw X11 clients never set `_NET_WM_PID`; XRes is
     /// the only way to map their windows to a process.
@@ -69,6 +75,7 @@ impl FocusWatcher {
             pid_atom: atom(b"_NET_WM_PID")?,
             transient_atom: atom(b"WM_TRANSIENT_FOR")?,
             client_list_atom: atom(b"_NET_CLIENT_LIST")?,
+            wm_state_atom: atom(b"WM_STATE")?,
             xres,
             root,
             child_pid,
@@ -88,11 +95,20 @@ impl FocusWatcher {
         let Some(active) = active else {
             return true;
         };
-        let desktop = active == 0 || active == self.root;
-        let active_in_tree = !desktop
-            && self.window_pid_in_tree(active, &game_pids, 0);
-        let game_has_windows = desktop && self.any_window_pid_in_tree(&game_pids);
-        is_focused(active_in_tree, desktop, game_has_windows)
+        let client_windows = self.client_windows();
+        // A Wayland-focused window never appears in _NET_ACTIVE_WINDOW: on
+        // GNOME Wayland the property holds a stale XWayland id that is not a
+        // managed client (or nothing at all). Such an active window carries
+        // no focus information — same degrade as the desktop being active.
+        let desktop_like =
+            active == 0 || active == self.root || !client_windows.contains(&active);
+        let active_in_tree = !desktop_like && self.window_pid_in_tree(active, &game_pids, 0);
+        let game_has_windows = desktop_like
+            && client_windows.iter().any(|window| {
+                self.window_pid(*window).is_some_and(|pid| game_pids.contains(&pid))
+                    && self.window_is_managed(*window)
+            });
+        is_focused(active_in_tree, desktop_like, game_has_windows)
     }
 
     /// Descendants of the launched process, refreshed from /proc at most
@@ -147,27 +163,37 @@ impl FocusWatcher {
         }
     }
 
-    /// Whether any window on the X server belongs to the game — the tell
-    /// that the game is an X11/XWayland client at all.
-    fn any_window_pid_in_tree(&self, pids: &HashSet<u32>) -> bool {
+    /// The window manager's managed X11 clients.
+    fn client_windows(&self) -> Vec<Window> {
         let Ok(cookie) = self
             .conn
             .get_property(false, self.root, self.client_list_atom, AtomEnum::WINDOW, 0, 1024)
         else {
-            return false;
+            return Vec::new();
         };
         let Ok(reply) = cookie.reply() else {
-            return false;
+            return Vec::new();
         };
         let Some(windows) = reply.value32() else {
-            return false;
+            return Vec::new();
         };
         // Collect first: the iterator borrows the reply, and a tail
         // expression temporary would outlive it.
-        let windows: Vec<u32> = windows.collect();
-        windows
-            .into_iter()
-            .any(|window| self.window_pid(window).is_some_and(|pid| pids.contains(&pid)))
+        windows.collect()
+    }
+
+    /// Whether the window manager manages this window: `WM_STATE` exists and
+    /// is not Withdrawn. Wayland-native games keep vestigial XWayland
+    /// windows that were never managed; counting those as the game's "X11
+    /// presence" made a focused Wayland game read as alt-tabbed away.
+    fn window_is_managed(&self, window: Window) -> bool {
+        let state = self
+            .conn
+            .get_property(false, window, self.wm_state_atom, AtomEnum::CARDINAL, 0, 1)
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .and_then(|reply| reply.value32().and_then(|mut values| values.next()));
+        state.is_some_and(|state| state != WITHDRAWN_STATE)
     }
 
     fn window_pid(&self, window: Window) -> Option<u32> {
@@ -232,10 +258,13 @@ fn client_owns_window(window: u32, base: u32, mask: u32) -> bool {
     mask != 0 && window & !mask == base
 }
 
-/// Focus decision given what the X server answered. "Desktop active" is the
-/// ambiguous case: unfocused for an X11 game (it is still on the client
-/// list but not active), unobservable for a Wayland-native one (no X11
-/// windows to check, so input stays active rather than wrongly pausing).
+/// Focus decision given what the X server answered. "Desktop-like" covers
+/// the desktop being active AND focus being unobservable (Wayland window
+/// focused, where `_NET_ACTIVE_WINDOW` holds a stale non-client id).
+/// "Desktop active" is then ambiguous: unfocused for an X11 game (it has
+/// managed windows on the client list but none active), unobservable for a
+/// Wayland-native one (no managed X11 windows, so input stays active rather
+/// than wrongly pausing).
 fn is_focused(active_in_game_tree: bool, desktop_active: bool, game_has_x11_windows: bool) -> bool {
     if active_in_game_tree {
         return true;

@@ -103,7 +103,7 @@ pub(crate) fn format_last_played(ts: i64) -> String {
     if ts == 0 {
         return crate::tr!("Never");
     }
-    chrono::DateTime::from_timestamp(ts, 0)
+    super::helpers::local_datetime(ts)
         .map(|dt| dt.format("%b %-d").to_string())
         .unwrap_or_else(|| crate::tr!("Never"))
 }

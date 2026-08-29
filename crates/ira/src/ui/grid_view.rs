@@ -98,7 +98,7 @@ fn badge_text(game: &Game, mode: SortMode) -> Option<String> {
             if game.last_played == 0 {
                 None
             } else {
-                chrono::DateTime::from_timestamp(game.last_played, 0)
+                super::helpers::local_datetime(game.last_played)
                     .map(|dt| dt.format("%b %-d").to_string())
             }
         }

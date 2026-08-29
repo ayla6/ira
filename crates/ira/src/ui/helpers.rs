@@ -1,5 +1,6 @@
 use crate::Game;
 use adw::prelude::{AdwDialogExt, AlertDialogExt, PreferencesRowExt};
+use chrono::TimeZone;
 use gtk4::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -558,6 +559,14 @@ pub fn format_duration(seconds: i64) -> String {
     }
 }
 
+/// Unix timestamp (seconds) as the user's local wall-clock time; `None` when
+/// the value is outside the representable range. All UI display of stored
+/// timestamps must go through this so times follow the user's timezone
+/// instead of UTC.
+pub fn local_datetime(secs: i64) -> Option<chrono::DateTime<chrono::Local>> {
+    chrono::Local.timestamp_opt(secs, 0).single()
+}
+
 /// Spawn a terminal running bash, with the given env vars set.
 /// Tries common terminal emulators in order since `-e` isn't universal.
 pub fn spawn_terminal(env: &[(String, String)]) {
@@ -698,6 +707,23 @@ mod tests {
     fn test_format_duration_rounds_near_hour() {
         assert_eq!(format_duration(3570), "1h");
         assert_eq!(format_duration(3630), "1h01min");
+    }
+
+    #[test]
+    fn test_local_datetime_noon_is_local_wall_clock() {
+        use chrono::TimeZone;
+        let noon = chrono::Local
+            .with_ymd_and_hms(2026, 3, 10, 12, 0, 0)
+            .single()
+            .unwrap();
+        let dt = local_datetime(noon.timestamp()).unwrap();
+        assert_eq!(dt.format("%H:%M").to_string(), "12:00");
+        assert_eq!(dt.format("%Y-%m-%d").to_string(), "2026-03-10");
+    }
+
+    #[test]
+    fn test_local_datetime_out_of_range_is_none() {
+        assert!(local_datetime(i64::MAX).is_none());
     }
 
     #[test]

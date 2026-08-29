@@ -12,13 +12,17 @@ use std::rc::Rc;
 type RebuildFn = std::rc::Rc<dyn Fn(Option<chrono::NaiveDate>)>;
 type RebuildHandle = std::rc::Rc<std::cell::RefCell<Option<RebuildFn>>>;
 
-fn format_time(timestamp: i64) -> String {
-    let secs = if timestamp > 1_000_000_000_000 {
+/// Some sources store milliseconds; normalize everything to seconds.
+fn ts_secs(timestamp: i64) -> i64 {
+    if timestamp > 1_000_000_000_000 {
         timestamp / 1000
     } else {
         timestamp
-    };
-    chrono::DateTime::from_timestamp(secs, 0)
+    }
+}
+
+fn format_time(timestamp: i64) -> String {
+    super::helpers::local_datetime(ts_secs(timestamp))
         .map(|dt| dt.format("%H:%M").to_string())
         .unwrap_or_default()
 }
@@ -31,12 +35,7 @@ fn now_secs() -> i64 {
 }
 
 fn ts_to_date(ts: i64) -> chrono::NaiveDate {
-    let secs = if ts > 1_000_000_000_000 {
-        ts / 1000
-    } else {
-        ts
-    };
-    chrono::DateTime::from_timestamp(secs, 0)
+    super::helpers::local_datetime(ts_secs(ts))
         .map(|dt| dt.date_naive())
         .unwrap_or_default()
 }
@@ -48,7 +47,7 @@ fn week_start(date: chrono::NaiveDate) -> chrono::NaiveDate {
 }
 
 fn current_week_start() -> chrono::NaiveDate {
-    week_start(ts_to_date(now_secs()))
+    week_start(chrono::Local::now().date_naive())
 }
 
 fn generate_week_days(ws: chrono::NaiveDate) -> Vec<chrono::NaiveDate> {
@@ -520,4 +519,48 @@ fn build_day_data(
     }
 
     (segments, details)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn test_ts_secs_passthrough_seconds() {
+        assert_eq!(ts_secs(1_700_000_000), 1_700_000_000);
+        assert_eq!(ts_secs(0), 0);
+    }
+
+    #[test]
+    fn test_ts_secs_normalizes_milliseconds() {
+        assert_eq!(ts_secs(1_700_000_000_123), 1_700_000_000);
+    }
+
+    #[test]
+    fn test_format_time_uses_local_timezone() {
+        let noon = chrono::Local
+            .with_ymd_and_hms(2026, 3, 10, 12, 0, 0)
+            .single()
+            .unwrap();
+        assert_eq!(format_time(noon.timestamp()), "12:00");
+    }
+
+    #[test]
+    fn test_ts_to_date_uses_local_timezone() {
+        let noon = chrono::Local
+            .with_ymd_and_hms(2026, 3, 10, 12, 0, 0)
+            .single()
+            .unwrap();
+        assert_eq!(
+            ts_to_date(noon.timestamp()),
+            chrono::NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_format_time_invalid_returns_empty() {
+        assert_eq!(format_time(i64::MAX), "");
+        assert_eq!(ts_to_date(i64::MAX), chrono::NaiveDate::default());
+    }
 }

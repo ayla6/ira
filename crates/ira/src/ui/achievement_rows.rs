@@ -147,7 +147,7 @@ pub fn create_achievement_row(
         time_label.add_css_class(CSS_DIM_LABEL);
         time_label.add_css_class(CSS_CAPTION);
         if ach.earned_time > 0 {
-            let t = chrono::DateTime::from_timestamp(ach.earned_time, 0)
+            let t = super::helpers::local_datetime(ach.earned_time)
                 .map(|dt| {
                     dt.format("%b %e, %Y @ %l:%M %p")
                         .to_string()

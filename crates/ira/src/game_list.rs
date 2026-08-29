@@ -271,7 +271,6 @@ fn build_game_list_with_mode(
 
     cleanup_stale_rom_entries(db, cfg);
     let ra_any_console = options.ra_enabled && cfg.any_console_enabled();
-    let merge_discovered_games = mode == GameListLoadMode::Startup;
     let db = db.clone();
     let save_dir = save_dir.to_string();
     let cfg = cfg.clone();
@@ -314,7 +313,10 @@ fn build_game_list_with_mode(
         let native_handle = s.spawn(move || {
             let _s = tracing::info_span!("load_games_from_db").entered();
             native_reporter.status(crate::tr!("Loading saved games…"));
-            let games = if merge_discovered_games {
+            // Startup stays DB-only for speed; explicit rescans refresh
+            // source-specific data. Rescans re-discover rows the DB load
+            // already produced, so source appends must replace, not add.
+            let games = if mode == GameListLoadMode::Startup {
                 game_loader::load_saved_games(&db_native, &save_dir_native)
             } else {
                 game_loader::load_games(&db_native, &save_dir_native)
@@ -470,14 +472,12 @@ fn build_game_list_with_mode(
         ] {
             match source {
                 PendingSource::Ready(source_games) => {
-                    append_source_games(&mut games, source_games, merge_discovered_games);
+                    append_source_games(&mut games, source_games);
                 }
                 PendingSource::Thread(name, handle) => {
                     let Some(handle) = handle else { continue };
                     match handle.join() {
-                        Ok(source_games) => {
-                            append_source_games(&mut games, source_games, merge_discovered_games)
-                        }
+                        Ok(source_games) => append_source_games(&mut games, source_games),
                         Err(_) => eprintln!("{name} games thread panicked"),
                     }
                 }
@@ -497,15 +497,19 @@ fn build_game_list_with_mode(
     })
 }
 
-fn append_source_games(games: &mut Vec<Game>, discovered: Vec<Game>, merge: bool) {
+/// Merge one scan source into the accumulated list. Replacement is
+/// unconditional on (db_id, variant_id): a full scan re-discovers rows the
+/// DB load already produced (same db_id — the DB is unique per source id),
+/// and appending them again would duplicate every entry. Scanned data wins
+/// because it is fresher; variants (same db_id, different variant_id) stay
+/// separate entries and replaced entries keep their position.
+fn append_source_games(games: &mut Vec<Game>, discovered: Vec<Game>) {
     for game in discovered {
-        if merge {
-            if let Some(existing) = games.iter_mut().find(|existing| {
-                existing.db_id == game.db_id && existing.variant_id == game.variant_id
-            }) {
-                *existing = game;
-                continue;
-            }
+        if let Some(existing) = games.iter_mut().find(|existing| {
+            existing.db_id == game.db_id && existing.variant_id == game.variant_id
+        }) {
+            *existing = game;
+            continue;
         }
         games.push(game);
     }
@@ -1284,12 +1288,80 @@ mod tests {
             },
         ];
 
-        append_source_games(&mut games, discovered, true);
+        append_source_games(&mut games, discovered);
 
         assert_eq!(games.len(), 3);
         assert_eq!(games[0].name, "Refreshed game");
         assert_eq!(games[1].name, "Saved variant");
         assert_eq!(games[2].name, "New game");
+    }
+
+    /// A rescan re-discovers DB rows the native load already listed (same
+    /// db_id — the DB is unique per source id). The merge must therefore be
+    /// unconditional: appending after a full scan replaces the DB-built
+    /// entry — base and variant alike — instead of duplicating it.
+    #[test]
+    fn test_append_source_games_replaces_existing_db_and_variant_ids() {
+        let mut games = vec![
+            Game {
+                db_id: 7,
+                name: "DB-built".to_string(),
+                ..Default::default()
+            },
+            Game {
+                db_id: 7,
+                variant_id: Some(1),
+                name: "DB-built variant".to_string(),
+                ..Default::default()
+            },
+        ];
+        let discovered = vec![
+            Game {
+                db_id: 7,
+                name: "Scanned".to_string(),
+                ..Default::default()
+            },
+            Game {
+                db_id: 7,
+                variant_id: Some(1),
+                name: "Scanned variant".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        append_source_games(&mut games, discovered);
+
+        assert_eq!(games.len(), 2);
+        assert_eq!(games[0].db_id, 7);
+        assert_eq!(games[0].variant_id, None);
+        assert_eq!(games[0].name, "Scanned");
+        assert_eq!(games[1].db_id, 7);
+        assert_eq!(games[1].variant_id, Some(1));
+        assert_eq!(games[1].name, "Scanned variant");
+    }
+
+    /// Games from unrelated DB rows never collide: distinct db_ids are both
+    /// kept, in append order.
+    #[test]
+    fn test_append_source_games_keeps_distinct_db_ids() {
+        let mut games = vec![Game {
+            db_id: 1,
+            name: "First".to_string(),
+            ..Default::default()
+        }];
+        let discovered = vec![Game {
+            db_id: 2,
+            name: "Second".to_string(),
+            ..Default::default()
+        }];
+
+        append_source_games(&mut games, discovered);
+
+        assert_eq!(games.len(), 2);
+        assert_eq!(games[0].db_id, 1);
+        assert_eq!(games[0].name, "First");
+        assert_eq!(games[1].db_id, 2);
+        assert_eq!(games[1].name, "Second");
     }
 
     #[test]

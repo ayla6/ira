@@ -115,36 +115,34 @@ pub fn show_play_history_dialog(
             let sessions = ira_db::get_sessions_for_game(&state.borrow().db, game_id, variant_id)
                 .unwrap_or_default();
             clear_children(&box_);
-            if sessions.is_empty() {
-                let empty_label =
-                    gtk4::Label::new(Some(&crate::tr!("No play sessions recorded yet")));
-                empty_label.set_xalign(0.0);
-                empty_label.set_opacity(0.6);
-                box_.append(&empty_label);
-            } else {
-                let on_delete: super::play_history_chart::DeleteSessionFn = {
-                    let state = state.clone();
-                    let dialog_weak = dialog.downgrade();
-                    let rebuild_handle = rebuild_handle_c.clone();
-                    std::rc::Rc::new(move |session_id: i64, ctrl: bool| {
-                        let Some(dialog) = dialog_weak.upgrade() else {
-                            return;
-                        };
-                        let rebuild = rebuild_handle.borrow().clone();
-                        if let Some(rebuild) = rebuild {
-                            delete_session_with_confirm(&state, &dialog, session_id, ctrl, rebuild);
-                        }
-                    })
-                };
-                let weeks = compute_game_weeks(&sessions, &game_name);
-                box_.append(&build_weekly_chart(
-                    weeks,
-                    true,
-                    Some(on_delete),
-                    focus_week,
-                    ctrl_held.clone(),
-                ));
-            }
+            let on_delete: super::play_history_chart::DeleteSessionFn = {
+                let state = state.clone();
+                let dialog_weak = dialog.downgrade();
+                let rebuild_handle = rebuild_handle_c.clone();
+                std::rc::Rc::new(move |session_id: i64, ctrl: bool| {
+                    let Some(dialog) = dialog_weak.upgrade() else {
+                        return;
+                    };
+                    let rebuild = rebuild_handle.borrow().clone();
+                    if let Some(rebuild) = rebuild {
+                        delete_session_with_confirm(&state, &dialog, session_id, ctrl, rebuild);
+                    }
+                })
+            };
+            // Always render the full chart (axes, day labels, nav, sidebar);
+            // when nothing was ever recorded it doubles as the empty state.
+            let empty_hint = sessions
+                .is_empty()
+                .then(|| crate::tr!("No play sessions recorded yet"));
+            let weeks = compute_game_weeks(&sessions, &game_name);
+            box_.append(&build_weekly_chart(
+                weeks,
+                true,
+                Some(on_delete),
+                focus_week,
+                ctrl_held.clone(),
+                empty_hint,
+            ));
         });
         *rebuild_handle.borrow_mut() = Some(rebuild);
     }
@@ -355,30 +353,27 @@ pub fn show_daily_history_dialog(state: &SharedState) {
     let all_sessions =
         ira_db::get_sessions_range(&state.borrow().db, from, now).unwrap_or_default();
 
-    if all_sessions.is_empty() {
-        let empty_label = gtk4::Label::new(Some(&crate::tr!("No play sessions recorded yet")));
-        empty_label.set_xalign(0.0);
-        empty_label.set_opacity(0.6);
-        box_.append(&empty_label);
-    } else {
-        let game_names: HashMap<i64, String> = state
-            .borrow()
-            .games
-            .iter()
-            .map(|g| (g.db_id, g.name.clone()))
-            .collect();
+    let game_names: HashMap<i64, String> = state
+        .borrow()
+        .games
+        .iter()
+        .map(|g| (g.db_id, g.name.clone()))
+        .collect();
 
-        let assignment = assign_game_colors(&all_sessions);
-        let weeks = compute_app_weeks(&all_sessions, &assignment, &game_names);
+    let empty_hint = all_sessions
+        .is_empty()
+        .then(|| crate::tr!("No play sessions recorded yet"));
+    let assignment = assign_game_colors(&all_sessions);
+    let weeks = compute_app_weeks(&all_sessions, &assignment, &game_names);
 
-        box_.append(&build_weekly_chart(
-            weeks,
-            false,
-            None,
-            None,
-            Rc::new(Cell::new(false)),
-        ));
-    }
+    box_.append(&build_weekly_chart(
+        weeks,
+        false,
+        None,
+        None,
+        Rc::new(Cell::new(false)),
+        empty_hint,
+    ));
 
     toolbar_view.set_content(Some(&box_));
     dialog.set_child(Some(&toolbar_view));
@@ -562,5 +557,25 @@ mod tests {
     fn test_format_time_invalid_returns_empty() {
         assert_eq!(format_time(i64::MAX), "");
         assert_eq!(ts_to_date(i64::MAX), chrono::NaiveDate::default());
+    }
+
+    #[test]
+    fn test_week_start_always_monday() {
+        use chrono::Datelike;
+        // 2026-08-26 is a Wednesday.
+        let wed = chrono::NaiveDate::from_ymd_opt(2026, 8, 26).unwrap();
+        let ws = week_start(wed);
+        assert_eq!(ws, chrono::NaiveDate::from_ymd_opt(2026, 8, 24).unwrap());
+        assert_eq!(ws.weekday(), chrono::Weekday::Mon);
+    }
+
+    #[test]
+    fn test_compute_game_weeks_always_includes_current_week() {
+        // No sessions at all → a single (current) week of empty days.
+        let weeks = compute_game_weeks(&[], "Test Game");
+        assert_eq!(weeks.len(), 1);
+        assert_eq!(weeks[0].week_start, current_week_start());
+        assert!(weeks[0].days.iter().all(|d| d.total == 0.0));
+        assert!(weeks[0].days.iter().all(|d| d.details.is_empty()));
     }
 }

@@ -122,6 +122,7 @@ pub(super) fn build_weekly_chart(
     on_delete: Option<DeleteSessionFn>,
     focus_week: Option<chrono::NaiveDate>,
     ctrl_held: Rc<Cell<bool>>,
+    empty_hint: Option<String>,
 ) -> gtk4::Widget {
     let container = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     container.set_focusable(true);
@@ -164,6 +165,21 @@ pub(super) fn build_weekly_chart(
     chart.set_hexpand(true);
     chart.set_vexpand(true);
 
+    // Overlay keeps the full chart skeleton visible when there is no data;
+    // the hint label ignores input so chart clicks/hover still work.
+    let chart_overlay = gtk4::Overlay::new();
+    chart_overlay.set_hexpand(true);
+    chart_overlay.set_vexpand(true);
+    chart_overlay.set_child(Some(&chart));
+    if let Some(hint) = &empty_hint {
+        let hint_label = gtk4::Label::new(Some(hint));
+        hint_label.add_css_class(CSS_DIM_LABEL);
+        hint_label.set_halign(gtk4::Align::Center);
+        hint_label.set_valign(gtk4::Align::Center);
+        hint_label.set_can_target(false);
+        chart_overlay.add_overlay(&hint_label);
+    }
+
     let day_labels = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     day_labels.set_hexpand(true);
     day_labels.set_margin_end(Y_AXIS_W);
@@ -176,7 +192,7 @@ pub(super) fn build_weekly_chart(
 
     let (nav, pw, pd, nd, nw) = build_nav();
 
-    chart_area.append(&chart);
+    chart_area.append(&chart_overlay);
     chart_area.append(&day_labels);
     chart_area.append(&nav);
     row.append(&chart_area);

@@ -9,6 +9,7 @@ pub mod consoles;
 pub mod emulator_detect;
 pub mod emulator_save_migration;
 mod emulator_systems;
+mod qt_ini;
 pub mod game_folder;
 pub mod gog;
 pub mod gog_setup;

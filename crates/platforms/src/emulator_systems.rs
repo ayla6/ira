@@ -39,10 +39,6 @@ pub fn native_names(console: &str) -> &'static [&'static str] {
         "sufami" => &["snes9x", "bsnes", "mesen"],
         "supergrafx" => &["mednafen", "mesen", "geargrafx"],
         "supervision" | "vsmile" => &["mame"],
-        "switch" => &[
-            "ryujinx", "Ryujinx", "ryubing", "Ryubing", "eden", "Eden", "yuzu", "suyu", "sudachi",
-            "citron",
-        ],
         "vectrex" => &["vecx", "mame"],
         "vircon32" => &["vircon32"],
         "wiiu" => &["cemu"],
@@ -70,13 +66,6 @@ pub fn native_names(console: &str) -> &'static [&'static str] {
         "ngp" | "ngpc" => &["mednafen", "ares"],
         "pce" | "pcecd" => &["mednafen", "mesen", "geargrafx", "ares"],
         "ws" | "wsc" => &["mednafen", "mesen", "ares"],
-        _ => &[],
-    }
-}
-
-pub fn flatpak_apps(console: &str) -> &'static [(&'static str, &'static str)] {
-    match console {
-        "switch" => &[("io.github.ryubing.Ryujinx", "Ryubing")],
         _ => &[],
     }
 }

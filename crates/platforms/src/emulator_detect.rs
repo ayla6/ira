@@ -43,6 +43,8 @@ pub fn cemu_choices() -> Vec<DetectedEmulator> {
     )
 }
 
+
+
 #[derive(Clone)]
 pub struct RaCore {
     pub display_name: String,
@@ -71,13 +73,13 @@ pub fn is_flatpak_installed(flatpak_id: &str) -> bool {
         .contains(flatpak_id)
 }
 
-fn which(name: &str) -> Option<String> {
+pub(crate) fn which(name: &str) -> Option<String> {
     which::which(name)
         .ok()
         .map(|p| p.to_string_lossy().into_owned())
 }
 
-fn detect_flatpak(flatpak_id: &str, display_name: &str) -> Option<DetectedEmulator> {
+pub(crate) fn detect_flatpak(flatpak_id: &str, display_name: &str) -> Option<DetectedEmulator> {
     if is_flatpak_installed(flatpak_id) {
         Some(DetectedEmulator {
             display_name: format!("{} (Flatpak)", display_name),
@@ -125,12 +127,15 @@ pub fn detect_emulators(console: &str) -> Vec<DetectedEmulator> {
     if console == "wiiu" {
         return cemu_choices();
     }
+    if console == "switch" {
+        return crate::switch_detect::choices();
+    }
     let def = ira_models::find_console(console);
     let mut choices = Vec::new();
     if let Some(d) = def {
         let mut native_names = d.binary_names.to_vec();
         native_names.extend_from_slice(emulator_systems::native_names(console));
-        let mut flatpak_apps = emulator_systems::flatpak_apps(console).to_vec();
+        let mut flatpak_apps: Vec<(&str, &str)> = Vec::new();
         if !d.flatpak_id.is_empty() {
             flatpak_apps.push((d.flatpak_id, d.emu_display_name));
         }
@@ -283,7 +288,12 @@ pub fn build_launch_command_with_filesystem(
     if fullscreen && !fullscreen_flag.is_empty() {
         cmd.push(fullscreen_flag.to_string());
     }
-    cmd.push(rom_path.to_string());
+    // An empty ROM path means "open the emulator itself" — installed
+    // titles live in the emulator's own NAND/library and launch from
+    // there, so no file argument is passed.
+    if !rom_path.is_empty() {
+        cmd.push(rom_path.to_string());
+    }
     cmd
 }
 

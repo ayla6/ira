@@ -21,7 +21,7 @@ pub mod variant;
 pub use achievement::{AchievementStatus, GogAchievementStatus, MergedAchievement, StringOrMap};
 pub use app_details::{AppDetails, DlcInfo, UfsPathTransform, UfsRootOverride, UfsSaveFile};
 pub use asset_type::{AssetType, LogoPosition};
-pub use consoles::{all_consoles, find_console, ConsoleDef, CONSOLES};
+pub use consoles::{all_consoles, console_has_ra, find_console, ConsoleDef, CONSOLES};
 pub use disc::GameDisc;
 pub use game::parse_db_id;
 pub use game::Game;

@@ -57,18 +57,21 @@ fn needs_sgdb_match(g: &Game) -> bool {
             || g.kind.is_console_emulator())
 }
 
+/// Games the RetroAchievements matcher can serve: matched by ROM hash on
+/// platforms RA actually covers — the Switch has no RA support at all.
+fn needs_ra_match(g: &Game) -> bool {
+    g.kind == ira_models::GameKind::Retro
+        && g.trophy_source == ira_models::TrophySource::Empty
+        && !g.manual_unmatch
+        && ira_models::console_has_ra(&g.platform_id)
+}
+
 fn collect_unmatched_games(state: &SharedState) -> (Vec<Game>, Vec<(String, String, String)>) {
     let s = state.borrow();
     let games = s.games.clone();
     let needs_matching: Vec<Game> = games
         .into_iter()
-        .filter(|g| {
-            needs_steam_match(g)
-                || (g.kind == ira_models::GameKind::Retro
-                    && g.trophy_source == ira_models::TrophySource::Empty
-                    && !g.manual_unmatch)
-                || needs_sgdb_match(g)
-        })
+        .filter(|g| needs_steam_match(g) || needs_ra_match(g) || needs_sgdb_match(g))
         .collect();
     let save_dir = &s.save_dir;
     let data_dir = std::path::Path::new(save_dir).join("data").join("steam");
@@ -96,9 +99,7 @@ fn populate_match_list(
     let mut row_action_boxes: Vec<gtk4::Box> = Vec::new();
 
     for game in needs_matching.iter() {
-        let action_box = if game.kind == ira_models::GameKind::Retro
-            && game.trophy_source == ira_models::TrophySource::Empty
-        {
+        let action_box = if needs_ra_match(game) {
             let ac = create_match_row(list, &game.name, &crate::tr!("RA: not matched"));
             let inner = ac.clone();
             let sc = state.clone();

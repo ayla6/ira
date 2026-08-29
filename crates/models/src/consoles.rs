@@ -295,6 +295,13 @@ pub fn find_console(id: &str) -> Option<&'static ConsoleDef> {
     all_consoles().find(|c| c.id == id)
 }
 
+/// True when the platform has RetroAchievements support at all. Consoles
+/// with an `ra_console_id` of 0 (Nintendo Switch, and other ESDE-sourced
+/// entries without an RA mapping) must never be offered RA matching.
+pub fn console_has_ra(platform_id: &str) -> bool {
+    find_console(platform_id).is_some_and(|def| def.ra_console_id != 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

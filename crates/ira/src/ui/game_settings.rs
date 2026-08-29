@@ -35,6 +35,14 @@ fn build_ra_section(
     pending_copies: &Rc<RefCell<HashMap<String, PendingImage>>>,
 ) -> adw::PreferencesGroup {
     let ra_group = adw::PreferencesGroup::new();
+    // Platforms without RA support (Nintendo Switch) get no match UI at
+    // all; already-linked games keep their Unmatch row wherever they run.
+    if game.trophy_source == ira_models::TrophySource::Empty
+        && !ira_models::console_has_ra(&game.platform_id)
+    {
+        return ra_group;
+    }
+
     ra_group.set_title(&crate::tr!("RetroAchievements"));
 
     if game.trophy_source == ira_models::TrophySource::Ra && !game.app_id.is_empty() {

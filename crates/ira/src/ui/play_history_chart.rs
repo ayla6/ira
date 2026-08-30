@@ -55,6 +55,11 @@ pub(super) struct WeekData {
     pub days: Vec<DayData>,
     pub week_total: f64,
 }
+#[derive(Clone, Copy)]
+pub(super) struct ChartFocus {
+    pub week: chrono::NaiveDate,
+    pub day: chrono::NaiveDate,
+}
 pub(super) struct GameColorAssignment {
     pub top_games: Vec<i64>,
     pub color_map: HashMap<i64, usize>,
@@ -116,11 +121,26 @@ struct State {
     ctrl_held: Rc<Cell<bool>>,
 }
 
+/// Resolves a focus hint to (week index, forced day index) for chart init.
+/// Without a hint the chart opens on the current week; with one it restores
+/// the browsed week and selected day (used after deleting a session).
+fn focus_selection(weeks: &[WeekData], focus: Option<ChartFocus>) -> (usize, Option<usize>) {
+    let Some(f) = focus else {
+        return (weeks.len().saturating_sub(1), None);
+    };
+    let idx = weeks
+        .iter()
+        .position(|w| w.week_start == f.week)
+        .unwrap_or_else(|| weeks.len().saturating_sub(1));
+    let day = weeks[idx].days.iter().position(|d| d.date == f.day);
+    (idx, day)
+}
+
 pub(super) fn build_weekly_chart(
     weeks: Vec<WeekData>,
     is_single_game: bool,
     on_delete: Option<DeleteSessionFn>,
-    focus_week: Option<chrono::NaiveDate>,
+    focus: Option<ChartFocus>,
     ctrl_held: Rc<Cell<bool>>,
     empty_hint: Option<String>,
 ) -> gtk4::Widget {
@@ -214,9 +234,7 @@ pub(super) fn build_weekly_chart(
     row.append(&sidebar_box);
     container.append(&row);
 
-    let initial_idx = focus_week
-        .and_then(|fw| weeks.iter().position(|w| w.week_start == fw))
-        .unwrap_or_else(|| weeks.len().saturating_sub(1));
+    let (initial_idx, forced_day) = focus_selection(&weeks, focus);
 
     let state = Rc::new(RefCell::new(State {
         current_idx: initial_idx,
@@ -312,7 +330,7 @@ pub(super) fn build_weekly_chart(
         container.add_controller(kc);
     }
 
-    rebuild(&state, None);
+    rebuild(&state, forced_day);
     container.upcast()
 }
 
@@ -577,6 +595,62 @@ fn make_delete_button(
 mod tests {
     use super::*;
     use ira_models::PlaySession;
+
+    fn day(date: chrono::NaiveDate, total: f64) -> DayData {
+        DayData {
+            date,
+            total,
+            segments: vec![],
+            details: vec![],
+        }
+    }
+
+    fn week(ws: chrono::NaiveDate, totals: [f64; 7]) -> WeekData {
+        let days: Vec<DayData> = (0..7)
+            .map(|i| day(ws + chrono::Duration::days(i), totals[i as usize]))
+            .collect();
+        let week_total = days.iter().map(|d| d.total).sum();
+        WeekData {
+            week_start: ws,
+            days,
+            week_total,
+        }
+    }
+
+    #[test]
+    fn test_focus_selection_none_opens_on_last_week() {
+        let weeks = vec![
+            week(chrono::NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(), [0.0; 7]),
+            week(chrono::NaiveDate::from_ymd_opt(2026, 8, 17).unwrap(), [0.0; 7]),
+        ];
+        assert_eq!(focus_selection(&weeks, None), (1, None));
+    }
+
+    #[test]
+    fn test_focus_selection_restores_week_and_day() {
+        let ws = chrono::NaiveDate::from_ymd_opt(2026, 8, 10).unwrap();
+        let weeks = vec![
+            week(ws, [3600.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            week(ws + chrono::Duration::days(7), [0.0; 7]),
+        ];
+        let focus = ChartFocus {
+            week: ws,
+            day: ws,
+        };
+        assert_eq!(focus_selection(&weeks, Some(focus)), (0, Some(0)));
+    }
+
+    #[test]
+    fn test_focus_selection_vanished_week_falls_back_to_last() {
+        let ws = chrono::NaiveDate::from_ymd_opt(2026, 8, 10).unwrap();
+        let weeks = vec![week(ws, [0.0; 7])];
+        let focus = ChartFocus {
+            week: ws - chrono::Duration::days(7),
+            day: ws - chrono::Duration::days(7),
+        };
+        // The emptied week is gone; land on the only remaining week.
+        assert_eq!(focus_selection(&weeks, Some(focus)), (0, None));
+    }
 
     #[test]
     fn test_color_hex() {

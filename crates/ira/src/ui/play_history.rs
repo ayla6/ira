@@ -1,7 +1,7 @@
 use super::helpers::{clear_children, format_duration};
 use super::play_history_chart::{
-    assign_game_colors, build_weekly_chart, color_hex, other_hex, BarSegment, DayData, DayDetail,
-    DaySession, GameColorAssignment, WeekData,
+    assign_game_colors, build_weekly_chart, color_hex, other_hex, BarSegment, ChartFocus, DayData,
+    DayDetail, DaySession, GameColorAssignment, WeekData,
 };
 use super::state::SharedState;
 use adw::prelude::*;
@@ -9,7 +9,7 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-type RebuildFn = std::rc::Rc<dyn Fn(Option<chrono::NaiveDate>)>;
+type RebuildFn = std::rc::Rc<dyn Fn(Option<ChartFocus>)>;
 type RebuildHandle = std::rc::Rc<std::cell::RefCell<Option<RebuildFn>>>;
 
 /// Some sources store milliseconds; normalize everything to seconds.
@@ -111,7 +111,7 @@ pub fn show_play_history_dialog(
         let box_ = box_.clone();
         let dialog = dialog.clone();
         let rebuild_handle_c = rebuild_handle.clone();
-        let rebuild: RebuildFn = std::rc::Rc::new(move |focus_week: Option<chrono::NaiveDate>| {
+        let rebuild: RebuildFn = std::rc::Rc::new(move |focus: Option<ChartFocus>| {
             let sessions = ira_db::get_sessions_for_game(&state.borrow().db, game_id, variant_id)
                 .unwrap_or_default();
             clear_children(&box_);
@@ -139,7 +139,7 @@ pub fn show_play_history_dialog(
                 weeks,
                 true,
                 Some(on_delete),
-                focus_week,
+                focus,
                 ctrl_held.clone(),
                 empty_hint,
             ));
@@ -231,10 +231,14 @@ fn delete_session_with_confirm(
 fn delete_session_from_db(
     state: &SharedState,
     session_id: i64,
-) -> Result<Option<chrono::NaiveDate>, String> {
+) -> Result<Option<ChartFocus>, String> {
     let session = ira_db::delete_session(&state.borrow().db, session_id)?
         .ok_or_else(|| format!("session {} not found", session_id))?;
-    let deleted_week = Some(week_start(ts_to_date(session.started_at)));
+    let deleted_day = ts_to_date(session.started_at);
+    let focus = ChartFocus {
+        week: week_start(deleted_day),
+        day: deleted_day,
+    };
     let hours = (session.duration_seconds as f64) / 3600.0;
     let (db, new_base_playtime, new_variant_playtime) = {
         let mut s = state.borrow_mut();
@@ -261,7 +265,7 @@ fn delete_session_from_db(
     if let Some((vid, vpt)) = new_variant_playtime {
         ira_db::update_variant_playtime(&db, vid, vpt)?;
     }
-    Ok(deleted_week)
+    Ok(Some(focus))
 }
 
 fn compute_game_weeks(sessions: &[ira_models::PlaySession], game_name: &str) -> Vec<WeekData> {

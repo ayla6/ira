@@ -86,6 +86,21 @@ pub fn spawn_game(
     cwd: Option<&str>,
     _log_path: Option<&str>,
 ) -> Result<Child, String> {
+    spawn_game_with(command, env, cwd, true)
+}
+
+/// The spawn behind both `spawn_game` and `spawn_detached`.
+///
+/// `kill_with_parent` sets PR_SET_PDEATHSIG, which the kernel delivers when
+/// the *spawning thread* exits — not the app. Callers that spawn from a
+/// short-lived helper thread (the settings-page "Open emulator" row) must
+/// pass false or the child is SIGKILLed the moment the thread returns.
+fn spawn_game_with(
+    command: &[String],
+    env: &[(String, String)],
+    cwd: Option<&str>,
+    kill_with_parent: bool,
+) -> Result<Child, String> {
     if command.is_empty() {
         return Err("Failed to spawn game process: empty command".to_string());
     }
@@ -108,7 +123,9 @@ pub fn spawn_game(
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     cmd.process_group(0);
-    die_with_parent(&mut cmd);
+    if kill_with_parent {
+        die_with_parent(&mut cmd);
+    }
 
     match cmd.spawn() {
         Ok(child) => Ok(child),
@@ -215,7 +232,9 @@ pub fn spawn_detached(
     log_key: i64,
     header: String,
 ) -> Result<(), String> {
-    let mut child = spawn_game(command, env, None, None)?;
+    // No PDEATHSIG: these processes are called from short-lived helper
+    // threads and must survive both the thread and Ira itself.
+    let mut child = spawn_game_with(command, env, None, false)?;
     clear_game_log(log_key);
     let log = get_game_log(log_key);
     log.lock().unwrap().push(header);

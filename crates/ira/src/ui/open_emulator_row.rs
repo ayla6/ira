@@ -1,4 +1,5 @@
 use super::css::{CSS_FLAT, CSS_SQUARE_BUTTON};
+use super::helpers::esc;
 use super::input_profile_settings::ConsoleProfileWidgets;
 use super::play_button::active_controller_input;
 use super::play_button_helpers::{console_input_mode, resolve_input_profile};
@@ -27,7 +28,7 @@ pub(super) fn add_open_emulator_row(
         &crate::tr!(
             "Start {name} without loading a game, using the current controller mapping"
         )
-        .replace("{name}", display_label),
+        .replace("{name}", &esc(display_label)),
     );
 
     let open = gtk4::Button::from_icon_name("media-playback-start-symbolic");

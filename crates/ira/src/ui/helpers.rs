@@ -259,6 +259,17 @@ pub fn hosting_window(w: &impl IsA<gtk4::Widget>) -> Option<gtk4::Window> {
     w.root().and_then(|root| root.downcast::<gtk4::Window>().ok())
 }
 
+/// Standard icon-only button: flat, square, vertically centered so row
+/// suffixes and entry rows cannot stretch it into a rectangle.
+pub fn icon_button(icon: &str, tooltip: &str) -> gtk4::Button {
+    let button = gtk4::Button::from_icon_name(icon);
+    button.add_css_class(CSS_FLAT);
+    button.add_css_class(CSS_SQUARE_BUTTON);
+    button.set_valign(gtk4::Align::Center);
+    button.set_tooltip_text(Some(tooltip));
+    button
+}
+
 pub fn make_browse_button(
     parent: Option<&impl IsA<gtk4::Widget>>,
     title: &str,
@@ -267,11 +278,7 @@ pub fn make_browse_button(
     initial_path: impl Fn() -> Option<String> + 'static,
     on_select: impl Fn(&std::path::Path) + 'static,
 ) -> gtk4::Button {
-    let browse = gtk4::Button::from_icon_name("folder-open-symbolic");
-    browse.add_css_class(CSS_FLAT);
-    browse.add_css_class(CSS_SQUARE_BUTTON);
-    browse.set_valign(gtk4::Align::Center);
-    browse.set_tooltip_text(Some(title));
+    let browse = icon_button("folder-open-symbolic", title);
     let parent = parent.map(|w| w.downgrade());
     let title = title.to_string();
     let filter = filter.map(|(name, mimes)| {

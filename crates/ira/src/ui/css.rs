@@ -200,8 +200,11 @@ gridview.game-grid child:focus-within {
 }
 
 .square-button {
-    min-width: 32px;
-    min-height: 32px;
+    /* GTK CSS min-* sets the content minimum; with the 4px padding this
+       yields a 32x32 button in containers that honor minimums, and the
+       symmetric padding keeps the natural size square everywhere else. */
+    min-width: 24px;
+    min-height: 24px;
     padding: 4px;
 }
 .source-badge {

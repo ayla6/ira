@@ -74,6 +74,7 @@ pub(super) fn build_dll_override_row(name: &str, value: &str) -> gtk4::ListBoxRo
     let remove_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
     remove_btn.add_css_class(CSS_FLAT);
     remove_btn.add_css_class(CSS_CIRCULAR);
+    remove_btn.set_valign(gtk4::Align::Center);
     let row_clone = glib::clone::Downgrade::downgrade(&row);
     remove_btn.connect_clicked(move |_| {
         let Some(row_clone) = row_clone.upgrade() else {

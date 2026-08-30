@@ -1,7 +1,6 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use super::css::CSS_FLAT;
 use super::helpers::string_list_from;
 use super::profile_dialog::{show_profile_dialog, ProfileDialogCallbacks};
 use super::state::SharedState;
@@ -62,11 +61,10 @@ pub fn build_wine_profile_picker(
         open_profile_editor(row, &state_n, &win_n, slug_n.as_deref(), &rebuilding_n, &previous_n);
     });
 
-    let edit_btn = gtk4::Button::new();
-    edit_btn.set_icon_name("document-edit-symbolic");
-    edit_btn.set_tooltip_text(Some(&crate::tr!("Edit profile")));
-    edit_btn.set_valign(gtk4::Align::Center);
-    edit_btn.add_css_class(CSS_FLAT);
+    let edit_btn = super::helpers::icon_button(
+        "document-edit-symbolic",
+        &crate::tr!("Edit profile"),
+    );
 
     let row_c = glib::clone::Downgrade::downgrade(&row);
     let state_c = state.clone();

@@ -1,5 +1,4 @@
-use super::css::{CSS_FLAT, CSS_SQUARE_BUTTON};
-use super::helpers::esc;
+use super::helpers::{esc, icon_button};
 use super::input_profile_store::{
     controller_default_path_for_backend, find_controller_default_profile,
 };
@@ -907,14 +906,6 @@ fn add_profile_row(
     });
     group.add(&row);
     row
-}
-
-fn icon_button(icon: &str, tooltip: &str) -> gtk4::Button {
-    let button = gtk4::Button::from_icon_name(icon);
-    button.add_css_class(CSS_FLAT);
-    button.add_css_class(CSS_SQUARE_BUTTON);
-    button.set_tooltip_text(Some(tooltip));
-    button
 }
 
 fn profile_label(stored: &StoredProfile) -> String {

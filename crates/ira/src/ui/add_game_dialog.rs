@@ -478,6 +478,7 @@ pub(super) fn build_env_var_row(key: &str, value: &str) -> gtk4::ListBoxRow {
     let remove_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
     remove_btn.add_css_class(CSS_FLAT);
     remove_btn.add_css_class(CSS_CIRCULAR);
+    remove_btn.set_valign(gtk4::Align::Center);
     let row_clone = row.clone();
     remove_btn.connect_clicked(move |_| {
         if let Some(list) = row_clone

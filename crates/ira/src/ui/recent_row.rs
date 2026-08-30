@@ -28,11 +28,13 @@ pub(super) fn build_recent_row(
 
     let left_btn = gtk4::Button::from_icon_name("go-previous-symbolic");
     left_btn.add_css_class(CSS_FLAT);
+    left_btn.set_valign(gtk4::Align::Center);
     left_btn.set_tooltip_text(Some(&crate::tr!("Previous games")));
     left_btn.set_sensitive(false);
 
     let right_btn = gtk4::Button::from_icon_name("go-next-symbolic");
     right_btn.add_css_class(CSS_FLAT);
+    right_btn.set_valign(gtk4::Align::Center);
     right_btn.set_tooltip_text(Some(&crate::tr!("Next games")));
 
     let btn_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);

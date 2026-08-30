@@ -27,9 +27,9 @@ pub struct LaunchContext {
 /// Attach the ira-overlay to a prepared command/environment pair.
 ///
 /// Shared by the Wine and native launch branches. Gamescope commands wrap the
-/// standalone overlay process around the compositor and move game-only env
-/// vars onto its wrapper script (restoring them if wrapping fails); any other
-/// command injects the Vulkan layer directly into the game environment.
+/// standalone overlay process around the compositor; the game-only env vars
+/// were already moved past Gamescope's `--` separator by `apply_performance`.
+/// Any other command injects the Vulkan layer directly into the game environment.
 fn attach_overlay(
     enabled: bool,
     cmd: &mut Vec<String>,
@@ -41,13 +41,10 @@ fn attach_overlay(
         return;
     }
     if super::env_builder::uses_gamescope(cmd) {
-        let game_env = super::env_builder::take_gamescope_game_env(env);
-        let mut capture_env = game_env.clone();
+        let mut capture_env = Vec::new();
         super::env_builder::add_overlay_env_without_ui(&mut capture_env, overlay_shm, font_family);
         super::env_builder::add_overlay_env_standalone(env, overlay_shm, font_family);
-        if !super::env_builder::wrap_with_standalone_overlay(cmd, &capture_env) {
-            super::env_builder::restore_gamescope_game_env(env, game_env);
-        }
+        super::env_builder::wrap_with_standalone_overlay(cmd, &capture_env);
     } else {
         super::env_builder::add_overlay_env(env, overlay_shm, font_family);
     }

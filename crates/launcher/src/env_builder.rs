@@ -235,8 +235,11 @@ pub fn apply_launch_overrides(env: &mut Vec<(String, String)>, launch: &GameLaun
     }
 }
 
-/// Removes variables that must apply only to the game inside Gamescope.
-pub fn take_gamescope_game_env(env: &mut Vec<(String, String)>) -> Vec<(String, String)> {
+/// Removes variables that must apply only to the game inside Gamescope
+/// (GPU selection, LD_PRELOAD) so the compositor itself never inherits them.
+/// The returned pairs are re-applied to the game command past Gamescope's
+/// `--` separator via `apply_game_env_inside_gamescope`.
+fn take_gamescope_game_env(env: &mut Vec<(String, String)>) -> Vec<(String, String)> {
     const GAME_KEYS: [&str; 9] = [
         "DRI_PRIME",
         "__NV_PRIME_RENDER_OFFLOAD",
@@ -258,16 +261,25 @@ pub fn take_gamescope_game_env(env: &mut Vec<(String, String)>) -> Vec<(String, 
     overrides
 }
 
-/// Restores game-only variables when Gamescope is not wrapped with the
-/// standalone overlay after all.
-pub fn restore_gamescope_game_env(
-    env: &mut Vec<(String, String)>,
-    game_env: Vec<(String, String)>,
+/// Prefixes `game_env` onto the command that runs inside Gamescope — directly
+/// after its `--` separator, so the compositor never sees the variables while
+/// the game and its wrappers do.
+fn apply_game_env_inside_gamescope(
+    command: &mut Vec<String>,
+    game_env: &[(String, String)],
 ) {
-    for (key, value) in game_env {
-        env.retain(|(existing, _)| existing != &key);
-        env.push((key, value));
+    if game_env.is_empty() {
+        return;
     }
+    let Some(sep) = command.iter().position(|arg| arg == "--") else {
+        eprintln!("launch: gamescope command has no `--`; game-only env vars not applied");
+        return;
+    };
+    let mut prefixed = vec!["/usr/bin/env".to_string()];
+    prefixed.extend(game_env.iter().map(|(key, value)| format!("{key}={value}")));
+    let inner = command.split_off(sep + 1);
+    command.extend(prefixed);
+    command.extend(inner);
 }
 
 /// Wraps the command with gamemode/mangohud/gamescope if configured.
@@ -337,6 +349,12 @@ pub fn apply_performance(
         gs_args.extend(extra_prefix);
         gs_args.append(command);
         *command = gs_args;
+        // Gamescope must see the system default GPU: pinning the compositor
+        // itself to a secondary GPU breaks its presentation to the desktop
+        // compositor. The game-only variables are re-applied past the `--`
+        // separator so only the game inherits them.
+        let game_env = take_gamescope_game_env(env);
+        apply_game_env_inside_gamescope(command, &game_env);
         true
     } else {
         if mangohud_enabled {
@@ -588,7 +606,7 @@ fn wrap_command_with_input(
 /// Into:       `gamescope -- sh -c 'ENABLE_GAMESCOPE_WSI=1 ira-overlay-standalone & exec "$@"' -- wine ...`
 pub fn wrap_with_standalone_overlay(
     command: &mut Vec<String>,
-    game_env: &[(String, String)],
+    capture_env: &[(String, String)],
 ) -> bool {
     let Some(bin) = standalone_binary_path() else {
         eprintln!("ira-overlay: standalone binary not found, skipping");
@@ -609,7 +627,7 @@ pub fn wrap_with_standalone_overlay(
     let quoted_bin = shlex::try_quote(&bin)
         .map(|c| c.into_owned())
         .unwrap_or(bin);
-    let game_env = game_env
+    let env_prefix = capture_env
         .iter()
         .map(|(key, value)| {
             let quoted = shlex::try_quote(value)
@@ -619,7 +637,7 @@ pub fn wrap_with_standalone_overlay(
         })
         .collect::<String>();
     let sh_script = format!(
-        "cleanup() {{ status=$?; trap - EXIT INT TERM HUP; if [ -n \"${{overlay_pid:-}}\" ]; then kill \"$overlay_pid\" 2>/dev/null; wait \"$overlay_pid\" 2>/dev/null; fi; exit \"$status\"; }}; trap cleanup EXIT; trap 'exit 143' INT TERM HUP; ENABLE_GAMESCOPE_WSI=1 {quoted_bin} & overlay_pid=$!; {game_env}\"$@\""
+        "cleanup() {{ status=$?; trap - EXIT INT TERM HUP; if [ -n \"${{overlay_pid:-}}\" ]; then kill \"$overlay_pid\" 2>/dev/null; wait \"$overlay_pid\" 2>/dev/null; fi; exit \"$status\"; }}; trap cleanup EXIT; trap 'exit 143' INT TERM HUP; ENABLE_GAMESCOPE_WSI=1 {quoted_bin} & overlay_pid=$!; {env_prefix}\"$@\""
     );
 
     command.push("/usr/bin/sh".to_string());
@@ -779,17 +797,92 @@ mod tests {
     }
 
     #[test]
-    fn test_restore_gamescope_game_env_restores_game_only_values() {
-        let mut env = vec![("PATH".to_string(), "/usr/bin".to_string())];
+    fn test_apply_game_env_inside_gamescope_prefixes_inner_command() {
+        let mut command = vec![
+            "gamescope".to_string(),
+            "-W".to_string(),
+            "1920".to_string(),
+            "--".to_string(),
+            "umu-run".to_string(),
+            "game.exe".to_string(),
+        ];
         let game_env = vec![
             ("DRI_PRIME".to_string(), "1".to_string()),
-            ("LD_PRELOAD".to_string(), "/game/helper.so".to_string()),
+            ("VK_DRIVER_FILES".to_string(), "/icd/nvidia.json".to_string()),
         ];
 
-        restore_gamescope_game_env(&mut env, game_env);
+        apply_game_env_inside_gamescope(&mut command, &game_env);
 
-        assert!(env.contains(&("DRI_PRIME".to_string(), "1".to_string())));
-        assert!(env.contains(&("LD_PRELOAD".to_string(), "/game/helper.so".to_string())));
+        assert_eq!(
+            command,
+            [
+                "gamescope",
+                "-W",
+                "1920",
+                "--",
+                "/usr/bin/env",
+                "DRI_PRIME=1",
+                "VK_DRIVER_FILES=/icd/nvidia.json",
+                "umu-run",
+                "game.exe"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_apply_game_env_inside_gamescope_keeps_prefix_wrappers() {
+        let mut command = vec![
+            "gamescope".to_string(),
+            "--".to_string(),
+            "gamemoderun".to_string(),
+            "game".to_string(),
+        ];
+        let game_env = vec![("LD_PRELOAD".to_string(), "/game/helper.so".to_string())];
+
+        apply_game_env_inside_gamescope(&mut command, &game_env);
+
+        assert_eq!(
+            command,
+            [
+                "gamescope",
+                "--",
+                "/usr/bin/env",
+                "LD_PRELOAD=/game/helper.so",
+                "gamemoderun",
+                "game"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_apply_game_env_inside_gamescope_without_separator_is_noop() {
+        let mut command = vec!["gamescope".to_string(), "-W".to_string(), "1920".to_string()];
+        let game_env = vec![("DRI_PRIME".to_string(), "1".to_string())];
+
+        apply_game_env_inside_gamescope(&mut command, &game_env);
+
+        assert_eq!(command, ["gamescope", "-W", "1920"]);
+    }
+
+    #[test]
+    fn test_apply_game_env_inside_gamescope_empty_env_is_noop() {
+        let mut command = command();
+
+        apply_game_env_inside_gamescope(&mut command, &[]);
+
+        assert_eq!(command, ["game", "--fullscreen"]);
+    }
+
+    #[test]
+    fn test_apply_performance_without_gamescope_keeps_game_env() {
+        let launch = GameLaunchConfig::default();
+        let mut cmd = command();
+        let mut env = vec![("DRI_PRIME".to_string(), "1".to_string())];
+
+        assert!(!apply_performance(&mut cmd, &mut env, &launch, &WineConfig::default()));
+
+        assert_eq!(cmd, ["game", "--fullscreen"]);
+        assert_eq!(env, [("DRI_PRIME".to_string(), "1".to_string())]);
     }
 
     #[test]

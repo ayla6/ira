@@ -180,7 +180,12 @@ pub fn find_wine_binary(version: &str, custom_path: &str) -> Result<String, Stri
 }
 
 pub fn find_umu_binary() -> Result<String, String> {
-    for path in ["/usr/bin/umu-run", "/usr/local/bin/umu-run"] {
+    for path in [
+        "/usr/bin/umu-run",
+        "/usr/local/bin/umu-run",
+        "/usr/sbin/umu-run",
+        "/sbin/umu-run",
+    ] {
         if std::path::Path::new(path).is_file() {
             return Ok(path.to_string());
         }

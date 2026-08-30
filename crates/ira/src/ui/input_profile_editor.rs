@@ -9,7 +9,7 @@ use super::input_profile_action_sets::build_sets_page;
 use super::input_profile_set_indicator::SetIndicator;
 use super::input_profile_editor_regions::Region;
 use super::input_profile_editor_save::{
-    build_profile, connect_persist, connect_unsaved_guard, persist_closure, EditorForm, SaveOutcome,
+    connect_persist, connect_unsaved_guard, is_dirty, persist_closure, EditorForm, SaveOutcome,
 };
 use super::input_profile_gyro_card::add_gyro_group;
 use super::input_profile_region_pages::{
@@ -100,6 +100,9 @@ pub(super) fn show_input_profile_editor(
     // Dirty baseline: the on-disk form with this game attached, the same
     // canonical shape build_profile produces.
     let baseline = Rc::new(RefCell::new(with_game(profile.clone(), game_id)));
+    // A layout opened without a file has never been written: it counts as
+    // dirty from the start so it can be saved without forcing a dummy edit.
+    let unsaved = Rc::new(std::cell::Cell::new(profile_path.is_none()));
     let gyro = Rc::new(RefCell::new(profile.gyro.clone()));
     let calibration = Rc::new(RefCell::new(profile.controller_calibration));
     let compatible_game_ids = profile.compatible_game_ids.clone();
@@ -162,6 +165,7 @@ pub(super) fn show_input_profile_editor(
         let pages = pages.clone();
         let form = form.clone();
         let baseline = baseline.clone();
+        let unsaved = unsaved.clone();
         let save = save.clone();
         let apply = apply.clone();
         let rebuild_pending = Rc::new(std::cell::Cell::new(false));
@@ -178,6 +182,7 @@ pub(super) fn show_input_profile_editor(
             let pages = pages.clone();
             let form = form.clone();
             let baseline = baseline.clone();
+            let unsaved = unsaved.clone();
             let save = save.clone();
             let apply = apply.clone();
             let rebuild_pending = rebuild_pending.clone();
@@ -190,9 +195,7 @@ pub(super) fn show_input_profile_editor(
                 // memory without bound and took the session down.
                 rebuild_pending.set(true);
                 rebuild_region_pages(&ctx, &pages);
-                let dirty = build_profile(&form)
-                    .map(|built| built != *baseline.borrow())
-                    .unwrap_or(true);
+                let dirty = is_dirty(unsaved.get(), &form, &baseline.borrow());
                 save.set_sensitive(dirty);
                 apply.set_sensitive(dirty);
                 rebuild_pending.set(false);
@@ -211,6 +214,7 @@ pub(super) fn show_input_profile_editor(
         save_dir: save_dir.clone(),
         current_path: current_path.clone(),
         baseline: baseline.clone(),
+        unsaved: unsaved.clone(),
         status: status.clone(),
         button: button.clone(),
         window: window_for_save.clone(),
@@ -230,14 +234,7 @@ pub(super) fn show_input_profile_editor(
         window_for_cancel.close();
     });
 
-    connect_unsaved_guard(
-        &layout.window,
-        &save,
-        &persist_save,
-        &baseline,
-        &form,
-        &force_close,
-    );
+    connect_unsaved_guard(&layout.window, &persist_save, &baseline, &form, &force_close);
 
     layout.window.present(Some(parent));
 }

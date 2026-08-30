@@ -39,11 +39,24 @@ pub(super) struct SaveOutcome {
     pub(super) save_dir: String,
     pub(super) current_path: Rc<RefCell<Option<PathBuf>>>,
     pub(super) baseline: Rc<RefCell<InputProfile>>,
+    /// True while the profile has never been written to disk: a new layout
+    /// counts as dirty even with no modifications, so it can always be saved.
+    pub(super) unsaved: Rc<std::cell::Cell<bool>>,
     pub(super) status: gtk4::Label,
     pub(super) button: gtk4::Button,
     pub(super) window: adw::Dialog,
     pub(super) on_saved: Rc<dyn Fn(PathBuf)>,
     pub(super) close_on_success: bool,
+}
+
+/// Whether the footer's Save/Apply buttons should be enabled: a never-saved
+/// profile is always saveable, otherwise the built form must differ from the
+/// last on-disk state.
+pub(super) fn is_dirty(unsaved: bool, form: &EditorForm, baseline: &InputProfile) -> bool {
+    unsaved
+        || build_profile(form)
+            .map(|built| built != *baseline)
+            .unwrap_or(true)
 }
 
 pub(super) fn persist_closure(form: EditorForm, outcome: SaveOutcome) -> Rc<dyn Fn()> {
@@ -59,6 +72,7 @@ pub(super) fn persist_closure(form: EditorForm, outcome: SaveOutcome) -> Rc<dyn 
                     *outcome.current_path.borrow_mut() = Some(path.clone());
                     // The just-saved state is the new dirty-check baseline.
                     *outcome.baseline.borrow_mut() = profile;
+                    outcome.unsaved.set(false);
                     outcome.status.set_visible(false);
                     outcome.button.set_sensitive(false);
                     (outcome.on_saved)(path);
@@ -77,24 +91,26 @@ pub(super) fn connect_persist(button: &gtk4::Button, persist: Rc<dyn Fn()>) {
     button.connect_clicked(move |_| persist());
 }
 
-/// Closing with unsaved changes offers Save / Discard / Cancel. The footer's
-/// Cancel button sets `force_close` first: pressing Cancel means discard and
-/// close, never another prompt.
+/// Closing with real modifications offers Save / Discard / Cancel. A profile
+/// that only differs by being never-saved closes silently — the footer
+/// buttons are enabled for it, but closing discards it without a prompt.
+/// The footer's Cancel button sets `force_close` first: pressing Cancel means
+/// discard and close, never another prompt.
 pub(super) fn connect_unsaved_guard(
     window: &adw::Dialog,
-    save: &gtk4::Button,
     persist: &Rc<dyn Fn()>,
     baseline: &Rc<RefCell<InputProfile>>,
     form: &EditorForm,
     force_close: &Rc<std::cell::Cell<bool>>,
 ) {
-    let save_for_guard = save.clone();
     let persist_for_guard = persist.clone();
     let baseline_for_guard = baseline.clone();
     let form_for_guard = form.clone();
     let force_close_for_guard = force_close.clone();
     window.connect_close_attempt(move |win| {
-        if !save_for_guard.is_sensitive() || force_close_for_guard.get() {
+        if force_close_for_guard.get()
+            || !is_dirty(false, &form_for_guard, &baseline_for_guard.borrow())
+        {
             win.force_close();
             return;
         }
@@ -112,7 +128,6 @@ pub(super) fn connect_unsaved_guard(
         let persist = persist_for_guard.clone();
         let baseline = baseline_for_guard.clone();
         let form = form_for_guard.clone();
-        let save = save_for_guard.clone();
         dialog.connect_response(None, move |_, response| match response {
             "save" => persist(),
             "discard" => {
@@ -121,7 +136,6 @@ pub(super) fn connect_unsaved_guard(
                 if let Ok(built) = build_profile(&form) {
                     *baseline.borrow_mut() = built;
                 }
-                save.set_sensitive(false);
                 win_for_response.force_close();
             }
             _ => {}

@@ -1,8 +1,8 @@
-use super::super::input_profile_editor_save::profile_path_for_save;
+use super::super::input_profile_editor_save::{is_dirty, profile_path_for_save, EditorForm};
 use super::{default_action_sets, test_default_output};
 use ira_input::{
-    DeviceInfo, GamepadAxis, GamepadButton, InputSource, OutputAction, SourceMode, StickOutput,
-    VirtualGamepadBackend,
+    DeviceInfo, GamepadAxis, GamepadButton, InputProfile, InputSource, OutputAction, SourceMode,
+    StickOutput, VirtualGamepadBackend,
 };
 use std::path::PathBuf;
 
@@ -75,4 +75,40 @@ fn test_profile_path_for_save_prefers_current_path() {
     );
     let fresh = profile_path_for_save("/tmp/profiles", None, "New Layout");
     assert!(fresh.to_string_lossy().starts_with("/tmp/profiles"));
+}
+
+fn dirty_form(profile: InputProfile) -> (EditorForm, InputProfile) {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let form = EditorForm {
+        name: Rc::new(RefCell::new(profile.name.clone())),
+        profile: Rc::new(RefCell::new(profile.clone())),
+        calibration: Rc::new(RefCell::new(profile.controller_calibration)),
+        gyro: Rc::new(RefCell::new(profile.gyro.clone())),
+        compatible_game_ids: profile.compatible_game_ids.clone(),
+        game_id: None,
+    };
+    (form, profile)
+}
+
+#[test]
+fn test_is_dirty_new_layout_without_changes_is_saveable() {
+    let (form, baseline) = dirty_form(InputProfile::default());
+    // A never-saved layout must count as dirty even when identical to its
+    // baseline, otherwise Save stays disabled and it can never be written.
+    assert!(is_dirty(true, &form, &baseline));
+    // The same form on an existing profile is clean.
+    assert!(!is_dirty(false, &form, &baseline));
+}
+
+#[test]
+fn test_is_dirty_flags_modified_form() {
+    let (form, baseline) = dirty_form(InputProfile::default());
+    assert!(!is_dirty(false, &form, &baseline));
+    let renamed = "Renamed layout".to_string();
+    form.profile.borrow_mut().name = renamed.clone();
+    *form.name.borrow_mut() = renamed;
+    assert!(is_dirty(false, &form, &baseline));
+    assert!(is_dirty(true, &form, &baseline));
 }

@@ -537,10 +537,12 @@ fn cleanup_stale_rom_entries(db: &db::DbConn, cfg: &Config) {
 
     for entry in entries
         .iter()
-        .filter(|entry| entry.kind == GameKind::Retro)
-        // Installed Switch titles have no ROM file by design — their
-        // identity is the emulator's title id — so the stale-ROM cleanup
-        // must never treat them as vanished ROMs.
+        // Switch ROM entries share the ROM library's lifecycle; the two
+        // kinds are exactly what the ROM scan manages.
+        .filter(|entry| matches!(entry.kind, GameKind::Retro | GameKind::Switch))
+        // Switch titles of an emulator's own library have no ROM file by
+        // design — their identity is the emulator's title id — so the
+        // stale-ROM cleanup must never treat them as vanished ROMs.
         .filter(|entry| {
             !(entry.platform_id == "switch"
                 && entry.rom_path.is_empty()
@@ -952,12 +954,12 @@ fn default_azahar_icon(save_dir: &str, title_id: &str, icon: Option<&[u8]>) -> s
     }
 }
 
-/// Builds games for the titles installed in the user's yuzu-family and
+/// Builds games for the titles of the user's yuzu-family and
 /// Ryujinx-family Switch emulators — both families at once, regardless of
-/// which emulator is configured to launch ROM files. Installed titles
-/// have no ROM file: their identity is the title id, so a game also
-/// present as a ROM file keeps its single entry and only gains the
-/// emulator's clean title and icon — or, when the cache has none, the
+/// which emulator is configured to launch ROM files. These titles have no
+/// ROM file in the user's library: their identity is the title id, so a
+/// game also present as a ROM file keeps its single entry and only gains
+/// the emulator's clean title and icon — or, when the cache has none, the
 /// title and icon decrypted from the installed control NCA.
 fn build_switch_installed_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Game> {
     discover_switch_installed_games(executable)
@@ -965,14 +967,14 @@ fn build_switch_installed_games(db: &db::DbConn, save_dir: &str, executable: &st
         .filter_map(|installed| {
             let meta = find_or_create_console_entry(
                 db,
-                GameKind::Retro,
+                GameKind::Switch,
                 &installed.title_id,
                 "switch",
                 &installed.title,
                 false,
             )?;
             let entry = db::find_by_db_id(db, meta.db_id).ok().flatten()?;
-            let data_dir = ira_parser::retro_data_dir(save_dir, meta.db_id);
+            let data_dir = ira_parser::switch_data_dir(save_dir, meta.db_id);
             // Cache-miss fallback: the NAND-installed control NCA is
             // decrypted when the emulator cached no icon; its NACP also
             // supplies the application title when the cache had none.
@@ -1048,7 +1050,7 @@ fn default_switch_icon(
     cached: Option<&std::path::Path>,
     nand: Option<&[u8]>,
 ) {
-    let data_dir = ira_parser::retro_data_dir(save_dir, db_id);
+    let data_dir = ira_parser::switch_data_dir(save_dir, db_id);
     if ira_parser::find_image_file(&data_dir, "icon").is_some() {
         return;
     }

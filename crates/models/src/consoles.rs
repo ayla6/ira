@@ -1,3 +1,5 @@
+use crate::kind::GameKind;
+
 pub struct ConsoleDef {
     pub id: &'static str,
     pub display_name: &'static str,
@@ -12,6 +14,17 @@ pub struct ConsoleDef {
 impl ConsoleDef {
     pub fn uses_rom_folder(&self) -> bool {
         !matches!(self.id, "ps3" | "ps4" | "psvita" | "wiiu")
+    }
+
+    /// The kind ROM-library entries of this console carry: Switch is a
+    /// first-class emulator integration, every other ROM-folder console
+    /// keeps the generic Retro kind.
+    pub fn game_kind(&self) -> GameKind {
+        if self.id == GameKind::Switch.as_str() {
+            GameKind::Switch
+        } else {
+            GameKind::Retro
+        }
     }
 }
 
@@ -343,6 +356,15 @@ mod tests {
         assert!(!find_console("psvita").unwrap().uses_rom_folder());
         assert!(!find_console("wiiu").unwrap().uses_rom_folder());
         assert!(find_console("ps2").unwrap().uses_rom_folder());
+    }
+
+    #[test]
+    fn test_game_kind_switch_vs_retro() {
+        assert_eq!(
+            find_console("switch").unwrap().game_kind(),
+            GameKind::Switch
+        );
+        assert_eq!(find_console("saturn").unwrap().game_kind(), GameKind::Retro);
     }
 
     #[test]

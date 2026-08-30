@@ -49,7 +49,14 @@ pub fn load_saved_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
         conn,
         save_dir,
         "Failed to load saved games from DB",
-        |entry| entry.kind == ira_models::GameKind::Retro && entry.rom_path.is_empty(),
+        // ROM-library entries only show once their source scan found their
+        // file (or, for Switch, the emulator library that owns them).
+        |entry| {
+            matches!(
+                entry.kind,
+                ira_models::GameKind::Retro | ira_models::GameKind::Switch
+            ) && entry.rom_path.is_empty()
+        },
         |entry| format!("Skipping saved game {}", entry.id),
     )
 }
@@ -143,12 +150,14 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
         game_folder: entry.game_folder.clone(),
     };
 
-    // Retro paths stay relative to the console's ROM folder; the other
-    // console kinds store absolute locations discovered at scan time and
-    // every later rebuild must keep them (context menu, icon restore).
+    // Retro and Switch paths stay relative to the console's ROM folder;
+    // the other console kinds store absolute locations discovered at scan
+    // time and every later rebuild must keep them (context menu, icon
+    // restore).
     if matches!(
         entry.kind,
         ira_models::GameKind::Retro
+            | ira_models::GameKind::Switch
             | ira_models::GameKind::ThreeDS
             | ira_models::GameKind::WiiU
             | ira_models::GameKind::PsVita
@@ -529,6 +538,7 @@ mod tests {
     fn test_build_game_base_restores_console_rom_path() {
         for kind in [
             GameKind::Retro,
+            GameKind::Switch,
             GameKind::ThreeDS,
             GameKind::WiiU,
             GameKind::PsVita,

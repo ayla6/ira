@@ -89,10 +89,13 @@ fn save_app_id(db: &ira_db::DbConn, params: &SaveGameSettingsParams) -> AppIdRes
             } else {
                 params.trophy_source
             };
-            let pid = if params.game_kind == ira_models::GameKind::Ps4
-                || params.game_kind == ira_models::GameKind::Ps3
-                || params.game_kind == ira_models::GameKind::Retro
-            {
+            let pid = if matches!(
+                params.game_kind,
+                ira_models::GameKind::Ps4
+                    | ira_models::GameKind::Ps3
+                    | ira_models::GameKind::Retro
+                    | ira_models::GameKind::Switch
+            ) {
                 &params.saved_platform_id
             } else if new_id.is_empty() {
                 ""

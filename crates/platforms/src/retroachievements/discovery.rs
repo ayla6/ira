@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use crate::consoles::{all_consoles, ConsoleDef};
 use crate::retroachievements::api::{RaClient, RaGameEntry};
 use ira_config::Config;
-use ira_models::{Game, GameDisc, GameKind, TrophySource};
+use ira_models::{Game, GameDisc, TrophySource};
 
 use super::discovery_helpers::{
     group_multi_disc_roms, normalize_name, scan_roms, DiscGroup, RaMatchIndex,
@@ -151,8 +151,8 @@ fn build_ra_games_for_console(
     };
 
     let existing_entries = {
-        let _s = tracing::info_span!("db_find_retro").entered();
-        ira_db::find_all_retro_by_platform(db, console.def.id).unwrap_or_default()
+        let _s = tracing::info_span!("db_find_rom").entered();
+        ira_db::find_all_rom_by_platform(db, console.def.id).unwrap_or_default()
     };
     let disc_paths = {
         let _s = tracing::info_span!("db_disc_paths").entered();
@@ -298,7 +298,7 @@ fn build_ra_games_for_console(
                 } else {
                     entry.game_id.clone()
                 },
-                kind: GameKind::Retro,
+                kind: console.def.game_kind(),
                 trophy_source: entry.trophy_source,
                 platform_id: entry.platform_id.clone(),
                 db_id: entry.id,
@@ -431,7 +431,7 @@ fn build_ra_games_for_console(
                     }
                     let mut g = load_game(&e, save_dir).unwrap_or_else(|_| Game {
                         app_id: e.game_id.clone(),
-                        kind: GameKind::Retro,
+                        kind: console.def.game_kind(),
                         trophy_source: e.trophy_source,
                         platform_id: e.platform_id.clone(),
                         db_id: e.id,
@@ -452,7 +452,7 @@ fn build_ra_games_for_console(
                 None => {
                     match ira_db::add_game(
                         db,
-                        GameKind::Retro,
+                        console.def.game_kind(),
                         trophy_source,
                         "",
                         &app_id,
@@ -465,7 +465,7 @@ fn build_ra_games_for_console(
                             }
                             Game {
                                 app_id: app_id.clone(),
-                                kind: GameKind::Retro,
+                                kind: console.def.game_kind(),
                                 trophy_source,
                                 platform_id: console.def.id.to_string(),
                                 db_id: id,
@@ -686,10 +686,10 @@ fn precompute_switch_metas(
 
 /// Saves a Switch title's native icon (an emulator-cached JPEG, the
 /// ROM's decrypted control-NCA icon, or a homebrew NRO's embedded PNG)
-/// into the game's retro data dir as lossless WebP unless one already
+/// into the game's switch data dir as lossless WebP unless one already
 /// exists, so downloaded or user-chosen icons always win.
 fn write_switch_icon(save_dir: &str, db_id: i64, icon: &crate::switch::SwitchIcon) {
-    let data_dir = ira_parser::retro_data_dir(save_dir, db_id);
+    let data_dir = ira_parser::switch_data_dir(save_dir, db_id);
     if ira_parser::find_image_file(&data_dir, "icon").is_some() {
         return;
     }
@@ -947,7 +947,7 @@ mod tests {
         let db = test_db();
         let db_id = ira_db::add_game(
             &db,
-            ira_models::GameKind::Retro,
+            ira_models::GameKind::Switch,
             ira_models::TrophySource::Empty,
             "",
             "The Legend of Zelda [01007EF00011E000]",
@@ -959,7 +959,7 @@ mod tests {
 
         let game = ira_models::Game {
             app_id: "The Legend of Zelda [01007EF00011E000]".into(),
-            kind: ira_models::GameKind::Retro,
+            kind: ira_models::GameKind::Switch,
             trophy_source: ira_models::TrophySource::Empty,
             platform_id: "switch".into(),
             db_id,
@@ -989,8 +989,8 @@ mod tests {
         let entry = ira_db::find_by_db_id(&db, game.db_id).unwrap().unwrap();
         assert_eq!(entry.game_id, "01007ef00011e000");
 
-        // …and the cached icon landed in the retro data dir.
-        let data_dir = ira_parser::retro_data_dir(&save_dir, game.db_id);
+        // …and the cached icon landed in the switch data dir.
+        let data_dir = ira_parser::switch_data_dir(&save_dir, game.db_id);
         assert!(ira_parser::find_image_file(&data_dir, "icon").is_some());
     }
 

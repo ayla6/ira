@@ -578,7 +578,9 @@ pub(super) fn launch_emulator_no_game(
     }
 
     let exe = match ctx.game_kind {
-        ira_models::GameKind::Retro => {
+        // Switch games launch like the ROM library's: through the console's
+        // configured emulator, per-game override first.
+        ira_models::GameKind::Retro | ira_models::GameKind::Switch => {
             let cc = cfg.console(platform_id);
             if !per_game_emu.is_empty() {
                 per_game_emu.to_string()
@@ -606,8 +608,9 @@ pub(super) fn launch_emulator_no_game(
         _ => return Err("not an emulated game".to_string()),
     };
 
-    // Retro games resolve their config key from the platform (e.g. "gc"),
-    // emulator-integrated games use GameKind::as_str(), which matches.
+    // ROM-library games resolve their config key from the platform (e.g.
+    // "gc"), emulator-integrated games use GameKind::as_str(), which
+    // matches.
     let console_id = if ctx.game_kind == ira_models::GameKind::Retro {
         platform_id.to_string()
     } else {

@@ -394,8 +394,8 @@ fn build_reset_icon_button(
         ira_models::GameKind::Ps3 => crate::tr!("PS3"),
         ira_models::GameKind::ThreeDS => crate::tr!("3DS"),
         ira_models::GameKind::WiiU => crate::tr!("Wii U"),
+        ira_models::GameKind::Switch => crate::tr!("Switch"),
         ira_models::GameKind::Retro if game.platform_id == "nds" => crate::tr!("NDS"),
-        ira_models::GameKind::Retro if game.platform_id == "switch" => crate::tr!("Switch"),
         _ => return None,
     };
     let reset_btn = gtk4::Button::with_label(&label);

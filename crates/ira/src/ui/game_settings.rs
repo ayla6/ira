@@ -167,7 +167,11 @@ fn add_game_path_if_needed(group: &adw::PreferencesGroup, game: &Game) {
 }
 
 fn game_file_path_for_display(game: &Game) -> String {
-    if game.kind == ira_models::GameKind::Retro && !game.platform_id.is_empty() {
+    if matches!(
+        game.kind,
+        ira_models::GameKind::Retro | ira_models::GameKind::Switch
+    ) && !game.platform_id.is_empty()
+    {
         let path = std::path::Path::new(&game.game_path);
         if !path.is_absolute()
             && path
@@ -424,20 +428,21 @@ fn build_retro_emulator_and_ra(
     let pending_emulator: Rc<RefCell<Option<String>>> = Default::default();
     let mut ra_container: Option<gtk4::Box> = None;
 
-    // Retro games pick emulator + RA core per game; PS3, Cemu and Azahar
+    // Retro games pick emulator + RA core per game; Switch has no RA
+    // support but still picks the emulator per game; PS3, Cemu and Azahar
     // games pick the emulator install per game — only these launch paths
     // consume the generic emulator override (PS4 has its own version
     // selector, Vita3K has a single launcher). Both store the choice as a
     // generic emulator override.
-    if game.kind == ira_models::GameKind::Retro {
-        add_emulator_dropdown_section(page, game, &pending_ra_core, &pending_emulator);
-        let container = build_ra_container(page, state, game, win, pending_copies);
-        ra_container = Some(container);
-    } else if matches!(
+    if matches!(
         game.kind,
-        ira_models::GameKind::ThreeDS | ira_models::GameKind::WiiU | ira_models::GameKind::Ps3
+        ira_models::GameKind::Retro | ira_models::GameKind::Switch
     ) {
         add_emulator_dropdown_section(page, game, &pending_ra_core, &pending_emulator);
+    }
+    if game.kind == ira_models::GameKind::Retro {
+        let container = build_ra_container(page, state, game, win, pending_copies);
+        ra_container = Some(container);
     }
 
     (pending_ra_core, pending_emulator, ra_container)
@@ -467,9 +472,13 @@ fn build_service_ids_section(
         ira_models::GameKind::ThreeDS
             | ira_models::GameKind::WiiU
             | ira_models::GameKind::PsVita
+            | ira_models::GameKind::Switch
             | ira_models::GameKind::Retro
     ) {
-        if game.kind == ira_models::GameKind::Retro {
+        if matches!(
+            game.kind,
+            ira_models::GameKind::Retro | ira_models::GameKind::Switch
+        ) {
             add_id_row(&crate::tr!("Game ID"), &game.app_id);
         } else {
             add_id_row(&crate::tr!("Title ID"), &game.app_id);
@@ -748,5 +757,20 @@ mod tests {
         };
 
         assert_eq!(game_file_path_for_display(&game), "/roms/saturn/disc1.chd");
+    }
+
+    #[test]
+    fn test_game_file_path_for_display_prefixes_switch() {
+        let game = Game {
+            kind: ira_models::GameKind::Switch,
+            platform_id: "switch".to_string(),
+            game_path: "Pikmin™ 1 [0100AA80194B0000][v0][Base].nsp".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            game_file_path_for_display(&game),
+            "switch/Pikmin™ 1 [0100AA80194B0000][v0][Base].nsp"
+        );
     }
 }

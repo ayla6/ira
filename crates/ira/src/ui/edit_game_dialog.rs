@@ -112,6 +112,7 @@ fn build_launch_wine_advanced_pages(
         ira_models::GameKind::PsVita => Some("psvita"),
         ira_models::GameKind::WiiU => Some("wiiu"),
         ira_models::GameKind::ThreeDS => Some("3ds"),
+        ira_models::GameKind::Switch => Some("switch"),
         _ => None,
     };
     let (

@@ -11,6 +11,7 @@ pub enum GameKind {
     PsVita,
     WiiU,
     ThreeDS,
+    Switch,
     Steam,
     Retro,
 }
@@ -25,6 +26,7 @@ impl GameKind {
             GameKind::PsVita => "psvita",
             GameKind::WiiU => "wiiu",
             GameKind::ThreeDS => "3ds",
+            GameKind::Switch => "switch",
             GameKind::Steam => "steam",
             GameKind::Retro => "retro",
             GameKind::Other => "other",
@@ -40,6 +42,7 @@ impl GameKind {
             "psvita" => GameKind::PsVita,
             "wiiu" => GameKind::WiiU,
             "3ds" => GameKind::ThreeDS,
+            "switch" => GameKind::Switch,
             "steam" => GameKind::Steam,
             "retro" => GameKind::Retro,
             _ => GameKind::Other,
@@ -55,6 +58,7 @@ impl GameKind {
             GameKind::PsVita => "PS Vita",
             GameKind::WiiU => "Wii U",
             GameKind::ThreeDS => "Nintendo 3DS",
+            GameKind::Switch => "Nintendo Switch",
             GameKind::Steam => "Steam",
             GameKind::Retro => "Retro",
             GameKind::Other => "Other",
@@ -72,11 +76,17 @@ impl GameKind {
     }
 
     /// Games discovered by an emulator integration (shadPS4, RPCS3, Vita3K,
-    /// Cemu, Azahar) rather than a store or a plain ROM folder.
+    /// Cemu, Azahar, yuzu-family/Ryujinx-family) rather than a store or a
+    /// plain ROM folder.
     pub fn is_console_emulator(self) -> bool {
         matches!(
             self,
-            GameKind::Ps4 | GameKind::Ps3 | GameKind::PsVita | GameKind::WiiU | GameKind::ThreeDS
+            GameKind::Ps4
+                | GameKind::Ps3
+                | GameKind::PsVita
+                | GameKind::WiiU
+                | GameKind::ThreeDS
+                | GameKind::Switch
         )
     }
 
@@ -178,6 +188,7 @@ mod tests {
             GameKind::PsVita,
             GameKind::WiiU,
             GameKind::ThreeDS,
+            GameKind::Switch,
             GameKind::Steam,
             GameKind::Retro,
             GameKind::Other,
@@ -252,6 +263,7 @@ mod tests {
         assert_eq!(GameKind::PsVita.display_name(), "PS Vita");
         assert_eq!(GameKind::WiiU.display_name(), "Wii U");
         assert_eq!(GameKind::ThreeDS.display_name(), "Nintendo 3DS");
+        assert_eq!(GameKind::Switch.display_name(), "Nintendo Switch");
         assert_eq!(GameKind::Steam.display_name(), "Steam");
         assert_eq!(GameKind::Retro.display_name(), "Retro");
         assert_eq!(GameKind::Other.display_name(), "Other");
@@ -281,6 +293,7 @@ mod tests {
         assert!(GameKind::PsVita.is_console_emulator());
         assert!(GameKind::WiiU.is_console_emulator());
         assert!(GameKind::ThreeDS.is_console_emulator());
+        assert!(GameKind::Switch.is_console_emulator());
         assert!(!GameKind::Steam.is_console_emulator());
         assert!(!GameKind::Retro.is_console_emulator());
         assert!(!GameKind::Wine.is_console_emulator());
@@ -295,6 +308,7 @@ mod tests {
             GameKind::PsVita,
             GameKind::WiiU,
             GameKind::ThreeDS,
+            GameKind::Switch,
         ] {
             assert!(kind.has_standalone_emulator(), "{kind:?}");
         }

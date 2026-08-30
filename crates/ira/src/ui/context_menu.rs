@@ -108,7 +108,11 @@ pub fn show_game_context_menu(
         }
         wine = wine.merge_with_default(&app_default);
         let resolve_rom = |p: &str| -> String {
-            if game.kind != ira_models::GameKind::Retro || p.is_empty() {
+            if !matches!(
+                game.kind,
+                ira_models::GameKind::Retro | ira_models::GameKind::Switch
+            ) || p.is_empty()
+            {
                 return p.to_string();
             }
             s.cfg

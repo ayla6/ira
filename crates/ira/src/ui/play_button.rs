@@ -177,6 +177,7 @@ pub fn launch_game(
             ira_models::GameKind::PsVita => Some("psvita"),
             ira_models::GameKind::WiiU => Some("wiiu"),
             ira_models::GameKind::ThreeDS => Some("3ds"),
+            ira_models::GameKind::Switch => Some("switch"),
             _ => None,
         });
         let overlay_global_enabled =
@@ -297,7 +298,10 @@ pub fn launch_game(
         controller_input_profile,
     };
 
-    if kind == ira_models::GameKind::Retro {
+    if matches!(
+        kind,
+        ira_models::GameKind::Retro | ira_models::GameKind::Switch
+    ) {
         play_button_helpers::launch_retro(
             &ctx,
             &cfg_clone,
@@ -436,6 +440,7 @@ pub fn open_emulator_no_game(state: &SharedState, db_id: i64) -> Result<(), Stri
             ira_models::GameKind::PsVita => Some("psvita"),
             ira_models::GameKind::WiiU => Some("wiiu"),
             ira_models::GameKind::ThreeDS => Some("3ds"),
+            ira_models::GameKind::Switch => Some("switch"),
             _ => None,
         });
         let overlay_global_enabled =

@@ -428,6 +428,7 @@ mod tests {
         for kind in [
             ira_models::GameKind::ThreeDS,
             ira_models::GameKind::WiiU,
+            ira_models::GameKind::Switch,
             ira_models::GameKind::Retro,
         ] {
             assert!(!needs_steam_match(&game(kind)), "{kind} has no steam path");
@@ -444,6 +445,13 @@ mod tests {
         g.sgdb_id.clear();
         g.manual_unmatch = true;
         assert!(!needs_sgdb_match(&g));
+    }
+
+    #[test]
+    fn test_switch_is_never_ra_matchable() {
+        let mut g = game(ira_models::GameKind::Switch);
+        g.platform_id = "switch".to_string();
+        assert!(!needs_ra_match(&g), "the Switch has no RA support at all");
     }
 
     #[test]

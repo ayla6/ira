@@ -153,14 +153,15 @@ pub(super) fn native_icon_bytes(
     cemu_executable: &str,
     switch_executable: &str,
 ) -> Option<Vec<u8>> {
-    // Resolve ROM path: Retro games store it relative to one of the ROM
-    // roots (e.g. "game.nds" or "game.zip"), while console games store an
-    // absolute path.
+    // Resolve ROM path: ROM-library games store it relative to one of the
+    // ROM roots (e.g. "game.nds" or "game.zip"), while console games store
+    // an absolute path.
     let game_root_owned;
     let game_root: &std::path::Path =
         if matches!(
             (game.kind, game.platform_id.as_str()),
-            (ira_models::GameKind::Retro, "nds" | "switch")
+            (ira_models::GameKind::Retro, "nds")
+                | (ira_models::GameKind::Switch, _)
         ) {
             let p = std::path::Path::new(&game.game_path);
             if p.is_absolute() {
@@ -174,9 +175,7 @@ pub(super) fn native_icon_bytes(
         };
     match game.kind {
         ira_models::GameKind::Retro if game.platform_id == "nds" => decode_nds_icon(game_root),
-        ira_models::GameKind::Retro if game.platform_id == "switch" => {
-            decode_switch_icon(game_root, switch_executable)
-        }
+        ira_models::GameKind::Switch => decode_switch_icon(game_root, switch_executable),
         ira_models::GameKind::ThreeDS => decode_smdh_icon(game_root).or_else(|| {
             ira_platforms::azahar::find_title_path_for(azahar_executable, &game.platform_id)
                 .and_then(|path| decode_smdh_icon(&path))
@@ -214,6 +213,7 @@ pub(super) fn write_native_icon_to_disk(save_dir: &str, game: &Game, webp_bytes:
             .join(&game.app_id),
         ira_models::GameKind::ThreeDS => ira_parser::three_ds_data_dir(save_dir, &game.app_id),
         ira_models::GameKind::WiiU => ira_parser::wiiu_data_dir(save_dir, &game.app_id),
+        ira_models::GameKind::Switch => ira_parser::switch_data_dir(save_dir, game.db_id),
         ira_models::GameKind::Retro => ira_parser::retro_data_dir(save_dir, game.db_id),
         _ => return false,
     };

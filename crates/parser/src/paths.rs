@@ -26,6 +26,10 @@ pub fn three_ds_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
     Path::new(save_dir).join("data").join("3ds").join(app_id)
 }
 
+pub fn switch_data_dir(save_dir: &str, db_id: i64) -> PathBuf {
+    Path::new(save_dir).join("data").join("switch").join(db_id.to_string())
+}
+
 pub fn sgdb_data_dir(save_dir: &str, sgdb_id: &str) -> PathBuf {
     Path::new(save_dir)
         .join("data")
@@ -53,6 +57,7 @@ fn data_dir_for(
 ) -> PathBuf {
     match kind {
         ira_models::GameKind::Retro => retro_data_dir(save_dir, db_id),
+        ira_models::GameKind::Switch => switch_data_dir(save_dir, db_id),
         ira_models::GameKind::Ps4 => ps4_data_dir(save_dir, id),
         ira_models::GameKind::Ps3 => ps3_data_dir(save_dir, id),
         ira_models::GameKind::PsVita => vita_data_dir(save_dir, id),
@@ -581,6 +586,10 @@ mod tests {
         assert_eq!(
             wiiu_data_dir("/save", "0005000010101d00"),
             PathBuf::from("/save/data/wiiu/0005000010101d00")
+        );
+        assert_eq!(
+            switch_data_dir("/save", 42),
+            PathBuf::from("/save/data/switch/42")
         );
     }
 

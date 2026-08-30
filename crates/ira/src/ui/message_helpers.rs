@@ -191,8 +191,8 @@ fn start_background_enrichment(state: &SharedState) {
             s.cfg.ra_username.clone(),
             s.cfg.ra_web_api_key.clone(),
             s.cfg.clone(),
-            // Retro games join enrichment only while icon-less, so the
-            // RA → native → SGDB default icon chain can fill them in.
+            // ROM-library games join enrichment only while icon-less, so
+            // the RA → native → SGDB default icon chain can fill them in.
             s.games
                 .iter()
                 .filter(|g| {
@@ -200,7 +200,10 @@ fn start_background_enrichment(state: &SharedState) {
                         && g.variant_id.is_none()
                         && g.kind != ira_models::GameKind::Ps4
                         && g.kind != ira_models::GameKind::Ps3
-                        && (g.kind != ira_models::GameKind::Retro || g.icon_path.is_empty())
+                        && (!matches!(
+                            g.kind,
+                            ira_models::GameKind::Retro | ira_models::GameKind::Switch
+                        ) || g.icon_path.is_empty())
                 })
                 .map(|g| {
                     (
@@ -371,6 +374,8 @@ fn start_background_enrichment(state: &SharedState) {
                         ira_parser::ps3_data_dir(&save_dir, &app_id)
                     } else if kind == ira_models::GameKind::Retro {
                         ira_parser::retro_data_dir(&save_dir, db_id)
+                    } else if kind == ira_models::GameKind::Switch {
+                        ira_parser::switch_data_dir(&save_dir, db_id)
                     } else if trophy_source.has_steam_enrichment() {
                         ira_parser::data_dir(&save_dir, &app_id)
                     } else {

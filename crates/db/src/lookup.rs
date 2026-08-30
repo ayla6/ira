@@ -83,14 +83,20 @@ pub fn find_by_game_folder(conn: &DbConn, game_folder: &str) -> Result<Option<Ga
     )
 }
 
-pub fn find_all_retro_by_platform(
+/// Every ROM-library entry of one console platform: the generic Retro
+/// kind plus Switch, the one ROM-folder console with a kind of its own.
+pub fn find_all_rom_by_platform(
     conn: &DbConn,
     platform_id: &str,
 ) -> Result<Vec<GameEntry>, String> {
     find_all_games_by(
         conn,
-        "kind = ?1 AND platform_id = ?2",
-        params![GameKind::Retro.as_str(), platform_id],
+        "kind IN (?1, ?2) AND platform_id = ?3",
+        params![
+            GameKind::Retro.as_str(),
+            GameKind::Switch.as_str(),
+            platform_id
+        ],
     )
 }
 
@@ -169,6 +175,46 @@ mod tests {
         .unwrap();
         let games = load_all_games(&conn).unwrap();
         assert_eq!(games.len(), 3);
+    }
+
+    #[test]
+    fn test_find_all_rom_by_platform_covers_switch_kind() {
+        let (conn, _tmp) = setup_db();
+        add_game(
+            &conn,
+            GameKind::Switch,
+            TrophySource::Empty,
+            "",
+            "010051f0207b2000",
+            "switch",
+            "Switch game",
+        )
+        .unwrap();
+        add_game(
+            &conn,
+            GameKind::Retro,
+            TrophySource::Empty,
+            "",
+            "legacy",
+            "switch",
+            "Legacy switch rom",
+        )
+        .unwrap();
+        add_game(
+            &conn,
+            GameKind::Switch,
+            TrophySource::Empty,
+            "",
+            "0100000000010000",
+            "not-a-rom-console",
+            "Other platform",
+        )
+        .unwrap();
+
+        let switch_games = find_all_rom_by_platform(&conn, "switch").unwrap();
+        let mut ids: Vec<&str> = switch_games.iter().map(|g| g.game_id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["010051f0207b2000", "legacy"]);
     }
 
     #[test]

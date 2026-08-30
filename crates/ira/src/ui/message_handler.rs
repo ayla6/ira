@@ -71,11 +71,24 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
 
 fn handle_add_game_error(state: &SharedState, e: String) {
     let window = state.borrow().window.clone();
+    // Present over whichever toplevel is currently active so the dialog is
+    // never hidden behind the window the user is looking at (e.g. the
+    // settings window when an emulator-open or add fails).
+    let parent = gtk4::Window::list_toplevels()
+        .into_iter()
+        .find_map(|widget| {
+            widget
+                .downcast::<gtk4::Window>()
+                .ok()
+                .filter(|toplevel| toplevel.is_active())
+        })
+        .map(|toplevel| toplevel.upcast::<gtk4::Widget>())
+        .unwrap_or_else(|| window.clone().upcast::<gtk4::Widget>());
     let dialog = adw::AlertDialog::new(Some(&crate::tr!("Couldn't add game")), Some(&e));
     dialog.add_response("ok", &crate::tr!("OK"));
     dialog.set_default_response(Some("ok"));
     dialog.set_close_response("ok");
-    dialog.present(Some(&window));
+    dialog.present(Some(&parent));
 }
 
 fn handle_game_stopped(state: &SharedState, db_id: i64) {

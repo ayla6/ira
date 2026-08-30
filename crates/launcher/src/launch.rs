@@ -75,6 +75,7 @@ pub fn launch_game(
             game_dir.as_deref(),
             &ctx.save_dir,
             ctx.game_id,
+            launch.pre_launch_wait.unwrap_or(true),
         )?;
     }
 
@@ -282,6 +283,8 @@ pub fn launch_game(
         running_games: ctx.running_games.clone(),
         env: env.clone(),
         command: command.clone(),
+        post_exit: launch.post_exit.clone(),
+        working_dir: game_dir.clone(),
     };
     std::thread::spawn(move || {
         super::wrapper::monitor_process(child, child_pid, mc);
@@ -297,6 +300,7 @@ fn run_pre_launch(
     cwd: Option<&str>,
     save_dir: &str,
     game_id: i64,
+    wait: bool,
 ) -> Result<(), String> {
     let log_path = super::wrapper::game_log_path(save_dir, game_id);
     let mut child = std::process::Command::new("sh");
@@ -309,13 +313,39 @@ fn run_pre_launch(
             eprintln!("Failed to create log directory {}: {}", parent.display(), e);
         }
     }
-    match child.output() {
-        Ok(out) => {
-            if let Ok(mut f) = std::fs::File::create(&log_path) {
-                use std::io::Write;
-                let _ = f.write_all(&out.stdout);
-                let _ = f.write_all(&out.stderr);
+    use std::process::Stdio;
+    child.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let spawned = child
+        .spawn()
+        .map_err(|e| {
+            format!(
+                "Failed to run pre-launch command {cmd:?} with cwd {:?}: {} (kind={:?}, raw_os_error={:?})",
+                cwd,
+                e,
+                e.kind(),
+                e.raw_os_error()
+            )
+        })?;
+    if !wait {
+        // Fire-and-forget: a waiter thread reaps the child and records its
+        // output, so a long-running script doesn't delay the game launch.
+        std::thread::spawn(move || match spawned.wait_with_output() {
+            Ok(out) => {
+                write_pre_launch_log(&log_path, &out);
+                if !out.status.success() {
+                    eprintln!(
+                        "Pre-launch command failed (exit code {:?})",
+                        out.status.code()
+                    );
+                }
             }
+            Err(e) => eprintln!("Failed to read pre-launch command status: {e}"),
+        });
+        return Ok(());
+    }
+    match spawned.wait_with_output() {
+        Ok(out) => {
+            write_pre_launch_log(&log_path, &out);
             if out.status.success() {
                 return Ok(());
             }
@@ -345,5 +375,13 @@ fn run_pre_launch(
             e.kind(),
             e.raw_os_error()
         )),
+    }
+}
+
+fn write_pre_launch_log(log_path: &str, out: &std::process::Output) {
+    if let Ok(mut f) = std::fs::File::create(log_path) {
+        use std::io::Write;
+        let _ = f.write_all(&out.stdout);
+        let _ = f.write_all(&out.stderr);
     }
 }

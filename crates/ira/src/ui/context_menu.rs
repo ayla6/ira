@@ -6,7 +6,8 @@ use super::context_menu_actions::{
     setup_multi_toggle_hide_action, setup_new_collection_action,
     setup_open_game_folder_action, setup_open_gog_status_action, setup_open_images_action,
     setup_open_save_location_action, setup_open_steam_status_action, setup_open_wine_prefix_action,
-    setup_play_action, setup_play_history_action, setup_toggle_group_action,
+    setup_play_action, setup_play_history_action, setup_run_manual_script_action,
+    setup_toggle_group_action,
 };
 use super::state::SharedState;
 use crate::Game;
@@ -93,7 +94,7 @@ pub fn show_game_context_menu(
 
     let folders_menu = gio::Menu::new();
 
-    let (game_folder, game_file, wine_prefix) = {
+    let (game_folder, game_file, wine_prefix, manual_script) = {
         let s = state.borrow();
         let config = ira_db::get_game_config(&s.db, game.db_id).ok().flatten();
         let app_default = s.cfg.default_wine_config.clone();
@@ -149,6 +150,7 @@ pub fn show_game_context_menu(
             } else {
                 None
             },
+            launch.manual_script.clone(),
         )
     };
 
@@ -197,6 +199,13 @@ pub fn show_game_context_menu(
         build_collections_submenu(&groups, |g| game_groups.iter().any(|gg| gg.id == g.id));
     menu.append_submenu(Some(&crate::tr!("Collections")), &collections_menu);
 
+    if !manual_script.is_empty() {
+        menu.append(
+            Some(&crate::tr!("Run manual script")),
+            Some("game.run_manual_script"),
+        );
+    }
+
     let hide_label = if current_hidden {
         crate::tr!("Unhide game")
     } else {
@@ -221,6 +230,14 @@ pub fn show_game_context_menu(
     setup_controller_action(&actions, state.clone(), game.clone());
     setup_play_history_action(&actions, state.clone(), game.db_id, game.variant_id);
     setup_hide_action(&actions, state.clone(), game.db_id, current_hidden);
+    if !manual_script.is_empty() {
+        setup_run_manual_script_action(
+            &actions,
+            game.clone(),
+            manual_script,
+            game_folder.clone(),
+        );
+    }
     if is_deletable {
         setup_delete_game_action(&actions, state.clone(), game.clone());
     }

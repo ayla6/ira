@@ -121,6 +121,7 @@ fn spawn_emulator_open(
     ira_launcher::wrapper::spawn_detached(
         &cmd,
         &env,
+        None,
         0,
         format!("Started {} (no game)", console_id),
     )

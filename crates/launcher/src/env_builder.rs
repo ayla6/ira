@@ -300,6 +300,15 @@ pub fn apply_performance(
     if launch.gamemode.unwrap_or(false) && has_exec("gamemoderun") {
         extra_prefix.push("gamemoderun".to_string());
     }
+    if !launch.command_prefix.is_empty() {
+        match shlex::split(&launch.command_prefix) {
+            Some(words) => extra_prefix.extend(words),
+            None => eprintln!(
+                "launch: failed to parse command prefix {:?}; launching without it",
+                launch.command_prefix
+            ),
+        }
+    }
     let mangohud_enabled = launch.mangohud.unwrap_or(false) && has_exec("mangohud");
     if mangohud_enabled {
         env.retain(|(k, _)| k != "MANGOHUD");

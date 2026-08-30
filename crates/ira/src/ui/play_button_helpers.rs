@@ -184,6 +184,8 @@ fn spawn_and_monitor(
                 running_games: ctx.running_games.clone(),
                 env: env.to_vec(),
                 command: cmd.to_vec(),
+                post_exit: String::new(),
+                working_dir: None,
             };
             std::thread::spawn(move || {
                 ira_launcher::wrapper::monitor_process(child, pid, mc);
@@ -615,6 +617,7 @@ pub(super) fn launch_emulator_no_game(
     ira_launcher::wrapper::spawn_detached(
         &cmd,
         &env,
+        None,
         ctx.game_id,
         format!("Started {} (no game)", ctx.game_name),
     )

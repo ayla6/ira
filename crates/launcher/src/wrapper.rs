@@ -229,12 +229,13 @@ fn pipe_lines_to_log<R: Read + std::marker::Send + 'static>(pipe: Option<R>, log
 pub fn spawn_detached(
     command: &[String],
     env: &[(String, String)],
+    cwd: Option<&str>,
     log_key: i64,
     header: String,
 ) -> Result<(), String> {
     // No PDEATHSIG: these processes are called from short-lived helper
     // threads and must survive both the thread and Ira itself.
-    let mut child = spawn_game_with(command, env, None, false)?;
+    let mut child = spawn_game_with(command, env, cwd, false)?;
     clear_game_log(log_key);
     let log = get_game_log(log_key);
     log.lock().unwrap().push(header);
@@ -269,6 +270,8 @@ pub struct MonitorContext {
     pub running_games: Arc<Mutex<HashMap<i64, i32>>>,
     pub env: Vec<(String, String)>,
     pub command: Vec<String>,
+    pub post_exit: String,
+    pub working_dir: Option<String>,
 }
 
 pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
@@ -322,6 +325,10 @@ pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
     }
 
     reap_zombies(child_pid);
+
+    if !ctx.post_exit.is_empty() {
+        run_post_exit(&ctx.post_exit, ctx.working_dir.as_deref(), &log_buf);
+    }
 
     let ended_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -381,6 +388,40 @@ fn reap_zombies(pgid: i32) {
         };
         if ret <= 0 {
             break;
+        }
+    }
+}
+
+/// Runs the game's post-exit script synchronously — the monitor thread blocks
+/// until it finishes, mirroring the pre-launch "wait" semantics. Output is
+/// appended to the in-memory game log next to the game's own output.
+fn run_post_exit(script: &str, working_dir: Option<&str>, log: &GameLog) {
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c").arg(script);
+    if let Some(dir) = working_dir {
+        cmd.current_dir(dir);
+    }
+    match cmd.output() {
+        Ok(out) => {
+            let mut lines = vec![format!(
+                "Post-exit script exited with status {}",
+                out.status
+            )];
+            for stream in [&out.stdout, &out.stderr] {
+                for line in String::from_utf8_lossy(stream).lines() {
+                    lines.push(format!("Post-exit: {line}"));
+                }
+            }
+            log.lock().unwrap().extend(lines);
+            if !out.status.success() {
+                eprintln!("Post-exit script failed with status {}", out.status);
+            }
+        }
+        Err(error) => {
+            eprintln!("Failed to run post-exit script: {error}");
+            log.lock()
+                .unwrap()
+                .push(format!("Failed to run post-exit script: {error}"));
         }
     }
 }

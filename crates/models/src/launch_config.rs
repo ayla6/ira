@@ -21,6 +21,21 @@ pub struct GameLaunchConfig {
     pub ld_library_path: String,
     #[serde(default)]
     pub pre_launch: String,
+    /// Shell words prepended to the game's execution command (Lutris-style
+    /// "command prefix"). Applied inside the gamescope/gamemode wrappers.
+    #[serde(default)]
+    pub command_prefix: String,
+    /// Script executed from the game's context menu.
+    #[serde(default)]
+    pub manual_script: String,
+    /// Whether launching waits for the pre-launch script to exit. None keeps
+    /// the historical behavior (wait), so configs saved before this field
+    /// existed keep gating the launch on the script.
+    #[serde(default)]
+    pub pre_launch_wait: Option<bool>,
+    /// Script executed after the game process exits.
+    #[serde(default)]
+    pub post_exit: String,
     #[serde(default)]
     pub overlay_enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

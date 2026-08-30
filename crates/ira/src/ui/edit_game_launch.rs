@@ -10,6 +10,10 @@ pub(super) struct LaunchConfigWidgets {
     pub(super) args_entry: adw::EntryRow,
     pub(super) wd_entry: adw::EntryRow,
     pub(super) pre_launch_entry: adw::EntryRow,
+    pub(super) command_prefix_entry: adw::EntryRow,
+    pub(super) manual_script_entry: adw::EntryRow,
+    pub(super) pre_launch_wait_row: adw::SwitchRow,
+    pub(super) post_exit_entry: adw::EntryRow,
     pub(super) profile_row: Option<adw::ComboRow>,
 }
 
@@ -98,9 +102,86 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
     pre_launch_entry.set_title(&crate::tr!("Run before game"));
     pre_launch_entry.set_text(&params.launch.pre_launch);
     pre_launch_entry.set_tooltip_text(Some(&crate::tr!(
-        "Shell command to run before launching the game. If it fails, the game will not launch."
+        "Shell command to run before launching the game. When waiting is enabled, a failure aborts the launch."
     )));
     lc_group.add(&pre_launch_entry);
+
+    let pre_launch_wait_row = adw::SwitchRow::new();
+    pre_launch_wait_row.set_title(&crate::tr!("Wait for pre-launch script completion"));
+    pre_launch_wait_row.set_subtitle(&crate::tr!(
+        "Run the game only once the pre-launch script has exited"
+    ));
+    pre_launch_wait_row.set_active(params.launch.pre_launch_wait.unwrap_or(true));
+    pre_launch_wait_row.set_sensitive(!params.launch.pre_launch.is_empty());
+    lc_group.add(&pre_launch_wait_row);
+    {
+        let wait_row = pre_launch_wait_row.clone();
+        pre_launch_entry.connect_changed(move |entry| {
+            wait_row.set_sensitive(!entry.text().is_empty());
+        });
+    }
+
+    let post_exit_entry = adw::EntryRow::new();
+    post_exit_entry.set_title(&crate::tr!("Post-exit script"));
+    post_exit_entry.set_text(&params.launch.post_exit);
+    post_exit_entry.set_tooltip_text(Some(&crate::tr!(
+        "Shell command to run when the game exits."
+    )));
+    let post_exit_browse = helpers::make_browse_button(
+        Some(params.win),
+        &crate::tr!("Select post-exit script"),
+        false,
+        Some((
+            &crate::tr!("Scripts"),
+            &["application/x-executable", "application/x-shellscript"],
+        )),
+        helpers::entry_path_closure(&post_exit_entry),
+        {
+            let entry = glib::clone::Downgrade::downgrade(&post_exit_entry);
+            move |path| {
+                if let Some(entry) = entry.upgrade() {
+                    entry.set_text(&path.to_string_lossy());
+                }
+            }
+        },
+    );
+    post_exit_entry.add_suffix(&post_exit_browse);
+    lc_group.add(&post_exit_entry);
+
+    let command_prefix_entry = adw::EntryRow::new();
+    command_prefix_entry.set_title(&crate::tr!("Command prefix"));
+    command_prefix_entry.set_text(&params.launch.command_prefix);
+    command_prefix_entry.set_tooltip_text(Some(&crate::tr!(
+        "Command line instructions to add in front of the game's execution command."
+    )));
+    lc_group.add(&command_prefix_entry);
+
+    let manual_script_entry = adw::EntryRow::new();
+    manual_script_entry.set_title(&crate::tr!("Manual script"));
+    manual_script_entry.set_text(&params.launch.manual_script);
+    manual_script_entry.set_tooltip_text(Some(&crate::tr!(
+        "Script to execute from the game's context menu."
+    )));
+    let manual_browse = helpers::make_browse_button(
+        Some(params.win),
+        &crate::tr!("Select manual script"),
+        false,
+        Some((
+            &crate::tr!("Scripts"),
+            &["application/x-executable", "application/x-shellscript"],
+        )),
+        helpers::entry_path_closure(&manual_script_entry),
+        {
+            let entry = glib::clone::Downgrade::downgrade(&manual_script_entry);
+            move |path| {
+                if let Some(entry) = entry.upgrade() {
+                    entry.set_text(&path.to_string_lossy());
+                }
+            }
+        },
+    );
+    manual_script_entry.add_suffix(&manual_browse);
+    lc_group.add(&manual_script_entry);
 
     page.append(&lc_group);
 
@@ -120,6 +201,10 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
         args_entry,
         wd_entry,
         pre_launch_entry,
+        command_prefix_entry,
+        manual_script_entry,
+        pre_launch_wait_row,
+        post_exit_entry,
         profile_row,
     })
 }

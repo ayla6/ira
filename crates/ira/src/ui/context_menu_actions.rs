@@ -148,6 +148,31 @@ pub(super) fn setup_delete_game_action(
     actions.add_action(&delete_game_action);
 }
 
+pub(super) fn setup_run_manual_script_action(
+    actions: &gio::SimpleActionGroup,
+    game: Game,
+    script: String,
+    working_dir: Option<String>,
+) {
+    let run_manual_script = gio::SimpleAction::new("run_manual_script", None);
+    run_manual_script.connect_activate(move |_, _| {
+        // The script runs outside any launcher wrapper, so it gets the app's
+        // own environment; spawn_detached logs its output into the game log.
+        let env: Vec<(String, String)> = std::env::vars().collect();
+        let header = format!("Started manual script for {}", game.name);
+        if let Err(e) = ira_launcher::wrapper::spawn_detached(
+            &["sh".to_string(), "-c".to_string(), script.clone()],
+            &env,
+            working_dir.as_deref(),
+            game.db_id,
+            header,
+        ) {
+            eprintln!("Failed to run manual script: {}", e);
+        }
+    });
+    actions.add_action(&run_manual_script);
+}
+
 pub(super) fn setup_open_game_folder_action(
     actions: &gio::SimpleActionGroup,
     game_file: Option<String>,

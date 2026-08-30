@@ -92,6 +92,7 @@ pub fn build_ui(
         restoring: false,
         running_games: Arc::new(Mutex::new(HashMap::new())),
         grid_store: gio::ListStore::new::<crate::ui::game_item::GameItem>(),
+        grid: glib::WeakRef::new(),
         sidebar_rebuild_pending: false,
         view_generation: 0,
         settings_data: None,

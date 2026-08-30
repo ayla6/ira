@@ -392,7 +392,7 @@ fn build_grid_view(
     state: &SharedState,
     games: &[Game],
     cover_width: i32,
-    _cover_height: i32,
+    cover_height: i32,
     sort_mode: SortMode,
     header_box: &gtk4::Box,
     content_scroll: &gtk4::ScrolledWindow,
@@ -405,6 +405,11 @@ fn build_grid_view(
     state.borrow_mut().grid_store = store.clone();
 
     let grid = VirtualGrid::new(cover_width);
+    {
+        let s = state.borrow();
+        s.grid.set(Some(&grid));
+        s.grid_item_height.set(cover_height);
+    }
     let item_size = grid.item_size_cell();
     grid.set_factory(
         make_setup(state, item_size.clone()),
@@ -601,4 +606,18 @@ pub fn refresh_grid_store(state: &SharedState) {
     let store = state.borrow().grid_store.clone();
     let new_items: Vec<GameItem> = games.iter().map(GameItem::new).collect();
     store.splice(0, store.n_items(), &new_items);
+}
+
+/// Rebuilds the grid header (heading + recently played row) in place, for
+/// after store-only updates like removing or hiding a game.
+pub fn refresh_grid_header(state: &SharedState) {
+    let Some(grid) = state.borrow().grid.upgrade() else {
+        return;
+    };
+    let item_height = state.borrow().grid_item_height.get();
+    if item_height <= 0 {
+        return;
+    }
+    let header = build_grid_header(state, item_height);
+    grid.set_header(Some(&header));
 }

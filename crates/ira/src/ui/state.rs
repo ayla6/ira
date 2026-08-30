@@ -83,6 +83,7 @@ pub struct AppState {
     pub restoring: bool,
     pub running_games: Arc<Mutex<HashMap<i64, i32>>>,
     pub grid_store: gio::ListStore,
+    pub grid: glib::WeakRef<super::virtual_grid::VirtualGrid>,
     pub sidebar_rebuild_pending: bool,
     pub view_generation: u32,
     pub settings_data: Option<SettingsData>,

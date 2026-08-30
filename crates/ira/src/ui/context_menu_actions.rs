@@ -90,6 +90,7 @@ pub(super) fn setup_hide_action(
         }
         super::sidebar::rebuild_sidebar(&state);
         super::grid_view::refresh_grid_store(&state);
+        super::grid_view::refresh_grid_header(&state);
     });
     actions.add_action(&hide_action);
 }
@@ -139,6 +140,8 @@ pub(super) fn setup_delete_game_action(
                 drop(s);
                 super::sidebar::rebuild_sidebar(&sc);
             }
+            super::grid_view::refresh_grid_store(&sc);
+            super::grid_view::refresh_grid_header(&sc);
         });
         dialog.present(Some(&window));
     });

@@ -22,6 +22,14 @@ fn base_application_id(id: &str) -> Option<String> {
     Some(format!("{value:016x}"))
 }
 
+/// True when the id is an update's (`base | 0x800`): it describes the same
+/// game as its base title and must never surface as a title of its own.
+pub(super) fn is_update_title_id(id: &str) -> bool {
+    u64::from_str_radix(id, 16)
+        .map(|value| value & 0x800 != 0)
+        .unwrap_or(false)
+}
+
 /// Finds a title id in a dump file name. Scene dumps bracket it
 /// (`Zelda [01007ef00011e000][v0]`); some tools lead with a bare id.
 pub fn title_id_from_filename(stem: &str) -> Option<String> {
@@ -237,6 +245,15 @@ mod tests {
     fn test_title_id_ignores_non_application_ids() {
         assert_eq!(title_id_from_filename("[1234567890abcdef] Game"), None);
         assert_eq!(title_id_from_filename("[0100] Game"), None);
+    }
+
+    #[test]
+    fn test_is_update_title_id_checks_low_bits() {
+        assert!(is_update_title_id("010051f0207b2800"));
+        assert!(!is_update_title_id("010051f0207b2000"));
+        // DLC ids (001–7ff) are not updates.
+        assert!(!is_update_title_id("010051f0207b2001"));
+        assert!(!is_update_title_id("garbage"));
     }
 
     /// Fixture NSP: PFS0 header, two entries whose names live in the string

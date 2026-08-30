@@ -3,10 +3,15 @@
 //!
 //! - yuzu-family (Eden, suyu, citron, sudachi, yuzu): Eden caches every
 //!   scanned title's native icon (`<title id>.jpeg`) and application name
-//!   (`<title id>.appname.txt`) under its `game_list` cache.
+//!   (`<title id>.appname.txt`) under its `game_list` cache, and it can
+//!   install titles to its NAND — its cache is also the installed-titles
+//!   source.
 //! - Ryujinx-family (Ryubing, Kenji-NX): `games/<title id>/gui/
 //!   metadata.json` holds each library title's display name; icons are
-//!   never cached on disk.
+//!   never cached on disk. The family cannot install titles, so its
+//!   library is enumerated from the ROM files in the folders its
+//!   `Config.json` points at — the metadata dirs themselves outlive
+//!   deleted files and would resurrect uninstalled titles.
 //!
 //! ROM files map onto these entries by file-name title id, NSP ticket
 //! names, or clean-name match; homebrew NROs carry icon and title inside
@@ -64,11 +69,13 @@ impl SwitchRomMeta {
 
 /// Title names and icons known to one emulator install, keyed by title id
 /// and by normalized title.
+#[derive(Clone)]
 pub struct TitleCache {
     by_id: HashMap<String, CacheEntry>,
     by_name: HashMap<String, String>,
 }
 
+#[derive(Clone)]
 struct CacheEntry {
     title: String,
     icon: Option<PathBuf>,
@@ -152,31 +159,37 @@ pub fn is_title_id(s: &str) -> bool {
     rom::is_title_id(s)
 }
 
-/// All native metadata caches on this machine, best source first:
-/// Ryujinx-family installs ahead of the yuzu-family, portable layouts
-/// ahead of XDG ones.
-pub struct SwitchCaches(Vec<TitleCache>);
+/// All native metadata caches on this machine: Ryujinx-family metadata
+/// dirs and yuzu-family game-list caches resolve ROM files' titles and
+/// icons; only the yuzu-family caches double as the installed-titles
+/// source, because that family alone can install titles to its NAND.
+pub struct SwitchCaches {
+    caches: Vec<TitleCache>,
+    installed: Vec<TitleCache>,
+}
 
 impl SwitchCaches {
     pub fn load(executable: &str) -> Self {
         let mut caches = ryujinx::title_caches(executable);
+        let mut installed = Vec::new();
         for dir in config::game_list_cache_dirs_for(executable) {
             let cache = TitleCache::from_game_list_dir(&dir);
             if !cache.is_empty() {
+                installed.push(cache.clone());
                 caches.push(cache);
             }
         }
-        SwitchCaches(caches)
+        SwitchCaches { caches, installed }
     }
 
     fn title_for(&self, title_id: &str) -> Option<&str> {
-        self.0
+        self.caches
             .iter()
             .find_map(|cache| cache.title_for(title_id).filter(|t| !t.is_empty()))
     }
 
     fn icon_for(&self, title_id: &str) -> SwitchIcon {
-        self.0
+        self.caches
             .iter()
             .find_map(|cache| match cache.icon_for(title_id) {
                 SwitchIcon::None => None,
@@ -186,15 +199,18 @@ impl SwitchCaches {
     }
 
     fn id_for_name(&self, name_key: &str) -> Option<&str> {
-        self.0.iter().find_map(|cache| cache.id_for_name(name_key))
+        self.caches.iter().find_map(|cache| cache.id_for_name(name_key))
     }
 }
 
-/// A title installed in an emulator's NAND or library rather than present
-/// as a ROM file: yuzu-family NAND installs surface through the game-list
-/// cache, Ryujinx-family library entries through their metadata dirs.
+/// A title of an emulator library rather than a ROM file in the user's
+/// own folders: yuzu-family NAND installs surface through the game-list
+/// cache, Ryujinx-family titles through the ROM files in the folders its
+/// config points at.
 pub struct SwitchInstalledGame {
-    /// 16 lowercase hex digits.
+    /// 16 lowercase hex digits, always a base application id: updates
+    /// (`…800`) describe the same game as their base title and never
+    /// become entries of their own.
     pub title_id: String,
     /// The emulator's application title; installed games always have one.
     pub title: String,
@@ -203,15 +219,18 @@ pub struct SwitchInstalledGame {
 }
 
 impl SwitchCaches {
-    /// Enumerates every installed title across all known installs,
-    /// deduplicated by title id with the Ryujinx family's metadata
-    /// winning, sorted by id so scans are reproducible.
+    /// Enumerates the yuzu family's NAND-installed titles: every cached
+    /// name, deduplicated by title id, update ids skipped, sorted so
+    /// scans are reproducible.
     fn installed_games(&self) -> Vec<SwitchInstalledGame> {
         let mut out: Vec<SwitchInstalledGame> = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for cache in &self.0 {
+        for cache in &self.installed {
             for (id, entry) in cache.by_id.iter() {
-                if entry.title.is_empty() || !seen.insert(id.clone()) {
+                if entry.title.is_empty()
+                    || rom::is_update_title_id(id)
+                    || !seen.insert(id.clone())
+                {
                     continue;
                 }
                 out.push(SwitchInstalledGame {
@@ -226,11 +245,23 @@ impl SwitchCaches {
     }
 }
 
-/// Enumerates the titles installed in every detected yuzu-family and
-/// Ryujinx-family install — both at once, no matter which emulator the
-/// user configured for launching ROM files.
+/// Enumerates the titles of every detected yuzu-family and Ryujinx-family
+/// install — both at once, no matter which emulator the user configured
+/// for launching ROM files.
 pub fn discover_installed_games(executable: &str) -> Vec<SwitchInstalledGame> {
-    SwitchCaches::load(executable).installed_games()
+    let caches = SwitchCaches::load(executable);
+    let mut games = caches.installed_games();
+    let mut seen: std::collections::HashSet<String> = games
+        .iter()
+        .map(|game| game.title_id.clone())
+        .collect();
+    for game in ryujinx::library_games(executable) {
+        if seen.insert(game.title_id.clone()) {
+            games.push(game);
+        }
+    }
+    games.sort_by(|a, b| a.title_id.cmp(&b.title_id));
+    games
 }
 
 /// Resolves a ROM file's native metadata: title id from the file name or
@@ -444,38 +475,62 @@ mod tests {
 
     #[test]
     fn test_installed_games_dedupes_by_title_id() {
-        let mut ryujinx = TitleCache::empty();
-        ryujinx.insert(
-            "0100000000010000",
-            "Super Mario Odyssey".to_string(),
-            None,
-        );
         let mut eden = TitleCache::empty();
-        // The same title known to both: the Ryujinx entry wins.
-        eden.insert("0100000000010000", "Older Name".to_string(), None);
         eden.insert(
             "01007ef00011e000",
             "The Legend of Zelda".to_string(),
             Some(PathBuf::from("/cache/01007EF00011E000.jpeg")),
         );
         // A title with no name (an unreadable metadata entry) is skipped.
-        eden.insert("0100000000010800", String::new(), None);
+        eden.insert("0100000000010000", String::new(), None);
+        // The same title cached twice dedupes to one entry.
+        let mut eden_portable = TitleCache::empty();
+        eden_portable.insert(
+            "01007ef00011e000",
+            "The Legend of Zelda".to_string(),
+            None,
+        );
 
-        let caches = SwitchCaches(vec![ryujinx, eden]);
+        let caches = SwitchCaches {
+            caches: vec![eden.clone(), eden_portable.clone()],
+            installed: vec![eden, eden_portable],
+        };
         let installed = caches.installed_games();
         assert_eq!(
             installed
                 .iter()
                 .map(|g| (g.title_id.as_str(), g.title.as_str()))
                 .collect::<Vec<_>>(),
-            vec![
-                ("0100000000010000", "Super Mario Odyssey"),
-                ("01007ef00011e000", "The Legend of Zelda"),
-            ]
+            vec![("01007ef00011e000", "The Legend of Zelda")]
         );
         assert_eq!(
-            installed[1].icon,
+            installed[0].icon,
             Some(PathBuf::from("/cache/01007EF00011E000.jpeg"))
+        );
+    }
+
+    #[test]
+    fn test_installed_games_skip_update_ids_and_ryujinx_dirs() {
+        let mut eden = TitleCache::empty();
+        // An update id cached on its own (its base title is gone) never
+        // becomes a game of its own.
+        eden.insert("010051f0207b2800", "Tomodachi Life".to_string(), None);
+        eden.insert("010051f0207b2000", "Real Base Title".to_string(), None);
+        // Ryujinx metadata dirs are a name source only.
+        let mut ryujinx = TitleCache::empty();
+        ryujinx.insert("0100000000010000", "Super Mario Odyssey".to_string(), None);
+
+        let caches = SwitchCaches {
+            caches: vec![ryujinx, eden.clone()],
+            installed: vec![eden],
+        };
+        assert_eq!(
+            caches
+                .installed_games()
+                .iter()
+                .map(|g| g.title_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["010051f0207b2000"]
         );
     }
 

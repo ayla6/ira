@@ -471,16 +471,8 @@ fn handle_variants_changed(state: &SharedState, db_id: i64) {
                 s.games[idx] = merged;
             }
             s.games.extend(variant_entries);
-            let sort_mode = s.cfg.sort_mode;
-            let sort_descending = s.cfg.sort_descending;
-            s.games.sort_by(|a, b| {
-                let ord = sort_mode.compare(a, b);
-                if sort_descending {
-                    ord.reverse()
-                } else {
-                    ord
-                }
-            });
+            let cfg = s.cfg.clone();
+            super::message_helpers::sort_games(&mut s.games, &cfg);
         }
     }
     rebuild_sidebar(state);

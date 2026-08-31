@@ -572,9 +572,12 @@ pub fn update_loading_view(state: &SharedState, status: &str, completed: usize, 
         w.status.set_label(status);
         w.progress.set_fraction(progress_fraction(completed, total));
         w.counter.set_label(&progress_text(completed, total));
-    } else {
+    } else if state.borrow().games.is_empty() {
         show_loading_view(state, status, completed, total);
     }
+    // else: a library view is already up (a game landed in it mid-load).
+    // Rebuilding the loading screen over it would hide the user's games
+    // again; this load's GamesLoaded message brings the final grid.
 }
 
 fn show_empty_search_view(content_scroll: &gtk4::ScrolledWindow) {

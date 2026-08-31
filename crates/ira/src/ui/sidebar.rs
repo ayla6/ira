@@ -327,9 +327,12 @@ fn restore_selection(state: &SharedState) {
 
 pub fn rebuild_sidebar_and_show_grid(state: &SharedState) {
     rebuild_sidebar(state);
+    // While the initial load is still in flight (loading screen up) the grid
+    // must wait for its GamesLoaded message: showing it now would present a
+    // nearly-empty library and let stale progress messages fight the view.
     let show = {
         let s = state.borrow();
-        s.selected_id.is_empty() && !s.content_unloaded
+        s.selected_id.is_empty() && !s.content_unloaded && s.loading.is_none()
     };
     if show {
         show_grid_view(state);

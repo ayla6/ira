@@ -8,7 +8,21 @@ use super::sidebar::{
 };
 use super::state::SharedState;
 use crate::Game;
+use ira_config::Config;
 use std::collections::{HashMap, HashSet};
+
+/// Order the library list by the user's sort settings.
+pub(super) fn sort_games(games: &mut [Game], cfg: &Config) {
+    games.sort_by(|a, b| {
+        let ord = cfg.sort_mode.compare(a, b);
+        if cfg.sort_descending {
+            ord.reverse()
+        } else {
+            ord
+        }
+    });
+}
+
 pub(super) fn refresh_steam_playtimes_for(state: &SharedState, db_ids: &[i64]) {
     let id_set: HashSet<i64> = db_ids.iter().copied().collect();
     let app_ids: Vec<(i64, String)> = {
@@ -108,6 +122,18 @@ fn refresh_selected_game_if(state: &SharedState, is_selected: impl FnOnce(&str) 
 pub(super) fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
     {
         let mut s = state.borrow_mut();
+        // The snapshot was read before some publishes landed in the UI: a
+        // game added while the load was building (auto-add wizard) may be
+        // absent from it. Keep anything the snapshot does not know about
+        // instead of silently dropping it from the library.
+        let mut games = games;
+        let loaded_ids: Vec<String> = games.iter().map(Game::grid_id).collect();
+        for existing in std::mem::take(&mut s.games) {
+            if !loaded_ids.iter().any(|id| *id == existing.grid_id()) {
+                games.push(existing);
+            }
+        }
+        sort_games(&mut games, &s.cfg);
         s.games = games;
 
         let db = s.db.clone();
@@ -553,17 +579,9 @@ pub(super) fn insert_or_update_game(state: &SharedState, game: Game) {
             (s.games[i].db_id, true)
         } else {
             let db_id = game.db_id;
+            let cfg = s.cfg.clone();
             s.games.push(game);
-            let sort_mode = s.cfg.sort_mode;
-            let sort_descending = s.cfg.sort_descending;
-            s.games.sort_by(|a, b| {
-                let ord = sort_mode.compare(a, b);
-                if sort_descending {
-                    ord.reverse()
-                } else {
-                    ord
-                }
-            });
+            sort_games(&mut s.games, &cfg);
             (db_id, false)
         }
     };

@@ -1,7 +1,6 @@
 use super::css::*;
 use super::helpers::settings_window_layout;
 use super::input_profile_settings::{ConsoleProfileWidgets, ControllerDefaultWidgets};
-use super::input_profile_store::ensure_controller_default_profile;
 use super::settings_dialog_console::{
     apply_console_settings, apply_emulator_settings, apply_override_states,
     discovery_settings_changed, register_console_pages, SharedConsoleSettingsWidgets,
@@ -356,28 +355,16 @@ fn apply_controller_defaults(
 ) {
     let mut controller_defaults = cfg.controller_defaults.clone();
     for widget in widgets.borrow().iter() {
-        let mut profile = widget
+        let profile = widget
             .profile_path
             .borrow()
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_default();
-        // The combo picks a default layout flavor; the backend lives in that
-        // layout, so only enabled/disabled is stored per device.
-        let flavor = super::input_profile_settings::backend_for_selection(widget.mode.selected());
-        let enabled = flavor.is_some();
-        if let Some(backend) = flavor.filter(|_| profile.is_empty()) {
-            match ensure_controller_default_profile(
-                &cfg.save_dir,
-                &widget.key,
-                &widget.device_name,
-                &widget.supported_buttons,
-                backend,
-            ) {
-                Ok(path) => profile = path.to_string_lossy().into_owned(),
-                Err(error) => eprintln!("Failed to create controller mapping: {error}"),
-            }
-        }
+        // The combo picks the default layout; the virtual controller type
+        // comes from that layout, so only enabled/disabled is stored per
+        // device.
+        let enabled = widget.layout.selected() != 0;
         let mode = if enabled {
             ira_models::ControllerInputMode::Enabled
         } else {

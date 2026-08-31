@@ -1,4 +1,4 @@
-use ira_input::{GamepadButton, InputProfile, InputSource, VirtualGamepadBackend};
+use ira_input::{GamepadButton, InputProfile, InputSource};
 use std::path::{Path, PathBuf};
 
 pub(super) const PROFILE_DIRECTORY: &str = "controller_profiles";
@@ -20,38 +20,19 @@ pub(super) fn controller_default_path(save_dir: &str, key: &str) -> PathBuf {
         .join(format!("{key}.json"))
 }
 
-pub(super) fn controller_default_path_for_backend(
-    save_dir: &str,
-    key: &str,
-    backend: VirtualGamepadBackend,
-) -> PathBuf {
-    match backend {
-        VirtualGamepadBackend::XInput => controller_default_path(save_dir, key),
-        VirtualGamepadBackend::DirectInput => Path::new(save_dir)
-            .join(CONTROLLER_DEFAULT_DIRECTORY)
-            .join(format!("{key}-directinput.json")),
-        VirtualGamepadBackend::SwitchPro => Path::new(save_dir)
-            .join(CONTROLLER_DEFAULT_DIRECTORY)
-            .join(format!("{key}-switch-pro.json")),
-        VirtualGamepadBackend::DualShock4 => Path::new(save_dir)
-            .join(CONTROLLER_DEFAULT_DIRECTORY)
-            .join(format!("{key}-dualshock4.json")),
-        VirtualGamepadBackend::DualSense => Path::new(save_dir)
-            .join(CONTROLLER_DEFAULT_DIRECTORY)
-            .join(format!("{key}-dualsense.json")),
-        VirtualGamepadBackend::Dsu => Path::new(save_dir)
-            .join(CONTROLLER_DEFAULT_DIRECTORY)
-            .join(format!("{key}-dsu.json")),
-    }
-}
+/// Default layouts written while the virtual backend was still chosen on the
+/// device instead of on the layout. Kept so existing files keep resolving;
+/// new defaults are a single file per device whose layout owns the backend.
+const LEGACY_DEFAULT_SUFFIXES: [&str; 5] =
+    ["-directinput", "-switch-pro", "-dualshock4", "-dualsense", "-dsu"];
 
-/// First default layout that already exists for this device, any flavor.
-/// Used when a stored path is missing and the mode no longer names a backend.
+/// First default layout that already exists for this device, legacy
+/// backend-keyed files included. Used when the stored path is missing.
 pub(super) fn find_controller_default_profile(save_dir: &str, key: &str) -> Option<PathBuf> {
-    use VirtualGamepadBackend::*;
-    [XInput, DirectInput, SwitchPro, DualShock4, DualSense, Dsu]
-        .into_iter()
-        .map(|backend| controller_default_path_for_backend(save_dir, key, backend))
+    let directory = Path::new(save_dir).join(CONTROLLER_DEFAULT_DIRECTORY);
+    std::iter::once(String::new())
+        .chain(LEGACY_DEFAULT_SUFFIXES.iter().map(|suffix| suffix.to_string()))
+        .map(|suffix| directory.join(format!("{key}{suffix}.json")))
         .find(|path| path.is_file())
 }
 
@@ -60,12 +41,10 @@ pub(super) fn ensure_controller_default_profile(
     key: &str,
     name: &str,
     supported_buttons: &[GamepadButton],
-    backend: VirtualGamepadBackend,
 ) -> Result<PathBuf, String> {
-    let path = controller_default_path_for_backend(save_dir, key, backend);
+    let path = controller_default_path(save_dir, key);
     if !path.is_file() {
-        let mut profile =
-            InputProfile::default_gamepad_for_backend_and_buttons(backend, supported_buttons);
+        let mut profile = InputProfile::default_gamepad_for_buttons(supported_buttons);
         profile.name = name.to_string();
         write_profile(&path, &profile)?;
     } else {
@@ -222,12 +201,12 @@ fn profile_slug(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        add_game_compatibility, ensure_controller_default_profile, managed_profile_path,
-        new_managed_profile_path, profile_matches_game,
+        add_game_compatibility, ensure_controller_default_profile, find_controller_default_profile,
+        managed_profile_path, new_managed_profile_path, profile_matches_game,
     };
     use ira_input::{
         ActionSet, ControllerCalibration, GamepadButton, InputMapping, InputProfile, InputSource,
-        OutputAction, VirtualGamepadBackend,
+        OutputAction,
     };
 
     #[test]
@@ -311,7 +290,6 @@ mod tests {
                 GamepadButton::Paddle3,
                 GamepadButton::Paddle4,
             ],
-            VirtualGamepadBackend::XInput,
         )
         .unwrap();
 
@@ -364,7 +342,6 @@ mod tests {
             "pad",
             "Pad",
             &[GamepadButton::A],
-            VirtualGamepadBackend::XInput,
         )
         .unwrap();
 
@@ -396,17 +373,31 @@ mod tests {
             },
         )
         .unwrap();
-        ensure_controller_default_profile(
-            tmp.path().to_str().unwrap(),
-            "pad",
-            "Pad",
-            &[],
-            VirtualGamepadBackend::XInput,
-        )
-        .unwrap();
+        ensure_controller_default_profile(tmp.path().to_str().unwrap(), "pad", "Pad", &[]).unwrap();
         assert_eq!(
             super::read_profile(&path).unwrap().controller_calibration,
             calibration
         );
+    }
+
+    #[test]
+    fn test_find_controller_default_profile_falls_back_to_legacy_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().to_str().unwrap();
+        // Nothing on disk yet.
+        assert_eq!(find_controller_default_profile(save_dir, "pad"), None);
+        // A legacy backend-keyed default still resolves.
+        let legacy = super::Path::new(save_dir)
+            .join(super::CONTROLLER_DEFAULT_DIRECTORY)
+            .join("pad-directinput.json");
+        super::write_profile(&legacy, &InputProfile::default()).unwrap();
+        assert_eq!(
+            find_controller_default_profile(save_dir, "pad"),
+            Some(legacy.clone())
+        );
+        // The plain per-device default wins once it exists.
+        let plain = super::controller_default_path(save_dir, "pad");
+        super::write_profile(&plain, &InputProfile::default()).unwrap();
+        assert_eq!(find_controller_default_profile(save_dir, "pad"), Some(plain));
     }
 }

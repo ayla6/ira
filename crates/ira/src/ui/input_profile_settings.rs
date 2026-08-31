@@ -1,8 +1,8 @@
 use super::helpers::{esc, icon_button};
 use super::input_profile_store::{
-    controller_default_path_for_backend, find_controller_default_profile,
+    controller_default_path, ensure_controller_default_profile, find_controller_default_profile,
+    list_profiles, read_profile, StoredProfile,
 };
-use super::input_profile_store::{ensure_controller_default_profile, list_profiles, StoredProfile};
 use adw::prelude::*;
 use ira_config::{Config, ControllerInputConfig};
 use ira_models::ControllerInputMode;
@@ -59,9 +59,7 @@ pub(super) fn add_pc_profile_group(
 #[derive(Clone)]
 pub(super) struct ControllerDefaultWidgets {
     pub key: String,
-    pub device_name: String,
-    pub supported_buttons: Vec<ira_input::GamepadButton>,
-    pub mode: adw::ComboRow,
+    pub layout: adw::ComboRow,
     pub profile_path: Rc<RefCell<Option<std::path::PathBuf>>>,
     row: adw::ExpanderRow,
 }
@@ -318,15 +316,20 @@ fn add_console_remapping_rows(
     }
 }
 
-fn console_profile_choices(
+/// Entries for a "choose a layout" combo, shared by the console and
+/// controller-default pickers: the none-style choice first, then every
+/// layout not scoped to a specific game, then the create-new sentinel.
+/// The selected layout owns the virtual backend; these rows never pick it.
+fn layout_choices(
     save_dir: &str,
     current_path: Option<std::path::PathBuf>,
+    none_label: &str,
 ) -> (Vec<String>, Vec<Option<std::path::PathBuf>>, u32) {
     let profiles = list_profiles(save_dir).unwrap_or_else(|error| {
         eprintln!("Failed to list controller profiles: {error}");
         Vec::new()
     });
-    let mut labels = vec![crate::tr!("Inherit")];
+    let mut labels = vec![none_label.to_string()];
     let mut paths = vec![None];
     for profile in profiles
         .into_iter()
@@ -346,6 +349,13 @@ fn console_profile_choices(
     labels.push(crate::tr!("Create new profile..."));
     paths.push(None);
     (labels, paths, selected as u32)
+}
+
+fn console_profile_choices(
+    save_dir: &str,
+    current_path: Option<std::path::PathBuf>,
+) -> (Vec<String>, Vec<Option<std::path::PathBuf>>, u32) {
+    layout_choices(save_dir, current_path, &crate::tr!("Inherit"))
 }
 
 fn selected_console_path(
@@ -401,7 +411,7 @@ fn rebuild_controller_rows(params: &ControllerRowsParams, devices: &[ira_input::
                 widget.key.clone(),
                 ControllerDefaultState {
                     config: ControllerInputConfig {
-                        mode: if widget.mode.selected() == 0 {
+                        mode: if widget.layout.selected() == 0 {
                             ControllerInputMode::Disabled
                         } else {
                             ControllerInputMode::Enabled
@@ -432,13 +442,7 @@ fn rebuild_controller_rows(params: &ControllerRowsParams, devices: &[ira_input::
         let default_path = configured
             .filter(|path| path.is_file())
             .or_else(|| find_controller_default_profile(&params.save_dir, &key))
-            .unwrap_or_else(|| {
-                controller_default_path_for_backend(
-                    &params.save_dir,
-                    &key,
-                    ira_input::VirtualGamepadBackend::XInput,
-                )
-            });
+            .unwrap_or_else(|| controller_default_path(&params.save_dir, &key));
         let default_state = ControllerDefaultState {
             config,
             profile_path: default_path.is_file().then_some(default_path),
@@ -485,44 +489,8 @@ fn add_controller_row(
 ) -> ControllerDefaultWidgets {
     let key = ira_config::Config::controller_key(device.vendor, device.product);
     let device_name = device.name.clone();
-    let supported_buttons = device.supported_buttons.clone();
     let expander = adw::ExpanderRow::new();
     expander.set_title(&esc(&device_name));
-    let initial_selection = stored_selection(state.config.mode, state.profile_path.as_deref());
-    let initial_flavor = backend_for_selection(initial_selection);
-    update_controller_subtitle(&expander, &device, initial_flavor);
-    let profile_path = Rc::new(RefCell::new(state.profile_path));
-    let mode_strings = [
-        crate::tr!("Disabled"),
-        crate::tr!("Virtual XInput"),
-        crate::tr!("Virtual DirectInput"),
-        crate::tr!("Nintendo Switch Pro Controller"),
-        crate::tr!("DualShock 4 Controller"),
-        crate::tr!("DualSense Controller"),
-    ];
-    let mode_refs: Vec<&str> = mode_strings.iter().map(String::as_str).collect();
-    let mode_model = gtk4::StringList::new(&mode_refs);
-    let mode = adw::ComboRow::new();
-    mode.set_title(&crate::tr!("Default layout"));
-    mode.set_model(Some(&mode_model));
-    mode.set_selected(initial_selection);
-    let expander_for_mode = expander.clone();
-    let device_for_mode = device.clone();
-    let profile_path_for_mode = profile_path.clone();
-    let save_dir_for_mode = save_dir.to_string();
-    let key_for_mode = key.clone();
-    mode.connect_selected_notify(move |row| {
-        let flavor = backend_for_selection(row.selected());
-        update_controller_subtitle(&expander_for_mode, &device_for_mode, flavor);
-        if let Some(backend) = flavor {
-            let path =
-                controller_default_path_for_backend(&save_dir_for_mode, &key_for_mode, backend);
-            *profile_path_for_mode.borrow_mut() = path.is_file().then_some(path);
-        }
-    });
-    let enabled = state.config.mode != ControllerInputMode::Disabled;
-    expander.set_expanded(enabled);
-    expander.add_row(&mode);
 
     let action_row = adw::ActionRow::new();
     action_row.set_title(&crate::tr!("Controller mapping"));
@@ -534,67 +502,194 @@ fn add_controller_row(
     action_row.add_suffix(&edit);
     expander.add_row(&action_row);
 
+    let layout = ControllerDefaultLayout::new(
+        &expander,
+        parent,
+        save_dir,
+        &device,
+        &state,
+        registry.clone(),
+    );
+    let enabled = state.config.mode != ControllerInputMode::Disabled;
+    expander.set_expanded(enabled);
+    edit.set_sensitive(layout.row.selected() != 0);
+    let layout_for_edit = layout.clone();
+    edit.connect_clicked(move |_| {
+        let Some(path) = layout_for_edit.chosen.borrow().clone() else {
+            return;
+        };
+        layout_for_edit.open_editor(path);
+    });
+
     // Calibration is per controller: deadzone preference and gyro bias for
     // this pad, stored outside any profile.
     super::input_calibration_settings::add_controller_calibration(
         &expander,
         &ira_input::calibration_store_path(save_dir),
         &device,
-        registry.clone(),
+        registry,
     );
 
-    let parent_for_edit = parent.clone();
-    let save_dir_for_edit = save_dir.to_string();
-    let profile_path_for_edit = profile_path.clone();
-    let key_for_edit = key.clone();
-    let device_name_for_edit = device_name.clone();
-    let supported_buttons_for_edit = supported_buttons.clone();
-    let device_for_edit = device;
-    let registry_for_edit = registry;
-    let mode_for_edit = mode.clone();
-    edit.connect_clicked(move |_| {
-        let Some(backend) = backend_for_selection(mode_for_edit.selected()) else {
-            return;
+    group.add(&expander);
+    ControllerDefaultWidgets {
+        key,
+        layout: layout.row.clone(),
+        profile_path: layout.chosen.clone(),
+        row: expander,
+    }
+}
+
+/// One controller-default expander's layout picker plus everything needed to
+/// create or edit the chosen layout. The picker lists layouts; which virtual
+/// controller a layout produces lives in the layout itself.
+#[derive(Clone)]
+struct ControllerDefaultLayout {
+    parent: gtk4::Widget,
+    save_dir: String,
+    device: ira_input::DeviceInfo,
+    registry: std::sync::Arc<ira_input::ControllerRegistry>,
+    row: adw::ComboRow,
+    expander: adw::ExpanderRow,
+    paths: Rc<RefCell<Vec<Option<std::path::PathBuf>>>>,
+    last_real: Rc<RefCell<u32>>,
+    /// The layout the device default points at. Kept while Disabled is
+    /// selected so re-enabling restores it.
+    chosen: Rc<RefCell<Option<std::path::PathBuf>>>,
+}
+
+impl ControllerDefaultLayout {
+    fn new(
+        expander: &adw::ExpanderRow,
+        parent: &gtk4::Widget,
+        save_dir: &str,
+        device: &ira_input::DeviceInfo,
+        state: &ControllerDefaultState,
+        registry: std::sync::Arc<ira_input::ControllerRegistry>,
+    ) -> Self {
+        let enabled = state.config.mode != ControllerInputMode::Disabled;
+        let current = enabled.then(|| state.profile_path.clone()).flatten();
+        let (labels, paths, selected) =
+            layout_choices(save_dir, current, &crate::tr!("Disabled"));
+        let row = adw::ComboRow::new();
+        row.set_title(&crate::tr!("Default layout"));
+        row.set_model(Some(&gtk4::StringList::new(
+            &labels.iter().map(String::as_str).collect::<Vec<_>>(),
+        )));
+        row.set_selected(selected);
+        expander.add_row(&row);
+        let layout = Self {
+            parent: parent.clone(),
+            save_dir: save_dir.to_string(),
+            device: device.clone(),
+            registry,
+            row,
+            expander: expander.clone(),
+            paths: Rc::new(RefCell::new(paths)),
+            last_real: Rc::new(RefCell::new(selected)),
+            chosen: Rc::new(RefCell::new(state.profile_path.clone())),
         };
-        let path = match ensure_controller_default_profile(
-            &save_dir_for_edit,
-            &key_for_edit,
-            &device_name_for_edit,
-            &supported_buttons_for_edit,
-            backend,
-        ) {
-            Ok(path) => {
-                *profile_path_for_edit.borrow_mut() = Some(path.clone());
-                path
+        layout.update_subtitle();
+        layout.connect_selection_changed();
+        layout
+    }
+
+    fn selected_path(&self) -> Option<std::path::PathBuf> {
+        self.paths
+            .borrow()
+            .get(self.row.selected() as usize)
+            .cloned()
+            .flatten()
+    }
+
+    /// Virtual backend of the selected layout; `None` for the Disabled
+    /// entry. The backend is read from the layout file, never from the row.
+    fn selected_backend(&self) -> Option<ira_input::VirtualGamepadBackend> {
+        let path = self.selected_path()?;
+        read_profile(&path).ok().map(|profile| profile.backend)
+    }
+
+    fn update_subtitle(&self) {
+        update_controller_subtitle(&self.expander, &self.device, self.selected_backend());
+    }
+
+    fn connect_selection_changed(&self) {
+        let layout = self.clone();
+        self.row.connect_selected_notify(move |row| {
+            let sentinel = layout.paths.borrow().len().saturating_sub(1) as u32;
+            if row.selected() == sentinel {
+                // The create-new entry is not a layout: snap back and open
+                // the editor on the device's default layout instead.
+                let layout = layout.clone();
+                let previous = *layout.last_real.borrow();
+                glib::idle_add_local(move || {
+                    layout.row.set_selected(previous);
+                    layout.create_and_open_editor();
+                    glib::ControlFlow::Break
+                });
+                return;
             }
+            *layout.last_real.borrow_mut() = row.selected();
+            if row.selected() != 0 {
+                *layout.chosen.borrow_mut() = layout.selected_path();
+            }
+            layout.update_subtitle();
+        });
+    }
+
+    /// Create the device's default layout if it does not exist yet, then
+    /// open it in the editor.
+    fn create_and_open_editor(&self) {
+        let key = ira_config::Config::controller_key(self.device.vendor, self.device.product);
+        let path = match ensure_controller_default_profile(
+            &self.save_dir,
+            &key,
+            &self.device.name,
+            &self.device.supported_buttons,
+        ) {
+            Ok(path) => path,
             Err(error) => {
                 eprintln!("Failed to create controller mapping: {error}");
                 return;
             }
         };
+        self.open_editor(path);
+    }
+
+    fn open_editor(&self, profile_path: std::path::PathBuf) {
+        let layout = self.clone();
         super::input_profile_editor::show_input_profile_editor(
-            &parent_for_edit,
+            &self.parent,
             super::input_profile_editor::InputProfileEditorParams {
-                save_dir: save_dir_for_edit.clone(),
-                profile_path: Some(path),
+                save_dir: self.save_dir.clone(),
+                profile_path: Some(profile_path),
                 game_id: None,
                 platform_id: None,
-                layout_name: Some(device_name_for_edit.clone()),
-                registry: registry_for_edit.clone(),
-                device: Some(device_for_edit.clone()),
+                layout_name: Some(self.device.name.clone()),
+                registry: self.registry.clone(),
+                device: Some(self.device.clone()),
             },
-            |_| {},
+            move |saved| layout.refresh(Some(&saved)),
         );
-    });
+    }
 
-    group.add(&expander);
-    ControllerDefaultWidgets {
-        key,
-        device_name,
-        supported_buttons,
-        mode,
-        profile_path,
-        row: expander,
+    /// Reload the picker after a layout was created or saved, keeping the
+    /// saved file selected and the subtitle in step with its backend.
+    fn refresh(&self, selected_path: Option<&std::path::Path>) {
+        let (labels, paths, selected) = layout_choices(
+            &self.save_dir,
+            selected_path.map(std::path::Path::to_path_buf),
+            &crate::tr!("Disabled"),
+        );
+        *self.paths.borrow_mut() = paths;
+        self.row.set_model(Some(&gtk4::StringList::new(
+            &labels.iter().map(String::as_str).collect::<Vec<_>>(),
+        )));
+        self.row.set_selected(selected);
+        *self.last_real.borrow_mut() = selected;
+        if selected != 0 {
+            *self.chosen.borrow_mut() = selected_path.map(std::path::Path::to_path_buf);
+        }
+        self.update_subtitle();
     }
 }
 
@@ -661,45 +756,6 @@ fn start_controller_registry_refresh(
         }
         glib::ControlFlow::Continue
     });
-}
-
-/// Combo index for an enabled default: derived from the flavor recorded in
-/// the layout itself, since backends live on profiles now.
-fn stored_selection(mode: ControllerInputMode, profile_path: Option<&std::path::Path>) -> u32 {
-    if mode == ControllerInputMode::Disabled {
-        return 0;
-    }
-    let backend = profile_path
-        .and_then(|path| super::input_profile_store::read_profile(path).ok())
-        .map(|profile| profile.backend)
-        .unwrap_or(ira_input::VirtualGamepadBackend::XInput);
-    selection_for_backend(backend)
-}
-
-fn selection_for_backend(backend: ira_input::VirtualGamepadBackend) -> u32 {
-    use ira_input::VirtualGamepadBackend;
-    match backend {
-        VirtualGamepadBackend::DirectInput => 2,
-        VirtualGamepadBackend::SwitchPro => 3,
-        VirtualGamepadBackend::DualShock4 => 4,
-        VirtualGamepadBackend::DualSense => 5,
-        VirtualGamepadBackend::Dsu => 6,
-        VirtualGamepadBackend::XInput => 1,
-    }
-}
-
-/// `None` means the "Disabled" entry.
-pub(super) fn backend_for_selection(selection: u32) -> Option<ira_input::VirtualGamepadBackend> {
-    use ira_input::VirtualGamepadBackend;
-    match selection {
-        1 => Some(VirtualGamepadBackend::XInput),
-        2 => Some(VirtualGamepadBackend::DirectInput),
-        3 => Some(VirtualGamepadBackend::SwitchPro),
-        4 => Some(VirtualGamepadBackend::DualShock4),
-        5 => Some(VirtualGamepadBackend::DualSense),
-        6 => Some(VirtualGamepadBackend::Dsu),
-        _ => None,
-    }
 }
 
 fn rebuild_profile_rows(
@@ -923,38 +979,10 @@ fn profile_label(stored: &StoredProfile) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        backend_for_selection, input_mode_from_index, input_mode_index, selection_for_backend,
-        stored_selection,
-    };
-    use ira_input::VirtualGamepadBackend;
+    use super::{input_mode_from_index, input_mode_index, layout_choices};
+    use crate::ui::input_profile_store::{managed_profile_path, write_profile};
+    use ira_input::InputProfile;
     use ira_models::ControllerInputMode;
-
-    #[test]
-    fn test_backend_for_selection_round_trip() {
-        for backend in [
-            VirtualGamepadBackend::XInput,
-            VirtualGamepadBackend::DirectInput,
-            VirtualGamepadBackend::SwitchPro,
-            VirtualGamepadBackend::DualShock4,
-            VirtualGamepadBackend::DualSense,
-            VirtualGamepadBackend::Dsu,
-        ] {
-            assert_eq!(
-                backend_for_selection(selection_for_backend(backend)),
-                Some(backend)
-            );
-        }
-        assert_eq!(backend_for_selection(0), None);
-        assert_eq!(backend_for_selection(99), None);
-    }
-
-    #[test]
-    fn test_stored_selection_disabled_is_zero_and_enabled_falls_back_to_xinput() {
-        assert_eq!(stored_selection(ControllerInputMode::Disabled, None), 0);
-        // An enabled default without a readable layout assumes XInput.
-        assert_eq!(stored_selection(ControllerInputMode::Enabled, None), 1);
-    }
 
     #[test]
     fn test_input_mode_from_index_preserves_inheritance() {
@@ -984,5 +1012,77 @@ mod tests {
         for index in [3u32, 4, 5, 6, 99] {
             assert_eq!(input_mode_from_index(index), None);
         }
+    }
+
+    #[test]
+    fn test_layout_choices_empty_store_has_none_and_sentinel_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (labels, paths, selected) =
+            layout_choices(tmp.path().to_str().unwrap(), None, "Disabled");
+        assert_eq!(labels, vec!["Disabled", "Create new profile..."]);
+        assert_eq!(paths, vec![None, None]);
+        assert_eq!(selected, 0);
+    }
+
+    #[test]
+    fn test_layout_choices_lists_unscoped_hides_game_scoped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().to_str().unwrap();
+        write_profile(
+            &managed_profile_path(save_dir, "Global"),
+            &InputProfile {
+                name: "Global".to_string(),
+                ..InputProfile::default()
+            },
+        )
+        .unwrap();
+        write_profile(
+            &managed_profile_path(save_dir, "Game only"),
+            &InputProfile {
+                name: "Game only".to_string(),
+                compatible_game_ids: vec![7],
+                ..InputProfile::default()
+            },
+        )
+        .unwrap();
+        let (labels, paths, selected) = layout_choices(save_dir, None, "Disabled");
+        assert_eq!(labels, vec!["Disabled", "Global", "Create new profile..."]);
+        assert!(paths[1].is_some());
+        assert_eq!(selected, 0);
+    }
+
+    #[test]
+    fn test_layout_choices_selects_the_current_layout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().to_str().unwrap();
+        let path = managed_profile_path(save_dir, "Global");
+        write_profile(
+            &path,
+            &InputProfile {
+                name: "Global".to_string(),
+                ..InputProfile::default()
+            },
+        )
+        .unwrap();
+        let (labels, _, selected) =
+            layout_choices(save_dir, Some(path), "Disabled");
+        assert_eq!(labels[selected as usize], "Global");
+    }
+
+    #[test]
+    fn test_layout_choices_unknown_current_falls_back_to_none_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().to_str().unwrap();
+        write_profile(
+            &managed_profile_path(save_dir, "Global"),
+            &InputProfile {
+                name: "Global".to_string(),
+                ..InputProfile::default()
+            },
+        )
+        .unwrap();
+        let missing = tmp.path().join("elsewhere.json");
+        let (_, _, selected) = layout_choices(save_dir, Some(missing), "Disabled");
+        assert_eq!(selected, 0);
     }
 }

@@ -264,8 +264,9 @@ fn on_folder_picked(
 ) {
     let folders = state.borrow().cfg.all_game_folders();
 
-    // Already living in a managed games folder (or none configured): no move.
-    if folders.is_empty() || folders.iter().any(|folder| path.starts_with(folder)) {
+    // Already living in a managed games folder, or no real choice of
+    // destination (none / a single root configured): add it where it is.
+    if !needs_move_choice(&folders, path) {
         start_identify(path.to_path_buf(), None, wizard);
         return;
     }
@@ -273,8 +274,17 @@ fn on_folder_picked(
     show_move_target_chooser(path, &folders, win, wizard);
 }
 
-/// The picked folder is outside every configured games root: offer to move
-/// it into one of them, listing each root with its free space.
+/// Whether picking `path` should open the move-target chooser: only when it
+/// sits outside every configured games root and there are several to
+/// choose between. With one root there is nothing to disambiguate, and
+/// silently moving the game there would be a surprise.
+fn needs_move_choice(folders: &[std::path::PathBuf], path: &Path) -> bool {
+    folders.len() > 1 && !folders.iter().any(|folder| path.starts_with(folder))
+}
+
+/// The picked folder is outside every configured games root and several
+/// roots exist: offer to move it into one of them, listing each with its
+/// free space.
 fn show_move_target_chooser(
     path: &Path,
     folders: &[std::path::PathBuf],
@@ -286,50 +296,57 @@ fn show_move_target_chooser(
 
     let dialog = adw::Dialog::new();
     dialog.set_title(&crate::tr!("Move to games folder?"));
-    dialog.set_content_width(520);
+    dialog.set_content_width(480);
 
     let header = adw::HeaderBar::new();
     let title = adw::WindowTitle::new(&crate::tr!("Move to games folder?"), "");
     header.set_title_widget(Some(&title));
+    header.add_css_class(CSS_FLAT);
+
+    let source = gtk4::Label::new(Some(&picked.to_string_lossy()));
+    source.add_css_class(CSS_CAPTION);
+    source.add_css_class(CSS_DIM_LABEL);
+    source.set_ellipsize(gtk4::pango::EllipsizeMode::Middle);
+    source.set_halign(gtk4::Align::Center);
+
+    let hint = gtk4::Label::new(Some(&crate::tr!(
+        "Pick where to move it, or keep it where it is."
+    )));
+    hint.add_css_class(CSS_DIM_LABEL);
+    hint.set_wrap(true);
+    hint.set_justify(gtk4::Justification::Center);
+    hint.set_halign(gtk4::Align::Center);
 
     let list = gtk4::ListBox::new();
     list.set_selection_mode(gtk4::SelectionMode::None);
-    list.add_css_class("boxed-list");
-
+    list.add_css_class(CSS_BOXED_LIST);
     for folder in folders {
-        let row = adw::ActionRow::new();
-        row.set_title(&super::helpers::esc(&folder.to_string_lossy()));
-        if let Some(free) = super::disk_space::available_bytes(folder) {
-            row.set_subtitle(&crate::tr!("{} free").replacen(
-                "{}",
-                &super::disk_space::format_size(free),
-                1,
-            ));
-        }
-        row.set_activatable(true);
-        let dest = folder.join(basename);
-        let chosen = dialog.clone();
-        let move_wizard = wizard.clone();
-        let source = picked.clone();
-        row.connect_activated(move |_| {
-            chosen.close();
-            start_identify(source.clone(), Some(dest.clone()), &move_wizard);
-        });
-        list.append(&row);
+        list.append(&move_destination_row(folder, basename, &picked, &dialog, wizard));
     }
 
-    let keep_row = adw::ActionRow::new();
-    keep_row.set_title(&crate::tr!("Keep where it is"));
-    keep_row.set_activatable(true);
-    let keep_wizard = wizard.clone();
-    let keep_source = picked.clone();
-    keep_row.connect_activated(move |_| {
-        start_identify(keep_source.clone(), None, &keep_wizard);
-    });
-    list.append(&keep_row);
+    let keep_btn = gtk4::Button::with_label(&crate::tr!("Keep where it is"));
+    keep_btn.add_css_class(CSS_FLAT);
+    keep_btn.set_halign(gtk4::Align::Center);
+    {
+        let chosen = dialog.clone();
+        let keep_wizard = wizard.clone();
+        keep_btn.connect_clicked(move |_| {
+            chosen.close();
+            start_identify(picked.clone(), None, &keep_wizard);
+        });
+    }
+
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    body.set_margin_start(16);
+    body.set_margin_end(16);
+    body.set_margin_bottom(16);
+    body.append(&source);
+    body.append(&hint);
+    body.append(&list);
+    body.append(&keep_btn);
 
     let scroll = gtk4::ScrolledWindow::new();
-    scroll.set_child(Some(&list));
+    scroll.set_child(Some(&body));
     scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
     scroll.set_vexpand(true);
 
@@ -342,6 +359,39 @@ fn show_move_target_chooser(
         Some(host) => dialog.present(Some(&host)),
         None => eprintln!("Cannot present move-target chooser without a parent window"),
     }
+}
+
+/// One destination row: the folder path plus its free space. Activating it
+/// closes the chooser and moves the game into that folder.
+fn move_destination_row(
+    folder: &Path,
+    basename: &str,
+    picked: &Path,
+    dialog: &adw::Dialog,
+    wizard: &Rc<RefCell<Wizard>>,
+) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    let icon = gtk4::Image::from_icon_name("folder-symbolic");
+    icon.set_valign(gtk4::Align::Center);
+    row.add_prefix(&icon);
+    row.set_title(&super::helpers::esc(&folder.to_string_lossy()));
+    if let Some(free) = super::disk_space::available_bytes(folder) {
+        row.set_subtitle(&crate::tr!("{} free").replacen(
+            "{}",
+            &super::disk_space::format_size(free),
+            1,
+        ));
+    }
+    row.set_activatable(true);
+    let dest = folder.join(basename);
+    let chosen = dialog.clone();
+    let move_wizard = wizard.clone();
+    let source = picked.to_path_buf();
+    row.connect_activated(move |_| {
+        chosen.close();
+        start_identify(source.clone(), Some(dest.clone()), &move_wizard);
+    });
+    row
 }
 
 pub(super) fn start_identify(
@@ -1756,5 +1806,22 @@ mod tests {
     fn test_score_candidate_prefers_exact_folder_match() {
         assert!(score_candidate("doom", "doom.exe", 0) > score_candidate("doom", "game.exe", 0));
         assert!(score_candidate("doom", "doom.exe", 0) > score_candidate("doom", "doom.exe", 1));
+    }
+
+    #[test]
+    fn test_needs_move_choice_single_root_never_asks() {
+        let folders = vec![PathBuf::from("/games/pc")];
+        assert!(!needs_move_choice(&folders, Path::new("/games/pc/Cool Game")));
+        assert!(!needs_move_choice(&folders, Path::new("/downloads/Cool Game")));
+        assert!(!needs_move_choice(&[], Path::new("/downloads/Cool Game")));
+    }
+
+    #[test]
+    fn test_needs_move_choice_asks_only_for_outside_paths() {
+        let folders = vec![PathBuf::from("/games/pc"), PathBuf::from("/mnt/hdd/games")];
+        assert!(needs_move_choice(&folders, Path::new("/downloads/Cool Game")));
+        assert!(!needs_move_choice(&folders, Path::new("/mnt/hdd/games/Cool Game")));
+        // Component-wise prefix: a sibling named /games/pc-games is outside.
+        assert!(needs_move_choice(&folders, Path::new("/games/pc-games/Cool Game")));
     }
 }

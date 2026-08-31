@@ -626,6 +626,7 @@ struct ConsoleDbMeta {
     sgdb_id: String,
     shadps4_version: String,
     last_played: i64,
+    rom_path: String,
 }
 
 impl ConsoleDbMeta {
@@ -644,6 +645,7 @@ impl ConsoleDbMeta {
                 String::new()
             },
             last_played: e.last_played,
+            rom_path: e.rom_path.clone(),
         }
     }
 
@@ -658,6 +660,7 @@ impl ConsoleDbMeta {
             sgdb_id: String::new(),
             shadps4_version: String::new(),
             last_played: 0,
+            rom_path: String::new(),
         }
     }
 
@@ -768,25 +771,79 @@ fn spawn_source_scan<'scope>(
 
 /// Shared body of the shadPS4/RPCS3 scans: run `discover` over the emulator
 /// executable, reconcile each hit against the DB, then hand the hit plus its
-/// DB metadata to `into_game`.
+/// DB metadata to `into_game`. The discovered location is persisted on the
+/// row and rows the scan no longer finds are marked vanished, so DB-only
+/// loads can tell deleted games from installed ones.
 fn scan_console_games<D>(
     db: &db::DbConn,
     kind: GameKind,
     include_version: bool,
     discover: impl FnOnce(&str) -> Vec<D>,
-    identity: impl Fn(&D) -> (&str, &str, &str),
+    identity: impl Fn(&D) -> (&str, &str, &str, &std::path::Path),
     into_game: impl Fn(&D, ConsoleDbMeta) -> Game,
     executable: &str,
 ) -> Vec<Game> {
-    discover(executable)
+    let discovered = discover(executable);
+    let mut seen: Vec<(String, String)> = Vec::with_capacity(discovered.len());
+    let games = discovered
         .iter()
         .filter_map(|item| {
-            let (npwr_id, serial, title) = identity(item);
+            let (npwr_id, serial, title, game_path) = identity(item);
             let meta =
                 find_or_create_console_entry(db, kind, npwr_id, serial, title, include_version)?;
+            remember_console_location(db, kind, &meta, game_path);
+            seen.push((npwr_id.to_string(), serial.to_string()));
             Some(into_game(item, meta))
         })
-        .collect()
+        .collect();
+    reconcile_console_presence(db, kind, &seen);
+    games
+}
+
+/// Record where a scanned game lives. The DB-only startup load uses the
+/// stored location to notice the game's files disappearing between scans.
+fn remember_console_location(
+    db: &db::DbConn,
+    kind: GameKind,
+    meta: &ConsoleDbMeta,
+    game_path: &std::path::Path,
+) {
+    let game_path_str = game_path.to_string_lossy();
+    if meta.rom_path == game_path_str {
+        return;
+    }
+    if let Err(e) = db::set_rom_path(db, meta.db_id, &game_path_str) {
+        eprintln!("Failed to persist {kind} game location: {e}");
+    }
+}
+
+/// A scan that found at least one game of its kind is the presence
+/// authority for that kind: rows it does not contain are deleted or moved
+/// installs. They keep their row — playtime and trophies stay — but the
+/// loader ignores them until a later scan finds the game again.
+fn reconcile_console_presence(db: &db::DbConn, kind: GameKind, seen: &[(String, String)]) {
+    if seen.is_empty() {
+        // An empty result means the source could not be read at all (no
+        // emulator, no config): nothing here proves any game vanished.
+        return;
+    }
+    let entries = match db::load_all_games(db) {
+        Ok(entries) => entries,
+        Err(error) => {
+            eprintln!("Failed to load games for {kind} presence reconcile: {error}");
+            return;
+        }
+    };
+    for entry in entries.iter().filter(|entry| entry.kind == kind) {
+        let present = seen
+            .iter()
+            .any(|(game_id, platform_id)| entry.game_id == *game_id && entry.platform_id == *platform_id);
+        if present == entry.vanished {
+            if let Err(error) = db::set_game_vanished(db, entry.id, !present) {
+                eprintln!("Failed to mark {kind} game {}: {error}", entry.id);
+            }
+        }
+    }
 }
 
 fn build_shadps4_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Game> {
@@ -800,6 +857,7 @@ fn build_shadps4_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec
                 shad.npwr_id.as_str(),
                 shad.serial.as_str(),
                 shad.title.as_str(),
+                shad.game_path.as_path(),
             )
         },
         |shad, meta| load_shadps4_game(shad, meta.db_id, &meta.into_shadps4_meta(), save_dir),
@@ -818,6 +876,7 @@ fn build_rpcs3_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<G
                 ps3_game.npwr_id.as_str(),
                 ps3_game.serial.as_str(),
                 ps3_game.title.as_str(),
+                ps3_game.game_path.as_path(),
             )
         },
         |ps3_game, meta| load_rpcs3_game(ps3_game, meta.db_id, &meta.into_rpcs3_meta(), save_dir),
@@ -1438,6 +1497,154 @@ mod tests {
             1
         );
         assert!(game_loader::load_saved_games(&db, &cfg.save_dir).is_empty());
+    }
+
+    #[test]
+    fn test_reconcile_console_presence_marks_unseen_rows_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
+        let seen_id = db::add_game(
+            &db,
+            GameKind::Ps4,
+            ira_models::TrophySource::Empty,
+            "",
+            "NPWR0001",
+            "CUSA00001",
+            "Present game",
+        )
+        .unwrap();
+        let gone_id = db::add_game(
+            &db,
+            GameKind::Ps4,
+            ira_models::TrophySource::Empty,
+            "",
+            "NPWR0002",
+            "CUSA00002",
+            "Deleted game",
+        )
+        .unwrap();
+        let other_kind_id = db::add_game(
+            &db,
+            GameKind::WiiU,
+            ira_models::TrophySource::Empty,
+            "",
+            "00050000",
+            "00050000",
+            "Other kind",
+        )
+        .unwrap();
+
+        reconcile_console_presence(
+            &db,
+            GameKind::Ps4,
+            &[("NPWR0001".to_string(), "CUSA00001".to_string())],
+        );
+
+        assert!(
+            !db::find_by_db_id(&db, seen_id).unwrap().unwrap().vanished,
+            "a seen row stays present"
+        );
+        assert!(
+            db::find_by_db_id(&db, gone_id).unwrap().unwrap().vanished,
+            "a row the scan no longer finds is vanished, but its row stays"
+        );
+        assert!(db::find_by_db_id(&db, gone_id).unwrap().is_some());
+        assert!(
+            !db::find_by_db_id(&db, other_kind_id)
+                .unwrap()
+                .unwrap()
+                .vanished,
+            "other kinds are not this scan's business"
+        );
+
+        // The game coming back clears the verdict.
+        reconcile_console_presence(
+            &db,
+            GameKind::Ps4,
+            &[
+                ("NPWR0001".to_string(), "CUSA00001".to_string()),
+                ("NPWR0002".to_string(), "CUSA00002".to_string()),
+            ],
+        );
+        assert!(!db::find_by_db_id(&db, gone_id).unwrap().unwrap().vanished);
+    }
+
+    #[test]
+    fn test_reconcile_console_presence_ignores_empty_scans() {
+        // An empty discovery means the source was unreadable (no emulator,
+        // no config) — it never proves any game vanished.
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
+        let game_id = db::add_game(
+            &db,
+            GameKind::Ps4,
+            ira_models::TrophySource::Empty,
+            "",
+            "NPWR0003",
+            "CUSA00003",
+            "Untitled install",
+        )
+        .unwrap();
+
+        reconcile_console_presence(&db, GameKind::Ps4, &[]);
+
+        assert!(!db::find_by_db_id(&db, game_id).unwrap().unwrap().vanished);
+    }
+
+    #[test]
+    fn test_load_saved_games_ignores_deleted_console_games() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
+        // Deleted before any scan recorded the location, but marked by the
+        // presence reconcile: never shows.
+        let swept = db::add_game(
+            &db,
+            GameKind::Ps4,
+            ira_models::TrophySource::Empty,
+            "",
+            "NPWR0004",
+            "CUSA00004",
+            "Catherine Full Body",
+        )
+        .unwrap();
+        db::set_game_vanished(&db, swept, true).unwrap();
+        // Deleted after a scan recorded the location: the missing file is
+        // enough, even without a reconcile verdict yet.
+        let missing_path = db::add_game(
+            &db,
+            GameKind::WiiU,
+            ira_models::TrophySource::Empty,
+            "",
+            "000500001010cd00",
+            "000500001010cd00",
+            "Bayonetta",
+        )
+        .unwrap();
+        db::set_rom_path(
+            &db,
+            missing_path,
+            tmp.path().join("deleted/bayonetta").to_string_lossy().as_ref(),
+        )
+        .unwrap();
+        // A live install keeps showing even when marked hidden by the user.
+        let live_dir = tmp.path().join("live-game");
+        std::fs::create_dir_all(&live_dir).unwrap();
+        let live = db::add_game(
+            &db,
+            GameKind::WiiU,
+            ira_models::TrophySource::Empty,
+            "",
+            "000500001011e800",
+            "000500001011e800",
+            "Live game",
+        )
+        .unwrap();
+        db::set_rom_path(&db, live, live_dir.to_string_lossy().as_ref()).unwrap();
+
+        let loaded = game_loader::load_saved_games(&db, &tmp.path().to_string_lossy());
+
+        let ids: Vec<i64> = loaded.iter().map(|game| game.db_id).collect();
+        assert_eq!(ids, vec![live], "only the live install loads");
     }
 
     #[test]

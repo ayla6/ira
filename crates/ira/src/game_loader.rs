@@ -50,15 +50,34 @@ pub fn load_saved_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
         save_dir,
         "Failed to load saved games from DB",
         // ROM-library entries only show once their source scan found their
-        // file (or, for Switch, the emulator library that owns them).
+        // file (or, for Switch, the emulator library that owns them), and
+        // vanished console installs never show at all.
         |entry| {
-            matches!(
+            (matches!(
                 entry.kind,
                 ira_models::GameKind::Retro | ira_models::GameKind::Switch
-            ) && entry.rom_path.is_empty()
+            ) && entry.rom_path.is_empty())
+                || console_game_vanished(entry)
         },
         |entry| format!("Skipping saved game {}", entry.id),
     )
+}
+
+/// Whether a console-library row's game is gone: the owning source scan
+/// marked it vanished, or its recorded install path no longer exists. The
+/// row stays in the DB for its playtime and trophies, but loads must ignore
+/// it entirely — this is independent of the user's hidden flag, which the
+/// "show hidden games" setting governs.
+fn console_game_vanished(entry: &GameEntry) -> bool {
+    matches!(
+        entry.kind,
+        ira_models::GameKind::Ps4
+            | ira_models::GameKind::Ps3
+            | ira_models::GameKind::PsVita
+            | ira_models::GameKind::WiiU
+            | ira_models::GameKind::ThreeDS
+    ) && (entry.vanished
+        || (!entry.rom_path.is_empty() && !std::path::Path::new(&entry.rom_path).exists()))
 }
 
 /// Shared implementation behind `load_games` and `load_saved_games`.
@@ -151,9 +170,9 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
     };
 
     // Retro and Switch paths stay relative to the console's ROM folder;
-    // the other console kinds store absolute locations discovered at scan
-    // time and every later rebuild must keep them (context menu, icon
-    // restore).
+    // every console kind with an emulator library stores the absolute
+    // location discovered at scan time and later rebuilds must keep it
+    // (context menu, icon restore).
     if matches!(
         entry.kind,
         ira_models::GameKind::Retro
@@ -161,6 +180,8 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
             | ira_models::GameKind::ThreeDS
             | ira_models::GameKind::WiiU
             | ira_models::GameKind::PsVita
+            | ira_models::GameKind::Ps4
+            | ira_models::GameKind::Ps3
     ) && !entry.rom_path.is_empty()
     {
         game.game_path = entry.rom_path.clone();
@@ -542,6 +563,8 @@ mod tests {
             GameKind::ThreeDS,
             GameKind::WiiU,
             GameKind::PsVita,
+            GameKind::Ps4,
+            GameKind::Ps3,
         ] {
             let entry = entry_with_path(kind, "/games/PQ.zcci");
             let game = build_game_base(&entry, "/tmp/ira-test-save");
@@ -551,6 +574,35 @@ mod tests {
         assert!(build_game_base(&entry, "/tmp/ira-test-save")
             .game_path
             .is_empty());
+    }
+
+    #[test]
+    fn test_console_game_vanished_when_marked_or_file_missing() {
+        // A live install path and no verdict from the scan: present.
+        let existing = entry_with_path(GameKind::WiiU, "/tmp");
+        assert!(!console_game_vanished(&existing));
+
+        let mut marked = entry_with_path(GameKind::Ps4, "");
+        marked.vanished = true;
+        assert!(console_game_vanished(&marked));
+
+        let deleted = entry_with_path(GameKind::Ps4, "/games/Gone-Catherine");
+        assert!(!std::path::Path::new("/games/Gone-Catherine").exists());
+        assert!(console_game_vanished(&deleted));
+    }
+
+    #[test]
+    fn test_console_game_vanished_ignores_other_kinds_and_present_files() {
+        // The hidden-games setting never resurrects these — but the check
+        // must not swallow non-console kinds either.
+        for kind in [GameKind::Steam, GameKind::Retro, GameKind::Switch] {
+            let mut entry = entry_with_path(kind, "/definitely/missing");
+            entry.vanished = true;
+            assert!(!console_game_vanished(&entry), "{kind:?}");
+        }
+        // Empty path without a vanished verdict means "unknown", not gone.
+        let legacy = entry_with_path(GameKind::Ps4, "");
+        assert!(!console_game_vanished(&legacy));
     }
 
     /// Generated placeholder names are recognized through the same

@@ -5,6 +5,13 @@ pub fn set_game_hidden(conn: &DbConn, id: i64, hidden: bool) -> Result<(), Strin
     update_field(conn, id, "hidden", &hidden)
 }
 
+/// Marks whether the source scan that owns this row still finds the game's
+/// files. A vanished row keeps its playtime and trophies but game loads
+/// ignore it entirely — it is not the user's hidden flag.
+pub fn set_game_vanished(conn: &DbConn, id: i64, vanished: bool) -> Result<(), String> {
+    update_field(conn, id, "vanished", &vanished)
+}
+
 pub fn set_logo_settings(conn: &DbConn, id: i64, position: &str, size: i32) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.execute(

@@ -53,6 +53,11 @@ pub struct GameEntry {
     pub cached_achievement_mtime: i64,
     /// RetroAchievements identification hash (empty = unknown).
     pub rom_hash: String,
+    /// The game's files are gone: the source scan that owns this row last
+    /// looked and did not find it. The row stays (its playtime and trophies
+    /// remain), but game loads must ignore it entirely — even when hidden
+    /// games are set to shown.
+    pub vanished: bool,
 }
 
 impl GameEntry {
@@ -96,6 +101,7 @@ impl GameEntry {
             cached_total_count: 0,
             cached_achievement_mtime: 0,
             rom_hash: String::new(),
+            vanished: false,
         }
     }
 
@@ -138,6 +144,7 @@ impl GameEntry {
             cached_total_count: g.total_count as i64,
             cached_achievement_mtime: 0,
             rom_hash: String::new(),
+            vanished: false,
         }
     }
 }

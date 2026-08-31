@@ -91,7 +91,8 @@ pub fn init_db(db_path: &str) -> DbConn {
                 cached_achievement_mtime INTEGER NOT NULL DEFAULT 0,
                 api_dll_folder TEXT NOT NULL DEFAULT '',
                 saves_centralized INTEGER NOT NULL DEFAULT 0,
-                rom_hash TEXT NOT NULL DEFAULT ''
+                rom_hash TEXT NOT NULL DEFAULT '',
+                vanished INTEGER NOT NULL DEFAULT 0
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_game_id_platform ON games(game_id, platform_id) WHERE game_id != '';
@@ -135,6 +136,7 @@ pub fn init_db(db_path: &str) -> DbConn {
         ).expect("failed to create tables");
         // Schema migrations for databases created before a column existed.
         ensure_column(&conn, "games", "rom_hash", "TEXT NOT NULL DEFAULT ''");
+        ensure_column(&conn, "games", "vanished", "INTEGER NOT NULL DEFAULT 0");
     }
 
     crate::create_variants_table(&pool);

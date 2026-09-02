@@ -1,5 +1,5 @@
 use adw::prelude::*;
-use ira_input::{ControllerFamily, GamepadAxis, GamepadButton, InputSource, OutputAction};
+use ira_input::{ControllerFamily, GamepadAxis, GamepadButton, InputSource};
 
 /// Loads a Steam glyph into `image`, reporting whether one was found. The
 /// caller shows its text fallback only when this returns false.
@@ -33,31 +33,6 @@ pub(crate) fn set_source_asset(
     } else {
         fallback.set_visible(true);
     }
-}
-
-/// The Steam glyph name of a bound command, reusing the source glyphs for
-/// gamepad buttons and axes. Keyboard, mouse, and engine-internal commands
-/// have no glyph and stay textual.
-pub(crate) fn output_asset_name(
-    output: &OutputAction,
-    family: ControllerFamily,
-) -> Option<&'static str> {
-    let source = match output {
-        OutputAction::GamepadButton(button) => InputSource::Button(*button),
-        OutputAction::GamepadAxis(axis) => InputSource::Axis(*axis),
-        _ => return None,
-    };
-    source_asset_name(source, family)
-}
-
-/// Loads the glyph of a bound command into `image`, reporting whether the
-/// glyph set has one.
-pub(crate) fn set_output_asset(
-    image: &gtk4::Image,
-    output: &OutputAction,
-    family: ControllerFamily,
-) -> bool {
-    set_asset_from_name(image, output_asset_name(output, family))
 }
 
 pub(super) fn source_asset_name(

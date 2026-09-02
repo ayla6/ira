@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-02 15:37-0300\n"
+"POT-Creation-Date: 2026-09-02 16:18-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -66,11 +66,6 @@ msgstr ""
 
 #: crates/overlay/src/ui/model.rs:216
 msgid "Shift+Tab to toggle | Scroll to browse"
-msgstr ""
-
-#: crates/overlay/src/ui/widgets/stepper.rs:68
-#, rust-format
-msgid "< {} >"
 msgstr ""
 
 #: crates/ira/src/game_list.rs:289
@@ -173,6 +168,207 @@ msgstr ""
 msgid "{} - {}"
 msgstr ""
 
+#: crates/overlay/src/ui/widgets/stepper.rs:68
+#, rust-format
+msgid "< {} >"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:126
+msgid "Behavior"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:160
+msgid "Command"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:171
+#: crates/ira/src/ui/input_profile_input_rows.rs:260
+msgid "Not mapped"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:249
+msgid "Unbound"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:290
+#: crates/ira/src/ui/input_profile_input_rows.rs:303
+#: crates/ira/src/ui/wine_config_widget.rs:397
+#: crates/ira/src/ui/input_profile_source_modes.rs:48
+#: crates/ira/src/ui/input_profile_action_sets.rs:217
+msgid "None"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:291
+msgid "The trigger only runs its click bindings"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:294
+#: crates/ira/src/ui/input_profile_source_modes.rs:53
+msgid "Trigger"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:296
+msgid ""
+"The trigger sends an analog value; soft and full pulls get their own bindings"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:304
+msgid "The stick sends nothing"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:307
+#: crates/ira/src/ui/input_profile_source_modes.rs:49
+msgid "Joystick"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:309
+msgid "Deflection drives a virtual joystick — the standard analog movement"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:313
+#: crates/ira/src/ui/input_profile_source_modes.rs:50
+msgid "Directional Pad"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:314
+msgid "Deflection presses the d-pad directions"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:317
+#: crates/ira/src/ui/input_profile_source_modes.rs:51
+msgid "Joystick Mouse"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:318
+msgid "Deflection moves the mouse pointer"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:321
+#: crates/ira/src/ui/input_profile_source_modes.rs:52
+msgid "Flick Stick"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_input_rows.rs:323
+msgid ""
+"Direction sets the facing; a flick turns instantly — pairs well with gyro"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:39
+#: crates/ira/src/ui/input_output_picker.rs:271
+msgid "Buttons"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:40
+#: crates/ira/src/ui/input_profile_editor_regions.rs:157
+#: crates/ira/src/ui/input_output_picker.rs:176
+msgid "D-pad"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:41
+msgid "Triggers"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:42
+msgid "Joysticks"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:43
+msgid "System and Paddles"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:63
+msgid "Left Stick"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:64
+msgid "Right Stick"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:71
+#: crates/ira/src/ui/input_profile_options.rs:151
+#, rust-format
+msgid "{} ({})"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:143
+#: crates/ira/src/ui/input_profile_editor_regions.rs:272
+#: crates/ira/src/ui/input_profile_editor_regions.rs:344
+#: crates/ira/src/ui/input_output_picker.rs:165
+msgid "Face Buttons"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:152
+#: crates/ira/src/ui/input_profile_editor_regions.rs:277
+msgid "Bumpers"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:175
+#: crates/ira/src/ui/input_profile_editor_regions.rs:313
+#: crates/ira/src/ui/input_profile_options.rs:127
+msgid "Left Trigger"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:179
+#: crates/ira/src/ui/input_profile_editor_regions.rs:321
+#: crates/ira/src/ui/input_profile_options.rs:128
+msgid "Right Trigger"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:191
+#: crates/ira/src/ui/input_profile_editor_regions.rs:291
+#: crates/ira/src/ui/input_profile_stick_settings.rs:251
+msgid "Left Joystick"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:198
+#: crates/ira/src/ui/input_profile_editor_regions.rs:299
+#: crates/ira/src/ui/input_profile_stick_settings.rs:251
+msgid "Right Joystick"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:207
+#: crates/ira/src/ui/input_profile_editor_regions.rs:353
+msgid "System"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:241
+#: crates/ira/src/ui/input_profile_editor_regions.rs:354
+#: crates/ira/src/ui/input_profile_editor_regions.rs:376
+#: crates/ira/src/ui/input_output_picker.rs:210
+msgid "Paddles"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:254
+#: crates/ira/src/ui/input_profile_activator_edit.rs:48
+#: crates/ira/src/ui/input_profile_activator_edit.rs:196
+msgid "Click"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:255
+#: crates/ira/src/ui/input_profile_activator_edit.rs:54
+msgid "Double press"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:256
+#: crates/ira/src/ui/input_profile_activator_edit.rs:60
+msgid "Long press"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:257
+#: crates/ira/src/ui/input_profile_activator_edit.rs:66
+msgid "On press down"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:258
+#: crates/ira/src/ui/input_profile_activator_edit.rs:72
+msgid "On release"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_regions.rs:259
+#: crates/ira/src/ui/input_profile_activator_edit.rs:78
+msgid "Soft pull"
+msgstr ""
+
 #: crates/ira/src/ui/input_profile_editor.rs:74
 #, rust-format
 msgid "Could not load profile: {}"
@@ -215,7 +411,7 @@ msgstr ""
 #: crates/ira/src/ui/group_dialog.rs:67
 #: crates/ira/src/ui/group_dialog.rs:109
 #: crates/ira/src/ui/play_history.rs:217
-#: crates/ira/src/ui/edit_game_controller.rs:431
+#: crates/ira/src/ui/edit_game_controller.rs:422
 #: crates/ira/src/ui/input_profile_settings.rs:938
 #: crates/ira/src/ui/settings_dialog.rs:245
 #: crates/ira/src/ui/input_profile_editor_save.rs:121
@@ -308,7 +504,7 @@ msgstr ""
 
 #: crates/ira/src/ui/group_dialog.rs:110
 #: crates/ira/src/ui/play_history.rs:218
-#: crates/ira/src/ui/edit_game_controller.rs:432
+#: crates/ira/src/ui/edit_game_controller.rs:423
 #: crates/ira/src/ui/sidebar.rs:427
 #: crates/ira/src/ui/input_profile_settings.rs:939
 #: crates/ira/src/ui/edit_game_variants.rs:138
@@ -343,74 +539,69 @@ msgstr ""
 msgid "Edit controller layout"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:123
-#, rust-format
-msgid "This game has no layout of its own — it uses \"{}\"."
-msgstr ""
-
-#: crates/ira/src/ui/edit_game_controller.rs:136
+#: crates/ira/src/ui/edit_game_controller.rs:132
 #, rust-format
 msgid "Modify \"{}\""
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:137
+#: crates/ira/src/ui/edit_game_controller.rs:133
 msgid "Edit the shared layout; every game using it changes"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:164
+#: crates/ira/src/ui/edit_game_controller.rs:160
 msgid "Create a copy for this game"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:165
+#: crates/ira/src/ui/edit_game_controller.rs:161
 #, rust-format
 msgid "Start from \"{}\"; changes only affect this game"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:194
+#: crates/ira/src/ui/edit_game_controller.rs:190
 msgid "Create an empty layout"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:195
+#: crates/ira/src/ui/edit_game_controller.rs:191
 msgid "Start from scratch for this game only"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:333
+#: crates/ira/src/ui/edit_game_controller.rs:324
 #: crates/ira/src/ui/input_profile_settings.rs:180
 msgid "Input remapping"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:335
+#: crates/ira/src/ui/edit_game_controller.rs:326
 #: crates/ira/src/ui/input_profile_settings.rs:187
 #: crates/ira/src/ui/input_profile_settings.rs:360
 msgid "Inherit"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:336
+#: crates/ira/src/ui/edit_game_controller.rs:327
 #: crates/ira/src/ui/input_profile_settings.rs:188
 #: crates/ira/src/ui/input_profile_settings.rs:574
 #: crates/ira/src/ui/input_profile_settings.rs:684
 msgid "Disabled"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:337
+#: crates/ira/src/ui/edit_game_controller.rs:328
 #: crates/ira/src/ui/input_profile_settings.rs:189
 #: crates/ira/src/ui/wine_config_widget.rs:430
 msgid "Enabled"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:347
+#: crates/ira/src/ui/edit_game_controller.rs:338
 msgid "Pause when the game loses focus"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:349
+#: crates/ira/src/ui/edit_game_controller.rs:340
 msgid "Suspend controller input and gyro while another window is focused"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:366
+#: crates/ira/src/ui/edit_game_controller.rs:357
 msgid "Current layout"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:395
+#: crates/ira/src/ui/edit_game_controller.rs:386
 #: crates/ira/src/ui/input_profile_settings.rs:882
 #: crates/ira/src/ui/wine_profile_picker.rs:66
 #: crates/ira/src/ui/profile_dialog.rs:160
@@ -418,33 +609,33 @@ msgstr ""
 msgid "Edit profile"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:398
-#: crates/ira/src/ui/edit_game_controller.rs:425
+#: crates/ira/src/ui/edit_game_controller.rs:389
+#: crates/ira/src/ui/edit_game_controller.rs:416
 #: crates/ira/src/ui/input_profile_settings.rs:883
 #: crates/ira/src/ui/profile_dialog.rs:187
 #: crates/ira/src/ui/profile_dialog.rs:195
 msgid "Delete profile"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:427
+#: crates/ira/src/ui/edit_game_controller.rs:418
 #, rust-format
 msgid "Delete \"{}\"? Every game using it falls back to no profile."
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:626
+#: crates/ira/src/ui/edit_game_controller.rs:617
 msgid "Search community layouts shared on Steam"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:727
+#: crates/ira/src/ui/edit_game_controller.rs:718
 msgid "No profile"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:752
+#: crates/ira/src/ui/edit_game_controller.rs:743
 #, rust-format
 msgid "{} (current)"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_controller.rs:758
+#: crates/ira/src/ui/edit_game_controller.rs:749
 msgid "Create new profile…"
 msgstr ""
 
@@ -1400,14 +1591,6 @@ msgstr ""
 
 #: crates/ira/src/ui/wine_config_widget.rs:384
 msgid "Avoid loading the Steam client library (PROTON_DISABLE_LSTEAMCLIENT)"
-msgstr ""
-
-#: crates/ira/src/ui/wine_config_widget.rs:397
-#: crates/ira/src/ui/input_profile_source_modes.rs:48
-#: crates/ira/src/ui/input_profile_input_rows.rs:285
-#: crates/ira/src/ui/input_profile_input_rows.rs:298
-#: crates/ira/src/ui/input_profile_action_sets.rs:217
-msgid "None"
 msgstr ""
 
 #: crates/ira/src/ui/wine_config_widget.rs:401
@@ -3284,18 +3467,6 @@ msgstr ""
 msgid "Which stick the input drives"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_stick_settings.rs:251
-#: crates/ira/src/ui/input_profile_editor_regions.rs:191
-#: crates/ira/src/ui/input_profile_editor_regions.rs:274
-msgid "Left Joystick"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_stick_settings.rs:251
-#: crates/ira/src/ui/input_profile_editor_regions.rs:198
-#: crates/ira/src/ui/input_profile_editor_regions.rs:282
-msgid "Right Joystick"
-msgstr ""
-
 #: crates/ira/src/ui/input_profile_stick_settings.rs:266
 msgid "Output Axis"
 msgstr ""
@@ -3371,31 +3542,6 @@ msgstr ""
 
 #: crates/ira/src/ui/input_profile_stick_settings.rs:365
 msgid "Set up a custom deadzone for this profile's configuration."
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_source_modes.rs:49
-#: crates/ira/src/ui/input_profile_input_rows.rs:302
-msgid "Joystick"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_source_modes.rs:50
-#: crates/ira/src/ui/input_profile_input_rows.rs:308
-msgid "Directional Pad"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_source_modes.rs:51
-#: crates/ira/src/ui/input_profile_input_rows.rs:312
-msgid "Joystick Mouse"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_source_modes.rs:52
-#: crates/ira/src/ui/input_profile_input_rows.rs:316
-msgid "Flick Stick"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_source_modes.rs:53
-#: crates/ira/src/ui/input_profile_input_rows.rs:289
-msgid "Trigger"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_source_modes.rs:54
@@ -3828,55 +3974,24 @@ msgstr ""
 msgid "Native motion sensors"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:48
-#: crates/ira/src/ui/input_profile_activator_edit.rs:196
-#: crates/ira/src/ui/input_profile_editor_regions.rs:237
-msgid "Click"
-msgstr ""
-
 #: crates/ira/src/ui/input_profile_activator_edit.rs:50
 msgid "The regular activation: fires when the input is pressed"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_activator_edit.rs:54
-#: crates/ira/src/ui/input_profile_editor_regions.rs:238
-msgid "Double press"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_activator_edit.rs:56
 msgid "Fires when the input is pressed twice in quick succession"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:60
-#: crates/ira/src/ui/input_profile_editor_regions.rs:239
-msgid "Long press"
-msgstr ""
-
 #: crates/ira/src/ui/input_profile_activator_edit.rs:62
 msgid "Fires when the input is held past the hold duration"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_activator_edit.rs:66
-#: crates/ira/src/ui/input_profile_editor_regions.rs:240
-msgid "On press down"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_activator_edit.rs:68
 msgid "Fires the instant the input goes down, without waiting for the release"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:72
-#: crates/ira/src/ui/input_profile_editor_regions.rs:241
-msgid "On release"
-msgstr ""
-
 #: crates/ira/src/ui/input_profile_activator_edit.rs:73
 msgid "Fires when the input is released"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_activator_edit.rs:78
-#: crates/ira/src/ui/input_profile_editor_regions.rs:242
-msgid "Soft pull"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_activator_edit.rs:80
@@ -4000,53 +4115,6 @@ msgstr ""
 
 #: crates/ira/src/ui/input_calibration_settings.rs:162
 msgid "Calibrate"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_input_rows.rs:127
-msgid "Behavior"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_input_rows.rs:161
-msgid "Command"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_input_rows.rs:172
-#: crates/ira/src/ui/input_profile_input_rows.rs:255
-msgid "Not mapped"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_input_rows.rs:244
-msgid "Unbound"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_input_rows.rs:286
-msgid "The trigger only runs its click bindings"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_input_rows.rs:291
-msgid ""
-"The trigger sends an analog value; soft and full pulls get their own bindings"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_input_rows.rs:299
-msgid "The stick sends nothing"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_input_rows.rs:304
-msgid "Deflection drives a virtual joystick — the standard analog movement"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_input_rows.rs:309
-msgid "Deflection presses the d-pad directions"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_input_rows.rs:313
-msgid "Deflection moves the mouse pointer"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_input_rows.rs:318
-msgid ""
-"Direction sets the facing; a flick turns instantly — pairs well with gyro"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_search.rs:178
@@ -4533,78 +4601,6 @@ msgstr ""
 
 #: crates/ira/src/ui/input_profile_mode_shifts.rs:160
 msgid "Remove shift"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:39
-#: crates/ira/src/ui/input_output_picker.rs:271
-msgid "Buttons"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:40
-#: crates/ira/src/ui/input_profile_editor_regions.rs:157
-#: crates/ira/src/ui/input_output_picker.rs:176
-msgid "D-pad"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:41
-msgid "Triggers"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:42
-msgid "Joysticks"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:43
-msgid "System and Paddles"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:63
-msgid "Left Stick"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:64
-msgid "Right Stick"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:71
-#: crates/ira/src/ui/input_profile_options.rs:151
-#, rust-format
-msgid "{} ({})"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:143
-#: crates/ira/src/ui/input_profile_editor_regions.rs:255
-#: crates/ira/src/ui/input_profile_editor_regions.rs:327
-#: crates/ira/src/ui/input_output_picker.rs:165
-msgid "Face Buttons"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:152
-#: crates/ira/src/ui/input_profile_editor_regions.rs:260
-msgid "Bumpers"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:175
-#: crates/ira/src/ui/input_profile_editor_regions.rs:296
-#: crates/ira/src/ui/input_profile_options.rs:127
-msgid "Left Trigger"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:179
-#: crates/ira/src/ui/input_profile_editor_regions.rs:304
-#: crates/ira/src/ui/input_profile_options.rs:128
-msgid "Right Trigger"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:207
-#: crates/ira/src/ui/input_profile_editor_regions.rs:336
-msgid "System"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_regions.rs:215
-#: crates/ira/src/ui/input_profile_editor_regions.rs:337
-#: crates/ira/src/ui/input_output_picker.rs:210
-msgid "Paddles"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_activator_gate.rs:21

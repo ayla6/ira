@@ -115,17 +115,13 @@ fn show_layout_choice(
     let header = adw::HeaderBar::new();
     header.add_css_class(super::css::CSS_FLAT);
 
+    // No height: the dialog sizes itself to the three rows, only the
+    // presenter caps it — three options never need to scroll.
     let body = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     body.set_margin_start(16);
     body.set_margin_end(16);
+    body.set_margin_top(12);
     body.set_margin_bottom(16);
-    let intro = gtk4::Label::new(Some(&crate::tr!(
-        "This game has no layout of its own — it uses \"{}\"."
-    )
-    .replacen("{}", &parent_label, 1)));
-    intro.set_wrap(true);
-    intro.set_xalign(0.0);
-    body.append(&intro);
 
     let list = gtk4::ListBox::new();
     list.set_selection_mode(gtk4::SelectionMode::None);
@@ -218,14 +214,9 @@ fn show_layout_choice(
     list.append(&empty_row);
     body.append(&list);
 
-    let scroll = gtk4::ScrolledWindow::new();
-    scroll.set_child(Some(&body));
-    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    scroll.set_vexpand(true);
-
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
-    toolbar.set_content(Some(&scroll));
+    toolbar.set_content(Some(&body));
     dialog.set_child(Some(&toolbar));
     dialog.present(Some(&window));
 }

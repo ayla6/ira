@@ -11,10 +11,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 
 use super::css::{CSS_DIM_LABEL, CSS_SOURCE_BADGE};
-use super::input_profile_assets::{
-    output_asset_name, set_asset_from_name, set_output_asset, set_source_asset, source_badge,
-};
-use super::input_profile_editor_regions::source_label;
+use super::input_profile_assets::{set_source_asset, source_badge};
 use super::input_profile_options::output_display_label;
 use super::input_profile_region_pages::{rebind_hook, PagesCtx};
 use super::input_profile_sheet_base::{find_mapping, with_mapping, Reopen, SheetBase};
@@ -153,8 +150,7 @@ fn behavior_row(ctx: &PagesCtx, base: &SheetBase, reopen: &Reopen) -> adw::Combo
 }
 
 /// The digital input's command slot as an expander child: shows the current
-/// output, and activating it opens the command picker. Glyphs stand in for
-/// the output names when the Steam glyph set covers them all.
+/// output, and activating it opens the command picker.
 fn command_child(
     ctx: &PagesCtx,
     base: &SheetBase,
@@ -162,46 +158,22 @@ fn command_child(
 ) -> adw::ActionRow {
     let child = adw::ActionRow::new();
     child.set_title(&crate::tr!("Command"));
-    let outputs: Vec<ira_input::OutputAction> = mapping
+    let value = mapping
         .and_then(|mapping| mapping.activators.first())
-        .map(|activator| activator.outputs.clone())
-        .unwrap_or_default();
-    let family = base
-        .device
-        .as_ref()
-        .map(ira_input::DeviceInfo::family)
-        .unwrap_or_default();
-    let glyphs: Vec<&str> = outputs
-        .iter()
-        .filter_map(|output| output_asset_name(output, family))
-        .collect();
-    if !outputs.is_empty() && glyphs.len() == outputs.len() {
-        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
-        row.set_valign(gtk4::Align::Center);
-        for name in glyphs {
-            let image = gtk4::Image::new();
-            image.set_pixel_size(16);
-            image.set_valign(gtk4::Align::Center);
-            set_asset_from_name(&image, Some(name));
-            row.append(&image);
-        }
-        child.add_suffix(&row);
-    } else {
-        let value = if outputs.is_empty() {
-            crate::tr!("Not mapped").to_string()
-        } else {
-            outputs
+        .map(|activator| {
+            activator
+                .outputs
                 .iter()
                 .map(output_display_label)
                 .collect::<Vec<String>>()
                 .join(", ")
-        };
-        let value_label = gtk4::Label::new(Some(&value));
-        value_label.add_css_class(CSS_DIM_LABEL);
-        value_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-        value_label.set_valign(gtk4::Align::Center);
-        child.add_suffix(&value_label);
-    }
+        })
+        .unwrap_or_else(|| crate::tr!("Not mapped").to_string());
+    let value_label = gtk4::Label::new(Some(&value));
+    value_label.add_css_class(CSS_DIM_LABEL);
+    value_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    value_label.set_valign(gtk4::Align::Center);
+    child.add_suffix(&value_label);
     child.set_activatable(true);
     let on_rebind = rebind_hook(ctx, base.source);
     child.connect_activated(move |_| on_rebind());
@@ -218,27 +190,14 @@ pub(crate) fn input_expander_row(
 ) -> adw::ExpanderRow {
     let expander = adw::ExpanderRow::new();
     add_source_prefix(&expander, source, family, mapping.is_none());
-    expander.set_title(&source_label(source));
-    // The bound command's glyph replaces the text name when the Steam glyph
-    // set covers it; the name is only the fallback.
-    let mut shows_glyph = false;
-    if matches!(source, InputSource::Button(_)) {
-        if let Some(output) = mapping
-            .and_then(|mapping| mapping.activators.first())
-            .and_then(|activator| activator.outputs.first())
-        {
-            let glyph = gtk4::Image::new();
-            glyph.set_pixel_size(18);
-            glyph.set_valign(gtk4::Align::Center);
-            shows_glyph = set_output_asset(&glyph, output, family);
-            if shows_glyph {
-                expander.add_suffix(&glyph);
-            }
-        }
-    }
-    if !shows_glyph {
-        expander.set_subtitle(&summary_text(source, mapping));
-    }
+    // The input's glyph — or its badge text when the glyph set lacks it —
+    // identifies the row; it carries no text title. The bound command stays
+    // text, right-aligned, "Not mapped" included.
+    let value_label = gtk4::Label::new(Some(&summary_text(source, mapping)));
+    value_label.add_css_class(CSS_DIM_LABEL);
+    value_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    value_label.set_valign(gtk4::Align::Center);
+    expander.add_suffix(&value_label);
 
     let base = SheetBase {
         gyro: ctx.gyro.clone(),

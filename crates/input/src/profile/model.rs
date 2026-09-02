@@ -1162,23 +1162,10 @@ impl InputProfile {
             mode.validate()
                 .map_err(|error| format!("{label}: {error}"))?;
         }
-        // Button inputs express everything through activators; analog
-        // inputs (sticks, triggers) may legitimately have no mode — that
-        // is Steam's "None" behavior, an inert input the user chose to
-        // leave unbound.
-        if matches!(input.source, InputSource::Button(_))
-            && input.mode.is_none()
-            && input.activators.is_empty()
-        {
-            return Err(format!(
-                "{context}: the {source} has nothing bound to it. Every button \
-                 input needs at least one activator — a press or release that \
-                 triggers it. Open this input in the controller editor and add \
-                 an activator under it, or remove the input if it is unused.",
-                context = context,
-                source = input.source.display_name(),
-            ));
-        }
+        // An input with no mode and no activators is Steam's "None": an
+        // inert entry the user chose to leave unbound. Buttons and analog
+        // inputs are treated the same — the editor's "Not mapped" state
+        // (e.g. after removing a button's last activator) must save.
         for activator in &input.activators {
             if activator.outputs.is_empty() {
                 return Err(format!("{label}: activator needs at least one output"));
@@ -1980,22 +1967,23 @@ mod tests {
             ..InputProfile::default()
         };
         assert!(unknown_parent.validate().is_err());
+    }
 
-        let empty_activators = InputProfile {
+    #[test]
+    fn test_validate_allows_button_with_nothing_bound() {
+        // The editor's "Not mapped" state: clearing a button's last
+        // activator must not make the profile unsavable. Same Steam "None"
+        // behavior as an unbound axis below.
+        let unbound_button = InputProfile {
             action_sets: vec![ActionSet {
                 name: "Default".to_string(),
-                inputs: vec![InputMapping::new(InputSource::Button(GamepadButton::A))],
+                inputs: vec![InputMapping::new(InputSource::Button(
+                    GamepadButton::A,
+                ))],
             }],
             ..InputProfile::default()
         };
-        let error = empty_activators.validate().unwrap_err();
-        // The message must name the input in plain language and say what to
-        // do about it — "Default input 21: needs at least one activator"
-        // was unreadable.
-        assert!(error.contains("Default"), "{error}");
-        assert!(error.contains("A (bottom face button)"), "{error}");
-        assert!(error.contains("activator"), "{error}");
-        assert!(error.contains("controller editor"), "{error}");
+        assert!(unbound_button.validate().is_ok());
     }
 
     #[test]

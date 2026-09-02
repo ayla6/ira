@@ -224,6 +224,20 @@ permanent migration mechanism.
   inline 40-line closures.
 - **CSS classes are defined in `ui/css.rs`**, not scattered as string literals.
 
+### Translations
+- **Every user-facing string goes through `crate::tr!`** so it lands in
+  `po/ira.pot` (extracted from `crates/ira/src` and `crates/overlay/src` by
+  `po/update-pot.sh`). Widget titles, labels, subtitles, tooltips, dialog
+  bodies, response buttons, and placeholders count; `eprintln!` diagnostics
+  and log-only strings do not.
+- **`tr!` takes a string literal only.** Build dynamic text with a `{}` placeholder
+  inside the msgid and `.replacen("{}", value, 1)` — never `format!` around
+  translated fragments, or the msgid is untranslatable.
+- **Run `po/update-pot.sh`** after adding or changing any user-facing string, and
+  commit the regenerated `po/ira.pot` with the change.
+- Strings in lower crates (`ira-input` validation messages, launcher logs) are
+  English-only for now; do not introduce a second translation mechanism.
+
 ## Testing
 
 ### What to test
@@ -377,3 +391,4 @@ Adds GAME_COLUMNS constant so column list stays in sync."
 - [ ] Every `AppMessage` variant is both sent and handled
 - [ ] Commit message follows conventional format
 - [ ] No secrets in the diff
+- [ ] User-facing strings go through `crate::tr!` and `po/ira.pot` is regenerated

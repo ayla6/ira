@@ -713,11 +713,11 @@ fn update_controller_subtitle(
         Some(VirtualGamepadBackend::DualSense) => crate::tr!("DualSense Controller layout"),
         Some(VirtualGamepadBackend::Dsu) => crate::tr!("DSU (cemuhook) controller layout"),
     };
-    row.set_subtitle(&format!(
-        "{} | Linux reports {}",
-        virtualization,
-        device.reported_input_mode().label()
-    ));
+    row.set_subtitle(
+        &crate::tr!("{} | Linux reports {}")
+            .replacen("{}", &virtualization, 1)
+            .replacen("{}", device.reported_input_mode().label(), 1),
+    );
 }
 
 fn start_controller_registry_refresh(

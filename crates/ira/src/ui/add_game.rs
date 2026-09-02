@@ -11,7 +11,7 @@ pub fn prompt_for_steam_id(
     let dialog = adw::AlertDialog::new(Some(title), Some(body));
 
     let entry = gtk4::Entry::new();
-    entry.set_placeholder_text(Some("e.g. 1687950"));
+    entry.set_placeholder_text(Some(&crate::tr!("e.g. 1687950")));
     entry.set_input_purpose(gtk4::InputPurpose::Digits);
     entry.set_margin_top(8);
     entry.set_margin_bottom(8);

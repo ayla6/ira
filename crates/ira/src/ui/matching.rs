@@ -213,11 +213,10 @@ pub fn confirm_mark_unlocked(
     confirm_dialog(
         &window,
         &crate::tr!("Mark as already unlocked?"),
-        &format!(
-            "This will mark \u{201C}{}\u{201D} as earned without a real unlock time. \
-             Use this only if you already unlocked it previously (e.g. before using this tool).",
-            ach.display_name
-        ),
+        &crate::tr!(
+            "This will mark \u{201c}{}\u{201d} as earned without a real unlock time. Use this only if you already unlocked it previously (e.g. before using this tool)."
+        )
+        .replacen("{}", &ach.display_name, 1),
         &crate::tr!("Mark as unlocked"),
         adw::ResponseAppearance::Destructive,
         move || {

@@ -71,7 +71,7 @@ pub(super) fn show_input_profile_editor(
             Ok(profile) => (profile, String::new(), false),
             Err(error) => (
                 InputProfile::default(),
-                format!("Could not load profile: {error}"),
+                crate::tr!("Could not load profile: {}").replacen("{}", &error, 1),
                 true,
             ),
         },

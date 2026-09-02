@@ -99,11 +99,11 @@ pub fn show_rename_group_dialog(state: &SharedState, group_id: i64, current_name
 pub fn show_delete_group_dialog(state: &SharedState, group_id: i64, name: &str) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
-        Some("Delete collection"),
-        Some(&format!(
-            "Delete \"{}\"? Games in this collection will not be removed.",
-            name
-        )),
+        Some(&crate::tr!("Delete collection")),
+        Some(
+            &crate::tr!("Delete \u{201c}{}\u{201d}? Games in this collection will not be removed.")
+                .replacen("{}", name, 1),
+        ),
     );
 
     dialog.add_response("cancel", &crate::tr!("Cancel"));

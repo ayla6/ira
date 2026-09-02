@@ -112,6 +112,12 @@ pub(super) fn show_input_profile_editor(
     let status = gtk4::Label::new(Some(&initial_status));
     status.set_xalign(0.0);
     status.set_visible(!initial_status.is_empty());
+    // Validation errors can be long; wrapped text keeps the label's natural
+    // width bounded so the floating sheet never asks for more than its
+    // presenter has (Adwaita warns and clips that).
+    status.set_wrap(true);
+    status.set_max_width_chars(70);
+    status.set_hexpand(true);
     if initial_error {
         status.add_css_class(CSS_ERROR);
     }

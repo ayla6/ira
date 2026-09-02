@@ -20,7 +20,7 @@ impl MappingEngine {
     /// layers), with mode shifts replacing the mode while held. Layers come
     /// first so "first wins" consumers resolve overrides the way
     /// `resolve_mapping` documents: active layers beat the base set.
-    fn mode_inputs(&self) -> Vec<(InputSource, SourceMode)> {
+    pub(crate) fn mode_inputs(&self) -> Vec<(InputSource, SourceMode)> {
         let mut result = Vec::new();
         let mut push = |mapping: &crate::profile::InputMapping| {
             let mode = match self.active_shift(mapping) {

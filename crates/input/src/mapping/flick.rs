@@ -5,18 +5,22 @@
 use super::{MappingEngine, OutputEvent, VALUE_EPSILON};
 use crate::profile::{GamepadAxis, InputSource, MouseAxis, SourceMode};
 
-/// Stick deflection that counts as "pointing" (below this the stick is
-/// centered and no flick or rotation happens).
+/// Stick deflection that counts as "pointing": crossing this from centered
+/// starts a flick.
 const FLICK_ENGAGE: f32 = 0.85;
-/// How long a full flick takes, in seconds, at flick_duration_ms = 100.
-const FLICK_BASE_SECONDS: f32 = 0.1;
+/// An engaged stick ends its flick below this softer line instead of the
+/// engage point — re-crossing the rim would otherwise re-flick on every
+/// wobble.
+const FLICK_RELEASE: f32 = 0.75;
 
 #[derive(Default)]
 pub(crate) struct FlickState {
     /// Angle of the stick while engaged, radians.
     last_angle: Option<f32>,
-    /// Counts left to emit for the current flick.
+    /// Turns left to emit for the current flick.
     flick_remaining: f32,
+    /// Emission pace of the in-flight flick, turns per second.
+    flick_rate: f32,
     /// Sign of the ongoing flick (+1 clockwise, -1 counter-clockwise).
     flick_direction: f32,
 }
@@ -26,18 +30,17 @@ impl MappingEngine {
     /// called from tick() with the elapsed time.
     pub(crate) fn emit_flick_motion(&mut self, dt: f32) -> Vec<OutputEvent> {
         let mut modes: Vec<(InputSource, SourceMode)> = Vec::new();
-        if let Some(set) = self.profile.action_sets.get(self.active_set) {
-            for mapping in &set.inputs {
-                if let Some(mode @ SourceMode::Flickstick { .. }) = mapping.mode.clone() {
-                    modes.push((mapping.source, mode));
-                }
+        for (source, mode) in self.mode_inputs() {
+            let is_flick = matches!(mode, SourceMode::Flickstick { .. });
+            if is_flick && !modes.iter().any(|(seen, _)| *seen == source) {
+                modes.push((source, mode));
             }
         }
         let mut output = Vec::new();
         for (source, mode) in modes {
             let SourceMode::Flickstick {
                 rotation_sensitivity,
-                ..
+                flick_duration_ms,
             } = mode
             else {
                 continue;
@@ -48,8 +51,12 @@ impl MappingEngine {
             let state = self.flick_states.entry(source).or_default();
             // Steam's shared calibration: one 360° sweep moves this many
             // mouse pixels at 1x sweep sensitivity.
-            let dots_per_360 = self.profile.gyro.dots_per_360;
-            emit_flick_for_stick(state, x, y, dt, rotation_sensitivity, dots_per_360, &mut output);
+            let cfg = FlickConfig {
+                sensitivity: rotation_sensitivity,
+                dots_per_360: self.profile.gyro.dots_per_360,
+                flick_seconds: flick_duration_ms as f32 / 1000.0,
+            };
+            emit_flick_for_stick(state, x, y, dt, &cfg, &mut output);
         }
         output
     }
@@ -75,17 +82,32 @@ impl MappingEngine {
     }
 }
 
+/// Per-stick constants for the flick path.
+struct FlickConfig {
+    /// Wheel-mode rotation scale (the snap always covers the stick angle
+    /// exactly).
+    sensitivity: f32,
+    /// Mouse counts for one full camera turn.
+    dots_per_360: f32,
+    /// How long a flick is spread, in seconds.
+    flick_seconds: f32,
+}
+
 fn emit_flick_for_stick(
     state: &mut FlickState,
     x: f32,
     y: f32,
     dt: f32,
-    sensitivity: f32,
-    dots_per_360: f32,
+    cfg: &FlickConfig,
     output: &mut Vec<OutputEvent>,
 ) {
     let magnitude = (x * x + y * y).sqrt();
-    if magnitude < FLICK_ENGAGE {
+    let threshold = if state.last_angle.is_some() {
+        FLICK_RELEASE
+    } else {
+        FLICK_ENGAGE
+    };
+    if magnitude < threshold {
         // Released: forget direction so re-engaging starts a fresh flick.
         state.last_angle = None;
         state.flick_remaining = 0.0;
@@ -98,13 +120,13 @@ fn emit_flick_for_stick(
     // the same tick instead of starting a frame late.
     if state.last_angle.is_none() {
         state.last_angle = Some(angle);
-        start_flick(state, angle, sensitivity);
+        start_flick(state, angle, cfg.flick_seconds);
     }
 
     if state.flick_remaining > VALUE_EPSILON {
         // Emit the in-flight flick burst.
-        let step = state.flick_remaining.min(dt / FLICK_BASE_SECONDS);
-        let counts = step * dots_per_360 * sensitivity * state.flick_direction;
+        let step = state.flick_remaining.min(state.flick_rate * dt);
+        let counts = step * cfg.dots_per_360 * state.flick_direction;
         push_yaw(output, counts);
         state.flick_remaining -= step;
     }
@@ -112,24 +134,25 @@ fn emit_flick_for_stick(
     if let Some(previous) = state.last_angle {
         let delta = wrap_angle(angle - previous);
         if delta.abs() > VALUE_EPSILON {
-            // Continuous rotation proportional to how fast the player
-            // swings the stick.
-            push_yaw(output, delta * dots_per_360 / std::f32::consts::TAU);
+            // Wheel mode: while engaged the camera turns with the stick,
+            // scaled by the rotation sensitivity.
+            push_yaw(
+                output,
+                delta * cfg.dots_per_360 / std::f32::consts::TAU * cfg.sensitivity,
+            );
             state.last_angle = Some(angle);
         }
     }
 }
 
-fn start_flick(state: &mut FlickState, angle: f32, sensitivity: f32) {
-    // Fractional turns past the nearest cardinal are preserved as rotation;
-    // the flick itself covers the angle to the nearest half turn.
-    let turns = angle / std::f32::consts::PI;
-    let nearest_half = turns.round();
-    let remainder = turns - nearest_half;
-    let fraction = remainder.abs(); // 0..=0.5 of a half turn
-    let _ = nearest_half;
-    state.flick_direction = -remainder.signum();
-    state.flick_remaining = fraction * 0.5 * sensitivity.max(0.05);
+fn start_flick(state: &mut FlickState, angle: f32, flick_seconds: f32) {
+    // The flick snaps the camera to the direction the stick points: the
+    // full stick angle, so pointing down from neutral is a 180° turn and
+    // pointing up does not move the camera at all.
+    let turns = angle / std::f32::consts::TAU; // -0.5..=0.5
+    state.flick_remaining = turns.abs();
+    state.flick_rate = state.flick_remaining / flick_seconds.max(0.01);
+    state.flick_direction = if turns < 0.0 { -1.0 } else { 1.0 };
 }
 
 fn push_yaw(output: &mut Vec<OutputEvent>, counts: f32) {
@@ -258,6 +281,83 @@ mod tests {
         assert!(
             (total - expected).abs() < expected * 0.25,
             "total {total} vs expected ~{expected}"
+        );
+    }
+
+    #[test]
+    fn test_flick_from_neutral_down_snaps_half_circle() {
+        // The defining flick-stick move: from a centered stick, pointing
+        // down must flick the camera 180°. The old snap covered only the
+        // remainder past the nearest half turn and turned nothing.
+        let profile = flick_profile();
+        let dots = profile.gyro.dots_per_360;
+        let mut engine = MappingEngine::new(profile).unwrap();
+        stick(&mut engine, 0.0, 1.0); // down, from neutral
+        let mut total = yaw_total(&engine.tick(4_000));
+        for i in 1..30 {
+            total += yaw_total(&engine.tick(4_000 + i * 4_000));
+        }
+        let expected = dots / 2.0;
+        assert!(
+            (total - expected).abs() < expected * 0.2,
+            "total {total} vs expected ~{expected}"
+        );
+    }
+
+    #[test]
+    fn test_flick_duration_setting_paces_the_snap() {
+        let mut profile = flick_profile();
+        profile.action_sets[0].inputs[0].mode = Some(SourceMode::Flickstick {
+            rotation_sensitivity: 1.0,
+            flick_duration_ms: 200,
+        });
+        let dots = profile.gyro.dots_per_360;
+        let mut engine = MappingEngine::new(profile).unwrap();
+        stick(&mut engine, 0.0, 1.0); // down: half-circle flick, 200 ms
+
+        // Halfway through the flick only half the turn has been emitted.
+        let mut halfway = yaw_total(&engine.tick(4_000));
+        for i in 1..20 {
+            halfway += yaw_total(&engine.tick(4_000 + i * 4_000));
+        }
+        assert!(
+            halfway < dots * 0.35,
+            "flick must still be in flight at 100 ms, got {halfway}"
+        );
+
+        // After the full 200 ms it lands on the same half circle.
+        let mut total = halfway;
+        for i in 20..45 {
+            total += yaw_total(&engine.tick(4_000 + i * 4_000));
+        }
+        let expected = dots / 2.0;
+        assert!(
+            (total - expected).abs() < expected * 0.2,
+            "total {total} vs expected ~{expected}"
+        );
+    }
+
+    #[test]
+    fn test_rim_wobble_does_not_reflick() {
+        // Dropping just below the engage point while engaged must not end
+        // the flick, or re-crossing the rim would snap all over again.
+        let profile = flick_profile();
+        let dots = profile.gyro.dots_per_360;
+        let mut engine = MappingEngine::new(profile).unwrap();
+        stick(&mut engine, 0.0, 1.0); // down: 180° flick
+        let mut total = yaw_total(&engine.tick(4_000));
+        for i in 1..30 {
+            total += yaw_total(&engine.tick(4_000 + i * 4_000));
+        }
+
+        // Wobble between the release and engage lines at the same angle.
+        for magnitude in [0.8f32, 0.95, 0.8, 1.0] {
+            stick(&mut engine, 0.0, magnitude);
+            total += yaw_total(&engine.tick(40_000));
+        }
+        assert!(
+            total < dots * 0.75,
+            "wobbling at the rim re-flicked: total {total}"
         );
     }
 }

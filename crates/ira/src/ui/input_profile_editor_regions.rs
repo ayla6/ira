@@ -128,13 +128,13 @@ pub(crate) fn region_groups(
     device: Option<&ira_input::DeviceInfo>,
 ) -> Vec<SourceGroup> {
     let supported = supported_button_sources(device);
+    // Preserve `wanted` order: groups list inputs the way the hardware
+    // sits, which is not always the numeric button order.
     let buttons = |wanted: &[GamepadButton]| -> Vec<InputSource> {
-        supported
+        wanted
             .iter()
-            .filter(
-                |source| matches!(source, InputSource::Button(button) if wanted.contains(button)),
-            )
-            .copied()
+            .filter(|button| supported.contains(&InputSource::Button(**button)))
+            .map(|button| InputSource::Button(*button))
             .collect()
     };
     let mut groups = match region {
@@ -211,9 +211,22 @@ pub(crate) fn region_groups(
                     GamepadButton::Guide,
                 ]),
             }];
-            groups.push(SourceGroup {
-                title: crate::tr!("Paddles"),
-                sources: buttons(&[
+            // The 8BitDo numbers its back paddles by position on each side
+            // (R4=1, L4=2, PR=3, PL=4); read left to right the pairs are
+            // L4/R4 then PL/PR, so list them spatially instead of numerically.
+            // Other controllers give the numbers no known layout — keep
+            // numeric order there.
+            let paddle_order: &[GamepadButton] = if device.is_some_and(|device| {
+                device.family() == ira_input::ControllerFamily::EightBitDo
+            }) {
+                &[
+                    GamepadButton::Paddle2,
+                    GamepadButton::Paddle1,
+                    GamepadButton::Paddle4,
+                    GamepadButton::Paddle3,
+                ]
+            } else {
+                &[
                     GamepadButton::Paddle1,
                     GamepadButton::Paddle2,
                     GamepadButton::Paddle3,
@@ -222,7 +235,11 @@ pub(crate) fn region_groups(
                     GamepadButton::Paddle6,
                     GamepadButton::Paddle7,
                     GamepadButton::Paddle8,
-                ]),
+                ]
+            };
+            groups.push(SourceGroup {
+                title: crate::tr!("Paddles"),
+                sources: buttons(paddle_order),
             });
             groups
         }
@@ -335,5 +352,51 @@ mod tests {
         assert_eq!(system.len(), 2);
         assert_eq!(system[0].title, crate::tr!("System"));
         assert_eq!(system[1].title, crate::tr!("Paddles"));
+    }
+
+    #[test]
+    fn test_paddles_read_left_to_right_for_8bitdo() {
+        let device_with = |vendor: u16| ira_input::DeviceInfo {
+            path: std::path::PathBuf::from("/dev/input/event0"),
+            name: "pad".to_string(),
+            vendor,
+            product: 0,
+            version: 0,
+            has_evdev_gyro: false,
+            supported_buttons: vec![
+                GamepadButton::Paddle1,
+                GamepadButton::Paddle2,
+                GamepadButton::Paddle3,
+                GamepadButton::Paddle4,
+            ],
+        };
+        let paddles = |device: ira_input::DeviceInfo| {
+            region_groups(Region::SystemPaddles, Some(&device))
+                .into_iter()
+                .find(|group| group.title == crate::tr!("Paddles"))
+                .unwrap()
+                .sources
+        };
+        // The 8BitDo numbers its paddles R4, L4, PR, PL; spatially the
+        // pairs read L4, R4 then PL, PR.
+        assert_eq!(
+            paddles(device_with(0x2dc8)),
+            vec![
+                InputSource::Button(GamepadButton::Paddle2),
+                InputSource::Button(GamepadButton::Paddle1),
+                InputSource::Button(GamepadButton::Paddle4),
+                InputSource::Button(GamepadButton::Paddle3),
+            ]
+        );
+        // No known layout behind other vendors' numbers: keep them.
+        assert_eq!(
+            paddles(device_with(0x045e)),
+            vec![
+                InputSource::Button(GamepadButton::Paddle1),
+                InputSource::Button(GamepadButton::Paddle2),
+                InputSource::Button(GamepadButton::Paddle3),
+                InputSource::Button(GamepadButton::Paddle4),
+            ]
+        );
     }
 }

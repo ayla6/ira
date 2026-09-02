@@ -1,5 +1,26 @@
 use adw::prelude::*;
-use ira_input::{ControllerFamily, GamepadAxis, GamepadButton, InputSource};
+use ira_input::{ControllerFamily, GamepadAxis, GamepadButton, InputSource, OutputAction};
+
+/// Loads a Steam glyph into `image`, reporting whether one was found. The
+/// caller shows its text fallback only when this returns false.
+pub(crate) fn set_asset_from_name(image: &gtk4::Image, asset_name: Option<&str>) -> bool {
+    let Some(asset_name) = asset_name else {
+        image.clear();
+        image.set_visible(false);
+        return false;
+    };
+    let dark = !gtk4::Settings::default()
+        .is_some_and(|settings| settings.is_gtk_application_prefer_dark_theme());
+    if let Some(path) = steam_asset_path(asset_name, dark) {
+        image.set_from_file(Some(&path));
+        image.set_visible(true);
+        true
+    } else {
+        image.clear();
+        image.set_visible(false);
+        false
+    }
+}
 
 pub(crate) fn set_source_asset(
     image: &gtk4::Image,
@@ -7,23 +28,36 @@ pub(crate) fn set_source_asset(
     source: InputSource,
     family: ControllerFamily,
 ) {
-    let Some(asset_name) = source_asset_name(source, family) else {
-        image.clear();
-        image.set_visible(false);
-        fallback.set_visible(true);
-        return;
-    };
-    let dark = !gtk4::Settings::default()
-        .is_some_and(|settings| settings.is_gtk_application_prefer_dark_theme());
-    if let Some(path) = steam_asset_path(asset_name, dark) {
-        image.set_from_file(Some(&path));
-        image.set_visible(true);
+    if set_asset_from_name(image, source_asset_name(source, family)) {
         fallback.set_visible(false);
     } else {
-        image.clear();
-        image.set_visible(false);
         fallback.set_visible(true);
     }
+}
+
+/// The Steam glyph name of a bound command, reusing the source glyphs for
+/// gamepad buttons and axes. Keyboard, mouse, and engine-internal commands
+/// have no glyph and stay textual.
+pub(crate) fn output_asset_name(
+    output: &OutputAction,
+    family: ControllerFamily,
+) -> Option<&'static str> {
+    let source = match output {
+        OutputAction::GamepadButton(button) => InputSource::Button(*button),
+        OutputAction::GamepadAxis(axis) => InputSource::Axis(*axis),
+        _ => return None,
+    };
+    source_asset_name(source, family)
+}
+
+/// Loads the glyph of a bound command into `image`, reporting whether the
+/// glyph set has one.
+pub(crate) fn set_output_asset(
+    image: &gtk4::Image,
+    output: &OutputAction,
+    family: ControllerFamily,
+) -> bool {
+    set_asset_from_name(image, output_asset_name(output, family))
 }
 
 pub(super) fn source_asset_name(

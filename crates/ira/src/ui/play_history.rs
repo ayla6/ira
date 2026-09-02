@@ -562,7 +562,7 @@ mod tests {
         // Many games in one day: each gets its own segment and swatch —
         // nothing is lumped into a grey "Other" bucket.
         let s: Vec<ira_models::PlaySession> = (1..=8i64)
-            .map(|i| session(i, i, 600 * (9 - i as i64)))
+            .map(|i| session(i, i, 600 * (9 - i)))
             .collect();
         let mut day: HashMap<i64, Vec<&ira_models::PlaySession>> = HashMap::new();
         for session in &s {

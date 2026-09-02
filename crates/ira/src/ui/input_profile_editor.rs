@@ -26,6 +26,11 @@ use std::sync::Arc;
 pub(super) struct InputProfileEditorParams {
     pub save_dir: String,
     pub profile_path: Option<PathBuf>,
+    /// Seed content for a new layout: `profile_path` is None (the seed is
+    /// never written back to) but the editor starts from this file's layout
+    /// instead of the blank default — the "create a copy for this game"
+    /// choice. The copy saves under its own name.
+    pub seed_from: Option<PathBuf>,
     pub game_id: Option<i64>,
     /// The presenting game's platform, when it has one. New profiles are
     /// scoped to it so a Wii layout never offers itself to a PS1 game.
@@ -43,6 +48,7 @@ pub(super) fn show_input_profile_editor(
     let InputProfileEditorParams {
         save_dir,
         profile_path,
+        seed_from,
         game_id,
         platform_id,
         layout_name,
@@ -69,15 +75,25 @@ pub(super) fn show_input_profile_editor(
                 true,
             ),
         },
-        None => {
-            let mut profile = InputProfile::default();
-            if let Some(platform_id) = platform_id.as_deref() {
-                if !platform_id.is_empty() {
-                    profile.compatible_platform_ids.push(platform_id.to_string());
+        // Seeded copy: start from another layout's content but stay a
+        // never-saved new file, renamed to the presenting layout name.
+        None => match seed_from.as_deref().map(read_profile) {
+            Some(Ok(mut seeded)) => {
+                if let Some(name) = layout_name.as_deref().filter(|name| !name.is_empty()) {
+                    seeded.name = name.to_string();
                 }
+                (seeded, String::new(), false)
             }
-            (profile, String::new(), false)
-        }
+            _ => {
+                let mut profile = InputProfile::default();
+                if let Some(platform_id) = platform_id.as_deref() {
+                    if !platform_id.is_empty() {
+                        profile.compatible_platform_ids.push(platform_id.to_string());
+                    }
+                }
+                (profile, String::new(), false)
+            }
+        },
     };
     if let Some(layout_name) = layout_name
         .as_deref()

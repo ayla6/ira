@@ -14,11 +14,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 /// Quick access to a game's controller layout (game header button, context
-/// menu): opens the input profile editor on the associated layout, or seeds a
-/// new one bound to this game when none is associated yet. Saving from here
-/// also enables ira-input for the game and points it at the saved layout.
+/// menu): opens the input profile editor on the associated layout. With no
+/// layout of its own the game inherits its console's at launch, so editing
+/// first asks whether to modify that parent layout, seed a copy from it, or
+/// start empty. Saving a new layout also enables ira-input for the game and
+/// points it at the saved layout.
 pub(super) fn open_controller_settings(state: &SharedState, game: &Game) {
-    let (window, save_dir, registry, associated) = {
+    let (window, save_dir, registry, associated, cfg) = {
         let s = state.borrow();
         let associated = ira_db::get_game_config(&s.db, game.db_id)
             .ok()
@@ -30,6 +32,7 @@ pub(super) fn open_controller_settings(state: &SharedState, game: &Game) {
             s.save_dir.clone(),
             s.controller_registry.clone(),
             associated,
+            s.cfg.clone(),
         )
     };
     let profile_path = associated.and_then(|path| {
@@ -45,20 +48,220 @@ pub(super) fn open_controller_settings(state: &SharedState, game: &Game) {
     });
     let state_for_saved = state.clone();
     let game_for_saved = game.clone();
-    super::input_profile_editor::show_input_profile_editor(
+    let enable_on_save = std::rc::Rc::new(move |path: &Path| {
+        enable_input_for_game(&state_for_saved, &game_for_saved, path);
+    });
+
+    let Some(path) = profile_path else {
+        // The console's own layout is what the game inherits at launch.
+        let parent_profile = cfg.console(&game.platform_id).controller_profile.clone();
+        let parent = if parent_profile.is_empty() {
+            None
+        } else {
+            let path = PathBuf::from(parent_profile);
+            path.is_file().then_some(path)
+        };
+        match parent {
+            Some(parent) => {
+                show_layout_choice(
+                    game.clone(),
+                    window,
+                    save_dir,
+                    registry,
+                    parent,
+                    enable_on_save,
+                )
+            }
+            None => show_editor(&window, &save_dir, None, None, game, &registry, enable_on_save),
+        }
+        return;
+    };
+    show_editor(
         &window,
+        &save_dir,
+        Some(&path),
+        None,
+        game,
+        &registry,
+        enable_on_save,
+    );
+}
+
+/// The game has no layout of its own but its console has one: ask whether
+/// to edit the inherited layout in place (affecting every game that uses
+/// it), start a copy of it bound to this game, or start from empty.
+fn show_layout_choice(
+    game: Game,
+    window: adw::ApplicationWindow,
+    save_dir: String,
+    registry: Arc<ira_input::ControllerRegistry>,
+    parent: PathBuf,
+    enable_on_save: std::rc::Rc<dyn Fn(&Path)>,
+) {
+    let parent_label = read_profile(&parent)
+        .map(|profile| {
+            if profile.name.trim().is_empty() {
+                path_label(&parent)
+            } else {
+                profile.name
+            }
+        })
+        .unwrap_or_else(|_| path_label(&parent));
+
+    let dialog = adw::Dialog::new();
+    dialog.set_title(&crate::tr!("Edit controller layout"));
+    dialog.set_content_width(520);
+
+    let header = adw::HeaderBar::new();
+    header.add_css_class(super::css::CSS_FLAT);
+
+    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    body.set_margin_start(16);
+    body.set_margin_end(16);
+    body.set_margin_bottom(16);
+    let intro = gtk4::Label::new(Some(&crate::tr!(
+        "This game has no layout of its own — it uses \"{}\"."
+    )
+    .replacen("{}", &parent_label, 1)));
+    intro.set_wrap(true);
+    intro.set_xalign(0.0);
+    body.append(&intro);
+
+    let list = gtk4::ListBox::new();
+    list.set_selection_mode(gtk4::SelectionMode::None);
+    list.add_css_class(super::css::CSS_BOXED_LIST);
+
+    // Modify the parent in place: every game using it sees the changes.
+    let modify_row = choice_row(
+        &crate::tr!("Modify \"{}\"").replacen("{}", &parent_label, 1),
+        &crate::tr!("Edit the shared layout; every game using it changes"),
+        "document-edit-symbolic",
+    );
+    {
+        let parent = parent.clone();
+        let window = window.clone();
+        let registry = registry.clone();
+        let dialog = dialog.clone();
+        let save_dir = save_dir.clone();
+        let game = game.clone();
+        modify_row.connect_activated(move |_| {
+            dialog.close();
+            show_editor(
+                &window,
+                &save_dir,
+                Some(&parent),
+                None,
+                &game,
+                &registry,
+                std::rc::Rc::new(|_| {}),
+            );
+        });
+    }
+    list.append(&modify_row);
+
+    // Copy: seed a new layout from the parent, bound to this game only.
+    let copy_row = choice_row(
+        &crate::tr!("Create a copy for this game"),
+        &crate::tr!("Start from \"{}\"; changes only affect this game")
+            .replacen("{}", &parent_label, 1),
+        "edit-copy-symbolic",
+    );
+    {
+        let parent = parent.clone();
+        let window = window.clone();
+        let registry = registry.clone();
+        let enable_on_save = enable_on_save.clone();
+        let dialog = dialog.clone();
+        let save_dir = save_dir.clone();
+        let game = game.clone();
+        copy_row.connect_activated(move |_| {
+            dialog.close();
+            show_editor(
+                &window,
+                &save_dir,
+                None,
+                Some(&parent),
+                &game,
+                &registry,
+                enable_on_save.clone(),
+            );
+        });
+    }
+    list.append(&copy_row);
+
+    // Empty: the previous behavior, a blank layout for this game.
+    let empty_row = choice_row(
+        &crate::tr!("Create an empty layout"),
+        &crate::tr!("Start from scratch for this game only"),
+        "list-add-symbolic",
+    );
+    {
+        let window = window.clone();
+        let registry = registry.clone();
+        let enable_on_save = enable_on_save.clone();
+        let dialog = dialog.clone();
+        let save_dir = save_dir.clone();
+        let game = game.clone();
+        empty_row.connect_activated(move |_| {
+            dialog.close();
+            show_editor(
+                &window,
+                &save_dir,
+                None,
+                None,
+                &game,
+                &registry,
+                enable_on_save.clone(),
+            );
+        });
+    }
+    list.append(&empty_row);
+    body.append(&list);
+
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_child(Some(&body));
+    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroll.set_vexpand(true);
+
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&header);
+    toolbar.set_content(Some(&scroll));
+    dialog.set_child(Some(&toolbar));
+    dialog.present(Some(&window));
+}
+
+fn choice_row(title: &str, subtitle: &str, icon: &str) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    row.set_title(title);
+    row.set_subtitle(subtitle);
+    row.add_prefix(&gtk4::Image::from_icon_name(icon));
+    row.set_activatable(true);
+    row
+}
+
+/// Editor launch with this game's binding and the post-save hook.
+fn show_editor(
+    window: &adw::ApplicationWindow,
+    save_dir: &str,
+    profile_path: Option<&Path>,
+    seed_from: Option<&Path>,
+    game: &Game,
+    registry: &Arc<ira_input::ControllerRegistry>,
+    on_saved: std::rc::Rc<dyn Fn(&Path)>,
+) {
+    super::input_profile_editor::show_input_profile_editor(
+        window,
         super::input_profile_editor::InputProfileEditorParams {
-            save_dir,
-            profile_path,
+            save_dir: save_dir.to_string(),
+            profile_path: profile_path.map(Path::to_path_buf),
+            seed_from: seed_from.map(Path::to_path_buf),
             game_id: Some(game.db_id),
             platform_id: Some(game.platform_id.clone()).filter(|id| !id.is_empty()),
             layout_name: Some(game.name.clone()),
-            registry,
+            registry: registry.clone(),
             device: None,
         },
-        move |path| {
-            enable_input_for_game(&state_for_saved, &game_for_saved, &path);
-        },
+        move |saved| on_saved(saved.as_path()),
     );
 }
 
@@ -285,6 +488,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
             super::input_profile_editor::InputProfileEditorParams {
                 save_dir: save_dir_for_edit.clone(),
                 profile_path: Some(path),
+                seed_from: None,
                 game_id: Some(game_id_for_edit),
                 platform_id: Some(platform_for_edit.clone()).filter(|id| !id.is_empty()),
                 layout_name: Some(game_name_for_edit.clone()),
@@ -346,6 +550,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
                 super::input_profile_editor::InputProfileEditorParams {
                     save_dir,
                     profile_path: None,
+                    seed_from: None,
                     game_id: Some(game_id),
                     platform_id: Some(platform_for_new.clone()).filter(|id| !id.is_empty()),
                     layout_name: Some(game_name.clone()),

@@ -247,6 +247,7 @@ fn add_console_remapping_rows(
             &parent_for_edit,
             super::input_profile_editor::InputProfileEditorParams {
                 save_dir: save_dir.clone(),
+                seed_from: None,
                 profile_path: Some(path),
                 game_id: None,
                 platform_id: None,
@@ -284,8 +285,9 @@ fn add_console_remapping_rows(
                         super::input_profile_editor::InputProfileEditorParams {
                             save_dir: save_dir.clone(),
                             profile_path: None,
+                            seed_from: None,
                             game_id: None,
-                platform_id: None,
+                            platform_id: None,
                             layout_name: Some(label.clone()),
                             registry: registry.clone(),
                             device: None,
@@ -661,6 +663,7 @@ impl ControllerDefaultLayout {
             &self.parent,
             super::input_profile_editor::InputProfileEditorParams {
                 save_dir: self.save_dir.clone(),
+                seed_from: None,
                 profile_path: Some(profile_path),
                 game_id: None,
                 platform_id: None,
@@ -842,6 +845,7 @@ fn rebuild_profile_rows(
             super::input_profile_editor::InputProfileEditorParams {
                 save_dir: save_dir.clone(),
                 profile_path: None,
+                seed_from: None,
                 game_id: None,
                 platform_id: None,
                 layout_name: None,
@@ -892,6 +896,7 @@ fn add_profile_row(
             &parent_for_edit,
             super::input_profile_editor::InputProfileEditorParams {
                 save_dir: save_dir_for_edit.clone(),
+                seed_from: None,
                 profile_path: Some(path_for_edit.clone()),
                 game_id: None,
                 platform_id: None,

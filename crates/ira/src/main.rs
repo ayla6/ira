@@ -62,6 +62,13 @@ fn main() {
 
     let app = adw::Application::new(Some("com.github.ira"), gio::ApplicationFlags::empty());
 
+    // Big-picture entry (gamescope, couch use): `--big-picture` or
+    // IRA_BIG_PICTURE=1 fullscreens the main window, dropping the desktop
+    // chrome. Fullscreening is what makes the UI fill Gamescope's display —
+    // the window's default size otherwise stays put inside it.
+    let big_picture = std::env::args().any(|arg| arg == "--big-picture")
+        || std::env::var("IRA_BIG_PICTURE").is_ok_and(|value| value == "1");
+
     let state_holder: Rc<RefCell<Option<SharedState>>> = Rc::new(RefCell::new(None));
 
     app.connect_activate({
@@ -74,6 +81,9 @@ fn main() {
                 return;
             }
             let state = activate(app);
+            if big_picture {
+                state.borrow().window.fullscreen();
+            }
             *state_holder.borrow_mut() = Some(state);
         }
     });

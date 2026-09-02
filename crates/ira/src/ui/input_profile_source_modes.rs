@@ -201,19 +201,19 @@ pub(crate) fn mode_setting_rows(
             flick_duration_ms,
         } => {
             // Steam's shared angle calibration: pixels per full 360° sweep
-            // at 1x. Lives on the profile so the gyro edits the same value.
+            // at 1x. Lives on the shared live Gyro config — the same copy
+            // the Gyro page's Dots Per 360° row edits — so read it back
+            // from there too: this row rebuilds on every edit, and reading
+            // the profile snapshot instead made the slider snap back to
+            // the value the editor opened with.
+            let initial_dots = base.gyro.borrow().dots_per_360;
             let calibration_base = base.clone();
             rows.push(slider_row_with_scale(
                 &crate::tr!("Flick Stick ° to Mouse Pixels (Dots Per 360°)"),
                 Some(&crate::tr!(
                     "One full 360° sweep of the stick turns the camera this many pixels of mouse movement at 1x sweep sensitivity. Shared with the Gyro's Dots Per 360°."
                 )),
-                &SliderSpec(
-                    500.0,
-                    30_000.0,
-                    5.0,
-                    f64::from(base.profile.borrow().gyro.dots_per_360),
-                ),
+                &SliderSpec(500.0, 30_000.0, 5.0, f64::from(initial_dots)),
                 move |value| {
                     calibration_base.gyro.borrow_mut().dots_per_360 = value as f32;
                     (calibration_base.on_changed)();

@@ -1,3 +1,4 @@
+pub mod daemon;
 mod calibration;
 mod gyro;
 mod hid_ds4;

@@ -655,7 +655,10 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
     install_signal_handlers();
     let mut trace = TraceState::new(arguments.trace);
     let mut gamepad = open_initial_gamepad(arguments.device.as_deref());
-    let profile = load_profile(arguments.profile.as_deref())?;
+    // A broken profile or unavailable uinput must never keep the game from
+    // starting: degrade to the builtin layout, or to shadow-only devices,
+    // and say so on stderr.
+    let profile = load_profile_or_default(arguments.profile.as_deref());
     let mut mapper = MappingEngine::new(profile)?;
     let mut profile_monitor = arguments
         .profile
@@ -674,8 +677,20 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         .map(|set| set.inputs.len())
         .sum::<usize>();
     eprintln!("ira-input: loaded {mapped_inputs} mapped inputs from {profile_name}");
-    let mut keyboard = create_keyboard(mapper.profile().keyboard_keycodes())?;
-    let mut mouse = create_mouse(mapper.profile().uses_mouse())?;
+    let mut keyboard = match create_keyboard(mapper.profile().keyboard_keycodes()) {
+        Ok(keyboard) => keyboard,
+        Err(error) => {
+            eprintln!("ira-input: {error}; keyboard output disabled, the game still launches");
+            None
+        }
+    };
+    let mut mouse = match create_mouse(mapper.profile().uses_mouse()) {
+        Ok(mouse) => mouse,
+        Err(error) => {
+            eprintln!("ira-input: {error}; mouse output disabled, the game still launches");
+            None
+        }
+    };
     let sensor = gamepad
         .as_ref()
         .and_then(|gamepad| open_sensor(gamepad.info()));
@@ -715,8 +730,16 @@ fn run_session(arguments: Arguments) -> Result<i32, String> {
         eprintln!("ira-input: uinput gamepad suppressed; the uhid controller is the controller");
         VirtualGamepad::shadow_only(mapper.profile().backend)
     } else {
-        VirtualGamepad::create_for_backend(mapper.profile().backend)
-            .map_err(|error| format!("failed to create virtual gamepad: {error}"))?
+        match VirtualGamepad::create_for_backend(mapper.profile().backend) {
+            Ok(virtual_gamepad) => virtual_gamepad,
+            Err(error) => {
+                eprintln!(
+                    "ira-input: failed to create virtual gamepad: {error}; \
+                     gamepad output disabled, the game still launches"
+                );
+                VirtualGamepad::shadow_only(mapper.profile().backend)
+            }
+        }
     };
     // The cemuhook stream is the DSU backend itself: picking that output
     // mode always streams, nothing toggles it. A profile on any other
@@ -1523,6 +1546,23 @@ fn load_profile(path: Option<&Path>) -> Result<InputProfile, String> {
         None => format!("invalid builtin profile: {error}"),
     })?;
     Ok(profile)
+}
+
+/// Like [`load_profile`], but an unreadable or invalid profile file falls
+/// back to the builtin default layout instead of aborting: the wrapper
+/// sits between the launcher and the game command, so exiting here would
+/// stop the game from starting at all.
+fn load_profile_or_default(path: Option<&Path>) -> InputProfile {
+    match load_profile(path) {
+        Ok(profile) => profile,
+        Err(error) => {
+            eprintln!(
+                "ira-input: {error}; falling back to the builtin default layout, \
+                 the game still launches"
+            );
+            InputProfile::default_gamepad()
+        }
+    }
 }
 
 fn is_real_profile(path: &Path) -> bool {

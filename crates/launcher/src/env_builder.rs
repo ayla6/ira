@@ -539,24 +539,27 @@ pub fn wrap_with_input(
 }
 
 /// Wraps the command only when input remapping is explicitly enabled; which
-/// virtual controller the game sees is decided by the profile itself.
+/// virtual controller the game sees is decided by the profile itself. A
+/// missing ira-input binary degrades to launching unwrapped — remapping is
+/// optional garnish, the game itself must start.
 pub fn wrap_with_input_mode(
     command: &mut Vec<String>,
     mode: Option<ControllerInputMode>,
     profile: Option<&str>,
     calibration: Option<&str>,
     pause_unfocused: bool,
-) -> Result<(), String> {
-    let binary = match mode {
-        Some(ControllerInputMode::Enabled) => Some(input_binary_path()),
-        None | Some(ControllerInputMode::Disabled) => None,
-    };
-    if let Some(binary) = binary {
-        let binary = binary
-            .ok_or_else(|| "input remapping enabled but ira-input was not found".to_string())?;
-        wrap_command_with_input(command, &binary, profile, calibration, pause_unfocused);
+) {
+    if let Some(ControllerInputMode::Enabled) = mode {
+        match input_binary_path() {
+            Some(binary) => {
+                wrap_command_with_input(command, &binary, profile, calibration, pause_unfocused)
+            }
+            None => eprintln!(
+                "launch: input remapping is enabled but ira-input was not found; \
+                 launching without input remapping"
+            ),
+        }
     }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -264,8 +264,8 @@ fn on_folder_picked(
 ) {
     let folders = state.borrow().cfg.all_game_folders();
 
-    // Already living in a managed games folder, or no real choice of
-    // destination (none / a single root configured): add it where it is.
+    // Already living in a managed games folder, or no root to move into:
+    // add it where it is. Otherwise ask where it belongs.
     if !needs_move_choice(&folders, path) {
         start_identify(path.to_path_buf(), None, wizard);
         return;
@@ -275,16 +275,15 @@ fn on_folder_picked(
 }
 
 /// Whether picking `path` should open the move-target chooser: only when it
-/// sits outside every configured games root and there are several to
-/// choose between. With one root there is nothing to disambiguate, and
-/// silently moving the game there would be a surprise.
+/// sits outside every configured games root and at least one root exists.
+/// A single root still asks — moving the game there silently would be a
+/// surprise; the chooser doubles as the yes/no prompt.
 fn needs_move_choice(folders: &[std::path::PathBuf], path: &Path) -> bool {
-    folders.len() > 1 && !folders.iter().any(|folder| path.starts_with(folder))
+    !folders.is_empty() && !folders.iter().any(|folder| path.starts_with(folder))
 }
 
-/// The picked folder is outside every configured games root and several
-/// roots exist: offer to move it into one of them, listing each with its
-/// free space.
+/// The picked folder is outside every configured games root: offer to move
+/// it into one of them, listing each with its free space.
 fn show_move_target_chooser(
     path: &Path,
     folders: &[std::path::PathBuf],
@@ -1809,10 +1808,14 @@ mod tests {
     }
 
     #[test]
-    fn test_needs_move_choice_single_root_never_asks() {
+    fn test_needs_move_choice_asks_for_outside_paths_with_one_root() {
         let folders = vec![PathBuf::from("/games/pc")];
         assert!(!needs_move_choice(&folders, Path::new("/games/pc/Cool Game")));
-        assert!(!needs_move_choice(&folders, Path::new("/downloads/Cool Game")));
+        // Outside the single root still asks: the chooser is the move yes/no.
+        assert!(needs_move_choice(&folders, Path::new("/downloads/Cool Game")));
+        // Component-wise prefix: a sibling named /games/pc-games is outside.
+        assert!(needs_move_choice(&folders, Path::new("/games/pc-games/Cool Game")));
+        // No roots configured: nothing to move into, keep it where it is.
         assert!(!needs_move_choice(&[], Path::new("/downloads/Cool Game")));
     }
 

@@ -185,6 +185,12 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     let content_header = adw::HeaderBar::new();
     content_header.add_css_class("flat");
     content_header.add_css_class("app-content-header");
+    if super::big_picture::is_big_picture() {
+        // The min/max/close buttons are the last desktop tell on a couch
+        // screen, and fullscreen doesn't remove them — they're CSD widgets.
+        content_header.set_show_start_title_buttons(false);
+        content_header.set_show_end_title_buttons(false);
+    }
 
     let search_entry = gtk4::SearchEntry::new();
     search_entry.set_placeholder_text(Some(&crate::tr!("Search games…")));

@@ -1,5 +1,6 @@
 mod achievement_rows;
 mod achievement_view;
+pub mod big_picture;
 mod background;
 mod context_menu;
 mod context_menu_actions;

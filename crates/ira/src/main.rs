@@ -46,6 +46,23 @@ fn init_critical_backtrace() {
 }
 
 fn main() {
+    // Under Gamescope's nested compositor, run GTK against its XWayland:
+    // the Wayland-native path segfaults the compositor on menus (xdg_popup).
+    // Respect an explicit GDK_BACKEND; this only fills in the default.
+    let in_gamescope = ira::ui::big_picture::running_in_gamescope();
+    if in_gamescope && std::env::var("GDK_BACKEND").is_err() {
+        std::env::set_var("GDK_BACKEND", "x11");
+    }
+
+    // Big-picture entry: `--big-picture`, IRA_BIG_PICTURE=1, or running
+    // under Gamescope. Fullscreens the main window, dropping the desktop
+    // chrome — nothing maximizes the window for the app inside Gamescope,
+    // so its default size otherwise stays put with the header bars on.
+    let big_picture = ira::ui::big_picture::is_big_picture();
+    if big_picture {
+        eprintln!("ira: big picture mode");
+    }
+
     let _flush_guard = init_tracing();
     init_critical_backtrace();
     // Keep large image buffers (covers, heroes, logos) mmap-backed so freeing
@@ -61,13 +78,6 @@ fn main() {
         .expect("failed to register application resources");
 
     let app = adw::Application::new(Some("com.github.ira"), gio::ApplicationFlags::empty());
-
-    // Big-picture entry (gamescope, couch use): `--big-picture` or
-    // IRA_BIG_PICTURE=1 fullscreens the main window, dropping the desktop
-    // chrome. Fullscreening is what makes the UI fill Gamescope's display —
-    // the window's default size otherwise stays put inside it.
-    let big_picture = std::env::args().any(|arg| arg == "--big-picture")
-        || std::env::var("IRA_BIG_PICTURE").is_ok_and(|value| value == "1");
 
     let state_holder: Rc<RefCell<Option<SharedState>>> = Rc::new(RefCell::new(None));
 

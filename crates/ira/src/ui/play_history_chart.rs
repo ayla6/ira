@@ -4,12 +4,10 @@ use super::helpers::{clear_children, esc, format_duration};
 use adw::prelude::*;
 use chrono::Datelike;
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 
 const Y_AXIS_W: i32 = 34;
 const SIDEBAR_W: i32 = 260;
-const MAX_TOP_GAMES: usize = 5;
 const COLOR_HEX: &[&str] = &[
     "#3584e4", "#33d17a", "#ff7800", "#e01b24", "#9141ac", "#f5c211",
 ];
@@ -20,6 +18,18 @@ pub(super) fn color_hex(i: usize) -> &'static str {
 }
 pub(super) fn other_hex() -> &'static str {
     OTHER_HEX
+}
+
+/// Every game gets its own palette color, derived from its id, so bars and
+/// sidebar swatches stay consistent everywhere a game appears. A hash keeps
+/// the assignment stable without any top-N cap — the old "top 5 by total
+/// playtime" ranking left every other game grey.
+pub(super) fn color_index_for_game(game_id: i64) -> usize {
+    // splitmix64 finalizer: well-distributed low bits from small ids.
+    let mut z = (game_id as u64).wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    ((z ^ (z >> 31)) as usize) % COLOR_HEX.len()
 }
 
 #[derive(Clone)]
@@ -60,27 +70,8 @@ pub(super) struct ChartFocus {
     pub week: chrono::NaiveDate,
     pub day: chrono::NaiveDate,
 }
-pub(super) struct GameColorAssignment {
-    pub top_games: Vec<i64>,
-    pub color_map: HashMap<i64, usize>,
-}
 
 pub(super) type DeleteSessionFn = Rc<dyn Fn(i64, bool)>;
-
-pub(super) fn assign_game_colors(s: &[ira_models::PlaySession]) -> GameColorAssignment {
-    let mut t: HashMap<i64, f64> = HashMap::new();
-    for s in s {
-        *t.entry(s.game_id).or_default() += s.duration_seconds as f64;
-    }
-    let mut v: Vec<(i64, f64)> = t.into_iter().collect();
-    v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    let top: Vec<i64> = v.iter().take(MAX_TOP_GAMES).map(|(id, _)| *id).collect();
-    let map = top.iter().enumerate().map(|(i, id)| (*id, i)).collect();
-    GameColorAssignment {
-        top_games: top,
-        color_map: map,
-    }
-}
 
 /// Returns (interval_seconds, nice_max_seconds). Prefers smallest interval that fits.
 fn axis_config(max_v: f64) -> (f64, f64) {
@@ -594,7 +585,6 @@ fn make_delete_button(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ira_models::PlaySession;
 
     fn day(date: chrono::NaiveDate, total: f64) -> DayData {
         DayData {
@@ -670,19 +660,15 @@ mod tests {
     }
 
     #[test]
-    fn test_assign_colors() {
-        let s: Vec<PlaySession> = (1..=8i64)
-            .map(|i| PlaySession {
-                id: i,
-                game_id: i,
-                variant_id: None,
-                started_at: 1000 + i,
-                ended_at: 1000 + i + 100 * (9 - i),
-                duration_seconds: 100 * (9 - i),
-            })
-            .collect();
-        let a = assign_game_colors(&s);
-        assert_eq!(a.top_games.len(), 5);
-        assert!(!a.color_map.contains_key(&8));
+    fn test_color_index_for_game_is_stable_and_bounded() {
+        for id in 0..200i64 {
+            let idx = color_index_for_game(id);
+            assert!(idx < COLOR_HEX.len());
+            assert_eq!(idx, color_index_for_game(id));
+        }
+        // Not everything collapses onto one swatch.
+        let distinct: std::collections::HashSet<usize> =
+            (0..50i64).map(color_index_for_game).collect();
+        assert!(distinct.len() > 1);
     }
 }

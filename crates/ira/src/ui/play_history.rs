@@ -1,7 +1,7 @@
 use super::helpers::{clear_children, format_duration};
 use super::play_history_chart::{
-    assign_game_colors, build_weekly_chart, color_hex, other_hex, BarSegment, ChartFocus, DayData,
-    DayDetail, DaySession, GameColorAssignment, WeekData,
+    build_weekly_chart, color_hex, color_index_for_game, BarSegment, ChartFocus, DayData,
+    DayDetail, DaySession, WeekData,
 };
 use super::state::SharedState;
 use adw::prelude::*;
@@ -367,8 +367,7 @@ pub fn show_daily_history_dialog(state: &SharedState) {
     let empty_hint = all_sessions
         .is_empty()
         .then(|| crate::tr!("No play sessions recorded yet"));
-    let assignment = assign_game_colors(&all_sessions);
-    let weeks = compute_app_weeks(&all_sessions, &assignment, &game_names);
+    let weeks = compute_app_weeks(&all_sessions, &game_names);
 
     box_.append(&build_weekly_chart(
         weeks,
@@ -386,7 +385,6 @@ pub fn show_daily_history_dialog(state: &SharedState) {
 
 fn compute_app_weeks(
     sessions: &[ira_models::PlaySession],
-    assignment: &GameColorAssignment,
     game_names: &HashMap<i64, String>,
 ) -> Vec<WeekData> {
     let mut by_day: HashMap<chrono::NaiveDate, HashMap<i64, Vec<&ira_models::PlaySession>>> =
@@ -413,7 +411,7 @@ fn compute_app_weeks(
             .into_iter()
             .map(|date| {
                 let day_games = by_day.get(&date);
-                let (segments, details) = build_day_data(day_games, assignment, game_names);
+                let (segments, details) = build_day_data(day_games, game_names);
                 let total: f64 = segments.iter().map(|s| s.value).sum();
                 DayData {
                     date,
@@ -436,85 +434,50 @@ fn compute_app_weeks(
 
 fn build_day_data(
     day_games: Option<&HashMap<i64, Vec<&ira_models::PlaySession>>>,
-    assignment: &GameColorAssignment,
     game_names: &HashMap<i64, String>,
 ) -> (Vec<BarSegment>, Vec<DayDetail>) {
     let Some(day_games) = day_games else {
         return (vec![], vec![]);
     };
 
+    // One colored segment per game, largest playtime first. Every game has a
+    // stable palette color (see color_index_for_game), so nothing collapses
+    // into a shared grey "Other" bucket.
+    let mut played: Vec<(i64, f64, Vec<&ira_models::PlaySession>)> = day_games
+        .iter()
+        .map(|(&gid, sessions)| {
+            let total: f64 = sessions.iter().map(|s| s.duration_seconds as f64).sum();
+            (gid, total, sessions.clone())
+        })
+        .filter(|&(_, total, _)| total > 0.0)
+        .collect();
+    played.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
     let mut segments: Vec<BarSegment> = Vec::new();
     let mut details: Vec<DayDetail> = Vec::new();
-
-    for &gid in &assignment.top_games {
-        if let Some(sessions) = day_games.get(&gid) {
-            let total: f64 = sessions.iter().map(|s| s.duration_seconds as f64).sum();
-            if total > 0.0 {
-                let color_idx = assignment.color_map.get(&gid).copied();
-                let name = game_names.get(&gid).cloned().unwrap_or_default();
-                let hex = color_hex(color_idx.unwrap_or(0)).to_string();
-                let sub_sessions: Vec<DaySession> = sessions
-                    .iter()
-                    .map(|s| DaySession {
-                        session_id: s.id,
-                        label: format_time(s.started_at),
-                        value: format_duration(s.duration_seconds),
-                    })
-                    .collect();
-                segments.push(BarSegment {
-                    value: total,
-                    color_index: color_idx,
-                    label: name.clone(),
-                });
-                details.push(DayDetail {
-                    session_id: None,
-                    label: name,
-                    value: format_duration(total as i64),
-                    color_hex: Some(hex),
-                    sessions: sub_sessions,
-                });
-            }
-        }
-    }
-
-    // Non-top-5 games: single "Other" bar segment, but individual sidebar details
-    let mut other_total: f64 = 0.0;
-    let mut other_details: Vec<(i64, f64, Vec<&ira_models::PlaySession>)> = Vec::new();
-    for (&gid, sessions) in day_games {
-        if !assignment.color_map.contains_key(&gid) {
-            let total: f64 = sessions.iter().map(|s| s.duration_seconds as f64).sum();
-            if total > 0.0 {
-                other_total += total;
-                other_details.push((gid, total, sessions.clone()));
-            }
-        }
-    }
-    if other_total > 0.0 {
+    for (gid, total, sessions) in played {
+        let color_idx = color_index_for_game(gid);
+        let name = game_names.get(&gid).cloned().unwrap_or_default();
+        let sub_sessions: Vec<DaySession> = sessions
+            .iter()
+            .map(|s| DaySession {
+                session_id: s.id,
+                label: format_time(s.started_at),
+                value: format_duration(s.duration_seconds),
+            })
+            .collect();
         segments.push(BarSegment {
-            value: other_total,
-            color_index: None,
-            label: crate::tr!("Other"),
+            value: total,
+            color_index: Some(color_idx),
+            label: name.clone(),
         });
-        // Sort by playtime descending
-        other_details.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        for (gid, total, sessions) in other_details {
-            let name = game_names.get(&gid).cloned().unwrap_or_default();
-            let sub_sessions: Vec<DaySession> = sessions
-                .iter()
-                .map(|s| DaySession {
-                    session_id: s.id,
-                    label: format_time(s.started_at),
-                    value: format_duration(s.duration_seconds),
-                })
-                .collect();
-            details.push(DayDetail {
-                session_id: None,
-                label: name,
-                value: format_duration(total as i64),
-                color_hex: Some(other_hex().to_string()),
-                sessions: sub_sessions,
-            });
-        }
+        details.push(DayDetail {
+            session_id: None,
+            label: name,
+            value: format_duration(total as i64),
+            color_hex: Some(color_hex(color_idx).to_string()),
+            sessions: sub_sessions,
+        });
     }
 
     (segments, details)
@@ -581,5 +544,58 @@ mod tests {
         assert_eq!(weeks[0].week_start, current_week_start());
         assert!(weeks[0].days.iter().all(|d| d.total == 0.0));
         assert!(weeks[0].days.iter().all(|d| d.details.is_empty()));
+    }
+
+    fn session(id: i64, game_id: i64, duration: i64) -> ira_models::PlaySession {
+        ira_models::PlaySession {
+            id,
+            game_id,
+            variant_id: None,
+            started_at: 1_700_000_000,
+            ended_at: 1_700_000_000 + duration,
+            duration_seconds: duration,
+        }
+    }
+
+    #[test]
+    fn test_build_day_data_colors_every_game() {
+        // Many games in one day: each gets its own segment and swatch —
+        // nothing is lumped into a grey "Other" bucket.
+        let s: Vec<ira_models::PlaySession> = (1..=8i64)
+            .map(|i| session(i, i, 600 * (9 - i as i64)))
+            .collect();
+        let mut day: HashMap<i64, Vec<&ira_models::PlaySession>> = HashMap::new();
+        for session in &s {
+            day.entry(session.game_id).or_default().push(session);
+        }
+        let names: HashMap<i64, String> = (1..=8i64).map(|i| (i, format!("Game {i}"))).collect();
+
+        let (segments, details) = build_day_data(Some(&day), &names);
+
+        assert_eq!(segments.len(), 8);
+        assert_eq!(details.len(), 8);
+        // Largest playtime first (game 1 has the longest sessions).
+        assert_eq!(segments[0].label, "Game 1");
+        assert_eq!(segments[0].value, 4800.0);
+        for (segment, detail) in segments.iter().zip(&details) {
+            let idx = segment.color_index.expect("every game is colored");
+            assert_eq!(detail.color_hex.as_deref(), Some(color_hex(idx)));
+        }
+        // Colors are per game, not one shared grey.
+        assert!(segments.iter().any(|s| s.color_index != segments[0].color_index));
+    }
+
+    #[test]
+    fn test_build_day_data_stable_colors_match_index() {
+        let s = [session(1, 42, 1200)];
+        let mut day: HashMap<i64, Vec<&ira_models::PlaySession>> = HashMap::new();
+        day.insert(42, vec![&s[0]]);
+        let (segments, _) = build_day_data(Some(&day), &HashMap::new());
+        assert_eq!(segments.len(), 1);
+        assert_eq!(
+            segments[0].color_index,
+            Some(color_index_for_game(42)),
+            "color must be the game's stable palette index"
+        );
     }
 }

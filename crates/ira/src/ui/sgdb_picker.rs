@@ -153,6 +153,9 @@ struct SgdbPickerCtx {
     steam: Arc<SteamDataClient>,
     asset: String,
     is_steam_id: bool,
+    // Weak: ctx clones are owned by closures attached to the picker's own
+    // widgets, and the settings-screen cache owns the dialog strongly, so a
+    // strong ref here would make dialog -> closure -> dialog a cycle.
     picker: glib::WeakRef<adw::Dialog>,
     on_done: Rc<dyn Fn()>,
     pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
@@ -418,17 +421,17 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     // stale results (and resume pagination from the wrong stream).
     let cache_key = format!("{}|{}|{}|{}", id, is_steam_id, asset, dimensions.join(","));
 
-    // If a picker window for this exact query is still alive (hidden, not
-    // destroyed), re-present it with its loaded thumbnails and scroll intact
-    // instead of rebuilding everything and refetching the list.
-    if let Some(c) = sgdb_cache.as_ref() {
-        if let Some(entry) = c.borrow().get(&cache_key) {
-            if let Some(w) = entry.picker.upgrade() {
-                super::helpers::fit_dialog_height(&w, parent, 700);
-                w.present(Some(parent));
-            }
-            return;
-        }
+    // If a picker dialog for this exact query is already registered (open,
+    // or closed but still cache-owned), re-present it with its loaded
+    // thumbnails and scroll intact instead of rebuilding everything and
+    // refetching the list.
+    let cached_picker = sgdb_cache
+        .as_ref()
+        .and_then(|c| c.borrow().get(&cache_key).map(|entry| entry.picker.clone()));
+    if let Some(picker) = cached_picker {
+        super::helpers::fit_dialog_height(&picker, parent, 700);
+        picker.present(Some(parent));
+        return;
     }
 
     let picker = adw::Dialog::new();
@@ -515,10 +518,12 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     super::helpers::fit_dialog_height(&picker, parent, 700);
     picker.present(Some(parent));
 
-    // Closing an AdwDialog only unmaps it, so the picker object — and its
-    // loaded thumbnails — survive until the settings screen tears down.
+    // Closing an AdwDialog only unmaps it; the cache entry registered below
+    // is what owns the dialog from here on. Without that strong ref the
+    // dialog would be finalized on close, because every handler holds it
+    // weakly and this function's own ref dies with the call frame.
 
-    // Register the live window in the settings-screen cache immediately so a
+    // Register the live dialog in the settings-screen cache immediately so a
     // reopen (even before the first fetch lands) can re-present it instead of
     // building a fresh one. The fetch handler updates this entry in place.
     if let Some(ref cache) = sgdb_cache {
@@ -528,7 +533,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
                 assets: Vec::new(),
                 has_more: true,
                 next_page: 0,
-                picker: picker.downgrade(),
+                picker: picker.clone(),
             },
         );
     }
@@ -692,7 +697,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
                                     assets: new_assets,
                                     has_more: more,
                                     next_page: 1,
-                                    picker: picker.downgrade(),
+                                    picker,
                                 },
                             );
                         }

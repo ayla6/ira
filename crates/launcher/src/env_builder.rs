@@ -261,6 +261,21 @@ fn take_gamescope_game_env(env: &mut Vec<(String, String)>) -> Vec<(String, Stri
     overrides
 }
 
+/// Assembles the variables re-applied past Gamescope's `--` separator: the
+/// GPU/preload keys that must not reach the compositor, plus a Wayland
+/// display override. Gamescope overrides `DISPLAY` for its children but
+/// never `WAYLAND_DISPLAY`, so a Wayland-native game would inherit the
+/// desktop's `wayland-0` through Ira's environment and escape the gamescope
+/// window entirely; its own compositor socket is always `gamescope-0`. The
+/// override must live past the `--` separator, since Gamescope itself reads
+/// `WAYLAND_DISPLAY` to find the compositor it nests in.
+fn gamescope_game_env(env: &mut Vec<(String, String)>) -> Vec<(String, String)> {
+    let mut game_env = take_gamescope_game_env(env);
+    game_env.retain(|(key, _)| key != "WAYLAND_DISPLAY");
+    game_env.push(("WAYLAND_DISPLAY".to_string(), "gamescope-0".to_string()));
+    game_env
+}
+
 /// Prefixes `game_env` onto the command that runs inside Gamescope — directly
 /// after its `--` separator, so the compositor never sees the variables while
 /// the game and its wrappers do.
@@ -362,7 +377,7 @@ pub fn apply_performance(
         // itself to a secondary GPU breaks its presentation to the desktop
         // compositor. The game-only variables are re-applied past the `--`
         // separator so only the game inherits them.
-        let game_env = take_gamescope_game_env(env);
+        let game_env = gamescope_game_env(env);
         apply_game_env_inside_gamescope(command, &game_env);
         true
     } else {
@@ -806,6 +821,32 @@ mod tests {
         assert_eq!(env, [("PATH".to_string(), "/usr/bin".to_string())]);
         assert!(game_env.contains(&("DRI_PRIME".to_string(), "1".to_string())));
         assert!(game_env.contains(&("LD_PRELOAD".to_string(), "/game/helper.so".to_string())));
+    }
+
+    #[test]
+    fn test_gamescope_game_env_pins_wayland_display_to_gamescope() {
+        let mut env = vec![
+            ("PATH".to_string(), "/usr/bin".to_string()),
+            ("WAYLAND_DISPLAY".to_string(), "wayland-0".to_string()),
+            ("DRI_PRIME".to_string(), "1".to_string()),
+        ];
+
+        let game_env = gamescope_game_env(&mut env);
+
+        // Exactly one override, pointing at Gamescope's own compositor —
+        // the desktop's wayland-0 must not leak through to the game.
+        assert_eq!(
+            game_env
+                .iter()
+                .filter(|(key, _)| key == "WAYLAND_DISPLAY")
+                .count(),
+            1
+        );
+        assert!(game_env.contains(&(
+            "WAYLAND_DISPLAY".to_string(),
+            "gamescope-0".to_string()
+        )));
+        assert!(game_env.contains(&("DRI_PRIME".to_string(), "1".to_string())));
     }
 
     #[test]

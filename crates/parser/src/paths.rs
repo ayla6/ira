@@ -606,13 +606,13 @@ mod tests {
     #[test]
     fn test_ensure_small_image_2x_downscale_picks_smaller_of_both_encodings() {
         let tmp = tempfile::tempdir().unwrap();
-        write_webp_source(tmp.path(), "hero.webp", 1920, 620);
-        ensure_small_image(tmp.path(), "hero", 960, 310);
+        write_webp_source(tmp.path(), "hero.webp", 480, 155);
+        ensure_small_image(tmp.path(), "hero", 240, 78);
         let small = std::fs::read(tmp.path().join("hero_small.webp")).unwrap();
 
-        let solid = vec![0u8; (960 * 310 * 4) as usize];
-        let lossless = webp::Encoder::from_rgba(&solid, 960, 310).encode_lossless();
-        let lossy = webp::Encoder::from_rgba(&solid, 960, 310).encode(95.0);
+        let solid = vec![0u8; (240 * 78 * 4) as usize];
+        let lossless = webp::Encoder::from_rgba(&solid, 240, 78).encode_lossless();
+        let lossy = webp::Encoder::from_rgba(&solid, 240, 78).encode(95.0);
         let expected = if lossless.len() <= lossy.len() {
             lossless
         } else {
@@ -628,7 +628,7 @@ mod tests {
     #[test]
     fn test_ensure_small_image_2x_downscale_noise_picks_lossy() {
         let tmp = tempfile::tempdir().unwrap();
-        let (w, h) = (1920u32, 620u32);
+        let (w, h) = (480u32, 155u32);
         let mut state: u32 = 7;
         let pixels: Vec<u8> = (0..(w * h * 4) as usize)
             .map(|_| {
@@ -638,7 +638,7 @@ mod tests {
             .collect();
         let encoded = webp::Encoder::from_rgba(&pixels, w, h).encode_lossless();
         std::fs::write(tmp.path().join("hero.webp"), &*encoded).unwrap();
-        ensure_small_image(tmp.path(), "hero", 960, 310);
+        ensure_small_image(tmp.path(), "hero", 240, 78);
         let small = std::fs::read(tmp.path().join("hero_small.webp")).unwrap();
         assert!(
             !webp_is_lossless(&small),
@@ -649,8 +649,8 @@ mod tests {
     #[test]
     fn test_ensure_small_image_mild_resize_stays_lossless() {
         let tmp = tempfile::tempdir().unwrap();
-        write_webp_source(tmp.path(), "hero.webp", 1920, 620);
-        ensure_small_image(tmp.path(), "hero", 1600, 517);
+        write_webp_source(tmp.path(), "hero.webp", 480, 155);
+        ensure_small_image(tmp.path(), "hero", 400, 129);
         let small = std::fs::read(tmp.path().join("hero_small.webp")).unwrap();
         assert!(
             webp_is_lossless(&small),
@@ -661,8 +661,8 @@ mod tests {
     #[test]
     fn test_ensure_small_image_already_small_stays_lossless() {
         let tmp = tempfile::tempdir().unwrap();
-        write_webp_source(tmp.path(), "hero.webp", 1920, 620);
-        ensure_small_image(tmp.path(), "hero", 1920, 620);
+        write_webp_source(tmp.path(), "hero.webp", 960, 310);
+        ensure_small_image(tmp.path(), "hero", 960, 310);
         let small = std::fs::read(tmp.path().join("hero_small.webp")).unwrap();
         assert!(
             webp_is_lossless(&small),

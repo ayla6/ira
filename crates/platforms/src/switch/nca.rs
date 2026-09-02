@@ -42,18 +42,29 @@ pub struct ControlMeta {
     pub icon: Option<Vec<u8>>,
 }
 
-/// Decrypts the control NCA of a ROM container (NSP; XCIs that carry
-/// keys also work) and reads its application title and icon in one pass,
-/// or `None` when no key/section yields either.
+/// Decrypts the control NCA inside an NSP with the user's dumped keys and
+/// pulls the 256×256 icon PNG and the `control.nacp` application title out
+/// of its RomFS — the same bytes and names the emulators show. XCIs are
+/// HFS0 containers and are not read here.
+/// Decrypts the control NCA of an NSP and reads its application title and
+/// icon in one pass, or `None` when no key/section yields either.
 pub fn extract_control_meta(path: &Path, keys: &SwitchKeys) -> Option<ControlMeta> {
     let entries = read_pfs0_entries(path)?;
     let tickets = inline_tickets(path, &entries);
+    // Combined base+update NSPs carry two control NCAs and PFS0 order
+    // depends on the dump tool, so the update's metadata must not win by
+    // listing first: prefer the base title's NCA, keep any success as a
+    // fallback.
+    let mut fallback = None;
     for nca in entries.iter().filter(|entry| entry.name.ends_with(".nca")) {
-        if let Some((_, meta)) = control_meta_from_entry(path, nca, keys, &tickets) {
-            return Some(meta);
+        if let Some((title_id, meta)) = control_meta_from_entry(path, nca, keys, &tickets) {
+            if !super::rom::is_update_title_id(&title_id) {
+                return Some(meta);
+            }
+            fallback = fallback.or(Some(meta));
         }
     }
-    None
+    fallback
 }
 
 /// Encrypted title keys from the container's `.tik` files, keyed by
@@ -276,25 +287,36 @@ fn control_meta_from_entry(
 /// `control.nacp` application-title table from the RomFS image it
 /// contains, in one pass.
 fn control_meta_from_romfs(section: &[u8]) -> ControlMeta {
-    walk_romfs_files(section).unwrap_or_default()
+    // The 0x50 header-size marker has no magic around it, so payload data
+    // can match it too; keep trying candidates until one walks as a RomFS
+    // image that actually holds the control files.
+    for romfs_at in romfs_image_candidates(section) {
+        if let Some(meta) = walk_romfs_files(section, romfs_at) {
+            if meta.icon.is_some() || meta.title.is_some() {
+                return meta;
+            }
+        }
+    }
+    ControlMeta::default()
 }
 
-/// Locates the RomFS image inside the decrypted section by scanning for
-/// the header signature (header size `0x50` as u64 LE) at 8-byte-aligned
-/// offsets: the IVFC superblock that precedes the image varies in size.
-fn romfs_image_at(section: &[u8]) -> Option<usize> {
+/// All 8-byte-aligned offsets of the RomFS header signature (header size
+/// `0x50` as u64 LE): the IVFC superblock that precedes the image varies
+/// in size, so the image is located by scanning.
+fn romfs_image_candidates(section: &[u8]) -> impl Iterator<Item = usize> + '_ {
     let pattern = 0x50u64.to_le_bytes();
-    let last = section.len().checked_sub(0x50)?;
+    let last = section.len().saturating_sub(0x50);
     (0..=last)
         .step_by(8)
-        .find(|at| section[*at..*at + 8] == pattern)
+        .filter(move |at| section[*at..*at + 8] == pattern)
 }
 
-/// One walk over the RomFS file-entry table capturing both targets.
-/// Table ordering varies between build tools, so nothing beyond the
-/// RomFS magic is assumed; the entry walk validates the candidate.
-fn walk_romfs_files(section: &[u8]) -> Option<ControlMeta> {
-    let romfs_at = romfs_image_at(section)?;
+/// One walk over the RomFS file-entry table starting at `romfs_at`,
+/// capturing both targets. Table ordering varies between build tools, so
+/// nothing beyond the RomFS magic is assumed; the entry walk validates the
+/// candidate, and a walk that finds neither file leaves the caller free to
+/// try the next candidate.
+fn walk_romfs_files(section: &[u8], romfs_at: usize) -> Option<ControlMeta> {
     let romfs = section.get(romfs_at..)?;
 
     let u64_at = |at: usize| -> Option<u64> {
@@ -512,6 +534,80 @@ mod tests {
         let meta = control_meta_from_romfs(&section_with_romfs(&romfs));
         assert_eq!(meta.title.as_deref(), Some("Table Order"));
         assert_eq!(meta.icon.as_deref(), Some(b"PNG!".as_slice()));
+    }
+
+    /// A coincidental 0x50 u64 in the payload before the real RomFS image
+    /// must not derail the walk: the next candidate is tried.
+    #[test]
+    fn test_control_meta_from_romfs_retries_decoy_header() {
+        let nacp_bytes = crate::switch::nacp::test_table(&[(0, "After Decoy")]);
+        let romfs = two_file_romfs(
+            (b"control.nacp", &nacp_bytes),
+            (b"icon_en.dat", b"PNG!"),
+        );
+        let mut section = section_with_romfs(&romfs);
+        // A plain 0x50 u64 sitting at an aligned offset inside the data
+        // ahead of the image — exactly what romfs_image_candidates matches.
+        section[0x20..0x28].copy_from_slice(&0x50u64.to_le_bytes());
+
+        let meta = control_meta_from_romfs(&section);
+        assert_eq!(meta.title.as_deref(), Some("After Decoy"));
+        assert_eq!(meta.icon.as_deref(), Some(b"PNG!".as_slice()));
+    }
+
+    /// Combined base+update NSPs carry two control NCAs; the update's must
+    /// not win just because the dump tool listed it first.
+    #[test]
+    fn test_extract_control_meta_prefers_base_over_update() {
+        let base = synthetic_control_nca(0x0100a9400c9c2000);
+        let update = synthetic_control_nca(0x0100a9400c9c2800);
+        let nsp = nsp_of(&[
+            ("update.nca", &update),  // listed first on purpose
+            ("base.nca", &base),
+        ]);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("combined.nsp");
+        std::fs::write(&path, &nsp).unwrap();
+        let keys_path = tmp.path().join("prod.keys");
+        std::fs::write(&keys_path, test_keys_text()).unwrap();
+        let keys = SwitchKeys::from_file(&keys_path).unwrap();
+
+        assert!(extract_control_meta(&path, &keys).is_some());
+        // Sanity on the helper itself: the title ids differ only in the
+        // update bit the preference keys on.
+        assert!(super::super::rom::is_update_title_id("0100a9400c9c2800"));
+    }
+
+    /// Wraps already-built NCAs in a PFS0 container under given names.
+    fn nsp_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut table = Vec::new();
+        let mut offsets = Vec::new();
+        for (name, _) in entries {
+            let offset = table.len() as u32;
+            table.extend_from_slice(name.as_bytes());
+            table.push(0);
+            offsets.push(offset);
+        }
+        while table.len() % 16 != 0 {
+            table.push(0);
+        }
+        let mut nsp = Vec::new();
+        nsp.extend_from_slice(b"PFS0");
+        nsp.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+        nsp.extend_from_slice(&(table.len() as u32).to_le_bytes());
+        nsp.extend_from_slice(&0u32.to_le_bytes());
+        for (i, (_, nca)) in entries.iter().enumerate() {
+            nsp.extend_from_slice(&0u64.to_le_bytes()); // offset
+            nsp.extend_from_slice(&(nca.len() as u64).to_le_bytes());
+            nsp.extend_from_slice(&offsets[i].to_le_bytes());
+            nsp.extend_from_slice(&0u32.to_le_bytes());
+        }
+        nsp.extend_from_slice(&table);
+        for (_, nca) in entries {
+            nsp.extend_from_slice(nca);
+        }
+        nsp
     }
 
     /// A retail-shaped ticket (RSA-2048-SHA256): the 0x100-byte signature

@@ -99,23 +99,51 @@ pub(super) fn read_pfs0_entries(path: &Path) -> Option<Vec<PfsEntry>> {
     Some(entries)
 }
 
-/// Reads the title id from a `…​.tik`/`….cert` entry name inside an NSP.
-/// The 32-hex rights id of the ticket name starts with the title id.
+/// Reads the title id from an NSP's plaintext file-table names: the
+/// `<rights id>.tik`/`.cert` tickets, or the `<title id>.cnmt.nca` meta
+/// entry repacked NSPs carry. Works without any keys, so every ticketed or
+/// repacked dump gets its real id instead of a filename-based identity.
 pub fn title_id_from_nsp(path: &Path) -> Option<String> {
+    let mut cnmt = None;
     for entry in read_pfs0_entries(path)? {
-        let Some((id, kind)) = entry.name.rsplit_once('.') else {
-            continue;
-        };
-        if !matches!(kind, "tik" | "cert") {
-            continue;
+        match id_from_entry_name(&entry.name) {
+            EntryId::RightsId(id) => return Some(id),
+            EntryId::Cnmt(id) => {
+                // First-come: the table order of meta entries is not
+                // meaningful, but a base-game NSP carries exactly one.
+                cnmt = cnmt.or(Some(id));
+            }
+            EntryId::None => {}
         }
-        if let Some(title_id) = base_application_id(&id[..16.min(id.len())]) {
-            if is_title_id(&title_id) {
-                return Some(title_id);
+    }
+    cnmt
+}
+
+/// The title id an entry name carries, if any.
+enum EntryId {
+    /// `<rights id>.tik`/`.cert` — the most specific source.
+    RightsId(String),
+    /// `<title id>.cnmt.nca` — repacked NSPs rename the meta NCA.
+    Cnmt(String),
+    None,
+}
+
+fn id_from_entry_name(name: &str) -> EntryId {
+    if let Some((id, kind)) = name.rsplit_once('.') {
+        if matches!(kind, "tik" | "cert") {
+            if let Some(title_id) = base_application_id(&id[..16.min(id.len())]) {
+                if is_title_id(&title_id) {
+                    return EntryId::RightsId(title_id);
+                }
             }
         }
     }
-    None
+    match name.strip_suffix(".cnmt.nca") {
+        // Only the exact 16-hex shape: a hash-named (original card dump)
+        // meta NCA has no readable title id in its name.
+        Some(stem) if is_title_id(stem) => EntryId::Cnmt(base_application_id(stem).unwrap_or(stem.to_string())),
+        _ => EntryId::None,
+    }
 }
 
 fn cstr(bytes: &[u8]) -> Option<&str> {
@@ -293,6 +321,57 @@ mod tests {
             nsp_fixture(&[
                 "0100000000010000.cnmt.nca",
                 "01000000000108000000000000000003.tik",
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            title_id_from_nsp(&path),
+            Some("0100000000010000".to_string())
+        );
+    }
+
+    #[test]
+    fn test_title_id_from_nsp_cnmt_name_without_ticket() {
+        // Ticket-less repacked dumps carry only the renamed meta NCA.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("game.nsp");
+        std::fs::write(
+            &path,
+            nsp_fixture(&[
+                "01000ab001234800.cnmt.nca",
+                "9c4f2b099c79dedff9426c2722d09b18.nca",
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            title_id_from_nsp(&path),
+            Some("01000ab001234000".to_string())
+        );
+    }
+
+    #[test]
+    fn test_title_id_from_nsp_ignores_hash_named_cnmt() {
+        // Original card dumps name the meta NCA by content hash — no id
+        // is readable there.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("game.nsp");
+        std::fs::write(
+            &path,
+            nsp_fixture(&["9c4f2b099c79dedff9426c2722d09b18.cnmt.nca"]),
+        )
+        .unwrap();
+        assert_eq!(title_id_from_nsp(&path), None);
+    }
+
+    #[test]
+    fn test_title_id_from_nsp_ticket_beats_cnmt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("game.nsp");
+        std::fs::write(
+            &path,
+            nsp_fixture(&[
+                "0100000000010800.cnmt.nca",
+                "01000000000100000000000000000016.tik",
             ]),
         )
         .unwrap();

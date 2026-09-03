@@ -6,12 +6,11 @@ use crate::{
 };
 
 use super::devices::{
-    apply_controller_deadzone, apply_controller_layout, create_keyboard, create_mouse,
-    is_real_profile, load_profile_or_default, make_gyro_processor, open_initial_gamepad,
-    open_rumble, open_sensor, resolved_layout_for,
+    apply_controller_deadzone, apply_controller_layout, is_real_profile, load_profile_or_default,
+    make_gyro_processor, open_initial_gamepad, open_rumble, open_sensor, resolved_layout_for,
 };
 use super::loop_io::LoopSchedule;
-use super::sensor::{open_motion_node, spawn_paired_imu, SensorPipeline};
+use super::sensor::{tick_needed_for, SensorPipeline};
 use super::super::{
     ignored_device_for_target, SessionEvent, inject_flatpak_target_env, sdl_mapping_for_backend,
     Arguments, ProfileMonitor, SteamWatcher, TraceState,
@@ -166,20 +165,6 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         .map(|set| set.inputs.len())
         .sum::<usize>();
     eprintln!("ira-input: loaded {mapped_inputs} mapped inputs from {profile_name}");
-    let keyboard = match create_keyboard(mapper.profile().keyboard_keycodes()) {
-        Ok(keyboard) => keyboard,
-        Err(error) => {
-            eprintln!("ira-input: {error}; keyboard output disabled, the game still launches");
-            None
-        }
-    };
-    let mouse = match create_mouse(mapper.profile().uses_mouse()) {
-        Ok(mouse) => mouse,
-        Err(error) => {
-            eprintln!("ira-input: {error}; mouse output disabled, the game still launches");
-            None
-        }
-    };
     let sensor = gamepad
         .as_ref()
         .and_then(|gamepad| open_sensor(gamepad.info()));
@@ -208,56 +193,11 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
     // reach the pad shadow that the hidraw reports and the cemuhook stream
     // read from.
     let motion_available = sensor.is_some() || switch_hidraw.is_some();
-    let native_transport = motion_available && mapper.profile().wants_native_controller();
-    let native_ds4 =
-        native_transport && mapper.profile().backend == crate::VirtualGamepadBackend::DualShock4;
-    let native_switch_pro =
-        native_transport && mapper.profile().backend == crate::VirtualGamepadBackend::SwitchPro;
-    let native_dualsense =
-        native_transport && mapper.profile().backend == crate::VirtualGamepadBackend::DualSense;
-    let virtual_gamepad = if native_ds4 || native_switch_pro || native_dualsense {
-        eprintln!("ira-input: uinput gamepad suppressed; the uhid controller is the controller");
-        VirtualGamepad::shadow_only(mapper.profile().backend)
-    } else {
-        match VirtualGamepad::create_for_backend(mapper.profile().backend) {
-            Ok(virtual_gamepad) => virtual_gamepad,
-            Err(error) => {
-                eprintln!(
-                    "ira-input: failed to create virtual gamepad: {error}; \
-                     gamepad output disabled, the game still launches"
-                );
-                VirtualGamepad::shadow_only(mapper.profile().backend)
-            }
-        }
-    };
-    // The cemuhook stream is the DSU backend itself: picking that output
-    // mode always streams, nothing toggles it. A profile on any other
-    // backend can opt into a motion-only companion stream (`dsu_motion`)
-    // for emulators that bind the DSU provider purely as a motion source;
-    // its frames read neutral to a client that wants buttons. The
-    // per-game launcher flag (--motion-port 0) remains the harder kill
-    // switch. It works even when no gyro exists (motion just reads zero).
-    let motion_enabled = arguments.motion_port != Some(0)
-        && (mapper.profile().backend == crate::VirtualGamepadBackend::Dsu
-            || mapper.profile().dsu_motion);
-    let motion_server = if motion_enabled {
-        crate::MotionServer::bind()
-    } else {
-        None
-    };
-    match (&motion_server, sensor.as_ref()) {
-        (Some(_), Some(_)) => eprintln!(
-            "ira-input: motion passthrough on udp/{} for emulators (cemuhook)",
-            crate::MOTION_PORT
-        ),
-        (None, Some(_)) if arguments.motion_port != Some(0) => {
-            eprintln!(
-                "ira-input: udp/{} busy; motion passthrough disabled",
-                crate::MOTION_PORT
-            )
-        }
-        _ => {}
-    }
+    let stack = super::output_stack::build_virtual_stack(
+        motion_available,
+        arguments.motion_port != Some(0),
+        mapper.profile(),
+    );
     let (pad_vendor, pad_product) = gamepad
         .as_ref()
         .map(|gamepad| (gamepad.info().vendor, gamepad.info().product))
@@ -286,95 +226,24 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         open_rumble(gamepad.as_ref(), mapper.profile().rumble)
     };
     let last_sensor_us: Option<u64> = None;
-    // The motion node must exist before the game opens the virtual pad:
-    // SDL pairs sensor nodes with a pad at open time only.
-    let motion_device = if motion_available && mapper.profile().native_motion {
-        open_motion_node(mapper.profile().backend)
-    } else {
-        None
-    };
-    // Experimental whole-HID DualShock4: a real hidraw device whose reports
-    // carry buttons, sticks, triggers AND motion, so SDL's DS4 driver reads
-    // our sensors natively. A companion motion-only HID shares its serial:
-    // SDL's evdev backend pairs them, which is the half flatpaks can see.
-    let mut ds4_hid = None;
-    let mut imu_hid = None;
-    if native_ds4 {
-        let uniq = format!("ira-virtual-{}", std::process::id());
-        match crate::Ds4UhidDevice::create(&uniq) {
-            Ok(device) => {
-                eprintln!("ira-input: experimental native-motion DS4 exposed over hidraw");
-                ds4_hid = Some(device);
-                imu_hid = spawn_paired_imu(&uniq);
-            }
-            Err(error) => {
-                eprintln!(
-                    "ira-input: failed to create virtual DS4: {error}; \
-                     /dev/uhid is root-only unless a uaccess rule grants it"
-                );
-            }
-        }
-    }
     let ever_had_sensor = motion_available;
-    // A virtual *real* Switch Pro: hid-nintendo claims it, completes its
-    // handshake against our answers and builds an IMU input node itself.
-    // That kernel IMU carries no usable serial though, so SDL cannot pair
-    // it with anything — the paired twin below is what delivers gyro.
-    let mut switch_pro_hid = None;
-    if native_switch_pro {
-        let uniq = format!("ira-virtual-{}", std::process::id());
-        match crate::SwitchProUhidDevice::create(&uniq) {
-            Ok(device) => {
-                eprintln!("ira-input: virtual Switch Pro claimed by hid-nintendo");
-                switch_pro_hid = Some(device);
-                imu_hid = spawn_paired_imu(&uniq);
-            }
-            Err(error) => {
-                eprintln!("ira-input: failed to create virtual Switch Pro: {error}");
-            }
-        }
-    }
-    // Same whole-HID approach as the DS4, on SDL's PS5 third-party path:
-    // the licensed HORI PID is typed PS5 in SDL's table and feature replies
-    // enable sensors with an identity calibration.
-    let mut dualsense_hid = None;
-    if native_dualsense {
-        let uniq = format!("ira-virtual-{}", std::process::id());
-        match crate::DualsenseUhidDevice::create(&uniq) {
-            Ok(device) => {
-                eprintln!("ira-input: experimental native-motion DualSense exposed over hidraw");
-                dualsense_hid = Some(device);
-                imu_hid = spawn_paired_imu(&uniq);
-            }
-            Err(error) => {
-                eprintln!(
-                    "ira-input: failed to create virtual DualSense: {error}; \
-                     /dev/uhid is root-only unless a uaccess rule grants it"
-                );
-            }
-        }
-    }
     let pipeline = SensorPipeline {
         sensor,
         switch_hidraw,
         gyro_processor,
         last_sensor_us,
-        motion: motion_server,
-        motion_device,
-        ds4_hid,
-        dualsense_hid,
-        imu_hid,
-        switch_pro_hid,
+        motion: stack.motion,
+        motion_device: stack.motion_device,
+        ds4_hid: stack.ds4_hid,
+        dualsense_hid: stack.dualsense_hid,
+        imu_hid: stack.imu_hid,
+        switch_pro_hid: stack.switch_pro_hid,
         ever_had_sensor,
         last_dsu_ts: 0,
     };
     // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
     // even when no sensor exists, as long as something consumes them.
-    let tick_needed = pipeline.motion_alive()
-        || mapper.has_continuous_outputs()
-        || mapper.profile().backend == crate::VirtualGamepadBackend::Dsu
-        || pipeline.motion.is_some()
-        || pipeline.ds4_hid.is_some();
+    let tick_needed = tick_needed_for(&pipeline, &mapper);
     let report_rate = ReportRateEstimator::default();
     if let Some(gamepad) = gamepad.as_mut() {
         if let Err(error) = gamepad.grab() {
@@ -442,13 +311,13 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         gamepad,
         mapper,
         profile_monitor,
-        keyboard,
-        mouse,
-        virtual_gamepad,
+        keyboard: stack.keyboard,
+        mouse: stack.mouse,
+        virtual_gamepad: stack.gamepad,
         pad_state,
         pipeline,
         rumble_output,
-        motion_enabled,
+        motion_enabled: stack.motion_enabled,
         pad_vendor,
         pad_product,
         tick_needed,

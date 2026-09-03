@@ -1,5 +1,6 @@
 mod devices;
 mod inputs;
+mod output_stack;
 mod loop_io;
 mod outputs;
 mod sensor;
@@ -20,8 +21,8 @@ use loop_io::{
     PROCESS_POLL_INTERVAL, PROFILE_POLL_INTERVAL, RECONNECT_INTERVAL,
     SWITCH_DRIVER_SILENCE_LIMIT,
 };
-use outputs::{emit_outputs, reload_profile, stop_child, OutputTargets};
-use sensor::{open_motion_node, process_tick, service_twin_events};
+use outputs::{emit_outputs, reload_profile, stop_child, LiveOutputs, OutputTargets};
+use sensor::{open_motion_node, process_tick, service_twin_events, tick_needed_for};
 use setup::{setup_session, SessionSetup};
 
 pub fn run_session(arguments: Arguments) -> Result<i32, String> {
@@ -389,42 +390,45 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
             schedule.profile = Instant::now();
             if let Some(monitor) = profile_monitor.as_mut() {
                 if monitor.changed() {
-                    if let Err(error) = reload_profile(
-                        &mut mapper,
-                        &mut virtual_gamepad,
-                        &mut keyboard,
-                        &mut mouse,
-                        &mut pad_state,
-                        monitor.path(),
-                        &mut trace,
-                    ) {
-                        eprintln!(
+                    let reloaded = {
+                        let mut outputs = LiveOutputs {
+                            mapper: &mut mapper,
+                            gamepad: &mut virtual_gamepad,
+                            keyboard: &mut keyboard,
+                            mouse: &mut mouse,
+                            pad: &mut pad_state,
+                            pipeline: &mut pipeline,
+                            motion_enabled,
+                        };
+                        reload_profile(&mut outputs, monitor.path(), &mut trace)
+                    };
+                    match reloaded {
+                        Err(error) => eprintln!(
                             "ira-input: profile reload failed for {}: {error}",
                             monitor.path().display()
-                        );
-                    } else {
-                        if let Some(events) = &arguments.events {
-                            let _ = events.send(SessionEvent::ProfileReloaded {
-                                path: monitor.path().display().to_string(),
-                            });
+                        ),
+                        Ok(()) => {
+                            if let Some(events) = &arguments.events {
+                                let _ = events.send(SessionEvent::ProfileReloaded {
+                                    path: monitor.path().display().to_string(),
+                                });
+                            }
+                            pipeline.gyro_processor = make_gyro_processor(
+                                mapper.profile(),
+                                pad_vendor,
+                                pad_product,
+                                arguments.calibration.as_deref(),
+                            );
+                            apply_controller_deadzone(
+                                &mut mapper,
+                                arguments.calibration.as_deref(),
+                                pad_vendor,
+                                pad_product,
+                            );
+                            pipeline.last_sensor_us = None;
+                            tick_needed = tick_needed_for(&pipeline, &mapper);
+                            rumble_output = open_rumble(gamepad.as_ref(), mapper.profile().rumble);
                         }
-                        pipeline.gyro_processor = make_gyro_processor(
-                            mapper.profile(),
-                            pad_vendor,
-                            pad_product,
-                            arguments.calibration.as_deref(),
-                        );
-                        apply_controller_deadzone(
-                            &mut mapper,
-                            arguments.calibration.as_deref(),
-                            pad_vendor,
-                            pad_product,
-                        );
-                        pipeline.last_sensor_us = None;
-                        tick_needed = pipeline.sensor.is_some()
-                            || pipeline.motion.is_some()
-                            || mapper.has_continuous_outputs();
-                        rumble_output = open_rumble(gamepad.as_ref(), mapper.profile().rumble);
                     }
                 }
             }

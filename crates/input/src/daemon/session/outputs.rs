@@ -4,36 +4,103 @@ use crate::{InputEvent, MappingEngine, OutputEvent, VirtualGamepad, VirtualKeybo
 
 use super::super::TraceState;
 use super::devices::{create_keyboard, create_mouse, load_profile};
+use super::sensor::SensorPipeline;
+
+/// Everything a profile reload may rebuild, borrowed from the session loop.
+pub(crate) struct LiveOutputs<'a> {
+    pub(crate) mapper: &'a mut MappingEngine,
+    pub(crate) gamepad: &'a mut VirtualGamepad,
+    pub(crate) keyboard: &'a mut Option<VirtualKeyboard>,
+    pub(crate) mouse: &'a mut Option<VirtualMouse>,
+    pub(crate) pad: &'a mut crate::PadState,
+    pub(crate) pipeline: &'a mut SensorPipeline,
+    pub(crate) motion_enabled: bool,
+}
 
 pub(crate) fn reload_profile(
-    mapper: &mut MappingEngine,
-    virtual_gamepad: &mut VirtualGamepad,
-    keyboard: &mut Option<VirtualKeyboard>,
-    mouse: &mut Option<VirtualMouse>,
-    pad: &mut crate::PadState,
+    outputs: &mut LiveOutputs<'_>,
     path: &Path,
     trace: &mut TraceState,
 ) -> Result<(), String> {
     let profile = load_profile(Some(path))?;
     let new_mapper = MappingEngine::new(profile)?;
-    let backend_changed = mapper.profile().backend != new_mapper.profile().backend;
-    if backend_changed {
-        return Err("virtual gamepad backend changes require restarting the game".to_string());
+    if super::output_stack::reload_needs_full_rebuild(
+        outputs.mapper.profile(),
+        new_mapper.profile(),
+    ) {
+        rebuild_output_stack(outputs, new_mapper, trace);
+    } else {
+        hot_apply_mappings(outputs, new_mapper, trace)?;
     }
-    // Same class of problem as a backend change: the uhid controller is
-    // created once at startup, and the engine routes gyro output for the
-    // transport it was built with. Silently reloading a profile that flips
-    // native motion leaves the gyro writing to no device at all, so refuse
-    // instead — the running session keeps the previous profile.
-    if mapper.profile().wants_native_controller() != new_mapper.profile().wants_native_controller()
-    {
-        return Err(
-            "native motion transport changes require restarting the game".to_string(),
-        );
-    }
-    let keycodes_changed =
-        mapper.profile().keyboard_keycodes() != new_mapper.profile().keyboard_keycodes();
-    let mouse_changed = mapper.profile().uses_mouse() != new_mapper.profile().uses_mouse();
+    eprintln!(
+        "ira-input: reloaded {} mapped inputs from {}",
+        outputs
+            .mapper
+            .profile()
+            .action_sets
+            .iter()
+            .map(|set| set.inputs.len())
+            .sum::<usize>(),
+        path.display()
+    );
+    Ok(())
+}
+
+/// The controller kind changed: release everything held on the outgoing
+/// devices, then rebuild the pad (and twins, motion node, cemuhook stream)
+/// for the new one. Games that re-enumerate see a fresh controller; games
+/// that only bind at startup keep the old one until they are restarted —
+/// the swap is best-effort by nature, not by refusal.
+fn rebuild_output_stack(
+    outputs: &mut LiveOutputs<'_>,
+    new_mapper: MappingEngine,
+    trace: &mut TraceState,
+) {
+    let stack = super::output_stack::build_virtual_stack(
+        outputs.pipeline.motion_alive(),
+        outputs.motion_enabled,
+        new_mapper.profile(),
+    );
+    emit_outputs(
+        outputs.mapper.reset(),
+        OutputTargets {
+            gamepad: outputs.gamepad,
+            keyboard: outputs.keyboard.as_mut(),
+            mouse: outputs.mouse.as_mut(),
+            pad: outputs.pad,
+        },
+        trace,
+    )
+    .unwrap_or_else(|error| {
+        eprintln!("ira-input: failed to release outputs before the controller swap: {error}")
+    });
+    eprintln!(
+        "ira-input: controller kind changed; the game sees a new {:?} controller",
+        new_mapper.profile().backend
+    );
+    *outputs.gamepad = stack.gamepad;
+    *outputs.keyboard = stack.keyboard;
+    *outputs.mouse = stack.mouse;
+    outputs.pipeline.motion = stack.motion;
+    outputs.pipeline.motion_device = stack.motion_device;
+    outputs.pipeline.ds4_hid = stack.ds4_hid;
+    outputs.pipeline.dualsense_hid = stack.dualsense_hid;
+    outputs.pipeline.switch_pro_hid = stack.switch_pro_hid;
+    outputs.pipeline.imu_hid = stack.imu_hid;
+    *outputs.mapper = new_mapper;
+}
+
+/// Same controller kind: recreate only the devices whose needs changed and
+/// hot-apply the new mappings, leaving the pad itself untouched.
+fn hot_apply_mappings(
+    outputs: &mut LiveOutputs<'_>,
+    new_mapper: MappingEngine,
+    trace: &mut TraceState,
+) -> Result<(), String> {
+    let keycodes_changed = outputs.mapper.profile().keyboard_keycodes()
+        != new_mapper.profile().keyboard_keycodes();
+    let mouse_changed =
+        outputs.mapper.profile().uses_mouse() != new_mapper.profile().uses_mouse();
     let replacement_keyboard = if keycodes_changed {
         create_keyboard(new_mapper.profile().keyboard_keycodes())?
     } else {
@@ -45,32 +112,22 @@ pub(crate) fn reload_profile(
         None
     };
     emit_outputs(
-        mapper.reset(),
+        outputs.mapper.reset(),
         OutputTargets {
-            gamepad: virtual_gamepad,
-            keyboard: keyboard.as_mut(),
-            mouse: mouse.as_mut(),
-            pad,
+            gamepad: outputs.gamepad,
+            keyboard: outputs.keyboard.as_mut(),
+            mouse: outputs.mouse.as_mut(),
+            pad: outputs.pad,
         },
         trace,
     )?;
     if keycodes_changed {
-        *keyboard = replacement_keyboard;
+        *outputs.keyboard = replacement_keyboard;
     }
     if mouse_changed {
-        *mouse = replacement_mouse;
+        *outputs.mouse = replacement_mouse;
     }
-    *mapper = new_mapper;
-    eprintln!(
-        "ira-input: reloaded {} mapped inputs from {}",
-        mapper
-            .profile()
-            .action_sets
-            .iter()
-            .map(|set| set.inputs.len())
-            .sum::<usize>(),
-        path.display()
-    );
+    *outputs.mapper = new_mapper;
     Ok(())
 }
 

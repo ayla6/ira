@@ -384,52 +384,87 @@ mod tests {
     use super::*;
     use ira_input_ipc::DaemonClient;
 
-    #[test]
-    fn test_daemon_serves_status_and_full_session() {
+    fn temp_test_dir(label: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "ira-input-daemon-test-{}",
+            "ira-input-daemon-test-{label}-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .subsec_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Connects once the server thread has bound its socket.
+    fn wait_for_server(path: &Path) -> DaemonClient {
+        loop {
+            match DaemonClient::connect(path) {
+                Ok(client) => return client,
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
+    }
+
+    fn session_request(command: Vec<String>, profile: Option<String>) -> LaunchRequest {
+        LaunchRequest {
+            device: None,
+            command,
+            env: vec![("PATH".into(), std::env::var("PATH").unwrap_or_default())],
+            working_dir: None,
+            profile,
+            calibration: None,
+            pause_unfocused: false,
+            motion_port: Some(0),
+            steam_app_id: None,
+        }
+    }
+
+    fn write_profile(path: &Path, backend: crate::VirtualGamepadBackend) {
+        std::fs::write(
+            path,
+            serde_json::to_vec(&crate::InputProfile::default_gamepad_for_backend(backend))
+                .unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn shutdown_and_join(
+        client: &mut DaemonClient,
+        server: std::thread::JoinHandle<Result<i32, String>>,
+    ) {
+        match client
+            .request(Request::Shutdown { stop_running: true })
+            .unwrap()
+        {
+            Response::Bye => {}
+            other => panic!("expected bye, got {other:?}"),
+        }
+        let _ = server.join();
+    }
+
+    #[test]
+    fn test_daemon_serves_status_and_full_session() {
+        let dir = temp_test_dir("session");
         let path = dir.join("test.sock");
         let server = std::thread::spawn({
             let path = path.clone();
             move || run_daemon_on(&path)
         });
+        let mut client = wait_for_server(&path);
 
-        // Poll instead of spawn-daemon: the server thread is already coming up.
-        let mut client = loop {
-            match DaemonClient::connect(&path) {
-                Ok(client) => break client,
-                Err(_) => std::thread::sleep(Duration::from_millis(20)),
-            }
-        };
         let status = client.status().unwrap();
         assert_eq!(status.protocol_version, PROTOCOL_VERSION);
         assert!(!status.session_active);
 
         let mut started = None;
-        let mut lines = Vec::new();
         let code = client
             .launch_and_wait(
-                LaunchRequest {
-                    device: None,
-                    command: vec!["sleep".into(), "0.3".into()],
-                    env: vec![("PATH".into(), std::env::var("PATH").unwrap_or_default())],
-                    working_dir: None,
-                    profile: None,
-                    calibration: None,
-                    pause_unfocused: false,
-                    motion_port: Some(0),
-                    steam_app_id: None,
-                },
-                |event| match event {
-                    Event::SessionStarted { child_pid, .. } => started = Some(child_pid),
-                    Event::Output { line } => lines.push(line),
-                    _ => {}
+                session_request(vec!["sleep".into(), "0.3".into()], None),
+                |event| {
+                    if let Event::SessionStarted { child_pid, .. } = event {
+                        started = Some(child_pid);
+                    }
                 },
             )
             .unwrap();
@@ -439,16 +474,55 @@ mod tests {
         let status = client.status().unwrap();
         assert!(!status.session_active);
 
-        // Ask the daemon to retire instead of waiting out its idle timer,
-        // which never starts while this client is still connected.
-        match client
-            .request(Request::Shutdown { stop_running: true })
-            .unwrap()
-        {
-            Response::Bye => {}
-            other => panic!("expected bye, got {other:?}"),
-        }
-        let _ = server.join();
+        shutdown_and_join(&mut client, server);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_daemon_hot_swaps_controller_kind_on_profile_reload() {
+        let dir = temp_test_dir("hotswap");
+        let path = dir.join("test.sock");
+        let profile_path = dir.join("profile.json");
+        write_profile(&profile_path, crate::VirtualGamepadBackend::XInput);
+        let server = std::thread::spawn({
+            let path = path.clone();
+            move || run_daemon_on(&path)
+        });
+        let mut client = wait_for_server(&path);
+
+        // Rewrite the profile with a different controller kind mid-session.
+        // The first write happens once the session is live; a second flip
+        // back exercises a rebuild in the other direction. Establishing the
+        // watch also triggers one same-content reload, hence the >= 2 bar.
+        let rewrites = profile_path.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            write_profile(&rewrites, crate::VirtualGamepadBackend::DirectInput);
+            std::thread::sleep(Duration::from_millis(300));
+            write_profile(&rewrites, crate::VirtualGamepadBackend::XInput);
+        });
+
+        let mut reloads = 0;
+        let code = client
+            .launch_and_wait(
+                session_request(
+                    vec!["sleep".into(), "2".into()],
+                    Some(profile_path.display().to_string()),
+                ),
+                |event| {
+                    if matches!(event, Event::ProfileReloaded { .. }) {
+                        reloads += 1;
+                    }
+                },
+            )
+            .unwrap();
+        assert_eq!(code, 0);
+        assert!(
+            reloads >= 2,
+            "controller-kind changes must hot-reload, not refuse (saw {reloads})"
+        );
+
+        shutdown_and_join(&mut client, server);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

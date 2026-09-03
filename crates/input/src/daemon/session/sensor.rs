@@ -29,6 +29,17 @@ pub(crate) struct SensorPipeline {
     pub(crate) last_dsu_ts: u64,
 }
 
+/// Whether the tick loop must run for this session state. Ticks drive
+/// continuous outputs (mouse motion, gyro axes, cemuhook frames), so they
+/// are needed whenever any of those consumers exists.
+pub(crate) fn tick_needed_for(pipeline: &SensorPipeline, mapper: &MappingEngine) -> bool {
+    pipeline.motion_alive()
+        || mapper.has_continuous_outputs()
+        || mapper.profile().backend == crate::VirtualGamepadBackend::Dsu
+        || pipeline.motion.is_some()
+        || pipeline.ds4_hid.is_some()
+}
+
 pub(crate) fn open_motion_node(
     backend: crate::VirtualGamepadBackend,
 ) -> Option<crate::VirtualMotionSensor> {

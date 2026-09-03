@@ -68,7 +68,13 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
     // The session unsubscribes from the pad hub on every exit path.
     let _unsubscribe = UnsubscribeOnDrop(&hub, arguments.session_id);
     // The hub routes pad traffic to whoever owns focus; until it says
-    // otherwise this session is frozen.
+    // otherwise this session is frozen. `None` means the first focus
+    // reading has not been reported yet.
+    let mut reported_focus: Option<bool> = if focus.is_none() {
+        Some(true)
+    } else {
+        None
+    };
     let mut hub_live = false;
     let mut latest_sample = None;
     let mut pending: Vec<PadEvent> = Vec::new();
@@ -84,13 +90,20 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
             let focused = focus
                 .as_ref()
                 .is_some_and(crate::FocusWatcher::game_is_focused);
+            // The hub only routes to sessions it believes are focused, so
+            // every change from the last reported state must be reported —
+            // including the first reading, which claims the pad for a game
+            // that launched focused.
+            if reported_focus != Some(focused) {
+                reported_focus = Some(focused);
+                hub.send(HubCommand::Focus {
+                    id: arguments.session_id,
+                    focused,
+                });
+            }
             if !focused && !paused_for_focus {
                 paused_for_focus = true;
                 eprintln!("ira-input: game window unfocused; pausing input");
-                hub.send(HubCommand::Focus {
-                    id: arguments.session_id,
-                    focused: false,
-                });
                 if let Err(error) = release_outputs(
                     &mut mapper, &mut virtual_gamepad, &mut keyboard, &mut mouse,
                     &mut pad_state, &mut trace,
@@ -100,10 +113,6 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
             } else if focused && paused_for_focus {
                 paused_for_focus = false;
                 eprintln!("ira-input: game window focused; resuming input");
-                hub.send(HubCommand::Focus {
-                    id: arguments.session_id,
-                    focused: true,
-                });
             }
         }
         if let Some(watcher) = cursor_watcher.as_ref() {

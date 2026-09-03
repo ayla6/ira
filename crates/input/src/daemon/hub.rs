@@ -484,3 +484,62 @@ fn broadcast_motion(routes: &HashMap<u64, RouteEntry>, available: bool) {
         let _ = entry.events.send(PadEvent::Motion(available));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(focused: bool, live_always: bool, focus_seq: u64) -> RouteEntry {
+        let (tx, _rx) = channel();
+        RouteEntry {
+            events: tx,
+            focused,
+            live_always,
+            always_claims_focus: false,
+            focus_seq,
+        }
+    }
+
+    #[test]
+    fn test_pick_target_routes_to_the_focused_session() {
+        let mut routes = HashMap::new();
+        routes.insert(1, entry(false, false, 0));
+        routes.insert(2, entry(true, false, 1));
+        assert_eq!(pick_target(&routes), Some(2));
+    }
+
+    #[test]
+    fn test_pick_target_prefers_the_latest_focus_claim() {
+        let mut routes = HashMap::new();
+        routes.insert(1, entry(true, false, 1));
+        routes.insert(2, entry(true, false, 2));
+        assert_eq!(pick_target(&routes), Some(2));
+    }
+
+    #[test]
+    fn test_pick_target_lone_live_always_session_stays_routed_unfocused() {
+        let mut routes = HashMap::new();
+        routes.insert(1, entry(false, true, 0));
+        assert_eq!(pick_target(&routes), Some(1));
+    }
+
+    #[test]
+    fn test_pick_target_paused_lone_session_routes_nothing() {
+        // A focus-watched session that has not claimed focus (the game
+        // launched focused but the first reading has not arrived, or the
+        // game is unfocused) must not be routed: frozen, not live.
+        let mut routes = HashMap::new();
+        routes.insert(1, entry(false, false, 0));
+        assert_eq!(pick_target(&routes), None);
+    }
+
+    #[test]
+    fn test_pick_target_multi_session_without_focus_routes_nothing() {
+        // The live-always fallback only covers a single session; with two
+        // games and no focus signal there is no honest owner of the pad.
+        let mut routes = HashMap::new();
+        routes.insert(1, entry(false, true, 0));
+        routes.insert(2, entry(false, false, 0));
+        assert_eq!(pick_target(&routes), None);
+    }
+}

@@ -145,6 +145,7 @@ pub(crate) fn process_tick(
         let rates = pipeline
             .gyro_processor
             .process(sample.gyro, sample.accel, dt);
+        trace.record_sample(dt, sample.gyro, [rates.yaw, rates.pitch, 0.0]);
         mapper.update_gyro(rates);
     }
     // One sensor reading feeds every consumer, each in its own frame: the

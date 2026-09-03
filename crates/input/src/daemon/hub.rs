@@ -26,6 +26,9 @@ const IDLE_POLL: Duration = Duration::from_millis(50);
 /// During a Switch-protocol takeover events arrive on hidraw with no
 /// pollable descriptor, so that mode polls on a tight cadence instead.
 const SWITCH_POLL: Duration = Duration::from_millis(5);
+/// SDL exposes only each sensor's latest sample, so gyro polling must run
+/// near the old tick cadence or rotation between polls is simply lost.
+const SENSOR_POLL: Duration = Duration::from_millis(4);
 /// Reconnect cadence for a pad that vanished, matching the old per-session
 /// reconnect interval.
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(250);
@@ -262,6 +265,8 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
 fn park(pad: &PhysicalPad) {
     let timeout = if pad.switch_hidraw.is_some() {
         SWITCH_POLL
+    } else if pad.sensor.is_some() {
+        SENSOR_POLL
     } else {
         IDLE_POLL
     };
@@ -478,6 +483,7 @@ fn read_pad(pad: &mut PhysicalPad, routes: &HashMap<u64, RouteEntry>, routed: &O
         }
     }
 }
+
 
 fn broadcast_motion(routes: &HashMap<u64, RouteEntry>, available: bool) {
     for entry in routes.values() {

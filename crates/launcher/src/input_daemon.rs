@@ -41,6 +41,7 @@ pub fn launch_via_daemon(
         profile: input.profile.clone(),
         calibration: input.calibration.clone(),
         pause_unfocused: input.pause_unfocused,
+        trace: false,
         motion_port: None,
         steam_app_id: None,
     })?;

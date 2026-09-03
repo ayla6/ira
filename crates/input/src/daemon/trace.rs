@@ -32,6 +32,19 @@ impl TraceState {
         self.gyro = gyro;
     }
 
+    /// Per-sample diagnostics for drift hunting: the integration delta, the
+    /// raw sensor reading, and the rates the mapper receives.
+    pub(crate) fn record_sample(&self, dt: f32, gyro: [f32; 3], rates: [f32; 3]) {
+        if !self.enabled {
+            return;
+        }
+        eprintln!(
+            "ira-input: sample dt={dt:.5} gyro=({:.4}, {:.4}, {:.4}) \
+             rates=({:.1}, {:.1}, {:.1}) dps",
+            gyro[0], gyro[1], gyro[2], rates[0], rates[1], rates[2]
+        );
+    }
+
     pub(crate) fn record_output(&mut self, output: &OutputEvent) {
         if self.enabled
             && !matches!(

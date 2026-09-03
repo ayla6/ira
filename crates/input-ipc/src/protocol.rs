@@ -32,6 +32,7 @@ pub struct LaunchRequest {
     pub profile: Option<String>,
     pub calibration: Option<String>,
     pub pause_unfocused: bool,
+    pub trace: bool,
     pub motion_port: Option<u16>,
     pub steam_app_id: Option<String>,
 }
@@ -98,6 +99,7 @@ mod tests {
             profile: Some("/profiles/x.json".into()),
             calibration: None,
             pause_unfocused: true,
+            trace: false,
             motion_port: Some(26760),
             steam_app_id: None,
         }));

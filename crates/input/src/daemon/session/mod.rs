@@ -193,6 +193,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                     }
                 }
                 PadEvent::ProfileChanged => {}
+                PadEvent::Live => hub_live = true,
                 PadEvent::Frozen => {
                     if hub_live {
                         hub_live = false;
@@ -204,7 +205,6 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                         }
                     }
                 }
-                PadEvent::Live => hub_live = true,
             }
         }
 
@@ -398,6 +398,8 @@ impl Drop for UnsubscribeOnDrop<'_> {
         self.0.send(HubCommand::Unsubscribe(self.1));
     }
 }
+
+
 
 fn release_outputs(
     mapper: &mut crate::MappingEngine,

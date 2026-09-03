@@ -40,6 +40,7 @@ pub fn run_via_daemon(arguments: &Arguments) -> Result<i32, String> {
             .as_deref()
             .map(|path| path.display().to_string()),
         pause_unfocused: arguments.pause_unfocused,
+        trace: arguments.trace,
         motion_port: arguments.motion_port,
         steam_app_id: arguments.steam_app_id.clone(),
     })?;

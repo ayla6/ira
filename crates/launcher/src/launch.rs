@@ -1,4 +1,5 @@
 use ira_db::DbConn;
+use ira_models::ControllerInputMode;
 use ira_models::AppSender;
 use ira_models::{GameLaunchConfig, TrophySource, UfsRootOverride, UfsSaveFile, WineConfig};
 
@@ -220,6 +221,39 @@ pub fn launch_game(
     // Same file ira_input::calibration_store_path writes; the launcher does
     // not depend on that crate, so the name lives here too.
     let calibration = std::path::Path::new(&ctx.save_dir).join("controller_calibration.json");
+    let input_launch = super::input_daemon::InputLaunch {
+        mode: launch.input_mode,
+        profile: input_profile.map(str::to_string),
+        calibration: Some(calibration.to_string_lossy().into_owned()),
+        pause_unfocused: launch.input_pause_unfocused.unwrap_or(true),
+    };
+    match super::input_daemon::launch_via_daemon(&command, &env, game_dir.as_deref(), &input_launch)
+    {
+        Ok(client) => {
+            // The daemon supervises the game from here on; our monitor only
+            // consumes its event stream.
+            let mc = super::wrapper::MonitorContext {
+                sender: ctx.sender.clone(),
+                game_id: ctx.game_id,
+                variant_id: ctx.variant_id,
+                count_playtime: ctx.count_playtime,
+                started_at,
+                db: ctx.db.clone(),
+                running_games: ctx.running_games.clone(),
+                env: env.clone(),
+                command: command.clone(),
+                post_exit: launch.post_exit.clone(),
+                working_dir: game_dir.clone(),
+            };
+            std::thread::spawn(move || super::wrapper::monitor_session(client, mc));
+            return Ok(0);
+        }
+        Err(reason) => {
+            if matches!(launch.input_mode, Some(ControllerInputMode::Enabled)) {
+                eprintln!("launch: input daemon unavailable ({reason}); using the wrapper");
+            }
+        }
+    }
     super::env_builder::wrap_with_input_mode(
         &mut command,
         launch.input_mode,

@@ -1,3 +1,5 @@
+use std::io::BufRead;
+
 use crate::{
     MappingEngine, PhysicalGamepad, ReportRateEstimator, VirtualGamepad, VirtualKeyboard,
     VirtualMouse,
@@ -11,7 +13,7 @@ use super::devices::{
 use super::loop_io::LoopSchedule;
 use super::sensor::{open_motion_node, spawn_paired_imu, SensorPipeline};
 use super::super::{
-    ignored_device_for_target, inject_flatpak_target_env, sdl_mapping_for_backend,
+    ignored_device_for_target, SessionEvent, inject_flatpak_target_env, sdl_mapping_for_backend,
     Arguments, ProfileMonitor, SteamWatcher, TraceState,
 };
 
@@ -41,6 +43,101 @@ pub(crate) struct SessionSetup {
     pub(crate) paused_for_focus: bool,
     pub(crate) cursor_watcher: Option<crate::CursorWatcher>,
     pub(crate) cursor_visible: Option<bool>,
+}
+
+
+/// Spawns the game process. The legacy wrapper passes nothing but the
+/// command line: the child inherits the wrapper's environment (which the
+/// launcher already built). A daemon session carries the full environment
+/// and working directory in the request and streams the child's output back
+/// to clients, because the game log lives in the app, not here.
+fn spawn_session_child(
+    arguments: &Arguments,
+    mapper: &MappingEngine,
+    gamepad: &Option<PhysicalGamepad>,
+) -> Option<std::process::Child> {
+    if arguments.command.is_empty() {
+        return None;
+    }
+    let mut target_args = arguments.command[1..].to_vec();
+    inject_flatpak_target_env(
+        &arguments.command[0],
+        &mut target_args,
+        mapper.profile().backend,
+        gamepad.as_ref().map(|gamepad| gamepad.info().vendor),
+        gamepad.as_ref().map(|gamepad| gamepad.info().product),
+    );
+    let mut command = std::process::Command::new(&arguments.command[0]);
+    command.args(target_args);
+    command.env("SDL_JOYSTICK_HIDAPI", "0");
+    if let Some(mapping) = sdl_mapping_for_backend(mapper.profile().backend) {
+        command.env("SDL_GAMECONTROLLERCONFIG", mapping);
+    }
+    if let Some(gamepad) = gamepad.as_ref() {
+        if let Some(ignored_device) = ignored_device_for_target(
+            gamepad.info().vendor,
+            gamepad.info().product,
+            mapper.profile().backend,
+        ) {
+            command.env("SDL_GAMECONTROLLER_IGNORE_DEVICES", ignored_device);
+        }
+    }
+    if let Some(env) = &arguments.env {
+        // The request environment is complete: the launcher's list already
+        // excludes everything it wants filtered, so start from zero rather
+        // than leaking the daemon's own desktop environment into the game.
+        command.env_clear();
+        for (key, value) in env {
+            command.env(key, value);
+        }
+    }
+    if let Some(dir) = &arguments.working_dir {
+        command.current_dir(dir);
+    }
+    if arguments.events.is_some() {
+        command
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+    }
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let message = format!(
+                "failed to launch target process {}: {error}",
+                arguments.command[0]
+            );
+            eprintln!("ira-input: {message}");
+            return None;
+        }
+    };
+    if let Some(events) = &arguments.events {
+        let _ = events.send(SessionEvent::SessionStarted {
+            child_pid: child.id() as i32,
+            command: arguments.command.clone(),
+        });
+        pump_output(child.stdout.take(), events);
+        pump_output(child.stderr.take(), events);
+    }
+    Some(child)
+}
+
+/// Forwards the game's stdout/stderr to clients line by line. The pipes EOF
+/// when the child exits, so the pump threads end on their own.
+fn pump_output<R: std::io::Read + Send + 'static>(
+    reader: Option<R>,
+    events: &std::sync::mpsc::Sender<SessionEvent>,
+) {
+    if let Some(reader) = reader {
+        let events = events.clone();
+        std::thread::spawn(move || {
+            let reader = std::io::BufReader::new(reader);
+            for line in reader.lines().map_while(Result::ok) {
+                if events.send(SessionEvent::Output(line)).is_err() {
+                    break;
+                }
+            }
+        });
+    }
 }
 
 pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, String> {
@@ -286,39 +383,7 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
     }
     let steam_watch = arguments.steam_app_id.as_deref().map(SteamWatcher::spawn);
     let launcher_exit_code = None;
-    let child = if arguments.command.is_empty() {
-        None
-    } else {
-        let mut target_args = arguments.command[1..].to_vec();
-        inject_flatpak_target_env(
-            &arguments.command[0],
-            &mut target_args,
-            mapper.profile().backend,
-            gamepad.as_ref().map(|gamepad| gamepad.info().vendor),
-            gamepad.as_ref().map(|gamepad| gamepad.info().product),
-        );
-        let mut command = std::process::Command::new(&arguments.command[0]);
-        command.args(target_args);
-        command.env("SDL_JOYSTICK_HIDAPI", "0");
-        if let Some(mapping) = sdl_mapping_for_backend(mapper.profile().backend) {
-            command.env("SDL_GAMECONTROLLERCONFIG", mapping);
-        }
-        if let Some(gamepad) = gamepad.as_ref() {
-            if let Some(ignored_device) = ignored_device_for_target(
-                gamepad.info().vendor,
-                gamepad.info().product,
-                mapper.profile().backend,
-            ) {
-                command.env("SDL_GAMECONTROLLER_IGNORE_DEVICES", ignored_device);
-            }
-        }
-        Some(command.spawn().map_err(|error| {
-            format!(
-                "failed to launch target process {}: {error}",
-                arguments.command[0]
-            )
-        })?)
-    };
+    let child = spawn_session_child(arguments, &mapper, &gamepad);
     let pad_state = crate::PadState::default();
     let schedule = LoopSchedule::new();
     // Pause injection while the game window is unfocused (alt-tab). Without

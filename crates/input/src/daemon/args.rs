@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use super::SessionEvent;
+
 pub struct Arguments {
     pub device: Option<PathBuf>,
     pub profile: Option<PathBuf>,
@@ -12,8 +14,13 @@ pub struct Arguments {
     pub steam_app_id: Option<String>,
     pub trace: bool,
     pub command: Vec<String>,
+    /// Daemon-only fields: they never come from the command line, only from
+    /// a server assembling a session out of a Launch request.
+    pub daemon: bool,
+    pub(crate) env: Option<Vec<(String, String)>>,
+    pub(crate) working_dir: Option<String>,
+    pub(crate) events: Option<std::sync::mpsc::Sender<SessionEvent>>,
 }
-
 
 pub fn parse_arguments() -> Result<Arguments, String> {
     let mut arguments = Arguments {
@@ -28,6 +35,10 @@ pub fn parse_arguments() -> Result<Arguments, String> {
         steam_app_id: None,
         trace: false,
         command: Vec::new(),
+        daemon: false,
+        env: None,
+        working_dir: None,
+        events: None,
     };
     let mut values = std::env::args().skip(1);
     while let Some(argument) = values.next() {
@@ -89,9 +100,11 @@ pub fn parse_arguments() -> Result<Arguments, String> {
             "--list" => arguments.list = true,
             "--probe-sensors" => arguments.probe_sensors = true,
             "--trace" => arguments.trace = true,
+            "--daemon" => arguments.daemon = true,
             "--help" | "-h" => {
                 println!(
-                    "usage: ira-input [--vdf-import IN.vdf OUT.json] | --list | [--device PATH] [--profile PATH] [--steam-app-id ID] [--trace] -- COMMAND"
+                    "usage: ira-input [--vdf-import IN.vdf OUT.json] | --list | --daemon | \
+                     [--device PATH] [--profile PATH] [--steam-app-id ID] [--trace] -- COMMAND"
                 );
                 std::process::exit(0);
             }

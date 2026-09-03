@@ -16,6 +16,7 @@ members = [
     "crates/overlay-vk",
     "crates/overlay-standalone",
     "crates/input",
+    "crates/input-ipc", "crates/input-ipc",
 ]
 resolver = "2"
 

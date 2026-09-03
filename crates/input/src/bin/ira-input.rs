@@ -24,6 +24,15 @@ fn main() {
         probe_sensors();
         return;
     }
+    if arguments.daemon {
+        match ira_input::daemon::server::run_daemon() {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("ira-input: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if let Some((input, output)) = arguments.vdf_import.clone() {
         match import_vdf_file(&input, &output) {
             Ok(report) => {

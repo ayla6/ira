@@ -2,6 +2,7 @@ pub mod emulator_saves;
 pub mod env_builder;
 pub mod game_saves;
 pub mod gpu;
+pub mod input_daemon;
 mod launch;
 pub mod native_launch;
 pub mod wine_detect;

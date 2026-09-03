@@ -2135,6 +2135,7 @@ name = "ira-input"
 version = "0.1.0"
 dependencies = [
  "evdev",
+ "ira-input-ipc",
  "libc",
  "serde",
  "serde_json",
@@ -2143,10 +2144,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ira-input-ipc"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ira-launcher"
 version = "0.1.0"
 dependencies = [
  "ira-db",
+ "ira-input-ipc",
  "ira-models",
  "ira-overlay-ipc",
  "libc",

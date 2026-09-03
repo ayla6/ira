@@ -1,4 +1,5 @@
 use ira_db::{record_session, DbConn};
+use ira_input_ipc::{DaemonClient, Event};
 use ira_models::AppMessage;
 use ira_models::AppSender;
 use std::collections::HashMap;
@@ -281,23 +282,7 @@ pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
     clear_game_log(game_id);
     let log_buf = get_game_log(game_id);
 
-    // Log the command and env vars to the in-memory buffer (matching Lutris/umu format).
-    // This runs in the monitor thread so it doesn't block the main thread.
-    {
-        let mut log = log_buf.lock().unwrap();
-        log.push(format!(
-            "Started initial process from {}",
-            ctx.command.join(" ")
-        ));
-        let mut sorted_env = ctx.env.clone();
-        sorted_env.sort_by(|a, b| a.0.cmp(&b.0));
-        for (k, v) in &sorted_env {
-            if k.starts_with("CARGO_") || k.starts_with("RUSTUP_") || k.starts_with("RUST_") {
-                continue;
-            }
-            log.push(format!("DEBUG: {}={}", k, v));
-        }
-    }
+    log_launch_header(&ctx, &log_buf, "Started initial process");
 
     // Spawn separate threads for stdout and stderr so both are read live.
     // Reading them sequentially would block stderr until stdout EOFs (i.e. never,
@@ -324,10 +309,29 @@ pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
         }
     }
 
-    reap_zombies(child_pid);
+    finalize_game(&ctx, &log_buf, Some(child_pid), None);
+}
+
+/// Shared end-of-session bookkeeping for both monitors: zombie reaping,
+/// post-exit script, playtime recording, and the UI notifications.
+/// `exit_code` carries the daemon session's reported code, if any.
+fn finalize_game(
+    ctx: &MonitorContext,
+    log_buf: &GameLog,
+    child_pid: Option<i32>,
+    exit_code: Option<i32>,
+) {
+    if let Some(code) = exit_code {
+        let message = format!("Game session exited with code {code}");
+        eprintln!("launch: {message}");
+        log_buf.lock().unwrap().push(message);
+    }
+    if let Some(pid) = child_pid {
+        reap_zombies(pid);
+    }
 
     if !ctx.post_exit.is_empty() {
-        run_post_exit(&ctx.post_exit, ctx.working_dir.as_deref(), &log_buf);
+        run_post_exit(&ctx.post_exit, ctx.working_dir.as_deref(), log_buf);
     }
 
     let ended_at = std::time::SystemTime::now()
@@ -374,10 +378,79 @@ pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
     // Wine background processes and stragglers may die after the main
     // game process, and without a reaper they become visible as defunct
     // processes in htop/btop.
-    for _ in 0..10 {
-        std::thread::sleep(Duration::from_secs(1));
-        reap_zombies(child_pid);
+    if let Some(pid) = child_pid {
+        for _ in 0..10 {
+            std::thread::sleep(Duration::from_secs(1));
+            reap_zombies(pid);
+        }
     }
+}
+
+/// The first lines of every game log: the command being run and the launch
+/// environment, minus cargo's own noise.
+fn log_launch_header(ctx: &MonitorContext, log_buf: &GameLog, started_message: &str) {
+    let mut log = log_buf.lock().unwrap();
+    log.push(format!("{} from {}", started_message, ctx.command.join(" ")));
+    let mut sorted_env = ctx.env.clone();
+    sorted_env.sort_by(|a, b| a.0.cmp(&b.0));
+    for (k, v) in &sorted_env {
+        if k.starts_with("CARGO_") || k.starts_with("RUSTUP_") || k.starts_with("RUST_") {
+            continue;
+        }
+        log.push(format!("DEBUG: {}={}", k, v));
+    }
+}
+
+/// Monitor for a game handed to the resident input daemon: no child process
+/// of our own — the daemon supervises the game and reports back over the
+/// IPC socket. The playtime bookkeeping is identical to the wrapper path.
+pub fn monitor_session(mut client: DaemonClient, ctx: MonitorContext) {
+    let game_id = ctx.game_id;
+    clear_game_log(game_id);
+    let log_buf = get_game_log(game_id);
+    log_launch_header(&ctx, &log_buf, "Started via the input daemon");
+
+    let mut child_pid: Option<i32> = None;
+    let result = client.wait_session(|event| match event {
+        Event::SessionStarted { child_pid: pid, .. } => {
+            child_pid = Some(pid);
+            ctx.running_games.lock().unwrap().insert(ctx.game_id, pid);
+        }
+        Event::Output { line } => log_buf.lock().unwrap().push(line),
+        Event::Controller {
+            connected,
+            name,
+            path,
+        } => {
+            let message = if connected {
+                format!("Controller connected: {name} ({path})")
+            } else {
+                format!("Controller disconnected: {name}")
+            };
+            log_buf.lock().unwrap().push(message);
+        }
+        Event::ProfileReloaded { path } => {
+            log_buf
+                .lock()
+                .unwrap()
+                .push(format!("Controller profile reloaded: {path}"));
+        }
+        Event::SessionEnded { .. } => {}
+    });
+    let exit_code = match result {
+        Ok(code) => Some(code),
+        Err(error) => {
+            // The daemon connection dropped mid-session. The game itself may
+            // still be running; say so instead of pretending this was a clean
+            // end.
+            let message = format!("Input daemon connection lost: {error}");
+            eprintln!("launch: {message}");
+            log_buf.lock().unwrap().push(message);
+            None
+        }
+    };
+
+    finalize_game(&ctx, &log_buf, child_pid, exit_code);
 }
 
 fn reap_zombies(pgid: i32) {

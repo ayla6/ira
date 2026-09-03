@@ -10,6 +10,7 @@ libc = "0.2"
 ira-models = { path = "../models" }
 ira-db = { path = "../db" }
 ira-overlay-ipc = { path = "../overlay-ipc" }
+ira-input-ipc = { version = "0.1.0", path = "../input-ipc" }
 
 [dev-dependencies]
 tempfile = "3"

@@ -8,7 +8,7 @@ mod setup;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
-use super::{Arguments, SteamWatcher};
+use super::{Arguments, SessionEvent, SteamWatcher};
 use super::signals::{install_signal_handlers, STOP_REQUESTED};
 use devices::{
     apply_controller_deadzone, apply_controller_layout, make_gyro_processor,
@@ -232,6 +232,16 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
             .as_ref()
             .is_some_and(|gamepad| gamepad.is_connected());
         if was_connected && !connected {
+            if let Some(events) = &arguments.events {
+                let _ = events.send(SessionEvent::Controller {
+                    connected: false,
+                    name: gamepad
+                        .as_ref()
+                        .map(|gamepad| gamepad.info().name.clone())
+                        .unwrap_or_default(),
+                    path: String::new(),
+                });
+            }
             pipeline.sensor = None;
             pipeline.last_sensor_us = None;
             // A lost sensor must not stop frame servicing: gyroless DSU
@@ -343,6 +353,19 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                             || mapper.has_continuous_outputs();
                         report_rate.reset();
                     }
+                    if let Some(events) = &arguments.events {
+                        let _ = events.send(SessionEvent::Controller {
+                            connected: true,
+                            name: gamepad
+                                .as_ref()
+                                .map(|gamepad| gamepad.info().name.clone())
+                                .unwrap_or_default(),
+                            path: gamepad
+                                .as_ref()
+                                .map(|gamepad| gamepad.info().path.display().to_string())
+                                .unwrap_or_default(),
+                        });
+                    }
                     schedule.sensor = Instant::now();
                     if let Some(gamepad) = gamepad.as_mut() {
                         if let Err(error) = gamepad.grab() {
@@ -372,6 +395,11 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                             monitor.path().display()
                         );
                     } else {
+                        if let Some(events) = &arguments.events {
+                            let _ = events.send(SessionEvent::ProfileReloaded {
+                                path: monitor.path().display().to_string(),
+                            });
+                        }
                         pipeline.gyro_processor = make_gyro_processor(
                             mapper.profile(),
                             pad_vendor,

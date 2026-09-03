@@ -521,7 +521,7 @@ pub fn add_overlay_env_standalone(
     env.push(("IRA_OVERLAY_FONT_FAMILY".to_string(), font));
 }
 
-fn input_binary_path() -> Option<String> {
+pub(crate) fn input_binary_path() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
     let exe_dir = exe.parent()?;
     let candidates = [

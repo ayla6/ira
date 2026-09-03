@@ -63,7 +63,20 @@ pub(super) fn build_recent_row(
         } else {
             game.grid_path.clone()
         };
-        let item = build_cover(state, game, &path, w, h);
+        let db_id = game.db_id;
+        let variant_id = game.variant_id;
+        let item = build_cover(
+            state,
+            game,
+            &path,
+            w,
+            h,
+            false,
+            move |state| {
+                switch_to_game(state, db_id, variant_id);
+                super::sidebar::scroll_to_row(state, db_id, variant_id);
+            },
+        );
         row.append_cover(&item);
     }
 
@@ -114,12 +127,19 @@ pub(super) fn build_recent_row(
     vbox.upcast()
 }
 
+/// One clickable cover: the artwork (or the game name as fallback) with a
+/// hover scale. `on_click` decides what clicking means — the desktop row
+/// navigates to the game, the big-picture carousel selects and launches.
+/// `square` marks a couch capsule: square frame, cover-fit (centered, the
+/// overflow cropped), selection ring around the capsule instead of the art.
 pub(super) fn build_cover(
     state: &SharedState,
     game: &Game,
     image_path: &str,
     w: i32,
     h: i32,
+    square: bool,
+    on_click: impl Fn(&SharedState) + 'static,
 ) -> gtk4::Widget {
     let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     vbox.set_valign(gtk4::Align::Start);
@@ -127,6 +147,9 @@ pub(super) fn build_cover(
     vbox.add_css_class(CSS_COVER_ITEM);
     vbox.set_size_request(w, h);
     vbox.set_overflow(gtk4::Overflow::Visible);
+    if square {
+        vbox.add_css_class(CSS_BP_SQ);
+    }
 
     let overlay = gtk4::Overlay::new();
     overlay.set_overflow(gtk4::Overflow::Visible);
@@ -136,15 +159,37 @@ pub(super) fn build_cover(
     pic.set_size_request(w, h);
     pic.add_css_class(CSS_GAME_COVER_PIC);
     if !image_path.is_empty() {
-        queue_cover_load_priority(
-            pic.clone(),
-            image_path.to_string(),
-            (w, h),
-            game.db_id,
-            game.variant_id.unwrap_or(0),
-            vbox.clone(),
-            glib::Priority::DEFAULT,
-        );
+        if square {
+            // Cover-fit: hand the Picture the raw texture so its
+            // ContentFit::Cover scales it, centered, cropping the
+            // overflow — the scaled paintable the desktop row uses would
+            // stretch mismatched ratios instead.
+            let pic_weak = pic.downgrade();
+            let path = image_path.to_string();
+            let set = move |texture: Option<gdk4::Texture>| {
+                if let (Some(pic), Some(texture)) = (pic_weak.upgrade(), texture) {
+                    pic.set_paintable(Some(&texture));
+                }
+            };
+            match ira_images::cached_texture(image_path) {
+                Some(texture) => set(Some(texture)),
+                None => ira_images::load_texture_async_with_priority(
+                    &path,
+                    glib::Priority::DEFAULT,
+                    set,
+                ),
+            }
+        } else {
+            queue_cover_load_priority(
+                pic.clone(),
+                image_path.to_string(),
+                (w, h),
+                game.db_id,
+                game.variant_id.unwrap_or(0),
+                vbox.clone(),
+                glib::Priority::DEFAULT,
+            );
+        }
     }
     overlay.set_child(Some(&pic));
 
@@ -163,14 +208,9 @@ pub(super) fn build_cover(
 
     vbox.append(&overlay);
 
-    let state_clone = state.clone();
-    let db_id = game.db_id;
-    let variant_id = game.variant_id;
+    let click_state = state.clone();
     let click = gtk4::GestureClick::new();
-    click.connect_pressed(move |_, _, _, _| {
-        switch_to_game(&state_clone, db_id, variant_id);
-        super::sidebar::scroll_to_row(&state_clone, db_id, variant_id);
-    });
+    click.connect_pressed(move |_, _, _, _| on_click(&click_state));
     vbox.add_controller(click);
 
     let sc = state.clone();

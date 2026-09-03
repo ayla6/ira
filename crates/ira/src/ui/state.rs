@@ -99,6 +99,12 @@ pub struct AppState {
     pub sort_label: gtk4::Label,
     pub collapsed_collections: HashSet<i64>,
     pub multi_selected_ids: HashSet<String>,
+    /// The couch view's widgets and selection, present only in big-picture
+    /// mode (see `big_picture::is_big_picture`). Shared behind an `Rc` so
+    /// refreshes and navigation mutate the same selection state.
+    pub big_picture: Option<Rc<super::big_picture_view::BigPictureUi>>,
+    /// Sidebar indicator for long-running image fetches (desktop mode).
+    pub fetch_progress: RefCell<Option<super::fetch_images::FetchIndicator>>,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;

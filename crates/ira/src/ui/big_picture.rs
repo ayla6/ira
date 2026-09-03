@@ -9,14 +9,7 @@ pub fn running_in_gamescope() -> bool {
 }
 
 /// Big-picture mode: fullscreens the main window and drops the desktop
-/// chrome. Opt in via `--big-picture` or `IRA_BIG_PICTURE=1`; automatic
-/// under Gamescope; opt out with `IRA_BIG_PICTURE=0`.
+/// chrome. Opt in via `--big-picture`; automatic under Gamescope.
 pub fn is_big_picture() -> bool {
-    if std::env::args().any(|arg| arg == "--big-picture") {
-        return true;
-    }
-    match std::env::var("IRA_BIG_PICTURE") {
-        Ok(value) => value == "1",
-        Err(_) => running_in_gamescope(),
-    }
+    std::env::args().any(|arg| arg == "--big-picture") || running_in_gamescope()
 }

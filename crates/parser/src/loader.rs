@@ -73,6 +73,7 @@ pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
             AssetType::Grid => game.grid_path = p,
             AssetType::Header => game.header_path = p,
             AssetType::Logo => game.logo_path = p,
+            AssetType::Square => game.square_path = p,
         }
     }
 }

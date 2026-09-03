@@ -38,7 +38,11 @@ pub enum AppMessage {
         grid: String,
         logo: String,
         header: String,
+        square: String,
     },
+    /// A game's square.webp landed on disk (SGDB square or imported ROM
+    /// icon); reload the game so listeners can pick the new art up.
+    SquareReady(i64),
     /// User selected a different variant on the base game's play button.
     /// Reloads the game page with the variant's hero + logo.
     VariantSelected(i64, Option<i64>),

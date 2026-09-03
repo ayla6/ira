@@ -200,6 +200,7 @@ fn build_variant_images_and_logo_section(
                             AssetType::Grid => 64,
                             AssetType::Header => 48,
                             AssetType::Logo => 64,
+                            AssetType::Square => 64,
                         },
                         state: &state_c,
                         entry: &entry,

@@ -54,10 +54,10 @@ fn main() {
         std::env::set_var("GDK_BACKEND", "x11");
     }
 
-    // Big-picture entry: `--big-picture`, IRA_BIG_PICTURE=1, or running
-    // under Gamescope. Fullscreens the main window, dropping the desktop
-    // chrome — nothing maximizes the window for the app inside Gamescope,
-    // so its default size otherwise stays put with the header bars on.
+    // Big-picture entry: `--big-picture` or running under Gamescope.
+    // Fullscreens the main window, dropping the desktop chrome — nothing
+    // maximizes the window for the app inside Gamescope, so its default
+    // size otherwise stays put with the header bars on.
     let big_picture = ira::ui::big_picture::is_big_picture();
     if big_picture {
         eprintln!("ira: big picture mode");
@@ -78,6 +78,16 @@ fn main() {
         .expect("failed to register application resources");
 
     let app = adw::Application::new(Some("com.github.ira"), gio::ApplicationFlags::empty());
+    // Register the flag so glib's option parser accepts it; main() below
+    // reads it back out of argv.
+    app.add_main_option(
+        "big-picture",
+        glib::Char::from(0),
+        glib::OptionFlags::NONE,
+        glib::OptionArg::None,
+        "Start in big picture mode",
+        None,
+    );
 
     let state_holder: Rc<RefCell<Option<SharedState>>> = Rc::new(RefCell::new(None));
 

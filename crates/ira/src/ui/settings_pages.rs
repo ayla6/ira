@@ -83,6 +83,7 @@ pub(super) fn build_general_settings_page(
     adw::PasswordEntryRow,
     gtk4::ListBox,
     adw::SwitchRow,
+    adw::SwitchRow,
     AutoReloadWidgets,
 ) {
     let page = settings_page_container();
@@ -120,6 +121,14 @@ pub(super) fn build_general_settings_page(
     ));
     saves_row.set_active(cfg.centralize_game_saves);
     hidden_group.add(&saves_row);
+
+    let square_row = adw::SwitchRow::new();
+    square_row.set_title(&crate::tr!("Square covers in big picture"));
+    square_row.set_subtitle(&crate::tr!(
+        "Couch mode shows square capsule art, falling back to cropped cover capsules"
+    ));
+    square_row.set_active(cfg.big_picture_square_capsules);
+    hidden_group.add(&square_row);
     page.append(&hidden_group);
 
     let reload_group = adw::PreferencesGroup::new();
@@ -231,6 +240,7 @@ pub(super) fn build_general_settings_page(
         sgdb_entry,
         lang_list,
         saves_row,
+        square_row,
         AutoReloadWidgets {
             steam: auto_reload_steam,
             roms: auto_reload_roms,

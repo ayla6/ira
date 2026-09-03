@@ -143,6 +143,7 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
         grid_path: String::new(),
         header_path: String::new(),
         logo_path: String::new(),
+        square_path: String::new(),
         achievements: Vec::new(),
         earned_count: 0,
         total_count: 0,
@@ -430,6 +431,9 @@ fn apply_non_empty_images(from: &Game, to: &mut Game) {
     }
     if !from.hero_image_path.is_empty() {
         to.hero_image_path = from.hero_image_path.clone();
+    }
+    if !from.square_path.is_empty() {
+        to.square_path = from.square_path.clone();
     }
     if !from.grid_path.is_empty() {
         to.grid_path = from.grid_path.clone();

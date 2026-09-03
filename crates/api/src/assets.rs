@@ -18,7 +18,7 @@ fn shrink(dir: &Path, asset: AssetType) {
 }
 
 impl SteamDataClient {
-    pub fn ensure_sgdb_assets(&self, sgdb_id: &str) -> (String, String, String, String, String) {
+    pub fn ensure_sgdb_assets(&self, sgdb_id: &str) -> (String, String, String, String, String, String) {
         let dir = self.sgdb_dir(sgdb_id);
         self.ensure_sgdb_assets_in_dir(&dir, sgdb_id)
     }
@@ -27,7 +27,7 @@ impl SteamDataClient {
         &self,
         dir: &Path,
         sgdb_id: &str,
-    ) -> (String, String, String, String, String) {
+    ) -> (String, String, String, String, String, String) {
         let _s = tracing::info_span!("ensure_sgdb_assets_in_dir", sgdb_id).entered();
         let _ = std::fs::create_dir_all(dir);
 
@@ -36,6 +36,7 @@ impl SteamDataClient {
         let mut grid_path = String::new();
         let mut logo_path = String::new();
         let mut header_path = String::new();
+        let mut square_path = String::new();
 
         for (asset_type, path) in [
             (AssetType::Icon, &mut icon_path),
@@ -43,6 +44,7 @@ impl SteamDataClient {
             (AssetType::Grid, &mut grid_path),
             (AssetType::Logo, &mut logo_path),
             (AssetType::Header, &mut header_path),
+            (AssetType::Square, &mut square_path),
         ] {
             *path = if let Some(existing) = ira_parser::find_image_file(dir, asset_type.file_base())
             {
@@ -54,7 +56,7 @@ impl SteamDataClient {
             };
         }
 
-        (icon_path, hero_path, grid_path, logo_path, header_path)
+        (icon_path, hero_path, grid_path, logo_path, header_path, square_path)
     }
 
     pub fn ensure_assets(&self, app_id: &str, has_local_icon: bool) -> (String, String) {

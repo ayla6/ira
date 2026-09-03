@@ -103,7 +103,7 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
         } else {
             ira_parser::sgdb_data_dir(&save_dir, &sgdb_id)
         };
-        let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id);
+        let (icon, hero, grid, logo, header, square) = steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id);
 
         if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, db_id) {
             let game = Game {
@@ -119,6 +119,7 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
                 grid_path: grid,
                 header_path: header,
                 logo_path: logo,
+                square_path: square.clone(),
                 achievements: Vec::new(),
                 earned_count: 0,
                 total_count: 0,
@@ -185,7 +186,7 @@ pub(crate) fn fetch_and_report_sgdb_assets(
         Some(g) => ira_parser::game_data_dir(save_dir, g),
         None => ira_parser::sgdb_data_dir(save_dir, &sgdb_id),
     };
-    let (icon, hero, grid, logo, header) = steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id);
+    let (icon, hero, grid, logo, header, square) = steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id);
     let _ = sender.send(AppMessage::SgdbAssetsDownloaded {
         db_id,
         sgdb_id,
@@ -194,6 +195,7 @@ pub(crate) fn fetch_and_report_sgdb_assets(
         grid,
         logo,
         header,
+        square,
     });
 }
 

@@ -13,15 +13,21 @@ use adw::prelude::*;
 use std::collections::HashSet;
 
 pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
+    use super::big_picture_view::refresh;
     match msg {
         AppMessage::EnrichedGame(game) | AppMessage::WatcherGameUpdated(game) => {
             apply_game_update(state, game);
+            refresh(state);
         }
         AppMessage::NewGame(game) => {
             insert_or_update_game(state, game);
+            refresh(state);
         }
         AppMessage::AddGameError(e) => handle_add_game_error(state, e),
-        AppMessage::GameStopped(db_id, _) => handle_game_stopped(state, db_id),
+        AppMessage::GameStopped(db_id, _) => {
+            handle_game_stopped(state, db_id);
+            refresh(state);
+        }
         AppMessage::GameStarted(db_id, _) => handle_game_started(state, db_id),
         AppMessage::SessionRecorded {
             game_id,
@@ -48,25 +54,44 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             grid,
             logo,
             header,
+            square,
         } => {
-            handle_sgdb_assets_downloaded(
-                state,
-                db_id,
-                sgdb_id,
-                SgdbAssetPaths {
-                    icon,
-                    hero,
-                    grid,
-                    logo,
-                    header,
-                },
-            );
-        }
+                handle_sgdb_assets_downloaded(
+                    state,
+                    db_id,
+                    sgdb_id,
+                    SgdbAssetPaths {
+                        icon,
+                        hero,
+                        grid,
+                        logo,
+                        header,
+                        square,
+                    },
+                );
+                refresh(state);
+            }
+        AppMessage::SquareReady(db_id) => handle_square_ready(state, db_id),
         AppMessage::VariantSelected(db_id, variant_id) => {
             handle_variant_selected(state, db_id, variant_id);
         }
         AppMessage::VariantsChanged(db_id) => handle_variants_changed(state, db_id),
     }
+}
+
+/// A square.webp landed for one game: reload it so the couch carousel (and
+/// any open view) sees the new art.
+fn handle_square_ready(state: &SharedState, db_id: i64) {
+    let (db, save_dir) = {
+        let s = state.borrow();
+        (s.db.clone(), s.save_dir.clone())
+    };
+    if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, db_id) {
+        if let Ok(updated) = crate::game_loader::load_game_fast(&entry, &save_dir) {
+            apply_game_update(state, updated);
+        }
+    }
+    super::big_picture_view::refresh(state);
 }
 
 fn handle_add_game_error(state: &SharedState, e: String) {
@@ -336,6 +361,7 @@ struct SgdbAssetPaths {
     grid: String,
     logo: String,
     header: String,
+    square: String,
 }
 
 fn handle_sgdb_assets_downloaded(
@@ -370,6 +396,9 @@ fn handle_sgdb_assets_downloaded(
             if !paths.header.is_empty() {
                 g.header_path = paths.header;
             }
+            if !paths.square.is_empty() {
+                g.square_path = paths.square;
+            }
             Some(g.clone())
         } else {
             None
@@ -383,6 +412,7 @@ fn handle_sgdb_assets_downloaded(
             &g.grid_path,
             &g.header_path,
             &g.logo_path,
+            &g.square_path,
         ] {
             if !path.is_empty() {
                 ira_images::invalidate_texture(path);

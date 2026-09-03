@@ -9,6 +9,7 @@ mod imp {
     pub struct RecentRow {
         pub covers: RefCell<Vec<gtk4::Widget>>,
         pub hovered: RefCell<Option<gtk4::Widget>>,
+        pub selected: RefCell<Option<gtk4::Widget>>,
         pub cover_h: Cell<i32>,
         pub spacing: Cell<i32>,
         pub adj: RefCell<Option<gtk4::Adjustment>>,
@@ -20,6 +21,7 @@ mod imp {
             Self {
                 covers: RefCell::new(Vec::new()),
                 hovered: RefCell::new(None),
+                selected: RefCell::new(None),
                 cover_h: Cell::new(0),
                 spacing: Cell::new(8),
                 adj: RefCell::new(None),
@@ -100,6 +102,7 @@ mod imp {
                 cover.unparent();
             }
             *self.hovered.borrow_mut() = None;
+            *self.selected.borrow_mut() = None;
         }
     }
 
@@ -166,21 +169,26 @@ mod imp {
 
         /// Paint covers in child order but draw the hovered cover last so its
         /// hover scale sits on top of the overlapping neighbor to its right
-        /// (which would otherwise be painted over it).
+        /// (which would otherwise be painted over it). The selected cover
+        /// paints last of all so the big-picture selection sits on top of a
+        /// simultaneous pointer hover.
         fn snapshot(&self, snapshot: &gtk4::Snapshot) {
             let covers = self.covers.borrow();
             let hovered = self.hovered.borrow();
+            let selected = self.selected.borrow();
             for c in covers.iter() {
                 if !c.is_child_visible() {
                     continue;
                 }
-                if hovered.as_ref().is_none_or(|h| h.as_ptr() != c.as_ptr()) {
+                let is_hovered = hovered.as_ref().is_some_and(|h| h.as_ptr() == c.as_ptr());
+                let is_selected = selected.as_ref().is_some_and(|s| s.as_ptr() == c.as_ptr());
+                if !is_hovered && !is_selected {
                     self.obj().snapshot_child(c, snapshot);
                 }
             }
-            if let Some(h) = hovered.as_ref() {
-                if h.is_child_visible() {
-                    self.obj().snapshot_child(h, snapshot);
+            for elevated in [hovered.as_ref(), selected.as_ref()].into_iter().flatten() {
+                if elevated.is_child_visible() {
+                    self.obj().snapshot_child(elevated, snapshot);
                 }
             }
         }
@@ -241,5 +249,44 @@ impl RecentRow {
             *self.imp().hovered.borrow_mut() = cover.map(ToOwned::to_owned);
             self.queue_draw();
         }
+    }
+
+    /// Mark one cover as the big-picture selection: it paints on top of its
+    /// neighbors so its scale-up and outline stay visible. Styling itself is
+    /// the caller's job (a CSS class on the cover widget).
+    pub fn set_selected_cover(&self, cover: Option<&gtk4::Widget>) {
+        let cur = self.imp().selected.borrow().as_ref().map(|h| h.as_ptr());
+        let new = cover.map(|c| c.as_ptr());
+        if cur != new {
+            *self.imp().selected.borrow_mut() = cover.map(ToOwned::to_owned);
+            self.queue_draw();
+        }
+    }
+
+    /// Detach every cover (drop without destroying the widgets).
+    pub fn clear_covers(&self) {
+        for cover in self.imp().covers.borrow_mut().drain(..) {
+            cover.unparent();
+        }
+        *self.imp().hovered.borrow_mut() = None;
+        *self.imp().selected.borrow_mut() = None;
+        self.queue_resize();
+    }
+
+    /// X offset and width of one cover within the row's content coordinates,
+    /// or None when the index is out of range. Usable before allocation —
+    /// widths come from the width requests, not live allocations.
+    pub fn cover_geometry(&self, index: usize) -> Option<(f64, f64)> {
+        let covers = self.imp().covers.borrow();
+        let spacing = self.imp().spacing.get() as f64;
+        let mut x = spacing;
+        for (i, c) in covers.iter().enumerate() {
+            let w = c.width_request().max(1) as f64;
+            if i == index {
+                return Some((x, w));
+            }
+            x += w + spacing;
+        }
+        None
     }
 }

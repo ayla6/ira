@@ -136,17 +136,7 @@ fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
     let show_recent = !searching && selected_group == GroupSelection::AllGames;
 
     if show_recent {
-        let show_hidden = state.borrow().cfg.show_hidden_games;
-        let mut recent: Vec<Game> = state
-            .borrow()
-            .games
-            .iter()
-            .filter(|g| g.last_played > 0 && (!g.hidden || show_hidden))
-            .cloned()
-            .collect();
-        recent.sort_by_key(|a| std::cmp::Reverse(a.last_played));
-        recent.truncate(8);
-
+        let recent = super::helpers::recently_played(state, 8);
         if !recent.is_empty() {
             header_box.append(&build_recent_row(state, &recent, cover_height));
         }
@@ -173,15 +163,8 @@ fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
     heading.add_css_class(CSS_SECTION_TITLE);
     heading.set_margin_start(16);
     heading.set_margin_end(16);
-    let show_hidden = state.borrow().cfg.show_hidden_games;
     heading.set_margin_top(
-        if show_recent
-            && state
-                .borrow()
-                .games
-                .iter()
-                .any(|g| g.last_played > 0 && (!g.hidden || show_hidden))
-        {
+        if show_recent && !super::helpers::recently_played(state, 1).is_empty() {
             20
         } else {
             0
@@ -443,6 +426,12 @@ fn build_grid_view(
 }
 
 pub fn show_grid_view(state: &SharedState) {
+    if super::big_picture::is_big_picture() {
+        // The couch view has no grid; refresh the carousel instead of
+        // building covers for a window that never shows them.
+        super::big_picture_view::refresh(state);
+        return;
+    }
     let _span = tracing::info_span!("show_grid_view").entered();
     {
         let mut s = state.borrow_mut();

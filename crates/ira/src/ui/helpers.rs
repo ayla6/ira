@@ -374,6 +374,9 @@ pub fn merge_game_enrichment(existing: &Game, enriched: &Game) -> Game {
         if !enriched.logo_path.is_empty() {
             result.logo_path = enriched.logo_path.clone();
         }
+        if !enriched.square_path.is_empty() {
+            result.square_path = enriched.square_path.clone();
+        }
     }
 
     // Name — apply only if existing is a placeholder.
@@ -620,6 +623,23 @@ pub fn replace_grid_game(state: &SharedState, game: &Game) {
             }
         }
     }
+}
+
+/// The most recently played visible games, newest first. Shared by the
+/// desktop grid header and the big-picture carousel so both agree on what
+/// "recent" means.
+pub fn recently_played(state: &SharedState, limit: usize) -> Vec<Game> {
+    let s = state.borrow();
+    let show_hidden = s.cfg.show_hidden_games;
+    let mut recent: Vec<Game> = s
+        .games
+        .iter()
+        .filter(|g| g.last_played > 0 && (!g.hidden || show_hidden))
+        .cloned()
+        .collect();
+    recent.sort_by_key(|a| std::cmp::Reverse(a.last_played));
+    recent.truncate(limit);
+    recent
 }
 
 pub fn esc(s: &str) -> String {

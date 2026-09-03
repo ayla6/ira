@@ -1,4 +1,8 @@
 pub const CSS_BOXED_LIST: &str = "boxed-list";
+pub const CSS_BP_CAPTION: &str = "bp-caption";
+pub const CSS_BP_SQ: &str = "bp-sq";
+pub const CSS_BP_ROOT: &str = "bp-root";
+pub const CSS_BP_SELECTED: &str = "bp-selected";
 pub const CSS_CAPTION: &str = "caption";
 pub const CSS_CIRCULAR: &str = "circular";
 pub const CSS_CLICKABLE_STAT: &str = "clickable-stat";
@@ -270,4 +274,39 @@ gridview.game-grid child:focus-within {
     color: @error_color;
     background-color: alpha(@error_color, 0.22);
 }
+
+.bp-root .cover-item:hover .game-cover-pic {
+    transform: none;
+    box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
+}
+.bp-selected .game-cover-pic {
+    transform: scale(1.08);
+    outline: 3px solid @accent_color;
+    outline-offset: 5px;
+    box-shadow: 0 10px 34px 8px rgba(0,0,0,0.6);
+}
+.cover-item.bp-sq.bp-selected {
+    outline: 3px solid @accent_color;
+    outline-offset: 4px;
+}
+.fetch-strip label {
+    font-weight: normal;
+}
+.cover-item.bp-sq.bp-selected .game-cover-pic,
+.cover-item.bp-sq:hover .game-cover-pic {
+    transform: none;
+    box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
+}
+.bp-caption { font-size: 1.6em; font-weight: 700; }
 ";
+
+/// Install the global stylesheet and icon theme additions on the default
+/// display. Called once per window build (desktop or big picture); repeated
+/// calls simply re-add the provider, which is idempotent.
+pub fn init_styles() {
+    let display = gtk4::gdk::Display::default().expect("no default display");
+    let css = gtk4::CssProvider::new();
+    css.load_from_string(APP_CSS);
+    gtk4::style_context_add_provider_for_display(&display, &css, gtk4::STYLE_PROVIDER_PRIORITY_USER);
+    gtk4::IconTheme::for_display(&display).add_resource_path("/com/github/ira/icons");
+}

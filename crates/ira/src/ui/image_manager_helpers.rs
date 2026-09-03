@@ -201,7 +201,12 @@ pub(super) fn native_icon_bytes(
 /// Writes a rendered native icon into the game's data dir, replacing any
 /// existing one. Only used when there is no settings dialog to Save from;
 /// the dialog stages instead and lets the Save flow apply it.
-pub(super) fn write_native_icon_to_disk(save_dir: &str, game: &Game, webp_bytes: &[u8]) -> bool {
+pub(super) fn write_native_icon_to_disk(
+    save_dir: &str,
+    game: &Game,
+    webp_bytes: &[u8],
+    asset: ira_models::AssetType,
+) -> bool {
     let image_dir = match game.kind {
         ira_models::GameKind::Ps4 => std::path::Path::new(save_dir)
             .join("data")
@@ -218,18 +223,19 @@ pub(super) fn write_native_icon_to_disk(save_dir: &str, game: &Game, webp_bytes:
         _ => return false,
     };
     let _ = std::fs::create_dir_all(&image_dir);
-    ira_parser::remove_image_variants(&image_dir, "icon");
-    ira_parser::remove_image_variants(&image_dir, "icon_small");
-    if std::fs::write(image_dir.join("icon.webp"), webp_bytes).is_err() {
+    ira_parser::remove_image_variants(&image_dir, asset.file_base());
+    let small = format!("{}_small", asset.file_base());
+    ira_parser::remove_image_variants(&image_dir, &small);
+    if std::fs::write(image_dir.join(format!("{}.webp", asset.file_base())), webp_bytes).is_err() {
         return false;
     }
     ira_parser::ensure_small_image(
         &image_dir,
-        "icon",
-        ira_models::AssetType::Icon.thumb_dims().0,
-        ira_models::AssetType::Icon.thumb_dims().1,
+        asset.file_base(),
+        asset.thumb_dims().0,
+        asset.thumb_dims().1,
     );
-    if let Some(p) = ira_parser::find_image_file(&image_dir, "icon") {
+    if let Some(p) = ira_parser::find_image_file(&image_dir, asset.file_base()) {
         ira_images::invalidate_texture(&p.to_string_lossy());
     }
     true
@@ -327,7 +333,12 @@ mod tests {
         let webp =
             ira_parser::convert_bytes_to_lossless_webp(&std::fs::read(&png).unwrap()).unwrap();
 
-        assert!(write_native_icon_to_disk(save_dir, &game, &webp));
+        assert!(write_native_icon_to_disk(
+            save_dir,
+            &game,
+            &webp,
+            ira_models::AssetType::Icon
+        ));
 
         assert!(data_dir.join("icon.webp").is_file());
         assert!(!data_dir.join("icon.png").is_file());

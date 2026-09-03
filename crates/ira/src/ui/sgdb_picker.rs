@@ -196,6 +196,7 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
         AssetType::Grid => format!("{}.jpg", at.file_base()),
         AssetType::Header => format!("{}.jpg", at.file_base()),
         AssetType::Logo => format!("{}.png", at.file_base()),
+        AssetType::Square => format!("{}.png", at.file_base()),
     };
     let dl_url = a.url.clone();
     let steam_dl = ctx.steam.clone();

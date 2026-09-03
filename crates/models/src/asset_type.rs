@@ -15,6 +15,7 @@ pub enum AssetType {
     Grid,
     Header,
     Logo,
+    Square,
 }
 
 impl AssetType {
@@ -25,6 +26,7 @@ impl AssetType {
             AssetType::Grid => "grid",
             AssetType::Header => "header",
             AssetType::Logo => "logo",
+            AssetType::Square => "square",
         }
     }
 
@@ -43,6 +45,7 @@ impl AssetType {
             AssetType::Grid => "Capsule",
             AssetType::Header => "Header",
             AssetType::Logo => "Logo",
+            AssetType::Square => "Square",
         }
     }
 
@@ -54,6 +57,7 @@ impl AssetType {
             AssetType::Grid => (300, 450),
             AssetType::Header => (460, 215),
             AssetType::Logo => (620, 620),
+            AssetType::Square => (512, 512),
         }
     }
 
@@ -64,6 +68,7 @@ impl AssetType {
             "grid" => Some(AssetType::Grid),
             "header" => Some(AssetType::Header),
             "logo" => Some(AssetType::Logo),
+            "square" => Some(AssetType::Square),
             _ => None,
         }
     }
@@ -72,6 +77,7 @@ impl AssetType {
         match self {
             AssetType::Grid => &["600x900"],
             AssetType::Header => &["460x215", "920x430"],
+            AssetType::Square => &["1024x1024", "512x512"],
             _ => &[],
         }
     }
@@ -81,6 +87,7 @@ impl AssetType {
             AssetType::Icon,
             AssetType::Hero,
             AssetType::Grid,
+            AssetType::Square,
             AssetType::Header,
             AssetType::Logo,
         ]

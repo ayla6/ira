@@ -409,7 +409,7 @@ fn start_background_enrichment(state: &SharedState) {
                     };
                     steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id)
                 }));
-                if let Ok((icon, hero, grid, logo, header)) = result {
+                if let Ok((icon, hero, grid, logo, header, square)) = result {
                     let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
                         db_id,
                         sgdb_id,
@@ -418,6 +418,7 @@ fn start_background_enrichment(state: &SharedState) {
                         grid,
                         logo,
                         header,
+                        square,
                     });
                 }
             }

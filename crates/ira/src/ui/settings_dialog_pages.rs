@@ -10,6 +10,7 @@ use super::settings_pages::{
 };
 use super::state::SharedState;
 use super::wine_config_widget::{build_wine_config_pages, WineConfigWidgets, WinePage};
+use adw::prelude::*;
 use glib::object::IsA;
 use ira_config::Config;
 use std::cell::RefCell;
@@ -30,6 +31,7 @@ pub(super) struct SettingsPageWidgets {
     pub(super) rom_page: gtk4::Box,
     pub(super) notif_row: adw::SwitchRow,
     pub(super) bg_row: adw::SwitchRow,
+    pub(super) square_row: adw::SwitchRow,
     pub(super) hidden_row: adw::SwitchRow,
     pub(super) steam_entry: adw::PasswordEntryRow,
     pub(super) sgdb_entry: adw::PasswordEntryRow,
@@ -69,8 +71,29 @@ pub(super) fn build_settings_pages(
         sgdb_entry,
         lang_list,
         saves_row,
+        square_row,
         auto_reload_widgets,
     ) = build_general_settings_page(cfg);
+
+    // One-click maintenance: re-run the SGDB asset ensure for every matched
+    // game so missing art (squares included) is fetched again, even for
+    // games whose enrichment had been skipped as already complete.
+    let fetch_group = adw::PreferencesGroup::new();
+    fetch_group.set_title(&crate::tr!("Game images"));
+    let fetch_row = adw::ActionRow::new();
+    fetch_row.set_title(&crate::tr!("Fetch missing images"));
+    fetch_row.set_subtitle(&crate::tr!(
+        "Re-downloads any missing SGDB art for matched games, even ones skipped before"
+    ));
+    let fetch_btn = gtk4::Button::with_label(&crate::tr!("Fetch"));
+    fetch_btn.set_valign(gtk4::Align::Center);
+    let fetch_state = state.clone();
+    fetch_btn.connect_clicked(move |_| {
+        super::fetch_images::start_missing_images_fetch(&fetch_state);
+    });
+    fetch_row.add_suffix(&fetch_btn);
+    fetch_group.add(&fetch_row);
+    general_page.append(&fetch_group);
     let (overlay_page, overlay_widgets) = build_overlay_settings_page(cfg);
     let registry = state.borrow().controller_registry.clone();
     let (input_page, input_widgets) = build_input_settings_page(
@@ -114,6 +137,7 @@ pub(super) fn build_settings_pages(
         sgdb_entry,
         lang_list,
         saves_row,
+        square_row,
         auto_reload_widgets,
         controller_default_widgets,
         game_folders,

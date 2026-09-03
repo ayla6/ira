@@ -118,6 +118,8 @@ pub struct Config {
     pub close_to_background: bool,
     #[serde(default)]
     pub show_hidden_games: bool,
+    #[serde(default = "default_true")]
+    pub big_picture_square_capsules: bool,
     #[serde(default = "default_grid_cover_width")]
     pub grid_cover_width: i32,
     #[serde(default)]
@@ -254,6 +256,7 @@ impl Default for Config {
             notifications_enabled: true,
             close_to_background: false,
             show_hidden_games: false,
+            big_picture_square_capsules: true,
             grid_cover_width: DEFAULT_GRID_COVER_WIDTH,
             shadps4_enabled: false,
             shadps4_executable: String::new(),

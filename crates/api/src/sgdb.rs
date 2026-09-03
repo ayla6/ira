@@ -51,6 +51,12 @@ impl SteamDataClient {
             best.map(|(item, _)| item)
                 .or(data.first())
                 .and_then(|item| item.get("url")?.as_str().map(|s| s.to_string()))
+        } else if !dimensions.is_empty() {
+            // A dimension-filtered query (square grids, headers) can match
+            // several sizes; the widest one carries the most detail.
+            data.iter()
+                .max_by_key(|item| item.get("width").and_then(|v| v.as_i64()).unwrap_or(0))
+                .and_then(|item| item.get("url")?.as_str().map(|s| s.to_string()))
         } else {
             data[0].get("url")?.as_str().map(|s| s.to_string())
         }
@@ -163,8 +169,12 @@ pub(super) fn sgdb_endpoint(asset: AssetType, is_steam_id: bool, id: &str) -> Op
         (AssetType::Icon, false) => format!("icons/game/{}", id),
         (AssetType::Hero, true) => format!("heroes/steam/{}", id),
         (AssetType::Hero, false) => format!("heroes/game/{}", id),
-        (AssetType::Grid, true) | (AssetType::Header, true) => format!("grids/steam/{}", id),
-        (AssetType::Grid, false) | (AssetType::Header, false) => format!("grids/game/{}", id),
+        (AssetType::Grid, true)
+        | (AssetType::Header, true)
+        | (AssetType::Square, true) => format!("grids/steam/{}", id),
+        (AssetType::Grid, false)
+        | (AssetType::Header, false)
+        | (AssetType::Square, false) => format!("grids/game/{}", id),
         (AssetType::Logo, true) => format!("logos/steam/{}", id),
         (AssetType::Logo, false) => format!("logos/game/{}", id),
     })

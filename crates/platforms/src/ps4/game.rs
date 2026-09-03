@@ -70,6 +70,7 @@ pub fn load_shadps4_game(
         grid_path: String::new(),
         header_path: String::new(),
         logo_path: String::new(),
+            square_path: String::new(),
         achievements: Vec::new(),
         earned_count: 0,
         total_count: 0,

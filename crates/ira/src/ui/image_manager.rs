@@ -42,6 +42,7 @@ pub fn build_image_manager_content_with_drafts(
             AssetType::Grid => (48, 64),
             AssetType::Header => (96, 48),
             AssetType::Logo => (64, 64),
+            AssetType::Square => (64, 64),
         };
         let section = build_image_section(BuildImageSectionParams {
             label: at.display_name(),
@@ -386,7 +387,18 @@ fn build_reset_icon_button(
     save_dir: &str,
     state: &SharedState,
 ) -> Option<gtk4::Button> {
-    if AssetType::from_string(asset_type) != Some(AssetType::Icon) {
+    // The Square section only offers ROM art where the ROM carries a
+    // square icon: PS4's icon0.png and Switch's home-menu icon.
+    let asset = match AssetType::from_string(asset_type) {
+        Some(at @ (AssetType::Icon | AssetType::Square)) => at,
+        _ => return None,
+    };
+    if asset == AssetType::Square
+        && !matches!(
+            game.kind,
+            ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
+        )
+    {
         return None;
     }
     let label = match game.kind {
@@ -429,7 +441,12 @@ fn build_reset_icon_button(
                 PendingImage::Bytes(gtk4::glib::Bytes::from_owned(bytes)),
             );
         } else {
-            super::image_manager_helpers::write_native_icon_to_disk(&save_dir_c2, &gc, &bytes);
+            super::image_manager_helpers::write_native_icon_to_disk(
+                &save_dir_c2,
+                &gc,
+                &bytes,
+                asset,
+            );
         }
         refresh();
     });

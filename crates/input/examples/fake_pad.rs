@@ -7,6 +7,8 @@
 //!   lt <0-255>         ABS_Z raw value
 //!   rt <0-255>         ABS_RZ raw value
 //!   sticks <x> <y> <rx> <ry>  stick axes in raw -32768..32767 units
+//!   hatx <-1|0|1>      left dpad hat on ABS_HAT0X
+//!   adown / aup        south face button down / up (BTN_SOUTH)
 //!   jitter             resting trigger noise sweep on ABS_Z/ABS_RZ
 //!
 //! Prints its evdev node paths on startup; feed them to ira-input --device.
@@ -61,6 +63,7 @@ fn main() -> std::io::Result<()> {
         match line.trim().split_once(' ') {
             Some(("lt", value)) => emit_axis(&mut device, AbsoluteAxisCode::ABS_Z, parse(value)),
             Some(("rt", value)) => emit_axis(&mut device, AbsoluteAxisCode::ABS_RZ, parse(value)),
+            Some(("hatx", value)) => emit_axis(&mut device, AbsoluteAxisCode::ABS_HAT0X, parse(value)),
             Some(("sticks", rest)) => {
                 let values: Vec<i32> = rest.split_whitespace().map(parse).collect();
                 if values.len() == 4 {
@@ -81,6 +84,8 @@ fn main() -> std::io::Result<()> {
                 "rtp" | "rtr" => {
                     emit_key(&mut device, KeyCode::BTN_TR2, line.trim() == "rtp")?;
                 }
+                "adown" => emit_key(&mut device, KeyCode::BTN_SOUTH, true)?,
+                "aup" => emit_key(&mut device, KeyCode::BTN_SOUTH, false)?,
                 "jitter" => {
                     for value in [0, 1, 2, 1, 0] {
                         emit_axis(&mut device, AbsoluteAxisCode::ABS_Z, value);

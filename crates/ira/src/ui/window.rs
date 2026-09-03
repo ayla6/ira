@@ -105,6 +105,8 @@ pub fn build_ui(
         sort_label: gtk4::Label::new(Some(SortMode::Alphabetical.display_label())),
         collapsed_collections: HashSet::new(),
         multi_selected_ids: HashSet::new(),
+        big_picture: None,
+        fetch_progress: RefCell::new(None),
     }));
 
     {
@@ -119,20 +121,17 @@ pub fn build_ui(
 }
 
 pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
+    if super::big_picture::is_big_picture() {
+        super::big_picture_view::build_window(state, app);
+        return;
+    }
+
     let window = adw::ApplicationWindow::new(app);
     window.set_title(Some(&crate::tr!("Ira")));
     window.set_default_size(1200, 720);
     window.set_size_request(900, 650);
 
-    let css = gtk4::CssProvider::new();
-    css.load_from_string(APP_CSS);
-    gtk4::style_context_add_provider_for_display(
-        &gtk4::gdk::Display::default().expect("no default display"),
-        &css,
-        gtk4::STYLE_PROVIDER_PRIORITY_USER,
-    );
-    gtk4::IconTheme::for_display(&gtk4::gdk::Display::default().expect("no default display"))
-        .add_resource_path("/com/github/ira/icons");
+    super::css::init_styles();
 
     let split_view = adw::NavigationSplitView::new();
     split_view.set_sidebar_width_fraction(0.22);
@@ -158,6 +157,10 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     menu_btn.add_css_class(CSS_FLAT);
     menu_btn.set_popover(Some(&popover));
     sidebar_header.pack_end(&menu_btn);
+
+    let fetch_indicator = super::fetch_images::FetchIndicator::build(&sidebar_toolbar);
+    sidebar_toolbar.add_bottom_bar(&fetch_indicator.widget());
+    sidebar_toolbar.set_reveal_bottom_bars(false);
 
     sidebar_toolbar.add_top_bar(&sidebar_header);
 
@@ -227,6 +230,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     {
         let mut s = state.borrow_mut();
         s.window = window.clone();
+        *s.fetch_progress.borrow_mut() = Some(fetch_indicator);
         s.sidebar_store = sidebar_store.clone();
         s.sidebar_selection = sidebar_selection.clone();
         s.sidebar_view = sidebar_view.clone();

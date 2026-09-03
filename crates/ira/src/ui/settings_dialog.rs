@@ -37,6 +37,7 @@ struct SavedSettingsWidgets {
     sgdb_entry: adw::PasswordEntryRow,
     notif_row: adw::SwitchRow,
     bg_row: adw::SwitchRow,
+    square_row: adw::SwitchRow,
     hidden_row: adw::SwitchRow,
     saves_row: adw::SwitchRow,
     auto_reload_widgets: AutoReloadWidgets,
@@ -199,6 +200,7 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         sgdb_entry: pages.sgdb_entry,
         notif_row: pages.notif_row,
         bg_row: pages.bg_row,
+        square_row: pages.square_row,
         hidden_row: pages.hidden_row,
         saves_row: pages.saves_row,
         auto_reload_widgets: pages.auto_reload_widgets,
@@ -326,6 +328,7 @@ fn apply_general_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
     cfg.notifications_enabled = widgets.notif_row.is_active();
     cfg.close_to_background = widgets.bg_row.is_active();
     cfg.show_hidden_games = widgets.hidden_row.is_active();
+    cfg.big_picture_square_capsules = widgets.square_row.is_active();
     cfg.centralize_game_saves = widgets.saves_row.is_active();
     cfg.auto_reload_steam = widgets.auto_reload_widgets.steam.is_active();
     cfg.auto_reload_roms = widgets.auto_reload_widgets.roms.is_active();

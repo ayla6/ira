@@ -255,7 +255,12 @@ fn ensure_default_icon(
     if let Some(bytes) = super::image_manager_helpers::native_icon_bytes(
         game, cfg, &azahar_exe, &cemu_exe, &switch_exe,
     ) {
-        if super::image_manager_helpers::write_native_icon_to_disk(save_dir, game, &bytes) {
+        if super::image_manager_helpers::write_native_icon_to_disk(
+            save_dir,
+            game,
+            &bytes,
+            ira_models::AssetType::Icon,
+        ) {
             if let Some(path) =
                 ira_parser::find_image_file(&ira_parser::game_data_dir(save_dir, game), "icon")
             {

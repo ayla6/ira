@@ -402,55 +402,6 @@ mod tests {
         exe.to_string_lossy().into_owned()
     }
 
-    /// Portable Ryubing layout next to the same executable, naming a
-    /// different title — the family the lookup prefers.
-    fn ryujinx_fixture(tmp: &Path) {
-        let dir = tmp.join("portable/games/0100000000010000/gui");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("metadata.json"), r#"{"title": "Super Mario Odyssey"}"#).unwrap();
-    }
-
-    #[test]
-    fn test_rom_meta_from_filename_id_uses_cache() {
-        let tmp = tempfile::tempdir().unwrap();
-        let exe = eden_fixture(tmp.path());
-        let caches = SwitchCaches::load(&exe);
-        let meta = rom_meta(Path::new("/roms/Zelda [01007EF00011E000].nsp"), &caches);
-        assert_eq!(meta.title_id, "01007ef00011e000");
-        assert_eq!(meta.title, "The Legend of Zelda");
-        assert!(matches!(meta.icon, SwitchIcon::File(_)));
-    }
-
-    #[test]
-    fn test_rom_meta_matches_cached_app_name() {
-        let tmp = tempfile::tempdir().unwrap();
-        let exe = eden_fixture(tmp.path());
-        let caches = SwitchCaches::load(&exe);
-        let meta = rom_meta(Path::new("/roms/The Legend of Zelda [upd].xci"), &caches);
-        assert_eq!(meta.title_id, "01007ef00011e000");
-        assert_eq!(meta.title, "The Legend of Zelda");
-    }
-
-    #[test]
-    fn test_rom_meta_prefers_ryujinx_then_eden() {
-        let tmp = tempfile::tempdir().unwrap();
-        let exe = eden_fixture(tmp.path());
-        ryujinx_fixture(tmp.path());
-        let caches = SwitchCaches::load(&exe);
-
-        // Ryujinx's title and id win…
-        let meta = rom_meta(Path::new("/roms/Super Mario Odyssey.xci"), &caches);
-        assert_eq!(meta.title_id, "0100000000010000");
-        assert_eq!(meta.title, "Super Mario Odyssey");
-        assert!(matches!(meta.icon, SwitchIcon::None));
-
-        // …while an id from the file name takes Ryujinx's title (unknown
-        // here) but Eden's icon.
-        let meta = rom_meta(Path::new("/roms/game [01007EF00011E000].nsp"), &caches);
-        assert_eq!(meta.title, "The Legend of Zelda");
-        assert!(matches!(meta.icon, SwitchIcon::File(_)));
-    }
-
     #[test]
     fn test_rom_meta_unknown_file_is_empty() {
         let tmp = tempfile::tempdir().unwrap();

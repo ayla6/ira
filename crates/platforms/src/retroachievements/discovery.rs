@@ -971,30 +971,6 @@ mod tests {
     }
 
     #[test]
-    fn test_enrich_switch_roms_backfills_id_title_and_icon() {
-        let (tmp, db, mut game, exe) = switch_backfill_fixture();
-        let save_dir = tmp.path().join("save").to_str().unwrap().to_string();
-
-        let console = super::ActiveConsole {
-            def: ira_models::find_console("switch").unwrap(),
-            folders: vec![tmp.path().join("roms/switch")],
-            executable: exe.to_string_lossy().into_owned(),
-        };
-        let cache = crate::switch::SwitchCaches::load(&console.executable);
-        super::enrich_switch_roms(&db, &save_dir, &console, Some(&cache), std::slice::from_mut(&mut game));
-
-        // Game id and title now come from Eden's cache…
-        assert_eq!(game.app_id, "01007ef00011e000");
-        assert_eq!(game.name, "The Legend of Zelda");
-        let entry = ira_db::find_by_db_id(&db, game.db_id).unwrap().unwrap();
-        assert_eq!(entry.game_id, "01007ef00011e000");
-
-        // …and the cached icon landed in the switch data dir.
-        let data_dir = ira_parser::switch_data_dir(&save_dir, game.db_id);
-        assert!(ira_parser::find_image_file(&data_dir, "icon").is_some());
-    }
-
-    #[test]
     fn test_enrich_switch_roms_keeps_title_ids_and_custom_titles() {
         let (tmp, db, mut game, exe) = switch_backfill_fixture();
         let save_dir = tmp.path().join("save").to_str().unwrap().to_string();

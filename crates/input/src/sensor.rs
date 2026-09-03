@@ -179,13 +179,21 @@ pub struct Sdl3SensorBackend {
     /// fallback path has no paired accelerometer, leaving player-space gyro
     /// to degrade to controller-space rates.
     accel_on_gamepad: bool,
-    /// Timestamp of the last gyro sample we handed out. Polling faster
-    /// than the controller's report rate returns the same sample; handing
-    /// it out again would make consumers double-integrate the same
-    /// rotation (cemuhook clients feel it as randomly oversensitive
-    /// turning), so repeats surface as None.
+    /// Timestamp of the last gyro sample we handed out, when SDL provides
+    /// sensor timestamps at all.
     last_gyro_time_ns: u64,
+    /// Last accepted reading (gyro, accel) and the caller clock at which it
+    /// was accepted, for duplicate detection on SDL builds without sensor
+    /// timestamps.
+    last_accepted: Option<([f32; 3], Option<[f32; 3]>)>,
+    last_accepted_fallback_us: u64,
 }
+
+/// How long a value-identical reading stays stale when SDL provides no
+/// sensor clock: one 25 ms window spans several reports of any IMU the
+/// daemon supports, so a genuinely new-but-identical sample (a steady
+/// spin) still gets through at a reduced, integration-correct rate.
+const DUPLICATE_SAMPLE_HOLD_US: u64 = 25_000;
 
 fn select_gyro_id<F>(gyro_ids: &[i32], matches: F) -> Option<i32>
 where
@@ -223,6 +231,8 @@ impl Sdl3SensorBackend {
                     source: SensorSource::Gamepad(gamepad),
                     accel_on_gamepad,
                     last_gyro_time_ns: 0,
+                    last_accepted: None,
+                    last_accepted_fallback_us: 0,
                 }));
             }
             unsafe { (api.close_gamepad)(gamepad) };
@@ -242,6 +252,8 @@ impl Sdl3SensorBackend {
                     source: SensorSource::Global(sensor),
                     accel_on_gamepad: false,
                     last_gyro_time_ns: 0,
+                    last_accepted: None,
+                    last_accepted_fallback_us: 0,
                 }));
             }
         }
@@ -307,11 +319,25 @@ impl Sdl3SensorBackend {
         if data.iter().any(|value| !value.is_finite()) {
             return Err("SDL3 returned a non-finite gyro sample".to_string());
         }
-        if sensor_time_ns != 0 && sensor_time_ns == self.last_gyro_time_ns {
-            return Ok(None); // same sample as last poll, not fresh input
+        let accel = self.read_accel().transpose()?;
+        if !sample_is_fresh(
+            sensor_time_ns,
+            self.last_gyro_time_ns,
+            self.last_accepted,
+            self.last_accepted_fallback_us,
+            data,
+            accel,
+            fallback_timestamp_us,
+        ) {
+            // SDL handed back its cached reading again: not fresh input.
+            // Consumers integrate per sample, so repeats would double-count
+            // rotation and derivatives would divide stale low-pass steps by
+            // the poll interval.
+            return Ok(None);
         }
         self.last_gyro_time_ns = sensor_time_ns;
-        let accel = self.read_accel().transpose()?;
+        self.last_accepted = Some((data, accel));
+        self.last_accepted_fallback_us = fallback_timestamp_us;
         Ok(Some(SensorSample {
             gyro: data,
             accel,
@@ -365,6 +391,54 @@ fn sensor_timestamp_us(sensor_time_ns: u64, fallback_us: u64) -> u64 {
         0 => fallback_us,
         nanos => (nanos / 1_000).max(1),
     }
+}
+
+/// Whether a polled reading counts as fresh input. SDL hands out its latest
+/// cached sensor value on every poll, and builds without the `*WithTime`
+/// entry points (including libSDL3.so.0 as commonly shipped) expose no
+/// sensor timestamps to prove a new report arrived — polling faster than
+/// the controller reports then delivers the same sample over and over.
+/// With timestamps freshness is a clock comparison; without, a reading is
+/// fresh only when its values changed or enough wall time passed for a new
+/// report to have arrived.
+fn sample_is_fresh(
+    sensor_time_ns: u64,
+    last_sensor_time_ns: u64,
+    last_accepted: Option<([f32; 3], Option<[f32; 3]>)>,
+    last_accepted_fallback_us: u64,
+    gyro: [f32; 3],
+    accel: Option<[f32; 3]>,
+    fallback_us: u64,
+) -> bool {
+    if sensor_time_ns != 0 {
+        return sensor_time_ns != last_sensor_time_ns;
+    }
+    let Some((last_gyro, last_accel)) = last_accepted else {
+        return true;
+    };
+    readings_differ(gyro, accel, last_gyro, last_accel)
+        || fallback_us.saturating_sub(last_accepted_fallback_us) >= DUPLICATE_SAMPLE_HOLD_US
+}
+
+fn readings_differ(
+    gyro: [f32; 3],
+    accel: Option<[f32; 3]>,
+    last_gyro: [f32; 3],
+    last_accel: Option<[f32; 3]>,
+) -> bool {
+    let gyro_differs = gyro
+        .iter()
+        .zip(last_gyro)
+        .any(|(value, last)| (value - last).abs() > f32::EPSILON);
+    let accel_differs = match (accel, last_accel) {
+        (Some(accel), Some(last)) => accel
+            .iter()
+            .zip(last)
+            .any(|(value, last)| (value - last).abs() > f32::EPSILON),
+        (None, None) => false,
+        _ => true,
+    };
+    gyro_differs || accel_differs
 }
 
 pub fn discover_sdl_gamepads() -> Result<Vec<SdlGamepadInfo>, String> {
@@ -497,7 +571,8 @@ fn c_string(pointer: *const c_char) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        names_match, select_gyro_id, sensor_timestamp_us, ControllerCalibration, SensorSample,
+        names_match, sample_is_fresh, select_gyro_id, sensor_timestamp_us, ControllerCalibration,
+        SensorSample, DUPLICATE_SAMPLE_HOLD_US,
     };
 
     fn sample(gyro: [f32; 3], timestamp_us: u64) -> SensorSample {
@@ -550,5 +625,101 @@ mod tests {
     fn test_sensor_timestamp_converts_nanoseconds_and_falls_back() {
         assert_eq!(sensor_timestamp_us(1_500_000, 7), 1_500);
         assert_eq!(sensor_timestamp_us(0, 7), 7);
+    }
+
+    #[test]
+    fn test_sample_is_fresh_first_reading_without_timestamp() {
+        assert!(sample_is_fresh(0, 0, None, 0, [0.0; 3], None, 1_000));
+    }
+
+    #[test]
+    fn test_sample_is_fresh_identical_values_within_hold_are_stale() {
+        // The daemon hub polls at 4ms; SDL (no WithTime API) returns the
+        // same cached reading each poll. Those repeats must not surface as
+        // fresh samples.
+        let accepted = ([0.01, 0.02, 0.03], Some([0.0, 0.1, 0.98]));
+        for elapsed in [4_000u64, 8_000, 20_000] {
+            assert!(
+                !sample_is_fresh(
+                    0,
+                    0,
+                    Some(accepted),
+                    1_000_000,
+                    [0.01, 0.02, 0.03],
+                    Some([0.0, 0.1, 0.98]),
+                    1_000_000 + elapsed,
+                ),
+                "identical sample at {elapsed}us must be stale"
+            );
+        }
+        // Once a full hold window has passed, a still-identical reading is
+        // accepted again: a steady spin reports constant values that are
+        // genuinely new reports.
+        assert!(sample_is_fresh(
+            0,
+            0,
+            Some(accepted),
+            1_000_000,
+            [0.01, 0.02, 0.03],
+            Some([0.0, 0.1, 0.98]),
+            1_000_000 + DUPLICATE_SAMPLE_HOLD_US,
+        ));
+    }
+
+    #[test]
+    fn test_sample_is_fresh_changed_values_are_fresh() {
+        let accepted = ([0.01, 0.02, 0.03], Some([0.0, 0.1, 0.98]));
+        assert!(sample_is_fresh(
+            0,
+            0,
+            Some(accepted),
+            1_000_000,
+            [0.02, 0.02, 0.03],
+            Some([0.0, 0.1, 0.98]),
+            1_000_004,
+        ));
+        // Accelerometer noise alone also proves a new report arrived.
+        assert!(sample_is_fresh(
+            0,
+            0,
+            Some(accepted),
+            1_000_000,
+            [0.01, 0.02, 0.03],
+            Some([0.0, 0.1, 0.97]),
+            1_000_004,
+        ));
+        // The accelerometer appearing or disappearing counts as a change.
+        assert!(sample_is_fresh(
+            0,
+            0,
+            Some(accepted),
+            1_000_000,
+            [0.01, 0.02, 0.03],
+            None,
+            1_000_004,
+        ));
+    }
+
+    #[test]
+    fn test_sample_is_fresh_with_timestamps_compares_clocks() {
+        let accepted = ([0.01, 0.02, 0.03], None);
+        assert!(!sample_is_fresh(
+            500,
+            500,
+            Some(accepted),
+            0,
+            [0.01, 0.02, 0.03],
+            None,
+            1_000_004,
+        ));
+        assert!(sample_is_fresh(
+            900,
+            500,
+            Some(accepted),
+            0,
+            [0.01, 0.02, 0.03],
+            None,
+            1_000_004,
+        ));
     }
 }

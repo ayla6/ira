@@ -4,6 +4,7 @@
 
 pub mod args;
 mod client_mode;
+pub(crate) mod hub;
 pub mod server;
 pub mod session;
 

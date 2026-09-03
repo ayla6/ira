@@ -26,6 +26,9 @@ pub fn socket_path() -> PathBuf {
 pub struct DaemonClient {
     stream: UnixStream,
     reader: BufReader<UnixStream>,
+    /// The session this client launched, so `wait_session` can ignore
+    /// other sessions' events on a shared daemon.
+    session: Option<u64>,
 }
 
 impl DaemonClient {
@@ -33,7 +36,11 @@ impl DaemonClient {
         let stream =
             UnixStream::connect(path).map_err(|error| format!("connect {}: {error}", path.display()))?;
         let reader = BufReader::new(stream.try_clone().map_err(|error| error.to_string())?);
-        Ok(Self { stream, reader })
+        Ok(Self {
+            stream,
+            reader,
+            session: None,
+        })
     }
 
     /// Connects to the daemon, starting one first when the socket is dead.
@@ -113,9 +120,12 @@ impl DaemonClient {
 
     /// Hands a game to the daemon. `Err` means the daemon refused (busy,
     /// stale) and the caller should fall back to the wrapper launch.
-    pub fn begin_launch(&mut self, request: LaunchRequest) -> Result<(), String> {
+    pub fn begin_launch(&mut self, request: LaunchRequest) -> Result<u64, String> {
         match self.request(Request::Launch(request))? {
-            Response::Launched => Ok(()),
+            Response::Launched { session } => {
+                self.session = Some(session);
+                Ok(session)
+            }
             Response::Error(error) => Err(error),
             _ => Err("unexpected response to launch".to_string()),
         }
@@ -137,12 +147,35 @@ impl DaemonClient {
     pub fn wait_session(&mut self, mut on_event: impl FnMut(Event)) -> Result<i32, String> {
         loop {
             match self.read()? {
-                Wire::Event(Event::SessionEnded { code }) => return Ok(code),
-                Wire::Event(event) => on_event(event),
+                Wire::Event(event) => {
+                    if Self::event_is_ours(self.session, &event) {
+                        match event {
+                            Event::SessionEnded { code, .. } => return Ok(code),
+                            event => on_event(event),
+                        }
+                    }
+                }
                 Wire::Response(Response::Error(error)) => return Err(error),
                 Wire::Response(_) => {}
                 Wire::Request(_) => {}
             }
+        }
+    }
+
+    /// Session-scoped events only count when they belong to this client's
+    /// session; presence events are daemon-wide and always count.
+    fn event_is_ours(session: Option<u64>, event: &Event) -> bool {
+        let owner = match event {
+            Event::SessionStarted { session, .. }
+            | Event::SessionEnded { session, .. }
+            | Event::Output { session, .. }
+            | Event::ProfileReloaded { session, .. } => Some(*session),
+            Event::Controller { .. } => None,
+        };
+        match (session, owner) {
+            (Some(mine), Some(owner)) => mine == owner,
+            (Some(_), None) => true,
+            (None, _) => true,
         }
     }
 }

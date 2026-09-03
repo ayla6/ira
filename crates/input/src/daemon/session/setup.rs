@@ -1,26 +1,27 @@
 use std::io::BufRead;
 
-use crate::{
-    MappingEngine, PhysicalGamepad, ReportRateEstimator, VirtualGamepad, VirtualKeyboard,
-    VirtualMouse,
-};
+use std::sync::mpsc::Receiver;
+
+use crate::{MappingEngine, ReportRateEstimator, VirtualGamepad, VirtualKeyboard, VirtualMouse};
 
 use super::devices::{
-    apply_controller_deadzone, apply_controller_layout, is_real_profile, load_profile_or_default,
-    make_gyro_processor, open_initial_gamepad, open_rumble, open_sensor, resolved_layout_for,
+    apply_controller_deadzone, is_real_profile, load_profile_or_default, make_gyro_processor,
 };
 use super::loop_io::LoopSchedule;
 use super::sensor::{tick_needed_for, SensorPipeline};
+use super::super::hub::{HubCommand, HubHandle, PadEvent, Subscribe};
 use super::super::{
-    ignored_device_for_target, SessionEvent, inject_flatpak_target_env, sdl_mapping_for_backend,
-    Arguments, ProfileMonitor, SteamWatcher, TraceState,
+    ignored_device_for_target, inject_flatpak_target_env, sdl_mapping_for_backend, Arguments,
+    ProfileMonitor, SessionEvent, SteamWatcher, TraceState,
 };
 
 /// Everything the mapping loop needs, opened once before the event loop
 /// starts. Field names mirror the locals the loop body has always used.
 pub(crate) struct SessionSetup {
     pub(crate) trace: TraceState,
-    pub(crate) gamepad: Option<PhysicalGamepad>,
+    pub(crate) hub: HubHandle,
+    /// Pad events routed to this session by the hub.
+    pub(crate) pad_events: Receiver<PadEvent>,
     pub(crate) mapper: MappingEngine,
     pub(crate) profile_monitor: Option<ProfileMonitor>,
     pub(crate) keyboard: Option<VirtualKeyboard>,
@@ -28,7 +29,6 @@ pub(crate) struct SessionSetup {
     pub(crate) virtual_gamepad: VirtualGamepad,
     pub(crate) pad_state: crate::PadState,
     pub(crate) pipeline: SensorPipeline,
-    pub(crate) rumble_output: Option<crate::PhysicalRumble>,
     pub(crate) motion_enabled: bool,
     pub(crate) pad_vendor: u16,
     pub(crate) pad_product: u16,
@@ -53,7 +53,7 @@ pub(crate) struct SessionSetup {
 fn spawn_session_child(
     arguments: &Arguments,
     mapper: &MappingEngine,
-    gamepad: &Option<PhysicalGamepad>,
+    pad_identity: Option<(u16, u16)>,
 ) -> Option<std::process::Child> {
     if arguments.command.is_empty() {
         return None;
@@ -63,8 +63,8 @@ fn spawn_session_child(
         &arguments.command[0],
         &mut target_args,
         mapper.profile().backend,
-        gamepad.as_ref().map(|gamepad| gamepad.info().vendor),
-        gamepad.as_ref().map(|gamepad| gamepad.info().product),
+        pad_identity.map(|(vendor, _)| vendor),
+        pad_identity.map(|(_, product)| product),
     );
     let mut command = std::process::Command::new(&arguments.command[0]);
     command.args(target_args);
@@ -72,10 +72,10 @@ fn spawn_session_child(
     if let Some(mapping) = sdl_mapping_for_backend(mapper.profile().backend) {
         command.env("SDL_GAMECONTROLLERCONFIG", mapping);
     }
-    if let Some(gamepad) = gamepad.as_ref() {
+    if let Some((vendor, product)) = pad_identity {
         if let Some(ignored_device) = ignored_device_for_target(
-            gamepad.info().vendor,
-            gamepad.info().product,
+            vendor,
+            product,
             mapper.profile().backend,
         ) {
             command.env("SDL_GAMECONTROLLER_IGNORE_DEVICES", ignored_device);
@@ -142,7 +142,6 @@ fn pump_output<R: std::io::Read + Send + 'static>(
 pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, String> {
 
     let trace = TraceState::new(arguments.trace);
-    let mut gamepad = open_initial_gamepad(arguments.device.as_deref());
     // A broken profile or unavailable uinput must never keep the game from
     // starting: degrade to the builtin layout, or to shadow-only devices,
     // and say so on stderr.
@@ -165,42 +164,39 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         .map(|set| set.inputs.len())
         .sum::<usize>();
     eprintln!("ira-input: loaded {mapped_inputs} mapped inputs from {profile_name}");
-    let sensor = gamepad
-        .as_ref()
-        .and_then(|gamepad| open_sensor(gamepad.info()));
-    // Switch-protocol takeover: when neither the kernel's IMU node nor SDL
-    // sources motion, speak the pad's own protocol over hidraw — what SDL
-    // does for games, and the only gyro path for Switch-mode pads
-    // hid-nintendo has not claimed. It replaces evdev as the input source
-    // too, because switching the report mode invalidates what generic HID
-    // parses from the descriptor.
-    let mut switch_hidraw = sensor
-        .is_none()
-        .then(|| {
-            gamepad
-                .as_ref()
-                .and_then(|gamepad| crate::SwitchHidrawPad::open(gamepad.info()))
-        })
-        .flatten();    if let (Some(driver), Some(gamepad)) = (switch_hidraw.as_mut(), gamepad.as_ref()) {
-        driver.set_nintendo_layout(resolved_layout_for(
-            gamepad.info(),
-            arguments.calibration.as_deref(),
-        ));
-    }
-    // When an experimental uhid controller owns the session (DS4 or the
-    // hid-nintendo Switch Pro), the uinput pad must not exist too or games
-    // see two controllers and often bind the motionless one. Outputs still
-    // reach the pad shadow that the hidraw reports and the cemuhook stream
-    // read from.
-    let motion_available = sensor.is_some() || switch_hidraw.is_some();
+    // Subscribe to the pad hub — the daemon's shared one, or a private one
+    // for a standalone (`--no-daemon`) session — and learn the pad's state
+    // synchronously so the output stack matches the controller kind.
+    let hub = match &arguments.hub {
+        Some(hub) => hub.clone(),
+        None => {
+            let (presence, _presence_rx) = std::sync::mpsc::channel();
+            super::super::hub::spawn(presence)
+        }
+    };
+    let (pad_events_tx, pad_events_rx) = std::sync::mpsc::channel();
+    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+    hub.send(HubCommand::Subscribe(Subscribe {
+        id: arguments.session_id,
+        events: pad_events_tx.clone(),
+        live_always: !arguments.pause_unfocused,
+        calibration: arguments.calibration.clone(),
+        device: arguments.device.clone(),
+        reply: reply_tx,
+    }));
+    let snapshot = reply_rx
+        .recv()
+        .map_err(|_| "pad hub is gone".to_string())?;
+    let motion_available = snapshot.motion;
     let stack = super::output_stack::build_virtual_stack(
         motion_available,
         arguments.motion_port != Some(0),
         mapper.profile(),
     );
-    let (pad_vendor, pad_product) = gamepad
+    let (pad_vendor, pad_product) = snapshot
+        .pad
         .as_ref()
-        .map(|gamepad| (gamepad.info().vendor, gamepad.info().product))
+        .map(|(_, _, vendor, product)| (*vendor, *product))
         .unwrap_or((0, 0));
     let gyro_processor = make_gyro_processor(
         mapper.profile(),
@@ -214,22 +210,9 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         pad_vendor,
         pad_product,
     );
-    apply_controller_layout(&mut gamepad, arguments.calibration.as_deref());
-    // Game-side rumble replays on the physical controller unless the profile
-    // opts out; a controller without force feedback just stays silent. The
-    // Switch-protocol driver replays rumble itself, and its report mode
-    // makes the vendor DInput packet wrong for the pad, so it stays the
-    // only rumble path while active.
-    let rumble_output = if switch_hidraw.is_some() {
-        None
-    } else {
-        open_rumble(gamepad.as_ref(), mapper.profile().rumble)
-    };
     let last_sensor_us: Option<u64> = None;
-    let ever_had_sensor = motion_available;
     let pipeline = SensorPipeline {
-        sensor,
-        switch_hidraw,
+        motion_available,
         gyro_processor,
         last_sensor_us,
         motion: stack.motion,
@@ -238,21 +221,18 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         dualsense_hid: stack.dualsense_hid,
         imu_hid: stack.imu_hid,
         switch_pro_hid: stack.switch_pro_hid,
-        ever_had_sensor,
+        ever_had_sensor: motion_available,
         last_dsu_ts: 0,
     };
-    // Ticks drive continuous outputs (mouse motion, gyro axes) and must run
-    // even when no sensor exists, as long as something consumes them.
     let tick_needed = tick_needed_for(&pipeline, &mapper);
     let report_rate = ReportRateEstimator::default();
-    if let Some(gamepad) = gamepad.as_mut() {
-        if let Err(error) = gamepad.grab() {
-            eprintln!("ira-input: {error}; continuing without exclusive grab");
-        }
-    }
     let steam_watch = arguments.steam_app_id.as_deref().map(SteamWatcher::spawn);
     let launcher_exit_code = None;
-    let child = spawn_session_child(arguments, &mapper, &gamepad);
+    let child = spawn_session_child(
+        arguments,
+        &mapper,
+        snapshot.pad.as_ref().map(|(_, _, vendor, product)| (*vendor, *product)),
+    );
     let pad_state = crate::PadState::default();
     let schedule = LoopSchedule::new();
     // Pause injection while the game window is unfocused (alt-tab). Without
@@ -268,6 +248,14 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         eprintln!(
             "ira-input: no X server available for focus tracking; input stays active while unfocused"
         );
+    }
+    if focus.is_none() {
+        // No focus watcher means no focus signal will ever come: claim the
+        // hub routing outright.
+        hub.send(HubCommand::Focus {
+            id: arguments.session_id,
+            focused: true,
+        });
     }
     let paused_for_focus = false;
     // Cursor-driven set switching (Steam Input's "action set when the mouse
@@ -290,25 +278,20 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         None
     };
     let cursor_visible: Option<bool> = None;
-    if let Some(gamepad) = gamepad.as_ref() {
-        eprintln!(
-            "ira-input: mapping {} through {}",
-            gamepad.info().name,
-            gamepad.info().path.display()
-        );
-        eprintln!(
-            "ira-input: physical SDL device excluded ({:04x}:{:04x})",
-            gamepad.info().vendor,
-            gamepad.info().product
-        );
-    } else {
-        eprintln!("ira-input: no controller found; waiting for one to be plugged in");
+
+
+    // Profile saves wake the session channel the moment they land, so a
+    // reload applies instantly even while the loop is parked on the hub.
+    if let Some(fd) = profile_monitor.as_ref().and_then(|monitor| monitor.fd()) {
+        let wake_tx = pad_events_tx.clone();
+        let _ = std::thread::Builder::new()
+            .name("ira-profile-wake".to_string())
+            .spawn(move || profile_wake_pump(fd, wake_tx));
     }
-
-
     Ok(SessionSetup {
         trace,
-        gamepad,
+        hub,
+        pad_events: pad_events_rx,
         mapper,
         profile_monitor,
         keyboard: stack.keyboard,
@@ -316,7 +299,6 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         virtual_gamepad: stack.gamepad,
         pad_state,
         pipeline,
-        rumble_output,
         motion_enabled: stack.motion_enabled,
         pad_vendor,
         pad_product,
@@ -331,4 +313,24 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         cursor_watcher,
         cursor_visible,
     })
+}
+
+/// Parks on the profile watcher's inotify descriptor and pushes a wake into
+/// the session's pad channel for every change. When the session ends, the
+/// watcher fd closes and the failed send retires the pump.
+fn profile_wake_pump(fd: libc::c_int, events: std::sync::mpsc::Sender<PadEvent>) {
+    loop {
+        let mut descriptor = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ready = unsafe { libc::poll(&mut descriptor, 1, 250) };
+        if ready > 0 && events.send(PadEvent::ProfileChanged).is_err() {
+            return;
+        }
+        if ready < 0 {
+            return;
+        }
+    }
 }

@@ -416,7 +416,7 @@ pub fn monitor_session(mut client: DaemonClient, ctx: MonitorContext) {
             child_pid = Some(pid);
             ctx.running_games.lock().unwrap().insert(ctx.game_id, pid);
         }
-        Event::Output { line } => log_buf.lock().unwrap().push(line),
+        Event::Output { line, .. } => log_buf.lock().unwrap().push(line),
         Event::Controller {
             connected,
             name,
@@ -429,7 +429,7 @@ pub fn monitor_session(mut client: DaemonClient, ctx: MonitorContext) {
             };
             log_buf.lock().unwrap().push(message);
         }
-        Event::ProfileReloaded { path } => {
+        Event::ProfileReloaded { path, .. } => {
             log_buf
                 .lock()
                 .unwrap()

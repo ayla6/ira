@@ -39,8 +39,9 @@ pub struct LaunchRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
-    /// The session was accepted; lifecycle arrives as events.
-    Launched,
+    /// The session was accepted; lifecycle arrives as events, tagged with
+    /// the session id that identifies them to their owner.
+    Launched { session: u64 },
     Status(DaemonStatus),
     Bye,
     Error(String),
@@ -57,17 +58,22 @@ pub struct DaemonStatus {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     /// The session's child was spawned; `child_pid` is the game process.
-    SessionStarted { child_pid: i32, command: Vec<String> },
-    SessionEnded { code: i32 },
+    SessionStarted {
+        session: u64,
+        child_pid: i32,
+        command: Vec<String>,
+    },
+    SessionEnded { session: u64, code: i32 },
     /// One line of the game's stdout or stderr, forwarded for the in-app
     /// game log.
-    Output { line: String },
+    Output { session: u64, line: String },
+    /// Physical controller presence, daemon-wide (not session-scoped).
     Controller {
         connected: bool,
         name: String,
         path: String,
     },
-    ProfileReloaded { path: String },
+    ProfileReloaded { session: u64, path: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,11 +119,13 @@ mod tests {
     fn test_wire_event_roundtrip() {
         for event in [
             Event::SessionStarted {
+                session: 1,
                 child_pid: 42,
                 command: vec!["game".into()],
             },
-            Event::SessionEnded { code: 3 },
+            Event::SessionEnded { session: 1, code: 3 },
             Event::Output {
+                session: 1,
                 line: "game: started".into(),
             },
             Event::Controller {
@@ -126,6 +134,7 @@ mod tests {
                 path: "/dev/input/event42".into(),
             },
             Event::ProfileReloaded {
+                session: 1,
                 path: "/profiles/x.json".into(),
             },
         ] {

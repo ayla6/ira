@@ -1,34 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use super::sensor::SensorPipeline;
-
 use crate::{
     discover_gamepads, GyroProcessor, GyroProcessingOptions, InputProfile, MappingEngine,
     PhysicalGamepad, Sdl3SensorBackend, VirtualKeyboard, VirtualMouse,
 };
-
-/// Open the initially detected controller. Returns `None` (no error) when no
-/// controller is plugged in yet — the session keeps running and picks one up
-/// the moment it appears.
-pub(crate) fn open_initial_gamepad(device: Option<&Path>) -> Option<PhysicalGamepad> {
-    if let Some(path) = device {
-        return match PhysicalGamepad::open(path, false) {
-            Ok(gamepad) => Some(gamepad),
-            Err(error) => {
-                eprintln!("ira-input: {error}");
-                None
-            }
-        };
-    }
-    let info = discover_gamepads().into_iter().next()?;
-    match PhysicalGamepad::open(&info.path, false) {
-        Ok(gamepad) => Some(gamepad),
-        Err(error) => {
-            eprintln!("ira-input: failed to open {}: {error}", info.path.display());
-            None
-        }
-    }
-}
 
 /// Reconnect the previously-used controller, or detect a brand-new one when
 /// none was present at launch. Returns true when a controller is now open.
@@ -200,20 +175,6 @@ pub(crate) fn apply_controller_deadzone(
         })
         .unwrap_or((0.0, 0.0));
     mapper.set_controller_deadzones(left, right);
-}
-
-/// Routes one rumble command to whichever path owns the physical pad: the
-/// Switch-protocol driver when active, else the evdev/vendor backend.
-pub(crate) fn play_physical_rumble(
-    pipeline: &mut SensorPipeline,
-    rumble_output: &mut Option<crate::PhysicalRumble>,
-    command: crate::RumbleCommand,
-) {
-    if let Some(switch) = pipeline.switch_hidraw.as_mut() {
-        switch.play_rumble(command);
-    } else if let Some(rumble) = rumble_output.as_mut() {
-        rumble.play(command);
-    }
 }
 
 /// Applies the controller-level Nintendo button layout from the

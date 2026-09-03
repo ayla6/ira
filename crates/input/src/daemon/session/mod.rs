@@ -1,36 +1,45 @@
 mod devices;
 mod inputs;
 mod output_stack;
+
+// The hub owns the physical side now; these device helpers are its tools.
+pub(crate) use devices::{
+    apply_controller_layout, open_rumble, open_sensor, reconnect_gamepad, resolved_layout_for,
+    GyroSource,
+};
+pub(crate) use sensor::now_us;
 mod loop_io;
 mod outputs;
 mod sensor;
 mod setup;
 
 use std::sync::atomic::Ordering;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use super::hub::{HubCommand, HubHandle, PadEvent};
 use super::{Arguments, SessionEvent, SteamWatcher};
 use super::signals::{install_signal_handlers, STOP_REQUESTED};
-use devices::{
-    apply_controller_deadzone, apply_controller_layout, make_gyro_processor,
-    open_rumble, open_sensor, play_physical_rumble, reconnect_gamepad, resolved_layout_for,
-};
-use inputs::{poll_cursor_switch, process_physical_inputs};
+use devices::{apply_controller_deadzone, make_gyro_processor};
+use inputs::{poll_cursor_switch, process_pad_events};
 use loop_io::{
-    floor_poll_timeout, wait_for_inputs, FOCUS_POLL_INTERVAL, LoopActivity,
-    PROCESS_POLL_INTERVAL, PROFILE_POLL_INTERVAL, RECONNECT_INTERVAL,
-    SWITCH_DRIVER_SILENCE_LIMIT,
+    floor_poll_timeout, FOCUS_POLL_INTERVAL, LoopActivity, PROCESS_POLL_INTERVAL,
+    PROFILE_POLL_INTERVAL,
 };
 use outputs::{emit_outputs, reload_profile, stop_child, LiveOutputs, OutputTargets};
-use sensor::{open_motion_node, process_tick, service_twin_events, tick_needed_for};
+use sensor::{process_tick, service_twin_events, tick_needed_for};
 use setup::{setup_session, SessionSetup};
+
+/// Park ceiling when no scheduled work needs a shorter deadline: pad events
+/// wake the channel instantly, so a long park only delays idle bookkeeping.
+const IDLE_PARK: Duration = Duration::from_secs(1);
 
 pub fn run_session(arguments: Arguments) -> Result<i32, String> {
     STOP_REQUESTED.store(false, Ordering::Relaxed);
     install_signal_handlers();
     let SessionSetup {
         mut trace,
-        mut gamepad,
+        hub,
+        pad_events,
         mut mapper,
         mut profile_monitor,
         mut keyboard,
@@ -38,10 +47,9 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
         mut virtual_gamepad,
         mut pad_state,
         mut pipeline,
-        mut rumble_output,
         motion_enabled,
-        pad_vendor,
-        pad_product,
+        mut pad_vendor,
+        mut pad_product,
         mut tick_needed,
         mut report_rate,
         mut steam_watch,
@@ -53,14 +61,19 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
         cursor_watcher,
         mut cursor_visible,
     } = setup_session(&arguments)?;
-    // Parked in the session loop's poll set so profile saves apply instantly.
+    // Profile saves wake the loop through the pad channel; the fd gates the
+    // fallback cadence when inotify could not be created.
     let profile_wake_fd: Option<libc::c_int> =
         profile_monitor.as_ref().and_then(|monitor| monitor.fd());
+    // The session unsubscribes from the pad hub on every exit path.
+    let _unsubscribe = UnsubscribeOnDrop(&hub, arguments.session_id);
+    // The hub routes pad traffic to whoever owns focus; until it says
+    // otherwise this session is frozen.
+    let mut hub_live = false;
+    let mut latest_sample = None;
+    let mut pending: Vec<PadEvent> = Vec::new();
 
     loop {
-        let was_connected = gamepad
-            .as_ref()
-            .is_some_and(|gamepad| gamepad.is_connected());
         let tick_interval = report_rate.interval();
         let run_tick = tick_needed && schedule.sensor.elapsed() >= tick_interval;
         if run_tick {
@@ -74,27 +87,23 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
             if !focused && !paused_for_focus {
                 paused_for_focus = true;
                 eprintln!("ira-input: game window unfocused; pausing input");
-                if let Err(error) = emit_outputs(
-                    mapper.reset(),
-                    OutputTargets {
-                        gamepad: &mut virtual_gamepad,
-                        keyboard: keyboard.as_mut(),
-                        mouse: mouse.as_mut(),
-                        pad: &mut pad_state,
-                    },
-                    &mut trace,
+                hub.send(HubCommand::Focus {
+                    id: arguments.session_id,
+                    focused: false,
+                });
+                if let Err(error) = release_outputs(
+                    &mut mapper, &mut virtual_gamepad, &mut keyboard, &mut mouse,
+                    &mut pad_state, &mut trace,
                 ) {
                     eprintln!("ira-input: failed to release outputs on pause: {error}");
-                }
-                if let Some(rumble) = rumble_output.as_mut() {
-                    rumble.stop();
-                }
-                if let Some(switch) = pipeline.switch_hidraw.as_mut() {
-                    switch.stop_rumble();
                 }
             } else if focused && paused_for_focus {
                 paused_for_focus = false;
                 eprintln!("ira-input: game window focused; resuming input");
+                hub.send(HubCommand::Focus {
+                    id: arguments.session_id,
+                    focused: true,
+                });
             }
         }
         if let Some(watcher) = cursor_watcher.as_ref() {
@@ -123,49 +132,81 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
         // reader opens a pad, and queued output events otherwise stall the
         // rumble replay path.
         service_twin_events(&mut pipeline);
-        // Fail-safe for the Switch hidraw takeover: a pad that streamed
-        // once and then went silent would otherwise starve the session of
-        // input entirely, since the takeover replaced the evdev path.
-        // Drop the driver, fall back to evdev, and let rumble take the
-        // ordinary path again.
-        if pipeline
-            .switch_hidraw
-            .as_ref()
-            .is_some_and(|driver| driver.silent_for() >= SWITCH_DRIVER_SILENCE_LIMIT)
-        {
-            eprintln!(
-                "ira-input: Switch hidraw driver went silent; \
-                 falling back to the evdev input path"
-            );
-            pipeline.switch_hidraw = None;
-            rumble_output = open_rumble(gamepad.as_ref(), mapper.profile().rumble);
+
+        // Consume everything the hub sent: control events act immediately,
+        // input and samples queue for the mapping pass below.
+        loop {
+            match pad_events.try_recv() {
+                Ok(event) => pending.push(event),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            }
         }
-        // Vendor hidraw rumble has no kernel timer: check the deadline every
-        // pass so a game that stops replaying its effect cannot leave the
-        // motors running.
-        if let Some(rumble) = rumble_output.as_mut() {
-            rumble.service();
-        }
-        let result = if paused_for_focus {
-            // The pad keeps streaming while its events are ignored. If those
-            // reports stayed queued, the fd would read POLLIN forever and
-            // poll would return instantly on every pass — the loop would
-            // free-run at full speed doing nothing (one core at 100%). Drain
-            // and discard instead; mapping state stays in sync for the
-            // unpause.
-            if let Some(gamepad) = gamepad.as_mut() {
-                if let Err(error) = gamepad.fetch_events() {
-                    eprintln!("ira-input: failed draining paused controller: {error}");
+        for event in std::mem::take(&mut pending) {
+            match event {
+                PadEvent::Input(_) | PadEvent::Sample(_) => pending.push(event),
+                PadEvent::Motion(motion) => {
+                    pipeline.motion_available = motion;
+                    pipeline.ever_had_sensor |= motion;
+                    tick_needed = tick_needed_for(&pipeline, &mapper);
                 }
+                PadEvent::Connected {
+                    name,
+                    path,
+                    vendor,
+                    product,
+                } => {
+                    pad_vendor = vendor;
+                    pad_product = product;
+                    pipeline.gyro_processor = make_gyro_processor(
+                        mapper.profile(),
+                        vendor,
+                        product,
+                        arguments.calibration.as_deref(),
+                    );
+                    apply_controller_deadzone(
+                        &mut mapper,
+                        arguments.calibration.as_deref(),
+                        vendor,
+                        product,
+                    );
+                    pipeline.last_sensor_us = None;
+                    report_rate.reset();
+                    if let Some(events) = &arguments.events {
+                        let _ = events.send(SessionEvent::Controller {
+                            connected: true,
+                            name,
+                            path,
+                        });
+                    }
+                }
+                PadEvent::ProfileChanged => {}
+                PadEvent::Frozen => {
+                    if hub_live {
+                        hub_live = false;
+                        if let Err(error) = release_outputs(
+                            &mut mapper, &mut virtual_gamepad, &mut keyboard, &mut mouse,
+                            &mut pad_state, &mut trace,
+                        ) {
+                            eprintln!("ira-input: failed to release frozen outputs: {error}");
+                        }
+                    }
+                }
+                PadEvent::Live => hub_live = true,
             }
-            if let Some(switch) = pipeline.switch_hidraw.as_mut() {
-                let _ = switch.take_events();
-            }
+        }
+
+        let paused = paused_for_focus || !hub_live;
+        let result = if paused {
+            // Frozen or unfocused: the hub forwards no inputs, and anything
+            // already queued is stale — drop it along with motion samples.
+            pending.clear();
+            latest_sample = None;
             Ok(())
         } else {
-            process_physical_inputs(
-                &mut gamepad,
-                &mut pipeline,
+            process_pad_events(
+                &mut pending,
+                &mut latest_sample,
                 &mut mapper,
                 &mut report_rate,
                 OutputTargets {
@@ -177,6 +218,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                 &mut trace,
             )
             .and_then(|()| {
+                let reading = latest_sample.take();
                 process_tick(
                     &mut pipeline,
                     &mut mapper,
@@ -188,86 +230,49 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                     },
                     &mut trace,
                     run_tick,
+                    reading,
                 )
             })
         };
         trace.flush();
         // Rumble uploads are drained every pass so the kernel queue never
-        // overflows, even while paused — commands just land nowhere then.
-        for command in virtual_gamepad.poll_rumble() {
-            if !paused_for_focus {
-                play_physical_rumble(&mut pipeline, &mut rumble_output, command);
+        // overflows; while frozen or paused the commands simply go nowhere.
+        if !paused && mapper.profile().rumble {
+            for command in virtual_gamepad.poll_rumble() {
+                hub.send(HubCommand::Rumble {
+                    id: arguments.session_id,
+                    command,
+                });
             }
-        }
-        // Native transports carry rumble inside HID output reports instead
-        // (the uinput pad does not exist then); drain them the same way.
-        let hid_rumble = if let Some(device) = pipeline.switch_pro_hid.as_mut() {
-            device.take_rumble()
-        } else if let Some(device) = pipeline.ds4_hid.as_mut() {
-            device.take_rumble()
-        } else if let Some(device) = pipeline.dualsense_hid.as_mut() {
-            device.take_rumble()
+            // Native transports carry rumble inside HID output reports
+            // instead (the uinput pad does not exist then).
+            let hid_rumble = if let Some(device) = pipeline.switch_pro_hid.as_mut() {
+                device.take_rumble()
+            } else if let Some(device) = pipeline.ds4_hid.as_mut() {
+                device.take_rumble()
+            } else if let Some(device) = pipeline.dualsense_hid.as_mut() {
+                device.take_rumble()
+            } else {
+                Vec::new()
+            };
+            for command in hid_rumble {
+                hub.send(HubCommand::Rumble {
+                    id: arguments.session_id,
+                    command,
+                });
+            }
         } else {
-            Vec::new()
-        };
-        for command in hid_rumble {
-            if !paused_for_focus {
-                play_physical_rumble(&mut pipeline, &mut rumble_output, command);
-            }
+            virtual_gamepad.poll_rumble();
         }
         if let Err(error) = result {
-            let resets = emit_outputs(
-                mapper.reset(),
-                OutputTargets {
-                    gamepad: &mut virtual_gamepad,
-                    keyboard: keyboard.as_mut(),
-                    mouse: mouse.as_mut(),
-                    pad: &mut pad_state,
-                },
-                &mut trace,
-            );
-            if let Err(reset_error) = resets {
+            if let Err(reset_error) = release_outputs(
+                &mut mapper, &mut virtual_gamepad, &mut keyboard, &mut mouse,
+                &mut pad_state, &mut trace,
+            ) {
                 eprintln!("ira-input: failed to emit reset releases: {reset_error}");
             }
             stop_child(&mut child);
             return Err(error);
-        }
-        let connected = gamepad
-            .as_ref()
-            .is_some_and(|gamepad| gamepad.is_connected());
-        if was_connected && !connected {
-            if let Some(events) = &arguments.events {
-                let _ = events.send(SessionEvent::Controller {
-                    connected: false,
-                    name: gamepad
-                        .as_ref()
-                        .map(|gamepad| gamepad.info().name.clone())
-                        .unwrap_or_default(),
-                    path: String::new(),
-                });
-            }
-            pipeline.sensor = None;
-            pipeline.last_sensor_us = None;
-            // A lost sensor must not stop frame servicing: gyroless DSU
-            // sessions deliberately keep streaming whole-controller frames.
-            tick_needed = pipeline.ever_had_sensor || mapper.has_continuous_outputs();
-            schedule.reconnect = Instant::now();
-            if let Some(rumble) = rumble_output.as_mut() {
-                rumble.stop();
-            }
-            if let Some(switch) = pipeline.switch_hidraw.as_mut() {
-                switch.stop_rumble();
-            }
-            emit_outputs(
-                mapper.reset(),
-                OutputTargets {
-                    gamepad: &mut virtual_gamepad,
-                    keyboard: keyboard.as_mut(),
-                    mouse: mouse.as_mut(),
-                    pad: &mut pad_state,
-                },
-                &mut trace,
-            )?;
         }
         if STOP_REQUESTED.load(Ordering::Relaxed) {
             if let Some(watcher) = steam_watch.as_mut() {
@@ -305,85 +310,9 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
         {
             return Ok(launcher_exit_code.unwrap_or(0));
         }
-        if !connected && schedule.reconnect.elapsed() >= RECONNECT_INTERVAL {
-            schedule.reconnect = Instant::now();
-            pipeline.sensor = None;
-            pipeline.switch_hidraw = None;
-            match reconnect_gamepad(&mut gamepad) {
-                Ok(true) => {
-                    apply_controller_layout(&mut gamepad, arguments.calibration.as_deref());
-                    if let Some(gamepad) = gamepad.as_ref() {
-                        eprintln!(
-                            "ira-input: controller connected through {}",
-                            gamepad.info().path.display()
-                        );
-                        pipeline.sensor = open_sensor(gamepad.info());
-                        if pipeline.sensor.is_none() {
-                            pipeline.switch_hidraw =
-                                crate::SwitchHidrawPad::open(gamepad.info());
-                            if let Some(driver) = pipeline.switch_hidraw.as_mut() {
-                                driver.set_nintendo_layout(resolved_layout_for(
-                                    gamepad.info(),
-                                    arguments.calibration.as_deref(),
-                                ));
-                            }
-                        }
-                        rumble_output = if pipeline.switch_hidraw.is_some() {
-                            None
-                        } else {
-                            open_rumble(Some(gamepad), mapper.profile().rumble)
-                        };
-                        if pipeline.motion_device.is_none() && mapper.profile().native_motion {
-                            // Best effort: if the game already opened the pad
-                            // before this node appears, pairing waits for the
-                            // next pad (re)open.
-                            pipeline.motion_device = open_motion_node(mapper.profile().backend);
-                        }
-                        if pipeline.motion_alive()
-                            && pipeline.motion.is_none()
-                            && motion_enabled
-                        {
-                            pipeline.motion = crate::MotionServer::bind();
-                            if pipeline.motion.is_some() {
-                                eprintln!(
-                                    "ira-input: motion passthrough on udp/{} for emulators (cemuhook)",
-                                    crate::MOTION_PORT
-                                );
-                            }
-                        }
-                        pipeline.last_sensor_us = None;
-                        tick_needed = pipeline.motion_alive()
-                            || pipeline.motion.is_some()
-                            || mapper.has_continuous_outputs();
-                        report_rate.reset();
-                    }
-                    if let Some(events) = &arguments.events {
-                        let _ = events.send(SessionEvent::Controller {
-                            connected: true,
-                            name: gamepad
-                                .as_ref()
-                                .map(|gamepad| gamepad.info().name.clone())
-                                .unwrap_or_default(),
-                            path: gamepad
-                                .as_ref()
-                                .map(|gamepad| gamepad.info().path.display().to_string())
-                                .unwrap_or_default(),
-                        });
-                    }
-                    schedule.sensor = Instant::now();
-                    if let Some(gamepad) = gamepad.as_mut() {
-                        if let Err(error) = gamepad.grab() {
-                            eprintln!("ira-input: failed to grab controller: {error}");
-                        }
-                    }
-                }
-                Ok(false) => {}
-                Err(error) => eprintln!("ira-input: controller reconnect failed: {error}"),
-            }
-        }
-        // With the inotify descriptor parked in the poll set, writes wake
-        // the loop directly and every pass can drain; the periodic cadence
-        // only remains as the fallback when inotify is unavailable.
+        // With the inotify pump waking the channel, profile saves apply
+        // instantly; the periodic cadence only remains as the fallback when
+        // inotify is unavailable.
         let profile_wake_due = profile_wake_fd.is_some()
             || schedule.profile.elapsed() >= PROFILE_POLL_INTERVAL;
         if profile_monitor.is_some() && profile_wake_due {
@@ -427,7 +356,6 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                             );
                             pipeline.last_sensor_us = None;
                             tick_needed = tick_needed_for(&pipeline, &mapper);
-                            rumble_output = open_rumble(gamepad.as_ref(), mapper.profile().rumble);
                         }
                     }
                 }
@@ -437,18 +365,45 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
         // drive the wakeup rate; the focus entry keeps unpause latency at
         // one poll interval.
         let timeout = floor_poll_timeout(schedule.timeout(LoopActivity {
-            tick: tick_needed && !paused_for_focus,
+            tick: tick_needed && !paused,
             tick_interval,
             child: child.is_some(),
             profile: profile_monitor.is_some() && profile_wake_fd.is_none(),
-            disconnected: !connected,
             cursor: cursor_watcher.is_some(),
             focus: focus.is_some(),
         }));
-        wait_for_inputs(
-            &gamepad,
-            profile_wake_fd.as_slice(),
-            timeout,
-        )?;
+        match pad_events.recv_timeout(timeout.unwrap_or(IDLE_PARK)) {
+            Ok(event) => pending.push(event),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+        }
     }
+}
+
+struct UnsubscribeOnDrop<'a>(&'a HubHandle, u64);
+
+impl Drop for UnsubscribeOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.send(HubCommand::Unsubscribe(self.1));
+    }
+}
+
+fn release_outputs(
+    mapper: &mut crate::MappingEngine,
+    virtual_gamepad: &mut crate::VirtualGamepad,
+    keyboard: &mut Option<crate::VirtualKeyboard>,
+    mouse: &mut Option<crate::VirtualMouse>,
+    pad_state: &mut crate::PadState,
+    trace: &mut super::TraceState,
+) -> Result<(), String> {
+    emit_outputs(
+        mapper.reset(),
+        OutputTargets {
+            gamepad: virtual_gamepad,
+            keyboard: keyboard.as_mut(),
+            mouse: mouse.as_mut(),
+            pad: pad_state,
+        },
+        trace,
+    )
 }

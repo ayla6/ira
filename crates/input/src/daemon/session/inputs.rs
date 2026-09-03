@@ -1,60 +1,42 @@
 use std::time::Instant;
 
-use crate::{MappingEngine, PhysicalGamepad, ReportRateEstimator};
+use crate::{MappingEngine, ReportRateEstimator};
 
 use super::outputs::{emit_mapped, emit_outputs, OutputTargets};
-use super::sensor::SensorPipeline;
 use super::super::TraceState;
 
-pub(crate) fn process_physical_inputs(
-    gamepad: &mut Option<PhysicalGamepad>,
-    pipeline: &mut SensorPipeline,
+/// Maps the hub-forwarded input events and stashes motion samples for the
+/// tick. Both arrive pre-routed: this session owns focus.
+pub(crate) fn process_pad_events(
+    pending: &mut Vec<super::super::hub::PadEvent>,
+    latest_sample: &mut Option<crate::SensorSample>,
     mapper: &mut MappingEngine,
     report_rate: &mut ReportRateEstimator,
     mut targets: OutputTargets<'_>,
     trace: &mut TraceState,
 ) -> Result<(), String> {
-    // The Switch-protocol driver owns this pad's inputs: its report-mode
-    // switch makes whatever generic HID parses from evdev unreliable.
-    if let Some(switch) = pipeline.switch_hidraw.as_mut() {
-        let events = switch.take_events();
-        if !events.is_empty() {
-            report_rate.observe(Instant::now());
+    for event in std::mem::take(pending) {
+        match event {
+            super::super::hub::PadEvent::Input(event) => {
+                report_rate.observe(Instant::now());
+                emit_mapped(
+                    mapper,
+                    OutputTargets {
+                        gamepad: targets.gamepad,
+                        keyboard: targets.keyboard.as_deref_mut(),
+                        mouse: targets.mouse.as_deref_mut(),
+                        pad: targets.pad,
+                    },
+                    event,
+                    trace,
+                )?;
+            }
+            super::super::hub::PadEvent::Sample(sample) => {
+                *latest_sample = Some(sample);
+            }
+            // Control variants are consumed in the session loop.
+            _ => {}
         }
-        for event in events {
-            emit_mapped(
-                mapper,
-                OutputTargets {
-                    gamepad: targets.gamepad,
-                    keyboard: targets.keyboard.as_deref_mut(),
-                    mouse: targets.mouse.as_deref_mut(),
-                    pad: targets.pad,
-                },
-                event,
-                trace,
-            )?;
-        }
-        return Ok(());
-    }
-    let Some(gamepad) = gamepad.as_mut() else {
-        return Ok(());
-    };
-    let events = gamepad.fetch_events()?;
-    if !events.is_empty() {
-        report_rate.observe(Instant::now());
-    }
-    for event in events {
-        emit_mapped(
-            mapper,
-            OutputTargets {
-                gamepad: targets.gamepad,
-                keyboard: targets.keyboard.as_deref_mut(),
-                mouse: targets.mouse.as_deref_mut(),
-                pad: targets.pad,
-            },
-            event,
-            trace,
-        )?;
     }
     Ok(())
 }

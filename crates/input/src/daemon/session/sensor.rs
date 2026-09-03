@@ -1,17 +1,15 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::{GyroProcessor, InputProfile, MappingEngine};
+use crate::{GyroProcessor, InputProfile, MappingEngine, SensorSample};
 
-use super::devices::GyroSource;
 use super::outputs::{emit_outputs, OutputTargets};
 use super::super::TraceState;
 
 /// Sensor-side state advanced by the tick loop.
 pub(crate) struct SensorPipeline {
-    pub(crate) sensor: Option<GyroSource>,
-    /// A Switch-protocol pad driven directly over hidraw: motion source
-    /// and input source at once, replacing evdev for that pad.
-    pub(crate) switch_hidraw: Option<crate::SwitchHidrawPad>,
+    /// Whether the pad currently has any motion source (kernel IMU, SDL,
+    /// or Switch-protocol takeover) — the hub reports transitions.
+    pub(crate) motion_available: bool,
     pub(crate) gyro_processor: GyroProcessor,
     pub(crate) last_sensor_us: Option<u64>,
     pub(crate) motion: Option<crate::MotionServer>,
@@ -61,14 +59,11 @@ pub(crate) fn open_motion_node(
 impl SensorPipeline {
     /// Whether any motion source is currently live.
     pub(crate) fn motion_alive(&self) -> bool {
-        self.sensor.is_some() || self.switch_hidraw.is_some()
+        self.motion_available
     }
 }
 
 pub(crate) fn service_twin_events(pipeline: &mut SensorPipeline) {
-    if let Some(pad) = pipeline.switch_hidraw.as_mut() {
-        pad.service();
-    }
     if pipeline.switch_pro_hid.is_some() {
         if let Err(error) = pipeline.switch_pro_hid.as_mut().unwrap().service() {
             eprintln!("ira-input: virtual Switch Pro stopped: {error}");
@@ -111,30 +106,15 @@ pub(crate) fn process_tick(
     targets: OutputTargets<'_>,
     trace: &mut TraceState,
     run: bool,
+    reading: Option<SensorSample>,
 ) -> Result<(), String> {
     if !run {
         return Ok(());
     }
-    let mut sensor_failed = false;
     // The raw sensor reading, kept unconverted so each consumer can request
-    // its own frame below. Sources are tried in the daemon's priority
-    // order: the kernel IMU / SDL backend, else the Switch-protocol
-    // driver's newest sample.
+    // its own frame below. The hub samples the physical gyro and forwards
+    // it; a tick without a fresh sample still carries state forward.
     let mut latest: Option<([f32; 3], [f32; 3], u64)> = None;
-    let reading = if let Some(sensor) = pipeline.sensor.as_mut() {
-        match sensor.read(now_us()) {
-            Ok(sample) => sample,
-            Err(error) => {
-                eprintln!("ira-input: gyro backend stopped: {error}");
-                sensor_failed = true;
-                None
-            }
-        }
-    } else if let Some(switch) = pipeline.switch_hidraw.as_mut() {
-        switch.take_sample(now_us())
-    } else {
-        None
-    };
     if let Some(sample) = reading {
         let dt = pipeline
             .last_sensor_us
@@ -164,9 +144,6 @@ pub(crate) fn process_tick(
             .gyro_processor
             .process(sample.gyro, sample.accel, dt);
         mapper.update_gyro(rates);
-    }
-    if sensor_failed {
-        pipeline.sensor = None;
     }
     // One sensor reading feeds every consumer, each in its own frame: the
     // virtual DS4 and the cemuhook stream both carry our SDL frame with
@@ -239,7 +216,7 @@ pub(crate) fn process_tick(
         // frames with zeroed motion at tick rate.
         if should_send_dsu_frame(
             latest.is_some(),
-            pipeline.sensor.is_some(),
+            pipeline.motion_available,
             pipeline.ever_had_sensor,
         ) {
             // Stamp with the sensor sample's own clock when available and

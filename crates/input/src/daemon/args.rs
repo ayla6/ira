@@ -18,6 +18,11 @@ pub struct Arguments {
     /// a server assembling a session out of a Launch request.
     pub daemon: bool,
     pub no_daemon: bool,
+    /// Identity used for hub routing; the server assigns one per session.
+    pub(crate) session_id: u64,
+    /// The shared pad hub. A daemon hands down its hub; a standalone
+    /// (`--no-daemon`) session spawns a private one in setup.
+    pub(crate) hub: Option<super::hub::HubHandle>,
     pub(crate) env: Option<Vec<(String, String)>>,
     pub(crate) working_dir: Option<String>,
     pub(crate) events: Option<std::sync::mpsc::Sender<SessionEvent>>,
@@ -38,6 +43,8 @@ pub fn parse_arguments() -> Result<Arguments, String> {
         command: Vec::new(),
         daemon: false,
         no_daemon: false,
+        session_id: 0,
+        hub: None,
         env: None,
         working_dir: None,
         events: None,

@@ -9,7 +9,7 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use ira_input_ipc::{
@@ -17,6 +17,7 @@ use ira_input_ipc::{
 };
 
 use super::args::Arguments;
+use super::hub::{self, HubCommand, HubHandle};
 use super::session::run_session;
 use super::signals::{install_signal_handlers, STOP_REQUESTED};
 use super::SessionEvent;
@@ -40,6 +41,7 @@ struct Client {
 }
 
 struct SessionHandle {
+    id: u64,
     events: Receiver<SessionEvent>,
     done: Receiver<Result<i32, String>>,
 }
@@ -65,7 +67,12 @@ pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
     eprintln!("ira-input: daemon listening on {}", path.display());
 
     let mut clients: Vec<Client> = Vec::new();
-    let mut session: Option<SessionHandle> = None;
+    // One hub for the daemon's lifetime: it owns every physical controller
+    // and routes them to whichever session holds focus.
+    let (controller_tx, controller_rx) = std::sync::mpsc::channel();
+    let hub = hub::spawn(controller_tx);
+    let mut sessions: Vec<SessionHandle> = Vec::new();
+    let mut next_session_id: u64 = 0;
     let mut shutdown = false;
     let mut idle_since: Option<Instant> = None;
 
@@ -73,11 +80,12 @@ pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
         if STOP_REQUESTED.load(Ordering::Relaxed) {
             shutdown = true;
         }
-        if shutdown && session.is_none() {
+        if shutdown && sessions.is_empty() {
             break;
         }
-        pump_session(&mut session, &mut clients);
-        let timeout = loop_timeout(session.is_some(), idle_since);
+        pump_sessions(&mut sessions, &mut clients, &hub);
+        drain_controller_presence(&controller_rx, &mut clients);
+        let timeout = loop_timeout(!sessions.is_empty(), idle_since);
         let ready = poll_sockets(&listener, &clients, timeout)?;
         if ready[0] {
             accept(&listener, &mut clients);
@@ -85,14 +93,22 @@ pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
         for index in (0..clients.len()).rev() {
             let requests = read_client(&mut clients, index);
             for request in requests {
-                process_request(&mut clients, index, &mut session, &mut shutdown, request);
+                process_request(
+                    &mut clients,
+                    index,
+                    &hub,
+                    &mut sessions,
+                    &mut next_session_id,
+                    &mut shutdown,
+                    request,
+                );
             }
             if index >= clients.len() {
                 // The client was dropped while its requests were processed.
                 continue;
             }
         }
-        if clients.is_empty() && session.is_none() {
+        if clients.is_empty() && sessions.is_empty() {
             let since = *idle_since.get_or_insert_with(Instant::now);
             if since.elapsed() >= IDLE_EXIT {
                 eprintln!("ira-input: idle with no clients or sessions; exiting");
@@ -103,7 +119,7 @@ pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
         }
     }
 
-    stop_running_session(&mut session);
+    stop_running_sessions(&mut sessions);
     let _ = std::fs::remove_file(path);
     eprintln!("ira-input: daemon exited");
     Ok(0)
@@ -122,30 +138,55 @@ fn loop_timeout(session_active: bool, idle_since: Option<Instant>) -> Duration {
     }
 }
 
-/// Drains a live session's event channel, broadcasts new events, and moves
-/// ended sessions into history.
-fn pump_session(session: &mut Option<SessionHandle>, clients: &mut Vec<Client>) {
-    let Some(handle) = session.as_ref() else {
-        return;
-    };
-    while let Ok(event) = handle.events.try_recv() {
-        broadcast(clients, &session_event_to_protocol(&event));
-    }
-    if let Ok(result) = handle.done.try_recv() {
-        let code = result.unwrap_or(-1);
-        eprintln!("ira-input: session ended with code {code}");
-        broadcast(clients, &Event::SessionEnded { code });
-        *session = None;
+/// Drains every live session's event channel, broadcasts new events, and
+/// removes sessions that ended.
+fn pump_sessions(
+    sessions: &mut Vec<SessionHandle>,
+    clients: &mut Vec<Client>,
+    hub: &HubHandle,
+) {
+    for index in (0..sessions.len()).rev() {
+        while let Ok(event) = sessions[index].events.try_recv() {
+            broadcast(clients, &session_event_to_protocol(sessions[index].id, &event));
+        }
+        if let Ok(result) = sessions[index].done.try_recv() {
+            let handle = sessions.remove(index);
+            let code = result.unwrap_or(-1);
+            eprintln!("ira-input: session {} ended with code {}", handle.id, code);
+            hub.send(HubCommand::Unsubscribe(handle.id));
+            broadcast(clients, &Event::SessionEnded { session: handle.id, code });
+        }
     }
 }
 
-fn session_event_to_protocol(event: &SessionEvent) -> Event {
+/// Forwards controller presence changes from the hub to every client.
+fn drain_controller_presence(
+    controller_rx: &std::sync::mpsc::Receiver<(bool, String, String)>,
+    clients: &mut Vec<Client>,
+) {
+    while let Ok((connected, name, path)) = controller_rx.try_recv() {
+        broadcast(
+            clients,
+            &Event::Controller {
+                connected,
+                name,
+                path,
+            },
+        );
+    }
+}
+
+fn session_event_to_protocol(session: u64, event: &SessionEvent) -> Event {
     match event {
         SessionEvent::SessionStarted { child_pid, command } => Event::SessionStarted {
+            session,
             child_pid: *child_pid,
             command: command.clone(),
         },
-        SessionEvent::Output(line) => Event::Output { line: line.clone() },
+        SessionEvent::Output(line) => Event::Output {
+            session,
+            line: line.clone(),
+        },
         SessionEvent::Controller {
             connected,
             name,
@@ -156,7 +197,7 @@ fn session_event_to_protocol(event: &SessionEvent) -> Event {
             path: path.clone(),
         },
         SessionEvent::ProfileReloaded { path } => {
-            Event::ProfileReloaded { path: path.clone() }
+            Event::ProfileReloaded { session, path: path.clone() }
         }
     }
 }
@@ -240,7 +281,9 @@ fn read_client(clients: &mut Vec<Client>, index: usize) -> Vec<Request> {
 fn process_request(
     clients: &mut Vec<Client>,
     index: usize,
-    session: &mut Option<SessionHandle>,
+    hub: &HubHandle,
+    sessions: &mut Vec<SessionHandle>,
+    next_session_id: &mut u64,
     shutdown: &mut bool,
     request: Request,
 ) {
@@ -251,38 +294,31 @@ fn process_request(
             Response::Status(DaemonStatus {
                 pid: std::process::id(),
                 protocol_version: PROTOCOL_VERSION,
-                session_active: session.is_some(),
+                session_active: !sessions.is_empty(),
             }),
         ),
         Request::Launch(launch) => {
-            if session.is_some() {
-                respond(
-                    clients,
-                    index,
-                    Response::Error("a game session is already running".to_string()),
-                );
-                return;
-            }
-            match start_session(launch) {
+            *next_session_id += 1;
+            match start_session(launch, *next_session_id, hub.clone()) {
                 Ok(handle) => {
-                    *session = Some(handle);
-                    respond(clients, index, Response::Launched);
+                    sessions.push(handle);
+                    respond(clients, index, Response::Launched { session: *next_session_id });
                 }
                 Err(error) => respond(clients, index, Response::Error(error)),
             }
         }
         Request::Shutdown { stop_running } => {
-            if session.is_some() && !stop_running {
+            if !sessions.is_empty() && !stop_running {
                 respond(
                     clients,
                     index,
-                    Response::Error("a game session is running".to_string()),
+                    Response::Error("game sessions are running".to_string()),
                 );
                 return;
             }
-            if session.is_some() {
-                // The session loop watches this flag and stops the game the
-                // same way a SIGTERM to the old wrapper did.
+            if !sessions.is_empty() {
+                // Every session loop watches this flag and stops its game
+                // the same way a SIGTERM to the old wrapper did.
                 STOP_REQUESTED.store(true, Ordering::Relaxed);
             }
             *shutdown = true;
@@ -291,7 +327,11 @@ fn process_request(
     }
 }
 
-fn start_session(launch: LaunchRequest) -> Result<SessionHandle, String> {
+fn start_session(
+    launch: LaunchRequest,
+    session_id: u64,
+    hub: HubHandle,
+) -> Result<SessionHandle, String> {
     if launch.command.is_empty() {
         return Err("launch request has an empty command".to_string());
     }
@@ -314,6 +354,8 @@ fn start_session(launch: LaunchRequest) -> Result<SessionHandle, String> {
         command: launch.command.clone(),
         daemon: false,
         no_daemon: false,
+        session_id,
+        hub: Some(hub),
         env: Some(launch.env.clone()),
         working_dir: launch.working_dir.clone(),
         events: Some(event_tx),
@@ -325,6 +367,7 @@ fn start_session(launch: LaunchRequest) -> Result<SessionHandle, String> {
         })
         .map_err(|error| format!("spawn session thread: {error}"))?;
     Ok(SessionHandle {
+        id: session_id,
         events: event_rx,
         done: done_rx,
     })
@@ -358,24 +401,27 @@ fn send_line(stream: &mut UnixStream, line: &str) -> std::io::Result<()> {
 /// On shutdown, gives a live session the same treatment the wrapper's
 /// SIGTERM handler did: the session loop sees the stop flag and stops the
 /// game before the daemon goes away.
-fn stop_running_session(session: &mut Option<SessionHandle>) {
-    if session.is_none() {
+fn stop_running_sessions(sessions: &mut Vec<SessionHandle>) {
+    if sessions.is_empty() {
         return;
     }
     STOP_REQUESTED.store(true, Ordering::Relaxed);
-    let Some(handle) = session.take() else {
-        return;
-    };
     let deadline = Instant::now() + SESSION_STOP_PATIENCE;
-    loop {
-        match handle.done.recv_timeout(Duration::from_millis(100)) {
-            Ok(_) | Err(RecvTimeoutError::Disconnected) => break,
-            Err(RecvTimeoutError::Timeout) if Instant::now() >= deadline => {
-                eprintln!("ira-input: session did not acknowledge shutdown in time");
-                break;
+    while !sessions.is_empty() && Instant::now() < deadline {
+        let mut finished = false;
+        for session in sessions.iter_mut() {
+            if session.done.try_recv().is_ok() {
+                finished = true;
             }
-            Err(RecvTimeoutError::Timeout) => {}
         }
+        if finished {
+            sessions.retain(|session| session.done.try_recv().is_err());
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if !sessions.is_empty() {
+        eprintln!("ira-input: sessions did not acknowledge shutdown in time");
     }
 }
 
@@ -523,6 +569,56 @@ mod tests {
         );
 
         shutdown_and_join(&mut client, server);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_daemon_runs_two_sessions_concurrently() {
+        let dir = temp_test_dir("multi");
+        let path = dir.join("test.sock");
+        let server = std::thread::spawn({
+            let path = path.clone();
+            move || run_daemon_on(&path)
+        });
+        let mut first = wait_for_server(&path);
+        let mut second = DaemonClient::connect(&path).unwrap();
+
+        // Two games at once: both sessions must be accepted and both must
+        // run to completion — the old daemon refused the second launch.
+        let session_a = first
+            .begin_launch(session_request(vec!["sleep".into(), "0.4".into()], None))
+            .unwrap();
+        let session_b = second
+            .begin_launch(session_request(vec!["sleep".into(), "0.2".into()], None))
+            .unwrap();
+        assert_ne!(session_a, session_b, "sessions need distinct ids");
+
+        let (code_a, code_b) = std::thread::scope(|scope| {
+            let a = scope.spawn({
+                let first = &mut first;
+                move || {
+                    first
+                        .wait_session(|_| {})
+                        .expect("first session must end cleanly")
+                }
+            });
+            let b = scope.spawn({
+                let second = &mut second;
+                move || {
+                    second
+                        .wait_session(|_| {})
+                        .expect("second session must end cleanly")
+                }
+            });
+            (a.join().unwrap(), b.join().unwrap())
+        });
+        assert_eq!(code_a, 0);
+        assert_eq!(code_b, 0);
+
+        let status = first.status().unwrap();
+        assert!(!status.session_active, "both sessions must be over");
+
+        shutdown_and_join(&mut first, server);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

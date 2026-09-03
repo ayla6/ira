@@ -44,7 +44,7 @@ pub fn run_via_daemon(arguments: &Arguments) -> Result<i32, String> {
         steam_app_id: arguments.steam_app_id.clone(),
     })?;
     client.wait_session(|event| match event {
-        Event::Output { line } => eprintln!("{line}"),
+        Event::Output { line, .. } => eprintln!("{line}"),
         Event::SessionStarted { child_pid, .. } => {
             eprintln!("ira-input: session started (pid {child_pid})")
         }
@@ -60,7 +60,7 @@ pub fn run_via_daemon(arguments: &Arguments) -> Result<i32, String> {
                 }
             );
         }
-        Event::ProfileReloaded { path } => {
+        Event::ProfileReloaded { path, .. } => {
             eprintln!("ira-input: profile reloaded: {path}")
         }
         Event::SessionEnded { .. } => {}

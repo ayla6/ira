@@ -274,6 +274,12 @@ impl PhysicalGamepad {
         self.device.is_some()
     }
 
+    /// Raw evdev descriptor for callers that poll several input sources at
+    /// once; `None` while no device is open.
+    pub fn device_fd(&self) -> Option<i32> {
+        self.device.as_ref().map(|device| device.as_raw_fd())
+    }
+
     /// Blocks until the kernel has another evdev event or scheduled work is due.
     pub fn wait_for_event(&self, timeout: Option<Duration>) -> Result<(), String> {
         let Some(device) = self.device.as_ref() else {

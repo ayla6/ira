@@ -52,6 +52,9 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
         cursor_watcher,
         mut cursor_visible,
     } = setup_session(&arguments)?;
+    // Parked in the session loop's poll set so profile saves apply instantly.
+    let profile_wake_fd: Option<libc::c_int> =
+        profile_monitor.as_ref().and_then(|monitor| monitor.fd());
 
     loop {
         let was_connected = gamepad
@@ -377,7 +380,12 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                 Err(error) => eprintln!("ira-input: controller reconnect failed: {error}"),
             }
         }
-        if profile_monitor.is_some() && schedule.profile.elapsed() >= PROFILE_POLL_INTERVAL {
+        // With the inotify descriptor parked in the poll set, writes wake
+        // the loop directly and every pass can drain; the periodic cadence
+        // only remains as the fallback when inotify is unavailable.
+        let profile_wake_due = profile_wake_fd.is_some()
+            || schedule.profile.elapsed() >= PROFILE_POLL_INTERVAL;
+        if profile_monitor.is_some() && profile_wake_due {
             schedule.profile = Instant::now();
             if let Some(monitor) = profile_monitor.as_mut() {
                 if monitor.changed() {
@@ -428,11 +436,15 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
             tick: tick_needed && !paused_for_focus,
             tick_interval,
             child: child.is_some(),
-            profile: profile_monitor.is_some(),
+            profile: profile_monitor.is_some() && profile_wake_fd.is_none(),
             disconnected: !connected,
             cursor: cursor_watcher.is_some(),
             focus: focus.is_some(),
         }));
-        wait_for_inputs(&gamepad, timeout)?;
+        wait_for_inputs(
+            &gamepad,
+            profile_wake_fd.as_slice(),
+            timeout,
+        )?;
     }
 }

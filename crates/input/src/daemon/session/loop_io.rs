@@ -76,15 +76,15 @@ pub(crate) fn floor_poll_timeout(timeout: Option<Duration>) -> Option<Duration> 
     timeout.map(|timeout| timeout.max(POLL_FLOOR))
 }
 
-/// Block until the kernel has an input event or scheduled work is due. When no
-/// controller is present, waits on the scheduled timeout instead.
+/// Block until the kernel has an input event, a wake descriptor signals, or
+/// scheduled work is due. The pad's evdev descriptor and the profile
+/// monitor's inotify descriptor share one poll so a profile save applies
+/// immediately instead of at the next periodic drain.
 pub(crate) fn wait_for_inputs(
     gamepad: &Option<PhysicalGamepad>,
+    wake_fds: &[libc::c_int],
     timeout: Option<Duration>,
 ) -> Result<(), String> {
-    if let Some(gamepad) = gamepad {
-        return gamepad.wait_for_event(timeout);
-    }
     let timeout_ms = timeout
         .map(|timeout| {
             timeout
@@ -93,7 +93,30 @@ pub(crate) fn wait_for_inputs(
                 .min(libc::c_int::MAX as u128) as libc::c_int
         })
         .unwrap_or(-1);
-    let result = unsafe { libc::poll(std::ptr::null_mut(), 0, timeout_ms) };
+    let mut descriptors: Vec<libc::pollfd> = Vec::new();
+    if let Some(fd) = gamepad.as_ref().and_then(PhysicalGamepad::device_fd) {
+        descriptors.push(libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        });
+    }
+    descriptors.extend(wake_fds.iter().map(|fd| libc::pollfd {
+        fd: *fd,
+        events: libc::POLLIN,
+        revents: 0,
+    }));
+    if descriptors.is_empty() {
+        let result = unsafe { libc::poll(std::ptr::null_mut(), 0, timeout_ms) };
+        if result < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+            return Err(format!(
+                "failed waiting for controller: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        return Ok(());
+    }
+    let result = unsafe { libc::poll(descriptors.as_mut_ptr(), descriptors.len() as u64, timeout_ms) };
     if result < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
         return Err(format!(
             "failed waiting for controller: {}",

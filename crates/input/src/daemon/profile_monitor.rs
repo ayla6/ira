@@ -59,6 +59,13 @@ impl ProfileMonitor {
         &self.path
     }
 
+    /// The inotify descriptor to park in an external poll set, so profile
+    /// writes wake the session loop immediately. `None` when inotify could
+    /// not be created and the caller must fall back to periodic drains.
+    pub(crate) fn fd(&self) -> Option<libc::c_int> {
+        (self.fd >= 0).then_some(self.fd)
+    }
+
     pub(crate) fn changed(&mut self) -> bool {
         if self.fd < 0 {
             return false;

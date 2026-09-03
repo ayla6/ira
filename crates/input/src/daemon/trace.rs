@@ -33,15 +33,37 @@ impl TraceState {
     }
 
     /// Per-sample diagnostics for drift hunting: the integration delta, the
-    /// raw sensor reading, and the rates the mapper receives.
-    pub(crate) fn record_sample(&self, dt: f32, gyro: [f32; 3], rates: [f32; 3]) {
+    /// raw sensor reading, the accelerometer feeding the gravity filters,
+    /// the live bias estimate, and the rates the mapper receives. Rates are
+    /// converted from rad/s so the label is honest.
+    pub(crate) fn record_sample(
+        &self,
+        dt: f32,
+        gyro: [f32; 3],
+        accel: Option<[f32; 3]>,
+        bias: [f32; 3],
+        rates: [f32; 2],
+    ) {
         if !self.enabled {
             return;
         }
+        const RAD_TO_DEG: f32 = 57.295_78;
+        let accel = accel.unwrap_or([0.0, 0.0, 0.0]);
         eprintln!(
             "ira-input: sample dt={dt:.5} gyro=({:.4}, {:.4}, {:.4}) \
-             rates=({:.1}, {:.1}, {:.1}) dps",
-            gyro[0], gyro[1], gyro[2], rates[0], rates[1], rates[2]
+             accel=({:.3}, {:.3}, {:.3}) bias=({:.4}, {:.4}, {:.4}) \
+             rates=({:.1}, {:.1}) dps",
+            gyro[0],
+            gyro[1],
+            gyro[2],
+            accel[0],
+            accel[1],
+            accel[2],
+            bias[0],
+            bias[1],
+            bias[2],
+            rates[0] * RAD_TO_DEG,
+            rates[1] * RAD_TO_DEG,
         );
     }
 

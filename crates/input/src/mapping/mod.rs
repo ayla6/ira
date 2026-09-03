@@ -55,6 +55,17 @@ pub enum OutputEvent {
     },
 }
 
+/// Whether a profile's gyro starts out engaged: Always and Suppress
+/// (active-unless-held) are active from the start, so the engine must not
+/// treat its first tick as a re-engagement and discard fresh rates.
+fn initial_gyro_active(profile: &InputProfile) -> bool {
+    profile.gyro.enabled
+        && matches!(
+            profile.gyro.activation,
+            GyroActivation::Always | GyroActivation::Suppress(_)
+        )
+}
+
 pub struct MappingEngine {
     pub(crate) profile: InputProfile,
     pub(crate) values: HashMap<InputSource, f32>,
@@ -66,6 +77,16 @@ pub struct MappingEngine {
     pub(crate) axis_outputs: HashMap<GamepadAxis, f32>,
     /// Latest player-space rotation rates, fed by the gyro processor.
     pub(crate) gyro_rates: GyroRates,
+    /// Tick-clock time of the most recent `update_gyro` call, so rates that
+    /// stopped being refreshed (a sensor that went quiet) can age out.
+    pub(crate) last_gyro_sample_us: Option<u64>,
+    /// Whether the gyro was active at the last refresh; its rising edge
+    /// clears carried rates so re-engaging starts from rest.
+    pub(crate) gyro_was_active: bool,
+    /// Laser Pointer angle deltas drained from the gyro processor since
+    /// the last tick, emitted directly as cursor position deltas.
+    pub(crate) laser_yaw_delta: f32,
+    pub(crate) laser_pitch_delta: f32,
     /// Rates the output paths consume: live rates while the gyro is active,
     /// the momentum glide while it decays, zero otherwise.
     pub(crate) gyro_effective: GyroRates,
@@ -98,6 +119,7 @@ pub struct MappingEngine {
 impl MappingEngine {
     pub fn new(profile: InputProfile) -> Result<Self, String> {
         profile.validate()?;
+        let gyro_was_active = initial_gyro_active(&profile);
         Ok(Self {
             profile,
             values: HashMap::new(),
@@ -105,6 +127,10 @@ impl MappingEngine {
             chord_toggles: HashMap::new(),
             axis_outputs: HashMap::new(),
             gyro_rates: GyroRates::default(),
+            last_gyro_sample_us: None,
+            gyro_was_active,
+            laser_yaw_delta: 0.0,
+            laser_pitch_delta: 0.0,
             gyro_effective: GyroRates::default(),
             gyro_momentum: GyroRates::default(),
             last_tick_us: None,
@@ -155,6 +181,10 @@ impl MappingEngine {
         self.toggles.clear();
         self.chord_toggles.clear();
         self.gyro_rates = GyroRates::default();
+        self.last_gyro_sample_us = None;
+        self.gyro_was_active = initial_gyro_active(&self.profile);
+        self.laser_yaw_delta = 0.0;
+        self.laser_pitch_delta = 0.0;
         self.gyro_effective = GyroRates::default();
         self.gyro_momentum = GyroRates::default();
         self.last_tick_us = None;

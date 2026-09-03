@@ -17,18 +17,21 @@ const FLICK_RELEASE: f32 = 0.75;
 pub(crate) struct FlickState {
     /// Angle of the stick while engaged, radians.
     last_angle: Option<f32>,
-    /// Turns left to emit for the current flick.
-    flick_remaining: f32,
-    /// Emission pace of the in-flight flick, turns per second.
-    flick_rate: f32,
-    /// Sign of the ongoing flick (+1 clockwise, -1 counter-clockwise).
-    flick_direction: f32,
+    /// In-flight flick: tick-clock start time.
+    flick_start_us: Option<u64>,
+    /// Signed flick angle in radians (our convention: clockwise positive).
+    flick_angle: f32,
+    /// Duration of this flick, seconds — scaled by flick size per the
+    /// reference: a 90° snap plays in half the time of a 180°.
+    flick_duration_s: f32,
+    /// Eased progress already emitted, 0..1.
+    last_shaped: f32,
 }
 
 impl MappingEngine {
     /// Emit flick/rotation mouse motion for every Flickstick-mode input;
     /// called from tick() with the elapsed time.
-    pub(crate) fn emit_flick_motion(&mut self, dt: f32) -> Vec<OutputEvent> {
+    pub(crate) fn emit_flick_motion(&mut self, now_us: u64) -> Vec<OutputEvent> {
         let mut modes: Vec<(InputSource, SourceMode)> = Vec::new();
         for (source, mode) in self.mode_inputs() {
             let is_flick = matches!(mode, SourceMode::Flickstick { .. });
@@ -56,7 +59,7 @@ impl MappingEngine {
                 dots_per_360: self.profile.gyro.dots_per_360,
                 flick_seconds: flick_duration_ms as f32 / 1000.0,
             };
-            emit_flick_for_stick(state, x, y, dt, &cfg, &mut output);
+            emit_flick_for_stick(state, x, y, now_us, &cfg, &mut output);
         }
         output
     }
@@ -97,7 +100,7 @@ fn emit_flick_for_stick(
     state: &mut FlickState,
     x: f32,
     y: f32,
-    dt: f32,
+    now_us: u64,
     cfg: &FlickConfig,
     output: &mut Vec<OutputEvent>,
 ) {
@@ -108,51 +111,48 @@ fn emit_flick_for_stick(
         FLICK_ENGAGE
     };
     if magnitude < threshold {
-        // Released: forget direction so re-engaging starts a fresh flick.
+        // Released: forget the direction so re-engaging starts a fresh
+        // flick — but an in-flight flick keeps playing to completion, as
+        // in the reference; canceling it ate the tail of every snap.
         state.last_angle = None;
-        state.flick_remaining = 0.0;
-        return;
-    }
-
-    let angle = f32::atan2(x, -y); // 0 = up, growing clockwise.
-
-    // Engage before emitting so a fresh flick produces its first slice in
-    // the same tick instead of starting a frame late.
-    if state.last_angle.is_none() {
-        state.last_angle = Some(angle);
-        start_flick(state, angle, cfg.flick_seconds);
-    }
-
-    if state.flick_remaining > VALUE_EPSILON {
-        // Emit the in-flight flick burst.
-        let step = state.flick_remaining.min(state.flick_rate * dt);
-        let counts = step * cfg.dots_per_360 * state.flick_direction;
-        push_yaw(output, counts);
-        state.flick_remaining -= step;
-    }
-
-    if let Some(previous) = state.last_angle {
-        let delta = wrap_angle(angle - previous);
-        if delta.abs() > VALUE_EPSILON {
-            // Wheel mode: while engaged the camera turns with the stick,
-            // scaled by the rotation sensitivity.
-            push_yaw(
-                output,
-                delta * cfg.dots_per_360 / std::f32::consts::TAU * cfg.sensitivity,
-            );
+    } else {
+        let angle = f32::atan2(x, -y); // 0 = up, growing clockwise.
+        if state.last_angle.is_none() {
+            // Bam! New flick: snap the camera by the full stick angle.
             state.last_angle = Some(angle);
+            state.flick_angle = angle;
+            state.last_shaped = 0.0;
+            state.flick_duration_s =
+                (cfg.flick_seconds * (angle.abs() / std::f32::consts::PI)).max(0.01);
+            state.flick_start_us = Some(now_us);
+        } else if let Some(previous) = state.last_angle {
+            let delta = wrap_angle(angle - previous);
+            if delta.abs() > VALUE_EPSILON {
+                // Wheel mode: while engaged the camera turns with the
+                // stick, scaled by the rotation sensitivity.
+                push_yaw(
+                    output,
+                    delta * cfg.dots_per_360 / std::f32::consts::TAU * cfg.sensitivity,
+                );
+                state.last_angle = Some(angle);
+            }
         }
     }
-}
 
-fn start_flick(state: &mut FlickState, angle: f32, flick_seconds: f32) {
-    // The flick snaps the camera to the direction the stick points: the
-    // full stick angle, so pointing down from neutral is a 180° turn and
-    // pointing up does not move the camera at all.
-    let turns = angle / std::f32::consts::TAU; // -0.5..=0.5
-    state.flick_remaining = turns.abs();
-    state.flick_rate = state.flick_remaining / flick_seconds.max(0.01);
-    state.flick_direction = if turns < 0.0 { -1.0 } else { 1.0 };
+    // The flick's progress is time-based and eased (fast start, gliding
+    // into the target) — the reference's shape; our old linear pacing
+    // crawled through small flicks at constant speed.
+    if let Some(started) = state.flick_start_us {
+        let elapsed = now_us.saturating_sub(started) as f32 / 1_000_000.0;
+        let progress = (elapsed / state.flick_duration_s).clamp(0.0, 1.0);
+        let shaped = 1.0 - (1.0 - progress) * (1.0 - progress);
+        let delta_shaped = shaped - state.last_shaped;
+        state.last_shaped = shaped;
+        push_yaw(output, delta_shaped * state.flick_angle * cfg.dots_per_360 / std::f32::consts::TAU);
+        if progress >= 1.0 {
+            state.flick_start_us = None;
+        }
+    }
 }
 
 fn push_yaw(output: &mut Vec<OutputEvent>, counts: f32) {
@@ -251,16 +251,34 @@ mod tests {
     #[test]
     fn test_centering_resets_and_reengage_flicks_again() {
         let profile = flick_profile();
+        let dots = profile.gyro.dots_per_360;
         let mut engine = MappingEngine::new(profile).unwrap();
-        stick(&mut engine, 1.0, 0.0); // right
+        stick(&mut engine, 1.0, 0.0); // right: quarter-turn flick starts
         engine.tick(4_000);
-        stick(&mut engine, 0.0, 0.0); // center resets
-        engine.tick(8_000);
-        assert!(yaw_total(&engine.tick(12_000)).abs() < 1.0);
+        // Centering mid-flick must not eat it: the reference plays flicks
+        // to completion. A quarter turn drains in half the base time.
+        let mut total = 0.0;
+        for i in 1..25 {
+            total += yaw_total(&engine.tick(4_000 + i * 4_000));
+        }
+        let expected = dots / 4.0;
+        assert!(
+            (total - expected).abs() < expected * 0.2,
+            "flick must finish after re-centering: {total} vs ~{expected}"
+        );
 
-        stick(&mut engine, -1.0, 0.0); // left: another flick
-        let motion = yaw_total(&engine.tick(16_000));
-        assert!(motion.abs() > 10.0, "re-engage must flick, got {motion}");
+        // Release, then flick the other way: a fresh snap of the same size.
+        stick(&mut engine, 0.0, 0.0);
+        engine.tick(104_000);
+        stick(&mut engine, -1.0, 0.0); // left
+        let mut motion = yaw_total(&engine.tick(108_000));
+        for i in 1..25 {
+            motion += yaw_total(&engine.tick(108_000 + i * 4_000));
+        }
+        assert!(
+            (motion.abs() - expected).abs() < expected * 0.2,
+            "got {motion}"
+        );
     }
 
     #[test]

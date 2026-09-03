@@ -111,6 +111,7 @@ pub(crate) fn process_tick(
     if !run {
         return Ok(());
     }
+    let tick_now = now_us();
     // The raw sensor readings, kept unconverted so each consumer can request
     // its own frame below. The hub forwards every physical sample; each is
     // integrated with its own time delta — dropping one would stretch the
@@ -145,8 +146,21 @@ pub(crate) fn process_tick(
         let rates = pipeline
             .gyro_processor
             .process(sample.gyro, sample.accel, dt);
-        trace.record_sample(dt, sample.gyro, [rates.yaw, rates.pitch, 0.0]);
-        mapper.update_gyro(rates);
+        let bias = pipeline.gyro_processor.bias();
+        trace.record_sample(
+            dt,
+            sample.gyro,
+            sample.accel,
+            [bias.x, bias.y, bias.z],
+            [rates.yaw, rates.pitch],
+        );
+        mapper.update_gyro(rates, tick_now);
+        // Laser Pointer position deltas ride alongside the rates: the
+        // processor accumulates angles, the mapper emits them directly.
+        if mapper.profile().gyro.orientation == crate::GyroOrientation::LaserPointer {
+            let (yaw_delta, pitch_delta) = pipeline.gyro_processor.take_laser_deltas();
+            mapper.update_gyro_position(yaw_delta, pitch_delta);
+        }
     }
     // One sensor reading feeds every consumer, each in its own frame: the
     // virtual DS4 and the cemuhook stream both carry our SDL frame with
@@ -245,7 +259,7 @@ pub(crate) fn process_tick(
             }
         }
     }
-    let outputs = mapper.tick(now_us());
+    let outputs = mapper.tick(tick_now);
     emit_outputs(outputs, targets, trace)
 }
 

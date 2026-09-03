@@ -12,8 +12,8 @@ use std::collections::HashMap;
 use super::{MappingEngine, DEFAULT_TICK_INTERVAL};
 use crate::gyro::GyroRates;
 use crate::profile::{
-    GamepadAxis, GyroActivation, GyroOutput, GyroStickResponseStyle, GyroStickSettings,
-    InputProfile, InputSource, MouseAxis, TriggerDampening,
+    GamepadAxis, GyroActivation, GyroOrientation, GyroOutput, GyroStickResponseStyle,
+    GyroStickSettings, InputProfile, InputSource, MouseAxis, TriggerDampening,
 };
 use crate::OutputEvent;
 
@@ -22,6 +22,13 @@ use crate::OutputEvent;
 /// Stick-to-mouse velocity at full deflection and sensitivity 1.0, in counts
 /// per second.
 pub(crate) const STICK_MOUSE_COUNTS_PER_SECOND: f32 = 2000.0;
+/// Time constant for spreading Laser Pointer deltas across ticks, in
+/// seconds. The pad delivers IMU samples in ~30 Hz bursts even though its
+/// button reports run at 1000 Hz; this spreads each burst so the cursor
+/// glides instead of stepping. Wider = smoother but laggier. JSM has no
+/// laser mode to copy; its comparable flick-rotation smoothing targets
+/// 64 ms — this stays well under that for pointer responsiveness.
+const LASER_EMIT_TC: f32 = 0.02;
 /// Stick-to-wheel velocity at full deflection, in detents per second.
 /// Gyro-to-stick scaling: rotation rate (rad/s) that drives the stick to full
 /// deflection at sensitivity 1.0. Steam's camera feel lands near a
@@ -35,12 +42,41 @@ const DAMPENING_SOFT_PULL: f32 = 0.5;
 const DAMPENING_FULL_PULL: f32 = 0.95;
 /// Angular rate (rad/s) under which the momentum glide is considered spent.
 const MOMENTUM_MIN_RATE: f32 = 0.01;
+/// Sample gap under which the sensor stream counts as live and rates pass
+/// through untouched. Real motion always brings follow-up reports (the
+/// pads stream at 30 Hz+ while moving); only stillness and sub-threshold
+/// slow aiming produce silence.
+const GYRO_STREAM_CONFIRM_US: u64 = 120_000;
+
 
 impl MappingEngine {
-    /// Feed the latest player-space rates from the gyro processor. Smoothed
+    /// Feed the latest player-space rates from the gyro processor, stamped
+    /// with the tick clock at which the sample arrived. Smoothed
     /// bias-corrected rates in rad/s; see `crate::gyro`.
-    pub fn update_gyro(&mut self, rates: GyroRates) {
+    pub fn update_gyro(&mut self, rates: GyroRates, now_us: u64) {
         self.gyro_rates = rates;
+        self.last_gyro_sample_us = Some(now_us);
+    }
+
+    /// Stop the rates once the sensor stream goes quiet past the confirm
+    /// window. This pad streams while anything moves and goes silent when
+    /// it stops, so silence past the window means the hand stopped: the
+    /// cursor must stop with it. Carrying or gliding the last rate through
+    /// silence read as the cursor sliding on ice after every motion.
+    fn stop_quiet_gyro_rates(&mut self, now_us: u64) {
+        let quiet = self
+            .last_gyro_sample_us
+            .map_or(u64::MAX, |last| now_us.saturating_sub(last));
+        if quiet >= GYRO_STREAM_CONFIRM_US {
+            self.gyro_rates = GyroRates::default();
+        }
+    }
+
+    /// Accumulate Laser Pointer angle deltas (radians) drained from the
+    /// gyro processor; the next tick emits them as cursor position deltas.
+    pub fn update_gyro_position(&mut self, yaw_delta: f32, pitch_delta: f32) {
+        self.laser_yaw_delta += yaw_delta;
+        self.laser_pitch_delta += pitch_delta;
     }
 
     /// Recomputes the rates the output paths consume. While the gyro is
@@ -49,7 +85,19 @@ impl MappingEngine {
     /// without momentum output stops dead.
     pub(crate) fn refresh_gyro_effective(&mut self, dt: f32) {
         let momentum = &self.profile.gyro.momentum;
-        if self.gyro_active() {
+        let active = self.gyro_active();
+        if active && !self.gyro_was_active {
+            // Re-engaging must start from rest. The sensor kept reporting
+            // through the pause — a fling putting the pad down, a wake-up
+            // burst — and none of that belongs to the moment the user
+            // chose to aim again.
+            self.gyro_rates = GyroRates::default();
+            self.gyro_momentum = GyroRates::default();
+            self.laser_yaw_delta = 0.0;
+            self.laser_pitch_delta = 0.0;
+        }
+        self.gyro_was_active = active;
+        if active {
             self.gyro_effective = self.gyro_rates;
             if momentum.enabled {
                 self.gyro_momentum = self.gyro_rates;
@@ -62,6 +110,8 @@ impl MappingEngine {
         if !gliding {
             self.gyro_momentum = GyroRates::default();
             self.gyro_effective = GyroRates::default();
+            self.laser_yaw_delta = 0.0;
+            self.laser_pitch_delta = 0.0;
             return;
         }
         let decay = (-momentum.friction * dt).exp();
@@ -105,6 +155,7 @@ impl MappingEngine {
 
     pub fn tick(&mut self, now_us: u64) -> Vec<OutputEvent> {
         let dt = self.tick_delta(now_us);
+        self.stop_quiet_gyro_rates(now_us);
         self.refresh_gyro_effective(dt);
         let mut output = Vec::new();
         if !self.profile.action_sets.is_empty() {
@@ -113,7 +164,7 @@ impl MappingEngine {
             self.emit_mode_mouse_motion(dt, &mut output);
             self.emit_mode_dpad(&mut output);
             self.emit_mode_outer_ring(&mut output);
-            output.extend(self.emit_flick_motion(dt));
+            output.extend(self.emit_flick_motion(now_us));
         }
         self.emit_mouse_motion(dt, &mut output);
         self.emit_axis_outputs(&mut output);
@@ -130,8 +181,39 @@ impl MappingEngine {
         delta
     }
 
-    fn emit_mouse_motion(&self, dt: f32, output: &mut Vec<OutputEvent>) {
+    fn emit_mouse_motion(&mut self, dt: f32, output: &mut Vec<OutputEvent>) {
         let gyro = &self.profile.gyro;
+        if gyro.enabled
+            && gyro.output == GyroOutput::Mouse
+            && gyro.orientation == GyroOrientation::LaserPointer
+        {
+            // Laser Pointer is position-based: the accumulated angle
+            // deltas ARE the cursor movement. They bypass the rate
+            // pipeline entirely — no smoothing, no decay, nothing that
+            // could keep sliding after the hand stops. A still hand
+            // produces zero deltas and a still cursor.
+            if self.gyro_active() {
+                // The pad delivers motion samples in bursts; emitting the
+                // accumulated deltas verbatim made the cursor teleport in
+                // chunks. A 20 ms leaky bucket spreads each burst over a
+                // few ticks — imperceptible latency, no jumps.
+                let share = 1.0 - (-dt / LASER_EMIT_TC).exp();
+                let yaw = self.laser_yaw_delta * share;
+                let pitch = self.laser_pitch_delta * share;
+                self.laser_yaw_delta -= yaw;
+                self.laser_pitch_delta -= pitch;
+                let scale = gyro.dots_per_360 / std::f32::consts::TAU
+                    * gyro.sensitivity
+                    * self.gyro_dampening_scale();
+                let (yaw, pitch) = rotate_gyro_output(yaw, pitch, gyro.rotate_output);
+                push_mouse(output, MouseAxis::X, yaw * scale * sign(gyro.invert_x));
+                push_mouse(output, MouseAxis::Y, -pitch * scale * sign(gyro.invert_y));
+            } else {
+                self.laser_yaw_delta = 0.0;
+                self.laser_pitch_delta = 0.0;
+            }
+            return;
+        }
         if gyro.enabled && gyro.output == GyroOutput::Mouse {
             // Steam's "Dots Per 360°": one full physical turn produces this
             // many mouse pixels at 1x sensitivity.
@@ -390,7 +472,7 @@ mod tests {
             yaw: 2.0,
             pitch: -1.0,
             gravity_locked: true,
-        });
+        }, 0);
         let events = engine.tick(4_000);
         let dt = 0.004;
         assert!(
@@ -418,7 +500,7 @@ mod tests {
             yaw: 1.0,
             pitch: 1.0,
             gravity_locked: true,
-        });
+        }, 0);
         let events = engine.tick(4_000);
         assert!(motion(&events, MouseAxis::X) < 0.0);
         // Double negation: pitch up is negative Y, inverted back to positive.
@@ -440,12 +522,205 @@ mod tests {
             yaw: 1.0,
             pitch: 0.0,
             gravity_locked: true,
-        });
+        }, 0);
         assert!(engine.tick(4_000).is_empty());
+        // Pressing the activation re-engages from rest; the next sensor
+        // sample drives output again.
         engine.process(event(InputSource::Button(GamepadButton::LeftTrigger), 1.0));
+        engine.update_gyro(GyroRates {
+            yaw: 1.0,
+            pitch: 0.0,
+            gravity_locked: true,
+        }, 6_000);
         assert!(!engine.tick(8_000).is_empty());
         engine.process(event(InputSource::Button(GamepadButton::LeftTrigger), 0.0));
         assert!(engine.tick(12_000).is_empty());
+    }
+
+    #[test]
+    fn test_gyro_output_stops_when_the_stream_goes_quiet() {
+        let profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                ..GyroConfig::default()
+            },
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        let base = 1_000_000u64;
+        let rate = GyroRates {
+            yaw: 2.0,
+            pitch: 0.0,
+            gravity_locked: true,
+        };
+        engine.update_gyro(rate, base);
+        // A second report within the confirm window establishes the stream.
+        engine.update_gyro(rate, base + 50_000);
+        assert!(motion(&engine.tick(base + 54_000), MouseAxis::X) > 0.0);
+        // Quiet gaps shorter than the grace window (a live 50 ms report
+        // stream) keep the full rate: the cursor must not freeze mid-aim.
+        // The long gap clamps to the 50 ms tick-dt ceiling.
+        let within_grace = base + 50_000 + GYRO_STREAM_CONFIRM_US - 4_000;
+        let held = motion(&engine.tick(within_grace), MouseAxis::X);
+        assert!(
+            (held - 2.0 * (6545.0 / std::f32::consts::TAU) * 0.05).abs() < 0.5,
+            "held: {held}"
+        );
+        // Past the confirm window the stream has stopped and so must the
+        // cursor: no clamp, no glide — carried rates read as the cursor
+        // sliding on ice after every motion.
+        let now = within_grace + 50_000;
+        assert_eq!(motion(&engine.tick(now), MouseAxis::X), 0.0);
+        assert_eq!(motion(&engine.tick(now + 50_000), MouseAxis::X), 0.0);
+        // A fresh sample restores full output immediately.
+        engine.update_gyro(rate, now + 100_000);
+        assert!(
+            motion(&engine.tick(now + 104_000), MouseAxis::X)
+                > 2.0 * (6545.0 / std::f32::consts::TAU) * 0.004 * 0.5,
+            "fresh sample must resume output"
+        );
+    }
+
+    #[test]
+    fn test_laser_pointer_emits_position_deltas_once() {
+        let profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                orientation: GyroOrientation::LaserPointer,
+                ..GyroConfig::default()
+            },
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        // A turn right and a nose-down tilt, drained as position deltas.
+        // Burst-delivered deltas spread across a few ticks (the 20 ms
+        // emitter) instead of teleporting in one chunk, and land at the
+        // exact target: a still hand (no fresh deltas) stops emitting.
+        engine.update_gyro_position(0.1, -0.2);
+        let scale = 6545.0f32 / std::f32::consts::TAU;
+        let first = engine.tick(4_000);
+        let first_x = motion(&first, MouseAxis::X);
+        assert!(
+            first_x > 0.0 && first_x < 0.1 * scale,
+            "first tick must emit a partial share: {first_x}"
+        );
+        let mut total_x = first_x;
+        let mut total_y = motion(&first, MouseAxis::Y);
+        for i in 1..70 {
+            let events = engine.tick(4_000 + i * 4_000);
+            total_x += motion(&events, MouseAxis::X);
+            total_y += motion(&events, MouseAxis::Y);
+        }
+        assert!((total_x - 0.1 * scale).abs() < 0.5, "x total: {total_x}");
+        assert!((total_y - 0.2 * scale).abs() < 0.5, "y total: {total_y}");
+        // Consumed: nothing further can slide.
+        let mut tail_x;
+        let mut tail_y;
+        loop {
+            let tail = engine.tick(40_000_000);
+            tail_x = motion(&tail, MouseAxis::X);
+            tail_y = motion(&tail, MouseAxis::Y);
+            if tail_x == 0.0 && tail_y == 0.0 {
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn test_reengaging_gyro_starts_from_rest() {
+        // While the gyro is paused the sensor keeps reporting — a fling
+        // putting the pad down, a wake-up burst. Re-engaging must discard
+        // all of that and start from rest instead of jerking the cursor
+        // with the paused stretch's last motion.
+        let profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                activation: GyroActivation::Hold(GamepadButton::LeftShoulder),
+                ..GyroConfig::default()
+            },
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        let base = 1_000_000u64;
+        let rate = GyroRates {
+            yaw: 2.0,
+            pitch: 0.0,
+            gravity_locked: true,
+        };
+        engine.process(event(InputSource::Button(GamepadButton::LeftShoulder), 1.0));
+        engine.update_gyro(rate, base);
+        assert!(motion(&engine.tick(base + 4_000), MouseAxis::X) > 0.0);
+        // Pause: output stops dead.
+        engine.process(event(InputSource::Button(GamepadButton::LeftShoulder), 0.0));
+        assert_eq!(motion(&engine.tick(base + 8_000), MouseAxis::X), 0.0);
+        // During the pause the pad is flung — a confirmed stream of big
+        // rates lands in the engine.
+        engine.update_gyro(
+            GyroRates {
+                yaw: 6.0,
+                pitch: 0.0,
+                gravity_locked: true,
+            },
+            base + 20_000,
+        );
+        engine.update_gyro(
+            GyroRates {
+                yaw: 4.0,
+                pitch: 0.0,
+                gravity_locked: true,
+            },
+            base + 60_000,
+        );
+        // Re-engage: the paused stretch's rates are discarded, output
+        // starts from rest.
+        engine.process(event(InputSource::Button(GamepadButton::LeftShoulder), 1.0));
+        assert_eq!(motion(&engine.tick(base + 64_000), MouseAxis::X), 0.0);
+        // A fresh sample aims normally again.
+        engine.update_gyro(rate, base + 100_000);
+        assert!(motion(&engine.tick(base + 104_000), MouseAxis::X) > 0.0);
+    }
+
+    #[test]
+    fn test_isolated_gyro_sample_does_not_drift_through_silence() {
+        // The pad emits a lone reading as its report stream wakes (any input
+        // event pulls one out) and then goes quiet while nothing moves.
+        // Carrying that reading through the silence was the cursor drifting
+        // away the moment the paddle was pressed.
+        let profile = InputProfile {
+            gyro: GyroConfig {
+                enabled: true,
+                ..GyroConfig::default()
+            },
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        let base = 1_000_000u64;
+        let rate = GyroRates {
+            yaw: 0.2,
+            pitch: 0.0,
+            gravity_locked: false,
+        };
+        engine.update_gyro(rate, base);
+        // The lone sample outputs for its own moment — it is a real reading.
+        assert!(motion(&engine.tick(base + 4_000), MouseAxis::X) > 0.0);
+        // Silence past the confirm window with no partner sample: stop dead,
+        // no clamp, no glide.
+        assert_eq!(
+            motion(
+                &engine.tick(base + GYRO_STREAM_CONFIRM_US + 4_000),
+                MouseAxis::X
+            ),
+            0.0
+        );
+        // A paired arrival resumes output normally.
+        engine.update_gyro(rate, base + GYRO_STREAM_CONFIRM_US + 100_000);
+        engine.update_gyro(rate, base + GYRO_STREAM_CONFIRM_US + 150_000);
+        assert!(
+            motion(
+                &engine.tick(base + GYRO_STREAM_CONFIRM_US + 154_000),
+                MouseAxis::X
+            ) > 0.0
+        );
     }
 
     #[test]
@@ -463,7 +738,7 @@ mod tests {
             yaw: 1.0,
             pitch: 0.0,
             gravity_locked: true,
-        });
+        }, 0);
         assert!(!engine.gyro_active());
         engine.process(event(InputSource::Button(GamepadButton::Guide), 1.0));
         engine.process(event(InputSource::Button(GamepadButton::Guide), 0.0));
@@ -488,7 +763,7 @@ mod tests {
             yaw: 0.75,
             pitch: 0.0,
             gravity_locked: true,
-        });
+        }, 0);
         let events = engine.tick(4_000);
         // 0.75 rad/s over 1.5 rad/s-per-unit = half deflection.
         assert!(events.iter().any(|event| matches!(
@@ -500,7 +775,7 @@ mod tests {
             yaw: 0.0,
             pitch: -3.0,
             gravity_locked: true,
-        });
+        }, 0);
         let events = engine.tick(8_000);
         assert!(events.iter().any(|event| matches!(
             event,
@@ -525,7 +800,7 @@ mod tests {
             yaw: 0.75,
             pitch: 0.0,
             gravity_locked: true,
-        });
+        }, 0);
         let events = engine.tick(4_000);
         assert!(events.iter().any(|event| matches!(
             event,
@@ -593,7 +868,7 @@ mod tests {
             yaw: 5.0,
             pitch: 5.0,
             gravity_locked: true,
-        });
+        }, 0);
         assert!(engine.tick(4_000).is_empty());
     }
 
@@ -617,7 +892,7 @@ mod tests {
             yaw: 4.0,
             pitch: 0.0,
             gravity_locked: true,
-        });
+        }, 0);
         let dt = 0.004f32;
         let held = motion(&engine.tick(4_000), MouseAxis::X);
         assert!(
@@ -657,7 +932,7 @@ mod tests {
             yaw: 4.0,
             pitch: 0.0,
             gravity_locked: true,
-        });
+        }, 0);
         assert!(motion(&engine.tick(4_000), MouseAxis::X) > 0.0);
         engine.process(event(InputSource::Button(GamepadButton::LeftShoulder), 0.0));
         assert_eq!(motion(&engine.tick(8_000), MouseAxis::X), 0.0);
@@ -679,7 +954,7 @@ mod tests {
             yaw: 1.0,
             pitch: 0.0,
             gravity_locked: true,
-        });
+        }, 0);
         let full = motion(&engine.tick(4_000), MouseAxis::X);
 
         // Below the soft-pull threshold nothing changes.
@@ -716,7 +991,7 @@ mod tests {
             yaw: 1.0,
             pitch: 0.0,
             gravity_locked: true,
-        });
+        }, 0);
         engine.tick(4_000);
         // A half pull is not a full pull: no dampening.
         engine.process(event(InputSource::Axis(GamepadAxis::LeftTrigger), 0.5));
@@ -745,7 +1020,7 @@ mod tests {
             yaw: 0.75,
             pitch: 0.0,
             gravity_locked: true,
-        });
+        }, 0);
         // Trigger past its soft pull: had dampening leaked into the stick
         // path, the deflection would be zeroed and no axis event emitted.
         engine.process(event(InputSource::Axis(GamepadAxis::RightTrigger), 0.6));

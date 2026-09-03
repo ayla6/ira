@@ -25,6 +25,8 @@ pub enum Request {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LaunchRequest {
     pub command: Vec<String>,
+    /// Pin discovery to one controller path instead of the first pad found.
+    pub device: Option<String>,
     pub env: Vec<(String, String)>,
     pub working_dir: Option<String>,
     pub profile: Option<String>,
@@ -84,6 +86,7 @@ mod tests {
     fn test_wire_request_roundtrip() {
         let request = Wire::Request(Request::Launch(LaunchRequest {
             command: vec!["game".into(), "--fullscreen".into()],
+            device: Some("/dev/input/event42".into()),
             env: vec![("DISPLAY".into(), ":0".into())],
             working_dir: Some("/games/dir".into()),
             profile: Some("/profiles/x.json".into()),
@@ -97,6 +100,7 @@ mod tests {
         match parsed {
             Wire::Request(Request::Launch(launch)) => {
                 assert_eq!(launch.command, ["game", "--fullscreen"]);
+                assert_eq!(launch.device.as_deref(), Some("/dev/input/event42"));
                 assert_eq!(launch.working_dir.as_deref(), Some("/games/dir"));
                 assert!(launch.pause_unfocused);
                 assert_eq!(launch.motion_port, Some(26760));

@@ -4,7 +4,7 @@
 //! cannot be reached or refuses, every caller falls back to the classic
 //! wrapper spawn — the game itself must always start.
 
-use ira_input_ipc::{DaemonClient, LaunchRequest, PROTOCOL_VERSION};
+use ira_input_ipc::{DaemonClient, LaunchRequest};
 use ira_models::ControllerInputMode;
 
 /// The input-related slice of a launch config, resolved for the daemon.
@@ -29,17 +29,12 @@ pub fn launch_via_daemon(
     }
     let binary = super::env_builder::input_binary_path()
         .ok_or_else(|| "ira-input binary was not found".to_string())?;
-    let mut client = DaemonClient::ensure_connected(&binary)?;
-    // A daemon from an older build would misunderstand the protocol; refuse
-    // here so the caller falls back instead of launching something broken.
-    let status = client.status()?;
-    if status.protocol_version != PROTOCOL_VERSION {
-        return Err(format!(
-            "daemon speaks protocol {}, this build speaks {PROTOCOL_VERSION}",
-            status.protocol_version
-        ));
-    }
+    // A daemon from an older build would misunderstand the protocol;
+    // connect_daemon refuses it so the caller falls back instead of
+    // launching something broken.
+    let mut client = DaemonClient::connect_daemon(&binary)?;
     client.begin_launch(LaunchRequest {
+        device: None,
         command: command.to_vec(),
         env: env.to_vec(),
         working_dir: working_dir.map(str::to_string),

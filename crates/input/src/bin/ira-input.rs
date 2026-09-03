@@ -48,6 +48,16 @@ fn main() {
         }
         return;
     }
+    // The daemon is the default session host; an explicit --no-daemon (or a
+    // command-less mapping session) stays in-process.
+    if !arguments.no_daemon && !arguments.command.is_empty() {
+        match ira_input::daemon::run_via_daemon(&arguments) {
+            Ok(code) => std::process::exit(code),
+            Err(reason) => eprintln!(
+                "ira-input: daemon unavailable ({reason}); running the session in-process"
+            ),
+        }
+    }
     match run_session(arguments) {
         Ok(code) => std::process::exit(code),
         Err(error) => {

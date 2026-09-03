@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use crate::protocol::{DaemonStatus, Event, LaunchRequest, Request, Response, Wire};
+use crate::protocol::{
+    DaemonStatus, Event, LaunchRequest, Request, Response, Wire, PROTOCOL_VERSION,
+};
 
 /// Where the daemon listens. Under `XDG_RUNTIME_DIR` (a normal desktop
 /// session) the socket lives in a per-user runtime directory; otherwise the
@@ -51,6 +53,21 @@ impl DaemonClient {
             std::thread::sleep(Duration::from_millis(50));
         }
         Err("ira-input daemon did not accept connections in time".to_string())
+    }
+
+    /// Connects (spawning the daemon when needed) and verifies it speaks
+    /// this build's protocol version. `Err` means "use whatever local
+    /// fallback the caller has".
+    pub fn connect_daemon(binary: &str) -> Result<Self, String> {
+        let mut client = Self::ensure_connected(binary)?;
+        let status = client.status()?;
+        if status.protocol_version != PROTOCOL_VERSION {
+            return Err(format!(
+                "daemon speaks protocol {}, this build speaks {PROTOCOL_VERSION}",
+                status.protocol_version
+            ));
+        }
+        Ok(client)
     }
 
     fn send(&mut self, message: &Wire) -> Result<(), String> {

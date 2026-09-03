@@ -298,7 +298,10 @@ fn start_session(launch: LaunchRequest) -> Result<SessionHandle, String> {
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     let arguments = Arguments {
-        device: None,
+        device: launch
+            .device
+            .as_deref()
+            .map(std::path::PathBuf::from),
         profile: launch.profile.as_deref().map(Path::new).map(Path::to_path_buf),
         calibration: launch.calibration.as_deref().map(Path::new).map(Path::to_path_buf),
         pause_unfocused: launch.pause_unfocused,
@@ -310,6 +313,7 @@ fn start_session(launch: LaunchRequest) -> Result<SessionHandle, String> {
         trace: false,
         command: launch.command.clone(),
         daemon: false,
+        no_daemon: false,
         env: Some(launch.env.clone()),
         working_dir: launch.working_dir.clone(),
         events: Some(event_tx),
@@ -412,6 +416,7 @@ mod tests {
         let code = client
             .launch_and_wait(
                 LaunchRequest {
+                    device: None,
                     command: vec!["sleep".into(), "0.3".into()],
                     env: vec![("PATH".into(), std::env::var("PATH").unwrap_or_default())],
                     working_dir: None,

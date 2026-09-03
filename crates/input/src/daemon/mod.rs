@@ -3,6 +3,7 @@
 //! pipeline). Shared by the wrapper binary and, later, the daemon server.
 
 pub mod args;
+mod client_mode;
 pub mod server;
 pub mod session;
 
@@ -13,6 +14,7 @@ mod target_env;
 mod trace;
 
 pub use args::{parse_arguments, Arguments};
+pub use client_mode::run_via_daemon;
 pub use session::run_session;
 
 /// Events a session reports to its host while it runs; the daemon server

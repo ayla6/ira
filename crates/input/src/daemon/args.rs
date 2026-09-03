@@ -17,6 +17,7 @@ pub struct Arguments {
     /// Daemon-only fields: they never come from the command line, only from
     /// a server assembling a session out of a Launch request.
     pub daemon: bool,
+    pub no_daemon: bool,
     pub(crate) env: Option<Vec<(String, String)>>,
     pub(crate) working_dir: Option<String>,
     pub(crate) events: Option<std::sync::mpsc::Sender<SessionEvent>>,
@@ -36,6 +37,7 @@ pub fn parse_arguments() -> Result<Arguments, String> {
         trace: false,
         command: Vec::new(),
         daemon: false,
+        no_daemon: false,
         env: None,
         working_dir: None,
         events: None,
@@ -101,9 +103,10 @@ pub fn parse_arguments() -> Result<Arguments, String> {
             "--probe-sensors" => arguments.probe_sensors = true,
             "--trace" => arguments.trace = true,
             "--daemon" => arguments.daemon = true,
+            "--no-daemon" => arguments.no_daemon = true,
             "--help" | "-h" => {
                 println!(
-                    "usage: ira-input [--vdf-import IN.vdf OUT.json] | --list | --daemon | \
+                    "usage: ira-input [--vdf-import IN.vdf OUT.json] | --list | --daemon | --no-daemon | \
                      [--device PATH] [--profile PATH] [--steam-app-id ID] [--trace] -- COMMAND"
                 );
                 std::process::exit(0);

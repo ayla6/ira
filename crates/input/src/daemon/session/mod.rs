@@ -170,6 +170,10 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                 } => {
                     pad_vendor = vendor;
                     pad_product = product;
+                    eprintln!(
+                        "ira-input: controller identity {vendor:04x}:{product:04x}; \
+                         applying per-controller calibration and deadzones"
+                    );
                     pipeline.gyro_processor = make_gyro_processor(
                         mapper.profile(),
                         vendor,

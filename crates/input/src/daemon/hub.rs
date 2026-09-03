@@ -248,8 +248,19 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
         }
         if pad.gamepad.is_none() && pad.reconnect_at.elapsed() >= RECONNECT_INTERVAL {
             pad.reconnect_at = Instant::now();
-            if let Some((name, path, _, _)) = pad.try_open() {
-                let _ = controller_events.send((true, name, path));
+            if let Some((name, path, vendor, product)) = pad.try_open() {
+                let _ = controller_events.send((true, name.clone(), path.clone()));
+                // Sessions that subscribed before the pad existed (the normal
+                // case: opening the pad probes the motion source for ~200 ms)
+                // need the identity to load their per-controller calibration.
+                for entry in routes.values() {
+                    let _ = entry.events.send(PadEvent::Connected {
+                        name: name.clone(),
+                        path: path.clone(),
+                        vendor,
+                        product,
+                    });
+                }
                 broadcast_motion(&routes, pad.motion_alive());
             }
         }

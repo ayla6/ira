@@ -9,16 +9,20 @@ use super::super::TraceState;
 /// tick. Both arrive pre-routed: this session owns focus.
 pub(crate) fn process_pad_events(
     pending: &mut Vec<super::super::hub::PadEvent>,
-    latest_sample: &mut Option<crate::SensorSample>,
+    samples: &mut Vec<crate::SensorSample>,
     mapper: &mut MappingEngine,
     report_rate: &mut ReportRateEstimator,
     mut targets: OutputTargets<'_>,
     trace: &mut TraceState,
 ) -> Result<(), String> {
+    // The report rate describes the pad's event cadence: one observation
+    // per drained batch, like the direct-read loop this replaced, not one
+    // per buffered event (those share microseconds).
+    let mut observed = false;
     for event in std::mem::take(pending) {
         match event {
             super::super::hub::PadEvent::Input(event) => {
-                report_rate.observe(Instant::now());
+                observed = true;
                 emit_mapped(
                     mapper,
                     OutputTargets {
@@ -31,12 +35,13 @@ pub(crate) fn process_pad_events(
                     trace,
                 )?;
             }
-            super::super::hub::PadEvent::Sample(sample) => {
-                *latest_sample = Some(sample);
-            }
+            super::super::hub::PadEvent::Sample(sample) => samples.push(sample),
             // Control variants are consumed in the session loop.
             _ => {}
         }
+    }
+    if observed {
+        report_rate.observe(Instant::now());
     }
     Ok(())
 }

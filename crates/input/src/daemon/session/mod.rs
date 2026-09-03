@@ -76,8 +76,11 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
         None
     };
     let mut hub_live = false;
-    let mut latest_sample = None;
     let mut pending: Vec<PadEvent> = Vec::new();
+    // Motion samples queued since the last tick. Every sample must be
+    // processed: dropping one stretches the next integration window over
+    // its time and turns real micro-motion into phantom rotation.
+    let mut samples: Vec<crate::SensorSample> = Vec::new();
 
     loop {
         let tick_interval = report_rate.interval();
@@ -210,12 +213,12 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
             // Frozen or unfocused: the hub forwards no inputs, and anything
             // already queued is stale — drop it along with motion samples.
             pending.clear();
-            latest_sample = None;
+            samples.clear();
             Ok(())
         } else {
             process_pad_events(
                 &mut pending,
-                &mut latest_sample,
+                &mut samples,
                 &mut mapper,
                 &mut report_rate,
                 OutputTargets {
@@ -227,7 +230,6 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                 &mut trace,
             )
             .and_then(|()| {
-                let reading = latest_sample.take();
                 process_tick(
                     &mut pipeline,
                     &mut mapper,
@@ -239,7 +241,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                     },
                     &mut trace,
                     run_tick,
-                    reading,
+                    std::mem::take(&mut samples),
                 )
             })
         };

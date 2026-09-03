@@ -106,16 +106,18 @@ pub(crate) fn process_tick(
     targets: OutputTargets<'_>,
     trace: &mut TraceState,
     run: bool,
-    reading: Option<SensorSample>,
+    mut readings: Vec<SensorSample>,
 ) -> Result<(), String> {
     if !run {
         return Ok(());
     }
-    // The raw sensor reading, kept unconverted so each consumer can request
-    // its own frame below. The hub samples the physical gyro and forwards
-    // it; a tick without a fresh sample still carries state forward.
+    // The raw sensor readings, kept unconverted so each consumer can request
+    // its own frame below. The hub forwards every physical sample; each is
+    // integrated with its own time delta — dropping one would stretch the
+    // next window and fabricate rotation out of micro-motion. A tick
+    // without fresh samples still carries state forward.
     let mut latest: Option<([f32; 3], [f32; 3], u64)> = None;
-    if let Some(sample) = reading {
+    for sample in readings.drain(..) {
         let dt = pipeline
             .last_sensor_us
             .map(|last| sample.timestamp_us.saturating_sub(last) as f32 / 1_000_000.0)

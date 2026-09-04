@@ -88,6 +88,10 @@ mod imp {
         pub hadj: RefCell<Option<gtk4::Adjustment>>,
         pub freeze: Cell<bool>,
         pub dirty: Cell<bool>,
+        /// The layout applied by the last allocation: (columns, item width,
+        /// item height, edge spacing). Scroll-to-index math reads it instead
+        /// of recomputing from the viewport size.
+        pub last_layout: Cell<(u32, i32, i32, i32)>,
 
         pub setup_fn: RefCell<Option<SetupFn>>,
         pub bind_fn: RefCell<Option<BindFn>>,
@@ -118,6 +122,7 @@ mod imp {
                 hadj: RefCell::new(None),
                 freeze: Cell::new(false),
                 dirty: Cell::new(false),
+                last_layout: Cell::new((1, min_w, min_h, 8)),
                 setup_fn: RefCell::new(None),
                 bind_fn: RefCell::new(None),
                 unbind_fn: RefCell::new(None),
@@ -291,6 +296,7 @@ mod imp {
 
             let (n_cols, item_w, item_h, sp) =
                 compute_grid_layout(width, min_w, min_sp, height, self.square_aspect());
+            self.last_layout.set((n_cols, item_w, item_h, sp));
             let avail_width = (width - 2 * sp).max(min_w);
             let row_h = item_h + sp;
             let n_rows = n_items.div_ceil(n_cols) as i32;
@@ -609,6 +615,21 @@ impl VirtualGrid {
 
     pub fn set_size_changed(&self, cb: SizeChangedFn) {
         *self.imp().size_changed_fn.borrow_mut() = Some(cb);
+    }
+
+    /// The layout applied by the last allocation: (columns, item width,
+    /// item height, edge spacing). Callers driving an external selection
+    /// (the big-picture grid) use it for move and scroll-to-index math.
+    pub fn current_layout(&self) -> (u32, i32, i32, i32) {
+        self.imp().last_layout.get()
+    }
+
+    /// Re-run the bind closure on every visible cell. Cells reflect state
+    /// they can't know on their own (an external selection highlight), so
+    /// after that state changes the visible range is bound again.
+    pub fn rebind_visible(&self) {
+        self.imp().dirty.set(true);
+        self.queue_allocate();
     }
 
     pub fn clear_recycle_pool(&self) {

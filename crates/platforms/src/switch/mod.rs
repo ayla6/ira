@@ -25,8 +25,10 @@ mod nacp;
 mod nca;
 mod registered;
 mod rom;
+mod xci;
 mod ryujinx;
 
+pub use config::resolve_rom;
 pub use nca::ControlMeta;
 
 /// Synthetic encrypted NCA fixtures shared across the switch tests.

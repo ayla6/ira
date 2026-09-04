@@ -146,7 +146,7 @@ fn id_from_entry_name(name: &str) -> EntryId {
     }
 }
 
-fn cstr(bytes: &[u8]) -> Option<&str> {
+pub(super) fn cstr(bytes: &[u8]) -> Option<&str> {
     let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
     std::str::from_utf8(&bytes[..end]).ok()
 }

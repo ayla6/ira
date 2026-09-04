@@ -42,14 +42,17 @@ pub struct ControlMeta {
     pub icon: Option<Vec<u8>>,
 }
 
-/// Decrypts the control NCA inside an NSP with the user's dumped keys and
-/// pulls the 256×256 icon PNG and the `control.nacp` application title out
-/// of its RomFS — the same bytes and names the emulators show. XCIs are
-/// HFS0 containers and are not read here.
-/// Decrypts the control NCA of an NSP and reads its application title and
-/// icon in one pass, or `None` when no key/section yields either.
+/// Decrypts a dump's control NCA with the user's dumped keys and pulls the
+/// 256×256 icon PNG and the `control.nacp` application title out of its
+/// RomFS — the same bytes and names the emulators show. NSPs (PFS0) and
+/// XCIs (HFS0 gamecards) are both read; `None` when no key/section yields
+/// either.
 pub fn extract_control_meta(path: &Path, keys: &SwitchKeys) -> Option<ControlMeta> {
-    let entries = read_pfs0_entries(path)?;
+    let entries = if super::xci::is_xci(path) {
+        super::xci::content_entries(path)?
+    } else {
+        read_pfs0_entries(path)?
+    };
     let tickets = inline_tickets(path, &entries);
     // Combined base+update NSPs carry two control NCAs and PFS0 order
     // depends on the dump tool, so the update's metadata must not win by
@@ -414,6 +417,65 @@ mod tests {
         std::fs::write(&keys_path, test_keys_text()).unwrap();
         let keys = SwitchKeys::from_file(&keys_path).unwrap();
 
+        let meta = extract_control_meta(&path, &keys).expect("control meta extracted");
+        assert_eq!(meta.icon.as_deref(), Some(b"JPEGDATA".as_slice()));
+        assert_eq!(meta.title.as_deref(), Some(SYNTH_TITLE));
+    }
+
+    /// Builds an HFS0 image (XCI partition shape): 0x40-byte entries,
+    /// name string table, data after both.
+    fn hfs0(entries: &[(&str, Vec<u8>)]) -> Vec<u8> {
+        let mut table = Vec::new();
+        let mut name_offsets = Vec::new();
+        for (name, _) in entries {
+            name_offsets.push(table.len() as u32);
+            table.extend_from_slice(name.as_bytes());
+            table.push(0);
+        }
+        while table.len() % 16 != 0 {
+            table.push(0);
+        }
+        let mut out = Vec::new();
+        out.extend_from_slice(b"HFS0");
+        out.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(table.len() as u32).to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        let mut data = Vec::new();
+        for (i, (_, content)) in entries.iter().enumerate() {
+            out.extend_from_slice(&(data.len() as u64).to_le_bytes());
+            out.extend_from_slice(&(content.len() as u64).to_le_bytes());
+            out.extend_from_slice(&0u64.to_le_bytes()); // metatable offset
+            out.extend_from_slice(&0u64.to_le_bytes()); // metatable size
+            out.extend_from_slice(&name_offsets[i].to_le_bytes());
+            out.extend_from_slice(&0u32.to_le_bytes()); // hashed flag
+            out.extend_from_slice(&[0u8; 0x18]);
+            data.extend_from_slice(content);
+        }
+        out.extend_from_slice(&table);
+        out.extend_from_slice(&data);
+        out
+    }
+
+    /// The gamecard shape: 0x1000-byte HEAD area, root HFS0 holding a
+    /// `secure` partition whose image is an HFS0 of its own.
+    #[test]
+    fn test_extract_control_meta_round_trips_synthetic_xci() {
+        let nca = synthetic_control_nca(0x0100a9400c9c2000);
+        let secure = hfs0(&[("9c4f2b099c79dedff9426c2722d09b18.nca", nca)]);
+        let root = hfs0(&[("update", Vec::new()), ("secure", secure)]);
+
+        let mut xci = vec![0u8; 0x1000];
+        xci[0..4].copy_from_slice(b"HEAD");
+        xci.extend_from_slice(&root);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("game.xci");
+        std::fs::write(&path, &xci).unwrap();
+        let keys_path = tmp.path().join("prod.keys");
+        std::fs::write(&keys_path, test_keys_text()).unwrap();
+        let keys = SwitchKeys::from_file(&keys_path).unwrap();
+
+        assert!(super::super::xci::is_xci(&path));
         let meta = extract_control_meta(&path, &keys).expect("control meta extracted");
         assert_eq!(meta.icon.as_deref(), Some(b"JPEGDATA".as_slice()));
         assert_eq!(meta.title.as_deref(), Some(SYNTH_TITLE));

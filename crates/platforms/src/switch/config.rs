@@ -165,3 +165,143 @@ mod tests {
         assert!(dirs.contains(&cache_home.join("AppImage-Cache/eden/game_list")));
     }
 }
+
+
+
+
+/// Game directories configured in every yuzu-family install's own
+/// settings (`qt-config.ini` `[Paths] gamedirs`), portable `user/config`
+/// trees included. The emulator library — not Ira's ROM roots — is the
+/// source of truth for where these files live.
+fn rom_game_dirs(executable: &str) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    for cfg_path in qt_config_paths(executable) {
+        if let Ok(text) = std::fs::read_to_string(&cfg_path) {
+            for dir in rom_game_dirs_in(&text) {
+                if !dirs.contains(&dir) {
+                    dirs.push(dir);
+                }
+            }
+        }
+    }
+    dirs
+}
+
+/// The usable game directories in one qt-config's text: existing folders
+/// from `gamedirs\<n>\path` keys — the `deep_scan`/`default` siblings and
+/// the virtual SDMC/UserNAND/SysNAND entries never appear here.
+fn rom_game_dirs_in(text: &str) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    for (section, key, value) in crate::qt_ini::QtIni::parse(text).entries {
+        // QtIni lowercases sections and keys; real files write `Paths`.
+        if section != "paths" || !key.starts_with("gamedirs\\") || !key.ends_with("\\path") {
+            continue;
+        }
+        let dir = PathBuf::from(crate::qt_ini::percent_decode(&value));
+        if dir.is_dir() && !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    dirs
+}
+
+/// Resolves a Switch ROM file name through every detected install's game
+/// directories. Emulator-library titles are stored relative to those
+/// directories, which exist whether or not Ira's own ROM roots are
+/// configured. Absolute inputs pass through unhandled — the caller keeps
+/// its own absolute-path branch.
+pub fn resolve_rom(path: &str, executable: &str) -> Option<std::path::PathBuf> {
+    resolve_rom_in(rom_game_dirs(executable), path)
+}
+
+fn resolve_rom_in(dirs: Vec<PathBuf>, path: &str) -> Option<std::path::PathBuf> {
+    if path.is_empty() {
+        return None;
+    }
+    let relative = std::path::Path::new(path);
+    if relative.is_absolute() {
+        return None;
+    }
+    dirs.into_iter()
+        .map(|dir| dir.join(relative))
+        .find(|candidate| candidate.is_file())
+}
+
+/// `qt-config.ini` of every yuzu-family install: each fork's shared XDG
+/// config, flatpak app dirs, and portable `user/config` trees.
+fn qt_config_paths(executable: &str) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    let push = |path: PathBuf, out: &mut Vec<PathBuf>| {
+        if !out.contains(&path) {
+            out.push(path);
+        }
+    };
+    let exes = std::iter::once(executable.to_string())
+        .chain(crate::switch_detect::detected_launch_commands());
+    for exe in exes {
+        if exe.is_empty() || exe.starts_with("flatpak:") {
+            continue;
+        }
+        let path = std::path::Path::new(&exe);
+        for root in [path.parent(), Some(path)].into_iter().flatten() {
+            push(root.join("user").join("config").join("qt-config.ini"), &mut out);
+        }
+        if let Some(app) = crate::emu_dirs::flatpak_app_dir(&exe) {
+            push(app.join("config").join("qt-config.ini"), &mut out);
+        }
+    }
+    // The forks this codebase recognizes; Eden reads their directories too.
+    for name in ["eden", "suyu", "citron", "sudachi", "yuzu"] {
+        push(
+            crate::emu_dirs::config_home().join(name).join("qt-config.ini"),
+            &mut out,
+        );
+    }
+    out
+}
+
+#[cfg(test)]
+mod xci_rom_tests {
+    use super::*;
+
+    fn ini_with_dirs(dirs: &[&str]) -> String {
+        let mut out = String::from("[Paths]\n");
+        out.push_str("gamedirs\\size=5\n");
+        for (i, dir) in dirs.iter().enumerate() {
+            out.push_str(&format!("gamedirs\\{}\\path={}\n", i + 1, dir));
+            out.push_str(&format!("gamedirs\\{}\\deep_scan\\default=true\n", i + 1));
+            out.push_str(&format!("gamedirs\\{}\\deep_scan=false\n", i + 1));
+        }
+        out.push_str("gamedirs\\6\\path=SDMC\n");
+        out
+    }
+
+    #[test]
+    fn test_rom_game_dirs_in_reads_gamedir_paths_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("switch dumps");
+        std::fs::create_dir_all(&real).unwrap();
+        let text = ini_with_dirs(&[&real.to_string_lossy(), "/gone/nsp", "SDMC"]);
+        let dirs = rom_game_dirs_in(&text);
+        assert_eq!(dirs, vec![real]);
+    }
+
+    #[test]
+    fn test_resolve_rom_in_finds_file_across_dirs_and_skips_absolute() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a");
+        let b = tmp.path().join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(b.join("Game [0100000000010000].nsp"), b"x").unwrap();
+
+        let dirs = vec![a.clone(), b.clone()];
+        assert_eq!(
+            resolve_rom_in(dirs.clone(), "Game [0100000000010000].nsp"),
+            Some(b.join("Game [0100000000010000].nsp"))
+        );
+        // Absolute paths and empties are the caller's business.
+        assert_eq!(resolve_rom_in(dirs.clone(), "/abs/game.nsp"), None);
+        assert_eq!(resolve_rom_in(dirs, ""), None);
+    }
+}

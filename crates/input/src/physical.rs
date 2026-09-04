@@ -6,12 +6,11 @@ use std::time::UNIX_EPOCH;
 
 use evdev::{AbsoluteAxisCode, Device, EventSummary, KeyCode};
 
+use crate::hid_8bitdo::{is_ultimate_2, VENDOR_8BITDO};
 use crate::{GamepadAxis, GamepadButton, InputEvent, InputSource};
 
 const AXIS_MIN: f32 = -1.0;
 const AXIS_MAX: f32 = 1.0;
-const EIGHTBITDO_VENDOR: u16 = 0x2dc8;
-const ULTIMATE_2_PRODUCT: u16 = 0x6012;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceInfo {
@@ -59,7 +58,7 @@ impl ReportedInputMode {
 impl DeviceInfo {
     pub fn family(&self) -> ControllerFamily {
         let name = self.name.to_ascii_lowercase();
-        if self.vendor == EIGHTBITDO_VENDOR || name.contains("8bitdo") {
+        if self.vendor == VENDOR_8BITDO || name.contains("8bitdo") {
             ControllerFamily::EightBitDo
         } else if self.vendor == 0x045e || name.contains("xbox") || name.contains("x-input") {
             ControllerFamily::Xbox
@@ -689,10 +688,6 @@ fn map_button_for_device(code: KeyCode, layout: ButtonLayout) -> Option<GamepadB
     }
 }
 
-fn is_ultimate_2(vendor: u16, product: u16) -> bool {
-    vendor == EIGHTBITDO_VENDOR && product == ULTIMATE_2_PRODUCT
-}
-
 fn read_axis_ranges(device: &Device) -> HashMap<AbsoluteAxisCode, (i32, i32)> {
     device
         .get_absinfo()
@@ -748,11 +743,11 @@ fn is_ira_virtual_device(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        button_layout, device_gone, is_ira_virtual_device, is_ultimate_2, map_button,
-        map_button_for_device, normalize_signed, normalize_trigger, poll_timeout_ms,
-        same_device, swap_face_buttons, synthesized_trigger_click, ButtonLayout,
-        ControllerFamily, DeviceInfo, ReportedInputMode, EIGHTBITDO_VENDOR, ULTIMATE_2_PRODUCT,
+        button_layout, device_gone, is_ira_virtual_device, map_button, map_button_for_device,
+        normalize_signed, normalize_trigger, poll_timeout_ms, same_device, swap_face_buttons,
+        synthesized_trigger_click, ButtonLayout, ControllerFamily, DeviceInfo, ReportedInputMode,
     };
+    use crate::hid_8bitdo::{is_ultimate_2, VENDOR_8BITDO, ULTIMATE_2_WIRELESS};
     use crate::GamepadButton;
     use std::path::PathBuf;
     use std::time::Duration;
@@ -977,8 +972,8 @@ mod tests {
         let device = DeviceInfo {
             path: PathBuf::from("/dev/input/event0"),
             name: "8BitDo Controller (DInput)".to_string(),
-            vendor: EIGHTBITDO_VENDOR,
-            product: ULTIMATE_2_PRODUCT,
+            vendor: VENDOR_8BITDO,
+            product: ULTIMATE_2_WIRELESS,
             version: 0,
             has_evdev_gyro: false,
             supported_buttons: Vec::new(),
@@ -991,8 +986,8 @@ mod tests {
         let device = DeviceInfo {
             path: PathBuf::from("/dev/input/event0"),
             name: "8BitDo Ultimate 2 Wireless Controller for PC".to_string(),
-            vendor: EIGHTBITDO_VENDOR,
-            product: ULTIMATE_2_PRODUCT,
+            vendor: VENDOR_8BITDO,
+            product: ULTIMATE_2_WIRELESS,
             version: 0,
             has_evdev_gyro: false,
             supported_buttons: Vec::new(),

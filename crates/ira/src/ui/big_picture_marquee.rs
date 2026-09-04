@@ -173,6 +173,20 @@ impl Marquee {
         self.upcast_ref()
     }
 
+    /// Plain large accent text (home) or a subtle translucent pill
+    /// (All Software, where the name hovers over a busy grid).
+    pub(super) fn set_tooltip_style(&self, pill: bool) {
+        let label_guard = self.imp().label.borrow();
+        let Some(label) = label_guard.as_ref() else {
+            return;
+        };
+        if pill {
+            label.add_css_class(super::css::CSS_BP_TOOLTIP);
+        } else {
+            label.remove_css_class(super::css::CSS_BP_TOOLTIP);
+        }
+    }
+
     /// The pill's rendered height, for callers that float it above a tile.
     pub(super) fn pill_height(&self) -> i32 {
         self.imp()

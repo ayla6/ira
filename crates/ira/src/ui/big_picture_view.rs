@@ -154,9 +154,6 @@ pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
         NavMsg::Nav(command) => route(state, command),
         NavMsg::Pads(status) => {
             if let Some(big) = state.borrow().big_picture.clone() {
-                if let Some(family) = status.family {
-                    big.bottom.set_pad_family(family);
-                }
                 big.bottom
                     .set_pad_status(status.count, status.battery);
             }

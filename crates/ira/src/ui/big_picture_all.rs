@@ -133,6 +133,7 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     // tile, riding the scroll. It draws over the games, so it lives in an
     // overlay that neither measures nor gets clipped by the viewport.
     let tooltip = Marquee::new(0, TOOLTIP_MAX_WIDTH);
+    tooltip.set_tooltip_style(true);
     let grid_overlay = gtk4::Overlay::new();
     grid_overlay.set_child(Some(&scrolled));
     grid_overlay.add_overlay(tooltip.widget());
@@ -272,9 +273,9 @@ impl AllSoftwareUi {
         self.update_tooltip();
     }
 
-    /// Float the name tooltip over the selected tile, above its top edge,
-    /// riding whatever scroll position the grid is at. The pill overlaps
-    /// the tile slightly when the tile touches the viewport top.
+    /// Float the name tooltip over the selected tile — above its top edge
+    /// normally, below it when the tile touches the viewport top — riding
+    /// whatever scroll position the grid is at.
     fn update_tooltip(&self) {
         if !self.tooltip.is_visible() {
             return;
@@ -284,15 +285,22 @@ impl AllSoftwareUi {
             return;
         };
         self.tooltip.set_text(&game.name);
-        let (_, item_w, _item_h, _sp) = self.grid.current_layout();
+        let (_, item_w, item_h, _sp) = self.grid.current_layout();
         let Some((x, y)) = self.grid.cell_geometry(self.selected.get()) else {
             return;
         };
         let scroll = self.scrolled.vadjustment().value();
         let pill_h = self.tooltip.pill_height() as f64;
         let center = x + item_w as f64 / 2.0;
-        let top = (y - scroll - pill_h - 6.0).max(2.0);
-        self.tooltip.set_position(center, top);
+        let tile_top = y - scroll;
+        let gap = 6.0;
+        let above = tile_top - pill_h - gap;
+        let ty = if above >= 2.0 {
+            above
+        } else {
+            tile_top + item_h as f64 + gap
+        };
+        self.tooltip.set_position(center, ty);
     }
 
     /// Move the highlight onto a game by key (a mouse click on a cell

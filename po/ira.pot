@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-04 13:36-0300\n"
+"POT-Creation-Date: 2026-09-04 16:30-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -117,102 +117,48 @@ msgstr ""
 msgid "{} - {}"
 msgstr ""
 
-#: crates/overlay/src/ui/renderer.rs:506
-#: crates/overlay/src/ui/model.rs:106
-msgid "Ira Overlay"
-msgstr ""
-
-#: crates/overlay/src/ui/renderer.rs:513
-#: crates/overlay/src/ui/model.rs:205
-#: crates/ira/src/ui/settings_pages.rs:892
-msgid "Screenshot"
-msgstr ""
-
-#: crates/overlay/src/ui/renderer.rs:516
-#: crates/overlay/src/ui/model.rs:208
-msgid "Record"
-msgstr ""
-
-#: crates/overlay/src/ui/renderer.rs:522
-msgid "Shift+Tab / Guide to toggle"
-msgstr ""
-
-#: crates/overlay/src/ui/renderer.rs:527
-msgid "F12 screenshot | F11 record"
-msgstr ""
-
-#: crates/overlay/src/ui/model.rs:123
-#, rust-format
-msgid "{}/{} ({}%)"
-msgstr ""
-
-#: crates/overlay/src/ui/model.rs:128
-msgid "No achievements"
-msgstr ""
-
-#: crates/overlay/src/ui/model.rs:140
-#, rust-format
-msgid "Playtime: {:.1}h"
-msgstr ""
-
-#: crates/overlay/src/ui/model.rs:142
-#, rust-format
-msgid "Playtime: {}m"
-msgstr ""
-
-#: crates/overlay/src/ui/model.rs:168
-msgid "Hidden achievement"
-msgstr ""
-
-#: crates/overlay/src/ui/model.rs:216
-msgid "Shift+Tab to toggle | Scroll to browse"
-msgstr ""
-
-#: crates/overlay/src/ui/widgets/stepper.rs:68
-#, rust-format
-msgid "< {} >"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture_home.rs:324
-#: crates/ira/src/ui/big_picture_all.rs:88
-msgid "All Software"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture_all.rs:93
-msgid "By name"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture_all.rs:114
-msgid "No games yet"
-msgstr ""
-
 #: crates/ira/src/ui/big_picture_view.rs:40
 #: crates/ira/src/ui/window.rs:130
 msgid "Ira"
 msgstr ""
 
 #: crates/ira/src/ui/big_picture_view.rs:101
-#: crates/ira/src/ui/big_picture_view.rs:235
-#: crates/ira/src/ui/big_picture_view.rs:245
+#: crates/ira/src/ui/big_picture_view.rs:238
+#: crates/ira/src/ui/big_picture_view.rs:250
 #: crates/ira/src/ui/context_menu.rs:82
 #: crates/ira/src/ui/play_button.rs:28
 #: crates/ira/src/ui/play_button.rs:48
 msgid "Play"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture_view.rs:235
+#: crates/ira/src/ui/big_picture_view.rs:237
+#: crates/ira/src/ui/big_picture_all.rs:93
 msgid "Back"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture_status.rs:172
+#: crates/ira/src/ui/big_picture_all.rs:104
+#: crates/ira/src/ui/big_picture_home.rs:293
+msgid "All Software"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture_all.rs:109
+msgid "By name"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture_all.rs:144
+msgid "No games yet"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture_status.rs:189
 msgid "System battery"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture_status.rs:173
-msgid "Controller battery"
+#: crates/ira/src/ui/big_picture_status.rs:281
+#, rust-format
+msgid "Controller battery: {}%"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture_status.rs:235
+#: crates/ira/src/ui/big_picture_status.rs:286
 #, rust-format
 msgid "Controllers connected: {}"
 msgstr ""
@@ -798,6 +744,12 @@ msgstr ""
 
 #: crates/ira/src/ui/settings_pages.rs:884
 msgid "Toggle overlay"
+msgstr ""
+
+#: crates/ira/src/ui/settings_pages.rs:892
+#: crates/overlay/src/ui/renderer.rs:513
+#: crates/overlay/src/ui/model.rs:205
+msgid "Screenshot"
 msgstr ""
 
 #: crates/ira/src/ui/settings_pages.rs:900
@@ -5467,4 +5419,54 @@ msgstr ""
 #: crates/ira/src/ui/add_game_method.rs:62
 msgid ""
 "Run installer files (exe, sh, GOG) and let Ira detect the installed game"
+msgstr ""
+
+#: crates/overlay/src/ui/renderer.rs:506
+#: crates/overlay/src/ui/model.rs:106
+msgid "Ira Overlay"
+msgstr ""
+
+#: crates/overlay/src/ui/renderer.rs:516
+#: crates/overlay/src/ui/model.rs:208
+msgid "Record"
+msgstr ""
+
+#: crates/overlay/src/ui/renderer.rs:522
+msgid "Shift+Tab / Guide to toggle"
+msgstr ""
+
+#: crates/overlay/src/ui/renderer.rs:527
+msgid "F12 screenshot | F11 record"
+msgstr ""
+
+#: crates/overlay/src/ui/model.rs:123
+#, rust-format
+msgid "{}/{} ({}%)"
+msgstr ""
+
+#: crates/overlay/src/ui/model.rs:128
+msgid "No achievements"
+msgstr ""
+
+#: crates/overlay/src/ui/model.rs:140
+#, rust-format
+msgid "Playtime: {:.1}h"
+msgstr ""
+
+#: crates/overlay/src/ui/model.rs:142
+#, rust-format
+msgid "Playtime: {}m"
+msgstr ""
+
+#: crates/overlay/src/ui/model.rs:168
+msgid "Hidden achievement"
+msgstr ""
+
+#: crates/overlay/src/ui/model.rs:216
+msgid "Shift+Tab to toggle | Scroll to browse"
+msgstr ""
+
+#: crates/overlay/src/ui/widgets/stepper.rs:68
+#, rust-format
+msgid "< {} >"
 msgstr ""

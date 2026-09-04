@@ -36,13 +36,11 @@ pub(super) enum NavCommand {
 }
 
 /// What the bottom rail shows about connected gamepads: the count for the
-/// dots, a battery when any pad reports one, and the controller family for
-/// the prompt glyphs.
+/// dots and a battery when any pad reports one.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct PadStatus {
     pub count: usize,
     pub battery: Option<(u8, bool)>,
-    pub family: Option<ira_input::ControllerFamily>,
 }
 
 /// Everything the reader thread reports: navigation steps and pad status.
@@ -206,7 +204,6 @@ fn reader_loop(tx: Sender<NavMsg>, save_dir: String) {
 #[derive(Default)]
 struct PadUi {
     count: usize,
-    family: Option<ira_input::ControllerFamily>,
     reader: Option<(std::path::PathBuf, ira_input::EightBitDoBatteryReader)>,
     hidraw_battery: Option<(u8, bool)>,
     sysfs_battery: Option<(u8, bool)>,
@@ -216,7 +213,6 @@ struct PadUi {
 impl PadUi {
     fn after_rescan(&mut self, pads: &[PhysicalGamepad]) {
         self.count = pads.len();
-        self.family = pads.first().map(|pad| pad.info().family());
         // Keep the reader only while its pad is still connected; losing it
         // invalidates the reading it produced.
         self.reader = self.reader.take().and_then(|(path, reader)| {
@@ -251,7 +247,6 @@ impl PadUi {
         let status = PadStatus {
             count: self.count,
             battery: self.hidraw_battery.or(self.sysfs_battery),
-            family: self.family,
         };
         if self.sent == Some(status) {
             return true;

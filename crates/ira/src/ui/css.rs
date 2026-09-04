@@ -12,6 +12,7 @@ pub const CSS_BP_PAD_LIT: &str = "bp-pad-lit";
 pub const CSS_BP_PROMPT: &str = "bp-prompt";
 pub const CSS_BP_PROMPT_KEY: &str = "bp-prompt-key";
 pub const CSS_BP_TITLE: &str = "bp-title";
+pub const CSS_BP_TOOLTIP: &str = "bp-tooltip";
 pub const CSS_BP_ALL: &str = "bp-all";
 pub const CSS_BP_ALL_TILE: &str = "bp-all-tile";
 pub const CSS_BP_ALL_PAGE: &str = "bp-all-page";
@@ -324,13 +325,13 @@ gridview.game-grid child:focus-within {
 }
 /* Couch rails: status strip on top, gamepads + prompts below. */
 .bp-status { padding: 16px 28px 4px 28px; }
-.bp-clock { font-size: 1.3em; font-weight: 800; }
+.bp-clock { font-size: 1.3em; }
 .bp-date { font-size: 1.05em; }
 .bp-batt { font-size: 1.05em; }
 .bp-bottom { padding: 14px 28px 20px 28px; }
 .bp-pad-dot { opacity: 0.25; }
 /* A connected pad lights its dot green, like a player LED. */
-.bp-pad-dot.bp-pad-lit { color: @green_4; }
+.bp-pad-dot.bp-pad-lit { color: @green_2; }
 .bp-prompt-key {
     min-width: 26px;
     min-height: 26px;
@@ -340,17 +341,22 @@ gridview.game-grid child:focus-within {
     font-weight: 800;
     font-size: 0.85em;
 }
-/* Floating title pill: a tooltip, not a heading — reads over the games
-   with the popover surface instead of shouting in accent color. */
+/* Floating title over the selected tile, Switch-style: big, colored,
+   no box at all. The All Software page adds .bp-tooltip for a subtler
+   translucent pill, since there the name hovers over a busy grid. */
 .bp-title {
-    font-size: 1.15em;
-    font-weight: 700;
-    background: @popover_bg_color;
+    font-size: 1.8em;
+    font-weight: 800;
+    color: @accent_color;
+}
+.bp-title.bp-tooltip {
+    font-size: 1.05em;
+    font-weight: 600;
     color: @theme_fg_color;
-    border: 1px solid alpha(@theme_fg_color, 0.14);
+    background: alpha(@popover_bg_color, 0.92);
+    border: 1px solid alpha(@theme_fg_color, 0.08);
     border-radius: 9px;
-    padding: 5px 12px;
-    box-shadow: 0 4px 14px 2px rgba(0,0,0,0.45);
+    padding: 4px 10px;
 }
 .bp-page-title { font-size: 1.45em; font-weight: 800; }
 .bp-all-tile {

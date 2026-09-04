@@ -317,6 +317,48 @@ pub fn is_decodable_image(data: &[u8]) -> bool {
     load_image_bytes(data).is_some()
 }
 
+/// SGDB serves a takedown notice card in place of removed art. The card
+/// only comes in a handful of fixed layouts (one per aspect ratio), so
+/// the fastest reliable check is an exact match on the 8x8 average hash
+/// of every observed variant: a thumbnail and a set lookup, no pixel
+/// scanning. New layouts are added with the `dmca_hash` example.
+const DMCA_CARD_HASHES: &[u64] = &[
+    0x000000ff7e000000,
+    0x0000007eff000000,
+    0x000000ff7f000000,
+    0x00007e7eff7e0000,
+];
+
+/// 8x8 average hash: downscale to 8x8 luma, set a bit per cell brighter
+/// than the mean.
+pub fn image_average_hash(data: &[u8]) -> Option<u64> {
+    let img = load_image_bytes(data)?;
+    let thumb = img.resize_exact(8, 8, image::imageops::FilterType::Triangle);
+    let gray = thumb.to_luma8();
+    let px = gray.as_raw();
+    let mean = px.iter().map(|&v| u32::from(v)).sum::<u32>() / px.len() as u32;
+    let mut hash = 0u64;
+    for (i, &v) in px.iter().enumerate() {
+        if u32::from(v) > mean {
+            hash |= 1 << i;
+        }
+    }
+    Some(hash)
+}
+
+fn is_dmca_hash(hash: u64) -> bool {
+    // The card is byte-identical per layout, so the normalized hash is
+    // deterministic: exact match only, never a fuzzy distance.
+    DMCA_CARD_HASHES.contains(&hash)
+}
+
+pub fn is_dmca_placeholder(data: &[u8]) -> bool {
+    let Some(hash) = image_average_hash(data) else {
+        return false;
+    };
+    is_dmca_hash(hash)
+}
+
 /// Open an image file (PNG, ICO, etc.) and re-save as lossless WebP,
 /// removing the original. Does nothing if the file is already WebP or is
 /// a JPEG (JPEGs are kept as-is to avoid generation loss).
@@ -669,7 +711,55 @@ mod tests {
             "already-small source should stay lossless WebP"
         );
     }
-}
+
+    #[test]
+    fn test_dmca_card_hashes_match_exactly() {
+        for reference in DMCA_CARD_HASHES {
+            assert!(is_dmca_hash(*reference));
+            // Near misses are just as unwanted as the card itself: real
+            // cover art must never trip the filter.
+            assert!(!is_dmca_hash(reference ^ 1));
+            assert!(!is_dmca_hash(reference ^ (1 << 63)));
+        }
+        assert!(!is_dmca_hash(0));
+        assert!(!is_dmca_hash(u64::MAX));
+    }
+
+    #[test]
+    fn test_image_average_hash_is_stable_across_sizes() {
+        // A notice-shaped card at two sizes hashes to nearly the same
+        // pattern: black background, bright centered band.
+        let draw = |width: u32, height: u32| {
+            let mut card = image::RgbaImage::new(width, height);
+            for (_, _, px) in card.enumerate_pixels_mut() {
+                *px = image::Rgba([8, 8, 8, 255]);
+            }
+            let band_top = (height as f64 * 0.42) as i32;
+            let band_h = (height as f64 * 0.16) as i32;
+            let band_x = (width as f64 * 0.12) as i32;
+            let band_w = (width as f64 * 0.76) as i32;
+            for y in band_top..band_top + band_h {
+                for x in band_x..band_x + band_w {
+                    if y < 0 || x < 0 || y >= height as i32 || x >= width as i32 {
+                        continue;
+                    }
+                    card.put_pixel(x as u32, y as u32, image::Rgba([240, 25, 127, 255]));
+                }
+            }
+            let mut bytes = Vec::new();
+            image::DynamicImage::ImageRgba8(card)
+                .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+                .unwrap();
+            bytes
+        };
+        let tall = image_average_hash(&draw(600, 900)).unwrap();
+        let tall_again = image_average_hash(&draw(600, 900)).unwrap();
+        let square = image_average_hash(&draw(512, 512)).unwrap();
+        // Deterministic render: identical bytes, identical hash.
+        assert_eq!(tall, tall_again);
+        // The layout hash itself is size-independent.
+        assert_eq!(tall, square);
+    }}
 
 #[cfg(test)]
 mod tga_tests {

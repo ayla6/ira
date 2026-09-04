@@ -1,7 +1,7 @@
 //! Controller navigation for big-picture mode: a background reader opens
 //! gamepads without grabbing them (couch mode runs without the input daemon,
-//! so the devices are free) and translates the left stick, the dpad and the
-//! A button into navigation commands delivered on the GTK main loop.
+//! so the devices are free) and translates sticks, dpads and the A/B buttons
+//! into navigation messages delivered on the GTK main loop.
 
 use super::state::SharedState;
 use ira_input::{discover_gamepads, PhysicalGamepad};
@@ -29,20 +29,32 @@ const IDLE_SLEEP_MS: u64 = 100;
 pub(super) enum NavCommand {
     Left,
     Right,
+    Up,
+    Down,
     Confirm,
+    Back,
 }
 
-/// Held-direction tracking shared by the stick and the dpad: whichever
-/// source commanded last wins, and holding it repeats after a delay.
+/// Everything the reader thread reports: navigation steps and the number of
+/// currently connected gamepads (the status rail's indicator).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum NavMsg {
+    Nav(NavCommand),
+    Pads(usize),
+}
+
+/// Held-direction tracking for one axis: whichever source commanded last
+/// wins, and holding it repeats after a delay. The stick and the dpad feed
+/// it; both use engage/release hysteresis so rim jitter doesn't stutter.
 #[derive(Default)]
-struct NavState {
+struct AxisNav {
     stick: Option<NavCommand>,
     dpad: Option<NavCommand>,
     active: Option<NavCommand>,
     next_repeat_ms: u64,
 }
 
-impl NavState {
+impl AxisNav {
     /// Re-derive the held command from the stick and dpad state. Returns a
     /// command when a direction just engaged or the stick rolled straight
     /// from one direction into another; holding steady returns nothing.
@@ -66,46 +78,60 @@ impl NavState {
         Some(cmd)
     }
 
-    fn apply_stick(&mut self, x: f32) {
+    /// A stick axis value mapped onto the axis's two commands. `positive`
+    /// is the command for deflection past +1.
+    fn apply_stick(&mut self, value: f32, positive: NavCommand, negative: NavCommand) {
         let threshold = if self.stick.is_some() {
             STICK_RELEASE
         } else {
             STICK_ENGAGE
         };
-        self.stick = if x >= threshold {
-            Some(NavCommand::Right)
-        } else if x <= -threshold {
-            Some(NavCommand::Left)
+        self.stick = if value >= threshold {
+            Some(positive)
+        } else if value <= -threshold {
+            Some(negative)
         } else {
             None
         };
     }
 
-    fn apply_dpad(&mut self, left: bool, pressed: bool) {
-        let cmd = if left {
-            NavCommand::Left
-        } else {
-            NavCommand::Right
-        };
-        let matches = self.dpad == Some(cmd);
-        self.dpad = match (pressed, matches) {
-            (true, _) => Some(cmd),
-            (false, true) => None,
-            (false, false) => self.dpad,
-        };
+    /// A dpad button press/release for one of the axis's two directions.
+    fn apply_button(&mut self, cmd: NavCommand, pressed: bool) {
+        if pressed {
+            self.dpad = Some(cmd);
+        } else if self.dpad == Some(cmd) {
+            self.dpad = None;
+        }
     }
 }
 
-/// Spawn the reader thread and drain its command channel on the main loop.
+/// Both axes of directional navigation, plus the moment they last ticked.
+#[derive(Default)]
+struct NavState {
+    h: AxisNav,
+    v: AxisNav,
+}
+
+impl NavState {
+    fn update(&mut self, now_ms: u64) -> Option<NavCommand> {
+        self.h.update(now_ms).or_else(|| self.v.update(now_ms))
+    }
+
+    fn repeat_due(&mut self, now_ms: u64) -> Option<NavCommand> {
+        self.h.repeat_due(now_ms).or_else(|| self.v.repeat_due(now_ms))
+    }
+}
+
+/// Spawn the reader thread and drain its message channel on the main loop.
 /// A fixed poll follows the calibration dialog's pattern; at 30 ms it is
 /// invisible next to the 450 ms repeat delay.
 pub(super) fn start(state: &SharedState) {
-    let (tx, rx) = std::sync::mpsc::channel::<NavCommand>();
+    let (tx, rx) = std::sync::mpsc::channel::<NavMsg>();
     let save_dir = state.borrow().save_dir.clone();
     let nav_state = state.clone();
     glib::timeout_add_local(Duration::from_millis(30), move || loop {
         match rx.try_recv() {
-            Ok(command) => super::big_picture_view::handle_nav(&nav_state, command),
+            Ok(msg) => super::big_picture_view::handle_msg(&nav_state, msg),
             Err(std::sync::mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => return glib::ControlFlow::Break,
         }
@@ -116,17 +142,24 @@ pub(super) fn start(state: &SharedState) {
         .expect("spawn big-picture navigation thread");
 }
 
-fn reader_loop(tx: Sender<NavCommand>, save_dir: String) {
+fn reader_loop(tx: Sender<NavMsg>, save_dir: String) {
     let calibration_path = ira_input::calibration_store_path(&save_dir);
     let mut pads: Vec<PhysicalGamepad> = Vec::new();
     let mut nav = NavState::default();
     let started = Instant::now();
     let mut last_rescan = 0u64;
+    let mut last_pad_count = None;
     loop {
         let now_ms = started.elapsed().as_millis() as u64;
         if now_ms.saturating_sub(last_rescan) >= RESCAN_EVERY_MS {
             last_rescan = now_ms;
             rescan(&mut pads, &calibration_path);
+            if last_pad_count != Some(pads.len()) {
+                last_pad_count = Some(pads.len());
+                if tx.send(NavMsg::Pads(pads.len())).is_err() {
+                    return; // receiver dropped: the app is shutting down
+                }
+            }
         }
         if pads.is_empty() {
             std::thread::sleep(Duration::from_millis(IDLE_SLEEP_MS));
@@ -149,7 +182,7 @@ fn reader_loop(tx: Sender<NavCommand>, save_dir: String) {
         }
         pads = live;
         if let Some(command) = nav.repeat_due(now_ms) {
-            if tx.send(command).is_err() {
+            if tx.send(NavMsg::Nav(command)).is_err() {
                 return; // receiver dropped: the app is shutting down
             }
         }
@@ -159,21 +192,37 @@ fn reader_loop(tx: Sender<NavCommand>, save_dir: String) {
 fn fold_event(
     nav: &mut NavState,
     event: ira_input::InputEvent,
-    tx: &Sender<NavCommand>,
+    tx: &Sender<NavMsg>,
     now_ms: u64,
 ) {
     let pressed = event.value > 0.5;
     match event.source {
-        InputSource::Button(GamepadButton::DpadLeft) => nav.apply_dpad(true, pressed),
-        InputSource::Button(GamepadButton::DpadRight) => nav.apply_dpad(false, pressed),
-        InputSource::Button(GamepadButton::A) if pressed => {
-            let _ = tx.send(NavCommand::Confirm);
+        InputSource::Button(GamepadButton::DpadLeft) => {
+            nav.h.apply_button(NavCommand::Left, pressed)
         }
-        InputSource::Axis(GamepadAxis::LeftX) => nav.apply_stick(event.value),
+        InputSource::Button(GamepadButton::DpadRight) => {
+            nav.h.apply_button(NavCommand::Right, pressed)
+        }
+        InputSource::Button(GamepadButton::DpadUp) => nav.v.apply_button(NavCommand::Up, pressed),
+        InputSource::Button(GamepadButton::DpadDown) => {
+            nav.v.apply_button(NavCommand::Down, pressed)
+        }
+        InputSource::Button(GamepadButton::A) if pressed => {
+            let _ = tx.send(NavMsg::Nav(NavCommand::Confirm));
+        }
+        InputSource::Button(GamepadButton::B) if pressed => {
+            let _ = tx.send(NavMsg::Nav(NavCommand::Back));
+        }
+        InputSource::Axis(GamepadAxis::LeftX) => {
+            nav.h.apply_stick(event.value, NavCommand::Right, NavCommand::Left)
+        }
+        InputSource::Axis(GamepadAxis::LeftY) => {
+            nav.v.apply_stick(event.value, NavCommand::Down, NavCommand::Up)
+        }
         _ => {}
     }
     if let Some(command) = nav.update(now_ms) {
-        let _ = tx.send(command);
+        let _ = tx.send(NavMsg::Nav(command));
     }
 }
 
@@ -204,7 +253,7 @@ mod tests {
     fn test_update_emits_once_per_engage() {
         let mut nav = NavState::default();
         assert_eq!(nav.update(0), None);
-        nav.apply_stick(0.9);
+        nav.h.apply_stick(0.9, NavCommand::Right, NavCommand::Left);
         assert_eq!(nav.update(10), Some(NavCommand::Right));
         assert_eq!(nav.update(20), None, "holding steady must not re-emit");
     }
@@ -212,40 +261,68 @@ mod tests {
     #[test]
     fn test_stick_uses_release_hysteresis() {
         let mut nav = NavState::default();
-        nav.apply_stick(0.9);
+        nav.h.apply_stick(0.9, NavCommand::Right, NavCommand::Left);
         assert_eq!(nav.update(0), Some(NavCommand::Right));
         // Between engage and release the direction is kept.
-        nav.apply_stick(0.5);
+        nav.h.apply_stick(0.5, NavCommand::Right, NavCommand::Left);
         assert_eq!(nav.update(10), None);
-        nav.apply_stick(0.2);
+        nav.h.apply_stick(0.2, NavCommand::Right, NavCommand::Left);
         assert_eq!(nav.update(20), None, "returning to center releases");
-        assert_eq!(nav.active, None);
+        assert_eq!(nav.h.active, None);
     }
 
     #[test]
     fn test_rolling_between_directions_reengages() {
         let mut nav = NavState::default();
-        nav.apply_stick(-0.9);
+        nav.h.apply_stick(-0.9, NavCommand::Right, NavCommand::Left);
         assert_eq!(nav.update(0), Some(NavCommand::Left));
-        nav.apply_stick(0.9);
+        nav.h.apply_stick(0.9, NavCommand::Right, NavCommand::Left);
         assert_eq!(nav.update(10), Some(NavCommand::Right));
     }
 
     #[test]
     fn test_dpad_drives_and_releases() {
         let mut nav = NavState::default();
-        nav.apply_dpad(true, true);
+        nav.h.apply_button(NavCommand::Left, true);
         assert_eq!(nav.update(0), Some(NavCommand::Left));
         assert_eq!(nav.update(10), None);
-        nav.apply_dpad(true, false);
+        nav.h.apply_button(NavCommand::Left, false);
         assert_eq!(nav.update(20), None);
-        assert_eq!(nav.active, None);
+        assert_eq!(nav.h.active, None);
+    }
+
+    #[test]
+    fn test_vertical_axis_maps_down_positive() {
+        let mut nav = NavState::default();
+        nav.v.apply_stick(0.9, NavCommand::Down, NavCommand::Up);
+        assert_eq!(nav.update(0), Some(NavCommand::Down));
+        nav.v.apply_stick(-0.9, NavCommand::Down, NavCommand::Up);
+        assert_eq!(nav.update(10), Some(NavCommand::Up));
+    }
+
+    #[test]
+    fn test_vertical_dpad_drives_and_releases() {
+        let mut nav = NavState::default();
+        nav.v.apply_button(NavCommand::Down, true);
+        assert_eq!(nav.update(0), Some(NavCommand::Down));
+        nav.v.apply_button(NavCommand::Down, false);
+        assert_eq!(nav.update(10), None);
+    }
+
+    #[test]
+    fn test_released_direction_does_not_repeat() {
+        let mut nav = NavState::default();
+        nav.h.apply_stick(1.0, NavCommand::Right, NavCommand::Left);
+        assert_eq!(nav.update(0), Some(NavCommand::Right));
+        nav.h.apply_stick(0.0, NavCommand::Right, NavCommand::Left);
+        assert_eq!(nav.update(10), None);
+        assert_eq!(nav.repeat_due(5_000), None);
     }
 
     #[test]
     fn test_repeat_waits_then_repeats() {
         let mut nav = NavState::default();
-        nav.apply_stick(1.0);
+        nav.h.apply_stick(1.0, NavCommand::Right, NavCommand::Left);
         assert_eq!(nav.update(100), Some(NavCommand::Right));
         assert_eq!(nav.repeat_due(100 + REPEAT_DELAY_MS - 1), None);
         assert_eq!(nav.repeat_due(100 + REPEAT_DELAY_MS), Some(NavCommand::Right));
@@ -257,12 +334,19 @@ mod tests {
     }
 
     #[test]
-    fn test_released_direction_does_not_repeat() {
+    fn test_axes_report_independently() {
         let mut nav = NavState::default();
-        nav.apply_stick(1.0);
+        nav.h.apply_stick(1.0, NavCommand::Right, NavCommand::Left);
+        nav.v.apply_stick(-1.0, NavCommand::Down, NavCommand::Up);
         assert_eq!(nav.update(0), Some(NavCommand::Right));
-        nav.apply_stick(0.0);
-        assert_eq!(nav.update(10), None);
-        assert_eq!(nav.repeat_due(5_000), None);
+        assert_eq!(nav.update(1), Some(NavCommand::Up));
+        // Each held axis repeats on its own schedule.
+        assert_eq!(nav.repeat_due(REPEAT_DELAY_MS), Some(NavCommand::Right));
+        assert_eq!(nav.repeat_due(REPEAT_DELAY_MS + 1), Some(NavCommand::Up));
+        // Releasing the stick silences only the horizontal axis.
+        nav.h.apply_stick(0.0, NavCommand::Right, NavCommand::Left);
+        assert_eq!(nav.update(REPEAT_DELAY_MS + 2), None);
+        assert_eq!(nav.repeat_due(REPEAT_DELAY_MS + 2), None);
+        assert_eq!(nav.v.repeat_due(1 + REPEAT_DELAY_MS + REPEAT_EVERY_MS), Some(NavCommand::Up));
     }
 }

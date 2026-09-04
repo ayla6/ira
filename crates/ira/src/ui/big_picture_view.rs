@@ -3,7 +3,7 @@
 //! content when Ira runs in big-picture mode (`--big-picture`,
 //! `IRA_BIG_PICTURE=1`, or under Gamescope).
 
-use super::big_picture_input::NavCommand;
+use super::big_picture_input::{NavCommand, NavMsg};
 use super::css::*;
 use super::recent_carousel::RecentRow;
 use super::recent_row::build_cover;
@@ -256,10 +256,19 @@ fn on_cover_clicked(state: &SharedState, index: usize) {
     }
 }
 
+pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
+    match msg {
+        NavMsg::Nav(command) => handle_nav(state, command),
+        NavMsg::Pads(_) => {}
+    }
+}
+
 pub(super) fn handle_nav(state: &SharedState, command: NavCommand) {
     match command {
         NavCommand::Left => move_selection(state, -1),
         NavCommand::Right => move_selection(state, 1),
+        // Vertical moves and back belong to the All Software grid.
+        NavCommand::Up | NavCommand::Down | NavCommand::Back => {}
         NavCommand::Confirm => confirm(state),
     }
 }

@@ -1,7 +1,11 @@
 mod achievement_rows;
 mod achievement_view;
 pub mod big_picture;
+mod big_picture_all;
+mod big_picture_home;
 mod big_picture_input;
+mod big_picture_marquee;
+mod big_picture_status;
 mod big_picture_view;
 mod background;
 mod context_menu;

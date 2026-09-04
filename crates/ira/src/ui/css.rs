@@ -1,8 +1,20 @@
 pub const CSS_BOXED_LIST: &str = "boxed-list";
-pub const CSS_BP_CAPTION: &str = "bp-caption";
 pub const CSS_BP_SQ: &str = "bp-sq";
 pub const CSS_BP_ROOT: &str = "bp-root";
 pub const CSS_BP_SELECTED: &str = "bp-selected";
+pub const CSS_BP_STATUS: &str = "bp-status";
+pub const CSS_BP_CLOCK: &str = "bp-clock";
+pub const CSS_BP_DATE: &str = "bp-date";
+pub const CSS_BP_BATT: &str = "bp-batt";
+pub const CSS_BP_BOTTOM: &str = "bp-bottom";
+pub const CSS_BP_PAD_DOT: &str = "bp-pad-dot";
+pub const CSS_BP_PROMPT: &str = "bp-prompt";
+pub const CSS_BP_PROMPT_KEY: &str = "bp-prompt-key";
+pub const CSS_BP_TITLE: &str = "bp-title";
+pub const CSS_BP_ALL: &str = "bp-all";
+pub const CSS_BP_ALL_TILE: &str = "bp-all-tile";
+pub const CSS_BP_ALL_PAGE: &str = "bp-all-page";
+pub const CSS_BP_PAGE_TITLE: &str = "bp-page-title";
 pub const CSS_CAPTION: &str = "caption";
 pub const CSS_CIRCULAR: &str = "circular";
 pub const CSS_CLICKABLE_STAT: &str = "clickable-stat";
@@ -279,15 +291,23 @@ gridview.game-grid child:focus-within {
     transform: none;
     box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
 }
-.bp-selected .game-cover-pic {
-    transform: scale(1.08);
-    outline: 3px solid @accent_color;
+/* The selected tile: a stronger ring than the desktop selection, an accent
+   halo, and the pop scale (which the row's own transform animates — no CSS
+   transform here). Kept after the :hover rule so it wins when both apply. */
+.bp-root .cover-item.bp-selected .game-cover-pic {
+    outline: 4px solid @accent_color;
     outline-offset: 5px;
-    box-shadow: 0 10px 34px 8px rgba(0,0,0,0.6);
+    box-shadow: 0 0 0 6px alpha(@accent_color, 0.30), 0 10px 34px 8px rgba(0,0,0,0.6);
 }
 .cover-item.bp-sq.bp-selected {
-    outline: 3px solid @accent_color;
+    outline: 4px solid @accent_color;
     outline-offset: 4px;
+    box-shadow: 0 0 0 6px alpha(@accent_color, 0.30), 0 2px 14px 3px rgba(0,0,0,0.4);
+}
+.cover-item.bp-all.bp-selected {
+    outline: 4px solid @accent_color;
+    outline-offset: 4px;
+    box-shadow: 0 0 0 6px alpha(@accent_color, 0.30);
 }
 .fetch-strip label {
     font-weight: normal;
@@ -297,7 +317,33 @@ gridview.game-grid child:focus-within {
     transform: none;
     box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
 }
-.bp-caption { font-size: 1.6em; font-weight: 700; }
+/* Couch rails: status strip on top, gamepads + prompts below. */
+.bp-status { padding: 18px 28px 4px 28px; }
+.bp-clock { font-size: 1.3em; font-weight: 800; }
+.bp-date { font-size: 1.05em; }
+.bp-batt { font-size: 1.05em; font-weight: 700; }
+.bp-bottom { padding: 14px 28px 20px 28px; }
+.bp-pad-dot { opacity: 0.25; }
+.bp-prompt-key {
+    min-width: 26px;
+    min-height: 26px;
+    padding: 0;
+    border-radius: 9999px;
+    border: 2px solid alpha(@theme_fg_color, 0.9);
+    font-weight: 800;
+    font-size: 0.85em;
+}
+/* Floating title over the selected tile, scrolling when it overflows. */
+.bp-title { font-size: 1.45em; font-weight: 800; color: @accent_color; }
+.bp-page-title { font-size: 1.45em; font-weight: 800; }
+.bp-all-tile {
+    border-radius: 9999px;
+    background: alpha(@theme_fg_color, 0.08);
+    border: 1px solid alpha(@theme_fg_color, 0.12);
+}
+.cover-item.bp-all:hover .bp-all-tile {
+    background: alpha(@theme_fg_color, 0.13);
+}
 /* SGDB picker: the per-item filter button floats on the art with a shadow
    (no pill background) and fades in while the pointer is anywhere over the
    card or row; hovering the button itself shows a disc so it reads as

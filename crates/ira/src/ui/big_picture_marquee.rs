@@ -105,6 +105,10 @@ impl Marquee {
         }
     }
 
+    pub(super) fn set_visible(&self, visible: bool) {
+        self.fixed.set_visible(visible);
+    }
+
     fn start_ticker(&self) {
         let sweep = Rc::clone(&self.sweep);
         let fixed = self.fixed.downgrade();

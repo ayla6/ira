@@ -237,7 +237,7 @@ pub(super) fn open_all(state: &SharedState) {
     big.all.ensure_opened();
 }
 
-fn show_home(state: &SharedState) {
+pub(super) fn show_home(state: &SharedState) {
     let Some(big) = state.borrow().big_picture.clone() else {
         return;
     };

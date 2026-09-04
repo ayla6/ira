@@ -4,6 +4,7 @@
 //! recycles cells); A launches, B returns home.
 
 use super::css::*;
+use super::big_picture_marquee::Marquee;
 use super::state::SharedState;
 use super::virtual_grid::VirtualGrid;
 use crate::Game;
@@ -63,6 +64,9 @@ pub(super) struct AllSoftwareUi {
     page: gtk4::Box,
     scrolled: gtk4::ScrolledWindow,
     grid: VirtualGrid,
+    /// The selected game's name, Switch-style, centered above the grid;
+    /// marquees when a long name overflows.
+    name: Marquee,
     empty: gtk4::Label,
     games: RefCell<Vec<Game>>,
     selected: Cell<usize>,
@@ -81,6 +85,16 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     header.set_margin_bottom(6);
     header.set_margin_start(28);
     header.set_margin_end(28);
+    // Controllers back out with B; the mouse needs a visible way home.
+    let back = gtk4::Button::from_icon_name("go-previous-symbolic");
+    back.add_css_class(CSS_FLAT);
+    back.set_tooltip_text(Some(&crate::tr!("Back")));
+    back.set_valign(gtk4::Align::Center);
+    {
+        let back_state = state.clone();
+        back.connect_clicked(move |_| super::big_picture_view::show_home(&back_state));
+    }
+    header.append(&back);
     let icon = gtk4::Image::from_icon_name("games-symbolic");
     icon.set_pixel_size(24);
     icon.set_valign(gtk4::Align::Center);
@@ -95,6 +109,11 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     ordering.add_css_class(CSS_DIM_LABEL);
     header.append(&ordering);
     page.append(&header);
+
+    let name = Marquee::new();
+    name.widget().set_halign(gtk4::Align::Center);
+    name.set_visible(false);
+    page.append(name.widget());
 
     let grid = VirtualGrid::new(220);
     grid.set_square(true);
@@ -121,6 +140,7 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         page,
         scrolled,
         grid,
+        name,
         empty,
         games: RefCell::new(Vec::new()),
         selected: Cell::new(0),
@@ -188,6 +208,10 @@ impl AllSoftwareUi {
         }
         self.empty.set_visible(games.is_empty());
         self.scrolled.set_visible(!games.is_empty());
+        self.name.set_visible(!games.is_empty());
+        if let Some(game) = games.get(selected) {
+            self.name.set_text(&game.name);
+        }
         *self.games.borrow_mut() = games.to_vec();
     }
 
@@ -211,16 +235,30 @@ impl AllSoftwareUi {
     }
 
     /// Point the highlight at `index`: update the shared key, restyle the
-    /// visible cells, and scroll the row into view.
+    /// visible cells, name the game, and scroll the row into view.
     fn apply_selection(&self, index: usize) {
         let game = self.games.borrow().get(index).map(|g| (game_key(g), g.clone()));
-        let Some((key, _)) = game else {
+        let Some((key, game)) = game else {
             return;
         };
         self.selected.set(index);
         self.selected_key.set(key);
         self.grid.rebind_visible();
+        self.name.set_text(&game.name);
         self.scroll_to_selected();
+    }
+
+    /// Move the highlight onto a game by key (a mouse click on a cell
+    /// selects what it clicked before launching it).
+    pub(super) fn select_key(&self, key: GameKey) {
+        let index = self
+            .games
+            .borrow()
+            .iter()
+            .position(|g| game_key(g) == key);
+        if let Some(index) = index {
+            self.apply_selection(index);
+        }
     }
 
     fn scroll_to_selected(&self) {
@@ -405,6 +443,11 @@ fn launch_from_cell(state: &SharedState, widget: &gtk4::Widget) {
         .find(|g| g.db_id == db_id && g.variant_id == variant_id.filter(|v| *v > 0))
         .cloned();
     if let Some(game) = game {
+        // The click selects what it clicked, then launches it — so the
+        // highlight never rests on a game the user did not point at.
+        if let Some(big) = state.borrow().big_picture.clone() {
+            big.all.select_key(game_key(&game));
+        }
         launch(state, &game);
     }
 }

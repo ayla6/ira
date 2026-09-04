@@ -274,6 +274,8 @@ impl BottomBar {
             self.pad_battery_icon
                 .set_icon_name(Some(&battery_icon_name(u32::from(percent), charging)));
             self.pad_battery_label.set_text(&format!("{percent}%"));
+            self.pad_battery
+                .set_tooltip_text(Some(&crate::tr!("Controller battery")));
         }
         self.pads.set_tooltip_text(Some(
             &crate::tr!("Controllers connected: {}").replacen("{}", &count.to_string(), 1),

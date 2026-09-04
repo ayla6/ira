@@ -19,6 +19,15 @@ fn default_language_preferences() -> Vec<String> {
     vec!["english".to_string()]
 }
 
+/// A SteamGridDB author whose art is filtered. `name` drives the filtering
+/// (the API matches authors by name); `steam64` links to their profile page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SgdbFilteredUser {
+    pub name: String,
+    #[serde(default)]
+    pub steam64: String,
+}
+
 fn default_save_dir() -> String {
     xdg_dir(xdg::BaseDirectories::new().get_data_home())
         .join("ira")
@@ -120,6 +129,14 @@ pub struct Config {
     pub show_hidden_games: bool,
     #[serde(default = "default_true")]
     pub big_picture_square_capsules: bool,
+    #[serde(default)]
+    pub grid_square_capsules: bool,
+    #[serde(default)]
+    pub sgdb_disabled_assets: Vec<String>,
+    #[serde(default)]
+    pub sgdb_filtered_users: Vec<SgdbFilteredUser>,
+    #[serde(default)]
+    pub sgdb_filtered_styles: Vec<String>,
     #[serde(default = "default_grid_cover_width")]
     pub grid_cover_width: i32,
     #[serde(default)]
@@ -257,6 +274,10 @@ impl Default for Config {
             close_to_background: false,
             show_hidden_games: false,
             big_picture_square_capsules: true,
+            grid_square_capsules: false,
+            sgdb_disabled_assets: Vec::new(),
+            sgdb_filtered_users: Vec::new(),
+            sgdb_filtered_styles: Vec::new(),
             grid_cover_width: DEFAULT_GRID_COVER_WIDTH,
             shadps4_enabled: false,
             shadps4_executable: String::new(),
@@ -382,6 +403,7 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<(), String> {
+        let _guard = crate::load::config_io_lock();
         let steam_err = secrets::set_secret("steam", &self.steam_api_key);
         let sgdb_err = secrets::set_secret("steamgriddb", &self.steam_griddb_api_key);
         let ra_web_err = secrets::set_secret("ra_web_api_key", &self.ra_web_api_key);
@@ -403,8 +425,17 @@ impl Config {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
+        // Keep the last known-good config so a future corruption is
+        // recoverable on load.
+        if path.is_file() {
+            let _ = std::fs::copy(&path, crate::load::backup_path());
+        }
+        // Write-then-rename: readers never observe a half-written JSON,
+        // even when saves race (settings dialog, background persist).
         let data = serde_json::to_string_pretty(&plaintext).map_err(|e| e.to_string())?;
-        std::fs::write(&path, data).map_err(|e| e.to_string())?;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, data).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
         Ok(())
     }
 }

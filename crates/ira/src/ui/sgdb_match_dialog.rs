@@ -86,6 +86,7 @@ pub(super) fn handle_unified_sgdb_result(
         let steam_dl = state.borrow().steam.clone();
         let sender = state.borrow().sender.clone();
         let save_dir = state.borrow().save_dir.clone();
+        let cfg_dl = state.borrow().cfg.clone();
         let game_for_dir = state
             .borrow()
             .games
@@ -99,6 +100,7 @@ pub(super) fn handle_unified_sgdb_result(
                 &steam_dl,
                 &sender,
                 &save_dir,
+                &cfg_dl,
                 game_for_dir.as_ref(),
                 db_id,
                 sgdb_id,
@@ -308,12 +310,13 @@ fn apply_sgdb_match(state: &SharedState, db_id: i64, sgdb_id: &str) {
         build_image_manager_content_with_drafts(s, game, win, pc, scache).upcast()
     });
 
-    let (steam, sender, save_dir, game_for_dir) = {
+    let (steam, sender, save_dir, cfg, game_for_dir) = {
         let s = state.borrow();
         (
             s.steam.clone(),
             s.sender.clone(),
             s.save_dir.clone(),
+            s.cfg.clone(),
             s.games.iter().find(|g| g.db_id == db_id).cloned(),
         )
     };
@@ -326,6 +329,7 @@ fn apply_sgdb_match(state: &SharedState, db_id: i64, sgdb_id: &str) {
             &steam,
             &sender,
             &save_dir,
+            &cfg,
             game_for_dir.as_ref(),
             db_id,
             sgdb_id_d,

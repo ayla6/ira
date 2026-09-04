@@ -22,43 +22,45 @@ impl SteamDataClient {
         resp.json().ok()
     }
 
-    pub(super) fn fetch_sgdb_endpoint(
+    /// Candidate asset URLs for `endpoint`, best first. SGDB serves its own
+    /// popularity order and the API exposes no score/likes fields, so the
+    /// auto-pick is simply the first entry left after filtered users are
+    /// removed; icons keep the narrowest-at-most-128px rule instead. Empty
+    /// when the request fails or nothing is left.
+    pub(super) fn fetch_sgdb_candidates(
         &self,
         endpoint: &str,
         dimensions: &[&str],
-    ) -> Option<String> {
+    ) -> Vec<String> {
         let base = format!("https://www.steamgriddb.com/api/v2/{}", endpoint);
         let url = if dimensions.is_empty() {
             base
         } else {
             format!("{}?dimensions={}", base, dimensions.join(","))
         };
-        let json = self.sgdb_get_json(&url)?;
-        let data = json.get("data")?.as_array()?;
-        if data.is_empty() {
-            return None;
+        let Some(json) = self.sgdb_get_json(&url) else {
+            return Vec::new();
+        };
+        let Some(data) = json.get("data").and_then(|d| d.as_array()) else {
+            return Vec::new();
+        };
+        let items = not_filtered(&data.iter().collect::<Vec<_>>(), &self.sgdb_filtered_users());
+        let items = not_style_filtered(&items, &self.sgdb_filtered_styles());
+        if items.is_empty() {
+            return Vec::new();
         }
         if endpoint.starts_with("icons") {
-            // Best-icon rule: prefer the narrowest candidate at most 128px
-            // wide; fall back to the first entry otherwise.
-            let mut best: Option<(&serde_json::Value, i64)> = None;
-            for item in data {
-                let w = item.get("width").and_then(|v| v.as_i64()).unwrap_or(9999);
-                if best.is_none() || (w <= 128 && w < best.unwrap().1) {
-                    best = Some((item, w));
-                }
-            }
-            best.map(|(item, _)| item)
-                .or(data.first())
-                .and_then(|item| item.get("url")?.as_str().map(|s| s.to_string()))
-        } else if !dimensions.is_empty() {
-            // A dimension-filtered query (square grids, headers) can match
-            // several sizes; the widest one carries the most detail.
-            data.iter()
-                .max_by_key(|item| item.get("width").and_then(|v| v.as_i64()).unwrap_or(0))
-                .and_then(|item| item.get("url")?.as_str().map(|s| s.to_string()))
+            best_icon_item(&items)
+                .and_then(|item| item.get("url"))
+                .and_then(|u| u.as_str())
+                .map(|u| vec![u.to_string()])
+                .unwrap_or_default()
         } else {
-            data[0].get("url")?.as_str().map(|s| s.to_string())
+            items
+                .iter()
+                .filter_map(|item| item.get("url").and_then(|u| u.as_str()))
+                .map(|u| u.to_string())
+                .collect()
         }
     }
 
@@ -119,6 +121,12 @@ impl SteamDataClient {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
+                let author_steam64 = item
+                    .get("author")
+                    .and_then(|a| a.get("steam64"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let mime = item
                     .get("mime")
                     .and_then(|v| v.as_str())
@@ -131,10 +139,18 @@ impl SteamDataClient {
                     height,
                     style,
                     author,
+                    author_steam64,
                     mime,
                 })
             })
             .collect();
+        // Filtered authors and styles stay visible in the manual picker but
+        // sink to the bottom, so they are only reached when nothing else
+        // fits.
+        let (visible, sunk): (Vec<SgdbAsset>, Vec<SgdbAsset>) = items.into_iter().partition(|a| {
+            !self.user_filtered(&a.author) && !self.style_filtered(&a.style)
+        });
+        let items = visible.into_iter().chain(sunk).collect();
         let has_more = (page as u64 + 1) * 30 < total;
         (items, has_more)
     }
@@ -163,6 +179,60 @@ impl SteamDataClient {
     }
 }
 
+/// An SGDB response item's author display name, empty when absent.
+fn item_author(item: &serde_json::Value) -> &str {
+    item.get("author")
+        .and_then(|a| a.get("name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+}
+
+/// Items not authored by a filtered user, preserving SGDB's order.
+fn not_filtered<'a>(
+    items: &[&'a serde_json::Value],
+    filtered: &[String],
+) -> Vec<&'a serde_json::Value> {
+    items
+        .iter()
+        .copied()
+        .filter(|item| {
+            !filtered
+                .iter()
+                .any(|user| user.eq_ignore_ascii_case(item_author(item)))
+        })
+        .collect()
+}
+
+/// Items whose style is not filtered out, preserving SGDB's order.
+fn not_style_filtered<'a>(
+    items: &[&'a serde_json::Value],
+    filtered: &[String],
+) -> Vec<&'a serde_json::Value> {
+    items
+        .iter()
+        .copied()
+        .filter(|item| {
+            let style = item.get("style").and_then(|v| v.as_str()).unwrap_or("");
+            !filtered.iter().any(|s| s.eq_ignore_ascii_case(style))
+        })
+        .collect()
+}
+
+/// Best-icon rule: prefer the narrowest candidate at most 128px wide;
+/// fall back to the first entry otherwise.
+fn best_icon_item<'a>(items: &[&'a serde_json::Value]) -> Option<&'a serde_json::Value> {
+    let mut best: Option<&serde_json::Value> = None;
+    let mut best_w = i64::MAX;
+    for item in items {
+        let w = item.get("width").and_then(|v| v.as_i64()).unwrap_or(9999);
+        if best.is_none() || (w <= 128 && w < best_w) {
+            best = Some(item);
+            best_w = w;
+        }
+    }
+    best.or_else(|| items.first().copied())
+}
+
 pub(super) fn sgdb_endpoint(asset: AssetType, is_steam_id: bool, id: &str) -> Option<String> {
     Some(match (asset, is_steam_id) {
         (AssetType::Icon, true) => format!("icons/steam/{}", id),
@@ -183,6 +253,74 @@ pub(super) fn sgdb_endpoint(asset: AssetType, is_steam_id: bool, id: &str) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn grid(id: i64, author: &str, width: i64) -> serde_json::Value {
+        json!({
+            "id": id,
+            "url": format!("https://cdn.example/{id}.png"),
+            "width": width,
+            "author": { "name": author },
+        })
+    }
+
+    #[test]
+    fn test_not_filtered_drops_filtered_authors_case_insensitive() {
+        let data = [
+            grid(1, "Kept", 600),
+            grid(2, "BadGuy", 600),
+            grid(3, "kept", 600),
+            grid(4, "badguy", 600),
+        ];
+        let refs: Vec<&serde_json::Value> = data.iter().collect();
+        let filtered = vec!["badguy".to_string()];
+        let items = not_filtered(&refs, &filtered);
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().all(|item| item["id"] != 2 && item["id"] != 4));
+    }
+
+    #[test]
+    fn test_not_filtered_keeps_items_without_author() {
+        let data = [json!({"id": 1, "url": "https://cdn.example/1.png"})];
+        let refs: Vec<&serde_json::Value> = data.iter().collect();
+        assert_eq!(not_filtered(&refs, &["x".to_string()]).len(), 1);
+    }
+
+    #[test]
+    fn test_not_filtered_preserves_sgdb_order() {
+        let data = [grid(1, "a", 600), grid(2, "bad", 600), grid(3, "b", 1024)];
+        let refs: Vec<&serde_json::Value> = data.iter().collect();
+        let items = not_filtered(&refs, &["bad".to_string()]);
+        let ids: Vec<i64> = items.iter().map(|item| item["id"].as_i64().unwrap()).collect();
+        assert_eq!(ids, vec![1, 3]);
+    }
+
+    #[test]
+    fn test_not_style_filtered_drops_named_styles() {
+        let data = [
+            json!({"id": 1, "url": "https://cdn.example/1.png", "style": "alternate"}),
+            json!({"id": 2, "url": "https://cdn.example/2.png", "style": "blurred"}),
+            json!({"id": 3, "url": "https://cdn.example/3.png", "style": "material"}),
+        ];
+        let refs: Vec<&serde_json::Value> = data.iter().collect();
+        let items = not_style_filtered(&refs, &["blurred".to_string()]);
+        let ids: Vec<i64> = items.iter().map(|item| item["id"].as_i64().unwrap()).collect();
+        assert_eq!(ids, vec![1, 3]);
+    }
+
+    #[test]
+    fn test_best_icon_item_prefers_narrowest_small_icon() {
+        let data = [grid(1, "a", 512), grid(2, "b", 64), grid(3, "c", 128)];
+        let refs: Vec<&serde_json::Value> = data.iter().collect();
+        assert_eq!(best_icon_item(&refs).unwrap()["id"], 2);
+    }
+
+    #[test]
+    fn test_best_icon_item_falls_back_to_first_when_all_large() {
+        let data = [grid(1, "a", 512), grid(2, "b", 256)];
+        let refs: Vec<&serde_json::Value> = data.iter().collect();
+        assert_eq!(best_icon_item(&refs).unwrap()["id"], 1);
+    }
 
     #[test]
     fn test_sgdb_endpoint_icon_steam() {

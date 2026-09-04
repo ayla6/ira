@@ -63,7 +63,16 @@ pub fn start_missing_images_fetch(state: &SharedState) {
         let s = state.borrow();
         s.games
             .iter()
-            .filter(|g| !g.sgdb_id.is_empty())
+            .filter(|g| {
+                !g.sgdb_id.is_empty()
+                    || matches!(
+                        g.kind,
+                        ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
+                    )
+                    // Steam games have no Steam-CDN square; the SGDB steam
+                    // endpoints serve it through the app id.
+                    || (g.trophy_source.has_steam_enrichment() && !g.app_id.is_empty())
+            })
             .cloned()
             .collect()
     };
@@ -94,32 +103,53 @@ pub fn start_missing_images_fetch(state: &SharedState) {
         )
     };
     let cancel = Arc::clone(&indicator.cancel);
+    let cfg = state.borrow().cfg.clone();
+    let switch_exe = cfg.console("switch").executable.clone();
     std::thread::spawn(move || {
         let mut fetched = 0usize;
         for (done, game) in games.iter().enumerate() {
             if cancel.load(Ordering::Relaxed) {
                 break;
             }
-            let entry = match ira_db::find_by_db_id(&db, game.db_id) {
-                Ok(Some(entry)) => entry,
-                _ => continue,
-            };
-            let dir = ira_parser::entry_data_dir(&save_dir, &entry);
-            let had = count_present(&dir);
-            let (icon, hero, grid, logo, header, square) =
-                steam.ensure_sgdb_assets_in_dir(&dir, &game.sgdb_id);
-            if count_present(&dir) > had {
+            // Matched and steam-enriched games get the full SGDB ensure
+            // (console games with their square kept native); unmatched PS4
+            // and Switch titles get their ROM's native icon imported into
+            // the square slot.
+            let mut changed = false;
+            if !game.sgdb_id.is_empty()
+                || (game.trophy_source.has_steam_enrichment() && !game.app_id.is_empty())
+            {
+                let entry = match ira_db::find_by_db_id(&db, game.db_id) {
+                    Ok(Some(entry)) => entry,
+                    _ => continue,
+                };
+                let dir = ira_parser::entry_data_dir(&save_dir, &entry);
+                let had = count_present(&dir);
+                let (icon, hero, grid, logo, header, square) =
+                    ensure_game_assets(&steam, &dir, &cfg, game, &switch_exe);
+                changed = count_present(&dir) > had;
+                if changed {
+                    let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
+                        db_id: game.db_id,
+                        sgdb_id: game.sgdb_id.clone(),
+                        icon,
+                        hero,
+                        grid,
+                        logo,
+                        header,
+                        square: square.clone(),
+                    });
+                }
+            } else if matches!(
+                game.kind,
+                ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
+            ) {
+                changed = !import_rom_square(&save_dir, &db, game, &cfg, &switch_exe)
+                    .is_empty();
+            }
+            if changed {
                 fetched += 1;
-                let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
-                    db_id: game.db_id,
-                    sgdb_id: game.sgdb_id.clone(),
-                    icon,
-                    hero,
-                    grid,
-                    logo,
-                    header,
-                    square,
-                });
+                let _ = sender.send(crate::AppMessage::SquareReady(game.db_id));
             }
             let _ = tx.send(FetchUpdate {
                 done: done + 1,
@@ -155,6 +185,156 @@ fn details_text(update: &FetchUpdate) -> String {
     }
 }
 
+/// Fill one game's square slot: the ROM's native icon for PS4/Switch games
+/// (never SGDB art), the SGDB square for other matched games. Returns the
+/// square path when a file landed on disk.
+pub(super) fn ensure_game_square(
+    steam: &ira_api::SteamDataClient,
+    save_dir: &str,
+    db: &ira_db::DbConn,
+    cfg: &ira_config::Config,
+    game: &Game,
+) -> String {
+    if matches!(
+        game.kind,
+        ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
+    ) {
+        let switch_exe = cfg.console("switch").executable.clone();
+        let square = import_rom_square(save_dir, db, game, cfg, &switch_exe);
+        if square.is_empty() && !game.sgdb_id.is_empty() {
+            // ROM icon extraction is not bulletproof (some NSP dumps yield
+            // nothing) — SGDB square art beats a missing capsule.
+            fetch_sgdb_square(steam, save_dir, db, game.db_id, &game.sgdb_id)
+        } else {
+            square
+        }
+    } else if !game.sgdb_id.is_empty() {
+        fetch_sgdb_square(steam, save_dir, db, game.db_id, &game.sgdb_id)
+    } else {
+        String::new()
+    }
+}
+
+/// Full SGDB asset ensure for one game. Matched games use their SGDB id;
+/// steam-enriched games without a match are served by the SGDB steam
+/// endpoints through their app id. PS4 and Switch titles never take SGDB
+/// squares — that slot is the ROM's native icon — so SGDB fills the other
+/// five slots and the native import fills the square.
+pub(super) fn ensure_game_assets(
+    steam: &ira_api::SteamDataClient,
+    dir: &std::path::Path,
+    cfg: &ira_config::Config,
+    game: &Game,
+    switch_exe: &str,
+) -> (String, String, String, String, String, String) {
+    let console = matches!(
+        game.kind,
+        ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
+    );
+    let steam_only = game.sgdb_id.is_empty()
+        && game.trophy_source.has_steam_enrichment()
+        && !game.app_id.is_empty();
+    let id = if game.sgdb_id.is_empty() {
+        if !steam_only {
+            return (
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            );
+        }
+        ira_api::types::SgdbId::Steam(&game.app_id)
+    } else {
+        ira_api::types::SgdbId::Game(&game.sgdb_id)
+    };
+    let skip: &[ira_models::AssetType] = if console {
+        &[ira_models::AssetType::Square]
+    } else {
+        &[]
+    };
+    let (icon, hero, grid, logo, header, square) = steam.ensure_sgdb_assets_in_dir(dir, id, skip);
+    let square = if console {
+        let native = native_square(dir, game, cfg, switch_exe);
+        if native.is_empty() {
+            // ROM icon extraction is not bulletproof (some NSP dumps yield
+            // nothing) — SGDB square art beats a missing capsule.
+            let (_, _, _, _, _, sgdb_square) = steam.ensure_sgdb_assets_in_dir(dir, id, &[]);
+            sgdb_square
+        } else {
+            native
+        }
+    } else {
+        square
+    };
+    (icon, hero, grid, logo, header, square)
+}
+
+/// Download the matched game's SGDB square (and any other missing SGDB
+/// asset alongside it; cached files are reused). Returns the square path.
+pub(super) fn fetch_sgdb_square(
+    steam: &ira_api::SteamDataClient,
+    save_dir: &str,
+    db: &ira_db::DbConn,
+    db_id: i64,
+    sgdb_id: &str,
+) -> String {
+    let Ok(Some(entry)) = ira_db::find_by_db_id(db, db_id) else {
+        return String::new();
+    };
+    let dir = ira_parser::entry_data_dir(save_dir, &entry);
+    let (_, _, _, _, _, square) =
+        steam.ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(sgdb_id), &[]);
+    square
+}
+
+/// Import a console game's ROM icon into its data dir as square.webp —
+/// the same native art the icon slot starts from, kept in its own slot so
+/// SGDB's small chat icon never replaces it here.
+pub(super) fn import_rom_square(
+    save_dir: &str,
+    db: &ira_db::DbConn,
+    game: &Game,
+    cfg: &ira_config::Config,
+    switch_exe: &str,
+) -> String {
+    let Ok(Some(entry)) = ira_db::find_by_db_id(db, game.db_id) else {
+        return String::new();
+    };
+    let dir = ira_parser::entry_data_dir(save_dir, &entry);
+    native_square(&dir, game, cfg, switch_exe)
+}
+
+/// Write the game's native ROM icon into `dir` as square.webp, replacing
+/// any previous square (SGDB art included). When extraction fails, an
+/// existing square file survives so custom art is never lost.
+fn native_square(
+    dir: &std::path::Path,
+    game: &Game,
+    cfg: &ira_config::Config,
+    switch_exe: &str,
+) -> String {
+    let bytes = super::image_manager_helpers::native_icon_bytes(
+        game,
+        cfg,
+        &cfg.azahar_executable,
+        &cfg.cemu_executable,
+        switch_exe,
+    );
+    if let Some(bytes) = bytes {
+        let _ = std::fs::create_dir_all(dir);
+        ira_parser::remove_image_variants(dir, ira_models::AssetType::Square.file_base());
+        let dest = dir.join(format!("{}.webp", ira_models::AssetType::Square.file_base()));
+        if std::fs::write(&dest, &bytes).is_ok() {
+            return dest.to_string_lossy().into_owned();
+        }
+    }
+    ira_parser::find_image_file(dir, ira_models::AssetType::Square.file_base())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 fn count_present(dir: &std::path::Path) -> usize {
     ira_models::AssetType::all()
         .iter()
@@ -173,6 +353,7 @@ fn drain_updates(indicator: &FetchIndicator, rx: std::sync::mpsc::Receiver<Fetch
     }));
     glib::timeout_add_local(Duration::from_millis(POLL_MS), move || {
         let mut fresh = false;
+        let mut disconnected = false;
         loop {
             match rx.try_recv() {
                 Ok(update) => {
@@ -180,9 +361,12 @@ fn drain_updates(indicator: &FetchIndicator, rx: std::sync::mpsc::Receiver<Fetch
                     fresh = true;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                // The thread may finish between two polls, leaving the
+                // final updates buffered next to the disconnect: drain
+                // everything first, render below, and only then tear down.
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    indicator.running.set(false);
-                    return glib::ControlFlow::Break;
+                    disconnected = true;
+                    break;
                 }
             }
         }
@@ -228,6 +412,10 @@ fn drain_updates(indicator: &FetchIndicator, rx: std::sync::mpsc::Receiver<Fetch
                 indicator.ring.set_fraction(fraction);
                 indicator.details.set_markup(&details_text(&update));
             }
+        }
+        if disconnected {
+            indicator.running.set(false);
+            return glib::ControlFlow::Break;
         }
         glib::ControlFlow::Continue
     });

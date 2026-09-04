@@ -283,7 +283,7 @@ fn ensure_default_icon(
         return;
     };
     let dir = ira_parser::game_data_dir(save_dir, game);
-    let icon = steam.force_download_sgdb(&dir, &sgdb_id, ira_models::AssetType::Icon, false);
+    let icon = steam.force_download_sgdb(&dir, ira_api::types::SgdbId::Game(&sgdb_id), ira_models::AssetType::Icon);
     if !icon.is_empty() {
         game.icon_path = icon;
     }

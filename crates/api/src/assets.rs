@@ -18,17 +18,25 @@ fn shrink(dir: &Path, asset: AssetType) {
 }
 
 impl SteamDataClient {
-    pub fn ensure_sgdb_assets(&self, sgdb_id: &str) -> (String, String, String, String, String, String) {
+    pub fn ensure_sgdb_assets(
+        &self,
+        sgdb_id: &str,
+    ) -> (String, String, String, String, String, String) {
         let dir = self.sgdb_dir(sgdb_id);
-        self.ensure_sgdb_assets_in_dir(&dir, sgdb_id)
+        self.ensure_sgdb_assets_in_dir(&dir, crate::types::SgdbId::Game(sgdb_id), &[])
     }
 
+    /// Fetch every enabled SGDB asset type into `dir` (cached files are
+    /// reused). Types in `skip` are not touched at all — used to keep the
+    /// square slot native for console games. `id` picks the endpoint
+    /// family: an SGDB id or a Steam app id.
     pub fn ensure_sgdb_assets_in_dir(
         &self,
         dir: &Path,
-        sgdb_id: &str,
+        id: crate::types::SgdbId,
+        skip: &[AssetType],
     ) -> (String, String, String, String, String, String) {
-        let _s = tracing::info_span!("ensure_sgdb_assets_in_dir", sgdb_id).entered();
+        let _s = tracing::info_span!("ensure_sgdb_assets_in_dir", id = %id.as_str()).entered();
         let _ = std::fs::create_dir_all(dir);
 
         let mut icon_path = String::new();
@@ -46,13 +54,21 @@ impl SteamDataClient {
             (AssetType::Header, &mut header_path),
             (AssetType::Square, &mut square_path),
         ] {
+            if skip.contains(&asset_type) {
+                continue;
+            }
+            // Disabled categories keep whatever is already on disk but are
+            // never fetched; existing files are returned either way.
+            if !self.sgdb_auto_enabled(asset_type) {
+                continue;
+            }
             *path = if let Some(existing) = ira_parser::find_image_file(dir, asset_type.file_base())
             {
                 let p = existing.to_string_lossy().into_owned();
                 shrink(dir, asset_type);
                 p
             } else {
-                self.force_download_sgdb(dir, sgdb_id, asset_type, false)
+                self.force_download_sgdb(dir, id, asset_type)
             };
         }
 
@@ -93,13 +109,17 @@ impl SteamDataClient {
         if let Some(cached) = self.find_cached_icon(app_id) {
             return cached.to_string_lossy().into_owned();
         }
-        let Some(url) = crate::sgdb::sgdb_endpoint(AssetType::Icon, true, app_id)
-            .and_then(|endpoint| self.fetch_sgdb_endpoint(&endpoint, &[]))
-        else {
-            return String::new();
-        };
+        let candidates = crate::sgdb::sgdb_endpoint(AssetType::Icon, true, app_id)
+            .map(|endpoint| self.fetch_sgdb_candidates(&endpoint, &[]))
+            .unwrap_or_default();
         ira_parser::remove_image_variants(dir, AssetType::Icon.file_base());
-        self.download_webp(dir, AssetType::Icon.file_base(), &url)
+        for url in candidates {
+            let path = self.download_webp(dir, AssetType::Icon.file_base(), &url);
+            if !path.is_empty() {
+                return path;
+            }
+        }
+        String::new()
     }
 
     pub fn ensure_grids(&self, app_id: &str) -> (String, String, String) {
@@ -185,64 +205,70 @@ impl SteamDataClient {
         }
     }
 
-    pub fn force_download_sgdb(
-        &self,
-        dir: &Path,
-        id: &str,
-        asset: AssetType,
-        is_steam_id: bool,
-    ) -> String {
-        let _s = tracing::info_span!("force_download_sgdb", sgdb_id = id, asset = %asset).entered();
+    pub fn force_download_sgdb(&self, dir: &Path, id: crate::types::SgdbId, asset: AssetType) -> String {
+        let _s = tracing::info_span!("force_download_sgdb", sgdb_id = id.as_str(), asset = %asset)
+            .entered();
         let _ = std::fs::create_dir_all(dir);
-        let endpoint = match crate::sgdb::sgdb_endpoint(asset, is_steam_id, id) {
+        let endpoint = match crate::sgdb::sgdb_endpoint(asset, id.is_steam(), id.as_str()) {
             Some(e) => e,
             None => return String::new(),
         };
-        let url = match self.fetch_sgdb_endpoint(&endpoint, asset.sgdb_dimensions()) {
-            Some(u) => u,
-            None => return String::new(),
-        };
+        let candidates = self.fetch_sgdb_candidates(&endpoint, asset.sgdb_dimensions());
+        if candidates.is_empty() {
+            return String::new();
+        }
 
         let base_name = asset.file_base();
         ira_parser::remove_image_variants(dir, base_name);
 
-        let r = if asset == AssetType::Icon {
-            // Icon URLs frequently end in .ico; download_webp decodes fully
-            // in memory so a bad dump never lands on disk.
-            self.download_webp(dir, base_name, &url)
-        } else {
-            let ext = Path::new(&url)
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("png");
-            let dest = dir.join(format!("{}.{}", base_name, ext));
-            let is_png = ext.eq_ignore_ascii_case("png");
-            let r = if is_png {
-                if self.download_file(&url, &dest).is_ok() {
-                    dest.to_string_lossy().into_owned()
-                } else {
-                    String::new()
-                }
-            } else {
-                self.fetch_image(&url, &dest)
+        // Try candidates in SGDB's popularity order, rejecting DMCA takedown
+        // notice cards before anything lands on disk.
+        for url in candidates {
+            let Ok(bytes) = self.download_bytes(&url) else {
+                continue;
             };
-            if r.is_empty() {
-                r
-            } else {
-                ira_parser::convert_to_lossless_webp(&dest);
-                let webp = dir.join(format!("{base_name}.webp"));
-                if webp.is_file() {
-                    webp.to_string_lossy().into_owned()
-                } else {
-                    r
-                }
+            if ira_parser::is_dmca_placeholder(&bytes) {
+                continue;
             }
-        };
-
-        if !r.is_empty() {
-            shrink(dir, asset);
+            let path = self.persist_sgdb_bytes(dir, base_name, &url, asset, &bytes);
+            if !path.is_empty() {
+                shrink(dir, asset);
+                return path;
+            }
         }
-        r
+        String::new()
+    }
+
+    /// Persist already-validated image bytes under `{base_name}`: icons are
+    /// re-encoded to lossless WebP in memory so a bad dump (.ico payloads
+    /// included) never lands on disk; other assets keep their original
+    /// extension and are converted in place afterwards.
+    fn persist_sgdb_bytes(
+        &self,
+        dir: &Path,
+        base_name: &str,
+        url: &str,
+        asset: AssetType,
+        bytes: &[u8],
+    ) -> String {
+        if asset == AssetType::Icon {
+            return self.store_image_bytes(dir, base_name, bytes);
+        }
+        let ext = Path::new(url)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("png");
+        let dest = dir.join(format!("{}.{}", base_name, ext));
+        if std::fs::write(&dest, bytes).is_err() {
+            return String::new();
+        }
+        ira_parser::convert_to_lossless_webp(&dest);
+        let webp = dir.join(format!("{base_name}.webp"));
+        if webp.is_file() {
+            webp.to_string_lossy().into_owned()
+        } else {
+            dest.to_string_lossy().into_owned()
+        }
     }
 
     // ── shared Steam CDN / WebP flows ───────────────────────────────────
@@ -327,8 +353,21 @@ impl SteamDataClient {
             .download_bytes(url)
             .ok()
             .filter(|bytes| ira_parser::is_decodable_image(bytes))
+            .filter(|bytes| !ira_parser::is_dmca_placeholder(bytes))
             .and_then(|bytes| ira_parser::convert_bytes_to_lossless_webp(&bytes))
         {
+            Some(webp) if std::fs::write(&dest_webp, &webp).is_ok() => {
+                dest_webp.to_string_lossy().into_owned()
+            }
+            _ => String::new(),
+        }
+    }
+
+    /// Re-encode already-downloaded image bytes as lossless WebP at
+    /// `{base_name}.webp` in `dir`.
+    fn store_image_bytes(&self, dir: &Path, base_name: &str, bytes: &[u8]) -> String {
+        let dest_webp = dir.join(format!("{base_name}.webp"));
+        match ira_parser::convert_bytes_to_lossless_webp(bytes) {
             Some(webp) if std::fs::write(&dest_webp, &webp).is_ok() => {
                 dest_webp.to_string_lossy().into_owned()
             }

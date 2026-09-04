@@ -81,13 +81,14 @@ pub fn match_game_to_steam(
 }
 
 pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
-    let (steam, sender, db, save_dir) = {
+    let (steam, sender, db, save_dir, cfg) = {
         let s = state.borrow();
         (
             s.steam.clone(),
             s.sender.clone(),
             s.db.clone(),
             s.save_dir.clone(),
+            s.cfg.clone(),
         )
     };
     std::thread::spawn(move || {
@@ -98,56 +99,75 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
         if let Err(e) = ira_db::set_manual_unmatch(&db, db_id, false) {
             eprintln!("match_game_to_sgdb: set_manual_unmatch failed: {}", e);
         }
-        let dir = if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, db_id) {
-            ira_parser::entry_data_dir(&save_dir, &entry)
-        } else {
-            ira_parser::sgdb_data_dir(&save_dir, &sgdb_id)
+        let entry = ira_db::find_by_db_id(&db, db_id).ok().flatten();
+        let (dir, game) = match &entry {
+            Some(e) => (
+                ira_parser::entry_data_dir(&save_dir, e),
+                Some(sgdb_game_from_entry(e, &sgdb_id)),
+            ),
+            None => (ira_parser::sgdb_data_dir(&save_dir, &sgdb_id), None),
         };
-        let (icon, hero, grid, logo, header, square) = steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id);
-
-        if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, db_id) {
-            let game = Game {
-                app_id: String::new(),
-                kind: entry.kind,
-                trophy_source: entry.trophy_source,
-                platform_id: entry.platform_id.clone(),
-                db_id: entry.id,
-                name: entry.title.clone(),
-                name_lower: entry.title.to_lowercase(),
-                icon_path: icon,
-                hero_image_path: hero,
-                grid_path: grid,
-                header_path: header,
-                logo_path: logo,
-                square_path: square.clone(),
-                achievements: Vec::new(),
-                earned_count: 0,
-                total_count: 0,
-                hidden: entry.hidden,
-                slug: String::new(),
-                playtime: 0.0,
-                last_played: entry.last_played,
-                logo_position: entry.logo_position.clone(),
-                logo_size: entry.logo_size,
-                manual_unmatch: entry.manual_unmatch,
-                sort_title: entry.sort_title.clone(),
-                game_path: String::new(),
-                sgdb_id,
-                shadps4_version: entry.shadps4_version.clone(),
-                release_date: entry.release_date.clone(),
-                release_timestamp: entry.release_timestamp,
-                metacritic_score: entry.metacritic_score,
-                steam_review_score: entry.steam_review_score,
-                steam_review_count: entry.steam_review_count,
-                ra_core: entry.ra_core.clone(),
-                emulator_override: entry.emulator_override.clone(),
-                rom_path: entry.rom_path.clone(),
-                game_folder: entry.game_folder.clone(),
-                variant_id: None,
-            };
-            let _ = sender.send(AppMessage::NewGame(game));
-        }
+        let switch_exe = cfg.console("switch").executable.clone();
+        let (icon, hero, grid, logo, header, square) = match &game {
+            Some(g) => super::fetch_images::ensure_game_assets(&steam, &dir, &cfg, g, &switch_exe),
+            None => steam.ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(&sgdb_id), &[]),
+        };
+        let Some(mut game) = game else {
+            return;
+        };
+        game.icon_path = icon;
+        game.hero_image_path = hero;
+        game.grid_path = grid;
+        game.logo_path = logo;
+        game.header_path = header;
+        game.square_path = square;
+        let _ = sender.send(AppMessage::NewGame(game));
     });
+}
+
+/// The display `Game` for a freshly matched SGDB entry, before any asset
+/// paths are filled in. `game_path` carries the ROM path so the native
+/// icon import can find console ROMs.
+fn sgdb_game_from_entry(entry: &ira_models::GameEntry, sgdb_id: &str) -> Game {
+    Game {
+        app_id: String::new(),
+        kind: entry.kind,
+        trophy_source: entry.trophy_source,
+        platform_id: entry.platform_id.clone(),
+        db_id: entry.id,
+        name: entry.title.clone(),
+        name_lower: entry.title.to_lowercase(),
+        icon_path: String::new(),
+        hero_image_path: String::new(),
+        grid_path: String::new(),
+        header_path: String::new(),
+        logo_path: String::new(),
+        square_path: String::new(),
+        achievements: Vec::new(),
+        earned_count: 0,
+        total_count: 0,
+        hidden: entry.hidden,
+        slug: String::new(),
+        playtime: 0.0,
+        last_played: entry.last_played,
+        logo_position: entry.logo_position.clone(),
+        logo_size: entry.logo_size,
+        manual_unmatch: entry.manual_unmatch,
+        sort_title: entry.sort_title.clone(),
+        game_path: entry.rom_path.clone(),
+        sgdb_id: sgdb_id.to_string(),
+        shadps4_version: entry.shadps4_version.clone(),
+        release_date: entry.release_date.clone(),
+        release_timestamp: entry.release_timestamp,
+        metacritic_score: entry.metacritic_score,
+        steam_review_score: entry.steam_review_score,
+        steam_review_count: entry.steam_review_count,
+        ra_core: entry.ra_core.clone(),
+        emulator_override: entry.emulator_override.clone(),
+        rom_path: entry.rom_path.clone(),
+        game_folder: entry.game_folder.clone(),
+        variant_id: None,
+    }
 }
 
 /// Persist accepting an SGDB match on the DB side: store the SGDB id and,
@@ -171,13 +191,15 @@ pub(crate) fn persist_sgdb_match(
 
 /// Worker-thread tail shared by the SGDB-match flows: resolve the asset
 /// directory (the matched game's own kind-aware directory when known, else
-/// the bare SGDB-id pool), download the asset set into it, and announce the
-/// resulting paths to the UI. Purely blocking work — call from a spawned
-/// thread; each caller keeps its own tracing span and any stagger sleep.
+/// the bare SGDB-id pool), download the asset set into it (console games
+/// keep their square native), and announce the resulting paths to the UI.
+/// Purely blocking work — call from a spawned thread; each caller keeps its
+/// own tracing span and any stagger sleep.
 pub(crate) fn fetch_and_report_sgdb_assets(
     steam: &Arc<SteamDataClient>,
     sender: &AppSender,
     save_dir: &str,
+    cfg: &ira_config::Config,
     game_for_dir: Option<&Game>,
     db_id: i64,
     sgdb_id: String,
@@ -186,7 +208,13 @@ pub(crate) fn fetch_and_report_sgdb_assets(
         Some(g) => ira_parser::game_data_dir(save_dir, g),
         None => ira_parser::sgdb_data_dir(save_dir, &sgdb_id),
     };
-    let (icon, hero, grid, logo, header, square) = steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id);
+    let (icon, hero, grid, logo, header, square) = match game_for_dir {
+        Some(g) => {
+            let switch_exe = cfg.console("switch").executable.clone();
+            super::fetch_images::ensure_game_assets(steam, &dir, cfg, g, &switch_exe)
+        }
+        None => steam.ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(&sgdb_id), &[]),
+    };
     let _ = sender.send(AppMessage::SgdbAssetsDownloaded {
         db_id,
         sgdb_id,

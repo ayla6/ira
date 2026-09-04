@@ -106,6 +106,14 @@ pub fn activate(app: &adw::Application) -> SharedState {
         steam_griddb_api_key,
         &format!("{}/data", save_dir),
     ));
+    steam.set_sgdb_disabled_assets(&cfg.sgdb_disabled_assets);
+    steam.set_sgdb_filtered_users(
+        &cfg.sgdb_filtered_users
+            .iter()
+            .map(|u| (u.name.clone(), u.steam64.clone()))
+            .collect::<Vec<_>>(),
+    );
+    steam.set_sgdb_filtered_styles(&cfg.sgdb_filtered_styles);
 
     let state = {
         let _s = tracing::info_span!("build_ui_wrap").entered();

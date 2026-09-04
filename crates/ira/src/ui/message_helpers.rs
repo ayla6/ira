@@ -396,18 +396,29 @@ fn start_background_enrichment(state: &SharedState) {
                 .entered();
             for (db_id, sgdb_id, kind, app_id, trophy_source) in sgdb_games {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let dir = if kind == ira_models::GameKind::Ps3 {
-                        ira_parser::ps3_data_dir(&save_dir, &app_id)
-                    } else if kind == ira_models::GameKind::Retro {
-                        ira_parser::retro_data_dir(&save_dir, db_id)
-                    } else if kind == ira_models::GameKind::Switch {
-                        ira_parser::switch_data_dir(&save_dir, db_id)
-                    } else if trophy_source.has_steam_enrichment() {
-                        ira_parser::data_dir(&save_dir, &app_id)
-                    } else {
-                        ira_parser::sgdb_data_dir(&save_dir, &sgdb_id)
-                    };
-                    steam.ensure_sgdb_assets_in_dir(&dir, &sgdb_id)
+                let dir = if kind == ira_models::GameKind::Ps3 {
+                    ira_parser::ps3_data_dir(&save_dir, &app_id)
+                } else if kind == ira_models::GameKind::Retro {
+                    ira_parser::retro_data_dir(&save_dir, db_id)
+                } else if kind == ira_models::GameKind::Switch {
+                    ira_parser::switch_data_dir(&save_dir, db_id)
+                } else if trophy_source.has_steam_enrichment() {
+                    ira_parser::data_dir(&save_dir, &app_id)
+                } else {
+                    ira_parser::sgdb_data_dir(&save_dir, &sgdb_id)
+                };
+                // Console games keep their square native: SGDB must never
+                // write that slot, and an empty path preserves whatever the
+                // handler already shows.
+                let skip: &[ira_models::AssetType] = if matches!(
+                    kind,
+                    ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
+                ) {
+                    &[ira_models::AssetType::Square]
+                } else {
+                    &[]
+                };
+                steam.ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(&sgdb_id), skip)
                 }));
                 if let Ok((icon, hero, grid, logo, header, square)) = result {
                     let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {

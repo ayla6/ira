@@ -3,6 +3,27 @@ use std::collections::HashMap;
 
 pub use ira_models::{AppDetails, DlcInfo};
 
+/// Which SGDB endpoint family a fetch targets: an explicit SGDB id
+/// (`…/game/{id}`) or a Steam app id (`…/steam/{id}`, for games matched by
+/// their Steam entry).
+#[derive(Clone, Copy)]
+pub enum SgdbId<'a> {
+    Game(&'a str),
+    Steam(&'a str),
+}
+
+impl<'a> SgdbId<'a> {
+    pub fn as_str(self) -> &'a str {
+        match self {
+            SgdbId::Game(id) | SgdbId::Steam(id) => id,
+        }
+    }
+
+    pub fn is_steam(self) -> bool {
+        matches!(self, SgdbId::Steam(_))
+    }
+}
+
 #[derive(Clone)]
 pub struct SgdbAsset {
     pub url: String,
@@ -11,6 +32,7 @@ pub struct SgdbAsset {
     pub height: i64,
     pub style: String,
     pub author: String,
+    pub author_steam64: String,
     pub mime: String,
 }
 

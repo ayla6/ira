@@ -1,9 +1,9 @@
-//! A clipping rail for the floating couch title. The widget spans the full
-//! row and positions its label internally, so moving the title never
-//! changes the rail's own size — a `Fixed` would grow with the label and
-//! shove the rest of the screen around. Short text sits centered under the
-//! selected tile; long text glides left to reveal its end, pauses, glides
-//! back, and loops — calm enough to fit the rest of the couch UI.
+//! A floating title pill for the couch screens, styled like a tooltip. The
+//! widget spans its rail and positions the pill internally, so moving it
+//! never changes the rail's own size — a `Fixed` would grow with the label
+//! and shove the rest of the screen around. Text at most `max_width` wide
+//! centers under the selected tile; longer text glides left to reveal its
+//! end, pauses, glides back, and loops.
 
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -11,14 +11,12 @@ use gtk4::subclass::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::time::Duration;
 
-/// Width the scrolling text is clipped to.
-const MAX_WIDTH: f64 = 480.0;
 /// Hold at each end before scrolling back, and scroll speed.
 const HOLD_MS: f64 = 1_400.0;
 const SPEED: f64 = 42.0;
 const TICK_MS: u64 = 16;
 
-/// One side of the scroll sweep: the label starts left-aligned in the clip
+/// One side of the scroll sweep: the pill starts left-aligned in the clip
 /// window (readable), glides right to reveal its end, holds, glides back.
 #[derive(Clone, Copy, PartialEq, Debug)]
 struct Sweep {
@@ -66,10 +64,15 @@ mod imp {
 
     pub struct Marquee {
         pub label: RefCell<Option<gtk4::Label>>,
-        /// Where the 480px clip window sits inside the full-width rail.
+        /// Left edge of the clip window: the pill centers on the selected
+        /// tile and the rail's own edges clip the overflow.
         pub window_x: Cell<f64>,
+        /// Top edge of the pill inside the widget; negative centers it in
+        /// the rail's height.
+        pub pill_y: Cell<f64>,
         pub(super) sweep: RefCell<Option<Sweep>>,
         pub rail_height: Cell<i32>,
+        pub max_width: Cell<f64>,
         pub tick: RefCell<Option<glib::SourceId>>,
     }
 
@@ -78,8 +81,10 @@ mod imp {
             Self {
                 label: RefCell::new(None),
                 window_x: Cell::new(0.0),
+                pill_y: Cell::new(-1.0),
                 sweep: RefCell::new(None),
                 rail_height: Cell::new(56),
+                max_width: Cell::new(400.0),
                 tick: RefCell::new(None),
             }
         }
@@ -101,11 +106,11 @@ mod imp {
     }
 
     impl WidgetImpl for Marquee {
-        /// Width never reports the label, so a traveling title can't push
+        /// Width never reports the pill, so a traveling title can't push
         /// the rest of the screen around; height is the fixed rail strip.
         fn measure(&self, orientation: gtk4::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             if orientation == gtk4::Orientation::Horizontal {
-                (0, MAX_WIDTH as i32, -1, -1)
+                (0, self.max_width.get() as i32, -1, -1)
             } else {
                 let h = self.rail_height.get();
                 (h, h, -1, -1)
@@ -119,19 +124,22 @@ mod imp {
             };
             let (_, natural_w, _, _) = label.measure(gtk4::Orientation::Horizontal, -1);
             let (_, natural_h, _, _) = label.measure(gtk4::Orientation::Vertical, -1);
+            let max_width = self.max_width.get();
             let sweep = self.sweep.borrow();
             // Text wider than the clip window rides within it at the sweep
             // offset; fitting text centers in the window.
             let x = match sweep.as_ref() {
                 Some(s) => self.window_x.get() + s.x,
-                None => {
-                    self.window_x.get() + ((MAX_WIDTH - natural_w as f64) / 2.0).max(0.0)
-                }
+                None => self.window_x.get() + ((max_width - natural_w as f64) / 2.0).max(0.0),
             };
-            let tx = gtk4::gsk::Transform::new().translate(&gtk4::graphene::Point::new(
-                x as f32,
-                ((height - natural_h) / 2) as f32,
-            ));
+            let y = self.pill_y.get();
+            let py = if y < 0.0 {
+                ((height - natural_h) / 2).max(0)
+            } else {
+                y as i32
+            };
+            let tx = gtk4::gsk::Transform::new()
+                .translate(&gtk4::graphene::Point::new(x as f32, py as f32));
             label.allocate(natural_w.max(1), natural_h.max(1), -1, Some(tx));
         }
     }
@@ -144,15 +152,20 @@ glib::wrapper! {
 }
 
 impl Marquee {
-    pub(super) fn new(rail_height: i32) -> Self {
+    /// `rail_height` is the widget's own height when it rides a layout
+    /// (the home title rail); as a free-floating overlay it is ignored.
+    /// Text beyond `max_width` marquees.
+    pub(super) fn new(rail_height: i32, max_width: f64) -> Self {
         let this: Self = glib::Object::new();
         this.set_overflow(gtk4::Overflow::Hidden);
-        this.imp().rail_height.set(rail_height);
+        let imp = this.imp();
+        imp.rail_height.set(rail_height);
+        imp.max_width.set(max_width);
 
         let label = gtk4::Label::new(None);
         label.add_css_class(super::css::CSS_BP_TITLE);
         label.set_parent(&this);
-        *this.imp().label.borrow_mut() = Some(label);
+        *imp.label.borrow_mut() = Some(label);
         this
     }
 
@@ -160,12 +173,24 @@ impl Marquee {
         self.upcast_ref()
     }
 
-    /// Slide the clip window so its center rests on `center` (a tile's
-    /// center in this rail's coordinates), kept on screen within `viewport`.
-    pub(super) fn set_position(&self, center: f64, viewport: f64) {
-        let x = (center - MAX_WIDTH / 2.0).clamp(0.0, (viewport - MAX_WIDTH).max(0.0));
-        if self.imp().window_x.get() != x {
-            self.imp().window_x.set(x);
+    /// The pill's rendered height, for callers that float it above a tile.
+    pub(super) fn pill_height(&self) -> i32 {
+        self.imp()
+            .label
+            .borrow()
+            .as_ref()
+            .map(|label| label.measure(gtk4::Orientation::Vertical, -1).1)
+            .unwrap_or(0)
+    }
+
+    /// Center the pill on `center_x`; `y` is the pill's top edge, or
+    /// negative to center it vertically in the rail.
+    pub(super) fn set_position(&self, center_x: f64, y: f64) {
+        let imp = self.imp();
+        let x = center_x - imp.max_width.get() / 2.0;
+        if (imp.window_x.get() - x).abs() > 0.5 || (imp.pill_y.get() - y).abs() > 0.5 {
+            imp.window_x.set(x);
+            imp.pill_y.set(y);
             self.queue_allocate();
         }
     }
@@ -183,7 +208,8 @@ impl Marquee {
         let (_, natural, _, _) = label.measure(gtk4::Orientation::Horizontal, -1);
         drop(label_guard);
         let natural = natural.max(1) as f64;
-        let sweep = (natural > MAX_WIDTH).then(|| Sweep::new(MAX_WIDTH - natural, 0.0));
+        let max = self.imp().max_width.get();
+        let sweep = (natural > max).then(|| Sweep::new(max - natural, 0.0));
         *self.imp().sweep.borrow_mut() = sweep;
         self.queue_allocate();
         if sweep.is_some() {

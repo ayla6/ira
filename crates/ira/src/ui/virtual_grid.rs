@@ -92,6 +92,9 @@ mod imp {
         /// item height, edge spacing). Scroll-to-index math reads it instead
         /// of recomputing from the viewport size.
         pub last_layout: Cell<(u32, i32, i32, i32)>,
+        /// The column gap from the last allocation; columns widen to fill
+        /// the viewport, so cell geometry needs the real value.
+        pub last_col_spacing: Cell<i32>,
 
         pub setup_fn: RefCell<Option<SetupFn>>,
         pub bind_fn: RefCell<Option<BindFn>>,
@@ -123,6 +126,7 @@ mod imp {
                 freeze: Cell::new(false),
                 dirty: Cell::new(false),
                 last_layout: Cell::new((1, min_w, min_h, 8)),
+                last_col_spacing: Cell::new(8),
                 setup_fn: RefCell::new(None),
                 bind_fn: RefCell::new(None),
                 unbind_fn: RefCell::new(None),
@@ -303,6 +307,13 @@ mod imp {
             let content_h = n_rows * row_h + sp;
             let total_h = header_h + content_h;
 
+            let col_spacing = if n_cols > 1 {
+                ((avail_width - n_cols as i32 * item_w) / (n_cols as i32 - 1)).max(sp)
+            } else {
+                0
+            };
+            self.last_col_spacing.set(col_spacing);
+
             let prev_w = self.cur_item_w.get();
             let prev_h = self.cur_item_h.get();
             let size_changed = prev_w != item_w || prev_h != item_h;
@@ -315,12 +326,6 @@ mod imp {
                     glib::idle_add_local_once(move || cb(item_w, item_h));
                 }
             }
-
-            let col_spacing = if n_cols > 1 {
-                ((avail_width - n_cols as i32 * item_w) / (n_cols as i32 - 1)).max(sp)
-            } else {
-                0
-            };
 
             let scroll_pos = self
                 .vadj
@@ -622,6 +627,22 @@ impl VirtualGrid {
     /// (the big-picture grid) use it for move and scroll-to-index math.
     pub fn current_layout(&self) -> (u32, i32, i32, i32) {
         self.imp().last_layout.get()
+    }
+
+    /// A cell's origin in the grid's own content coordinates, or None when
+    /// `index` is out of range. The floating All Software tooltip reads it
+    /// to hover above the selected tile.
+    pub fn cell_geometry(&self, index: usize) -> Option<(f64, f64)> {
+        let (cols, item_w, item_h, sp) = self.imp().last_layout.get();
+        if index >= self.imp().n_items.get() as usize {
+            return None;
+        }
+        let cols = cols.max(1) as usize;
+        let col = (index % cols) as f64;
+        let row = (index / cols) as f64;
+        let x = sp as f64 + col * (item_w as f64 + self.imp().last_col_spacing.get() as f64);
+        let y = sp as f64 + row * (item_h + sp) as f64;
+        Some((x, y))
     }
 
     /// Re-run the bind closure on every visible cell. Cells reflect state

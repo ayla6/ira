@@ -159,19 +159,8 @@ mod imp {
                 let w = widths[i] as f64;
                 if x + w >= -0.5 && x <= width as f64 + 0.5 {
                     c.set_child_visible(true);
-                    // Big-picture covers carry a paint scale (the selection
-                    // pop); the transform scales the cover around its own
-                    // center without touching layout. The stored type must
-                    // match attach_scale's exactly — data() transmutes.
-                    let scale = unsafe { c.data::<std::rc::Rc<std::cell::Cell<f64>>>("bp-scale") }
-                        .map(|ptr| unsafe { ptr.as_ref() }.get())
-                        .unwrap_or(1.0);
                     let tx = gtk4::gsk::Transform::new()
-                        .translate(&gtk4::graphene::Point::new(
-                            (x + w * (1.0 - scale) / 2.0) as f32,
-                            (spacing as f64 + cover_h as f64 * (1.0 - scale) / 2.0) as f32,
-                        ))
-                        .scale(scale as f32, scale as f32);
+                        .translate(&gtk4::graphene::Point::new(x as f32, spacing as f32));
                     c.allocate(w as i32, cover_h, -1, Some(tx));
                 }
                 x += w + spacing as f64;

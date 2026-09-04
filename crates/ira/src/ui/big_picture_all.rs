@@ -17,6 +17,9 @@ use std::sync::atomic::{AtomicI64, Ordering};
 /// pair the desktop grid stores on its cells.
 type GameKey = (i64, i64);
 
+/// Width the floating name tooltip clips its text to.
+const TOOLTIP_MAX_WIDTH: f64 = 480.0;
+
 fn game_key(game: &Game) -> GameKey {
     (game.db_id, game.variant_id.unwrap_or(0))
 }
@@ -64,9 +67,8 @@ pub(super) struct AllSoftwareUi {
     page: gtk4::Box,
     scrolled: gtk4::ScrolledWindow,
     grid: VirtualGrid,
-    /// The selected game's name, Switch-style, centered above the grid;
-    /// marquees when a long name overflows.
-    name: Marquee,
+    /// The selected game's name as a tooltip pill floating above its tile.
+    tooltip: Marquee,
     empty: gtk4::Label,
     games: RefCell<Vec<Game>>,
     selected: Cell<usize>,
@@ -95,7 +97,7 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         back.connect_clicked(move |_| super::big_picture_view::show_home(&back_state));
     }
     header.append(&back);
-    let icon = gtk4::Image::from_icon_name("games-symbolic");
+    let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
     icon.set_pixel_size(24);
     icon.set_valign(gtk4::Align::Center);
     header.append(&icon);
@@ -110,13 +112,11 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     header.append(&ordering);
     page.append(&header);
 
-    let name = Marquee::new(40);
-    name.set_halign(gtk4::Align::Center);
-    name.set_visible(false);
-    page.append(name.widget());
-
     let grid = VirtualGrid::new(220);
     grid.set_square(true);
+    // Recycled cells must never paint outside the viewport, over the page
+    // header above.
+    grid.set_overflow(gtk4::Overflow::Hidden);
     let store = gio::ListStore::new::<super::game_item::GameItem>();
     grid.set_model(&store);
     let selected_key = Rc::new(Cell::new((0, 0)));
@@ -128,7 +128,17 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     scrolled.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
     scrolled.set_vexpand(true);
     scrolled.set_child(Some(&grid));
-    page.append(&scrolled);
+
+    // The floating name tooltip hovers over the grid, above the selected
+    // tile, riding the scroll. It draws over the games, so it lives in an
+    // overlay that neither measures nor gets clipped by the viewport.
+    let tooltip = Marquee::new(0, TOOLTIP_MAX_WIDTH);
+    let grid_overlay = gtk4::Overlay::new();
+    grid_overlay.set_child(Some(&scrolled));
+    grid_overlay.add_overlay(tooltip.widget());
+    grid_overlay.set_measure_overlay(tooltip.widget(), false);
+    grid_overlay.set_clip_overlay(tooltip.widget(), true);
+    page.append(&grid_overlay);
 
     let empty = gtk4::Label::new(Some(&crate::tr!("No games yet")));
     empty.add_css_class(CSS_DIM_LABEL);
@@ -136,11 +146,22 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     empty.set_visible(false);
     page.append(&empty);
 
+    // The tooltip tracks the scroll too, so it stays glued to its tile.
+    {
+        let scroll_state = state.clone();
+        let adj = scrolled.vadjustment();
+        adj.connect_value_changed(move |_| {
+            if let Some(big) = scroll_state.borrow().big_picture.clone() {
+                big.all.update_tooltip();
+            }
+        });
+    }
+
     let ui = AllSoftwareUi {
         page,
         scrolled,
         grid,
-        name,
+        tooltip,
         empty,
         games: RefCell::new(Vec::new()),
         selected: Cell::new(0),
@@ -208,11 +229,12 @@ impl AllSoftwareUi {
         }
         self.empty.set_visible(games.is_empty());
         self.scrolled.set_visible(!games.is_empty());
-        self.name.set_visible(!games.is_empty());
+        self.tooltip.set_visible(!games.is_empty());
         if let Some(game) = games.get(selected) {
-            self.name.set_text(&game.name);
+            self.tooltip.set_text(&game.name);
         }
         *self.games.borrow_mut() = games.to_vec();
+        self.update_tooltip();
     }
 
     /// First open: park the selection and the scroll at the top. Later
@@ -235,7 +257,8 @@ impl AllSoftwareUi {
     }
 
     /// Point the highlight at `index`: update the shared key, restyle the
-    /// visible cells, name the game, and scroll the row into view.
+    /// visible cells, float the name tooltip over the tile, and scroll the
+    /// row into view.
     fn apply_selection(&self, index: usize) {
         let game = self.games.borrow().get(index).map(|g| (game_key(g), g.clone()));
         let Some((key, game)) = game else {
@@ -244,8 +267,32 @@ impl AllSoftwareUi {
         self.selected.set(index);
         self.selected_key.set(key);
         self.grid.rebind_visible();
-        self.name.set_text(&game.name);
+        self.tooltip.set_text(&game.name);
         self.scroll_to_selected();
+        self.update_tooltip();
+    }
+
+    /// Float the name tooltip over the selected tile, above its top edge,
+    /// riding whatever scroll position the grid is at. The pill overlaps
+    /// the tile slightly when the tile touches the viewport top.
+    fn update_tooltip(&self) {
+        if !self.tooltip.is_visible() {
+            return;
+        }
+        let game = self.games.borrow().get(self.selected.get()).cloned();
+        let Some(game) = game else {
+            return;
+        };
+        self.tooltip.set_text(&game.name);
+        let (_, item_w, _item_h, _sp) = self.grid.current_layout();
+        let Some((x, y)) = self.grid.cell_geometry(self.selected.get()) else {
+            return;
+        };
+        let scroll = self.scrolled.vadjustment().value();
+        let pill_h = self.tooltip.pill_height() as f64;
+        let center = x + item_w as f64 / 2.0;
+        let top = (y - scroll - pill_h - 6.0).max(2.0);
+        self.tooltip.set_position(center, top);
     }
 
     /// Move the highlight onto a game by key (a mouse click on a cell

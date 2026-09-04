@@ -103,8 +103,8 @@ fn battery_icon_name(capacity: u32, charging: bool) -> String {
     format!("battery-{level}{suffix}-symbolic")
 }
 
-/// The top rail: date, clock and battery pushed to the right as a compact
-/// two-line block — time on top, battery and date under it.
+/// The top rail: clock, date and battery in one horizontal line pushed to
+/// the right.
 pub(super) struct StatusBar {
     root: gtk4::Box,
     date: gtk4::Label,
@@ -132,20 +132,16 @@ impl StatusBar {
 
         let date = gtk4::Label::new(None);
         date.add_css_class(CSS_BP_DATE);
-        let sub = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-        sub.set_halign(gtk4::Align::End);
-        sub.append(&battery);
-        sub.append(&date);
-
         let clock = gtk4::Label::new(None);
         clock.add_css_class(CSS_BP_CLOCK);
 
-        let cluster = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        let cluster = gtk4::Box::new(gtk4::Orientation::Horizontal, 16);
         cluster.set_hexpand(true);
         cluster.set_halign(gtk4::Align::End);
         cluster.set_valign(gtk4::Align::Center);
+        cluster.append(&battery);
+        cluster.append(&date);
         cluster.append(&clock);
-        cluster.append(&sub);
         root.append(&cluster);
 
         let status = Self { root, date, clock, battery, battery_icon, battery_label };
@@ -220,14 +216,14 @@ impl BottomBar {
         root.set_hexpand(true);
 
         // Expanding left cluster pushes the prompts to the far edge; two
-        // plain haligns inside one Box would just pack side by side.
-        let pads = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
-        pads.set_valign(gtk4::Align::Center);
-        pads.set_halign(gtk4::Align::Start);
-        pads.set_hexpand(true);
+        // plain haligns inside one Box would just pack side by side. The
+        // cluster is vertical — pads and player dots on one line, the
+        // battery under them — to keep its footprint small.
+        let pads_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
         let pad_icon = gtk4::Image::from_icon_name("input-gaming-symbolic");
         pad_icon.set_pixel_size(22);
-        pads.append(&pad_icon);
+        pad_icon.set_valign(gtk4::Align::Center);
+        pads_row.append(&pad_icon);
         let dots_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         dots_row.set_valign(gtk4::Align::Center);
         let dots = (0..4)
@@ -239,15 +235,22 @@ impl BottomBar {
                 dot
             })
             .collect();
-        pads.append(&dots_row);
+        pads_row.append(&dots_row);
 
         let pad_battery = gtk4::Box::new(gtk4::Orientation::Horizontal, 5);
         pad_battery.set_valign(gtk4::Align::Center);
+        pad_battery.set_halign(gtk4::Align::Start);
         let pad_battery_icon = gtk4::Image::from_icon_name("battery-full-symbolic");
         let pad_battery_label = gtk4::Label::new(None);
         pad_battery_label.add_css_class(CSS_BP_BATT);
         pad_battery.append(&pad_battery_icon);
         pad_battery.append(&pad_battery_label);
+
+        let pads = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+        pads.set_valign(gtk4::Align::Center);
+        pads.set_halign(gtk4::Align::Start);
+        pads.set_hexpand(true);
+        pads.append(&pads_row);
         pads.append(&pad_battery);
 
         root.append(&pads);

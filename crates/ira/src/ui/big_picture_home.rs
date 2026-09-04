@@ -1,8 +1,7 @@
 //! The couch home page: a horizontal carousel of recently played games plus
-//! the grid tile that opens All Software. The selected tile pops forward
-//! (an ease-out-back scale baked into the row's allocation transform) under
-//! a stronger accent ring, with the game's name floating above it as a
-//! marquee when it overflows.
+//! the grid tile that opens All Software. The selected tile wears a
+//! single-line accent ring, with the game's name floating above it in a
+//! tooltip pill that marquees when it overflows.
 
 use super::big_picture_marquee::Marquee;
 use super::big_picture_view::BigPictureUi;
@@ -11,8 +10,8 @@ use super::recent_carousel::RecentRow;
 use super::recent_row::build_cover;
 use super::state::SharedState;
 use crate::Game;
-use adw::prelude::*;
-use std::cell::{Cell, RefCell};
+use gtk4::prelude::*;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -24,15 +23,8 @@ const COVER_HEIGHT: i32 = 320;
 const RECENT_LIMIT: usize = 16;
 /// Selection scroll animation length.
 const SCROLL_MILLIS: u64 = 160;
-/// Selected tile scale and pop timing (ease-out-back overshoots slightly).
-const POP_SCALE: f64 = 1.05;
-const POP_IN_MS: u32 = 240;
-const POP_OUT_MS: u32 = 140;
 /// Height of the strip the floating title moves within.
 const TITLE_AREA_HEIGHT: i32 = 56;
-/// Per-cover paint-scale key. RecentRow reads it during allocation and
-/// bakes it into the tile's transform, so the pop never touches layout.
-const SCALE_KEY: &str = "bp-scale";
 
 /// Widgets and selection state of the home carousel. `selected` runs over
 /// the covers followed by the All Software tile (index == `games.len()`).
@@ -47,8 +39,6 @@ pub(super) struct HomeUi {
     /// Games whose SGDB square is already being fetched in the background,
     /// so a refresh while the download runs does not re-queue them.
     square_queued: RefCell<HashSet<i64>>,
-    /// Selection pops still playing; skipped when the selection moves on.
-    pops: RefCell<Vec<adw::Animation>>,
 }
 
 pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Box, HomeUi) {
@@ -59,7 +49,8 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Box, HomeU
     spring_top.set_vexpand(true);
     page.append(&spring_top);
 
-    let marquee = Marquee::new(TITLE_AREA_HEIGHT);
+    let marquee =
+        Marquee::new(TITLE_AREA_HEIGHT, capsule_width(square_mode) as f64 * 1.25);
     // Same side margins as the carousel below, so the title rail's
     // coordinates match the scroll viewport's and tiles center exactly.
     marquee.set_margin_start(16);
@@ -105,7 +96,6 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Box, HomeU
         selected: RefCell::new(0),
         scroll_anim: RefCell::new(None),
         square_queued: RefCell::new(HashSet::new()),
-        pops: RefCell::new(Vec::new()),
     };
     (page, ui)
 }
@@ -169,12 +159,10 @@ pub(super) fn refresh(state: &SharedState) {
         let cover = build_cover(state, game, art, width, COVER_HEIGHT, square_mode, move |state| {
             on_cover_clicked(state, index)
         });
-        attach_scale(&cover);
         ui.row.append_cover(&cover);
         covers.push(cover);
     }
     let tile = build_all_tile(state);
-    attach_scale(&tile);
     ui.row.append_cover(&tile);
     covers.push(tile);
     *ui.covers.borrow_mut() = covers;
@@ -189,7 +177,7 @@ pub(super) fn refresh(state: &SharedState) {
     };
     *ui.selected.borrow_mut() = selected;
     *ui.games.borrow_mut() = games;
-    apply_selection(&big, None, false);
+    apply_selection(&big);
     // Queued after the swap so it sees the freshly loaded list.
     queue_missing_squares(state, ui, square_mode);
 }
@@ -218,9 +206,8 @@ fn on_cover_clicked(state: &SharedState, index: usize) {
         let Some(big) = state.borrow().big_picture.clone() else {
             return;
         };
-        let previous = *big.home.selected.borrow();
         *big.home.selected.borrow_mut() = index;
-        apply_selection(&big, Some(previous), true);
+        apply_selection(&big);
     }
 }
 
@@ -234,9 +221,8 @@ pub(super) fn move_selection(state: &SharedState, delta: i32) {
     let Some(next) = next_selection(*ui.selected.borrow(), count, delta) else {
         return;
     };
-    let previous = *ui.selected.borrow();
     *ui.selected.borrow_mut() = next;
-    apply_selection(&big, Some(previous), true);
+    apply_selection(&big);
 }
 
 /// Clamp `current` by `delta` into `0..count`, or None when there is nothing
@@ -278,10 +264,8 @@ pub(super) fn selection_is_tile(big: &Rc<BigPictureUi>) -> bool {
     *big.home.selected.borrow() >= big.home.games.borrow().len()
 }
 
-/// Selection visuals, floating title, scroll, and the pop animation.
-/// `previous` is the index that wore the highlight before; animations only
-/// run when it is known (a real selection change, not a refresh).
-fn apply_selection(big: &Rc<BigPictureUi>, previous: Option<usize>, animate: bool) {
+/// Selection visuals, floating title, and scroll.
+fn apply_selection(big: &Rc<BigPictureUi>) {
     let ui = &big.home;
     let selected = *ui.selected.borrow();
     let covers = ui.covers.borrow();
@@ -292,30 +276,13 @@ fn apply_selection(big: &Rc<BigPictureUi>, previous: Option<usize>, animate: boo
             cover.remove_css_class(CSS_BP_SELECTED);
         }
     }
-    let previous_cover = previous.and_then(|index| covers.get(index).cloned());
     let selected_cover = covers.get(selected).cloned();
     drop(covers);
     ui.row.set_selected_cover(selected_cover.as_ref());
 
-    skip_pops(ui);
-    match (animate, previous_cover, selected_cover.as_ref()) {
-        (true, Some(previous), Some(cover)) => {
-            play_pop(ui, &previous, 1.0, adw::Easing::EaseOutCubic, POP_OUT_MS);
-            play_pop(ui, cover, POP_SCALE, adw::Easing::EaseOutBack, POP_IN_MS);
-        }
-        (false, _, Some(cover)) => {
-            // Selection restored without an event (refresh): snap, don't pop.
-            if let Some(cell) = scale_of(cover) {
-                cell.set(POP_SCALE);
-            }
-            ui.row.queue_allocate();
-        }
-        _ => {}
-    }
-
     sync_title_text(ui);
     sync_title_position(big);
-    update_scroll(big, animate);
+    update_scroll(big);
 }
 
 fn sync_title_text(ui: &HomeUi) {
@@ -341,12 +308,12 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
     // carries the same side margins as the scrolled row, so the
     // coordinates line up with no adjustment.
     let center = x + w / 2.0 - adj.value();
-    ui.marquee.set_position(center, adj.page_size());
+    ui.marquee.set_position(center, -1.0);
 }
 
 /// Smooth-scroll the selected tile to the viewport center; the adjustment's
 /// value_changed signal keeps the floating title glued to it.
-fn update_scroll(big: &Rc<BigPictureUi>, animate: bool) {
+fn update_scroll(big: &Rc<BigPictureUi>) {
     let ui = &big.home;
     let selected = *ui.selected.borrow();
     let Some((x, w)) = ui.row.cover_geometry(selected) else {
@@ -357,10 +324,6 @@ fn update_scroll(big: &Rc<BigPictureUi>, animate: bool) {
     let target = (x + w / 2.0 - adj.page_size() / 2.0).clamp(0.0, max);
     if let Some(id) = ui.scroll_anim.borrow_mut().take() {
         id.remove();
-    }
-    if !animate {
-        adj.set_value(target);
-        return;
     }
     let start = adj.value();
     if (target - start).abs() < 0.5 {
@@ -383,43 +346,9 @@ fn update_scroll(big: &Rc<BigPictureUi>, animate: bool) {
     *ui.scroll_anim.borrow_mut() = Some(id);
 }
 
-fn attach_scale(cover: &gtk4::Widget) {
-    unsafe { cover.set_data::<Rc<Cell<f64>>>(SCALE_KEY, Rc::new(Cell::new(1.0))) };
-}
-
-fn scale_of(cover: &gtk4::Widget) -> Option<Rc<Cell<f64>>> {
-    unsafe { cover.data::<Rc<Cell<f64>>>(SCALE_KEY) }.map(|ptr| unsafe { ptr.as_ref() }.clone())
-}
-
-fn skip_pops(ui: &HomeUi) {
-    for anim in ui.pops.borrow_mut().drain(..) {
-        anim.skip();
-    }
-}
-
-/// Animate one tile's scale to `to`; the row repaints from the cell each
-/// frame. `skip_pops` runs first so two animations never fight over a cell.
-fn play_pop(ui: &HomeUi, cover: &gtk4::Widget, to: f64, easing: adw::Easing, ms: u32) {
-    let Some(cell) = scale_of(cover) else {
-        return;
-    };
-    let row = ui.row.downgrade();
-    let anim_cell = Rc::clone(&cell);
-    let target = adw::CallbackAnimationTarget::new(move |value| {
-        anim_cell.set(value);
-        if let Some(row) = row.upgrade() {
-            row.queue_allocate();
-        }
-    });
-    let anim = adw::TimedAnimation::new(cover, cell.get(), to, ms, target);
-    anim.set_easing(easing);
-    anim.play();
-    ui.pops.borrow_mut().push(anim.upcast());
-}
-
-/// The grid tile at the end of the carousel that opens All Software. A
-/// circle in a capsule shell so the selection ring and pop treat it like
-/// any cover.
+/// The grid tile at the end of the carousel that opens All Software: a
+/// half-size circle in the capsule shell, so the selection ring hugs the
+/// circle instead of drawing a square around empty space.
 fn build_all_tile(state: &SharedState) -> gtk4::Widget {
     let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     vbox.set_valign(gtk4::Align::Start);
@@ -431,11 +360,11 @@ fn build_all_tile(state: &SharedState) -> gtk4::Widget {
 
     let circle = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     circle.add_css_class(CSS_BP_ALL_TILE);
-    circle.set_hexpand(true);
-    circle.set_vexpand(true);
-    circle.set_valign(gtk4::Align::Fill);
-    let icon = gtk4::Image::from_icon_name("games-symbolic");
-    icon.set_pixel_size(64);
+    circle.set_size_request(COVER_HEIGHT / 2, COVER_HEIGHT / 2);
+    circle.set_halign(gtk4::Align::Center);
+    circle.set_valign(gtk4::Align::Center);
+    let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
+    icon.set_pixel_size(56);
     icon.set_opacity(0.7);
     icon.set_vexpand(true);
     icon.set_valign(gtk4::Align::Center);

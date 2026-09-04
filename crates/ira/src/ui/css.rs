@@ -292,23 +292,27 @@ gridview.game-grid child:focus-within {
     transform: none;
     box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
 }
-/* The selected tile: a stronger ring than the desktop selection, an accent
-   halo, and the pop scale (which the row's own transform animates — no CSS
-   transform here). Kept after the :hover rule so it wins when both apply. */
+/* The selected tile: one clean accent line, nothing else — no halo, no
+   scale. Kept after the :hover rule so it wins when both apply. */
 .bp-root .cover-item.bp-selected .game-cover-pic {
-    outline: 4px solid @accent_color;
-    outline-offset: 5px;
-    box-shadow: 0 0 0 6px alpha(@accent_color, 0.30), 0 10px 34px 8px rgba(0,0,0,0.6);
+    outline: 3px solid @accent_color;
+    outline-offset: 4px;
+    box-shadow: 0 10px 34px 8px rgba(0,0,0,0.6);
 }
 .cover-item.bp-sq.bp-selected {
-    outline: 4px solid @accent_color;
+    outline: 3px solid @accent_color;
     outline-offset: 4px;
-    box-shadow: 0 0 0 6px alpha(@accent_color, 0.30), 0 2px 14px 3px rgba(0,0,0,0.4);
+    box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
 }
+/* The All Software tile is a circle: its ring hugs the circle, not the
+   square capsule shell around it. */
 .cover-item.bp-all.bp-selected {
-    outline: 4px solid @accent_color;
-    outline-offset: 4px;
-    box-shadow: 0 0 0 6px alpha(@accent_color, 0.30);
+    outline: none;
+    box-shadow: none;
+}
+.cover-item.bp-all.bp-selected .bp-all-tile {
+    outline: 3px solid @accent_color;
+    outline-offset: 5px;
 }
 .fetch-strip label {
     font-weight: normal;
@@ -320,9 +324,9 @@ gridview.game-grid child:focus-within {
 }
 /* Couch rails: status strip on top, gamepads + prompts below. */
 .bp-status { padding: 16px 28px 4px 28px; }
-.bp-clock { font-size: 1.5em; font-weight: 800; }
-.bp-date { font-size: 1em; }
-.bp-batt { font-size: 1em; }
+.bp-clock { font-size: 1.3em; font-weight: 800; }
+.bp-date { font-size: 1.05em; }
+.bp-batt { font-size: 1.05em; }
 .bp-bottom { padding: 14px 28px 20px 28px; }
 .bp-pad-dot { opacity: 0.25; }
 /* A connected pad lights its dot green, like a player LED. */
@@ -336,8 +340,18 @@ gridview.game-grid child:focus-within {
     font-weight: 800;
     font-size: 0.85em;
 }
-/* Floating title over the selected tile, scrolling when it overflows. */
-.bp-title { font-size: 1.45em; font-weight: 800; color: @accent_color; }
+/* Floating title pill: a tooltip, not a heading — reads over the games
+   with the popover surface instead of shouting in accent color. */
+.bp-title {
+    font-size: 1.15em;
+    font-weight: 700;
+    background: @popover_bg_color;
+    color: @theme_fg_color;
+    border: 1px solid alpha(@theme_fg_color, 0.14);
+    border-radius: 9px;
+    padding: 5px 12px;
+    box-shadow: 0 4px 14px 2px rgba(0,0,0,0.45);
+}
 .bp-page-title { font-size: 1.45em; font-weight: 800; }
 .bp-all-tile {
     border-radius: 9999px;

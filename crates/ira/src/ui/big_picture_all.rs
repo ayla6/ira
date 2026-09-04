@@ -110,8 +110,8 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     header.append(&ordering);
     page.append(&header);
 
-    let name = Marquee::new();
-    name.widget().set_halign(gtk4::Align::Center);
+    let name = Marquee::new(40);
+    name.set_halign(gtk4::Align::Center);
     name.set_visible(false);
     page.append(name.widget());
 

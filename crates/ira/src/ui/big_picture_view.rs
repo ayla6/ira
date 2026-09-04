@@ -98,7 +98,7 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
     root.append(&stack);
 
     let bottom = BottomBar::build();
-    bottom.set_prompts(&[("A", &crate::tr!("Play"))]);
+    bottom.set_prompts(&[(ira_input::GamepadButton::A, &crate::tr!("Play"))]);
     root.append(bottom.widget());
 
     root.set_hexpand(true);
@@ -154,6 +154,9 @@ pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
         NavMsg::Nav(command) => route(state, command),
         NavMsg::Pads(status) => {
             if let Some(big) = state.borrow().big_picture.clone() {
+                if let Some(family) = status.family {
+                    big.bottom.set_pad_family(family);
+                }
                 big.bottom
                     .set_pad_status(status.count, status.battery);
             }
@@ -233,7 +236,10 @@ pub(super) fn open_all(state: &SharedState) {
     };
     big.page.set(Page::AllSoftware);
     big.stack.set_visible_child(&big.all_page);
-    big.bottom.set_prompts(&[("B", &crate::tr!("Back")), ("A", &crate::tr!("Play"))]);
+    big.bottom.set_prompts(&[
+        (ira_input::GamepadButton::B, &crate::tr!("Back")),
+        (ira_input::GamepadButton::A, &crate::tr!("Play")),
+    ]);
     big.all.ensure_opened();
 }
 
@@ -243,7 +249,8 @@ pub(super) fn show_home(state: &SharedState) {
     };
     big.page.set(Page::Home);
     big.stack.set_visible_child(&big.home_page);
-    big.bottom.set_prompts(&[("A", &crate::tr!("Play"))]);
+    big.bottom
+        .set_prompts(&[(ira_input::GamepadButton::A, &crate::tr!("Play"))]);
 }
 
 fn quit_app(state: &SharedState) {

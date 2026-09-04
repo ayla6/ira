@@ -161,8 +161,9 @@ mod imp {
                     c.set_child_visible(true);
                     // Big-picture covers carry a paint scale (the selection
                     // pop); the transform scales the cover around its own
-                    // center without touching layout.
-                    let scale = unsafe { c.data::<std::cell::Cell<f64>>("bp-scale") }
+                    // center without touching layout. The stored type must
+                    // match attach_scale's exactly — data() transmutes.
+                    let scale = unsafe { c.data::<std::rc::Rc<std::cell::Cell<f64>>>("bp-scale") }
                         .map(|ptr| unsafe { ptr.as_ref() }.get())
                         .unwrap_or(1.0);
                     let tx = gtk4::gsk::Transform::new()

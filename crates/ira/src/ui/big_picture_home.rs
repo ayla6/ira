@@ -30,9 +30,6 @@ const POP_IN_MS: u32 = 240;
 const POP_OUT_MS: u32 = 140;
 /// Height of the strip the floating title moves within.
 const TITLE_AREA_HEIGHT: i32 = 56;
-/// The title strip's margin differs from the carousel's viewport margin by
-/// this much; tile centers need the delta to land under the title.
-const MARGIN_DELTA: f64 = 12.0;
 /// Per-cover paint-scale key. RecentRow reads it during allocation and
 /// bakes it into the tile's transform, so the pop never touches layout.
 const SCALE_KEY: &str = "bp-scale";
@@ -42,7 +39,6 @@ const SCALE_KEY: &str = "bp-scale";
 pub(super) struct HomeUi {
     row: RecentRow,
     scrolled: gtk4::ScrolledWindow,
-    title_area: gtk4::Fixed,
     marquee: Marquee,
     covers: RefCell<Vec<gtk4::Widget>>,
     games: RefCell<Vec<Game>>,
@@ -63,13 +59,13 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Box, HomeU
     spring_top.set_vexpand(true);
     page.append(&spring_top);
 
-    let title_area = gtk4::Fixed::new();
-    title_area.set_size_request(-1, TITLE_AREA_HEIGHT);
-    title_area.set_margin_start(28);
-    title_area.set_margin_end(28);
-    let marquee = Marquee::new();
-    title_area.put(marquee.widget(), 0.0, 0.0);
-    page.append(&title_area);
+    let marquee = Marquee::new(TITLE_AREA_HEIGHT);
+    // Same side margins as the carousel below, so the title rail's
+    // coordinates match the scroll viewport's and tiles center exactly.
+    marquee.set_margin_start(16);
+    marquee.set_margin_end(16);
+    marquee.set_hexpand(true);
+    page.append(marquee.widget());
 
     let width = capsule_width(square_mode);
     let spacing = super::virtual_grid::VirtualGrid::grid_spacing_for_item_w(width);
@@ -103,7 +99,6 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Box, HomeU
     let ui = HomeUi {
         row,
         scrolled,
-        title_area,
         marquee,
         covers: RefCell::new(Vec::new()),
         games: RefCell::new(Vec::new()),
@@ -341,15 +336,12 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
         return;
     };
     let adj = ui.scrolled.hadjustment();
-    // Tile center in title-strip coordinates: content x (cover_geometry
-    // includes the leading spacing) minus the scroll, adjusted for the
-    // different side margins of the two areas.
-    let center = x + w / 2.0 - adj.value() - MARGIN_DELTA;
-    let viewport = adj.page_size();
-    let marquee = ui.marquee.widget();
-    let marquee_w = marquee.width_request().max(1) as f64;
-    let x = (center - marquee_w / 2.0).clamp(0.0, (viewport - marquee_w).max(0.0));
-    ui.title_area.move_(marquee, x, 0.0);
+    // Tile center in viewport coordinates: content x (cover_geometry
+    // includes the leading spacing) minus the scroll. The marquee rail
+    // carries the same side margins as the scrolled row, so the
+    // coordinates line up with no adjustment.
+    let center = x + w / 2.0 - adj.value();
+    ui.marquee.set_position(center, adj.page_size());
 }
 
 /// Smooth-scroll the selected tile to the viewport center; the adjustment's

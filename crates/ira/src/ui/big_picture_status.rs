@@ -4,7 +4,8 @@
 //! the right.
 
 use super::css::*;
-use adw::prelude::*;
+use gtk4::prelude::*;
+use std::cell::RefCell;
 use std::path::Path;
 
 /// The clock reads the system time this often; battery drains slower still,
@@ -102,7 +103,8 @@ fn battery_icon_name(capacity: u32, charging: bool) -> String {
     format!("battery-{level}{suffix}-symbolic")
 }
 
-/// The top rail: avatar, then date, clock and battery pushed to the right.
+/// The top rail: date, clock and battery pushed to the right as a compact
+/// two-line block — time on top, battery and date under it.
 pub(super) struct StatusBar {
     root: gtk4::Box,
     date: gtk4::Label,
@@ -121,11 +123,7 @@ impl StatusBar {
         let root = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         root.add_css_class(CSS_BP_STATUS);
 
-        let avatar = adw::Avatar::new(40, Some("Ira"), true);
-        avatar.set_valign(gtk4::Align::Center);
-        root.append(&avatar);
-
-        let battery = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+        let battery = gtk4::Box::new(gtk4::Orientation::Horizontal, 5);
         let battery_icon = gtk4::Image::from_icon_name("battery-full-symbolic");
         let battery_label = gtk4::Label::new(None);
         battery_label.add_css_class(CSS_BP_BATT);
@@ -134,17 +132,21 @@ impl StatusBar {
 
         let date = gtk4::Label::new(None);
         date.add_css_class(CSS_BP_DATE);
+        let sub = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+        sub.set_halign(gtk4::Align::End);
+        sub.append(&battery);
+        sub.append(&date);
+
         let clock = gtk4::Label::new(None);
         clock.add_css_class(CSS_BP_CLOCK);
 
-        let right = gtk4::Box::new(gtk4::Orientation::Horizontal, 14);
-        right.set_hexpand(true);
-        right.set_halign(gtk4::Align::End);
-        right.set_valign(gtk4::Align::Center);
-        right.append(&battery);
-        right.append(&date);
-        right.append(&clock);
-        root.append(&right);
+        let cluster = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        cluster.set_hexpand(true);
+        cluster.set_halign(gtk4::Align::End);
+        cluster.set_valign(gtk4::Align::Center);
+        cluster.append(&clock);
+        cluster.append(&sub);
+        root.append(&cluster);
 
         let status = Self { root, date, clock, battery, battery_icon, battery_label };
         status.refresh();
@@ -201,6 +203,9 @@ pub(super) struct BottomBar {
     pad_battery: gtk4::Box,
     pad_battery_icon: gtk4::Image,
     pad_battery_label: gtk4::Label,
+    /// The connected pads' controller family, for prompt glyphs; Xbox's
+    /// layout until a pad reports otherwise.
+    family: RefCell<ira_input::ControllerFamily>,
     prompts: gtk4::Box,
 }
 
@@ -214,9 +219,12 @@ impl BottomBar {
         root.add_css_class(CSS_BP_BOTTOM);
         root.set_hexpand(true);
 
+        // Expanding left cluster pushes the prompts to the far edge; two
+        // plain haligns inside one Box would just pack side by side.
         let pads = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
         pads.set_valign(gtk4::Align::Center);
         pads.set_halign(gtk4::Align::Start);
+        pads.set_hexpand(true);
         let pad_icon = gtk4::Image::from_icon_name("input-gaming-symbolic");
         pad_icon.set_pixel_size(22);
         pads.append(&pad_icon);
@@ -256,6 +264,7 @@ impl BottomBar {
             pad_battery,
             pad_battery_icon,
             pad_battery_label,
+            family: RefCell::new(ira_input::ControllerFamily::Xbox),
             prompts,
         };
         bar.set_pad_status(0, None);
@@ -263,10 +272,16 @@ impl BottomBar {
     }
 
     /// Light one dot per connected gamepad (four shown at most); unlit dots
-    /// stay visible as slots, Switch-style. The pads' battery reading (any
-    /// connected pad) sits beside the dots when one is known.
+    /// stay visible as slots, and the lit ones glow green like a player
+    /// LED. The pads' battery reading (any connected pad) sits beside the
+    /// dots when one is known.
     pub(super) fn set_pad_status(&self, count: usize, battery: Option<(u8, bool)>) {
         for (index, dot) in self.dots.iter().enumerate() {
+            if index < count {
+                dot.add_css_class(CSS_BP_PAD_LIT);
+            } else {
+                dot.remove_css_class(CSS_BP_PAD_LIT);
+            }
             dot.set_opacity(if index < count { 1.0 } else { 0.25 });
         }
         self.pad_battery.set_visible(battery.is_some());
@@ -282,17 +297,39 @@ impl BottomBar {
         ));
     }
 
+    /// Remember which controller family is connected (for prompt glyphs).
+    pub(super) fn set_pad_family(&self, family: ira_input::ControllerFamily) {
+        *self.family.borrow_mut() = family;
+    }
+
     /// Replace the prompt row, e.g. A/Play on the home screen, B/Back plus
-    /// A/Play on the All Software grid.
-    pub(super) fn set_prompts(&self, items: &[(&str, &str)]) {
+    /// A/Play on the All Software grid. Glyphs come from the same gamepad
+    /// icon set the input customization uses, falling back to the button's
+    /// badge letter when no asset exists.
+    pub(super) fn set_prompts(&self, items: &[(ira_input::GamepadButton, &str)]) {
         super::helpers::clear_children(&self.prompts);
-        for (glyph, label) in items {
-            let item = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-            let key = gtk4::Label::new(Some(glyph));
-            key.add_css_class(CSS_BP_PROMPT_KEY);
+        let family = *self.family.borrow();
+        for (button, label) in items {
+            let item = gtk4::Box::new(gtk4::Orientation::Horizontal, 7);
+            let glyph = gtk4::Image::new();
+            glyph.set_pixel_size(20);
+            let fallback = gtk4::Label::new(Some(
+                &super::input_profile_assets::source_badge(
+                    ira_input::InputSource::Button(*button),
+                    family,
+                ),
+            ));
+            fallback.add_css_class(CSS_BP_PROMPT_KEY);
+            super::input_profile_assets::set_source_asset(
+                &glyph,
+                &fallback,
+                ira_input::InputSource::Button(*button),
+                family,
+            );
             let text = gtk4::Label::new(Some(label));
             text.add_css_class(CSS_BP_PROMPT);
-            item.append(&key);
+            item.append(&glyph);
+            item.append(&fallback);
             item.append(&text);
             self.prompts.append(&item);
         }

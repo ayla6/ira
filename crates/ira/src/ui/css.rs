@@ -8,6 +8,7 @@ pub const CSS_BP_DATE: &str = "bp-date";
 pub const CSS_BP_BATT: &str = "bp-batt";
 pub const CSS_BP_BOTTOM: &str = "bp-bottom";
 pub const CSS_BP_PAD_DOT: &str = "bp-pad-dot";
+pub const CSS_BP_PAD_LIT: &str = "bp-pad-lit";
 pub const CSS_BP_PROMPT: &str = "bp-prompt";
 pub const CSS_BP_PROMPT_KEY: &str = "bp-prompt-key";
 pub const CSS_BP_TITLE: &str = "bp-title";
@@ -318,12 +319,14 @@ gridview.game-grid child:focus-within {
     box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
 }
 /* Couch rails: status strip on top, gamepads + prompts below. */
-.bp-status { padding: 18px 28px 4px 28px; }
-.bp-clock { font-size: 1.3em; font-weight: 800; }
-.bp-date { font-size: 1.05em; }
-.bp-batt { font-size: 1.05em; font-weight: 700; }
+.bp-status { padding: 16px 28px 4px 28px; }
+.bp-clock { font-size: 1.5em; font-weight: 800; }
+.bp-date { font-size: 1em; }
+.bp-batt { font-size: 1em; }
 .bp-bottom { padding: 14px 28px 20px 28px; }
 .bp-pad-dot { opacity: 0.25; }
+/* A connected pad lights its dot green, like a player LED. */
+.bp-pad-dot.bp-pad-lit { color: @green_4; }
 .bp-prompt-key {
     min-width: 26px;
     min-height: 26px;

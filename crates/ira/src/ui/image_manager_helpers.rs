@@ -9,6 +9,44 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+/// Add an SGDB author to the config's filtered-users list and push the
+/// list to the shared API client so the next fetch honors it. The config
+/// file itself is written on a background thread (save round-trips the
+/// keyring) so the click never blocks the UI.
+pub(super) fn add_sgdb_filtered_user(state: &SharedState, author: &str, steam64: &str) {
+    let author = author.trim();
+    if author.is_empty() {
+        return;
+    }
+    let cfg = {
+        let mut s = state.borrow_mut();
+        if s.cfg
+            .sgdb_filtered_users
+            .iter()
+            .any(|u| u.name.eq_ignore_ascii_case(author))
+        {
+            return;
+        }
+        s.cfg.sgdb_filtered_users.push(ira_config::SgdbFilteredUser {
+            name: author.to_string(),
+            steam64: steam64.trim().to_string(),
+        });
+        s.steam.set_sgdb_filtered_users(
+            &s.cfg
+                .sgdb_filtered_users
+                .iter()
+                .map(|u| (u.name.clone(), u.steam64.clone()))
+                .collect::<Vec<_>>(),
+        );
+        s.cfg.clone()
+    };
+    std::thread::spawn(move || {
+        if let Err(e) = cfg.save() {
+            eprintln!("Failed to save config after filtering user: {e}");
+        }
+    });
+}
+
 pub(super) fn find_best_image_path(
     game: &Game,
     field: &str,
@@ -167,7 +205,14 @@ pub(super) fn native_icon_bytes(
             if p.is_absolute() {
                 p
             } else {
-                game_root_owned = cfg.resolve_rom_path(&game.platform_id, &game.game_path)?;
+                // Emulator-library titles live in the emulator's own game
+                // directories, so they resolve even when the file sits
+                // outside Ira's ROM roots.
+                game_root_owned = cfg
+                    .resolve_rom_path(&game.platform_id, &game.game_path)
+                    .or_else(|| {
+                        ira_platforms::switch::resolve_rom(&game.game_path, switch_executable)
+                    })?;
                 &game_root_owned
             }
         } else {

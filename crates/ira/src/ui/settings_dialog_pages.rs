@@ -32,9 +32,10 @@ pub(super) struct SettingsPageWidgets {
     pub(super) notif_row: adw::SwitchRow,
     pub(super) bg_row: adw::SwitchRow,
     pub(super) square_row: adw::SwitchRow,
+    pub(super) sgdb_page: adw::ToastOverlay,
+    pub(super) sgdb_widgets: super::settings_pages::SgdbSettingsWidgets,
     pub(super) hidden_row: adw::SwitchRow,
     pub(super) steam_entry: adw::PasswordEntryRow,
-    pub(super) sgdb_entry: adw::PasswordEntryRow,
     pub(super) lang_list: gtk4::ListBox,
     pub(super) saves_row: adw::SwitchRow,
     pub(super) auto_reload_widgets: AutoReloadWidgets,
@@ -68,12 +69,12 @@ pub(super) fn build_settings_pages(
         bg_row,
         hidden_row,
         steam_entry,
-        sgdb_entry,
         lang_list,
         saves_row,
         square_row,
         auto_reload_widgets,
     ) = build_general_settings_page(cfg);
+    let (sgdb_page, sgdb_widgets) = super::settings_pages::build_sgdb_settings_page(cfg);
 
     // One-click maintenance: re-run the SGDB asset ensure for every matched
     // game so missing art (squares included) is fetched again, even for
@@ -134,7 +135,8 @@ pub(super) fn build_settings_pages(
         bg_row,
         hidden_row,
         steam_entry,
-        sgdb_entry,
+        sgdb_page,
+        sgdb_widgets,
         lang_list,
         saves_row,
         square_row,
@@ -218,6 +220,14 @@ pub(super) fn register_settings_pages(
     register_page(
         sidebar,
         stack,
+        &pages.sgdb_page,
+        "globe-symbolic",
+        &crate::tr!("SteamGridDB"),
+        "sgdb",
+    );
+    register_page(
+        sidebar,
+        stack,
         &pages.emu_page,
         "api-symbolic",
         &crate::tr!("API emulators"),
@@ -276,7 +286,7 @@ pub(super) fn register_settings_pages(
 fn register_page(
     sidebar: &gtk4::ListBox,
     stack: &gtk4::Stack,
-    page: &gtk4::Box,
+    page: &impl IsA<gtk4::Widget>,
     icon: &str,
     label: &str,
     page_id: &str,

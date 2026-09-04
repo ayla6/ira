@@ -34,10 +34,11 @@ pub(super) use super::settings_pages::{
 
 struct SavedSettingsWidgets {
     steam_entry: adw::PasswordEntryRow,
-    sgdb_entry: adw::PasswordEntryRow,
+
     notif_row: adw::SwitchRow,
     bg_row: adw::SwitchRow,
     square_row: adw::SwitchRow,
+    sgdb: super::settings_pages::SgdbSettingsWidgets,
     hidden_row: adw::SwitchRow,
     saves_row: adw::SwitchRow,
     auto_reload_widgets: AutoReloadWidgets,
@@ -197,10 +198,11 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
     }
     let saved_widgets = SavedSettingsWidgets {
         steam_entry: pages.steam_entry,
-        sgdb_entry: pages.sgdb_entry,
+
         notif_row: pages.notif_row,
         bg_row: pages.bg_row,
         square_row: pages.square_row,
+        sgdb: pages.sgdb_widgets,
         hidden_row: pages.hidden_row,
         saves_row: pages.saves_row,
         auto_reload_widgets: pages.auto_reload_widgets,
@@ -273,6 +275,15 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         apply_saved_settings(&mut s.cfg, &saved_widgets);
 
         steam_clone.update_keys(&s.cfg.steam_api_key, &s.cfg.steam_griddb_api_key);
+        steam_clone.set_sgdb_disabled_assets(&s.cfg.sgdb_disabled_assets);
+        steam_clone.set_sgdb_filtered_users(
+            &s.cfg
+                .sgdb_filtered_users
+                .iter()
+                .map(|u| (u.name.clone(), u.steam64.clone()))
+                .collect::<Vec<_>>(),
+        );
+        steam_clone.set_sgdb_filtered_styles(&s.cfg.sgdb_filtered_styles);
 
         let reload_games = discovery_settings_changed(&old_cfg, &s.cfg);
         let cfg = s.cfg.clone();
@@ -324,11 +335,27 @@ fn apply_saved_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
 
 fn apply_general_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
     cfg.steam_api_key = widgets.steam_entry.text().to_string();
-    cfg.steam_griddb_api_key = widgets.sgdb_entry.text().to_string();
+    cfg.steam_griddb_api_key = widgets.sgdb.sgdb_entry.text().to_string();
     cfg.notifications_enabled = widgets.notif_row.is_active();
     cfg.close_to_background = widgets.bg_row.is_active();
     cfg.show_hidden_games = widgets.hidden_row.is_active();
     cfg.big_picture_square_capsules = widgets.square_row.is_active();
+    cfg.sgdb_disabled_assets = widgets
+        .sgdb
+        .auto_asset_rows
+        .iter()
+        .filter(|(_, row)| !row.is_active())
+        .map(|(name, _)| name.clone())
+        .collect();
+    cfg.sgdb_filtered_styles = widgets
+        .sgdb
+        .style_rows
+        .iter()
+        .filter(|(_, row)| !row.is_active())
+        .map(|(name, _)| name.clone())
+        .collect();
+    cfg.sgdb_filtered_users =
+        super::settings_pages::filtered_users(&widgets.sgdb.filter_users_list, &widgets.sgdb.filter_user_ids);
     cfg.centralize_game_saves = widgets.saves_row.is_active();
     cfg.auto_reload_steam = widgets.auto_reload_widgets.steam.is_active();
     cfg.auto_reload_roms = widgets.auto_reload_widgets.roms.is_active();

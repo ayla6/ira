@@ -8,6 +8,7 @@ use ira_overlay_ipc::{
     clamp_replay_buffer_seconds, MAX_REPLAY_BUFFER_SECONDS, MIN_REPLAY_BUFFER_SECONDS,
 };
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 pub(super) fn settings_sidebar_row(icon: &str, label: &str, page_id: &str) -> gtk4::ListBoxRow {
@@ -72,6 +73,10 @@ pub(super) struct AutoReloadWidgets {
     pub switch: adw::SwitchRow,
 }
 
+/// Switch rows keyed by SGDB name: the auto-download per-asset group and
+/// the filtered image-styles group.
+pub(super) type AutoAssetRows = Vec<(String, adw::SwitchRow)>;
+
 pub(super) fn build_general_settings_page(
     cfg: &Config,
 ) -> (
@@ -79,7 +84,6 @@ pub(super) fn build_general_settings_page(
     adw::SwitchRow,
     adw::SwitchRow,
     adw::SwitchRow,
-    adw::PasswordEntryRow,
     adw::PasswordEntryRow,
     gtk4::ListBox,
     adw::SwitchRow,
@@ -209,10 +213,6 @@ pub(super) fn build_general_settings_page(
     steam_entry.set_text(&cfg.steam_api_key);
     key_group.add(&steam_entry);
 
-    let sgdb_entry = adw::PasswordEntryRow::new();
-    sgdb_entry.set_title(&crate::tr!("SteamGridDB API key"));
-    sgdb_entry.set_text(&cfg.steam_griddb_api_key);
-    key_group.add(&sgdb_entry);
     page.append(&key_group);
 
     let lang_list = build_language_preferences_list(&cfg.language_preferences);
@@ -237,7 +237,6 @@ pub(super) fn build_general_settings_page(
         bg_row,
         hidden_row,
         steam_entry,
-        sgdb_entry,
         lang_list,
         saves_row,
         square_row,
@@ -1133,3 +1132,314 @@ fn available_language_strings(list: &gtk4::ListBox) -> Vec<String> {
 pub(super) fn read_language_preferences(list: &gtk4::ListBox) -> Vec<String> {
     enabled_language_codes(list)
 }
+
+/// Widgets the settings save handler reads back for the SteamGridDB page.
+pub(super) struct SgdbSettingsWidgets {
+    pub sgdb_entry: adw::PasswordEntryRow,
+    pub auto_asset_rows: AutoAssetRows,
+    pub style_rows: AutoAssetRows,
+    pub filter_users_list: gtk4::ListBox,
+    /// steam64 per author name for rows currently in the filter editor, so
+    /// activating a row can open the author's profile page.
+    pub filter_user_ids: Rc<RefCell<HashMap<String, String>>>,
+}
+
+/// The SteamGridDB settings page: API key, per-asset auto-download
+/// switches, filtered image styles, and the filtered-users editor.
+pub(super) fn build_sgdb_settings_page(
+    cfg: &Config,
+) -> (adw::ToastOverlay, SgdbSettingsWidgets) {
+    let page = settings_page_container();
+
+    let key_group = adw::PreferencesGroup::new();
+    key_group.set_title(&crate::tr!("API keys"));
+    let sgdb_entry = adw::PasswordEntryRow::new();
+    sgdb_entry.set_title(&crate::tr!("SteamGridDB API key"));
+    sgdb_entry.set_text(&cfg.steam_griddb_api_key);
+    key_group.add(&sgdb_entry);
+    page.append(&key_group);
+
+    let auto_group = adw::PreferencesGroup::new();
+    auto_group.set_title(&crate::tr!("Auto-download"));
+    auto_group.set_description(Some(&crate::tr!(
+        "Which image types are fetched automatically when missing"
+    )));
+    let mut auto_asset_rows: Vec<(String, adw::SwitchRow)> = Vec::new();
+    for (label, name) in [
+        (crate::tr!("Icons"), "icon"),
+        (crate::tr!("Heroes"), "hero"),
+        (crate::tr!("Capsules"), "vertical"),
+        (crate::tr!("Squares"), "square"),
+        (crate::tr!("Headers"), "header"),
+        (crate::tr!("Logos"), "logo"),
+    ] {
+        let row = adw::SwitchRow::new();
+        row.set_title(&label);
+        row.set_active(!cfg.sgdb_disabled_assets.iter().any(|n| n == name));
+        auto_group.add(&row);
+        auto_asset_rows.push((name.to_string(), row));
+    }
+    page.append(&auto_group);
+
+    let style_group = adw::PreferencesGroup::new();
+    style_group.set_title(&crate::tr!("Allowed image styles"));
+    style_group.set_description(Some(&crate::tr!(
+        "Enabled styles are fetched automatically and come first in manual image search; disabled ones sink to the bottom"
+    )));
+    let mut style_rows: Vec<(String, adw::SwitchRow)> = Vec::new();
+    for (label, name) in [
+        (crate::tr!("Alternate"), "alternate"),
+        (crate::tr!("Blurred"), "blurred"),
+        (crate::tr!("White logo"), "white_logo"),
+        (crate::tr!("Material"), "material"),
+        (crate::tr!("No logo"), "no_logo"),
+    ] {
+        let row = adw::SwitchRow::new();
+        row.set_title(&label);
+        row.set_active(!cfg.sgdb_filtered_styles.iter().any(|n| n == name));
+        style_group.add(&row);
+        style_rows.push((name.to_string(), row));
+    }
+    page.append(&style_group);
+
+    let users_group = adw::PreferencesGroup::new();
+    users_group.set_title(&crate::tr!("Filtered users"));
+    users_group.set_description(Some(&crate::tr!(
+        "Art by these authors is skipped in automatic downloads and sinks to the bottom of manual image search. Click a user to open their profile on SteamGridDB."
+    )));
+    // One boxed list with the search and entry as its first rows: entry and
+    // users render as a single card, the way libadwaita settings lists do
+    // it. The overlay floats "user was unfiltered (Undo)" toasts.
+    let toast_overlay = adw::ToastOverlay::new();
+    let filter_users_list = gtk4::ListBox::new();
+    filter_users_list.set_selection_mode(gtk4::SelectionMode::None);
+    filter_users_list.add_css_class("boxed-list");
+    let search_row = gtk4::SearchEntry::new();
+    search_row.set_placeholder_text(Some(&crate::tr!("Search filtered users\u{2026}")));
+    search_row.set_hexpand(true);
+    filter_users_list.append(&search_row);
+    let filter_entry = adw::EntryRow::new();
+    filter_entry.set_title(&crate::tr!("Add user\u{2026}"));
+    filter_users_list.append(&filter_entry);
+    let filter_user_ids: Rc<RefCell<HashMap<String, String>>> = Rc::new(RefCell::new(
+        cfg.sgdb_filtered_users
+            .iter()
+            .map(|u| (u.name.clone(), u.steam64.clone()))
+            .collect(),
+    ));
+    let mut seeded: Vec<&ira_config::SgdbFilteredUser> = cfg.sgdb_filtered_users.iter().collect();
+    seeded.sort_by_key(|user| user.name.to_lowercase());
+    for user in &seeded {
+        add_filtered_user_row(
+            &filter_users_list,
+            &user.name,
+            &user.steam64,
+            &filter_user_ids,
+            &toast_overlay,
+        );
+    }
+    {
+        let list = filter_users_list.clone();
+        search_row.connect_search_changed(move |entry| {
+            let query = entry.text().to_lowercase();
+            let mut child = list.first_child();
+            while let Some(row) = child {
+                child = row.next_sibling();
+                let name = row.widget_name().to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                row.set_visible(name.to_lowercase().contains(&query));
+            }
+        });
+    }
+    let filter_add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    filter_add_btn.add_css_class(CSS_FLAT);
+    filter_add_btn.set_valign(gtk4::Align::Center);
+    filter_add_btn.set_tooltip_text(Some(&crate::tr!("Add user to the filter list")));
+    filter_entry.add_suffix(&filter_add_btn);
+    let add_filtered_action: Rc<dyn Fn()> = {
+        let list = filter_users_list.clone();
+        let entry = filter_entry.clone();
+        let ids = filter_user_ids.clone();
+        let toast_overlay = toast_overlay.clone();
+        Rc::new(move || {
+            let name = entry.text().trim().to_string();
+            if name.is_empty() {
+                return;
+            }
+            if filtered_users(&list, &ids)
+                .iter()
+                .any(|u| u.name.eq_ignore_ascii_case(&name))
+            {
+                entry.set_text("");
+                return;
+            }
+            add_filtered_user_row(&list, &name, "", &ids, &toast_overlay);
+            entry.set_text("");
+        })
+    };
+    {
+        let add = add_filtered_action.clone();
+        filter_add_btn.connect_clicked(move |_| add());
+    }
+    filter_entry.connect_activate(move |_| add_filtered_action());
+    users_group.add(&filter_users_list);
+    page.append(&users_group);
+
+    toast_overlay.set_child(Some(&page));
+    (
+        toast_overlay,
+        SgdbSettingsWidgets {
+            sgdb_entry,
+            auto_asset_rows,
+            style_rows,
+            filter_users_list,
+            filter_user_ids,
+        },
+    )
+}
+
+/// One row in the filtered-users editor: the author name plus a remove
+/// button. The row's widget name carries the name for saving; activating
+/// the row opens the author's SteamGridDB profile.
+fn add_filtered_user_row(
+    list: &gtk4::ListBox,
+    name: &str,
+    steam64: &str,
+    ids: &Rc<RefCell<HashMap<String, String>>>,
+    overlay: &adw::ToastOverlay,
+) {
+    let row = make_filtered_user_row(list, name, steam64, ids, overlay);
+    insert_user_row_sorted(list, &row, name);
+}
+
+fn make_filtered_user_row(
+    list: &gtk4::ListBox,
+    name: &str,
+    steam64: &str,
+    ids: &Rc<RefCell<HashMap<String, String>>>,
+    overlay: &adw::ToastOverlay,
+) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    row.set_widget_name(name);
+    row.set_activatable(true);
+    row.set_title(name);
+
+    let remove_btn = gtk4::Button::from_icon_name("user-trash-symbolic");
+    remove_btn.add_css_class(CSS_FLAT);
+    remove_btn.set_valign(gtk4::Align::Center);
+    remove_btn.set_tooltip_text(Some(&crate::tr!("Remove from filter list")));
+    row.add_suffix(&remove_btn);
+
+    {
+        let row_c = row.clone();
+        let steam64 = steam64.to_string();
+        row.connect_activated(move |_| open_sgdb_profile(row_c.upcast_ref(), &steam64));
+    }
+
+    {
+        let row_c = row.clone();
+        let ids = ids.clone();
+        let name = name.to_string();
+        let steam64 = steam64.to_string();
+        // Weak refs: the closure would otherwise keep the list (and its
+        // rows) alive after the settings window is gone.
+        let list_w = glib::WeakRef::<gtk4::ListBox>::new();
+        list_w.set(Some(list));
+        let overlay_w = glib::WeakRef::<adw::ToastOverlay>::new();
+        overlay_w.set(Some(overlay));
+        remove_btn.connect_clicked(move |_| {
+            row_c.unparent();
+            ids.borrow_mut().remove(&name);
+            let (Some(list), Some(overlay)) = (list_w.upgrade(), overlay_w.upgrade()) else {
+                return;
+            };
+            // HIG pattern for destructive list actions: announce the change
+            // and offer Undo before the removal is final.
+            let toast = adw::Toast::new(
+                &crate::tr!("{} was unfiltered").replacen("{}", &name, 1),
+            );
+            toast.set_button_label(Some(&crate::tr!("Undo")));
+            toast.set_timeout(5);
+            {
+                let list = list.clone();
+                let ids = ids.clone();
+                let overlay = overlay.clone();
+                let name = name.clone();
+                let steam64 = steam64.clone();
+                toast.connect_button_clicked(move |_| {
+                    ids.borrow_mut().insert(name.clone(), steam64.clone());
+                    let row = make_filtered_user_row(
+                        &list,
+                        &name,
+                        &steam64,
+                        &ids,
+                        &overlay,
+                    );
+                    insert_user_row_sorted(&list, &row, &name);
+                });
+            }
+            overlay.add_toast(toast);
+        });
+    }
+    row
+}
+
+/// Inserts a user row keeping the list alphabetical (case-insensitive),
+/// skipping the search and add rows that share the list.
+fn insert_user_row_sorted(list: &gtk4::ListBox, row: &adw::ActionRow, name: &str) {
+    let name_lower = name.to_lowercase();
+    let mut child = list.first_child();
+    let mut index = 0usize;
+    while let Some(existing) = child {
+        child = existing.next_sibling();
+        let existing_name = existing.widget_name().to_string();
+        if existing_name.is_empty() {
+            index += 1;
+            continue;
+        }
+        if existing_name.to_lowercase() > name_lower {
+            break;
+        }
+        index += 1;
+    }
+    list.insert(row, index as i32);
+}
+
+/// Open the author's profile at steamgriddb.com/profile/{steam64}; authors
+/// added by hand have no known id, so they simply do nothing on click.
+fn open_sgdb_profile(row: &gtk4::Widget, steam64: &str) {
+    if steam64.is_empty() {
+        return;
+    }
+    let uri = format!("https://www.steamgriddb.com/profile/{steam64}");
+    let launcher = gtk4::UriLauncher::new(&uri);
+    let parent = row.root().and_then(|w| w.downcast::<gtk4::Window>().ok());
+    launcher.launch(parent.as_ref(), gio::Cancellable::NONE, |res| {
+        if let Err(e) = res {
+            eprintln!("Failed to open SteamGridDB profile: {e}");
+        }
+    });
+}
+
+/// Read the filtered users back out of the editor list (for saving).
+pub(super) fn filtered_users(
+    list: &gtk4::ListBox,
+    ids: &Rc<RefCell<HashMap<String, String>>>,
+) -> Vec<ira_config::SgdbFilteredUser> {
+    let mut users = Vec::new();
+    let mut child = list.first_child();
+    while let Some(c) = child {
+        if let Some(row) = c.downcast_ref::<gtk4::ListBoxRow>() {
+            let name = row.widget_name().to_string();
+            if !name.is_empty() {
+                let steam64 = ids.borrow().get(&name).cloned().unwrap_or_default();
+                users.push(ira_config::SgdbFilteredUser { name, steam64 });
+            }
+        }
+        child = c.next_sibling();
+    }
+    users
+}
+

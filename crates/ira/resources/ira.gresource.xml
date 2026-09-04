@@ -5,6 +5,7 @@
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/file-operation-cancelled-symbolic.svg">icons/file-operation-cancelled-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/file-operation-finished-symbolic.svg">icons/file-operation-finished-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/games-symbolic.svg">icons/games-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/16x16/actions/eye-not-looking-symbolic.svg">icons/eye-not-looking-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/globe-symbolic.svg">icons/globe-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/layers-symbolic.svg">icons/layers-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/library-symbolic.svg">icons/library-symbolic.svg</file>

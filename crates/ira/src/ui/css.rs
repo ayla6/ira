@@ -298,6 +298,28 @@ gridview.game-grid child:focus-within {
     box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
 }
 .bp-caption { font-size: 1.6em; font-weight: 700; }
+/* SGDB picker: the per-item filter button floats on the art with a shadow
+   (no pill background) and fades in while the pointer is anywhere over the
+   card or row; hovering the button itself shows a disc so it reads as
+   clickable. Reveal is driven by a motion controller (sgdb-reveal). */
+button.sgdb-filter {
+    background: none;
+    box-shadow: none;
+    min-width: 0;
+    min-height: 0;
+    padding: 4px;
+    opacity: 0;
+    transition: opacity 150ms ease;
+}
+button.sgdb-filter image {
+    color: currentcolor;
+    -gtk-icon-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+button.sgdb-filter.sgdb-reveal,
+button.sgdb-filter:hover {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.55);
+}
 ";
 
 /// Install the global stylesheet and icon theme additions on the default

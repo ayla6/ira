@@ -196,7 +196,12 @@ fn build_steam_non_icon_button(
     id: &str,
     refresh_images: &Rc<dyn Fn()>,
 ) -> Option<gtk4::Button> {
-    if !is_steam || AssetType::from_string(asset_type) == Some(AssetType::Icon) {
+    // Squares have no Steam source — the CDN only serves portrait
+    // capsules — so the Steam button stays off that section.
+    if !is_steam
+        || AssetType::from_string(asset_type) == Some(AssetType::Icon)
+        || AssetType::from_string(asset_type) == Some(AssetType::Square)
+    {
         return None;
     }
     let btn = gtk4::Button::with_label(&crate::tr!("Steam"));
@@ -355,12 +360,19 @@ fn build_sgdb_picker_button(
     let sgdb_id_c = sgdb_id_for_picker.clone();
     let save_dir_c = ctx.save_dir.to_string();
     let sgdb_cache_btn = ctx.sgdb_cache.clone();
+    let filter_state = ctx.state.clone();
     let dest_dir = ira_parser::game_data_dir(&save_dir_c, game)
         .to_string_lossy()
         .into_owned();
     btn.connect_clicked(move |_| {
         let Some(parent) = parent.upgrade() else {
             return;
+        };
+        let filter_user: Rc<dyn Fn(String, String)> = {
+            let state = filter_state.clone();
+            Rc::new(move |author, steam64| {
+                super::image_manager_helpers::add_sgdb_filtered_user(&state, &author, &steam64)
+            })
         };
         show_sgdb_picker(ShowSgdbPickerParams {
             steam: &steam,
@@ -374,6 +386,7 @@ fn build_sgdb_picker_button(
             sgdb_cache: sgdb_cache_btn.clone(),
             save_dir: &save_dir_c,
             dest_dir: Some(&dest_dir),
+            filter_user: Some(filter_user),
         });
     });
     Some(btn)
@@ -820,6 +833,7 @@ fn build_dir_buttons(
         let sgdb_id_empty = sgdb_id.is_empty();
         let dims_vec: Vec<&str> = ctx.dimensions.to_vec();
         let target_dir_c = target_dir.to_string_lossy().into_owned();
+        let filter_state = ctx.state.clone();
         btn.connect_clicked(move |_| {
             let Some(parent) = parent.upgrade() else {
                 return;
@@ -828,6 +842,12 @@ fn build_dir_buttons(
                 let refresh = refresh.clone();
                 Rc::new(move || {
                     refresh();
+                })
+            };
+            let filter_user: Rc<dyn Fn(String, String)> = {
+                let state = filter_state.clone();
+                Rc::new(move |author, steam64| {
+                    super::image_manager_helpers::add_sgdb_filtered_user(&state, &author, &steam64)
                 })
             };
             show_sgdb_picker(ShowSgdbPickerParams {
@@ -842,6 +862,7 @@ fn build_dir_buttons(
                 sgdb_cache: None,
                 save_dir: &save_dir,
                 dest_dir: Some(&target_dir_c),
+                filter_user: Some(filter_user),
             });
         });
         btns.append(&btn);

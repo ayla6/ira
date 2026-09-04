@@ -13,11 +13,9 @@ use std::sync::Arc;
 
 fn build_sgdb_asset_card(
     a: &SgdbAsset,
-    _asset_type: &str,
-    steam: &Arc<SteamDataClient>,
+    ctx: &SgdbPickerCtx,
     on_download: Rc<dyn Fn()>,
     thumb_size: i32,
-    all_buttons: Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>>,
 ) -> (gtk4::Widget, gtk4::Widget) {
     let mut info = String::new();
     if a.width > 0 && a.height > 0 {
@@ -44,10 +42,23 @@ fn build_sgdb_asset_card(
     card.set_margin_top(8);
     card.set_margin_bottom(8);
 
+    // Thumbnail with the hide-author button overlaid top-right; the button
+    // is revealed by hovering anywhere on the card (see the sgdb-filter
+    // CSS rules).
+    let thumb_overlay = gtk4::Overlay::new();
     let grid_pic = gtk4::Picture::new();
     grid_pic.set_content_fit(gtk4::ContentFit::ScaleDown);
     grid_pic.set_size_request(thumb_size, thumb_size);
-    card.append(&grid_pic);
+    thumb_overlay.set_child(Some(&grid_pic));
+    if let Some(btn) = build_filter_button(ctx, a) {
+        btn.set_halign(gtk4::Align::End);
+        btn.set_valign(gtk4::Align::Start);
+        btn.set_margin_top(6);
+        btn.set_margin_end(6);
+        thumb_overlay.add_overlay(&btn);
+        attach_hover_reveal(&card, &btn);
+    }
+    card.append(&thumb_overlay);
 
     let ilbl = gtk4::Label::new(Some(&info));
     ilbl.set_xalign(0.5);
@@ -78,15 +89,19 @@ fn build_sgdb_asset_card(
     rlbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     row.append(&rlbl);
 
+    if let Some(btn) = build_filter_button(ctx, a) {
+        row.append(&btn);
+        attach_hover_reveal(&row, &btn);
+    }
     let ldl = gtk4::Button::with_label(&crate::tr!("Download"));
     ldl.add_css_class(CSS_SUGGESTED_ACTION);
     row.append(&ldl);
 
-    all_buttons.borrow_mut().push(gdl.downgrade());
-    all_buttons.borrow_mut().push(ldl.downgrade());
+    all_buttons_push(ctx, &gdl);
+    all_buttons_push(ctx, &ldl);
 
     let cb_g = on_download.clone();
-    let buttons_g = all_buttons.clone();
+    let buttons_g = ctx.all_buttons.clone();
     gdl.connect_clicked(move |_| {
         for b in buttons_g.borrow().iter() {
             if let Some(b) = b.upgrade() {
@@ -96,7 +111,7 @@ fn build_sgdb_asset_card(
         }
         cb_g();
     });
-    let buttons_l = all_buttons.clone();
+    let buttons_l = ctx.all_buttons.clone();
     ldl.connect_clicked(move |_| {
         for b in buttons_l.borrow().iter() {
             if let Some(b) = b.upgrade() {
@@ -112,7 +127,7 @@ fn build_sgdb_asset_card(
     } else {
         a.thumb.clone()
     };
-    let steam_thumb = steam.clone();
+    let steam_thumb = ctx.steam.clone();
     let (tx_thumb, rx_thumb) = std::sync::mpsc::channel::<Option<Vec<u8>>>();
     let rx_thumb = std::cell::RefCell::new(rx_thumb);
     std::thread::spawn(move || {
@@ -143,7 +158,64 @@ fn build_sgdb_asset_card(
         }
     });
 
-    (card.upcast::<gtk4::Widget>(), row.upcast::<gtk4::Widget>())
+    // Wrapped and tagged by author so a filter click can pluck exactly
+    // these widgets out of their containers without rebuilding anything.
+    let flow_child = gtk4::FlowBoxChild::new();
+    flow_child.set_widget_name(&a.author);
+    flow_child.set_child(Some(&card));
+    let list_row = gtk4::ListBoxRow::new();
+    list_row.set_widget_name(&a.author);
+    list_row.set_child(Some(&row));
+    (
+        flow_child.upcast::<gtk4::Widget>(),
+        list_row.upcast::<gtk4::Widget>(),
+    )
+}
+
+/// The hide-author button: an eye-not-looking icon that follows the theme
+/// text color, overlaid on thumbnails and revealed on hover (rows included).
+fn build_filter_button(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Option<gtk4::Button> {
+    if a.author.is_empty() || ctx.filter_user.is_none() {
+        return None;
+    }
+    let btn = gtk4::Button::from_icon_name("eye-not-looking-symbolic");
+    btn.add_css_class("flat");
+    btn.add_css_class("sgdb-filter");
+    btn.set_tooltip_text(Some(&crate::tr!("Hide art by this author")));
+    let ctx = ctx.clone();
+    let author = a.author.clone();
+    let steam64 = a.author_steam64.clone();
+    btn.connect_clicked(move |_| ctx.filter_author(&author, &steam64));
+    Some(btn)
+}
+
+fn all_buttons_push(ctx: &SgdbPickerCtx, btn: &gtk4::Button) {
+    ctx.all_buttons.borrow_mut().push(btn.downgrade());
+}
+
+/// Reveal `target` while the pointer is anywhere over `area` (the whole
+/// card or row), not just over the button itself — CSS :hover on ancestor
+/// boxes is not dependable, so track motion explicitly.
+fn attach_hover_reveal<T: IsA<gtk4::Widget>, U: IsA<gtk4::Widget>>(
+    area: &T,
+    target: &U,
+) {
+    let target = target.downgrade();
+    let ctrl = gtk4::EventControllerMotion::new();
+    ctrl.connect_enter({
+        let target = target.clone();
+        move |_, _, _| {
+            if let Some(t) = target.upgrade() {
+                t.add_css_class("sgdb-reveal");
+            }
+        }
+    });
+    ctrl.connect_leave(move |_| {
+        if let Some(t) = target.upgrade() {
+            t.remove_css_class("sgdb-reveal");
+        }
+    });
+    area.add_controller(ctrl);
 }
 
 #[derive(Clone)]
@@ -160,6 +232,81 @@ struct SgdbPickerCtx {
     on_done: Rc<dyn Fn()>,
     pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     dest_dir: Option<String>,
+    // Live view state, so asset cards can react to clicks without closures
+    // strongly owning the widgets they render into.
+    store: Rc<RefCell<Vec<SgdbAsset>>>,
+    rendered: Rc<Cell<usize>>,
+    zoom_level: Rc<Cell<i32>>,
+    all_buttons: Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>>,
+    flow: glib::WeakRef<gtk4::FlowBox>,
+    list_view: glib::WeakRef<gtk4::ListBox>,
+    // Persists an author (name, steam64) to the config's filtered-users
+    // list; None when the caller has no config to persist to.
+    filter_user: Option<Rc<dyn Fn(String, String)>>,
+}
+
+impl SgdbPickerCtx {
+    /// Re-render every asset currently in the store.
+    fn rebuild_all(&self) {
+        let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade())
+        else {
+            return;
+        };
+        let assets = self.store.borrow();
+        full_rebuild(&flow, &list_view, &assets, self.zoom_level.get(), self);
+        self.rendered.set(assets.len());
+    }
+
+    /// Render assets fetched since the last render (infinite scroll).
+    fn append_new(&self) {
+        let start = self.rendered.get();
+        if start >= self.store.borrow().len() {
+            return;
+        }
+        let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade())
+        else {
+            return;
+        };
+        let assets = self.store.borrow();
+        append_assets(
+            &flow,
+            &list_view,
+            &assets,
+            start,
+            self.zoom_level.get(),
+            self,
+        );
+        self.rendered.set(assets.len());
+    }
+
+    /// Hide one author's art: persist the choice, then pluck exactly that
+    /// author's card and row widgets out of their containers — no rebuild,
+    /// so loaded thumbnails and the scroll position stay untouched. The
+    /// store keeps its indices, and append/full rebuild skip filtered
+    /// authors and styles, so future pages stay consistent.
+    fn filter_author(&self, author: &str, steam64: &str) {
+        if let Some(persist) = &self.filter_user {
+            persist(author.to_string(), steam64.to_string());
+        }
+        let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade())
+        else {
+            return;
+        };
+        let mut child = flow.first_child();
+        while let Some(w) = child {
+            child = w.next_sibling();
+            if w.widget_name() == author {
+                flow.remove(&w);
+            }
+        }
+        let mut child = list_view.first_child();
+        while let Some(w) = child {
+            child = w.next_sibling();
+            if w.widget_name() == author {
+                list_view.remove(&w);
+            }
+        }
+    }
 }
 
 fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
@@ -345,19 +492,14 @@ fn append_assets(
     start: usize,
     thumb_size: i32,
     ctx: &SgdbPickerCtx,
-    all_buttons: &Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>>,
 ) {
     flow.set_max_children_per_line((900 / (thumb_size + 20)).clamp(1, 8) as u32);
     for a in &assets[start..] {
+        if ctx.steam.asset_filtered(&a.author, &a.style) {
+            continue;
+        }
         let on_download = build_on_download(ctx, a);
-        let (grid_card, list_row) = build_sgdb_asset_card(
-            a,
-            &ctx.asset,
-            &ctx.steam,
-            on_download,
-            thumb_size,
-            all_buttons.clone(),
-        );
+        let (grid_card, list_row) = build_sgdb_asset_card(a, ctx, on_download, thumb_size);
         flow.append(&grid_card);
         list_view.append(&list_row);
     }
@@ -369,11 +511,10 @@ fn full_rebuild(
     assets: &[SgdbAsset],
     thumb_size: i32,
     ctx: &SgdbPickerCtx,
-    all_buttons: &Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>>,
 ) {
     clear_children(flow);
     clear_children(list_view);
-    all_buttons.borrow_mut().clear();
+    ctx.all_buttons.borrow_mut().clear();
 
     if assets.is_empty() {
         let none = gtk4::Label::new(Some(&crate::tr!("No images found on SteamGridDB")));
@@ -385,7 +526,7 @@ fn full_rebuild(
         return;
     }
 
-    append_assets(flow, list_view, assets, 0, thumb_size, ctx, all_buttons);
+    append_assets(flow, list_view, assets, 0, thumb_size, ctx);
 }
 
 pub(crate) struct ShowSgdbPickerParams<'a> {
@@ -400,6 +541,9 @@ pub(crate) struct ShowSgdbPickerParams<'a> {
     pub sgdb_cache: Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
     pub save_dir: &'a str,
     pub dest_dir: Option<&'a str>,
+    /// Persists an author (name, steam64) to the filtered-users config;
+    /// enables the per-item filter buttons when set.
+    pub filter_user: Option<Rc<dyn Fn(String, String)>>,
 }
 
 pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
@@ -415,6 +559,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         sgdb_cache,
         save_dir,
         dest_dir,
+        filter_user,
     } = params;
     // Key the settings-screen cache by the full SGDB query, not just the
     // asset type: a Steam game's picker runs against its Steam id until it's
@@ -539,6 +684,16 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         );
     }
 
+    let assets_store: Rc<RefCell<Vec<SgdbAsset>>> = Rc::new(RefCell::new(Vec::new()));
+    let zoom_level = Rc::new(Cell::new(300));
+    let current_page: Rc<Cell<u32>> = Rc::new(Cell::new(0));
+    let has_more: Rc<Cell<bool>> = Rc::new(Cell::new(true));
+    let loading_more: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+    let rendered_count: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+    let all_buttons: Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>> =
+        Rc::new(RefCell::new(Vec::new()));
+    let is_initial_load: Rc<Cell<bool>> = Rc::new(Cell::new(true));
+
     let picker_ctx = SgdbPickerCtx {
         id: id.to_string(),
         save_dir: save_dir.to_string(),
@@ -549,17 +704,14 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         on_done: on_done.clone(),
         pending_copies: pending_copies.clone(),
         dest_dir: dest_dir.map(|s| s.to_string()),
+        store: assets_store.clone(),
+        rendered: rendered_count.clone(),
+        zoom_level: zoom_level.clone(),
+        all_buttons: all_buttons.clone(),
+        flow: flow.downgrade(),
+        list_view: list_view.downgrade(),
+        filter_user,
     };
-
-    let assets_store: Rc<RefCell<Vec<SgdbAsset>>> = Rc::new(RefCell::new(Vec::new()));
-    let zoom_level = Rc::new(Cell::new(300));
-    let current_page: Rc<Cell<u32>> = Rc::new(Cell::new(0));
-    let has_more: Rc<Cell<bool>> = Rc::new(Cell::new(true));
-    let loading_more: Rc<Cell<bool>> = Rc::new(Cell::new(false));
-    let rendered_count: Rc<Cell<usize>> = Rc::new(Cell::new(0));
-    let all_buttons: Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>> =
-        Rc::new(RefCell::new(Vec::new()));
-    let is_initial_load: Rc<Cell<bool>> = Rc::new(Cell::new(true));
 
     // Re-showing a hidden picker resets any buttons left disabled by a
     // previous download so the same window is ready to pick again.
@@ -574,48 +726,13 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     });
 
     let do_full_rebuild = {
-        let assets_store = assets_store.clone();
-        let zoom_level = zoom_level.clone();
-        let flow = flow.clone();
-        let list_view = list_view.clone();
         let ctx = picker_ctx.clone();
-        let all_buttons = all_buttons.clone();
-        let rendered_count = rendered_count.clone();
-
-        Rc::new(move || {
-            let assets = assets_store.borrow();
-            let thumb_size = zoom_level.get();
-            full_rebuild(&flow, &list_view, &assets, thumb_size, &ctx, &all_buttons);
-            rendered_count.set(assets.len());
-        }) as Rc<dyn Fn()>
+        Rc::new(move || ctx.rebuild_all()) as Rc<dyn Fn()>
     };
 
     let do_append = {
-        let assets_store = assets_store.clone();
-        let zoom_level = zoom_level.clone();
-        let flow = flow.clone();
-        let list_view = list_view.clone();
         let ctx = picker_ctx.clone();
-        let all_buttons = all_buttons.clone();
-        let rendered_count = rendered_count.clone();
-
-        Rc::new(move || {
-            let assets = assets_store.borrow();
-            let thumb_size = zoom_level.get();
-            let start = rendered_count.get();
-            if start < assets.len() {
-                append_assets(
-                    &flow,
-                    &list_view,
-                    &assets,
-                    start,
-                    thumb_size,
-                    &ctx,
-                    &all_buttons,
-                );
-                rendered_count.set(assets.len());
-            }
-        }) as Rc<dyn Fn()>
+        Rc::new(move || ctx.append_new()) as Rc<dyn Fn()>
     };
 
     let stack_toggle = stack.clone();

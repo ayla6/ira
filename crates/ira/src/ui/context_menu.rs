@@ -320,3 +320,131 @@ pub fn show_multi_game_context_menu(
 
     setup_and_show_popover(&menu, &actions, parent, at_x, at_y);
 }
+
+
+/// Shift+right-click on grid covers: a small menu to reset (delete) any of
+/// the game's stored art files, so the fallback — or a fresh auto
+/// download — takes over.
+pub fn show_image_reset_menu(
+    state: &SharedState,
+    game: &Game,
+    parent: &impl glib::prelude::IsA<gtk4::Widget>,
+    at_x: f64,
+    at_y: f64,
+) {
+    let (db, save_dir) = {
+        let s = state.borrow();
+        (s.db.clone(), s.save_dir.clone())
+    };
+    let Ok(Some(entry)) = ira_db::find_by_db_id(&db, game.db_id) else {
+        return;
+    };
+    let image_dir = ira_parser::entry_data_dir(&save_dir, &entry);
+
+    let candidates: [(String, &str); 6] = [
+        (crate::tr!("Icon"), "icon"),
+        (crate::tr!("Capsule"), "vertical"),
+        (crate::tr!("Square"), "square"),
+        (crate::tr!("Header"), "header"),
+        (crate::tr!("Logo"), "logo"),
+        (crate::tr!("Hero"), "hero"),
+    ];
+    let existing: Vec<(String, &str)> = candidates
+        .iter()
+        .filter(|(_, base)| ira_parser::find_image_file(&image_dir, base).is_some())
+        .map(|(label, base)| (label.clone(), *base))
+        .collect();
+    if existing.is_empty() {
+        return;
+    }
+
+    // Standard menu styling, same as the game context menu.
+    let menu = gio::Menu::new();
+    let section = gio::Menu::new();
+    for (label, base) in &existing {
+        section.append(Some(label), Some(&format!("image.reset('{base}')")));
+    }
+    menu.append_section(Some(&crate::tr!("Reset image")), &section);
+
+    let actions = gio::SimpleActionGroup::new();
+    let reset = gio::SimpleAction::new("reset", Some(glib::VariantTy::STRING));
+    let state_c = state.clone();
+    let game_c = game.clone();
+    reset.connect_activate(move |_, parameter| {
+        if let Some(base) = parameter.and_then(|v| v.str()) {
+            reset_game_image(&state_c, &game_c, base);
+        }
+    });
+    actions.add_action(&reset);
+
+    let popover = gtk4::PopoverMenu::from_model(Some(&menu));
+    popover.set_halign(gtk4::Align::Start);
+    popover.set_has_arrow(false);
+    popover.set_parent(parent);
+    popover.set_pointing_to(Some(&gdk4::Rectangle::new(
+        at_x as i32,
+        at_y as i32,
+        1,
+        1,
+    )));
+    parent.insert_action_group("image", Some(&actions));
+    let popover_clone = popover.clone();
+    popover.connect_closed(move |_| {
+        let p = popover_clone.clone();
+        glib::idle_add_local_once(move || {
+            p.unparent();
+        });
+    });
+    popover.popup();
+}
+
+/// Delete one stored art file from the game's data dir and update the
+/// shared state so every view falls back immediately.
+fn reset_game_image(state: &SharedState, game: &Game, base: &str) {
+    let (db, save_dir) = {
+        let s = state.borrow();
+        (s.db.clone(), s.save_dir.clone())
+    };
+    let Ok(Some(entry)) = ira_db::find_by_db_id(&db, game.db_id) else {
+        return;
+    };
+    let dir = ira_parser::entry_data_dir(&save_dir, &entry);
+    ira_parser::remove_image_variants(&dir, base);
+    ira_parser::remove_image_variants(&dir, &format!("{base}_small"));
+    if let Some(path) = ira_parser::find_image_file(&dir, base) {
+        ira_images::invalidate_texture(&path.to_string_lossy());
+    }
+
+    let mut updated = game.clone();
+    match base {
+        "icon" => updated.icon_path.clear(),
+        "hero" => updated.hero_image_path.clear(),
+        "vertical" => updated.grid_path.clear(),
+        "square" => updated.square_path.clear(),
+        "header" => updated.header_path.clear(),
+        "logo" => updated.logo_path.clear(),
+        _ => {}
+    }
+
+    {
+        let mut s = state.borrow_mut();
+        for g in s
+            .games
+            .iter_mut()
+            .filter(|g| g.db_id == game.db_id && g.variant_id == game.variant_id)
+        {
+            match base {
+                "icon" => g.icon_path.clear(),
+                "hero" => g.hero_image_path.clear(),
+                "vertical" => g.grid_path.clear(),
+                "square" => g.square_path.clear(),
+                "header" => g.header_path.clear(),
+                "logo" => g.logo_path.clear(),
+                _ => {}
+            }
+        }
+    }
+    super::helpers::replace_grid_game(state, &updated);
+    super::big_picture_view::refresh(state);
+}
+

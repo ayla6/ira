@@ -733,6 +733,7 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
                     g.grid_path = reloaded.grid_path;
                     g.header_path = reloaded.header_path;
                     g.logo_path = reloaded.logo_path;
+                    g.square_path = reloaded.square_path;
                 }
             }
         }

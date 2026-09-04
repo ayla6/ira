@@ -413,74 +413,15 @@ fn queue_missing_squares(state: &SharedState, ui: &BigPictureUi, square_mode: bo
     if jobs.is_empty() {
         return;
     }
-    let switch_exe = cfg.console("switch").executable.clone();
     std::thread::spawn(move || {
         for game in jobs {
-            let square = if !game.sgdb_id.is_empty() {
-                fetch_sgdb_square(&steam, &save_dir, &db, game.db_id, &game.sgdb_id)
-            } else if matches!(
-                game.kind,
-                ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
-            ) {
-                import_rom_square(&save_dir, &db, &game, &cfg, &switch_exe)
-            } else {
-                String::new()
-            };
+            let square =
+                super::fetch_images::ensure_game_square(&steam, &save_dir, &db, &cfg, &game);
             if !square.is_empty() {
                 let _ = sender.send(crate::AppMessage::SquareReady(game.db_id));
             }
         }
     });
-}
-
-/// Download the matched game's SGDB square (and any other missing SGDB
-/// asset alongside it; cached files are reused). Returns the square path.
-fn fetch_sgdb_square(
-    steam: &ira_api::SteamDataClient,
-    save_dir: &str,
-    db: &ira_db::DbConn,
-    db_id: i64,
-    sgdb_id: &str,
-) -> String {
-    let Ok(Some(entry)) = ira_db::find_by_db_id(db, db_id) else {
-        return String::new();
-    };
-    let dir = ira_parser::entry_data_dir(save_dir, &entry);
-    let (_, _, _, _, _, square) = steam.ensure_sgdb_assets_in_dir(&dir, sgdb_id);
-    square
-}
-
-/// Import a console game's ROM icon into its data dir as square.webp —
-/// the same native art the icon slot starts from, kept in its own slot so
-/// SGDB's small chat icon never replaces it here.
-fn import_rom_square(
-    save_dir: &str,
-    db: &ira_db::DbConn,
-    game: &Game,
-    cfg: &ira_config::Config,
-    switch_exe: &str,
-) -> String {
-    let Some(bytes) = super::image_manager_helpers::native_icon_bytes(
-        game,
-        cfg,
-        &cfg.azahar_executable,
-        &cfg.cemu_executable,
-        switch_exe,
-    ) else {
-        return String::new();
-    };
-    let Ok(Some(entry)) = ira_db::find_by_db_id(db, game.db_id) else {
-        return String::new();
-    };
-    let dir = ira_parser::entry_data_dir(save_dir, &entry);
-    if std::fs::create_dir_all(&dir).is_err() {
-        return String::new();
-    }
-    let dest = dir.join("square.webp");
-    if std::fs::write(&dest, &bytes).is_err() {
-        return String::new();
-    }
-    dest.to_string_lossy().into_owned()
 }
 
 #[cfg(test)]

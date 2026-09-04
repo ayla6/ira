@@ -22,6 +22,7 @@ fn compute_grid_layout(
     min_item_w: i32,
     base_sp: i32,
     viewport_h: i32,
+    aspect: f64,
 ) -> (u32, i32, i32, i32) {
     let avail_w = (width - 2 * base_sp).max(min_item_w);
     let raw_cols = (((avail_w + base_sp) / (min_item_w + base_sp)).max(1) as u32).min(30);
@@ -40,7 +41,7 @@ fn compute_grid_layout(
             .enumerate()
             .rev()
             .find(|(_, &w)| {
-                let h = ((w as f64) * ASPECT_RATIO) as i32;
+                let h = ((w as f64) * aspect) as i32;
                 let row_h = h + base_sp;
                 (viewport_h as f64) / (row_h as f64) >= MIN_VISIBLE_ROWS
             })
@@ -52,7 +53,7 @@ fn compute_grid_layout(
 
     let step_idx = width_step.min(max_step);
     let item_w = STEP_SIZES[step_idx].max(min_item_w);
-    let item_h = ((item_w as f64) * ASPECT_RATIO) as i32;
+    let item_h = ((item_w as f64) * aspect) as i32;
 
     let sp = base_sp + step_idx as i32 * 4;
     let avail_w = (width - 2 * sp).max(item_w);
@@ -72,6 +73,7 @@ mod imp {
         pub min_item_width: Cell<i32>,
         pub cur_item_w: Cell<i32>,
         pub cur_item_h: Cell<i32>,
+        pub square: Cell<bool>,
         pub item_size: Rc<Cell<(i32, i32)>>,
         pub min_spacing: Cell<i32>,
         pub prev_width: Cell<i32>,
@@ -104,6 +106,7 @@ mod imp {
                 min_item_width: Cell::new(min_w),
                 cur_item_w: Cell::new(min_w),
                 cur_item_h: Cell::new(min_h),
+                square: Cell::new(false),
                 item_size: Rc::new(Cell::new((min_w, min_h))),
                 min_spacing: Cell::new(8),
                 prev_width: Cell::new(0),
@@ -129,6 +132,16 @@ mod imp {
         type Type = super::VirtualGrid;
         type ParentType = gtk4::Widget;
         type Interfaces = (gtk4::Scrollable,);
+    }
+
+    impl VirtualGrid {
+        fn square_aspect(&self) -> f64 {
+            if self.square.get() {
+                1.0
+            } else {
+                ASPECT_RATIO
+            }
+        }
     }
 
     impl ObjectImpl for VirtualGrid {
@@ -229,7 +242,8 @@ mod imp {
                 } else {
                     self.prev_width.get().max(1).max(800)
                 };
-                let (n_cols, _item_w, item_h, sp) = compute_grid_layout(width, min_w, min_sp, 0);
+                let (n_cols, _item_w, item_h, sp) =
+                    compute_grid_layout(width, min_w, min_sp, 0, self.square_aspect());
                 let n_rows = if n_items == 0 {
                     0
                 } else {
@@ -275,7 +289,8 @@ mod imp {
                 return;
             }
 
-            let (n_cols, item_w, item_h, sp) = compute_grid_layout(width, min_w, min_sp, height);
+            let (n_cols, item_w, item_h, sp) =
+                compute_grid_layout(width, min_w, min_sp, height, self.square_aspect());
             let avail_width = (width - 2 * sp).max(min_w);
             let row_h = item_h + sp;
             let n_rows = n_items.div_ceil(n_cols) as i32;
@@ -496,8 +511,14 @@ impl VirtualGrid {
         obj
     }
 
-    pub fn compute_item_size(width: i32, height: i32, min_item_width: i32) -> (i32, i32) {
-        let (_, item_w, item_h, _) = compute_grid_layout(width, min_item_width, 12, height);
+    pub fn compute_item_size(
+        width: i32,
+        height: i32,
+        min_item_width: i32,
+        aspect: f64,
+    ) -> (i32, i32) {
+        let (_, item_w, item_h, _) =
+            compute_grid_layout(width, min_item_width, 12, height, aspect);
         (item_w, item_h)
     }
 
@@ -513,6 +534,14 @@ impl VirtualGrid {
             .map(|(i, _)| i)
             .unwrap_or(0);
         8 + step_idx as i32 * 4
+    }
+
+    /// Square capsules (1:1) instead of 2:3 portraits.
+    pub fn set_square(&self, on: bool) {
+        if self.imp().square.get() != on {
+            self.imp().square.set(on);
+            self.queue_allocate();
+        }
     }
 
     pub fn item_size_cell(&self) -> Rc<Cell<(i32, i32)>> {

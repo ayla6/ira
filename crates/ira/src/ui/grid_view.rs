@@ -243,6 +243,37 @@ fn make_setup(state: &SharedState, item_size: Rc<Cell<(i32, i32)>>) -> SetupFn {
         let right_click = gtk4::GestureClick::new();
         right_click.set_button(3);
         right_click.connect_pressed(move |gesture, _, x, y| {
+            // Shift+right-click: reset one of the game's stored images.
+            if gesture
+                .current_event_state()
+                .contains(gdk4::ModifierType::SHIFT_MASK)
+            {
+                let widget = gesture.widget().unwrap();
+                if let Some(ptr) = unsafe { widget.data::<AtomicI64>("game-db-id") } {
+                    let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
+                    if db_id != 0 {
+                        let variant_id = unsafe { widget.data::<AtomicI64>("game-variant-id") }
+                            .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed))
+                            .filter(|v| *v > 0);
+                        let game = sc2
+                            .borrow()
+                            .games
+                            .iter()
+                            .find(|g| g.db_id == db_id && g.variant_id == variant_id)
+                            .cloned();
+                        if let Some(game) = game {
+                            super::context_menu::show_image_reset_menu(
+                                &sc2,
+                                &game,
+                                &widget,
+                                x,
+                                y,
+                            );
+                        }
+                    }
+                }
+                return;
+            }
             let widget = gesture.widget().unwrap();
             if let Some(ptr) = unsafe { widget.data::<AtomicI64>("game-db-id") } {
                 let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
@@ -281,7 +312,11 @@ fn make_setup(state: &SharedState, item_size: Rc<Cell<(i32, i32)>>) -> SetupFn {
     })
 }
 
-fn make_bind(item_size: Rc<Cell<(i32, i32)>>, sort_mode: SortMode) -> BindFn {
+fn make_bind(
+    item_size: Rc<Cell<(i32, i32)>>,
+    sort_mode: SortMode,
+    square: bool,
+) -> BindFn {
     Rc::new(move |widget, game| {
         let _span = tracing::info_span!("grid_bind", db_id = game.db_id).entered();
         let (cover_width, cover_height) = item_size.get();
@@ -293,6 +328,14 @@ fn make_bind(item_size: Rc<Cell<(i32, i32)>>, sort_mode: SortMode) -> BindFn {
         vbox.set_size_request(cover_width, cover_height);
         pic.set_size_request(cover_width, cover_height);
 
+        // Square capsules show square.webp when the game has one, keeping
+        // the vertical capsule as the fallback art.
+        let art = if square && !game.square_path.is_empty() {
+            &game.square_path
+        } else {
+            &game.grid_path
+        };
+
         let name_label = unsafe { vbox.data::<gtk4::Label>("name-label") }
             .map(|ptr| unsafe { ptr.as_ref() }.clone());
 
@@ -302,16 +345,46 @@ fn make_bind(item_size: Rc<Cell<(i32, i32)>>, sort_mode: SortMode) -> BindFn {
         if let Some(ptr) = unsafe { vbox.data::<AtomicI64>("game-variant-id") } {
             unsafe { ptr.as_ref() }.store(game.variant_id.unwrap_or(0), Ordering::Relaxed);
         }
-        if !game.grid_path.is_empty() {
-            queue_cover_load(
-                pic.clone(),
-                game.grid_path.clone(),
-                cover_width,
-                cover_height,
-                game.db_id,
-                game.variant_id.unwrap_or(0),
-                vbox.clone(),
-            );
+        if !art.is_empty() {
+            if square {
+                // Cover-fit: the raw texture keeps its aspect and the
+                // Picture crops it into the square, so mismatched art is
+                // never stretched. The staleness check matters: a decoded
+                // texture landing after the cell was rebound to another
+                // game would paint the wrong art.
+                let pic_weak = pic.downgrade();
+                let vbox_weak = vbox.downgrade();
+                let db_id = game.db_id;
+                let variant_id = game.variant_id.unwrap_or(0);
+                let path = art.clone();
+                let set = move |texture: Option<gdk4::Texture>| {
+                    if let (Some(pic), Some(vbox), Some(texture)) =
+                        (pic_weak.upgrade(), vbox_weak.upgrade(), texture)
+                    {
+                        if !is_stale(&vbox, db_id, variant_id) {
+                            pic.set_paintable(Some(&texture));
+                        }
+                    }
+                };
+                match ira_images::cached_texture(art) {
+                    Some(texture) => set(Some(texture)),
+                    None => ira_images::load_texture_async_with_priority(
+                        &path,
+                        glib::Priority::DEFAULT,
+                        set,
+                    ),
+                }
+            } else {
+                queue_cover_load(
+                    pic.clone(),
+                    art.clone(),
+                    cover_width,
+                    cover_height,
+                    game.db_id,
+                    game.variant_id.unwrap_or(0),
+                    vbox.clone(),
+                );
+            }
             if let Some(ref label) = name_label {
                 label.set_visible(false);
             }
@@ -377,8 +450,8 @@ fn build_grid_view(
     cover_width: i32,
     cover_height: i32,
     sort_mode: SortMode,
+    square: bool,
     header_box: &gtk4::Box,
-    content_scroll: &gtk4::ScrolledWindow,
 ) {
     let _span = tracing::info_span!("build_grid_view", count = games.len()).entered();
     let store = gio::ListStore::new::<GameItem>();
@@ -388,6 +461,7 @@ fn build_grid_view(
     state.borrow_mut().grid_store = store.clone();
 
     let grid = VirtualGrid::new(cover_width);
+    grid.set_square(square);
     {
         let s = state.borrow();
         s.grid.set(Some(&grid));
@@ -396,7 +470,7 @@ fn build_grid_view(
     let item_size = grid.item_size_cell();
     grid.set_factory(
         make_setup(state, item_size.clone()),
-        make_bind(item_size.clone(), sort_mode),
+        make_bind(item_size.clone(), sort_mode, square),
         make_unbind(item_size),
     );
 
@@ -422,7 +496,7 @@ fn build_grid_view(
     grid.set_valign(gtk4::Align::Fill);
     grid.add_css_class(CSS_GAME_GRID);
 
-    content_scroll.set_child(Some(&grid));
+    state.borrow().content_scroll.set_child(Some(&grid));
 }
 
 pub fn show_grid_view(state: &SharedState) {
@@ -447,9 +521,11 @@ pub fn show_grid_view(state: &SharedState) {
     content_scroll.vadjustment().set_value(0.0);
     clear_children(&grid_header);
 
+    let square = state.borrow().cfg.grid_square_capsules;
+    let aspect = if square { 1.0 } else { 1.5 };
     let min_w = 110;
     let stored_h = state.borrow().grid_item_height.get();
-    let item_h = if stored_h > 0 {
+    let item_h = if !square && stored_h > 0 {
         stored_h
     } else {
         let (cw, ch) = {
@@ -466,8 +542,13 @@ pub fn show_grid_view(state: &SharedState) {
                     .unwrap_or((800, 600))
             }
         };
-        let (_, h) = VirtualGrid::compute_item_size(cw.max(1), ch.max(1), min_w);
-        h
+        let (w, h) = VirtualGrid::compute_item_size(cw.max(1), ch.max(1), min_w, aspect);
+        if square {
+            // Square capsules: the height tracks the computed width.
+            w
+        } else {
+            h
+        }
     };
 
     let header_box = build_grid_header(state, item_h);
@@ -486,8 +567,8 @@ pub fn show_grid_view(state: &SharedState) {
         min_w,
         item_h,
         sort_mode,
+        square,
         &header_box,
-        &content_scroll,
     );
 }
 

@@ -209,6 +209,23 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     sort_btn.add_css_class(CSS_FLAT);
     content_header.pack_end(&sort_btn);
 
+    let square_toggle = gtk4::ToggleButton::new();
+    square_toggle.set_icon_name("view-grid-symbolic");
+    square_toggle.set_tooltip_text(Some(&crate::tr!("Square capsules")));
+    square_toggle.add_css_class(CSS_FLAT);
+    square_toggle.set_active(state.borrow().cfg.grid_square_capsules);
+    {
+        let state = state.clone();
+        square_toggle.connect_toggled(move |btn| {
+            state.borrow_mut().cfg.grid_square_capsules = btn.is_active();
+            if let Err(e) = state.borrow().cfg.save() {
+                eprintln!("Failed to save config: {e}");
+            }
+            super::grid_view::show_grid_view(&state);
+        });
+    }
+    content_header.pack_end(&square_toggle);
+
     content_toolbar.add_top_bar(&content_header);
 
     let grid_header = gtk4::Box::new(gtk4::Orientation::Vertical, 0);

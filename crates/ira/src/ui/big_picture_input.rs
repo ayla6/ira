@@ -35,12 +35,19 @@ pub(super) enum NavCommand {
     Back,
 }
 
-/// Everything the reader thread reports: navigation steps and the number of
-/// currently connected gamepads (the status rail's indicator).
+/// What the bottom rail shows about connected gamepads: the count for the
+/// dots and, when any pad reports one, its battery.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) struct PadStatus {
+    pub count: usize,
+    pub battery: Option<(u8, bool)>,
+}
+
+/// Everything the reader thread reports: navigation steps and pad status.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum NavMsg {
     Nav(NavCommand),
-    Pads(usize),
+    Pads(PadStatus),
 }
 
 /// Held-direction tracking for one axis: whichever source commanded last
@@ -148,20 +155,18 @@ fn reader_loop(tx: Sender<NavMsg>, save_dir: String) {
     let mut nav = NavState::default();
     let started = Instant::now();
     let mut last_rescan = 0u64;
-    let mut last_pad_count = None;
+    let mut pads_ui = PadUi::default();
     loop {
         let now_ms = started.elapsed().as_millis() as u64;
         if now_ms.saturating_sub(last_rescan) >= RESCAN_EVERY_MS {
             last_rescan = now_ms;
             rescan(&mut pads, &calibration_path);
-            if last_pad_count != Some(pads.len()) {
-                last_pad_count = Some(pads.len());
-                if tx.send(NavMsg::Pads(pads.len())).is_err() {
-                    return; // receiver dropped: the app is shutting down
-                }
-            }
+            pads_ui.after_rescan(&pads);
         }
         if pads.is_empty() {
+            if !pads_ui.maybe_send(&tx) {
+                return;
+            }
             std::thread::sleep(Duration::from_millis(IDLE_SLEEP_MS));
             continue;
         }
@@ -181,11 +186,76 @@ fn reader_loop(tx: Sender<NavMsg>, save_dir: String) {
             live.push(pad);
         }
         pads = live;
+        pads_ui.poll_battery();
+        if !pads_ui.maybe_send(&tx) {
+            return;
+        }
         if let Some(command) = nav.repeat_due(now_ms) {
             if tx.send(NavMsg::Nav(command)).is_err() {
                 return; // receiver dropped: the app is shutting down
             }
         }
+    }
+}
+
+/// Pad-status bookkeeping for the reader thread: the 8BitDo DInput battery
+/// reader follows its pad across rescans, a power_supply scan fills in for
+/// pads the kernel reports on its own, and changes go out as `NavMsg::Pads`.
+#[derive(Default)]
+struct PadUi {
+    count: usize,
+    reader: Option<(std::path::PathBuf, ira_input::EightBitDoBatteryReader)>,
+    hidraw_battery: Option<(u8, bool)>,
+    sysfs_battery: Option<(u8, bool)>,
+    sent: Option<PadStatus>,
+}
+
+impl PadUi {
+    fn after_rescan(&mut self, pads: &[PhysicalGamepad]) {
+        self.count = pads.len();
+        // Keep the reader only while its pad is still connected; losing it
+        // invalidates the reading it produced.
+        self.reader = self.reader.take().and_then(|(path, reader)| {
+            pads.iter()
+                .any(|pad| pad.info().path == path)
+                .then_some((path, reader))
+        });
+        if self.reader.is_none() {
+            self.hidraw_battery = None;
+            for pad in pads {
+                if let Some(mut reader) = ira_input::EightBitDoBatteryReader::open(pad.info()) {
+                    self.hidraw_battery = reader.poll().map(|b| (b.percent, b.charging));
+                    self.reader = Some((pad.info().path.clone(), reader));
+                    break;
+                }
+            }
+        }
+        self.sysfs_battery = super::big_picture_status::pad_battery();
+    }
+
+    fn poll_battery(&mut self) {
+        if let Some((_, reader)) = self.reader.as_mut() {
+            if let Some(battery) = reader.poll() {
+                self.hidraw_battery = Some((battery.percent, battery.charging));
+            }
+        }
+    }
+
+    /// Push the current status when it changed; false when the receiver is
+    /// gone (the app is shutting down).
+    fn maybe_send(&mut self, tx: &Sender<NavMsg>) -> bool {
+        let status = PadStatus {
+            count: self.count,
+            battery: self.hidraw_battery.or(self.sysfs_battery),
+        };
+        if self.sent == Some(status) {
+            return true;
+        }
+        if tx.send(NavMsg::Pads(status)).is_err() {
+            return false;
+        }
+        self.sent = Some(status);
+        true
     }
 }
 

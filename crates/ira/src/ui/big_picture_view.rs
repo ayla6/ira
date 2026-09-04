@@ -148,13 +148,14 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
 }
 
 /// Messages from the controller reader: navigation for the showing page,
-/// and pad counts for the bottom rail's dots.
+/// and the pad status for the bottom rail's dots and battery.
 pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
     match msg {
         NavMsg::Nav(command) => route(state, command),
-        NavMsg::Pads(count) => {
+        NavMsg::Pads(status) => {
             if let Some(big) = state.borrow().big_picture.clone() {
-                big.bottom.set_pad_count(count);
+                big.bottom
+                    .set_pad_status(status.count, status.battery);
             }
         }
     }

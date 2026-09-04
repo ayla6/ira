@@ -36,6 +36,8 @@ pub use registry::ControllerRegistry;
 mod rumble;
 pub use report_rate::ReportRateEstimator;
 pub use rumble::{rumble_report_8bitdo, PhysicalRumble, RumbleCommand, VENDOR_8BITDO};
+mod hid_8bitdo;
+pub use hid_8bitdo::{EightBitDoBatteryReader, PadBattery};
 mod cursor;
 mod evdev_imu;
 mod focus;

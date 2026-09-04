@@ -347,7 +347,7 @@ fn now_us() -> u64 {
 /// Sandboxed environments (distrobox) bind-mount /dev at container start,
 /// so freshly created hidraw nodes exist only under the host's tree; prefer
 /// it when the direct path is absent. On the host this never triggers.
-fn host_visible(node: std::path::PathBuf) -> std::path::PathBuf {
+pub(crate) fn host_visible(node: std::path::PathBuf) -> std::path::PathBuf {
     if node.exists() {
         return node;
     }

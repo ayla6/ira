@@ -15,7 +15,9 @@ const PSU_ROOT: &str = "/sys/class/power_supply";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum BatteryKind {
+    /// The machine's own pack (a laptop battery).
     System,
+    /// A peripheral's pack (a gamepad, headset…).
     Peripheral,
 }
 
@@ -23,10 +25,11 @@ enum BatteryKind {
 struct Battery {
     capacity: u32,
     kind: BatteryKind,
+    charging: bool,
 }
 
-/// One power_supply entry that is a battery (not mains/USB), if its
-/// capacity is readable.
+/// One power_supply entry that is a battery (not mains/USB), with its
+/// charge state when the kernel says.
 fn read_battery(dir: &Path) -> Option<Battery> {
     let kind = match std::fs::read_to_string(dir.join("type")) {
         Ok(text) if text.trim() == "Battery" => {
@@ -42,7 +45,10 @@ fn read_battery(dir: &Path) -> Option<Battery> {
         .trim()
         .parse()
         .ok()?;
-    Some(Battery { capacity, kind })
+    let charging = std::fs::read_to_string(dir.join("status"))
+        .map(|status| status.trim() == "Charging")
+        .unwrap_or(false);
+    Some(Battery { capacity, kind, charging })
 }
 
 /// Scan every power_supply; unreadable or non-battery entries are skipped.
@@ -59,27 +65,41 @@ fn scan_batteries() -> Vec<Battery> {
     batteries
 }
 
-/// The battery worth showing: the fullest system battery (laptop pack)
-/// wins; otherwise a peripheral pack (a gamepad) is better than nothing.
-fn pick_battery(batteries: &[Battery]) -> Option<Battery> {
-    let best_of = |kind| {
-        batteries
-            .iter()
-            .filter(|b| b.kind == kind)
-            .max_by_key(|b| b.capacity)
-            .copied()
-    };
-    best_of(BatteryKind::System).or_else(|| best_of(BatteryKind::Peripheral))
+/// The machine's own battery, for the status rail. A gamepad's pack never
+/// stands in for the computer's — pads report in the pad area instead.
+fn system_battery(batteries: &[Battery]) -> Option<Battery> {
+    batteries
+        .iter()
+        .filter(|b| b.kind == BatteryKind::System)
+        .max_by_key(|b| b.capacity)
+        .copied()
 }
 
-fn battery_icon_name(capacity: u32) -> &'static str {
-    match capacity {
-        0..=9 => "battery-empty-symbolic",
-        10..=24 => "battery-caution-symbolic",
-        25..=59 => "battery-low-symbolic",
-        60..=94 => "battery-good-symbolic",
-        _ => "battery-full-symbolic",
-    }
+/// The fullest connected gamepad battery, for the pad area. Peripheral
+/// packs surface here (kernel HID drivers expose many pads), and the
+/// 8BitDo DInput reader fills the gap for hardware the kernel can't see.
+pub(super) fn pad_battery() -> Option<(u8, bool)> {
+    pad_battery_of(&scan_batteries())
+}
+
+fn pad_battery_of(batteries: &[Battery]) -> Option<(u8, bool)> {
+    batteries
+        .iter()
+        .filter(|b| b.kind == BatteryKind::Peripheral)
+        .max_by_key(|b| b.capacity)
+        .map(|b| (b.capacity.min(u32::from(u8::MAX)) as u8, b.charging))
+}
+
+fn battery_icon_name(capacity: u32, charging: bool) -> String {
+    let level = match capacity {
+        0..=9 => "empty",
+        10..=24 => "caution",
+        25..=59 => "low",
+        60..=94 => "good",
+        _ => "full",
+    };
+    let suffix = if charging { "-charging" } else { "" };
+    format!("battery-{level}{suffix}-symbolic")
 }
 
 /// The top rail: avatar, then date, clock and battery pushed to the right.
@@ -163,24 +183,24 @@ fn refresh_widgets(
     let now = chrono::Local::now();
     clock.set_text(&now.format("%H:%M").to_string());
     date.set_text(&now.format("%a %-d %b").to_string());
-    let battery = pick_battery(&scan_batteries());
+    let battery = system_battery(&scan_batteries());
     battery_box.set_visible(battery.is_some());
     if let Some(battery) = battery {
-        battery_icon.set_icon_name(Some(battery_icon_name(battery.capacity)));
+        battery_icon.set_icon_name(Some(&battery_icon_name(battery.capacity, battery.charging)));
         battery_label.set_text(&format!("{}%", battery.capacity));
-        let tip = match battery.kind {
-            BatteryKind::System => crate::tr!("System battery"),
-            BatteryKind::Peripheral => crate::tr!("Controller battery"),
-        };
-        battery_box.set_tooltip_text(Some(&tip));
+        battery_box.set_tooltip_text(Some(&crate::tr!("System battery")));
     }
 }
 
-/// The bottom rail: gamepad dots on the left, button prompts on the right.
+/// The bottom rail: gamepad dots (and the pads' battery) on the left,
+/// button prompts on the right.
 pub(super) struct BottomBar {
     root: gtk4::Box,
     pads: gtk4::Box,
     dots: Vec<gtk4::Image>,
+    pad_battery: gtk4::Box,
+    pad_battery_icon: gtk4::Image,
+    pad_battery_label: gtk4::Label,
     prompts: gtk4::Box,
 }
 
@@ -212,6 +232,16 @@ impl BottomBar {
             })
             .collect();
         pads.append(&dots_row);
+
+        let pad_battery = gtk4::Box::new(gtk4::Orientation::Horizontal, 5);
+        pad_battery.set_valign(gtk4::Align::Center);
+        let pad_battery_icon = gtk4::Image::from_icon_name("battery-full-symbolic");
+        let pad_battery_label = gtk4::Label::new(None);
+        pad_battery_label.add_css_class(CSS_BP_BATT);
+        pad_battery.append(&pad_battery_icon);
+        pad_battery.append(&pad_battery_label);
+        pads.append(&pad_battery);
+
         root.append(&pads);
 
         let prompts = gtk4::Box::new(gtk4::Orientation::Horizontal, 18);
@@ -219,17 +249,31 @@ impl BottomBar {
         prompts.set_halign(gtk4::Align::End);
         root.append(&prompts);
 
-        let bar = Self { root, pads, dots, prompts };
-        bar.set_pad_count(0);
+        let bar = Self {
+            root,
+            pads,
+            dots,
+            pad_battery,
+            pad_battery_icon,
+            pad_battery_label,
+            prompts,
+        };
+        bar.set_pad_status(0, None);
         bar
     }
 
     /// Light one dot per connected gamepad (four shown at most); unlit dots
-    /// stay visible as slots, Switch-style. The exact count is in the
-    /// tooltip.
-    pub(super) fn set_pad_count(&self, count: usize) {
+    /// stay visible as slots, Switch-style. The pads' battery reading (any
+    /// connected pad) sits beside the dots when one is known.
+    pub(super) fn set_pad_status(&self, count: usize, battery: Option<(u8, bool)>) {
         for (index, dot) in self.dots.iter().enumerate() {
             dot.set_opacity(if index < count { 1.0 } else { 0.25 });
+        }
+        self.pad_battery.set_visible(battery.is_some());
+        if let Some((percent, charging)) = battery {
+            self.pad_battery_icon
+                .set_icon_name(Some(&battery_icon_name(u32::from(percent), charging)));
+            self.pad_battery_label.set_text(&format!("{percent}%"));
         }
         self.pads.set_tooltip_text(Some(
             &crate::tr!("Controllers connected: {}").replacen("{}", &count.to_string(), 1),
@@ -264,23 +308,27 @@ mod tests {
     }
 
     #[test]
-    fn test_read_battery_type_and_scope() {
+    fn test_read_battery_type_scope_and_status() {
         let tmp = TempDir::new().unwrap();
         let bat = tmp.path().join("BAT0");
         fs::create_dir(&bat).unwrap();
         write(&bat, "type", "Battery\n");
         write(&bat, "capacity", "87\n");
+        write(&bat, "status", "Discharging\n");
         let battery = read_battery(&bat).unwrap();
         assert_eq!(battery.capacity, 87);
         assert_eq!(battery.kind, BatteryKind::System);
+        assert!(!battery.charging);
 
         let pad = tmp.path().join("ps-controller-battery-aa");
         fs::create_dir(&pad).unwrap();
         write(&pad, "type", "Battery\n");
         write(&pad, "scope", "Device\n");
         write(&pad, "capacity", "45\n");
+        write(&pad, "status", "Charging\n");
         let battery = read_battery(&pad).unwrap();
         assert_eq!(battery.kind, BatteryKind::Peripheral);
+        assert!(battery.charging);
     }
 
     #[test]
@@ -294,20 +342,31 @@ mod tests {
     }
 
     #[test]
-    fn test_pick_battery_prefers_system_pack() {
-        let system = Battery { capacity: 40, kind: BatteryKind::System };
-        let peripheral = Battery { capacity: 99, kind: BatteryKind::Peripheral };
-        assert_eq!(pick_battery(&[peripheral, system]).unwrap().capacity, 40);
-        assert_eq!(pick_battery(&[peripheral]).unwrap().kind, BatteryKind::Peripheral);
-        assert!(pick_battery(&[]).is_none());
+    fn test_system_battery_ignores_peripheral_packs() {
+        let system = Battery { capacity: 40, kind: BatteryKind::System, charging: false };
+        let peripheral = Battery { capacity: 99, kind: BatteryKind::Peripheral, charging: false };
+        assert_eq!(system_battery(&[peripheral, system]).unwrap().capacity, 40);
+        assert!(system_battery(&[peripheral]).is_none());
+        assert!(system_battery(&[]).is_none());
     }
 
     #[test]
-    fn test_battery_icon_thresholds() {
-        assert_eq!(battery_icon_name(100), "battery-full-symbolic");
-        assert_eq!(battery_icon_name(70), "battery-good-symbolic");
-        assert_eq!(battery_icon_name(40), "battery-low-symbolic");
-        assert_eq!(battery_icon_name(15), "battery-caution-symbolic");
-        assert_eq!(battery_icon_name(5), "battery-empty-symbolic");
+    fn test_pad_battery_picks_peripheral_pack() {
+        let system = Battery { capacity: 40, kind: BatteryKind::System, charging: false };
+        let peripheral = Battery { capacity: 99, kind: BatteryKind::Peripheral, charging: true };
+        let (capacity, charging) = pad_battery_of(&[system, peripheral]).unwrap();
+        assert_eq!(capacity, 99);
+        assert!(charging);
+        assert!(pad_battery_of(&[system]).is_none());
+    }
+
+    #[test]
+    fn test_battery_icon_thresholds_and_charging() {
+        assert_eq!(battery_icon_name(100, false), "battery-full-symbolic");
+        assert_eq!(battery_icon_name(70, false), "battery-good-symbolic");
+        assert_eq!(battery_icon_name(40, false), "battery-low-symbolic");
+        assert_eq!(battery_icon_name(15, false), "battery-caution-symbolic");
+        assert_eq!(battery_icon_name(5, false), "battery-empty-symbolic");
+        assert_eq!(battery_icon_name(70, true), "battery-good-charging-symbolic");
     }
 }

@@ -15,6 +15,9 @@ use std::time::Duration;
 const HOLD_MS: f64 = 1_400.0;
 const SPEED: f64 = 42.0;
 const TICK_MS: u64 = 16;
+/// Extra vertical pixels over the measured line height; fractional font
+/// metrics floor out in allocation and shave descenders otherwise.
+const DESCENDER_SLACK: i32 = 6;
 
 /// One side of the scroll sweep: the pill starts left-aligned in the clip
 /// window (readable), glides right to reveal its end, holds, glides back.
@@ -132,15 +135,19 @@ mod imp {
                 Some(s) => self.window_x.get() + s.x,
                 None => self.window_x.get() + ((max_width - natural_w as f64) / 2.0).max(0.0),
             };
+            // Fractional font metrics floor out on allocation (X11 is the
+            // worst), shaving the descenders off the bottom row of glyphs;
+            // a few pixels of slack keep the text whole.
+            let pill_h = natural_h + DESCENDER_SLACK;
             let y = self.pill_y.get();
             let py = if y < 0.0 {
-                ((height - natural_h) / 2).max(0)
+                ((height - pill_h) / 2).max(0)
             } else {
                 y as i32
             };
             let tx = gtk4::gsk::Transform::new()
                 .translate(&gtk4::graphene::Point::new(x as f32, py as f32));
-            label.allocate(natural_w.max(1), natural_h.max(1), -1, Some(tx));
+            label.allocate(natural_w.max(1), pill_h, -1, Some(tx));
         }
     }
 }
@@ -171,20 +178,6 @@ impl Marquee {
 
     pub(super) fn widget(&self) -> &gtk4::Widget {
         self.upcast_ref()
-    }
-
-    /// Plain large accent text (home) or a subtle translucent pill
-    /// (All Software, where the name hovers over a busy grid).
-    pub(super) fn set_tooltip_style(&self, pill: bool) {
-        let label_guard = self.imp().label.borrow();
-        let Some(label) = label_guard.as_ref() else {
-            return;
-        };
-        if pill {
-            label.add_css_class(super::css::CSS_BP_TOOLTIP);
-        } else {
-            label.remove_css_class(super::css::CSS_BP_TOOLTIP);
-        }
     }
 
     /// The pill's rendered height, for callers that float it above a tile.

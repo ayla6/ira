@@ -219,12 +219,13 @@ impl BottomBar {
         let pad_icon = gtk4::Image::from_icon_name("input-gaming-symbolic");
         pad_icon.set_pixel_size(22);
         pads.append(&pad_icon);
-        let dots_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        // The player LEDs read as a vertical line beside the pad, Switch-style.
+        let dots_row = gtk4::Box::new(gtk4::Orientation::Vertical, 3);
         dots_row.set_valign(gtk4::Align::Center);
         let dots = (0..4)
             .map(|_| {
                 let dot = gtk4::Image::from_icon_name("media-record-symbolic");
-                dot.set_pixel_size(8);
+                dot.set_pixel_size(10);
                 dot.add_css_class(CSS_BP_PAD_DOT);
                 dots_row.append(&dot);
                 dot
@@ -287,21 +288,38 @@ impl BottomBar {
     }
 
     /// Replace the prompt row, e.g. A/Play on the home screen, B/Back plus
-    /// A/Play on the All Software grid. The glyph is the button's badge
-    /// letter — the shared Steam icon pack is inconsistent enough that the
-    /// letters read better until the icon pipeline gets a proper pass.
+    /// A/Play on the All Software grid. Glyphs come from the same gamepad
+    /// icon set the input customization uses, with the badge letter as the
+    /// fallback. Both live in one fixed-size slot so the row never shifts
+    /// while the icons come in.
     pub(super) fn set_prompts(&self, items: &[(ira_input::GamepadButton, &str)]) {
         super::helpers::clear_children(&self.prompts);
         for (button, label) in items {
             let item = gtk4::Box::new(gtk4::Orientation::Horizontal, 7);
-            let key = gtk4::Label::new(Some(&super::input_profile_assets::source_badge(
+            let slot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+            slot.set_size_request(26, 26);
+            let glyph = gtk4::Image::new();
+            glyph.set_pixel_size(24);
+            glyph.set_halign(gtk4::Align::Center);
+            glyph.set_valign(gtk4::Align::Center);
+            slot.append(&glyph);
+            let fallback = gtk4::Label::new(Some(&super::input_profile_assets::source_badge(
                 ira_input::InputSource::Button(*button),
                 ira_input::ControllerFamily::Xbox,
             )));
-            key.add_css_class(CSS_BP_PROMPT_KEY);
+            fallback.add_css_class(CSS_BP_PROMPT_KEY);
+            fallback.set_halign(gtk4::Align::Center);
+            fallback.set_valign(gtk4::Align::Center);
+            slot.append(&fallback);
+            super::input_profile_assets::set_source_asset(
+                &glyph,
+                &fallback,
+                ira_input::InputSource::Button(*button),
+                ira_input::ControllerFamily::Xbox,
+            );
             let text = gtk4::Label::new(Some(label));
             text.add_css_class(CSS_BP_PROMPT);
-            item.append(&key);
+            item.append(&slot);
             item.append(&text);
             self.prompts.append(&item);
         }

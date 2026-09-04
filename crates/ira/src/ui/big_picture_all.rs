@@ -133,7 +133,6 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     // tile, riding the scroll. It draws over the games, so it lives in an
     // overlay that neither measures nor gets clipped by the viewport.
     let tooltip = Marquee::new(0, TOOLTIP_MAX_WIDTH);
-    tooltip.set_tooltip_style(true);
     let grid_overlay = gtk4::Overlay::new();
     grid_overlay.set_child(Some(&scrolled));
     grid_overlay.add_overlay(tooltip.widget());

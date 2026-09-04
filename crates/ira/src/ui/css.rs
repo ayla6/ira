@@ -12,7 +12,6 @@ pub const CSS_BP_PAD_LIT: &str = "bp-pad-lit";
 pub const CSS_BP_PROMPT: &str = "bp-prompt";
 pub const CSS_BP_PROMPT_KEY: &str = "bp-prompt-key";
 pub const CSS_BP_TITLE: &str = "bp-title";
-pub const CSS_BP_TOOLTIP: &str = "bp-tooltip";
 pub const CSS_BP_ALL: &str = "bp-all";
 pub const CSS_BP_ALL_TILE: &str = "bp-all-tile";
 pub const CSS_BP_ALL_PAGE: &str = "bp-all-page";
@@ -329,8 +328,9 @@ gridview.game-grid child:focus-within {
 .bp-date { font-size: 1.05em; }
 .bp-batt { font-size: 1.05em; }
 .bp-bottom { padding: 14px 28px 20px 28px; }
-.bp-pad-dot { opacity: 0.25; }
-/* A connected pad lights its dot green, like a player LED. */
+/* A connected pad lights its dot green, like a player LED. Dimming for
+   empty slots is done per-widget in code; a CSS opacity here would
+   multiply into the lit dots and wash the color out. */
 .bp-pad-dot.bp-pad-lit { color: @green_2; }
 .bp-prompt-key {
     min-width: 26px;
@@ -342,21 +342,12 @@ gridview.game-grid child:focus-within {
     font-size: 0.85em;
 }
 /* Floating title over the selected tile, Switch-style: big, colored,
-   no box at all. The All Software page adds .bp-tooltip for a subtler
-   translucent pill, since there the name hovers over a busy grid. */
+   transparent — the same treatment on the home carousel and the
+   All Software grid. */
 .bp-title {
     font-size: 1.8em;
     font-weight: 800;
     color: @accent_color;
-}
-.bp-title.bp-tooltip {
-    font-size: 1.05em;
-    font-weight: 600;
-    color: @theme_fg_color;
-    background: alpha(@popover_bg_color, 0.92);
-    border: 1px solid alpha(@theme_fg_color, 0.08);
-    border-radius: 9px;
-    padding: 4px 10px;
 }
 .bp-page-title { font-size: 1.45em; font-weight: 800; }
 .bp-all-tile {

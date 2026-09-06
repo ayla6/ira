@@ -7,7 +7,7 @@ use ira_config::Config;
 use ira_models::{Game, GameDisc, TrophySource};
 
 use super::discovery_helpers::{
-    group_multi_disc_roms, normalize_name, scan_roms, DiscGroup, RaMatchIndex,
+    group_multi_disc_roms, normalize_name, rom_display_title, scan_roms, DiscGroup, RaMatchIndex,
 };
 
 struct ActiveConsole {
@@ -279,7 +279,7 @@ fn build_ra_games_for_console(
                         let ra_title = ra_index
                             .title_of(ra_id)
                             .map(str::to_string)
-                            .unwrap_or_else(|| rom_name.clone());
+                            .unwrap_or_else(|| rom_display_title(&rom_name));
                         if let Err(e) = ira_db::update_game_ids(
                             db,
                             entry.id,
@@ -357,14 +357,14 @@ fn build_ra_games_for_console(
                     let t = ra_index
                         .title_of(id)
                         .map(str::to_string)
-                        .unwrap_or_else(|| rom_name.clone());
+                        .unwrap_or_else(|| rom_display_title(rom_name));
                     (id.to_string(), t, TrophySource::Ra)
                 }
                 None => {
                     // Switch: native title id and application title from
                     // the emulator caches or, with keys installed, the
-                    // ROM's own control NACP; the file name stays the
-                    // final fallback.
+                    // ROM's own control NACP; the cleaned file name stays
+                    // the final fallback.
                     let meta = switch_metas.get(&rom_path_str);
                     let native_id = meta
                         .and_then(|m| (!m.title_id.is_empty()).then(|| m.title_id.clone()));
@@ -372,7 +372,7 @@ fn build_ra_games_for_console(
                         meta.and_then(|m| (!m.title.is_empty()).then(|| m.title.clone()));
                     (
                         native_id.or(serial.clone()).unwrap_or_else(|| rom_name.clone()),
-                        native_title.unwrap_or_else(|| rom_name.clone()),
+                        native_title.unwrap_or_else(|| rom_display_title(rom_name)),
                         TrophySource::Empty,
                     )
                 }
@@ -827,6 +827,33 @@ mod tests {
     #[test]
     fn test_normalize_name_empty() {
         assert_eq!(normalize_name(""), "");
+    }
+
+    #[test]
+    fn test_rom_display_title_strips_region_language_and_version_tags() {
+        assert_eq!(
+            rom_display_title("Super Mario Bros. (USA) (En,Ja)"),
+            "Super Mario Bros."
+        );
+        assert_eq!(
+            rom_display_title("Tokyo Mirage Sessions #FE Encore [0100A9400C9C2000][v0][Base]"),
+            "Tokyo Mirage Sessions #FE Encore"
+        );
+        assert_eq!(rom_display_title("Chrono Trigger [T-En_v1.1] (Rev 2)"), "Chrono Trigger");
+    }
+
+    #[test]
+    fn test_rom_display_title_collapses_tag_leftovers() {
+        // Tags removed mid-string must not leave double spaces behind.
+        assert_eq!(rom_display_title("Game (USA) Extra"), "Game Extra");
+        assert_eq!(rom_display_title("Game - (Australia)"), "Game -");
+    }
+
+    #[test]
+    fn test_rom_display_title_all_tags_falls_back_to_input() {
+        let all_tags = "(USA) [En]";
+        assert_eq!(rom_display_title(all_tags), all_tags);
+        assert_eq!(rom_display_title("Bastion"), "Bastion");
     }
 
     #[test]

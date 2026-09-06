@@ -56,6 +56,23 @@ fn remove_version_tags(s: &str) -> String {
     result.trim().to_string()
 }
 
+/// Display title for a ROM file name: region, language, version and hack
+/// tag groups — `(USA)`, `(En,Ja)`, `(Rev 1)`, `[0100AF80…][Base]` — have
+/// no place in the title, so drop every parenthesized or bracketed group
+/// and tidy the spacing. Matching keeps using [`normalize_name`]; a name
+/// made entirely of tags falls back to the input.
+pub(super) fn rom_display_title(rom_name: &str) -> String {
+    let collapsed = remove_version_tags(rom_name)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if collapsed.is_empty() {
+        rom_name.to_string()
+    } else {
+        collapsed
+    }
+}
+
 pub(super) fn strip_disc_pattern(name: &str) -> Option<(String, i32)> {
     let lower = name.to_lowercase();
     let keywords = ["disc ", "disk ", "cd "];

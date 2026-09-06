@@ -433,6 +433,12 @@ impl AllSoftwareUi {
         }
     }
 
+    /// Whether `key` is the highlighted game — a second mouse click on an
+    /// already-focused cell launches it.
+    pub(super) fn is_selected(&self, key: GameKey) -> bool {
+        self.selected_key.get() == key
+    }
+
     fn scroll_to_selected(&self) {
         let adj = self.scrolled.vadjustment();
         // Before the first layout the page height reads as zero, which
@@ -549,29 +555,6 @@ fn build_cell(state: &SharedState) -> gtk4::Widget {
     });
     vbox.add_controller(click);
 
-    // Hovering a tile moves the selection onto it; the cell's game ids are
-    // re-read on every enter because recycled cells rebind to new games.
-    let hover_state = state.clone();
-    let hover = gtk4::EventControllerMotion::new();
-    hover.connect_enter(move |controller, _, _| {
-        let Some(big) = hover_state.borrow().big_picture.clone() else {
-            return;
-        };
-        let widget = controller.widget().unwrap();
-        let cell_key = || -> Option<GameKey> {
-            let db = unsafe { widget.data::<AtomicI64>("game-db-id") }
-                .map(|p| unsafe { p.as_ref() }.load(Ordering::Relaxed))?;
-            let variant = unsafe { widget.data::<AtomicI64>("game-variant-id") }
-                .map(|p| unsafe { p.as_ref() }.load(Ordering::Relaxed))
-                .unwrap_or(0);
-            Some((db, variant))
-        };
-        if let Some(key) = cell_key() {
-            big.all.select_key(key);
-        }
-    });
-    vbox.add_controller(hover);
-
     vbox.upcast()
 }
 
@@ -677,13 +660,19 @@ fn launch_from_cell(state: &SharedState, widget: &gtk4::Widget) {
         .iter()
         .find(|g| g.db_id == db_id && g.variant_id == variant_id.filter(|v| *v > 0))
         .cloned();
-    if let Some(game) = game {
-        // The click selects what it clicked, then launches it — so the
-        // highlight never rests on a game the user did not point at.
-        if let Some(big) = state.borrow().big_picture.clone() {
-            big.all.select_key(game_key(&game));
-        }
+    let Some(game) = game else {
+        return;
+    };
+    let Some(big) = state.borrow().big_picture.clone() else {
+        return;
+    };
+    // First click focuses the pointed-at game (the scroll target leaves a
+    // visible row alone, so the camera only moves if the tile was out of
+    // view); the second click launches it.
+    if big.all.is_selected(game_key(&game)) {
         launch(state, &game);
+    } else {
+        big.all.select_key(game_key(&game));
     }
 }
 

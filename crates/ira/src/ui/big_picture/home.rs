@@ -254,13 +254,6 @@ pub(super) fn refresh(state: &SharedState) {
         let cover = build_cover(state, game, &art, width, capsule, square_mode, move |state| {
             on_cover_clicked(state, index)
         });
-        // The pointer hovering a cover moves the selection onto it; the
-        // gamepad keeps working because selection is shared state.
-        let hover_state = state.clone();
-        let hover_index = index;
-        let hover = gtk4::EventControllerMotion::new();
-        hover.connect_enter(move |_, _, _| set_selection(&hover_state, hover_index));
-        cover.add_controller(hover);
         ui.row.append_cover(&cover);
         covers.push(cover);
     }
@@ -312,11 +305,16 @@ fn on_cover_clicked(state: &SharedState, index: usize) {
     if selected == index {
         super::view::confirm(state);
     } else {
+        // First click focuses the cover the pointer is on; the camera
+        // stays put (the cover is on screen by definition) and the second
+        // click plays it.
         let Some(big) = state.borrow().big_picture.clone() else {
             return;
         };
         *big.home.selected.borrow_mut() = index;
-        apply_selection(&big);
+        restyle_selection(&big);
+        sync_title_text(&big.home);
+        sync_title_position(&big);
     }
 }
 
@@ -331,20 +329,6 @@ pub(super) fn move_selection(state: &SharedState, delta: i32) {
         return;
     };
     *ui.selected.borrow_mut() = next;
-    apply_selection(&big);
-}
-
-/// The pointer hovering a cover moves the selection onto it. The hovered
-/// cover is on screen by definition, so the follow-up scroll is a small
-/// correction rather than a jump.
-pub(super) fn set_selection(state: &SharedState, index: usize) {
-    let Some(big) = state.borrow().big_picture.clone() else {
-        return;
-    };
-    if *big.home.selected.borrow() == index {
-        return;
-    }
-    *big.home.selected.borrow_mut() = index;
     apply_selection(&big);
 }
 
@@ -388,7 +372,18 @@ pub(super) fn selection_is_tile(big: &Rc<BigPictureUi>) -> bool {
 }
 
 /// Selection visuals, floating title, and scroll.
+/// The gamepad or keyboard moved the selection: restyle it and bring it
+/// to the viewport center.
 fn apply_selection(big: &Rc<BigPictureUi>) {
+    restyle_selection(big);
+    sync_title_text(&big.home);
+    sync_title_position(big);
+    update_scroll(big);
+}
+
+/// Restyle the covers and re-anchor the floating title and ring to the
+/// selection without touching the scroll position.
+fn restyle_selection(big: &Rc<BigPictureUi>) {
     let ui = &big.home;
     let selected = *ui.selected.borrow();
     let covers = ui.covers.borrow();
@@ -402,10 +397,6 @@ fn apply_selection(big: &Rc<BigPictureUi>) {
     let selected_cover = covers.get(selected).cloned();
     drop(covers);
     ui.row.set_selected_cover(selected_cover.as_ref());
-
-    sync_title_text(ui);
-    sync_title_position(big);
-    update_scroll(big);
 }
 
 fn sync_title_text(ui: &HomeUi) {

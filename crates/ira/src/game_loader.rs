@@ -21,28 +21,9 @@ pub fn read_app_details(save_dir: &str, app_id: &str) -> Option<AppDetails> {
     Some(details)
 }
 
-pub fn load_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
-    let _span = tracing::info_span!("load_games").entered();
-    load_selected_games(
-        conn,
-        save_dir,
-        "Failed to load games from DB",
-        |entry| {
-            entry.kind != ira_models::GameKind::Linux && entry.kind != ira_models::GameKind::Wine
-        },
-        |entry| {
-            let id = if !entry.steam_id.is_empty() {
-                &entry.steam_id
-            } else {
-                &entry.game_id
-            };
-            format!("Skipping game {} ({})", id, entry.kind)
-        },
-    )
-}
-
 /// Load every saved game from the database without probing external sources.
-/// Use this during startup; explicit rescans can refresh source-specific data.
+/// This is the base of every list build; enabled source scans refresh
+/// source-specific data on top of it.
 pub fn load_saved_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
     let _span = tracing::info_span!("load_saved_games").entered();
     load_selected_games(
@@ -80,7 +61,7 @@ fn console_game_vanished(entry: &GameEntry) -> bool {
         || (!entry.rom_path.is_empty() && !std::path::Path::new(&entry.rom_path).exists()))
 }
 
-/// Shared implementation behind `load_games` and `load_saved_games`.
+/// Shared implementation behind `load_saved_games`.
 /// `skip` filters out entries this caller must not process and `describe`
 /// renders one entry in the per-failure diagnostic.
 fn load_selected_games(

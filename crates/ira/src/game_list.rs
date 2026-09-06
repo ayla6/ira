@@ -237,7 +237,7 @@ fn start_game_list_load_with_mode(
                 total: update.total,
             });
         });
-        let games = build_game_list_with_mode(&db, &save_dir, &cfg, &options, progress, mode);
+        let games = build_game_list(&db, &save_dir, &cfg, &options, progress);
         let _ = sender.send(ira_models::AppMessage::GamesLoaded(games));
     });
 }
@@ -248,24 +248,6 @@ pub fn build_game_list(
     cfg: &Config,
     options: &GameListOptions,
     progress: Arc<dyn Fn(GameListProgress) + Send + Sync>,
-) -> Vec<Game> {
-    build_game_list_with_mode(
-        db,
-        save_dir,
-        cfg,
-        options,
-        progress,
-        GameListLoadMode::FullScan,
-    )
-}
-
-fn build_game_list_with_mode(
-    db: &db::DbConn,
-    save_dir: &str,
-    cfg: &Config,
-    options: &GameListOptions,
-    progress: Arc<dyn Fn(GameListProgress) + Send + Sync>,
-    mode: GameListLoadMode,
 ) -> Vec<Game> {
     let _span = tracing::info_span!("build_game_list").entered();
 
@@ -313,14 +295,11 @@ fn build_game_list_with_mode(
         let native_handle = s.spawn(move || {
             let _s = tracing::info_span!("load_games_from_db").entered();
             native_reporter.status(crate::tr!("Loading saved games…"));
-            // Startup stays DB-only for speed; explicit rescans refresh
-            // source-specific data. Rescans re-discover rows the DB load
-            // already produced, so source appends must replace, not add.
-            let games = if mode == GameListLoadMode::Startup {
-                game_loader::load_saved_games(&db_native, &save_dir_native)
-            } else {
-                game_loader::load_games(&db_native, &save_dir_native)
-            };
+            // The DB load is the floor of the list: it holds every row no
+            // enabled scan re-discovers (a disabled source has no scan at
+            // all), and rescans re-discover the rest. Source appends must
+            // therefore replace, not add.
+            let games = game_loader::load_saved_games(&db_native, &save_dir_native);
             native_reporter.finish(crate::tr!("Loaded saved games"));
             games
         });
@@ -1681,17 +1660,72 @@ mod tests {
         cfg.console_mut("switch").enabled = false;
         let options = GameListOptions::from_config(&cfg);
 
-        let games = build_game_list_with_mode(
+        let games = build_game_list(
             &db,
             &cfg.save_dir,
             &cfg,
             &options,
             progress,
-            GameListLoadMode::Startup,
         );
 
         assert_eq!(games.len(), 1);
         assert_eq!(games[0].name, "Saved game");
         assert_eq!(updates.lock().unwrap().last().unwrap().completed, 1);
+    }
+
+    /// A rescan with every source integration disabled still lists the
+    /// library: the DB load is the floor of the list, and a disabled source
+    /// has no scan that could re-discover its rows.
+    #[test]
+    fn test_build_game_list_full_scan_keeps_disabled_source_games() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
+        let rom_id = db::add_game(
+            &db,
+            GameKind::Retro,
+            ira_models::TrophySource::Empty,
+            "",
+            "saved-rom",
+            "saturn",
+            "Saved rom",
+        )
+        .unwrap();
+        db::set_rom_path(&db, rom_id, "saved.rom").unwrap();
+        let rom_root = tmp.path().join("roms/saturn");
+        std::fs::create_dir_all(&rom_root).unwrap();
+        std::fs::write(rom_root.join("saved.rom"), b"rom").unwrap();
+        db::add_game(
+            &db,
+            GameKind::Wine,
+            ira_models::TrophySource::Nge,
+            "570",
+            "",
+            "gog",
+            "Saved gog game",
+        )
+        .unwrap();
+
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let updates_clone = updates.clone();
+        let progress: Arc<dyn Fn(GameListProgress) + Send + Sync> = Arc::new(move |update| {
+            updates_clone.lock().unwrap().push(update);
+        });
+        let mut cfg = Config {
+            save_dir: tmp.path().to_string_lossy().into_owned(),
+            roms_folder: tmp.path().join("roms").to_string_lossy().into_owned(),
+            ..Config::default()
+        };
+        // Every source integration is off — the machine's real installed
+        // Steam/Switch libraries must not leak into this test's library.
+        cfg.steam_enabled = false;
+        cfg.ra_enabled = false;
+        cfg.console_mut("switch").enabled = false;
+        let options = GameListOptions::from_config(&cfg);
+
+        let games = build_game_list(&db, &cfg.save_dir, &cfg, &options, progress);
+
+        let names: Vec<&str> = games.iter().map(|game| game.name.as_str()).collect();
+        assert!(names.contains(&"Saved rom"), "{names:?}");
+        assert!(names.contains(&"Saved gog game"), "{names:?}");
     }
 }

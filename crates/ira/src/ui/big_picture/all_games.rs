@@ -3,11 +3,11 @@
 //! and keyboard drive an external selection highlight (the grid itself only
 //! recycles cells); A launches, B returns home.
 
-use super::css::*;
-use super::big_picture_marquee::{Marquee, TAIL_HEIGHT};
-use super::selection_ring::SelectionRing;
-use super::state::SharedState;
-use super::virtual_grid::VirtualGrid;
+use crate::ui::css::*;
+use super::marquee::{Marquee, TAIL_HEIGHT};
+use crate::ui::selection_ring::SelectionRing;
+use crate::ui::state::SharedState;
+use crate::ui::virtual_grid::VirtualGrid;
 use crate::Game;
 use gtk4::prelude::*;
 use std::cell::{Cell, RefCell};
@@ -15,7 +15,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 
-/// The game a couch grid action targets: launch uses the same (db, variant)
+/// The game a big-picture grid action targets: launch uses the same (db, variant)
 /// pair the desktop grid stores on its cells.
 type GameKey = (i64, i64);
 
@@ -117,7 +117,7 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     back.set_valign(gtk4::Align::Center);
     {
         let back_state = state.clone();
-        back.connect_clicked(move |_| super::big_picture_view::show_home(&back_state));
+        back.connect_clicked(move |_| super::view::show_home(&back_state));
     }
     header.append(&back);
     let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
@@ -128,12 +128,12 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     title.set_xalign(0.0);
     title.set_hexpand(true);
     title.add_css_class(CSS_BP_PAGE_TITLE);
-    super::helpers::crisp_label(&title);
+    crate::ui::helpers::crisp_label(&title);
     header.append(&title);
     let ordering = gtk4::Label::new(Some(&crate::tr!("By name")));
     ordering.set_valign(gtk4::Align::Center);
     ordering.add_css_class(CSS_BP_PAGE_SUBTITLE);
-    super::helpers::crisp_label(&ordering);
+    crate::ui::helpers::crisp_label(&ordering);
     header.append(&ordering);
     page.append(&header);
 
@@ -145,7 +145,7 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     // Recycled cells must never paint outside the viewport, over the page
     // header above.
     grid.set_overflow(gtk4::Overflow::Hidden);
-    let store = gio::ListStore::new::<super::game_item::GameItem>();
+    let store = gio::ListStore::new::<crate::ui::game_item::GameItem>();
     grid.set_model(&store);
     let selected_key = Rc::new(Cell::new((0, 0)));
     let (setup, bind, unbind) =
@@ -269,9 +269,9 @@ impl AllSoftwareUi {
 
     /// Replace the model contents and restyle around the surviving game.
     fn sync_store(&self, games: &[Game]) {
-        let store = gio::ListStore::new::<super::game_item::GameItem>();
+        let store = gio::ListStore::new::<crate::ui::game_item::GameItem>();
         for game in games {
-            store.append(&super::game_item::GameItem::new(game));
+            store.append(&crate::ui::game_item::GameItem::new(game));
         }
         // The model swap replays items_changed with removed != added, so the
         // grid clears its visible cells and rebinds from the new store.
@@ -304,12 +304,12 @@ impl AllSoftwareUi {
         }
         self.opened.set(true);
         // The pill's text was set while this page sat hidden — possibly at
-        // a different couch scale — so its layout may measure stale.
+        // a different big-picture scale — so its layout may measure stale.
         self.tooltip.revalidate_text();
         self.apply_selection(0);
     }
 
-    /// Re-measure the pill after the couch scale changed (see
+    /// Re-measure the pill after the big-picture scale changed (see
     /// `Marquee::revalidate_text`).
     pub(super) fn revalidate_tooltip(&self) {
         self.tooltip.revalidate_text();
@@ -480,25 +480,25 @@ impl AllSoftwareUi {
     }
 }
 
-/// Cell factories for the couch grid: the same square-capsule recipe as the
+/// Cell factories for the big picture grid: the same square-capsule recipe as the
 /// desktop grid, minus the context menus, plus the external highlight.
 fn cell_factories(
     state: &SharedState,
     item_size: Rc<Cell<(i32, i32)>>,
     selected_key: Rc<Cell<GameKey>>,
 ) -> (
-    super::virtual_grid::SetupFn,
-    super::virtual_grid::BindFn,
-    super::virtual_grid::UnbindFn,
+    crate::ui::virtual_grid::SetupFn,
+    crate::ui::virtual_grid::BindFn,
+    crate::ui::virtual_grid::UnbindFn,
 ) {
     let setup_state = state.clone();
-    let setup: super::virtual_grid::SetupFn = Rc::new(move || {
+    let setup: crate::ui::virtual_grid::SetupFn = Rc::new(move || {
         build_cell(&setup_state)
     });
-    let bind: super::virtual_grid::BindFn = Rc::new(move |widget, game| {
+    let bind: crate::ui::virtual_grid::BindFn = Rc::new(move |widget, game| {
         bind_cell(widget, game, &item_size, &selected_key);
     });
-    let unbind: super::virtual_grid::UnbindFn = Rc::new(|widget| {
+    let unbind: crate::ui::virtual_grid::UnbindFn = Rc::new(|widget| {
         widget.remove_css_class(CSS_BP_SELECTED);
     });
     (setup, bind, unbind)
@@ -528,7 +528,7 @@ fn build_cell(state: &SharedState) -> gtk4::Widget {
     name_label.set_margin_start(6);
     name_label.set_margin_end(6);
     name_label.add_css_class(CSS_COVER_NAME_FALLBACK);
-    super::helpers::crisp_label(&name_label);
+    crate::ui::helpers::crisp_label(&name_label);
     name_label.set_visible(false);
     overlay.add_overlay(&name_label);
     vbox.append(&overlay);
@@ -696,7 +696,7 @@ fn read_cell_ids(widget: &gtk4::Widget) -> Option<(i64, Option<i64>)> {
 
 fn launch(state: &SharedState, game: &Game) {
     if let Err(error) =
-        super::play_button::launch_game(state, game.db_id, game.variant_id)
+        crate::ui::play_button::launch_game(state, game.db_id, game.variant_id)
     {
         eprintln!("Failed to launch game: {error}");
         let _ = state

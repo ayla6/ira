@@ -1,15 +1,8 @@
 mod achievement_rows;
 mod achievement_view;
 pub mod big_picture;
-mod big_picture_all;
-mod big_picture_home;
-mod big_picture_input;
-mod big_picture_marquee;
-mod big_picture_mouse;
-mod big_picture_status;
-mod big_picture_view;
 mod background;
-pub mod couch_font;
+pub mod big_picture_font;
 mod context_menu;
 mod context_menu_actions;
 mod css;

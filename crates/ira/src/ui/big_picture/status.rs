@@ -1,9 +1,9 @@
-//! The couch screen's rails. Top: an avatar, the date, a ticking clock, and
+//! The big-picture screen's rails. Top: an avatar, the date, a ticking clock, and
 //! the battery when the machine has one to report. Bottom: the
 //! connected-gamepad dots on the left and contextual button prompts on the
 //! right.
 
-use super::css::*;
+use crate::ui::css::*;
 use gtk4::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::path::Path;
@@ -119,16 +119,16 @@ impl StatusBar {
         let battery_icon = gtk4::Image::from_icon_name("battery-full-symbolic");
         let battery_label = gtk4::Label::new(None);
         battery_label.add_css_class(CSS_BP_BATT);
-        super::helpers::crisp_label(&battery_label);
+        crate::ui::helpers::crisp_label(&battery_label);
         battery.append(&battery_icon);
         battery.append(&battery_label);
 
         let date = gtk4::Label::new(None);
         date.add_css_class(CSS_BP_DATE);
-        super::helpers::crisp_label(&date);
+        crate::ui::helpers::crisp_label(&date);
         let clock = gtk4::Label::new(None);
         clock.add_css_class(CSS_BP_CLOCK);
-        super::helpers::crisp_label(&clock);
+        crate::ui::helpers::crisp_label(&clock);
 
         let cluster = gtk4::Box::new(gtk4::Orientation::Horizontal, 16);
         cluster.set_hexpand(true);
@@ -194,6 +194,9 @@ pub(super) struct BottomBar {
     prompts: gtk4::Box,
     /// The current prompt row, rebuilt when the viewport scale changes.
     prompt_items: RefCell<Vec<(ira_input::GamepadButton, String)>>,
+    /// The connected pad's family, so prompts draw that controller's
+    /// glyphs; Xbox art until a pad reports otherwise.
+    family: Cell<ira_input::ControllerFamily>,
     ui_scale: Cell<f64>,
 }
 
@@ -255,16 +258,17 @@ impl BottomBar {
             dots,
             prompts,
             prompt_items: RefCell::new(Vec::new()),
+            family: Cell::new(ira_input::ControllerFamily::Xbox),
             ui_scale: Cell::new(0.0),
         };
-        bar.set_pad_status(0);
+        bar.set_pad_status(0, ira_input::ControllerFamily::Xbox);
         bar
     }
 
     /// Light one dot per connected gamepad (four shown at most); unlit dots
     /// stay visible as slots, and the lit ones glow green like a player
-    /// LED.
-    pub(super) fn set_pad_status(&self, count: usize) {
+    /// LED. The prompts redraw in the leading pad's family.
+    pub(super) fn set_pad_status(&self, count: usize, family: ira_input::ControllerFamily) {
         for (index, dot) in self.dots.iter().enumerate() {
             if index < count {
                 dot.add_css_class(CSS_BP_PAD_LIT);
@@ -272,6 +276,10 @@ impl BottomBar {
                 dot.remove_css_class(CSS_BP_PAD_LIT);
             }
             dot.set_opacity(if index < count { 1.0 } else { 0.25 });
+        }
+        if self.family.get() != family {
+            self.family.set(family);
+            self.rebuild_prompts();
         }
         self.pads.set_tooltip_text(Some(
             &crate::tr!("Controllers connected: {}").replacen("{}", &count.to_string(), 1),
@@ -290,7 +298,8 @@ impl BottomBar {
     }
 
     fn rebuild_prompts(&self) {
-        super::helpers::clear_children(&self.prompts);
+        let family = self.family.get();
+        crate::ui::helpers::clear_children(&self.prompts);
         let items: Vec<(ira_input::GamepadButton, String)> =
             self.prompt_items.borrow().clone();
         for (button, label) in items {
@@ -304,23 +313,23 @@ impl BottomBar {
             glyph.set_halign(gtk4::Align::Center);
             glyph.set_valign(gtk4::Align::Center);
             slot.append(&glyph);
-            let fallback = gtk4::Label::new(Some(&super::input_profile_assets::source_badge(
+            let fallback = gtk4::Label::new(Some(&crate::ui::input_profile_assets::source_badge(
                 ira_input::InputSource::Button(button),
-                ira_input::ControllerFamily::Xbox,
+                family,
             )));
             fallback.add_css_class(CSS_BP_PROMPT_KEY);
             fallback.set_halign(gtk4::Align::Center);
             fallback.set_valign(gtk4::Align::Center);
             slot.append(&fallback);
-            super::input_profile_assets::set_source_asset(
+            crate::ui::input_profile_assets::set_source_asset(
                 &glyph,
                 &fallback,
                 ira_input::InputSource::Button(button),
-                ira_input::ControllerFamily::Xbox,
+                family,
             );
             let text = gtk4::Label::new(Some(label));
             text.add_css_class(CSS_BP_PROMPT);
-            super::helpers::crisp_label(&text);
+            crate::ui::helpers::crisp_label(&text);
             item.append(&slot);
             item.append(&text);
             self.prompts.append(&item);

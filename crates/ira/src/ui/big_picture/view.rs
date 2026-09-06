@@ -1,26 +1,26 @@
-//! The big-picture couch shell: status rail on top (avatar, date, clock,
+//! The big-picture big-picture shell: status rail on top (avatar, date, clock,
 //! battery), a two-page stack in the middle (home carousel, All Software
 //! grid), and a bottom rail (connected gamepads, button prompts).
 //! Controller and keyboard input is routed to whichever page is showing.
 
-use super::big_picture_all::AllSoftwareUi;
-use super::big_picture_home::HomeUi;
-use super::big_picture_input::{NavCommand, NavMsg};
-use super::big_picture_status::{BottomBar, StatusBar};
-use super::css::*;
-use super::state::SharedState;
+use super::all_games::AllSoftwareUi;
+use super::home::HomeUi;
+use super::input::{NavCommand, NavMsg};
+use super::status::{BottomBar, StatusBar};
+use crate::ui::css::*;
+use crate::ui::state::SharedState;
 use adw::prelude::*;
 use std::cell::Cell;
 use std::rc::Rc;
 
-/// Which page of the couch shell is showing.
+/// Which page of the big-picture shell is showing.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
     Home,
     AllSoftware,
 }
 
-/// Widgets of the couch view, kept on `AppState` behind an `Rc` so every
+/// Widgets of the big-picture view, kept on `AppState` behind an `Rc` so every
 /// handler — refreshes, navigation, the scroll ticker — sees the same
 /// selection state instead of a deep-cloned snapshot.
 pub struct BigPictureUi {
@@ -30,7 +30,7 @@ pub struct BigPictureUi {
     status: StatusBar,
     bottom: BottomBar,
     page: Cell<Page>,
-    /// The couch scale the pills were last measured at, so a scale change
+    /// The big-picture scale the pills were last measured at, so a scale change
     /// can force their stale label layouts to re-resolve.
     ui_scale: Cell<f64>,
     /// Whether the pointer is currently hidden because a gamepad or the
@@ -40,23 +40,23 @@ pub struct BigPictureUi {
     pub(super) all: AllSoftwareUi,
 }
 
-/// Build the couch window (fullscreen is applied by main.rs) and take over
+/// Build the big-picture window (fullscreen is applied by main.rs) and take over
 /// the shared state's window reference.
-pub(super) fn build_window(state: &SharedState, app: &adw::Application) {
+pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     let window = adw::ApplicationWindow::new(app);
     window.set_title(Some(&crate::tr!("Ira")));
     window.set_size_request(900, 650);
 
-    // Couch text renders best fully hinted: at TV distance, 'slight'
+    // Big-picture text renders best fully hinted: at TV distance, 'slight'
     // hinting drops whole pixel columns out of letter stems.
     let settings = gtk4::Settings::for_display(&gtk4::prelude::WidgetExt::display(&window));
     settings.set_property("gtk-xft-hinting", 1);
     settings.set_property("gtk-xft-hintstyle", String::from("hintfull"));
 
     // The window has no width yet here, and a 0-scale sheet would floor
-    // every couch font to 1px — start from the 1080p reference instead;
+    // every big-picture font to 1px — start from the 1080p reference instead;
     // the first refresh swaps in the real scale.
-    super::css::init_styles(couch_scale(state).max(1.0));
+    crate::ui::css::init_styles(big_picture_scale(state).max(1.0));
 
     let square_mode = state.borrow().cfg.big_picture_square_capsules;
     let (root, ui) = build_root(state, square_mode);
@@ -65,7 +65,7 @@ pub(super) fn build_window(state: &SharedState, app: &adw::Application) {
     wire_keyboard(state, &window);
     // The pointer returns on mouse motion and hides on gamepad/keyboard
     // navigation; hovering a cover selects it.
-    super::big_picture_mouse::attach(state, root.upcast_ref());
+    super::mouse::attach(state, root.upcast_ref());
     // The desktop window's close wiring never runs in this mode, so honor
     // the close-to-background setting here: without it a compositor close
     // would destroy the window and leave the process running headless.
@@ -74,7 +74,7 @@ pub(super) fn build_window(state: &SharedState, app: &adw::Application) {
         window.connect_close_request(move |_| {
             let close_to_background = close_state.borrow().cfg.close_to_background;
             if close_to_background {
-                super::background::show_close_choice_dialog(&close_state);
+                crate::ui::background::show_close_choice_dialog(&close_state);
                 glib::Propagation::Stop
             } else {
                 if let Some(app) = close_state.borrow().window.application() {
@@ -92,7 +92,7 @@ pub(super) fn build_window(state: &SharedState, app: &adw::Application) {
     }
     window.set_content(Some(&root));
     // Fullscreen BEFORE the first present: presenting at the default size
-    // first would lay the whole couch out small and resize it a frame
+    // first would lay the whole shell out small and resize it a frame
     // later — a transitional stage the floats can anchor to and then sit
     // at until something moves. Requested while unmapped, the fullscreen
     // state applies at the very first layout instead.
@@ -100,7 +100,7 @@ pub(super) fn build_window(state: &SharedState, app: &adw::Application) {
     window.present();
 
     refresh(state);
-    super::big_picture_input::start(state);
+    super::input::start(state);
 }
 
 fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPictureUi) {
@@ -116,8 +116,8 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
     stack.set_vexpand(true);
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
     stack.set_transition_duration(150);
-    let (home_page, home) = super::big_picture_home::build(state, square_mode);
-    let (all_page, all) = super::big_picture_all::build(state);
+    let (home_page, home) = super::home::build(state, square_mode);
+    let (all_page, all) = super::all_games::build(state);
     stack.add_named(&home_page, Some("home"));
     stack.add_named(&all_page, Some("all"));
     root.append(&stack);
@@ -182,14 +182,14 @@ pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
         NavMsg::Nav(command) => route(state, command),
         NavMsg::Pads(status) => {
             if let Some(big) = state.borrow().big_picture.clone() {
-                big.bottom.set_pad_status(status.count);
+                big.bottom.set_pad_status(status.count, status.family);
             }
         }
     }
 }
 
 fn route(state: &SharedState, command: NavCommand) {
-    super::big_picture_mouse::note_controller_use(state);
+    super::mouse::note_controller_use(state);
     if showing_all(state) {
         match command {
             NavCommand::Left => grid_move(state, -1, 0),
@@ -204,7 +204,7 @@ fn route(state: &SharedState, command: NavCommand) {
                     .and_then(|big| big.all.selected_game());
                 if let Some(game) = game {
                     if let Err(error) =
-                        super::play_button::launch_game(state, game.db_id, game.variant_id)
+                        crate::ui::play_button::launch_game(state, game.db_id, game.variant_id)
                     {
                         eprintln!("Failed to launch game: {error}");
                         let _ = state
@@ -218,8 +218,8 @@ fn route(state: &SharedState, command: NavCommand) {
         }
     } else {
         match command {
-            NavCommand::Left => super::big_picture_home::move_selection(state, -1),
-            NavCommand::Right => super::big_picture_home::move_selection(state, 1),
+            NavCommand::Left => super::home::move_selection(state, -1),
+            NavCommand::Right => super::home::move_selection(state, 1),
             NavCommand::Confirm => confirm(state),
             NavCommand::Up | NavCommand::Down | NavCommand::Back => {}
         }
@@ -247,11 +247,11 @@ pub(super) fn confirm(state: &SharedState) {
         .borrow()
         .big_picture
         .as_ref()
-        .map(super::big_picture_home::selection_is_tile);
+        .map(super::home::selection_is_tile);
     if is_tile == Some(true) {
         open_all(state);
     } else {
-        super::big_picture_home::launch_selected(state);
+        super::home::launch_selected(state);
     }
 }
 
@@ -278,9 +278,9 @@ pub(super) fn show_home(state: &SharedState) {
         .set_prompts(&[(ira_input::GamepadButton::A, &crate::tr!("Play"))]);
 }
 
-/// The couch UI's viewport scale (1.0 = 1920 wide); 0 before the window
+/// The big-picture UI's viewport scale (1.0 = 1920 wide); 0 before the window
 /// has a size.
-fn couch_scale(state: &SharedState) -> f64 {
+fn big_picture_scale(state: &SharedState) -> f64 {
     state.borrow().window.width() as f64 / 1920.0
 }
 
@@ -294,16 +294,16 @@ fn quit_app(state: &SharedState) {
 /// Repopulate both pages from the shared game list. Cheap no-op outside
 /// big-picture mode; message handlers call it whenever the game list or its
 /// artwork changes.
-pub(super) fn refresh(state: &SharedState) {
+pub(crate) fn refresh(state: &SharedState) {
     let Some(big) = state.borrow().big_picture.clone() else {
         return;
     };
-    // Couch sizes scale with the viewport (1.0 = 1920 wide), which also
+    // Big-picture sizes scale with the viewport (1.0 = 1920 wide), which also
     // cancels desktop display scaling: logical pixels shrink as the scale
     // grows, and everything follows.
-    let scale = couch_scale(state);
+    let scale = big_picture_scale(state);
     if scale > 0.01 {
-        super::css::init_styles(scale);
+        crate::ui::css::init_styles(scale);
         big.status.set_icon_scale(scale);
         big.bottom.set_icon_scale(scale);
         // A pill whose text was set at the old font keeps measuring its
@@ -311,9 +311,9 @@ pub(super) fn refresh(state: &SharedState) {
         if (big.ui_scale.get() - scale).abs() > 0.001 {
             big.ui_scale.set(scale);
             big.all.revalidate_tooltip();
-            super::big_picture_home::revalidate_pill(&big);
+            super::home::revalidate_pill(&big);
         }
     }
-    super::big_picture_home::refresh(state);
+    super::home::refresh(state);
     big.all.refresh(state);
 }

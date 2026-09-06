@@ -13,7 +13,7 @@ use adw::prelude::*;
 use std::collections::HashSet;
 
 pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
-    use super::big_picture_view::refresh;
+    use super::big_picture::refresh;
     match msg {
         AppMessage::EnrichedGame(game) | AppMessage::WatcherGameUpdated(game) => {
             apply_game_update(state, game);
@@ -79,7 +79,7 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
     }
 }
 
-/// A square.webp landed for one game: reload it so the couch carousel (and
+/// A square.webp landed for one game: reload it so the big picture carousel (and
 /// any open view) sees the new art.
 fn handle_square_ready(state: &SharedState, db_id: i64) {
     let (db, save_dir) = {
@@ -91,7 +91,7 @@ fn handle_square_ready(state: &SharedState, db_id: i64) {
             apply_game_update(state, updated);
         }
     }
-    super::big_picture_view::refresh(state);
+    super::big_picture::refresh(state);
 }
 
 fn handle_add_game_error(state: &SharedState, e: String) {

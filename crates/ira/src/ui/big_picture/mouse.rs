@@ -1,11 +1,11 @@
-//! Mouse and touchpad behavior for the couch shell. Clicking works through
+//! Mouse and touchpad behavior for the big-picture shell. Clicking works through
 //! the covers' own gesture handlers, and both pages scroll natively through
 //! GTK scrolled windows (wheel, touchpad pan, kinetic), so what is left
 //! lives here: hovering a cover moves the selection onto it, and the cursor
 //! hides while a gamepad or the keyboard drives the UI, returning on the
 //! next mouse move.
 
-use super::state::SharedState;
+use crate::ui::state::SharedState;
 use gtk4::prelude::*;
 use gtk4::Widget;
 
@@ -24,7 +24,7 @@ pub(super) fn note_controller_use(state: &SharedState) {
     }
 }
 
-/// Watch for mouse motion on the couch root and bring the pointer back.
+/// Watch for mouse motion on the big picture root and bring the pointer back.
 pub(super) fn attach(state: &SharedState, root: &Widget) {
     let motion_state = state.clone();
     let motion = gtk4::EventControllerMotion::new();

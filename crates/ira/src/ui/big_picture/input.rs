@@ -1,9 +1,9 @@
 //! Controller navigation for big-picture mode: a background reader opens
-//! gamepads without grabbing them (couch mode runs without the input daemon,
+//! gamepads without grabbing them (big-picture mode runs without the input daemon,
 //! so the devices are free) and translates sticks, dpads and the A/B buttons
 //! into navigation messages delivered on the GTK main loop.
 
-use super::state::SharedState;
+use crate::ui::state::SharedState;
 use ira_input::{discover_gamepads, PhysicalGamepad};
 use ira_input::{GamepadAxis, GamepadButton, InputSource};
 use std::collections::HashSet;
@@ -36,10 +36,12 @@ pub(super) enum NavCommand {
 }
 
 /// What the bottom rail shows about connected gamepads: the count for the
-/// dots.
+/// dots and the leading pad's family, so the button prompts draw that
+/// controller's glyphs. With no pads the prompts stay Xbox-style.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct PadStatus {
     pub count: usize,
+    pub family: ira_input::ControllerFamily,
 }
 
 /// Everything the reader thread reports: navigation steps and pad status.
@@ -137,7 +139,7 @@ pub(super) fn start(state: &SharedState) {
     let nav_state = state.clone();
     glib::timeout_add_local(Duration::from_millis(30), move || loop {
         match rx.try_recv() {
-            Ok(msg) => super::big_picture_view::handle_msg(&nav_state, msg),
+            Ok(msg) => super::view::handle_msg(&nav_state, msg),
             Err(std::sync::mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => return glib::ControlFlow::Break,
         }
@@ -201,18 +203,23 @@ fn reader_loop(tx: Sender<NavMsg>, save_dir: String) {
 #[derive(Default)]
 struct PadUi {
     count: usize,
+    family: Option<ira_input::ControllerFamily>,
     sent: Option<PadStatus>,
 }
 
 impl PadUi {
     fn after_rescan(&mut self, pads: &[PhysicalGamepad]) {
         self.count = pads.len();
+        self.family = pads.first().map(|pad| pad.info().family());
     }
 
     /// Push the current status when it changed; false when the receiver is
     /// gone (the app is shutting down).
     fn maybe_send(&mut self, tx: &Sender<NavMsg>) -> bool {
-        let status = PadStatus { count: self.count };
+        let status = PadStatus {
+            count: self.count,
+            family: self.family.unwrap_or(ira_input::ControllerFamily::Xbox),
+        };
         if self.sent == Some(status) {
             return true;
         }

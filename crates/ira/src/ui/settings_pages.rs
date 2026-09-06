@@ -129,7 +129,7 @@ pub(super) fn build_general_settings_page(
     let square_row = adw::SwitchRow::new();
     square_row.set_title(&crate::tr!("Square covers in big picture"));
     square_row.set_subtitle(&crate::tr!(
-        "Couch mode shows square capsule art, falling back to cropped cover capsules"
+        "Big picture mode shows square capsule art, falling back to cropped cover capsules"
     ));
     square_row.set_active(cfg.big_picture_square_capsules);
     hidden_group.add(&square_row);

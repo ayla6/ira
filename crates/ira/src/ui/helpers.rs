@@ -11,7 +11,7 @@ use super::css::*;
 use super::game_item::GameItem;
 use super::state::{PendingImage, SgdbAssetsCacheEntry, SharedState};
 
-/// Lock a couch label's text rasterization: slight hinting with
+/// Lock a big-picture label's text rasterization: slight hinting with
 /// whole-pixel glyph positions. Full hinting distorts the outlines at UI
 /// sizes (stems snap into uneven weights); slight keeps the shapes and
 /// rounding the positions still stops stems from falling between pixels.

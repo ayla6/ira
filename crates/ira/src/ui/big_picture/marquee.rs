@@ -1,4 +1,4 @@
-//! A floating tooltip bubble for the couch screens, drawn as one shape in
+//! A floating tooltip bubble for the big-picture screens, drawn as one shape in
 //! a single `snapshot()` pass: a rounded pill joined with a tail that
 //! reaches the selected tile (Cairo), with the title repeating after a
 //! gap — "name    name" — always drifting right and wrapping around when
@@ -496,8 +496,8 @@ impl Marquee {
         clip.set_overflow(gtk4::Overflow::Hidden);
         for slot in [&imp.label, &imp.label2] {
             let label = gtk4::Label::new(None);
-            label.add_css_class(super::css::CSS_BP_TITLE);
-            super::helpers::crisp_label(&label);
+            label.add_css_class(crate::ui::css::CSS_BP_TITLE);
+            crate::ui::helpers::crisp_label(&label);
             label.set_parent(&clip);
             *slot.borrow_mut() = Some(label);
         }
@@ -588,7 +588,7 @@ impl Marquee {
         });
     }
 
-    /// Re-create the label layouts from the current style. The couch CSS
+    /// Re-create the label layouts from the current style. The big-picture CSS
     /// reloads with new font sizes on a viewport resize, but a label
     /// whose text was set while its page sat hidden keeps measuring its
     /// stale Pango layout — and `set_text`'s unchanged-guard skips
@@ -619,8 +619,8 @@ impl Marquee {
             for slot in [&imp.label, &imp.label2] {
                 let label = slot.borrow();
                 if let Some(label) = label.as_ref() {
-                    label.remove_css_class(super::css::CSS_BP_TITLE);
-                    label.add_css_class(super::css::CSS_BP_TITLE);
+                    label.remove_css_class(crate::ui::css::CSS_BP_TITLE);
+                    label.add_css_class(crate::ui::css::CSS_BP_TITLE);
                 }
             }
             marquee.set_text("");

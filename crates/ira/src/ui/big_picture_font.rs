@@ -1,9 +1,9 @@
-//! The couch UI's font under test: embedded in the binary, registered as
+//! The big-picture UI's font under test: embedded in the binary, registered as
 //! a fontconfig *application* font — private to this process, never
 //! installed into the user's font directories. Swap the `ACTIVE` block to
 //! try another candidate.
 
-/// The family the couch CSS currently uses, and its files (Regular first,
+/// The family the big picture CSS currently uses, and its files (Regular first,
 /// then any weight companions). Candidates waiting their turn live in
 /// `assets/fonts/` unembedded: IBM_Plex_Sans_JP, Murecho, M_PLUS_2,
 /// M_PLUS_1.

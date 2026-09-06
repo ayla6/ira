@@ -308,8 +308,8 @@ gridview.game-grid child:focus-within {
     transform: none;
     box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
 }
-/* Couch text: the experimental bundled font. The couch's sizes live in
-   couch_css(), which scales them with the viewport. */
+/* Big-picture text: the experimental bundled font. Its sizes live in
+   big_picture_css(), which scales them with the viewport. */
 .bp-root {
     font-family: \"M PLUS 2\", sans-serif;
 }
@@ -350,9 +350,9 @@ button.sgdb-filter:hover {
 }
 ";
 
-/// The couch UI's sizes, scaled from the 1080p reference by `s`. Everything
+/// The big-picture UI's sizes, scaled from the 1080p reference by `s`. Everything
 /// is integer pixels: fractional font sizes render choppy.
-fn couch_css(s: f64) -> String {
+fn big_picture_css(s: f64) -> String {
     let px = |v: i32| format!("{}px", (v as f64 * s).round().max(1.0));
     let status_pad_x = px(24);
     format!(
@@ -404,15 +404,15 @@ fn couch_css(s: f64) -> String {
 }
 
 /// The full stylesheet at a given viewport scale (1.0 = the 1080p
-/// reference). The couch section scales; the desktop section does not.
+/// reference). The big-picture section scales; the desktop section does not.
 pub fn app_css(ui_scale: f64) -> String {
     format!("{APP_CSS}
-{}", couch_css(ui_scale))
+{}", big_picture_css(ui_scale))
 }
 
 /// Install the global stylesheet and icon theme additions on the default
 /// display. Called once per window build (desktop or big picture) and on
-/// viewport resizes; repeat calls reload the couch sizes in place.
+/// viewport resizes; repeat calls reload the big picture sizes in place.
 pub fn init_styles(ui_scale: f64) {
     thread_local! {
         static PROVIDER: gtk4::CssProvider = gtk4::CssProvider::new();

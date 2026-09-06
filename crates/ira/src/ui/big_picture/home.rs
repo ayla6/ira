@@ -1,15 +1,15 @@
-//! The couch home page: a horizontal carousel of recently played games plus
+//! The big picture home page: a horizontal carousel of recently played games plus
 //! the grid tile that opens All Software. The selected tile wears a
 //! single-line accent ring, with the game's name floating above it in a
 //! tooltip pill that marquees when it overflows.
 
-use super::big_picture_marquee::Marquee;
-use super::selection_ring::SelectionRing;
-use super::big_picture_view::BigPictureUi;
-use super::css::*;
-use super::recent_carousel::RecentRow;
-use super::recent_row::build_cover;
-use super::state::SharedState;
+use super::marquee::Marquee;
+use crate::ui::selection_ring::SelectionRing;
+use super::view::BigPictureUi;
+use crate::ui::css::*;
+use crate::ui::recent_carousel::RecentRow;
+use crate::ui::recent_row::build_cover;
+use crate::ui::state::SharedState;
 use crate::Game;
 use gtk4::prelude::*;
 use std::cell::{Cell, RefCell};
@@ -23,7 +23,7 @@ const RECENT_LIMIT: usize = 16;
 /// Selection scroll animation length.
 const SCROLL_MILLIS: u64 = 90;
 /// Layout spacer between the page top and the carousel: keeps the covers
-/// clear of the floating pill (bubble + tail at the couch title size),
+/// clear of the floating pill (bubble + tail at the big picture title size),
 /// which overlays the page and sizes itself from the cover's position.
 const TITLE_AREA_HEIGHT: i32 = 68;
 
@@ -75,7 +75,7 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, H
     main.append(&title_area);
 
     let width = capsule_width(square_mode, capsule.get());
-    let spacing = super::virtual_grid::VirtualGrid::grid_spacing_for_item_w(width);
+    let spacing = crate::ui::virtual_grid::VirtualGrid::grid_spacing_for_item_w(width);
     let row = RecentRow::new(spacing, capsule.get());
     let scrolled = gtk4::ScrolledWindow::new();
     scrolled.set_policy(gtk4::PolicyType::Automatic, gtk4::PolicyType::Never);
@@ -98,7 +98,7 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, H
                 let desired = ((big.home.page.width() as f64 / 6.0).round() as i32).max(160);
                 if desired != big.home.capsule.get() {
                     big.home.capsule.set(desired);
-                    super::big_picture_view::refresh(&scroll_state);
+                    super::view::refresh(&scroll_state);
                 }
                 sync_title_position(&big);
                 // The rebuild above can run while the row is still
@@ -177,7 +177,7 @@ pub(super) fn refresh(state: &SharedState) {
         return;
     };
     let ui = &big.home;
-    let games = super::helpers::recently_played(state, RECENT_LIMIT);
+    let games = crate::ui::helpers::recently_played(state, RECENT_LIMIT);
 
     // Pre-load stage: with no games yet, the stage stays empty — no
     // covers, no All Software tile, nothing floating over it. Everything
@@ -285,7 +285,7 @@ pub(super) fn refresh(state: &SharedState) {
     queue_missing_squares(state, ui, square_mode);
 }
 
-/// Re-measure the floating title after the couch scale changed (see
+/// Re-measure the floating title after the big-picture scale changed (see
 /// `Marquee::revalidate_text`).
 pub(super) fn revalidate_pill(big: &Rc<BigPictureUi>) {
     big.home.marquee.revalidate_text();
@@ -300,7 +300,7 @@ fn on_cover_clicked(state: &SharedState, index: usize) {
         .as_ref()
         .is_some_and(|big| index >= big.home.games.borrow().len());
     if is_tile {
-        super::big_picture_view::open_all(state);
+        super::view::open_all(state);
         return;
     }
     let selected = state
@@ -310,7 +310,7 @@ fn on_cover_clicked(state: &SharedState, index: usize) {
         .map(|big| *big.home.selected.borrow())
         .unwrap_or(usize::MAX);
     if selected == index {
-        super::big_picture_view::confirm(state);
+        super::view::confirm(state);
     } else {
         let Some(big) = state.borrow().big_picture.clone() else {
             return;
@@ -372,7 +372,7 @@ pub(super) fn launch_selected(state: &SharedState) {
     let Some(game) = game else {
         return;
     };
-    if let Err(error) = super::play_button::launch_game(state, game.db_id, game.variant_id) {
+    if let Err(error) = crate::ui::play_button::launch_game(state, game.db_id, game.variant_id) {
         eprintln!("Failed to launch game: {error}");
         let _ = state
             .borrow()
@@ -549,7 +549,7 @@ fn build_all_tile(state: &SharedState, capsule: i32) -> gtk4::Widget {
     let open_state = state.clone();
     let click = gtk4::GestureClick::new();
     click.connect_pressed(move |_, _, _, _| {
-        super::big_picture_view::open_all(&open_state);
+        super::view::open_all(&open_state);
     });
     vbox.add_controller(click);
     vbox.upcast()
@@ -589,7 +589,7 @@ fn queue_missing_squares(state: &SharedState, ui: &HomeUi, square_mode: bool) {
     std::thread::spawn(move || {
         for game in jobs {
             let square =
-                super::fetch_images::ensure_game_square(&steam, &save_dir, &db, &cfg, &game);
+                crate::ui::fetch_images::ensure_game_square(&steam, &save_dir, &db, &cfg, &game);
             if !square.is_empty() {
                 let _ = sender.send(crate::AppMessage::SquareReady(game.db_id));
             }

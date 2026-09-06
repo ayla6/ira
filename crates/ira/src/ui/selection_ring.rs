@@ -1,4 +1,4 @@
-//! The couch selection ring: a drawn frame that floats 4px outside the
+//! The big-picture selection ring: a drawn frame that floats 4px outside the
 //! selected tile. Square frames keep their INNER edge straight and round
 //! only the outside corners a touch; the round variant (the All Software
 //! circle) is a full circle. Drawn as the fill between an outer shape

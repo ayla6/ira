@@ -505,9 +505,9 @@ fn build_grid_view(
 
 pub fn show_grid_view(state: &SharedState) {
     if super::big_picture::is_big_picture() {
-        // The couch view has no grid; refresh the carousel instead of
+        // The big-picture view has no grid; refresh the carousel instead of
         // building covers for a window that never shows them.
-        super::big_picture_view::refresh(state);
+        super::big_picture::refresh(state);
         return;
     }
     let _span = tracing::info_span!("show_grid_view").entered();

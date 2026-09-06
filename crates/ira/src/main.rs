@@ -63,7 +63,7 @@ fn main() {
         eprintln!("ira: big picture mode");
         // Before GTK initializes fontconfig, so the app font is usable in
         // this same session.
-        ira::ui::couch_font::install();
+        ira::ui::big_picture_font::install();
     }
 
     let _flush_guard = init_tracing();

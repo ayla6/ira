@@ -122,7 +122,7 @@ pub fn build_ui(
 
 pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     if super::big_picture::is_big_picture() {
-        super::big_picture_view::build_window(state, app);
+        super::big_picture::build_window(state, app);
         return;
     }
 
@@ -189,7 +189,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     content_header.add_css_class("flat");
     content_header.add_css_class("app-content-header");
     if super::big_picture::is_big_picture() {
-        // The min/max/close buttons are the last desktop tell on a couch
+        // The min/max/close buttons are the last desktop tell on a big-picture
         // screen, and fullscreen doesn't remove them — they're CSD widgets.
         content_header.set_show_start_title_buttons(false);
         content_header.set_show_end_title_buttons(false);

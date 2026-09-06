@@ -445,6 +445,6 @@ fn reset_game_image(state: &SharedState, game: &Game, base: &str) {
         }
     }
     super::helpers::replace_grid_game(state, &updated);
-    super::big_picture_view::refresh(state);
+    super::big_picture::refresh(state);
 }
 

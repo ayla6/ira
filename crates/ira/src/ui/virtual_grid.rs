@@ -25,7 +25,7 @@ fn compute_grid_layout(
     aspect: f64,
     fixed_cols: u32,
 ) -> (u32, i32, i32, i32) {
-    // Couch mode: an exact column count at every resolution, with
+    // Big picture mode: an exact column count at every resolution, with
     // Switch-style proportions derived from the tile itself — half a tile
     // of edge margin on each side, a tenth-of-a-tile gap between tiles:
     // width = item × (n + 1 + (n−1)/10). At 1920 wide that lands on
@@ -114,11 +114,11 @@ mod imp {
         /// The column gap from the last allocation; columns widen to fill
         /// the viewport, so cell geometry needs the real value.
         pub last_col_spacing: Cell<i32>,
-        /// The edge margin from the last allocation (a fixed-column couch
+        /// The edge margin from the last allocation (a fixed-column big-picture
         /// grid derives it from the tile, not from the gap).
         pub last_edge: Cell<i32>,
         /// When set, the grid always lays out exactly this many columns —
-        /// the couch grid pins 6 and scales the tiles with the viewport.
+        /// the big picture grid pins 6 and scales the tiles with the viewport.
         pub fixed_cols: Cell<u32>,
 
         pub setup_fn: RefCell<Option<SetupFn>>,
@@ -687,7 +687,7 @@ impl VirtualGrid {
             .cloned()
     }
 
-    /// Pin the column count (the couch grid pins 6 so every resolution
+    /// Pin the column count (the big picture grid pins 6 so every resolution
     /// shows the same layout); 0 keeps the width-driven step system.
     pub fn set_fixed_cols(&self, cols: u32) {
         if self.imp().fixed_cols.get() != cols {

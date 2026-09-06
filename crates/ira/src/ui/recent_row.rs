@@ -130,7 +130,7 @@ pub(super) fn build_recent_row(
 /// One clickable cover: the artwork (or the game name as fallback) with a
 /// hover scale. `on_click` decides what clicking means — the desktop row
 /// navigates to the game, the big-picture carousel selects and launches.
-/// `square` marks a couch capsule: square frame, cover-fit (centered, the
+/// `square` marks a big-picture capsule: square frame, cover-fit (centered, the
 /// overflow cropped), selection ring around the capsule instead of the art.
 pub(super) fn build_cover(
     state: &SharedState,

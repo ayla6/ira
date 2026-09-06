@@ -37,12 +37,17 @@ fn grid_move(current: usize, count: usize, cols: usize, dx: i32, dy: i32) -> Opt
         return None;
     }
     let cols = cols.max(1) as i64;
+    let count = count as i64;
     let col = (current as i64) % cols;
     let row = (current as i64) / cols;
     let next_col = (col + dx as i64).clamp(0, cols - 1);
-    let next_row = (row + dy as i64).max(0);
-    let next = (next_row * cols + next_col).clamp(0, count as i64 - 1) as usize;
-    (next != current).then_some(next)
+    let last_row = (count - 1) / cols;
+    let next_row = (row + dy as i64).clamp(0, last_row);
+    let next = next_row * cols + next_col;
+    // A short last row has no cell under many columns: a vertical move
+    // onto a missing cell stays put instead of dragging the selection
+    // sideways, and moving past either edge never wraps around.
+    (next < count && next != current as i64).then_some(next as usize)
 }
 
 /// The selection outline pokes this far past a tile's edge; the scroll
@@ -724,16 +729,24 @@ mod tests {
     fn test_grid_move_keeps_column() {
         assert_eq!(grid_move(2, 12, COLS, 0, 1), Some(7));
         assert_eq!(grid_move(7, 12, COLS, 0, -1), Some(2));
-        assert_eq!(grid_move(2, 12, COLS, 0, -3), None, "top edge stays put");
+        assert_eq!(grid_move(2, 12, COLS, 0, -1), None, "top edge stays put");
     }
 
     #[test]
-    fn test_grid_move_slides_onto_short_last_row() {
-        // 7 items: row 1 holds indexes 5 and 6. Down from 3 slides left
-        // onto 6; down from 4 lands on 6 too.
-        assert_eq!(grid_move(3, 7, COLS, 0, 1), Some(6));
-        assert_eq!(grid_move(4, 7, COLS, 0, 1), Some(6));
+    fn test_grid_move_never_slides_off_short_last_row() {
+        // 7 items: row 1 holds indexes 5 and 6. Down from a column the
+        // short row does not have stays put instead of dragging the
+        // selection onto the row's only remaining cell.
+        assert_eq!(grid_move(0, 7, COLS, 0, 1), Some(5));
+        assert_eq!(grid_move(3, 7, COLS, 0, 1), None);
+        assert_eq!(grid_move(4, 7, COLS, 0, 1), None);
         assert_eq!(grid_move(6, 7, COLS, 0, 1), None);
+    }
+
+    #[test]
+    fn test_grid_move_stays_put_on_last_row() {
+        assert_eq!(grid_move(7, 12, COLS, 0, 1), None);
+        assert_eq!(grid_move(11, 12, COLS, 0, 1), None);
     }
 
     #[test]

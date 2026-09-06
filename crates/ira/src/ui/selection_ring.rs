@@ -54,6 +54,13 @@ mod imp {
     }
 
     impl WidgetImpl for SelectionRing {
+        // The ring floats over the whole page as a drawing surface but is
+        // never interactive: picking must fall through to the covers, or
+        // the float eats every click, motion, and scroll event.
+        fn contains(&self, _x: f64, _y: f64) -> bool {
+            false
+        }
+
         fn measure(&self, _o: gtk4::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             (0, 0, -1, -1)
         }

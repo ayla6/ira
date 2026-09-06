@@ -88,6 +88,12 @@ mod clip {
     }
 
     impl WidgetImpl for Clip {
+        // The clip only bounds the marquee's drawing; picking must fall
+        // through so the covers underneath get the mouse.
+        fn contains(&self, _x: f64, _y: f64) -> bool {
+            false
+        }
+
         fn measure(
             &self,
             orientation: gtk4::Orientation,
@@ -292,6 +298,13 @@ mod imp {
     }
 
     impl WidgetImpl for Marquee {
+        // The marquee spans the whole page as a drawing surface but is
+        // never interactive: picking must fall through to the covers, or
+        // the float eats every click, motion, and scroll event.
+        fn contains(&self, _x: f64, _y: f64) -> bool {
+            false
+        }
+
         /// Width never reports the bubble, so a traveling title can't push
         /// the rest of the screen around; height is the rail strip.
         fn measure(&self, orientation: gtk4::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {

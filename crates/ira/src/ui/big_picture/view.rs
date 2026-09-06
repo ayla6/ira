@@ -99,6 +99,18 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     window.fullscreen();
     window.present();
 
+    // Rails' icons, prompts and fonts scale with the viewport, and the
+    // real size only exists a frame or two after present. Scale then —
+    // not when the first games load, or a 4K screen spends the whole
+    // library load with 1080p-reference icons.
+    let tick_state = state.clone();
+    window.add_tick_callback(move |_, _| {
+        if tick_state.borrow().window.width() == 0 {
+            return glib::ControlFlow::Continue;
+        }
+        refresh(&tick_state);
+        glib::ControlFlow::Break
+    });
     refresh(state);
     super::input::start(state);
 }

@@ -5,6 +5,7 @@ mod big_picture_all;
 mod big_picture_home;
 mod big_picture_input;
 mod big_picture_marquee;
+mod big_picture_mouse;
 mod big_picture_status;
 mod big_picture_view;
 mod background;

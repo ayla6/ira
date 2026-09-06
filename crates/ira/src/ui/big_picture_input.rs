@@ -36,11 +36,10 @@ pub(super) enum NavCommand {
 }
 
 /// What the bottom rail shows about connected gamepads: the count for the
-/// dots and a battery when any pad reports one.
+/// dots.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct PadStatus {
     pub count: usize,
-    pub battery: Option<(u8, bool)>,
 }
 
 /// Everything the reader thread reports: navigation steps and pad status.
@@ -186,7 +185,6 @@ fn reader_loop(tx: Sender<NavMsg>, save_dir: String) {
             live.push(pad);
         }
         pads = live;
-        pads_ui.poll_battery();
         if !pads_ui.maybe_send(&tx) {
             return;
         }
@@ -198,56 +196,23 @@ fn reader_loop(tx: Sender<NavMsg>, save_dir: String) {
     }
 }
 
-/// Pad-status bookkeeping for the reader thread: the 8BitDo DInput battery
-/// reader follows its pad across rescans, a power_supply scan fills in for
-/// pads the kernel reports on its own, and changes go out as `NavMsg::Pads`.
+/// Pad-status bookkeeping for the reader thread: changes go out as
+/// `NavMsg::Pads`.
 #[derive(Default)]
 struct PadUi {
     count: usize,
-    reader: Option<(std::path::PathBuf, ira_input::EightBitDoBatteryReader)>,
-    hidraw_battery: Option<(u8, bool)>,
-    sysfs_battery: Option<(u8, bool)>,
     sent: Option<PadStatus>,
 }
 
 impl PadUi {
     fn after_rescan(&mut self, pads: &[PhysicalGamepad]) {
         self.count = pads.len();
-        // Keep the reader only while its pad is still connected; losing it
-        // invalidates the reading it produced.
-        self.reader = self.reader.take().and_then(|(path, reader)| {
-            pads.iter()
-                .any(|pad| pad.info().path == path)
-                .then_some((path, reader))
-        });
-        if self.reader.is_none() {
-            self.hidraw_battery = None;
-            for pad in pads {
-                if let Some(mut reader) = ira_input::EightBitDoBatteryReader::open(pad.info()) {
-                    self.hidraw_battery = reader.poll().map(|b| (b.percent, b.charging));
-                    self.reader = Some((pad.info().path.clone(), reader));
-                    break;
-                }
-            }
-        }
-        self.sysfs_battery = super::big_picture_status::pad_battery();
-    }
-
-    fn poll_battery(&mut self) {
-        if let Some((_, reader)) = self.reader.as_mut() {
-            if let Some(battery) = reader.poll() {
-                self.hidraw_battery = Some((battery.percent, battery.charging));
-            }
-        }
     }
 
     /// Push the current status when it changed; false when the receiver is
     /// gone (the app is shutting down).
     fn maybe_send(&mut self, tx: &Sender<NavMsg>) -> bool {
-        let status = PadStatus {
-            count: self.count,
-            battery: self.hidraw_battery.or(self.sysfs_battery),
-        };
+        let status = PadStatus { count: self.count };
         if self.sent == Some(status) {
             return true;
         }

@@ -33,6 +33,9 @@ pub struct BigPictureUi {
     /// The couch scale the pills were last measured at, so a scale change
     /// can force their stale label layouts to re-resolve.
     ui_scale: Cell<f64>,
+    /// Whether the pointer is currently hidden because a gamepad or the
+    /// keyboard is driving the UI (see `big_picture_mouse`).
+    pub(super) cursor_hidden: Cell<bool>,
     pub(super) home: HomeUi,
     pub(super) all: AllSoftwareUi,
 }
@@ -60,6 +63,9 @@ pub(super) fn build_window(state: &SharedState, app: &adw::Application) {
     // Key events land on the toplevel whenever nothing else holds focus, so
     // the keyboard handler lives there rather than on a child widget.
     wire_keyboard(state, &window);
+    // The pointer returns on mouse motion and hides on gamepad/keyboard
+    // navigation; hovering a cover selects it.
+    super::big_picture_mouse::attach(state, root.upcast_ref());
     // The desktop window's close wiring never runs in this mode, so honor
     // the close-to-background setting here: without it a compositor close
     // would destroy the window and leave the process running headless.
@@ -132,6 +138,7 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
         bottom,
         page: Cell::new(Page::Home),
         ui_scale: Cell::new(0.0),
+        cursor_hidden: Cell::new(false),
         home,
         all,
     };
@@ -169,20 +176,20 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
 }
 
 /// Messages from the controller reader: navigation for the showing page,
-/// and the pad status for the bottom rail's dots and battery.
+/// and the pad count for the bottom rail's dots.
 pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
     match msg {
         NavMsg::Nav(command) => route(state, command),
         NavMsg::Pads(status) => {
             if let Some(big) = state.borrow().big_picture.clone() {
-                big.bottom
-                    .set_pad_status(status.count, status.battery);
+                big.bottom.set_pad_status(status.count);
             }
         }
     }
 }
 
 fn route(state: &SharedState, command: NavCommand) {
+    super::big_picture_mouse::note_controller_use(state);
     if showing_all(state) {
         match command {
             NavCommand::Left => grid_move(state, -1, 0),

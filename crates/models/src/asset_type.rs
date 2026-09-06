@@ -49,7 +49,10 @@ impl AssetType {
         }
     }
 
-    /// `(max_width, max_height)` for thumbnail generation.
+    /// `(max_width, max_height)` for thumbnail generation. The square thumb
+    /// is couch-capsule sized: big picture draws it at viewport/6, so 384
+    /// covers 1080p-class viewports while decoding roughly half the pixels
+    /// of the 512 generation it replaced.
     pub fn thumb_dims(self) -> (u32, u32) {
         match self {
             AssetType::Icon => (32, 32),
@@ -57,7 +60,7 @@ impl AssetType {
             AssetType::Grid => (300, 450),
             AssetType::Header => (460, 215),
             AssetType::Logo => (620, 620),
-            AssetType::Square => (512, 512),
+            AssetType::Square => (384, 384),
         }
     }
 

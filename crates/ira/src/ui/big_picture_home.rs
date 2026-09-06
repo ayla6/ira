@@ -162,6 +162,13 @@ fn capsule_width(square: bool, capsule: i32) -> i32 {
     }
 }
 
+/// The `_small` square thumbnail beside a full square image, when one is on
+/// disk. Same directory, generated alongside the download or edit save.
+fn small_square_path(square_path: &str) -> Option<String> {
+    let dir = std::path::Path::new(square_path).parent()?;
+    ira_parser::find_image_file(dir, "square_small").map(|p| p.to_string_lossy().into_owned())
+}
+
 /// Repopulate the carousel from the shared game list. Message handlers call
 /// it whenever the game list or its artwork changes; the rebuild is skipped
 /// when nothing visible differs.
@@ -236,15 +243,24 @@ pub(super) fn refresh(state: &SharedState) {
     for (index, game) in games.iter().enumerate() {
         // Square mode: cover-fit the art into a square capsule. A game
         // whose square.webp has not landed yet falls back to its vertical
-        // capsule, scaled to cover (centered, overflow cropped).
-        let art = if square_mode && !game.square_path.is_empty() {
-            &game.square_path
+        // capsule, scaled to cover (centered, overflow cropped). The
+        // small square variant decodes much faster than the full art and
+        // the capsule never draws larger than it.
+        let art: String = if square_mode && !game.square_path.is_empty() {
+            small_square_path(&game.square_path).unwrap_or_else(|| game.square_path.clone())
         } else {
-            &game.grid_path
+            game.grid_path.clone()
         };
-        let cover = build_cover(state, game, art, width, capsule, square_mode, move |state| {
+        let cover = build_cover(state, game, &art, width, capsule, square_mode, move |state| {
             on_cover_clicked(state, index)
         });
+        // The pointer hovering a cover moves the selection onto it; the
+        // gamepad keeps working because selection is shared state.
+        let hover_state = state.clone();
+        let hover_index = index;
+        let hover = gtk4::EventControllerMotion::new();
+        hover.connect_enter(move |_, _, _| set_selection(&hover_state, hover_index));
+        cover.add_controller(hover);
         ui.row.append_cover(&cover);
         covers.push(cover);
     }
@@ -315,6 +331,20 @@ pub(super) fn move_selection(state: &SharedState, delta: i32) {
         return;
     };
     *ui.selected.borrow_mut() = next;
+    apply_selection(&big);
+}
+
+/// The pointer hovering a cover moves the selection onto it. The hovered
+/// cover is on screen by definition, so the follow-up scroll is a small
+/// correction rather than a jump.
+pub(super) fn set_selection(state: &SharedState, index: usize) {
+    let Some(big) = state.borrow().big_picture.clone() else {
+        return;
+    };
+    if *big.home.selected.borrow() == index {
+        return;
+    }
+    *big.home.selected.borrow_mut() = index;
     apply_selection(&big);
 }
 

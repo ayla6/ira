@@ -544,6 +544,29 @@ fn build_cell(state: &SharedState) -> gtk4::Widget {
     });
     vbox.add_controller(click);
 
+    // Hovering a tile moves the selection onto it; the cell's game ids are
+    // re-read on every enter because recycled cells rebind to new games.
+    let hover_state = state.clone();
+    let hover = gtk4::EventControllerMotion::new();
+    hover.connect_enter(move |controller, _, _| {
+        let Some(big) = hover_state.borrow().big_picture.clone() else {
+            return;
+        };
+        let widget = controller.widget().unwrap();
+        let cell_key = || -> Option<GameKey> {
+            let db = unsafe { widget.data::<AtomicI64>("game-db-id") }
+                .map(|p| unsafe { p.as_ref() }.load(Ordering::Relaxed))?;
+            let variant = unsafe { widget.data::<AtomicI64>("game-variant-id") }
+                .map(|p| unsafe { p.as_ref() }.load(Ordering::Relaxed))
+                .unwrap_or(0);
+            Some((db, variant))
+        };
+        if let Some(key) = cell_key() {
+            big.all.select_key(key);
+        }
+    });
+    vbox.add_controller(hover);
+
     vbox.upcast()
 }
 

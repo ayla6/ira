@@ -1,7 +1,7 @@
 //! The couch screen's rails. Top: an avatar, the date, a ticking clock, and
-//! the battery when the machine (or a gamepad) has one to report. Bottom:
-//! the connected-gamepad dots on the left and contextual button prompts on
-//! the right.
+//! the battery when the machine has one to report. Bottom: the
+//! connected-gamepad dots on the left and contextual button prompts on the
+//! right.
 
 use super::css::*;
 use gtk4::prelude::*;
@@ -67,28 +67,13 @@ fn scan_batteries() -> Vec<Battery> {
 }
 
 /// The machine's own battery, for the status rail. A gamepad's pack never
-/// stands in for the computer's — pads report in the pad area instead.
+/// stands in for the computer's.
 fn system_battery(batteries: &[Battery]) -> Option<Battery> {
     batteries
         .iter()
         .filter(|b| b.kind == BatteryKind::System)
         .max_by_key(|b| b.capacity)
         .copied()
-}
-
-/// The fullest connected gamepad battery, for the pad area. Peripheral
-/// packs surface here (kernel HID drivers expose many pads), and the
-/// 8BitDo DInput reader fills the gap for hardware the kernel can't see.
-pub(super) fn pad_battery() -> Option<(u8, bool)> {
-    pad_battery_of(&scan_batteries())
-}
-
-fn pad_battery_of(batteries: &[Battery]) -> Option<(u8, bool)> {
-    batteries
-        .iter()
-        .filter(|b| b.kind == BatteryKind::Peripheral)
-        .max_by_key(|b| b.capacity)
-        .map(|b| (b.capacity.min(u32::from(u8::MAX)) as u8, b.charging))
 }
 
 fn battery_icon_name(capacity: u32, charging: bool) -> String {
@@ -200,15 +185,12 @@ fn refresh_widgets(
     }
 }
 
-/// The bottom rail: gamepad dots (and the pads' battery) on the left,
-/// button prompts on the right.
+/// The bottom rail: gamepad dots on the left, button prompts on the right.
 pub(super) struct BottomBar {
     root: gtk4::Box,
     pads: gtk4::Box,
     pad_icon: gtk4::Image,
     dots: Vec<gtk4::Image>,
-    pad_battery: gtk4::Box,
-    pad_battery_icon: gtk4::Image,
     prompts: gtk4::Box,
     /// The current prompt row, rebuilt when the viewport scale changes.
     prompt_items: RefCell<Vec<(ira_input::GamepadButton, String)>>,
@@ -224,8 +206,6 @@ impl BottomBar {
     pub(super) fn set_icon_scale(&self, scale: f64) {
         self.ui_scale.set(scale);
         self.pad_icon.set_pixel_size((32.0 * scale).round() as i32);
-        self.pad_battery_icon
-            .set_pixel_size((24.0 * scale).round() as i32);
         for dot in &self.dots {
             dot.set_pixel_size((7.0 * scale).round() as i32);
         }
@@ -261,16 +241,6 @@ impl BottomBar {
             .collect();
         pads.append(&dots_row);
 
-        // Icon only — the fill level is the icon's business, the exact
-        // percentage lives in the tooltip.
-        let pad_battery = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-        pad_battery.set_valign(gtk4::Align::Center);
-        let pad_battery_icon = gtk4::Image::from_icon_name("battery-full-symbolic");
-        pad_battery_icon.set_pixel_size(24);
-        pad_battery.append(&pad_battery_icon);
-
-        pads.append(&pad_battery);
-
         root.append(&pads);
 
         let prompts = gtk4::Box::new(gtk4::Orientation::Horizontal, 18);
@@ -283,20 +253,18 @@ impl BottomBar {
             pads,
             pad_icon,
             dots,
-            pad_battery,
-            pad_battery_icon,
             prompts,
             prompt_items: RefCell::new(Vec::new()),
             ui_scale: Cell::new(0.0),
         };
-        bar.set_pad_status(0, None);
+        bar.set_pad_status(0);
         bar
     }
 
     /// Light one dot per connected gamepad (four shown at most); unlit dots
     /// stay visible as slots, and the lit ones glow green like a player
-    /// LED. The pads' battery icon sits beside the dots when one is known.
-    pub(super) fn set_pad_status(&self, count: usize, battery: Option<(u8, bool)>) {
+    /// LED.
+    pub(super) fn set_pad_status(&self, count: usize) {
         for (index, dot) in self.dots.iter().enumerate() {
             if index < count {
                 dot.add_css_class(CSS_BP_PAD_LIT);
@@ -304,15 +272,6 @@ impl BottomBar {
                 dot.remove_css_class(CSS_BP_PAD_LIT);
             }
             dot.set_opacity(if index < count { 1.0 } else { 0.25 });
-        }
-        self.pad_battery.set_visible(battery.is_some());
-        if let Some((percent, charging)) = battery {
-            self.pad_battery_icon
-                .set_icon_name(Some(&battery_icon_name(u32::from(percent), charging)));
-            self.pad_battery.set_tooltip_text(Some(
-                &crate::tr!("Controller battery: {}%")
-                    .replacen("{}", &percent.to_string(), 1),
-            ));
         }
         self.pads.set_tooltip_text(Some(
             &crate::tr!("Controllers connected: {}").replacen("{}", &count.to_string(), 1),
@@ -420,16 +379,6 @@ mod tests {
         assert_eq!(system_battery(&[peripheral, system]).unwrap().capacity, 40);
         assert!(system_battery(&[peripheral]).is_none());
         assert!(system_battery(&[]).is_none());
-    }
-
-    #[test]
-    fn test_pad_battery_picks_peripheral_pack() {
-        let system = Battery { capacity: 40, kind: BatteryKind::System, charging: false };
-        let peripheral = Battery { capacity: 99, kind: BatteryKind::Peripheral, charging: true };
-        let (capacity, charging) = pad_battery_of(&[system, peripheral]).unwrap();
-        assert_eq!(capacity, 99);
-        assert!(charging);
-        assert!(pad_battery_of(&[system]).is_none());
     }
 
     #[test]

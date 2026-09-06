@@ -335,6 +335,43 @@ fn start_background_enrichment(state: &SharedState) {
         });
     }
 
+    // PS4 and Switch squares come from the game itself — no SGDB match
+    // needed — so import the native icon into the square slot for every
+    // one of those games whose square never landed.
+    let square_targets: Vec<Game> = {
+        let s = state.borrow();
+        s.games
+            .iter()
+            .filter(|g| {
+                g.variant_id.is_none()
+                    && g.square_path.is_empty()
+                    && matches!(
+                        g.kind,
+                        ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
+                    )
+            })
+            .cloned()
+            .collect()
+    };
+    if !square_targets.is_empty() {
+        let steam = steam.clone();
+        let sender = sender.clone();
+        let db = db.clone();
+        let save_dir = save_dir.clone();
+        let cfg = cfg.clone();
+        std::thread::spawn(move || {
+            let _s =
+                tracing::info_span!("background_squares", count = square_targets.len()).entered();
+            for game in square_targets {
+                let square =
+                    super::fetch_images::ensure_game_square(&steam, &save_dir, &db, &cfg, &game);
+                if !square.is_empty() {
+                    let _ = sender.send(crate::AppMessage::SquareReady(game.db_id));
+                }
+            }
+        });
+    }
+
     if !ra_games.is_empty() {
         let sender = sender.clone();
         let save_dir = save_dir.clone();

@@ -144,7 +144,10 @@ pub struct GameListOptions {
     pub auto_reload_cemu: bool,
     pub auto_reload_azahar: bool,
     pub auto_reload_switch: bool,
-    pub ra_enabled: bool,
+    /// Whether the ROM library scan runs: any ROM-folder console is enabled,
+    /// and at startup additionally the auto-reload setting. Independent of
+    /// the RetroAchievements toggle, which only governs enrichment.
+    pub rom_scan_enabled: bool,
     pub sort_mode: SortMode,
     pub sort_descending: bool,
 }
@@ -173,7 +176,7 @@ impl GameListOptions {
             auto_reload_cemu: cfg.auto_reload_cemu,
             auto_reload_azahar: cfg.auto_reload_azahar,
             auto_reload_switch: cfg.auto_reload_switch,
-            ra_enabled: cfg.ra_enabled,
+            rom_scan_enabled: cfg.any_console_enabled(),
             sort_mode: cfg.sort_mode,
             sort_descending: cfg.sort_descending,
         }
@@ -188,7 +191,7 @@ impl GameListOptions {
         options.cemu_enabled &= options.auto_reload_cemu;
         options.azahar_enabled &= options.auto_reload_azahar;
         options.switch_installed_enabled &= options.auto_reload_switch;
-        options.ra_enabled &= options.auto_reload_roms;
+        options.rom_scan_enabled &= options.auto_reload_roms;
         options
     }
 }
@@ -252,7 +255,6 @@ pub fn build_game_list(
     let _span = tracing::info_span!("build_game_list").entered();
 
     cleanup_stale_rom_entries(db, cfg);
-    let ra_any_console = options.ra_enabled && cfg.any_console_enabled();
     let db = db.clone();
     let save_dir = save_dir.to_string();
     let cfg = cfg.clone();
@@ -266,7 +268,7 @@ pub fn build_game_list(
         + usize::from(options.cemu_enabled)
         + usize::from(options.azahar_enabled)
         + usize::from(options.switch_installed_enabled)
-        + usize::from(ra_any_console);
+        + usize::from(options.rom_scan_enabled);
     let reporter = ProgressReporter::new(progress, total_sources);
     reporter.status(crate::tr!("Preparing game library…"));
 
@@ -390,7 +392,7 @@ pub fn build_game_list(
             },
         );
 
-        let ra_handle = if ra_any_console {
+        let ra_handle = if options.rom_scan_enabled {
             let db_ra = db.clone();
             let save_dir_ra = save_dir.clone();
             let cfg_ra = cfg.clone();
@@ -1276,7 +1278,9 @@ mod tests {
         let options = GameListOptions::from_config(&cfg);
 
         assert!(options.steam_enabled);
-        assert!(!options.ra_enabled);
+        // Config::default() enables every ROM-folder console, so the ROM
+        // library scan is on independent of the RA integration flag.
+        assert!(options.rom_scan_enabled);
         assert!(options.shadps4_enabled);
         assert_eq!(options.shadps4_executable, "/tmp/shadps4");
         assert!(options.sort_descending);
@@ -1305,7 +1309,7 @@ mod tests {
         let options = GameListOptions::for_startup(&cfg);
 
         assert!(!options.steam_enabled);
-        assert!(!options.ra_enabled);
+        assert!(!options.rom_scan_enabled);
         assert!(options.shadps4_enabled);
         assert!(!options.rpcs3_enabled);
         assert!(options.vita3k_enabled);
@@ -1656,9 +1660,10 @@ mod tests {
             ..Config::default()
         };
         // The machine's real installed Switch titles must not leak into
-        // this test's library.
+        // this test's library; with the startup options the ROM scan is
+        // off anyway (auto-reload defaults to disabled).
         cfg.console_mut("switch").enabled = false;
-        let options = GameListOptions::from_config(&cfg);
+        let options = GameListOptions::for_startup(&cfg);
 
         let games = build_game_list(
             &db,
@@ -1690,10 +1695,10 @@ mod tests {
             "Saved rom",
         )
         .unwrap();
-        db::set_rom_path(&db, rom_id, "saved.rom").unwrap();
+        db::set_rom_path(&db, rom_id, "saved.iso").unwrap();
         let rom_root = tmp.path().join("roms/saturn");
         std::fs::create_dir_all(&rom_root).unwrap();
-        std::fs::write(rom_root.join("saved.rom"), b"rom").unwrap();
+        std::fs::write(rom_root.join("saved.iso"), b"rom").unwrap();
         db::add_game(
             &db,
             GameKind::Wine,
@@ -1715,11 +1720,15 @@ mod tests {
             roms_folder: tmp.path().join("roms").to_string_lossy().into_owned(),
             ..Config::default()
         };
-        // Every source integration is off — the machine's real installed
-        // Steam/Switch libraries must not leak into this test's library.
+        // Every source integration is off; Saturn is the only enabled
+        // console and its ROM must stay listed even though no scan covers
+        // it. The fixture uses a scanned extension so the ROM scan itself
+        // recognizes the file.
         cfg.steam_enabled = false;
         cfg.ra_enabled = false;
-        cfg.console_mut("switch").enabled = false;
+        for def in ira_models::all_consoles() {
+            cfg.console_mut(def.id).enabled = def.id == "saturn";
+        }
         let options = GameListOptions::from_config(&cfg);
 
         let games = build_game_list(&db, &cfg.save_dir, &cfg, &options, progress);
@@ -1727,5 +1736,40 @@ mod tests {
         let names: Vec<&str> = games.iter().map(|game| game.name.as_str()).collect();
         assert!(names.contains(&"Saved rom"), "{names:?}");
         assert!(names.contains(&"Saved gog game"), "{names:?}");
+    }
+
+    /// A rescan discovers new ROMs even with the RetroAchievements
+    /// integration off: the ROM library scans offline, and the file lands
+    /// in the library named after its file stem with no RA source attached.
+    #[test]
+    fn test_build_game_list_full_scan_discovers_roms_with_ra_disabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
+        let rom_root = tmp.path().join("roms/saturn");
+        std::fs::create_dir_all(&rom_root).unwrap();
+        std::fs::write(rom_root.join("Quack Shot.iso"), b"rom").unwrap();
+
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let updates_clone = updates.clone();
+        let progress: Arc<dyn Fn(GameListProgress) + Send + Sync> = Arc::new(move |update| {
+            updates_clone.lock().unwrap().push(update);
+        });
+        let mut cfg = Config {
+            save_dir: tmp.path().to_string_lossy().into_owned(),
+            roms_folder: tmp.path().join("roms").to_string_lossy().into_owned(),
+            ..Config::default()
+        };
+        cfg.ra_enabled = false;
+        for def in ira_models::all_consoles() {
+            cfg.console_mut(def.id).enabled = def.id == "saturn";
+        }
+        let options = GameListOptions::from_config(&cfg);
+
+        let games = build_game_list(&db, &cfg.save_dir, &cfg, &options, progress);
+
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].name, "Quack Shot");
+        assert_eq!(games[0].kind, GameKind::Retro);
+        assert_eq!(games[0].trophy_source, ira_models::TrophySource::Empty);
     }
 }

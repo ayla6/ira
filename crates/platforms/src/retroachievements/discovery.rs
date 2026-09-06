@@ -58,13 +58,16 @@ pub fn build_ra_games(
     let load_game = &load_game;
     progress("Checking ROM library caches…");
 
-    let needs_fetch = consoles.iter().any(|c| {
-        c.def.ra_console_id != 0
-            && !crate::retroachievements::api::RaClient::console_cache_is_current(
-                save_dir,
-                c.def.ra_console_id,
-            )
-    });
+    // The RA toggle governs talking to retroachievements.org; the ROM scan
+    // itself runs offline regardless.
+    let needs_fetch = cfg.ra_enabled
+        && consoles.iter().any(|c| {
+            c.def.ra_console_id != 0
+                && !crate::retroachievements::api::RaClient::console_cache_is_current(
+                    save_dir,
+                    c.def.ra_console_id,
+                )
+        });
     if needs_fetch {
         if let Some(ra_client) = RaClient::from_config(cfg) {
             for console in consoles.iter().filter(|c| c.def.ra_console_id != 0) {
@@ -91,6 +94,7 @@ pub fn build_ra_games(
                     &db,
                     save_dir,
                     console,
+                    cfg.ra_enabled,
                     cfg.unpack_roms,
                     load_game,
                     progress,
@@ -113,6 +117,7 @@ fn build_ra_games_for_console(
     db: &ira_db::DbConn,
     save_dir: &str,
     console: &ActiveConsole,
+    ra_enabled: bool,
     unpack_roms: bool,
     load_game: &dyn Fn(&ira_models::GameEntry, &str) -> Result<ira_models::Game, String>,
     progress: &dyn Fn(&str),
@@ -208,10 +213,13 @@ fn build_ra_games_for_console(
         .map(|e| (e.rom_path.clone(), e.clone()))
         .collect();
 
-    let needs_ra_cache = !new_roms.is_empty()
-        || existing_by_path
-            .values()
-            .any(|e| e.trophy_source == ira_models::TrophySource::Empty && !e.manual_unmatch);
+    // With RA disabled the match index stays empty: ROMs are discovered
+    // offline and get matched whenever the integration is turned back on.
+    let needs_ra_cache = ra_enabled
+        && (!new_roms.is_empty()
+            || existing_by_path
+                .values()
+                .any(|e| e.trophy_source == ira_models::TrophySource::Empty && !e.manual_unmatch));
     let ra_games: Vec<RaGameEntry> = if console.def.ra_console_id != 0 && needs_ra_cache {
         let _cs = tracing::info_span!("read_console_games_cache").entered();
         match crate::retroachievements::read_console_games_cache(

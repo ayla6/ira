@@ -28,7 +28,10 @@ pub(super) fn note_controller_use(state: &SharedState) {
 }
 
 /// Watch for mouse motion on the big picture root and bring the pointer
-/// back when it actually changes position.
+/// back when it actually changes position. Wheel and touchpad scrolling
+/// count as mouse presence too: they are captured before the scrolled
+/// windows consume the event, and merely observed so native scrolling is
+/// untouched.
 pub(super) fn attach(state: &SharedState, root: &Widget) {
     let motion_state = state.clone();
     // NaN start: every real position differs from it, so the first event
@@ -43,6 +46,17 @@ pub(super) fn attach(state: &SharedState, root: &Widget) {
         show_cursor(&motion_state);
     });
     root.add_controller(motion);
+
+    let scroll_state = state.clone();
+    let scroll = gtk4::EventControllerScroll::new(
+        gtk4::EventControllerScrollFlags::VERTICAL | gtk4::EventControllerScrollFlags::HORIZONTAL,
+    );
+    scroll.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    scroll.connect_scroll(move |_, _, _| {
+        show_cursor(&scroll_state);
+        glib::Propagation::Proceed
+    });
+    root.add_controller(scroll);
 }
 
 fn show_cursor(state: &SharedState) {

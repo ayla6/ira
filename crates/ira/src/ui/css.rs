@@ -1,6 +1,7 @@
 pub const CSS_BOXED_LIST: &str = "boxed-list";
 pub const CSS_BP_SQ: &str = "bp-sq";
 pub const CSS_BP_ROOT: &str = "bp-root";
+pub const CSS_BP_TITLE: &str = "bp-title";
 pub const CSS_BP_SELECTED: &str = "bp-selected";
 pub const CSS_BP_STATUS: &str = "bp-status";
 pub const CSS_BP_CLOCK: &str = "bp-clock";
@@ -11,11 +12,15 @@ pub const CSS_BP_PAD_DOT: &str = "bp-pad-dot";
 pub const CSS_BP_PAD_LIT: &str = "bp-pad-lit";
 pub const CSS_BP_PROMPT: &str = "bp-prompt";
 pub const CSS_BP_PROMPT_KEY: &str = "bp-prompt-key";
-pub const CSS_BP_TITLE: &str = "bp-title";
 pub const CSS_BP_ALL: &str = "bp-all";
 pub const CSS_BP_ALL_TILE: &str = "bp-all-tile";
 pub const CSS_BP_ALL_PAGE: &str = "bp-all-page";
 pub const CSS_BP_PAGE_TITLE: &str = "bp-page-title";
+pub const CSS_BP_PAGE_SUBTITLE: &str = "bp-page-subtitle";
+/// The selection ring reaches this far past a tile's edge (4px gap plus
+/// the 4px frame), and the tooltip's tail tip rests 3px beyond the
+/// frame — 11px from the tile edge in total, on every page.
+pub const BP_RING_OUTSET: f64 = 11.0;
 pub const CSS_CAPTION: &str = "caption";
 pub const CSS_CIRCULAR: &str = "circular";
 pub const CSS_CLICKABLE_STAT: &str = "clickable-stat";
@@ -292,64 +297,27 @@ gridview.game-grid child:focus-within {
     transform: none;
     box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
 }
-/* The selected tile: one clean accent line, nothing else — no halo, no
-   scale. Kept after the :hover rule so it wins when both apply. */
-.bp-root .cover-item.bp-selected .game-cover-pic {
-    outline: 3px solid @accent_color;
-    outline-offset: 4px;
-    box-shadow: 0 10px 34px 8px rgba(0,0,0,0.6);
-}
-.cover-item.bp-sq.bp-selected {
-    outline: 3px solid @accent_color;
-    outline-offset: 4px;
-    box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
-}
-/* The All Software tile is a circle: its ring hugs the circle, not the
-   square capsule shell around it. */
-.cover-item.bp-all.bp-selected {
-    outline: none;
-    box-shadow: none;
-}
-.cover-item.bp-all.bp-selected .bp-all-tile {
-    outline: 3px solid @accent_color;
-    outline-offset: 5px;
-}
 .fetch-strip label {
     font-weight: normal;
 }
-.cover-item.bp-sq.bp-selected .game-cover-pic,
+.cover-item.bp-sq.bp-selected .game-cover-pic {
+    transform: none;
+    box-shadow: none;
+}
 .cover-item.bp-sq:hover .game-cover-pic {
     transform: none;
     box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
 }
-/* Couch rails: status strip on top, gamepads + prompts below. */
-.bp-status { padding: 16px 28px 4px 28px; }
-.bp-clock { font-size: 1.3em; }
-.bp-date { font-size: 1.05em; }
-.bp-batt { font-size: 1.05em; }
-.bp-bottom { padding: 14px 28px 20px 28px; }
+/* Couch text: the experimental bundled font. The couch's sizes live in
+   couch_css(), which scales them with the viewport. */
+.bp-root {
+    font-family: \"M PLUS 2\", sans-serif;
+}
+.bp-ring { color: @accent_color; }
 /* A connected pad lights its dot green, like a player LED. Dimming for
    empty slots is done per-widget in code; a CSS opacity here would
    multiply into the lit dots and wash the color out. */
 .bp-pad-dot.bp-pad-lit { color: @green_2; }
-.bp-prompt-key {
-    min-width: 26px;
-    min-height: 26px;
-    padding: 0;
-    border-radius: 9999px;
-    border: 2px solid alpha(@theme_fg_color, 0.9);
-    font-weight: 800;
-    font-size: 0.85em;
-}
-/* Floating title over the selected tile, Switch-style: big, colored,
-   transparent — the same treatment on the home carousel and the
-   All Software grid. */
-.bp-title {
-    font-size: 1.8em;
-    font-weight: 800;
-    color: @accent_color;
-}
-.bp-page-title { font-size: 1.45em; font-weight: 800; }
 .bp-all-tile {
     border-radius: 9999px;
     background: alpha(@theme_fg_color, 0.08);
@@ -382,13 +350,81 @@ button.sgdb-filter:hover {
 }
 ";
 
+/// The couch UI's sizes, scaled from the 1080p reference by `s`. Everything
+/// is integer pixels: fractional font sizes render choppy.
+fn couch_css(s: f64) -> String {
+    let px = |v: i32| format!("{}px", (v as f64 * s).round().max(1.0));
+    let status_pad_x = px(24);
+    format!(
+        r#".bp-status {{ padding: {status_pad_top} {status_pad_x} {status_pad_bottom} {status_pad_x}; min-height: {status_min_h}; }}
+.bp-clock {{ font-size: {clock}; padding: 2px 0; }}
+.bp-date, .bp-batt, .bp-prompt {{ font-size: {small}; padding: 2px 0; }}
+.bp-bottom {{
+    padding: {pad_v} {pad_h};
+    min-height: {min_h};
+}}
+.bp-prompt-key {{
+    min-width: {key};
+    min-height: {key};
+    padding: 0;
+    border-radius: 9999px;
+    border: 2px solid alpha(@theme_fg_color, 0.9);
+    font-weight: 800;
+    font-size: {key_font};
+}}
+.bp-title {{
+    font-size: {title};
+    font-weight: 400;
+    color: @accent_color;
+    padding: 2px 0;
+}}
+.bp-page-title {{ font-size: {page_title}; font-weight: 400; }}
+.bp-page-subtitle {{
+    font-size: {subtitle};
+    color: alpha(@theme_fg_color, 0.55);
+}}
+"#,
+        status_pad_top = px(16),
+        status_pad_bottom = px(4),
+        // The clock line plus both paddings: without a floor of its own,
+        // the window's first transitional allocation starves the rail
+        // below its content and GTK warns about measuring it for ~13px.
+        status_min_h = px(56),
+        clock = px(28),
+        small = px(24),
+        pad_v = px(18),
+        pad_h = px(36),
+        min_h = px(72),
+        key = px(32),
+        key_font = px(16),
+        title = px(28),
+        page_title = px(30),
+        subtitle = px(22),
+    )
+}
+
+/// The full stylesheet at a given viewport scale (1.0 = the 1080p
+/// reference). The couch section scales; the desktop section does not.
+pub fn app_css(ui_scale: f64) -> String {
+    format!("{APP_CSS}
+{}", couch_css(ui_scale))
+}
+
 /// Install the global stylesheet and icon theme additions on the default
-/// display. Called once per window build (desktop or big picture); repeated
-/// calls simply re-add the provider, which is idempotent.
-pub fn init_styles() {
-    let display = gtk4::gdk::Display::default().expect("no default display");
-    let css = gtk4::CssProvider::new();
-    css.load_from_string(APP_CSS);
-    gtk4::style_context_add_provider_for_display(&display, &css, gtk4::STYLE_PROVIDER_PRIORITY_USER);
-    gtk4::IconTheme::for_display(&display).add_resource_path("/com/github/ira/icons");
+/// display. Called once per window build (desktop or big picture) and on
+/// viewport resizes; repeat calls reload the couch sizes in place.
+pub fn init_styles(ui_scale: f64) {
+    thread_local! {
+        static PROVIDER: gtk4::CssProvider = gtk4::CssProvider::new();
+    }
+    PROVIDER.with(|provider| {
+        provider.load_from_string(&app_css(ui_scale));
+        let display = gtk4::gdk::Display::default().expect("no default display");
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_USER,
+        );
+        gtk4::IconTheme::for_display(&display).add_resource_path("/com/github/ira/icons");
+    });
 }

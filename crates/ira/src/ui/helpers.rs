@@ -1,6 +1,7 @@
 use crate::Game;
 use adw::prelude::{AdwDialogExt, AlertDialogExt, AdwWindowExt, PreferencesRowExt};
 use chrono::TimeZone;
+use gtk4::glib::translate::ToGlibPtr;
 use gtk4::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -9,6 +10,33 @@ use std::rc::Rc;
 use super::css::*;
 use super::game_item::GameItem;
 use super::state::{PendingImage, SgdbAssetsCacheEntry, SharedState};
+
+/// Lock a couch label's text rasterization: slight hinting with
+/// whole-pixel glyph positions. Full hinting distorts the outlines at UI
+/// sizes (stems snap into uneven weights); slight keeps the shapes and
+/// rounding the positions still stops stems from falling between pixels.
+pub fn crisp_label(label: &gtk4::Label) {
+    let context = label.pango_context();
+    context.set_round_glyph_positions(true);
+    // pango_cairo_context_set_font_options is not bound by pango-rs.
+    unsafe {
+        let options = gtk4::cairo::ffi::cairo_font_options_create();
+        gtk4::cairo::ffi::cairo_font_options_set_hint_style(
+            options,
+            gtk4::cairo::ffi::HINT_STYLE_SLIGHT,
+        );
+        pango_cairo_context_set_font_options(context.to_glib_none().0, options);
+        gtk4::cairo::ffi::cairo_font_options_destroy(options);
+    }
+}
+
+#[link(name = "pangocairo-1.0")]
+extern "C" {
+    fn pango_cairo_context_set_font_options(
+        context: *mut gtk4::pango::ffi::PangoContext,
+        options: *mut gtk4::cairo::ffi::cairo_font_options_t,
+    );
+}
 
 pub struct DialogLayout {
     pub window: adw::Dialog,

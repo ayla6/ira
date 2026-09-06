@@ -23,7 +23,21 @@ fn compute_grid_layout(
     base_sp: i32,
     viewport_h: i32,
     aspect: f64,
+    fixed_cols: u32,
 ) -> (u32, i32, i32, i32) {
+    // Couch mode: an exact column count at every resolution, with
+    // Switch-style proportions derived from the tile itself — half a tile
+    // of edge margin on each side, a tenth-of-a-tile gap between tiles:
+    // width = item × (n + 1 + (n−1)/10). At 1920 wide that lands on
+    // 256px tiles, like the reference.
+    if fixed_cols > 0 {
+        let n = fixed_cols.max(1) as i32;
+        let item_w = (width * 10 / (11 * n + 9)).max(1);
+        let item_h = ((item_w as f64) * aspect) as i32;
+        let sp = item_w / 10;
+        return (fixed_cols, item_w, item_h, sp);
+    }
+
     let avail_w = (width - 2 * base_sp).max(min_item_w);
     let raw_cols = (((avail_w + base_sp) / (min_item_w + base_sp)).max(1) as u32).min(30);
 
@@ -53,11 +67,16 @@ fn compute_grid_layout(
 
     let step_idx = width_step.min(max_step);
     let item_w = STEP_SIZES[step_idx].max(min_item_w);
-    let item_h = ((item_w as f64) * aspect) as i32;
 
     let sp = base_sp + step_idx as i32 * 4;
     let avail_w = (width - 2 * sp).max(item_w);
     let n_cols = (((avail_w + sp) / (item_w + sp)).max(1) as u32).min(30);
+
+    // One spacing value everywhere: edges, column gaps and row gaps are
+    // all `sp`, and the tiles grow or shrink to close the width exactly —
+    // the leftover is never dumped into the gaps.
+    let item_w = ((avail_w - (n_cols as i32 - 1) * sp) / n_cols as i32).max(min_item_w);
+    let item_h = ((item_w as f64) * aspect) as i32;
 
     (n_cols, item_w, item_h, sp)
 }
@@ -95,11 +114,21 @@ mod imp {
         /// The column gap from the last allocation; columns widen to fill
         /// the viewport, so cell geometry needs the real value.
         pub last_col_spacing: Cell<i32>,
+        /// The edge margin from the last allocation (a fixed-column couch
+        /// grid derives it from the tile, not from the gap).
+        pub last_edge: Cell<i32>,
+        /// When set, the grid always lays out exactly this many columns —
+        /// the couch grid pins 6 and scales the tiles with the viewport.
+        pub fixed_cols: Cell<u32>,
 
         pub setup_fn: RefCell<Option<SetupFn>>,
         pub bind_fn: RefCell<Option<BindFn>>,
         pub unbind_fn: RefCell<Option<UnbindFn>>,
         pub size_changed_fn: RefCell<Option<SizeChangedFn>>,
+        /// Fired after every allocation pass: floating overlays anchored
+        /// to tiles (the selection ring, the name tooltip) re-read their
+        /// anchor here, so a relayout can never leave them stale.
+        pub post_layout_fn: RefCell<Option<Rc<dyn Fn()>>>,
     }
 
     impl Default for VirtualGrid {
@@ -127,10 +156,13 @@ mod imp {
                 dirty: Cell::new(false),
                 last_layout: Cell::new((1, min_w, min_h, 8)),
                 last_col_spacing: Cell::new(8),
+                last_edge: Cell::new(8),
+                fixed_cols: Cell::new(0),
                 setup_fn: RefCell::new(None),
                 bind_fn: RefCell::new(None),
                 unbind_fn: RefCell::new(None),
                 size_changed_fn: RefCell::new(None),
+                post_layout_fn: RefCell::new(None),
             }
         }
     }
@@ -251,8 +283,14 @@ mod imp {
                 } else {
                     self.prev_width.get().max(1).max(800)
                 };
-                let (n_cols, _item_w, item_h, sp) =
-                    compute_grid_layout(width, min_w, min_sp, 0, self.square_aspect());
+                let (n_cols, _item_w, item_h, sp) = compute_grid_layout(
+                    width,
+                    min_w,
+                    min_sp,
+                    0,
+                    self.square_aspect(),
+                    self.fixed_cols.get(),
+                );
                 let n_rows = if n_items == 0 {
                     0
                 } else {
@@ -298,20 +336,28 @@ mod imp {
                 return;
             }
 
-            let (n_cols, item_w, item_h, sp) =
-                compute_grid_layout(width, min_w, min_sp, height, self.square_aspect());
+            let (n_cols, item_w, item_h, sp) = compute_grid_layout(
+                width,
+                min_w,
+                min_sp,
+                height,
+                self.square_aspect(),
+                self.fixed_cols.get(),
+            );
             self.last_layout.set((n_cols, item_w, item_h, sp));
-            let avail_width = (width - 2 * sp).max(min_w);
+            // Center the content: the rounding slack from the integer
+            // tile size splits between the two edges instead of piling
+            // up on the right.
+            let content_w = n_cols as i32 * item_w + (n_cols as i32 - 1) * sp;
+            self.last_edge.set(((width - content_w) / 2).max(0));
             let row_h = item_h + sp;
             let n_rows = n_items.div_ceil(n_cols) as i32;
             let content_h = n_rows * row_h + sp;
             let total_h = header_h + content_h;
 
-            let col_spacing = if n_cols > 1 {
-                ((avail_width - n_cols as i32 * item_w) / (n_cols as i32 - 1)).max(sp)
-            } else {
-                0
-            };
+            // The tiles were sized to close the width exactly, so every
+            // gap equals the edge spacing.
+            let col_spacing = sp;
             self.last_col_spacing.set(col_spacing);
 
             let prev_w = self.cur_item_w.get();
@@ -485,7 +531,7 @@ mod imp {
                 for (&position, widget) in visible.iter() {
                     let row = position / n_cols as usize;
                     let col = position % n_cols as usize;
-                    let x = sp + col as i32 * (item_w + col_spacing);
+                    let x = self.last_edge.get() + col as i32 * (item_w + col_spacing);
                     let y = header_h + sp + row as i32 * row_h - actual_scroll;
 
                     widget.set_child_visible(true);
@@ -500,6 +546,10 @@ mod imp {
                 self.obj().queue_resize();
             }
             self.prev_width.set(width);
+
+            if let Some(post) = self.post_layout_fn.borrow().as_ref() {
+                post();
+            }
         }
     }
 }
@@ -529,7 +579,7 @@ impl VirtualGrid {
         aspect: f64,
     ) -> (i32, i32) {
         let (_, item_w, item_h, _) =
-            compute_grid_layout(width, min_item_width, 12, height, aspect);
+            compute_grid_layout(width, min_item_width, 12, height, aspect, 0);
         (item_w, item_h)
     }
 
@@ -622,6 +672,30 @@ impl VirtualGrid {
         *self.imp().size_changed_fn.borrow_mut() = Some(cb);
     }
 
+    /// A callback fired at the end of every allocation pass, after the
+    /// visible cells are placed.
+    pub fn set_post_layout_fn(&self, cb: Rc<dyn Fn()>) {
+        *self.imp().post_layout_fn.borrow_mut() = Some(cb);
+    }
+
+    /// The widget currently displaying `index`, if it is visible.
+    pub fn widget_for_index(&self, index: usize) -> Option<gtk4::Widget> {
+        self.imp()
+            .visible
+            .borrow()
+            .get(&index)
+            .cloned()
+    }
+
+    /// Pin the column count (the couch grid pins 6 so every resolution
+    /// shows the same layout); 0 keeps the width-driven step system.
+    pub fn set_fixed_cols(&self, cols: u32) {
+        if self.imp().fixed_cols.get() != cols {
+            self.imp().fixed_cols.set(cols);
+            self.queue_allocate();
+        }
+    }
+
     /// The layout applied by the last allocation: (columns, item width,
     /// item height, edge spacing). Callers driving an external selection
     /// (the big-picture grid) use it for move and scroll-to-index math.
@@ -640,7 +714,8 @@ impl VirtualGrid {
         let cols = cols.max(1) as usize;
         let col = (index % cols) as f64;
         let row = (index / cols) as f64;
-        let x = sp as f64 + col * (item_w as f64 + self.imp().last_col_spacing.get() as f64);
+        let x = self.imp().last_edge.get() as f64
+            + col * (item_w as f64 + self.imp().last_col_spacing.get() as f64);
         let y = sp as f64 + row * (item_h + sp) as f64;
         Some((x, y))
     }

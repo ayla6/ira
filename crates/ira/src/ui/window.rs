@@ -131,7 +131,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     window.set_default_size(1200, 720);
     window.set_size_request(900, 650);
 
-    super::css::init_styles();
+    super::css::init_styles(1.0);
 
     let split_view = adw::NavigationSplitView::new();
     split_view.set_sidebar_width_fraction(0.22);

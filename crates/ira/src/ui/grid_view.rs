@@ -351,7 +351,11 @@ fn make_bind(
                 // Picture crops it into the square, so mismatched art is
                 // never stretched. The staleness check matters: a decoded
                 // texture landing after the cell was rebound to another
-                // game would paint the wrong art.
+                // game would paint the wrong art. Recycled cells also
+                // blank first — the previous game's cover must not flash
+                // while the new one decodes.
+                let blank = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
+                pic.set_paintable(Some(&blank));
                 let pic_weak = pic.downgrade();
                 let vbox_weak = vbox.downgrade();
                 let db_id = game.db_id;

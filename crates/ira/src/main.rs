@@ -61,6 +61,9 @@ fn main() {
     let big_picture = ira::ui::big_picture::is_big_picture();
     if big_picture {
         eprintln!("ira: big picture mode");
+        // Before GTK initializes fontconfig, so the app font is usable in
+        // this same session.
+        ira::ui::couch_font::install();
     }
 
     let _flush_guard = init_tracing();
@@ -101,9 +104,6 @@ fn main() {
                 return;
             }
             let state = activate(app);
-            if big_picture {
-                state.borrow().window.fullscreen();
-            }
             *state_holder.borrow_mut() = Some(state);
         }
     });

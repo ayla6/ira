@@ -25,10 +25,14 @@ enum Page {
 /// selection state instead of a deep-cloned snapshot.
 pub struct BigPictureUi {
     stack: gtk4::Stack,
-    home_page: gtk4::Box,
+    home_page: gtk4::Overlay,
     all_page: gtk4::Box,
+    status: StatusBar,
     bottom: BottomBar,
     page: Cell<Page>,
+    /// The couch scale the pills were last measured at, so a scale change
+    /// can force their stale label layouts to re-resolve.
+    ui_scale: Cell<f64>,
     pub(super) home: HomeUi,
     pub(super) all: AllSoftwareUi,
 }
@@ -40,7 +44,16 @@ pub(super) fn build_window(state: &SharedState, app: &adw::Application) {
     window.set_title(Some(&crate::tr!("Ira")));
     window.set_size_request(900, 650);
 
-    super::css::init_styles();
+    // Couch text renders best fully hinted: at TV distance, 'slight'
+    // hinting drops whole pixel columns out of letter stems.
+    let settings = gtk4::Settings::for_display(&gtk4::prelude::WidgetExt::display(&window));
+    settings.set_property("gtk-xft-hinting", 1);
+    settings.set_property("gtk-xft-hintstyle", String::from("hintfull"));
+
+    // The window has no width yet here, and a 0-scale sheet would floor
+    // every couch font to 1px — start from the 1080p reference instead;
+    // the first refresh swaps in the real scale.
+    super::css::init_styles(couch_scale(state).max(1.0));
 
     let square_mode = state.borrow().cfg.big_picture_square_capsules;
     let (root, ui) = build_root(state, square_mode);
@@ -72,6 +85,12 @@ pub(super) fn build_window(state: &SharedState, app: &adw::Application) {
         s.big_picture = Some(Rc::new(ui));
     }
     window.set_content(Some(&root));
+    // Fullscreen BEFORE the first present: presenting at the default size
+    // first would lay the whole couch out small and resize it a frame
+    // later — a transitional stage the floats can anchor to and then sit
+    // at until something moves. Requested while unmapped, the fullscreen
+    // state applies at the very first layout instead.
+    window.fullscreen();
     window.present();
 
     refresh(state);
@@ -109,8 +128,10 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
         stack,
         home_page,
         all_page,
+        status,
         bottom,
         page: Cell::new(Page::Home),
+        ui_scale: Cell::new(0.0),
         home,
         all,
     };
@@ -250,6 +271,12 @@ pub(super) fn show_home(state: &SharedState) {
         .set_prompts(&[(ira_input::GamepadButton::A, &crate::tr!("Play"))]);
 }
 
+/// The couch UI's viewport scale (1.0 = 1920 wide); 0 before the window
+/// has a size.
+fn couch_scale(state: &SharedState) -> f64 {
+    state.borrow().window.width() as f64 / 1920.0
+}
+
 fn quit_app(state: &SharedState) {
     let window = state.borrow().window.clone();
     if let Some(app) = window.application() {
@@ -264,6 +291,22 @@ pub(super) fn refresh(state: &SharedState) {
     let Some(big) = state.borrow().big_picture.clone() else {
         return;
     };
+    // Couch sizes scale with the viewport (1.0 = 1920 wide), which also
+    // cancels desktop display scaling: logical pixels shrink as the scale
+    // grows, and everything follows.
+    let scale = couch_scale(state);
+    if scale > 0.01 {
+        super::css::init_styles(scale);
+        big.status.set_icon_scale(scale);
+        big.bottom.set_icon_scale(scale);
+        // A pill whose text was set at the old font keeps measuring its
+        // stale layout; force a re-measure when the scale actually moved.
+        if (big.ui_scale.get() - scale).abs() > 0.001 {
+            big.ui_scale.set(scale);
+            big.all.revalidate_tooltip();
+            super::big_picture_home::revalidate_pill(&big);
+        }
+    }
     super::big_picture_home::refresh(state);
     big.all.refresh(state);
 }

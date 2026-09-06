@@ -125,16 +125,22 @@ mod imp {
         }
 
         fn size_allocate(&self, width: i32, _height: i32, _baseline: i32) {
-            let covers = self.covers.borrow();
             let spacing = self.spacing.get();
             let cover_h = self.cover_h.get().max(1);
 
-            let widths: Vec<i32> = covers.iter().map(|c| c.width_request().max(1)).collect();
-            let content: i32 = widths.iter().sum::<i32>() + spacing * (covers.len() as i32 + 1);
+            let content: i32 = {
+                let covers = self.covers.borrow();
+                covers.iter().map(|c| c.width_request().max(1)).sum::<i32>()
+                    + spacing * (covers.len() as i32 + 1)
+            };
 
             let page = (width as f64).max(1.0);
             let upper = (content as f64).max(page);
             if let Some(adj) = self.adj.borrow().as_ref() {
+                // No covers borrow may be live here: configure() emits
+                // `changed` synchronously, and the home hook rebuilds the
+                // carousel from that signal — a re-entrant clear_covers()
+                // would hit the borrow mid-allocation.
                 let max_val = (upper - page).max(0.0);
                 let cur = adj.value().clamp(0.0, max_val);
                 if !self.freeze.get() {
@@ -150,18 +156,19 @@ mod imp {
                 0.0
             };
 
-            for c in covers.iter() {
-                c.set_child_visible(false);
-            }
-
+            // Borrowed anew: the adjustment signal above may have rebuilt
+            // the covers under us, changing both their set and their sizes.
+            let covers = self.covers.borrow();
             let mut x: f64 = spacing as f64 - off;
-            for (i, c) in covers.iter().enumerate() {
-                let w = widths[i] as f64;
+            for c in covers.iter() {
+                let w = c.width_request().max(1) as f64;
                 if x + w >= -0.5 && x <= width as f64 + 0.5 {
                     c.set_child_visible(true);
                     let tx = gtk4::gsk::Transform::new()
                         .translate(&gtk4::graphene::Point::new(x as f32, spacing as f32));
                     c.allocate(w as i32, cover_h, -1, Some(tx));
+                } else {
+                    c.set_child_visible(false);
                 }
                 x += w + spacing as f64;
             }
@@ -213,6 +220,15 @@ impl RecentRow {
         obj.imp().cover_h.set(cover_h);
         obj.set_overflow(gtk4::Overflow::Visible);
         obj
+    }
+
+    /// The viewport changed: covers re-layout at this height on the next
+    /// allocation.
+    pub fn set_cover_height(&self, cover_h: i32) {
+        if self.imp().cover_h.get() != cover_h {
+            self.imp().cover_h.set(cover_h);
+            self.queue_resize();
+        }
     }
 
     pub fn append_cover(&self, cover: &impl IsA<gtk4::Widget>) {

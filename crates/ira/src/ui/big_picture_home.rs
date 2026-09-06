@@ -4,6 +4,7 @@
 //! tooltip pill that marquees when it overflows.
 
 use super::big_picture_marquee::Marquee;
+use super::selection_ring::SelectionRing;
 use super::big_picture_view::BigPictureUi;
 use super::css::*;
 use super::recent_carousel::RecentRow;
@@ -11,27 +12,39 @@ use super::recent_row::build_cover;
 use super::state::SharedState;
 use crate::Game;
 use gtk4::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-/// Carousel cover height; the covers are 2:3 portraits of this, and the
-/// All Software tile is this square.
-const COVER_HEIGHT: i32 = 320;
+
 /// How many recent games the carousel keeps.
 const RECENT_LIMIT: usize = 16;
 /// Selection scroll animation length.
-const SCROLL_MILLIS: u64 = 160;
-/// Height of the strip the floating title moves within.
-const TITLE_AREA_HEIGHT: i32 = 56;
+const SCROLL_MILLIS: u64 = 90;
+/// Layout spacer between the page top and the carousel: keeps the covers
+/// clear of the floating pill (bubble + tail at the couch title size),
+/// which overlays the page and sizes itself from the cover's position.
+const TITLE_AREA_HEIGHT: i32 = 68;
 
 /// Widgets and selection state of the home carousel. `selected` runs over
 /// the covers followed by the All Software tile (index == `games.len()`).
 pub(super) struct HomeUi {
+    page: gtk4::Overlay,
     row: RecentRow,
     scrolled: gtk4::ScrolledWindow,
     marquee: Marquee,
+    ring: SelectionRing,
+    /// The active capsule size; the carousel rebuilds when it changes.
+    capsule: Rc<Cell<i32>>,
+    /// The capsule and square-mode the current covers were built at: a
+    /// viewport resize changes the capsule without touching the game
+    /// list, and the unchanged-games guard alone would skip the rebuild.
+    built_capsule: Cell<i32>,
+    built_square: Cell<bool>,
+    /// The row's edge spacing: covers sit this far below the scrolled
+    /// window's top, so the tooltip measures the art top from there.
+    spacing: i32,
     covers: RefCell<Vec<gtk4::Widget>>,
     games: RefCell<Vec<Game>>,
     selected: RefCell<usize>,
@@ -41,26 +54,29 @@ pub(super) struct HomeUi {
     square_queued: RefCell<HashSet<i64>>,
 }
 
-pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Box, HomeUi) {
-    let page = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, HomeUi) {
+    // The floating title overlays the whole page — the same recipe as the
+    // All Software grid — so its distance to the selected cover comes from
+    // the cover's real position instead of a fixed rail's.
+    let page = gtk4::Overlay::new();
     page.set_hexpand(true);
 
+    // One sixth of the viewport: the capsule's size at any resolution.
+    // 320 is the 1080p reference, used until the window reports a width.
+    let capsule = Rc::new(Cell::new(320));
+
+    let main = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let spring_top = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     spring_top.set_vexpand(true);
-    page.append(&spring_top);
+    main.append(&spring_top);
 
-    let marquee =
-        Marquee::new(TITLE_AREA_HEIGHT, capsule_width(square_mode) as f64 * 1.25);
-    // Same side margins as the carousel below, so the title rail's
-    // coordinates match the scroll viewport's and tiles center exactly.
-    marquee.set_margin_start(16);
-    marquee.set_margin_end(16);
-    marquee.set_hexpand(true);
-    page.append(marquee.widget());
+    let title_area = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    title_area.set_height_request(TITLE_AREA_HEIGHT);
+    main.append(&title_area);
 
-    let width = capsule_width(square_mode);
+    let width = capsule_width(square_mode, capsule.get());
     let spacing = super::virtual_grid::VirtualGrid::grid_spacing_for_item_w(width);
-    let row = RecentRow::new(spacing, COVER_HEIGHT);
+    let row = RecentRow::new(spacing, capsule.get());
     let scrolled = gtk4::ScrolledWindow::new();
     scrolled.set_policy(gtk4::PolicyType::Automatic, gtk4::PolicyType::Never);
     scrolled.set_valign(gtk4::Align::Start);
@@ -70,27 +86,64 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Box, HomeU
     scrolled.set_margin_end(16);
     scrolled.add_css_class(CSS_RECENT_SCROLL);
     scrolled.set_child(Some(&row));
-    // The floating title rides the scroll: any adjustment move (animated
-    // selection scroll, wheel, drag) re-centers it over the selected tile.
+    // The floating title rides the scroll; the adjustment's changed signal
+    // covers the first layout, when the page learns the viewport width.
     {
         let scroll_state = state.clone();
         let adj = scrolled.hadjustment();
-        adj.connect_value_changed(move |_| {
+        let track = move |_: &gtk4::Adjustment| {
             if let Some(big) = scroll_state.borrow().big_picture.clone() {
+                // Rebuild the carousel when the viewport (and with it the
+                // capsule size) changes; a no-op while it stays put.
+                let desired = ((big.home.page.width() as f64 / 6.0).round() as i32).max(160);
+                if desired != big.home.capsule.get() {
+                    big.home.capsule.set(desired);
+                    super::big_picture_view::refresh(&scroll_state);
+                }
                 sync_title_position(&big);
+                // The rebuild above can run while the row is still
+                // mid-allocation, so positions mapped through it are one
+                // pass stale; re-anchor after the layout cycle settles.
+                let idle_state = scroll_state.clone();
+                glib::idle_add_local_once(move || {
+                    if let Some(big) = idle_state.borrow().big_picture.clone() {
+                        sync_title_position(&big);
+                    }
+                });
             }
-        });
+        };
+        adj.connect_value_changed(track.clone());
+        adj.connect_changed(track);
     }
-    page.append(&scrolled);
+    main.append(&scrolled);
 
     let spring_bottom = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     spring_bottom.set_vexpand(true);
-    page.append(&spring_bottom);
+    main.append(&spring_bottom);
+    page.set_child(Some(&main));
+
+    let marquee = Marquee::new(0, capsule.get() as f64 * 2.0);
+    // Fill the page: the pill floats anywhere over it.
+    marquee.set_hexpand(true);
+    marquee.set_halign(gtk4::Align::Fill);
+    marquee.set_valign(gtk4::Align::Fill);
+    let ring = SelectionRing::new();
+    page.add_overlay(&ring);
+    page.set_measure_overlay(&ring, false);
+    page.add_overlay(marquee.widget());
+    page.set_measure_overlay(marquee.widget(), false);
+
 
     let ui = HomeUi {
+        page: page.clone(),
         row,
         scrolled,
         marquee,
+        ring,
+        capsule: Rc::clone(&capsule),
+        built_capsule: Cell::new(0),
+        built_square: Cell::new(false),
+        spacing,
         covers: RefCell::new(Vec::new()),
         games: RefCell::new(Vec::new()),
         selected: RefCell::new(0),
@@ -101,11 +154,11 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Box, HomeU
 }
 
 /// Capsule width for the current mode: square art or 2:3 portraits.
-fn capsule_width(square: bool) -> i32 {
+fn capsule_width(square: bool, capsule: i32) -> i32 {
     if square {
-        COVER_HEIGHT
+        capsule
     } else {
-        (COVER_HEIGHT as f64 * 2.0 / 3.0) as i32
+        (capsule as f64 * 2.0 / 3.0) as i32
     }
 }
 
@@ -119,20 +172,49 @@ pub(super) fn refresh(state: &SharedState) {
     let ui = &big.home;
     let games = super::helpers::recently_played(state, RECENT_LIMIT);
 
+    // Pre-load stage: with no games yet, the stage stays empty — no
+    // covers, no All Software tile, nothing floating over it. Everything
+    // appears together once the library lands.
+    if games.is_empty() {
+        ui.row.clear_covers();
+        ui.covers.borrow_mut().clear();
+        *ui.games.borrow_mut() = Vec::new();
+        *ui.selected.borrow_mut() = 0;
+        ui.marquee.set_visible(false);
+        ui.ring.set_visible(false);
+        // Zero means "nothing built", so the first real refresh rebuilds.
+        ui.built_capsule.set(0);
+        ui.built_square.set(false);
+        return;
+    }
+
+    // The capsule follows the viewport (one sixth of its width); 320 is
+    // the reference until the window reports a size. The row's cover
+    // height is kept in step so covers stay square.
+    let square_mode = state.borrow().cfg.big_picture_square_capsules;
+    let viewport = state.borrow().window.width();
+    let capsule = if viewport >= 960 {
+        (viewport as f64 / 6.0).round() as i32
+    } else {
+        ui.capsule.get().max(320)
+    };
+
     // The achievement watcher re-reports games constantly; rebuilding the
     // whole carousel for each report churns covers for no visible change.
-    // Only rebuild when the carousel's content actually differs.
-    let square_mode = state.borrow().cfg.big_picture_square_capsules;
-    let unchanged = {
-        let current = ui.games.borrow();
-        current.len() == games.len()
-            && current.iter().zip(&games).all(|(a, b)| {
-                a.grid_id() == b.grid_id()
-                    && a.grid_path == b.grid_path
-                    && a.square_path == b.square_path
-                    && a.name == b.name
-            })
-    };
+    // Only rebuild when the carousel's content — or the size it is built
+    // at — actually differs.
+    let unchanged = ui.built_capsule.get() == capsule
+        && ui.built_square.get() == square_mode
+        && {
+            let current = ui.games.borrow();
+            current.len() == games.len()
+                && current.iter().zip(&games).all(|(a, b)| {
+                    a.grid_id() == b.grid_id()
+                        && a.grid_path == b.grid_path
+                        && a.square_path == b.square_path
+                        && a.name == b.name
+                })
+        };
     if unchanged {
         return;
     }
@@ -145,7 +227,11 @@ pub(super) fn refresh(state: &SharedState) {
 
     ui.row.clear_covers();
 
-    let width = capsule_width(square_mode);
+    ui.capsule.set(capsule);
+    ui.built_capsule.set(capsule);
+    ui.built_square.set(square_mode);
+    ui.row.set_cover_height(capsule);
+    let width = capsule_width(square_mode, capsule);
     let mut covers = Vec::with_capacity(games.len() + 1);
     for (index, game) in games.iter().enumerate() {
         // Square mode: cover-fit the art into a square capsule. A game
@@ -156,13 +242,13 @@ pub(super) fn refresh(state: &SharedState) {
         } else {
             &game.grid_path
         };
-        let cover = build_cover(state, game, art, width, COVER_HEIGHT, square_mode, move |state| {
+        let cover = build_cover(state, game, art, width, capsule, square_mode, move |state| {
             on_cover_clicked(state, index)
         });
         ui.row.append_cover(&cover);
         covers.push(cover);
     }
-    let tile = build_all_tile(state);
+    let tile = build_all_tile(state, capsule);
     ui.row.append_cover(&tile);
     covers.push(tile);
     *ui.covers.borrow_mut() = covers;
@@ -177,9 +263,16 @@ pub(super) fn refresh(state: &SharedState) {
     };
     *ui.selected.borrow_mut() = selected;
     *ui.games.borrow_mut() = games;
+    ui.marquee.set_max_width(width as f64 * 2.0);
     apply_selection(&big);
     // Queued after the swap so it sees the freshly loaded list.
     queue_missing_squares(state, ui, square_mode);
+}
+
+/// Re-measure the floating title after the couch scale changed (see
+/// `Marquee::revalidate_text`).
+pub(super) fn revalidate_pill(big: &Rc<BigPictureUi>) {
+    big.home.marquee.revalidate_text();
 }
 
 /// Mouse navigation on a cover: the first click selects, clicking the
@@ -295,20 +388,72 @@ fn sync_title_text(ui: &HomeUi) {
     ui.marquee.set_text(&title);
 }
 
-/// Slide the floating title so it rides above the selected tile.
+/// Slide the floating title so it rides just above the selected cover,
+/// tail touching it — the same tile-relative distance the All Software
+/// grid keeps.
 fn sync_title_position(big: &Rc<BigPictureUi>) {
     let ui = &big.home;
     let selected = *ui.selected.borrow();
     let Some((x, w)) = ui.row.cover_geometry(selected) else {
+        // Nothing to anchor to (the stage is still empty): hide the
+        // floats rather than leave them painted at a stale spot.
+        ui.marquee.set_visible(false);
+        ui.ring.set_visible(false);
         return;
     };
+    ui.ring.set_visible(true);
     let adj = ui.scrolled.hadjustment();
-    // Tile center in viewport coordinates: content x (cover_geometry
-    // includes the leading spacing) minus the scroll. The marquee rail
-    // carries the same side margins as the scrolled row, so the
-    // coordinates line up with no adjustment.
-    let center = x + w / 2.0 - adj.value();
-    ui.marquee.set_position(center, -1.0);
+    // Cover center in page coordinates: the scrolled margin plus content
+    // x (cover_geometry includes the leading spacing) minus the scroll.
+    let center = ui.scrolled.margin_start() as f64 + x + w / 2.0 - adj.value();
+    // The cover's top edge, mapped into the page the marquee spans. The
+    // row lays its covers one spacing below its own top.
+    let cover_top = ui
+        .scrolled
+        .compute_point(&ui.page, &gtk4::graphene::Point::zero())
+        .map(|point| point.y() as f64 + ui.spacing as f64)
+        .unwrap_or(ui.spacing as f64);
+    // The All Software tile's visible content is its centered half-size
+    // circle, not the full capsule shell — anchor to the circle, or the
+    // pill floats far above the thing it points at.
+    let is_tile = selected >= ui.games.borrow().len();
+    let capsule = ui.capsule.get() as f64;
+    let content_top = cover_top
+        + if is_tile {
+            (capsule - capsule / 2.0) / 2.0
+        } else {
+            0.0
+        };
+    // Top bias: the tail tip rests just outside the selection ring, the
+    // same distance the All Software grid keeps. The viewport is the
+    // page's own width — final here, unlike the floating marquee's,
+    // which lags one allocation pass behind (and starts at zero).
+    let viewport = ui.page.width() as f64;
+    // The pill points at icons, like the All Software grid does: while the
+    // selected cover has no art yet (library still loading) it stays
+    // hidden instead of floating over an empty frame.
+    let has_art = ui
+        .games
+        .borrow()
+        .get(selected)
+        .is_none_or(|g| !g.grid_path.is_empty() || !g.square_path.is_empty());
+    ui.marquee.set_visible(has_art);
+    if has_art {
+        ui.marquee
+            .set_position(center, viewport, content_top - BP_RING_OUTSET, false);
+    }
+    let ring_scale = viewport / 1920.0;
+    // The ring hugs what is visibly selected: the full capsule on a game
+    // cover, the centered half-size circle on the All Software tile — a
+    // true circle there, since the tile's content is round.
+    if is_tile {
+        let circle = capsule / 2.0;
+        ui.ring
+            .place(center - circle / 2.0, content_top, circle, circle, ring_scale, true);
+    } else {
+        ui.ring
+            .place(center - w / 2.0, cover_top, w, capsule, ring_scale, false);
+    }
 }
 
 /// Smooth-scroll the selected tile to the viewport center; the adjustment's
@@ -349,18 +494,18 @@ fn update_scroll(big: &Rc<BigPictureUi>) {
 /// The grid tile at the end of the carousel that opens All Software: a
 /// half-size circle in the capsule shell, so the selection ring hugs the
 /// circle instead of drawing a square around empty space.
-fn build_all_tile(state: &SharedState) -> gtk4::Widget {
+fn build_all_tile(state: &SharedState, capsule: i32) -> gtk4::Widget {
     let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     vbox.set_valign(gtk4::Align::Start);
     vbox.set_halign(gtk4::Align::Center);
     vbox.add_css_class(CSS_COVER_ITEM);
     vbox.add_css_class(CSS_BP_ALL);
-    vbox.set_size_request(COVER_HEIGHT, COVER_HEIGHT);
+    vbox.set_size_request(capsule, capsule);
     vbox.set_overflow(gtk4::Overflow::Visible);
 
     let circle = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     circle.add_css_class(CSS_BP_ALL_TILE);
-    circle.set_size_request(COVER_HEIGHT / 2, COVER_HEIGHT / 2);
+    circle.set_size_request(capsule / 2, capsule / 2);
     circle.set_halign(gtk4::Align::Center);
     circle.set_valign(gtk4::Align::Center);
     let icon = gtk4::Image::from_icon_name("view-grid-symbolic");

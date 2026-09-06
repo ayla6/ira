@@ -346,11 +346,12 @@ impl AllSoftwareUi {
 
     /// Float the name tooltip over the selected tile — above its top edge
     /// normally, below it when the tile touches the viewport top — riding
-    /// whatever scroll position the grid is at, and kept fully on screen.
+    /// whatever scroll position the grid is at. The floats only track the
+    /// selection while its tile is fully inside the scrolled viewport: a
+    /// tile sliding under the header or off an edge must not drag the ring
+    /// over the header text or leave a detached pill behind, so both hide
+    /// until the scroll brings the tile back.
     fn update_tooltip(&self) {
-        if !self.tooltip.is_visible() {
-            return;
-        }
         let game = self.games.borrow().get(self.selected.get()).cloned();
         let Some(game) = game else {
             return;
@@ -359,8 +360,9 @@ impl AllSoftwareUi {
         // still loading) the tooltip stays hidden instead of floating
         // over an empty frame.
         let has_art = !game.square_path.is_empty() || !game.grid_path.is_empty();
-        self.tooltip.set_visible(has_art);
         if !has_art {
+            self.tooltip.set_visible(false);
+            self.ring.set_visible(false);
             return;
         };
         let (_, item_w, item_h, _sp) = self.grid.current_layout();
@@ -386,12 +388,6 @@ impl AllSoftwareUi {
             .map(|p| (p.x() as f64, p.y() as f64))
             .unwrap_or((x, y - self.scrolled.vadjustment().value()));
         let center = x + item_w as f64 / 2.0;
-        // The tail tip rests just outside the selection ring on whichever
-        // side the pill's actual height fits into the scrolled area —
-        // above by preference, below near the top edge. Both checks are in
-        // page coordinates against the scrolled area's bounds, so the pill
-        // never slides under the page header.
-        let pill_h = self.tooltip.pill_height() as f64;
         // The overlay is the parent of both the grid and the floating
         // widgets, so its width is final whenever this runs (the grid's
         // post-layout hook fires mid-pass, before the overlay children
@@ -405,6 +401,23 @@ impl AllSoftwareUi {
             .map(|p| p.y() as f64)
             .unwrap_or(0.0);
         let scrolled_bottom = scrolled_top + self.scrolled.vadjustment().page_size();
+        // Full visibility, ring outset included: anything poking past the
+        // viewport hides the floats rather than dragging them along.
+        let fully_visible = tile_top - BP_RING_OUTSET >= scrolled_top
+            && tile_top + item_h as f64 + BP_RING_OUTSET <= scrolled_bottom;
+        if !fully_visible {
+            self.tooltip.set_visible(false);
+            self.ring.set_visible(false);
+            return;
+        }
+        self.tooltip.set_visible(true);
+        self.ring.set_visible(true);
+        // The tail tip rests just outside the selection ring on whichever
+        // side the pill's actual height fits into the scrolled area —
+        // above by preference, below near the top edge. Both checks are in
+        // page coordinates against the scrolled area's bounds, so the pill
+        // never slides under the page header.
+        let pill_h = self.tooltip.pill_height() as f64;
         let top_tip = tile_top - BP_RING_OUTSET;
         let bottom_tip = tile_top + item_h as f64 + BP_RING_OUTSET;
         let fits_above = top_tip - TAIL_HEIGHT - pill_h >= scrolled_top + 2.0;

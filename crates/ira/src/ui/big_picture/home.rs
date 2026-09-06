@@ -458,11 +458,33 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
         .borrow()
         .get(selected)
         .is_none_or(|g| !g.grid_path.is_empty() || !g.square_path.is_empty());
-    ui.marquee.set_visible(has_art);
-    if has_art {
-        ui.marquee
-            .set_position(center, viewport, content_top - BP_RING_OUTSET, false);
+    // The floats only track the selection while it sits fully inside the
+    // scrolled viewport (ring outset included): a cover sliding off the
+    // edge must not leave a detached pill behind, and the cover keeps its
+    // own selected style meanwhile.
+    let fully_visible = (|| {
+        let cover = ui.covers.borrow().get(selected).cloned()?;
+        let left = f64::from(
+            cover
+                .compute_point(&ui.scrolled, &gtk4::graphene::Point::zero())?
+                .x(),
+        );
+        let view = ui.scrolled.width() as f64
+            - f64::from(ui.scrolled.margin_start() + ui.scrolled.margin_end());
+        Some(
+            left - BP_RING_OUTSET >= 0.0 && left + cover.width() as f64 + BP_RING_OUTSET <= view,
+        )
+    })()
+    .unwrap_or(false);
+    if !has_art || !fully_visible {
+        ui.marquee.set_visible(false);
+        ui.ring.set_visible(false);
+        return;
     }
+    ui.marquee.set_visible(true);
+    ui.ring.set_visible(true);
+    ui.marquee
+        .set_position(center, viewport, content_top - BP_RING_OUTSET, false);
     let ring_scale = viewport / 1920.0;
     // The ring hugs what is visibly selected: the full capsule on a game
     // cover, the centered half-size circle on the All Software tile — a

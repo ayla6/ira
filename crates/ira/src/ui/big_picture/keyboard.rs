@@ -2,7 +2,9 @@
 //! with a right-hand action column (backspace, return, OK), a shift and a
 //! page toggle on the bottom row, and a wide space bar. It types from the
 //! gamepad/keyboard cursor, from mouse clicks, and from the physical
-//! keyboard, and hands the finished text to the caller's callback.
+//! keyboard, and hands the finished text to the caller's callback. Return
+//! is a dead key unless the caller's input is multiline: shown, but
+//! dimmed and skipped by every cursor move.
 
 use crate::ui::css::*;
 use crate::ui::state::SharedState;
@@ -65,12 +67,12 @@ const SYMBOL_ROWS: &[&[Key]] = &[
     &[
         Key::Char('/'), Key::Char(':'), Key::Char(';'), Key::Char('('), Key::Char(')'),
         Key::Char('$'), Key::Char('&'), Key::Char('@'), Key::Char('"'), Key::Char('\''),
-        Key::Char('*'),
+        Key::Char('*'), Key::Return,
     ],
     &[
         Key::Char('<'), Key::Char('>'), Key::Char('('), Key::Char(')'), Key::Char('['),
         Key::Char(']'), Key::Char('{'), Key::Char('}'), Key::Char('+'), Key::Char('='),
-        Key::Char('*'),
+        Key::Char('*'), Key::Return,
     ],
     &[
         Key::Char('['), Key::Char(']'), Key::Char('{'), Key::Char('}'), Key::Char('('),
@@ -85,6 +87,82 @@ fn shifted(c: char) -> char {
     match c {
         '1' => '!', '2' => '@', '3' => '#', '4' => '$', '5' => '%', '6' => '^',
         '7' => '&', '8' => '*', '9' => '(', '0' => ')', '-' => '_', c => c,
+    }
+}
+
+/// The cursor's next key. Horizontal moves wrap around the row and skip
+/// keys the cursor can't rest on. Vertical moves from an action key ride
+/// the action column — the last key of each row — landing on the next
+/// restable one (up from OK reaches Backspace, skipping a single-line
+/// input's dead Return); elsewhere the move keeps the column, and the
+/// bottom row's four keys answer the twelve columns above them: shift,
+/// page, the space bar's span, OK.
+/// Whether two cursor addresses rest on the same key widget: Return and
+/// OK span several rows, so each lives at two addresses (Return rows 1-2,
+/// OK rows 3 and bottom). The action column's ride must not count its own
+/// key's twin as progress.
+fn same_key(rows: &[&[Key]], a: (usize, usize), b: (usize, usize)) -> bool {
+    let key = |(row, col): (usize, usize)| {
+        rows.get(row).and_then(|keys| keys.get(col)).copied()
+    };
+    match (key(a), key(b)) {
+        (Some(Key::Ok), Some(Key::Ok)) | (Some(Key::Return), Some(Key::Return)) => true,
+        _ => a == b,
+    }
+}
+
+fn advance_cursor(
+    rows: &[&[Key]],
+    multiline: bool,
+    cursor: (usize, usize),
+    dx: i32,
+    dy: i32,
+) -> (usize, usize) {
+    let restable = |(row, col): (usize, usize)| {
+        rows.get(row)
+            .and_then(|keys| keys.get(col))
+            .is_some_and(|key| *key != Key::Return || multiline)
+    };
+    let (row, col) = cursor;
+    let action_key = rows
+        .get(row)
+        .and_then(|keys| keys.get(col))
+        .is_some_and(|key| matches!(key, Key::Backspace | Key::Return | Key::Ok));
+    if dy != 0 {
+        if action_key {
+            let mut r = row as i64 + dy as i64;
+            while (0..rows.len() as i64).contains(&r) {
+                let next = (r as usize, rows[r as usize].len() - 1);
+                if restable(next) && !same_key(rows, next, cursor) {
+                    return next;
+                }
+                r += dy as i64;
+            }
+            (row, col)
+        } else {
+            let r = (row as i64 + dy as i64).clamp(0, rows.len() as i64 - 1) as usize;
+            if r == rows.len() - 1 {
+                let bottom = match col {
+                    0 => 0,
+                    1 => 1,
+                    11 => 3,
+                    _ => 2,
+                };
+                (r, bottom)
+            } else {
+                (r, col.min(rows[r].len() - 1))
+            }
+        }
+    } else {
+        let len = rows[row].len() as i64;
+        let mut c = col as i64;
+        for _ in 0..len {
+            c = (c + dx as i64).rem_euclid(len);
+            if restable((row, c as usize)) {
+                break;
+            }
+        }
+        (row, c as usize)
     }
 }
 
@@ -104,6 +182,9 @@ pub(super) struct Keyboard {
     /// One-shot shift (L3): the next letter types uppercase, then it
     /// clears. The Shift key itself is a caps-lock toggle.
     once: Cell<bool>,
+    /// Whether the input being typed accepts newlines. When it doesn't,
+    /// Return is a dead key: drawn dimmed and skipped by the cursor.
+    multiline: Cell<bool>,
     /// Cursor-addressable key widgets of the showing page, for repaints.
     keys: RefCell<Vec<Vec<gtk4::Widget>>>,
     /// The prompt line the panel was opened with, kept for page/shift
@@ -156,6 +237,7 @@ impl Keyboard {
             page: Cell::new(Page::Letters),
             shift: Cell::new(false),
             once: Cell::new(false),
+            multiline: Cell::new(false),
             keys: RefCell::new(Vec::new()),
             prompt: RefCell::new(String::new()),
             family: Cell::new(ira_input::ControllerFamily::Xbox),
@@ -173,19 +255,22 @@ impl Keyboard {
         self.root.is_visible()
     }
 
-    /// Open with a prompt, any starting text, and what to do with the
-    /// finished name.
+    /// Open with a prompt, any starting text, whether the input accepts
+    /// newlines (a group name doesn't — Return stays a dead key), and what
+    /// to do with the finished name.
     pub(super) fn open(
         &self,
         state: &SharedState,
         prompt: &str,
         initial: &str,
+        multiline: bool,
         on_ok: NameCallback,
     ) {
         *self.buffer.borrow_mut() = initial.to_string();
         self.caret.set(initial.chars().count());
         *self.prompt.borrow_mut() = prompt.to_string();
         *self.on_ok.borrow_mut() = Some(on_ok);
+        self.multiline.set(multiline);
         self.cursor.set((1, 0));
         self.rebuild(state, prompt);
         self.refresh_preview();
@@ -296,6 +381,13 @@ impl Keyboard {
         if matches!(key, Key::Shift) && self.shift.get() {
             button.add_css_class(CSS_BP_KEY_ACTIVE);
         }
+        // A single-line input's Return: shown for Switch-keyboard
+        // fidelity, but dimmed and deaf — the cursor skips it and clicks
+        // fall through nowhere.
+        let dead = matches!(key, Key::Return) && !self.multiline.get();
+        if dead {
+            button.add_css_class(CSS_BP_KEY_DISABLED);
+        }
         // The badge rides an overlay above the label, so its presence
         // never shifts the letter's centering.
         let key_surface = gtk4::Overlay::new();
@@ -339,19 +431,21 @@ impl Keyboard {
         // The keys stretch with the panel and take the entire width.
         button.set_hexpand(true);
         button.set_size_request(80, 72);
-        let click_state = state.clone();
-        let click = gtk4::GestureClick::new();
-        click.connect_pressed(move |_, _, _, _| {
-            // Clone out of the borrow: confirming runs the caller's
-            // callback, which mutably borrows the state.
-            let big = click_state.borrow().big_picture.clone();
-            if let Some(big) = big {
-                big.keyboard.cursor.set(position);
-                big.keyboard.refresh_cursor();
-                big.keyboard.press(&click_state, key);
-            }
-        });
-        button.add_controller(click);
+        if !dead {
+            let click_state = state.clone();
+            let click = gtk4::GestureClick::new();
+            click.connect_pressed(move |_, _, _, _| {
+                // Clone out of the borrow: confirming runs the caller's
+                // callback, which mutably borrows the state.
+                let big = click_state.borrow().big_picture.clone();
+                if let Some(big) = big {
+                    big.keyboard.cursor.set(position);
+                    big.keyboard.refresh_cursor();
+                    big.keyboard.press(&click_state, key);
+                }
+            });
+            button.add_controller(click);
+        }
         button.upcast()
     }
 
@@ -388,19 +482,6 @@ impl Keyboard {
             }
             map.push(row_map);
         }
-        // Return is only meaningful for multiline input, which a group
-        // name is not: it keeps its usual spot, greyed out, unclickable,
-        // and outside the cursor's path.
-        let return_key = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-        return_key.add_css_class(CSS_BP_KEY);
-        return_key.add_css_class(CSS_BP_KEY_DISABLED);
-        let return_label = gtk4::Label::new(Some(&crate::tr!("Return")));
-        return_label.set_halign(gtk4::Align::Center);
-        return_label.set_valign(gtk4::Align::Center);
-        crate::ui::helpers::crisp_label(&return_label);
-        return_key.append(&return_label);
-        grid.attach(&return_key, 11, 1, 1, 2);
-
         *self.keys.borrow_mut() = map;
         self.panel.append(&grid);
 
@@ -453,32 +534,17 @@ impl Keyboard {
         self.family.set(family);
     }
 
-    /// Move the key cursor: horizontal moves wrap around the row, and a
-    /// vertical move past a short row snaps to its last key — except the
-    /// action column, which jumps between the rows that have one (up from
-    /// OK lands on backspace, the dead Return aside).
+    /// Move the key cursor. The rules live in `advance_cursor` so they
+    /// can be tested without GTK.
     pub(super) fn move_cursor(&self, dx: i32, dy: i32) {
-        let rows = self.rows();
         let (row, col) = self.cursor.get();
-        if dy != 0 {
-            // The action column exists on every row (Return and OK share
-            // theirs), so a vertical move from it stays on it.
-            let on_action = rows[row][col] == Key::Return || rows[row][col] == Key::Ok;
-            let row = (row as i64 + dy as i64).clamp(0, rows.len() as i64 - 1) as usize;
-            let len = rows[row].len();
-            let col = if on_action && len > 11 {
-                11
-            } else if col < len {
-                col
-            } else {
-                len - 1
-            };
-            self.cursor.set((row, col));
-        } else {
-            let len = rows[row].len();
-            let col = ((col as i64 + dx as i64).rem_euclid(len as i64)) as usize;
-            self.cursor.set((row, col));
-        }
+        self.cursor.set(advance_cursor(
+            self.rows(),
+            self.multiline.get(),
+            (row, col),
+            dx,
+            dy,
+        ));
         self.refresh_cursor();
     }
 
@@ -660,5 +726,73 @@ impl Keyboard {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_advance_down_from_backspace_lands_on_ok() {
+        // The dead Return between them is skipped on a single-line input.
+        assert_eq!(advance_cursor(LETTER_ROWS, false, (0, 11), 0, 1), (3, 11));
+    }
+
+    #[test]
+    fn test_advance_up_from_ok_lands_on_backspace() {
+        assert_eq!(advance_cursor(LETTER_ROWS, false, (3, 11), 0, -1), (0, 11));
+        // The OK key under the bottom row's last cell is the same widget;
+        // riding up from it reaches Backspace too.
+        assert_eq!(advance_cursor(LETTER_ROWS, false, (4, 3), 0, -1), (0, 11));
+    }
+
+    #[test]
+    fn test_advance_return_restable_only_when_multiline() {
+        assert_eq!(advance_cursor(LETTER_ROWS, true, (0, 11), 0, 1), (1, 11));
+        // Return's second row is the same widget — not a second stop.
+        assert_eq!(advance_cursor(LETTER_ROWS, true, (1, 11), 0, 1), (3, 11));
+        assert_eq!(advance_cursor(LETTER_ROWS, true, (2, 11), 0, 1), (3, 11));
+        assert_eq!(advance_cursor(LETTER_ROWS, true, (2, 11), 0, -1), (0, 11));
+    }
+
+    #[test]
+    fn test_advance_horizontal_wraps_past_dead_return() {
+        // Right from the last letter skips Return and wraps to the row's
+        // first key; left from the first letter skips it the other way.
+        assert_eq!(advance_cursor(LETTER_ROWS, false, (1, 10), 1, 0), (1, 0));
+        assert_eq!(advance_cursor(LETTER_ROWS, false, (1, 0), -1, 0), (1, 10));
+        // With multiline the wrap stops on Return.
+        assert_eq!(advance_cursor(LETTER_ROWS, true, (1, 10), 1, 0), (1, 11));
+    }
+
+    #[test]
+    fn test_advance_down_maps_letter_columns_to_bottom_row_keys() {
+        // The space bar answers the columns above it; the edges map to
+        // shift and page. Down from OK stays: the bottom row's OK cell is
+        // the same widget, not a further step.
+        assert_eq!(advance_cursor(LETTER_ROWS, false, (3, 5), 0, 1), (4, 2));
+        assert_eq!(advance_cursor(LETTER_ROWS, false, (3, 0), 0, 1), (4, 0));
+        assert_eq!(advance_cursor(LETTER_ROWS, false, (3, 1), 0, 1), (4, 1));
+        assert_eq!(advance_cursor(LETTER_ROWS, false, (3, 11), 0, 1), (3, 11));
+    }
+
+    #[test]
+    fn test_advance_up_from_bottom_row_keeps_column() {
+        assert_eq!(advance_cursor(LETTER_ROWS, false, (4, 2), 0, -1), (3, 2));
+        assert_eq!(advance_cursor(LETTER_ROWS, false, (4, 0), 0, -1), (3, 0));
+    }
+
+    #[test]
+    fn test_advance_horizontal_wraps_on_bottom_row() {
+        assert_eq!(advance_cursor(LETTER_ROWS, false, (4, 3), 1, 0), (4, 0));
+    }
+
+    #[test]
+    fn test_advance_uses_same_shape_on_both_pages() {
+        // The symbol page carries the same action column, so the rules
+        // hold there verbatim.
+        assert_eq!(advance_cursor(SYMBOL_ROWS, false, (0, 11), 0, 1), (3, 11));
+        assert_eq!(advance_cursor(SYMBOL_ROWS, false, (2, 11), 0, -1), (0, 11));
     }
 }

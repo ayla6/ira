@@ -19,6 +19,10 @@ pub(super) const COLS: usize = 5;
 const FLOW_MARGIN: i32 = 28;
 const FLOW_SPACING: i32 = 18;
 
+/// The smallest slot allocation the ring will draw from; anything smaller
+/// is a pre-layout placeholder, never a tile (tiles are 160px at least).
+const MIN_RING_TILE: i32 = 8;
+
 pub(super) struct GroupsGrid {
     /// The scrolled tiles with the selection ring floating over them; the
     /// widget this page shows.
@@ -161,14 +165,6 @@ impl GroupsGrid {
         }
         self.clamp_selection(state);
         self.repaint_selection();
-        // The rebuilt children read as unallocated until their first
-        // layout pass; re-anchor the ring once that lands.
-        let anchor_state = state.clone();
-        glib::idle_add_local_once(move || {
-            if let Some(big) = anchor_state.borrow().big_picture.clone() {
-                big.all.groups_grid.position_ring();
-            }
-        });
     }
 
     /// The shared tile shell: square slot over the name, wired with the
@@ -192,6 +188,16 @@ impl GroupsGrid {
 
         let index = self.slots.borrow().len();
         self.slots.borrow_mut().push(slot.clone());
+        // GTK maps a widget inside the allocation pass that first sizes
+        // it, so every map — first layout, a rebuild's fresh tiles, a
+        // tab re-entry's remap — is a moment of real geometry: re-derive
+        // the ring there instead of sampling on timers.
+        let map_state = state.clone();
+        slot.connect_map(move |_| {
+            if let Some(big) = map_state.borrow().big_picture.clone() {
+                big.all.groups_grid.position_ring();
+            }
+        });
         let click_state = state.clone();
         let click = gtk4::GestureClick::new();
         click.connect_pressed(move |_, _, _, _| {
@@ -332,10 +338,12 @@ impl GroupsGrid {
         self.scroll_selection_into_view();
     }
 
-    /// Anchor the ring to the selected slot's live position.
+    /// Anchor the ring to the selected slot's live position. It draws
+    /// only from real geometry: an unmapped surface or a slot without a
+    /// full-size allocation (pre-layout, mid-rebuild) hides the ring, and
+    /// the allocation hooks re-anchor it the moment reality arrives. A
+    /// zero-size slot sampled here is exactly the tiny square ring.
     pub(super) fn position_ring(&self) {
-        // An unmapped or unallocated surface produces the speck at the
-        // origin; the hooks that follow layout re-anchor it.
         if self.overlay.width() <= 1 || self.overlay.height() <= 1 || !self.overlay.is_mapped() {
             self.ring.set_visible(false);
             return;
@@ -344,7 +352,7 @@ impl GroupsGrid {
             self.ring.set_visible(false);
             return;
         };
-        if !slot.is_mapped() {
+        if !slot.is_mapped() || slot.width() < MIN_RING_TILE || slot.height() < MIN_RING_TILE {
             self.ring.set_visible(false);
             return;
         }

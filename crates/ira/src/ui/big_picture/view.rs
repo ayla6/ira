@@ -429,6 +429,7 @@ pub(super) fn name_new_group(state: &SharedState, game: Option<crate::Game>) {
         state,
         &crate::tr!("Name the group"),
         "",
+        false,
         Box::new(move |state, name| {
             let db = state.borrow().db.clone();
             let Ok(id) = ira_db::create_group(&db, name) else {
@@ -453,6 +454,7 @@ pub(super) fn rename_group(state: &SharedState, group_id: i64, current: &str) {
         state,
         &crate::tr!("Rename the group"),
         current,
+        false,
         Box::new(move |state, name| {
             let db = state.borrow().db.clone();
             if let Err(e) = ira_db::rename_group(&db, group_id, name) {

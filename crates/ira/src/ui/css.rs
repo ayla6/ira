@@ -31,6 +31,7 @@ pub const CSS_BP_GROUP_SLOT: &str = "bp-group-slot";
 pub const CSS_BP_KEY: &str = "bp-key";
 pub const CSS_BP_KEY_SELECTED: &str = "bp-key-selected";
 pub const CSS_BP_KEY_ACTIVE: &str = "bp-key-active";
+pub const CSS_BP_KEY_DISABLED: &str = "bp-key-disabled";
 pub const CSS_BP_KEY_BADGE: &str = "bp-key-badge";
 pub const CSS_BP_KEY_PREVIEW: &str = "bp-key-preview";
 pub const CSS_BP_KEYBOARD: &str = "bp-keyboard";
@@ -370,6 +371,21 @@ button.sgdb-filter:hover {
 /// is integer pixels: fractional font sizes render choppy.
 fn big_picture_css(s: f64) -> String {
     let px = |v: i32| format!("{}px", (v as f64 * s).round().max(1.0));
+    let pxs = |v: i32| format!("{}px", (v as f64 * s).round());
+    // libadwaita's keyboard focus ring, ported from its stylesheet's
+    // focus-ring mixin: a 2px outline in the accent at half strength,
+    // inset 2px, resting as an invisible zero-width outline one step
+    // further out, and animated between the two with ease-out-quad.
+    let ease = "cubic-bezier(0.25, 0.46, 0.45, 0.94)";
+    let ring_rest = format!(
+        "outline: 0 solid transparent;\n    outline-offset: {rest};\n    transition: outline-color 200ms {ease}, outline-width 200ms {ease}, outline-offset 200ms {ease};",
+        rest = pxs(4),
+    );
+    let ring_on = format!(
+        "outline-color: alpha(@accent_color, 0.5);\n    outline-width: {width};\n    outline-offset: {offset};",
+        width = pxs(2),
+        offset = pxs(-2),
+    );
     let status_pad_x = px(24);
     format!(
         r#".bp-status {{ padding: {status_pad_top} {status_pad_x} {status_pad_bottom} {status_pad_x}; min-height: {status_min_h}; }}
@@ -436,11 +452,14 @@ fn big_picture_css(s: f64) -> String {
     padding-left: {menu_pad};
     padding-right: {menu_pad};
     border-radius: 10px;
+    {ring_rest}
 }}
 .bp-menu-row label {{
     font-size: {subtitle};
 }}
-.bp-menu-row-selected {{ background: alpha(@accent_color, 0.45); }}
+/* The cursor's row wears libadwaita's focus ring, not a fill: gamepad
+   navigation reads exactly like GTK keyboard navigation. */
+.bp-menu-row-selected {{ {ring_on} }}
 .bp-menu-row-active label {{
     color: @accent_color;
 }}
@@ -471,18 +490,22 @@ fn big_picture_css(s: f64) -> String {
 .bp-key {{
     background: alpha(white, 0.08);
     border-radius: 8px;
+    {ring_rest}
 }}
 .bp-key label {{
     font-size: {subtitle};
 }}
-.bp-key-selected {{
-    background: alpha(@accent_color, 0.45);
-}}
+/* The cursor rests on a key the way GTK focus rests on a button: the
+   ported focus ring, never a fill. */
+.bp-key-selected {{ {ring_on} }}
 .bp-key-active {{
     background: alpha(@accent_color, 0.45);
 }}
 .bp-key-active label {{
     color: @theme_fg_color;
+}}
+.bp-key-disabled label {{
+    color: alpha(@theme_fg_color, 0.35);
 }}
 .bp-key-preview, .bp-keyboard label {{
     font-family: "M PLUS 2", sans-serif;

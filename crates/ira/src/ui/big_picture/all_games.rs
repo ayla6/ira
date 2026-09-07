@@ -692,15 +692,9 @@ impl AllSoftwareUi {
         self.surfaces.set_visible_child(target);
         self.refresh(state);
         if tiles {
+            // The ring re-anchors itself from the tiles' own allocation
+            // hooks; a tab slide reallocates the page and lands it.
             self.groups_grid.repaint(state);
-            // The tiles just became visible and a tab slide may be moving
-            // them; re-anchor once it settles.
-            let idle_state = state.clone();
-            glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
-                if let Some(big) = idle_state.borrow().big_picture.clone() {
-                    big.all.groups_grid.position_ring();
-                }
-            });
         } else if !recent {
             self.ensure_default_selection();
         }

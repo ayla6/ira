@@ -196,6 +196,9 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         crate::ui::helpers::crisp_label(tab_label);
         tab_label.set_valign(gtk4::Align::Center);
     }
+    // The page builds on the Software tab; set_tab only fires on a
+    // switch, so the initial active state must be set here.
+    software_tab.add_css_class(CSS_BP_TAB_ACTIVE);
     header.append(&shoulder_l.slot);
     header.append(&software_tab);
     header.append(&groups_tab);
@@ -592,7 +595,7 @@ impl AllSoftwareUi {
     }
 
     pub(super) fn refresh(&self, state: &SharedState) {
-        if self.groups_grid.ensure_sized(state) {
+        if self.groups_grid.ensure_sized() {
             self.groups_grid.reload(state);
         }
         let was_empty = self.games.borrow().is_empty();
@@ -828,12 +831,8 @@ impl AllSoftwareUi {
         // navigation parks it. Manual scrolling deselects instead of
         // hiding (see `clear_selection`).
         let in_view = tile_top + item_h as f64 > scrolled_top && tile_top < scrolled_bottom;
-        // The pill points at icons: while the tile has no art yet (library
-        // still loading) it stays hidden instead of floating over an
-        // empty frame; the ring marks the selection regardless.
-        let has_art = !game.square_path.is_empty() || !game.grid_path.is_empty();
         self.ring.set_visible(in_view);
-        self.tooltip.set_visible(in_view && has_art);
+        self.tooltip.set_visible(in_view);
         if !in_view {
             return;
         }
@@ -841,9 +840,6 @@ impl AllSoftwareUi {
         let scale = viewport / 1920.0;
         self.ring
             .place(x, tile_top, item_w as f64, item_h as f64, scale, false);
-        if !has_art {
-            return;
-        }
         self.tooltip.set_max_width(item_w as f64 * 3.0);
         self.tooltip.set_text(&game.name);
         // The tail tip rests just outside the selection ring on whichever

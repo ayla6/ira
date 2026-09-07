@@ -450,18 +450,12 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
     // page's own width — final here, unlike the floating marquee's,
     // which lags one allocation pass behind (and starts at zero).
     let viewport = ui.page.width() as f64;
-    // The pill points at icons, like the All Software grid does: while the
-    // selected cover has no art yet (library still loading) it stays
-    // hidden instead of floating over an empty frame.
-    let has_art = ui
-        .games
-        .borrow()
-        .get(selected)
-        .is_none_or(|g| !g.grid_path.is_empty() || !g.square_path.is_empty());
-    // The floats only track the selection while it sits fully inside the
-    // scrolled viewport (ring outset included): a cover sliding off the
-    // edge must not leave a detached pill behind, and the cover keeps its
-    // own selected style meanwhile.
+    // The pill points at icons, like the All Software grid does; a cover
+    // without art shows its name anyway, so the floats track regardless.
+    // They only hide while the selection sits outside the scrolled
+    // viewport (ring outset included): a cover sliding off the edge must
+    // not leave a detached pill behind, and the cover keeps its own
+    // selected style meanwhile.
     let fully_visible = (|| {
         let cover = ui.covers.borrow().get(selected).cloned()?;
         let left = f64::from(
@@ -481,9 +475,10 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
         ui.ring.set_visible(false);
         return;
     }
-    // The ring marks the selection whether or not art has landed; only
-    // the pill needs something to point at.
+    ui.marquee.set_visible(true);
     ui.ring.set_visible(true);
+    ui.marquee
+        .set_position(center, viewport, content_top - BP_RING_OUTSET, false);
     let ring_scale = viewport / 1920.0;
     // The ring hugs what is visibly selected: the full capsule on a game
     // cover, the centered half-size circle on the All Software tile — a
@@ -496,13 +491,6 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
         ui.ring
             .place(center - w / 2.0, cover_top, w, capsule, ring_scale, false);
     }
-    if !has_art {
-        ui.marquee.set_visible(false);
-        return;
-    }
-    ui.marquee.set_visible(true);
-    ui.marquee
-        .set_position(center, viewport, content_top - BP_RING_OUTSET, false);
 }
 
 /// Smooth-scroll the selected tile to the viewport center; the adjustment's

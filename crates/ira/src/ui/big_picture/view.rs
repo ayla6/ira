@@ -243,7 +243,7 @@ pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
 }
 
 fn route(state: &SharedState, command: NavCommand) {
-    super::mouse::note_controller_use(state);
+    let mouse_drove = super::mouse::note_controller_use(state);
     // The virtual keyboard swallows navigation while it is open: arrows
     // walk the keys, Confirm types, B deletes, Options cancels.
     {
@@ -294,6 +294,17 @@ fn route(state: &SharedState, command: NavCommand) {
         let Some(big) = state.borrow().big_picture.clone() else {
             return;
         };
+        // First directional press while the pointer was still in charge:
+        // its focused tile yields entirely, and the arrows re-acquire
+        // from whatever is on screen (see `AllSoftwareUi::move_selection`).
+        if mouse_drove
+            && matches!(
+                command,
+                NavCommand::Left | NavCommand::Right | NavCommand::Up | NavCommand::Down
+            )
+        {
+            big.all.clear_selection();
+        }
         match command {
             NavCommand::Back => {
                 if !big.all.on_back(state) {

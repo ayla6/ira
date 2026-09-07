@@ -15,13 +15,15 @@ use std::rc::Rc;
 /// The gamepad or keyboard took over: hide the pointer until the mouse
 /// physically moves again. The window also wears `bp-cursor-hidden` for
 /// that stretch, so hover styling stops dressing whatever tile the parked
-/// pointer happens to rest on.
-pub(super) fn note_controller_use(state: &SharedState) {
+/// pointer happens to rest on. Returns true when this call did the
+/// hiding — the moment the mouse era ends, so the router can drop the
+/// pointer's tile focus.
+pub(super) fn note_controller_use(state: &SharedState) -> bool {
     let Some(big) = state.borrow().big_picture.clone() else {
-        return;
+        return false;
     };
     if big.cursor_hidden.get() {
-        return;
+        return false;
     }
     big.cursor_hidden.set(true);
     let window = state.borrow().window.clone();
@@ -29,6 +31,7 @@ pub(super) fn note_controller_use(state: &SharedState) {
     if let Some(cursor) = gdk4::Cursor::from_name("none", None) {
         window.set_cursor(Some(&cursor));
     }
+    true
 }
 
 /// Watch for mouse motion on the big picture root and bring the pointer

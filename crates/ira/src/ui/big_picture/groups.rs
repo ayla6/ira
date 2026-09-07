@@ -64,10 +64,11 @@ impl GroupsGrid {
     }
 
     /// Track the viewport: slots are square and sized like the game
-    /// grid's tiles (the window width split over the columns). Returns
-    /// true when the size moved and the tiles need a reload.
-    pub(super) fn ensure_sized(&self, state: &SharedState) -> bool {
-        let width = state.borrow().window.width();
+    /// grid's tiles (the flow's real allocation split over the columns —
+    /// a window-width read can disagree with the allocation and overflow).
+    /// Returns true when the size moved and the tiles need a reload.
+    pub(super) fn ensure_sized(&self) -> bool {
+        let width = self.flow.width();
         if width < 600 {
             return false;
         }
@@ -86,6 +87,7 @@ impl GroupsGrid {
     /// collages only consider games the library shows — hidden games are
     /// not advertised by a group tile.
     pub(super) fn reload(&self, state: &SharedState) {
+        self.ensure_sized();
         let (groups, db, show_hidden) = {
             let s = state.borrow();
             (s.groups.clone(), s.db.clone(), s.cfg.show_hidden_games)
@@ -172,13 +174,23 @@ impl GroupsGrid {
         let collage = gtk4::Grid::new();
         collage.set_row_homogeneous(true);
         collage.set_column_homogeneous(true);
+        // Rows keep their natural half-tile height: a stretched Grid
+        // (Box children fill by default) is what makes a 2-cover collage
+        // grow to the whole slot.
+        collage.set_valign(gtk4::Align::Start);
         for (i, game) in covers.iter().enumerate() {
             let pic = gtk4::Picture::new();
             pic.set_content_fit(gtk4::ContentFit::Cover);
-            // Each quadrant is pinned to half the slot: left to their
-            // natural sizes, the pictures would stretch the collage out
-            // of square.
+            // GTK sizes a Picture to its paintable's natural size unless
+            // it may shrink; the request pins each quadrant to half the
+            // slot and this lets the allocation actually land there —
+            // without it the quadrants blow up to 384px and, through the
+            // FlowBox's homogeneous cells, drag the whole grid past the
+            // viewport edge.
+            pic.set_can_shrink(true);
             pic.set_size_request(tile / 2, tile / 2);
+            pic.set_halign(gtk4::Align::Fill);
+            pic.set_valign(gtk4::Align::Fill);
             pic.add_css_class(CSS_GAME_COVER_PIC);
             let path = if game.square_path.is_empty() {
                 &game.grid_path

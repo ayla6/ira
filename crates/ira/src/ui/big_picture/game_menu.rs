@@ -20,6 +20,8 @@ pub(super) enum MenuKind {
     Sort,
     /// Pick the Groups tab's tile ordering.
     GroupOrder,
+    /// Ask before a group is deleted; carries its id and name.
+    ConfirmDelete { id: i64, name: String },
 }
 
 /// One actionable row of the open menu.
@@ -29,6 +31,8 @@ enum MenuRow {
     NewGroup,
     Sort(ira_models::SortMode),
     GroupOrder(ira_models::GroupOrder),
+    DeleteGroup { id: i64 },
+    Cancel,
 }
 
 pub(super) struct GameMenu {
@@ -167,6 +171,18 @@ impl GameMenu {
                 }
                 self.close();
             }
+            MenuRow::DeleteGroup { id } => {
+                if let Err(e) = ira_db::delete_group(&db, id) {
+                    eprintln!("Failed to delete group: {e}");
+                }
+                if let Some(big) = state.borrow().big_picture.clone() {
+                    big.all.group_deleted(state, id);
+                }
+                self.close();
+            }
+            MenuRow::Cancel => {
+                self.close();
+            }
         }
     }
 
@@ -237,6 +253,22 @@ impl GameMenu {
                     self.append_row(state, order.display_label(), index, *order == current);
                     rows.push(MenuRow::GroupOrder(*order));
                 }
+                *self.rows.borrow_mut() = rows;
+            }
+            MenuKind::ConfirmDelete { id, name } => {
+                let header = gtk4::Label::new(Some(&crate::tr!("Delete group")));
+                header.set_xalign(0.0);
+                header.add_css_class(CSS_BP_MENU_TITLE);
+                crate::ui::helpers::crisp_label(&header);
+                self.panel.append(&header);
+
+                let mut rows = Vec::new();
+                let index = rows.len();
+                self.append_row(state, &crate::tr!("Keep {}").replacen("{}", &name, 1), index, false);
+                rows.push(MenuRow::Cancel);
+                let index = rows.len();
+                self.append_row(state, &crate::tr!("Delete"), index, false);
+                rows.push(MenuRow::DeleteGroup { id });
                 *self.rows.borrow_mut() = rows;
             }
         }

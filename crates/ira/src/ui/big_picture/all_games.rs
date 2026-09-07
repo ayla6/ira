@@ -226,18 +226,21 @@ pub(super) fn build(
         adw::Toggle::builder()
             .name("recent")
             .label(crate::tr!("Recent"))
+            .icon_name("document-open-recent-symbolic")
             .build(),
     );
     tabs.add(
         adw::Toggle::builder()
             .name("everything")
             .label(crate::tr!("Everything"))
+            .icon_name("view-grid-symbolic")
             .build(),
     );
     tabs.add(
         adw::Toggle::builder()
             .name("groups")
             .label(crate::tr!("Groups"))
+            .icon_name("folder-symbolic")
             .build(),
     );
     tabs.add_css_class(CSS_BP_TABS);
@@ -323,9 +326,11 @@ pub(super) fn build(
     let groups = super::groups::GroupsGrid::build(state);
 
     // The three tab surfaces in one stack: the recent carousel, the game
-    // grid, and the groups tiles.
+    // grid, and the groups tiles. A quick directional slide, nothing
+    // showy.
     let surfaces = gtk4::Stack::new();
-    surfaces.set_transition_type(gtk4::StackTransitionType::None);
+    surfaces.set_transition_type(gtk4::StackTransitionType::SlideLeftRight);
+    surfaces.set_transition_duration(130);
     surfaces.set_vexpand(true);
     surfaces.add_titled(recent_page, Some("recent"), "recent");
     surfaces.add_named(&grid_overlay, Some("everything"));
@@ -545,19 +550,34 @@ impl AllSoftwareUi {
 
     /// Delete the group under the selection (the X button on the Groups
     /// tiles). Membership rows go with it; games stay.
+    /// The groups tab's X: ask before the group is gone for good.
     pub(super) fn groups_delete_selected(&self, state: &SharedState) {
         let Some(id) = self.groups_grid.selected_group_id(state) else {
             return;
         };
-        let db = state.borrow().db.clone();
-        if let Err(e) = ira_db::delete_group(&db, id) {
-            eprintln!("Failed to delete group: {e}");
-            return;
+        let name = state
+            .borrow()
+            .groups
+            .iter()
+            .find(|g| g.id == id)
+            .map(|g| g.name.clone())
+            .unwrap_or_default();
+        if let Some(big) = state.borrow().big_picture.clone() {
+            big.game_menu.open(
+                state,
+                super::game_menu::MenuKind::ConfirmDelete { id, name },
+            );
         }
+    }
+
+    /// A group was deleted: refresh the shared list and the tiles, and
+    /// land back on the groups tiles.
+    pub(super) fn group_deleted(&self, state: &SharedState, group_id: i64) {
         self.sync_groups(state);
-        if self.groups_view.get() == Some(id) {
+        if self.groups_view.get() == Some(group_id) {
             self.groups_view.set(None);
         }
+        self.groups_grid.reload(state);
         self.apply_mode(state);
     }
 
@@ -637,13 +657,17 @@ impl AllSoftwareUi {
             } else if tiles {
                 vec![
                     (ira_input::GamepadButton::X, crate::tr!("Delete Group")),
-                    (ira_input::GamepadButton::B, crate::tr!("Back")),
                     (ira_input::GamepadButton::Start, crate::tr!("Rename")),
                     (ira_input::GamepadButton::A, crate::tr!("OK")),
                 ]
-            } else {
+            } else if self.groups_view.get().is_some() {
                 vec![
                     (ira_input::GamepadButton::B, crate::tr!("Back")),
+                    (ira_input::GamepadButton::Start, crate::tr!("Options")),
+                    (ira_input::GamepadButton::A, crate::tr!("Play")),
+                ]
+            } else {
+                vec![
                     (ira_input::GamepadButton::Start, crate::tr!("Options")),
                     (ira_input::GamepadButton::A, crate::tr!("Play")),
                 ]
@@ -666,6 +690,11 @@ impl AllSoftwareUi {
 
     pub(super) fn refresh(&self, state: &SharedState) {
         if self.groups_grid.ensure_sized() {
+            self.groups_grid.reload(state);
+        }
+        // Keep the tiles current while they show: games hidden or art
+        // arriving changes what the collages advertise.
+        if self.in_groups_tiles() {
             self.groups_grid.reload(state);
         }
         let was_empty = self.games.borrow().is_empty();

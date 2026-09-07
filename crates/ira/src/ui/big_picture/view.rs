@@ -254,6 +254,7 @@ pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
             if let Some(big) = state.borrow().big_picture.clone() {
                 big.bottom.set_pad_status(status.count, status.family);
                 big.all.set_shoulder_family(status.family);
+                big.keyboard.set_pad_family(status.family);
             }
         }
     }
@@ -280,7 +281,7 @@ fn route(state: &SharedState, command: NavCommand) {
                 NavCommand::Right => big.keyboard.move_cursor(1, 0),
                 NavCommand::Confirm => big.keyboard.press_selected(state),
                 NavCommand::Back => big.keyboard.backspace(),
-                NavCommand::Options => big.keyboard.close(state),
+                NavCommand::Secondary | NavCommand::Options => big.keyboard.close(state),
                 _ => {}
             }
             return;
@@ -310,9 +311,15 @@ fn route(state: &SharedState, command: NavCommand) {
     let Some(big) = state.borrow().big_picture.clone() else {
         return;
     };
+    // The shoulders change tabs from every tab, Recent included.
+    match command {
+        NavCommand::PrevTab => big.all.switch_tab(state, -1),
+        NavCommand::NextTab => big.all.switch_tab(state, 1),
+        _ => {}
+    }
     if big.all.tab() == Tab::Recent {
         // The recent carousel: left/right walk the covers, A plays, and
-        // the grid tile at the end jumps to the Everything tab.
+        // the arrow tile at the end jumps to the Everything tab.
         match command {
             NavCommand::Left => super::home::move_selection(state, -1),
             NavCommand::Right => super::home::move_selection(state, 1),
@@ -346,9 +353,9 @@ fn route(state: &SharedState, command: NavCommand) {
     }
     match command {
         NavCommand::Back => {
-            if !big.all.on_back(state) {
-                quit_app(state);
-            }
+            // Only a group's game view has somewhere to go back to; the
+            // root tabs show no back affordance at all.
+            big.all.on_back(state);
         }
         NavCommand::PrevTab => big.all.switch_tab(state, -1),
         NavCommand::NextTab => big.all.switch_tab(state, 1),
@@ -458,7 +465,11 @@ fn finish_group_change(state: &SharedState, group_id: i64) {
     let db = state.borrow().db.clone();
     let groups = ira_db::get_all_groups(&db).unwrap_or_default();
     state.borrow_mut().groups = groups;
-    if let Some(big) = state.borrow().big_picture.clone() {
+    // Clone out of the borrow: sync_and_focus_group mutably borrows the
+    // state to store the refreshed list, and an if-let keeps its
+    // scrutinee borrow for the whole block.
+    let big = state.borrow().big_picture.clone();
+    if let Some(big) = big {
         big.all.sync_and_focus_group(state, group_id);
     }
 }

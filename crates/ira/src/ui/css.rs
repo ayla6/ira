@@ -31,6 +31,7 @@ pub const CSS_BP_GROUP_SLOT: &str = "bp-group-slot";
 pub const CSS_BP_KEY: &str = "bp-key";
 pub const CSS_BP_KEY_SELECTED: &str = "bp-key-selected";
 pub const CSS_BP_KEY_ACTIVE: &str = "bp-key-active";
+pub const CSS_BP_KEY_BADGE: &str = "bp-key-badge";
 pub const CSS_BP_KEY_PREVIEW: &str = "bp-key-preview";
 /// The selection ring reaches this far past a tile's edge (4px gap plus
 /// the 4px frame), and the tooltip's tail tip rests 3px beyond the
@@ -472,6 +473,13 @@ fn big_picture_css(s: f64) -> String {
 .bp-key-active label {{
     color: @accent_color;
 }}
+.bp-key-badge {{
+    min-width: {badge};
+    min-height: {badge};
+    border-radius: 9999px;
+    background: alpha(black, 0.55);
+    font-size: {key_font};
+}}
 .bp-key-preview {{
     font-size: {page_title};
     padding: {group_row_pad};
@@ -492,6 +500,7 @@ fn big_picture_css(s: f64) -> String {
         min_h = px(72),
         key = px(32),
         key_font = px(16),
+        badge = px(22),
         title = px(28),
         page_title = px(30),
         subtitle = px(22),

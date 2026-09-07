@@ -20,6 +20,7 @@ pub(super) enum Key {
     Backspace,
     Return,
     Ok,
+    Cancel,
 }
 
 /// Which key table is showing.
@@ -52,7 +53,7 @@ const LETTER_ROWS: &[&[Key]] = &[
         Key::Char('n'), Key::Char('m'), Key::Char('<'), Key::Char('>'), Key::Char('+'),
         Key::Char('='), Key::Ok,
     ],
-    &[Key::Shift, Key::Page, Key::Space, Key::Ok],
+    &[Key::Shift, Key::Page, Key::Space, Key::Cancel, Key::Ok],
 ];
 
 /// The symbol page: digits and punctuation, same shape as the letter page.
@@ -77,7 +78,7 @@ const SYMBOL_ROWS: &[&[Key]] = &[
         Key::Char('|'), Key::Char('\\'), Key::Char('{'), Key::Char('}'), Key::Char('['),
         Key::Char(']'), Key::Ok,
     ],
-    &[Key::Shift, Key::Page, Key::Space, Key::Ok],
+    &[Key::Shift, Key::Page, Key::Space, Key::Cancel, Key::Ok],
 ];
 
 /// What to do with the finished name.
@@ -98,6 +99,8 @@ pub(super) struct Keyboard {
     /// The prompt line the panel was opened with, kept for page/shift
     /// rebuilds.
     prompt: RefCell<String>,
+    /// The connected pad's family, for the badge and hint glyphs.
+    family: Cell<ira_input::ControllerFamily>,
     buffer: RefCell<String>,
     on_ok: RefCell<Option<NameCallback>>,
 }
@@ -139,6 +142,7 @@ impl Keyboard {
             shift: Cell::new(false),
             keys: RefCell::new(Vec::new()),
             prompt: RefCell::new(String::new()),
+            family: Cell::new(ira_input::ControllerFamily::Xbox),
             buffer: RefCell::new(String::new()),
             on_ok: RefCell::new(None),
         }
@@ -164,6 +168,10 @@ impl Keyboard {
         *self.buffer.borrow_mut() = initial.to_string();
         *self.prompt.borrow_mut() = prompt.to_string();
         *self.on_ok.borrow_mut() = Some(on_ok);
+        // The keyboard takes over the screen: the panel spans most of the
+        // window so the keys and the hint row read at TV distance.
+        let width = (state.borrow().window.width() as f64 * 0.82).round() as i32;
+        self.panel.set_size_request(width.max(880), -1);
         self.cursor.set((1, 0));
         self.rebuild(state, prompt);
         self.refresh_preview();
@@ -215,6 +223,18 @@ impl Keyboard {
             Key::Backspace => "⌫".to_string(),
             Key::Return => crate::tr!("Return"),
             Key::Ok => crate::tr!("OK"),
+            Key::Cancel => crate::tr!("Cancel"),
+        }
+    }
+
+    /// The pad button wired to an action key, shown as a badge on the key
+    /// itself like the Switch keyboard does.
+    fn badge(key: Key) -> Option<ira_input::GamepadButton> {
+        match key {
+            Key::Backspace => Some(ira_input::GamepadButton::B),
+            Key::Cancel => Some(ira_input::GamepadButton::X),
+            Key::Ok => Some(ira_input::GamepadButton::A),
+            _ => None,
         }
     }
 
@@ -226,7 +246,8 @@ impl Keyboard {
         match key {
             Key::Shift => Some((0, 4, 1, 1)),
             Key::Page => Some((1, 4, 1, 1)),
-            Key::Space => Some((2, 4, 9, 1)),
+            Key::Space => Some((2, 4, 8, 1)),
+            Key::Cancel => Some((10, 4, 1, 1)),
             Key::Ok if row == 4 => None,
             Key::Ok => Some((11, 3, 1, 2)),
             Key::Return => match row {
@@ -260,6 +281,36 @@ impl Keyboard {
         label.set_valign(gtk4::Align::Center);
         crate::ui::helpers::crisp_label(&label);
         button.append(&label);
+        // Action keys wear their pad button in the corner, Switch-style.
+        if let Some(badge) = Self::badge(key) {
+            let badge_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+            badge_box.set_valign(gtk4::Align::Start);
+            badge_box.set_halign(gtk4::Align::End);
+            badge_box.set_margin_top(4);
+            badge_box.set_margin_end(4);
+            let glyph = gtk4::Image::new();
+            glyph.set_pixel_size(24);
+            glyph.set_halign(gtk4::Align::Center);
+            glyph.set_valign(gtk4::Align::Center);
+            let fallback = gtk4::Label::new(Some(
+                &crate::ui::input_profile_assets::source_badge(
+                    ira_input::InputSource::Button(badge),
+                    self.family.get(),
+                ),
+            ));
+            fallback.add_css_class(CSS_BP_KEY_BADGE);
+            fallback.set_halign(gtk4::Align::Center);
+            fallback.set_valign(gtk4::Align::Center);
+            badge_box.append(&glyph);
+            badge_box.append(&fallback);
+            crate::ui::input_profile_assets::set_source_asset(
+                &glyph,
+                &fallback,
+                ira_input::InputSource::Button(badge),
+                self.family.get(),
+            );
+            button.append(&badge_box);
+        }
         button.set_size_request(80, 72);
         let click_state = state.clone();
         let click = gtk4::GestureClick::new();
@@ -308,6 +359,52 @@ impl Keyboard {
         }
         *self.keys.borrow_mut() = map;
         self.panel.append(&grid);
+
+        // The shortcut row, Switch-style: every action with its pad
+        // button beside it, in the pad's own colors.
+        let hints = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
+        hints.set_halign(gtk4::Align::Center);
+        hints.set_margin_top(8);
+        let family = self.family.get();
+        for (button, label) in [
+            (ira_input::GamepadButton::A, crate::tr!("Select")),
+            (ira_input::GamepadButton::B, crate::tr!("Delete")),
+            (ira_input::GamepadButton::X, crate::tr!("Cancel")),
+        ] {
+            let label = label.as_str();
+            let item = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+            let glyph = gtk4::Image::new();
+            glyph.set_pixel_size(28);
+            let fallback = gtk4::Label::new(Some(
+                &crate::ui::input_profile_assets::source_badge(
+                    ira_input::InputSource::Button(button),
+                    family,
+                ),
+            ));
+            fallback.add_css_class(CSS_BP_KEY_BADGE);
+            fallback.set_halign(gtk4::Align::Center);
+            fallback.set_valign(gtk4::Align::Center);
+            crate::ui::helpers::crisp_label(&fallback);
+            item.append(&glyph);
+            item.append(&fallback);
+            crate::ui::input_profile_assets::set_source_asset(
+                &glyph,
+                &fallback,
+                ira_input::InputSource::Button(button),
+                family,
+            );
+            let text = gtk4::Label::new(Some(label));
+            text.add_css_class(CSS_BP_PROMPT);
+            crate::ui::helpers::crisp_label(&text);
+            item.append(&text);
+            hints.append(&item);
+        }
+        self.panel.append(&hints);
+    }
+
+    /// The connected pad's family changed; the next open draws its glyphs.
+    pub(super) fn set_pad_family(&self, family: ira_input::ControllerFamily) {
+        self.family.set(family);
     }
 
     /// Move the key cursor, clamping each row to its own length.
@@ -342,6 +439,10 @@ impl Keyboard {
             Key::Backspace => {
                 self.buffer.borrow_mut().pop();
             }
+            Key::Cancel => {
+                self.close(state);
+                return;
+            }
             Key::Page => {
                 self.page
                     .set(match self.page.get() {
@@ -369,6 +470,11 @@ impl Keyboard {
             }
             Key::Return | Key::Ok => {
                 let text = self.buffer.borrow().trim().to_string();
+                // An unnamed group helps nobody: refuse to commit and let
+                // the name keep being typed.
+                if text.is_empty() {
+                    return;
+                }
                 let callback = self.on_ok.borrow_mut().take();
                 self.close(state);
                 if let Some(callback) = callback {

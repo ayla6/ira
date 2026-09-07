@@ -410,7 +410,7 @@ fn sync_title_text(ui: &HomeUi) {
     let game = ui.games.borrow().get(selected).cloned();
     let title = match game {
         Some(game) => game.name,
-        None => crate::tr!("All Software"),
+        None => crate::tr!("Everything"),
     };
     ui.marquee.set_text(&title);
 }
@@ -547,7 +547,7 @@ fn build_all_tile(state: &SharedState, capsule: i32) -> gtk4::Widget {
     circle.set_size_request(capsule / 2, capsule / 2);
     circle.set_halign(gtk4::Align::Center);
     circle.set_valign(gtk4::Align::Center);
-    let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
+    let icon = gtk4::Image::from_icon_name("go-next-symbolic");
     icon.set_pixel_size(56);
     icon.set_opacity(0.7);
     icon.set_vexpand(true);

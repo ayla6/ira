@@ -132,9 +132,7 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
     stack.set_transition_duration(150);
     let (home_page, home) = super::home::build(state, square_mode);
-    // The status rail rides the All Software header on this page instead
-    // of a rail of its own — the two lines merged into one.
-    let (all_page, all) = super::all_games::build(state, &status);
+    let (all_page, all) = super::all_games::build(state);
     stack.add_named(&home_page, Some("home"));
     stack.add_named(&all_page, Some("all"));
     root.append(&stack);
@@ -146,6 +144,16 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
     root.set_hexpand(true);
     root.set_valign(gtk4::Align::Fill);
     overlay.add_overlay(&root);
+
+    // The status rail floats over the top-right on every page: on All
+    // Software it shares the header's line (that side stays empty), on
+    // home it hangs over the carousel. It must be under the menus, so it
+    // is added before them.
+    let status_widget = status.widget();
+    status_widget.set_halign(gtk4::Align::End);
+    status_widget.set_valign(gtk4::Align::Start);
+    overlay.add_overlay(status_widget);
+    overlay.set_measure_overlay(status_widget, false);
 
     let game_menu = super::game_menu::GameMenu::new(state);
     overlay.add_overlay(game_menu.root());

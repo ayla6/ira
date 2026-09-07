@@ -169,10 +169,10 @@ pub(super) struct AllSoftwareUi {
     /// the grid holds (`None` = the groups tile grid itself).
     tab: Cell<Tab>,
     groups_view: Cell<Option<i64>>,
-    groups_grid: super::groups::GroupsGrid,
+    pub(super) groups_grid: super::groups::GroupsGrid,
 }
 
-pub(super) fn build(state: &SharedState, status: &super::status::StatusBar) -> (gtk4::Box, AllSoftwareUi) {
+pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     page.add_css_class(CSS_BP_ALL_PAGE);
 
@@ -181,9 +181,9 @@ pub(super) fn build(state: &SharedState, status: &super::status::StatusBar) -> (
     header.set_margin_bottom(6);
     header.set_margin_start(28);
     header.set_margin_end(28);
-    // One header line: the ordering and its button on the left, the
-    // Software/Groups tabs centered between the expanding spacers, and
-    // the shell's status cluster (clock, battery) docked right.
+    // The ordering and its button live on the left; the tabs center
+    // between the expanding spacers (the status rail floats above the
+    // empty right side — see `view::build_root`).
     let ordering = gtk4::Label::new(None);
     ordering.set_valign(gtk4::Align::Center);
     ordering.add_css_class(CSS_BP_PAGE_SUBTITLE);
@@ -227,10 +227,6 @@ pub(super) fn build(state: &SharedState, status: &super::status::StatusBar) -> (
     let trail = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     trail.set_hexpand(true);
     header.append(&trail);
-    // The shell's status rail lives here while this page shows (see
-    // `view::build_root`); drop its rail padding so it sits inline.
-    status.widget().add_css_class(CSS_BP_STATUS_INLINE);
-    header.append(status.widget());
     {
         let tab_state = state.clone();
         software_tab.set_cursor_from_name(Some("pointer"));

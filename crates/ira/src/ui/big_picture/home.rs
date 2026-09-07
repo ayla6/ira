@@ -453,13 +453,11 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
     // page's own width — final here, unlike the floating marquee's,
     // which lags one allocation pass behind (and starts at zero).
     let viewport = ui.page.width() as f64;
-    // The pill points at icons, like the All Software grid does; a cover
-    // without art shows its name anyway, so the floats track regardless.
-    // They only hide while the selection sits outside the scrolled
-    // viewport (ring outset included): a cover sliding off the edge must
-    // not leave a detached pill behind, and the cover keeps its own
-    // selected style meanwhile.
-    let fully_visible = (|| {
+    // Any overlap keeps the floats: the camera clamps at the row's ends,
+    // so the selected cover — the All Software tile above all — can rest
+    // partway off the edge. Demanding full visibility there left the
+    // selection markerless exactly when it was picked.
+    let visible = (|| {
         let cover = ui.covers.borrow().get(selected).cloned()?;
         let left = f64::from(
             cover
@@ -468,12 +466,10 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
         );
         let view = ui.scrolled.width() as f64
             - f64::from(ui.scrolled.margin_start() + ui.scrolled.margin_end());
-        Some(
-            left - BP_RING_OUTSET >= 0.0 && left + cover.width() as f64 + BP_RING_OUTSET <= view,
-        )
+        Some(left + cover.width() as f64 > 0.0 && left < view)
     })()
     .unwrap_or(false);
-    if !fully_visible {
+    if !visible {
         ui.marquee.set_visible(false);
         ui.ring.set_visible(false);
         return;

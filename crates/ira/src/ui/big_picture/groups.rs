@@ -52,6 +52,19 @@ impl GroupsGrid {
         scrolled.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
         scrolled.set_vexpand(true);
         scrolled.set_child(Some(&flow));
+        // First allocation lands here: size the tiles from the flow's real
+        // width and rebuild. Without this, a first open shows the fallback
+        // 200px slots floating in oversized cells.
+        {
+            let size_state = state.clone();
+            scrolled.vadjustment().connect_changed(move |_| {
+                if let Some(big) = size_state.borrow().big_picture.clone() {
+                    if big.all.groups_grid.ensure_sized() {
+                        big.all.groups_grid.reload(&size_state);
+                    }
+                }
+            });
+        }
         let grid = Self {
             scrolled,
             flow,
@@ -181,43 +194,50 @@ impl GroupsGrid {
         let collage = gtk4::Grid::new();
         collage.set_row_homogeneous(true);
         collage.set_column_homogeneous(true);
-        // The collage fills the whole slot and splits it evenly, so a
-        // 2-cover group is two full-height halves — the tile reads square
-        // however many covers it has.
-        for (i, game) in covers.iter().enumerate() {
-            let pic = gtk4::Picture::new();
-            pic.set_content_fit(gtk4::ContentFit::Cover);
-            // GTK sizes a Picture to its paintable's natural size unless
-            // it may shrink; without this the quadrants blow up to 384px
-            // and, through the FlowBox's homogeneous cells, drag the
-            // whole grid past the viewport edge.
-            pic.set_can_shrink(true);
-            pic.set_halign(gtk4::Align::Fill);
-            pic.set_valign(gtk4::Align::Fill);
-            pic.add_css_class(CSS_GAME_COVER_PIC);
-            let path = if game.square_path.is_empty() {
-                &game.grid_path
-            } else {
-                &game.square_path
-            };
-            if !path.is_empty() {
-                if let Some(texture) = ira_images::cached_texture(path) {
-                    pic.set_paintable(Some(&texture));
-                } else {
-                    let pic_weak = pic.downgrade();
-                    let path_owned = path.clone();
-                    ira_images::load_texture_async_with_priority(
-                        &path_owned,
-                        glib::Priority::DEFAULT,
-                        move |texture| {
-                            if let (Some(pic), Some(t)) = (pic_weak.upgrade(), texture) {
-                                pic.set_paintable(Some(&t));
-                            }
-                        },
-                    );
+        // Always a 2x2: the group's covers take the first cells and the
+        // missing ones stay invisible, so a 2-cover group is two quarters
+        // in the top row — never two stretched halves.
+        for i in 0..4 {
+            let cell = match covers.get(i) {
+                Some(game) => {
+                    let pic = gtk4::Picture::new();
+                    pic.set_content_fit(gtk4::ContentFit::Cover);
+                    // GTK sizes a Picture to its paintable's natural size
+                    // unless it may shrink; without this the quadrants
+                    // blow up to 384px and, through the FlowBox's
+                    // homogeneous cells, drag the whole grid past the
+                    // viewport edge.
+                    pic.set_can_shrink(true);
+                    pic.set_halign(gtk4::Align::Fill);
+                    pic.set_valign(gtk4::Align::Fill);
+                    pic.add_css_class(CSS_GAME_COVER_PIC);
+                    let path = if game.square_path.is_empty() {
+                        &game.grid_path
+                    } else {
+                        &game.square_path
+                    };
+                    if !path.is_empty() {
+                        if let Some(texture) = ira_images::cached_texture(path) {
+                            pic.set_paintable(Some(&texture));
+                        } else {
+                            let pic_weak = pic.downgrade();
+                            let path_owned = path.clone();
+                            ira_images::load_texture_async_with_priority(
+                                &path_owned,
+                                glib::Priority::DEFAULT,
+                                move |texture| {
+                                    if let (Some(pic), Some(t)) = (pic_weak.upgrade(), texture) {
+                                        pic.set_paintable(Some(&t));
+                                    }
+                                },
+                            );
+                        }
+                    }
+                    pic.upcast::<gtk4::Widget>()
                 }
-            }
-            collage.attach(&pic, (i % 2) as i32, (i / 2) as i32, 1, 1);
+                None => gtk4::Box::new(gtk4::Orientation::Horizontal, 0).upcast::<gtk4::Widget>(),
+            };
+            collage.attach(&cell, (i % 2) as i32, (i / 2) as i32, 1, 1);
         }
         slot.append(&collage);
     }

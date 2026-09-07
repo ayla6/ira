@@ -4,7 +4,6 @@ pub const CSS_BP_ROOT: &str = "bp-root";
 pub const CSS_BP_TITLE: &str = "bp-title";
 pub const CSS_BP_SELECTED: &str = "bp-selected";
 pub const CSS_BP_STATUS: &str = "bp-status";
-pub const CSS_BP_STATUS_INLINE: &str = "bp-status-inline";
 pub const CSS_BP_CLOCK: &str = "bp-clock";
 pub const CSS_BP_DATE: &str = "bp-date";
 pub const CSS_BP_BATT: &str = "bp-batt";
@@ -455,10 +454,6 @@ fn big_picture_css(s: f64) -> String {
 .bp-cursor-hidden button:hover {{
     background: none;
     box-shadow: none;
-}}
-.bp-status-inline {{
-    padding: 0;
-    min-height: 0;
 }}
 .bp-shoulder {{
     padding: 2px 10px;

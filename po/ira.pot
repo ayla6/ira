@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-07 01:09-0300\n"
+"POT-Creation-Date: 2026-09-07 16:25-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -16,6 +16,57 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+
+#: crates/overlay/src/ui/renderer.rs:506
+#: crates/overlay/src/ui/model.rs:106
+msgid "Ira Overlay"
+msgstr ""
+
+#: crates/overlay/src/ui/renderer.rs:513
+#: crates/overlay/src/ui/model.rs:205
+#: crates/ira/src/ui/settings_pages.rs:892
+msgid "Screenshot"
+msgstr ""
+
+#: crates/overlay/src/ui/renderer.rs:516
+#: crates/overlay/src/ui/model.rs:208
+msgid "Record"
+msgstr ""
+
+#: crates/overlay/src/ui/renderer.rs:522
+msgid "Shift+Tab / Guide to toggle"
+msgstr ""
+
+#: crates/overlay/src/ui/renderer.rs:527
+msgid "F12 screenshot | F11 record"
+msgstr ""
+
+#: crates/overlay/src/ui/model.rs:123
+#, rust-format
+msgid "{}/{} ({}%)"
+msgstr ""
+
+#: crates/overlay/src/ui/model.rs:128
+msgid "No achievements"
+msgstr ""
+
+#: crates/overlay/src/ui/model.rs:140
+#, rust-format
+msgid "Playtime: {:.1}h"
+msgstr ""
+
+#: crates/overlay/src/ui/model.rs:142
+#, rust-format
+msgid "Playtime: {}m"
+msgstr ""
+
+#: crates/overlay/src/ui/model.rs:168
+msgid "Hidden achievement"
+msgstr ""
+
+#: crates/overlay/src/ui/model.rs:216
+msgid "Shift+Tab to toggle | Scroll to browse"
+msgstr ""
 
 #: crates/ira/src/game_list.rs:273
 #: crates/ira/src/ui/message_helpers.rs:205
@@ -115,6 +166,11 @@ msgstr ""
 #: crates/ira/src/game_loader.rs:484
 #, rust-format
 msgid "{} - {}"
+msgstr ""
+
+#: crates/overlay/src/ui/widgets/stepper.rs:68
+#, rust-format
+msgid "< {} >"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_region_pages.rs:140
@@ -882,6 +938,7 @@ msgid "Enter"
 msgstr ""
 
 #: crates/ira/src/ui/input_output_keys.rs:127
+#: crates/ira/src/ui/big_picture/keyboard.rs:196
 msgid "Shift"
 msgstr ""
 
@@ -899,7 +956,7 @@ msgstr ""
 
 #: crates/ira/src/ui/input_output_keys.rs:131
 #: crates/ira/src/ui/input_output_keys.rs:172
-#: crates/ira/src/ui/big_picture/keyboard.rs:133
+#: crates/ira/src/ui/big_picture/keyboard.rs:201
 msgid "Space"
 msgstr ""
 
@@ -1084,9 +1141,8 @@ msgstr ""
 #: crates/ira/src/ui/helpers.rs:472
 #: crates/ira/src/ui/helpers.rs:806
 #: crates/ira/src/ui/settings_pages.rs:500
-#: crates/ira/src/ui/big_picture/keyboard.rs:136
 #: crates/ira/src/ui/settings_dialog.rs:249
-#: crates/ira/src/ui/fetch_images.rs:504
+#: crates/ira/src/ui/fetch_images.rs:511
 #: crates/ira/src/ui/input_profile_editor.rs:395
 #: crates/ira/src/ui/add_game.rs:22
 #: crates/ira/src/ui/group_dialog.rs:20
@@ -1275,8 +1331,8 @@ msgid "Search games…"
 msgstr ""
 
 #: crates/ira/src/ui/window.rs:208
-#: crates/ira/src/ui/big_picture/all_games.rs:210
-#: crates/ira/src/ui/big_picture/game_menu.rs:192
+#: crates/ira/src/ui/big_picture/all_games.rs:199
+#: crates/ira/src/ui/big_picture/game_menu.rs:198
 #: crates/ira/src/ui/input_profile_search_filters.rs:100
 msgid "Sort by"
 msgstr ""
@@ -1799,12 +1855,6 @@ msgstr ""
 msgid "Toggle overlay"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:892
-#: crates/overlay/src/ui/renderer.rs:513
-#: crates/overlay/src/ui/model.rs:205
-msgid "Screenshot"
-msgstr ""
-
 #: crates/ira/src/ui/settings_pages.rs:900
 msgid "Toggle recording"
 msgstr ""
@@ -1950,8 +2000,8 @@ msgid "Couldn't add game"
 msgstr ""
 
 #: crates/ira/src/ui/message_handler.rs:113
-#: crates/ira/src/ui/big_picture/all_games.rs:512
-#: crates/ira/src/ui/big_picture/keyboard.rs:135
+#: crates/ira/src/ui/big_picture/all_games.rs:574
+#: crates/ira/src/ui/big_picture/keyboard.rs:204
 #: crates/ira/src/ui/auto_add_dialog.rs:1697
 #: crates/ira/src/ui/mass_match_dialog.rs:340
 msgid "OK"
@@ -2007,9 +2057,9 @@ msgid "Add to new collection…"
 msgstr ""
 
 #: crates/ira/src/ui/context_menu.rs:82
-#: crates/ira/src/ui/big_picture/all_games.rs:518
-#: crates/ira/src/ui/big_picture/view.rs:142
-#: crates/ira/src/ui/big_picture/view.rs:402
+#: crates/ira/src/ui/big_picture/all_games.rs:580
+#: crates/ira/src/ui/big_picture/view.rs:141
+#: crates/ira/src/ui/big_picture/view.rs:447
 #: crates/ira/src/ui/play_button.rs:28
 #: crates/ira/src/ui/play_button.rs:48
 msgid "Play"
@@ -2105,64 +2155,71 @@ msgstr ""
 msgid "Reset image"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:143
-#: crates/ira/src/ui/big_picture/all_games.rs:510
-#: crates/ira/src/ui/big_picture/all_games.rs:516
-msgid "Back"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture/all_games.rs:158
+#: crates/ira/src/ui/big_picture/all_games.rs:221
 msgid "Software"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:159
+#: crates/ira/src/ui/big_picture/all_games.rs:222
 msgid "Groups"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:280
+#: crates/ira/src/ui/big_picture/all_games.rs:311
 msgid "No games yet"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:509
+#: crates/ira/src/ui/big_picture/all_games.rs:571
 msgid "Delete Group"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:511
+#: crates/ira/src/ui/big_picture/all_games.rs:572
+#: crates/ira/src/ui/big_picture/all_games.rs:578
+msgid "Back"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/all_games.rs:573
 #: crates/ira/src/ui/group_dialog.rs:68
 #: crates/ira/src/ui/sidebar.rs:426
 msgid "Rename"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:517
+#: crates/ira/src/ui/big_picture/all_games.rs:579
 msgid "Options"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/keyboard.rs:134
-msgid "Del"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture/keyboard.rs:230
-msgid "Type a name…"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture/groups.rs:94
-msgid "New Group"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture/game_menu.rs:186
-msgid "New Group…"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture/view.rs:426
+#: crates/ira/src/ui/big_picture/view.rs:471
 msgid "Name the group"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/view.rs:450
+#: crates/ira/src/ui/big_picture/view.rs:495
 msgid "Rename the group"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/home.rs:407
+#: crates/ira/src/ui/big_picture/keyboard.rs:198
+msgid "#+="
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/keyboard.rs:199
+msgid "ABC"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/keyboard.rs:203
+msgid "Return"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/keyboard.rs:386
+msgid "Type a name…"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/groups.rs:184
+msgid "New Group"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/home.rs:410
 msgid "All Software"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/game_menu.rs:192
+msgid "New Group…"
 msgstr ""
 
 #: crates/ira/src/ui/big_picture/status.rs:184
@@ -2478,16 +2535,16 @@ msgstr ""
 msgid "Fetching missing images…"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:385
+#: crates/ira/src/ui/fetch_images.rs:392
 #, rust-format
 msgid "{} games needed new art"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:390
+#: crates/ira/src/ui/fetch_images.rs:397
 msgid "Images fetched"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:561
+#: crates/ira/src/ui/fetch_images.rs:568
 msgid "Cancelled"
 msgstr ""
 
@@ -5632,54 +5689,4 @@ msgstr ""
 #: crates/ira/src/ui/add_game_method.rs:62
 msgid ""
 "Run installer files (exe, sh, GOG) and let Ira detect the installed game"
-msgstr ""
-
-#: crates/overlay/src/ui/renderer.rs:506
-#: crates/overlay/src/ui/model.rs:106
-msgid "Ira Overlay"
-msgstr ""
-
-#: crates/overlay/src/ui/renderer.rs:516
-#: crates/overlay/src/ui/model.rs:208
-msgid "Record"
-msgstr ""
-
-#: crates/overlay/src/ui/renderer.rs:522
-msgid "Shift+Tab / Guide to toggle"
-msgstr ""
-
-#: crates/overlay/src/ui/renderer.rs:527
-msgid "F12 screenshot | F11 record"
-msgstr ""
-
-#: crates/overlay/src/ui/model.rs:123
-#, rust-format
-msgid "{}/{} ({}%)"
-msgstr ""
-
-#: crates/overlay/src/ui/model.rs:128
-msgid "No achievements"
-msgstr ""
-
-#: crates/overlay/src/ui/model.rs:140
-#, rust-format
-msgid "Playtime: {:.1}h"
-msgstr ""
-
-#: crates/overlay/src/ui/model.rs:142
-#, rust-format
-msgid "Playtime: {}m"
-msgstr ""
-
-#: crates/overlay/src/ui/model.rs:168
-msgid "Hidden achievement"
-msgstr ""
-
-#: crates/overlay/src/ui/model.rs:216
-msgid "Shift+Tab to toggle | Scroll to browse"
-msgstr ""
-
-#: crates/overlay/src/ui/widgets/stepper.rs:68
-#, rust-format
-msgid "< {} >"
 msgstr ""

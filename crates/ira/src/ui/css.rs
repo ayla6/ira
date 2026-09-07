@@ -17,8 +17,7 @@ pub const CSS_BP_ALL_TILE: &str = "bp-all-tile";
 pub const CSS_BP_ALL_PAGE: &str = "bp-all-page";
 pub const CSS_BP_PAGE_TITLE: &str = "bp-page-title";
 pub const CSS_BP_PAGE_SUBTITLE: &str = "bp-page-subtitle";
-pub const CSS_BP_TAB: &str = "bp-tab";
-pub const CSS_BP_TAB_ACTIVE: &str = "bp-tab-active";
+pub const CSS_BP_TABS_PILL: &str = "bp-tabs-pill";
 pub const CSS_BP_MENU_DIM: &str = "bp-menu-dim";
 pub const CSS_BP_MENU_PANEL: &str = "bp-menu-panel";
 pub const CSS_BP_OPTION_PANEL: &str = "bp-option-panel";
@@ -29,9 +28,9 @@ pub const CSS_BP_MENU_ROW_ACTIVE: &str = "bp-menu-row-active";
 pub const CSS_BP_SHOULDER: &str = "bp-shoulder";
 pub const CSS_BP_CURSOR_HIDDEN: &str = "bp-cursor-hidden";
 pub const CSS_BP_GROUP_SLOT: &str = "bp-group-slot";
-pub const CSS_BP_GROUP_TILE_SELECTED: &str = "bp-group-tile-selected";
 pub const CSS_BP_KEY: &str = "bp-key";
 pub const CSS_BP_KEY_SELECTED: &str = "bp-key-selected";
+pub const CSS_BP_KEY_ACTIVE: &str = "bp-key-active";
 pub const CSS_BP_KEY_PREVIEW: &str = "bp-key-preview";
 /// The selection ring reaches this far past a tile's edge (4px gap plus
 /// the 4px frame), and the tooltip's tail tip rests 3px beyond the
@@ -337,7 +336,6 @@ gridview.game-grid child:focus-within {
 .bp-all-tile {
     border-radius: 9999px;
     background: alpha(@theme_fg_color, 0.08);
-    border: 1px solid alpha(@theme_fg_color, 0.12);
 }
 .cover-item.bp-all:hover .bp-all-tile {
     background: alpha(@theme_fg_color, 0.13);
@@ -373,8 +371,8 @@ fn big_picture_css(s: f64) -> String {
     let status_pad_x = px(24);
     format!(
         r#".bp-status {{ padding: {status_pad_top} {status_pad_x} {status_pad_bottom} {status_pad_x}; min-height: {status_min_h}; }}
-.bp-clock {{ font-size: {clock}; padding: 2px 0; }}
-.bp-date, .bp-batt, .bp-prompt {{ font-size: {small}; padding: 2px 0; }}
+.bp-clock {{ font-size: {small}; padding: 2px 0; }}
+.bp-date, .bp-batt, .bp-clock, .bp-prompt {{ font-size: {small}; padding: 2px 0; }}
 .bp-bottom {{
     padding: {pad_v} {pad_h};
     min-height: {min_h};
@@ -399,14 +397,13 @@ fn big_picture_css(s: f64) -> String {
     font-size: {subtitle};
     color: alpha(@theme_fg_color, 0.55);
 }}
-.bp-tab {{
-    font-size: {subtitle};
-    color: alpha(@theme_fg_color, 0.55);
-    padding: 2px 18px 8px;
+.bp-tabs-pill {{
+    background: alpha(white, 0.05);
+    border-radius: 9999px;
+    padding: 4px 8px;
 }}
-.bp-tab-active {{
-    color: @theme_fg_color;
-    border-bottom: 4px solid @accent_color;
+.bp-tabs-pill label {{
+    font-size: {subtitle};
 }}
 .bp-menu-dim {{
     background: alpha(black, 0.6);
@@ -463,11 +460,6 @@ fn big_picture_css(s: f64) -> String {
 }}
 .bp-group-slot {{
     background: alpha(white, 0.06);
-    border-radius: 10px;
-}}
-.bp-group-tile-selected {{
-    outline: 4px solid @accent_color;
-    outline-offset: -2px;
 }}
 .bp-key {{
     background: alpha(white, 0.08);
@@ -475,6 +467,9 @@ fn big_picture_css(s: f64) -> String {
 }}
 .bp-key-selected {{
     background: alpha(@accent_color, 0.45);
+}}
+.bp-key-active label {{
+    color: @accent_color;
 }}
 .bp-key-preview {{
     font-size: {page_title};
@@ -490,7 +485,6 @@ fn big_picture_css(s: f64) -> String {
         // the window's first transitional allocation starves the rail
         // below its content and GTK warns about measuring it for ~13px.
         status_min_h = px(56),
-        clock = px(28),
         small = px(24),
         pad_v = px(18),
         pad_h = px(36),

@@ -9,7 +9,7 @@ use crate::ui::selection_ring::SelectionRing;
 use crate::ui::state::SharedState;
 use crate::ui::virtual_grid::VirtualGrid;
 use crate::Game;
-use gtk4::prelude::*;
+use adw::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -157,8 +157,9 @@ pub(super) struct AllSoftwareUi {
     opened: Cell<bool>,
     /// The "sorted by …" label in the header.
     ordering: gtk4::Label,
-    software_tab: gtk4::Label,
-    groups_tab: gtk4::Label,
+    software_tab: gtk4::Box,
+    groups_tab: gtk4::Box,
+    view_stack: adw::ViewStack,
     /// The L/R shoulder badges flanking the tabs.
     shoulder_l: ShoulderBadge,
     shoulder_r: ShoulderBadge,
@@ -210,45 +211,42 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     header.append(&lead);
     let shoulder_l = ShoulderBadge::new();
     let shoulder_r = ShoulderBadge::new();
-    let software_tab = gtk4::Label::new(Some(&crate::tr!("Software")));
-    let groups_tab = gtk4::Label::new(Some(&crate::tr!("Groups")));
-    for tab_label in [&software_tab, &groups_tab] {
-        tab_label.add_css_class(CSS_BP_TAB);
-        crate::ui::helpers::crisp_label(tab_label);
-        tab_label.set_valign(gtk4::Align::Center);
-    }
-    // The page builds on the Software tab; set_tab only fires on a
-    // switch, so the initial active state must be set here.
-    software_tab.add_css_class(CSS_BP_TAB_ACTIVE);
+    // The tab picker: an Adwaita view switcher in a pill, flanked by the
+    // pad's shoulder glyphs. The switcher's pages are dummies — the real
+    // surfaces are toggled in `apply_mode`, because a group's game view
+    // replaces the grid while the tab stays Groups.
+    let dummy_software = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    let dummy_groups = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    let view_stack = adw::ViewStack::new();
+    view_stack.add_titled(&dummy_software, Some("software"), &crate::tr!("Software"));
+    view_stack.add_titled(&dummy_groups, Some("groups"), &crate::tr!("Groups"));
+    let switcher = adw::ViewSwitcher::new();
+    switcher.set_stack(Some(&view_stack));
+    switcher.set_policy(adw::ViewSwitcherPolicy::Narrow);
+    let pill = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    pill.add_css_class(CSS_BP_TABS_PILL);
+    pill.append(&switcher);
     header.append(&shoulder_l.slot);
-    header.append(&software_tab);
-    header.append(&groups_tab);
+    header.append(&pill);
     header.append(&shoulder_r.slot);
     let trail = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     trail.set_hexpand(true);
     header.append(&trail);
     {
         let tab_state = state.clone();
-        software_tab.set_cursor_from_name(Some("pointer"));
-        let software_click = gtk4::GestureClick::new();
-        software_click.connect_pressed(move |_, _, _, _| {
+        let groups_dummy = dummy_groups.clone().upcast::<gtk4::Widget>();
+        view_stack.connect_visible_child_notify(move |stack| {
+            let tab = if stack.visible_child().as_ref() == Some(&groups_dummy) {
+                Tab::Groups
+            } else {
+                Tab::Software
+            };
             if let Some(big) = tab_state.borrow().big_picture.clone() {
-                big.all.set_tab(&tab_state, Tab::Software);
+                big.all.set_tab(&tab_state, tab);
             }
         });
-        software_tab.add_controller(software_click);
     }
-    {
-        let tab_state = state.clone();
-        groups_tab.set_cursor_from_name(Some("pointer"));
-        let groups_click = gtk4::GestureClick::new();
-        groups_click.connect_pressed(move |_, _, _, _| {
-            if let Some(big) = tab_state.borrow().big_picture.clone() {
-                big.all.set_tab(&tab_state, Tab::Groups);
-            }
-        });
-        groups_tab.add_controller(groups_click);
-    }
+    page.append(&header);
 
     let grid = VirtualGrid::new(240);
     grid.set_square(true);
@@ -362,12 +360,13 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         overlay: grid_overlay,
         opened: Cell::new(false),
         ordering,
+        software_tab: dummy_software,
+        groups_tab: dummy_groups,
+        view_stack,
         shoulder_l,
         shoulder_r,
         shoulder_family: Cell::new(ira_input::ControllerFamily::Xbox),
         shoulder_scale: Cell::new(0.0),
-        software_tab,
-        groups_tab,
         tab: Cell::new(Tab::Software),
         groups_view: Cell::new(None),
         groups_grid: groups,
@@ -427,20 +426,21 @@ impl AllSoftwareUi {
 
     /// Switch tabs. The Groups tab reloads its tiles so groups created
     /// elsewhere show up; a group's game view never survives the switch —
-    /// the shoulders always land on the tab's own surface.
+    /// the shoulders and the view switcher always land on the tab's own
+    /// surface.
     pub(super) fn set_tab(&self, state: &SharedState, tab: Tab) {
         if self.tab.get() == tab && self.groups_view.get().is_none() {
             return;
         }
         self.tab.set(tab);
         self.groups_view.set(None);
-        self.software_tab.remove_css_class(CSS_BP_TAB_ACTIVE);
-        self.groups_tab.remove_css_class(CSS_BP_TAB_ACTIVE);
-        match tab {
+        // Keep the switcher's highlight in step; its notify loops back
+        // here and early-returns.
+        let dummy = match tab {
             Tab::Software => &self.software_tab,
             Tab::Groups => &self.groups_tab,
-        }
-        .add_css_class(CSS_BP_TAB_ACTIVE);
+        };
+        self.view_stack.set_visible_child(dummy);
         if tab == Tab::Groups {
             self.groups_grid.reload(state);
         }

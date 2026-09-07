@@ -20,19 +20,23 @@ const FLOW_MARGIN: i32 = 28;
 const FLOW_SPACING: i32 = 18;
 
 pub(super) struct GroupsGrid {
+    /// The scrolled tiles with the selection ring floating over them; the
+    /// widget this page shows.
+    overlay: gtk4::Overlay,
     scrolled: gtk4::ScrolledWindow,
     flow: gtk4::FlowBox,
+    ring: crate::ui::selection_ring::SelectionRing,
     selection: Cell<usize>,
     /// Current tile edge length (slots are square); 0 until the window
     /// reports a real size.
     tile: Cell<i32>,
-    /// Each tile's square slot in tile order, for painting the selection.
+    /// Each tile's square slot in tile order, for anchoring the ring.
     slots: RefCell<Vec<gtk4::Box>>,
 }
 
 impl GroupsGrid {
-    pub(super) fn widget(&self) -> &gtk4::ScrolledWindow {
-        &self.scrolled
+    pub(super) fn widget(&self) -> &gtk4::Overlay {
+        &self.overlay
     }
 
     pub(super) fn build(state: &SharedState) -> Self {
@@ -52,22 +56,35 @@ impl GroupsGrid {
         scrolled.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
         scrolled.set_vexpand(true);
         scrolled.set_child(Some(&flow));
+        // The selection ring floats over the tiles — the same frame the
+        // game grid wears, not a CSS outline.
+        let ring = crate::ui::selection_ring::SelectionRing::new();
+        let overlay = gtk4::Overlay::new();
+        overlay.set_child(Some(&scrolled));
+        overlay.add_overlay(&ring);
+        overlay.set_measure_overlay(&ring, false);
+        overlay.set_clip_overlay(&ring, true);
         // First allocation lands here: size the tiles from the flow's real
         // width and rebuild. Without this, a first open shows the fallback
         // 200px slots floating in oversized cells.
         {
             let size_state = state.clone();
-            scrolled.vadjustment().connect_changed(move |_| {
+            let track = move |_: &gtk4::Adjustment| {
                 if let Some(big) = size_state.borrow().big_picture.clone() {
                     if big.all.groups_grid.ensure_sized() {
                         big.all.groups_grid.reload(&size_state);
                     }
+                    big.all.groups_grid.position_ring();
                 }
-            });
+            };
+            scrolled.vadjustment().connect_changed(track.clone());
+            scrolled.vadjustment().connect_value_changed(track);
         }
         let grid = Self {
+            overlay,
             scrolled,
             flow,
+            ring,
             selection: Cell::new(0),
             tile: Cell::new(0),
             slots: RefCell::new(Vec::new()),
@@ -281,19 +298,35 @@ impl GroupsGrid {
         }
     }
 
-    /// Paint the selection onto the selected tile's slot — the outline
-    /// hugs the square, not the label below it — and keep the row on
-    /// screen.
+    /// Paint the selection: float the ring over the selected tile's slot
+    /// — the same frame the game grid wears — and keep the row on screen.
     fn repaint_selection(&self) {
-        let selected = self.selection.get();
-        for (index, slot) in self.slots.borrow().iter().enumerate() {
-            if index == selected {
-                slot.add_css_class(CSS_BP_GROUP_TILE_SELECTED);
-            } else {
-                slot.remove_css_class(CSS_BP_GROUP_TILE_SELECTED);
-            }
-        }
+        self.position_ring();
         self.scroll_selection_into_view();
+    }
+
+    /// Anchor the ring to the selected slot's live position.
+    fn position_ring(&self) {
+        let Some(slot) = self.slots.borrow().get(self.selection.get()).cloned() else {
+            self.ring.set_visible(false);
+            return;
+        };
+        let Some(point) = slot.compute_point(&self.overlay, &gtk4::graphene::Point::zero())
+        else {
+            // Not laid out yet; the adjustment hooks re-anchor on the first
+            // allocation.
+            self.ring.set_visible(false);
+            return;
+        };
+        self.ring.set_visible(true);
+        self.ring.place(
+            point.x() as f64,
+            point.y() as f64,
+            slot.width() as f64,
+            slot.height() as f64,
+            self.overlay.width() as f64 / 1920.0,
+            false,
+        );
     }
 
     /// Nudge the scroll so the selected row shows. Rows pitch at the

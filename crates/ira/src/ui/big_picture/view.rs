@@ -147,9 +147,11 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
 
     // The status rail floats over the top-right on every page: on All
     // Software it shares the header's line (that side stays empty), on
-    // home it hangs over the carousel. It must be under the menus, so it
-    // is added before them.
+    // home it hangs over the carousel. It is a sibling of the bp-root
+    // Box, so it carries that class itself for the big-picture font. It
+    // must be under the menus, so it is added before them.
     let status_widget = status.widget();
+    status_widget.add_css_class(CSS_BP_ROOT);
     status_widget.set_halign(gtk4::Align::End);
     status_widget.set_valign(gtk4::Align::Start);
     overlay.add_overlay(status_widget);
@@ -192,6 +194,29 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
     let key = gtk4::EventControllerKey::new();
     key.set_propagation_phase(gtk4::PropagationPhase::Capture);
     key.connect_key_pressed(move |_, key, _, modifiers| {
+        // While the virtual keyboard shows, physical typing goes straight
+        // into it; navigation keys still fall through to the router.
+        let keyboard_open = state
+            .borrow()
+            .big_picture
+            .as_ref()
+            .is_some_and(|big| big.keyboard.is_open());
+        if keyboard_open {
+            if key == gdk4::Key::BackSpace {
+                if let Some(big) = state.borrow().big_picture.clone() {
+                    big.keyboard.backspace();
+                }
+                return glib::Propagation::Stop;
+            }
+            if let Some(ch) = key.to_unicode() {
+                if !ch.is_control() {
+                    if let Some(big) = state.borrow().big_picture.clone() {
+                        big.keyboard.type_char(ch);
+                    }
+                    return glib::Propagation::Stop;
+                }
+            }
+        }
         match key {
             gdk4::Key::Left => route(&state, NavCommand::Left),
             gdk4::Key::Right => route(&state, NavCommand::Right),

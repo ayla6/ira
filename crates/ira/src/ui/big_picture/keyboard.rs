@@ -1,7 +1,8 @@
-//! The couch's virtual keyboard: a QWERTY panel over a dimmed page used to
-//! name and rename groups. For now it is the front end only — arrows move
-//! the key cursor, Confirm types or acts, B deletes a character, Escape
-//! cancels — and the finished text is handed to the caller's callback.
+//! The big-picture virtual keyboard, modeled on the Switch's: a key grid
+//! with a right-hand action column (backspace, return, OK), a shift and a
+//! page toggle on the bottom row, and a wide space bar. It types from the
+//! gamepad/keyboard cursor, from mouse clicks, and from the physical
+//! keyboard, and hands the finished text to the caller's callback.
 
 use crate::ui::css::*;
 use crate::ui::state::SharedState;
@@ -13,20 +14,70 @@ use std::cell::{Cell, RefCell};
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Key {
     Char(char),
+    Shift,
+    Page,
     Space,
-    Del,
+    Backspace,
+    Return,
     Ok,
-    Cancel,
 }
 
-/// The layout rows, top to bottom. Keys are uppercase; the buffer keeps
-/// them as typed.
-const ROWS: &[&[Key]] = &[
-    &[Key::Char('1'), Key::Char('2'), Key::Char('3'), Key::Char('4'), Key::Char('5'), Key::Char('6'), Key::Char('7'), Key::Char('8'), Key::Char('9'), Key::Char('0')],
-    &[Key::Char('Q'), Key::Char('W'), Key::Char('E'), Key::Char('R'), Key::Char('T'), Key::Char('Y'), Key::Char('U'), Key::Char('I'), Key::Char('O'), Key::Char('P')],
-    &[Key::Char('A'), Key::Char('S'), Key::Char('D'), Key::Char('F'), Key::Char('G'), Key::Char('H'), Key::Char('J'), Key::Char('K'), Key::Char('L')],
-    &[Key::Char('Z'), Key::Char('X'), Key::Char('C'), Key::Char('V'), Key::Char('B'), Key::Char('N'), Key::Char('M')],
-    &[Key::Space, Key::Del, Key::Ok, Key::Cancel],
+/// Which key table is showing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Page {
+    Letters,
+    Symbols,
+}
+
+/// The letter page: symbols on top, QWERTY below, and the right-hand
+/// action column riding every row's last entry.
+const LETTER_ROWS: &[&[Key]] = &[
+    &[
+        Key::Char('#'), Key::Char('['), Key::Char(']'), Key::Char('$'), Key::Char('%'),
+        Key::Char('^'), Key::Char('&'), Key::Char('*'), Key::Char('('), Key::Char(')'),
+        Key::Char('_'), Key::Backspace,
+    ],
+    &[
+        Key::Char('q'), Key::Char('w'), Key::Char('e'), Key::Char('r'), Key::Char('t'),
+        Key::Char('y'), Key::Char('u'), Key::Char('i'), Key::Char('o'), Key::Char('p'),
+        Key::Char('@'), Key::Return,
+    ],
+    &[
+        Key::Char('a'), Key::Char('s'), Key::Char('d'), Key::Char('f'), Key::Char('g'),
+        Key::Char('h'), Key::Char('j'), Key::Char('k'), Key::Char('l'), Key::Char(';'),
+        Key::Char('"'), Key::Return,
+    ],
+    &[
+        Key::Char('z'), Key::Char('x'), Key::Char('c'), Key::Char('v'), Key::Char('b'),
+        Key::Char('n'), Key::Char('m'), Key::Char('<'), Key::Char('>'), Key::Char('+'),
+        Key::Char('='), Key::Ok,
+    ],
+    &[Key::Shift, Key::Page, Key::Space, Key::Ok],
+];
+
+/// The symbol page: digits and punctuation, same shape as the letter page.
+const SYMBOL_ROWS: &[&[Key]] = &[
+    &[
+        Key::Char('1'), Key::Char('2'), Key::Char('3'), Key::Char('4'), Key::Char('5'),
+        Key::Char('6'), Key::Char('7'), Key::Char('8'), Key::Char('9'), Key::Char('0'),
+        Key::Char('-'), Key::Backspace,
+    ],
+    &[
+        Key::Char('/'), Key::Char(':'), Key::Char(';'), Key::Char('('), Key::Char(')'),
+        Key::Char('$'), Key::Char('&'), Key::Char('@'), Key::Char('"'), Key::Char('\''),
+        Key::Char('*'), Key::Return,
+    ],
+    &[
+        Key::Char('+'), Key::Char('='), Key::Char('<'), Key::Char('>'), Key::Char('%'),
+        Key::Char('#'), Key::Char('!'), Key::Char('?'), Key::Char('~'), Key::Char('`'),
+        Key::Char('^'), Key::Return,
+    ],
+    &[
+        Key::Char(','), Key::Char('.'), Key::Char('\''), Key::Char('"'), Key::Char('_'),
+        Key::Char('|'), Key::Char('\\'), Key::Char('{'), Key::Char('}'), Key::Char('['),
+        Key::Char(']'), Key::Ok,
+    ],
+    &[Key::Shift, Key::Page, Key::Space, Key::Ok],
 ];
 
 /// What to do with the finished name.
@@ -38,8 +89,15 @@ pub(super) struct Keyboard {
     panel: gtk4::Box,
     /// The text preview the typed characters show up in.
     preview: gtk4::Label,
-    /// Key cursor position: (row, column).
+    /// Key cursor position: (row, column) into the showing page's rows.
     cursor: Cell<(usize, usize)>,
+    page: Cell<Page>,
+    shift: Cell<bool>,
+    /// Cursor-addressable key widgets of the showing page, for repaints.
+    keys: RefCell<Vec<Vec<gtk4::Widget>>>,
+    /// The prompt line the panel was opened with, kept for page/shift
+    /// rebuilds.
+    prompt: RefCell<String>,
     buffer: RefCell<String>,
     on_ok: RefCell<Option<NameCallback>>,
 }
@@ -62,7 +120,7 @@ impl Keyboard {
         panel.add_css_class(CSS_BP_MENU_PANEL);
         panel.set_halign(gtk4::Align::Center);
         panel.set_valign(gtk4::Align::Center);
-        panel.set_size_request(720, -1);
+        panel.set_size_request(880, -1);
 
         let root = gtk4::Overlay::new();
         // The overlay is a sibling of the bp-root Box, so it must carry the
@@ -76,6 +134,10 @@ impl Keyboard {
             panel,
             preview: gtk4::Label::new(None),
             cursor: Cell::new((1, 0)),
+            page: Cell::new(Page::Letters),
+            shift: Cell::new(false),
+            keys: RefCell::new(Vec::new()),
+            prompt: RefCell::new(String::new()),
             buffer: RefCell::new(String::new()),
             on_ok: RefCell::new(None),
         }
@@ -99,27 +161,10 @@ impl Keyboard {
         on_ok: NameCallback,
     ) {
         *self.buffer.borrow_mut() = initial.to_string();
+        *self.prompt.borrow_mut() = prompt.to_string();
         *self.on_ok.borrow_mut() = Some(on_ok);
         self.cursor.set((1, 0));
-        crate::ui::helpers::clear_children(&self.panel);
-        let title = gtk4::Label::new(Some(prompt));
-        title.set_xalign(0.0);
-        title.add_css_class(CSS_BP_PAGE_TITLE);
-        crate::ui::helpers::crisp_label(&title);
-        self.panel.append(&title);
-        self.preview.add_css_class(CSS_BP_KEY_PREVIEW);
-        self.preview.set_xalign(0.0);
-        crate::ui::helpers::crisp_label(&self.preview);
-        self.panel.append(&self.preview);
-        for (row, keys) in ROWS.iter().enumerate() {
-            let row_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-            row_box.set_halign(gtk4::Align::Center);
-            for (col, key) in keys.iter().enumerate() {
-                let button = self.key_button(state, *key, (row, col));
-                row_box.append(&button);
-            }
-            self.panel.append(&row_box);
-        }
+        self.rebuild(state, prompt);
         self.refresh_preview();
         self.refresh_cursor();
         self.root.set_visible(true);
@@ -131,13 +176,52 @@ impl Keyboard {
         *self.buffer.borrow_mut() = String::new();
     }
 
-    fn key_label(key: Key) -> String {
+    fn rows(&self) -> &'static [&'static [Key]] {
+        match self.page.get() {
+            Page::Letters => LETTER_ROWS,
+            Page::Symbols => SYMBOL_ROWS,
+        }
+    }
+
+    fn key_label(&self, key: Key) -> String {
         match key {
-            Key::Char(c) => c.to_string(),
+            Key::Char(c) => {
+                let c = if self.shift.get() && self.page.get() == Page::Letters {
+                    c.to_ascii_uppercase()
+                } else {
+                    c
+                };
+                c.to_string()
+            }
+            Key::Shift => crate::tr!("Shift"),
+            Key::Page => match self.page.get() {
+                Page::Letters => crate::tr!("#+="),
+                Page::Symbols => crate::tr!("ABC"),
+            },
             Key::Space => crate::tr!("Space"),
-            Key::Del => crate::tr!("Del"),
+            Key::Backspace => "⌫".to_string(),
+            Key::Return => crate::tr!("Return"),
             Key::Ok => crate::tr!("OK"),
-            Key::Cancel => crate::tr!("Cancel"),
+        }
+    }
+
+    /// Grid placement for a key: the action column rides column 11 with
+    /// Return spanning rows 1-2 and OK spanning rows 3-4; the bottom row
+    /// is shift, page toggle, and a space bar nine cells wide. None means
+    /// the key shares an already-attached widget.
+    fn place(row: usize, col: usize, key: Key) -> Option<(i32, i32, i32, i32)> {
+        match key {
+            Key::Shift => Some((0, 4, 1, 1)),
+            Key::Page => Some((1, 4, 1, 1)),
+            Key::Space => Some((2, 4, 9, 1)),
+            Key::Ok if row == 4 => None,
+            Key::Ok => Some((11, 3, 1, 2)),
+            Key::Return => match row {
+                1 => Some((11, 1, 1, 2)),
+                _ => None,
+            },
+            Key::Backspace => Some((11, 0, 1, 1)),
+            Key::Char(_) => Some((col as i32, row as i32, 1, 1)),
         }
     }
 
@@ -152,22 +236,21 @@ impl Keyboard {
         if self.cursor.get() == position {
             button.add_css_class(CSS_BP_KEY_SELECTED);
         }
-        let label = gtk4::Label::new(Some(&Self::key_label(key)));
+        if matches!(key, Key::Shift) && self.shift.get() {
+            button.add_css_class(CSS_BP_KEY_ACTIVE);
+        }
+        let label = gtk4::Label::new(Some(&self.key_label(key)));
         label.set_halign(gtk4::Align::Center);
         label.set_valign(gtk4::Align::Center);
         crate::ui::helpers::crisp_label(&label);
         button.append(&label);
-        let wide = matches!(key, Key::Space | Key::Del | Key::Ok | Key::Cancel);
-        if wide {
-            button.set_size_request(116, 56);
-        } else {
-            button.set_size_request(56, 56);
-        }
+        button.set_size_request(64, 56);
         let click_state = state.clone();
         let click = gtk4::GestureClick::new();
         click.connect_pressed(move |_, _, _, _| {
             if let Some(big) = click_state.borrow().big_picture.clone() {
                 big.keyboard.cursor.set(position);
+                big.keyboard.refresh_cursor();
                 big.keyboard.press(&click_state, key);
             }
         });
@@ -175,35 +258,103 @@ impl Keyboard {
         button.upcast()
     }
 
+    /// Rebuild the panel for the current page and shift state.
+    fn rebuild(&self, state: &SharedState, prompt: &str) {
+        crate::ui::helpers::clear_children(&self.panel);
+        let title = gtk4::Label::new(Some(prompt));
+        title.set_xalign(0.0);
+        title.add_css_class(CSS_BP_PAGE_TITLE);
+        crate::ui::helpers::crisp_label(&title);
+        self.panel.append(&title);
+        self.preview.add_css_class(CSS_BP_KEY_PREVIEW);
+        self.preview.set_xalign(0.0);
+        crate::ui::helpers::crisp_label(&self.preview);
+        self.panel.append(&self.preview);
+
+        let grid = gtk4::Grid::new();
+        grid.set_row_spacing(8);
+        grid.set_column_spacing(8);
+        grid.set_halign(gtk4::Align::Center);
+        let mut map: Vec<Vec<gtk4::Widget>> = Vec::new();
+        for (row, keys) in self.rows().iter().enumerate() {
+            let mut row_map = Vec::new();
+            for (col, key) in keys.iter().enumerate() {
+                let widget = self.key_button(state, *key, (row, col));
+                row_map.push(widget.clone());
+                if let Some((left, top, width, height)) = Self::place(row, col, *key) {
+                    grid.attach(&widget, left, top, width, height);
+                }
+            }
+            map.push(row_map);
+        }
+        *self.keys.borrow_mut() = map;
+        self.panel.append(&grid);
+    }
+
     /// Move the key cursor, clamping each row to its own length.
     pub(super) fn move_cursor(&self, dx: i32, dy: i32) {
+        let rows = self.rows();
         let (row, col) = self.cursor.get();
-        let row = (row as i64 + dy as i64).clamp(0, ROWS.len() as i64 - 1) as usize;
-        let col = (col as i64 + dx as i64).clamp(0, ROWS[row].len() as i64 - 1) as usize;
+        let row = (row as i64 + dy as i64).clamp(0, rows.len() as i64 - 1) as usize;
+        let col = (col as i64 + dx as i64).clamp(0, rows[row].len() as i64 - 1) as usize;
         self.cursor.set((row, col));
         self.refresh_cursor();
+    }
+
+    /// Type a character straight from the physical keyboard.
+    pub(super) fn type_char(&self, ch: char) {
+        self.buffer.borrow_mut().push(ch);
+        self.refresh_preview();
     }
 
     /// Type the key under the cursor (or the given one from a mouse
     /// click), updating the buffer or running the special action.
     pub(super) fn press(&self, state: &SharedState, key: Key) {
         match key {
-            Key::Char(c) => self.buffer.borrow_mut().push(c),
+            Key::Char(c) => {
+                let c = if self.shift.get() && self.page.get() == Page::Letters {
+                    c.to_ascii_uppercase()
+                } else {
+                    c
+                };
+                self.buffer.borrow_mut().push(c);
+            }
             Key::Space => self.buffer.borrow_mut().push(' '),
-            Key::Del => {
+            Key::Backspace => {
                 self.buffer.borrow_mut().pop();
             }
-            Key::Ok => {
+            Key::Page => {
+                self.page
+                    .set(match self.page.get() {
+                        Page::Letters => Page::Symbols,
+                        Page::Symbols => Page::Letters,
+                    });
+                let (row, col) = self.cursor.get();
+                let rows = self.rows();
+                let row = row.min(rows.len().saturating_sub(1));
+                let col = col.min(rows[row].len().saturating_sub(1));
+                self.cursor.set((row, col));
+                self.rebuild(state, &self.prompt.borrow().clone());
+                self.refresh_cursor();
+                self.refresh_preview();
+                return;
+            }
+            Key::Shift => {
+                self.shift.set(!self.shift.get());
+                let cursor = self.cursor.get();
+                self.rebuild(state, &self.prompt.borrow().clone());
+                self.cursor.set(cursor);
+                self.refresh_cursor();
+                self.refresh_preview();
+                return;
+            }
+            Key::Return | Key::Ok => {
                 let text = self.buffer.borrow().trim().to_string();
                 let callback = self.on_ok.borrow_mut().take();
                 self.close();
                 if let Some(callback) = callback {
                     callback(state, &text);
                 }
-                return;
-            }
-            Key::Cancel => {
-                self.close();
                 return;
             }
         }
@@ -219,7 +370,8 @@ impl Keyboard {
     /// Type whichever key the cursor rests on (Confirm from the router).
     pub(super) fn press_selected(&self, state: &SharedState) {
         let (row, col) = self.cursor.get();
-        let Some(keys) = ROWS.get(row) else {
+        let rows = self.rows();
+        let Some(keys) = rows.get(row) else {
             return;
         };
         let Some(key) = keys.get(col) else {
@@ -239,29 +391,27 @@ impl Keyboard {
     }
 
     fn refresh_cursor(&self) {
-        // Re-highlight without a rebuild: walk the panel's rows.
         let (cursor_row, cursor_col) = self.cursor.get();
-        let mut row_index = 0usize;
-        let mut child = self.panel.first_child();
-        while let Some(row) = child {
-            // Panel children: title, preview, then one box per key row.
-            if row_index >= 2 && row.type_().name() == "GtkBox" {
-                let mut key_index = 0usize;
-                let mut key_child = row.first_child();
-                while let Some(key) = key_child {
-                    let selected =
-                        row_index - 2 == cursor_row && key_index == cursor_col;
-                    if selected {
-                        key.add_css_class(CSS_BP_KEY_SELECTED);
-                    } else {
-                        key.remove_css_class(CSS_BP_KEY_SELECTED);
-                    }
-                    key_child = key.next_sibling();
-                    key_index += 1;
+        // Return and OK sit at two cursor addresses (their column spans
+        // two rows); compare widgets so the shared one is highlighted
+        // exactly once.
+        let selected = self
+            .keys
+            .borrow()
+            .get(cursor_row)
+            .and_then(|row| row.get(cursor_col))
+            .cloned();
+        for keys in self.keys.borrow().iter() {
+            for widget in keys.iter() {
+                let is_selected = selected
+                    .as_ref()
+                    .is_some_and(|selected| selected.as_ptr() == widget.as_ptr());
+                if is_selected {
+                    widget.add_css_class(CSS_BP_KEY_SELECTED);
+                } else {
+                    widget.remove_css_class(CSS_BP_KEY_SELECTED);
                 }
             }
-            child = row.next_sibling();
-            row_index += 1;
         }
     }
 }

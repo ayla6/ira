@@ -162,8 +162,9 @@ fn pick_outer_ring_command(
         current,
         move |output| {
             write_processing(&base_for_pick, target, |processing| {
-                processing.outer_ring = Some(ira_input::OuterRingCommand {
-                    output: output.clone(),
+                // "None" clears the outer ring command entirely.
+                processing.outer_ring = output.clone().map(|output| ira_input::OuterRingCommand {
+                    output,
                     ..Default::default()
                 });
             });

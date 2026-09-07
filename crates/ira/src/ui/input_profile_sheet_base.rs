@@ -135,6 +135,20 @@ pub(crate) fn is_trigger_axis(source: InputSource) -> bool {
     )
 }
 
+/// The X/Y axis pair a stick source belongs to, mirroring the mapping
+/// engine's own grouping: the pair is one input whose modes live on the X
+/// axis.
+pub(crate) fn stick_axis_pair(source: InputSource) -> (GamepadAxis, GamepadAxis) {
+    match source {
+        InputSource::Axis(GamepadAxis::RightX | GamepadAxis::RightY)
+        | InputSource::AxisDirection {
+            axis: GamepadAxis::RightX | GamepadAxis::RightY,
+            ..
+        } => (GamepadAxis::RightX, GamepadAxis::RightY),
+        _ => (GamepadAxis::LeftX, GamepadAxis::LeftY),
+    }
+}
+
 /// A full-width libadwaita combo row; callers add it directly instead of
 /// nesting a compact dropdown inside another row's suffix.
 pub(crate) fn combo_row(labels: &[String], selected: u32) -> adw::ComboRow {

@@ -339,8 +339,10 @@ fn activator_output_rows(
             None,
             move |action| {
                 with_mapping(&base, |input| {
-                    if let Some(activator) = input.activators.get_mut(index) {
-                        activator.outputs.push(action.clone());
+                    if let (Some(action), Some(activator)) =
+                        (action, input.activators.get_mut(index))
+                    {
+                        activator.outputs.push(action);
                     }
                 });
                 (base.on_changed)();

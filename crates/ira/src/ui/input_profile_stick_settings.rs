@@ -417,7 +417,7 @@ pub(super) fn mode_switch_row(
 }
 
 /// One combo row bound to an enum field of the targeted SourceMode.
-fn mode_combo_row(
+pub(crate) fn mode_combo_row(
     base: &SheetBase,
     target: ModeTarget,
     title: &str,

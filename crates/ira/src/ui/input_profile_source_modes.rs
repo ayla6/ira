@@ -13,7 +13,7 @@ use super::input_profile_widgets::{
     OptionChoice, SliderSpec,
 };
 use adw::prelude::*;
-use ira_input::{GamepadAxis, InputSource, SourceMode, StickOutput, StickProcessing};
+use ira_input::{GamepadAxis, InputSource, JoystickSettings, SourceMode, StickOutput, StickProcessing};
 
 /// Which `SourceMode` an edit targets: the mapping's own behavior or the
 /// shifted behavior of one of its mode shifts.
@@ -24,6 +24,17 @@ pub(crate) enum ModeTarget {
 }
 
 pub(crate) fn modes_for(source: InputSource) -> Vec<Option<SourceMode>> {
+    // The d-pad group's behavior, Steam's dpad page, stored on the Up row
+    // the way a stick's mode lives on its X axis. "None" rides the stick
+    // Dpad mode: on button sources the engine runs it as fully inert, which
+    // is exactly what the choice means.
+    if matches!(source, InputSource::Button(button) if button.is_dpad()) {
+        return vec![
+            Some(SourceMode::Dpad { threshold: 0.5 }),
+            None,
+            Some(SourceMode::Joystick(JoystickSettings::new(StickOutput::Left))),
+        ];
+    }
     if is_trigger_axis(source) {
         vec![None, Some(SourceMode::Trigger { threshold: 0.5 })]
     } else {

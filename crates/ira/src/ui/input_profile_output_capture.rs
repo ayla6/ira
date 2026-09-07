@@ -80,8 +80,14 @@ fn capture_dialog(
 }
 
 fn present_dialog<P: IsA<gtk4::Widget>>(dialog: &adw::Dialog, parent: &P, content: &gtk4::Box) {
+    // The key controller lives on the dialog, so something inside it must
+    // hold focus for keys to arrive. Grabbing before the dialog is mapped
+    // fails silently — grab when the content maps instead.
+    let mapped = content.clone();
+    content.connect_map(move |_| {
+        mapped.grab_focus();
+    });
     dialog.present(Some(parent));
-    content.grab_focus();
 }
 
 fn is_modifier_key(keyval: gdk4::Key) -> bool {

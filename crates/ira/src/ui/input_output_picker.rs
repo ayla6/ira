@@ -24,12 +24,12 @@ pub(crate) fn show_output_picker(
     input_title: &str,
     scope: &OutputPickerScope,
     current: Option<&OutputAction>,
-    on_pick: impl Fn(OutputAction) + 'static,
+    on_pick: impl Fn(Option<OutputAction>) + 'static,
 ) {
-    let on_pick: Rc<dyn Fn(OutputAction)> = Rc::new(on_pick);
+    let on_pick: Rc<dyn Fn(Option<OutputAction>)> = Rc::new(on_pick);
     let window = adw::Dialog::new();
-    window.set_content_width(780);
-    window.set_content_height(560);
+    window.set_content_width(920);
+    window.set_content_height(640);
     window.set_title(input_title);
 
     let stack = adw::ViewStack::new();
@@ -57,8 +57,8 @@ pub(crate) fn show_output_picker(
         match name {
             "gamepad" => build_gamepad_page(&content, scope, current, &on_pick, &window),
             "mouse" => build_mouse_page(&content, current, &on_pick, &window),
-            "keyboard" => build_keyboard_page(&content, &on_pick, &window),
-            "numpad" => build_numpad_page(&content, &on_pick, &window),
+            "keyboard" => build_keyboard_page(&content, current, &on_pick, &window),
+            "numpad" => build_numpad_page(&content, current, &on_pick, &window),
             _ => build_sets_page(&content, scope, current, &on_pick, &window),
         }
         let scroll = gtk4::ScrolledWindow::new();
@@ -101,7 +101,7 @@ pub(crate) fn tile(
     label: &str,
     action: Option<OutputAction>,
     current: Option<&OutputAction>,
-    on_pick: &Rc<dyn Fn(OutputAction)>,
+    on_pick: &Rc<dyn Fn(Option<OutputAction>)>,
     window: &adw::Dialog,
 ) {
     let button = gtk4::Button::new();
@@ -118,7 +118,7 @@ pub(crate) fn tile(
             let on_pick = on_pick.clone();
             let window = window.clone();
             button.connect_clicked(move |_| {
-                on_pick(action.clone());
+                on_pick(Some(action.clone()));
                 window.close();
             });
         }
@@ -130,11 +130,33 @@ pub(crate) fn tile(
     flow.insert(&button, -1);
 }
 
+/// The unbind tile: picking it clears the input's commands, Steam's "None".
+/// Highlighted when the input currently has nothing bound.
+pub(crate) fn none_tile(
+    flow: &gtk4::FlowBox,
+    current: Option<&OutputAction>,
+    on_pick: &Rc<dyn Fn(Option<OutputAction>)>,
+    window: &adw::Dialog,
+) {
+    let button = gtk4::Button::with_label(&crate::tr!("None"));
+    button.add_css_class(CSS_COMMAND_TILE);
+    if current.is_none() {
+        button.add_css_class(CSS_COMMAND_TILE_ACTIVE);
+    }
+    let on_pick = on_pick.clone();
+    let window = window.clone();
+    button.connect_clicked(move |_| {
+        on_pick(None);
+        window.close();
+    });
+    flow.insert(&button, -1);
+}
+
 fn build_gamepad_page(
     content: &gtk4::Box,
     scope: &OutputPickerScope,
     current: Option<&OutputAction>,
-    on_pick: &Rc<dyn Fn(OutputAction)>,
+    on_pick: &Rc<dyn Fn(Option<OutputAction>)>,
     window: &adw::Dialog,
 ) {
     let buttons = [
@@ -162,6 +184,8 @@ fn build_gamepad_page(
         GamepadButton::LeftStick,
         GamepadButton::RightStick,
     ];
+    let flow = section(content, &crate::tr!("Unbind"));
+    none_tile(&flow, current, on_pick, window);
     let flow = section(content, &crate::tr!("Face Buttons"));
     for button in buttons {
         tile(
@@ -258,7 +282,7 @@ fn build_gamepad_page(
 fn build_mouse_page(
     content: &gtk4::Box,
     current: Option<&OutputAction>,
-    on_pick: &Rc<dyn Fn(OutputAction)>,
+    on_pick: &Rc<dyn Fn(Option<OutputAction>)>,
     window: &adw::Dialog,
 ) {
     let clicks = [
@@ -319,7 +343,7 @@ fn build_sets_page(
     content: &gtk4::Box,
     scope: &OutputPickerScope,
     current: Option<&OutputAction>,
-    on_pick: &Rc<dyn Fn(OutputAction)>,
+    on_pick: &Rc<dyn Fn(Option<OutputAction>)>,
     window: &adw::Dialog,
 ) {
     if scope.set_names.len() < 2 && scope.layer_names.is_empty() {

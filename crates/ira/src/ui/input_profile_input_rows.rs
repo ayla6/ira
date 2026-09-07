@@ -13,11 +13,15 @@ use adw::prelude::*;
 use super::css::{CSS_DIM_LABEL, CSS_SOURCE_BADGE};
 use super::input_profile_assets::{set_source_asset, source_badge};
 use super::input_profile_options::output_display_label;
-use super::input_profile_region_pages::{rebind_hook, PagesCtx};
-use super::input_profile_sheet_base::{find_mapping, with_mapping, Reopen, SheetBase};
+use super::input_profile_editor_regions::source_label;
+use super::input_profile_region_pages::rebind_hook;
+use super::input_profile_region_pages::PagesCtx;
+use super::input_profile_sheet_base::{
+    find_mapping, stick_axis_pair, with_mapping, Reopen, SheetBase,
+};
 use super::input_profile_source_modes::{same_mode, ModeTarget};
 use super::input_profile_widgets::{section_title_row, OptionChoice};
-use ira_input::{GamepadAxis, InputMapping, InputSource, SourceMode};
+use ira_input::{AxisDirection, GamepadAxis, GamepadButton, InputMapping, InputSource, SourceMode};
 
 /// Whether each input's settings expander is open, remembered across the
 /// rebuilds that follow every edit.
@@ -83,6 +87,9 @@ fn child_rows(ctx: &PagesCtx, base: &SheetBase, reopen: &Reopen) -> Vec<gtk4::Wi
                     reopen,
                 ) {
                     rows.push(child.upcast());
+                }
+                if matches!(mode, SourceMode::Dpad { .. }) && !is_trigger_axis(base.source) {
+                    rows.extend(direction_command_rows(ctx, base));
                 }
             }
             if is_trigger_axis(base.source) {
@@ -156,7 +163,7 @@ fn command_child(
     base: &SheetBase,
     mapping: Option<&InputMapping>,
 ) -> adw::ActionRow {
-    let child = adw::ActionRow::new();
+    let child = command_row(ctx, base.source);
     child.set_title(&crate::tr!("Command"));
     let value = mapping
         .and_then(|mapping| mapping.activators.first())
@@ -168,16 +175,63 @@ fn command_child(
                 .collect::<Vec<String>>()
                 .join(", ")
         })
-        .unwrap_or_else(|| crate::tr!("Not mapped").to_string());
+        .unwrap_or_else(|| crate::tr!("Add command").to_string());
     let value_label = gtk4::Label::new(Some(&value));
     value_label.add_css_class(CSS_DIM_LABEL);
     value_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     value_label.set_valign(gtk4::Align::Center);
     child.add_suffix(&value_label);
-    child.set_activatable(true);
-    let on_rebind = rebind_hook(ctx, base.source);
-    child.connect_activated(move |_| on_rebind());
     child
+}
+
+/// The command row for any bindable source — the input's own slot, or one
+/// of a stick's dpad-direction slots. Activating opens the command picker
+/// for that source.
+fn command_row(ctx: &PagesCtx, source: InputSource) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    row.set_activatable(true);
+    let on_rebind = rebind_hook(ctx, source);
+    row.connect_activated(move |_| on_rebind());
+    row
+}
+
+/// Steam's per-direction commands for the Dpad behavior: the stick's four
+/// digital halves each get a command slot, and a bound command replaces
+/// that direction's virtual dpad press in the engine.
+fn direction_command_rows(ctx: &PagesCtx, base: &SheetBase) -> Vec<gtk4::Widget> {
+    let (x_axis, y_axis) = stick_axis_pair(base.source);
+    let directions = [
+        (GamepadButton::DpadUp, y_axis, AxisDirection::Negative),
+        (GamepadButton::DpadDown, y_axis, AxisDirection::Positive),
+        (GamepadButton::DpadLeft, x_axis, AxisDirection::Negative),
+        (GamepadButton::DpadRight, x_axis, AxisDirection::Positive),
+    ];
+    let mut rows: Vec<gtk4::Widget> = vec![section_title_row(&crate::tr!("Direction Commands")).upcast()];
+    for (button, axis, direction) in directions {
+        let source = InputSource::AxisDirection { axis, direction };
+        let row = command_row(ctx, source);
+        row.set_title(&source_label(InputSource::Button(button)));
+        let value = base
+            .active_target
+            .find_mapping(&base.profile.borrow(), source)
+            .and_then(|mapping| mapping.activators.first().cloned())
+            .map(|activator| {
+                activator
+                    .outputs
+                    .iter()
+                    .map(output_display_label)
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            })
+            .unwrap_or_else(|| crate::tr!("Add command").to_string());
+        let value_label = gtk4::Label::new(Some(&value));
+        value_label.add_css_class(CSS_DIM_LABEL);
+        value_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        value_label.set_valign(gtk4::Align::Center);
+        row.add_suffix(&value_label);
+        rows.push(row.upcast());
+    }
+    rows
 }
 
 /// One binding row per input: the header identifies the input and carries
@@ -238,7 +292,9 @@ pub(crate) fn input_expander_row(
 
 fn summary_text(source: InputSource, mapping: Option<&InputMapping>) -> String {
     match source {
-        InputSource::Axis(_) | InputSource::AxisDirection { .. } => mapping
+        // Whole axes summarize their behavior mode; direction halves are
+        // digital command slots and summarize like buttons do.
+        InputSource::Axis(_) => mapping
             .and_then(|mapping| mapping.mode.as_ref())
             .map(|mode| {
                 super::input_profile_source_modes::mode_label(
@@ -282,8 +338,31 @@ fn add_source_prefix(
 
 /// Steam's behavior list for an analog source: the modes it can take, each
 /// with its one-line description. Titles must match `mode_label` — the
-/// tests pin them together.
+/// tests pin them together. The d-pad group differs on purpose: its bare
+/// "no mode" state is the standard directional pad (identity bindings),
+/// while Steam's inert None rides the stick Dpad mode, which the engine
+/// runs as a no-op on button sources.
 pub(crate) fn behavior_choices(source: InputSource) -> Vec<OptionChoice> {
+    if matches!(source, InputSource::Button(button) if button.is_dpad()) {
+        return vec![
+            OptionChoice {
+                title: crate::tr!("None"),
+                description: Some(crate::tr!("The d-pad sends nothing")),
+            },
+            OptionChoice {
+                title: crate::tr!("Directional Pad"),
+                description: Some(crate::tr!(
+                    "The standard d-pad; each direction keeps its own command"
+                )),
+            },
+            OptionChoice {
+                title: crate::tr!("Joystick"),
+                description: Some(crate::tr!(
+                    "The four directions deflect a virtual joystick — for games and menus that only read the stick"
+                )),
+            },
+        ];
+    }
     if is_trigger_axis(source) {
         return vec![
             OptionChoice {

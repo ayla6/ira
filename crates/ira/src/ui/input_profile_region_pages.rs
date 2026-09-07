@@ -61,11 +61,117 @@ pub(crate) fn rebuild_region_pages(ctx: &PagesCtx, pages: &RegionPages) {
         for group in region_groups(region, ctx.device.as_ref()) {
             let widget = adw::PreferencesGroup::new();
             widget.set_title(&group.title);
-            for source in &group.sources {
-                let mapping = mappings.iter().find(|mapping| mapping.source == *source);
-                widget.add(&input_expander_row(ctx, *source, mapping, family));
+            // Steam's d-pad page leads with the group's Behavior entry; the
+            // direction rows only exist under the Directional Pad behavior
+            // — None and Joystick leave the Behavior entry alone.
+            let mut dpad_rows_shown = true;
+            if region == Region::Dpad {
+                dpad_rows_shown = dpad_group_mode(ctx).is_none();
+                for row in dpad_behavior_rows(ctx) {
+                    widget.add(&row);
+                }
+            }
+            if dpad_rows_shown {
+                for source in &group.sources {
+                    let mapping = mappings.iter().find(|mapping| mapping.source == *source);
+                    widget.add(&input_expander_row(ctx, *source, mapping, family));
+                }
             }
             page.append(&widget);
+        }
+    }
+}
+
+/// The canonical source the d-pad group's behavior is stored on.
+fn dpad_behavior_source() -> InputSource {
+    InputSource::Button(ira_input::GamepadButton::DpadUp)
+}
+
+/// The d-pad group's mode, if any direction mapping carries one.
+fn dpad_group_mode(ctx: &PagesCtx) -> Option<ira_input::SourceMode> {
+    active_mappings(&ctx.profile, ctx.active_target.get())
+        .into_iter()
+        .find(|mapping| mapping.source == dpad_behavior_source())
+        .and_then(|mapping| mapping.mode)
+}
+
+/// Steam's group-level Behavior entry: one combo row above the direction
+/// rows choosing between the standard d-pad and the four buttons composed
+/// into a joystick, plus the target-stick choice while the joystick
+/// behavior is active. The mode is stored on the group's canonical Up
+/// mapping; the deferred dirty rebuild refreshes both rows.
+fn dpad_behavior_rows(ctx: &PagesCtx) -> Vec<adw::ComboRow> {
+    let source = dpad_behavior_source();
+    let modes = super::input_profile_source_modes::modes_for(source);
+    let choices = super::input_profile_input_rows::behavior_choices(source);
+    let titles: Vec<&str> = choices.iter().map(|choice| choice.title.as_str()).collect();
+    let mode = dpad_group_mode(ctx);
+    let selected = mode
+        .as_ref()
+        .and_then(|mode| {
+            modes.iter().position(|candidate| {
+                super::input_profile_source_modes::same_mode(candidate, mode)
+            })
+        })
+        .unwrap_or(0);
+
+    let behavior = adw::ComboRow::new();
+    behavior.set_title(&crate::tr!("Behavior"));
+    behavior.set_model(Some(&gtk4::StringList::new(&titles)));
+    behavior.set_selected(selected as u32);
+    let ctx_for_behavior = ctx.clone();
+    let modes_for_change = modes.clone();
+    behavior.connect_selected_notify(move |behavior| {
+        let mode = modes_for_change
+            .get(behavior.selected() as usize)
+            .cloned()
+            .flatten();
+        write_dpad_mode(&ctx_for_behavior, mode);
+        (ctx_for_behavior.on_dirty)();
+    });
+
+    let mut rows = vec![behavior];
+    if let Some(ira_input::SourceMode::Joystick(settings)) = mode.as_ref() {
+        let output = adw::ComboRow::new();
+        output.set_title(&crate::tr!("Output Joystick"));
+        output.set_subtitle(&crate::tr!("Which stick the d-pad drives"));
+        output.set_model(Some(&gtk4::StringList::new(&[
+            &crate::tr!("Left Joystick"),
+            &crate::tr!("Right Joystick"),
+        ])));
+        output.set_selected(
+            super::input_profile_stick_indices::output_index(settings.output) as u32,
+        );
+        let ctx_for_output = ctx.clone();
+        output.connect_selected_notify(move |output| {
+            let output_choice =
+                super::input_profile_stick_indices::output_from_index(output.selected() as usize);
+            write_dpad_mode(&ctx_for_output, Some(ira_input::SourceMode::Joystick(
+                ira_input::JoystickSettings::new(output_choice),
+            )));
+            (ctx_for_output.on_dirty)();
+        });
+        rows.push(output);
+    }
+    rows
+}
+
+/// Write the d-pad group's mode onto its canonical mapping, creating the
+/// mapping when a behavior is picked on an unbound d-pad.
+fn write_dpad_mode(ctx: &PagesCtx, mode: Option<ira_input::SourceMode>) {
+    let mut profile = ctx.profile.borrow_mut();
+    let Some(inputs) = ctx.active_target.get().inputs_mut(&mut profile) else {
+        return;
+    };
+    match inputs.iter_mut().find(|input| input.source == dpad_behavior_source()) {
+        Some(input) => input.mode = mode,
+        None => {
+            if mode.is_some() {
+                inputs.push(InputMapping {
+                    mode,
+                    ..InputMapping::new(dpad_behavior_source())
+                });
+            }
         }
     }
 }
@@ -135,27 +241,38 @@ fn open_rebind_picker(ctx: &PagesCtx, source: InputSource) {
     );
 }
 
-fn apply_quick_rebind(ctx: &PagesCtx, source: InputSource, output: OutputAction) {
+/// Apply a command picked for one input: `Some` replaces the click output,
+/// `None` (the picker's "None" tile) clears every command the input has,
+/// Steam's unbound state — which the profile model saves as an input with
+/// no activators.
+fn apply_quick_rebind(ctx: &PagesCtx, source: InputSource, output: Option<OutputAction>) {
     {
         let target = ctx.active_target.get();
         let mut profile = ctx.profile.borrow_mut();
         let Some(inputs) = target.inputs_mut(&mut profile) else {
             return;
         };
-        match inputs.iter_mut().find(|input| input.source == source) {
-            Some(input) => {
-                match input
-                    .activators
-                    .iter_mut()
-                    .find(|activator| matches!(activator.kind, ActivatorKind::FullPress))
-                {
-                    Some(activator) => activator.outputs = vec![output],
-                    None => input
+        match output {
+            Some(output) => match inputs.iter_mut().find(|input| input.source == source) {
+                Some(input) => {
+                    match input
                         .activators
-                        .push(ira_input::Activator::full_press(vec![output])),
+                        .iter_mut()
+                        .find(|activator| matches!(activator.kind, ActivatorKind::FullPress))
+                    {
+                        Some(activator) => activator.outputs = vec![output],
+                        None => input
+                            .activators
+                            .push(ira_input::Activator::full_press(vec![output])),
+                    }
+                }
+                None => inputs.push(InputMapping::simple(source, output)),
+            },
+            None => {
+                if let Some(input) = inputs.iter_mut().find(|input| input.source == source) {
+                    input.activators.clear();
                 }
             }
-            None => inputs.push(InputMapping::simple(source, output)),
         }
     }
     (ctx.on_dirty)();
@@ -183,6 +300,23 @@ mod tests {
                 assert_eq!(choice.title, mode_label(mode, trigger));
             }
         }
+    }
+
+    #[test]
+    fn test_dpad_button_behavior_covers_none_directional_and_joystick() {
+        // Steam's dpad page states: None (inert), the standard Directional
+        // Pad, and the joystick composition. "None" rides the stick Dpad
+        // mode, inert on button sources; the bare "no mode" state is the
+        // Directional Pad, matching existing profiles.
+        let source = InputSource::Button(GamepadButton::DpadUp);
+        let choices = behavior_choices(source);
+        let modes = modes_for(source);
+        assert_eq!(choices.len(), modes.len());
+        assert_eq!(choices[0].title, crate::tr!("None"));
+        assert!(matches!(modes[0], Some(ira_input::SourceMode::Dpad { .. })));
+        assert_eq!(choices[1].title, crate::tr!("Directional Pad"));
+        assert!(modes[1].is_none());
+        assert_eq!(choices[2].title, mode_label(&modes[2], false));
     }
 
     #[test]

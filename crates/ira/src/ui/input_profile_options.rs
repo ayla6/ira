@@ -186,7 +186,9 @@ pub(crate) fn output_display_label(output: &OutputAction) -> String {
         OutputAction::GamepadButton(button) => button_label(*button),
         OutputAction::GamepadAxis(axis) => axis_label(*axis),
         OutputAction::Keyboard { keycode } => {
-            crate::tr!("Keyboard key {}").replacen("{}", &keycode.to_string(), 1)
+            super::input_output_keys::keycode_display_name(*keycode).unwrap_or_else(|| {
+                crate::tr!("Keyboard key {}").replacen("{}", &keycode.to_string(), 1)
+            })
         }
         OutputAction::MouseButton(button) => match button {
             MouseButton::Left => crate::tr!("Mouse Left"),
@@ -276,7 +278,12 @@ mod tests {
     fn test_output_display_label_names_keyboard_and_mouse_actions() {
         assert_eq!(
             output_display_label(&OutputAction::Keyboard { keycode: 57 }),
-            "Keyboard key 57"
+            "Space"
+        );
+        // A code the table cannot name falls back to its number.
+        assert_eq!(
+            output_display_label(&OutputAction::Keyboard { keycode: 250 }),
+            "Keyboard key 250"
         );
         assert_eq!(
             output_display_label(&OutputAction::MouseButton(MouseButton::Side)),

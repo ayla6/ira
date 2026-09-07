@@ -81,11 +81,12 @@ fn scroll_target(
     (top_pad + rows * row_h - OUTLINE_ALLOWANCE).max(0.0)
 }
 
-/// Which tab of the All Software page is showing: the game grid or the
-/// groups list.
+/// Which tab of the single big-picture page is showing: the recent
+/// carousel, the game grid, or the groups tiles.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Tab {
-    Software,
+    Recent,
+    Everything,
     Groups,
 }
 
@@ -133,9 +134,12 @@ impl ShoulderBadge {
     }
 }
 
-/// Widgets and selection state of the All Software page.
+/// Widgets and selection state of the big-picture page: one screen with
+/// Recent / Everything / Groups tabs over a shared header.
 pub(super) struct AllSoftwareUi {
     page: gtk4::Box,
+    surfaces: gtk4::Stack,
+    recent_page: gtk4::Widget,
     scrolled: gtk4::ScrolledWindow,
     grid: VirtualGrid,
     /// The selected game's name as a tooltip pill floating above its tile.
@@ -154,12 +158,9 @@ pub(super) struct AllSoftwareUi {
     selected_key: Rc<Cell<GameKey>>,
     /// The running scroll glide, so a new press replaces it mid-flight.
     scroll_anim: Rc<RefCell<Option<glib::SourceId>>>,
-    opened: Cell<bool>,
     /// The "sorted by …" label in the header.
     ordering: gtk4::Label,
-    software_tab: gtk4::Box,
-    groups_tab: gtk4::Box,
-    view_stack: adw::ViewStack,
+    tabs: adw::ToggleGroup,
     /// The L/R shoulder badges flanking the tabs.
     shoulder_l: ShoulderBadge,
     shoulder_r: ShoulderBadge,
@@ -173,25 +174,28 @@ pub(super) struct AllSoftwareUi {
     pub(super) groups_grid: super::groups::GroupsGrid,
 }
 
-pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
+pub(super) fn build(
+    state: &SharedState,
+    recent_page: &gtk4::Overlay,
+) -> (gtk4::Box, AllSoftwareUi) {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     page.add_css_class(CSS_BP_ALL_PAGE);
 
-    let header = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
+    // One header line, truly centered: the ordering and its button in the
+    // start wing, the tab picker in the middle (flanked by the pad's
+    // shoulder glyphs), and nothing on the right — the status rail floats
+    // above that empty corner (see `view::build_root`).
+    let header = gtk4::CenterBox::new();
     header.set_margin_top(18);
     header.set_margin_bottom(6);
     header.set_margin_start(28);
     header.set_margin_end(28);
-    // The ordering and its button live on the left; the tabs center
-    // between the expanding spacers (the status rail floats above the
-    // empty right side — see `view::build_root`).
     let ordering = gtk4::Label::new(None);
     ordering.set_valign(gtk4::Align::Center);
     ordering.add_css_class(CSS_BP_PAGE_SUBTITLE);
     crate::ui::helpers::crisp_label(&ordering);
-    header.append(&ordering);
     // The sort button opens the sort menu (Options does the same when no
-    // game is focused).
+    // game is focused); on the Groups tab it orders the tiles instead.
     let sort_btn = gtk4::Button::from_icon_name("view-sort-descending-symbolic");
     sort_btn.add_css_class(CSS_FLAT);
     sort_btn.set_focusable(false);
@@ -200,50 +204,62 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     {
         let sort_state = state.clone();
         sort_btn.connect_clicked(move |_| {
-            if let Some(big) = sort_state.borrow().big_picture.clone() {
-                big.game_menu.open(&sort_state, super::game_menu::MenuKind::Sort);
-            }
+            let Some(big) = sort_state.borrow().big_picture.clone() else {
+                return;
+            };
+            let kind = if big.all.tab.get() == Tab::Groups {
+                super::game_menu::MenuKind::GroupOrder
+            } else {
+                super::game_menu::MenuKind::Sort
+            };
+            big.game_menu.open(&sort_state, kind);
         });
     }
-    header.append(&sort_btn);
-    let lead = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    lead.set_hexpand(true);
-    header.append(&lead);
+    let start = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
+    start.append(&ordering);
+    start.append(&sort_btn);
+    header.set_start_widget(Some(&start));
     let shoulder_l = ShoulderBadge::new();
     let shoulder_r = ShoulderBadge::new();
-    // The tab picker: an Adwaita view switcher in a pill, flanked by the
-    // pad's shoulder glyphs. The switcher's pages are dummies — the real
-    // surfaces are toggled in `apply_mode`, because a group's game view
-    // replaces the grid while the tab stays Groups.
-    let dummy_software = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    let dummy_groups = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    let view_stack = adw::ViewStack::new();
-    view_stack.add_titled(&dummy_software, Some("software"), &crate::tr!("Software"));
-    view_stack.add_titled(&dummy_groups, Some("groups"), &crate::tr!("Groups"));
-    let switcher = adw::ViewSwitcher::new();
-    switcher.set_stack(Some(&view_stack));
-    switcher.set_policy(adw::ViewSwitcherPolicy::Narrow);
-    let pill = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    pill.add_css_class(CSS_BP_TABS_PILL);
-    pill.append(&switcher);
-    header.append(&shoulder_l.slot);
-    header.append(&pill);
-    header.append(&shoulder_r.slot);
-    let trail = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    trail.set_hexpand(true);
-    header.append(&trail);
+    let tabs = adw::ToggleGroup::new();
+    tabs.add(
+        adw::Toggle::builder()
+            .name("recent")
+            .label(crate::tr!("Recent"))
+            .build(),
+    );
+    tabs.add(
+        adw::Toggle::builder()
+            .name("everything")
+            .label(crate::tr!("Everything"))
+            .build(),
+    );
+    tabs.add(
+        adw::Toggle::builder()
+            .name("groups")
+            .label(crate::tr!("Groups"))
+            .build(),
+    );
+    tabs.add_css_class(CSS_BP_TABS);
+    tabs.set_active_name(Some("recent"));
+    let center = gtk4::Box::new(gtk4::Orientation::Horizontal, 14);
+    center.set_valign(gtk4::Align::Center);
+    center.append(&shoulder_l.slot);
+    center.append(&tabs);
+    center.append(&shoulder_r.slot);
+    header.set_center_widget(Some(&center));
     {
         let tab_state = state.clone();
-        let groups_dummy = dummy_groups.clone().upcast::<gtk4::Widget>();
-        view_stack.connect_visible_child_notify(move |stack| {
-            let tab = if stack.visible_child().as_ref() == Some(&groups_dummy) {
-                Tab::Groups
-            } else {
-                Tab::Software
+        tabs.connect_active_name_notify(move |_| {
+            let Some(big) = tab_state.borrow().big_picture.clone() else {
+                return;
             };
-            if let Some(big) = tab_state.borrow().big_picture.clone() {
-                big.all.set_tab(&tab_state, tab);
-            }
+            let tab = match big.all.tabs.active_name().as_deref() {
+                Some("groups") => Tab::Groups,
+                Some("everything") => Tab::Everything,
+                _ => Tab::Recent,
+            };
+            big.all.set_tab(&tab_state, tab);
         });
     }
     page.append(&header);
@@ -303,10 +319,19 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         })
     });
     grid_overlay.set_clip_overlay(tooltip.widget(), false);
-    page.append(&grid_overlay);
 
     let groups = super::groups::GroupsGrid::build(state);
-    page.append(groups.widget());
+
+    // The three tab surfaces in one stack: the recent carousel, the game
+    // grid, and the groups tiles.
+    let surfaces = gtk4::Stack::new();
+    surfaces.set_transition_type(gtk4::StackTransitionType::None);
+    surfaces.set_vexpand(true);
+    surfaces.add_titled(recent_page, Some("recent"), "recent");
+    surfaces.add_named(&grid_overlay, Some("everything"));
+    surfaces.add_named(groups.widget(), Some("groups"));
+    surfaces.set_visible_child(recent_page);
+    page.append(&surfaces);
 
     let empty = gtk4::Label::new(Some(&crate::tr!("No games yet")));
     empty.add_css_class(CSS_BP_PAGE_SUBTITLE);
@@ -348,6 +373,8 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
 
     let ui = AllSoftwareUi {
         page,
+        surfaces,
+        recent_page: recent_page.clone().upcast::<gtk4::Widget>(),
         scrolled,
         grid,
         tooltip,
@@ -358,16 +385,13 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         scroll_anim: Rc::new(RefCell::new(None)),
         ring,
         overlay: grid_overlay,
-        opened: Cell::new(false),
         ordering,
-        software_tab: dummy_software,
-        groups_tab: dummy_groups,
-        view_stack,
+        tabs,
         shoulder_l,
         shoulder_r,
         shoulder_family: Cell::new(ira_input::ControllerFamily::Xbox),
         shoulder_scale: Cell::new(0.0),
-        tab: Cell::new(Tab::Software),
+        tab: Cell::new(Tab::Recent),
         groups_view: Cell::new(None),
         groups_grid: groups,
     };
@@ -376,15 +400,36 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
 }
 
 impl AllSoftwareUi {
-    /// Name the current ordering in the header.
+    /// The tab whose surface is showing (a group's game view counts as
+    /// Everything for input purposes).
+    pub(super) fn tab(&self) -> Tab {
+        self.tab.get()
+    }
+
+    /// Name the current ordering in the header: the game sort on
+    /// Everything, the tile order on Groups, nothing on Recent.
     pub(super) fn update_ordering_label(&self, state: &SharedState) {
-        let (mode, descending) = {
-            let s = state.borrow();
-            (s.cfg.sort_mode, s.cfg.sort_descending)
-        };
-        let arrow = if descending { " ↓" } else { "" };
-        self.ordering
-            .set_text(&format!("{}{arrow}", mode.display_label()));
+        match self.tab.get() {
+            Tab::Recent => {
+                self.ordering.set_text("");
+                self.ordering.set_visible(false);
+            }
+            Tab::Everything => {
+                let (mode, descending) = {
+                    let s = state.borrow();
+                    (s.cfg.sort_mode, s.cfg.sort_descending)
+                };
+                let arrow = if descending { " ↓" } else { "" };
+                self.ordering
+                    .set_text(&format!("{}{arrow}", mode.display_label()));
+                self.ordering.set_visible(true);
+            }
+            Tab::Groups => {
+                let order = state.borrow().cfg.group_order;
+                self.ordering.set_text(order.display_label());
+                self.ordering.set_visible(true);
+            }
+        }
     }
 
     /// The game the selection currently rests on, if any.
@@ -426,7 +471,7 @@ impl AllSoftwareUi {
 
     /// Switch tabs. The Groups tab reloads its tiles so groups created
     /// elsewhere show up; a group's game view never survives the switch —
-    /// the shoulders and the view switcher always land on the tab's own
+    /// the shoulders and the toggle group always land on the tab's own
     /// surface.
     pub(super) fn set_tab(&self, state: &SharedState, tab: Tab) {
         if self.tab.get() == tab && self.groups_view.get().is_none() {
@@ -434,31 +479,36 @@ impl AllSoftwareUi {
         }
         self.tab.set(tab);
         self.groups_view.set(None);
-        // Keep the switcher's highlight in step; its notify loops back
-        // here and early-returns.
-        let dummy = match tab {
-            Tab::Software => &self.software_tab,
-            Tab::Groups => &self.groups_tab,
+        // Keep the toggle group in step; its notify loops back here and
+        // early-returns.
+        let name = match tab {
+            Tab::Recent => "recent",
+            Tab::Everything => "everything",
+            Tab::Groups => "groups",
         };
-        self.view_stack.set_visible_child(dummy);
+        if self.tabs.active_name().as_deref() != Some(name) {
+            self.tabs.set_active_name(Some(name));
+        }
         if tab == Tab::Groups {
             self.groups_grid.reload(state);
         }
         self.apply_mode(state);
     }
 
-    /// Step to the other tab (the shoulders), Switch-style.
-    pub(super) fn switch_tab(&self, state: &SharedState, _delta: i32) {
-        let next = match self.tab.get() {
-            Tab::Software => Tab::Groups,
-            Tab::Groups => Tab::Software,
-        };
-        self.set_tab(state, next);
+    /// Step to the neighbouring tab (the shoulders), clamped at the ends.
+    pub(super) fn switch_tab(&self, state: &SharedState, delta: i32) {
+        const ORDER: [Tab; 3] = [Tab::Recent, Tab::Everything, Tab::Groups];
+        let current = ORDER
+            .iter()
+            .position(|t| *t == self.tab.get())
+            .unwrap_or(0) as i64;
+        let next = (current + delta as i64).clamp(0, ORDER.len() as i64 - 1) as usize;
+        self.set_tab(state, ORDER[next]);
     }
 
     /// Back out one level on this page: a group's games return to the
     /// groups tiles. Returns false when the page has nothing to pop and
-    /// the caller should leave for home.
+    /// the caller should quit.
     pub(super) fn on_back(&self, state: &SharedState) -> bool {
         if self.tab.get() == Tab::Groups && self.groups_view.get().is_some() {
             self.groups_view.set(None);
@@ -557,16 +607,34 @@ impl AllSoftwareUi {
     /// highlight-less.
     pub(super) fn apply_mode(&self, state: &SharedState) {
         let tiles = self.in_groups_tiles();
-        self.groups_grid.widget().set_visible(tiles);
-        self.overlay.set_visible(!tiles);
+        let recent = self.tab.get() == Tab::Recent;
+        let target: &gtk4::Widget = if recent {
+            &self.recent_page
+        } else if tiles {
+            self.groups_grid.widget().upcast_ref()
+        } else {
+            self.overlay.upcast_ref()
+        };
+        self.surfaces.set_visible_child(target);
         self.refresh(state);
         if tiles {
             self.groups_grid.repaint(state);
-        } else {
+            // The tiles just became visible; their first allocation lands
+            // after this call, so re-anchor the ring once it does.
+            let idle_state = state.clone();
+            glib::idle_add_local_once(move || {
+                if let Some(big) = idle_state.borrow().big_picture.clone() {
+                    big.all.groups_grid.position_ring();
+                }
+            });
+        } else if !recent {
             self.ensure_default_selection();
         }
+        self.update_ordering_label(state);
         if let Some(big) = state.borrow().big_picture.clone() {
-            let prompts: Vec<(ira_input::GamepadButton, String)> = if tiles {
+            let prompts: Vec<(ira_input::GamepadButton, String)> = if recent {
+                vec![(ira_input::GamepadButton::A, crate::tr!("Play"))]
+            } else if tiles {
                 vec![
                     (ira_input::GamepadButton::X, crate::tr!("Delete Group")),
                     (ira_input::GamepadButton::B, crate::tr!("Back")),
@@ -591,7 +659,7 @@ impl AllSoftwareUi {
     /// show a highlight. A selection cleared by manual scrolling stays
     /// cleared; only a surface (re)entry re-parks it.
     fn ensure_default_selection(&self) {
-        if self.opened.get() && self.selected.get().is_none() && !self.games.borrow().is_empty() {
+        if self.selected.get().is_none() && !self.games.borrow().is_empty() {
             self.select(0);
         }
     }
@@ -668,9 +736,9 @@ impl AllSoftwareUi {
             self.selected_key.set(key.unwrap_or((0, 0)));
         }
         self.sync_store(&games);
-        // The library landed while the page was open with nothing selected
-        // (its first open predated the games): park on the first tile.
-        if was_empty && !games.is_empty() && self.opened.get() {
+        // The library landed with nothing selected: park on the first
+        // tile.
+        if was_empty && !games.is_empty() {
             self.select(0);
         }
     }
@@ -697,31 +765,6 @@ impl AllSoftwareUi {
         }
         *self.games.borrow_mut() = games.to_vec();
         self.update_tooltip();
-    }
-
-    /// Opening the page: park the selection on the first tile when there
-    /// is none and keep the scroll anchored. Later opens keep both.
-    pub(super) fn ensure_opened(&self, state: &SharedState) {
-        if !self.opened.get() {
-            self.opened.set(true);
-            // The pill's text was set while this page sat hidden — possibly
-            // at a different big-picture scale — so its layout may measure
-            // stale.
-            self.tooltip.revalidate_text();
-        }
-        if self.selected.get().is_none() {
-            self.select(0);
-        }
-        self.scroll_to_selected();
-        self.update_tooltip();
-        // The page is mid stack transition here: its first real allocation
-        // still lies ahead, and the floats must re-anchor once it lands.
-        let idle_state = state.clone();
-        glib::idle_add_local_once(move || {
-            if let Some(big) = idle_state.borrow().big_picture.clone() {
-                big.all.update_tooltip();
-            }
-        });
     }
 
     /// Re-measure the pill after the big-picture scale changed (see

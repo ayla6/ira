@@ -1,9 +1,9 @@
-//! The big-picture big-picture shell: status rail on top (avatar, date, clock,
-//! battery), a two-page stack in the middle (home carousel, All Software
-//! grid), and a bottom rail (connected gamepads, button prompts).
-//! Controller and keyboard input is routed to whichever page is showing.
+//! The big-picture shell: a status rail floating top-right, one page in
+//! the middle (Recent / Everything / Groups tabs over a shared header),
+//! and a bottom rail (connected gamepads, button prompts). Controller and
+//! keyboard input is routed to whichever tab is showing.
 
-use super::all_games::AllSoftwareUi;
+use super::all_games::{AllSoftwareUi, Tab};
 use super::home::HomeUi;
 use super::input::{NavCommand, NavMsg};
 use super::status::{BottomBar, StatusBar};
@@ -13,23 +13,12 @@ use adw::prelude::*;
 use std::cell::Cell;
 use std::rc::Rc;
 
-/// Which page of the big-picture shell is showing.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Page {
-    Home,
-    AllSoftware,
-}
-
 /// Widgets of the big-picture view, kept on `AppState` behind an `Rc` so every
 /// handler — refreshes, navigation, the scroll ticker — sees the same
 /// selection state instead of a deep-cloned snapshot.
 pub struct BigPictureUi {
-    stack: gtk4::Stack,
-    home_page: gtk4::Overlay,
-    all_page: gtk4::Box,
     status: StatusBar,
     bottom: BottomBar,
-    page: Cell<Page>,
     /// The big-picture scale the pills were last measured at, so a scale change
     /// can force their stale label layouts to re-resolve.
     ui_scale: Cell<f64>,
@@ -116,6 +105,11 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
         glib::ControlFlow::Break
     });
     refresh(state);
+    // The page is up from the start now — apply the tab's prompts and
+    // header labels before the first frame.
+    if let Some(big) = state.borrow().big_picture.clone() {
+        big.all.apply_mode(state);
+    }
     super::input::start(state);
 }
 
@@ -127,15 +121,10 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
 
     let status = StatusBar::build();
 
-    let stack = gtk4::Stack::new();
-    stack.set_vexpand(true);
-    stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
-    stack.set_transition_duration(150);
     let (home_page, home) = super::home::build(state, square_mode);
-    let (all_page, all) = super::all_games::build(state);
-    stack.add_named(&home_page, Some("home"));
-    stack.add_named(&all_page, Some("all"));
-    root.append(&stack);
+    let (all_page, all) = super::all_games::build(state, &home_page);
+    all_page.set_vexpand(true);
+    root.append(&all_page);
 
     let bottom = BottomBar::build();
     bottom.set_prompts(&[(ira_input::GamepadButton::A, &crate::tr!("Play"))]);
@@ -165,12 +154,8 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
     overlay.set_measure_overlay(keyboard.root(), false);
 
     let ui = BigPictureUi {
-        stack,
-        home_page,
-        all_page,
         status,
         bottom,
-        page: Cell::new(Page::Home),
         ui_scale: Cell::new(0.0),
         cursor_hidden: Cell::new(false),
         home,
@@ -240,14 +225,12 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
                     .is_some_and(|big| big.game_menu.is_open());
                 if keyboard_open {
                     if let Some(big) = state.borrow().big_picture.clone() {
-                        big.keyboard.close();
+                        big.keyboard.close(&state);
                     }
                 } else if menu_open {
                     if let Some(big) = state.borrow().big_picture.clone() {
                         big.game_menu.close();
                     }
-                } else if showing_all(&state) {
-                    show_home(&state);
                 } else {
                     quit_app(&state);
                 }
@@ -297,7 +280,7 @@ fn route(state: &SharedState, command: NavCommand) {
                 NavCommand::Right => big.keyboard.move_cursor(1, 0),
                 NavCommand::Confirm => big.keyboard.press_selected(state),
                 NavCommand::Back => big.keyboard.backspace(),
-                NavCommand::Options => big.keyboard.close(),
+                NavCommand::Options => big.keyboard.close(state),
                 _ => {}
             }
             return;
@@ -324,75 +307,22 @@ fn route(state: &SharedState, command: NavCommand) {
             return;
         }
     }
-    if showing_all(state) {
-        let Some(big) = state.borrow().big_picture.clone() else {
-            return;
-        };
-        // First directional press while the pointer was still in charge:
-        // its focused tile yields entirely, and the arrows re-acquire
-        // from whatever is on screen (see `AllSoftwareUi::move_selection`).
-        if mouse_drove
-            && matches!(
-                command,
-                NavCommand::Left | NavCommand::Right | NavCommand::Up | NavCommand::Down
-            )
-        {
-            big.all.clear_selection();
-        }
-        match command {
-            NavCommand::Back => {
-                if !big.all.on_back(state) {
-                    show_home(state);
-                }
-            }
-            NavCommand::PrevTab => big.all.switch_tab(state, -1),
-            NavCommand::NextTab => big.all.switch_tab(state, 1),
-            _ if big.all.in_groups_tiles() => match command {
-                NavCommand::Secondary => big.all.groups_delete_selected(state),
-                NavCommand::Options => big.all.groups_rename_selected(state),
-                NavCommand::Left => big.all.groups_move(state, -1, 0),
-                NavCommand::Right => big.all.groups_move(state, 1, 0),
-                NavCommand::Up => big.all.groups_move(state, 0, -1),
-                NavCommand::Down => big.all.groups_move(state, 0, 1),
-                NavCommand::Confirm => big.all.groups_open_selected(state),
-                _ => {}
-            },
-            NavCommand::Options => {
-                // Options on a focused game opens its group menu; with
-                // nothing focused it opens the sort picker.
-                let game = big.all.selected_game();
-                match game {
-                    Some(game) => big
-                        .game_menu
-                        .open(state, super::game_menu::MenuKind::Groups(Box::new(game))),
-                    None => big.game_menu.open(state, super::game_menu::MenuKind::Sort),
-                }
-            }
-            NavCommand::Left => big.all.move_selection(-1, 0),
-            NavCommand::Right => big.all.move_selection(1, 0),
-            NavCommand::Up => big.all.move_selection(0, -1),
-            NavCommand::Down => big.all.move_selection(0, 1),
-            NavCommand::Confirm => {
-                let game = big.all.selected_game();
-                if let Some(game) = game {
-                    if let Err(error) =
-                        crate::ui::play_button::launch_game(state, game.db_id, game.variant_id)
-                    {
-                        eprintln!("Failed to launch game: {error}");
-                        let _ = state
-                            .borrow()
-                            .sender
-                            .send(crate::AppMessage::AddGameError(error));
-                    }
-                }
-            }
-            _ => {}
-        }
-    } else {
+    let Some(big) = state.borrow().big_picture.clone() else {
+        return;
+    };
+    if big.all.tab() == Tab::Recent {
+        // The recent carousel: left/right walk the covers, A plays, and
+        // the grid tile at the end jumps to the Everything tab.
         match command {
             NavCommand::Left => super::home::move_selection(state, -1),
             NavCommand::Right => super::home::move_selection(state, 1),
-            NavCommand::Confirm => confirm(state),
+            NavCommand::Confirm => {
+                if super::home::selection_is_tile(&big) {
+                    big.all.set_tab(state, Tab::Everything);
+                } else {
+                    super::home::launch_selected(state);
+                }
+            }
             NavCommand::Up
             | NavCommand::Down
             | NavCommand::Back
@@ -401,50 +331,68 @@ fn route(state: &SharedState, command: NavCommand) {
             | NavCommand::PrevTab
             | NavCommand::NextTab => {}
         }
-    }
-}
-
-fn showing_all(state: &SharedState) -> bool {
-    state
-        .borrow()
-        .big_picture
-        .as_ref()
-        .is_some_and(|big| big.page.get() == Page::AllSoftware)
-}
-
-/// The home screen's Confirm: launch the selected game, or open All
-/// Software when the grid tile is selected.
-pub(super) fn confirm(state: &SharedState) {
-    let is_tile = state
-        .borrow()
-        .big_picture
-        .as_ref()
-        .map(super::home::selection_is_tile);
-    if is_tile == Some(true) {
-        open_all(state);
-    } else {
-        super::home::launch_selected(state);
-    }
-}
-
-pub(super) fn open_all(state: &SharedState) {
-    let Some(big) = state.borrow().big_picture.clone() else {
         return;
-    };
-    big.page.set(Page::AllSoftware);
-    big.stack.set_visible_child(&big.all_page);
-    big.all.apply_mode(state);
-    big.all.ensure_opened(state);
-}
-
-pub(super) fn show_home(state: &SharedState) {
-    let Some(big) = state.borrow().big_picture.clone() else {
-        return;
-    };
-    big.page.set(Page::Home);
-    big.stack.set_visible_child(&big.home_page);
-    big.bottom
-        .set_prompts(&[(ira_input::GamepadButton::A, &crate::tr!("Play"))]);
+    }
+    // First directional press while the pointer was still in charge:
+    // its focused tile yields entirely, and the arrows re-acquire
+    // from whatever is on screen (see `AllSoftwareUi::move_selection`).
+    if mouse_drove
+        && matches!(
+            command,
+            NavCommand::Left | NavCommand::Right | NavCommand::Up | NavCommand::Down
+        )
+    {
+        big.all.clear_selection();
+    }
+    match command {
+        NavCommand::Back => {
+            if !big.all.on_back(state) {
+                quit_app(state);
+            }
+        }
+        NavCommand::PrevTab => big.all.switch_tab(state, -1),
+        NavCommand::NextTab => big.all.switch_tab(state, 1),
+        _ if big.all.in_groups_tiles() => match command {
+            NavCommand::Secondary => big.all.groups_delete_selected(state),
+            NavCommand::Options => big.all.groups_rename_selected(state),
+            NavCommand::Left => big.all.groups_move(state, -1, 0),
+            NavCommand::Right => big.all.groups_move(state, 1, 0),
+            NavCommand::Up => big.all.groups_move(state, 0, -1),
+            NavCommand::Down => big.all.groups_move(state, 0, 1),
+            NavCommand::Confirm => big.all.groups_open_selected(state),
+            _ => {}
+        }
+        NavCommand::Options => {
+            // Options on a focused game opens its group menu; with
+            // nothing focused it opens the sort picker.
+            let game = big.all.selected_game();
+            match game {
+                Some(game) => big
+                    .game_menu
+                    .open(state, super::game_menu::MenuKind::Groups(Box::new(game))),
+                None => big.game_menu.open(state, super::game_menu::MenuKind::Sort),
+            }
+        }
+        NavCommand::Left => big.all.move_selection(-1, 0),
+        NavCommand::Right => big.all.move_selection(1, 0),
+        NavCommand::Up => big.all.move_selection(0, -1),
+        NavCommand::Down => big.all.move_selection(0, 1),
+        NavCommand::Confirm => {
+            let game = big.all.selected_game();
+            if let Some(game) = game {
+                if let Err(error) =
+                    crate::ui::play_button::launch_game(state, game.db_id, game.variant_id)
+                {
+                    eprintln!("Failed to launch game: {error}");
+                    let _ = state
+                        .borrow()
+                        .sender
+                        .send(crate::AppMessage::AddGameError(error));
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The big-picture UI's viewport scale (1.0 = 1920 wide); 0 before the window
@@ -453,7 +401,7 @@ fn big_picture_scale(state: &SharedState) -> f64 {
     state.borrow().window.width() as f64 / 1920.0
 }
 
-fn quit_app(state: &SharedState) {
+pub(super) fn quit_app(state: &SharedState) {
     let window = state.borrow().window.clone();
     if let Some(app) = window.application() {
         app.quit();

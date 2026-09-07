@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-07 16:25-0300\n"
+"POT-Creation-Date: 2026-09-07 17:22-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -872,6 +872,7 @@ msgstr ""
 
 #: crates/ira/src/ui/input_output_keys.rs:104
 #: crates/ira/src/ui/input_output_keys.rs:201
+#: crates/ira/src/ui/big_picture/keyboard.rs:176
 #: crates/ira/src/ui/group_dialog.rs:110
 #: crates/ira/src/ui/play_history.rs:218
 #: crates/ira/src/ui/edit_game_controller.rs:423
@@ -938,7 +939,7 @@ msgid "Enter"
 msgstr ""
 
 #: crates/ira/src/ui/input_output_keys.rs:127
-#: crates/ira/src/ui/big_picture/keyboard.rs:196
+#: crates/ira/src/ui/big_picture/keyboard.rs:209
 msgid "Shift"
 msgstr ""
 
@@ -956,7 +957,7 @@ msgstr ""
 
 #: crates/ira/src/ui/input_output_keys.rs:131
 #: crates/ira/src/ui/input_output_keys.rs:172
-#: crates/ira/src/ui/big_picture/keyboard.rs:201
+#: crates/ira/src/ui/big_picture/keyboard.rs:214
 msgid "Space"
 msgstr ""
 
@@ -1314,7 +1315,7 @@ msgid "Toggle {name}"
 msgstr ""
 
 #: crates/ira/src/ui/window.rs:130
-#: crates/ira/src/ui/big_picture/view.rs:51
+#: crates/ira/src/ui/big_picture/view.rs:40
 msgid "Ira"
 msgstr ""
 
@@ -1331,8 +1332,8 @@ msgid "Search games…"
 msgstr ""
 
 #: crates/ira/src/ui/window.rs:208
-#: crates/ira/src/ui/big_picture/all_games.rs:199
-#: crates/ira/src/ui/big_picture/game_menu.rs:198
+#: crates/ira/src/ui/big_picture/all_games.rs:203
+#: crates/ira/src/ui/big_picture/game_menu.rs:212
 #: crates/ira/src/ui/input_profile_search_filters.rs:100
 msgid "Sort by"
 msgstr ""
@@ -2000,8 +2001,8 @@ msgid "Couldn't add game"
 msgstr ""
 
 #: crates/ira/src/ui/message_handler.rs:113
-#: crates/ira/src/ui/big_picture/all_games.rs:574
-#: crates/ira/src/ui/big_picture/keyboard.rs:204
+#: crates/ira/src/ui/big_picture/all_games.rs:642
+#: crates/ira/src/ui/big_picture/keyboard.rs:217
 #: crates/ira/src/ui/auto_add_dialog.rs:1697
 #: crates/ira/src/ui/mass_match_dialog.rs:340
 msgid "OK"
@@ -2057,9 +2058,9 @@ msgid "Add to new collection…"
 msgstr ""
 
 #: crates/ira/src/ui/context_menu.rs:82
-#: crates/ira/src/ui/big_picture/all_games.rs:580
-#: crates/ira/src/ui/big_picture/view.rs:141
-#: crates/ira/src/ui/big_picture/view.rs:447
+#: crates/ira/src/ui/big_picture/view.rs:130
+#: crates/ira/src/ui/big_picture/all_games.rs:636
+#: crates/ira/src/ui/big_picture/all_games.rs:648
 #: crates/ira/src/ui/play_button.rs:28
 #: crates/ira/src/ui/play_button.rs:48
 msgid "Play"
@@ -2155,71 +2156,88 @@ msgstr ""
 msgid "Reset image"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:221
-msgid "Software"
+#: crates/ira/src/ui/big_picture/view.rs:419
+msgid "Name the group"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:222
+#: crates/ira/src/ui/big_picture/view.rs:443
+msgid "Rename the group"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/all_games.rs:228
+msgid "Recent"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/all_games.rs:234
+msgid "Everything"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/all_games.rs:240
 msgid "Groups"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:311
+#: crates/ira/src/ui/big_picture/all_games.rs:336
 msgid "No games yet"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:571
+#: crates/ira/src/ui/big_picture/all_games.rs:639
 msgid "Delete Group"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:572
-#: crates/ira/src/ui/big_picture/all_games.rs:578
+#: crates/ira/src/ui/big_picture/all_games.rs:640
+#: crates/ira/src/ui/big_picture/all_games.rs:646
 msgid "Back"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:573
+#: crates/ira/src/ui/big_picture/all_games.rs:641
 #: crates/ira/src/ui/group_dialog.rs:68
 #: crates/ira/src/ui/sidebar.rs:426
 msgid "Rename"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:579
+#: crates/ira/src/ui/big_picture/all_games.rs:647
 msgid "Options"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/view.rs:471
-msgid "Name the group"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture/view.rs:495
-msgid "Rename the group"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture/keyboard.rs:198
-msgid "#+="
-msgstr ""
-
-#: crates/ira/src/ui/big_picture/keyboard.rs:199
-msgid "ABC"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture/keyboard.rs:203
-msgid "Return"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture/keyboard.rs:386
-msgid "Type a name…"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture/groups.rs:184
-msgid "New Group"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture/home.rs:410
+#: crates/ira/src/ui/big_picture/home.rs:413
 msgid "All Software"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/game_menu.rs:192
+#: crates/ira/src/ui/big_picture/keyboard.rs:175
+msgid "Type"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/keyboard.rs:177
+#: crates/ira/src/ui/sgdb_picker.rs:647
+msgid "Close"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/keyboard.rs:211
+msgid "#+="
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/keyboard.rs:212
+msgid "ABC"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/keyboard.rs:216
+msgid "Return"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/keyboard.rs:405
+msgid "Type a name…"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/groups.rs:201
+msgid "New Group"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/game_menu.rs:206
 msgid "New Group…"
+msgstr ""
+
+#: crates/ira/src/ui/big_picture/game_menu.rs:228
+msgid "Order groups by"
 msgstr ""
 
 #: crates/ira/src/ui/big_picture/status.rs:184
@@ -2271,10 +2289,6 @@ msgstr ""
 #: crates/ira/src/ui/sgdb_picker.rs:637
 #: crates/ira/src/ui/sgdb_picker.rs:640
 msgid "Loading…"
-msgstr ""
-
-#: crates/ira/src/ui/sgdb_picker.rs:647
-msgid "Close"
 msgstr ""
 
 #: crates/ira/src/ui/sgdb_picker.rs:743
@@ -5652,22 +5666,6 @@ msgstr ""
 msgid "Default"
 msgstr ""
 
-#: crates/ira/src/ui/background.rs:14
-msgid "Close Ira"
-msgstr ""
-
-#: crates/ira/src/ui/background.rs:16
-msgid "Keep the watcher running in the background, or quit completely?"
-msgstr ""
-
-#: crates/ira/src/ui/background.rs:20
-msgid "Hide to background"
-msgstr ""
-
-#: crates/ira/src/ui/background.rs:21
-msgid "Quit"
-msgstr ""
-
 #: crates/ira/src/ui/add_game_method.rs:31
 msgid "How do you want to add this game?"
 msgstr ""
@@ -5689,4 +5687,20 @@ msgstr ""
 #: crates/ira/src/ui/add_game_method.rs:62
 msgid ""
 "Run installer files (exe, sh, GOG) and let Ira detect the installed game"
+msgstr ""
+
+#: crates/ira/src/ui/background.rs:14
+msgid "Close Ira"
+msgstr ""
+
+#: crates/ira/src/ui/background.rs:16
+msgid "Keep the watcher running in the background, or quit completely?"
+msgstr ""
+
+#: crates/ira/src/ui/background.rs:20
+msgid "Hide to background"
+msgstr ""
+
+#: crates/ira/src/ui/background.rs:21
+msgid "Quit"
 msgstr ""

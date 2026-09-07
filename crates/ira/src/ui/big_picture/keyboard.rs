@@ -110,8 +110,9 @@ impl Keyboard {
             let close_state = state.clone();
             let click = gtk4::GestureClick::new();
             click.connect_pressed(move |_, _, _, _| {
-                if let Some(big) = close_state.borrow().big_picture.clone() {
-                    big.keyboard.close();
+                let big = close_state.borrow().big_picture.clone();
+                if let Some(big) = big {
+                    big.keyboard.close(&close_state);
                 }
             });
             dim.add_controller(click);
@@ -168,12 +169,24 @@ impl Keyboard {
         self.refresh_preview();
         self.refresh_cursor();
         self.root.set_visible(true);
+        // The keyboard's controls live in the bottom rail while it shows.
+        if let Some(big) = state.borrow().big_picture.clone() {
+            big.set_prompts(&[
+                (ira_input::GamepadButton::A, &crate::tr!("Type")),
+                (ira_input::GamepadButton::B, &crate::tr!("Delete")),
+                (ira_input::GamepadButton::Start, &crate::tr!("Close")),
+            ]);
+        }
     }
 
-    pub(super) fn close(&self) {
+    /// Close and hand the bottom rail's prompts back to the page.
+    pub(super) fn close(&self, state: &SharedState) {
         self.root.set_visible(false);
         *self.on_ok.borrow_mut() = None;
         *self.buffer.borrow_mut() = String::new();
+        if let Some(big) = state.borrow().big_picture.clone() {
+            big.all.apply_mode(state);
+        }
     }
 
     fn rows(&self) -> &'static [&'static [Key]] {
@@ -240,15 +253,21 @@ impl Keyboard {
             button.add_css_class(CSS_BP_KEY_ACTIVE);
         }
         let label = gtk4::Label::new(Some(&self.key_label(key)));
+        // Expand+center: a Box ignores halign along its own axis, so
+        // without expanding, the letter hugs the key's left edge.
+        label.set_hexpand(true);
         label.set_halign(gtk4::Align::Center);
         label.set_valign(gtk4::Align::Center);
         crate::ui::helpers::crisp_label(&label);
         button.append(&label);
-        button.set_size_request(64, 56);
+        button.set_size_request(80, 72);
         let click_state = state.clone();
         let click = gtk4::GestureClick::new();
         click.connect_pressed(move |_, _, _, _| {
-            if let Some(big) = click_state.borrow().big_picture.clone() {
+            // Clone out of the borrow: confirming runs the caller's
+            // callback, which mutably borrows the state.
+            let big = click_state.borrow().big_picture.clone();
+            if let Some(big) = big {
                 big.keyboard.cursor.set(position);
                 big.keyboard.refresh_cursor();
                 big.keyboard.press(&click_state, key);
@@ -351,7 +370,7 @@ impl Keyboard {
             Key::Return | Key::Ok => {
                 let text = self.buffer.borrow().trim().to_string();
                 let callback = self.on_ok.borrow_mut().take();
-                self.close();
+                self.close(state);
                 if let Some(callback) = callback {
                     callback(state, &text);
                 }

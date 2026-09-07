@@ -288,7 +288,8 @@ pub(super) fn revalidate_pill(big: &Rc<BigPictureUi>) {
 }
 
 /// Mouse navigation on a cover: the first click selects, clicking the
-/// already-selected cover plays. The All Software tile opens immediately.
+/// already-selected cover plays. The All Software tile jumps to the
+/// Everything tab.
 fn on_cover_clicked(state: &SharedState, index: usize) {
     let is_tile = state
         .borrow()
@@ -296,7 +297,9 @@ fn on_cover_clicked(state: &SharedState, index: usize) {
         .as_ref()
         .is_some_and(|big| index >= big.home.games.borrow().len());
     if is_tile {
-        super::view::open_all(state);
+        if let Some(big) = state.borrow().big_picture.clone() {
+            big.all.set_tab(state, super::all_games::Tab::Everything);
+        }
         return;
     }
     let selected = state
@@ -306,7 +309,7 @@ fn on_cover_clicked(state: &SharedState, index: usize) {
         .map(|big| *big.home.selected.borrow())
         .unwrap_or(usize::MAX);
     if selected == index {
-        super::view::confirm(state);
+        super::home::launch_selected(state);
     } else {
         // First click focuses the cover the pointer is on; the camera
         // stays put (the cover is on screen by definition) and the second
@@ -555,7 +558,9 @@ fn build_all_tile(state: &SharedState, capsule: i32) -> gtk4::Widget {
     let open_state = state.clone();
     let click = gtk4::GestureClick::new();
     click.connect_pressed(move |_, _, _, _| {
-        super::view::open_all(&open_state);
+        if let Some(big) = open_state.borrow().big_picture.clone() {
+            big.all.set_tab(&open_state, super::all_games::Tab::Everything);
+        }
     });
     vbox.add_controller(click);
     vbox.upcast()

@@ -17,7 +17,7 @@ pub const CSS_BP_ALL_TILE: &str = "bp-all-tile";
 pub const CSS_BP_ALL_PAGE: &str = "bp-all-page";
 pub const CSS_BP_PAGE_TITLE: &str = "bp-page-title";
 pub const CSS_BP_PAGE_SUBTITLE: &str = "bp-page-subtitle";
-pub const CSS_BP_TABS_PILL: &str = "bp-tabs-pill";
+pub const CSS_BP_TABS: &str = "bp-tabs";
 pub const CSS_BP_MENU_DIM: &str = "bp-menu-dim";
 pub const CSS_BP_MENU_PANEL: &str = "bp-menu-panel";
 pub const CSS_BP_OPTION_PANEL: &str = "bp-option-panel";
@@ -397,12 +397,11 @@ fn big_picture_css(s: f64) -> String {
     font-size: {subtitle};
     color: alpha(@theme_fg_color, 0.55);
 }}
-.bp-tabs-pill {{
-    background: alpha(white, 0.05);
-    border-radius: 9999px;
-    padding: 4px 8px;
+/* The tab picker: libadwaita's toggle group, minus its bold labels. */
+.bp-tabs toggle {{
+    font-weight: normal;
 }}
-.bp-tabs-pill label {{
+.bp-tabs toggle label {{
     font-size: {subtitle};
 }}
 .bp-menu-dim {{
@@ -435,7 +434,6 @@ fn big_picture_css(s: f64) -> String {
 .bp-menu-row-selected {{ background: alpha(@accent_color, 0.45); }}
 .bp-menu-row-active label {{
     color: @accent_color;
-    font-weight: 700;
 }}
 /* The pointer is parked (a gamepad or the keyboard is driving): hover must
    not keep dressing whatever the parked pointer rests on — covers, group
@@ -464,6 +462,9 @@ fn big_picture_css(s: f64) -> String {
 .bp-key {{
     background: alpha(white, 0.08);
     border-radius: 8px;
+}}
+.bp-key label {{
+    font-size: {subtitle};
 }}
 .bp-key-selected {{
     background: alpha(@accent_color, 0.45);

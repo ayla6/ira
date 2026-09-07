@@ -16,8 +16,10 @@ pub(super) enum MenuKind {
     /// Toggle the focused game's membership of each group, or file it
     /// into a new one.
     Groups(Box<crate::Game>),
-    /// Pick the All Software ordering.
+    /// Pick the Everything tab's game ordering.
     Sort,
+    /// Pick the Groups tab's tile ordering.
+    GroupOrder,
 }
 
 /// One actionable row of the open menu.
@@ -26,6 +28,7 @@ enum MenuRow {
     Group { id: i64 },
     NewGroup,
     Sort(ira_models::SortMode),
+    GroupOrder(ira_models::GroupOrder),
 }
 
 pub(super) struct GameMenu {
@@ -153,6 +156,17 @@ impl GameMenu {
                 }
                 self.close();
             }
+            MenuRow::GroupOrder(order) => {
+                state.borrow_mut().cfg.group_order = order;
+                if let Err(e) = state.borrow().cfg.save() {
+                    eprintln!("Failed to save group order: {e}");
+                }
+                if let Some(big) = state.borrow().big_picture.clone() {
+                    big.all.update_ordering_label(state);
+                    big.all.groups_grid.reload(state);
+                }
+                self.close();
+            }
         }
     }
 
@@ -209,6 +223,22 @@ impl GameMenu {
                 }
                 *self.rows.borrow_mut() = rows;
             }
+            MenuKind::GroupOrder => {
+                let current = state.borrow().cfg.group_order;
+                let header = gtk4::Label::new(Some(&crate::tr!("Order groups by")));
+                header.set_xalign(0.0);
+                header.add_css_class(CSS_BP_MENU_TITLE);
+                crate::ui::helpers::crisp_label(&header);
+                self.panel.append(&header);
+
+                let mut rows = Vec::new();
+                for order in ira_models::GroupOrder::ALL {
+                    let index = rows.len();
+                    self.append_row(state, order.display_label(), index, *order == current);
+                    rows.push(MenuRow::GroupOrder(*order));
+                }
+                *self.rows.borrow_mut() = rows;
+            }
         }
     }
 
@@ -231,7 +261,10 @@ impl GameMenu {
         let click_state = state.clone();
         let click = gtk4::GestureClick::new();
         click.connect_pressed(move |_, _, _, _| {
-            if let Some(big) = click_state.borrow().big_picture.clone() {
+            // Clone out of the borrow: activate saves the config through a
+            // mutable borrow, which would panic under the held one.
+            let big = click_state.borrow().big_picture.clone();
+            if let Some(big) = big {
                 big.game_menu.selection.set(index);
                 big.game_menu.activate(&click_state);
             }

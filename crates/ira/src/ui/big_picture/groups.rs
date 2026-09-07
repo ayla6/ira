@@ -113,14 +113,20 @@ impl GroupsGrid {
         true
     }
 
-    /// Rebuild the tiles: New Group first, then one per group. Counts and
+    /// Rebuild the tiles: New Group first, then one per group in the
+    /// configured order (alphabetical, or most games first). Counts and
     /// collages only consider games the library shows — hidden games are
     /// not advertised by a group tile.
     pub(super) fn reload(&self, state: &SharedState) {
         self.ensure_sized();
-        let (groups, db, show_hidden) = {
+        let (groups, db, show_hidden, order) = {
             let s = state.borrow();
-            (s.groups.clone(), s.db.clone(), s.cfg.show_hidden_games)
+            (
+                s.groups.clone(),
+                s.db.clone(),
+                s.cfg.show_hidden_games,
+                s.cfg.group_order,
+            )
         };
         let visible_games: Vec<Game> = state
             .borrow()
@@ -133,13 +139,24 @@ impl GroupsGrid {
         self.slots.borrow_mut().clear();
         let tile = self.tile.get().max(200);
         self.append_new_group_tile(state, tile);
-        for group in &groups {
-            let covers: Vec<&Game> = ira_db::get_game_ids_in_group(&db, group.id)
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|id| visible_games.iter().find(|g| g.db_id == *id))
-                .take(4)
-                .collect();
+        // (member count, group, cover games) — the count feeds the size
+        // ordering, the covers feed the collage.
+        let mut entries: Vec<(usize, &Group, Vec<&Game>)> = groups
+            .iter()
+            .map(|group| {
+                let members = ira_db::get_game_ids_in_group(&db, group.id).unwrap_or_default();
+                let covers: Vec<&Game> = members
+                    .iter()
+                    .filter_map(|id| visible_games.iter().find(|g| g.db_id == *id))
+                    .take(4)
+                    .collect();
+                (members.len(), group, covers)
+            })
+            .collect();
+        if order == ira_models::GroupOrder::Size {
+            entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
+        }
+        for (group, covers) in entries.into_iter().map(|(_, group, covers)| (group, covers)) {
             self.append_group_tile(state, group, &covers, tile);
         }
         self.clamp_selection(state);
@@ -306,7 +323,7 @@ impl GroupsGrid {
     }
 
     /// Anchor the ring to the selected slot's live position.
-    fn position_ring(&self) {
+    pub(super) fn position_ring(&self) {
         let Some(slot) = self.slots.borrow().get(self.selection.get()).cloned() else {
             self.ring.set_visible(false);
             return;

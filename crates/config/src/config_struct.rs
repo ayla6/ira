@@ -239,6 +239,8 @@ pub struct Config {
     #[serde(default)]
     pub sort_mode: ira_models::SortMode,
     #[serde(default)]
+    pub group_order: ira_models::GroupOrder,
+    #[serde(default)]
     pub sort_descending: bool,
     #[serde(default)]
     pub ra_enabled: bool,
@@ -318,6 +320,7 @@ impl Default for Config {
             centralize_game_saves: true,
             language_preferences: default_language_preferences(),
             sort_mode: ira_models::SortMode::default(),
+            group_order: ira_models::GroupOrder::default(),
             sort_descending: false,
             ra_enabled: false,
             ra_username: String::new(),

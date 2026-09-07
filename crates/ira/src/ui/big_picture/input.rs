@@ -38,6 +38,9 @@ pub(super) enum NavCommand {
     /// The shoulders switch the page's tabs (Software / Groups).
     PrevTab,
     NextTab,
+    /// The X button: a secondary action on the focused thing (delete a
+    /// group on the Groups tiles).
+    Secondary,
 }
 
 /// What the bottom rail shows about connected gamepads: the count for the
@@ -268,6 +271,9 @@ fn fold_event(
         }
         InputSource::Button(GamepadButton::RightShoulder) if pressed => {
             let _ = tx.send(NavMsg::Nav(NavCommand::NextTab));
+        }
+        InputSource::Button(GamepadButton::X) if pressed => {
+            let _ = tx.send(NavMsg::Nav(NavCommand::Secondary));
         }
         InputSource::Axis(GamepadAxis::LeftX) => {
             nav.h.apply_stick(event.value, NavCommand::Right, NavCommand::Left)

@@ -1,35 +1,40 @@
-//! The couch's per-game options menu: a centered panel over a dimmed page
-//! that assigns the focused game to groups, creates groups, and cycles the
-//! All Software ordering. While the menu is open the navigation router
-//! feeds it Up/Down/Confirm/Back; the mouse clicks rows directly, and a
-//! click on the dimmed area closes it.
+//! The couch's options menus: a centered panel over a dimmed page, in two
+//! flavors — group assignment for a focused game, and the All Software
+//! sort picker. While a menu is open the navigation router feeds it
+//! Up/Down/Confirm/Back; the mouse clicks rows directly, and a click on
+//! the dimmed area closes it.
 
 use crate::ui::css::*;
 use crate::ui::state::SharedState;
 use gtk4::prelude::*;
 use gtk4::Widget;
-use ira_models::Group;
 use std::cell::{Cell, RefCell};
+
+/// What the open menu does.
+#[derive(Clone)]
+pub(super) enum MenuKind {
+    /// Toggle the focused game's membership of each group, or file it
+    /// into a new one.
+    Groups(crate::Game),
+    /// Pick the All Software ordering.
+    Sort,
+}
 
 /// One actionable row of the open menu.
 #[derive(Clone)]
 enum MenuRow {
-    /// Toggle the focused game's membership of a group.
     Group { id: i64 },
-    /// Create a fresh group and put the game in it.
     NewGroup,
-    /// Advance the All Software sort order.
-    Sort,
+    Sort(ira_models::SortMode),
 }
 
 pub(super) struct GameMenu {
     /// The menu surface: dim layer with the panel floating on top.
     root: gtk4::Overlay,
     panel: gtk4::Box,
+    kind: RefCell<Option<MenuKind>>,
     rows: RefCell<Vec<MenuRow>>,
     selection: Cell<usize>,
-    /// The game the menu was opened for.
-    game: RefCell<Option<crate::Game>>,
 }
 
 impl GameMenu {
@@ -51,7 +56,6 @@ impl GameMenu {
         panel.set_halign(gtk4::Align::Center);
         panel.set_valign(gtk4::Align::Center);
         panel.set_size_request(620, -1);
-        panel.set_margin_bottom(24);
 
         let root = gtk4::Overlay::new();
         root.set_child(Some(&dim));
@@ -60,9 +64,9 @@ impl GameMenu {
         Self {
             root,
             panel,
+            kind: RefCell::new(None),
             rows: RefCell::new(Vec::new()),
             selection: Cell::new(0),
-            game: RefCell::new(None),
         }
     }
 
@@ -74,10 +78,9 @@ impl GameMenu {
         self.root.is_visible()
     }
 
-    /// Open the menu for `game`: one checked row per group, then New
-    /// Group, then the sort cycler.
-    pub(super) fn open(&self, state: &SharedState, game: &crate::Game) {
-        *self.game.borrow_mut() = Some(game.clone());
+    /// Open a menu flavor and lay out its rows.
+    pub(super) fn open(&self, state: &SharedState, kind: MenuKind) {
+        *self.kind.borrow_mut() = Some(kind);
         self.selection.set(0);
         self.rebuild(state);
         self.root.set_visible(true);
@@ -85,7 +88,7 @@ impl GameMenu {
 
     pub(super) fn close(&self) {
         self.root.set_visible(false);
-        *self.game.borrow_mut() = None;
+        *self.kind.borrow_mut() = None;
     }
 
     pub(super) fn move_selection(&self, state: &SharedState, delta: i32) {
@@ -100,23 +103,19 @@ impl GameMenu {
         }
     }
 
-    /// Run the selected row's action and keep the menu open (rows read as
-    /// toggles); without a game the menu just closes.
+    /// Run the selected row's action. Group rows stay open so membership
+    /// reads as a checklist; picking a sort closes.
     pub(super) fn activate(&self, state: &SharedState) {
-        let action = {
-            let rows = self.rows.borrow();
-            rows.get(self.selection.get()).cloned()
-        };
+        let action = self.rows.borrow().get(self.selection.get()).cloned();
         let Some(action) = action else {
-            return;
-        };
-        let Some(game) = self.game.borrow().clone() else {
-            self.close();
             return;
         };
         let db = state.borrow().db.clone();
         match action {
             MenuRow::Group { id } => {
+                let Some(MenuKind::Groups(game)) = self.kind.borrow().clone() else {
+                    return;
+                };
                 let member = ira_db::get_groups_for_game(&db, game.db_id)
                     .unwrap_or_default()
                     .iter()
@@ -129,81 +128,83 @@ impl GameMenu {
                 if let Err(e) = result {
                     eprintln!("Failed to update group membership: {e}");
                 }
+                self.rebuild(state);
             }
             MenuRow::NewGroup => {
-                let existing: Vec<String> = state
-                    .borrow()
-                    .groups
-                    .iter()
-                    .map(|g| g.name.clone())
-                    .collect();
-                let mut n = 1;
-                while existing.iter().any(|name| name == &format!("Group {n}")) {
-                    n += 1;
-                }
-                match ira_db::create_group(&db, &format!("Group {n}")) {
-                    Ok(id) => {
-                        let result = ira_db::add_game_to_group(&db, game.db_id, id);
-                        if let Err(e) = result {
-                            eprintln!("Failed to add game to group: {e}");
-                        }
-                        let group = Group { id, name: format!("Group {n}") };
-                        state.borrow_mut().groups.push(group);
-                    }
-                    Err(e) => eprintln!("Failed to create group: {e}"),
-                }
+                let Some(MenuKind::Groups(game)) = self.kind.borrow().clone() else {
+                    return;
+                };
+                self.close();
+                super::view::name_new_group(state, Some(game));
             }
-            MenuRow::Sort => super::all_games::cycle_sort(state),
+            MenuRow::Sort(mode) => {
+                state.borrow_mut().cfg.sort_mode = mode;
+                if let Err(e) = state.borrow().cfg.save() {
+                    eprintln!("Failed to save sort order: {e}");
+                }
+                if let Some(big) = state.borrow().big_picture.clone() {
+                    big.all.update_ordering_label(state);
+                    big.all.refresh(state);
+                }
+                self.close();
+            }
         }
-        self.rebuild(state);
     }
 
-    /// Rebuild the rows for the current game: groups (checked when the
-    /// game is a member), New Group, and the sort cycler.
+    /// Rebuild the rows for the menu's flavor.
     fn rebuild(&self, state: &SharedState) {
-        let Some(game) = self.game.borrow().clone() else {
+        crate::ui::helpers::clear_children(&self.panel);
+        let kind = self.kind.borrow().clone();
+        let Some(kind) = kind else {
             return;
         };
-        let (groups, db) = {
-            let s = state.borrow();
-            (s.groups.clone(), s.db.clone())
-        };
-        let member_of: Vec<i64> = ira_db::get_groups_for_game(&db, game.db_id)
-            .unwrap_or_default()
-            .iter()
-            .map(|g| g.id)
-            .collect();
-        crate::ui::helpers::clear_children(&self.panel);
+        match kind {
+            MenuKind::Groups(game) => {
+                let (groups, db) = {
+                    let s = state.borrow();
+                    (s.groups.clone(), s.db.clone())
+                };
+                let member_of: Vec<i64> = ira_db::get_groups_for_game(&db, game.db_id)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|g| g.id)
+                    .collect();
+                let header = gtk4::Label::new(Some(&game.name));
+                header.set_xalign(0.0);
+                header.add_css_class(CSS_BP_PAGE_TITLE);
+                crate::ui::helpers::crisp_label(&header);
+                self.panel.append(&header);
 
-        let header = gtk4::Label::new(Some(&game.name));
-        header.set_xalign(0.0);
-        header.add_css_class(CSS_BP_PAGE_TITLE);
-        crate::ui::helpers::crisp_label(&header);
-        self.panel.append(&header);
+                let mut rows = Vec::new();
+                for group in &groups {
+                    let check = if member_of.contains(&group.id) { "✓" } else { "·" };
+                    let index = rows.len();
+                    self.append_row(state, &format!("{check}  {}", group.name), index);
+                    rows.push(MenuRow::Group { id: group.id });
+                }
+                let index = rows.len();
+                self.append_row(state, &crate::tr!("New Group…"), index);
+                rows.push(MenuRow::NewGroup);
+                *self.rows.borrow_mut() = rows;
+            }
+            MenuKind::Sort => {
+                let current = state.borrow().cfg.sort_mode;
+                let header = gtk4::Label::new(Some(&crate::tr!("Sort by")));
+                header.set_xalign(0.0);
+                header.add_css_class(CSS_BP_PAGE_TITLE);
+                crate::ui::helpers::crisp_label(&header);
+                self.panel.append(&header);
 
-        let mut rows = Vec::new();
-        for group in &groups {
-            let check = if member_of.contains(&group.id) { "✓" } else { "·" };
-            let index = rows.len();
-            self.append_row(state, &format!("{check}  {}", group.name), index);
-            rows.push(MenuRow::Group { id: group.id });
+                let mut rows = Vec::new();
+                for mode in ira_models::SortMode::ALL {
+                    let check = if *mode == current { "✓" } else { "·" };
+                    let index = rows.len();
+                    self.append_row(state, &format!("{check}  {}", mode.display_label()), index);
+                    rows.push(MenuRow::Sort(*mode));
+                }
+                *self.rows.borrow_mut() = rows;
+            }
         }
-        let index = rows.len();
-        self.append_row(state, &crate::tr!("New Group"), index);
-        rows.push(MenuRow::NewGroup);
-        let (mode, descending) = {
-            let s = state.borrow();
-            (s.cfg.sort_mode, s.cfg.sort_descending)
-        };
-        let label = format!(
-            "{}{}",
-            crate::tr!("Sort: {}").replacen("{}", mode.display_label(), 1),
-            if descending { " ↓" } else { "" }
-        );
-        let index = rows.len();
-        self.append_row(state, &label, index);
-        rows.push(MenuRow::Sort);
-        *self.rows.borrow_mut() = rows;
     }
 
     fn append_row(&self, state: &SharedState, text: &str, index: usize) {

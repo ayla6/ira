@@ -40,6 +40,8 @@ pub struct BigPictureUi {
     pub(super) all: AllSoftwareUi,
     /// The per-game options menu (groups, sorting); topmost when open.
     pub(super) game_menu: super::game_menu::GameMenu,
+    /// The virtual keyboard, topmost over everything while open.
+    pub(super) keyboard: super::keyboard::Keyboard,
 }
 
 /// Build the big-picture window (fullscreen is applied by main.rs) and take over
@@ -147,6 +149,9 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
     let game_menu = super::game_menu::GameMenu::new(state);
     overlay.add_overlay(game_menu.root());
     overlay.set_measure_overlay(game_menu.root(), false);
+    let keyboard = super::keyboard::Keyboard::new(state);
+    overlay.add_overlay(keyboard.root());
+    overlay.set_measure_overlay(keyboard.root(), false);
 
     let ui = BigPictureUi {
         stack,
@@ -160,6 +165,7 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
         home,
         all,
         game_menu,
+        keyboard,
     };
     (overlay, ui)
 }
@@ -186,13 +192,23 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
                 route(&state, NavCommand::Confirm)
             }
             gdk4::Key::Escape => {
-                // Escape closes the options menu first, wherever it is.
+                // Escape peels overlays first: keyboard, then menu, then
+                // the page.
+                let keyboard_open = state
+                    .borrow()
+                    .big_picture
+                    .as_ref()
+                    .is_some_and(|big| big.keyboard.is_open());
                 let menu_open = state
                     .borrow()
                     .big_picture
                     .as_ref()
                     .is_some_and(|big| big.game_menu.is_open());
-                if menu_open {
+                if keyboard_open {
+                    if let Some(big) = state.borrow().big_picture.clone() {
+                        big.keyboard.close();
+                    }
+                } else if menu_open {
                     if let Some(big) = state.borrow().big_picture.clone() {
                         big.game_menu.close();
                     }
@@ -227,6 +243,31 @@ pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
 
 fn route(state: &SharedState, command: NavCommand) {
     super::mouse::note_controller_use(state);
+    // The virtual keyboard swallows navigation while it is open: arrows
+    // walk the keys, Confirm types, B deletes, Options cancels.
+    {
+        let keyboard_open = state
+            .borrow()
+            .big_picture
+            .as_ref()
+            .is_some_and(|big| big.keyboard.is_open());
+        if keyboard_open {
+            let Some(big) = state.borrow().big_picture.clone() else {
+                return;
+            };
+            match command {
+                NavCommand::Up => big.keyboard.move_cursor(state, 0, -1),
+                NavCommand::Down => big.keyboard.move_cursor(state, 0, 1),
+                NavCommand::Left => big.keyboard.move_cursor(state, -1, 0),
+                NavCommand::Right => big.keyboard.move_cursor(state, 1, 0),
+                NavCommand::Confirm => big.keyboard.press_selected(state),
+                NavCommand::Back => big.keyboard.backspace(),
+                NavCommand::Options => big.keyboard.close(),
+                _ => {}
+            }
+            return;
+        }
+    }
     // The options menu swallows navigation while it is open.
     {
         let menu_open = state
@@ -253,16 +294,6 @@ fn route(state: &SharedState, command: NavCommand) {
             return;
         };
         match command {
-            NavCommand::Options => {
-                // Options on a focused game opens its menu; with nothing
-                // focused it falls through to the sort cycler.
-                let game = big.all.selected_game();
-                match game {
-                    Some(game) => big.game_menu.open(state, &game),
-                    None if big.all.grid_active() => super::all_games::cycle_sort(state),
-                    None => {}
-                }
-            }
             NavCommand::Back => {
                 if !big.all.on_back(state) {
                     show_home(state);
@@ -270,16 +301,32 @@ fn route(state: &SharedState, command: NavCommand) {
             }
             NavCommand::PrevTab => big.all.switch_tab(state, -1),
             NavCommand::NextTab => big.all.switch_tab(state, 1),
-            _ if big.all.in_groups_list() => match command {
-                NavCommand::Up => big.all.groups_move(-1),
-                NavCommand::Down => big.all.groups_move(1),
-                NavCommand::Confirm => big.all.activate_groups_selection(state),
+            _ if big.all.in_groups_tiles() => match command {
+                NavCommand::Secondary => big.all.groups_delete_selected(state),
+                NavCommand::Options => big.all.groups_rename_selected(state),
+                NavCommand::Left => big.all.groups_move(state, -1, 0),
+                NavCommand::Right => big.all.groups_move(state, 1, 0),
+                NavCommand::Up => big.all.groups_move(state, 0, -1),
+                NavCommand::Down => big.all.groups_move(state, 0, 1),
+                NavCommand::Confirm => big.all.groups_open_selected(state),
                 _ => {}
             },
-            NavCommand::Left => big.all.move_selection(-1, 0),
-            NavCommand::Right => big.all.move_selection(1, 0),
-            NavCommand::Up => big.all.move_selection(0, -1),
-            NavCommand::Down => big.all.move_selection(0, 1),
+            NavCommand::Options => {
+                // Options on a focused game opens its group menu; with
+                // nothing focused it opens the sort picker.
+                let game = big.all.selected_game();
+                match game {
+                    Some(game) => {
+                        big.game_menu
+                            .open(state, super::game_menu::MenuKind::Groups(game))
+                    }
+                    None => big.game_menu.open(state, super::game_menu::MenuKind::Sort),
+                }
+            }
+            NavCommand::Left => big.all.move_selection(state, -1, 0),
+            NavCommand::Right => big.all.move_selection(state, 1, 0),
+            NavCommand::Up => big.all.move_selection(state, 0, -1),
+            NavCommand::Down => big.all.move_selection(state, 0, 1),
             NavCommand::Confirm => {
                 let game = big.all.selected_game();
                 if let Some(game) = game {
@@ -294,6 +341,7 @@ fn route(state: &SharedState, command: NavCommand) {
                     }
                 }
             }
+            _ => {}
         }
     } else {
         match command {
@@ -304,6 +352,7 @@ fn route(state: &SharedState, command: NavCommand) {
             | NavCommand::Down
             | NavCommand::Back
             | NavCommand::Options
+            | NavCommand::Secondary
             | NavCommand::PrevTab
             | NavCommand::NextTab => {}
         }
@@ -340,7 +389,7 @@ pub(super) fn open_all(state: &SharedState) {
     big.page.set(Page::AllSoftware);
     big.stack.set_visible_child(&big.all_page);
     big.all.apply_mode(state);
-    big.all.ensure_opened();
+    big.all.ensure_opened(state);
 }
 
 pub(super) fn show_home(state: &SharedState) {
@@ -363,6 +412,61 @@ fn quit_app(state: &SharedState) {
     let window = state.borrow().window.clone();
     if let Some(app) = window.application() {
         app.quit();
+    }
+}
+
+/// Open the virtual keyboard to name a new group. With `game`, the fresh
+/// group takes the game in as its first member.
+pub(super) fn name_new_group(state: &SharedState, game: Option<crate::Game>) {
+    let Some(big) = state.borrow().big_picture.clone() else {
+        return;
+    };
+    big.keyboard.open(
+        state,
+        &crate::tr!("Name the group"),
+        "",
+        Box::new(move |state, name| {
+            let db = state.borrow().db.clone();
+            let Ok(id) = ira_db::create_group(&db, name) else {
+                return;
+            };
+            if let Some(game) = &game {
+                if let Err(e) = ira_db::add_game_to_group(&db, game.db_id, id) {
+                    eprintln!("Failed to add game to group: {e}");
+                }
+            }
+            finish_group_change(state, id);
+        }),
+    );
+}
+
+/// Open the virtual keyboard to rename an existing group.
+pub(super) fn rename_group(state: &SharedState, group_id: i64, current: &str) {
+    let Some(big) = state.borrow().big_picture.clone() else {
+        return;
+    };
+    big.keyboard.open(
+        state,
+        &crate::tr!("Rename the group"),
+        current,
+        Box::new(move |state, name| {
+            let db = state.borrow().db.clone();
+            if let Err(e) = ira_db::rename_group(&db, group_id, name) {
+                eprintln!("Failed to rename group: {e}");
+            }
+            finish_group_change(state, group_id);
+        }),
+    );
+}
+
+/// Sync the shared groups list and redraw the Groups tiles after a
+/// change, landing the selection on the touched group.
+fn finish_group_change(state: &SharedState, group_id: i64) {
+    let db = state.borrow().db.clone();
+    let groups = ira_db::get_all_groups(&db).unwrap_or_default();
+    state.borrow_mut().groups = groups;
+    if let Some(big) = state.borrow().big_picture.clone() {
+        big.all.sync_and_focus_group(state, group_id);
     }
 }
 

@@ -25,6 +25,13 @@ pub const CSS_BP_MENU_DIM: &str = "bp-menu-dim";
 pub const CSS_BP_MENU_PANEL: &str = "bp-menu-panel";
 pub const CSS_BP_MENU_ROW: &str = "bp-menu-row";
 pub const CSS_BP_MENU_ROW_SELECTED: &str = "bp-menu-row-selected";
+pub const CSS_BP_SHOULDER: &str = "bp-shoulder";
+pub const CSS_BP_SHOULDER_DIM: &str = "bp-shoulder-dim";
+pub const CSS_BP_GROUP_SLOT: &str = "bp-group-slot";
+pub const CSS_BP_GROUP_TILE_SELECTED: &str = "bp-group-tile-selected";
+pub const CSS_BP_KEY: &str = "bp-key";
+pub const CSS_BP_KEY_SELECTED: &str = "bp-key-selected";
+pub const CSS_BP_KEY_PREVIEW: &str = "bp-key-preview";
 /// The selection ring reaches this far past a tile's edge (4px gap plus
 /// the 4px frame), and the tooltip's tail tip rests 3px beyond the
 /// frame — 11px from the tile edge in total, on every page.
@@ -420,6 +427,39 @@ fn big_picture_css(s: f64) -> String {
     border-radius: 10px;
 }}
 .bp-menu-row-selected {{ background: alpha(@accent_color, 0.28); }}
+.bp-shoulder {{
+    padding: 2px 10px;
+    border: 2px solid alpha(@theme_fg_color, 0.55);
+    border-radius: 8px;
+    font-size: {small};
+}}
+.bp-shoulder-dim {{
+    color: alpha(@theme_fg_color, 0.3);
+    border-color: alpha(@theme_fg_color, 0.15);
+}}
+.bp-group-slot {{
+    background: alpha(white, 0.06);
+    border-radius: 10px;
+}}
+.bp-group-tile-selected {{
+    outline: 4px solid @accent_color;
+    outline-offset: -2px;
+    border-radius: 12px;
+}}
+.bp-key {{
+    background: alpha(white, 0.08);
+    border-radius: 8px;
+}}
+.bp-key-selected {{
+    background: alpha(@accent_color, 0.45);
+}}
+.bp-key-preview {{
+    font-size: {page_title};
+    padding: {group_row_pad};
+    padding-left: 22px;
+    background: alpha(white, 0.05);
+    border-radius: 10px;
+}}
 "#,
         status_pad_top = px(16),
         status_pad_bottom = px(4),

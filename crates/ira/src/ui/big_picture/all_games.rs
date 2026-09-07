@@ -32,7 +32,7 @@ fn game_key(game: &Game) -> GameKey {
 /// `count` items; None when the grid is empty or the press is a no-op.
 /// Horizontal moves stay on the row, vertical moves keep the column, and
 /// overshoot into a short last row slides onto its last item.
-fn grid_move(current: usize, count: usize, cols: usize, dx: i32, dy: i32) -> Option<usize> {
+pub(super) fn grid_move(current: usize, count: usize, cols: usize, dx: i32, dy: i32) -> Option<usize> {
     if count == 0 {
         return None;
     }
@@ -102,24 +102,27 @@ pub(super) struct AllSoftwareUi {
     overlay: gtk4::Overlay,
     empty: gtk4::Label,
     games: RefCell<Vec<Game>>,
-    selected: Cell<usize>,
+    /// The focused tile, if any. Scrolling the grid by hand clears it;
+    /// the arrows re-acquire from whatever is on screen.
+    selected: Cell<Option<usize>>,
     /// The highlighted game as a (db, variant) key, shared with the bind
     /// closure so cells can style themselves without a rebuild.
     selected_key: Rc<Cell<GameKey>>,
     /// The running scroll glide, so a new press replaces it mid-flight.
     scroll_anim: Rc<RefCell<Option<glib::SourceId>>>,
     opened: Cell<bool>,
-    /// The "sorted by …" label in the header; the sort cycler rewrites it.
+    /// The "sorted by …" label in the header.
     ordering: gtk4::Label,
-    /// The header's page title; a group view renames it to the group.
-    title: gtk4::Label,
     software_tab: gtk4::Label,
     groups_tab: gtk4::Label,
+    /// The L/R shoulder badges flanking the tabs.
+    shoulder_l: gtk4::Label,
+    shoulder_r: gtk4::Label,
     /// Which tab is showing and, on the Groups tab, which group's games
-    /// the grid holds (`None` = the group list itself).
+    /// the grid holds (`None` = the groups tile grid itself).
     tab: Cell<Tab>,
     groups_view: Cell<Option<i64>>,
-    groups: super::groups::GroupsUi,
+    groups_grid: super::groups::GroupsGrid,
 }
 
 pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
@@ -144,25 +147,30 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         back.connect_clicked(move |_| super::view::show_home(&back_state));
     }
     header.append(&back);
-    let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
-    icon.set_pixel_size(24);
-    icon.set_valign(gtk4::Align::Center);
-    header.append(&icon);
-    let title = gtk4::Label::new(Some(&crate::tr!("All Software")));
-    title.set_xalign(0.0);
-    title.add_css_class(CSS_BP_PAGE_TITLE);
-    crate::ui::helpers::crisp_label(&title);
-    header.append(&title);
-    // The Software/Groups tabs, Switch-style: the active one is bright and
-    // underlined, and both respond to clicks and to the shoulders.
+    // Centered Software/Groups tabs with the shoulder badges flanking
+    // them, Switch-style: the active tab is bright and underlined, and a
+    // dimmed badge marks the shoulder that would do nothing.
+    let lead = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    lead.set_hexpand(true);
+    header.append(&lead);
+    let shoulder_l = gtk4::Label::new(Some("L"));
+    let shoulder_r = gtk4::Label::new(Some("R"));
     let software_tab = gtk4::Label::new(Some(&crate::tr!("Software")));
     let groups_tab = gtk4::Label::new(Some(&crate::tr!("Groups")));
-    for tab in [&software_tab, &groups_tab] {
-        tab.add_css_class(CSS_BP_TAB);
-        crate::ui::helpers::crisp_label(tab);
-        tab.set_valign(gtk4::Align::Center);
+    for (badge, tab_label) in [(&shoulder_l, &software_tab), (&shoulder_r, &groups_tab)] {
+        badge.add_css_class(CSS_BP_SHOULDER);
+        badge.set_valign(gtk4::Align::Center);
+        badge.set_margin_end(10);
+        tab_label.add_css_class(CSS_BP_TAB);
+        crate::ui::helpers::crisp_label(tab_label);
+        tab_label.set_valign(gtk4::Align::Center);
     }
-    software_tab.add_css_class(CSS_BP_TAB_ACTIVE);
+    shoulder_l.add_css_class(CSS_BP_SHOULDER_DIM);
+    header.append(&shoulder_l);
+    header.append(&software_tab);
+    header.append(&groups_tab);
+    header.append(&shoulder_r);
+    shoulder_r.add_css_class(CSS_BP_SHOULDER_DIM);
     {
         let tab_state = state.clone();
         software_tab.set_cursor_from_name(Some("pointer"));
@@ -185,27 +193,30 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         });
         groups_tab.add_controller(groups_click);
     }
-    header.append(&software_tab);
-    header.append(&groups_tab);
+    let trail = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    trail.set_hexpand(true);
+    header.append(&trail);
     let ordering = gtk4::Label::new(None);
     ordering.set_valign(gtk4::Align::Center);
     ordering.add_css_class(CSS_BP_PAGE_SUBTITLE);
     crate::ui::helpers::crisp_label(&ordering);
-    ordering.set_hexpand(true);
-    ordering.set_xalign(1.0);
     header.append(&ordering);
-    // The sort cycler: one button, Switch-style — each press moves to the
-    // next ordering, the label names the current one, and the Options key
-    // cycles too for the gamepad.
+    // The sort button opens the sort menu (Options does the same when no
+    // game is focused).
     let sort_btn = gtk4::Button::from_icon_name("view-sort-descending-symbolic");
     sort_btn.add_css_class(CSS_FLAT);
     sort_btn.set_focusable(false);
     sort_btn.set_valign(gtk4::Align::Center);
-    sort_btn.set_tooltip_text(Some(&crate::tr!("Change sort order")));
+    sort_btn.set_tooltip_text(Some(&crate::tr!("Sort by")));
     {
         let sort_state = state.clone();
-        sort_btn.connect_clicked(move |_| cycle_sort(&sort_state));
+        sort_btn.connect_clicked(move |_| {
+            if let Some(big) = sort_state.borrow().big_picture.clone() {
+                big.game_menu.open(&sort_state, super::game_menu::MenuKind::Sort);
+            }
+        });
     }
+    header.append(&sort_btn);
     header.append(&sort_btn);
     page.append(&header);
 
@@ -263,7 +274,7 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     grid_overlay.set_clip_overlay(tooltip.widget(), false);
     page.append(&grid_overlay);
 
-    let groups = super::groups::GroupsUi::build(state);
+    let groups = super::groups::GroupsGrid::build(state);
     page.append(groups.widget());
 
     let empty = gtk4::Label::new(Some(&crate::tr!("No games yet")));
@@ -286,6 +297,23 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         adj.connect_value_changed(track.clone());
         adj.connect_changed(track);
     }
+    // Wheel and touchpad scrolling over the grid deselect: the pointer
+    // has taken over, and the arrows re-acquire from the visible rows.
+    {
+        let wheel_state = state.clone();
+        let wheel = gtk4::EventControllerScroll::new(
+            gtk4::EventControllerScrollFlags::VERTICAL
+                | gtk4::EventControllerScrollFlags::HORIZONTAL,
+        );
+        wheel.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        wheel.connect_scroll(move |_, _, _| {
+            if let Some(big) = wheel_state.borrow().big_picture.clone() {
+                big.all.clear_selection();
+            }
+            glib::Propagation::Proceed
+        });
+        scrolled.add_controller(wheel);
+    }
 
     let ui = AllSoftwareUi {
         page,
@@ -294,65 +322,28 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         tooltip,
         empty: empty.clone(),
         games: RefCell::new(Vec::new()),
-        selected: Cell::new(0),
+        selected: Cell::new(None),
         selected_key,
         scroll_anim: Rc::new(RefCell::new(None)),
         ring,
         overlay: grid_overlay,
         opened: Cell::new(false),
         ordering,
-        title,
+        shoulder_l,
+        shoulder_r,
         software_tab,
         groups_tab,
         tab: Cell::new(Tab::Software),
         groups_view: Cell::new(None),
-        groups,
+        groups_grid: groups,
     };
     ui.update_ordering_label(state);
     (ui.page.clone(), ui)
 }
 
-/// Advance the All Software ordering to the next mode and persist it. The
-/// same cycle the sort button and the Options key drive.
-/// Create a group with the first unused "Group N" name. Groups created
-/// here start empty; games join through the assignment flow.
-fn create_group(state: &SharedState) -> Option<ira_models::Group> {
-    let db = state.borrow().db.clone();
-    let existing: Vec<String> = state.borrow().groups.iter().map(|g| g.name.clone()).collect();
-    let mut n = 1;
-    while existing.iter().any(|name| name == &format!("Group {n}")) {
-        n += 1;
-    }
-    let name = format!("Group {n}");
-    let id = ira_db::create_group(&db, &name).ok()?;
-    let group = ira_models::Group { id, name };
-    state.borrow_mut().groups.push(group.clone());
-    Some(group)
-}
-
-pub(super) fn cycle_sort(state: &SharedState) {
-    let next = {
-        let s = state.borrow();
-        let modes = ira_models::SortMode::ALL;
-        let current = modes
-            .iter()
-            .position(|mode| *mode == s.cfg.sort_mode)
-            .unwrap_or(0);
-        modes[(current + 1) % modes.len()]
-    };
-    state.borrow_mut().cfg.sort_mode = next;
-    if let Err(error) = state.borrow().cfg.save() {
-        eprintln!("Failed to save sort order: {error}");
-    }
-    if let Some(big) = state.borrow().big_picture.clone() {
-        big.all.update_ordering_label(state);
-        big.all.refresh(state);
-    }
-}
-
 impl AllSoftwareUi {
     /// Name the current ordering in the header.
-    fn update_ordering_label(&self, state: &SharedState) {
+    pub(super) fn update_ordering_label(&self, state: &SharedState) {
         let (mode, descending) = {
             let s = state.borrow();
             (s.cfg.sort_mode, s.cfg.sort_descending)
@@ -364,25 +355,17 @@ impl AllSoftwareUi {
 
     /// The game the selection currently rests on, if any.
     pub(super) fn selected_game(&self) -> Option<Game> {
-        self.games
-            .borrow()
-            .get(self.selected.get())
-            .cloned()
+        let index = self.selected.get()?;
+        self.games.borrow().get(index).cloned()
     }
 
-    /// Whether the Groups tab's group list is showing (the grid can also
-    /// show a group's games — that is grid navigation as usual).
-    pub(super) fn in_groups_list(&self) -> bool {
+    /// Whether the Groups tab's tile grid is showing (opening a group
+    /// hands the surface back to the game grid).
+    pub(super) fn in_groups_tiles(&self) -> bool {
         self.tab.get() == Tab::Groups && self.groups_view.get().is_none()
     }
 
-    /// Whether the game grid is the active surface (Software tab, or a
-    /// group's games).
-    pub(super) fn grid_active(&self) -> bool {
-        !self.in_groups_list()
-    }
-
-    /// Switch tabs. The Groups tab reloads its rows so groups created
+    /// Switch tabs. The Groups tab reloads its tiles so groups created
     /// elsewhere show up.
     pub(super) fn set_tab(&self, state: &SharedState, tab: Tab) {
         if self.tab.get() == tab {
@@ -396,8 +379,14 @@ impl AllSoftwareUi {
             Tab::Groups => &self.groups_tab,
         };
         active.add_css_class(CSS_BP_TAB_ACTIVE);
+        self.shoulder_l.remove_css_class(CSS_BP_SHOULDER_DIM);
+        self.shoulder_r.remove_css_class(CSS_BP_SHOULDER_DIM);
+        match tab {
+            Tab::Software => self.shoulder_l.add_css_class(CSS_BP_SHOULDER_DIM),
+            Tab::Groups => self.shoulder_r.add_css_class(CSS_BP_SHOULDER_DIM),
+        }
         if tab == Tab::Groups {
-            self.groups.reload(state);
+            self.groups_grid.reload(state);
         }
         self.apply_mode(state);
     }
@@ -413,8 +402,8 @@ impl AllSoftwareUi {
     }
 
     /// Back out one level on this page: a group's games return to the
-    /// group list. Returns false when the page has nothing to pop and the
-    /// caller should leave for home.
+    /// groups tiles. Returns false when the page has nothing to pop and
+    /// the caller should leave for home.
     pub(super) fn on_back(&self, state: &SharedState) -> bool {
         if self.tab.get() == Tab::Groups && self.groups_view.get().is_some() {
             self.groups_view.set(None);
@@ -425,66 +414,107 @@ impl AllSoftwareUi {
         }
     }
 
-    /// Open the group the list selection rests on — or create a fresh
-    /// group when the selection rests on New Group.
-    pub(super) fn activate_groups_selection(&self, state: &SharedState) {
-        if self.groups.selection_is_new_group() {
-            let Some(group) = create_group(state) else {
-                return;
-            };
-            self.groups.reload(state);
-            self.groups_view.set(Some(group.id));
-            self.apply_mode(state);
+    /// Activate the selected groups tile: New Group names (and creates)
+    /// a group through the keyboard, a group opens its game view.
+    pub(super) fn groups_open_selected(&self, state: &SharedState) {
+        match self.groups_grid.selected_group_id(state) {
+            Some(id) => {
+                self.groups_view.set(Some(id));
+                self.selected.set(None);
+                self.apply_mode(state);
+            }
+            None => super::view::name_new_group(state, None),
+        }
+    }
+
+    /// The mouse clicked a groups tile: first click focuses it, a click
+    /// on the focused tile activates it.
+    pub(super) fn groups_grid_selected(&self, state: &SharedState, tile: usize) {
+        if self.groups_grid.selection() == tile {
+            self.groups_open_selected(state);
+        } else {
+            self.groups_grid.select_tile(tile);
+            self.groups_grid.repaint(state);
+        }
+    }
+
+    /// Delete the group under the selection (the X button on the Groups
+    /// tiles). Membership rows go with it; games stay.
+    pub(super) fn groups_delete_selected(&self, state: &SharedState) {
+        let Some(id) = self.groups_grid.selected_group_id(state) else {
+            return;
+        };
+        let db = state.borrow().db.clone();
+        if let Err(e) = ira_db::delete_group(&db, id) {
+            eprintln!("Failed to delete group: {e}");
             return;
         }
-        if let Some(group) = self.groups.selected_group() {
-            self.groups_view.set(Some(group.id));
-            self.apply_mode(state);
+        self.sync_groups(state);
+        if self.groups_view.get() == Some(id) {
+            self.groups_view.set(None);
         }
+        self.apply_mode(state);
     }
 
-    /// Activate a group row by id (the mouse clicked a row).
-    pub(super) fn group_row_activated(state: &SharedState, group_id: i64) {
-        if let Some(big) = state.borrow().big_picture.clone() {
-            if group_id < 0 {
-                big.all.activate_groups_selection(state);
-                return;
-            }
-            big.all.groups_view.set(Some(group_id));
-            big.all.apply_mode(state);
+    /// Rename the group under the selection through the keyboard.
+    pub(super) fn groups_rename_selected(&self, state: &SharedState) {
+        let Some(id) = self.groups_grid.selected_group_id(state) else {
+            return;
+        };
+        let current = state
+            .borrow()
+            .groups
+            .iter()
+            .find(|g| g.id == id)
+            .map(|g| g.name.clone())
+            .unwrap_or_default();
+        super::view::rename_group(state, id, &current);
+    }
+
+    /// Move the groups tile selection (arrows on the Groups tab).
+    pub(super) fn groups_move(&self, state: &SharedState, dx: i32, dy: i32) {
+        self.groups_grid.move_selection(state, dx, dy);
+    }
+
+    /// Pull the shared groups list back from the database.
+    fn sync_groups(&self, state: &SharedState) {
+        let db = state.borrow().db.clone();
+        state.borrow_mut().groups = ira_db::get_all_groups(&db).unwrap_or_default();
+    }
+
+    /// After a create or rename: sync the tiles, land the selection on
+    /// the touched group, and open its game view.
+    pub(super) fn sync_and_focus_group(&self, state: &SharedState, group_id: i64) {
+        self.sync_groups(state);
+        self.groups_grid.reload(state);
+        if let Some(index) = state.borrow().groups.iter().position(|g| g.id == group_id) {
+            self.groups_grid.select_tile(index + 1);
+            self.groups_grid.repaint(state);
         }
+        self.groups_view.set(Some(group_id));
+        self.selected.set(None);
+        self.apply_mode(state);
     }
 
-    /// Move the group-list selection (Up/Down on the Groups tab).
-    pub(super) fn groups_move(&self, delta: i32) {
-        self.groups.move_selection(delta);
-    }
-
-    /// Lay out the page for the current tab and view: which surface shows,
-    /// what the title says, and which button prompts the bottom rail has.
+    /// Lay out the page for the current tab and view: which surface
+    /// shows, and which button prompts the bottom rail has.
     pub(super) fn apply_mode(&self, state: &SharedState) {
-        let show_list = self.in_groups_list();
-        self.groups.widget().set_visible(show_list);
-        self.overlay.set_visible(!show_list);
-        let open_group = self
-            .groups_view
-            .get()
-            .and_then(|id| state.borrow().groups.iter().find(|g| g.id == id).cloned());
-        match open_group {
-            Some(group) => self.title.set_text(&group.name),
-            None => self.title.set_text(&crate::tr!("All Software")),
-        }
+        let tiles = self.in_groups_tiles();
+        self.groups_grid.widget().set_visible(tiles);
+        self.overlay.set_visible(!tiles);
         self.refresh(state);
         if let Some(big) = state.borrow().big_picture.clone() {
-            let prompts: Vec<(ira_input::GamepadButton, String)> = if show_list {
+            let prompts: Vec<(ira_input::GamepadButton, String)> = if tiles {
                 vec![
+                    (ira_input::GamepadButton::X, crate::tr!("Delete Group")),
                     (ira_input::GamepadButton::B, crate::tr!("Back")),
-                    (ira_input::GamepadButton::A, crate::tr!("Open")),
+                    (ira_input::GamepadButton::Start, crate::tr!("Rename")),
+                    (ira_input::GamepadButton::A, crate::tr!("OK")),
                 ]
             } else {
                 vec![
                     (ira_input::GamepadButton::B, crate::tr!("Back")),
-                    (ira_input::GamepadButton::Start, crate::tr!("Sort")),
+                    (ira_input::GamepadButton::Start, crate::tr!("Options")),
                     (ira_input::GamepadButton::A, crate::tr!("Play")),
                 ]
             };
@@ -494,14 +524,14 @@ impl AllSoftwareUi {
         }
     }
 
-    /// Swap in the full game list under the current ordering. On the
-    /// Groups tab with a group open, only that group's members are shown.
-    /// Rebuilds the store only when the content actually differs; the
-    /// achievement watcher re-reports often.
     pub(super) fn refresh(&self, state: &SharedState) {
         let (show_hidden, sort_mode, sort_descending) = {
             let s = state.borrow();
-            (s.cfg.show_hidden_games, s.cfg.sort_mode, s.cfg.sort_descending)
+            (
+                s.cfg.show_hidden_games,
+                s.cfg.sort_mode,
+                s.cfg.sort_descending,
+            )
         };
         let members: Option<std::collections::HashSet<i64>> =
             self.groups_view.get().map(|group_id| {
@@ -545,10 +575,25 @@ impl AllSoftwareUi {
         if unchanged {
             return;
         }
+        // The games changed under a selection: keep the focused key when
+        // it survives the new list, drop the focus when it does not.
+        if let Some(index) = self.selected.get() {
+            let key = self
+                .games
+                .borrow()
+                .get(index)
+                .map(|g| (g.db_id, g.variant_id.unwrap_or(0)));
+            let kept = key.and_then(|key| {
+                games
+                    .iter()
+                    .position(|g| (g.db_id, g.variant_id.unwrap_or(0)) == key)
+            });
+            self.selected.set(kept);
+            self.selected_key.set(key.unwrap_or((0, 0)));
+        }
         self.sync_store(&games);
     }
 
-    /// Replace the model contents and restyle around the surviving game.
     fn sync_store(&self, games: &[Game]) {
         let store = gio::ListStore::new::<crate::ui::game_item::GameItem>();
         for game in games {
@@ -558,36 +603,34 @@ impl AllSoftwareUi {
         // grid clears its visible cells and rebinds from the new store.
         self.grid.set_model(&store);
 
-        let selected = self
-            .selected
-            .get()
-            .min(games.len().saturating_sub(1));
-        self.selected.set(selected);
-        if let Some(game) = games.get(selected) {
-            self.selected_key.set(game_key(game));
+        if let Some(selected) = self.selected.get() {
+            let selected = selected.min(games.len().saturating_sub(1));
+            self.selected.set(Some(selected));
+            if let Some(game) = games.get(selected) {
+                self.selected_key.set(game_key(game));
+            }
         }
         self.empty.set_visible(games.is_empty());
-        self.scrolled.set_visible(!games.is_empty());
-        self.tooltip.set_visible(!games.is_empty());
-        if let Some(game) = games.get(selected) {
+        if let Some(game) = games.get(self.selected.get().unwrap_or(0)) {
             self.tooltip.set_text(&game.name);
         }
         *self.games.borrow_mut() = games.to_vec();
         self.update_tooltip();
     }
 
-    /// First open: park the selection and the scroll at the top. Later
-    /// opens keep both.
-    pub(super) fn ensure_opened(&self) {
+    /// First open: park the selection on the first tile and the scroll at
+    /// the top. Later opens keep both.
+    pub(super) fn ensure_opened(&self, state: &SharedState) {
         if self.opened.get() {
             self.scroll_to_selected();
+            self.update_tooltip();
             return;
         }
         self.opened.set(true);
         // The pill's text was set while this page sat hidden — possibly at
         // a different big-picture scale — so its layout may measure stale.
         self.tooltip.revalidate_text();
-        self.apply_selection(0);
+        self.select(0);
     }
 
     /// Re-measure the pill after the big-picture scale changed (see
@@ -596,40 +639,79 @@ impl AllSoftwareUi {
         self.tooltip.revalidate_text();
     }
 
-    pub(super) fn move_selection(&self, dx: i32, dy: i32) {
-        let (cols, _, _item_h, _sp) = self.grid.current_layout();
+    /// The arrows moved the selection. With nothing focused yet — the user
+    /// scrolled the grid by hand, which deselects — the selection comes
+    /// back on the first fully visible tile before the move applies, so
+    /// navigation never resumes from somewhere off screen.
+    pub(super) fn move_selection(&self, state: &SharedState, dx: i32, dy: i32) {
+        let (cols, _, item_h, sp) = self.grid.current_layout();
         let count = self.games.borrow().len();
-        if let Some(next) = grid_move(self.selected.get(), count, cols as usize, dx, dy) {
-            self.apply_selection(next);
+        if count == 0 {
+            return;
+        }
+        if self.selected.get().is_none() {
+            let value = self.scrolled.vadjustment().value();
+            let row = ((value / (item_h + sp) as f64).round().max(0.0) as usize)
+                .min((count - 1) / cols.max(1) as usize);
+            self.select((row * cols.max(1) as usize).min(count - 1));
+        }
+        let selected = self.selected.get().unwrap_or(0);
+        if let Some(next) = grid_move(selected, count, cols as usize, dx, dy) {
+            self.select(next);
         }
     }
 
-    /// Point the highlight at `index`: update the shared key, restyle the
-    /// visible cells, float the name tooltip over the tile, and scroll the
-    /// row into view.
-    fn apply_selection(&self, index: usize) {
-        let game = self.games.borrow().get(index).map(|g| (game_key(g), g.clone()));
+    /// Point the highlight at `index` and bring it into view: the gamepad
+    /// and keyboard path, where the camera follows the selection.
+    fn select(&self, index: usize) {
+        if self.apply_selection(index) {
+            self.scroll_to_selected();
+            self.update_tooltip();
+        }
+    }
+
+    /// Restyle the grid around `index` and set the focused key. Returns
+    /// false when the index has no game.
+    fn apply_selection(&self, index: usize) -> bool {
+        let game = self
+            .games
+            .borrow()
+            .get(index)
+            .map(|g| (game_key(g), g.clone()));
         let Some((key, game)) = game else {
-            return;
+            return false;
         };
-        self.selected.set(index);
+        self.selected.set(Some(index));
         self.selected_key.set(key);
         self.grid.rebind_visible();
         self.tooltip.set_text(&game.name);
-        self.scroll_to_selected();
-        self.update_tooltip();
+        true
+    }
+
+    /// The user scrolled the grid by hand: the focus goes away entirely.
+    /// The arrows bring it back on the first visible tile (see
+    /// `move_selection`).
+    pub(super) fn clear_selection(&self) {
+        if self.selected.get().is_none() {
+            return;
+        }
+        self.selected.set(None);
+        self.grid.rebind_visible();
+        self.tooltip.set_visible(false);
+        self.ring.set_visible(false);
     }
 
     /// Float the name tooltip over the selected tile — above its top edge
     /// normally, below it when the tile touches the viewport top — riding
-    /// whatever scroll position the grid is at. The floats only track the
-    /// selection while its tile is fully inside the scrolled viewport: a
-    /// tile sliding under the header or off an edge must not drag the ring
-    /// over the header text or leave a detached pill behind, so both hide
-    /// until the scroll brings the tile back.
+    /// whatever scroll position the grid is at. With no selection the
+    /// floats stay hidden.
     fn update_tooltip(&self) {
-        let game = self.games.borrow().get(self.selected.get()).cloned();
-        let Some(game) = game else {
+        let Some(selected) = self.selected.get() else {
+            self.tooltip.set_visible(false);
+            self.ring.set_visible(false);
+            return;
+        };
+        let Some(game) = self.games.borrow().get(selected).cloned() else {
             return;
         };
         // The pill points at icons: while a tile has no art yet (library
@@ -642,34 +724,21 @@ impl AllSoftwareUi {
             return;
         };
         let (_, item_w, item_h, _sp) = self.grid.current_layout();
-        // The tooltip's clip width follows the tiles — 3 of them, the same
-        // pixel width as 2 home capsules (the tiles are 2:3 apart). The
-        // title scales with the tile (256px = the 1080p reference) so the
-        // tooltip keeps its proportions at 720p, 1080p, 1440p…
         self.tooltip.set_max_width(item_w as f64 * 3.0);
         self.tooltip.set_text(&game.name);
-        let Some((x, y)) = self.grid.cell_geometry(self.selected.get()) else {
+        let Some((x, y)) = self.grid.cell_geometry(selected) else {
             return;
         };
-        // Store the position even when this widget has no width yet (the
-        // page is still being mapped): the marquee falls back to its own
-        // allocation when it paints, so the bubble lands right on first
-        // open instead of waiting for a scroll event that may never come.
         // The anchor comes from the real cell widget mapped into the
-        // page's coordinates — no content-vs-page arithmetic to get wrong.
-        let cell_widget = self.grid.widget_for_index(self.selected.get());
+        // overlay's coordinates; the fallback keeps the first paint
+        // anchored when the page has no width yet.
+        let cell_widget = self.grid.widget_for_index(selected);
         let (x, tile_top) = cell_widget
             .as_ref()
             .and_then(|cell| cell.compute_point(&self.overlay, &gtk4::graphene::Point::zero()))
             .map(|p| (p.x() as f64, p.y() as f64))
             .unwrap_or((x, y - self.scrolled.vadjustment().value()));
         let center = x + item_w as f64 / 2.0;
-        // The overlay is the parent of both the grid and the floating
-        // widgets, so its width is final whenever this runs (the grid's
-        // post-layout hook fires mid-pass, before the overlay children
-        // are re-allocated). The tooltip's own width there would be one
-        // pass stale — zero before the first one, which pinned the pill
-        // to the left edge and scaled the ring down to a hairline.
         let viewport = self.overlay.width() as f64;
         let scrolled_top = self
             .scrolled
@@ -677,22 +746,20 @@ impl AllSoftwareUi {
             .map(|p| p.y() as f64)
             .unwrap_or(0.0);
         let scrolled_bottom = scrolled_top + self.scrolled.vadjustment().page_size();
-        // Full visibility, ring outset included: anything poking past the
-        // viewport hides the floats rather than dragging them along.
-        let fully_visible = tile_top - BP_RING_OUTSET >= scrolled_top
-            && tile_top + item_h as f64 + BP_RING_OUTSET <= scrolled_bottom;
-        if !fully_visible {
-            self.tooltip.set_visible(false);
-            self.ring.set_visible(false);
+        // Any overlap keeps the floats: the scroll target itself rests the
+        // selection's outline a few pixels past the viewport edge, so
+        // demanding full visibility here would hide the ring right where
+        // navigation parks it. Manual scrolling deselects instead of
+        // hiding (see `clear_selection`).
+        let in_view = tile_top + item_h as f64 > scrolled_top && tile_top < scrolled_bottom;
+        self.tooltip.set_visible(in_view);
+        self.ring.set_visible(in_view);
+        if !in_view {
             return;
         }
-        self.tooltip.set_visible(true);
-        self.ring.set_visible(true);
         // The tail tip rests just outside the selection ring on whichever
         // side the pill's actual height fits into the scrolled area —
-        // above by preference, below near the top edge. Both checks are in
-        // page coordinates against the scrolled area's bounds, so the pill
-        // never slides under the page header.
+        // above by preference, below near the top edge.
         let pill_h = self.tooltip.pill_height() as f64;
         let top_tip = tile_top - BP_RING_OUTSET;
         let bottom_tip = tile_top + item_h as f64 + BP_RING_OUTSET;
@@ -709,17 +776,15 @@ impl AllSoftwareUi {
             .place(x, tile_top, item_w as f64, item_h as f64, scale, false);
     }
 
-    /// Move the highlight onto a game by key (a mouse click on a cell
-    /// selects what it clicked before launching it).
-    pub(super) fn select_key(&self, key: GameKey) {
+    /// Focus the clicked game without moving the camera. Returns whether
+    /// the game was found.
+    pub(super) fn focus_key(&self, key: GameKey) -> bool {
         let index = self
             .games
             .borrow()
             .iter()
             .position(|g| game_key(g) == key);
-        if let Some(index) = index {
-            self.apply_selection(index);
-        }
+        index.is_some_and(|index| self.apply_selection(index))
     }
 
     /// Whether `key` is the highlighted game — a second mouse click on an
@@ -740,9 +805,12 @@ impl AllSoftwareUi {
             adj.set_value(0.0);
             return;
         }
+        let Some(selected) = self.selected.get() else {
+            return;
+        };
         let (cols, _, item_h, sp) = self.grid.current_layout();
         let target = scroll_target(
-            self.selected.get(),
+            selected,
             cols as usize,
             (item_h + sp) as f64,
             sp as f64,
@@ -961,7 +1029,7 @@ fn launch_from_cell(state: &SharedState, widget: &gtk4::Widget) {
     if big.all.is_selected(game_key(&game)) {
         launch(state, &game);
     } else {
-        big.all.select_key(game_key(&game));
+        big.all.focus_key(game_key(&game));
     }
 }
 

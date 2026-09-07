@@ -6,6 +6,7 @@
 mod all_games;
 mod game_menu;
 mod groups;
+mod keyboard;
 mod home;
 mod input;
 mod marquee;

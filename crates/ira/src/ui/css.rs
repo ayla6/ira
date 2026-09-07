@@ -405,6 +405,12 @@ fn big_picture_css(s: f64) -> String {
 .bp-tabs toggle label {{
     font-weight: normal;
 }}
+.bp-tabs > toggle {{
+    padding: 4px 16px;
+}}
+.bp-tabs buttoncontent > box > image {{
+    margin-top: 3px;
+}}
 .bp-tabs toggle label {{
     font-size: {subtitle};
 }}
@@ -479,8 +485,8 @@ fn big_picture_css(s: f64) -> String {
 .bp-key-active label {{
     color: @theme_fg_color;
 }}
-.bp-key-disabled {{
-    opacity: 0.35;
+.bp-key-disabled label {{
+    color: alpha(@theme_fg_color, 0.35);
 }}
 .bp-key-preview, .bp-keyboard label {{
     font-family: "M PLUS 2", sans-serif;

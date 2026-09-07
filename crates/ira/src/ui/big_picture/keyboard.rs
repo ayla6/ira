@@ -51,7 +51,7 @@ const LETTER_ROWS: &[&[Key]] = &[
         Key::Char('n'), Key::Char('m'), Key::Char('<'), Key::Char('>'), Key::Char('+'),
         Key::Char('='), Key::Ok,
     ],
-    &[Key::Shift, Key::Page, Key::Space],
+    &[Key::Shift, Key::Page, Key::Space, Key::Ok],
 ];
 
 /// The symbol page: digits and punctuation, same shape as the letter page.
@@ -76,7 +76,7 @@ const SYMBOL_ROWS: &[&[Key]] = &[
         Key::Char(')'), Key::Char('-'), Key::Char('_'), Key::Char('/'), Key::Char(':'),
         Key::Char('"'), Key::Ok,
     ],
-    &[Key::Shift, Key::Page, Key::Space],
+    &[Key::Shift, Key::Page, Key::Space, Key::Ok],
 ];
 
 /// A letter key's shifted self (the top row's digits become symbols).
@@ -401,6 +401,7 @@ impl Keyboard {
             (ira_input::GamepadButton::A, crate::tr!("Select")),
             (ira_input::GamepadButton::B, crate::tr!("Delete")),
             (ira_input::GamepadButton::X, crate::tr!("Cancel")),
+            (ira_input::GamepadButton::LeftStick, crate::tr!("Shift")),
         ] {
             let label = label.as_str();
             let item = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
@@ -438,13 +439,29 @@ impl Keyboard {
         self.family.set(family);
     }
 
-    /// Move the key cursor, clamping each row to its own length.
+    /// Move the key cursor: horizontal moves wrap around the row, and a
+    /// vertical move past a short row snaps to its last key — except the
+    /// action column, which jumps between the rows that have one (up from
+    /// OK lands on backspace, the dead Return aside).
     pub(super) fn move_cursor(&self, dx: i32, dy: i32) {
         let rows = self.rows();
         let (row, col) = self.cursor.get();
-        let row = (row as i64 + dy as i64).clamp(0, rows.len() as i64 - 1) as usize;
-        let col = (col as i64 + dx as i64).clamp(0, rows[row].len() as i64 - 1) as usize;
-        self.cursor.set((row, col));
+        if dy != 0 {
+            let row = (row as i64 + dy as i64).clamp(0, rows.len() as i64 - 1) as usize;
+            let len = rows[row].len();
+            let col = if col < len {
+                col
+            } else if col == 11 && len > 11 {
+                11
+            } else {
+                len - 1
+            };
+            self.cursor.set((row, col));
+        } else {
+            let len = rows[row].len();
+            let col = ((col as i64 + dx as i64).rem_euclid(len as i64)) as usize;
+            self.cursor.set((row, col));
+        }
         self.refresh_cursor();
     }
 

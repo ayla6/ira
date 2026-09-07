@@ -172,7 +172,7 @@ pub(super) struct AllSoftwareUi {
     groups_grid: super::groups::GroupsGrid,
 }
 
-pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
+pub(super) fn build(state: &SharedState, status: &super::status::StatusBar) -> (gtk4::Box, AllSoftwareUi) {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     page.add_css_class(CSS_BP_ALL_PAGE);
 
@@ -181,9 +181,30 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     header.set_margin_bottom(6);
     header.set_margin_start(28);
     header.set_margin_end(28);
-    // Centered Software/Groups tabs with the shoulder badges flanking
-    // them, Switch-style: the active tab is bright and underlined, and
-    // the badges draw the connected pad's L/R glyph art.
+    // One header line: the ordering and its button on the left, the
+    // Software/Groups tabs centered between the expanding spacers, and
+    // the shell's status cluster (clock, battery) docked right.
+    let ordering = gtk4::Label::new(None);
+    ordering.set_valign(gtk4::Align::Center);
+    ordering.add_css_class(CSS_BP_PAGE_SUBTITLE);
+    crate::ui::helpers::crisp_label(&ordering);
+    header.append(&ordering);
+    // The sort button opens the sort menu (Options does the same when no
+    // game is focused).
+    let sort_btn = gtk4::Button::from_icon_name("view-sort-descending-symbolic");
+    sort_btn.add_css_class(CSS_FLAT);
+    sort_btn.set_focusable(false);
+    sort_btn.set_valign(gtk4::Align::Center);
+    sort_btn.set_tooltip_text(Some(&crate::tr!("Sort by")));
+    {
+        let sort_state = state.clone();
+        sort_btn.connect_clicked(move |_| {
+            if let Some(big) = sort_state.borrow().big_picture.clone() {
+                big.game_menu.open(&sort_state, super::game_menu::MenuKind::Sort);
+            }
+        });
+    }
+    header.append(&sort_btn);
     let lead = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     lead.set_hexpand(true);
     header.append(&lead);
@@ -203,6 +224,13 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     header.append(&software_tab);
     header.append(&groups_tab);
     header.append(&shoulder_r.slot);
+    let trail = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    trail.set_hexpand(true);
+    header.append(&trail);
+    // The shell's status rail lives here while this page shows (see
+    // `view::build_root`); drop its rail padding so it sits inline.
+    status.widget().add_css_class(CSS_BP_STATUS_INLINE);
+    header.append(status.widget());
     {
         let tab_state = state.clone();
         software_tab.set_cursor_from_name(Some("pointer"));
@@ -225,31 +253,6 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         });
         groups_tab.add_controller(groups_click);
     }
-    let trail = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    trail.set_hexpand(true);
-    header.append(&trail);
-    let ordering = gtk4::Label::new(None);
-    ordering.set_valign(gtk4::Align::Center);
-    ordering.add_css_class(CSS_BP_PAGE_SUBTITLE);
-    crate::ui::helpers::crisp_label(&ordering);
-    header.append(&ordering);
-    // The sort button opens the sort menu (Options does the same when no
-    // game is focused).
-    let sort_btn = gtk4::Button::from_icon_name("view-sort-descending-symbolic");
-    sort_btn.add_css_class(CSS_FLAT);
-    sort_btn.set_focusable(false);
-    sort_btn.set_valign(gtk4::Align::Center);
-    sort_btn.set_tooltip_text(Some(&crate::tr!("Sort by")));
-    {
-        let sort_state = state.clone();
-        sort_btn.connect_clicked(move |_| {
-            if let Some(big) = sort_state.borrow().big_picture.clone() {
-                big.game_menu.open(&sort_state, super::game_menu::MenuKind::Sort);
-            }
-        });
-    }
-    header.append(&sort_btn);
-    page.append(&header);
 
     let grid = VirtualGrid::new(240);
     grid.set_square(true);
@@ -289,6 +292,9 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     let ring = SelectionRing::new();
     grid_overlay.add_overlay(&ring);
     grid_overlay.set_measure_overlay(&ring, false);
+    // The ring must never paint past the grid area: a mid-glide place
+    // used to smear its side edges up over the header.
+    grid_overlay.set_clip_overlay(&ring, true);
     grid_overlay.add_overlay(tooltip.widget());
     grid_overlay.set_measure_overlay(tooltip.widget(), false);
     // Every grid allocation re-anchors the floating overlays: without this

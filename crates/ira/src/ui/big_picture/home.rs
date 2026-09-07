@@ -130,6 +130,9 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, H
     let ring = SelectionRing::new();
     page.add_overlay(&ring);
     page.set_measure_overlay(&ring, false);
+    // Same as the All Software grid: a mid-glide ring must not smear
+    // past the carousel's own area.
+    page.set_clip_overlay(&ring, true);
     page.add_overlay(marquee.widget());
     page.set_measure_overlay(marquee.widget(), false);
 

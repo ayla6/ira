@@ -126,14 +126,15 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
     root.add_css_class(CSS_BP_ROOT);
 
     let status = StatusBar::build();
-    root.append(status.widget());
 
     let stack = gtk4::Stack::new();
     stack.set_vexpand(true);
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
     stack.set_transition_duration(150);
     let (home_page, home) = super::home::build(state, square_mode);
-    let (all_page, all) = super::all_games::build(state);
+    // The status rail rides the All Software header on this page instead
+    // of a rail of its own — the two lines merged into one.
+    let (all_page, all) = super::all_games::build(state, &status);
     stack.add_named(&home_page, Some("home"));
     stack.add_named(&all_page, Some("all"));
     root.append(&stack);

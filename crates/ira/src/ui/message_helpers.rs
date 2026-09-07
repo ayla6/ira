@@ -93,26 +93,37 @@ fn apply_playtime_updates_db(state: &SharedState, updates: &HashMap<i64, (f64, i
     }
 }
 
+/// Re-display the game page when it currently shows `db_id` (any of its
+/// variants). The refresh keys on what is *displayed*, not on the sidebar
+/// or grid selection: play history, the SGDB match dialog and background
+/// restore all put a game page on screen without touching the selection,
+/// and a play-state change must reach the button the user is looking at.
 pub(super) fn refresh_selected_game(state: &SharedState, db_id: i64) {
-    refresh_selected_game_if(state, |selected_id| {
-        ira_models::parse_db_id(selected_id) == db_id
-    });
+    refresh_displayed_game_if(state, |displayed_db_id, _| displayed_db_id == db_id);
 }
 
 pub(super) fn refresh_selected_base_game(state: &SharedState, db_id: i64) {
-    refresh_selected_game_if(state, |selected_id| selected_id == db_id.to_string());
+    refresh_displayed_game_if(state, |displayed_db_id, displayed_variant_id| {
+        displayed_db_id == db_id && displayed_variant_id.is_none()
+    });
 }
 
-fn refresh_selected_game_if(state: &SharedState, is_selected: impl FnOnce(&str) -> bool) {
-    let selected_id = state.borrow().selected_id.clone();
-    if !is_selected(&selected_id) {
+fn refresh_displayed_game_if(
+    state: &SharedState,
+    is_displayed: impl FnOnce(i64, Option<i64>) -> bool,
+) {
+    let (displayed_db_id, displayed_variant_id) = {
+        let s = state.borrow();
+        (s.displayed_db_id, s.displayed_variant_id)
+    };
+    if !is_displayed(displayed_db_id, displayed_variant_id) {
         return;
     }
     let game = state
         .borrow()
         .games
         .iter()
-        .find(|g| g.grid_id() == selected_id)
+        .find(|g| g.db_id == displayed_db_id && g.variant_id == displayed_variant_id)
         .cloned();
     if let Some(game) = game {
         display_game(&game, state);
